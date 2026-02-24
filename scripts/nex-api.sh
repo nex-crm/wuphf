@@ -5,7 +5,7 @@
 # WRITES: Depends on method (POST/PUT/PATCH/DELETE modify data)
 set -euo pipefail
 
-BASE_URL="http://localhost:30000/api/developers/v1"
+BASE_URL="http://localhost:30000/api/developers"
 TIMEOUT=120
 
 # --- Validate environment ---
