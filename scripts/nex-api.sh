@@ -5,7 +5,7 @@
 # WRITES: Depends on method (POST/PUT/PATCH/DELETE modify data)
 set -euo pipefail
 
-BASE_URL="https://app.nex.ai/api/developers"
+BASE_URL="${NEX_BASE_URL:-https://app.nex.ai}/api/developers"
 TIMEOUT=120
 
 # --- Validate environment ---
