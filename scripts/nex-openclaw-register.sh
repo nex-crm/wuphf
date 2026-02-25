@@ -3,7 +3,7 @@
 # Usage: nex-openclaw-register.sh <email> [name] [company_name] [jq-filter]
 set -euo pipefail
 
-BASE_URL="http://localhost:30000/api/v1/agents/register"
+BASE_URL="https://app.nex.ai/api/v1/agents/register"
 TIMEOUT="${NEX_API_TIMEOUT:-120}"
 SOURCE="${NEX_AGENT_SOURCE:-openclaw}"
 

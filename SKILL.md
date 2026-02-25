@@ -70,7 +70,7 @@ jq -e '.skills.entries.nex.env.NEX_API_KEY | type == "string" and length > 0' "$
 
 - All Nex Developer API calls are routed through a validated wrapper script (`scripts/nex-api.sh`)
 - OpenClaw registration calls must go through `scripts/nex-openclaw-register.sh`
-- The wrapper validates that all requests go to `http://localhost:30000/api/developers` only
+- The wrapper validates that all requests go to `https://app.nex.ai/api/developers` only
 - API key is read from `$NEX_API_KEY` environment variable (never from prompts)
 - JSON request bodies are passed via stdin (`printf '%s'` pipe) to avoid shell injection
 - The wrapper uses `set -euo pipefail` for safe shell execution
@@ -86,7 +86,7 @@ jq -e '.skills.entries.nex.env.NEX_API_KEY | type == "string" and length > 0' "$
 | URL Pattern | Methods | Data Sent |
 |-------------|---------|-----------|
 | `POST /api/v1/agents/register` | POST | OpenClaw onboarding registration payload (`email`, required `source`, optional `name`, optional `company_name`) |
-| `http://localhost:30000/api/developers/v1/*` | GET, POST, PUT, PATCH, DELETE | Context queries, records, insights, text content |
+| `https://app.nex.ai/api/developers/v1/*` | GET, POST, PUT, PATCH, DELETE | Context queries, records, insights, text content |
 
 ## How to Make API Calls
 
