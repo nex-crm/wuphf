@@ -1,114 +1,109 @@
-# Nex as a Skill for OpenClaw
+# Nex — AI Agent Integrations
 
-Give your OpenClaw agent a Context Graph.
+Give any AI agent a Context Graph. Two integration paths: **MCP Server** (Claude Desktop, ChatGPT, Cursor, Windsurf) and **OpenClaw Skill**.
 
 ## What is Nex?
 
-Nex is a real-time context layer for AI agents. It builds a Context Graph from your conversations and shares organizational context with your agents. This skill allows OpenClaw agents to:
+Nex is a real-time context layer for AI agents. It builds a Context Graph from your conversations and shares organizational context with your agents — query contacts, companies, relationships, tasks, notes, and insights.
 
-- **Query context** - Ask natural language questions about your contacts and companies
-- **Add context** - Process conversation transcripts to extract entities and insights
-- **Stream insights** - (Coming soon) Receive real-time notifications when new insights are discovered
+## Integration Options
 
-## Installation
+| | MCP Server | OpenClaw Skill |
+|---|---|---|
+| **Format** | TypeScript MCP server | SKILL.md + bash scripts |
+| **Platforms** | Claude Desktop, ChatGPT, Cursor, Windsurf, any MCP client | OpenClaw |
+| **Transport** | stdio (local) or Streamable HTTP (remote) | Shell exec |
+| **Tools** | 47 typed tools with Zod schemas | Bash wrapper around curl |
+| **Auth** | Auto-registration or manual API key | Auto-registration or manual |
+| **Setup** | `npm install` + add to client config | Copy SKILL.md to skills dir |
 
-### Prerequisites
+## MCP Server (recommended)
 
-- [OpenClaw](https://github.com/openclaw/openclaw) installed and configured
-- A Nex account with Developer API access
+Works with Claude Desktop, ChatGPT (agent mode), Cursor, Windsurf, and any MCP-compatible client.
 
-### Step 1: Get Your API Key
-
-1. Log in to [Nex](https://app.nex.ai)
-2. Go to **Settings > Developer**
-3. Create a new API key with the following scopes:
-   - `record.read` - For querying context
-   - `record.write` - For processing text
-
-### Step 2: Install the Skill
-
-#### Option A: Manual Installation
-
-1. Create the skill directory:
-   ```bash
-   mkdir -p ~/.openclaw/workspace/skills/nex
-   ```
-
-2. Copy `SKILL.md` to the directory:
-   ```bash
-   cp SKILL.md ~/.openclaw/workspace/skills/nex/
-   ```
-
-#### Option B: Clone Repository
+### Quick Start
 
 ```bash
-git clone https://github.com/nex-crm/nex-as-a-skill.git
-cp nex-as-a-skill/SKILL.md ~/.openclaw/workspace/skills/nex/
+cd mcp && npm install
 ```
 
-### Step 3: Configure Your API Key
+#### Claude Desktop
 
-Add your API key to `~/.openclaw/openclaw.json`:
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
-  "skills": {
-    "entries": {
-      "nex": {
-        "enabled": true,
-        "env": {
-          "NEX_API_KEY": "nex_dev_your_key_here"
-        }
+  "mcpServers": {
+    "nex": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/nex-as-a-skill/mcp/src/index.ts"],
+      "env": {
+        "NEX_API_KEY": "sk-your_key_here"
       }
     }
   }
 }
 ```
 
-### Step 4: Verify Installation
+#### Cursor
 
-Start OpenClaw and check that the skill is loaded:
+Add to `.cursor/mcp.json`:
 
-```bash
-openclaw agent --message "What skills do you have?"
+```json
+{
+  "mcpServers": {
+    "nex": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/nex-as-a-skill/mcp/src/index.ts"],
+      "env": {
+        "NEX_API_KEY": "sk-your_key_here"
+      }
+    }
+  }
+}
 ```
 
-The agent should list "nex" among its available skills.
+#### No API Key? Auto-register
 
-## Usage Examples
+If you don't set `NEX_API_KEY`, the server starts in registration mode. Just call the `register` tool with your email — it gets an API key and saves it to `~/.nex-mcp.json` for all future sessions.
 
-### Query Context
+See [`mcp/README.md`](mcp/README.md) for the full tool reference and setup guide.
 
-```
-You: What do I know about Acme Corp?
+## OpenClaw Skill
 
-OpenClaw: [Uses Nex skill to query context]
-Based on your context graph, Acme Corp is a technology company you've been
-working with for 3 months. Key contacts include John Smith (VP Sales) and
-Sarah Chen (CTO). Recent activity shows discussions about their APAC expansion.
-```
+For OpenClaw agents specifically.
 
-### Add Context
+### Setup
 
-```
-You: I just had a call with John. He mentioned they're closing their Series B
-next month and plan to hire 50 engineers.
+1. Copy `SKILL.md` to your OpenClaw skills directory:
+   ```bash
+   mkdir -p ~/.openclaw/workspace/skills/nex
+   cp SKILL.md ~/.openclaw/workspace/skills/nex/
+   ```
 
-OpenClaw: [Uses Nex skill to process text]
-I've added this context to your graph. Created/updated:
-- John (contact) - linked to Series B and hiring plans
-- Added insight: Acme Corp closing Series B next month
-- Added insight: Acme Corp planning to hire 50 engineers
-```
+2. Add your API key to `~/.openclaw/openclaw.json`:
+   ```json
+   {
+     "skills": {
+       "entries": {
+         "nex": {
+           "enabled": true,
+           "env": {
+             "NEX_API_KEY": "sk-your_key_here"
+           }
+         }
+       }
+     }
+   }
+   ```
+
+3. Verify: `openclaw agent --message "What skills do you have?"`
+
+Or skip the API key — the skill can auto-register on first use.
 
 ## API Documentation
 
 See [docs.nex.ai](https://docs.nex.ai) for full API documentation.
-
-## Support
-
-- GitHub Issues: [nex-crm/nex-as-a-skill/issues](https://github.com/nex-crm/nex-as-a-skill/issues)
-- OpenClaw Discord: #nex-skill channel
 
 ## License
 
