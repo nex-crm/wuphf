@@ -86,8 +86,8 @@ async function main(): Promise<void> {
       sessionId: result.session_id,
     });
 
-    const output = JSON.stringify({ additionalContext: context });
-    process.stdout.write(output);
+    // Output as plain text — Claude Code adds stdout text as context on exit 0
+    process.stdout.write(context);
   } catch {
     // Graceful degradation — never block Claude Code on recall failure
     process.stdout.write("{}");
