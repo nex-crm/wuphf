@@ -1,5 +1,5 @@
 {
-  "id": "memory-nex",
+  "id": "nex",
   "kind": "memory",
   "configSchema": {
     "type": "object",

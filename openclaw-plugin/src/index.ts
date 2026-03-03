@@ -120,7 +120,7 @@ interface OpenClawPluginApi {
 // --- Plugin definition ---
 
 const plugin = {
-  id: "memory-nex",
+  id: "nex",
   name: "Nex Memory",
   description: "Persistent context intelligence for OpenClaw agents, powered by Nex",
   version: "0.1.0",
@@ -151,7 +151,7 @@ const plugin = {
     // --- Service (health check on start, cleanup on stop) ---
 
     api.registerService({
-      id: "memory-nex",
+      id: "nex",
       async start({ logger }) {
         logger.info("Nex memory plugin starting...");
         try {

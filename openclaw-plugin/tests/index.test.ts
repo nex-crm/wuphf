@@ -395,7 +395,7 @@ describe("session-store", () => {
 
 describe("plugin", () => {
   it("has correct id and kind", () => {
-    expect(plugin.id).toBe("memory-nex");
+    expect(plugin.id).toBe("nex");
     expect(plugin.kind).toBe("memory");
   });
 

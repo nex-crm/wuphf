@@ -1,35 +1,43 @@
-# Nex — AI Agent Integrations
+# Nex — Cross-Agent Context Layer
 
-Give any AI agent a Context Graph. Two integration paths: **MCP Server** (Claude Desktop, ChatGPT, Cursor, Windsurf) and **OpenClaw Skill**.
+Give any AI agent persistent memory. One knowledge graph, every agent.
 
-## What is Nex?
+Tell something to OpenClaw. Ask about it in Claude Code. Reference it from Cursor. Context follows you across tools — no copy-pasting, no re-explaining, no lost context.
 
-Nex is a real-time context layer for AI agents. It builds a Context Graph from your conversations and shares organizational context with your agents — query contacts, companies, relationships, tasks, notes, and insights.
+## How It Works
+
+```
+You → OpenClaw: "Maria Rodriguez, CTO of TechFlow, wants to expand to Europe in Q3. Budget is $2M."
+
+You → Claude Code: "What do you know about Maria Rodriguez?"
+Claude Code: "Maria Rodriguez is the CTO of TechFlow. They're planning European expansion
+              in Q3 with a $2M budget."
+
+You → Cursor: "Which companies are planning European expansion?"
+Cursor: "TechFlow — Maria Rodriguez (CTO) confirmed Q3 timeline, $2M budget."
+```
+
+One fact entered once. Available everywhere, instantly.
 
 ## Integration Options
 
-| | MCP Server | OpenClaw Skill |
-|---|---|---|
-| **Format** | TypeScript MCP server | SKILL.md + bash scripts |
-| **Platforms** | Claude Desktop, ChatGPT, Cursor, Windsurf, any MCP client | OpenClaw |
-| **Transport** | stdio (local) or Streamable HTTP (remote) | Shell exec |
-| **Tools** | 47 typed tools with Zod schemas | Bash wrapper around curl |
-| **Auth** | Auto-registration or manual API key | Auto-registration or manual |
-| **Setup** | `npm install` + add to client config | Copy SKILL.md to skills dir |
+| | MCP Server | OpenClaw Plugin | Claude Code Plugin |
+|---|---|---|---|
+| **Platforms** | Claude Desktop, ChatGPT, Cursor, Windsurf | OpenClaw | Claude Code CLI |
+| **Auto-recall** | No (explicit tool calls) | Yes | Yes |
+| **Auto-capture** | No | Yes | Yes |
+| **Tools** | 47 typed tools | 3 memory tools | Via MCP server |
+| **Setup** | `npm install` + config | Copy plugin | Build + hooks |
 
-## MCP Server (recommended)
+## Quick Start
 
-Works with Claude Desktop, ChatGPT (agent mode), Cursor, Windsurf, and any MCP-compatible client.
-
-### Quick Start
+### MCP Server (Claude Desktop, Cursor, Windsurf)
 
 ```bash
-cd mcp && npm install
+cd mcp && npm install && npm run build
 ```
 
-#### Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Add to your client config:
 
 ```json
 {
@@ -37,74 +45,121 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
     "nex": {
       "command": "npx",
       "args": ["tsx", "/path/to/nex-as-a-skill/mcp/src/index.ts"],
-      "env": {
-        "NEX_API_KEY": "sk-your_key_here"
-      }
+      "env": { "NEX_API_KEY": "sk-your_key_here" }
     }
   }
 }
 ```
 
-#### Cursor
+No API key? The server starts in registration mode — call the `register` tool with your email.
 
-Add to `.cursor/mcp.json`:
+See [`mcp/README.md`](mcp/README.md) for all 47 tools.
+
+### OpenClaw Plugin (auto-recall + auto-capture)
+
+```bash
+cp -r openclaw-plugin /path/to/openclaw/plugins/nex
+cd /path/to/openclaw/plugins/nex && npm install && npm run build
+```
+
+Add to `openclaw.json`:
 
 ```json
 {
-  "mcpServers": {
-    "nex": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/nex-as-a-skill/mcp/src/index.ts"],
-      "env": {
-        "NEX_API_KEY": "sk-your_key_here"
+  "plugins": {
+    "load": { "paths": ["/path/to/plugins/nex"] },
+    "slots": { "memory": "nex" },
+    "entries": {
+      "nex": {
+        "enabled": true,
+        "config": {
+          "apiKey": "sk-your_key_here",
+          "baseUrl": "https://api.nex-crm.com"
+        }
       }
     }
   }
 }
 ```
 
-#### No API Key? Auto-register
+See [`openclaw-plugin/README.md`](openclaw-plugin/README.md) for details.
 
-If you don't set `NEX_API_KEY`, the server starts in registration mode. Just call the `register` tool with your email — it gets an API key and saves it to `~/.nex-mcp.json` for all future sessions.
+### Claude Code Plugin (auto-recall + auto-capture)
 
-See [`mcp/README.md`](mcp/README.md) for the full tool reference and setup guide.
+```bash
+cd claude-code-plugin && npm install && npm run build
+```
 
-## OpenClaw Skill
+Add hooks to `~/.claude/settings.json`:
 
-For OpenClaw agents specifically.
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "NEX_API_KEY=sk-your_key node /path/to/claude-code-plugin/dist/auto-recall.js",
+        "timeout": 10000
+      }]
+    }],
+    "Stop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "NEX_API_KEY=sk-your_key node /path/to/claude-code-plugin/dist/auto-capture.js",
+        "timeout": 5000,
+        "async": true
+      }]
+    }]
+  }
+}
+```
 
-### Setup
+Optional slash commands and MCP server:
 
-1. Copy `SKILL.md` to your OpenClaw skills directory:
-   ```bash
-   mkdir -p ~/.openclaw/workspace/skills/nex
-   cp SKILL.md ~/.openclaw/workspace/skills/nex/
-   ```
+```bash
+cp claude-code-plugin/commands/*.md ~/.claude/commands/    # /recall, /remember
+claude mcp add nex -- node /path/to/mcp/dist/index.js      # 47 tools
+```
 
-2. Add your API key to `~/.openclaw/openclaw.json`:
-   ```json
-   {
-     "skills": {
-       "entries": {
-         "nex": {
-           "enabled": true,
-           "env": {
-             "NEX_API_KEY": "sk-your_key_here"
-           }
-         }
-       }
-     }
-   }
-   ```
+See [`claude-code-plugin/README.md`](claude-code-plugin/README.md) for details.
 
-3. Verify: `openclaw agent --message "What skills do you have?"`
+## Architecture
 
-Or skip the API key — the skill can auto-register on first use.
+```
+                    ┌─────────────────────┐
+                    │   Nex Context Graph  │
+                    │  (people, companies, │
+                    │  insights, tasks...) │
+                    └──────────┬──────────┘
+                               │
+              ┌────────────────┼────────────────┐
+              │                │                │
+     ┌────────▼───────┐ ┌─────▼──────┐ ┌───────▼──────┐
+     │  MCP Server    │ │  OpenClaw  │ │  Claude Code │
+     │  (47 tools)    │ │  Plugin    │ │  Plugin      │
+     └────────┬───────┘ └─────┬──────┘ └───────┬──────┘
+              │               │                │
+     Claude Desktop    OpenClaw agents    Claude Code CLI
+     ChatGPT           Clawgent          Any project
+     Cursor
+     Windsurf
+```
 
-## API Documentation
+## Environment Variables
 
-See [docs.nex.ai](https://docs.nex.ai) for full API documentation.
+| Variable | Required | Default |
+|----------|----------|---------|
+| `NEX_API_KEY` | Yes | — |
+| `NEX_API_BASE_URL` | No | `https://api.nex-crm.com` |
+
+## Testing
+
+- **OpenClaw plugin**: 38/38 unit tests pass (`cd openclaw-plugin && npx vitest run`)
+- **Claude Code plugin**: 14/14 manual E2E tests pass (see [`docs/nex-plugin-test-results.md`](../docs/nex-plugin-test-results.md))
+- **MCP server**: Builds clean, all tools typed with Zod schemas
 
 ## License
 
-MIT License - see [LICENSE](LICENSE)
+MIT
