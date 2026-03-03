@@ -90,6 +90,7 @@ export async function ingestContextFiles(
         content = content.slice(0, MAX_FILE_SIZE) + "\n[...truncated]";
       }
       await client.post("/v1/context/text", { content, context: contextTag });
+      rateLimiter.recordRequest();
       markIngested(path, stat, contextTag, manifest);
       result.ingested++;
       result.files.push(contextTag);

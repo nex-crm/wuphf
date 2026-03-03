@@ -90,6 +90,7 @@ export async function scanAndIngest(
       }
       const context = `file-scan:${file.relativePath}`;
       await client.post("/v1/context/text", { content, context });
+      rateLimiter.recordRequest();
       markIngested(file.absolutePath, file.stat, context, manifest);
       result.ingested++;
     } catch (err) {

@@ -57,8 +57,13 @@ export class RateLimiter {
       this.writeTimestamps(timestamps);
       return false;
     }
+    return true;
+  }
+
+  recordRequest(): void {
+    const now = Date.now();
+    const timestamps = this.readTimestamps().filter((t) => now - t < this.config.windowMs);
     timestamps.push(now);
     this.writeTimestamps(timestamps);
-    return true;
   }
 }
