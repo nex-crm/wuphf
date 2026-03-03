@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "node <path-to>/claude-code-plugin/dist/auto-session-start.js",
-            "timeout": 10000,
+            "timeout": 120000,
             "statusMessage": "Loading knowledge context..."
           }
         ]
@@ -33,7 +33,7 @@
           {
             "type": "command",
             "command": "node <path-to>/claude-code-plugin/dist/auto-capture.js",
-            "timeout": 5000,
+            "timeout": 10000,
             "async": true
           }
         ]
