@@ -46,6 +46,7 @@ async function main(): Promise<void> {
     try {
       input = JSON.parse(raw) as HookInput;
     } catch {
+      process.stderr.write("[nex-recall] Failed to parse stdin JSON\n");
       process.stdout.write("{}");
       return;
     }
@@ -72,7 +73,10 @@ async function main(): Promise<void> {
     let cfg;
     try {
       cfg = loadConfig();
-    } catch {
+    } catch (err) {
+      process.stderr.write(
+        `[nex-recall] Config error: ${err instanceof Error ? err.message : String(err)}\n`
+      );
       process.stdout.write("{}");
       return;
     }
@@ -113,8 +117,10 @@ async function main(): Promise<void> {
       },
     });
     process.stdout.write(output);
-  } catch {
-    // Graceful degradation — never block Claude Code on recall failure
+  } catch (err) {
+    process.stderr.write(
+      `[nex-recall] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
+    );
     process.stdout.write("{}");
   }
 }

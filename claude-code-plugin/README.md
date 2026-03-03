@@ -12,7 +12,7 @@ Persistent context intelligence for Claude Code, powered by Nex. Automatically r
 ## Prerequisites
 
 - Node.js 18+
-- A Nex API key (get one at [nex-crm.com](https://nex-crm.com))
+- A Nex API key (get one at [app.nex.ai](https://app.nex.ai)) — [API docs](https://docs.nex.ai)
 - Claude Code CLI
 
 ## Installation
@@ -29,7 +29,7 @@ npm run build
 
 ```bash
 export NEX_API_KEY="your-api-key-here"
-export NEX_API_BASE_URL="https://api.nex-crm.com"  # optional, defaults to api.nex-crm.com
+export NEX_API_BASE_URL="https://api.nex.ai"  # optional, defaults to api.nex.ai
 ```
 
 ### 2. MCP Server Registration
@@ -47,6 +47,19 @@ Copy the hook entries from `settings.json` into your Claude Code settings at `~/
 ```json
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node /absolute/path/to/claude-code-plugin/dist/auto-session-start.js",
+            "timeout": 10000,
+            "statusMessage": "Loading knowledge context..."
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "matcher": "",
@@ -91,12 +104,20 @@ Then use:
 
 ## How It Works
 
+### Session Start (SessionStart Hook)
+
+1. Fires once when a new Claude Code session begins
+2. Queries Nex for a baseline context summary ("key active context, recent interactions, important updates")
+3. Injects as system context so the agent "already knows" relevant business context from the first message
+4. On any error: returns `{}`, logs to stderr (graceful degradation)
+
 ### Auto-Recall (UserPromptSubmit Hook)
 
 1. Reads the user's prompt from stdin (`{ "prompt": "...", "session_id": "..." }`)
-2. Queries Nex `/ask` endpoint for relevant context
-3. Returns `{ "additionalContext": "<nex-context>...</nex-context>" }` to inject into the conversation
-4. On any error: returns `{}` (graceful degradation, never blocks Claude Code)
+2. Runs prompt through `recall-filter.ts` — skips short directives, tool commands, code-heavy prompts; always recalls on questions and first prompt
+3. If recall needed, queries Nex `/ask` endpoint for relevant context
+4. Returns `{ "additionalContext": "<nex-context>...</nex-context>" }` to inject into the conversation
+5. On any error: returns `{}`, logs to stderr (graceful degradation)
 
 ### Auto-Capture (Stop Hook)
 
@@ -111,17 +132,19 @@ Then use:
 ```
 claude-code-plugin/
 ├── src/
-│   ├── auto-recall.ts      # UserPromptSubmit hook handler
-│   ├── auto-capture.ts     # Stop hook handler
-│   ├── nex-client.ts       # HTTP client for Nex API
-│   ├── config.ts           # Environment variable config
-│   ├── context-format.ts   # XML context formatting
-│   ├── capture-filter.ts   # Smart capture filtering
-│   ├── rate-limiter.ts     # Sliding window rate limiter
-│   └── session-store.ts    # LRU session ID mapping
+│   ├── auto-session-start.ts  # SessionStart hook — baseline context load
+│   ├── auto-recall.ts         # UserPromptSubmit hook — selective recall
+│   ├── auto-capture.ts        # Stop hook — conversation capture
+│   ├── recall-filter.ts       # Smart prompt classifier + debounce
+│   ├── nex-client.ts          # HTTP client for Nex API
+│   ├── config.ts              # Environment variable config
+│   ├── context-format.ts      # XML context formatting
+│   ├── capture-filter.ts      # Smart capture filtering
+│   ├── rate-limiter.ts        # Sliding window rate limiter
+│   └── session-store.ts       # LRU session ID mapping
 ├── commands/
-│   ├── recall.md           # /recall slash command
-│   └── remember.md         # /remember slash command
-├── settings.json           # Hook configuration template
+│   ├── recall.md              # /recall slash command
+│   └── remember.md            # /remember slash command
+├── settings.json              # Hook configuration template
 └── README.md
 ```

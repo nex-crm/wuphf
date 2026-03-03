@@ -27,7 +27,7 @@ export function loadConfig(): NexConfig {
     );
   }
 
-  let baseUrl = process.env.NEX_API_BASE_URL ?? "https://api.nex-crm.com";
+  let baseUrl = process.env.NEX_API_BASE_URL ?? "https://api.nex.ai";
   // Strip trailing slash
   baseUrl = baseUrl.replace(/\/+$/, "");
 

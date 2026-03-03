@@ -36,13 +36,16 @@ async function main(): Promise<void> {
     try {
       input = JSON.parse(raw) as HookInput;
     } catch {
-      // Unparseable stdin — continue with empty input
+      process.stderr.write("[nex-session-start] Failed to parse stdin JSON, continuing with defaults\n");
     }
 
     let cfg;
     try {
       cfg = loadConfig();
-    } catch {
+    } catch (err) {
+      process.stderr.write(
+        `[nex-session-start] Config error: ${err instanceof Error ? err.message : String(err)}\n`
+      );
       process.stdout.write("{}");
       return;
     }
@@ -78,7 +81,10 @@ async function main(): Promise<void> {
       },
     });
     process.stdout.write(output);
-  } catch {
+  } catch (err) {
+    process.stderr.write(
+      `[nex-session-start] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
+    );
     process.stdout.write("{}");
   }
 }
