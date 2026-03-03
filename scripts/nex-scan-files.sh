@@ -34,7 +34,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Resolve to absolute path
+# Validate directory
+if [[ ! -d "$DIR" ]]; then
+  echo "Error: Directory '$DIR' does not exist" >&2
+  exit 1
+fi
 DIR="$(cd "$DIR" && pwd)"
 
 # --- Ensure manifest directory exists ---
@@ -43,29 +47,43 @@ if [[ ! -f "$MANIFEST_FILE" ]]; then
   echo '{"version":1,"files":{}}' > "$MANIFEST_FILE"
 fi
 
-# --- Build find command for extensions ---
-# Convert ".md,.txt" to -name "*.md" -o -name "*.txt"
+# --- Validate and parse extensions ---
 IFS=',' read -ra EXT_ARRAY <<< "$EXTENSIONS"
-FIND_NAMES=""
 for ext in "${EXT_ARRAY[@]}"; do
-  ext="$(echo "$ext" | xargs)"  # trim whitespace
-  if [[ -n "$FIND_NAMES" ]]; then
-    FIND_NAMES="$FIND_NAMES -o"
+  ext="$(echo "$ext" | xargs)"
+  if [[ ! "$ext" =~ ^\.[a-zA-Z0-9]+$ ]]; then
+    echo "Error: Invalid extension '$ext'. Must match pattern '.<alphanumeric>'" >&2
+    exit 1
   fi
-  FIND_NAMES="$FIND_NAMES -name \"*${ext}\""
 done
 
-# --- Build find ignore patterns ---
+# --- Build find args as arrays (safe from injection) ---
 IFS=',' read -ra IGNORE_ARRAY <<< "$DEFAULT_IGNORE"
-FIND_PRUNE=""
+
+FIND_ARGS=("$DIR" "-maxdepth" "$MAX_DEPTH")
+
+# Add prune patterns
 for ign in "${IGNORE_ARRAY[@]}"; do
   ign="$(echo "$ign" | xargs)"
-  FIND_PRUNE="$FIND_PRUNE -name \"$ign\" -prune -o"
+  FIND_ARGS+=("-name" "$ign" "-prune" "-o")
 done
 
+# Add extension patterns
+FIND_ARGS+=("-type" "f" "(")
+first=true
+for ext in "${EXT_ARRAY[@]}"; do
+  ext="$(echo "$ext" | xargs)"
+  if [ "$first" = true ]; then
+    first=false
+  else
+    FIND_ARGS+=("-o")
+  fi
+  FIND_ARGS+=("-name" "*${ext}")
+done
+FIND_ARGS+=(")" "-print")
+
 # --- Find files ---
-# Use eval to handle the dynamically built command
-FILES=$(eval "find \"$DIR\" -maxdepth $MAX_DEPTH $FIND_PRUNE -type f \\( $FIND_NAMES \\) -print" 2>/dev/null || true)
+FILES=$(find "${FIND_ARGS[@]}" 2>/dev/null || true)
 
 if [[ -z "$FILES" ]]; then
   echo '{"scanned":0,"ingested":0,"skipped":0,"errors":0}'
@@ -89,8 +107,9 @@ while IFS= read -r filepath; do
   MANIFEST_MTIME=$(jq -r --arg p "$filepath" '.files[$p].mtime // 0' "$MANIFEST_FILE" 2>/dev/null || echo 0)
   MANIFEST_SIZE=$(jq -r --arg p "$filepath" '.files[$p].size // 0' "$MANIFEST_FILE" 2>/dev/null || echo 0)
 
-  # Skip if unchanged
-  if [[ "$FILE_MTIME" == "$MANIFEST_MTIME" && "$FILE_SIZE" == "$MANIFEST_SIZE" ]]; then
+  # Skip if unchanged (manifest stores mtime in ms)
+  FILE_MTIME_MS_CHECK=$((FILE_MTIME * 1000))
+  if [[ "$FILE_MTIME_MS_CHECK" == "$MANIFEST_MTIME" && "$FILE_SIZE" == "$MANIFEST_SIZE" ]]; then
     SKIPPED=$((SKIPPED + 1))
     continue
   fi
@@ -117,9 +136,10 @@ while IFS= read -r filepath; do
   if printf '%s' "$JSON_BODY" | bash "$SCRIPT_DIR/nex-api.sh" POST /v1/context/text >/dev/null 2>&1; then
     INGESTED=$((INGESTED + 1))
 
-    # Update manifest
+    # Update manifest (mtime in ms to match Node.js format)
+    FILE_MTIME_MS=$((FILE_MTIME * 1000))
     TMP=$(mktemp)
-    jq --arg p "$filepath" --argjson mt "$FILE_MTIME" --argjson sz "$FILE_SIZE" --arg ctx "$CONTEXT" --argjson now "$(date +%s)000" \
+    jq --arg p "$filepath" --argjson mt "$FILE_MTIME_MS" --argjson sz "$FILE_SIZE" --arg ctx "$CONTEXT" --argjson now "$(date +%s)000" \
       '.files[$p] = {mtime: $mt, size: $sz, ingestedAt: $now, context: $ctx}' \
       "$MANIFEST_FILE" > "$TMP" && mv "$TMP" "$MANIFEST_FILE"
   else
