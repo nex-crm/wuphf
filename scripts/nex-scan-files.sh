@@ -30,7 +30,16 @@ while [[ $# -gt 0 ]]; do
     --max-files) MAX_FILES="$2"; shift 2 ;;
     --max-depth) MAX_DEPTH="$2"; shift 2 ;;
     --extensions) EXTENSIONS="$2"; shift 2 ;;
-    *) echo "Unknown option: $1" >&2; exit 1 ;;
+    -h|--help)
+      echo "Usage: nex-scan-files.sh [OPTIONS]"
+      echo "  --dir PATH        Directory to scan (default: .)"
+      echo "  --max-files N     Max files to ingest per scan (default: 5)"
+      echo "  --max-depth N     Max directory depth (default: 2)"
+      echo "  --extensions LIST Comma-separated extensions (default: .md,.txt,.csv,.json,.yaml,.yml)"
+      echo "  -h, --help        Show this help"
+      exit 0
+      ;;
+    *) echo "Unknown option: $1. Use --help for usage." >&2; exit 1 ;;
   esac
 done
 
