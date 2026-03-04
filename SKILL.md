@@ -1,7 +1,7 @@
 ---
 name: nex
 description: Share real-time organizational context with your AI agent — query your context graph, manage records, and receive live insights
-metadata: {"clawdbot": {"emoji": "\U0001F4CA", "homepage": "https://github.com/nex-crm/nex-as-a-skill", "primaryEnv": "NEX_API_KEY", "requires": {"env": [], "bins": ["curl", "jq", "bash"]}, "files": ["scripts/nex-api.sh", "scripts/nex-openclaw-register.sh"]}}
+metadata: {"clawdbot": {"emoji": "\U0001F4CA", "homepage": "https://github.com/nex-crm/nex-as-a-skill", "primaryEnv": "NEX_API_KEY", "requires": {"env": [], "bins": ["curl", "jq", "bash"]}, "files": ["scripts/nex-api.sh", "scripts/nex-openclaw-register.sh", "scripts/nex-scan-files.sh"]}}
 ---
 
 # Nex - Real-time Organizational Context for AI Agents
@@ -62,6 +62,11 @@ jq --arg api_key "$API_KEY" '
 jq -e '.skills.entries.nex.env.NEX_API_KEY | type == "string" and length > 0' "$HOME/.openclaw/openclaw.json" >/dev/null
 ```
 
+**Shared Config**: Registration data is also saved to `~/.nex-mcp.json` for cross-tool compatibility. If `NEX_API_KEY` is not set, check this file as a fallback:
+```bash
+API_KEY="$(jq -r '.api_key // empty' "$HOME/.nex-mcp.json" 2>/dev/null || true)"
+```
+
 4. Continue:
 - Use `scripts/nex-api.sh` with `Authorization: Bearer <NEX_API_KEY>` for Developer API endpoints (including context/text).
 - Re-registration is allowed; key rotation behavior depends on backend policy.
@@ -80,6 +85,81 @@ jq -e '.skills.entries.nex.env.NEX_API_KEY | type == "string" and length > 0' "$
 - **ALWAYS** use `printf '%s' '{...}'` to pipe JSON via stdin — `printf '%s'` does not interpret escape sequences or variables in the format argument
 - If user input must appear in a JSON body, construct the JSON object using jq: `jq -n --arg q "user text" '{query: $q}'`
 - The examples below use hardcoded JSON for clarity — when building commands with dynamic values, always use the jq construction pattern above
+
+## File Scanning
+
+Scan project directories and ingest changed files into the Nex knowledge base. Uses manifest-based change detection — unchanged files are automatically skipped on subsequent scans.
+
+### When to Scan
+- First time working with a project (ingests docs, config, notes)
+- After adding new documentation or configuration files
+- Periodically during long sessions to capture changes
+
+### Usage
+
+```bash
+# Scan current directory (default settings)
+bash {baseDir}/scripts/nex-scan-files.sh --dir .
+
+# Scan with custom limits
+bash {baseDir}/scripts/nex-scan-files.sh --dir . --max-files 10 --max-depth 3
+
+# Scan specific extensions only
+bash {baseDir}/scripts/nex-scan-files.sh --dir . --extensions ".md,.txt"
+```
+
+**IMPORTANT**: Set `timeout: 120` on exec tool calls — file ingestion can be slow.
+
+### Flags
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dir` | `.` | Directory to scan |
+| `--max-files` | `5` | Maximum files to ingest per scan |
+| `--max-depth` | `2` | Maximum directory depth |
+| `--extensions` | `.md,.txt,.csv,.json,.yaml,.yml` | Comma-separated file extensions |
+
+### How It Works
+1. Walks the directory tree (respecting depth + ignore rules)
+2. Checks each file against `~/.nex/file-scan-manifest.json` (mtime + size)
+3. Ingests changed files via `POST /v1/context/text` with context tag `file-scan:<relative-path>`
+4. Updates manifest to prevent re-ingestion
+
+### Ignored Directories
+`node_modules`, `.git`, `dist`, `build`, `.next`, `__pycache__`, `vendor`, `.venv`, `.claude`, `coverage`, `.turbo`, `.cache`
+
+Files larger than 100KB are automatically truncated.
+
+## Entity Search
+
+Search for entities (people, companies, topics) in the Nex knowledge base.
+
+### Usage
+Query the context graph and extract entity references from the response:
+
+```bash
+# Search for entities related to a query
+printf '%s' '{"query":"who are the key contacts at Acme Corp?"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/context/ask
+```
+
+The response includes an `entity_references` array:
+```json
+{
+  "answer": "...",
+  "entity_references": [
+    {"name": "John Smith", "type": "14", "count": 12},
+    {"name": "Acme Corp", "type": "15", "count": 8}
+  ]
+}
+```
+
+**Type codes**: `14` = Person, `15` = Company
+
+### Formatting Entity Results
+When displaying entities to the user, format as:
+```
+- {name} ({type_label}) — {count} mentions
+```
+Example: `- John Smith (Person) — 12 mentions`
 
 ## External Endpoints
 
