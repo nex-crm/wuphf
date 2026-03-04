@@ -6,6 +6,7 @@ const CONFIG_PATH = join(homedir(), ".nex-mcp.json");
 
 interface NexMcpConfig {
   api_key?: string;
+  base_url?: string;
   workspace_id?: string;
   workspace_slug?: string;
   [key: string]: unknown;

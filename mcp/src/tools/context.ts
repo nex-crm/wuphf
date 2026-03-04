@@ -6,10 +6,15 @@ export function registerContextTools(server: McpServer, client: NexApiClient) {
   server.tool(
     "query_context",
     "Query the Nex context graph with a natural language question. Returns an AI-generated answer with supporting entities and evidence. Use for open-ended questions about contacts, companies, relationships, or history.",
-    { query: z.string().describe("Natural language question about your contacts, companies, or relationships") },
+    {
+      query: z.string().describe("Natural language question about your contacts, companies, or relationships"),
+      session_id: z.string().optional().describe("Session ID for multi-turn conversational continuity"),
+    },
     { readOnlyHint: true, openWorldHint: true },
-    async ({ query }) => {
-      const result = await client.post("/v1/context/ask", { query });
+    async ({ query, session_id }) => {
+      const body: Record<string, unknown> = { query };
+      if (session_id) body.session_id = session_id;
+      const result = await client.post("/v1/context/ask", body);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     },
   );
@@ -76,6 +81,22 @@ export function registerContextTools(server: McpServer, client: NexApiClient) {
       const path = `/v1/context/list/jobs/${encodeURIComponent(job_id)}${qs ? `?${qs}` : ""}`;
       const result = await client.get(path);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    },
+  );
+
+  server.tool(
+    "search_entities",
+    "Search for entities (people, companies, topics) in the Nex knowledge base. Returns a structured list with names, types, and mention counts.",
+    { query: z.string().describe("Search query to find entities") },
+    { readOnlyHint: true },
+    async ({ query }) => {
+      const result = await client.post("/v1/context/ask", { query }) as { entity_references?: Array<{ name: string; type: string; count?: number }> };
+      const entities = result.entity_references ?? [];
+      if (entities.length === 0) {
+        return { content: [{ type: "text", text: "No matching entities found." }] };
+      }
+      const lines = entities.map(e => `- ${e.name} (${e.type})${e.count ? ` — ${e.count} mentions` : ""}`);
+      return { content: [{ type: "text", text: `Found ${entities.length} entities:\n${lines.join("\n")}` }] };
     },
   );
 }
