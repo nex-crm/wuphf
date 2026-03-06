@@ -1,6 +1,6 @@
 # @nex-ai/cli
 
-Nex CLI — full-parity command-line interface for the Nex Developer API. 50+ commands covering knowledge graph queries, CRM CRUD, tasks, notes, insights, and agent hooks.
+Nex CLI provides organizational context & memory to AI agents. 50+ commands covering knowledge graph queries, CRM CRUD, tasks, notes, insights, and agent hooks.
 
 ## Install
 
