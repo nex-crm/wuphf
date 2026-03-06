@@ -33,7 +33,14 @@ export interface ScanResult {
 // --- Constants ---
 
 const MANIFEST_PATH = join(homedir(), ".nex", "file-scan-manifest.json");
-const DEFAULT_EXTENSIONS = [".md", ".txt", ".csv", ".json", ".yaml", ".yml"];
+const DEFAULT_EXTENSIONS = [
+  ".md", ".txt", ".rtf", ".html", ".htm",
+  ".csv", ".tsv", ".json", ".yaml", ".yml", ".toml", ".xml",
+  ".js", ".ts", ".jsx", ".tsx", ".py", ".rb", ".go", ".rs", ".java",
+  ".sh", ".bash", ".zsh", ".fish",
+  ".org", ".rst", ".adoc", ".tex", ".log",
+  ".env", ".ini", ".cfg", ".conf", ".properties",
+];
 const SKIP_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", "__pycache__", ".venv",
   ".cache", ".turbo", "coverage", ".nyc_output",
