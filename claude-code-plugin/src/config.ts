@@ -17,7 +17,7 @@ export class ConfigError extends Error {
 /**
  * Load config from environment variables.
  * - NEX_API_KEY: required
- * - NEX_API_BASE_URL: optional (default: https://api.nex-crm.com)
+ * - NEX_DEV_URL: optional override for local development
  */
 export function loadConfig(): NexConfig {
   const apiKey = process.env.NEX_API_KEY;
@@ -27,9 +27,7 @@ export function loadConfig(): NexConfig {
     );
   }
 
-  let baseUrl = process.env.NEX_API_BASE_URL ?? "https://app.nex.ai";
-  // Strip trailing slash
-  baseUrl = baseUrl.replace(/\/+$/, "");
+  const baseUrl = process.env.NEX_DEV_URL ?? "https://app.nex.ai";
 
   return { apiKey, baseUrl };
 }

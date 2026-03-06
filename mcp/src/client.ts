@@ -1,5 +1,6 @@
-const BASE_URL = "http://localhost:30000/api/developers";
-const REGISTER_URL = "http://localhost:30000/api/v1/agents/register";
+const PROD_URL = "https://app.nex.ai";
+const BASE_URL = `${process.env.NEX_DEV_URL ?? PROD_URL}/api/developers`;
+const REGISTER_URL = `${process.env.NEX_DEV_URL ?? PROD_URL}/api/v1/agents/register`;
 
 export class NexApiError extends Error {
   constructor(

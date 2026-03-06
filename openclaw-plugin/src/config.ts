@@ -16,7 +16,7 @@ export interface NexPluginConfig {
 }
 
 const DEFAULTS: Omit<NexPluginConfig, "apiKey"> = {
-  baseUrl: "https://api.nex-crm.com",
+  baseUrl: "https://app.nex.ai",
   autoRecall: true,
   autoCapture: true,
   captureMode: "last_turn",
@@ -58,9 +58,7 @@ export function parseConfig(raw?: Record<string, unknown>): NexPluginConfig {
     );
   }
 
-  let baseUrl = typeof cfg.baseUrl === "string" ? resolveEnvVars(cfg.baseUrl) : DEFAULTS.baseUrl;
-  // Strip trailing slash
-  baseUrl = baseUrl.replace(/\/+$/, "");
+  const baseUrl = process.env.NEX_DEV_URL ?? "https://app.nex.ai";
 
   const captureMode = cfg.captureMode as string | undefined;
   if (captureMode !== undefined && captureMode !== "last_turn" && captureMode !== "full_session") {
