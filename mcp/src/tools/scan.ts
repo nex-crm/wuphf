@@ -100,7 +100,7 @@ export function registerScanTools(server: McpServer, client: NexApiClient) {
         : DEFAULT_EXTENSIONS;
       const extSet = new Set(extList);
       const maxFiles = max_files ?? 5;
-      const maxDepth = depth ?? 2;
+      const maxDepth = depth ?? 20;
 
       const discovered = discoverFiles(absDir, extSet, maxDepth);
       discovered.sort((a, b) => b.mtime - a.mtime);
