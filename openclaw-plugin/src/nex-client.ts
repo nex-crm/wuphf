@@ -115,6 +115,21 @@ export class NexClient {
     }
   }
 
+  /** Generic GET request. */
+  async get<T = unknown>(path: string, timeoutMs?: number): Promise<T> {
+    return this.request<T>("GET", path, undefined, timeoutMs);
+  }
+
+  /** Generic POST request. */
+  async post<T = unknown>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
+    return this.request<T>("POST", path, body, timeoutMs);
+  }
+
+  /** Generic DELETE request. */
+  async delete<T = unknown>(path: string, timeoutMs?: number): Promise<T> {
+    return this.request<T>("DELETE", path, undefined, timeoutMs);
+  }
+
   /** Ingest text content into the Nex knowledge graph. */
   async ingest(content: string, context?: string): Promise<IngestResponse> {
     const body: Record<string, string> = { content };

@@ -389,6 +389,67 @@ const plugin = {
       },
     });
 
+    // --- Integration tools ---
+
+    const ListIntegrationsParams = Type.Object({});
+
+    api.registerTool({
+      name: "nex_list_integrations",
+      label: "List Integrations",
+      description: "List available third-party integrations and their connection status",
+      parameters: ListIntegrationsParams,
+      async execute(_toolCallId, _params) {
+        const result = await client.get("/v1/integrations/");
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          details: result,
+        };
+      },
+    });
+
+    const ConnectIntegrationParams = Type.Object({
+      type: Type.String({ description: "Integration type: email, calendar, crm, messaging" }),
+      provider: Type.String({ description: "Provider: google, microsoft, attio, slack, salesforce, hubspot" }),
+    });
+
+    api.registerTool({
+      name: "nex_connect_integration",
+      label: "Connect Integration",
+      description: "Start connecting a third-party integration via OAuth. Returns an auth_url for the user to open.",
+      parameters: ConnectIntegrationParams,
+      async execute(_toolCallId, params) {
+        const { type, provider } = params as Static<typeof ConnectIntegrationParams>;
+        const result = await client.post(
+          `/v1/integrations/${encodeURIComponent(type)}/${encodeURIComponent(provider)}/connect`
+        );
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          details: result,
+        };
+      },
+    });
+
+    const DisconnectIntegrationParams = Type.Object({
+      connection_id: Type.String({ description: "Connection ID to disconnect" }),
+    });
+
+    api.registerTool({
+      name: "nex_disconnect_integration",
+      label: "Disconnect Integration",
+      description: "Disconnect a third-party integration",
+      parameters: DisconnectIntegrationParams,
+      async execute(_toolCallId, params) {
+        const { connection_id } = params as Static<typeof DisconnectIntegrationParams>;
+        const result = await client.delete(
+          `/v1/integrations/connections/${encodeURIComponent(connection_id)}`
+        );
+        return {
+          content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+          details: result,
+        };
+      },
+    });
+
     // --- Commands ---
 
     api.registerCommand({
