@@ -14,6 +14,7 @@ import { NexClient } from "./nex-client.js";
 import { formatNexContext } from "./context-format.js";
 import { SessionStore } from "./session-store.js";
 import { recordRecall } from "./recall-filter.js";
+import { isScanEnabled, scanDirectory } from "./file-scanner.js";
 
 const sessions = new SessionStore();
 
@@ -74,10 +75,26 @@ async function main(): Promise<void> {
       sessionId: result.session_id,
     });
 
+    // --- File scan (best-effort, non-blocking) ---
+    let scanSummary = "";
+    if (isScanEnabled()) {
+      try {
+        const cwd = process.cwd();
+        const scanResult = await scanDirectory(cwd, client);
+        if (scanResult.scanned > 0) {
+          scanSummary = `\n[nex-scan] Ingested ${scanResult.scanned} file(s) from ${cwd}.`;
+        }
+      } catch (err) {
+        process.stderr.write(
+          `[nex-session-start] File scan error: ${err instanceof Error ? err.message : String(err)}\n`
+        );
+      }
+    }
+
     const output = JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "SessionStart",
-        additionalContext: context,
+        additionalContext: context + scanSummary,
       },
     });
     process.stdout.write(output);
