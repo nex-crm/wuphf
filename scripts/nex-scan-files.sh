@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # --- Defaults from env ---
 SCAN_DIR="${1:-.}"
-EXTENSIONS="${NEX_SCAN_EXTENSIONS:-.md,.txt,.csv,.json,.yaml,.yml}"
+EXTENSIONS="${NEX_SCAN_EXTENSIONS:-.md,.txt,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.js,.ts,.jsx,.tsx,.py,.rb,.go,.rs,.java,.sh,.bash,.zsh,.fish,.org,.rst,.adoc,.tex,.log,.env,.ini,.cfg,.conf,.properties}"
 MAX_FILES="${NEX_SCAN_MAX_FILES:-5}"
 MAX_DEPTH="${NEX_SCAN_DEPTH:-20}"
 FORCE=false
