@@ -2,10 +2,11 @@
  * Integration commands: list, connect, disconnect.
  */
 
-import { execSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { program } from "../cli.js";
 import { NexClient } from "../lib/client.js";
 import { resolveApiKey, resolveFormat, resolveTimeout } from "../lib/config.js";
+import { AuthError, ServerError } from "../lib/errors.js";
 import { printOutput, printError } from "../lib/output.js";
 import type { Format } from "../lib/output.js";
 
@@ -44,16 +45,24 @@ integrate
       throw new Error("No auth URL returned from API");
     }
 
-    // Open browser — URL is from our own API, not user input
+    // Open browser using spawn (no shell interpolation — safe from injection)
     const url = result.auth_url;
     try {
+      let cmd: string;
+      let args: string[];
       if (process.platform === "darwin") {
-        execSync(`open ${JSON.stringify(url)}`, { stdio: "ignore" });
+        cmd = "open";
+        args = [url];
       } else if (process.platform === "linux") {
-        execSync(`xdg-open ${JSON.stringify(url)}`, { stdio: "ignore" });
+        cmd = "xdg-open";
+        args = [url];
       } else if (process.platform === "win32") {
-        execSync(`start "" ${JSON.stringify(url)}`, { stdio: "ignore" });
+        cmd = "cmd";
+        args = ["/c", "start", "", url];
+      } else {
+        throw new Error("Unsupported platform");
       }
+      spawn(cmd, args, { stdio: "ignore", detached: true }).unref();
     } catch {
       process.stderr.write(`Open this URL in your browser:\n${url}\n\n`);
     }
@@ -80,6 +89,9 @@ integrate
           return;
         }
       } catch (err) {
+        // Fail fast on non-transient errors
+        if (err instanceof AuthError) throw err;
+        if (err instanceof ServerError && (err.status === 410 || err.status === 403)) throw err;
         // Continue polling on transient errors
         if (program.opts().debug) {
           process.stderr.write(`Poll error: ${err}\n`);
