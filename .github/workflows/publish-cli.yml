@@ -9,12 +9,16 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     defaults:
       run:
         working-directory: cli
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/setup-node@v4
         with:
@@ -27,21 +31,38 @@ jobs:
 
       - run: npm test
 
-      - name: Check if version changed
-        id: version-check
+      - name: Bump patch version
+        id: bump
         run: |
-          LOCAL_VERSION=$(node -p "require('./package.json').version")
-          PUBLISHED_VERSION=$(npm view @nex-ai/cli version 2>/dev/null || echo "0.0.0")
-          if [ "$LOCAL_VERSION" = "$PUBLISHED_VERSION" ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "Version $LOCAL_VERSION already published, skipping."
+          PUBLISHED=$(npm view @nex-ai/cli version 2>/dev/null || echo "0.0.0")
+          LOCAL=$(node -p "require('./package.json').version")
+          if [ "$LOCAL" = "$PUBLISHED" ]; then
+            npm version patch --no-git-tag-version
+            NEW_VERSION=$(node -p "require('./package.json').version")
+            echo "bumped=true" >> "$GITHUB_OUTPUT"
+            echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+            echo "Bumped $LOCAL -> $NEW_VERSION"
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "Publishing $LOCAL_VERSION (current: $PUBLISHED_VERSION)"
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            echo "version=$LOCAL" >> "$GITHUB_OUTPUT"
+            echo "Version $LOCAL already ahead of published $PUBLISHED, publishing as-is."
           fi
 
+      - name: Rebuild with new version
+        if: steps.bump.outputs.bumped == 'true'
+        run: npm run build
+
       - name: Publish to npm
-        if: steps.version-check.outputs.skip != 'true'
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Commit version bump
+        if: steps.bump.outputs.bumped == 'true'
+        run: |
+          cd ..
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add cli/package.json
+          git commit -m "chore(cli): bump to v${{ steps.bump.outputs.version }} [skip ci]"
+          git push
