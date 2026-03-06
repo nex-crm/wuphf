@@ -29,14 +29,14 @@ One fact entered once. Available everywhere, instantly.
 | **Commands** | 50+ CLI commands | 50+ typed tools | 4 tools + 4 commands | 5 slash commands + MCP | bash scripts |
 | **Rate limiting** | File-based | File-based | Queue + file-based | File-based | N/A |
 | **Session tracking** | File-based | File-based | In-memory LRU | File-based | N/A |
-| **Setup** | `npx @nex-crm/cli` | `npm install` + config | Copy plugin | Build + hooks | Set `NEX_API_KEY` |
+| **Setup** | `npx @nex-ai/cli` | `npm install` + config | Copy plugin | Build + hooks | Set `NEX_API_KEY` |
 
 ## Quick Start
 
 ### CLI (any terminal, any AI agent)
 
 ```bash
-npx @nex-crm/cli register --email you@company.com
+npx @nex-ai/cli register --email you@company.com
 ```
 
 That's it. Now use it:
@@ -66,7 +66,7 @@ nex recall "what do I know about TechFlow?"  # Returns <nex-context> XML block
 nex capture "Agent conversation text..."  # Rate-limited, filtered
 ```
 
-Install globally: `npm install -g @nex-crm/cli`
+Install globally: `npm install -g @nex-ai/cli`
 
 See [`cli/README.md`](cli/README.md) for all 50+ commands.
 

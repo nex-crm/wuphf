@@ -1,4 +1,4 @@
-# @nex-crm/cli
+# @nex-ai/cli
 
 Nex CLI — full-parity command-line interface for the Nex Developer API. 50+ commands covering knowledge graph queries, CRM CRUD, tasks, notes, insights, and agent hooks.
 
@@ -6,10 +6,10 @@ Nex CLI — full-parity command-line interface for the Nex Developer API. 50+ co
 
 ```bash
 # Run directly (no install)
-npx @nex-crm/cli ask "who is Maria?"
+npx @nex-ai/cli ask "who is Maria?"
 
 # Install globally
-npm install -g @nex-crm/cli
+npm install -g @nex-ai/cli
 
 # Or run from source
 cd cli && npm install && npm run build && node dist/index.js
