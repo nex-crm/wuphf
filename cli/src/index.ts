@@ -23,6 +23,7 @@ import "./commands/list-job.js";
 import "./commands/task.js";
 import "./commands/note.js";
 import "./commands/session.js";
+import "./commands/scan.js";
 
 /**
  * Read all data from stdin (non-TTY only).
