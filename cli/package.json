@@ -1,6 +1,6 @@
 {
   "name": "@nex-ai/cli",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Nex CLI provides organizational context & memory to AI agents",
   "type": "module",
   "bin": {

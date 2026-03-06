@@ -1,6 +1,6 @@
 # @nex-ai/cli
 
-Nex CLI provides organizational context & memory to AI agents. 50+ commands covering knowledge graph queries, records, tasks, notes, insights, and agent hooks.
+Nex CLI provides organizational context & memory to AI agents. 50+ commands covering knowledge graph queries, records, tasks, notes, insights, and file scanning.
 
 ## Install
 
@@ -36,7 +36,7 @@ nex config show
 nex ask <query>              # Query with natural language
 nex remember <content>       # Ingest text (meeting notes, emails, docs)
 nex recall <query>           # Query → XML-wrapped for agent injection
-nex capture [content]        # Rate-limited ingestion for agent hooks
+nex capture [content]        # Rate-limited ingestion
 nex artifact <id>            # Check processing status
 nex search <query>           # Search CRM records by name
 nex insight list [--last 24h]  # Recent insights
@@ -118,20 +118,6 @@ git diff | nex capture
 | 0 | Success |
 | 1 | General error (server error, rate limit, invalid input) |
 | 2 | Auth error (no API key, invalid key, 401/403) |
-
-## For Agent Builders
-
-Build auto-recall and auto-capture hooks for any AI agent:
-
-```bash
-# Auto-recall: inject context before each prompt
-nex recall "$USER_PROMPT"  # Returns <nex-context>...</nex-context> or empty
-
-# Auto-capture: save agent output after each turn
-nex capture "$AGENT_RESPONSE"  # Rate-limited, filtered, idempotent
-```
-
-The `recall` command includes smart filtering (skips short prompts, tool commands, code-heavy content) and the `capture` command includes rate limiting (10 req/min) and content filtering (strips previously injected context blocks).
 
 ## Development
 
