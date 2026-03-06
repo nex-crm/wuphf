@@ -226,9 +226,11 @@ Register once via any surface → all other surfaces pick up the key automatical
 | `NEX_API_KEY` | Yes (or register) | — |
 | `NEX_DEV_URL` | No (dev only) | `https://app.nex.ai` |
 | `NEX_SCAN_ENABLED` | No | `true` |
-| `NEX_SCAN_EXTENSIONS` | No | `.md,.txt,.csv,.json,.yaml,.yml` |
+| `NEX_SCAN_EXTENSIONS` | No | `.md,.txt,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.js,.ts,.jsx,.tsx,.py,.rb,.go,.rs,.java,.sh,.bash,.zsh,.fish,.org,.rst,.adoc,.tex,.log,.env,.ini,.cfg,.conf,.properties` |
 | `NEX_SCAN_MAX_FILES` | No | `5` |
-| `NEX_SCAN_DEPTH` | No | `2` |
+| `NEX_SCAN_DEPTH` | No | `20` |
+| `NEX_SCAN_MAX_FILE_SIZE` | No | `100000` (bytes) |
+| `NEX_SCAN_IGNORE_DIRS` | No | `node_modules,.git,dist,build,.next,__pycache__,vendor,.venv,.claude,coverage,.turbo,.cache` |
 
 ## Testing
 
