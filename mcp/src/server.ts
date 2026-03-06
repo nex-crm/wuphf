@@ -10,6 +10,7 @@ import { registerTaskTools } from "./tools/tasks.js";
 import { registerNoteTools } from "./tools/notes.js";
 import { registerInsightTools } from "./tools/insights.js";
 import { registerRegistrationTools } from "./tools/register.js";
+import { registerScanTools } from "./tools/scan.js";
 
 export function createServer(apiKey?: string): McpServer {
   const server = new McpServer({
@@ -29,6 +30,7 @@ export function createServer(apiKey?: string): McpServer {
   registerTaskTools(server, client);
   registerNoteTools(server, client);
   registerInsightTools(server, client);
+  registerScanTools(server, client);
 
   return server;
 }
