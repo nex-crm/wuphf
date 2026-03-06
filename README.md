@@ -21,19 +21,54 @@ One fact entered once. Available everywhere, instantly.
 
 ## Integration Options
 
-| | MCP Server | OpenClaw Plugin | Claude Code Plugin | SKILL.md |
-|---|---|---|---|---|
-| **Platforms** | Claude Desktop, ChatGPT, Cursor, Windsurf | OpenClaw | Claude Code CLI | OpenClaw (script-based) |
-| **Auto-recall** | No (tool calls) | Yes (smart filter) | Yes (smart filter) | No (manual) |
-| **Auto-capture** | No | Yes | Yes | No (manual) |
-| **File scanning** | Yes (tool) | Yes (auto on startup) | Yes (auto on startup) | Yes (script) |
-| **Entity search** | Yes (tool) | Yes (tool) | Yes (/entities) | Yes (API pattern) |
-| **Tools/Commands** | 50+ typed tools | 4 tools + 4 commands | 5 slash commands + MCP | bash scripts |
-| **Rate limiting** | File-based | Queue + file-based | File-based | N/A |
-| **Session tracking** | File-based | In-memory LRU | File-based | N/A |
-| **Setup** | `npm install` + config | Copy plugin | Build + hooks | Set `NEX_API_KEY` |
+| | CLI | MCP Server | OpenClaw Plugin | Claude Code Plugin | SKILL.md |
+|---|---|---|---|---|---|
+| **Platforms** | Any terminal / AI agent | Claude Desktop, ChatGPT, Cursor, Windsurf | OpenClaw | Claude Code CLI | OpenClaw (script-based) |
+| **Auto-recall** | Via `nex recall` | No (tool calls) | Yes (smart filter) | Yes (smart filter) | No (manual) |
+| **Auto-capture** | Via `nex capture` | No | Yes | Yes | No (manual) |
+| **Commands** | 50+ CLI commands | 50+ typed tools | 4 tools + 4 commands | 5 slash commands + MCP | bash scripts |
+| **Rate limiting** | File-based | File-based | Queue + file-based | File-based | N/A |
+| **Session tracking** | File-based | File-based | In-memory LRU | File-based | N/A |
+| **Setup** | `npx @nex-ai/cli` | `npm install` + config | Copy plugin | Build + hooks | Set `NEX_API_KEY` |
 
 ## Quick Start
+
+### CLI (any terminal, any AI agent)
+
+```bash
+npx @nex-ai/cli register --email you@company.com
+```
+
+That's it. Now use it:
+
+```bash
+# Ask your knowledge graph
+nex ask "who is Maria Rodriguez?"
+
+# Ingest information
+nex remember "Met with Maria Rodriguez, CTO of TechFlow. European expansion Q3, $2M budget."
+
+# Or pipe from stdin
+cat meeting-notes.txt | nex remember
+
+# Search CRM records
+nex search "TechFlow"
+
+# CRUD operations
+nex record list person --limit 10
+nex task create --title "Follow up with Maria" --priority high
+nex insight list --last 24h
+
+# Build auto-recall hooks for any agent
+nex recall "what do I know about TechFlow?"  # Returns <nex-context> XML block
+
+# Build auto-capture hooks
+nex capture "Agent conversation text..."  # Rate-limited, filtered
+```
+
+Install globally: `npm install -g @nex-ai/cli`
+
+See [`cli/README.md`](cli/README.md) for all 50+ commands.
 
 ### MCP Server (Claude Desktop, Cursor, Windsurf)
 
@@ -170,20 +205,18 @@ Register once via any surface → all other surfaces pick up the key automatical
                     │  insights, tasks...) │
                     └──────────┬──────────┘
                                │
-           ┌───────────────────┼───────────────────┐
-           │                   │                   │
-  ┌────────▼───────┐  ┌───────▼──────┐  ┌─────────▼────────┐
-  │  MCP Server    │  │  OpenClaw    │  │  Claude Code     │
-  │  (50+ tools)   │  │  Plugin     │  │  Plugin          │
-  │  + scan, entity│  │  + scan,    │  │  + scan, recall  │
-  │  + rate limit  │  │  recall     │  │  filter, capture │
-  │  + sessions    │  │  filter     │  │  + /entities     │
-  └────────┬───────┘  └──────┬──────┘  └────────┬─────────┘
-           │                 │                   │
-  Claude Desktop      OpenClaw agents      Claude Code CLI
-  ChatGPT             Clawgent            Any project
-  Cursor              WhatsApp
-  Windsurf
+      ┌────────────────────────┼────────────────────────┐
+      │              │                   │              │
+  ┌───▼────┐  ┌─────▼───────┐  ┌───────▼──────┐  ┌───▼──────────┐
+  │  CLI   │  │  MCP Server │  │  OpenClaw    │  │  Claude Code │
+  │  50+   │  │  50+ tools  │  │  Plugin     │  │  Plugin      │
+  │  cmds  │  │  + scan     │  │  + recall   │  │  + recall    │
+  └───┬────┘  └─────┬───────┘  └──────┬──────┘  └──────┬───────┘
+      │             │                 │                 │
+  Any agent    Claude Desktop    OpenClaw agents   Claude Code
+  Aider        ChatGPT          Clawgent          Any project
+  Codex        Cursor            WhatsApp
+  Custom       Windsurf
 ```
 
 ## Environment Variables
@@ -191,7 +224,7 @@ Register once via any surface → all other surfaces pick up the key automatical
 | Variable | Required | Default |
 |----------|----------|---------|
 | `NEX_API_KEY` | Yes (or register) | — |
-| `NEX_API_BASE_URL` | No | `https://app.nex.ai` |
+| `NEX_DEV_URL` | No (dev only) | `https://app.nex.ai` |
 | `NEX_SCAN_ENABLED` | No | `true` |
 | `NEX_SCAN_EXTENSIONS` | No | `.md,.txt,.csv,.json,.yaml,.yml` |
 | `NEX_SCAN_MAX_FILES` | No | `5` |
@@ -199,6 +232,7 @@ Register once via any surface → all other surfaces pick up the key automatical
 
 ## Testing
 
+- **CLI**: 65/65 unit tests + 10 E2E smoke tests (`cd cli && npm test`)
 - **OpenClaw plugin**: 38/38 unit tests (`cd openclaw-plugin && npx vitest run`)
 - **Claude Code plugin**: 21/21 E2E tests (see `docs/nex-plugin-test-results.md`)
 - **MCP server**: Builds clean, all tools typed with Zod schemas

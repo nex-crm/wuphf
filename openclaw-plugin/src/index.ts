@@ -13,6 +13,7 @@ import { RateLimiter } from "./rate-limiter.js";
 import { SessionStore } from "./session-store.js";
 import { formatNexContext, stripNexContext } from "./context-format.js";
 import { captureFilter, type AgentMessage } from "./capture-filter.js";
+import { scanFiles as scanFilesUtil, type ScanResult } from "./file-scanner.js";
 
 // --- TypeBox schemas for tool parameters ---
 
@@ -27,6 +28,14 @@ const RememberParams = Type.Object({
 
 const EntitiesParams = Type.Object({
   query: Type.String({ description: "Search query to find related entities" }),
+});
+
+const ScanFilesParams = Type.Object({
+  dir: Type.String({ description: "Directory path to scan for text files" }),
+  extensions: Type.Optional(Type.String({ description: "Comma-separated file extensions (default: .md,.txt,.csv,.json,.yaml,.yml)" })),
+  max_files: Type.Optional(Type.Number({ description: "Maximum files to scan per run (default: 5)" })),
+  depth: Type.Optional(Type.Number({ description: "Maximum directory depth (default: 2)" })),
+  force: Type.Optional(Type.Boolean({ description: "Re-scan all files ignoring manifest (default: false)" })),
 });
 
 // --- Plugin Logger interface (matches OpenClaw's PluginLogger) ---
@@ -348,6 +357,38 @@ const plugin = {
       },
     });
 
+    api.registerTool({
+      name: "nex_scan_files",
+      label: "Scan Files into Nex",
+      description:
+        "Scan a directory for text files (.md, .txt, .csv, .json, .yaml, .yml) and ingest new or changed files into the Nex knowledge base. Uses SHA-256 content hashing to skip already-ingested files.",
+      parameters: ScanFilesParams,
+      async execute(_toolCallId, params) {
+        const { dir, extensions, max_files, depth, force } = params as Static<typeof ScanFilesParams>;
+
+        const extList = extensions
+          ? extensions.split(",").map((e: string) => e.trim())
+          : undefined;
+
+        const result = await scanFilesUtil(dir, client, {
+          extensions: extList,
+          maxFiles: max_files,
+          depth,
+          force,
+        });
+
+        const summary = `Scanned ${result.scanned} file(s), skipped ${result.skipped}, errors ${result.errors}.`;
+        const details = result.files
+          .map((f) => `- ${f.path}: ${f.status}${f.reason ? ` (${f.reason})` : ""}`)
+          .join("\n");
+
+        return {
+          content: [{ type: "text", text: `${summary}\n\n${details}` }],
+          details: result,
+        };
+      },
+    });
+
     // --- Commands ---
 
     api.registerCommand({
@@ -410,6 +451,23 @@ const plugin = {
           return { text: "Remembered." };
         } catch (err) {
           return { text: `Remember failed: ${err instanceof Error ? err.message : String(err)}` };
+        }
+      },
+    });
+
+    api.registerCommand({
+      name: "scan",
+      description: "Scan a directory for files and ingest into Nex. Usage: /scan [dir]",
+      acceptsArgs: true,
+      async handler(ctx) {
+        const dir = ctx.args?.trim() || ".";
+        try {
+          const result = await scanFilesUtil(dir, client);
+          return {
+            text: `Scanned ${result.scanned} file(s), skipped ${result.skipped}, errors ${result.errors}.`,
+          };
+        } catch (err) {
+          return { text: `Scan failed: ${err instanceof Error ? err.message : String(err)}` };
         }
       },
     });
