@@ -396,7 +396,7 @@ const plugin = {
     api.registerTool({
       name: "nex_list_integrations",
       label: "List Integrations",
-      description: "List available third-party integrations and their connection status. Use nex_connect_integration to connect new ones, or nex_disconnect_integration with a connection ID to remove.",
+      description: "List available third-party integrations and their connection status. Calendar integrations (Google Calendar, Outlook Calendar) enable the Nex Meeting Bot which joins calls on any platform (Google Meet, Zoom, Webex, Teams, etc.) and feeds transcripts into the context graph.",
       parameters: ListIntegrationsParams,
       async execute(_toolCallId, _params) {
         const result = await client.get("/v1/integrations/");
@@ -415,7 +415,7 @@ const plugin = {
     api.registerTool({
       name: "nex_connect_integration",
       label: "Connect Integration",
-      description: "Start connecting a third-party integration via OAuth. Returns an auth_url for the user to open in their browser. Types: email, calendar, crm, messaging. Providers: google, microsoft, attio, slack, salesforce, hubspot.",
+      description: "Start connecting a third-party integration via OAuth. Returns an auth_url for the user to open in their browser. Calendar integrations (type: 'calendar') enable the Nex Meeting Bot which auto-joins calls and processes transcripts. Types: email, calendar, crm, messaging. Providers: google, microsoft, attio, slack, salesforce, hubspot.",
       parameters: ConnectIntegrationParams,
       async execute(_toolCallId, params) {
         const { type, provider } = params as Static<typeof ConnectIntegrationParams>;

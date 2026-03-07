@@ -8,7 +8,7 @@ import { NexClient } from "../lib/client.js";
 import { printOutput, printError } from "../lib/output.js";
 import { scanFiles, loadScanConfig, isScanEnabled } from "../lib/file-scanner.js";
 import type { Format } from "../lib/output.js";
-import { spinner as createSpinner, table, style, sym, isTTY } from "../lib/tui.js";
+import { spinner as createSpinner, table, style, sym, isTTY, exitHint } from "../lib/tui.js";
 
 interface ScanFileEntry {
   path?: string;
@@ -108,7 +108,7 @@ program
 
       // Show spinner for TTY text output
       const showSpinner = isTTY && format === "text" && !opts.dryRun;
-      const spin = showSpinner ? createSpinner("Scanning project files...") : null;
+      const spin = showSpinner ? createSpinner(`Scanning project files...  ${exitHint}`) : null;
 
       try {
         const result = await scanFiles(dir, scanOpts, async (content, context) => {

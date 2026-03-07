@@ -5,7 +5,7 @@ import { NexApiClient } from "../client.js";
 export function registerIntegrationTools(server: McpServer, client: NexApiClient) {
   server.tool(
     "list_integrations",
-    "List all available third-party integrations (Gmail, Slack, Salesforce, etc.) and their connection status. To connect a new integration, use the connect_integration tool. To disconnect, use disconnect_integration with the connection ID shown in the results.",
+    "List all available third-party integrations and their connection status. Calendar integrations (Google Calendar, Outlook Calendar) enable the Nex Meeting Bot which joins calls on any platform (Google Meet, Zoom, Webex, Teams, etc.) and feeds transcripts into the context graph. To connect, use connect_integration. To disconnect, use disconnect_integration.",
     {},
     { readOnlyHint: true },
     async () => {
@@ -16,7 +16,7 @@ export function registerIntegrationTools(server: McpServer, client: NexApiClient
 
   server.tool(
     "connect_integration",
-    "Start connecting a third-party integration via OAuth. Returns an auth_url to open in the browser and a connect_id to poll for status.",
+    "Start connecting a third-party integration via OAuth. Returns an auth_url to open in the browser and a connect_id to poll for status. Calendar integrations (type: 'calendar') enable the Nex Meeting Bot which auto-joins calls and processes transcripts.",
     {
       type: z.enum(["email", "calendar", "crm", "messaging"]).describe("Integration type"),
       provider: z.enum(["google", "microsoft", "attio", "slack", "salesforce", "hubspot"]).describe("Integration provider"),

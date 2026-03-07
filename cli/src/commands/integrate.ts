@@ -9,7 +9,7 @@ import { resolveApiKey, resolveFormat, resolveTimeout } from "../lib/config.js";
 import { AuthError } from "../lib/errors.js";
 import { printOutput, printError } from "../lib/output.js";
 import type { Format } from "../lib/output.js";
-import { style, sym, badge, isTTY } from "../lib/tui.js";
+import { style, sym, badge, isTTY, exitHint } from "../lib/tui.js";
 
 function getClient(): { client: NexClient; format: Format } {
   const opts = program.opts();
@@ -75,7 +75,7 @@ async function pollForConnection(
   existingIds: Set<number>,
   format: Format,
 ): Promise<void> {
-  process.stderr.write(`\n${sym.info} Waiting for OAuth completion...\n`);
+  process.stderr.write(`\n${sym.info} Waiting for OAuth completion...  ${exitHint}\n`);
   process.stderr.write(`  ${style.dim("Complete the OAuth flow in your browser, then return here.")}\n\n`);
 
   const maxWaitMs = 5 * 60 * 1000;
@@ -127,6 +127,16 @@ async function pollForConnection(
   process.exit(1);
 }
 
+/** Calendar integrations include the Nex Meeting Bot annotation. */
+const CALENDAR_TYPES = new Set(["calendar"]);
+
+function displayName(item: FullIntegrationEntry): string {
+  if (CALENDAR_TYPES.has(item.type)) {
+    return `${item.display_name} (Nex Meeting Bot)`;
+  }
+  return item.display_name;
+}
+
 const integrate = program
   .command("integrate")
   .description("Manage third-party integrations (Gmail, Slack, Salesforce, etc.)");
@@ -139,10 +149,29 @@ interface FullIntegrationEntry {
   connections: Array<{ id: number; status: string; identifier: string }>;
 }
 
-function renderList(items: FullIntegrationEntry[], selected: number, expanded: boolean): string {
+interface ActionItem {
+  label: string;
+  action: "connect" | "disconnect" | "reconnect";
+  connectionId?: number;
+}
+
+function getActions(item: FullIntegrationEntry): ActionItem[] {
+  const connected = item.connections.length > 0;
+  if (connected) {
+    const actions: ActionItem[] = [];
+    for (const conn of item.connections) {
+      actions.push({ label: `Disconnect ${conn.identifier}`, action: "disconnect", connectionId: conn.id });
+    }
+    actions.push({ label: "Reconnect (re-auth)", action: "reconnect" });
+    return actions;
+  }
+  return [{ label: "Connect", action: "connect" }];
+}
+
+function renderList(items: FullIntegrationEntry[], selected: number, expanded: boolean, actionIndex: number): string {
   const lines: string[] = [];
 
-  lines.push(`${style.bold("Integrations")}  ${style.dim("(arrow keys to navigate, enter to expand, q to quit)")}`);
+  lines.push(`${style.bold("Integrations")}  ${style.dim("(↑↓ navigate, enter expand, ←→ actions)")}  ${exitHint}`);
   lines.push("");
 
   for (let i = 0; i < items.length; i++) {
@@ -151,24 +180,29 @@ function renderList(items: FullIntegrationEntry[], selected: number, expanded: b
     const pointer = isSelected ? sym.pointer : " ";
     const connected = item.connections.length > 0;
     const status = connected ? badge("connected", "success") : badge("not connected", "dim");
-    const name = isSelected ? style.bold(item.display_name) : item.display_name;
+    const dname = displayName(item);
+    const name = isSelected ? style.bold(dname) : dname;
 
     lines.push(`  ${pointer} ${name}  ${status}`);
 
     if (isSelected && expanded) {
       lines.push(`    ${style.dim(item.description)}`);
+      if (CALENDAR_TYPES.has(item.type)) {
+        lines.push(`    ${style.dim("Joins calls on Google Meet, Zoom, Webex, Teams, etc. Transcripts are processed into your context graph.")}`);
+      }
       if (connected) {
         for (const conn of item.connections) {
           lines.push(`    ${style.green("\u2514")} ${conn.identifier}  ${style.dim(`(ID: ${conn.id}, status: ${conn.status})`)}`);
         }
-        lines.push(`    ${style.dim("Disconnect: nex integrate disconnect <id>")}`);
-      } else {
-        const shortcut = Object.entries(INTEGRATIONS).find(
-          ([, v]) => v.type === item.type && v.provider === item.provider
-        );
-        if (shortcut) {
-          lines.push(`    ${style.dim(`Connect: nex integrate connect ${shortcut[0]}`)}`);
-        }
+      }
+      // Render action items
+      const actions = getActions(item);
+      lines.push("");
+      for (let a = 0; a < actions.length; a++) {
+        const isActionSelected = a === actionIndex;
+        const actionPointer = isActionSelected ? style.cyan(sym.pointer) : " ";
+        const actionLabel = isActionSelected ? style.bold(actions[a].label) : style.dim(actions[a].label);
+        lines.push(`    ${actionPointer} ${actionLabel}`);
       }
     }
   }
@@ -177,23 +211,22 @@ function renderList(items: FullIntegrationEntry[], selected: number, expanded: b
   return lines.join("\n");
 }
 
-function interactiveList(items: FullIntegrationEntry[]): Promise<void> {
+function interactiveList(items: FullIntegrationEntry[], client: NexClient, format: Format): Promise<void> {
   return new Promise((resolve) => {
     let selected = 0;
     let expanded = false;
+    let actionIndex = 0;
 
     const draw = () => {
-      // Clear screen and move cursor to top
       process.stdout.write("\x1b[2J\x1b[H");
-      process.stdout.write(renderList(items, selected, expanded));
+      process.stdout.write(renderList(items, selected, expanded, actionIndex));
     };
 
     if (!process.stdin.isTTY) {
-      // Non-interactive: print simple list and exit
       for (const item of items) {
         const connected = item.connections.length > 0;
         const status = connected ? badge("connected", "success") : badge("not connected", "dim");
-        process.stdout.write(`${item.display_name}  ${status}\n`);
+        process.stdout.write(`${displayName(item)}  ${status}\n`);
         if (connected) {
           for (const conn of item.connections) {
             process.stdout.write(`  \u2514 ${conn.identifier} (ID: ${conn.id})\n`);
@@ -204,6 +237,63 @@ function interactiveList(items: FullIntegrationEntry[]): Promise<void> {
       return;
     }
 
+    const cleanup = () => {
+      process.stdin.setRawMode(false);
+      process.stdin.removeListener("data", onData);
+      process.stdin.pause();
+    };
+
+    const executeAction = async (item: FullIntegrationEntry, action: ActionItem) => {
+      cleanup();
+      process.stdout.write("\x1b[2J\x1b[H");
+
+      const shortcut = Object.entries(INTEGRATIONS).find(
+        ([, v]) => v.type === item.type && v.provider === item.provider
+      );
+
+      if (action.action === "connect" || action.action === "reconnect") {
+        if (!shortcut) {
+          printError(`No integration mapping for ${item.display_name}`);
+          resolve();
+          return;
+        }
+        const integration = INTEGRATIONS[shortcut[0]];
+
+        // Snapshot existing connections
+        let existingIds = new Set<number>();
+        try {
+          const integrations = await client.get<IntegrationEntry[]>("/v1/integrations/", 5_000);
+          if (Array.isArray(integrations)) {
+            existingIds = new Set(getConnections(integrations, integration.type, integration.provider).map((c) => c.id));
+          }
+        } catch { /* continue */ }
+
+        process.stderr.write(`${sym.info} Opening browser to connect ${item.display_name}...\n`);
+        const result = await client.post<{ auth_url: string; connect_id?: string }>(
+          `/v1/integrations/${encodeURIComponent(integration.type)}/${encodeURIComponent(integration.provider)}/connect`
+        );
+
+        if (!result.auth_url) {
+          printError("No auth URL returned from API");
+          resolve();
+          return;
+        }
+
+        openBrowser(result.auth_url);
+        await pollForConnection(client, integration.type, integration.provider, existingIds, format);
+        resolve();
+      } else if (action.action === "disconnect" && action.connectionId !== undefined) {
+        try {
+          await client.delete(`/v1/integrations/connections/${encodeURIComponent(action.connectionId)}`);
+          process.stderr.write(`${sym.success} Disconnected successfully.\n`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          printError(`Failed to disconnect: ${msg}`);
+        }
+        resolve();
+      }
+    };
+
     process.stdin.setRawMode(true);
     process.stdin.resume();
     process.stdin.setEncoding("utf-8");
@@ -212,10 +302,7 @@ function interactiveList(items: FullIntegrationEntry[]): Promise<void> {
 
     const onData = (key: string) => {
       if (key === "q" || key === "\x03") {
-        // q or Ctrl+C
-        process.stdin.setRawMode(false);
-        process.stdin.removeListener("data", onData);
-        process.stdin.pause();
+        cleanup();
         process.stdout.write("\x1b[2J\x1b[H");
         resolve();
         return;
@@ -223,18 +310,40 @@ function interactiveList(items: FullIntegrationEntry[]): Promise<void> {
 
       if (key === "\x1b[A") {
         // Up arrow
-        selected = Math.max(0, selected - 1);
-        expanded = false;
+        if (expanded) {
+          actionIndex = Math.max(0, actionIndex - 1);
+        } else {
+          selected = Math.max(0, selected - 1);
+        }
       } else if (key === "\x1b[B") {
         // Down arrow
-        selected = Math.min(items.length - 1, selected + 1);
-        expanded = false;
-      } else if (key === "\r" || key === "\x1b[C") {
-        // Enter or Right arrow
-        expanded = !expanded;
-      } else if (key === "\x1b[D") {
-        // Left arrow
-        expanded = false;
+        if (expanded) {
+          const actions = getActions(items[selected]);
+          actionIndex = Math.min(actions.length - 1, actionIndex + 1);
+        } else {
+          selected = Math.min(items.length - 1, selected + 1);
+        }
+      } else if (key === "\r") {
+        // Enter
+        if (expanded) {
+          const actions = getActions(items[selected]);
+          if (actions[actionIndex]) {
+            executeAction(items[selected], actions[actionIndex]);
+            return; // Don't redraw — executeAction resolves the promise
+          }
+        } else {
+          expanded = true;
+          actionIndex = 0;
+        }
+      } else if (key === "\x1b[D" || key === "\x1b[C") {
+        // Left/Right arrow — toggle expand
+        if (expanded) {
+          expanded = false;
+          actionIndex = 0;
+        } else {
+          expanded = true;
+          actionIndex = 0;
+        }
       }
 
       draw();
@@ -261,7 +370,7 @@ integrate
       return;
     }
 
-    await interactiveList(result);
+    await interactiveList(result, client, format);
   });
 
 integrate

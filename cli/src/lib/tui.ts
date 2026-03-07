@@ -56,6 +56,10 @@ export const sym = {
   tee: "\u251C",
 };
 
+// --- Exit hint ---
+
+export const exitHint: string = style.dim("(Ctrl+C to exit)");
+
 // --- Helpers ---
 
 function padRight(s: string, len: number): string {
@@ -272,7 +276,7 @@ export function interactiveSelect<T>(opts: {
         // Move cursor up and clear
         process.stderr.write(`\x1b[${totalLines}A\x1b[J`);
       }
-      process.stderr.write(`  ${title}\n\n`);
+      process.stderr.write(`  ${title}  ${exitHint}\n\n`);
       for (let i = 0; i < items.length; i++) {
         const isSelected = i === selected;
         const pointer = isSelected ? `${sym.pointer} ` : "  ";

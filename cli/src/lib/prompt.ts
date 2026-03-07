@@ -3,7 +3,7 @@
  */
 
 import { createInterface } from "node:readline";
-import { isTTY, style, sym } from "./tui.js";
+import { isTTY, style, sym, exitHint } from "./tui.js";
 
 export async function confirm(message: string, defaultYes = true): Promise<boolean> {
   const suffix = defaultYes ? "[Y/n]" : "[y/N]";
@@ -55,7 +55,7 @@ export async function choose(message: string, options: string[]): Promise<number
       if (!initial) {
         process.stderr.write(`\x1b[${totalLines}A\x1b[J`);
       }
-      process.stderr.write(`  ${message}\n\n`);
+      process.stderr.write(`  ${message}  ${exitHint}\n\n`);
       for (let i = 0; i < options.length; i++) {
         const isSelected = i === selected;
         const pointer = isSelected ? sym.pointer : " ";
