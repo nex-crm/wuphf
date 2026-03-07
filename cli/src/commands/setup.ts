@@ -17,7 +17,7 @@ import { NexClient } from "../lib/client.js";
 import { printOutput, printError } from "../lib/output.js";
 import { confirm, ask, choose } from "../lib/prompt.js";
 import type { Format } from "../lib/output.js";
-import { heading, keyValue, tree, badge, style, sym } from "../lib/tui.js";
+import { heading, keyValue, tree, badge, style, sym, spinner as createSpinner, exitHint } from "../lib/tui.js";
 
 const INTEGRATIONS_MAP: Record<string, { type: string; provider: string }> = {
   gmail: { type: "email", provider: "google" },
@@ -319,23 +319,29 @@ async function runSetup(opts: {
 
   // 6. Scan and ingest project files (requires API key)
   if (!opts.noScan && apiKey && isScanEnabled()) {
-    if (opts.format !== "json") {
-      process.stderr.write("\nScanning project files...\n");
-    }
+    const showSpinner = opts.format !== "json";
+    const spin = showSpinner ? createSpinner(`Scanning project files...  ${exitHint}`) : null;
     const scanOpts = loadScanConfig();
     const client = new NexClient(apiKey, resolveTimeout(globalOpts.timeout));
     try {
       const scanResult = await scanFiles(process.cwd(), scanOpts, async (content, context) => {
         return client.post("/v1/context/text", { content, context });
+      }, (current, total, filePath) => {
+        const name = filePath.replace(process.cwd() + "/", "");
+        spin?.update(`Scanning files (${current}/${total}): ${name}  ${exitHint}`);
       });
       if (scanResult.scanned > 0) {
+        spin?.succeed(`${scanResult.scanned} files ingested, ${scanResult.skipped} skipped, ${scanResult.errors} errors`);
         results.push(`File scan: ${scanResult.scanned} files ingested, ${scanResult.skipped} skipped, ${scanResult.errors} errors`);
       } else if (scanResult.skipped > 0) {
+        spin?.succeed(`All ${scanResult.skipped} files already up to date`);
         results.push(`File scan: all ${scanResult.skipped} files already up to date`);
       } else {
+        spin?.succeed("No eligible files found in current directory");
         results.push("File scan: no eligible files found in current directory");
       }
     } catch (err) {
+      spin?.fail(`Scan failed — ${err instanceof Error ? err.message : String(err)}`);
       results.push(`File scan: failed — ${err instanceof Error ? err.message : String(err)}`);
     }
   }

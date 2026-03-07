@@ -175,6 +175,7 @@ export async function scanFiles(
   dir: string,
   opts: ScanOptions,
   ingestFn: (content: string, context: string) => Promise<unknown>,
+  onProgress?: (current: number, total: number, filePath: string) => void,
 ): Promise<ScanResult> {
   const absDir = resolve(dir);
   const extSet = new Set(opts.extensions.map((e) => (e.startsWith(".") ? e : `.${e}`).toLowerCase()));
@@ -189,7 +190,9 @@ export async function scanFiles(
   const manifest = opts.force ? { version: 1, files: {} } as Manifest : loadManifest();
   const result: ScanResult = { scanned: 0, skipped: 0, errors: 0, files: [] };
 
-  for (const file of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const file = candidates[i];
+    onProgress?.(i + 1, candidates.length, file.path);
     const hash = hashFile(file.path);
     const existing = manifest.files[file.path];
 
