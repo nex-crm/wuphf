@@ -1,4 +1,4 @@
-# nex-ai
+# @nex-ai/nex
 
 Nex CLI provides organizational context & memory to AI agents across 10+ platforms.
 
@@ -6,28 +6,28 @@ Nex CLI provides organizational context & memory to AI agents across 10+ platfor
 
 ```bash
 # Install globally
-npm install -g nex-ai
+npm install -g @nex-ai/nex
 
 # Or run directly (no install)
-npx nex-ai ask "who is Maria?"
+npx @nex-ai/nex ask "who is Maria?"
 ```
 
 ## Quick Start
 
 ```bash
 # 1. Register for an API key
-nex-ai register --email you@company.com
+nex register --email you@company.com
 
 # 2. Set up your platforms (auto-detects installed tools)
-nex-ai setup
+nex setup
 
 # 3. Query your knowledge
-nex-ai ask "what's the latest on the Acme deal?"
+nex ask "what's the latest on the Acme deal?"
 ```
 
 ## Supported Platforms
 
-`nex-ai setup` auto-detects and configures these platforms:
+`nex setup` auto-detects and configures these platforms:
 
 | Platform | Detection | Integration |
 |----------|-----------|-------------|
@@ -57,11 +57,11 @@ All MCP-based platforms use the same server entry:
 ## Setup Command
 
 ```bash
-nex-ai setup                          # Auto-detect platforms, install Claude Code plugin, create .nex.toml
-nex-ai setup --with-mcp               # Also write MCP config to all detected platforms
-nex-ai setup --platform cursor        # Install for a specific platform only
-nex-ai setup --no-plugin              # Only create config files, skip hooks/commands
-nex-ai setup status                   # Show all platforms, install status, and connections
+nex setup                          # Auto-detect platforms, install Claude Code plugin, create .nex.toml
+nex setup --with-mcp               # Also write MCP config to all detected platforms
+nex setup --platform cursor        # Install for a specific platform only
+nex setup --no-plugin              # Only create config files, skip hooks/commands
+nex setup status                   # Show all platforms, install status, and connections
 ```
 
 **Default behavior** (no flags):
@@ -74,7 +74,7 @@ nex-ai setup status                   # Show all platforms, install status, and 
 
 ## Project Config: `.nex.toml`
 
-Per-project settings file created by `nex-ai setup`. All fields are optional.
+Per-project settings file created by `nex setup`. All fields are optional.
 
 ```toml
 [auth]
@@ -104,7 +104,7 @@ Per-project settings file created by `nex-ai setup`. All fields are optional.
 # depth = 2
 
 [mcp]
-# enabled = false             # Set to true by `nex-ai setup --with-mcp`
+# enabled = false             # Set to true by `nex setup --with-mcp`
 
 [output]
 # format = "text"             # "text" | "json"
@@ -118,22 +118,22 @@ Per-project settings file created by `nex-ai setup`. All fields are optional.
 ### Knowledge Graph
 
 ```bash
-nex-ai ask <query>              # Query with natural language
-nex-ai remember <content>       # Ingest text (meeting notes, emails, docs)
-nex-ai recall <query>           # Query → XML-wrapped for agent injection
-nex-ai capture [content]        # Rate-limited ingestion for agent hooks
-nex-ai artifact <id>            # Check processing status
-nex-ai search <query>           # Search CRM records by name
-nex-ai insight list [--last 24h]  # Recent insights
+nex ask <query>              # Query with natural language
+nex remember <content>       # Ingest text (meeting notes, emails, docs)
+nex recall <query>           # Query → XML-wrapped for agent injection
+nex capture [content]        # Rate-limited ingestion for agent hooks
+nex artifact <id>            # Check processing status
+nex search <query>           # Search CRM records by name
+nex insight list [--last 24h]  # Recent insights
 ```
 
 ### Integrations
 
 ```bash
-nex-ai integrate list                        # Show all integrations with connection status
-nex-ai integrate connect email google        # Connect Gmail via OAuth
-nex-ai integrate connect messaging slack     # Connect Slack
-nex-ai integrate disconnect <id>             # Disconnect by connection ID
+nex integrate list                        # Show all integrations with connection status
+nex integrate connect email google        # Connect Gmail via OAuth
+nex integrate connect messaging slack     # Connect Slack
+nex integrate disconnect <id>             # Disconnect by connection ID
 ```
 
 Supported providers: Gmail, Google Calendar, Outlook, Outlook Calendar, Slack, Attio, HubSpot, Salesforce.
@@ -141,32 +141,32 @@ Supported providers: Gmail, Google Calendar, Outlook, Outlook Calendar, Slack, A
 ### CRM Records
 
 ```bash
-nex-ai object list              # List object types (person, company, deal)
-nex-ai record list person --limit 10
-nex-ai record create person --data '{"name":"Jane Doe"}'
-nex-ai record upsert person --match email --data '{"name":"Jane","email":"jane@co.com"}'
-nex-ai record update <id> --data '{"phone":"+1234"}'
-nex-ai record delete <id>
-nex-ai record timeline <id>
+nex object list              # List object types (person, company, deal)
+nex record list person --limit 10
+nex record create person --data '{"name":"Jane Doe"}'
+nex record upsert person --match email --data '{"name":"Jane","email":"jane@co.com"}'
+nex record update <id> --data '{"phone":"+1234"}'
+nex record delete <id>
+nex record timeline <id>
 ```
 
 ### Tasks & Notes
 
 ```bash
-nex-ai task create --title "Follow up" --priority high --due 2026-04-01
-nex-ai task list --assignee me --search "follow up"
-nex-ai task update <id> --completed
-nex-ai note create --title "Call notes" --content "..." --entity <record-id>
+nex task create --title "Follow up" --priority high --due 2026-04-01
+nex task list --assignee me --search "follow up"
+nex task update <id> --completed
+nex note create --title "Call notes" --content "..." --entity <record-id>
 ```
 
 ### Relationships & Lists
 
 ```bash
-nex-ai rel list-defs
-nex-ai rel create <record-id> --def <def-id> --entity1 <id1> --entity2 <id2>
-nex-ai list list person
-nex-ai list add-member <list-id> --parent <record-id>
-nex-ai list-job create "enterprise contacts in EMEA"
+nex rel list-defs
+nex rel create <record-id> --def <def-id> --entity1 <id1> --entity2 <id2>
+nex list list person
+nex list add-member <list-id> --parent <record-id>
+nex list-job create "enterprise contacts in EMEA"
 ```
 
 ### File Scanning
@@ -182,11 +182,11 @@ Configure via `.nex.toml` `[scan]` section or environment variables (`NEX_SCAN_E
 ### Config & Sessions
 
 ```bash
-nex-ai config show              # Resolved config (key masked)
-nex-ai config set default_format text
-nex-ai config path              # ~/.nex/config.json
-nex-ai session list             # Stored session mappings
-nex-ai session clear
+nex config show              # Resolved config (key masked)
+nex config set default_format text
+nex config path              # ~/.nex/config.json
+nex session list             # Stored session mappings
+nex session clear
 ```
 
 ## Global Flags
@@ -204,9 +204,9 @@ nex-ai session clear
 `ask`, `remember`, and `capture` read from stdin when no argument is provided:
 
 ```bash
-cat meeting-notes.txt | nex-ai remember
-echo "what happened today?" | nex-ai ask
-git diff | nex-ai capture
+cat meeting-notes.txt | nex remember
+echo "what happened today?" | nex ask
+git diff | nex capture
 ```
 
 ## Exit Codes
@@ -224,5 +224,5 @@ npm install
 npm run build     # TypeScript → dist/
 npm run dev       # Run with tsx (no build)
 npm test          # Unit tests
-NEX_DEV_URL=http://localhost:30000 nex-ai ask "test"  # Local API
+NEX_DEV_URL=http://localhost:30000 nex ask "test"  # Local API
 ```

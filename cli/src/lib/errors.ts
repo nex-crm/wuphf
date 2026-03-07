@@ -6,7 +6,7 @@
 export class AuthError extends Error {
   public exitCode = 2;
 
-  constructor(message = "No API key configured. Run 'nex-ai register' or set NEX_API_KEY.") {
+  constructor(message = "No API key configured. Run 'nex register' or set NEX_API_KEY.") {
     super(message);
     this.name = "AuthError";
   }

@@ -1,10 +1,10 @@
 {
-  "name": "nex-ai",
+  "name": "@nex-ai/nex",
   "version": "0.1.7",
   "description": "Nex CLI provides organizational context & memory to AI agents",
   "type": "module",
   "bin": {
-    "nex-ai": "dist/index.js"
+    "nex": "dist/index.js"
   },
   "files": [
     "dist",

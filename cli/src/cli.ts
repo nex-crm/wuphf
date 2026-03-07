@@ -11,7 +11,7 @@ const { version } = require("../package.json") as { version: string };
 export const program = new Command();
 
 program
-  .name("nex-ai")
+  .name("nex")
   .description("Nex CLI — command-line interface for the Nex Developer API")
   .version(version)
   .option("--api-key <key>", "Override API key (env: NEX_API_KEY)")

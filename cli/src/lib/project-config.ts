@@ -176,7 +176,7 @@ const DEFAULT_TOML = `# .nex.toml — Nex project configuration
 # depth = 2
 
 # [mcp]
-# enabled = false             # Set to true by \`nex-ai setup --with-mcp\`
+# enabled = false             # Set to true by \`nex setup --with-mcp\`
 
 # [output]
 # format = "text"             # "text" | "json"

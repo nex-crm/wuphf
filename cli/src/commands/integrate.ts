@@ -65,8 +65,8 @@ integrate
     }
 
     lines.push("");
-    lines.push("Connect:     nex-ai integrate connect <type> <provider>");
-    lines.push("Disconnect:  nex-ai integrate disconnect <id>");
+    lines.push("Connect:     nex integrate connect <type> <provider>");
+    lines.push("Disconnect:  nex integrate disconnect <id>");
 
     process.stdout.write(lines.join("\n") + "\n");
   });
@@ -141,7 +141,7 @@ integrate
       }
     }
 
-    printError("Timed out waiting for OAuth completion. You can check status with 'nex-ai integrate list'.");
+    printError("Timed out waiting for OAuth completion. You can check status with 'nex integrate list'.");
     process.exit(1);
   });
 

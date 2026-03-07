@@ -34,7 +34,7 @@ program
       const format = resolveFormat(globalOpts.format) as Format;
 
       if (!opts.dryRun && !apiKey) {
-        printError("No API key. Run 'nex-ai register --email <email>' first or set NEX_API_KEY.");
+        printError("No API key. Run 'nex register --email <email>' first or set NEX_API_KEY.");
         process.exit(2);
       }
 

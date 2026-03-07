@@ -70,7 +70,7 @@ async function showStatus(format: Format): Promise<void> {
   if (apiKey) {
     lines.push(`Auth: Configured (${maskKey(apiKey)})`);
   } else {
-    lines.push("Auth: Not configured — run `nex-ai register` first");
+    lines.push("Auth: Not configured — run `nex register` first");
   }
   lines.push("");
 
@@ -120,7 +120,7 @@ async function showStatus(format: Format): Promise<void> {
               lines.push(`  ${padRight(label, 25)} \u25CF connected     ${displayName}     (ID: ${conn.id})`);
             }
           } else {
-            lines.push(`  ${padRight(label, 25)} \u25CB not connected \u2192 nex-ai integrate connect ${type} ${provider}`);
+            lines.push(`  ${padRight(label, 25)} \u25CB not connected \u2192 nex integrate connect ${type} ${provider}`);
           }
         }
       }
@@ -145,7 +145,7 @@ async function runSetup(opts: {
 
   // 1. Check auth
   if (!apiKey) {
-    printError("No API key found. Run `nex-ai register` first to create an account.");
+    printError("No API key found. Run `nex register` first to create an account.");
     process.exit(2);
   }
 
