@@ -66,6 +66,8 @@ nex setup status                   # Show all platforms, install status, and con
 ```
 
 **Default behavior** (no flags):
+- If no API key exists: prompts to register
+- If API key exists: offers to regenerate (picks up latest scopes) or change email
 - Claude Code: installs hooks + slash commands (no MCP — avoids filling context windows)
 - Other platforms: detected but MCP not written until `--with-mcp` is passed
 - Scans current directory and ingests new/changed files into Nex
@@ -134,13 +136,13 @@ nex insight list [--last 24h]  # Recent insights
 ### Integrations
 
 ```bash
-nex integrate list                        # Show all integrations with connection status
-nex integrate connect email google        # Connect Gmail via OAuth
-nex integrate connect messaging slack     # Connect Slack
-nex integrate disconnect <id>             # Disconnect by connection ID
+nex integrate list                  # Show all integrations with connection status
+nex integrate connect gmail         # Connect Gmail via OAuth
+nex integrate connect slack         # Connect Slack
+nex integrate disconnect <id>      # Disconnect by connection ID
 ```
 
-Supported providers: Gmail, Google Calendar, Outlook, Outlook Calendar, Slack, Attio, HubSpot, Salesforce.
+Available integrations: `gmail`, `google-calendar`, `outlook`, `outlook-calendar`, `slack`, `salesforce`, `hubspot`, `attio`.
 
 ### CRM Records
 

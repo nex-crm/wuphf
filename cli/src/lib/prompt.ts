@@ -21,6 +21,30 @@ export async function confirm(message: string, defaultYes = true): Promise<boole
   });
 }
 
+export async function choose(message: string, options: string[]): Promise<number> {
+  const rl = createInterface({ input: process.stdin, output: process.stderr });
+
+  for (let i = 0; i < options.length; i++) {
+    process.stderr.write(`  ${i + 1}) ${options[i]}\n`);
+  }
+
+  return new Promise((resolve) => {
+    const prompt = () => {
+      rl.question(`${message} `, (answer) => {
+        const num = parseInt(answer.trim(), 10);
+        if (num >= 1 && num <= options.length) {
+          rl.close();
+          resolve(num - 1);
+          return;
+        }
+        process.stderr.write(`  Please enter 1-${options.length}\n`);
+        prompt();
+      });
+    };
+    prompt();
+  });
+}
+
 export async function ask(message: string, required = false): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
 

@@ -14,6 +14,7 @@ export const REGISTER_URL = `${BASE_URL}/api/v1/agents/register`;
 
 export interface NexConfig {
   api_key?: string;
+  email?: string;
   workspace_id?: string;
   workspace_slug?: string;
   default_format?: string;
@@ -63,6 +64,7 @@ export function resolveTimeout(flagValue?: string): number {
 export function persistRegistration(data: Record<string, unknown>): void {
   const existing = loadConfig();
   if (typeof data.api_key === "string") existing.api_key = data.api_key;
+  if (typeof data.email === "string") existing.email = data.email;
   if (typeof data.workspace_id === "string" || typeof data.workspace_id === "number") {
     existing.workspace_id = String(data.workspace_id);
   }

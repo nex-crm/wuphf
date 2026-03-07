@@ -15,7 +15,7 @@ import { program } from "../cli.js";
 import { resolveApiKey, resolveFormat, resolveTimeout, persistRegistration, loadConfig } from "../lib/config.js";
 import { NexClient } from "../lib/client.js";
 import { printOutput, printError } from "../lib/output.js";
-import { confirm, ask } from "../lib/prompt.js";
+import { confirm, ask, choose } from "../lib/prompt.js";
 import type { Format } from "../lib/output.js";
 import { detectPlatforms, getPlatformById, VALID_PLATFORM_IDS } from "../lib/platform-detect.js";
 import type { Platform } from "../lib/platform-detect.js";
@@ -31,9 +31,9 @@ function getClient(): { client: NexClient; format: Format } {
 
 // --- Status subcommand ---
 
-async function showStatus(format: Format): Promise<void> {
+async function showStatus(format: Format, overrideApiKey?: string): Promise<void> {
   const opts = program.opts();
-  const apiKey = resolveApiKey(opts.apiKey);
+  const apiKey = overrideApiKey ?? resolveApiKey(opts.apiKey);
   const platforms = detectPlatforms();
 
   if (format === "json") {
@@ -49,10 +49,10 @@ async function showStatus(format: Format): Promise<void> {
       project_config: projectConfigExists(),
     };
 
-    // Fetch integrations if authenticated
+    // Fetch integrations if authenticated (short timeout — don't block setup)
     if (apiKey) {
       try {
-        const client = new NexClient(apiKey, resolveTimeout(opts.timeout));
+        const client = new NexClient(apiKey, 5_000);
         data.integrations = await client.get("/v1/integrations/");
       } catch {
         data.integrations = null;
@@ -104,10 +104,10 @@ async function showStatus(format: Format): Promise<void> {
   lines.push(`Project Config: ${projectConfigExists() ? ".nex.toml found" : ".nex.toml not found"}`);
   lines.push("");
 
-  // Integrations
+  // Integrations (short timeout — don't block setup)
   if (apiKey) {
     try {
-      const client = new NexClient(apiKey, resolveTimeout(opts.timeout));
+      const client = new NexClient(apiKey, 5_000);
       const integrations = await client.get<Record<string, unknown>[]>("/v1/integrations/");
       if (Array.isArray(integrations) && integrations.length > 0) {
         lines.push("Connections:");
@@ -137,13 +137,15 @@ async function showStatus(format: Format): Promise<void> {
 
 // --- Main setup flow ---
 
-async function registerAndPersist(globalOpts: { timeout?: string; apiKey?: string }): Promise<string> {
-  const email = await ask("Email (required):", true);
+async function registerAndPersist(globalOpts: { timeout?: string; apiKey?: string }, existingEmail?: string): Promise<string> {
+  const email = existingEmail ?? await ask("Email (required):", true);
   const name = await ask("Name (optional):");
 
   process.stderr.write("\nRegistering...\n");
   const client = new NexClient(undefined, resolveTimeout(globalOpts.timeout));
   const data = await client.register(email, name || undefined);
+  // Ensure email is persisted even if the API doesn't return it
+  data.email = email;
   persistRegistration(data);
   const apiKey = data.api_key as string;
 
@@ -194,16 +196,31 @@ async function runSetup(opts: {
     // Key exists — offer to regenerate (picks up new scopes, fixes expired keys)
     const config = loadConfig();
     const maskedKey = apiKey.slice(0, 6) + "..." + apiKey.slice(-4);
+    const existingEmail = config.email;
+
     process.stderr.write(`\nAPI key: ${maskedKey}`);
     if (config.workspace_slug) {
       process.stderr.write(` (workspace: ${config.workspace_slug})`);
     }
+    if (existingEmail) {
+      process.stderr.write(`\nEmail:   ${existingEmail}`);
+    }
     process.stderr.write("\n\n");
 
-    const wantsRegenerate = await confirm("Generate a new API key? (picks up latest scopes)", false);
-    if (wantsRegenerate) {
+    const choice = await choose("Generate a new API key?", [
+      `Generate new key${existingEmail ? ` for ${existingEmail}` : ""}`,
+      "Change email and generate new key",
+      "Keep current key",
+    ]);
+
+    if (choice === 0) {
+      // Regenerate with existing email (no prompt)
+      apiKey = await registerAndPersist(globalOpts, existingEmail);
+    } else if (choice === 1) {
+      // Change email — prompt for new one
       apiKey = await registerAndPersist(globalOpts);
     }
+    // choice === 2: keep current key, do nothing
   }
 
   // 2. Sync API key to shared config
@@ -320,9 +337,9 @@ async function runSetup(opts: {
     process.stderr.write("\n");
   }
 
-  // 8. Show status
+  // 8. Show status (pass current apiKey — may differ from global opts after re-registration)
   if (opts.format !== "json") {
-    await showStatus(opts.format);
+    await showStatus(opts.format, apiKey);
   }
 }
 

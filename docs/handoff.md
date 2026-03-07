@@ -27,15 +27,24 @@ All Developer API operations are now available on every surface:
 
 3. **SKILL.md**: Added Integrations section (Search already existed)
 
-### Setup Key Regeneration Fix
+### Setup Key Regeneration (v0.1.12)
 
-`nex setup` now:
-- Shows masked key + workspace when key exists
-- Asks "Generate a new API key? (picks up latest scopes)"
-- Prompts for email + name if regenerating (allows changing email)
-- Uses extracted `registerAndPersist()` helper
+`nex setup` now shows 3 options when a key exists:
+1. Generate new key for existing email (no re-prompt)
+2. Change email and generate new key
+3. Keep current key
 
-### Published `@nex-ai/nex@0.1.11` to npm
+Email is persisted in `~/.nex/config.json`. Status integrations fetch uses 5s timeout (was 120s).
+
+### Simplified `nex integrate connect` (v0.1.12)
+
+Removed `connect <type> <provider>` syntax. Now just:
+- `nex integrate connect gmail`
+- `nex integrate connect slack`
+
+Available: `gmail`, `google-calendar`, `outlook`, `outlook-calendar`, `slack`, `salesforce`, `hubspot`, `attio`
+
+### Published `@nex-ai/nex@0.1.12` to npm
 
 ## PRs (All Merged)
 
@@ -50,8 +59,7 @@ Core PR #669 (`nazz/feat/developer-api-oauth`) also merged - adds integration en
 ## Current State
 
 - **Branch**: `main` (up to date with all merged PRs)
-- **Uncommitted**: `cli/package.json` version bump `0.1.10` -> `0.1.11` (published to npm, needs commit)
-- **npm**: `@nex-ai/nex@0.1.11` is live
+- **npm**: `@nex-ai/nex@0.1.12` is live
 
 ## Pending Manual Tests
 

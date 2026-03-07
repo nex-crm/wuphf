@@ -2,16 +2,23 @@
 
 ## Completed
 
+### v0.1.12 — Setup UX + Integrate Simplification (2026-03-07)
+- [x] `nex setup`: 3-option key regeneration (reuse email / change email / keep)
+- [x] Email persisted in `~/.nex/config.json`
+- [x] Status integrations fetch timeout: 120s -> 5s
+- [x] `nex integrate connect <name>` — single command (gmail, slack, etc.)
+- [x] Removed `connect <type> <provider>` syntax
+- [x] README, slash commands, handoff docs updated
+- [x] Published to npm
+
 ### v0.1.11 — API Parity + Setup Fix (2026-03-07)
 - [x] OpenClaw plugin: 42 new tools (49 total, full API coverage)
 - [x] Claude Code plugin: 20 new slash commands (26 total)
 - [x] SKILL.md: Integrations section added
-- [x] `nex setup`: Key regeneration with email change option
+- [x] `nex setup`: Key regeneration added
 - [x] Config fix: `baseUrl` now properly resolves from plugin config
 - [x] Published to npm
 - [x] PRs #25, #26, #27 merged
-- [ ] Version bump 0.1.11 committed to git
-- [ ] Manual E2E test: setup regeneration -> integrate list
 
 ### v0.1.10 — Developer API OAuth (2026-03-06)
 - [x] CLI: `nex integrate list|connect|disconnect` commands
