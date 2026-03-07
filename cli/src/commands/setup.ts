@@ -1,10 +1,11 @@
 /**
  * `nex setup` command — detect platforms, install plugin/MCP, create .nex.toml.
  *
- * nex setup                     Interactive: detect → install plugin + config
+ * nex setup                     Interactive: detect → install plugin + scan files + config
  * nex setup --platform <name>   Direct install for specific platform
  * nex setup --with-mcp          Also install MCP server
  * nex setup --no-plugin         Skip hooks/commands, only config files
+ * nex setup --no-scan           Skip file scanning during setup
  * nex setup status              Show install status + integration connections
  */
 
@@ -20,6 +21,7 @@ import { detectPlatforms, getPlatformById, VALID_PLATFORM_IDS } from "../lib/pla
 import type { Platform } from "../lib/platform-detect.js";
 import { installMcpServer, installClaudeCodePlugin, syncApiKeyToMcpConfig } from "../lib/installers.js";
 import { writeDefaultProjectConfig } from "../lib/project-config.js";
+import { scanFiles, loadScanConfig, isScanEnabled } from "../lib/file-scanner.js";
 
 function getClient(): { client: NexClient; format: Format } {
   const opts = program.opts();
@@ -139,6 +141,7 @@ async function runSetup(opts: {
   platform?: string;
   withMcp: boolean;
   noPlugin: boolean;
+  noScan: boolean;
   format: Format;
 }): Promise<void> {
   const globalOpts = program.opts();
@@ -150,8 +153,23 @@ async function runSetup(opts: {
     const wantsRegister = await confirm("Register a new Nex workspace?");
 
     if (!wantsRegister) {
-      printError("Setup requires an API key. Run `nex register --email <email>` or set NEX_API_KEY.");
-      process.exit(2);
+      process.stderr.write("\nSetup complete, but no API key configured.\n\n");
+      process.stderr.write("To use Nex, set your API key in one of these locations:\n");
+      process.stderr.write('  1. Environment variable: export NEX_API_KEY="sk-..."\n');
+      process.stderr.write('  2. Global config:        ~/.nex-mcp.json  → {"api_key": "sk-..."}\n');
+      process.stderr.write('  3. Project config:       .nex.toml        → [auth] api_key = "sk-..."\n');
+      process.stderr.write("\nGet an API key: nex register --email you@company.com\n\n");
+
+      // Still install plugin hooks/commands (they'll gracefully degrade without a key)
+      const platforms = detectPlatforms().filter((p) => p.detected);
+      for (const platform of platforms) {
+        if (platform.id === "claude-code" && !opts.noPlugin) {
+          installClaudeCodePlugin();
+        }
+      }
+
+      writeDefaultProjectConfig();
+      return;
     }
 
     const email = await ask("Email (required):", true);
@@ -204,11 +222,11 @@ async function runSetup(opts: {
         } else {
           results.push("Claude Code: hooks already configured");
         }
-        if (result.commandsLinked.length > 0) {
-          results.push(`Claude Code: commands linked (${result.commandsLinked.join(", ")})`);
+        if (result.commandsCopied.length > 0) {
+          results.push(`Claude Code: commands installed (${result.commandsCopied.join(", ")})`);
         }
       } else {
-        results.push("Claude Code: plugin directory not found — install @nex-crm/claude-code-nex-plugin");
+        results.push("Claude Code: bundled plugin not found — reinstall @nex-ai/nex");
       }
     }
 
@@ -239,7 +257,30 @@ async function runSetup(opts: {
     results.push(".nex.toml already exists");
   }
 
-  // 6. Output results
+  // 6. Scan and ingest project files (requires API key)
+  if (!opts.noScan && apiKey && isScanEnabled()) {
+    if (opts.format !== "json") {
+      process.stderr.write("\nScanning project files...\n");
+    }
+    const scanOpts = loadScanConfig();
+    const client = new NexClient(apiKey, resolveTimeout(globalOpts.timeout));
+    try {
+      const scanResult = await scanFiles(process.cwd(), scanOpts, async (content, context) => {
+        return client.post("/v1/context/text", { content, context });
+      });
+      if (scanResult.scanned > 0) {
+        results.push(`File scan: ${scanResult.scanned} files ingested, ${scanResult.skipped} skipped, ${scanResult.errors} errors`);
+      } else if (scanResult.skipped > 0) {
+        results.push(`File scan: all ${scanResult.skipped} files already up to date`);
+      } else {
+        results.push("File scan: no eligible files found in current directory");
+      }
+    } catch (err) {
+      results.push(`File scan: failed — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  // 7. Output results
   if (opts.format === "json") {
     printOutput({
       platforms: targetPlatforms.map((p) => ({
@@ -257,7 +298,7 @@ async function runSetup(opts: {
     process.stderr.write("\n");
   }
 
-  // 7. Show status
+  // 8. Show status
   if (opts.format !== "json") {
     await showStatus(opts.format);
   }
@@ -286,13 +327,15 @@ const setup = program
   .option("--platform <name>", `Target platform: ${VALID_PLATFORM_IDS.join(", ")}`)
   .option("--with-mcp", "Also install MCP server for detected platforms", false)
   .option("--no-plugin", "Skip plugin (hooks/commands), only update config files")
+  .option("--no-scan", "Skip file scanning during setup")
   .action(async (cmdOpts) => {
     const globalOpts = program.opts();
     const format = resolveFormat(globalOpts.format) as Format;
     await runSetup({
       platform: cmdOpts.platform,
       withMcp: cmdOpts.withMcp,
-      noPlugin: cmdOpts.noPlugin ?? false,
+      noPlugin: cmdOpts.plugin === false,
+      noScan: cmdOpts.scan === false,
       format,
     });
   });

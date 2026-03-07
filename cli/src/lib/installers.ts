@@ -7,11 +7,10 @@
  * - Continue.dev writes YAML config
  */
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, symlinkSync, readdirSync } from "node:fs";
-import { join, dirname, resolve } from "node:path";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, copyFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { execFileSync } from "node:child_process";
 import type { Platform } from "./platform-detect.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -126,19 +125,38 @@ interface SettingsJson {
   [key: string]: unknown;
 }
 
-export function installClaudeCodePlugin(pluginDir?: string): {
+/**
+ * Resolve bundled plugin paths.
+ * Plugin source is compiled into dist/plugin/ alongside the CLI.
+ * Slash commands are at plugin-commands/ in the package root.
+ *
+ * From dist/lib/installers.js:
+ *   __dirname = <pkg>/dist/lib/
+ *   dist/plugin/ = __dirname/../plugin/
+ *   plugin-commands/ = __dirname/../../plugin-commands/
+ */
+function getPluginDistDir(): string {
+  return join(__dirname, "..", "plugin");
+}
+
+function getPluginCommandsDir(): string {
+  return join(__dirname, "..", "..", "plugin-commands");
+}
+
+export function installClaudeCodePlugin(): {
   installed: boolean;
   hooksAdded: string[];
-  commandsLinked: string[];
+  commandsCopied: string[];
 } {
   const home = homedir();
   const claudeDir = join(home, ".claude");
   const settingsPath = join(claudeDir, "settings.json");
 
-  // Resolve plugin directory — find it relative to the CLI package
-  const resolvedPluginDir = pluginDir ?? findPluginDir();
-  if (!resolvedPluginDir) {
-    return { installed: false, hooksAdded: [], commandsLinked: [] };
+  const distDir = getPluginDistDir();
+
+  // Verify bundled plugin exists
+  if (!existsSync(join(distDir, "auto-recall.js"))) {
+    return { installed: false, hooksAdded: [], commandsCopied: [] };
   }
 
   // 1. Read existing settings.json
@@ -155,9 +173,8 @@ export function installClaudeCodePlugin(pluginDir?: string): {
   }
 
   const hooksAdded: string[] = [];
-  const distDir = join(resolvedPluginDir, "dist");
 
-  // 2. Add hooks (idempotent — check if nex hooks already exist)
+  // 2. Add hooks (idempotent — remove stale nex hooks, then add fresh ones)
   const hookDefs: Array<{
     event: string;
     script: string;
@@ -191,32 +208,33 @@ export function installClaudeCodePlugin(pluginDir?: string): {
     }
 
     const groups = settings.hooks![def.event];
-    const alreadyInstalled = groups.some((g) =>
-      g.hooks.some((h) => h.command.includes("nex") || h.command.includes("auto-recall") || h.command.includes("auto-capture") || h.command.includes("auto-session-start"))
+
+    // Remove any existing nex hook entries (handles path updates on upgrade)
+    const filtered = groups.filter((g) =>
+      !g.hooks.some((h) => h.command.includes("auto-recall") || h.command.includes("auto-capture") || h.command.includes("auto-session-start"))
     );
 
-    if (!alreadyInstalled) {
-      const hookEntry: HookEntry = {
-        type: "command",
-        command: `node ${def.script}`,
-        timeout: def.timeout,
-      };
-      if (def.statusMessage) hookEntry.statusMessage = def.statusMessage;
-      if (def.async) hookEntry.async = true;
+    const hookEntry: HookEntry = {
+      type: "command",
+      command: `node ${def.script}`,
+      timeout: def.timeout,
+    };
+    if (def.statusMessage) hookEntry.statusMessage = def.statusMessage;
+    if (def.async) hookEntry.async = true;
 
-      groups.push({ matcher: "", hooks: [hookEntry] });
-      hooksAdded.push(def.event);
-    }
+    filtered.push({ matcher: "", hooks: [hookEntry] });
+    settings.hooks![def.event] = filtered;
+    hooksAdded.push(def.event);
   }
 
   // 3. Write settings.json
   mkdirSync(claudeDir, { recursive: true });
   writeFileSync(settingsPath, JSON.stringify(settings, null, 2) + "\n", "utf-8");
 
-  // 4. Symlink slash commands
-  const commandsLinked: string[] = [];
+  // 4. Copy slash commands (copy, not symlink — survives npm updates)
+  const commandsCopied: string[] = [];
   const commandsDir = join(claudeDir, "commands");
-  const sourceCommandsDir = join(resolvedPluginDir, "commands");
+  const sourceCommandsDir = getPluginCommandsDir();
 
   if (existsSync(sourceCommandsDir)) {
     mkdirSync(commandsDir, { recursive: true });
@@ -228,13 +246,18 @@ export function installClaudeCodePlugin(pluginDir?: string): {
         const target = join(commandsDir, entry);
         const source = join(sourceCommandsDir, entry);
 
-        if (!existsSync(target)) {
-          try {
-            symlinkSync(source, target, "file");
-            commandsLinked.push(entry);
-          } catch {
-            // May fail if file already exists as regular file — skip
-          }
+        // Remove stale symlink or existing file, then copy fresh
+        try {
+          unlinkSync(target);
+        } catch {
+          // File didn't exist — fine
+        }
+
+        try {
+          copyFileSync(source, target);
+          commandsCopied.push(entry);
+        } catch {
+          // Copy failed — non-critical
         }
       }
     } catch {
@@ -242,38 +265,7 @@ export function installClaudeCodePlugin(pluginDir?: string): {
     }
   }
 
-  return { installed: true, hooksAdded, commandsLinked };
-}
-
-/**
- * Find the claude-code-plugin directory relative to the CLI install.
- * Looks for it as a sibling package in the monorepo or as a globally installed npm package.
- */
-function findPluginDir(): string | undefined {
-  // Try common locations
-  const candidates = [
-    // Sibling in monorepo (from dist/lib/ → ../../.. = repo root → claude-code-plugin)
-    resolve(__dirname, "..", "..", "..", "claude-code-plugin"),
-    // Relative to cli package root (from dist/lib/ → ../.. = cli root → claude-code-plugin)
-    resolve(__dirname, "..", "..", "claude-code-plugin"),
-  ];
-
-  // Also check npm global node_modules for the published plugin package
-  try {
-    const globalPrefix = execFileSync("npm", ["prefix", "-g"], { encoding: "utf-8" }).trim();
-    candidates.push(join(globalPrefix, "lib", "node_modules", "@nex-crm", "claude-code-nex-plugin"));
-    candidates.push(join(globalPrefix, "lib", "node_modules", "@nex-ai", "claude-code-plugin"));
-  } catch {
-    // npm not available — skip
-  }
-
-  for (const candidate of candidates) {
-    if (existsSync(join(candidate, "package.json"))) {
-      return candidate;
-    }
-  }
-
-  return undefined;
+  return { installed: true, hooksAdded, commandsCopied };
 }
 
 // --- Sync API key to ~/.nex-mcp.json ---

@@ -57,18 +57,22 @@ All MCP-based platforms use the same server entry:
 ## Setup Command
 
 ```bash
-nex setup                          # Auto-detect platforms, install Claude Code plugin, create .nex.toml
+nex setup                          # Auto-detect platforms, install plugin, scan files, create .nex.toml
 nex setup --with-mcp               # Also write MCP config to all detected platforms
 nex setup --platform cursor        # Install for a specific platform only
 nex setup --no-plugin              # Only create config files, skip hooks/commands
+nex setup --no-scan                # Skip file scanning during setup
 nex setup status                   # Show all platforms, install status, and connections
 ```
 
 **Default behavior** (no flags):
 - Claude Code: installs hooks + slash commands (no MCP — avoids filling context windows)
 - Other platforms: detected but MCP not written until `--with-mcp` is passed
+- Scans current directory and ingests new/changed files into Nex
 - Creates `.nex.toml` project config with commented defaults
 - Syncs API key to `~/.nex-mcp.json` (shared config)
+
+**Single install**: `npm install -g @nex-ai/nex` bundles everything — the Claude Code plugin hooks, slash commands, and MCP server are all included. No separate packages needed.
 
 > **Tip:** AI agents don't automatically know about Nex. Explicitly tell your agent to "use Nex for context and memory" in your prompts or CLAUDE.md instructions.
 

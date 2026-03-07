@@ -8,6 +8,7 @@
   },
   "files": [
     "dist",
+    "plugin-commands",
     "README.md"
   ],
   "scripts": {
