@@ -58,7 +58,9 @@ export function parseConfig(raw?: Record<string, unknown>): NexPluginConfig {
     );
   }
 
-  const baseUrl = process.env.NEX_DEV_URL ?? "https://app.nex.ai";
+  let baseUrl = process.env.NEX_DEV_URL
+    ?? (typeof cfg.baseUrl === "string" ? resolveEnvVars(cfg.baseUrl).replace(/\/+$/, "") : undefined)
+    ?? DEFAULTS.baseUrl;
 
   const captureMode = cfg.captureMode as string | undefined;
   if (captureMode !== undefined && captureMode !== "last_turn" && captureMode !== "full_session") {

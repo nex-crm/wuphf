@@ -1534,6 +1534,75 @@ Receive insights as they are discovered in real time.
 
 **When to use**: Keep the SSE connection open in the background during active conversations. For one-off queries, use the Ask API instead.
 
+## Integrations
+
+Manage third-party integrations (Gmail, Google Calendar, Outlook, Outlook Calendar, Slack, Attio, HubSpot, Salesforce).
+
+**Scope**: `integration.read`, `integration.write`
+
+### List Integrations
+
+**Endpoint**: `GET /v1/integrations/`
+
+Lists available integration types and their current connection status.
+
+```json
+{
+  "tool": "exec",
+  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/integrations/",
+  "timeout": 120
+}
+```
+
+### Connect Integration
+
+**Endpoint**: `POST /v1/integrations/{type}/{provider}/connect`
+
+Start an OAuth connection flow. Returns an `auth_url` for the user to open in their browser.
+
+| Type | Providers |
+|------|-----------|
+| `email` | `google`, `microsoft` |
+| `calendar` | `google`, `microsoft` |
+| `messaging` | `slack` |
+| `crm` | `attio`, `hubspot`, `salesforce` |
+
+```json
+{
+  "tool": "exec",
+  "command": "printf '%s' '{}' | bash {baseDir}/scripts/nex-api.sh POST /v1/integrations/email/google/connect",
+  "timeout": 120
+}
+```
+
+### Check Connection Status
+
+**Endpoint**: `GET /v1/integrations/connect/{connect_id}/status`
+
+Poll this endpoint to check if the user has completed the OAuth flow.
+
+```json
+{
+  "tool": "exec",
+  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/integrations/connect/CONNECT_ID/status",
+  "timeout": 120
+}
+```
+
+### Disconnect Integration
+
+**Endpoint**: `DELETE /v1/integrations/connections/{connection_id}`
+
+Remove an existing integration connection.
+
+```json
+{
+  "tool": "exec",
+  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/integrations/connections/CONNECTION_ID",
+  "timeout": 120
+}
+```
+
 ## Error Handling
 
 | Status Code | Meaning | Action |

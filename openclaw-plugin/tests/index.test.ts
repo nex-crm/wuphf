@@ -18,7 +18,7 @@ describe("config", () => {
   it("parses valid config", () => {
     const cfg = parseConfig({ apiKey: "sk-test-123" });
     expect(cfg.apiKey).toBe("sk-test-123");
-    expect(cfg.baseUrl).toBe("https://api.nex-crm.com");
+    expect(cfg.baseUrl).toBe("https://app.nex.ai");
     expect(cfg.autoRecall).toBe(true);
     expect(cfg.autoCapture).toBe(true);
     expect(cfg.captureMode).toBe("last_turn");

@@ -1,8 +1,20 @@
-import { describe, it } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { shouldRecall } from "../../src/lib/recall-filter.js";
 
+const DATA_DIR = join(homedir(), ".nex");
+const STATE_FILE = join(DATA_DIR, "recall-state.json");
+
 describe("shouldRecall", () => {
+  // Reset recall state before each test to avoid debounce interference
+  beforeEach(() => {
+    mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(STATE_FILE, JSON.stringify({ lastRecallAt: 0 }), "utf-8");
+  });
+
   it("always recalls on first prompt", () => {
     const result = shouldRecall("anything at all", true);
     assert.equal(result.shouldRecall, true);

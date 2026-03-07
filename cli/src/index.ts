@@ -24,6 +24,8 @@ import "./commands/task.js";
 import "./commands/note.js";
 import "./commands/session.js";
 import "./commands/scan.js";
+import "./commands/integrate.js";
+import "./commands/setup.js";
 
 /**
  * Read all data from stdin (non-TTY only).

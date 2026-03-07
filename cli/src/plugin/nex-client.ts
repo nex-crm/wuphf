@@ -1,6 +1,6 @@
 /**
  * HTTP client for the Nex Developer API.
- * Uses native fetch with AbortController timeouts.
+ * Adapted from openclaw-plugin — uses native fetch with timeout.
  */
 
 // --- Error types ---
@@ -33,6 +33,13 @@ export class NexServerError extends Error {
 }
 
 // --- Response types ---
+
+export interface RegisterResponse {
+  api_key: string;
+  workspace_id?: string | number;
+  workspace_slug?: string;
+  [key: string]: unknown;
+}
 
 export interface IngestResponse {
   artifact_id: string;
@@ -98,53 +105,66 @@ export class NexClient {
       }
 
       if (!res.ok) {
-        let body: string | undefined;
+        let errorBody: string | undefined;
         try {
-          body = await res.text();
+          errorBody = await res.text();
         } catch {
           // ignore
         }
-        throw new NexServerError(res.status, body);
+        throw new NexServerError(res.status, errorBody);
       }
 
       const text = await res.text();
-      if (!text) return {} as T;
+      if (!text || !text.trim()) return {} as T;
       return JSON.parse(text) as T;
     } finally {
       clearTimeout(timer);
     }
   }
 
-  /** Generic GET request. */
-  async get<T = unknown>(path: string, timeoutMs?: number): Promise<T> {
-    return this.request<T>("GET", path, undefined, timeoutMs);
-  }
+  /**
+   * Register a new account and get an API key.
+   * Does NOT require an existing API key — uses the public registration endpoint.
+   */
+  static async register(
+    baseUrl: string,
+    email: string,
+    name?: string,
+    companyName?: string,
+  ): Promise<RegisterResponse> {
+    const url = `${baseUrl}/api/v1/agents/register`;
+    const body: Record<string, string> = { email, source: "claude-code" };
+    if (name) body.name = name;
+    if (companyName) body.company_name = companyName;
 
-  /** Generic POST request. */
-  async post<T = unknown>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
-    return this.request<T>("POST", path, body, timeoutMs);
-  }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
 
-  /** Generic DELETE request. */
-  async delete<T = unknown>(path: string, timeoutMs?: number): Promise<T> {
-    return this.request<T>("DELETE", path, undefined, timeoutMs);
-  }
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
 
-  /** Generic PATCH request. */
-  async patch<T = unknown>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
-    return this.request<T>("PATCH", path, body, timeoutMs);
-  }
+      if (!res.ok) {
+        let errorBody: string | undefined;
+        try { errorBody = await res.text(); } catch { /* ignore */ }
+        throw new NexServerError(res.status, errorBody);
+      }
 
-  /** Generic PUT request. */
-  async put<T = unknown>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
-    return this.request<T>("PUT", path, body, timeoutMs);
+      return await res.json() as RegisterResponse;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Ingest text content into the Nex knowledge graph. */
-  async ingest(content: string, context?: string): Promise<IngestResponse> {
+  async ingest(content: string, context?: string, timeoutMs?: number): Promise<IngestResponse> {
     const body: Record<string, string> = { content };
     if (context) body.context = context;
-    return this.request<IngestResponse>("POST", "/v1/context/text", body, 60_000);
+    return this.request<IngestResponse>("POST", "/v1/context/text", body, timeoutMs ?? 60_000);
   }
 
   /** Ask a question against the Nex knowledge graph. */
@@ -152,17 +172,5 @@ export class NexClient {
     const body: Record<string, unknown> = { query };
     if (sessionId) body.session_id = sessionId;
     return this.request<AskResponse>("POST", "/v1/context/ask", body, timeoutMs);
-  }
-
-  /** Lightweight health check — validates API key connectivity. */
-  async healthCheck(): Promise<boolean> {
-    try {
-      // Use a minimal ask call with short timeout
-      await this.request("POST", "/v1/context/ask", { query: "ping" }, 5000);
-      return true;
-    } catch (err) {
-      if (err instanceof NexAuthError) throw err; // Auth errors should propagate
-      return false; // Network/server errors = unhealthy but not fatal
-    }
   }
 }

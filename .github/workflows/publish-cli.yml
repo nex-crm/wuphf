@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - "cli/**"
+      - "claude-code-plugin/src/**"
+      - "claude-code-plugin/commands/**"
 
 jobs:
   publish:
@@ -25,6 +27,11 @@ jobs:
           node-version: 20
           registry-url: https://registry.npmjs.org
 
+      - name: Sync plugin into CLI
+        run: |
+          rsync -a --delete ../claude-code-plugin/src/ src/plugin/
+          rsync -a --delete ../claude-code-plugin/commands/ plugin-commands/
+
       - run: npm ci
 
       - run: npm run build
@@ -34,7 +41,7 @@ jobs:
       - name: Bump patch version
         id: bump
         run: |
-          PUBLISHED=$(npm view @nex-ai/cli version 2>/dev/null || echo "0.0.0")
+          PUBLISHED=$(npm view @nex-ai/nex version 2>/dev/null || echo "0.0.0")
           LOCAL=$(node -p "require('./package.json').version")
           if [ "$LOCAL" = "$PUBLISHED" ]; then
             npm version patch --no-git-tag-version
@@ -63,6 +70,6 @@ jobs:
           cd ..
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add cli/package.json
+          git add cli/package.json cli/src/plugin/ cli/plugin-commands/
           git commit -m "chore(cli): bump to v${{ steps.bump.outputs.version }} [skip ci]"
           git push

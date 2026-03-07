@@ -11,7 +11,7 @@ import { resolveFormat } from "../lib/config.js";
 
 program
   .command("register")
-  .description("Register a new Nex developer account")
+  .description("Register a new Nex workspace and get an API key")
   .requiredOption("--email <email>", "Email address")
   .option("--name <name>", "Your name")
   .option("--company <company>", "Company name")
