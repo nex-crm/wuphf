@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { program } from "../cli.js";
 import { NexClient } from "../lib/client.js";
 import { resolveApiKey, resolveFormat, resolveTimeout } from "../lib/config.js";
-import { AuthError, ServerError } from "../lib/errors.js";
+import { AuthError } from "../lib/errors.js";
 import { printOutput, printError } from "../lib/output.js";
 import type { Format } from "../lib/output.js";
 
@@ -55,33 +55,68 @@ function openBrowser(url: string): void {
   }
 }
 
-async function pollForConnection(client: NexClient, connectId: string, format: Format): Promise<void> {
+interface IntegrationEntry {
+  type?: string;
+  provider?: string;
+  connections?: Array<{ id?: number; [key: string]: unknown }>;
+  [key: string]: unknown;
+}
+
+function getConnectionIds(integrations: IntegrationEntry[], type: string, provider: string): Set<number> {
+  const ids = new Set<number>();
+  for (const entry of integrations) {
+    if (entry.type === type && entry.provider === provider && Array.isArray(entry.connections)) {
+      for (const conn of entry.connections) {
+        if (typeof conn.id === "number") ids.add(conn.id);
+      }
+    }
+  }
+  return ids;
+}
+
+async function pollForConnection(
+  client: NexClient,
+  type: string,
+  provider: string,
+  existingIds: Set<number>,
+  format: Format,
+): Promise<void> {
   process.stderr.write("Waiting for OAuth completion...\n");
+  process.stderr.write("Complete the OAuth flow in your browser, then return here.\n\n");
 
   const maxWaitMs = 5 * 60 * 1000;
-  const pollIntervalMs = 2000;
+  const pollIntervalMs = 3000;
   const startTime = Date.now();
+  let dots = 0;
 
   while (Date.now() - startTime < maxWaitMs) {
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
 
     try {
-      const status = await client.get<{ status: string; connection_id?: number }>(
-        `/v1/integrations/connect/${encodeURIComponent(connectId)}/status`
-      );
+      const integrations = await client.get<IntegrationEntry[]>("/v1/integrations/", 5_000);
 
-      if (status.status === "connected") {
-        process.stderr.write(`\nConnected successfully!\n`);
-        printOutput(status, format);
-        return;
+      if (!Array.isArray(integrations)) continue;
+
+      const currentIds = getConnectionIds(integrations, type, provider);
+      for (const id of currentIds) {
+        if (!existingIds.has(id)) {
+          process.stderr.write("\n\nConnected successfully!\n");
+          printOutput({ status: "connected", connection_id: id }, format);
+          return;
+        }
       }
+
+      dots = (dots + 1) % 4;
+      process.stderr.write(`\rPolling${".".repeat(dots)}${" ".repeat(3 - dots)}`);
     } catch (err) {
       if (err instanceof AuthError) throw err;
-      if (err instanceof ServerError && (err.status === 410 || err.status === 403)) throw err;
+      dots = (dots + 1) % 4;
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`\rPolling${".".repeat(dots)}${" ".repeat(3 - dots)}  (${msg.slice(0, 40)})`);
     }
   }
 
-  printError("Timed out waiting for OAuth completion. Check status with 'nex integrate list'.");
+  printError("Timed out after 5 minutes. Check status with 'nex integrate list'.");
   process.exit(1);
 }
 
@@ -94,7 +129,7 @@ integrate
   .description("List all available integrations and their connection status")
   .action(async () => {
     const { client, format } = getClient();
-    const result = await client.get<Record<string, unknown>[]>("/v1/integrations/");
+    const result = await client.get<IntegrationEntry[]>("/v1/integrations/");
 
     if (format === "json") {
       printOutput(result, "json");
@@ -114,11 +149,11 @@ integrate
       const type = String(integration.type ?? "");
       const provider = String(integration.provider ?? "");
       const label = `${type} / ${provider}`;
-      const connections = integration.connections as Array<Record<string, unknown>> | undefined;
+      const connections = integration.connections;
 
       if (connections && connections.length > 0) {
         for (const conn of connections) {
-          const displayName = conn.display_name ?? conn.email ?? "";
+          const displayName = (conn as Record<string, unknown>).display_name ?? (conn as Record<string, unknown>).email ?? "";
           lines.push(
             `${padRight(label, 25)} \u25CF connected     ${displayName}     (ID: ${conn.id})`
           );
@@ -148,7 +183,19 @@ integrate
     }
 
     const { client, format } = getClient();
-    const result = await client.post<{ auth_url: string; connect_id: string }>(
+
+    // Snapshot existing connections before OAuth
+    let existingIds = new Set<number>();
+    try {
+      const integrations = await client.get<IntegrationEntry[]>("/v1/integrations/", 5_000);
+      if (Array.isArray(integrations)) {
+        existingIds = getConnectionIds(integrations, integration.type, integration.provider);
+      }
+    } catch {
+      // Continue — we'll just not be able to detect duplicates
+    }
+
+    const result = await client.post<{ auth_url: string; connect_id?: string }>(
       `/v1/integrations/${encodeURIComponent(integration.type)}/${encodeURIComponent(integration.provider)}/connect`
     );
 
@@ -157,7 +204,7 @@ integrate
     }
 
     openBrowser(result.auth_url);
-    await pollForConnection(client, result.connect_id, format);
+    await pollForConnection(client, integration.type, integration.provider, existingIds, format);
   });
 
 integrate
