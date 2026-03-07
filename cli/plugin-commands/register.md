@@ -5,19 +5,9 @@ Register for a Nex account to get an API key for the memory plugin.
 
 If $ARGUMENTS contains an email address, use it directly. Otherwise, ask the user for their email.
 
-Run the registration script. Find the script path by running:
+Run the registration script:
 ```
-node -e "console.log(require('path').join(require('path').dirname(require.resolve('@nex-ai/nex/package.json')), 'dist', 'plugin', 'auto-register.js'))"
-```
-
-Then run:
-```
-node <resolved-path> <email> [name] [company]
-```
-
-If the resolve fails, try the global install path:
-```
-node $(npm prefix -g)/lib/node_modules/@nex-ai/nex/dist/plugin/auto-register.js <email> [name] [company]
+node <plugin-dir>/dist/auto-register.js <email> [name] [company]
 ```
 
 After successful registration:
