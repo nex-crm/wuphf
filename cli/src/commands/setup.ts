@@ -12,7 +12,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { program } from "../cli.js";
-import { resolveApiKey, resolveFormat, resolveTimeout, persistRegistration } from "../lib/config.js";
+import { resolveApiKey, resolveFormat, resolveTimeout, persistRegistration, loadConfig } from "../lib/config.js";
 import { NexClient } from "../lib/client.js";
 import { printOutput, printError } from "../lib/output.js";
 import { confirm, ask } from "../lib/prompt.js";
@@ -137,6 +137,23 @@ async function showStatus(format: Format): Promise<void> {
 
 // --- Main setup flow ---
 
+async function registerAndPersist(globalOpts: { timeout?: string; apiKey?: string }): Promise<string> {
+  const email = await ask("Email (required):", true);
+  const name = await ask("Name (optional):");
+
+  process.stderr.write("\nRegistering...\n");
+  const client = new NexClient(undefined, resolveTimeout(globalOpts.timeout));
+  const data = await client.register(email, name || undefined);
+  persistRegistration(data);
+  const apiKey = data.api_key as string;
+
+  const wsSlug = data.workspace_slug as string | undefined;
+  process.stderr.write(`\n  ✓ Registered!${wsSlug ? ` (${wsSlug})` : ""}\n`);
+  process.stderr.write(`    API key: ${apiKey}\n`);
+  process.stderr.write(`    Saved to: ~/.nex/config.json\n\n`);
+  return apiKey;
+}
+
 async function runSetup(opts: {
   platform?: string;
   withMcp: boolean;
@@ -147,7 +164,7 @@ async function runSetup(opts: {
   const globalOpts = program.opts();
   let apiKey = resolveApiKey(globalOpts.apiKey);
 
-  // 1. Register if no API key
+  // 1. Register or re-register
   if (!apiKey) {
     process.stderr.write("\nNo API key found. Let's set up your Nex account.\n\n");
     const wantsRegister = await confirm("Register a new Nex workspace?");
@@ -172,19 +189,21 @@ async function runSetup(opts: {
       return;
     }
 
-    const email = await ask("Email (required):", true);
-    const name = await ask("Name (optional):");
+    apiKey = await registerAndPersist(globalOpts);
+  } else {
+    // Key exists — offer to regenerate (picks up new scopes, fixes expired keys)
+    const config = loadConfig();
+    const maskedKey = apiKey.slice(0, 6) + "..." + apiKey.slice(-4);
+    process.stderr.write(`\nAPI key: ${maskedKey}`);
+    if (config.workspace_slug) {
+      process.stderr.write(` (workspace: ${config.workspace_slug})`);
+    }
+    process.stderr.write("\n\n");
 
-    process.stderr.write("\nRegistering...\n");
-    const client = new NexClient(undefined, resolveTimeout(globalOpts.timeout));
-    const data = await client.register(email, name || undefined);
-    persistRegistration(data);
-    apiKey = data.api_key as string;
-
-    const wsSlug = data.workspace_slug as string | undefined;
-    process.stderr.write(`\n  ✓ Workspace created!${wsSlug ? ` (${wsSlug})` : ""}\n`);
-    process.stderr.write(`    API key: ${apiKey}\n`);
-    process.stderr.write(`    Saved to: ~/.nex-mcp.json\n`);
+    const wantsRegenerate = await confirm("Generate a new API key? (picks up latest scopes)", false);
+    if (wantsRegenerate) {
+      apiKey = await registerAndPersist(globalOpts);
+    }
   }
 
   // 2. Sync API key to shared config
