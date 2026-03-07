@@ -7,11 +7,51 @@ import { NexClient } from "../lib/client.js";
 import { resolveApiKey, resolveFormat, resolveTimeout } from "../lib/config.js";
 import { printOutput } from "../lib/output.js";
 import type { Format } from "../lib/output.js";
+import { heading, style } from "../lib/tui.js";
 
 function getClient(): { client: NexClient; format: Format } {
   const opts = program.opts();
   const client = new NexClient(resolveApiKey(opts.apiKey), resolveTimeout(opts.timeout));
   return { client, format: resolveFormat(opts.format) as Format };
+}
+
+interface TaskEntry {
+  id?: string | number;
+  title?: string;
+  is_completed?: boolean;
+  priority?: string;
+  due_date?: string;
+  [k: string]: unknown;
+}
+
+function formatTaskListTTY(data: unknown): string | undefined {
+  if (!Array.isArray(data)) return undefined;
+  const tasks = data as TaskEntry[];
+
+  if (tasks.length === 0) {
+    return `  ${style.dim("No tasks found.")}`;
+  }
+
+  const lines: string[] = [];
+  lines.push(heading("Tasks"));
+  lines.push("");
+
+  for (const t of tasks) {
+    const check = t.is_completed ? style.dim("\u2611") : "\u2610";
+    const title = t.is_completed ? style.dim(t.title ?? "") : (t.title ?? "");
+    const parts = [`  ${check} ${title}`];
+
+    if (t.due_date) parts.push(`  ${style.dim("due: " + t.due_date)}`);
+    if (t.priority) parts.push(`  ${style.dim("priority: " + t.priority)}`);
+
+    lines.push(parts.join(""));
+  }
+
+  const completed = tasks.filter((t) => t.is_completed).length;
+  lines.push("");
+  lines.push(`  ${style.dim(`${tasks.length} task${tasks.length !== 1 ? "s" : ""} (${completed} completed)`)}`);
+
+  return lines.join("\n");
 }
 
 const task = program.command("task").description("Manage tasks");
@@ -34,7 +74,7 @@ task
     if (opts.limit) params.set("limit", opts.limit);
     const qs = params.toString();
     const result = await client.get(`/v1/tasks${qs ? `?${qs}` : ""}`);
-    printOutput(result, format);
+    printOutput(result, format, formatTaskListTTY);
   });
 
 task

@@ -1,5 +1,5 @@
 ---
-description: Search CRM records by name across all types
+description: Fuzzy keyword search to find specific named records (use /recall for AI-powered queries)
 ---
 Search for: $ARGUMENTS
 

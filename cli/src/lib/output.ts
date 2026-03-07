@@ -2,6 +2,8 @@
  * Output formatter: json / text / quiet.
  */
 
+import { isTTY, sym, style } from "./tui.js";
+
 export type Format = "json" | "text" | "quiet";
 
 function flattenForText(data: unknown, indent = 0): string {
@@ -42,13 +44,37 @@ export function formatOutput(data: unknown, format: Format): string | undefined 
   }
 }
 
-export function printOutput(data: unknown, format: Format): void {
-  const output = formatOutput(data, format);
-  if (output !== undefined) {
+export function printOutput(
+  data: unknown,
+  format: Format,
+  ttyFormatter?: (data: unknown) => string | undefined,
+): void {
+  if (format === "json") {
+    process.stdout.write(JSON.stringify(data, null, 2) + "\n");
+    return;
+  }
+  if (format === "quiet") return;
+
+  // text format: try formatter first (works in both TTY and piped output)
+  if (ttyFormatter) {
+    const result = ttyFormatter(data);
+    if (result !== undefined) {
+      process.stdout.write(result + "\n");
+      return;
+    }
+  }
+
+  // fallback to flattenForText
+  const output = flattenForText(data);
+  if (output) {
     process.stdout.write(output + "\n");
   }
 }
 
-export function printError(message: string): void {
-  process.stderr.write(`Error: ${message}\n`);
+export function printError(message: string, hint?: string): void {
+  process.stderr.write(`\n${sym.error} ${message}\n`);
+  if (hint) {
+    process.stderr.write(`  ${style.dim(hint)}\n`);
+  }
+  process.stderr.write("\n");
 }

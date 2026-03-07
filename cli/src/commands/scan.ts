@@ -8,6 +8,59 @@ import { NexClient } from "../lib/client.js";
 import { printOutput, printError } from "../lib/output.js";
 import { scanFiles, loadScanConfig, isScanEnabled } from "../lib/file-scanner.js";
 import type { Format } from "../lib/output.js";
+import { spinner as createSpinner, table, style, sym, isTTY } from "../lib/tui.js";
+
+interface ScanFileEntry {
+  path?: string;
+  status?: string;
+  [k: string]: unknown;
+}
+
+interface ScanOutput {
+  scanned?: number;
+  skipped?: number;
+  errors?: number;
+  files?: ScanFileEntry[];
+  dry_run?: boolean;
+  would_scan?: number;
+  would_skip?: number;
+  [k: string]: unknown;
+}
+
+function formatScanTTY(data: unknown): string | undefined {
+  const d = data as ScanOutput;
+  if (!d || typeof d !== "object") return undefined;
+
+  const lines: string[] = [];
+
+  if (d.dry_run) {
+    lines.push(`  ${sym.info} Dry run — no files ingested`);
+    lines.push(`  Would scan: ${d.would_scan ?? 0}, Would skip: ${d.would_skip ?? 0}`);
+  }
+
+  const files = d.files;
+  if (files && Array.isArray(files) && files.length > 0) {
+    const headers = ["FILE", "STATUS"];
+    const rows = files.map((f) => [
+      String(f.path ?? ""),
+      String(f.status ?? ""),
+    ]);
+    lines.push(table({ headers, rows }));
+    lines.push("");
+  }
+
+  if (!d.dry_run) {
+    const parts: string[] = [];
+    if (d.scanned) parts.push(`${d.scanned} ingested`);
+    if (d.skipped) parts.push(`${d.skipped} skipped`);
+    if (d.errors) parts.push(`${d.errors} errors`);
+    if (parts.length > 0) {
+      lines.push(`  ${style.dim(parts.join(", "))}`);
+    }
+  }
+
+  return lines.length > 0 ? lines.join("\n") : undefined;
+}
 
 program
   .command("scan")
@@ -53,30 +106,48 @@ program
 
       const client = new NexClient(apiKey, resolveTimeout(globalOpts.timeout));
 
-      const result = await scanFiles(dir, scanOpts, async (content, context) => {
-        return client.post("/v1/context/text", { content, context });
-      });
+      // Show spinner for TTY text output
+      const showSpinner = isTTY && format === "text" && !opts.dryRun;
+      const spin = showSpinner ? createSpinner("Scanning project files...") : null;
 
-      if (opts.dryRun) {
-        printOutput(
-          {
-            dry_run: true,
-            would_scan: result.scanned,
-            would_skip: result.skipped,
-            files: result.files,
-          },
-          format,
-        );
-      } else {
-        printOutput(
-          {
-            scanned: result.scanned,
-            skipped: result.skipped,
-            errors: result.errors,
-            files: result.files,
-          },
-          format,
-        );
+      try {
+        const result = await scanFiles(dir, scanOpts, async (content, context) => {
+          return client.post("/v1/context/text", { content, context });
+        });
+
+        if (spin) {
+          spin.succeed("Scan complete");
+          process.stderr.write("\n");
+        }
+
+        if (opts.dryRun) {
+          printOutput(
+            {
+              dry_run: true,
+              would_scan: result.scanned,
+              would_skip: result.skipped,
+              files: result.files,
+            },
+            format,
+            formatScanTTY,
+          );
+        } else {
+          printOutput(
+            {
+              scanned: result.scanned,
+              skipped: result.skipped,
+              errors: result.errors,
+              files: result.files,
+            },
+            format,
+            formatScanTTY,
+          );
+        }
+      } catch (err) {
+        if (spin) {
+          spin.fail("Scan failed");
+        }
+        throw err;
       }
     },
   );

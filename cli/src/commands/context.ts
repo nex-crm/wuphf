@@ -7,6 +7,7 @@ import { NexClient } from "../lib/client.js";
 import { resolveApiKey, resolveFormat, resolveTimeout } from "../lib/config.js";
 import { printOutput } from "../lib/output.js";
 import type { Format } from "../lib/output.js";
+import { box, keyValue, style, sym, isTTY } from "../lib/tui.js";
 import { shouldRecall, recordRecall } from "../lib/recall-filter.js";
 import { formatNexContext } from "../lib/context-format.js";
 import type { NexRecallResult } from "../lib/context-format.js";
@@ -30,9 +31,59 @@ async function readStdin(): Promise<string | undefined> {
   return text || undefined;
 }
 
+interface AskResult {
+  answer?: string;
+  entityCount?: number;
+  sessionId?: string;
+  [k: string]: unknown;
+}
+
+function formatAskText(data: unknown): string | undefined {
+  const d = data as AskResult;
+  if (!d || typeof d !== "object" || !d.answer) return undefined;
+
+  if (!isTTY) {
+    // Clean text output — just the answer
+    return d.answer;
+  }
+
+  // Rich TTY output — boxed answer with metadata
+  const lines: string[] = [];
+  lines.push(box("Context Answer", d.answer));
+
+  const meta: [string, string][] = [];
+  if (d.entityCount !== undefined && d.entityCount > 0) {
+    meta.push(["Entities", String(d.entityCount)]);
+  }
+  if (meta.length > 0) {
+    lines.push(keyValue(meta));
+  }
+
+  return lines.join("\n");
+}
+
+interface RememberResult {
+  artifact_id?: string;
+  status?: string;
+  [k: string]: unknown;
+}
+
+function formatRememberText(data: unknown): string | undefined {
+  const d = data as RememberResult;
+  if (!d || typeof d !== "object") return undefined;
+
+  if (d.status === "completed" || d.artifact_id) {
+    return `${sym.success} Stored${d.artifact_id ? style.dim(` (artifact: ${d.artifact_id})`) : ""}`;
+  }
+  if (d.status) {
+    return `${sym.info} ${d.status}${d.artifact_id ? style.dim(` (artifact: ${d.artifact_id})`) : ""}`;
+  }
+  return undefined;
+}
+
 program
   .command("ask")
-  .description("Ask a question against your Nex context")
+  .description("Query your context graph with AI (recommended for most lookups)")
   .argument("[query]", "The question to ask")
   .action(async (query?: string) => {
     const input = query ?? (await readStdin());
@@ -49,12 +100,12 @@ program
     }
 
     const result = await client.post("/v1/context/ask", body);
-    printOutput(result, format);
+    printOutput(result, format, formatAskText);
   });
 
 program
   .command("remember")
-  .description("Store content in your Nex context")
+  .description("Store a note, fact, or observation in your context graph")
   .argument("[content]", "The content to remember")
   .option("--context <context>", "Additional context")
   .action(async (content: string | undefined, opts: { context?: string }) => {
@@ -70,7 +121,7 @@ program
     }
 
     const result = await client.post("/v1/context/text", body);
-    printOutput(result, format);
+    printOutput(result, format, formatRememberText);
   });
 
 program
@@ -85,7 +136,7 @@ program
 
 program
   .command("recall")
-  .description("Recall context for injection into LLM prompts")
+  .description("Recall context for LLM prompt injection (used by hooks — prefer 'ask' for direct use)")
   .argument("[query]", "The query to recall context for")
   .option("--first-prompt", "Treat as first prompt in session")
   .action(async (query?: string, opts?: { firstPrompt?: boolean }) => {
@@ -121,7 +172,7 @@ program
 
 program
   .command("capture")
-  .description("Capture content into Nex context with filtering and rate limiting")
+  .description("Auto-capture content with filtering and rate limiting (used by hooks — prefer 'remember' for direct use)")
   .argument("[content]", "The content to capture")
   .action(async (content?: string) => {
     const input = content ?? (await readStdin());

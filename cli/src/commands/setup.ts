@@ -17,6 +17,18 @@ import { NexClient } from "../lib/client.js";
 import { printOutput, printError } from "../lib/output.js";
 import { confirm, ask, choose } from "../lib/prompt.js";
 import type { Format } from "../lib/output.js";
+import { heading, keyValue, tree, badge, style, sym } from "../lib/tui.js";
+
+const INTEGRATIONS_MAP: Record<string, { type: string; provider: string }> = {
+  gmail: { type: "email", provider: "google" },
+  "google-calendar": { type: "calendar", provider: "google" },
+  outlook: { type: "email", provider: "microsoft" },
+  "outlook-calendar": { type: "calendar", provider: "microsoft" },
+  slack: { type: "messaging", provider: "slack" },
+  salesforce: { type: "crm", provider: "salesforce" },
+  hubspot: { type: "crm", provider: "hubspot" },
+  attio: { type: "crm", provider: "attio" },
+};
 import { detectPlatforms, getPlatformById, VALID_PLATFORM_IDS } from "../lib/platform-detect.js";
 import type { Platform } from "../lib/platform-detect.js";
 import { installMcpServer, installClaudeCodePlugin, syncApiKeyToMcpConfig } from "../lib/installers.js";
@@ -65,43 +77,43 @@ async function showStatus(format: Format, overrideApiKey?: string): Promise<void
 
   // Text format
   const lines: string[] = [];
-  lines.push("Nex Setup Status");
-  lines.push("================");
+  lines.push(heading("Nex Setup Status"));
   lines.push("");
 
   // Auth
+  const authEntries: [string, string][] = [];
   if (apiKey) {
-    lines.push(`Auth: Configured (${maskKey(apiKey)})`);
+    authEntries.push(["Auth", maskKey(apiKey)]);
   } else {
-    lines.push("Auth: Not configured — run `nex register` first");
+    authEntries.push(["Auth", style.yellow("Not configured") + style.dim(" — run `nex register` first")]);
   }
-  lines.push("");
-
-  // Platforms
-  lines.push("Platforms:");
-  for (const p of platforms) {
-    if (!p.detected) {
-      lines.push(`  ${padRight(p.displayName, 20)} Not found`);
-      continue;
-    }
-
-    const parts = [`  ${padRight(p.displayName, 20)} Detected`];
-
-    if (p.pluginSupport) {
-      parts.push(`   Plugin: ${p.nexInstalled ? "installed" : "not installed"}`);
-    }
-
-    // MCP status
-    if (p.id !== "claude-code") {
-      parts.push(`   MCP: ${p.nexInstalled ? "installed" : "not installed"}`);
-    }
-
-    lines.push(parts.join(""));
-  }
+  lines.push(keyValue(authEntries));
   lines.push("");
 
   // Project config
-  lines.push(`Project Config: ${projectConfigExists() ? ".nex.toml found" : ".nex.toml not found"}`);
+  lines.push(keyValue([
+    ["Project Config", projectConfigExists() ? style.green(".nex.toml found") : style.dim(".nex.toml not found")],
+  ]));
+  lines.push("");
+
+  // Platforms
+  lines.push(`  ${style.bold("Platforms")}`);
+  const platformItems = platforms.map((p) => {
+    let statusLabel: string;
+    if (!p.detected) {
+      statusLabel = `${p.displayName}     ${badge("not detected", "dim")}`;
+      return { label: statusLabel };
+    }
+    const children: string[] = [];
+    if (p.pluginSupport) {
+      children.push(p.nexInstalled ? badge("hooks installed", "success") : badge("not installed", "dim"));
+    }
+    if (p.id !== "claude-code") {
+      children.push(p.nexInstalled ? badge("MCP installed", "success") : badge("not installed", "dim"));
+    }
+    return { label: `${p.displayName}`, children };
+  });
+  lines.push(tree(platformItems));
   lines.push("");
 
   // Integrations (short timeout — don't block setup)
@@ -110,25 +122,34 @@ async function showStatus(format: Format, overrideApiKey?: string): Promise<void
       const client = new NexClient(apiKey, 5_000);
       const integrations = await client.get<Record<string, unknown>[]>("/v1/integrations/");
       if (Array.isArray(integrations) && integrations.length > 0) {
-        lines.push("Connections:");
-        for (const integration of integrations) {
+        lines.push(`  ${style.bold("Connections")}`);
+        const connItems = integrations.map((integration) => {
           const type = String(integration.type ?? "");
           const provider = String(integration.provider ?? "");
           const label = `${type} / ${provider}`;
           const connections = integration.connections as Array<Record<string, unknown>> | undefined;
 
           if (connections && connections.length > 0) {
-            for (const conn of connections) {
-              const displayName = conn.display_name ?? conn.email ?? "";
-              lines.push(`  ${padRight(label, 25)} \u25CF connected     ${displayName}     (ID: ${conn.id})`);
-            }
-          } else {
-            lines.push(`  ${padRight(label, 25)} \u25CB not connected \u2192 nex integrate connect ${type} ${provider}`);
+            const children = connections.map((conn) => {
+              const displayName = String(conn.display_name ?? conn.email ?? "");
+              return `${badge("connected", "success")}  ${displayName}  ${style.dim(`(ID: ${conn.id})`)}`;
+            });
+            return { label, children };
           }
-        }
+
+          // Find shortcut name for connect command
+          const shortcut = Object.entries(INTEGRATIONS_MAP).find(
+            ([, v]) => v.type === type && v.provider === provider
+          );
+          const connectHint = shortcut
+            ? style.dim(`→ nex integrate connect ${shortcut[0]}`)
+            : "";
+          return { label: `${label}     ${badge("not connected", "dim")} ${connectHint}` };
+        });
+        lines.push(tree(connItems));
       }
     } catch {
-      lines.push("Connections: Could not fetch (check auth)");
+      lines.push(`  ${style.dim("Connections: Could not fetch (check auth)")}`);
     }
   }
 
@@ -350,9 +371,6 @@ function maskKey(key: string): string {
   return key.slice(0, 4) + "****" + key.slice(-4);
 }
 
-function padRight(str: string, len: number): string {
-  return str.length >= len ? str : str + " ".repeat(len - str.length);
-}
 
 function projectConfigExists(): boolean {
   return existsSync(join(process.cwd(), ".nex.toml"));
