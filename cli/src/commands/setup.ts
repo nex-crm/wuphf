@@ -221,7 +221,7 @@ async function showStatus(format: Format, overrideApiKey?: string): Promise<void
 
 async function registerAndPersist(globalOpts: { timeout?: string; apiKey?: string }, existingEmail?: string): Promise<string> {
   const email = existingEmail ?? await ask("Email (required):", true);
-  const name = await ask("Name (optional):");
+  const name = existingEmail ? undefined : await ask("Name (optional):");
 
   process.stderr.write("\nRegistering...\n");
   const client = new NexClient(undefined, resolveTimeout(globalOpts.timeout));
