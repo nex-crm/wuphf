@@ -22,15 +22,15 @@ import type { Format } from "../lib/output.js";
 import { heading, keyValue, tree, badge, style, sym, spinner as createSpinner, exitHint, isTTY } from "../lib/tui.js";
 import { openBrowser } from "./integrate.js";
 
-const INTEGRATIONS_MAP: Record<string, { type: string; provider: string }> = {
-  gmail: { type: "email", provider: "google" },
-  "google-calendar": { type: "calendar", provider: "google" },
-  outlook: { type: "email", provider: "microsoft" },
-  "outlook-calendar": { type: "calendar", provider: "microsoft" },
-  slack: { type: "messaging", provider: "slack" },
-  salesforce: { type: "crm", provider: "salesforce" },
-  hubspot: { type: "crm", provider: "hubspot" },
-  attio: { type: "crm", provider: "attio" },
+const INTEGRATIONS_MAP: Record<string, { type: string; provider: string; displayName: string; description: string }> = {
+  gmail: { type: "email", provider: "google", displayName: "Gmail", description: "Connect your Gmail account to sync emails" },
+  "google-calendar": { type: "calendar", provider: "google", displayName: "Google Calendar (Nex Meeting Bot)", description: "Connect Google Calendar for meeting transcripts" },
+  outlook: { type: "email", provider: "microsoft", displayName: "Outlook", description: "Connect your Outlook account to sync emails" },
+  "outlook-calendar": { type: "calendar", provider: "microsoft", displayName: "Outlook Calendar (Nex Meeting Bot)", description: "Connect Outlook Calendar for meeting transcripts" },
+  slack: { type: "messaging", provider: "slack", displayName: "Slack", description: "Connect Slack to sync messages" },
+  salesforce: { type: "crm", provider: "salesforce", displayName: "Salesforce", description: "Connect Salesforce CRM" },
+  hubspot: { type: "crm", provider: "hubspot", displayName: "HubSpot", description: "Connect HubSpot CRM" },
+  attio: { type: "crm", provider: "attio", displayName: "Attio", description: "Connect Attio CRM" },
 };
 import { detectPlatforms, getPlatformById, VALID_PLATFORM_IDS } from "../lib/platform-detect.js";
 import type { Platform } from "../lib/platform-detect.js";
@@ -500,7 +500,7 @@ async function runSetup(opts: {
 
 // --- Integration connection step ---
 
-interface IntegrationEntry {
+export interface IntegrationEntry {
   type: string;
   provider: string;
   display_name: string;
@@ -508,15 +508,31 @@ interface IntegrationEntry {
   connections: Array<{ id: string | number; status: string; identifier: string }>;
 }
 
+/** Exported for testing. */
+export function fallbackIntegrations(): IntegrationEntry[] {
+  return Object.values(INTEGRATIONS_MAP).map((entry) => ({
+    type: entry.type,
+    provider: entry.provider,
+    display_name: entry.displayName,
+    description: entry.description,
+    connections: [],
+  }));
+}
+
 async function connectIntegrations(apiKey: string): Promise<void> {
   const client = new NexClient(apiKey, 10_000);
 
   let integrations: IntegrationEntry[];
   try {
-    integrations = await client.get<IntegrationEntry[]>("/v1/integrations/", 10_000);
-    if (!Array.isArray(integrations) || integrations.length === 0) return;
+    const fetched = await client.get<IntegrationEntry[]>("/v1/integrations/", 10_000);
+    if (!Array.isArray(fetched) || fetched.length === 0) {
+      process.stderr.write(`\n  ${style.dim("No integrations available yet.")} Run ${style.bold("nex integrate")} to connect integrations later.\n`);
+      return;
+    }
+    integrations = fetched;
   } catch {
-    return; // Silently skip if API unavailable
+    process.stderr.write(`\n  ${style.dim("Could not fetch integrations.")} Run ${style.bold("nex integrate")} to connect integrations later.\n`);
+    return;
   }
 
   // Build multi-select options
