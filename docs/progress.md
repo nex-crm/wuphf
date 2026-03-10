@@ -2,6 +2,27 @@
 
 ## Completed
 
+### v0.1.20 — Full Platform Plugins + 6-Layer Setup Hierarchy (2026-03-10)
+- [x] Extracted shared hook logic into `cli/src/plugin/shared.ts` (doRecall, doCapture, doSessionStart)
+- [x] Refactored auto-recall.ts, auto-capture.ts, auto-session-start.ts to use shared.ts
+- [x] Created 8 platform adapter scripts in `cli/src/plugin/adapters/`:
+  - Cursor: session-start, recall, stop
+  - Windsurf: recall, capture
+  - Cline: recall, task-start, capture
+- [x] Created `cli/platform-plugins/` with 7 template files:
+  - opencode-plugin.ts, vscode-agent.md, kilocode-modes.yaml, continue-provider.ts
+  - windsurf-workflows: nex-ask.md, nex-remember.md, nex-search.md
+- [x] Updated platform-detect.ts: added supportsHooks, supportsCustomTools, supportsCustomAgents, supportsWorkflows, hookConfigPath; added OpenClaw + Aider platforms (12 total)
+- [x] Updated installers.ts: 7 new installer functions (hooks, plugins, agents, workflows per platform)
+- [x] Updated setup.ts: 6-layer hierarchy (Hooks → Plugins → Agents → Workflows → Rules → MCP)
+- [x] Added `--no-hooks` flag to setup
+- [x] Fixed name prompt bug: skip name prompt when regenerating API key for same email
+- [x] Added `platform-plugins` and `platform-rules` to package.json files array
+- [x] Updated CLI README with expanded 12-platform integration table
+- [x] Multi-agent team build: 4 parallel agents (cursor-hooks, windsurf-hooks, cline-hooks, platform-templates)
+- [x] Build passes, 65 tests pass, all adapter scripts exit 0
+- [x] PR #31 merged, published to npm as `@nex-ai/nex@0.1.20`
+
 ### v0.1.18 — TUI Polish + Integration Fixes (2026-03-09)
 - [x] Interactive integrate list with arrow-key selection, expand/collapse, inline actions
 - [x] Connection ID handling: `safenIds()` + `string | number` types
@@ -49,7 +70,7 @@
 - [x] File scanner with .nex.toml config
 - [x] Platform detection (10+ platforms)
 
-### v0.1.19 (unreleased) — Platform Rules + Setup Hierarchy (2026-03-09)
+### v0.1.19 — Platform Rules + Setup Hierarchy (2026-03-09, folded into v0.1.20)
 - [x] `nex setup` now installs rules + MCP for all detected platforms (hierarchy: plugins > rules > MCP)
 - [x] `--with-mcp` replaced with `--no-rules` (skip rules/instruction files)
 - [x] README restructured: `nex setup` is primary Quick Start, manual steps in collapsible sections
@@ -59,20 +80,29 @@
 - [x] Added `installRulesFile()` to `installers.ts` (standalone + append modes)
 - [x] Updated `setup.ts` install loop with hierarchy logic
 - [x] Updated README platforms table to show rules + MCP per platform
-- [ ] Not yet committed or published
+- [x] Published as part of v0.1.20
 
-## Core Backend Fixes (2026-03-09)
+## Core Backend Fixes (2026-03-09 — 2026-03-10)
 - [x] Search timeout: 300ms → 2000ms (PR #675, merged & deployed)
 - [x] Embedding dimension fix: 768 → 1024 (PR #679, merged & deployed)
 - [x] Semantic search date type fix (PR #680, open)
-- [x] Historical email processing (PR #681, merged & deployed to staging, prod deploy triggered)
+- [x] Historical email processing (PR #681, merged & deployed to prod)
 - [x] search_entities domain fallback (PR #676, merged & deployed)
-- [ ] Gmail reconnect sync fix (PR #673, awaiting Doug's re-review)
+- [x] Gmail reconnect sync fix (PR #673, merged & deployed to prod)
+- [x] Artifact direction fix: added `direction=None` to ArtifactModel for TEXT-type artifacts (PR #688, merged & deployed to prod)
 - [x] Deploy workflow fix: service=all on workflow_dispatch (PR #687, open)
+- [x] Full historical email pipeline verified end-to-end after Gmail reconnect (PRs #673 + #681 + #688)
 
 ## Pending / Next
 
-### P0: Platform Plugins/Rules — COMPLETE
+### P0: Interactive Integration Connection in `nex setup`
+- [ ] During `nex setup`, after platform install, show available integrations (Gmail, Slack, etc.)
+- [ ] Let user select which to connect (or skip all)
+- [ ] Integrations that are already connected show as such
+- [ ] Then proceed with normal setup flow
+- [ ] Goal: one-command onboarding — register + connect integrations + install platform plugins
+
+### P0 (DONE): Platform Plugins/Rules — COMPLETE
 - [x] Cursor: `.cursor/rules/nex.md` — rules + MCP
 - [x] Windsurf: `.windsurf/rules/nex.md` — rules + MCP
 - [x] VS Code / Copilot: `.github/instructions/nex.instructions.md` — instructions + MCP

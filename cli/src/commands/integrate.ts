@@ -30,7 +30,7 @@ const INTEGRATIONS: Record<string, { type: string; provider: string }> = {
 
 const INTEGRATION_NAMES = Object.keys(INTEGRATIONS).join(", ");
 
-function openBrowser(url: string): void {
+export function openBrowser(url: string): void {
   try {
     let cmd: string;
     let args: string[];

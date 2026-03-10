@@ -105,6 +105,112 @@ export async function choose(message: string, options: string[]): Promise<number
   });
 }
 
+/**
+ * Multi-select chooser with space to toggle, enter to confirm.
+ * Returns indices of selected items.
+ */
+export async function multiSelect(
+  message: string,
+  options: Array<{ label: string; checked?: boolean; disabled?: boolean }>,
+): Promise<number[]> {
+  const selected = options.map((o) => !!o.checked);
+
+  if (!isTTY) {
+    // Non-TTY fallback: return pre-checked items
+    return selected.reduce<number[]>((acc, v, i) => (v ? [...acc, i] : acc), []);
+  }
+
+  return new Promise((resolve) => {
+    let cursor = 0;
+    const totalLines = options.length + 3; // title + hint + blank + options
+
+    const draw = (initial = false) => {
+      if (!initial) {
+        process.stderr.write(`\x1b[${totalLines}A\x1b[J`);
+      }
+      process.stderr.write(`  ${message}  ${exitHint}\n`);
+      process.stderr.write(`  ${style.dim("(space to toggle, enter to confirm, s to skip all)")}\n\n`);
+      for (let i = 0; i < options.length; i++) {
+        const isCursor = i === cursor;
+        const pointer = isCursor ? sym.pointer : " ";
+        const isChecked = selected[i];
+        const isDisabled = options[i].disabled;
+        const checkbox = isDisabled
+          ? style.green("\u25A0")   // filled square for already connected
+          : isChecked
+            ? style.cyan("\u25A0") // filled square for selected
+            : "\u25A1";           // empty square
+        const label = isDisabled
+          ? style.dim(options[i].label)
+          : isCursor
+            ? style.bold(options[i].label)
+            : options[i].label;
+        process.stderr.write(`  ${pointer} ${checkbox} ${label}\n`);
+      }
+    };
+
+    process.stdin.setRawMode(true);
+    process.stdin.resume();
+    process.stdin.setEncoding("utf-8");
+
+    draw(true);
+
+    const onData = (key: string) => {
+      if (key === "\x03") {
+        cleanup();
+        process.stderr.write(`\x1b[${totalLines}A\x1b[J`);
+        process.stderr.write(`  ${message}\n`);
+        process.stderr.write(`  ${style.dim("Skipped")}\n\n`);
+        resolve([]);
+        return;
+      }
+      if (key === "s" || key === "S") {
+        cleanup();
+        process.stderr.write(`\x1b[${totalLines}A\x1b[J`);
+        process.stderr.write(`  ${message}\n`);
+        process.stderr.write(`  ${style.dim("Skipped")}\n\n`);
+        resolve([]);
+        return;
+      }
+      if (key === "\r") {
+        cleanup();
+        const result = selected.reduce<number[]>((acc, v, i) => {
+          if (v && !options[i].disabled) acc.push(i);
+          return acc;
+        }, []);
+        process.stderr.write(`\x1b[${totalLines}A\x1b[J`);
+        process.stderr.write(`  ${message}\n`);
+        if (result.length > 0) {
+          const names = result.map((i) => options[i].label).join(", ");
+          process.stderr.write(`  ${sym.success} ${names}\n\n`);
+        } else {
+          process.stderr.write(`  ${style.dim("None selected")}\n\n`);
+        }
+        resolve(result);
+        return;
+      }
+      if (key === " ") {
+        if (!options[cursor].disabled) {
+          selected[cursor] = !selected[cursor];
+        }
+      } else if (key === "\x1b[A") {
+        cursor = Math.max(0, cursor - 1);
+      } else if (key === "\x1b[B") {
+        cursor = Math.min(options.length - 1, cursor + 1);
+      }
+      draw();
+    };
+
+    const cleanup = () => {
+      process.stdin.setRawMode(false);
+      process.stdin.removeListener("data", onData);
+      process.stdin.pause();
+    };
+
+    process.stdin.on("data", onData);
+  });
+}
+
 export async function ask(message: string, required = false): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
 

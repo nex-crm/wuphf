@@ -6,6 +6,7 @@
  * nex setup --no-hooks          Skip hook installation
  * nex setup --no-rules          Skip rules/instruction file installation
  * nex setup --no-plugin         Skip hooks/commands (alias for --no-hooks)
+ * nex setup --no-integrations    Skip integration connection step
  * nex setup --no-scan           Skip file scanning during setup
  * nex setup status              Show install status + integration connections
  */
@@ -16,9 +17,10 @@ import { program } from "../cli.js";
 import { resolveApiKey, resolveFormat, resolveTimeout, persistRegistration, loadConfig } from "../lib/config.js";
 import { NexClient } from "../lib/client.js";
 import { printOutput, printError } from "../lib/output.js";
-import { confirm, ask, choose } from "../lib/prompt.js";
+import { confirm, ask, choose, multiSelect } from "../lib/prompt.js";
 import type { Format } from "../lib/output.js";
-import { heading, keyValue, tree, badge, style, sym, spinner as createSpinner, exitHint } from "../lib/tui.js";
+import { heading, keyValue, tree, badge, style, sym, spinner as createSpinner, exitHint, isTTY } from "../lib/tui.js";
+import { openBrowser } from "./integrate.js";
 
 const INTEGRATIONS_MAP: Record<string, { type: string; provider: string }> = {
   gmail: { type: "email", provider: "google" },
@@ -243,6 +245,7 @@ async function runSetup(opts: {
   noPlugin: boolean;
   noHooks: boolean;
   noRules: boolean;
+  noIntegrations: boolean;
   noScan: boolean;
   format: Format;
 }): Promise<void> {
@@ -429,7 +432,12 @@ async function runSetup(opts: {
     }
   }
 
-  // 5. Create .nex.toml
+  // 5. Interactive integration connection
+  if (apiKey && isTTY && opts.format !== "json" && !opts.noIntegrations) {
+    await connectIntegrations(apiKey);
+  }
+
+  // 6. Create .nex.toml
   const created = writeDefaultProjectConfig();
   if (created) {
     results.push("Created .nex.toml with default settings");
@@ -437,7 +445,7 @@ async function runSetup(opts: {
     results.push(".nex.toml already exists");
   }
 
-  // 6. Scan and ingest project files (requires API key)
+  // 7. Scan and ingest project files (requires API key)
   if (!opts.noScan && apiKey && isScanEnabled()) {
     const showSpinner = opts.format !== "json";
     const spin = showSpinner ? createSpinner(`Scanning project files...  ${exitHint}`) : null;
@@ -466,7 +474,7 @@ async function runSetup(opts: {
     }
   }
 
-  // 7. Output results
+  // 8. Output results
   if (opts.format === "json") {
     printOutput({
       platforms: targetPlatforms.map((p) => ({
@@ -484,10 +492,133 @@ async function runSetup(opts: {
     process.stderr.write("\n");
   }
 
-  // 8. Show status (pass current apiKey — may differ from global opts after re-registration)
+  // 9. Show status (pass current apiKey — may differ from global opts after re-registration)
   if (opts.format !== "json") {
     await showStatus(opts.format, apiKey);
   }
+}
+
+// --- Integration connection step ---
+
+interface IntegrationEntry {
+  type: string;
+  provider: string;
+  display_name: string;
+  description: string;
+  connections: Array<{ id: string | number; status: string; identifier: string }>;
+}
+
+async function connectIntegrations(apiKey: string): Promise<void> {
+  const client = new NexClient(apiKey, 10_000);
+
+  let integrations: IntegrationEntry[];
+  try {
+    integrations = await client.get<IntegrationEntry[]>("/v1/integrations/", 10_000);
+    if (!Array.isArray(integrations) || integrations.length === 0) return;
+  } catch {
+    return; // Silently skip if API unavailable
+  }
+
+  // Build multi-select options
+  const options = integrations.map((item) => {
+    const connected = item.connections.length > 0;
+    const connInfo = connected
+      ? ` ${style.green("connected")} (${item.connections.map((c) => c.identifier).join(", ")})`
+      : "";
+    return {
+      label: `${item.display_name}${connInfo}`,
+      checked: false,
+      disabled: connected,
+    };
+  });
+
+  // Check if all are already connected
+  if (options.every((o) => o.disabled)) {
+    process.stderr.write(`\n  ${sym.success} All integrations already connected\n`);
+    return;
+  }
+
+  process.stderr.write("\n");
+  const selectedIndices = await multiSelect("Connect integrations:", options);
+
+  if (selectedIndices.length === 0) return;
+
+  // Connect each selected integration
+  for (const idx of selectedIndices) {
+    const item = integrations[idx];
+    const shortcut = Object.entries(INTEGRATIONS_MAP).find(
+      ([, v]) => v.type === item.type && v.provider === item.provider
+    );
+
+    if (!shortcut) continue;
+
+    const integration = INTEGRATIONS_MAP[shortcut[0]];
+    process.stderr.write(`  ${sym.info} Opening browser to connect ${item.display_name}...\n`);
+
+    try {
+      // Snapshot existing connection IDs
+      let existingIds = new Set<string | number>();
+      for (const conn of item.connections) {
+        existingIds.add(conn.id);
+      }
+
+      const result = await client.post<{ auth_url: string }>(
+        `/v1/integrations/${encodeURIComponent(integration.type)}/${encodeURIComponent(integration.provider)}/connect`
+      );
+
+      if (!result.auth_url) {
+        process.stderr.write(`  ${sym.error} No auth URL returned for ${item.display_name}\n`);
+        continue;
+      }
+
+      openBrowser(result.auth_url);
+
+      // Poll for connection
+      process.stderr.write(`  ${style.dim("Waiting for OAuth completion...")}  ${exitHint}\n`);
+      const connected = await pollForSetupConnection(client, integration.type, integration.provider, existingIds);
+      if (connected) {
+        process.stderr.write(`  ${sym.success} ${item.display_name} connected!\n\n`);
+      } else {
+        process.stderr.write(`  ${sym.warning} ${item.display_name} timed out — connect later with: nex integrate connect ${shortcut[0]}\n\n`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`  ${sym.error} Failed to connect ${item.display_name}: ${msg}\n`);
+    }
+  }
+}
+
+async function pollForSetupConnection(
+  client: NexClient,
+  type: string,
+  provider: string,
+  existingIds: Set<string | number>,
+): Promise<boolean> {
+  const maxWaitMs = 3 * 60 * 1000; // 3 minutes (shorter than integrate command)
+  const pollIntervalMs = 3000;
+  const startTime = Date.now();
+
+  while (Date.now() - startTime < maxWaitMs) {
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+    try {
+      const integrations = await client.get<IntegrationEntry[]>("/v1/integrations/", 5_000);
+      if (!Array.isArray(integrations)) continue;
+
+      for (const entry of integrations) {
+        if (entry.type === type && entry.provider === provider && Array.isArray(entry.connections)) {
+          for (const conn of entry.connections) {
+            if (!existingIds.has(conn.id)) return true; // New connection found
+          }
+          // Reconnect scenario: same ID but refreshed
+          if (entry.connections.length > 0 && existingIds.size === 0) return true;
+        }
+      }
+    } catch {
+      // Continue polling
+    }
+  }
+  return false;
 }
 
 function maskKey(key: string): string {
@@ -509,6 +640,7 @@ const setup = program
   .option("--no-plugin", "Skip plugin (hooks/commands), only update config files")
   .option("--no-hooks", "Skip hook installation for all platforms")
   .option("--no-rules", "Skip rules/instruction file installation")
+  .option("--no-integrations", "Skip integration connection step")
   .option("--no-scan", "Skip file scanning during setup")
   .action(async (cmdOpts) => {
     const globalOpts = program.opts();
@@ -518,6 +650,7 @@ const setup = program
       noPlugin: cmdOpts.plugin === false,
       noHooks: cmdOpts.hooks === false,
       noRules: cmdOpts.rules === false,
+      noIntegrations: cmdOpts.integrations === false,
       noScan: cmdOpts.scan === false,
       format,
     });

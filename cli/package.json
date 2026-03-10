@@ -1,6 +1,6 @@
 {
   "name": "@nex-ai/nex",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "description": "Nex CLI provides organizational context & memory to AI agents",
   "type": "module",
   "bin": {
@@ -27,6 +27,15 @@
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nex-crm/nex-as-a-skill.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/nex-crm/nex-as-a-skill#readme",
+  "bugs": {
+    "url": "https://github.com/nex-crm/nex-as-a-skill/issues"
   },
   "engines": {
     "node": ">=18"

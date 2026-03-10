@@ -1,95 +1,111 @@
 # Nex Plugins — Session Handoff
 
-> Last updated: 2026-03-09
+> Last updated: 2026-03-10
 
 ## First Steps
 
 1. Read this file fully
 2. Check CLI builds: `cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill/cli && npm run build`
-3. Review uncommitted changes: `cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill && git diff --stat`
+3. Run tests: `cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill/cli && npm test`
 
-## What Was Done This Session
+## What Was Done Last Session (2026-03-10)
 
-### 1. Platform Rules/Instructions (P0 — COMPLETE)
+### 1. Full Platform Plugins — 6-Layer Setup Hierarchy (v0.1.20)
 
-Created 9 platform-specific rules/instruction template files in `cli/platform-rules/`:
-- `cursor-rules.md` → `.cursor/rules/nex.md`
-- `windsurf-rules.md` → `.windsurf/rules/nex.md`
-- `vscode-instructions.md` → `.github/instructions/nex.instructions.md` (has YAML frontmatter)
-- `cline-rules.md` → `.clinerules/nex.md`
-- `continue-rules.md` → `.continue/rules/nex.md`
-- `zed-rules.md` → `.rules` (append with markers)
-- `kilocode-rules.md` → `.kilocode/rules/nex.md`
-- `opencode-agents.md` → `AGENTS.md` (append with markers)
-- `aider-conventions.md` → `CONVENTIONS.md` (append with markers)
+Upgraded `nex setup` from 3-layer (plugins > rules > MCP) to 6-layer hierarchy per platform:
+**Hooks → Plugins → Agents → Workflows → Rules → MCP**
 
-Each file teaches the AI agent about Nex MCP tools (ask, remember, search, integrations).
+- Extracted shared hook logic into `cli/src/plugin/shared.ts` (doRecall, doCapture, doSessionStart)
+- Refactored 3 Claude Code hooks (auto-recall, auto-capture, auto-session-start) to use shared.ts
+- Created 8 adapter scripts in `cli/src/plugin/adapters/`:
+  - Cursor: session-start, recall, stop
+  - Windsurf: recall, capture
+  - Cline: recall, task-start, capture
+- Created `cli/platform-plugins/` with 7 template files:
+  - opencode-plugin.ts, vscode-agent.md, kilocode-modes.yaml, continue-provider.ts
+  - windsurf-workflows/: nex-ask.md, nex-remember.md, nex-search.md
+- Updated platform-detect.ts: 5 new capability fields, added OpenClaw + Aider (12 platforms total)
+- Updated installers.ts: 7 new installer functions
+- Updated setup.ts: 6-layer hierarchy, `--no-hooks` flag, fixed name prompt on key regen
+- PR #31 merged, published `@nex-ai/nex@0.1.20`
 
-### 2. Setup Hierarchy (plugins > rules > MCP)
+### 2. Core Backend Fixes
 
-Updated `nex setup` to use a clear hierarchy:
-- **Claude Code**: Plugin (hooks + slash commands) — no MCP needed
-- **Claude Desktop**: MCP only (no rules system)
-- **All others**: Rules (instruction files) + MCP (tools) — complementary
+- **PR #688 merged & deployed**: Artifact direction fix — `Artifact.__init__()` missing `direction` arg for TEXT-type artifacts in `core/py/context2/pipeline.py`
+- **PR #673 confirmed live**: Gmail reconnect (delete + recreate stale account)
+- **PR #681 confirmed live**: Historical email processing with engagement-based filtering
+- **Full historical email pipeline verified end-to-end** after Gmail reconnect with all 3 PRs deployed
 
-Files changed:
-- `cli/src/lib/platform-detect.ts` — Added `supportsRules`, `rulesPath` fields to Platform interface
-- `cli/src/lib/installers.ts` — Added `installRulesFile()` with standalone and append modes
-- `cli/src/commands/setup.ts` — Replaced install loop with hierarchy logic, `--no-mcp` → `--no-rules`
-- `cli/README.md` — Updated platforms table, setup flags, default behavior description
-- Root `README.md` — Quick Start restructured with `nex setup` as primary
+### 3. What Each Platform Gets Now
 
-### 3. P1 Integrations — Already Complete
+| Platform | Hooks | Plugins | Agents | Workflows | Rules | MCP |
+|----------|-------|---------|--------|-----------|-------|-----|
+| Claude Code | 3 hooks | — | — | 26 slash cmds | — | — |
+| OpenClaw | (plugin-internal) | 49 tools | — | — | — | — |
+| Cursor | 3 hooks | — | — | — | rules | MCP |
+| Windsurf | 2 hooks | — | — | 3 workflows | rules | MCP |
+| Cline | 3 hooks | — | — | — | rules | MCP |
+| OpenCode | — | plugin.ts | — | — | AGENTS.md | MCP |
+| VS Code | — | — | @nex agent | — | instructions | MCP |
+| Kilo Code | — | — | custom mode | — | rules | MCP |
+| Continue.dev | — | — | — | — | rules | MCP |
+| Zed | — | — | — | — | .rules | MCP |
+| Claude Desktop | — | — | — | — | — | MCP |
+| Aider | — | — | — | — | CONVENTIONS | — |
 
-Verified all surfaces already have integration tools:
-- MCP: `tools/integrations.ts` (4 tools)
-- OpenClaw: `nex_list/connect/disconnect_integration`
-- SKILL.md: Full API documentation
-- CLI slash commands: `/integrate`
+## Next Task: Interactive Integration Connection in `nex setup`
 
-### 4. Previous Session Work (still uncommitted)
+**Goal**: Make `nex setup` a complete one-command onboarding by adding an integration connection step.
 
-- `nex setup` is now the recommended onboarding path (README updates)
-- Core PRs: #681 merged (historical email), #687 created (deploy workflow fix)
+**Flow**:
+```
+nex setup
+  → Register (or reuse existing key)
+  → Install platform plugins (hooks, rules, MCP — already done)
+  → NEW: Show available integrations (Gmail, Slack, Google Calendar, Outlook, etc.)
+    → User selects which to connect (arrow-key TUI, can skip all)
+    → Already-connected integrations shown as ✓
+    → Opens OAuth URL in browser for each selected integration
+  → Done — full onboarding complete
+```
+
+**Key files to modify**:
+- `cli/src/commands/setup.ts` — Add integration step after platform install
+- `cli/src/lib/nex-api.ts` — Integration list/connect API calls (already exist)
+- `cli/src/lib/prompt.ts` — May need multi-select arrow-key chooser
+
+**Existing integration infrastructure** (already built):
+- `nex integrate list` — Lists available + connected integrations
+- `nex integrate connect <name>` — Opens OAuth URL in browser
+- API: `GET /api/sdk/integrations/available`, `POST /api/sdk/integrations/connect`
+- TUI: Interactive list with expand/collapse already in `cli/src/commands/integrate.ts`
 
 ## Build & Test
 
 ```bash
 cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill
-cd cli && npm run build && npm test    # CLI: 65 tests pass
+cd cli && npm run build && npm test    # 65+ tests pass
 cd ../mcp && npm run build             # MCP server
 ```
-
-## NOT YET DONE
-
-### Commit & Publish
-- All changes are uncommitted in nex-as-a-skill repo
-- Version bump needed: 0.1.18 → 0.1.19
-- `npm publish --access public` after commit
-
-### Aider Support
-- Aider has NO MCP support — rules-only platform
-- `aider-conventions.md` template created but `nex setup` doesn't handle Aider yet
-- Need to add Aider to `platform-detect.ts` (detect via `which aider` or `.aider.conf.yml`)
-
-### TUI Polish (P2, plan exists)
-- Plan at `.claude/plans/wobbly-roaming-tulip.md`
-- Shared `lib/tui.ts` already partially built (used by setup status, integrate list)
-- Remaining: ask/search/scan/task formatters, arrow-key choose()
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `cli/platform-rules/*.md` | Rules/instruction templates for each platform |
-| `cli/src/lib/platform-detect.ts` | Platform detection + capabilities |
-| `cli/src/lib/installers.ts` | MCP + plugin + rules installer functions |
-| `cli/src/commands/setup.ts` | Setup command — hierarchy-based install logic |
-| `cli/README.md` | npm README |
-| `README.md` | Repo README |
+| `cli/src/plugin/shared.ts` | Shared hook logic (doRecall, doCapture, doSessionStart) |
+| `cli/src/plugin/adapters/*.ts` | Platform-specific hook adapters |
+| `cli/platform-plugins/*` | Plugin/agent/workflow templates |
+| `cli/platform-rules/*.md` | Rules/instruction templates |
+| `cli/src/lib/platform-detect.ts` | Platform detection + 6 capability fields |
+| `cli/src/lib/installers.ts` | All installer functions (hooks, plugins, agents, workflows, rules, MCP) |
+| `cli/src/commands/setup.ts` | Setup command — 6-layer hierarchy |
+| `cli/src/commands/integrate.ts` | Integration list/connect/disconnect TUI |
+| `cli/package.json` | v0.1.20, files: dist, plugin-commands, platform-rules, platform-plugins |
 
 ## Core Repo Status
 
-- **PR #687**: Deploy workflow fix (`service=all` on `workflow_dispatch`) — open, needs merge
-- **PR #681**: Historical email processing — merged, deployed to staging, prod deploy triggered (run 22876044405)
-- **PR #673**: Gmail reconnect — awaiting Doug's re-review
+- **PR #688**: Artifact direction fix — merged & deployed to prod
+- **PR #681**: Historical email processing — merged & deployed to prod
+- **PR #673**: Gmail reconnect — merged & deployed to prod
+- **PR #680**: Semantic search date type fix — open
+- **PR #687**: Deploy workflow fix — open

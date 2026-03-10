@@ -1,6 +1,11 @@
 # @nex-ai/nex
 
-Nex CLI provides organizational context & memory to AI agents across 10+ platforms.
+[![npm version](https://img.shields.io/npm/v/@nex-ai/nex)](https://www.npmjs.com/package/@nex-ai/nex)
+[![GitHub](https://img.shields.io/badge/github-nex--crm%2Fnex--as--a--skill-blue)](https://github.com/nex-crm/nex-as-a-skill)
+
+Nex CLI provides organizational context & memory to AI agents across 12 platforms.
+
+**GitHub**: [github.com/nex-crm/nex-as-a-skill](https://github.com/nex-crm/nex-as-a-skill)
 
 ## Install
 
