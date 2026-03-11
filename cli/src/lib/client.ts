@@ -66,7 +66,7 @@ export class NexClient {
       });
 
       if (res.status === 401 || res.status === 403) {
-        throw new AuthError("Invalid or expired API key.");
+        throw new AuthError("Invalid or expired API key. Run 'nex setup' to re-authenticate.");
       }
 
       if (res.status === 429) {

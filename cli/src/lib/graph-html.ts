@@ -11,6 +11,7 @@ export interface GraphNode {
   definition_slug: string;
   primary_attribute?: string;
   created_at?: string;
+  summary?: string;
 }
 
 export interface GraphEdge {
@@ -267,6 +268,7 @@ ${legendTypes
     return {
       id: n.id, name: n.name, type: n.type, nodeKind: "entity",
       primary_attribute: n.primary_attribute || "", created_at: n.created_at || "",
+      summary: n.summary || "",
       color: nodeColors[n.type] || defaultColor,
       insightCount: insightCount[n.id] || 0
     };
@@ -786,6 +788,17 @@ ${legendTypes
     addField(detailBody, "Type", d.type || "");
     if (d.primary_attribute) addField(detailBody, "Primary", d.primary_attribute);
     if (d.created_at) addField(detailBody, "Created", d.created_at);
+
+    // Summary card
+    if (d.summary) {
+      var summaryField = document.createElement("div"); summaryField.className = "field";
+      var summaryLbl = document.createElement("div"); summaryLbl.className = "label"; summaryLbl.textContent = "Summary";
+      summaryField.appendChild(summaryLbl);
+      var summaryVal = document.createElement("div"); summaryVal.className = "value";
+      summaryVal.style.cssText = "font-size:12px;line-height:1.6;color:#94a3b8;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:break-word";
+      summaryVal.textContent = d.summary;
+      summaryField.appendChild(summaryVal); detailBody.appendChild(summaryField);
+    }
 
     // Connections
     var connCount = 0;

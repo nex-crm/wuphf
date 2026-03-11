@@ -88,6 +88,7 @@ nex setup --no-plugin              # Skip hooks/commands (alias for --no-hooks)
 nex setup --no-rules               # Skip rules/instruction file installation
 nex setup --no-scan                # Skip file scanning during setup
 nex setup status                   # Show all platforms, install status, and connections
+nex graph                          # Open the workspace graph in your browser
 ```
 
 **Default behavior** (no flags):
@@ -155,6 +156,7 @@ nex capture [content]        # Rate-limited ingestion for agent hooks
 nex artifact <id>            # Check processing status
 nex search <query>           # Search CRM records by name
 nex insight list [--last 24h]  # Recent insights
+nex graph                    # Visualize your workspace graph in the browser
 ```
 
 ### Integrations
