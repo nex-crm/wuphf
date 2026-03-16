@@ -1,10 +1,10 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { parseConfig, ConfigError } from "../src/config.js";
-import { formatNexContext, stripNexContext, hasNexContext } from "../src/context-format.js";
-import { captureFilter, resetDedupCache, type AgentMessage } from "../src/capture-filter.js";
-import { RateLimiter } from "../src/rate-limiter.js";
-import { SessionStore } from "../src/session-store.js";
-import plugin from "../src/index.js";
+import { describe, test, expect, beforeEach, afterEach, jest } from "bun:test";
+import { parseConfig, ConfigError } from "../src/config.ts";
+import { formatNexContext, stripNexContext, hasNexContext } from "../src/context-format.ts";
+import { captureFilter, resetDedupCache, type AgentMessage } from "../src/capture-filter.ts";
+import { RateLimiter } from "../src/rate-limiter.ts";
+import { SessionStore } from "../src/session-store.ts";
+import plugin from "../src/index.ts";
 
 // --- Config ---
 
@@ -15,7 +15,7 @@ describe("config", () => {
     process.env = { ...originalEnv };
   });
 
-  it("parses valid config", () => {
+  test("parses valid config", () => {
     const cfg = parseConfig({ apiKey: "sk-test-123" });
     expect(cfg.apiKey).toBe("sk-test-123");
     expect(cfg.baseUrl).toBe("https://app.nex.ai");
@@ -27,49 +27,49 @@ describe("config", () => {
     expect(cfg.debug).toBe(false);
   });
 
-  it("falls back to NEX_API_KEY env var", () => {
+  test("falls back to NEX_API_KEY env var", () => {
     process.env.NEX_API_KEY = "sk-from-env";
     const cfg = parseConfig({});
     expect(cfg.apiKey).toBe("sk-from-env");
   });
 
-  it("resolves ${VAR} syntax in apiKey", () => {
+  test("resolves ${VAR} syntax in apiKey", () => {
     process.env.MY_KEY = "sk-interpolated";
     const cfg = parseConfig({ apiKey: "${MY_KEY}" });
     expect(cfg.apiKey).toBe("sk-interpolated");
   });
 
-  it("resolves ${VAR} syntax in baseUrl", () => {
+  test("resolves ${VAR} syntax in baseUrl", () => {
     process.env.MY_URL = "https://staging.nex.io";
     const cfg = parseConfig({ apiKey: "sk-test", baseUrl: "${MY_URL}" });
     expect(cfg.baseUrl).toBe("https://staging.nex.io");
   });
 
-  it("strips trailing slash from baseUrl", () => {
+  test("strips trailing slash from baseUrl", () => {
     const cfg = parseConfig({ apiKey: "sk-test", baseUrl: "https://example.com///" });
     expect(cfg.baseUrl).toBe("https://example.com");
   });
 
-  it("throws on missing API key", () => {
+  test("throws on missing API key", () => {
     delete process.env.NEX_API_KEY;
     expect(() => parseConfig({})).toThrow(ConfigError);
   });
 
-  it("throws on invalid captureMode", () => {
+  test("throws on invalid captureMode", () => {
     expect(() => parseConfig({ apiKey: "sk-test", captureMode: "invalid" })).toThrow(ConfigError);
   });
 
-  it("throws on maxRecallResults out of range", () => {
+  test("throws on maxRecallResults out of range", () => {
     expect(() => parseConfig({ apiKey: "sk-test", maxRecallResults: 0 })).toThrow(ConfigError);
     expect(() => parseConfig({ apiKey: "sk-test", maxRecallResults: 21 })).toThrow(ConfigError);
   });
 
-  it("throws on recallTimeoutMs out of range", () => {
+  test("throws on recallTimeoutMs out of range", () => {
     expect(() => parseConfig({ apiKey: "sk-test", recallTimeoutMs: 100 })).toThrow(ConfigError);
     expect(() => parseConfig({ apiKey: "sk-test", recallTimeoutMs: 20000 })).toThrow(ConfigError);
   });
 
-  it("overrides defaults with explicit values", () => {
+  test("overrides defaults with explicit values", () => {
     const cfg = parseConfig({
       apiKey: "sk-test",
       autoRecall: false,
@@ -93,7 +93,7 @@ describe("config", () => {
 // --- Context Format ---
 
 describe("context-format", () => {
-  it("formats context with entity count", () => {
+  test("formats context with entity count", () => {
     const result = formatNexContext({
       answer: "John works at Acme Corp.",
       entityCount: 2,
@@ -104,27 +104,27 @@ describe("context-format", () => {
     expect(result).toContain("[2 related entities found]");
   });
 
-  it("omits entity count when zero", () => {
+  test("omits entity count when zero", () => {
     const result = formatNexContext({ answer: "No entities.", entityCount: 0 });
     expect(result).not.toContain("related entities");
   });
 
-  it("strips complete nex-context blocks", () => {
+  test("strips complete nex-context blocks", () => {
     const text = "Before <nex-context>injected stuff</nex-context> After";
     expect(stripNexContext(text)).toBe("Before  After");
   });
 
-  it("strips unclosed nex-context tags", () => {
+  test("strips unclosed nex-context tags", () => {
     const text = "Before <nex-context>injected but no close";
     expect(stripNexContext(text)).toBe("Before");
   });
 
-  it("strips multiline blocks", () => {
+  test("strips multiline blocks", () => {
     const text = "Start\n<nex-context>\nline1\nline2\n</nex-context>\nEnd";
     expect(stripNexContext(text)).toBe("Start\n\nEnd");
   });
 
-  it("detects presence of nex-context", () => {
+  test("detects presence of nex-context", () => {
     expect(hasNexContext("hello <nex-context>x</nex-context>")).toBe(true);
     expect(hasNexContext("hello world")).toBe(false);
   });
@@ -139,7 +139,7 @@ describe("capture-filter", () => {
     resetDedupCache();
   });
 
-  it("extracts last turn in last_turn mode", () => {
+  test("extracts last turn in last_turn mode", () => {
     const messages: AgentMessage[] = [
       { role: "user", content: "First question" },
       { role: "assistant", content: "First answer" },
@@ -154,7 +154,7 @@ describe("capture-filter", () => {
     }
   });
 
-  it("extracts full session in full_session mode", () => {
+  test("extracts full session in full_session mode", () => {
     const cfg = parseConfig({ apiKey: "sk-test", captureMode: "full_session" });
     const messages: AgentMessage[] = [
       { role: "user", content: "First question here" },
@@ -170,7 +170,7 @@ describe("capture-filter", () => {
     }
   });
 
-  it("strips nex-context before capture", () => {
+  test("strips nex-context before capture", () => {
     const messages: AgentMessage[] = [
       { role: "user", content: "<nex-context>injected</nex-context>What color?" },
       { role: "assistant", content: "Blue is your favorite." },
@@ -182,7 +182,7 @@ describe("capture-filter", () => {
     }
   });
 
-  it("skips failed agent runs", () => {
+  test("skips failed agent runs", () => {
     const result = captureFilter(
       [{ role: "user", content: "hello world test" }],
       defaultConfig,
@@ -192,7 +192,7 @@ describe("capture-filter", () => {
     if (result.skipped) expect(result.reason).toContain("failed");
   });
 
-  it("skips exec-event provider", () => {
+  test("skips exec-event provider", () => {
     const result = captureFilter(
       [{ role: "user", content: "hello world test" }],
       defaultConfig,
@@ -201,7 +201,7 @@ describe("capture-filter", () => {
     expect(result.skipped).toBe(true);
   });
 
-  it("skips cron-event provider", () => {
+  test("skips cron-event provider", () => {
     const result = captureFilter(
       [{ role: "user", content: "hello world test" }],
       defaultConfig,
@@ -210,7 +210,7 @@ describe("capture-filter", () => {
     expect(result.skipped).toBe(true);
   });
 
-  it("skips slash commands", () => {
+  test("skips slash commands", () => {
     const result = captureFilter(
       [{ role: "user", content: "/help me out please" }],
       defaultConfig,
@@ -219,7 +219,7 @@ describe("capture-filter", () => {
     if (result.skipped) expect(result.reason).toContain("slash command");
   });
 
-  it("skips short messages", () => {
+  test("skips short messages", () => {
     const result = captureFilter(
       [{ role: "user", content: "hi" }],
       defaultConfig,
@@ -228,12 +228,12 @@ describe("capture-filter", () => {
     if (result.skipped) expect(result.reason).toContain("short");
   });
 
-  it("skips empty messages array", () => {
+  test("skips empty messages array", () => {
     const result = captureFilter([], defaultConfig);
     expect(result.skipped).toBe(true);
   });
 
-  it("skips duplicate content", () => {
+  test("skips duplicate content", () => {
     const messages: AgentMessage[] = [
       { role: "user", content: "Tell me about OpenClaw plugins" },
       { role: "assistant", content: "OpenClaw plugins are extensions..." },
@@ -246,7 +246,7 @@ describe("capture-filter", () => {
     if (second.skipped) expect(second.reason).toContain("duplicate");
   });
 
-  it("handles array content format", () => {
+  test("handles array content format", () => {
     const messages: AgentMessage[] = [
       {
         role: "user",
@@ -269,14 +269,14 @@ describe("capture-filter", () => {
 
 describe("rate-limiter", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    jest.useFakeTimers();
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    jest.useRealTimers();
   });
 
-  it("allows requests within limit", async () => {
+  test("allows requests within limit", async () => {
     const limiter = new RateLimiter({ maxRequests: 3, windowMs: 1000, maxQueueDepth: 5 });
     const results: number[] = [];
 
@@ -289,7 +289,7 @@ describe("rate-limiter", () => {
     limiter.destroy();
   });
 
-  it("queues requests exceeding limit", async () => {
+  test("queues requests exceeding limit", async () => {
     const limiter = new RateLimiter({ maxRequests: 2, windowMs: 1000, maxQueueDepth: 5 });
     const results: number[] = [];
 
@@ -303,13 +303,13 @@ describe("rate-limiter", () => {
     expect(results).toEqual([1, 2]);
 
     // Third waits for window to slide
-    vi.advanceTimersByTime(1100);
+    jest.advanceTimersByTime(1100);
     await p3;
     expect(results).toEqual([1, 2, 3]);
     limiter.destroy();
   });
 
-  it("evicts oldest on queue overflow (LIFO)", async () => {
+  test("evicts oldest on queue overflow (LIFO)", async () => {
     const limiter = new RateLimiter({ maxRequests: 1, windowMs: 10000, maxQueueDepth: 2 });
     const results: number[] = [];
     const errors: string[] = [];
@@ -322,8 +322,8 @@ describe("rate-limiter", () => {
     const p3 = limiter.enqueue(async () => { results.push(3); }).catch((e) => errors.push(e.message));
     const p4 = limiter.enqueue(async () => { results.push(4); }).catch((e) => errors.push(e.message));
 
-    // Let eviction happen
-    await vi.advanceTimersByTimeAsync(100);
+    // Let eviction happen — need a microtask tick for async queue processing
+    await new Promise((r) => process.nextTick(r));
 
     // One should be evicted
     expect(errors.length).toBeGreaterThanOrEqual(1);
@@ -332,7 +332,7 @@ describe("rate-limiter", () => {
     limiter.destroy();
   });
 
-  it("reports pending count", () => {
+  test("reports pending count", () => {
     const limiter = new RateLimiter({ maxRequests: 1, windowMs: 60000, maxQueueDepth: 5 });
     limiter.enqueue(async () => {}).catch(() => {});
     // After first executes, pending should go to 0
@@ -344,7 +344,7 @@ describe("rate-limiter", () => {
 // --- Session Store ---
 
 describe("session-store", () => {
-  it("get/set/delete", () => {
+  test("get/set/delete", () => {
     const store = new SessionStore();
     expect(store.get("key1")).toBeUndefined();
 
@@ -355,7 +355,7 @@ describe("session-store", () => {
     expect(store.get("key1")).toBeUndefined();
   });
 
-  it("LRU eviction at max size", () => {
+  test("LRU eviction at max size", () => {
     const store = new SessionStore(3);
     store.set("a", "1");
     store.set("b", "2");
@@ -368,7 +368,7 @@ describe("session-store", () => {
     expect(store.size).toBe(3);
   });
 
-  it("access refreshes LRU position", () => {
+  test("access refreshes LRU position", () => {
     const store = new SessionStore(3);
     store.set("a", "1");
     store.set("b", "2");
@@ -382,7 +382,7 @@ describe("session-store", () => {
     expect(store.get("b")).toBeUndefined();
   });
 
-  it("clear removes all entries", () => {
+  test("clear removes all entries", () => {
     const store = new SessionStore();
     store.set("x", "1");
     store.set("y", "2");
@@ -394,16 +394,16 @@ describe("session-store", () => {
 // --- Plugin shape ---
 
 describe("plugin", () => {
-  it("has correct id and kind", () => {
+  test("has correct id and kind", () => {
     expect(plugin.id).toBe("nex");
     expect(plugin.kind).toBe("memory");
   });
 
-  it("has a register function", () => {
+  test("has a register function", () => {
     expect(typeof plugin.register).toBe("function");
   });
 
-  it("has name, description, and version", () => {
+  test("has name, description, and version", () => {
     expect(plugin.name).toBe("Nex Memory");
     expect(plugin.version).toBe("0.1.0");
     expect(plugin.description).toBeTruthy();

@@ -1,59 +1,59 @@
-import { describe, it, before, after } from "node:test";
-import assert from "node:assert/strict";
-import { runNex, nexEnv } from "./helpers.js";
-import { startMockServer } from "./mock-server.js";
+import { describe, test, beforeAll, afterAll } from "bun:test";
+import { expect } from "bun:test";
+import { runNex, nexEnv } from "./helpers.ts";
+import { startMockServer } from "./mock-server.ts";
 
 let env: Record<string, string>;
 let closeMock: () => void;
 
-before(() => {
+beforeAll(() => {
   const mock = startMockServer();
   env = nexEnv(mock.url);
   closeMock = mock.close;
 });
 
-after(() => closeMock());
+afterAll(() => closeMock());
 
 describe("note commands", () => {
-  it("note list — returns notes", async () => {
+  test("note list — returns notes", async () => {
     const { stdout, exitCode } = await runNex(["note", "list"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.ok(data.data, "should have data array");
-    assert.equal(data.data.length, 1);
-    assert.equal(data.data[0].id, "note-1");
+    expect(data.data).toBeTruthy();
+    expect(data.data.length).toBe(1);
+    expect(data.data[0].id).toBe("note-1");
   });
 
-  it("note get — returns a single note", async () => {
+  test("note get — returns a single note", async () => {
     const { stdout, exitCode } = await runNex(["note", "get", "note-1"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.id, "note-1");
-    assert.ok(data.body, "should have body");
+    expect(data.id).toBe("note-1");
+    expect(data.body).toBeTruthy();
   });
 
-  it("note create — creates a note", async () => {
+  test("note create — creates a note", async () => {
     const { stdout, exitCode } = await runNex(
       ["note", "create", "--title", "New observation"],
       { env },
     );
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.ok(data.id, "should have an id");
+    expect(data.id).toBeTruthy();
   });
 
-  it("note update — updates a note", async () => {
+  test("note update — updates a note", async () => {
     const { stdout, exitCode } = await runNex(
       ["note", "update", "note-1", "--title", "Updated note"],
       { env },
     );
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.title, "Updated note");
+    expect(data.title).toBe("Updated note");
   });
 
-  it("note delete — deletes a note", async () => {
+  test("note delete — deletes a note", async () => {
     const { stdout, exitCode } = await runNex(["note", "delete", "note-1"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
   });
 });

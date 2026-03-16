@@ -22,6 +22,8 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: oven-sh/setup-bun@v2
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -32,20 +34,20 @@ jobs:
           rsync -a --delete ../claude-code-plugin/src/ src/plugin/
           rsync -a --delete ../claude-code-plugin/commands/ plugin-commands/
 
-      - run: npm ci
+      - run: bun install --frozen-lockfile
 
-      - run: npm run build
+      - run: bun run build
 
-      - run: npm test
+      - run: bun test
 
       - name: Bump patch version
         id: bump
         run: |
           PUBLISHED=$(npm view @nex-ai/nex version 2>/dev/null || echo "0.0.0")
-          LOCAL=$(node -p "require('./package.json').version")
+          LOCAL=$(bun -e "console.log(require('./package.json').version)")
           if [ "$LOCAL" = "$PUBLISHED" ]; then
             npm version patch --no-git-tag-version
-            NEW_VERSION=$(node -p "require('./package.json').version")
+            NEW_VERSION=$(bun -e "console.log(require('./package.json').version)")
             echo "bumped=true" >> "$GITHUB_OUTPUT"
             echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
             echo "Bumped $LOCAL -> $NEW_VERSION"
@@ -57,7 +59,7 @@ jobs:
 
       - name: Rebuild with new version
         if: steps.bump.outputs.bumped == 'true'
-        run: npm run build
+        run: bun run build
 
       - name: Publish to npm
         run: npm publish --access public

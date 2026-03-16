@@ -15,17 +15,17 @@
   ],
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
-    "dev": "tsx src/index.ts",
-    "test": "node --import tsx --test tests/**/*.test.ts tests/**/**/*.test.ts",
-    "prepublishOnly": "npm run build"
+    "start": "bun dist/index.js",
+    "dev": "bun src/index.ts",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
   "dependencies": {
     "commander": "^13.0.0"
   },
   "devDependencies": {
+    "@types/bun": "latest",
     "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   },
   "repository": {

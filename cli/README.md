@@ -11,7 +11,7 @@ Nex CLI provides organizational context & memory to AI agents across 12 platform
 
 ```bash
 # Install globally
-npm install -g @nex-ai/nex
+bun install -g @nex-ai/nex
 
 # Or run directly (no install)
 npx @nex-ai/nex ask "who is Maria?"
@@ -99,7 +99,7 @@ nex graph                          # Open the workspace graph in your browser
 - Creates `.nex.toml` project config with commented defaults
 - Syncs API key to `~/.nex-mcp.json` (shared config)
 
-**Single install**: `npm install -g @nex-ai/nex` bundles everything — hooks, adapters, platform plugins, slash commands, rules, and MCP server. No separate packages needed.
+**Single install**: `bun install -g @nex-ai/nex` bundles everything — hooks, adapters, platform plugins, slash commands, rules, and MCP server. No separate packages needed.
 
 **Integration hierarchy** (per platform): Hooks > Custom plugins > Custom agents/modes > Workflows > Rules > MCP. Each platform gets every layer it supports.
 
@@ -252,9 +252,9 @@ git diff | nex capture
 ## Development
 
 ```bash
-npm install
-npm run build     # TypeScript → dist/
-npm run dev       # Run with tsx (no build)
-npm test          # Unit tests
+bun install
+bun run build     # TypeScript → dist/
+bun run dev       # Run TS directly (no build)
+bun test          # Unit + integration tests
 NEX_DEV_URL=http://localhost:30000 nex ask "test"  # Local API
 ```

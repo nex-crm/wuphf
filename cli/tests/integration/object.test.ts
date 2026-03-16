@@ -1,61 +1,61 @@
-import { describe, it, before, after } from "node:test";
-import assert from "node:assert/strict";
-import { runNex, nexEnv } from "./helpers.js";
-import { startMockServer } from "./mock-server.js";
+import { describe, test, beforeAll, afterAll } from "bun:test";
+import { expect } from "bun:test";
+import { runNex, nexEnv } from "./helpers.ts";
+import { startMockServer } from "./mock-server.ts";
 
 let env: Record<string, string>;
 let closeMock: () => void;
 
-before(() => {
+beforeAll(() => {
   const mock = startMockServer();
   env = nexEnv(mock.url);
   closeMock = mock.close;
 });
 
-after(() => closeMock());
+afterAll(() => closeMock());
 
 describe("object commands", () => {
-  it("object list — returns all objects", async () => {
+  test("object list — returns all objects", async () => {
     const { stdout, exitCode } = await runNex(["object", "list"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.ok(data.data, "should have data array");
-    assert.equal(data.data.length, 2);
-    assert.equal(data.data[0].slug, "company");
-    assert.equal(data.data[1].slug, "person");
+    expect(data.data).toBeTruthy();
+    expect(data.data.length).toBe(2);
+    expect(data.data[0].slug).toBe("company");
+    expect(data.data[1].slug).toBe("person");
   });
 
-  it("object get — returns a single object", async () => {
+  test("object get — returns a single object", async () => {
     const { stdout, exitCode } = await runNex(["object", "get", "company"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.slug, "company");
-    assert.equal(data.name, "Company");
+    expect(data.slug).toBe("company");
+    expect(data.name).toBe("Company");
   });
 
-  it("object create — creates an object", async () => {
+  test("object create — creates an object", async () => {
     const { stdout, exitCode } = await runNex(
       ["object", "create", "--name", "Deal", "--slug", "deal", "--type", "deal"],
       { env },
     );
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.ok(data.id, "should have an id");
-    assert.equal(data.slug, "deal");
+    expect(data.id).toBeTruthy();
+    expect(data.slug).toBe("deal");
   });
 
-  it("object update — updates an object", async () => {
+  test("object update — updates an object", async () => {
     const { stdout, exitCode } = await runNex(
       ["object", "update", "company", "--name", "Companies Updated"],
       { env },
     );
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.slug, "company");
+    expect(data.slug).toBe("company");
   });
 
-  it("object delete — deletes an object", async () => {
+  test("object delete — deletes an object", async () => {
     const { stdout, exitCode } = await runNex(["object", "delete", "company"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
   });
 });

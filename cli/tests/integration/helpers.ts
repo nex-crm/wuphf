@@ -23,12 +23,11 @@ export function runNex(
   opts: { env?: Record<string, string> } = {},
 ): Promise<RunResult> {
   return new Promise((res) => {
-    const proc = spawn("node", ["--import", "tsx", "src/index.ts", ...args], {
+    const proc = spawn("bun", ["src/index.ts", ...args], {
       cwd: CLI_DIR,
       env: {
         ...process.env,
         ...opts.env,
-        NODE_NO_WARNINGS: "1",
       },
     });
 

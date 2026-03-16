@@ -19,8 +19,8 @@ Persistent context intelligence for Claude Code, powered by Nex. Automatically r
 
 ```bash
 cd claude-code-plugin
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 ## Setup

@@ -1,63 +1,62 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
-import { formatOutput } from "../../src/lib/output.js";
+import { describe, test, expect } from "bun:test";
+import { formatOutput } from "../../src/lib/output.ts";
 
 describe("formatOutput", () => {
   describe("json format", () => {
-    it("formats objects as pretty JSON", () => {
+    test("formats objects as pretty JSON", () => {
       const result = formatOutput({ a: 1, b: "hello" }, "json");
-      assert.equal(result, JSON.stringify({ a: 1, b: "hello" }, null, 2));
+      expect(result).toBe(JSON.stringify({ a: 1, b: "hello" }, null, 2));
     });
 
-    it("formats arrays as pretty JSON", () => {
+    test("formats arrays as pretty JSON", () => {
       const result = formatOutput([1, 2, 3], "json");
-      assert.equal(result, JSON.stringify([1, 2, 3], null, 2));
+      expect(result).toBe(JSON.stringify([1, 2, 3], null, 2));
     });
 
-    it("formats primitives as JSON", () => {
-      assert.equal(formatOutput("hello", "json"), '"hello"');
-      assert.equal(formatOutput(42, "json"), "42");
+    test("formats primitives as JSON", () => {
+      expect(formatOutput("hello", "json")).toBe('"hello"');
+      expect(formatOutput(42, "json")).toBe("42");
     });
   });
 
   describe("text format", () => {
-    it("renders strings directly", () => {
-      assert.equal(formatOutput("hello world", "text"), "hello world");
+    test("renders strings directly", () => {
+      expect(formatOutput("hello world", "text")).toBe("hello world");
     });
 
-    it("renders objects as key-value pairs", () => {
+    test("renders objects as key-value pairs", () => {
       const result = formatOutput({ name: "Nex", version: 1 }, "text")!;
-      assert.ok(result.includes("name: Nex"));
-      assert.ok(result.includes("version: 1"));
+      expect(result.includes("name: Nex")).toBeTruthy();
+      expect(result.includes("version: 1")).toBeTruthy();
     });
 
-    it("renders arrays with indices", () => {
+    test("renders arrays with indices", () => {
       const result = formatOutput(["a", "b"], "text")!;
-      assert.ok(result.includes("[0]"));
-      assert.ok(result.includes("[1]"));
+      expect(result.includes("[0]")).toBeTruthy();
+      expect(result.includes("[1]")).toBeTruthy();
     });
 
-    it("renders nested objects with indentation", () => {
+    test("renders nested objects with indentation", () => {
       const result = formatOutput({ outer: { inner: "val" } }, "text")!;
-      assert.ok(result.includes("outer:"));
-      assert.ok(result.includes("inner: val"));
+      expect(result.includes("outer:")).toBeTruthy();
+      expect(result.includes("inner: val")).toBeTruthy();
     });
 
-    it("returns (empty) for empty arrays", () => {
+    test("returns (empty) for empty arrays", () => {
       const result = formatOutput([], "text")!;
-      assert.ok(result.includes("(empty)"));
+      expect(result.includes("(empty)")).toBeTruthy();
     });
 
-    it("returns empty string for null/undefined", () => {
-      assert.equal(formatOutput(null, "text"), "");
-      assert.equal(formatOutput(undefined, "text"), "");
+    test("returns empty string for null/undefined", () => {
+      expect(formatOutput(null, "text")).toBe("");
+      expect(formatOutput(undefined, "text")).toBe("");
     });
   });
 
   describe("quiet format", () => {
-    it("returns undefined", () => {
-      assert.equal(formatOutput({ a: 1 }, "quiet"), undefined);
-      assert.equal(formatOutput("hello", "quiet"), undefined);
+    test("returns undefined", () => {
+      expect(formatOutput({ a: 1 }, "quiet")).toBe(undefined);
+      expect(formatOutput("hello", "quiet")).toBe(undefined);
     });
   });
 });

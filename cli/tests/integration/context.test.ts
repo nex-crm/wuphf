@@ -1,52 +1,52 @@
-import { describe, it, before, after } from "node:test";
-import assert from "node:assert/strict";
-import { runNex, nexEnv } from "./helpers.js";
-import { startMockServer } from "./mock-server.js";
+import { describe, test, beforeAll, afterAll } from "bun:test";
+import { expect } from "bun:test";
+import { runNex, nexEnv } from "./helpers.ts";
+import { startMockServer } from "./mock-server.ts";
 
 let env: Record<string, string>;
 let closeMock: () => void;
 
-before(() => {
+beforeAll(() => {
   const mock = startMockServer();
   env = nexEnv(mock.url);
   closeMock = mock.close;
 });
 
-after(() => closeMock());
+afterAll(() => closeMock());
 
 describe("context commands", () => {
-  it("ask — returns AI answer as JSON", async () => {
+  test("ask — returns AI answer as JSON", async () => {
     const { stdout, exitCode } = await runNex(["ask", "What is the meaning of life?"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.answer, "The answer is 42");
+    expect(data.answer).toBe("The answer is 42");
   });
 
-  it("ask — text format shows answer", async () => {
+  test("ask — text format shows answer", async () => {
     const { stdout, exitCode } = await runNex(
       ["ask", "What is the meaning of life?", "--format", "text"],
       { env },
     );
-    assert.equal(exitCode, 0);
-    assert.ok(stdout.includes("42"), "output should contain the answer");
+    expect(exitCode).toBe(0);
+    expect(stdout.includes("42")).toBeTruthy();
   });
 
-  it("remember — stores context", async () => {
+  test("remember — stores context", async () => {
     const { stdout, exitCode } = await runNex(
       ["remember", "Important project context"],
       { env },
     );
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.status, "completed");
-    assert.equal(data.artifact_id, "art-1");
+    expect(data.status).toBe("completed");
+    expect(data.artifact_id).toBe("art-1");
   });
 
-  it("artifact — retrieves artifact by ID", async () => {
+  test("artifact — retrieves artifact by ID", async () => {
     const { stdout, exitCode } = await runNex(["artifact", "art-1"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.id, "art-1");
-    assert.ok(data.content, "should have content");
+    expect(data.id).toBe("art-1");
+    expect(data.content).toBeTruthy();
   });
 });

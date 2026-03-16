@@ -1,62 +1,62 @@
-import { describe, it, before, after } from "node:test";
-import assert from "node:assert/strict";
-import { runNex, nexEnv } from "./helpers.js";
-import { startMockServer } from "./mock-server.js";
+import { describe, test, beforeAll, afterAll } from "bun:test";
+import { expect } from "bun:test";
+import { runNex, nexEnv } from "./helpers.ts";
+import { startMockServer } from "./mock-server.ts";
 
 let mockUrl: string;
 let closeMock: () => void;
 
-before(() => {
+beforeAll(() => {
   const mock = startMockServer();
   mockUrl = mock.url;
   closeMock = mock.close;
 });
 
-after(() => closeMock());
+afterAll(() => closeMock());
 
 describe("error handling", () => {
-  it("auth error — fails with exit code 2 when no API key", async () => {
+  test("auth error — fails with exit code 2 when no API key", async () => {
     const { exitCode, stderr } = await runNex(
       ["object", "list"],
       { env: { NEX_DEV_URL: mockUrl } },
     );
-    assert.notEqual(exitCode, 0);
-    assert.ok(stderr.includes("API key") || stderr.includes("setup"), "should mention API key or setup");
+    expect(exitCode).not.toBe(0);
+    expect(stderr.includes("API key") || stderr.includes("setup")).toBeTruthy();
   });
 
-  it("auth error — fails with bad API key", async () => {
+  test("auth error — fails with bad API key", async () => {
     const { exitCode, stderr } = await runNex(
       ["object", "list"],
       { env: { NEX_DEV_URL: mockUrl, NEX_API_KEY: "wrong-key" } },
     );
-    assert.notEqual(exitCode, 0);
-    assert.ok(stderr.length > 0, "should have error output");
+    expect(exitCode).not.toBe(0);
+    expect(stderr.length > 0).toBeTruthy();
   });
 
-  it("missing required arg — record get with no ID", async () => {
+  test("missing required arg — record get with no ID", async () => {
     const { exitCode, stderr } = await runNex(
       ["record", "get"],
       { env: nexEnv(mockUrl) },
     );
-    assert.notEqual(exitCode, 0);
-    assert.ok(stderr.length > 0, "should have error output");
+    expect(exitCode).not.toBe(0);
+    expect(stderr.length > 0).toBeTruthy();
   });
 
-  it("missing required option — record create without --data", async () => {
+  test("missing required option — record create without --data", async () => {
     const { exitCode, stderr } = await runNex(
       ["record", "create", "company"],
       { env: nexEnv(mockUrl) },
     );
-    assert.notEqual(exitCode, 0);
-    assert.ok(stderr.length > 0, "should have error output");
+    expect(exitCode).not.toBe(0);
+    expect(stderr.length > 0).toBeTruthy();
   });
 
-  it("unknown command — exits with error", async () => {
+  test("unknown command — exits with error", async () => {
     const { exitCode, stderr } = await runNex(
       ["notacommand"],
       { env: nexEnv(mockUrl) },
     );
-    assert.notEqual(exitCode, 0);
-    assert.ok(stderr.length > 0, "should have error output");
+    expect(exitCode).not.toBe(0);
+    expect(stderr.length > 0).toBeTruthy();
   });
 });

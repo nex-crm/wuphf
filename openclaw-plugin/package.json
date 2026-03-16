@@ -11,16 +11,16 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "bun test",
+    "test:watch": "bun test --watch"
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
+    "@types/bun": "latest",
     "@types/node": "^22.0.0",
-    "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "typescript": "^5.7.0"
   },
   "engines": {
     "node": ">=18"

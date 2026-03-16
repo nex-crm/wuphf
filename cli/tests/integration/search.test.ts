@@ -1,35 +1,35 @@
-import { describe, it, before, after } from "node:test";
-import assert from "node:assert/strict";
-import { runNex, nexEnv } from "./helpers.js";
-import { startMockServer } from "./mock-server.js";
+import { describe, test, beforeAll, afterAll } from "bun:test";
+import { expect } from "bun:test";
+import { runNex, nexEnv } from "./helpers.ts";
+import { startMockServer } from "./mock-server.ts";
 
 let env: Record<string, string>;
 let closeMock: () => void;
 
-before(() => {
+beforeAll(() => {
   const mock = startMockServer();
   env = nexEnv(mock.url);
   closeMock = mock.close;
 });
 
-after(() => closeMock());
+afterAll(() => closeMock());
 
 describe("search command", () => {
-  it("search — returns matching results as JSON", async () => {
+  test("search — returns matching results as JSON", async () => {
     const { stdout, exitCode } = await runNex(["search", "acme"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.ok(data.results, "should have results");
-    assert.ok(data.results.length > 0, "should have at least one result");
-    assert.equal(data.results[0].primary_value, "Acme Corp");
+    expect(data.results).toBeTruthy();
+    expect(data.results.length > 0).toBeTruthy();
+    expect(data.results[0].primary_value).toBe("Acme Corp");
   });
 
-  it("search — text format includes result name", async () => {
+  test("search — text format includes result name", async () => {
     const { stdout, exitCode } = await runNex(
       ["search", "acme", "--format", "text"],
       { env },
     );
-    assert.equal(exitCode, 0);
-    assert.ok(stdout.includes("Acme Corp"), "output should contain Acme Corp");
+    expect(exitCode).toBe(0);
+    expect(stdout.includes("Acme Corp")).toBeTruthy();
   });
 });

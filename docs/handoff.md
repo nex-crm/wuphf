@@ -5,8 +5,8 @@
 ## First Steps
 
 1. Read this file fully
-2. Check CLI builds: `cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill/cli && npm run build`
-3. Run tests: `cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill/cli && npm test`
+2. Check CLI builds: `cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill/cli && bun run build`
+3. Run tests: `cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill/cli && bun test`
 
 ## What Was Done Last Session (2026-03-10)
 
@@ -84,8 +84,8 @@ nex setup
 
 ```bash
 cd /Users/najmuzzaman/Documents/nex/nex-as-a-skill
-cd cli && npm run build && npm test    # 65+ tests pass
-cd ../mcp && npm run build             # MCP server
+cd cli && bun run build && bun test    # 65+ tests pass
+cd ../mcp && bun run build             # MCP server
 ```
 
 ## Key Files

@@ -6,8 +6,8 @@ Give any MCP-compatible AI client access to your Nex CRM — contacts, companies
 
 ```bash
 cd mcp
-npm install
-npm run build
+bun install
+bun run build
 ```
 
 ## Setup
@@ -81,7 +81,7 @@ Add to `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for glob
 ChatGPT uses Streamable HTTP transport. Start the server in HTTP mode:
 
 ```bash
-NEX_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http npm start
+NEX_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http bun start
 ```
 
 Then in ChatGPT Desktop, add a new MCP server pointing to:
@@ -95,7 +95,7 @@ http://localhost:3001/mcp
 Start the server in HTTP mode and point your client at the `/mcp` endpoint:
 
 ```bash
-NEX_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http MCP_PORT=3001 npm start
+NEX_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http MCP_PORT=3001 bun start
 ```
 
 - MCP endpoint: `http://localhost:3001/mcp`
@@ -198,13 +198,13 @@ NEX_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http MCP_PORT=3001 npm start
 
 ```bash
 # Run with hot reload
-npm run dev
+bun run dev
 
 # Build
-npm run build
+bun run build
 
 # Run production
-npm start
+bun start
 ```
 
 ### MCP Inspector
@@ -212,7 +212,7 @@ npm start
 Debug tools interactively using the MCP Inspector:
 
 ```bash
-NEX_API_KEY="nex_dev_your_key_here" npm run inspect
+NEX_API_KEY="nex_dev_your_key_here" bun run inspect
 ```
 
 This opens a browser UI where you can list tools, call them with test inputs, and inspect responses.

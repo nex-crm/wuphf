@@ -1,60 +1,60 @@
-import { describe, it, before, after } from "node:test";
-import assert from "node:assert/strict";
-import { runNex, nexEnv } from "./helpers.js";
-import { startMockServer } from "./mock-server.js";
+import { describe, test, beforeAll, afterAll } from "bun:test";
+import { expect } from "bun:test";
+import { runNex, nexEnv } from "./helpers.ts";
+import { startMockServer } from "./mock-server.ts";
 
 let env: Record<string, string>;
 let closeMock: () => void;
 
-before(() => {
+beforeAll(() => {
   const mock = startMockServer();
   env = nexEnv(mock.url);
   closeMock = mock.close;
 });
 
-after(() => closeMock());
+afterAll(() => closeMock());
 
 describe("task commands", () => {
-  it("task list — returns tasks", async () => {
+  test("task list — returns tasks", async () => {
     const { stdout, exitCode } = await runNex(["task", "list"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.ok(data.data, "should have data array");
-    assert.equal(data.data.length, 1);
-    assert.equal(data.data[0].title, "Fix bug");
+    expect(data.data).toBeTruthy();
+    expect(data.data.length).toBe(1);
+    expect(data.data[0].title).toBe("Fix bug");
   });
 
-  it("task get — returns a single task", async () => {
+  test("task get — returns a single task", async () => {
     const { stdout, exitCode } = await runNex(["task", "get", "task-1"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.id, "task-1");
-    assert.equal(data.title, "Fix bug");
+    expect(data.id).toBe("task-1");
+    expect(data.title).toBe("Fix bug");
   });
 
-  it("task create — creates a task", async () => {
+  test("task create — creates a task", async () => {
     const { stdout, exitCode } = await runNex(
       ["task", "create", "--title", "Ship feature"],
       { env },
     );
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.ok(data.id, "should have an id");
-    assert.equal(data.title, "Ship feature");
+    expect(data.id).toBeTruthy();
+    expect(data.title).toBe("Ship feature");
   });
 
-  it("task update — updates a task", async () => {
+  test("task update — updates a task", async () => {
     const { stdout, exitCode } = await runNex(
       ["task", "update", "task-1", "--title", "Fixed bug"],
       { env },
     );
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
     const data = JSON.parse(stdout);
-    assert.equal(data.title, "Fixed bug");
+    expect(data.title).toBe("Fixed bug");
   });
 
-  it("task delete — deletes a task", async () => {
+  test("task delete — deletes a task", async () => {
     const { stdout, exitCode } = await runNex(["task", "delete", "task-1"], { env });
-    assert.equal(exitCode, 0);
+    expect(exitCode).toBe(0);
   });
 });

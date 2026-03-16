@@ -1,50 +1,49 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
-import { AuthError, RateLimitError, ServerError } from "../../src/lib/errors.js";
+import { describe, test, expect } from "bun:test";
+import { AuthError, RateLimitError, ServerError } from "../../src/lib/errors.ts";
 
 describe("AuthError", () => {
-  it("has correct name and exitCode", () => {
+  test("has correct name and exitCode", () => {
     const err = new AuthError("custom msg");
-    assert.equal(err.name, "AuthError");
-    assert.equal(err.message, "custom msg");
-    assert.equal(err.exitCode, 2);
-    assert.ok(err instanceof Error);
+    expect(err.name).toBe("AuthError");
+    expect(err.message).toBe("custom msg");
+    expect(err.exitCode).toBe(2);
+    expect(err instanceof Error).toBeTruthy();
   });
 
-  it("uses default message when none provided", () => {
+  test("uses default message when none provided", () => {
     const err = new AuthError();
-    assert.ok(err.message.includes("No API key configured"));
+    expect(err.message.includes("No API key configured")).toBeTruthy();
   });
 });
 
 describe("RateLimitError", () => {
-  it("has correct name, exitCode, and retryAfterMs", () => {
+  test("has correct name, exitCode, and retryAfterMs", () => {
     const err = new RateLimitError(5000);
-    assert.equal(err.name, "RateLimitError");
-    assert.equal(err.exitCode, 1);
-    assert.equal(err.retryAfterMs, 5000);
-    assert.ok(err.message.includes("5s"));
+    expect(err.name).toBe("RateLimitError");
+    expect(err.exitCode).toBe(1);
+    expect(err.retryAfterMs).toBe(5000);
+    expect(err.message.includes("5s")).toBeTruthy();
   });
 
-  it("defaults retryAfterMs to 60000", () => {
+  test("defaults retryAfterMs to 60000", () => {
     const err = new RateLimitError();
-    assert.equal(err.retryAfterMs, 60_000);
+    expect(err.retryAfterMs).toBe(60_000);
   });
 });
 
 describe("ServerError", () => {
-  it("has correct name, exitCode, and status", () => {
+  test("has correct name, exitCode, and status", () => {
     const err = new ServerError(500, "Internal");
-    assert.equal(err.name, "ServerError");
-    assert.equal(err.exitCode, 1);
-    assert.equal(err.status, 500);
-    assert.ok(err.message.includes("500"));
-    assert.ok(err.message.includes("Internal"));
+    expect(err.name).toBe("ServerError");
+    expect(err.exitCode).toBe(1);
+    expect(err.status).toBe(500);
+    expect(err.message.includes("500")).toBeTruthy();
+    expect(err.message.includes("Internal")).toBeTruthy();
   });
 
-  it("works without body", () => {
+  test("works without body", () => {
     const err = new ServerError(404);
-    assert.equal(err.status, 404);
-    assert.ok(err.message.includes("404"));
+    expect(err.status).toBe(404);
+    expect(err.message.includes("404")).toBeTruthy();
   });
 });

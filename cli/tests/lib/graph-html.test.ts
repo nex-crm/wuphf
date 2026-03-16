@@ -1,7 +1,6 @@
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
-import { generateGraphHtml } from "../../src/lib/graph-html.js";
-import type { GraphData } from "../../src/lib/graph-html.js";
+import { describe, test, expect } from "bun:test";
+import { generateGraphHtml } from "../../src/lib/graph-html.ts";
+import type { GraphData } from "../../src/lib/graph-html.ts";
 
 function makeData(overrides?: Partial<GraphData>): GraphData {
   return {
@@ -19,21 +18,21 @@ function makeData(overrides?: Partial<GraphData>): GraphData {
 }
 
 describe("generateGraphHtml", () => {
-  it("returns HTML containing D3 force-graph reference", () => {
+  test("returns HTML containing D3 force-graph reference", () => {
     const html = generateGraphHtml(makeData());
-    assert.ok(html.includes("d3@7"), "should reference D3.js v7");
-    assert.ok(html.includes("forceSimulation"), "should use D3 force-graph simulation");
-    assert.ok(html.includes("<!DOCTYPE html>"), "should be a full HTML document");
+    expect(html.includes("d3@7")).toBeTruthy();
+    expect(html.includes("forceSimulation")).toBeTruthy();
+    expect(html.includes("<!DOCTYPE html>")).toBeTruthy();
   });
 
-  it("renders empty graph without error", () => {
+  test("renders empty graph without error", () => {
     const html = generateGraphHtml(makeData());
-    assert.ok(html.length > 0);
-    assert.ok(html.includes("0 entities"));
-    assert.ok(html.includes("0 connections"));
+    expect(html.length > 0).toBeTruthy();
+    expect(html.includes("0 entities")).toBeTruthy();
+    expect(html.includes("0 connections")).toBeTruthy();
   });
 
-  it("embeds node data as JSON", () => {
+  test("embeds node data as JSON", () => {
     const data = makeData({
       nodes: [
         { id: "1", name: "Alice", type: "person", definition_slug: "person", primary_attribute: "alice@co.com" },
@@ -41,11 +40,11 @@ describe("generateGraphHtml", () => {
       total_nodes: 1,
     });
     const html = generateGraphHtml(data);
-    assert.ok(html.includes("Alice"), "node name should appear in output");
-    assert.ok(html.includes("graph-data"), "should contain graph-data script block");
+    expect(html.includes("Alice")).toBeTruthy();
+    expect(html.includes("graph-data")).toBeTruthy();
   });
 
-  it("escapes HTML special characters to prevent XSS", () => {
+  test("escapes HTML special characters to prevent XSS", () => {
     const data = makeData({
       nodes: [
         { id: "1", name: '<script>alert(1)</script>', type: "person", definition_slug: "person" },
@@ -53,28 +52,27 @@ describe("generateGraphHtml", () => {
       total_nodes: 1,
     });
     const html = generateGraphHtml(data);
-    assert.ok(!html.includes("<script>alert(1)</script>"), "raw script tag must not appear");
-    assert.ok(
+    expect(!html.includes("<script>alert(1)</script>")).toBeTruthy();
+    expect(
       html.includes("\\u003cscript\\u003e") || html.includes("&lt;script&gt;"),
-      "script tag should be escaped",
-    );
+    ).toBeTruthy();
   });
 
-  it("includes edge type legend items including insight", () => {
+  test("includes edge type legend items including insight", () => {
     const html = generateGraphHtml(makeData());
-    assert.ok(html.includes("Formal"), "should include Formal edge legend");
-    assert.ok(html.includes("Context"), "should include Context edge legend");
-    assert.ok(html.includes("Triplet"), "should include Triplet edge legend");
-    assert.ok(html.includes("Insight"), "should include Insight edge legend");
+    expect(html.includes("Formal")).toBeTruthy();
+    expect(html.includes("Context")).toBeTruthy();
+    expect(html.includes("Triplet")).toBeTruthy();
+    expect(html.includes("Insight")).toBeTruthy();
   });
 
-  it("computes stats bar with combined connection count", () => {
+  test("computes stats bar with combined connection count", () => {
     const data = makeData({ total_edges: 3, total_context_edges: 7 });
     const html = generateGraphHtml(data);
-    assert.ok(html.includes("10 connections"), "should show sum of edges + context_edges");
+    expect(html.includes("10 connections")).toBeTruthy();
   });
 
-  it("counts total insights across all entities and insight nodes", () => {
+  test("counts total insights across all entities and insight nodes", () => {
     const data = makeData({
       insights: {
         "1": [{ content: "a", confidence: 0.9, type: "fact" }],
@@ -85,10 +83,10 @@ describe("generateGraphHtml", () => {
       ],
     });
     const html = generateGraphHtml(data);
-    assert.ok(html.includes("4 insights"), "should count 3 from map + 1 from insight_nodes");
+    expect(html.includes("4 insights")).toBeTruthy();
   });
 
-  it("renders ghost nodes in legend when present", () => {
+  test("renders ghost nodes in legend when present", () => {
     const data = makeData({
       nodes: [
         { id: "ghost:123", name: "Some Topic", type: "ghost", definition_slug: "ghost" },
@@ -96,17 +94,17 @@ describe("generateGraphHtml", () => {
       total_nodes: 1,
     });
     const html = generateGraphHtml(data);
-    assert.ok(html.includes("ghost"), "should include ghost in legend");
-    assert.ok(html.includes("#8B5CF6"), "should use purple color for ghost");
+    expect(html.includes("ghost")).toBeTruthy();
+    expect(html.includes("#8B5CF6")).toBeTruthy();
   });
 
-  it("renders insight nodes in legend when present", () => {
+  test("renders insight nodes in legend when present", () => {
     const data = makeData({
       insight_nodes: [
         { id: "ei:1", content: "test insight", type: "fact", confidence: 0.9, source: "entity_insight" },
       ],
     });
     const html = generateGraphHtml(data);
-    assert.ok(html.includes("entity_insight"), "should include entity_insight in legend");
+    expect(html.includes("entity_insight")).toBeTruthy();
   });
 });
