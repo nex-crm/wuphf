@@ -1,6 +1,6 @@
-# Nex: Organizational Context & Memory Layer for AI agents
+# Nex: Compounding Intelligence for AI agents
 
-Give any AI agent persistent memory & organizational context. One knowledge graph, every agent.
+Turn all your AI agent conversations into a unified knowledge graph. Supports Claude Code, Codex, OpenClaw, Cursor, OpenCode, etc. Adds additional context from Email, Meetings, Slack, HubSpot, Salesforce.
 
 Tell something to OpenClaw. Ask about it in Claude Code. Reference it from Cursor. Context follows you across tools — no copy-pasting, no re-explaining, no lost context.
 
