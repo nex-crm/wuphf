@@ -8,6 +8,10 @@ on:
       - "claude-code-plugin/src/**"
       - "claude-code-plugin/commands/**"
 
+concurrency:
+  group: publish-cli
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -45,12 +49,24 @@ jobs:
         run: |
           PUBLISHED=$(npm view @nex-ai/nex version 2>/dev/null || echo "0.0.0")
           LOCAL=$(bun -e "console.log(require('./package.json').version)")
-          if [ "$LOCAL" = "$PUBLISHED" ]; then
+
+          # Semver-aware comparison using node
+          NEEDS_SYNC=$(node -e "
+            const [lM,lm,lp] = '$LOCAL'.split('.').map(Number);
+            const [pM,pm,pp] = '$PUBLISHED'.split('.').map(Number);
+            const localNum = lM*1000000 + lm*1000 + lp;
+            const pubNum = pM*1000000 + pm*1000 + pp;
+            console.log(localNum <= pubNum ? 'true' : 'false');
+          ")
+
+          if [ "$NEEDS_SYNC" = "true" ]; then
+            # Local is behind or equal to published — sync to published, then bump
+            npm version "$PUBLISHED" --no-git-tag-version --allow-same-version
             npm version patch --no-git-tag-version
             NEW_VERSION=$(bun -e "console.log(require('./package.json').version)")
             echo "bumped=true" >> "$GITHUB_OUTPUT"
             echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
-            echo "Bumped $LOCAL -> $NEW_VERSION"
+            echo "Bumped $LOCAL -> $NEW_VERSION (published was $PUBLISHED)"
           else
             echo "bumped=false" >> "$GITHUB_OUTPUT"
             echo "version=$LOCAL" >> "$GITHUB_OUTPUT"
@@ -62,7 +78,15 @@ jobs:
         run: bun run build
 
       - name: Publish to npm
-        run: npm publish --access public
+        run: |
+          VERSION="${{ steps.bump.outputs.version }}"
+          if [ -z "$VERSION" ]; then echo "ERROR: version output is empty"; exit 1; fi
+          # Check if this version already exists on npm
+          if npm view "@nex-ai/nex@$VERSION" version 2>/dev/null; then
+            echo "Version $VERSION already published, skipping."
+          else
+            npm publish --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -70,6 +94,7 @@ jobs:
         if: steps.bump.outputs.bumped == 'true'
         run: |
           cd ..
+          git pull --rebase
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add cli/package.json cli/src/plugin/ cli/plugin-commands/
