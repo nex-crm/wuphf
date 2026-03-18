@@ -128,6 +128,39 @@ export class NexClient {
     return this.request<T>("GET", path, undefined, timeoutMs);
   }
 
+  async getRaw(path: string, timeoutMs?: number): Promise<string> {
+    this.requireAuth();
+    const url = `${API_BASE}${path}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        method: "GET",
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        signal: controller.signal,
+      });
+
+      if (res.status === 401 || res.status === 403) {
+        throw new AuthError("Invalid or expired API key. Run 'nex setup' to re-authenticate.");
+      }
+      if (res.status === 429) {
+        const retryAfter = res.headers.get("retry-after");
+        const ms = retryAfter ? parseInt(retryAfter, 10) * 1000 : 60_000;
+        throw new RateLimitError(ms);
+      }
+      if (!res.ok) {
+        let errorBody: string | undefined;
+        try { errorBody = await res.text(); } catch { /* ignore */ }
+        throw new ServerError(res.status, errorBody);
+      }
+
+      return await res.text();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async post<T = unknown>(path: string, body?: unknown, timeoutMs?: number): Promise<T> {
     return this.request<T>("POST", path, body, timeoutMs);
   }

@@ -61,7 +61,7 @@ export async function doRecall(
   const client = new NexClient(cfg.apiKey, cfg.baseUrl);
 
   const nexSessionId = sessionKey ? sessions.get(sessionKey) : undefined;
-  const result = await client.ask(trimmed, nexSessionId, 10_000);
+  const result = await client.ask(trimmed, nexSessionId, 30_000);
 
   if (!result.answer) return null;
 
@@ -240,7 +240,7 @@ export async function doSessionStart(
     }
   }
 
-  const result = await client.ask(SESSION_START_QUERY, undefined, 10_000);
+  const result = await client.ask(SESSION_START_QUERY, undefined, 30_000);
 
   if (!result.answer && contextParts.length === 0) return null;
 

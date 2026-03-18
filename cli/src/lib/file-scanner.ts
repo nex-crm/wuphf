@@ -78,7 +78,7 @@ export function loadScanConfig(overrides?: Partial<ScanOptions>): ScanOptions {
 
   const envMaxFiles = process.env.NEX_SCAN_MAX_FILES;
   const maxFiles = overrides?.maxFiles
-    ?? (envMaxFiles ? parseInt(envMaxFiles, 10) : 5);
+    ?? (envMaxFiles ? parseInt(envMaxFiles, 10) : 1000);
 
   const envDepth = process.env.NEX_SCAN_DEPTH;
   const depth = overrides?.depth
@@ -169,6 +169,26 @@ function hashFile(filePath: string): string {
   return "sha256-" + createHash("sha256").update(content).digest("hex");
 }
 
+// --- Concurrency helper ---
+
+const DEFAULT_CONCURRENCY = 5;
+
+async function runConcurrent<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let next = 0;
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const idx = next++;
+      await fn(items[idx], idx);
+    }
+  }
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+  await Promise.all(workers);
+}
+
 // --- Scanner ---
 
 export async function scanFiles(
@@ -190,13 +210,19 @@ export async function scanFiles(
   const manifest = opts.force ? { version: 1, files: {} } as Manifest : loadManifest();
   const result: ScanResult = { scanned: 0, skipped: 0, errors: 0, files: [] };
 
-  for (let i = 0; i < candidates.length; i++) {
-    const file = candidates[i];
-    onProgress?.(i + 1, candidates.length, file.path);
+  // Pre-filter: hash check and dry-run handling (sequential, fast)
+  interface IngestJob {
+    file: DiscoveredFile;
+    hash: string;
+    existing: ManifestEntry | undefined;
+    content: string;
+  }
+  const jobs: IngestJob[] = [];
+
+  for (const file of candidates) {
     const hash = hashFile(file.path);
     const existing = manifest.files[file.path];
 
-    // Skip if hash matches (already ingested)
     if (existing && existing.hash === hash && !opts.force) {
       result.skipped++;
       result.files.push({ path: file.path, status: "skipped", reason: "unchanged" });
@@ -205,52 +231,51 @@ export async function scanFiles(
 
     if (opts.dryRun) {
       result.scanned++;
-      result.files.push({
-        path: file.path,
-        status: "ingested",
-        reason: existing ? "changed" : "new",
-      });
+      result.files.push({ path: file.path, status: "ingested", reason: existing ? "changed" : "new" });
       continue;
     }
 
-    // Read and ingest
+    const content = readFileSync(file.path, "utf-8");
+    if (!content.trim()) {
+      result.skipped++;
+      result.files.push({ path: file.path, status: "skipped", reason: "empty" });
+      continue;
+    }
+
+    jobs.push({ file, hash, existing, content });
+  }
+
+  if (opts.dryRun || jobs.length === 0) {
+    if (!opts.dryRun) saveManifest(manifest);
+    return result;
+  }
+
+  // Ingest concurrently
+  // TODO: Replace with server-side batch endpoint (POST /v1/context/batch) once available
+  const concurrency = Math.min(DEFAULT_CONCURRENCY, jobs.length);
+  let completed = 0;
+
+  await runConcurrent(jobs, concurrency, async (job) => {
     try {
-      const content = readFileSync(file.path, "utf-8");
-      if (!content.trim()) {
-        result.skipped++;
-        result.files.push({ path: file.path, status: "skipped", reason: "empty" });
-        continue;
-      }
+      await ingestFn(job.content, `file-scan:${job.file.path}`);
 
-      await ingestFn(content, `file-scan:${file.path}`);
-
-      // Update manifest
-      manifest.files[file.path] = {
-        hash,
-        size: file.size,
+      manifest.files[job.file.path] = {
+        hash: job.hash,
+        size: job.file.size,
         scanned_at: new Date().toISOString(),
       };
 
       result.scanned++;
-      result.files.push({
-        path: file.path,
-        status: "ingested",
-        reason: existing ? "changed" : "new",
-      });
+      result.files.push({ path: job.file.path, status: "ingested", reason: job.existing ? "changed" : "new" });
     } catch (err) {
       result.errors++;
-      result.files.push({
-        path: file.path,
-        status: "error",
-        reason: err instanceof Error ? err.message : String(err),
-      });
+      result.files.push({ path: job.file.path, status: "error", reason: err instanceof Error ? err.message : String(err) });
     }
-  }
 
-  // Persist manifest (unless dry-run)
-  if (!opts.dryRun) {
-    saveManifest(manifest);
-  }
+    completed++;
+    onProgress?.(completed, jobs.length, job.file.path);
+  });
 
+  saveManifest(manifest);
   return result;
 }

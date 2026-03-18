@@ -1,5 +1,6 @@
 /**
  * nex graph — Visualize the workspace entity graph in the browser.
+ * Fetches server-rendered HTML visualization directly from the API.
  */
 
 import { writeFileSync } from "node:fs";
@@ -11,8 +12,6 @@ import { NexClient } from "../lib/client.js";
 import { resolveApiKey, resolveFormat, resolveTimeout } from "../lib/config.js";
 import { printOutput, printError } from "../lib/output.js";
 import type { Format } from "../lib/output.js";
-import { generateGraphHtml } from "../lib/graph-html.js";
-import type { GraphData } from "../lib/graph-html.js";
 import { sym, style } from "../lib/tui.js";
 
 function getClient(): { client: NexClient; format: Format } {
@@ -55,40 +54,32 @@ program
 
     process.stderr.write(`${sym.info} Fetching workspace graph...\n`);
 
-    let data: GraphData;
+    let html: string;
     try {
-      data = await client.get<GraphData>(`/v1/graph?limit=${limit}`);
+      html = await client.getRaw(`/v1/graph?limit=${limit}&format=html`);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       printError(`Failed to fetch graph: ${message}`);
       process.exit(1);
     }
 
-    const html = generateGraphHtml(data);
     const outPath =
       opts.out ?? join(tmpdir(), `nex-graph-${Date.now()}.html`);
     writeFileSync(outPath, html, "utf-8");
 
     if (format === "json") {
-      printOutput(
-        {
-          path: outPath,
-          total_nodes: data.total_nodes,
-          total_edges: data.total_edges,
-        },
-        "json",
-      );
+      printOutput({ path: outPath }, "json");
       return;
     }
 
     if (opts.open) {
       openBrowser(`file://${outPath}`);
       process.stderr.write(
-        `${sym.success} Graph opened ${style.dim("—")} ${data.total_nodes} entities, ${data.total_edges} relationships\n`,
+        `${sym.success} Graph opened in browser\n`,
       );
     } else {
       process.stderr.write(
-        `${sym.success} Graph saved to ${outPath} ${style.dim("—")} ${data.total_nodes} entities, ${data.total_edges} relationships\n`,
+        `${sym.success} Graph saved to ${outPath}\n`,
       );
     }
   });

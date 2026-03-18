@@ -8,7 +8,7 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 
 export const CONFIG_PATH = join(homedir(), ".nex", "config.json");
-export const BASE_URL = process.env.NEX_DEV_URL ?? "https://app.nex.ai";
+export const BASE_URL = process.env.NEX_DEV_URL ?? loadConfig().dev_url ?? "https://app.nex.ai";
 export const API_BASE = `${BASE_URL}/api/developers`;
 export const REGISTER_URL = `${BASE_URL}/api/v1/agents/register`;
 

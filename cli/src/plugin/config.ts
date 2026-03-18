@@ -30,6 +30,8 @@ export class ConfigError extends Error {
 
 /** Shared config file with MCP server — stores registration data. */
 const MCP_CONFIG_PATH = join(homedir(), ".nex-mcp.json");
+/** CLI config file — stores API key, workspace, and dev_url. */
+const CLI_CONFIG_PATH = join(homedir(), ".nex", "config.json");
 
 export { MCP_CONFIG_PATH };
 
@@ -40,11 +42,28 @@ interface McpConfig {
   workspace_slug?: string;
 }
 
+interface CliConfig {
+  api_key?: string;
+  dev_url?: string;
+  workspace_id?: string;
+  workspace_slug?: string;
+}
+
 /** Read ~/.nex-mcp.json (shared with MCP server registration). */
 export function loadMcpConfig(): McpConfig {
   try {
     const raw = readFileSync(MCP_CONFIG_PATH, "utf-8");
     return JSON.parse(raw) as McpConfig;
+  } catch {
+    return {};
+  }
+}
+
+/** Read ~/.nex/config.json (CLI config). */
+function loadCliConfig(): CliConfig {
+  try {
+    const raw = readFileSync(CLI_CONFIG_PATH, "utf-8");
+    return JSON.parse(raw) as CliConfig;
   } catch {
     return {};
   }
@@ -72,9 +91,13 @@ export function loadConfig(): NexConfig {
   let apiKey = process.env.NEX_API_KEY;
 
   if (!apiKey) {
-    // Fallback to shared MCP config
+    // Fallback: MCP config → CLI config
     const mcpConfig = loadMcpConfig();
     apiKey = mcpConfig.api_key;
+  }
+  if (!apiKey) {
+    const cliConfig = loadCliConfig();
+    apiKey = cliConfig.api_key;
   }
 
   if (!apiKey) {
@@ -83,8 +106,8 @@ export function loadConfig(): NexConfig {
     );
   }
 
-  let baseUrl = process.env.NEX_API_BASE_URL ?? "https://app.nex.ai";
-  // Strip trailing slash
+  // Base URL: env → CLI config dev_url → production default
+  let baseUrl = process.env.NEX_API_BASE_URL ?? loadCliConfig().dev_url ?? "https://app.nex.ai";
   baseUrl = baseUrl.replace(/\/+$/, "");
 
   return { apiKey, baseUrl };
@@ -95,7 +118,7 @@ export function loadConfig(): NexConfig {
  * Used for registration (which doesn't need auth).
  */
 export function loadBaseUrl(): string {
-  let baseUrl = process.env.NEX_API_BASE_URL ?? "https://app.nex.ai";
+  let baseUrl = process.env.NEX_API_BASE_URL ?? loadCliConfig().dev_url ?? "https://app.nex.ai";
   return baseUrl.replace(/\/+$/, "");
 }
 

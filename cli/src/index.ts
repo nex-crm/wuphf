@@ -1,73 +1,57 @@
 #!/usr/bin/env node
 
 /**
- * Entry point: stdin detection, error handling, exit codes.
+ * Entry point.
+ *
+ * Interactive terminal → TUI (default)
+ * --cmd <input>       → single command, print result, exit
+ * Piped stdin         → read input, dispatch, exit
  */
 
-import { program } from "./cli.js";
-import { AuthError, RateLimitError, ServerError } from "./lib/errors.js";
-import { printError } from "./lib/output.js";
-
-// Import command registrations
-import "./commands/register.js";
-import "./commands/context.js";
-import "./commands/config-cmd.js";
-import "./commands/search.js";
-import "./commands/insight.js";
-import "./commands/object.js";
-import "./commands/attribute.js";
-import "./commands/record.js";
-import "./commands/relationship.js";
-import "./commands/list.js";
-import "./commands/list-job.js";
-import "./commands/task.js";
-import "./commands/note.js";
-import "./commands/session.js";
-import "./commands/scan.js";
-import "./commands/integrate.js";
-import "./commands/setup.js";
-import "./commands/graph.js";
-
-/**
- * Read all data from stdin (non-TTY only).
- */
-export async function readStdin(): Promise<string | undefined> {
-  if (process.stdin.isTTY) return undefined;
-
-  const chunks: Buffer[] = [];
-  for await (const chunk of process.stdin) {
-    chunks.push(chunk as Buffer);
-  }
-  const text = Buffer.concat(chunks).toString("utf-8").trim();
-  return text || undefined;
-}
+import { dispatch, commandNames } from "./commands/dispatch.js";
 
 async function main(): Promise<void> {
-  try {
-    await program.parseAsync(process.argv);
-  } catch (err) {
-    if (err instanceof AuthError) {
-      printError(err.message);
-      process.exit(2);
-    }
-    if (err instanceof RateLimitError) {
-      printError(err.message);
-      process.exit(1);
-    }
-    if (err instanceof ServerError) {
-      printError(err.message);
-      process.exit(1);
-    }
-    if (err instanceof Error) {
-      printError(err.message);
-      if (program.opts().debug) {
-        console.error(err.stack);
-      }
-      process.exit(1);
-    }
-    printError(String(err));
-    process.exit(1);
+  const args = process.argv.slice(2);
+
+  // --cmd "ask who is important" → run one command and exit
+  const cmdIdx = args.indexOf("--cmd");
+  if (cmdIdx >= 0 && args[cmdIdx + 1]) {
+    const input = args.slice(cmdIdx + 1).join(" ");
+    const result = await dispatch(input);
+    if (result.output) console.log(result.output);
+    process.exit(result.exitCode);
   }
+
+  // Direct subcommand: `nex graph`, `nex scan`, etc. → dispatch and exit
+  if (args.length > 0 && !args[0].startsWith("-")) {
+    const candidate = args[0];
+    const twoWord = args.length > 1 ? `${args[0]} ${args[1]}` : "";
+    if (commandNames.includes(twoWord) || commandNames.includes(candidate)) {
+      const input = args.join(" ");
+      const result = await dispatch(input);
+      if (result.output) console.log(result.output);
+      process.exit(result.exitCode);
+    }
+  }
+
+  // Piped stdin → dispatch each line
+  if (!process.stdin.isTTY) {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(chunk as Buffer);
+    }
+    const input = Buffer.concat(chunks).toString("utf-8").trim();
+    if (input) {
+      const result = await dispatch(input);
+      if (result.output) console.log(result.output);
+      process.exit(result.exitCode);
+    }
+    process.exit(0);
+  }
+
+  // Interactive terminal → TUI (no subcommand given)
+  const { startTui } = await import("./tui/index.js");
+  startTui();
 }
 
 main();
