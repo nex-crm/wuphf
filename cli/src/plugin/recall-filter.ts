@@ -71,14 +71,14 @@ export function recordRecall(sessionId?: string): void {
 export function shouldRecall(prompt: string, isFirstPrompt: boolean): RecallDecision {
   const trimmed = prompt.trim();
 
+  // Explicit opt-out: prompt starts with ! (overrides everything)
+  if (trimmed.startsWith("!")) {
+    return { shouldRecall: false, reason: "opt-out" };
+  }
+
   // Always recall on first prompt of session
   if (isFirstPrompt) {
     return { shouldRecall: true, reason: "first-prompt" };
-  }
-
-  // Explicit opt-out: prompt starts with !
-  if (trimmed.startsWith("!")) {
-    return { shouldRecall: false, reason: "opt-out" };
   }
 
   // Trivial confirmations
