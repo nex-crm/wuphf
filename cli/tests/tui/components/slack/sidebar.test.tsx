@@ -352,7 +352,7 @@ describe("SlackSidebar", () => {
     );
   });
 
-  it("shows + Add channel footer", () => {
+  it("shows keyboard hints footer", () => {
     const { lastFrame } = render(
       <SlackSidebar
         width={24}
@@ -367,6 +367,6 @@ describe("SlackSidebar", () => {
       />,
     );
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("+ Add channel"), "should show add channel link");
+    assert.ok(frame.includes("[n] channel"), "should show channel keyboard hint");
   });
 });

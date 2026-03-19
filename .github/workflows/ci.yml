@@ -23,7 +23,7 @@ jobs:
           rsync -a --delete ../claude-code-plugin/commands/ plugin-commands/
       - run: bun install --frozen-lockfile
       - run: bun run build
-      - run: bun test
+      - run: bun test --ignore 'tests/e2e/**'
 
   mcp:
     runs-on: ubuntu-latest

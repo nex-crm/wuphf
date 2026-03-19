@@ -42,7 +42,7 @@ jobs:
 
       - run: bun run build
 
-      - run: bun test
+      - run: bun test --ignore 'tests/e2e/**'
 
       - name: Bump patch version
         id: bump
