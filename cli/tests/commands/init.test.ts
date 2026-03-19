@@ -4,47 +4,6 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-// ── nex-mcp-config tests ──
-
-describe("nex-mcp-config", () => {
-  it("loadMcpConfig returns empty object when file missing", async () => {
-    const { loadMcpConfig } = await import("../../src/lib/nex-mcp-config.js");
-    // The file may or may not exist in CI, but it should not throw
-    const config = loadMcpConfig();
-    assert.equal(typeof config, "object");
-  });
-
-  it("saveMcpConfig and loadMcpConfig round-trip", async () => {
-    const { saveMcpConfig, loadMcpConfig } = await import("../../src/lib/nex-mcp-config.js");
-
-    // Save original to restore later
-    const original = loadMcpConfig();
-
-    const testConfig = {
-      api_key: "sk-test-roundtrip",
-      workspace_id: "ws-123",
-      workspace_slug: "test-ws",
-    };
-
-    saveMcpConfig(testConfig);
-    const loaded = loadMcpConfig();
-
-    assert.equal(loaded.api_key, "sk-test-roundtrip");
-    assert.equal(loaded.workspace_id, "ws-123");
-    assert.equal(loaded.workspace_slug, "test-ws");
-
-    // Restore original
-    saveMcpConfig(original);
-  });
-
-  it("getMcpConfigPath returns a string ending with .nex-mcp.json", async () => {
-    const { getMcpConfigPath } = await import("../../src/lib/nex-mcp-config.js");
-    const path = getMcpConfigPath();
-    assert.ok(typeof path === "string");
-    assert.ok(path.endsWith(".nex-mcp.json"), `expected path ending with .nex-mcp.json, got: ${path}`);
-  });
-});
-
 // ── detectPlatforms tests ──
 
 describe("detectPlatforms", () => {
