@@ -1,7 +1,6 @@
 /**
  * Plugin configuration — reads from environment variables,
- * with fallback to ~/.nex/config.json (canonical config),
- * then ~/.nex-mcp.json (legacy, read-only — kept for backward compatibility).
+ * with fallback to ~/.nex/config.json.
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -29,84 +28,50 @@ export class ConfigError extends Error {
   }
 }
 
-/** Canonical config file — stores API key, workspace, and dev_url. */
-const CLI_CONFIG_PATH = join(homedir(), ".nex", "config.json");
-/**
- * Legacy config file — read-only fallback for backward compatibility.
- * Existing installations may still have credentials here. We read from it
- * but never write to it. All new writes go to CLI_CONFIG_PATH.
- */
-const LEGACY_MCP_CONFIG_PATH = join(homedir(), ".nex-mcp.json");
+const CONFIG_PATH = join(homedir(), ".nex", "config.json");
 
-export { CLI_CONFIG_PATH as MCP_CONFIG_PATH };
+export { CONFIG_PATH as MCP_CONFIG_PATH };
 
-interface McpConfig {
-  api_key?: string;
-  base_url?: string;
-  workspace_id?: string;
-  workspace_slug?: string;
-}
-
-interface CliConfig {
+interface NexFileConfig {
   api_key?: string;
   dev_url?: string;
   workspace_id?: string;
   workspace_slug?: string;
 }
 
-/**
- * Read legacy ~/.nex-mcp.json (backward compatibility only).
- * New code should use loadCliConfig() instead.
- */
-export function loadMcpConfig(): McpConfig {
+/** Read ~/.nex/config.json. */
+function loadFileConfig(): NexFileConfig {
   try {
-    const raw = readFileSync(LEGACY_MCP_CONFIG_PATH, "utf-8");
-    return JSON.parse(raw) as McpConfig;
+    const raw = readFileSync(CONFIG_PATH, "utf-8");
+    return JSON.parse(raw) as NexFileConfig;
   } catch {
     return {};
   }
 }
 
-/** Read ~/.nex/config.json (CLI config). */
-function loadCliConfig(): CliConfig {
-  try {
-    const raw = readFileSync(CLI_CONFIG_PATH, "utf-8");
-    return JSON.parse(raw) as CliConfig;
-  } catch {
-    return {};
-  }
-}
-
-/** Write registration data to ~/.nex/config.json (canonical config). */
+/** Write registration data to ~/.nex/config.json. */
 export function persistRegistration(data: Record<string, unknown>): void {
-  const existing = loadCliConfig() as Record<string, unknown>;
+  const existing = loadFileConfig() as Record<string, unknown>;
   if (typeof data.api_key === "string") existing.api_key = data.api_key;
   if (typeof data.workspace_id === "string" || typeof data.workspace_id === "number") {
     existing.workspace_id = String(data.workspace_id);
   }
   if (typeof data.workspace_slug === "string") existing.workspace_slug = data.workspace_slug;
-  mkdirSync(dirname(CLI_CONFIG_PATH), { recursive: true });
-  writeFileSync(CLI_CONFIG_PATH, JSON.stringify(existing, null, 2) + "\n", "utf-8");
+  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+  writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + "\n", "utf-8");
 }
 
 /**
- * Load config from environment variables, with fallback to config files.
+ * Load config from environment variables, with fallback to ~/.nex/config.json.
  *
- * Priority: NEX_API_KEY env > ~/.nex/config.json > ~/.nex-mcp.json (legacy)
+ * Priority: NEX_API_KEY env > ~/.nex/config.json
  * If none is set, throws ConfigError with registration instructions.
  */
 export function loadConfig(): NexConfig {
   let apiKey = process.env.NEX_API_KEY;
 
   if (!apiKey) {
-    // Canonical config first
-    const cliConfig = loadCliConfig();
-    apiKey = cliConfig.api_key;
-  }
-  if (!apiKey) {
-    // Legacy fallback — backward compatibility for existing installations
-    const mcpConfig = loadMcpConfig();
-    apiKey = mcpConfig.api_key;
+    apiKey = loadFileConfig().api_key;
   }
 
   if (!apiKey) {
@@ -115,8 +80,7 @@ export function loadConfig(): NexConfig {
     );
   }
 
-  // Base URL: env → CLI config dev_url → production default
-  let baseUrl = process.env.NEX_API_BASE_URL ?? loadCliConfig().dev_url ?? "https://app.nex.ai";
+  let baseUrl = process.env.NEX_API_BASE_URL ?? loadFileConfig().dev_url ?? "https://app.nex.ai";
   baseUrl = baseUrl.replace(/\/+$/, "");
 
   return { apiKey, baseUrl };
@@ -127,7 +91,7 @@ export function loadConfig(): NexConfig {
  * Used for registration (which doesn't need auth).
  */
 export function loadBaseUrl(): string {
-  let baseUrl = process.env.NEX_API_BASE_URL ?? loadCliConfig().dev_url ?? "https://app.nex.ai";
+  let baseUrl = process.env.NEX_API_BASE_URL ?? loadFileConfig().dev_url ?? "https://app.nex.ai";
   return baseUrl.replace(/\/+$/, "");
 }
 

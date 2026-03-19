@@ -8,7 +8,7 @@ import { loadApiKey } from "./config.js";
 
 const apiKey = loadApiKey();
 if (!apiKey) {
-  console.error("No API key found (checked NEX_API_KEY env, ~/.nex/config.json, and legacy ~/.nex-mcp.json). Starting in registration-only mode. Use the 'register' tool to create an account and get an API key. Once registered, all context, search, and scan tools become available.");
+  console.error("No API key found (checked NEX_API_KEY env and ~/.nex/config.json). Starting in registration-only mode. Use the 'register' tool to create an account and get an API key. Once registered, all context, search, and scan tools become available.");
 }
 
 const transport = process.env.MCP_TRANSPORT ?? "stdio";
