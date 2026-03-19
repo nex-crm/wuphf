@@ -4,7 +4,7 @@
 [![GitHub](https://img.shields.io/badge/github-nex--crm%2Fnex--as--a--skill-blue)](https://github.com/nex-crm/nex-as-a-skill)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gjSySC3PzV)
 
-Turn all your AI agent conversations into a unified knowledge graph. Supports Claude Code, Codex, OpenClaw, Cursor, OpenCode, etc. Adds additional context from Email, Meetings, Slack, HubSpot, Salesforce.
+Turn all your AI agent conversations into a unified knowledge graph with proactive context surfacing. Supports Claude Code, Codex, OpenClaw, Cursor, OpenCode, etc. Adds additional context from Email, Meetings, Slack, HubSpot, Salesforce.
 
 <a href="https://discord.gg/gjSySC3PzV"><img src="https://img.shields.io/badge/Join%20our%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join our Discord" /></a>
 
@@ -16,7 +16,7 @@ Talk to the team, share feedback, and connect with other developers building AI 
 
 ```bash
 # Install globally
-bun install -g @nex-ai/nex
+npm install -g @nex-ai/nex
 
 # Or run directly (no install)
 npx @nex-ai/nex ask "who is Maria?"
@@ -102,9 +102,9 @@ nex graph                          # Open the workspace graph in your browser
 - Installs the full 6-layer hierarchy for each detected platform: hooks → plugins → agents → workflows → rules → MCP
 - Scans current directory and ingests new/changed files into Nex
 - Creates `.nex.toml` project config with commented defaults
-- Syncs API key to `~/.nex-mcp.json` (shared config)
+- Stores config in `~/.nex/config.json`
 
-**Single install**: `bun install -g @nex-ai/nex` bundles everything — hooks, adapters, platform plugins, slash commands, rules, and MCP server. No separate packages needed.
+**Single install**: `npm install -g @nex-ai/nex` bundles everything — hooks, adapters, platform plugins, slash commands, rules, and MCP server. No separate packages needed.
 
 **Integration hierarchy** (per platform): Hooks > Custom plugins > Custom agents/modes > Workflows > Rules > MCP. Each platform gets every layer it supports.
 
@@ -120,8 +120,8 @@ Per-project settings file created by `nex setup`. All fields are optional.
 # enabled = true              # Master kill switch for all hooks
 
 [hooks.recall]
-# enabled = true              # Auto-recall context on each prompt
-# debounce_ms = 30000
+# enabled = true              # Proactive context on every prompt
+# debounce_ms = 10000
 
 [hooks.capture]
 # enabled = true              # Auto-capture on conversation stop
@@ -135,7 +135,7 @@ Per-project settings file created by `nex setup`. All fields are optional.
 # enabled = true
 # extensions = [".md", ".txt", ".csv", ".json", ".yaml", ".yml"]
 # ignore_dirs = ["node_modules", ".git", "dist", "build", "__pycache__"]
-# max_files = 5
+# max_files = 1000
 # max_file_size = 100000
 # depth = 2
 
@@ -208,13 +208,30 @@ nex list-job create "enterprise contacts in EMEA"
 
 ### File Scanning
 
-On session start, Nex automatically scans project files and ingests changed content.
+On session start, Nex automatically scans project files and ingests changed content using concurrent workers (5 parallel requests). After ingestion, compounding intelligence jobs are triggered automatically to generate patterns and playbook rules.
+
+```bash
+nex scan                    # Scan current directory (up to 1000 files)
+nex scan --max-files 500    # Limit files per scan
+nex scan --force            # Re-scan all files (ignore manifest)
+nex scan --dry-run          # Preview what would be scanned
+```
 
 **Default text-based extensions:** `.md`, `.txt`, `.csv`, `.json`, `.yaml`, `.yml`
 
 **Document formats** (handled separately): `.docx`, `.doc`, `.odt`, `.xlsx`, `.xls`, `.pptx`, `.ppt`, `.pdf`
 
 Configure via `.nex.toml` `[scan]` section or environment variables (`NEX_SCAN_ENABLED`, `NEX_SCAN_EXTENSIONS`, etc.).
+
+### Proactive Context
+
+Nex surfaces relevant knowledge graph context on every prompt — not just questions. When you say "fix the migration script" or "deploy to staging", the system automatically injects entity insights, knowledge insights, and playbook patterns from your knowledge graph.
+
+Context is injected as `<nex-context>` blocks that AI agents use naturally without explicitly referencing the source. Only trivial inputs (yes/ok/lgtm) are skipped.
+
+### Transcript Capture
+
+At session end, the full conversation transcript is automatically ingested into the knowledge graph. This captures complete decision trails, code discussions, and debugging sessions — not just the last message.
 
 ### Config & Sessions
 
