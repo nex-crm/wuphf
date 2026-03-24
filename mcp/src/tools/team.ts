@@ -278,6 +278,66 @@ export function registerTeamTools(server: McpServer, client: NexApiClient) {
   );
 }
 
+/**
+ * startChannelPush polls the broker for new messages and pushes them
+ * to the Claude session via notifications/claude/channel.
+ * This makes messages appear in the conversation without the user typing.
+ */
+export function startChannelPush(server: McpServer, agentSlug?: string) {
+  let lastSeenId = "";
+  const POLL_INTERVAL = 1500; // 1.5 seconds
+
+  const poll = async () => {
+    if (!(await checkBroker())) return;
+
+    const params = new URLSearchParams();
+    params.set("limit", "10");
+    if (lastSeenId) params.set("since_id", lastSeenId);
+    if (agentSlug) params.set("my_slug", agentSlug);
+
+    const result = (await brokerGet(`/messages?${params}`)) as {
+      messages?: ChannelMessage[];
+    } | null;
+
+    if (!result?.messages?.length) return;
+
+    // Update cursor
+    lastSeenId = result.messages[result.messages.length - 1].id;
+
+    // Push each new message as a channel notification
+    for (const msg of result.messages) {
+      // Don't push your own messages back to yourself
+      if (agentSlug && msg.from === agentSlug) continue;
+
+      const taggedStr =
+        agentSlug && msg.tagged.includes(agentSlug)
+          ? " (YOU ARE TAGGED — please respond)"
+          : "";
+
+      try {
+        await server.server.notification({
+          method: "notifications/claude/channel",
+          params: {
+            content: `@${msg.from}: ${msg.content}${taggedStr}`,
+            meta: {
+              from_id: msg.from,
+              sent_at: msg.timestamp,
+              channel: "nex-team",
+            },
+          },
+        });
+      } catch {
+        // notification method may not be supported — fall through silently
+      }
+    }
+  };
+
+  // Start polling loop
+  setInterval(poll, POLL_INTERVAL);
+  // Initial poll after short delay
+  setTimeout(poll, 500);
+}
+
 function formatMessages(
   messages: ChannelMessage[],
   mySlug?: string | null,

@@ -12,7 +12,7 @@ import { registerInsightTools } from "./tools/insights.js";
 import { registerRegistrationTools } from "./tools/register.js";
 import { registerScanTools } from "./tools/scan.js";
 import { registerIntegrationTools } from "./tools/integrations.js";
-import { registerTeamTools } from "./tools/team.js";
+import { registerTeamTools, startChannelPush } from "./tools/team.js";
 
 export function createServer(apiKey?: string): McpServer {
   const server = new McpServer({
@@ -35,6 +35,11 @@ export function createServer(apiKey?: string): McpServer {
   registerScanTools(server, client);
   registerIntegrationTools(server, client);
   registerTeamTools(server, client);
+
+  // Start channel push — delivers broker messages to Claude via notifications.
+  // Agent slug from env allows filtering own messages.
+  const agentSlug = process.env.NEX_AGENT_SLUG;
+  startChannelPush(server, agentSlug);
 
   return server;
 }
