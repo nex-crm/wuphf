@@ -1,56 +1,65 @@
 # WUPHF
 
-WUPHF is a terminal-native multi-agent office.
+WUPHF is a weird little terminal office for a team of AI coworkers.
 
-It launches a team of Claude Code agents in one tmux window, gives them a shared Slack-like `#general` channel, keeps collaboration visible, supports threads and human interview pauses, and lets you work with a team instead of a single hidden assistant loop.
+You run one command, it opens one tmux window, and suddenly you have a CEO, PM, frontend engineer, backend engineer, AI engineer, designer, CMO, and CRO all sitting in the same place arguing about what to build. That is the product.
 
-Why WUPHF? See this:
+The name is from *The Office*. If you know, you know. If you do not, this is the bit:
 
 - https://theoffice.fandom.com/wiki/WUPHF.com_(Website)
 
-## What You Get
+The joke still fits. It is one thing hitting a bunch of people at once.
 
-- One shared office channel: `#general`
-- Multiple live agent panes in the same tmux window
-- Threaded discussion instead of one giant reply dump
-- Human interview flow when the team is blocked
-- Optional Nex integration for memory, notifications, and external integrations
+## What This Actually Does
 
-## Requirements
+- gives the team one shared channel: `#general`
+- shows live agent panes in the same tmux window
+- keeps discussions in threads so the main channel does not become soup
+- lets the team pause and ask you a real blocking question
+- can optionally use Nex for memory, notifications, and integrations
 
-You need these installed locally:
+This is not “one chatbot with a fancy prompt.” The point is to make the team visible.
+
+## What You Need
+
+Install these first:
 
 - `tmux`
 - `claude`
-- Go toolchain
+- Go
 
-If you want Nex-backed features, you also need:
+If you want Nex features too, also install:
 
 - `nex`
 - `nex-mcp`
 
 ## Nex Is Optional
 
-WUPHF is not just a frontend for Nex.
+Nex makes WUPHF better, but it is not mandatory.
 
-If you start it with `--no-nex`, WUPHF disables Nex completely for that run:
-
-- no context graph reads or writes
-- no Nex integrations
-- no proactive Nex notifications
-- no setup requirement for a Nex API key
+If you do not want context graph stuff, integrations, or notifications, just run:
 
 ```bash
 ./wuphf --no-nex
 ```
 
-With Nex enabled, the office gets better context and better continuity:
+That turns Nex off for that run.
 
-- durable memory across sessions
-- proactive signals from the user’s context graph
-- integrations like email, calendar, CRM, and Slack
+What you lose:
 
-But the office itself still works without it.
+- context graph reads and writes
+- Nex-powered notifications
+- Nex integrations
+- any need to configure a Nex API key
+
+What you keep:
+
+- the office
+- the channel
+- the team
+- the arguments
+
+So no, this repo is not trying to trap people into using Nex. If you want the multi-agent office without it, that is supported on purpose.
 
 ## Build
 
@@ -72,7 +81,7 @@ Start it with Nex disabled:
 ./wuphf --no-nex
 ```
 
-Stop a running team from outside:
+Kill a running session from outside tmux:
 
 ```bash
 ./wuphf kill
@@ -94,13 +103,25 @@ Inside the office:
 /init
 ```
 
-If you want the published CLI separately, you can still install it directly:
+If for some reason you want the published CLI separately, there is still a script for that:
 
 ```bash
 bash scripts/install-latest-wuphf-cli.sh
 ```
 
-## Manual Smoke Test
+## What You Should See
+
+When it works, you should get:
+
+- one tmux window
+- `The WUPHF Office` at the top
+- `# general` as the shared channel
+- the team visible in panes
+- a working composer in the channel pane
+
+If it feels like a hidden agent loop, something is wrong.
+
+## Quick Manual Test
 
 Build:
 
@@ -114,37 +135,33 @@ Launch:
 ./wuphf
 ```
 
-What you should see:
+Then check a few basics:
 
-- one tmux window
-- `The WUPHF Office` in the header
-- `# general` as the shared channel
-- visible agent panes in the same window
-- a working composer in the channel pane
+- type `/` and make sure slash autocomplete opens
+- type `/qui` and hit `Enter`; it should submit `/quit`
+- type `@` and make sure teammate autocomplete opens
+- use `/reply <message-id>` to reply inside a thread
+- use `/reset` and make sure the office clears without killing the channel pane
 
-Quick interaction checks:
+## Automated Tests
 
-- type `/` and verify slash autocomplete opens
-- type `/qui` and press `Enter`; it should submit `/quit`
-- type `@` and verify teammate autocomplete opens
-- use `/reply <message-id>` to reply in-thread
-- use `/reset` and confirm the office state clears without killing the channel pane
-
-Termwright smoke:
+Channel smoke:
 
 ```bash
 bash tests/uat/office-channel-e2e.sh
 ```
 
-Full office E2E:
+Full office flow:
 
 ```bash
 bash tests/uat/notetaker-e2e.sh
 ```
 
-## Architecture Notes
+## A Few Notes
 
-- The main binary is built from `./cmd/wuphf`.
-- Local office/team MCP tools are Go-native and run from the same binary via an internal subcommand.
-- WUPHF no longer needs Bun to run.
-- Nex-specific behavior is kept only where it refers to the optional Nex toolchain or backend.
+- The binary lives in `./cmd/wuphf`.
+- Local office/team tools are Go-native and run from the same binary through an internal subcommand.
+- WUPHF does not need Bun anymore.
+- Nex-specific code is kept only where it is actually about Nex.
+
+In other words: this repo is the office, not a pile of leftover CLI baggage wearing a fake mustache.
