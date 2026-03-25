@@ -93,7 +93,7 @@ func TestLeadGenAgencyPack(t *testing.T) {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port && go test ./internal/agent/ -run TestPack -v`
+Run: `cd /Users/najmuzzaman/Documents/nex/WUPHF && go test ./internal/agent/ -run TestPack -v`
 Expected: FAIL — `Packs` and `GetPack` undefined
 
 - [ ] **Step 3: Implement packs.go**
@@ -210,7 +210,7 @@ package provider
 import (
 	"testing"
 
-	"github.com/wuphf/wuphf-cli/internal/config"
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 func TestDefaultResolverUsesClaudeCode(t *testing.T) {
@@ -996,8 +996,8 @@ package e2e
 
 import (
 	"testing"
-	"github.com/wuphf/wuphf-cli/internal/agent"
-	"github.com/wuphf/wuphf-cli/internal/orchestration"
+	"github.com/nex-crm/wuphf/internal/agent"
+	"github.com/nex-crm/wuphf/internal/orchestration"
 )
 
 func TestDelegationFlow(t *testing.T) {
@@ -1056,7 +1056,7 @@ git commit -m "test: add integration test for full delegation flow"
 
 - [ ] **Step 1: Run full test suite**
 
-Run: `cd /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port && go test ./...`
+Run: `cd /Users/najmuzzaman/Documents/nex/WUPHF && go test ./...`
 Expected: All tests pass (existing + new)
 
 - [ ] **Step 2: Build binary**

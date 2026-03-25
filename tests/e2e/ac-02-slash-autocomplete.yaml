@@ -1,9 +1,9 @@
 session:
-  command: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/wuphf
+  command: /Users/najmuzzaman/Documents/nex/WUPHF/wuphf
   cols: 120
   rows: 40
 artifacts:
-  dir: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/termwright-artifacts
+  dir: /Users/najmuzzaman/Documents/nex/WUPHF/termwright-artifacts
 
 steps:
   # AC-2: Type "/" -> autocomplete overlay -> Tab completes

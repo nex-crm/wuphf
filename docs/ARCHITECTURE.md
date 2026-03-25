@@ -82,7 +82,7 @@ Each agent gets `--append-system-prompt` with:
 ## File Structure
 
 ```
-cmd/wuphf/
+cmd/nex/
 ├── main.go              # Entry: ./wuphf, ./wuphf kill, ./wuphf --solo, ./wuphf --cmd
 └── channel.go           # Channel TUI (polls broker, renders, human input)
 

@@ -3,8 +3,8 @@
 > Complete context for any agent continuing this work. Read this before touching code.
 
 **Date:** 2026-03-24
-**Branch:** `nazz/experiment/multi-agent-cli`
-**Location:** `/Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port`
+**Branch:** `main`
+**Location:** `/Users/najmuzzaman/Documents/nex/WUPHF`
 
 ---
 
@@ -172,8 +172,8 @@ internal/provider/claude.go    # Claude Code subprocess provider
 
 ### To run E2E tests:
 ```bash
-cd /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port
-go build -o wuphf ./cmd/wuphf
+cd /Users/najmuzzaman/Documents/nex/WUPHF
+go build -o wuphf ./cmd/nex
 bash tests/uat/notetaker-e2e.sh    # Full team flow test
 bash tests/uat/run-e2e.sh          # Solo TUI test
 bash tests/uat/persona-tests.sh    # Multi-persona solo TUI test
@@ -194,11 +194,11 @@ bash tests/uat/persona-tests.sh    # Multi-persona solo TUI test
 
 ```bash
 # Go CLI
-go build -o wuphf ./cmd/wuphf
+go build -o wuphf ./cmd/nex
 go test ./...
 
 # MCP server
-cd /Users/najmuzzaman/Documents/wuphf/wuphf/mcp
+cd /Users/najmuzzaman/Documents/nex/WUPHF/mcp
 bun run build
 
 # Required on PATH

@@ -295,7 +295,7 @@ Port 6-layer setup hierarchy:
 ## 6. File Structure
 
 ```
-cli/.worktrees/go-bubbletea-port/
+
 ├── cmd/wuphf/main.go                    # Entry point
 ├── internal/
 │   ├── agent/
