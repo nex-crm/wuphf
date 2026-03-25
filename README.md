@@ -4,6 +4,10 @@ WUPHF is a terminal-native multi-agent office.
 
 It launches a team of Claude Code agents in one tmux window, gives them a shared Slack-like office channel, keeps threads readable, supports human interview pauses, and lets the team work together in public instead of hiding all coordination inside one assistant reply.
 
+The name is a nod to WUPHF from *The Office*: a chaotic all-channel blast that hits you everywhere at once. If you never saw that bit, this is the reference:
+
+- https://theoffice.fandom.com/wiki/WUPHF.com_(Website)
+
 ## What It Is
 
 - One shared office channel: `#general`
@@ -47,19 +51,21 @@ If you want the latest published CLI separately, install it with:
 bash scripts/install-latest-wuphf-cli.sh
 ```
 
+The same npm install step now runs automatically as part of setup:
+
+- outside the TUI with `wuphf init`
+- inside the app with `/init`
+
 ## Build
 
 ```bash
-go build -o wuphf ./cmd/nex
+go build -o wuphf ./cmd/wuphf
 ```
 
-Build the MCP server too if you want the bundled tool runtime:
-
-```bash
-cd mcp
-bun install
-bun run build
-```
+Runtime note:
+- WUPHF no longer needs Bun to run the local office tool runtime
+- when Nex is enabled, agents use the installed `nex-mcp` binary for Nex tools
+- the local office/team tools now run from the main Go binary
 
 ## Run
 
@@ -75,12 +81,6 @@ Office-only mode with Nex fully disabled:
 ./wuphf --no-nex
 ```
 
-Single-agent Bubble Tea mode:
-
-```bash
-./wuphf --solo
-```
-
 Kill a running team:
 
 ```bash
@@ -92,8 +92,7 @@ Kill a running team:
 ### 1. Build
 
 ```bash
-go build -o wuphf ./cmd/nex
-cd mcp && bun install && bun run build && cd ..
+go build -o wuphf ./cmd/wuphf
 ```
 
 ### 2. Launch the office
@@ -173,7 +172,9 @@ bash tests/uat/office-channel-e2e.sh
 
 That smoke test verifies the office channel renders, slash autocomplete appears, and typed input lands in the composer.
 
+If Nex is enabled, make sure `nex` and `nex-mcp` are installed and on `PATH`.
+
 ## Notes
 
-- The main binary is still built from `./cmd/nex`, but the shipped command and user-facing product name are `wuphf`.
+- The main binary is built from `./cmd/wuphf`.
 - Nex-specific strings are kept only where they refer to the optional Nex tool or backend.

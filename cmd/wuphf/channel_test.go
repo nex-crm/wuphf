@@ -424,6 +424,24 @@ func TestSlashAutocompleteEnterSubmitsQuitCommand(t *testing.T) {
 	}
 }
 
+func TestCtrlCRequiresDoublePress(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := next.(channelModel)
+	if cmd != nil {
+		t.Fatal("expected first ctrl+c to not quit immediately")
+	}
+	if !strings.Contains(got.notice, "Press Ctrl+C again") {
+		t.Fatalf("expected warning notice, got %q", got.notice)
+	}
+
+	_, cmd = got.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("expected second ctrl+c to emit tea.Quit")
+	}
+}
+
 func TestMentionAutocompleteFiltersAgents(t *testing.T) {
 	m := newChannelModel(false)
 	m.members = []channelMember{{Slug: "designer"}, {Slug: "cmo"}}

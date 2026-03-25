@@ -14,6 +14,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/orchestration"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/setup"
 )
 
 // StreamMessage represents a message in the chat stream.
@@ -90,8 +91,8 @@ type StreamModel struct {
 	spinnerTicking    bool
 
 	// Channel mode: agents run in tmux, no provider loop.
-	channelMode  bool
-	agentStatus  []AgentStatusEntry
+	channelMode bool
+	agentStatus []AgentStatusEntry
 
 	initFlow InitFlowModel
 }
@@ -389,14 +390,24 @@ func (m StreamModel) Update(msg tea.Msg) (StreamModel, tea.Cmd) {
 			m.picker = NewPicker("Choose Agent Pack", PackOptions())
 			m.picker.SetActive(true)
 		case InitDone:
-			m.runtime.Reconfigure()
-			m.resetDelegationState()
-			m.rewireAllAgents()
-			heading, instructions := m.initFlow.phaseText()
-			m.appendSystemMessage(heading + " — " + instructions)
-			m.appendSystemMessage(m.runtimeSummary())
-			m.updateSpinnerLabel()
+			return m, applySoloSetup()
 		}
+
+	case SetupApplyMsg:
+		if msg.Err != nil {
+			m.appendSystemMessage("Setup failed: " + msg.Err.Error())
+			break
+		}
+		m.runtime.Reconfigure()
+		m.resetDelegationState()
+		m.rewireAllAgents()
+		if strings.TrimSpace(msg.Notice) != "" {
+			m.appendSystemMessage(msg.Notice)
+		}
+		heading, instructions := m.initFlow.phaseText()
+		m.appendSystemMessage(heading + " — " + instructions)
+		m.appendSystemMessage(m.runtimeSummary())
+		m.updateSpinnerLabel()
 
 	case SlashResultMsg:
 		if msg.Err != nil {
@@ -1296,7 +1307,7 @@ func (m StreamModel) renderAgentStatusLine(width int) string {
 			shortName = shortName[:8]
 		}
 		style := agentActivityStyle(s.Activity)
-		part := style.Render(icon+" "+shortName+" "+label)
+		part := style.Render(icon + " " + shortName + " " + label)
 		parts = append(parts, part)
 	}
 	line := strings.Join(parts, "  ")
@@ -1356,6 +1367,13 @@ func (m *StreamModel) appendSystemMessage(content string) {
 		Content:   content,
 		Timestamp: time.Now(),
 	})
+}
+
+func applySoloSetup() tea.Cmd {
+	return func() tea.Msg {
+		notice, err := setup.InstallLatestCLI()
+		return SetupApplyMsg{Notice: notice, Err: err}
+	}
 }
 
 func (m *StreamModel) ensureSpinnerTick() tea.Cmd {

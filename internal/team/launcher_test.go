@@ -1,8 +1,10 @@
 package team
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -90,4 +92,124 @@ func TestFetchAndIngestNexNotificationsSeedsCursorOnColdStart(t *testing.T) {
 	if len(b.Messages()) != 0 {
 		t.Fatalf("expected no notifications to be posted on cold start, got %d", len(b.Messages()))
 	}
+}
+
+func TestEnsureMCPConfigUsesLocalGoTeamServer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	l := &Launcher{cwd: t.TempDir()}
+
+	path, err := l.ensureMCPConfig()
+	if err != nil {
+		t.Fatalf("ensureMCPConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+
+	var cfg struct {
+		MCPServers map[string]struct {
+			Command string   `json:"command"`
+			Args    []string `json:"args"`
+		} `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	server, ok := cfg.MCPServers["wuphf-office"]
+	if !ok {
+		t.Fatal("expected wuphf-office MCP server entry")
+	}
+	wantCommand, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	if server.Command != wantCommand {
+		t.Fatalf("expected command %q, got %q", wantCommand, server.Command)
+	}
+	if len(server.Args) != 1 || server.Args[0] != "mcp-team" {
+		t.Fatalf("expected args [mcp-team], got %v", server.Args)
+	}
+}
+
+func TestShouldPrimeClaudePane(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{
+			name:    "trust prompt",
+			content: "Security guide\n❯ 1. Yes, I trust this folder\n2. No, exit\nEnter to confirm",
+			want:    true,
+		},
+		{
+			name:    "chrome startup hint",
+			content: "❯\n  ⏵⏵ bypass permissions on (...)\n  Claude in Chrome…",
+			want:    true,
+		},
+		{
+			name:    "normal conversation",
+			content: "@ceo I think the wedge should be meeting notes to follow-up tasks.",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldPrimeClaudePane(tt.content); got != tt.want {
+				t.Fatalf("shouldPrimeClaudePane(%q) = %v, want %v", tt.content, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChannelPaneNeedsRespawn(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+		want   bool
+	}{
+		{name: "healthy channel", status: "0 0 wuphf", want: false},
+		{name: "dead pane", status: "1 1 dead", want: true},
+		{name: "missing command", status: "", want: false},
+		{name: "wrong command", status: "0 0 bash", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := channelPaneNeedsRespawn(tt.status); got != tt.want {
+				t.Fatalf("channelPaneNeedsRespawn(%q) = %v, want %v", tt.status, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsNoSessionError(t *testing.T) {
+	if !isNoSessionError("can't find pane") {
+		t.Fatal("expected can't find pane to be treated as no-session")
+	}
+	if !isNoSessionError("no server running on /tmp/tmux") {
+		t.Fatal("expected no server error to be treated as no-session")
+	}
+	if isNoSessionError("permission denied") {
+		t.Fatal("did not expect unrelated error to be treated as no-session")
+	}
+}
+
+func TestChannelPaneLogPaths(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if got := channelStderrLogPath(); !strings.Contains(got, ".wuphf/logs/channel-stderr.log") {
+		t.Fatalf("unexpected stderr log path: %q", got)
+	}
+	if got := channelPaneSnapshotPath(); !strings.Contains(got, ".wuphf/logs/channel-pane.log") {
+		t.Fatalf("unexpected pane log path: %q", got)
+	}
+}
+
+func TestPrimeVisibleAgentsWithoutBrokerDoesNotPanic(t *testing.T) {
+	l := &Launcher{sessionName: SessionName}
+	l.primeVisibleAgents()
 }

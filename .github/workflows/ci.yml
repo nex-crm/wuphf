@@ -18,14 +18,3 @@ jobs:
           go-version-file: go.mod
       - run: go test ./...
       - run: go build -o wuphf ./cmd/nex
-
-  mcp:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: mcp
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run build

@@ -3,9 +3,10 @@
 ## Office Build
 
 ```bash
-go build -o wuphf ./cmd/nex
-cd mcp && bun install && bun run build && cd ..
+go build -o wuphf ./cmd/wuphf
 ```
+
+For normal app usage you do not need Bun. The local office/team MCP tools now run from the main Go binary through the hidden `wuphf mcp-team` subcommand.
 
 ## Latest Published CLI
 
@@ -17,9 +18,15 @@ If you need the latest published CLI separately:
 bash scripts/install-latest-wuphf-cli.sh
 ```
 
+The same install step is also wired into setup:
+
+```bash
+./wuphf init
+```
+
 ## Environments
 
-The WUPHF runtime and bundled MCP server read `WUPHF_BASE_URL` from the environment, falling back to `https://app.nex.ai` in production.
+The WUPHF runtime reads `WUPHF_BASE_URL` from the environment, falling back to `https://app.nex.ai` in production.
 
 | Environment | `WUPHF_BASE_URL` |
 |-------------|----------------|

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/tui/render"
 )
 
@@ -51,7 +53,37 @@ func cmdQuit(ctx *SlashContext, args string) error {
 }
 
 func cmdInit(ctx *SlashContext, args string) error {
-	ctx.AddMessage("system", "Starting setup — follow the prompts to configure your environment.")
+	if config.ResolveNoNex() {
+		ctx.AddMessage("system", "Nex integration is disabled for this session (--no-nex). Start WUPHF without --no-nex to run setup.")
+		return nil
+	}
+
+	cfg, _ := config.Load()
+	if cfg.APIKey == "" {
+		cfg.APIKey = config.ResolveAPIKey("")
+	}
+	if cfg.LLMProvider == "" {
+		cfg.LLMProvider = "claude-code"
+	}
+	if cfg.Pack == "" {
+		cfg.Pack = "founding-team"
+	}
+	if pack := agent.GetPack(cfg.Pack); pack != nil {
+		cfg.TeamLeadSlug = pack.LeadSlug
+	}
+	if err := config.Save(cfg); err != nil {
+		return err
+	}
+
+	notice, err := setup.InstallLatestCLI()
+	if err != nil {
+		return err
+	}
+	ctx.AddMessage("system", notice)
+	ctx.AddMessage("system", fmt.Sprintf("Setup defaults saved. Provider: %s | Pack: %s", cfg.LLMProvider, cfg.Pack))
+	if cfg.APIKey == "" {
+		ctx.AddMessage("system", "No WUPHF API key is configured yet. Run interactive /init inside WUPHF to add one.")
+	}
 	return nil
 }
 

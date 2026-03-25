@@ -2,6 +2,9 @@ package commands
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -174,5 +177,33 @@ func TestDispatchJSON(t *testing.T) {
 	}
 	if len(result.Output) == 0 || result.Output[0] != '{' {
 		t.Errorf("expected JSON output, got: %s", result.Output)
+	}
+}
+
+func TestDispatchInitInstallsLatestCLI(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_API_KEY", "")
+	t.Setenv("NEX_API_KEY", "")
+
+	dir := t.TempDir()
+	logFile := filepath.Join(dir, "args.log")
+	npmPath := filepath.Join(dir, "npm")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > '" + strings.ReplaceAll(logFile, "'", "'\"'\"'") + "'\n"
+	if err := os.WriteFile(npmPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake npm: %v", err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("WUPHF_CLI_INSTALL_BIN", "npm")
+	t.Setenv("WUPHF_CLI_PACKAGE", "@example/wuphf")
+
+	result := Dispatch("/init", "", "text", 0)
+	if result.ExitCode != 0 {
+		t.Fatalf("expected exit code 0, got %d (%s)", result.ExitCode, result.Error)
+	}
+	if !strings.Contains(result.Output, "Latest @example/wuphf CLI installed from npm.") {
+		t.Fatalf("expected install notice, got %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "Setup defaults saved.") {
+		t.Fatalf("expected setup defaults notice, got %q", result.Output)
 	}
 }

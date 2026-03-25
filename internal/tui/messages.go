@@ -89,6 +89,11 @@ type ProviderChoiceMsg struct {
 	Provider string
 }
 
+type SetupApplyMsg struct {
+	Notice string
+	Err    error
+}
+
 // View switching
 
 type ViewSwitchMsg struct {

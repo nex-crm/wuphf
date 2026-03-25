@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -20,6 +22,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
 )
@@ -95,7 +98,10 @@ type channelTickMsg time.Time
 type channelPostDoneMsg struct{ err error }
 type channelInterviewAnswerDoneMsg struct{ err error }
 type channelResetDoneMsg struct{ err error }
-type channelInitDoneMsg struct{ err error }
+type channelInitDoneMsg struct {
+	err    error
+	notice string
+}
 type channelIntegrationDoneMsg struct {
 	label string
 	url   string
@@ -220,6 +226,7 @@ type channelModel struct {
 	threadInputPos   int
 	threadScroll     int
 	usage            channelUsageState
+	lastCtrlCAt      time.Time
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
@@ -331,8 +338,14 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ── Global keys (always active) ───────────────────────────────
 		switch msg.String() {
 		case "ctrl+c":
-			killTeamSession()
-			return m, tea.Quit
+			now := time.Now()
+			if !m.lastCtrlCAt.IsZero() && now.Sub(m.lastCtrlCAt) <= 2*time.Second {
+				killTeamSession()
+				return m, tea.Quit
+			}
+			m.lastCtrlCAt = now
+			m.notice = "Press Ctrl+C again to quit WUPHF."
+			return m, nil
 		case "ctrl+b":
 			m.sidebarCollapsed = !m.sidebarCollapsed
 			return m, nil
@@ -449,6 +462,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ── focusMain: existing behavior ──────────────────────────────
 		switch msg.String() {
 		case "enter":
+			m.lastCtrlCAt = time.Time{}
 			if len(m.input) > 0 {
 				text := string(m.input)
 				trimmed := strings.TrimSpace(text)
@@ -477,38 +491,46 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "backspace":
+			m.lastCtrlCAt = time.Time{}
 			if m.inputPos > 0 {
 				m.input = append(m.input[:m.inputPos-1], m.input[m.inputPos:]...)
 				m.inputPos--
 				m.updateInputOverlays()
 			}
 		case "ctrl+u":
+			m.lastCtrlCAt = time.Time{}
 			m.input = nil
 			m.inputPos = 0
 			m.updateInputOverlays()
 		case "ctrl+a":
+			m.lastCtrlCAt = time.Time{}
 			m.inputPos = 0
 			m.updateInputOverlays()
 		case "ctrl+e":
+			m.lastCtrlCAt = time.Time{}
 			m.inputPos = len(m.input)
 			m.updateInputOverlays()
 		case "left":
+			m.lastCtrlCAt = time.Time{}
 			if m.inputPos > 0 {
 				m.inputPos--
 				m.updateInputOverlays()
 			}
 		case "right":
+			m.lastCtrlCAt = time.Time{}
 			if m.inputPos < len(m.input) {
 				m.inputPos++
 				m.updateInputOverlays()
 			}
 		case "up":
+			m.lastCtrlCAt = time.Time{}
 			if m.pending != nil && m.selectedOption > 0 {
 				m.selectedOption--
 			} else {
 				m.scroll++
 			}
 		case "down":
+			m.lastCtrlCAt = time.Time{}
 			if m.pending != nil && m.selectedOption < m.interviewOptionCount()-1 {
 				m.selectedOption++
 			} else {
@@ -518,13 +540,17 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "home":
+			m.lastCtrlCAt = time.Time{}
 			m.scroll = 1 << 30
 		case "end":
+			m.lastCtrlCAt = time.Time{}
 			m.scroll = 0
 			m.unreadCount = 0
 		case "pgup":
+			m.lastCtrlCAt = time.Time{}
 			m.scroll += maxInt(10, m.height/2)
 		case "pgdown":
+			m.lastCtrlCAt = time.Time{}
 			m.scroll -= maxInt(10, m.height/2)
 			if m.scroll < 0 {
 				m.scroll = 0
@@ -533,6 +559,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.unreadCount = 0
 			}
 		default:
+			m.lastCtrlCAt = time.Time{}
 			// Type character
 			if msg.Type == tea.KeySpace {
 				ch := []rune{' '}
@@ -604,7 +631,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.notice = "Setup failed: " + msg.err.Error()
 		} else {
-			m.notice = "Setup applied. Team reloaded with the new configuration."
+			m.notice = strings.TrimSpace(msg.notice)
+			if m.notice == "" {
+				m.notice = "Setup applied. Team reloaded with the new configuration."
+			}
 		}
 		m.initFlow = tui.NewInitFlow()
 		m.picker.SetActive(false)
@@ -712,7 +742,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pickerMode = channelPickerInitPack
 		case tui.InitDone:
 			m.posting = true
-			return m, tea.Batch(cmd, reconfigureTeamAgents())
+			return m, tea.Batch(cmd, applyTeamSetup())
 		}
 		return m, cmd
 
@@ -2250,8 +2280,12 @@ func resetTeamSession() tea.Cmd {
 	}
 }
 
-func reconfigureTeamAgents() tea.Cmd {
+func applyTeamSetup() tea.Cmd {
 	return func() tea.Msg {
+		notice, err := setup.InstallLatestCLI()
+		if err != nil {
+			return channelInitDoneMsg{err: err}
+		}
 		l, err := team.NewLauncher("")
 		if err != nil {
 			return channelInitDoneMsg{err: err}
@@ -2259,7 +2293,7 @@ func reconfigureTeamAgents() tea.Cmd {
 		if err := l.ReconfigureSession(); err != nil {
 			return channelInitDoneMsg{err: err}
 		}
-		return channelInitDoneMsg{}
+		return channelInitDoneMsg{notice: notice + " Setup applied. Team reloaded with the new configuration."}
 	}
 }
 
@@ -2433,9 +2467,46 @@ func isA2UIType(t string) bool {
 }
 
 func runChannelView(threadsCollapsed bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			reportChannelCrash(fmt.Sprintf("panic: %v\n\n%s", r, debug.Stack()))
+		}
+	}()
 	p := tea.NewProgram(newChannelModel(threadsCollapsed), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "channel view error: %v\n", err)
-		os.Exit(1)
+		reportChannelCrash(fmt.Sprintf("channel view error: %v\n", err))
 	}
+}
+
+func reportChannelCrash(details string) {
+	_ = appendChannelCrashLog(details)
+	fmt.Fprintln(os.Stderr, "WUPHF channel crashed.")
+	fmt.Fprintln(os.Stderr, "Log:", channelCrashLogPath())
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintln(os.Stderr, "The rest of the team is still running.")
+	fmt.Fprintln(os.Stderr, "Use `tmux -L wuphf attach -t wuphf-team` to inspect panes,")
+	fmt.Fprintln(os.Stderr, "then restart WUPHF when ready.")
+	select {}
+}
+
+func appendChannelCrashLog(details string) error {
+	path := channelCrashLogPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "\n[%s]\n%s\n", time.Now().Format(time.RFC3339), details)
+	return err
+}
+
+func channelCrashLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".wuphf-channel-crash.log"
+	}
+	return filepath.Join(home, ".wuphf", "logs", "channel-crash.log")
 }

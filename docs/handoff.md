@@ -94,7 +94,6 @@ These are DIFFERENT. Don't conflate them. Team chatter is NOT stored in the know
 | Notification push | ✅ | tmux send-keys (interim) |
 | `/quit` kills everything | ✅ | Channel, agents, broker, tmux |
 | `./wuphf kill` from outside | ✅ | Graceful cleanup |
-| `./wuphf --solo` TUI | ✅ | Single-agent with 55+ commands |
 | `./wuphf --cmd` dispatch | ✅ | Non-interactive |
 | Pane border labels | ⚠️ | Set but Claude overrides with "✳ Claude Code" |
 | Agent auto-response | ⚠️ | tmux send-keys works but interrupts mid-thought |
@@ -131,21 +130,20 @@ These are DIFFERENT. Don't conflate them. Team chatter is NOT stored in the know
 
 ### Core (what you'll touch most)
 ```
-cmd/wuphf/main.go              # Entry point: ./wuphf, ./wuphf kill, --solo, --cmd
+cmd/wuphf/main.go              # Entry point: ./wuphf, ./wuphf kill, --cmd
 cmd/wuphf/channel.go           # Channel TUI: polls broker, renders, input
 internal/team/launcher.go    # tmux mgmt, agent spawning, notification loop
 internal/team/broker.go      # HTTP message broker localhost:7890
 internal/agent/packs.go      # 3 pack definitions
 internal/agent/prompts.go    # System prompt generation
-mcp/src/tools/team.ts        # team_broadcast/poll/status/members + channel push
-mcp/src/server.ts            # MCP server with team tool registration
+internal/teammcp/server.go   # Go MCP server for office/team tools
 ```
 
 ### Supporting (stable, rarely changed)
 ```
 internal/commands/slash.go     # 21 commands
 internal/commands/cmd_*.go     # Command implementations
-internal/tui/stream.go         # Classic single-agent TUI
+internal/tui/stream.go         # Shared Bubble Tea stream/runtime components
 internal/tui/model.go          # Root Bubbletea model
 internal/orchestration/        # Message router, delegator
 internal/provider/claude.go    # Claude Code subprocess provider
@@ -157,7 +155,7 @@ internal/provider/claude.go    # Claude Code subprocess provider
 
 ### To fix P0-1 (MCP channel push):
 1. In `launcher.go claudeCommand()`, add `--dangerously-load-development-channels wuphf` to the claude args
-2. Verify `mcp/src/tools/team.ts startChannelPush()` actually delivers notifications
+2. Verify office tool notifications deliver without tmux send-keys
 3. Test: post to broker via curl, verify agent's Claude session shows the message without tmux send-keys
 4. Remove `notifyAgentsLoop` once MCP push works
 
@@ -173,10 +171,9 @@ internal/provider/claude.go    # Claude Code subprocess provider
 ### To run E2E tests:
 ```bash
 cd /Users/najmuzzaman/Documents/nex/WUPHF
-go build -o wuphf ./cmd/nex
+go build -o wuphf ./cmd/wuphf
 bash tests/uat/notetaker-e2e.sh    # Full team flow test
-bash tests/uat/run-e2e.sh          # Solo TUI test
-bash tests/uat/persona-tests.sh    # Multi-persona solo TUI test
+bash tests/uat/office-channel-e2e.sh
 ```
 
 ### To test manually:
@@ -193,17 +190,13 @@ bash tests/uat/persona-tests.sh    # Multi-persona solo TUI test
 ## 8. Build & Dependencies
 
 ```bash
-# Go CLI
-go build -o wuphf ./cmd/nex
+# Go runtime
+go build -o wuphf ./cmd/wuphf
 go test ./...
-
-# MCP server
-cd /Users/najmuzzaman/Documents/nex/WUPHF/mcp
-bun run build
 
 # Required on PATH
 tmux, claude
 ```
 
 Go deps: `charmbracelet/bubbletea`, `charmbracelet/lipgloss`, `charmbracelet/x/vt`, `creack/pty/v2`
-MCP deps: `@modelcontextprotocol/sdk`, `zod`
+Go MCP deps: `modelcontextprotocol/go-sdk`

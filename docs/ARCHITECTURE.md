@@ -12,7 +12,6 @@
 ```bash
 ./wuphf                    # Launch team (default: founding team, 7 agents)
 ./wuphf --pack coding-team # Launch coding team (4 agents)
-./wuphf --solo             # Single-agent TUI (no team)
 ./wuphf --cmd "/help"      # Non-interactive command
 ./wuphf kill               # Stop the team
 ```
@@ -57,12 +56,15 @@ Navigation:
 - `query_context` retrieves across sessions
 - WUPHF hooks (SessionStart, UserPromptSubmit) provide automatic context
 
-### MCP Tools (in WUPHF MCP server)
+### Office Tools
 - `team_broadcast` — post to channel
 - `team_poll` — read recent messages
 - `team_status` — share current activity
 - `team_members` — see who's active
-- `notifications/claude/channel` — push messages into Claude sessions
+- `human_interview` — block on a human answer when the team cannot proceed responsibly
+
+These tools now run from the main Go binary via the hidden `wuphf mcp-team` subcommand.
+Generic Nex tools come from the installed `nex-mcp` binary when Nex is enabled.
 
 ## Agent Packs
 
@@ -82,8 +84,8 @@ Each agent gets `--append-system-prompt` with:
 ## File Structure
 
 ```
-cmd/nex/
-├── main.go              # Entry: ./wuphf, ./wuphf kill, ./wuphf --solo, ./wuphf --cmd
+cmd/wuphf/
+├── main.go              # Entry: ./wuphf, ./wuphf kill, ./wuphf --cmd
 └── channel.go           # Channel TUI (polls broker, renders, human input)
 
 internal/
@@ -116,10 +118,8 @@ internal/
 ├── chat/                 # Chat channels + messages
 ├── calendar/             # Cron scheduling
 ├── config/               # Configuration
-└── api/                  # WUPHF HTTP client
-
-mcp/src/tools/
-└── team.ts               # team_broadcast/poll/status/members + channel push
+├── api/                  # WUPHF HTTP client
+└── teammcp/              # Go MCP server for office/team tools
 ```
 
 ## What Works (Verified)
@@ -128,7 +128,6 @@ mcp/src/tools/
 - Channel TUI displays messages, accepts human input
 - `/quit` kills entire session
 - `./wuphf kill` stops from outside
-- `./wuphf --solo` single-agent TUI with 55+ commands
 - `./wuphf --cmd` non-interactive dispatch
 - 340+ unit tests pass
 

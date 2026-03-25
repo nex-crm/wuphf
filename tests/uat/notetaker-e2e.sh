@@ -114,7 +114,9 @@ for attempt in 1 2 3 4 5; do
     if echo "$CONTENT" | grep -qi "trust this folder"; then
       continue
     fi
-    if echo "$PANE_CMD" | grep -qi "2.1.81\|claude"; then
+    # Newer Claude builds report the binary version as pane_current_command,
+    # while older ones report "claude". Accept either form.
+    if echo "$PANE_CMD" | grep -qiE 'claude|^[0-9]+\.[0-9]+\.[0-9]+$'; then
       BOOTED=$((BOOTED + 1))
     fi
   done

@@ -33,6 +33,7 @@ const (
 	SessionName                     = "wuphf-team"
 	tmuxSocketName                  = "wuphf"
 	defaultNotificationPollInterval = 15 * time.Minute
+	channelRespawnDelay             = 8 * time.Second
 )
 
 type nexFeedItemContentItem struct {
@@ -109,9 +110,6 @@ func (l *Launcher) Preflight() error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude not found. Install: npm install -g @anthropic-ai/claude-code")
 	}
-	if _, err := exec.LookPath("bun"); err != nil {
-		return fmt.Errorf("bun not found. Install: curl -fsSL https://bun.sh/install | bash")
-	}
 	return nil
 }
 
@@ -119,9 +117,6 @@ func (l *Launcher) Preflight() error {
 //   - Window 0 "team": Channel on left, agent panes on the right
 //   - No extra windows: all team activity is visible in one place
 func (l *Launcher) Launch() error {
-	if err := l.ensureMCPRuntime(); err != nil {
-		return fmt.Errorf("prepare mcp runtime: %w", err)
-	}
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)
@@ -142,10 +137,13 @@ func (l *Launcher) Launch() error {
 
 	// Resolve wuphf binary path for the channel view
 	wuphfBinary, _ := os.Executable()
+	if err := os.MkdirAll(filepath.Dir(channelStderrLogPath()), 0o700); err != nil {
+		return fmt.Errorf("prepare channel log dir: %w", err)
+	}
 
 	// Window 0 "team": channel on the left
 	// Pass broker token via env so channel view + agents can authenticate
-	channelCmd := fmt.Sprintf("WUPHF_BROKER_TOKEN=%s %s --channel-view", l.broker.Token(), wuphfBinary)
+	channelCmd := fmt.Sprintf("WUPHF_BROKER_TOKEN=%s %s --channel-view 2>>%s", l.broker.Token(), wuphfBinary, shellQuote(channelStderrLogPath()))
 	err = exec.Command("tmux", "-L", tmuxSocketName, "new-session", "-d",
 		"-s", l.sessionName,
 		"-n", "team",
@@ -163,6 +161,10 @@ func (l *Launcher) Launch() error {
 	// Hide tmux's default status bar — our channel TUI has its own.
 	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"status", "off",
+	).Run()
+	// Keep panes visible if a process exits so crashes don't collapse the layout.
+	exec.Command("tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
+		"remain-on-exit", "on",
 	).Run()
 
 	visibleSlugs, err := l.spawnVisibleAgents()
@@ -217,6 +219,8 @@ func (l *Launcher) Launch() error {
 	).Run()
 
 	// Start the notification loop that pushes new messages to agent panes
+	go l.watchChannelPaneLoop(channelCmd)
+	go l.primeVisibleAgents()
 	go l.notifyAgentsLoop()
 	go l.pollNexNotificationsLoop()
 
@@ -251,25 +255,170 @@ func (l *Launcher) notifyAgentsLoop() {
 				if slug == msg.From {
 					continue
 				}
+				l.sendChannelUpdate(i+1, slug, msg.ID, msg.From, msg.Content)
+			}
+		}
+	}
+}
 
-				// Build a single-line prompt for Claude (no newlines — send-keys types literally)
-				notification := fmt.Sprintf(
-					"[Channel update %s from @%s]: %s — Please call team_poll with my_slug \"%s\" to read the channel. If you're directly responding to this message, reply in-thread with team_broadcast reply_to_id \"%s\".",
-					msg.ID, msg.From, truncate(msg.Content, 150), slug, msg.ID,
-				)
+func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
+	unhealthyCount := 0
+	var deadSince time.Time
+	snapshotWritten := false
+	for {
+		time.Sleep(2 * time.Second)
 
-				paneTarget := fmt.Sprintf("%s:team.%d", l.sessionName, i+1)
+		status, err := l.channelPaneStatus()
+		if err != nil {
+			if isNoSessionError(err.Error()) {
+				return
+			}
+			continue
+		}
+		if !channelPaneNeedsRespawn(status) {
+			unhealthyCount = 0
+			deadSince = time.Time{}
+			snapshotWritten = false
+			continue
+		}
+		unhealthyCount++
+		if unhealthyCount < 2 {
+			continue
+		}
+		if deadSince.IsZero() {
+			deadSince = time.Now()
+		}
+		if !snapshotWritten {
+			_ = l.captureDeadChannelPane(status)
+			snapshotWritten = true
+		}
+		if time.Since(deadSince) < channelRespawnDelay {
+			continue
+		}
+		unhealthyCount = 0
+		deadSince = time.Time{}
+		snapshotWritten = false
+		target := l.sessionName + ":team.0"
+		exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
+			"-t", target,
+			"-c", l.cwd,
+			channelCmd,
+		).Run()
+		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+			"-t", target,
+			"-T", "📢 channel",
+		).Run()
+	}
+}
+
+func (l *Launcher) channelPaneStatus() (string, error) {
+	out, err := exec.Command("tmux", "-L", tmuxSocketName, "display-message",
+		"-p",
+		"-t", l.sessionName+":team.0",
+		"#{pane_dead} #{pane_dead_status} #{pane_current_command}",
+	).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func channelPaneNeedsRespawn(status string) bool {
+	if strings.TrimSpace(status) == "" {
+		return false
+	}
+	fields := strings.Fields(status)
+	if len(fields) == 0 {
+		return false
+	}
+	return fields[0] == "1"
+}
+
+func isNoSessionError(msg string) bool {
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "can't find") || strings.Contains(msg, "no server")
+}
+
+func (l *Launcher) captureDeadChannelPane(status string) error {
+	content, err := l.capturePaneContent(0)
+	if err != nil {
+		content = fmt.Sprintf("<capture failed: %v>", err)
+	}
+	path := channelPaneSnapshotPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "\n[%s] status=%s\n%s\n", time.Now().Format(time.RFC3339), status, content)
+	return err
+}
+
+func channelStderrLogPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".wuphf-channel-stderr.log"
+	}
+	return filepath.Join(home, ".wuphf", "logs", "channel-stderr.log")
+}
+
+func channelPaneSnapshotPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".wuphf-channel-pane.log"
+	}
+	return filepath.Join(home, ".wuphf", "logs", "channel-pane.log")
+}
+
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// primeVisibleAgents clears Claude startup interactivity in newly spawned panes and
+// replays a catch-up channel nudge once they are actually ready to read it.
+func (l *Launcher) primeVisibleAgents() {
+	if l.broker == nil {
+		return
+	}
+	time.Sleep(2 * time.Second)
+
+	panes := l.agentPaneSlugs()
+	if len(panes) == 0 {
+		return
+	}
+
+	for attempt := 0; attempt < 4; attempt++ {
+		for i := range panes {
+			paneIdx := i + 1 // pane 0 is the office channel
+			content, err := l.capturePaneContent(paneIdx)
+			if err != nil {
+				continue
+			}
+			if shouldPrimeClaudePane(content) {
 				exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
-					"-t", paneTarget,
-					"-l",
-					notification,
-				).Run()
-				exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
-					"-t", paneTarget,
+					"-t", fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx),
 					"Enter",
 				).Run()
 			}
 		}
+		time.Sleep(2 * time.Second)
+	}
+
+	// If the human already posted while Claude was still booting, replay a catch-up nudge
+	// so the first visible message is not lost forever behind the startup interactivity.
+	msgs := l.broker.Messages()
+	if len(msgs) == 0 {
+		return
+	}
+	latest := msgs[len(msgs)-1]
+	for i, slug := range panes {
+		if slug == latest.From {
+			continue
+		}
+		l.sendChannelUpdate(i+1, slug, latest.ID, latest.From, latest.Content)
 	}
 }
 
@@ -504,9 +653,6 @@ func (l *Launcher) ReconfigureSession() error {
 }
 
 func (l *Launcher) reconfigureVisibleAgents() error {
-	if err := l.ensureMCPRuntime(); err != nil {
-		return fmt.Errorf("prepare mcp runtime: %w", err)
-	}
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)
@@ -547,7 +693,41 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 		).Run()
 	}
 
+	if l.broker != nil {
+		go l.primeVisibleAgents()
+	}
+
 	return nil
+}
+
+func (l *Launcher) sendChannelUpdate(paneIdx int, slug, msgID, from, content string) {
+	notification := fmt.Sprintf(
+		"[Channel update %s from @%s]: %s — Please call team_poll with my_slug \"%s\" to read the channel. If you're directly responding to this message, reply in-thread with team_broadcast reply_to_id \"%s\".",
+		msgID, from, truncate(content, 150), slug, msgID,
+	)
+
+	paneTarget := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
+	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget,
+		"-l",
+		notification,
+	).Run()
+	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget,
+		"Enter",
+	).Run()
+}
+
+func (l *Launcher) capturePaneContent(paneIdx int) (string, error) {
+	target := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
+	out, err := exec.Command("tmux", "-L", tmuxSocketName, "capture-pane",
+		"-p", "-J",
+		"-t", target,
+	).CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 func ResetBrokerState() error {
@@ -634,6 +814,14 @@ func parseAgentPaneIndices(output string) []int {
 		panes = append(panes, idx)
 	}
 	return panes
+}
+
+func shouldPrimeClaudePane(content string) bool {
+	normalized := strings.ToLower(content)
+	return strings.Contains(normalized, "trust this folder") ||
+		strings.Contains(normalized, "security guide") ||
+		strings.Contains(normalized, "enter to confirm") ||
+		strings.Contains(normalized, "claude in chrome")
 }
 
 func (l *Launcher) spawnVisibleAgents() ([]string, error) {
@@ -917,28 +1105,37 @@ func (l *Launcher) resolvePermissionFlags(slug string) string {
 }
 
 func (l *Launcher) ensureMCPConfig() (string, error) {
-	root := l.cwd
 	apiKey := config.ResolveAPIKey("")
+	servers := map[string]any{}
+	wuphfBinary, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
 
-	entry := map[string]any{
-		"command": "bun",
-		"args":    []string{filepath.Join(root, "mcp", "src", "index.ts")},
+	servers["wuphf-office"] = map[string]any{
+		"command": wuphfBinary,
+		"args":    []string{"mcp-team"},
 	}
-	env := map[string]string{}
-	if apiKey != "" && !config.ResolveNoNex() {
-		env["WUPHF_API_KEY"] = apiKey
-	}
-	if config.ResolveNoNex() {
-		env["WUPHF_NO_NEX"] = "1"
-	}
-	if len(env) > 0 {
-		entry["env"] = env
+
+	if !config.ResolveNoNex() {
+		if nexMCP, err := exec.LookPath("nex-mcp"); err == nil {
+			nexEnv := map[string]string{}
+			if apiKey != "" {
+				nexEnv["WUPHF_API_KEY"] = apiKey
+				nexEnv["NEX_API_KEY"] = apiKey
+			}
+			nexEntry := map[string]any{
+				"command": nexMCP,
+			}
+			if len(nexEnv) > 0 {
+				nexEntry["env"] = nexEnv
+			}
+			servers["nex"] = nexEntry
+		}
 	}
 
 	cfg := map[string]any{
-		"mcpServers": map[string]any{
-			"wuphf": entry,
-		},
+		"mcpServers": servers,
 	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
@@ -950,17 +1147,6 @@ func (l *Launcher) ensureMCPConfig() (string, error) {
 		return "", err
 	}
 	return path, nil
-}
-
-func (l *Launcher) ensureMCPRuntime() error {
-	if _, err := os.Stat(filepath.Join(l.cwd, "mcp", "node_modules", "zod", "package.json")); err == nil {
-		return nil
-	}
-	cmd := exec.Command("bun", "install")
-	cmd.Dir = filepath.Join(l.cwd, "mcp")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
 }
 
 func teamVoiceForSlug(slug string) string {
