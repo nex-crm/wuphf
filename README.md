@@ -4,7 +4,7 @@ WUPHF is a terminal-native multi-agent office.
 
 It launches a team of Claude Code agents in one tmux window, gives them a shared Slack-like `#general` channel, keeps collaboration visible, supports threads and human interview pauses, and lets you work with a team instead of a single hidden assistant loop.
 
-The name is a nod to WUPHF from *The Office*:
+Why WUPHF? See this:
 
 - https://theoffice.fandom.com/wiki/WUPHF.com_(Website)
 
