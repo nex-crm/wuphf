@@ -37,6 +37,16 @@ With Nex enabled, the experience gets better:
 
 But it is not required.
 
+## Latest CLI
+
+This repo no longer vendors the old standalone WUPHF/Nex CLI command surface.
+
+If you want the latest published CLI separately, install it with:
+
+```bash
+bash scripts/install-latest-wuphf-cli.sh
+```
+
 ## Build
 
 ```bash
@@ -166,4 +176,4 @@ That smoke test verifies the office channel renders, slash autocomplete appears,
 ## Notes
 
 - The main binary is still built from `./cmd/nex`, but the shipped command and user-facing product name are `wuphf`.
-- Nex-specific strings are kept only where they refer to the actual optional Nex tool or backend.
+- Nex-specific strings are kept only where they refer to the optional Nex tool or backend.

@@ -1,8 +1,25 @@
 # Development
 
+## Office Build
+
+```bash
+go build -o wuphf ./cmd/nex
+cd mcp && bun install && bun run build && cd ..
+```
+
+## Latest Published CLI
+
+The old standalone CLI is no longer vendored in this repo.
+
+If you need the latest published CLI separately:
+
+```bash
+bash scripts/install-latest-wuphf-cli.sh
+```
+
 ## Environments
 
-Both wrapper scripts read `WUPHF_BASE_URL` from the environment, falling back to `https://app.nex.ai` in production.
+The WUPHF runtime and bundled MCP server read `WUPHF_BASE_URL` from the environment, falling back to `https://app.nex.ai` in production.
 
 | Environment | `WUPHF_BASE_URL` |
 |-------------|----------------|
@@ -23,6 +40,4 @@ export WUPHF_BASE_URL="http://localhost:30000"
 unset WUPHF_BASE_URL
 ```
 
-or set it directly to .zshrc or .bashrc
-
-The registration script also supports `WUPHF_REGISTER_URL` for a full override if the registration endpoint differs from the base pattern.
+or set it directly in `.zshrc` or `.bashrc`.
