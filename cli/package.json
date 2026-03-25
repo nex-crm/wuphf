@@ -1,0 +1,51 @@
+{
+  "name": "@wuphf/wuphf",
+  "private": true,
+  "version": "0.1.32",
+  "description": "WUPHF CLI provides organizational context & memory to AI agents",
+  "type": "module",
+  "bin": {
+    "wuphf": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "plugin-commands",
+    "platform-rules",
+    "platform-plugins",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "bun dist/index.js",
+    "dev": "bun src/index.ts",
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^22.0.0",
+    "@types/react": "^18.3.18",
+    "ink-testing-library": "^4.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nex-crm/wuphf.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/nex-crm/wuphf#readme",
+  "bugs": {
+    "url": "https://github.com/nex-crm/wuphf/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "@inkjs/ui": "^2.0.0",
+    "commander": "^14.0.3",
+    "ink": "^5.2.1",
+    "react": "^18.3.1"
+  }
+}

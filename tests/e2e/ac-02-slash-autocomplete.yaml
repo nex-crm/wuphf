@@ -1,0 +1,39 @@
+session:
+  command: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/wuphf
+  cols: 120
+  rows: 40
+artifacts:
+  dir: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/termwright-artifacts
+
+steps:
+  # AC-2: Type "/" -> autocomplete overlay -> Tab completes
+  - waitForText:
+      text: "Type a message"
+      timeoutMs: 5000
+
+  - type:
+      text: "/"
+
+  - sleep:
+      ms: 500
+
+  - screenshot:
+      name: "ac02-slash-typed"
+
+  - type:
+      text: "hel"
+
+  - sleep:
+      ms: 500
+
+  - screenshot:
+      name: "ac02-filter-hel"
+
+  - press:
+      key: Tab
+
+  - sleep:
+      ms: 500
+
+  - screenshot:
+      name: "ac02-tab-completed"

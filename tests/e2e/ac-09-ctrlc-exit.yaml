@@ -1,0 +1,31 @@
+session:
+  command: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/wuphf
+  cols: 120
+  rows: 40
+artifacts:
+  dir: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/termwright-artifacts
+
+steps:
+  # AC-9: Ctrl+C once -> hint, twice -> exit
+  - waitForText:
+      text: "Type a message"
+      timeoutMs: 5000
+
+  - press:
+      key: Ctrl+c
+
+  - sleep:
+      ms: 500
+
+  - screenshot:
+      name: "ac09-ctrlc-once"
+
+  # Second Ctrl+C should exit (process ends)
+  - press:
+      key: Ctrl+c
+
+  - sleep:
+      ms: 1000
+
+  - screenshot:
+      name: "ac09-ctrlc-twice"

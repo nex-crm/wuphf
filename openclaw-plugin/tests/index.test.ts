@@ -1,0 +1,411 @@
+import { describe, test, expect, beforeEach, afterEach, jest } from "bun:test";
+import { parseConfig, ConfigError } from "../src/config.ts";
+import { formatNexContext, stripNexContext, hasNexContext } from "../src/context-format.ts";
+import { captureFilter, resetDedupCache, type AgentMessage } from "../src/capture-filter.ts";
+import { RateLimiter } from "../src/rate-limiter.ts";
+import { SessionStore } from "../src/session-store.ts";
+import plugin from "../src/index.ts";
+
+// --- Config ---
+
+describe("config", () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  test("parses valid config", () => {
+    const cfg = parseConfig({ apiKey: "sk-test-123" });
+    expect(cfg.apiKey).toBe("sk-test-123");
+    expect(cfg.baseUrl).toBe("https://app.nex.ai");
+    expect(cfg.autoRecall).toBe(true);
+    expect(cfg.autoCapture).toBe(true);
+    expect(cfg.captureMode).toBe("last_turn");
+    expect(cfg.maxRecallResults).toBe(5);
+    expect(cfg.recallTimeoutMs).toBe(1500);
+    expect(cfg.debug).toBe(false);
+  });
+
+  test("falls back to WUPHF_API_KEY env var", () => {
+    process.env.WUPHF_API_KEY = "sk-from-env";
+    const cfg = parseConfig({});
+    expect(cfg.apiKey).toBe("sk-from-env");
+  });
+
+  test("resolves ${VAR} syntax in apiKey", () => {
+    process.env.MY_KEY = "sk-interpolated";
+    const cfg = parseConfig({ apiKey: "${MY_KEY}" });
+    expect(cfg.apiKey).toBe("sk-interpolated");
+  });
+
+  test("resolves ${VAR} syntax in baseUrl", () => {
+    process.env.MY_URL = "https://staging.wuphf.io";
+    const cfg = parseConfig({ apiKey: "sk-test", baseUrl: "${MY_URL}" });
+    expect(cfg.baseUrl).toBe("https://staging.wuphf.io");
+  });
+
+  test("strips trailing slash from baseUrl", () => {
+    const cfg = parseConfig({ apiKey: "sk-test", baseUrl: "https://example.com///" });
+    expect(cfg.baseUrl).toBe("https://example.com");
+  });
+
+  test("throws on missing API key", () => {
+    delete process.env.WUPHF_API_KEY;
+    expect(() => parseConfig({})).toThrow(ConfigError);
+  });
+
+  test("throws on invalid captureMode", () => {
+    expect(() => parseConfig({ apiKey: "sk-test", captureMode: "invalid" })).toThrow(ConfigError);
+  });
+
+  test("throws on maxRecallResults out of range", () => {
+    expect(() => parseConfig({ apiKey: "sk-test", maxRecallResults: 0 })).toThrow(ConfigError);
+    expect(() => parseConfig({ apiKey: "sk-test", maxRecallResults: 21 })).toThrow(ConfigError);
+  });
+
+  test("throws on recallTimeoutMs out of range", () => {
+    expect(() => parseConfig({ apiKey: "sk-test", recallTimeoutMs: 100 })).toThrow(ConfigError);
+    expect(() => parseConfig({ apiKey: "sk-test", recallTimeoutMs: 20000 })).toThrow(ConfigError);
+  });
+
+  test("overrides defaults with explicit values", () => {
+    const cfg = parseConfig({
+      apiKey: "sk-test",
+      autoRecall: false,
+      autoCapture: false,
+      captureMode: "full_session",
+      maxRecallResults: 10,
+      sessionTracking: false,
+      recallTimeoutMs: 3000,
+      debug: true,
+    });
+    expect(cfg.autoRecall).toBe(false);
+    expect(cfg.autoCapture).toBe(false);
+    expect(cfg.captureMode).toBe("full_session");
+    expect(cfg.maxRecallResults).toBe(10);
+    expect(cfg.sessionTracking).toBe(false);
+    expect(cfg.recallTimeoutMs).toBe(3000);
+    expect(cfg.debug).toBe(true);
+  });
+});
+
+// --- Context Format ---
+
+describe("context-format", () => {
+  test("formats context with entity count", () => {
+    const result = formatNexContext({
+      answer: "John works at Acme Corp.",
+      entityCount: 2,
+    });
+    expect(result).toContain("<wuphf-context>");
+    expect(result).toContain("</wuphf-context>");
+    expect(result).toContain("John works at Acme Corp.");
+    expect(result).toContain("[2 related entities found]");
+  });
+
+  test("omits entity count when zero", () => {
+    const result = formatNexContext({ answer: "No entities.", entityCount: 0 });
+    expect(result).not.toContain("related entities");
+  });
+
+  test("strips complete wuphf-context blocks", () => {
+    const text = "Before <wuphf-context>injected stuff</wuphf-context> After";
+    expect(stripNexContext(text)).toBe("Before  After");
+  });
+
+  test("strips unclosed wuphf-context tags", () => {
+    const text = "Before <wuphf-context>injected but no close";
+    expect(stripNexContext(text)).toBe("Before");
+  });
+
+  test("strips multiline blocks", () => {
+    const text = "Start\n<wuphf-context>\nline1\nline2\n</wuphf-context>\nEnd";
+    expect(stripNexContext(text)).toBe("Start\n\nEnd");
+  });
+
+  test("detects presence of wuphf-context", () => {
+    expect(hasNexContext("hello <wuphf-context>x</wuphf-context>")).toBe(true);
+    expect(hasNexContext("hello world")).toBe(false);
+  });
+});
+
+// --- Capture Filter ---
+
+describe("capture-filter", () => {
+  const defaultConfig = parseConfig({ apiKey: "sk-test" });
+
+  beforeEach(() => {
+    resetDedupCache();
+  });
+
+  test("extracts last turn in last_turn mode", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "First question" },
+      { role: "assistant", content: "First answer" },
+      { role: "user", content: "Second question here" },
+      { role: "assistant", content: "Second answer here" },
+    ];
+    const result = captureFilter(messages, defaultConfig);
+    expect(result.skipped).toBe(false);
+    if (!result.skipped) {
+      expect(result.text).toContain("Second question");
+      expect(result.text).toContain("Second answer");
+    }
+  });
+
+  test("extracts full session in full_session mode", () => {
+    const cfg = parseConfig({ apiKey: "sk-test", captureMode: "full_session" });
+    const messages: AgentMessage[] = [
+      { role: "user", content: "First question here" },
+      { role: "assistant", content: "First answer here" },
+      { role: "user", content: "Second question here" },
+      { role: "assistant", content: "Second answer here" },
+    ];
+    const result = captureFilter(messages, cfg);
+    expect(result.skipped).toBe(false);
+    if (!result.skipped) {
+      expect(result.text).toContain("First question");
+      expect(result.text).toContain("Second answer");
+    }
+  });
+
+  test("strips wuphf-context before capture", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "<wuphf-context>injected</wuphf-context>What color?" },
+      { role: "assistant", content: "Blue is your favorite." },
+    ];
+    const result = captureFilter(messages, defaultConfig);
+    expect(result.skipped).toBe(false);
+    if (!result.skipped) {
+      expect(result.text).not.toContain("<wuphf-context>");
+    }
+  });
+
+  test("skips failed agent runs", () => {
+    const result = captureFilter(
+      [{ role: "user", content: "hello world test" }],
+      defaultConfig,
+      { success: false },
+    );
+    expect(result.skipped).toBe(true);
+    if (result.skipped) expect(result.reason).toContain("failed");
+  });
+
+  test("skips exec-event provider", () => {
+    const result = captureFilter(
+      [{ role: "user", content: "hello world test" }],
+      defaultConfig,
+      { messageProvider: "exec-event" },
+    );
+    expect(result.skipped).toBe(true);
+  });
+
+  test("skips cron-event provider", () => {
+    const result = captureFilter(
+      [{ role: "user", content: "hello world test" }],
+      defaultConfig,
+      { messageProvider: "cron-event" },
+    );
+    expect(result.skipped).toBe(true);
+  });
+
+  test("skips slash commands", () => {
+    const result = captureFilter(
+      [{ role: "user", content: "/help me out please" }],
+      defaultConfig,
+    );
+    expect(result.skipped).toBe(true);
+    if (result.skipped) expect(result.reason).toContain("slash command");
+  });
+
+  test("skips short messages", () => {
+    const result = captureFilter(
+      [{ role: "user", content: "hi" }],
+      defaultConfig,
+    );
+    expect(result.skipped).toBe(true);
+    if (result.skipped) expect(result.reason).toContain("short");
+  });
+
+  test("skips empty messages array", () => {
+    const result = captureFilter([], defaultConfig);
+    expect(result.skipped).toBe(true);
+  });
+
+  test("skips duplicate content", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "Tell me about OpenClaw plugins" },
+      { role: "assistant", content: "OpenClaw plugins are extensions..." },
+    ];
+    const first = captureFilter(messages, defaultConfig);
+    expect(first.skipped).toBe(false);
+
+    const second = captureFilter(messages, defaultConfig);
+    expect(second.skipped).toBe(true);
+    if (second.skipped) expect(second.reason).toContain("duplicate");
+  });
+
+  test("handles array content format", () => {
+    const messages: AgentMessage[] = [
+      {
+        role: "user",
+        content: [{ type: "text", text: "Question about entities here" }],
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Answer about entities here" }],
+      },
+    ];
+    const result = captureFilter(messages, defaultConfig);
+    expect(result.skipped).toBe(false);
+    if (!result.skipped) {
+      expect(result.text).toContain("Question about entities");
+    }
+  });
+});
+
+// --- Rate Limiter ---
+
+describe("rate-limiter", () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  test("allows requests within limit", async () => {
+    const limiter = new RateLimiter({ maxRequests: 3, windowMs: 1000, maxQueueDepth: 5 });
+    const results: number[] = [];
+
+    const p1 = limiter.enqueue(async () => { results.push(1); });
+    const p2 = limiter.enqueue(async () => { results.push(2); });
+    const p3 = limiter.enqueue(async () => { results.push(3); });
+
+    await Promise.all([p1, p2, p3]);
+    expect(results).toEqual([1, 2, 3]);
+    limiter.destroy();
+  });
+
+  test("queues requests exceeding limit", async () => {
+    const limiter = new RateLimiter({ maxRequests: 2, windowMs: 1000, maxQueueDepth: 5 });
+    const results: number[] = [];
+
+    const p1 = limiter.enqueue(async () => { results.push(1); });
+    const p2 = limiter.enqueue(async () => { results.push(2); });
+    const p3 = limiter.enqueue(async () => { results.push(3); });
+
+    // First two execute immediately
+    await p1;
+    await p2;
+    expect(results).toEqual([1, 2]);
+
+    // Third waits for window to slide
+    jest.advanceTimersByTime(1100);
+    await p3;
+    expect(results).toEqual([1, 2, 3]);
+    limiter.destroy();
+  });
+
+  test("evicts oldest on queue overflow (LIFO)", async () => {
+    const limiter = new RateLimiter({ maxRequests: 1, windowMs: 10000, maxQueueDepth: 2 });
+    const results: number[] = [];
+    const errors: string[] = [];
+
+    const p1 = limiter.enqueue(async () => { results.push(1); }); // executes immediately
+    await p1;
+
+    // These 3 queue up, but max depth is 2 — oldest gets evicted
+    const p2 = limiter.enqueue(async () => { results.push(2); }).catch((e) => errors.push(e.message));
+    const p3 = limiter.enqueue(async () => { results.push(3); }).catch((e) => errors.push(e.message));
+    const p4 = limiter.enqueue(async () => { results.push(4); }).catch((e) => errors.push(e.message));
+
+    // Let eviction happen — need a microtask tick for async queue processing
+    await new Promise((r) => process.nextTick(r));
+
+    // One should be evicted
+    expect(errors.length).toBeGreaterThanOrEqual(1);
+    expect(errors[0]).toContain("eviction");
+
+    limiter.destroy();
+  });
+
+  test("reports pending count", () => {
+    const limiter = new RateLimiter({ maxRequests: 1, windowMs: 60000, maxQueueDepth: 5 });
+    limiter.enqueue(async () => {}).catch(() => {});
+    // After first executes, pending should go to 0
+    expect(limiter.pending).toBeGreaterThanOrEqual(0);
+    limiter.destroy();
+  });
+});
+
+// --- Session Store ---
+
+describe("session-store", () => {
+  test("get/set/delete", () => {
+    const store = new SessionStore();
+    expect(store.get("key1")).toBeUndefined();
+
+    store.set("key1", "session-abc");
+    expect(store.get("key1")).toBe("session-abc");
+
+    store.delete("key1");
+    expect(store.get("key1")).toBeUndefined();
+  });
+
+  test("LRU eviction at max size", () => {
+    const store = new SessionStore(3);
+    store.set("a", "1");
+    store.set("b", "2");
+    store.set("c", "3");
+    store.set("d", "4"); // should evict "a"
+
+    expect(store.get("a")).toBeUndefined();
+    expect(store.get("b")).toBe("2");
+    expect(store.get("d")).toBe("4");
+    expect(store.size).toBe(3);
+  });
+
+  test("access refreshes LRU position", () => {
+    const store = new SessionStore(3);
+    store.set("a", "1");
+    store.set("b", "2");
+    store.set("c", "3");
+
+    // Access "a" to make it most recent
+    store.get("a");
+
+    store.set("d", "4"); // should evict "b" (now oldest)
+    expect(store.get("a")).toBe("1");
+    expect(store.get("b")).toBeUndefined();
+  });
+
+  test("clear removes all entries", () => {
+    const store = new SessionStore();
+    store.set("x", "1");
+    store.set("y", "2");
+    store.clear();
+    expect(store.size).toBe(0);
+  });
+});
+
+// --- Plugin shape ---
+
+describe("plugin", () => {
+  test("has correct id and kind", () => {
+    expect(plugin.id).toBe("wuphf");
+    expect(plugin.kind).toBe("memory");
+  });
+
+  test("has a register function", () => {
+    expect(typeof plugin.register).toBe("function");
+  });
+
+  test("has name, description, and version", () => {
+    expect(plugin.name).toBe("WUPHF Memory");
+    expect(plugin.version).toBe("0.1.0");
+    expect(plugin.description).toBeTruthy();
+  });
+});

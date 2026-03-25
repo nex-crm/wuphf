@@ -1,0 +1,9 @@
+# Go binary
+/wuphf
+
+# Local artifacts
+/termwright-artifacts/
+.DS_Store
+
+# Dependency installs
+**/node_modules/

@@ -1,0 +1,37 @@
+session:
+  command: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/wuphf
+  cols: 120
+  rows: 40
+artifacts:
+  dir: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/termwright-artifacts
+
+steps:
+  # AC-5: /help shows help
+  - waitForText:
+      text: "Type a message"
+      timeoutMs: 5000
+
+  - type:
+      text: "/help"
+
+  - press:
+      key: Enter
+
+  - sleep:
+      ms: 1000
+
+  - screenshot:
+      name: "ac05-help-output"
+
+  # Then /clear clears
+  - type:
+      text: "/clear"
+
+  - press:
+      key: Enter
+
+  - sleep:
+      ms: 500
+
+  - screenshot:
+      name: "ac05-clear-output"

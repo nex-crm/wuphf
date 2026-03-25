@@ -1,0 +1,499 @@
+package agent
+
+import (
+	"context"
+	"sync"
+	"testing"
+)
+
+// mockStreamFn returns a StreamFn that yields a single text chunk.
+func mockStreamFn(response string) StreamFn {
+	return func(msgs []Message, tools []AgentTool) <-chan StreamChunk {
+		ch := make(chan StreamChunk, 1)
+		go func() {
+			defer close(ch)
+			ch <- StreamChunk{Type: "text", Content: response}
+		}()
+		return ch
+	}
+}
+
+// mockToolCallStreamFn returns a StreamFn that yields a tool_call chunk.
+func mockToolCallStreamFn(toolName string, params map[string]any) StreamFn {
+	calls := 0
+	var mu sync.Mutex
+	return func(msgs []Message, tools []AgentTool) <-chan StreamChunk {
+		ch := make(chan StreamChunk, 1)
+		mu.Lock()
+		c := calls
+		calls++
+		mu.Unlock()
+		go func() {
+			defer close(ch)
+			if c == 0 {
+				ch <- StreamChunk{Type: "tool_call", ToolName: toolName, ToolParams: params}
+			} else {
+				ch <- StreamChunk{Type: "text", Content: "done after tool"}
+			}
+		}()
+		return ch
+	}
+}
+
+func newTestLoop(t *testing.T, streamFn StreamFn) (*AgentLoop, string) {
+	t.Helper()
+	dir := t.TempDir()
+	sessions := NewSessionStoreAt(dir)
+	tools := NewToolRegistry()
+	queues := NewMessageQueues()
+
+	config := AgentConfig{
+		Slug:        "test-agent",
+		Name:        "Test Agent",
+		Expertise:   []string{"testing"},
+		Personality: "You are a test agent.",
+	}
+
+	loop := NewAgentLoop(config, tools, sessions, queues, streamFn, nil, nil)
+	return loop, dir
+}
+
+func TestFullTickCycle(t *testing.T) {
+	loop, _ := newTestLoop(t, mockStreamFn("hello world"))
+
+	// Track events.
+	var events []EventName
+	var mu sync.Mutex
+	handler := func(args ...any) {
+		// EventHandler is called with mu held by Tick, so we use a separate lock.
+	}
+	_ = handler
+
+	var phaseChanges []AgentPhase
+	loop.On(EventPhaseChange, func(args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(args) >= 2 {
+			if p, ok := args[1].(AgentPhase); ok {
+				phaseChanges = append(phaseChanges, p)
+			}
+		}
+	})
+
+	var messages []string
+	loop.On(EventMessage, func(args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if len(args) >= 1 {
+			if s, ok := args[0].(string); ok {
+				messages = append(messages, s)
+			}
+		}
+	})
+
+	doneCalled := false
+	loop.On(EventDone, func(args ...any) {
+		mu.Lock()
+		defer mu.Unlock()
+		doneCalled = true
+		events = append(events, EventDone)
+	})
+
+	// Enqueue a follow-up message so there's user input.
+	loop.queues.FollowUp("test-agent", "run the test")
+
+	loop.Start()
+
+	// Tick 1: idle → build_context (creates session, drains follow-up)
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	state := loop.GetState()
+	if state.Phase != PhaseBuildContext {
+		t.Fatalf("after tick 1: expected build_context, got %s", state.Phase)
+	}
+	if state.SessionID == "" {
+		t.Fatal("session ID should be set after build_context")
+	}
+
+	// Tick 2: build_context → stream_llm (streams LLM response)
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	state = loop.GetState()
+	if state.Phase != PhaseStreamLLM {
+		t.Fatalf("after tick 2: expected stream_llm, got %s", state.Phase)
+	}
+
+	// Tick 3: stream_llm (no tool call) → done
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 3: %v", err)
+	}
+	state = loop.GetState()
+	if state.Phase != PhaseDone {
+		t.Fatalf("after tick 3: expected done, got %s", state.Phase)
+	}
+
+	mu.Lock()
+	if !doneCalled {
+		t.Error("EventDone should have been emitted")
+	}
+	if len(messages) == 0 {
+		t.Error("expected at least one message event")
+	}
+	if messages[0] != "hello world" {
+		t.Errorf("expected message 'hello world', got %q", messages[0])
+	}
+	mu.Unlock()
+
+	// Verify session has entries.
+	entries, err := loop.sessions.GetHistory(state.SessionID, 0, "")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("expected at least 2 session entries (user + assistant), got %d", len(entries))
+	}
+
+	// Check entry types.
+	hasUser := false
+	hasAssistant := false
+	for _, e := range entries {
+		if e.Type == "user" {
+			hasUser = true
+		}
+		if e.Type == "assistant" {
+			hasAssistant = true
+		}
+	}
+	if !hasUser {
+		t.Error("session should have a user entry")
+	}
+	if !hasAssistant {
+		t.Error("session should have an assistant entry")
+	}
+}
+
+func TestSteerInjectsSystemMessage(t *testing.T) {
+	loop, _ := newTestLoop(t, mockStreamFn("ack"))
+
+	loop.queues.FollowUp("test-agent", "start task")
+	loop.queues.Steer("test-agent", "change priority to high")
+
+	loop.Start()
+
+	// Tick 1: idle → build_context (creates session and drains steer immediately)
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+
+	state := loop.GetState()
+	entries, err := loop.sessions.GetHistory(state.SessionID, 0, "")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+
+	found := false
+	for _, e := range entries {
+		if e.Type == "system" && e.Content == "[STEER] change priority to high" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected steer message as system entry in session")
+		for _, e := range entries {
+			t.Logf("  entry: type=%s content=%q", e.Type, e.Content)
+		}
+	}
+}
+
+func TestSteerOnlyMessageSurvivesFirstTick(t *testing.T) {
+	loop, _ := newTestLoop(t, mockStreamFn("ack"))
+	loop.queues.Steer("test-agent", "do the urgent thing")
+	loop.Start()
+
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+
+	state := loop.GetState()
+	entries, err := loop.sessions.GetHistory(state.SessionID, 0, "")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+
+	found := false
+	for _, e := range entries {
+		if e.Type == "system" && e.Content == "[STEER] do the urgent thing" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected steer-only message to survive first tick")
+	}
+}
+
+func TestToolCallCycle(t *testing.T) {
+	dir := t.TempDir()
+	sessions := NewSessionStoreAt(dir)
+	tools := NewToolRegistry()
+	queues := NewMessageQueues()
+
+	// Register a test tool.
+	tools.Register(AgentTool{
+		Name:        "echo",
+		Description: "Echoes input",
+		Schema: map[string]any{
+			"type":     "object",
+			"required": []any{"text"},
+			"properties": map[string]any{
+				"text": map[string]any{"type": "string"},
+			},
+		},
+		Execute: func(params map[string]any, ctx context.Context, onUpdate func(string)) (string, error) {
+			text, _ := params["text"].(string)
+			return "echo: " + text, nil
+		},
+	})
+
+	config := AgentConfig{
+		Slug:        "test-agent",
+		Name:        "Test Agent",
+		Expertise:   []string{"testing"},
+		Personality: "You are a test agent.",
+		Tools:       []string{"echo"},
+	}
+
+	streamFn := mockToolCallStreamFn("echo", map[string]any{"text": "hi"})
+	loop := NewAgentLoop(config, tools, sessions, queues, streamFn, nil, nil)
+
+	var toolCalls []string
+	loop.On(EventToolCall, func(args ...any) {
+		if len(args) >= 1 {
+			if name, ok := args[0].(string); ok {
+				toolCalls = append(toolCalls, name)
+			}
+		}
+	})
+
+	doneCalled := false
+	loop.On(EventDone, func(args ...any) {
+		doneCalled = true
+	})
+
+	queues.FollowUp("test-agent", "call echo")
+	loop.Start()
+
+	// Tick 1: idle → build_context
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+
+	// Tick 2: build_context → stream_llm (yields tool_call)
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+	state := loop.GetState()
+	if state.Phase != PhaseStreamLLM {
+		t.Fatalf("expected stream_llm, got %s", state.Phase)
+	}
+
+	// Tick 3: stream_llm with pending tool → execute_tool
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 3: %v", err)
+	}
+	state = loop.GetState()
+	if state.Phase != PhaseExecuteTool {
+		t.Fatalf("expected execute_tool, got %s", state.Phase)
+	}
+
+	// Tick 4: execute_tool → stream_llm (second call yields text)
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 4: %v", err)
+	}
+	state = loop.GetState()
+	if state.Phase != PhaseStreamLLM {
+		t.Fatalf("expected stream_llm, got %s", state.Phase)
+	}
+
+	// Tick 5: stream_llm (no tool) → done
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 5: %v", err)
+	}
+	state = loop.GetState()
+	if state.Phase != PhaseDone {
+		t.Fatalf("expected done, got %s", state.Phase)
+	}
+
+	if len(toolCalls) != 1 || toolCalls[0] != "echo" {
+		t.Errorf("expected one tool call to 'echo', got %v", toolCalls)
+	}
+	if !doneCalled {
+		t.Error("expected done event")
+	}
+
+	// Verify session has tool_call and tool_result entries.
+	entries, err := sessions.GetHistory(state.SessionID, 0, "")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+	hasToolCall := false
+	hasToolResult := false
+	for _, e := range entries {
+		if e.Type == "tool_call" {
+			hasToolCall = true
+		}
+		if e.Type == "tool_result" && e.Content == "echo: hi" {
+			hasToolResult = true
+		}
+	}
+	if !hasToolCall {
+		t.Error("expected tool_call entry in session")
+	}
+	if !hasToolResult {
+		t.Error("expected tool_result entry with 'echo: hi'")
+	}
+}
+
+func TestPauseResume(t *testing.T) {
+	loop, _ := newTestLoop(t, mockStreamFn("test"))
+	loop.queues.FollowUp("test-agent", "go")
+	loop.Start()
+
+	// Pause and verify tick is no-op.
+	loop.Pause()
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick while paused: %v", err)
+	}
+	state := loop.GetState()
+	if state.Phase != PhaseIdle {
+		t.Fatalf("expected idle while paused, got %s", state.Phase)
+	}
+
+	// Resume and tick should advance.
+	loop.Resume()
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick after resume: %v", err)
+	}
+	state = loop.GetState()
+	if state.Phase != PhaseBuildContext {
+		t.Fatalf("expected build_context after resume, got %s", state.Phase)
+	}
+}
+
+func TestCredibilityRecordOnDone(t *testing.T) {
+	dir := t.TempDir()
+	sessions := NewSessionStoreAt(dir)
+	tools := NewToolRegistry()
+	queues := NewMessageQueues()
+	tracker := NewCredibilityTracker(t.TempDir())
+
+	config := AgentConfig{
+		Slug:        "cred-agent",
+		Name:        "Cred Agent",
+		Personality: "You test credibility.",
+	}
+
+	loop := NewAgentLoop(config, tools, sessions, queues, mockStreamFn("ok"), nil, tracker)
+	queues.FollowUp("cred-agent", "task")
+	loop.Start()
+
+	// Run through full cycle.
+	for i := 0; i < 4; i++ {
+		if err := loop.Tick(); err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+
+	state := loop.GetState()
+	if state.Phase != PhaseDone {
+		t.Fatalf("expected done, got %s", state.Phase)
+	}
+
+	cred := tracker.GetCredibility("cred-agent")
+	if cred != 1.0 {
+		t.Errorf("expected credibility 1.0 (success), got %f", cred)
+	}
+}
+
+// mockErrorStreamFn returns a StreamFn that yields a single error chunk.
+func mockErrorStreamFn(errMsg string) StreamFn {
+	return func(msgs []Message, tools []AgentTool) <-chan StreamChunk {
+		ch := make(chan StreamChunk, 1)
+		go func() {
+			defer close(ch)
+			ch <- StreamChunk{Type: "error", Content: errMsg}
+		}()
+		return ch
+	}
+}
+
+func TestStreamLLMErrorChunk(t *testing.T) {
+	loop, _ := newTestLoop(t, mockErrorStreamFn("provider exploded"))
+
+	var errorEvents []string
+	loop.On(EventError, func(args ...any) {
+		if len(args) >= 1 {
+			if s, ok := args[0].(string); ok {
+				errorEvents = append(errorEvents, s)
+			}
+		}
+	})
+
+	loop.queues.FollowUp("test-agent", "do something")
+	loop.Start()
+
+	// Tick 1: idle → build_context
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+
+	// Tick 2: build_context → stream_llm (error chunk should trigger PhaseError)
+	err := loop.Tick()
+	if err == nil {
+		t.Fatal("tick 2 should have returned an error")
+	}
+	if err.Error() != "provider error: provider exploded" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	state := loop.GetState()
+	if state.Phase != PhaseError {
+		t.Fatalf("expected phase error, got %s", state.Phase)
+	}
+	if state.Error != "provider exploded" {
+		t.Fatalf("expected state.Error = 'provider exploded', got %q", state.Error)
+	}
+	if len(errorEvents) != 1 || errorEvents[0] != "provider exploded" {
+		t.Fatalf("expected one error event with 'provider exploded', got %v", errorEvents)
+	}
+}
+
+func TestOffRemovesHandler(t *testing.T) {
+	loop, _ := newTestLoop(t, mockStreamFn("test"))
+
+	callCount := 0
+	handler := func(args ...any) {
+		callCount++
+	}
+
+	loop.On(EventDone, handler)
+	loop.Off(EventDone, handler)
+
+	queues := loop.queues
+	queues.FollowUp("test-agent", "task")
+	loop.Start()
+
+	// Run full cycle.
+	for i := 0; i < 4; i++ {
+		if err := loop.Tick(); err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+	}
+
+	if callCount != 0 {
+		t.Errorf("handler should not have been called after Off, was called %d times", callCount)
+	}
+}

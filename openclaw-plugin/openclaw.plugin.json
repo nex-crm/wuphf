@@ -1,0 +1,85 @@
+{
+  "id": "wuphf",
+  "kind": "memory",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "description": "WUPHF Developer API key. Falls back to WUPHF_API_KEY environment variable if not set."
+      },
+      "baseUrl": {
+        "type": "string",
+        "description": "WUPHF API base URL.",
+        "default": "https://api.wuphf-crm.com"
+      },
+      "autoRecall": {
+        "type": "boolean",
+        "description": "Automatically inject relevant context before each agent turn.",
+        "default": true
+      },
+      "autoCapture": {
+        "type": "boolean",
+        "description": "Automatically extract and store facts after each agent turn.",
+        "default": true
+      },
+      "captureMode": {
+        "type": "string",
+        "enum": ["last_turn", "full_session"],
+        "description": "What to capture: last user/assistant pair or the full session transcript.",
+        "default": "last_turn"
+      },
+      "maxRecallResults": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 20,
+        "description": "Maximum number of context results to inject per recall.",
+        "default": 5
+      },
+      "sessionTracking": {
+        "type": "boolean",
+        "description": "Enable multi-turn session continuity via WUPHF session IDs.",
+        "default": true
+      },
+      "recallTimeoutMs": {
+        "type": "number",
+        "minimum": 500,
+        "maximum": 10000,
+        "description": "Maximum time (ms) to wait for recall API before falling back gracefully.",
+        "default": 1500
+      },
+      "debug": {
+        "type": "boolean",
+        "description": "Enable verbose debug logging.",
+        "default": false
+      }
+    }
+  },
+  "uiHints": {
+    "apiKey": {
+      "label": "WUPHF API Key",
+      "sensitive": true,
+      "placeholder": "sk-...",
+      "help": "Your WUPHF Developer API key. Get one at https://app.wuphf-crm.com/settings/developer. If running via Clawgent, this is set automatically."
+    },
+    "baseUrl": {
+      "label": "API Base URL",
+      "advanced": true,
+      "help": "Only change this for self-hosted or staging environments."
+    },
+    "captureMode": {
+      "label": "Capture Mode",
+      "help": "\"last_turn\" captures only the latest exchange. \"full_session\" captures the entire conversation."
+    },
+    "recallTimeoutMs": {
+      "label": "Recall Timeout (ms)",
+      "advanced": true,
+      "help": "How long to wait for context recall before proceeding without it. Higher values give richer context but add latency."
+    },
+    "debug": {
+      "label": "Debug Logging",
+      "advanced": true
+    }
+  }
+}

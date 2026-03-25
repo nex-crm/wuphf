@@ -1,0 +1,14 @@
+session:
+  command: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/wuphf
+  cols: 120
+  rows: 40
+artifacts:
+  dir: /Users/najmuzzaman/Documents/wuphf/wuphf/cli/.worktrees/go-bubbletea-port/termwright-artifacts
+
+steps:
+  - waitForText:
+      text: "Loading"
+      timeoutMs: 5000
+
+  - screenshot:
+      name: "debug-loading"

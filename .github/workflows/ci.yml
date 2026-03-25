@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  cli:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Sync plugin into CLI
+        run: |
+          rsync -a --delete ../claude-code-plugin/src/ src/plugin/
+          rsync -a --delete ../claude-code-plugin/commands/ plugin-commands/
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Run tests (excluding e2e and node:test mock files)
+        run: >-
+          bun test
+          tests/lib tests/integration tests/commands
+          tests/tui/components tests/tui/views tests/tui/generative tests/tui/hooks
+          tests/tui/agent-colors.test.ts tests/tui/channel-colors.test.ts
+          tests/tui/components.test.tsx tests/tui/keybindings.test.ts tests/tui/store.test.ts
+          tests/agent tests/calendar tests/chat tests/orchestration
+
+  mcp:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+
+  openclaw-plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: openclaw-plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun test
+
+  claude-code-plugin:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: claude-code-plugin
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run build

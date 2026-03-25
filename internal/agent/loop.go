@@ -1,0 +1,569 @@
+package agent
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"sync"
+	"time"
+)
+
+// EventName identifies an agent loop event.
+type EventName string
+
+const (
+	EventPhaseChange EventName = "phase_change"
+	EventToolCall    EventName = "tool_call"
+	EventMessage     EventName = "message"
+	EventError       EventName = "error"
+	EventDone        EventName = "done"
+	EventThinking    EventName = "thinking"
+	EventToolUse     EventName = "tool_use"
+	EventToolResult  EventName = "tool_result"
+)
+
+// EventHandler is a callback for agent loop events.
+type EventHandler func(args ...any)
+
+// AgentLoop is the core state machine for agent execution.
+type AgentLoop struct {
+	state              AgentState
+	tools              *ToolRegistry
+	sessions           *SessionStore
+	queues             *MessageQueues
+	streamFn           StreamFn
+	gossipLayer        *GossipLayer
+	credibilityTracker *CredibilityTracker
+
+	running           bool
+	paused            bool
+	eventHandlers     map[EventName][]EventHandler
+	pendingToolCall   *ToolCall
+	cancelFunc        context.CancelFunc
+	taskHadError      bool
+	collectedInsights []string
+	mu                sync.Mutex
+}
+
+// NewAgentLoop creates a new agent loop with the given dependencies.
+// gossipLayer and credibilityTracker may be nil.
+func NewAgentLoop(
+	config AgentConfig,
+	tools *ToolRegistry,
+	sessions *SessionStore,
+	queues *MessageQueues,
+	streamFn StreamFn,
+	gossipLayer *GossipLayer,
+	credibilityTracker *CredibilityTracker,
+) *AgentLoop {
+	return &AgentLoop{
+		state: AgentState{
+			Phase:  PhaseIdle,
+			Config: config,
+		},
+		tools:              tools,
+		sessions:           sessions,
+		queues:             queues,
+		streamFn:           streamFn,
+		gossipLayer:        gossipLayer,
+		credibilityTracker: credibilityTracker,
+		eventHandlers:      make(map[EventName][]EventHandler),
+	}
+}
+
+// On registers an event handler for the given event.
+func (l *AgentLoop) On(event EventName, handler EventHandler) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.eventHandlers[event] = append(l.eventHandlers[event], handler)
+}
+
+// Off removes the given handler from the event. Comparison is by pointer.
+func (l *AgentLoop) Off(event EventName, handler EventHandler) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	handlers := l.eventHandlers[event]
+	target := fmt.Sprintf("%p", handler)
+	for i, h := range handlers {
+		if fmt.Sprintf("%p", h) == target {
+			l.eventHandlers[event] = append(handlers[:i], handlers[i+1:]...)
+			return
+		}
+	}
+}
+
+// GetState returns a copy of the current agent state.
+func (l *AgentLoop) GetState() AgentState {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.state
+}
+
+// Start marks the loop as running and sets phase to idle.
+func (l *AgentLoop) Start() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.running = true
+	l.paused = false
+	l.setPhase(PhaseIdle)
+}
+
+// Stop cancels any in-flight context and marks the loop as not running.
+func (l *AgentLoop) Stop() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.running = false
+	if l.cancelFunc != nil {
+		l.cancelFunc()
+		l.cancelFunc = nil
+	}
+}
+
+// Pause pauses tick processing without stopping the loop.
+func (l *AgentLoop) Pause() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.paused = true
+}
+
+// Resume unpauses tick processing.
+func (l *AgentLoop) Resume() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.paused = false
+}
+
+// AddInsight records an insight to be published via gossip when the task completes.
+func (l *AgentLoop) AddInsight(insight string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.collectedInsights = append(l.collectedInsights, insight)
+}
+
+// Tick advances the state machine by one step. Called by the service's tick loop.
+func (l *AgentLoop) Tick() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if l.paused || !l.running {
+		return nil
+	}
+
+	switch l.state.Phase {
+	case PhaseIdle:
+		return l.buildContext()
+	case PhaseBuildContext:
+		return l.streamLLM()
+	case PhaseStreamLLM:
+		if l.pendingToolCall != nil {
+			return l.executeTool()
+		}
+		return l.handleDone()
+	case PhaseExecuteTool:
+		return l.streamLLM()
+	case PhaseDone:
+		return l.handleDone()
+	case PhaseError:
+		// After error, reset to idle so the agent can process new messages.
+		l.state.Error = ""
+		l.setPhase(PhaseIdle)
+		return nil
+	}
+	return nil
+}
+
+// setPhase updates the phase and emits a phase_change event. Must be called with mu held.
+func (l *AgentLoop) setPhase(phase AgentPhase) {
+	old := l.state.Phase
+	l.state.Phase = phase
+	l.emit(EventPhaseChange, old, phase)
+}
+
+// emit fires all handlers for the given event. Must be called with mu held.
+func (l *AgentLoop) emit(event EventName, args ...any) {
+	for _, h := range l.eventHandlers[event] {
+		h(args...)
+	}
+}
+
+// buildContext prepares the session and context for LLM streaming.
+func (l *AgentLoop) buildContext() error {
+	l.setPhase(PhaseBuildContext)
+	l.taskHadError = false
+	l.collectedInsights = nil
+
+	slug := l.state.Config.Slug
+
+	// Create session if none exists.
+	if l.state.SessionID == "" {
+		sessionID, err := l.sessions.Create(slug)
+		if err != nil {
+			l.state.Error = fmt.Sprintf("create session: %v", err)
+			l.setPhase(PhaseError)
+			l.emit(EventError, l.state.Error)
+			return err
+		}
+		l.state.SessionID = sessionID
+	}
+
+	// Inject system prompt if not already present in session.
+	entries, _ := l.sessions.GetHistory(l.state.SessionID, 0, "")
+	hasSystem := false
+	for _, e := range entries {
+		if e.Type == "system" {
+			hasSystem = true
+			break
+		}
+	}
+	if !hasSystem && l.state.Config.Personality != "" {
+		l.sessions.Append(l.state.SessionID, SessionEntry{
+			Type:    "system",
+			Content: l.state.Config.Personality,
+		})
+	}
+
+	// Drain steer messages after the session exists so the first user task is not lost.
+	if msg, ok := l.queues.DrainSteer(slug); ok {
+		l.sessions.Append(l.state.SessionID, SessionEntry{
+			Type:    "system",
+			Content: "[STEER] " + msg,
+		})
+	}
+
+	// Drain follow-up message and append as user entry.
+	if msg, ok := l.queues.DrainFollowUp(slug); ok {
+		l.state.CurrentTask = msg
+		l.sessions.Append(l.state.SessionID, SessionEntry{
+			Type:    "user",
+			Content: msg,
+		})
+	}
+
+	// Inject gossip insights if gossip layer is available.
+	if l.gossipLayer != nil {
+		l.injectGossipInsights()
+	}
+
+	l.emit(EventThinking, l.progressNote(PhaseBuildContext))
+
+	return nil
+}
+
+// injectGossipInsights queries gossip and injects scored insights into the session.
+func (l *AgentLoop) injectGossipInsights() {
+	slug := l.state.Config.Slug
+	// Use the first expertise topic for gossip queries.
+	topic := slug
+	if len(l.state.Config.Expertise) > 0 {
+		topic = l.state.Config.Expertise[0]
+	}
+
+	insights, err := l.gossipLayer.Query(slug, topic)
+	if err != nil {
+		return // Gossip errors are non-fatal.
+	}
+
+	for _, insight := range insights {
+		var srcCred *float64
+		if l.credibilityTracker != nil && insight.Source != "" {
+			c := l.credibilityTracker.GetCredibility(insight.Source)
+			srcCred = &c
+		}
+
+		score := ScoreInsight(insight, "", srcCred)
+		switch score.Decision {
+		case "adopt":
+			l.sessions.Append(l.state.SessionID, SessionEntry{
+				Type:    "system",
+				Content: fmt.Sprintf("[GOSSIP:ADOPTED] (from %s, score=%.2f) %s", insight.Source, score.Total, insight.Content),
+			})
+		case "test":
+			l.sessions.Append(l.state.SessionID, SessionEntry{
+				Type:    "system",
+				Content: fmt.Sprintf("[GOSSIP:TEST] (from %s, score=%.2f) %s", insight.Source, score.Total, insight.Content),
+			})
+		}
+		// "reject" is silently dropped.
+	}
+}
+
+// streamLLM streams output from the LLM and processes chunks.
+func (l *AgentLoop) streamLLM() error {
+	l.setPhase(PhaseStreamLLM)
+	l.emit(EventThinking, l.progressNote(PhaseStreamLLM))
+
+	// Get session history and convert to messages.
+	entries, err := l.sessions.GetHistory(l.state.SessionID, 0, "")
+	if err != nil {
+		l.state.Error = fmt.Sprintf("get history: %v", err)
+		l.setPhase(PhaseError)
+		l.emit(EventError, l.state.Error)
+		return err
+	}
+
+	messages := entriesToMessages(entries)
+
+	// If no messages, inject system message with agent personality.
+	if len(messages) == 0 {
+		personality := l.state.Config.Personality
+		if personality == "" {
+			personality = fmt.Sprintf("You are %s, an AI agent.", l.state.Config.Name)
+		}
+		messages = []Message{{Role: "system", Content: personality}}
+	}
+
+	// Create cancellable context.
+	ctx, cancel := context.WithCancel(context.Background())
+	l.cancelFunc = cancel
+
+	// Filter tools by agent config's tool list.
+	var allowedTools []AgentTool
+	if len(l.state.Config.Tools) > 0 {
+		for _, name := range l.state.Config.Tools {
+			if tool, ok := l.tools.Get(name); ok {
+				allowedTools = append(allowedTools, tool)
+			}
+		}
+	} else {
+		allowedTools = l.tools.List()
+	}
+
+	// Call streamFn — unlock mu while waiting on channel to avoid deadlock.
+	ch := l.streamFn(messages, allowedTools)
+
+	var fullText strings.Builder
+	for chunk := range ch {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		switch chunk.Type {
+		case "text":
+			fullText.WriteString(chunk.Content)
+			l.emit(EventMessage, chunk.Content)
+		case "thinking":
+			l.emit(EventThinking, chunk.Content)
+		case "tool_use":
+			l.emit(EventToolUse, chunk.ToolName, chunk.ToolInput)
+		case "tool_result":
+			l.emit(EventToolResult, chunk.Content)
+		case "tool_call":
+			l.pendingToolCall = &ToolCall{
+				ToolName:  chunk.ToolName,
+				Params:    chunk.ToolParams,
+				StartedAt: time.Now().UnixMilli(),
+			}
+			// Stop reading — tool needs to execute before continuing.
+			goto done
+		case "error":
+			l.state.Error = chunk.Content
+			l.setPhase(PhaseError)
+			l.emit(EventError, chunk.Content)
+			return fmt.Errorf("provider error: %s", chunk.Content)
+		}
+	}
+
+done:
+	// Append assistant text to session.
+	if fullText.Len() > 0 {
+		l.sessions.Append(l.state.SessionID, SessionEntry{
+			Type:    "assistant",
+			Content: fullText.String(),
+		})
+	}
+
+	return nil
+}
+
+// executeTool runs the pending tool call and records results in the session.
+func (l *AgentLoop) executeTool() error {
+	if l.pendingToolCall == nil {
+		return nil
+	}
+
+	l.setPhase(PhaseExecuteTool)
+	l.emit(EventThinking, l.progressNote(PhaseExecuteTool))
+	tc := l.pendingToolCall
+
+	l.emit(EventToolCall, tc.ToolName, tc.Params)
+
+	// Lookup and validate.
+	tool, ok := l.tools.Get(tc.ToolName)
+	if !ok {
+		errMsg := fmt.Sprintf("unknown tool: %q", tc.ToolName)
+		l.sessions.Append(l.state.SessionID, SessionEntry{
+			Type:    "tool_result",
+			Content: errMsg,
+			Metadata: map[string]any{
+				"toolName": tc.ToolName,
+				"error":    true,
+			},
+		})
+		l.taskHadError = true
+		l.pendingToolCall = nil
+		return nil
+	}
+
+	if valid, errs := l.tools.Validate(tc.ToolName, tc.Params); !valid {
+		errMsg := fmt.Sprintf("invalid params for %q: %s", tc.ToolName, strings.Join(errs, "; "))
+		l.sessions.Append(l.state.SessionID, SessionEntry{
+			Type:    "tool_result",
+			Content: errMsg,
+			Metadata: map[string]any{
+				"toolName": tc.ToolName,
+				"error":    true,
+			},
+		})
+		l.taskHadError = true
+		l.pendingToolCall = nil
+		return nil
+	}
+
+	// Append tool_call entry.
+	l.sessions.Append(l.state.SessionID, SessionEntry{
+		Type:    "tool_call",
+		Content: tc.ToolName,
+		Metadata: map[string]any{
+			"toolName": tc.ToolName,
+			"params":   tc.Params,
+		},
+	})
+
+	// Execute tool.
+	ctx := context.Background()
+	if l.cancelFunc != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		l.cancelFunc = cancel
+	}
+
+	result, err := tool.Execute(tc.Params, ctx, func(s string) {})
+	tc.CompletedAt = time.Now().UnixMilli()
+
+	if err != nil {
+		tc.Error = err.Error()
+		l.sessions.Append(l.state.SessionID, SessionEntry{
+			Type:    "tool_result",
+			Content: err.Error(),
+			Metadata: map[string]any{
+				"toolName": tc.ToolName,
+				"error":    true,
+			},
+		})
+		l.taskHadError = true
+	} else {
+		tc.Result = result
+		l.sessions.Append(l.state.SessionID, SessionEntry{
+			Type:    "tool_result",
+			Content: result,
+			Metadata: map[string]any{
+				"toolName": tc.ToolName,
+			},
+		})
+
+		// Collect gossip_publish insights.
+		if tc.ToolName == "nex_gossip_publish" {
+			if insight, ok := tc.Params["insight"].(string); ok {
+				l.collectedInsights = append(l.collectedInsights, insight)
+			}
+		}
+	}
+
+	l.pendingToolCall = nil
+	return nil
+}
+
+// handleDone finishes the current task cycle.
+func (l *AgentLoop) handleDone() error {
+	slug := l.state.Config.Slug
+
+	// If queues have more messages, go back to idle for another cycle.
+	if l.queues.HasMessages(slug) {
+		l.setPhase(PhaseIdle)
+		return nil
+	}
+
+	// Publish collected insights via gossip.
+	if l.gossipLayer != nil && len(l.collectedInsights) > 0 {
+		for _, insight := range l.collectedInsights {
+			l.gossipLayer.Publish(slug, insight, "")
+		}
+		l.collectedInsights = nil
+	}
+
+	// Record outcome in credibility tracker.
+	if l.credibilityTracker != nil {
+		l.credibilityTracker.RecordOutcome(slug, !l.taskHadError)
+	}
+
+	l.state.CurrentTask = ""
+	l.setPhase(PhaseDone)
+	l.emit(EventDone)
+	return nil
+}
+
+func (l *AgentLoop) progressNote(phase AgentPhase) string {
+	name := l.state.Config.Name
+	task := strings.TrimSpace(l.state.CurrentTask)
+	task = summarizeProgressTask(task)
+
+	switch phase {
+	case PhaseBuildContext:
+		if task != "" {
+			return fmt.Sprintf("%s is reviewing the task: %s", name, task)
+		}
+		return fmt.Sprintf("%s is reviewing the latest task.", name)
+	case PhaseStreamLLM:
+		if l.state.Config.Slug == "ceo" || strings.Contains(strings.ToLower(strings.Join(l.state.Config.Expertise, " ")), "delegation") {
+			return fmt.Sprintf("%s is coordinating the next move.", name)
+		}
+		if task != "" {
+			return fmt.Sprintf("%s is working on: %s", name, task)
+		}
+		return fmt.Sprintf("%s is drafting a response.", name)
+	case PhaseExecuteTool:
+		if l.pendingToolCall != nil && l.pendingToolCall.ToolName != "" {
+			return fmt.Sprintf("%s is using %s.", name, l.pendingToolCall.ToolName)
+		}
+		return fmt.Sprintf("%s is using tools.", name)
+	default:
+		return ""
+	}
+}
+
+func summarizeProgressTask(task string) string {
+	task = strings.TrimSpace(task)
+	if task == "" {
+		return ""
+	}
+	if len(task) <= 72 {
+		return task
+	}
+	cut := task[:72]
+	if idx := strings.LastIndex(cut, " "); idx > 36 {
+		cut = cut[:idx]
+	}
+	return strings.TrimSpace(cut) + "..."
+}
+
+// entriesToMessages converts session entries into LLM messages.
+func entriesToMessages(entries []SessionEntry) []Message {
+	var msgs []Message
+	for _, e := range entries {
+		switch e.Type {
+		case "user":
+			msgs = append(msgs, Message{Role: "user", Content: e.Content})
+		case "assistant":
+			msgs = append(msgs, Message{Role: "assistant", Content: e.Content})
+		case "system":
+			msgs = append(msgs, Message{Role: "system", Content: e.Content})
+		case "tool_call":
+			msgs = append(msgs, Message{Role: "assistant", Content: "[tool_call] " + e.Content})
+		case "tool_result":
+			msgs = append(msgs, Message{Role: "user", Content: "[tool_result] " + e.Content})
+		}
+	}
+	return msgs
+}

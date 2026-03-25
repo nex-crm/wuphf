@@ -1,0 +1,51 @@
+# Termwright UAT: Verify stream view renders correctly
+# Start daemon first:
+#   termwright daemon --socket /tmp/wuphf-test.sock --cols 120 --rows 40 \
+#     -- bash -c "cd /path/to/cli && bun src/index.ts"
+
+steps:
+  # 1. Wait for TUI to boot
+  - waitForText: {text: ">", timeoutMs: 10000}
+
+  # 2. Verify welcome message
+  - expectText: {text: "What would you like to do?", timeoutMs: 3000}
+
+  # 3. Type and verify screen stabilizes
+  - type: {text: "hello"}
+  - waitForIdle: {idleMs: 500, timeoutMs: 5000}
+  - expectText: {text: "hello"}
+
+  # 4. Type more
+  - type: {text: " world"}
+  - waitForIdle: {idleMs: 500, timeoutMs: 5000}
+  - expectText: {text: "hello world"}
+
+  # 5. Verify agent roster visible
+  - expectText: {text: "AGENTS", timeoutMs: 3000}
+
+  # 6. Verify Team-Lead in roster
+  - expectText: {text: "Team Lead", timeoutMs: 3000}
+
+  # 7. Submit message and verify it appears in stream
+  - press: {key: "Enter"}
+  - waitForText: {text: "You", timeoutMs: 5000}
+  - expectText: {text: "hello world"}
+
+  # 8. Verify input cleared and available
+  - waitForIdle: {idleMs: 500, timeoutMs: 10000}
+  - type: {text: "second msg"}
+  - waitForIdle: {idleMs: 500, timeoutMs: 5000}
+  - expectText: {text: "second msg"}
+
+  # 9. Test /help
+  - press: {key: "Enter"}
+  - waitForIdle: {idleMs: 500, timeoutMs: 5000}
+  - type: {text: "/help"}
+  - press: {key: "Enter"}
+  - waitForText: {text: "help", timeoutMs: 5000}
+
+  # 10. Screenshot
+  - screenshot: {name: "stream-final"}
+
+  # 11. Exit
+  - hotkey: {ctrl: true, ch: "c"}
