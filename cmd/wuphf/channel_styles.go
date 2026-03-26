@@ -1,11 +1,6 @@
 package main
 
-import (
-	"hash/fnv"
-	"strings"
-
-	"github.com/charmbracelet/lipgloss"
-)
+import "github.com/charmbracelet/lipgloss"
 
 // ── Slack dark-theme palette ────────────────────────────────────────
 const (
@@ -157,132 +152,157 @@ func threadIndicatorStyle() lipgloss.Style {
 func agentAvatar(slug string) string {
 	switch slug {
 	case "ceo":
-		return "☕"
+		return "◆"
 	case "pm":
-		return "📋"
+		return "▣"
 	case "fe":
-		return "🖥"
+		return "▤"
 	case "be":
-		return "🛠"
+		return "▥"
 	case "ai":
-		return "🤖"
+		return "◉"
 	case "designer":
-		return "✏️"
+		return "◌"
 	case "cmo":
-		return "📣"
+		return "✶"
 	case "cro":
-		return "💼"
+		return "◈"
 	case "nex":
-		return "🛰"
+		return "◎"
 	case "you":
-		return "🙂"
+		return "●"
 	default:
 		return "•"
 	}
 }
 
-// ── Sprite library ────────────────────────────────────────────────
-//
-// 16 multi-line character sprites. Each sprite is 3 lines tall:
-//   line 0: hat/hair (identity — what makes the character recognizable)
-//   line 1: face (changes with activity)
-//   line 2: body (changes with activity)
-//
-// Characters are NOT role-specific. Any agent can get any sprite.
-// CEO always gets sprite 0 (the sunglasses boss). All others are
-// assigned by stable hash of the agent's slug.
-//
-// Sprites are 7 chars wide (padded). This fits in a 24+ char sidebar
-// with room for name/role alongside.
-
-// spriteHat is the top line of a character — the identity marker.
-// These never change with activity; they're how you recognize the character.
-var spriteHats = [16]string{
-	" \u2310\u25a0-\u25a0 ", // 0: sunglasses (CEO)
-	" \u256d\u2593\u2593\u256e ", // 1: beanie
-	"  \u25b2\u25b2  ",         // 2: mohawk
-	" \u256d\u2500\u2500\u256e ", // 3: flat cap
-	"  \u265b   ",               // 4: crown
-	" \u250c\u2584\u2584\u2510 ", // 5: top hat
-	"  \u25d7   ",               // 6: beret
-	"  \u257d   ",               // 7: antenna
-	" \u25d6  \u25d7 ",          // 8: headphones
-	"  \u2227\u2227  ",         // 9: pointy ears
-	"  \u2740   ",               // 10: flower
-	"  \u2584\u2580  ",          // 11: backwards cap
-	" \u256d\u223f\u256e ",      // 12: wavy hair
-	"  \u2550\u2550  ",          // 13: visor
-	" \u2500\u25cb\u25cb\u2500 ", // 14: round goggles
-	"  \u2580\u2580  ",          // 15: flat top
-}
-
-// spriteFace returns the face line (line 1) for the given activity + frame.
-// The face is shared across all sprites — expression is universal.
-func spriteFace(activity string, frame int) string {
-	f := frame % 2
-	switch activity {
-	case "talking":
-		return pick(f, "(\u00b0\u1d17\u00b0)", "(\u00b0o\u00b0)")
-	case "shipping":
-		return pick(f, "(\u00b0\u25bf\u00b0)", "(\u00b0_\u00b0)")
-	case "plotting":
-		return pick(f, "(\u00b0\u2038\u00b0)", "(\u00b0_\u00b0)")
-	default: // idle/lurking
-		return pick(f, "(\u00b0_\u00b0)", "(\u00b0_\u00b0)")
-	}
-}
-
-// spriteBody returns the body line (line 2) for the given activity + frame.
-func spriteBody(activity string, frame int) string {
-	f := frame % 2
-	switch activity {
-	case "talking":
-		return pick(f, " /|\\>", " \\|/ ")
-	case "shipping":
-		return pick(f, " /|\u2588", " /|\u258a")
-	case "plotting":
-		return pick(f, " /|. ", " /|  ")
+func mascotAccent(slug string) string {
+	switch slug {
+	case "ceo":
+		return "⌐"
+	case "pm":
+		return "□"
+	case "fe":
+		return "="
+	case "be":
+		return "#"
+	case "ai":
+		return "*"
+	case "designer":
+		return "~"
+	case "cmo":
+		return "!"
+	case "cro":
+		return "$"
+	case "nex":
+		return "◎"
+	case "you":
+		return "+"
 	default:
-		return pick(f, " /|\\ ", " /|\\ ")
+		return "•"
 	}
 }
 
-// assignSpriteIndex returns a stable sprite index for a given agent slug.
-// CEO always gets 0 (the sunglasses). Everyone else hashes into 1..15
-// (skipping 0 to avoid looking like the CEO).
-func assignSpriteIndex(slug string) int {
-	if slug == "ceo" {
-		return 0
+func mascotEyes(slug string) (string, string) {
+	switch slug {
+	case "ceo":
+		return "■", "■"
+	case "ai", "nex":
+		return "◉", "◉"
+	case "designer":
+		return "◕", "◕"
+	case "cmo":
+		return "✶", "✶"
+	default:
+		return "•", "•"
 	}
-	h := fnv.New32a()
-	h.Write([]byte(slug))
-	return 1 + int(h.Sum32())%(len(spriteHats)-1) // range 1..15
 }
 
-// spriteLines returns the 3-line character sprite for an agent.
-func spriteLines(slug, activity string, frame int) [3]string {
-	idx := assignSpriteIndex(slug)
+func mascotMouth(activity string, frame int) string {
+	switch activity {
+	case "talking":
+		if frame%2 == 0 {
+			return "o"
+		}
+		return "ᴗ"
+	case "shipping":
+		if frame%2 == 0 {
+			return "⌣"
+		}
+		return "▿"
+	case "plotting":
+		if frame%2 == 0 {
+			return "~"
+		}
+		return "ˎ"
+	default:
+		if frame%2 == 0 {
+			return "‿"
+		}
+		return "_"
+	}
+}
+
+func mascotTop(activity string, frame int) string {
+	switch activity {
+	case "talking":
+		if frame%2 == 0 {
+			return " /^^\\\\"
+		}
+		return " /~~\\\\"
+	case "plotting":
+		if frame%2 == 0 {
+			return " /~~\\\\"
+		}
+		return " /^^\\\\"
+	default:
+		return " /^^\\\\"
+	}
+}
+
+func mascotProp(slug string) string {
+	switch slug {
+	case "ceo":
+		return "$"
+	case "pm":
+		return "]"
+	case "fe":
+		return "="
+	case "be":
+		return "#"
+	case "ai":
+		return "*"
+	case "designer":
+		return "~"
+	case "cmo":
+		return "!"
+	case "cro":
+		return "%"
+	case "nex":
+		return "o"
+	case "you":
+		return "+"
+	default:
+		return "|"
+	}
+}
+
+func mascotLines(slug, activity string, frame int) [3]string {
+	leftEye, rightEye := mascotEyes(slug)
+	face := "(" + leftEye + mascotMouth(activity, frame) + rightEye + ")"
+	body := " /|" + mascotProp(slug) + "\\ "
 	return [3]string{
-		spriteHats[idx],
-		spriteFace(activity, frame),
-		spriteBody(activity, frame),
+		mascotTop(activity, frame),
+		face,
+		body,
 	}
 }
 
-// agentCharacter returns a single-line compact face for inline use.
-// Uses the hat as a prefix badge so the character is recognizable in one line.
+// agentCharacter returns a compact mascot-like face for inline use.
+// WUPHF uses one coherent visual grammar: a role accent + a rounded face.
 func agentCharacter(slug, activity string, frame int) string {
-	idx := assignSpriteIndex(slug)
-	hat := strings.TrimSpace(spriteHats[idx])
-	face := spriteFace(activity, frame)
-	return hat + face
-}
-
-func pick(frame int, a, b string) string {
-	if frame == 0 {
-		return a
-	}
-	return b
+	leftEye, rightEye := mascotEyes(slug)
+	return mascotAccent(slug) + "(" + leftEye + mascotMouth(activity, frame) + rightEye + ")"
 }
 
 func appIcon(app officeApp) string {
