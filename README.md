@@ -119,7 +119,7 @@ Start it with Nex disabled:
 Kill a running session from outside tmux:
 
 ```bash
-./wuphf kill
+./wuphf shred
 ```
 
 ## Setup

@@ -33,7 +33,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
-		fmt.Fprintf(os.Stderr, "  %s kill         Stop the running team\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s shred        Stop the running team\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		flag.PrintDefaults()
@@ -56,7 +56,7 @@ func main() {
 		return
 	}
 
-	// Handle "wuphf kill" subcommand
+	// Handle subcommands
 	args := flag.Args()
 	if len(args) > 0 {
 		switch args[0] {
@@ -66,7 +66,7 @@ func main() {
 				os.Exit(1)
 			}
 			return
-		case "kill":
+		case "shred", "kill":
 			l, err := team.NewLauncher(*packFlag)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -76,7 +76,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Println("Team session killed.")
+			fmt.Println("Team session shredded.")
 			return
 		case "init":
 			dispatch("/init", *apiKeyFlag, *format)
@@ -139,7 +139,7 @@ func runTeam(args []string, packSlug string, unsafe bool) {
 	fmt.Println("  Ctrl+B z         zoom a pane full-screen")
 	fmt.Println("  Ctrl+B d         detach (keeps running)")
 	fmt.Println("  /quit            exit everything")
-	fmt.Printf("  %s kill         stop from outside\n", appName)
+	fmt.Printf("  %s shred        stop from outside\n", appName)
 	fmt.Println()
 
 	if err := l.Attach(); err != nil {

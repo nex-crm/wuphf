@@ -203,29 +203,143 @@ var spriteGeneric = pixelSprite{
 
 // spriteForSlug returns the unique sprite for a known role,
 // or a seeded variation of the generic sprite for dynamic agents.
-func spriteForSlug(slug string) pixelSprite {
+// frame alternates 0/1 for animation.
+func spriteForSlug(slug string, frame ...int) pixelSprite {
+	f := 0
+	if len(frame) > 0 {
+		f = frame[0] % 2
+	}
+
+	var base pixelSprite
 	switch slug {
 	case "ceo":
-		return spriteCEO
+		base = spriteCEO
 	case "pm":
-		return spritePM
+		base = spritePM
 	case "fe":
-		return spriteFE
+		base = spriteFE
 	case "be":
-		return spriteBE
+		base = spriteBE
 	case "ai":
-		return spriteAI
+		base = spriteAI
 	case "designer":
-		return spriteDesigner
+		base = spriteDesigner
 	case "cmo":
-		return spriteCMO
+		base = spriteCMO
 	case "cro":
-		return spriteCRO
+		base = spriteCRO
 	default:
-		// Dynamic agents get the generic sprite with seeded hair variation
-		sprite := cloneSprite(spriteGeneric)
+		base = spriteGeneric
+	}
+
+	sprite := cloneSprite(base)
+
+	if slug != "ceo" && slug != "pm" && slug != "fe" && slug != "be" &&
+		slug != "ai" && slug != "designer" && slug != "cmo" && slug != "cro" {
 		applyHairVariation(sprite, seedHash(slug))
-		return sprite
+	}
+
+	if f == 1 {
+		animateFrame(sprite, slug)
+	}
+	return sprite
+}
+
+// animateFrame applies micro-animations for frame 1 (frame 0 is the base).
+// Each character has a unique animation that conveys personality:
+//   CEO:      raises coffee cup (arm moves up)
+//   PM:       taps clipboard (hand shifts)
+//   FE:      screen flickers (highlight changes)
+//   BE:      tightens crossed arms
+//   AI:      antenna blinks (accent toggles)
+//   Designer: pencil moves (prop shifts position)
+//   CMO:      megaphone raised higher
+//   CRO:      briefcase swings
+func animateFrame(sprite pixelSprite, slug string) {
+	if len(sprite) < 14 {
+		return
+	}
+	switch slug {
+	case "ceo":
+		// Coffee cup raised: move prop pixels up one row
+		sprite[7][11] = pxProp
+		sprite[7][12] = pxLine
+		sprite[8][11] = pxAccent
+		sprite[8][12] = pxAccent
+		sprite[9][11] = pxSkin
+		sprite[9][12] = pxClear
+		// Mouth open (talking)
+		sprite[5][7] = pxClear
+	case "pm":
+		// Clipboard check: arm extends, clipboard shifts
+		sprite[8][12] = pxProp
+		sprite[8][13] = pxLine
+		sprite[9][12] = pxProp
+		sprite[9][13] = pxLine
+		// Eyebrow raise
+		sprite[2][5] = pxLine
+		sprite[2][8] = pxLine
+	case "fe":
+		// Screen glow flickers
+		sprite[9][5] = pxHighlight
+		sprite[9][8] = pxHighlight
+		sprite[8][6] = pxHighlight
+		sprite[8][7] = pxHighlight
+		// Typing: hands shift
+		sprite[8][4] = pxSkin
+		sprite[8][9] = pxSkin
+	case "be":
+		// Arms cross tighter + frown
+		sprite[8][4] = pxAccent
+		sprite[8][9] = pxAccent
+		sprite[9][5] = pxSkin
+		sprite[9][8] = pxSkin
+		// Frown deepens
+		sprite[4][6] = pxLine
+		sprite[4][7] = pxLine
+	case "ai":
+		// Antenna pulses (accent <-> highlight)
+		sprite[0][6] = pxHighlight
+		sprite[0][7] = pxHighlight
+		// Eyes glow brighter
+		sprite[4][5] = pxHighlight
+		sprite[4][9] = pxHighlight
+	case "designer":
+		// Pencil moves (drawing motion)
+		sprite[8][12] = pxClear
+		sprite[9][12] = pxProp
+		sprite[10][12] = pxProp
+		sprite[10][13] = pxLine
+		// Smirk
+		sprite[5][7] = pxLine
+	case "cmo":
+		// Megaphone raised higher
+		sprite[6][0] = pxProp
+		sprite[6][1] = pxProp
+		sprite[7][0] = pxClear
+		sprite[7][1] = pxSkin
+		sprite[8][0] = pxClear
+		sprite[8][1] = pxClear
+		// Mouth open (yelling)
+		sprite[4][6] = pxClear
+		sprite[4][7] = pxClear
+	case "cro":
+		// Briefcase swings forward
+		sprite[11][9] = pxClear
+		sprite[11][10] = pxProp
+		sprite[11][11] = pxProp
+		sprite[11][12] = pxProp
+		sprite[12][10] = pxLine
+		sprite[12][11] = pxProp
+		sprite[12][12] = pxLine
+		sprite[13][10] = pxProp
+		sprite[13][11] = pxProp
+		sprite[13][12] = pxProp
+	default:
+		// Generic: wave (arm up)
+		sprite[7][1] = pxSkin
+		sprite[8][0] = pxSkin
+		sprite[8][1] = pxClear
 	}
 }
 
@@ -347,19 +461,18 @@ func renderSpriteToANSI(sprite pixelSprite, palette map[int][3]int) []string {
 // ── Public API ──────────────────────────────────────────────────
 
 // renderWuphfSplashAvatar renders a full-body character for the splash screen.
-func renderWuphfSplashAvatar(seed, slug string, talking bool) []string {
+// frame alternates 0/1 for animation.
+func renderWuphfSplashAvatar(seed, slug string, frame int) []string {
 	_ = seed
-	_ = talking
-	sprite := spriteForSlug(slug)
+	sprite := spriteForSlug(slug, frame)
 	return renderSpriteToANSI(sprite, spritePaletteForSlug(slug))
 }
 
 // renderWuphfAvatar renders a small face portrait for inline use.
-func renderWuphfAvatar(seed, slug string, talking bool) []string {
+func renderWuphfAvatar(seed, slug string, frame int) []string {
 	_ = seed
-	_ = talking
 	// Use just the head portion (rows 0-5) of the full sprite
-	full := spriteForSlug(slug)
+	full := spriteForSlug(slug, frame)
 	if len(full) > 6 {
 		head := full[:6]
 		return renderSpriteToANSI(head, spritePaletteForSlug(slug))

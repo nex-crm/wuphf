@@ -121,7 +121,7 @@ func renderOfficeCharacter(m channelMember, act memberActivity, now time.Time) o
 	if act.Label == "talking" {
 		talkFrame = int(now.UnixNano()/250_000_000) % 2
 	}
-	avatar := renderWuphfAvatar(seed, m.Slug, talkFrame == 1)
+	avatar := renderWuphfAvatar(seed, m.Slug, talkFrame)
 	bubble := officeAside(m.Slug, act.Label, m.LastMessage, now)
 	return officeCharacter{Avatar: avatar, Bubble: bubble}
 }

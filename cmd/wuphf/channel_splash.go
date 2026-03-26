@@ -136,7 +136,7 @@ func (m splashModel) renderCast() string {
 		if seed == "" {
 			seed = member.Slug
 		}
-		lines := renderWuphfSplashAvatar(seed, member.Slug, false)
+		lines := renderWuphfSplashAvatar(seed, member.Slug, m.frame)
 		if len(lines) > maxAvatarH {
 			maxAvatarH = len(lines)
 		}
