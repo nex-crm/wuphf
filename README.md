@@ -1,12 +1,10 @@
 # WUPHF
 
+[![Watch the demo](https://i.sstatic.net/Vp2cE.png)](https://youtu.be/3oActq_QXgk)
+
 WUPHF is a weird little terminal office for a team of AI coworkers.
 
 You run one command, it opens one tmux window, and suddenly you have a CEO, PM, frontend engineer, backend engineer, AI engineer, designer, CMO, and CRO all sitting in the same place arguing about what to build. That is the product.
-
-See it at work below:
-
-[![WUPHF Demo](https://img.youtube.com/vi/3oActq_QXgk/maxresdefault.jpg)](https://youtu.be/3oActq_QXgk)
 
 The name is from *The Office*. If you know, you know. If you do not, this is the bit:
 
