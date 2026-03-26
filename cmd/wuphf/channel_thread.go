@@ -215,8 +215,9 @@ func renderThreadReply(reply threadedMessage, width int) []string {
 	}
 
 	var lines []string
-	lines = append(lines, fmt.Sprintf("%s%s  %s  %s",
+	lines = append(lines, fmt.Sprintf("%s%s %s  %s  %s",
 		prefix,
+		agentAvatar(msg.From),
 		nameStyle.Render(name),
 		tsStyle.Render(ts),
 		metaStyle.Render(meta),
@@ -270,8 +271,8 @@ func renderThreadMessage(msg brokerMessage, width int, isParent bool) []string {
 	}
 
 	var lines []string
-	lines = append(lines, fmt.Sprintf("  %s%s%s",
-		nameRendered, strings.Repeat(" ", gap), tsRendered))
+	lines = append(lines, fmt.Sprintf("  %s %s%s%s",
+		agentAvatar(msg.From), nameRendered, strings.Repeat(" ", gap), tsRendered))
 
 	// Render content
 	textPart, a2uiRendered := renderA2UIBlocks(msg.Content, width-4)

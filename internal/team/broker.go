@@ -1,11 +1,15 @@
 package team
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/nex-crm/wuphf/internal/company"
+	"github.com/nex-crm/wuphf/internal/config"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -24,6 +28,7 @@ var brokerStatePath = defaultBrokerStatePath
 type channelMessage struct {
 	ID          string   `json:"id"`
 	From        string   `json:"from"`
+	Channel     string   `json:"channel,omitempty"`
 	Kind        string   `json:"kind,omitempty"`
 	Source      string   `json:"source,omitempty"`
 	SourceLabel string   `json:"source_label,omitempty"`
@@ -50,21 +55,107 @@ type interviewAnswer struct {
 
 type humanInterview struct {
 	ID            string            `json:"id"`
+	Kind          string            `json:"kind,omitempty"`
+	Status        string            `json:"status,omitempty"`
 	From          string            `json:"from"`
+	Channel       string            `json:"channel,omitempty"`
+	Title         string            `json:"title,omitempty"`
 	Question      string            `json:"question"`
 	Context       string            `json:"context,omitempty"`
 	Options       []interviewOption `json:"options,omitempty"`
 	RecommendedID string            `json:"recommended_id,omitempty"`
+	Blocking      bool              `json:"blocking,omitempty"`
+	Required      bool              `json:"required,omitempty"`
+	Secret        bool              `json:"secret,omitempty"`
+	ReplyTo       string            `json:"reply_to,omitempty"`
+	DueAt         string            `json:"due_at,omitempty"`
+	FollowUpAt    string            `json:"follow_up_at,omitempty"`
+	ReminderAt    string            `json:"reminder_at,omitempty"`
+	RecheckAt     string            `json:"recheck_at,omitempty"`
 	CreatedAt     string            `json:"created_at"`
+	UpdatedAt     string            `json:"updated_at,omitempty"`
 	Answered      *interviewAnswer  `json:"answered,omitempty"`
 }
 
+type teamTask struct {
+	ID         string `json:"id"`
+	Channel    string `json:"channel,omitempty"`
+	Title      string `json:"title"`
+	Details    string `json:"details,omitempty"`
+	Owner      string `json:"owner,omitempty"`
+	Status     string `json:"status"`
+	CreatedBy  string `json:"created_by"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	DueAt      string `json:"due_at,omitempty"`
+	FollowUpAt string `json:"follow_up_at,omitempty"`
+	ReminderAt string `json:"reminder_at,omitempty"`
+	RecheckAt  string `json:"recheck_at,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+}
+
+type teamChannel struct {
+	Slug      string   `json:"slug"`
+	Name      string   `json:"name"`
+	Members   []string `json:"members,omitempty"`
+	Disabled  []string `json:"disabled,omitempty"`
+	CreatedBy string   `json:"created_by,omitempty"`
+	CreatedAt string   `json:"created_at,omitempty"`
+	UpdatedAt string   `json:"updated_at,omitempty"`
+}
+
+type officeMember struct {
+	Slug           string   `json:"slug"`
+	Name           string   `json:"name"`
+	Role           string   `json:"role,omitempty"`
+	Expertise      []string `json:"expertise,omitempty"`
+	Personality    string   `json:"personality,omitempty"`
+	PermissionMode string   `json:"permission_mode,omitempty"`
+	AllowedTools   []string `json:"allowed_tools,omitempty"`
+	CreatedBy      string   `json:"created_by,omitempty"`
+	CreatedAt      string   `json:"created_at,omitempty"`
+	BuiltIn        bool     `json:"built_in,omitempty"`
+}
+
+type officeActionLog struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Source    string `json:"source,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	Actor     string `json:"actor,omitempty"`
+	Summary   string `json:"summary"`
+	RelatedID string `json:"related_id,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+type schedulerJob struct {
+	Slug            string `json:"slug"`
+	Kind            string `json:"kind,omitempty"`
+	Label           string `json:"label"`
+	TargetType      string `json:"target_type,omitempty"`
+	TargetID        string `json:"target_id,omitempty"`
+	Channel         string `json:"channel,omitempty"`
+	IntervalMinutes int    `json:"interval_minutes"`
+	DueAt           string `json:"due_at,omitempty"`
+	NextRun         string `json:"next_run,omitempty"`
+	LastRun         string `json:"last_run,omitempty"`
+	Status          string `json:"status,omitempty"`
+	Payload         string `json:"payload,omitempty"`
+}
+
 type brokerState struct {
-	Messages          []channelMessage `json:"messages"`
-	Counter           int              `json:"counter"`
-	NotificationSince string           `json:"notification_since,omitempty"`
-	PendingInterview  *humanInterview  `json:"pending_interview,omitempty"`
-	Usage             teamUsageState   `json:"usage,omitempty"`
+	Messages          []channelMessage  `json:"messages"`
+	Members           []officeMember    `json:"members,omitempty"`
+	Channels          []teamChannel     `json:"channels,omitempty"`
+	Tasks             []teamTask        `json:"tasks,omitempty"`
+	Requests          []humanInterview  `json:"requests,omitempty"`
+	Actions           []officeActionLog `json:"actions,omitempty"`
+	Scheduler         []schedulerJob    `json:"scheduler,omitempty"`
+	Counter           int               `json:"counter"`
+	NotificationSince string            `json:"notification_since,omitempty"`
+	InsightsSince     string            `json:"insights_since,omitempty"`
+	PendingInterview  *humanInterview   `json:"pending_interview,omitempty"`
+	Usage             teamUsageState    `json:"usage,omitempty"`
 }
 
 type usageTotals struct {
@@ -86,8 +177,15 @@ type teamUsageState struct {
 // All agent MCP instances connect to this shared broker.
 type Broker struct {
 	messages          []channelMessage
+	members           []officeMember
+	channels          []teamChannel
+	tasks             []teamTask
+	requests          []humanInterview
+	actions           []officeActionLog
+	scheduler         []schedulerJob
 	counter           int
 	notificationSince string
+	insightsSince     string
 	pendingInterview  *humanInterview
 	usage             teamUsageState
 	mu                sync.Mutex
@@ -112,6 +210,10 @@ func NewBroker() *Broker {
 		token: generateToken(),
 	}
 	_ = b.loadState()
+	b.mu.Lock()
+	b.ensureDefaultChannelsLocked()
+	b.normalizeLoadedStateLocked()
+	b.mu.Unlock()
 	return b
 }
 
@@ -149,11 +251,20 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
+	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
+	mux.HandleFunc("/channels", b.requireAuth(b.handleChannels))
+	mux.HandleFunc("/channel-members", b.requireAuth(b.handleChannelMembers))
 	mux.HandleFunc("/members", b.requireAuth(b.handleMembers))
+	mux.HandleFunc("/tasks", b.requireAuth(b.handleTasks))
+	mux.HandleFunc("/requests", b.requireAuth(b.handleRequests))
+	mux.HandleFunc("/requests/answer", b.requireAuth(b.handleRequestAnswer))
 	mux.HandleFunc("/interview", b.requireAuth(b.handleInterview))
 	mux.HandleFunc("/interview/answer", b.requireAuth(b.handleInterviewAnswer))
 	mux.HandleFunc("/reset", b.requireAuth(b.handleReset))
 	mux.HandleFunc("/usage", b.requireAuth(b.handleUsage))
+	mux.HandleFunc("/actions", b.requireAuth(b.handleActions))
+	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
+	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
@@ -197,17 +308,164 @@ func (b *Broker) Messages() []channelMessage {
 }
 
 func (b *Broker) HasPendingInterview() bool {
+	return b.HasBlockingRequest()
+}
+
+func (b *Broker) HasBlockingRequest() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.pendingInterview != nil && b.pendingInterview.Answered == nil
+	for _, req := range b.requests {
+		if requestIsActive(req) && req.Blocking {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Broker) EnabledMembers(channel string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if ch := b.findChannelLocked(channel); ch != nil {
+		return b.enabledChannelMembersLocked(channel, ch.Members)
+	}
+	return nil
+}
+
+func (b *Broker) OfficeMembers() []officeMember {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]officeMember, len(b.members))
+	copy(out, b.members)
+	return out
+}
+
+func (b *Broker) ChannelMessages(channel string) []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	out := make([]channelMessage, 0, len(b.messages))
+	for _, msg := range b.messages {
+		if normalizeChannelSlug(msg.Channel) == channel {
+			out = append(out, msg)
+		}
+	}
+	return out
+}
+
+func (b *Broker) ChannelTasks(channel string) []teamTask {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	out := make([]teamTask, 0, len(b.tasks))
+	for _, task := range b.tasks {
+		if normalizeChannelSlug(task.Channel) == channel {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+
+func (b *Broker) Requests(channel string, includeResolved bool) []humanInterview {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	out := make([]humanInterview, 0, len(b.requests))
+	for _, req := range b.requests {
+		reqChannel := normalizeChannelSlug(req.Channel)
+		if reqChannel == "" {
+			reqChannel = "general"
+		}
+		if reqChannel != channel {
+			continue
+		}
+		if !includeResolved && !requestIsActive(req) {
+			continue
+		}
+		out = append(out, req)
+	}
+	return out
+}
+
+func (b *Broker) Actions() []officeActionLog {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]officeActionLog, len(b.actions))
+	copy(out, b.actions)
+	return out
+}
+
+func (b *Broker) Scheduler() []schedulerJob {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]schedulerJob, len(b.scheduler))
+	copy(out, b.scheduler)
+	return out
+}
+
+type queueSnapshot struct {
+	Actions   []officeActionLog `json:"actions"`
+	Scheduler []schedulerJob    `json:"scheduler"`
+	Due       []schedulerJob    `json:"due,omitempty"`
+}
+
+func (b *Broker) QueueSnapshot() queueSnapshot {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return queueSnapshot{
+		Actions:   append([]officeActionLog(nil), b.actions...),
+		Scheduler: append([]schedulerJob(nil), b.scheduler...),
+		Due:       append([]schedulerJob(nil), b.dueSchedulerJobsLocked(time.Now().UTC())...),
+	}
+}
+
+func (b *Broker) dueSchedulerJobsLocked(now time.Time) []schedulerJob {
+	now = now.UTC()
+	var out []schedulerJob
+	for _, job := range b.scheduler {
+		if strings.EqualFold(strings.TrimSpace(job.Status), "done") || strings.EqualFold(strings.TrimSpace(job.Status), "canceled") {
+			continue
+		}
+		target := strings.TrimSpace(job.NextRun)
+		if target == "" {
+			continue
+		}
+		dueAt, err := time.Parse(time.RFC3339, target)
+		if err != nil {
+			continue
+		}
+		if !dueAt.After(now) {
+			out = append(out, job)
+		}
+	}
+	return out
 }
 
 func (b *Broker) Reset() {
 	b.mu.Lock()
 	b.messages = nil
+	b.members = defaultOfficeMembers()
+	b.channels = defaultTeamChannels()
+	b.tasks = nil
+	b.requests = nil
+	b.actions = nil
+	b.scheduler = nil
 	b.pendingInterview = nil
 	b.counter = 0
 	b.notificationSince = ""
+	b.insightsSince = ""
 	b.usage = teamUsageState{Agents: make(map[string]usageTotals)}
 	_ = b.saveLocked()
 	b.mu.Unlock()
@@ -235,19 +493,32 @@ func (b *Broker) loadState() error {
 		return err
 	}
 	b.messages = state.Messages
+	b.members = state.Members
+	b.channels = state.Channels
+	b.tasks = state.Tasks
+	b.requests = state.Requests
+	b.actions = state.Actions
+	b.scheduler = state.Scheduler
 	b.counter = state.Counter
 	b.notificationSince = state.NotificationSince
+	b.insightsSince = state.InsightsSince
 	b.pendingInterview = state.PendingInterview
 	b.usage = state.Usage
 	if b.usage.Agents == nil {
 		b.usage.Agents = make(map[string]usageTotals)
 	}
+	if len(b.requests) == 0 && b.pendingInterview != nil {
+		b.requests = []humanInterview{*b.pendingInterview}
+	}
+	b.ensureDefaultChannelsLocked()
+	b.ensureDefaultOfficeMembersLocked()
+	b.normalizeLoadedStateLocked()
 	return nil
 }
 
 func (b *Broker) saveLocked() error {
 	path := brokerStatePath()
-	if len(b.messages) == 0 && b.pendingInterview == nil && b.counter == 0 && b.notificationSince == "" && usageStateIsZero(b.usage) {
+	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.scheduler) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -258,9 +529,16 @@ func (b *Broker) saveLocked() error {
 	}
 	state := brokerState{
 		Messages:          b.messages,
+		Members:           b.members,
+		Channels:          b.channels,
+		Tasks:             b.tasks,
+		Requests:          b.requests,
+		Actions:           b.actions,
+		Scheduler:         b.scheduler,
 		Counter:           b.counter,
 		NotificationSince: b.notificationSince,
-		PendingInterview:  b.pendingInterview,
+		InsightsSince:     b.insightsSince,
+		PendingInterview:  firstBlockingRequest(b.requests),
 		Usage:             b.usage,
 	}
 	data, err := json.MarshalIndent(state, "", "  ")
@@ -274,6 +552,436 @@ func (b *Broker) saveLocked() error {
 	return os.Rename(tmp, path)
 }
 
+func defaultOfficeMembers() []officeMember {
+	now := time.Now().UTC().Format(time.RFC3339)
+	manifest, err := company.LoadManifest()
+	if err != nil || len(manifest.Members) == 0 {
+		manifest = company.DefaultManifest()
+	}
+	members := make([]officeMember, 0, len(manifest.Members))
+	for _, cfg := range manifest.Members {
+		members = append(members, officeMember{
+			Slug:           cfg.Slug,
+			Name:           cfg.Name,
+			Role:           cfg.Role,
+			Expertise:      append([]string(nil), cfg.Expertise...),
+			Personality:    cfg.Personality,
+			PermissionMode: cfg.PermissionMode,
+			AllowedTools:   append([]string(nil), cfg.AllowedTools...),
+			CreatedBy:      "wuphf",
+			CreatedAt:      now,
+			BuiltIn:        cfg.System || cfg.Slug == manifest.Lead || cfg.Slug == "ceo",
+		})
+	}
+	return members
+}
+
+func defaultOfficeMemberSlugs() []string {
+	members := defaultOfficeMembers()
+	slugs := make([]string, 0, len(members))
+	for _, member := range members {
+		slugs = append(slugs, member.Slug)
+	}
+	return slugs
+}
+
+func defaultTeamChannels() []teamChannel {
+	now := time.Now().UTC().Format(time.RFC3339)
+	manifest, err := company.LoadManifest()
+	if err != nil || len(manifest.Channels) == 0 {
+		manifest = company.DefaultManifest()
+	}
+	channels := make([]teamChannel, 0, len(manifest.Channels))
+	for _, channel := range manifest.Channels {
+		channels = append(channels, teamChannel{
+			Slug:      channel.Slug,
+			Name:      channel.Name,
+			Members:   append([]string(nil), channel.Members...),
+			Disabled:  append([]string(nil), channel.Disabled...),
+			CreatedBy: "wuphf",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+	return channels
+}
+
+func isDefaultChannelState(channels []teamChannel) bool {
+	defaults := defaultTeamChannels()
+	if len(channels) != len(defaults) {
+		return false
+	}
+	for i := range defaults {
+		if channels[i].Slug != defaults[i].Slug || channels[i].Name != defaults[i].Name {
+			return false
+		}
+		if strings.Join(channels[i].Members, ",") != strings.Join(defaults[i].Members, ",") {
+			return false
+		}
+		if strings.Join(channels[i].Disabled, ",") != strings.Join(defaults[i].Disabled, ",") {
+			return false
+		}
+	}
+	return true
+}
+
+func isDefaultOfficeMemberState(members []officeMember) bool {
+	defaults := defaultOfficeMembers()
+	if len(members) != len(defaults) {
+		return false
+	}
+	for i := range defaults {
+		if members[i].Slug != defaults[i].Slug || members[i].Name != defaults[i].Name || members[i].Role != defaults[i].Role {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeChannelSlug(slug string) string {
+	slug = strings.ToLower(strings.TrimSpace(slug))
+	slug = strings.ReplaceAll(slug, " ", "-")
+	slug = strings.ReplaceAll(slug, "_", "-")
+	if slug == "" {
+		return "general"
+	}
+	return slug
+}
+
+func (b *Broker) ensureDefaultChannelsLocked() {
+	if len(b.channels) == 0 {
+		b.channels = defaultTeamChannels()
+		return
+	}
+	for _, ch := range b.channels {
+		if ch.Slug == "general" {
+			return
+		}
+	}
+	b.channels = append(defaultTeamChannels(), b.channels...)
+}
+
+func (b *Broker) ensureDefaultOfficeMembersLocked() {
+	if len(b.members) == 0 {
+		b.members = defaultOfficeMembers()
+		return
+	}
+	defaults := defaultOfficeMembers()
+	for _, member := range defaults {
+		if b.findMemberLocked(member.Slug) == nil {
+			b.members = append(b.members, member)
+		}
+	}
+}
+
+func (b *Broker) normalizeLoadedStateLocked() {
+	seenMembers := make(map[string]struct{}, len(b.members))
+	normalizedMembers := make([]officeMember, 0, len(b.members))
+	for _, member := range b.members {
+		member.Slug = normalizeChannelSlug(member.Slug)
+		if member.Slug == "" {
+			continue
+		}
+		if _, ok := seenMembers[member.Slug]; ok {
+			continue
+		}
+		seenMembers[member.Slug] = struct{}{}
+		member.Name = strings.TrimSpace(member.Name)
+		if member.Name == "" {
+			member.Name = humanizeSlug(member.Slug)
+		}
+		member.Role = strings.TrimSpace(member.Role)
+		if member.Role == "" {
+			member.Role = member.Name
+		}
+		member.BuiltIn = member.Slug == "ceo"
+		member.Expertise = normalizeStringList(member.Expertise)
+		member.AllowedTools = normalizeStringList(member.AllowedTools)
+		normalizedMembers = append(normalizedMembers, member)
+	}
+	b.members = normalizedMembers
+	for i := range b.channels {
+		b.channels[i].Slug = normalizeChannelSlug(b.channels[i].Slug)
+		if strings.TrimSpace(b.channels[i].Name) == "" {
+			b.channels[i].Name = b.channels[i].Slug
+		}
+		if b.channels[i].Slug == "general" && len(b.channels[i].Members) == 0 {
+			b.channels[i].Members = append([]string(nil), defaultOfficeMemberSlugs()...)
+		}
+		filteredMembers := make([]string, 0, len(b.channels[i].Members))
+		for _, slug := range uniqueSlugs(b.channels[i].Members) {
+			if b.findMemberLocked(slug) != nil {
+				filteredMembers = append(filteredMembers, slug)
+			}
+		}
+		b.channels[i].Members = filteredMembers
+		filteredDisabled := make([]string, 0, len(b.channels[i].Disabled))
+		for _, slug := range uniqueSlugs(b.channels[i].Disabled) {
+			if b.findMemberLocked(slug) != nil && containsString(filteredMembers, slug) {
+				filteredDisabled = append(filteredDisabled, slug)
+			}
+		}
+		b.channels[i].Disabled = filteredDisabled
+	}
+	for i := range b.messages {
+		if strings.TrimSpace(b.messages[i].Channel) == "" {
+			b.messages[i].Channel = "general"
+		}
+	}
+	for i := range b.tasks {
+		if strings.TrimSpace(b.tasks[i].Channel) == "" {
+			b.tasks[i].Channel = "general"
+		}
+	}
+	for i := range b.requests {
+		if strings.TrimSpace(b.requests[i].Channel) == "" {
+			b.requests[i].Channel = "general"
+		}
+		if strings.TrimSpace(b.requests[i].Kind) == "" {
+			b.requests[i].Kind = "choice"
+		}
+		if strings.TrimSpace(b.requests[i].Status) == "" {
+			if b.requests[i].Answered != nil {
+				b.requests[i].Status = "answered"
+			} else {
+				b.requests[i].Status = "pending"
+			}
+		}
+		if b.requests[i].Blocking || strings.TrimSpace(b.requests[i].Kind) == "interview" {
+			b.requests[i].Blocking = true
+		}
+		if strings.TrimSpace(b.requests[i].UpdatedAt) == "" {
+			b.requests[i].UpdatedAt = b.requests[i].CreatedAt
+		}
+		b.scheduleRequestLifecycleLocked(&b.requests[i])
+	}
+	for i := range b.tasks {
+		if strings.TrimSpace(b.tasks[i].Channel) == "" {
+			b.tasks[i].Channel = "general"
+		}
+		b.scheduleTaskLifecycleLocked(&b.tasks[i])
+	}
+	b.pendingInterview = firstBlockingRequest(b.requests)
+}
+
+func (b *Broker) findChannelLocked(slug string) *teamChannel {
+	slug = normalizeChannelSlug(slug)
+	for i := range b.channels {
+		if b.channels[i].Slug == slug {
+			return &b.channels[i]
+		}
+	}
+	return nil
+}
+
+func (b *Broker) findMemberLocked(slug string) *officeMember {
+	slug = normalizeChannelSlug(slug)
+	for i := range b.members {
+		if b.members[i].Slug == slug {
+			return &b.members[i]
+		}
+	}
+	return nil
+}
+
+func uniqueSlugs(items []string) []string {
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = normalizeChannelSlug(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func normalizeStringList(items []string) []string {
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func requestIsActive(req humanInterview) bool {
+	status := strings.ToLower(strings.TrimSpace(req.Status))
+	if req.Answered != nil {
+		return false
+	}
+	return status == "" || status == "pending" || status == "open"
+}
+
+func activeRequests(requests []humanInterview) []humanInterview {
+	out := make([]humanInterview, 0, len(requests))
+	for _, req := range requests {
+		if requestIsActive(req) {
+			out = append(out, req)
+		}
+	}
+	return out
+}
+
+func firstBlockingRequest(requests []humanInterview) *humanInterview {
+	for i := range requests {
+		if requestIsActive(requests[i]) && requests[i].Blocking {
+			req := requests[i]
+			return &req
+		}
+	}
+	return nil
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func humanizeSlug(slug string) string {
+	parts := strings.Split(strings.ReplaceAll(strings.TrimSpace(slug), "-", " "), " ")
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(part[:1]) + part[1:]
+	}
+	return strings.Join(parts, " ")
+}
+
+func truncateSummary(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len([]rune(s)) <= max {
+		return s
+	}
+	runes := []rune(s)
+	if max <= 1 {
+		return "…"
+	}
+	return string(runes[:max-1]) + "…"
+}
+
+func applyOfficeMemberDefaults(member *officeMember) {
+	if member == nil {
+		return
+	}
+	if member.Name == "" {
+		member.Name = humanizeSlug(member.Slug)
+	}
+	if member.Role == "" {
+		member.Role = member.Name
+	}
+	if len(member.Expertise) == 0 {
+		member.Expertise = inferOfficeExpertise(member.Slug, member.Role)
+	}
+	if member.Personality == "" {
+		member.Personality = inferOfficePersonality(member.Slug, member.Role)
+	}
+	if member.PermissionMode == "" {
+		member.PermissionMode = "plan"
+	}
+}
+
+func inferOfficeExpertise(slug, role string) []string {
+	text := strings.ToLower(strings.TrimSpace(slug + " " + role))
+	switch {
+	case strings.Contains(text, "front"), strings.Contains(text, "ui"), strings.Contains(text, "design eng"):
+		return []string{"frontend", "UI", "interaction design", "components", "accessibility"}
+	case strings.Contains(text, "back"), strings.Contains(text, "api"), strings.Contains(text, "infra"):
+		return []string{"backend", "APIs", "systems", "infrastructure", "databases"}
+	case strings.Contains(text, "ai"), strings.Contains(text, "ml"), strings.Contains(text, "llm"):
+		return []string{"AI", "LLMs", "agents", "retrieval", "evaluations"}
+	case strings.Contains(text, "market"), strings.Contains(text, "brand"), strings.Contains(text, "growth"):
+		return []string{"marketing", "growth", "positioning", "campaigns", "brand"}
+	case strings.Contains(text, "revenue"), strings.Contains(text, "sales"), strings.Contains(text, "cro"):
+		return []string{"sales", "revenue", "pipeline", "partnerships", "closing"}
+	case strings.Contains(text, "product"), strings.Contains(text, "pm"):
+		return []string{"product", "roadmap", "requirements", "prioritization", "scope"}
+	case strings.Contains(text, "design"):
+		return []string{"design", "UX", "visual systems", "prototyping", "brand"}
+	default:
+		return []string{strings.ToLower(strings.TrimSpace(role))}
+	}
+}
+
+func inferOfficePersonality(slug, role string) string {
+	text := strings.ToLower(strings.TrimSpace(slug + " " + role))
+	switch {
+	case strings.Contains(text, "front"):
+		return "Frontend specialist focused on polished user-facing work and sharp interaction details."
+	case strings.Contains(text, "back"):
+		return "Systems-minded engineer who keeps complexity under control and worries about reliability."
+	case strings.Contains(text, "ai"), strings.Contains(text, "ml"), strings.Contains(text, "llm"):
+		return "AI engineer who likes ambitious ideas but immediately asks how they will actually work."
+	case strings.Contains(text, "market"), strings.Contains(text, "brand"), strings.Contains(text, "growth"):
+		return "Growth and positioning operator who translates product work into market momentum."
+	case strings.Contains(text, "revenue"), strings.Contains(text, "sales"):
+		return "Commercial operator who thinks in demand, objections, and revenue consequences."
+	case strings.Contains(text, "product"), strings.Contains(text, "pm"):
+		return "Product thinker who turns ambiguity into scope, sequencing, and crisp tradeoffs."
+	case strings.Contains(text, "design"):
+		return "Taste-driven designer who cares about clarity, craft, and how the product actually feels."
+	default:
+		return "A sharp teammate with a clear specialty, strong point of view, and enough personality to feel human."
+	}
+}
+
+func (b *Broker) channelHasMemberLocked(channel, slug string) bool {
+	ch := b.findChannelLocked(channel)
+	if ch == nil {
+		return false
+	}
+	for _, member := range ch.Members {
+		if member == slug {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Broker) channelMemberEnabledLocked(channel, slug string) bool {
+	if !b.channelHasMemberLocked(channel, slug) {
+		return false
+	}
+	ch := b.findChannelLocked(channel)
+	if ch == nil {
+		return false
+	}
+	for _, disabled := range ch.Disabled {
+		if disabled == slug {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *Broker) enabledChannelMembersLocked(channel string, candidates []string) []string {
+	var out []string
+	for _, candidate := range candidates {
+		if b.channelMemberEnabledLocked(channel, candidate) {
+			out = append(out, candidate)
+		}
+	}
+	return out
+}
+
 func usageStateIsZero(state teamUsageState) bool {
 	if state.Total.TotalTokens > 0 || state.Total.CostUsd > 0 || state.Total.Requests > 0 {
 		return false
@@ -284,6 +992,309 @@ func usageStateIsZero(state teamUsageState) bool {
 		}
 	}
 	return true
+}
+
+func (b *Broker) appendActionLocked(kind, source, channel, actor, summary, relatedID string) {
+	b.actions = append(b.actions, officeActionLog{
+		ID:        fmt.Sprintf("action-%d", len(b.actions)+1),
+		Kind:      strings.TrimSpace(kind),
+		Source:    strings.TrimSpace(source),
+		Channel:   normalizeChannelSlug(channel),
+		Actor:     strings.TrimSpace(actor),
+		Summary:   strings.TrimSpace(summary),
+		RelatedID: strings.TrimSpace(relatedID),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	if len(b.actions) > 100 {
+		b.actions = append([]officeActionLog(nil), b.actions[len(b.actions)-100:]...)
+	}
+}
+
+func (b *Broker) SetSchedulerJob(job schedulerJob) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	job = normalizeSchedulerJob(job)
+	if job.Slug == "" {
+		return fmt.Errorf("job slug required")
+	}
+	if err := b.scheduleJobLocked(job); err != nil {
+		return err
+	}
+	return b.saveLocked()
+}
+
+func (b *Broker) ScheduleTaskFollowUp(taskID, channel, owner, label, payload string, when time.Time) error {
+	return b.scheduleJob(schedulerJob{
+		Slug:            normalizeSchedulerSlug("task_follow_up", channel, taskID),
+		Kind:            "task_follow_up",
+		Label:           label,
+		TargetType:      "task",
+		TargetID:        strings.TrimSpace(taskID),
+		Channel:         normalizeChannelSlug(channel),
+		IntervalMinutes: 0,
+		DueAt:           when.UTC().Format(time.RFC3339),
+		NextRun:         when.UTC().Format(time.RFC3339),
+		Status:          "scheduled",
+		Payload:         payload,
+	})
+}
+
+func (b *Broker) ScheduleRequestFollowUp(requestID, channel, label, payload string, when time.Time) error {
+	return b.scheduleJob(schedulerJob{
+		Slug:            normalizeSchedulerSlug("request_follow_up", channel, requestID),
+		Kind:            "request_follow_up",
+		Label:           label,
+		TargetType:      "request",
+		TargetID:        strings.TrimSpace(requestID),
+		Channel:         normalizeChannelSlug(channel),
+		IntervalMinutes: 0,
+		DueAt:           when.UTC().Format(time.RFC3339),
+		NextRun:         when.UTC().Format(time.RFC3339),
+		Status:          "scheduled",
+		Payload:         payload,
+	})
+}
+
+func (b *Broker) ScheduleRecheck(channel, targetType, targetID, label, payload string, when time.Time) error {
+	return b.scheduleJob(schedulerJob{
+		Slug:            normalizeSchedulerSlug("recheck", channel, targetType, targetID),
+		Kind:            "recheck",
+		Label:           label,
+		TargetType:      strings.TrimSpace(targetType),
+		TargetID:        strings.TrimSpace(targetID),
+		Channel:         normalizeChannelSlug(channel),
+		IntervalMinutes: 0,
+		DueAt:           when.UTC().Format(time.RFC3339),
+		NextRun:         when.UTC().Format(time.RFC3339),
+		Status:          "scheduled",
+		Payload:         payload,
+	})
+}
+
+func (b *Broker) scheduleJob(job schedulerJob) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	job = normalizeSchedulerJob(job)
+	if job.Slug == "" {
+		return fmt.Errorf("job slug required")
+	}
+	if job.Channel == "" {
+		job.Channel = "general"
+	}
+	if err := b.scheduleJobLocked(job); err != nil {
+		return err
+	}
+	return b.saveLocked()
+}
+
+func (b *Broker) scheduleJobLocked(job schedulerJob) error {
+	for i := range b.scheduler {
+		if !schedulerJobMatches(b.scheduler[i], job) {
+			continue
+		}
+		b.scheduler[i] = job
+		return nil
+	}
+	b.scheduler = append(b.scheduler, job)
+	return nil
+}
+
+func normalizeSchedulerSlug(parts ...string) string {
+	var filtered []string
+	for _, part := range parts {
+		part = normalizeSlugPart(part)
+		if part != "" {
+			filtered = append(filtered, part)
+		}
+	}
+	return strings.Join(filtered, ":")
+}
+
+func normalizeSlugPart(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	s = strings.ReplaceAll(s, " ", "-")
+	s = strings.ReplaceAll(s, "_", "-")
+	return s
+}
+
+func normalizeSchedulerJob(job schedulerJob) schedulerJob {
+	job.Slug = strings.TrimSpace(job.Slug)
+	job.Kind = strings.TrimSpace(job.Kind)
+	job.Label = strings.TrimSpace(job.Label)
+	job.TargetType = strings.TrimSpace(job.TargetType)
+	job.TargetID = strings.TrimSpace(job.TargetID)
+	job.Channel = normalizeChannelSlug(job.Channel)
+	if job.Channel == "" {
+		job.Channel = "general"
+	}
+	job.Payload = strings.TrimSpace(job.Payload)
+	job.Status = strings.TrimSpace(job.Status)
+	if job.Status == "" {
+		job.Status = "scheduled"
+	}
+	if job.IntervalMinutes < 0 {
+		job.IntervalMinutes = 0
+	}
+	if job.DueAt == "" && job.NextRun != "" {
+		job.DueAt = job.NextRun
+	}
+	if job.NextRun == "" && job.DueAt != "" {
+		job.NextRun = job.DueAt
+	}
+	return job
+}
+
+func schedulerJobMatches(existing, candidate schedulerJob) bool {
+	if existing.Slug != "" && candidate.Slug != "" && existing.Slug == candidate.Slug {
+		return true
+	}
+	if existing.Kind != "" && candidate.Kind != "" && existing.Kind != candidate.Kind {
+		return false
+	}
+	if existing.TargetType != "" && candidate.TargetType != "" && existing.TargetType != candidate.TargetType {
+		return false
+	}
+	if existing.TargetID != "" && candidate.TargetID != "" && existing.TargetID != candidate.TargetID {
+		return false
+	}
+	if existing.Channel != "" && candidate.Channel != "" && existing.Channel != candidate.Channel {
+		return false
+	}
+	return existing.Kind != "" && existing.Kind == candidate.Kind && existing.TargetType == candidate.TargetType && existing.TargetID == candidate.TargetID && existing.Channel == candidate.Channel
+}
+
+func schedulerJobDue(job schedulerJob, now time.Time) bool {
+	if strings.EqualFold(job.Status, "done") || strings.EqualFold(job.Status, "canceled") {
+		return false
+	}
+	if job.DueAt != "" {
+		if due, err := time.Parse(time.RFC3339, job.DueAt); err == nil && !due.After(now) {
+			return true
+		}
+	}
+	if job.NextRun != "" {
+		if due, err := time.Parse(time.RFC3339, job.NextRun); err == nil && !due.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *Broker) completeSchedulerJobsLocked(targetType, targetID, channel string) {
+	for i := range b.scheduler {
+		job := &b.scheduler[i]
+		if targetType != "" && job.TargetType != targetType {
+			continue
+		}
+		if targetID != "" && job.TargetID != targetID {
+			continue
+		}
+		if channel != "" && job.Channel != "" && normalizeChannelSlug(job.Channel) != normalizeChannelSlug(channel) {
+			continue
+		}
+		job.Status = "done"
+		job.DueAt = ""
+		job.NextRun = ""
+		job.LastRun = time.Now().UTC().Format(time.RFC3339)
+	}
+}
+
+func (b *Broker) scheduleTaskLifecycleLocked(task *teamTask) {
+	if task == nil {
+		return
+	}
+	taskChannel := normalizeChannelSlug(task.Channel)
+	if taskChannel == "" {
+		taskChannel = "general"
+	}
+	followUpMinutes := config.ResolveTaskFollowUpInterval()
+	recheckMinutes := config.ResolveTaskRecheckInterval()
+	reminderMinutes := config.ResolveTaskReminderInterval()
+	now := time.Now().UTC()
+	if strings.EqualFold(task.Status, "done") {
+		task.FollowUpAt = ""
+		task.ReminderAt = ""
+		task.RecheckAt = ""
+		task.DueAt = ""
+		b.completeSchedulerJobsLocked("task", task.ID, taskChannel)
+		return
+	}
+	switch strings.ToLower(strings.TrimSpace(task.Status)) {
+	case "in_progress":
+		due := now.Add(time.Duration(followUpMinutes) * time.Minute)
+		task.FollowUpAt = due.Format(time.RFC3339)
+		task.ReminderAt = due.Add(time.Duration(reminderMinutes) * time.Minute).Format(time.RFC3339)
+		task.RecheckAt = due.Add(time.Duration(recheckMinutes) * time.Minute).Format(time.RFC3339)
+		task.DueAt = task.FollowUpAt
+		_ = b.scheduleJobLocked(normalizeSchedulerJob(schedulerJob{
+			Slug:       normalizeSchedulerSlug("task_follow_up", taskChannel, task.ID),
+			Kind:       "task_follow_up",
+			Label:      "Follow up on " + task.Title,
+			TargetType: "task",
+			TargetID:   task.ID,
+			Channel:    taskChannel,
+			DueAt:      task.FollowUpAt,
+			NextRun:    task.FollowUpAt,
+			Status:     "scheduled",
+			Payload:    task.Details,
+		}))
+	default:
+		due := now.Add(time.Duration(recheckMinutes) * time.Minute)
+		task.RecheckAt = due.Format(time.RFC3339)
+		task.ReminderAt = due.Add(time.Duration(reminderMinutes) * time.Minute).Format(time.RFC3339)
+		task.FollowUpAt = task.RecheckAt
+		task.DueAt = task.RecheckAt
+		_ = b.scheduleJobLocked(normalizeSchedulerJob(schedulerJob{
+			Slug:       normalizeSchedulerSlug("recheck", taskChannel, "task", task.ID),
+			Kind:       "recheck",
+			Label:      "Recheck task " + truncateSummary(task.Title, 48),
+			TargetType: "task",
+			TargetID:   task.ID,
+			Channel:    taskChannel,
+			DueAt:      task.RecheckAt,
+			NextRun:    task.RecheckAt,
+			Status:     "scheduled",
+			Payload:    task.Details,
+		}))
+	}
+}
+
+func (b *Broker) scheduleRequestLifecycleLocked(req *humanInterview) {
+	if req == nil {
+		return
+	}
+	reqChannel := normalizeChannelSlug(req.Channel)
+	if reqChannel == "" {
+		reqChannel = "general"
+	}
+	reminderMinutes := config.ResolveTaskReminderInterval()
+	followUpMinutes := config.ResolveTaskFollowUpInterval()
+	now := time.Now().UTC()
+	if strings.EqualFold(req.Status, "answered") || strings.EqualFold(req.Status, "canceled") {
+		req.DueAt = ""
+		req.ReminderAt = ""
+		req.RecheckAt = ""
+		req.FollowUpAt = ""
+		b.completeSchedulerJobsLocked("request", req.ID, reqChannel)
+		return
+	}
+	due := now.Add(time.Duration(reminderMinutes) * time.Minute)
+	req.ReminderAt = due.Format(time.RFC3339)
+	req.FollowUpAt = due.Add(time.Duration(followUpMinutes) * time.Minute).Format(time.RFC3339)
+	req.RecheckAt = req.ReminderAt
+	req.DueAt = req.ReminderAt
+	_ = b.scheduleJobLocked(normalizeSchedulerJob(schedulerJob{
+		Slug:       normalizeSchedulerSlug("request_follow_up", reqChannel, req.ID),
+		Kind:       "request_follow_up",
+		Label:      "Follow up on " + req.Title,
+		TargetType: "request",
+		TargetID:   req.ID,
+		Channel:    reqChannel,
+		DueAt:      req.ReminderAt,
+		NextRun:    req.ReminderAt,
+		Status:     "scheduled",
+		Payload:    req.Question,
+	}))
 }
 
 func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -317,6 +1328,414 @@ func (b *Broker) handleUsage(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(usage)
 }
 
+func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b.mu.Lock()
+	actions := make([]officeActionLog, len(b.actions))
+	copy(actions, b.actions)
+	b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"actions": actions})
+}
+
+func (b *Broker) handleScheduler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b.mu.Lock()
+	jobs := make([]schedulerJob, 0, len(b.scheduler))
+	dueOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("due_only")), "true")
+	now := time.Now().UTC()
+	for _, job := range b.scheduler {
+		if dueOnly && !schedulerJobDue(job, now) {
+			continue
+		}
+		jobs = append(jobs, job)
+	}
+	b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"jobs": jobs})
+}
+
+func (b *Broker) handleQueue(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(b.QueueSnapshot())
+}
+
+func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		b.mu.Lock()
+		members := make([]officeMember, len(b.members))
+		copy(members, b.members)
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"members": members})
+	case http.MethodPost:
+		var body struct {
+			Action         string   `json:"action"`
+			Slug           string   `json:"slug"`
+			Name           string   `json:"name"`
+			Role           string   `json:"role"`
+			Expertise      []string `json:"expertise"`
+			Personality    string   `json:"personality"`
+			PermissionMode string   `json:"permission_mode"`
+			AllowedTools   []string `json:"allowed_tools"`
+			CreatedBy      string   `json:"created_by"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		action := strings.TrimSpace(body.Action)
+		slug := normalizeChannelSlug(body.Slug)
+		if slug == "" {
+			http.Error(w, "slug required", http.StatusBadRequest)
+			return
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		switch action {
+		case "create":
+			if b.findMemberLocked(slug) != nil {
+				http.Error(w, "member already exists", http.StatusConflict)
+				return
+			}
+			member := officeMember{
+				Slug:           slug,
+				Name:           strings.TrimSpace(body.Name),
+				Role:           strings.TrimSpace(body.Role),
+				Expertise:      normalizeStringList(body.Expertise),
+				Personality:    strings.TrimSpace(body.Personality),
+				PermissionMode: strings.TrimSpace(body.PermissionMode),
+				AllowedTools:   normalizeStringList(body.AllowedTools),
+				CreatedBy:      strings.TrimSpace(body.CreatedBy),
+				CreatedAt:      now,
+			}
+			applyOfficeMemberDefaults(&member)
+			b.members = append(b.members, member)
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"member": member})
+		case "update":
+			member := b.findMemberLocked(slug)
+			if member == nil {
+				http.Error(w, "member not found", http.StatusNotFound)
+				return
+			}
+			if body.Name != "" {
+				member.Name = strings.TrimSpace(body.Name)
+			}
+			if body.Role != "" {
+				member.Role = strings.TrimSpace(body.Role)
+			}
+			if body.Expertise != nil {
+				member.Expertise = normalizeStringList(body.Expertise)
+			}
+			if body.Personality != "" {
+				member.Personality = strings.TrimSpace(body.Personality)
+			}
+			if body.PermissionMode != "" {
+				member.PermissionMode = strings.TrimSpace(body.PermissionMode)
+			}
+			if body.AllowedTools != nil {
+				member.AllowedTools = normalizeStringList(body.AllowedTools)
+			}
+			applyOfficeMemberDefaults(member)
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"member": member})
+		case "remove":
+			member := b.findMemberLocked(slug)
+			if member == nil {
+				http.Error(w, "member not found", http.StatusNotFound)
+				return
+			}
+			if member.BuiltIn || slug == "ceo" {
+				http.Error(w, "cannot remove built-in member", http.StatusBadRequest)
+				return
+			}
+			filteredMembers := b.members[:0]
+			for _, existing := range b.members {
+				if existing.Slug != slug {
+					filteredMembers = append(filteredMembers, existing)
+				}
+			}
+			b.members = filteredMembers
+			for i := range b.channels {
+				nextMembers := b.channels[i].Members[:0]
+				for _, existing := range b.channels[i].Members {
+					if existing != slug {
+						nextMembers = append(nextMembers, existing)
+					}
+				}
+				b.channels[i].Members = nextMembers
+				nextDisabled := b.channels[i].Disabled[:0]
+				for _, existing := range b.channels[i].Disabled {
+					if existing != slug {
+						nextDisabled = append(nextDisabled, existing)
+					}
+				}
+				b.channels[i].Disabled = nextDisabled
+				b.channels[i].UpdatedAt = now
+			}
+			for i := range b.tasks {
+				if b.tasks[i].Owner == slug {
+					b.tasks[i].Owner = ""
+					b.tasks[i].Status = "open"
+					b.tasks[i].UpdatedAt = now
+				}
+			}
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+		}
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		b.mu.Lock()
+		channels := make([]teamChannel, len(b.channels))
+		copy(channels, b.channels)
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"channels": channels})
+	case http.MethodPost:
+		var body struct {
+			Action    string `json:"action"`
+			Slug      string `json:"slug"`
+			Name      string `json:"name"`
+			CreatedBy string `json:"created_by"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		action := strings.TrimSpace(body.Action)
+		slug := normalizeChannelSlug(body.Slug)
+		now := time.Now().UTC().Format(time.RFC3339)
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		switch action {
+		case "create":
+			if slug == "" {
+				http.Error(w, "slug required", http.StatusBadRequest)
+				return
+			}
+			if b.findChannelLocked(slug) != nil {
+				http.Error(w, "channel already exists", http.StatusConflict)
+				return
+			}
+			members := []string{"ceo"}
+			if creator := normalizeChannelSlug(body.CreatedBy); creator != "" && creator != "ceo" && b.findMemberLocked(creator) != nil {
+				members = append(members, creator)
+			}
+			ch := teamChannel{
+				Slug:      slug,
+				Name:      strings.TrimSpace(body.Name),
+				Members:   uniqueSlugs(members),
+				CreatedBy: strings.TrimSpace(body.CreatedBy),
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+			if ch.Name == "" {
+				ch.Name = slug
+			}
+			b.channels = append(b.channels, ch)
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"channel": ch})
+		case "remove":
+			if slug == "" || slug == "general" {
+				http.Error(w, "cannot remove channel", http.StatusBadRequest)
+				return
+			}
+			idx := -1
+			for i := range b.channels {
+				if b.channels[i].Slug == slug {
+					idx = i
+					break
+				}
+			}
+			if idx == -1 {
+				http.Error(w, "channel not found", http.StatusNotFound)
+				return
+			}
+			b.channels = append(b.channels[:idx], b.channels[idx+1:]...)
+			filteredMessages := b.messages[:0]
+			for _, msg := range b.messages {
+				if normalizeChannelSlug(msg.Channel) != slug {
+					filteredMessages = append(filteredMessages, msg)
+				}
+			}
+			b.messages = filteredMessages
+			filteredTasks := b.tasks[:0]
+			for _, task := range b.tasks {
+				if normalizeChannelSlug(task.Channel) != slug {
+					filteredTasks = append(filteredTasks, task)
+				}
+			}
+			b.tasks = filteredTasks
+			filteredRequests := b.requests[:0]
+			for _, req := range b.requests {
+				if normalizeChannelSlug(req.Channel) != slug {
+					filteredRequests = append(filteredRequests, req)
+				}
+			}
+			b.requests = filteredRequests
+			b.pendingInterview = firstBlockingRequest(b.requests)
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+		}
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
+		b.mu.Lock()
+		ch := b.findChannelLocked(channel)
+		if ch == nil {
+			b.mu.Unlock()
+			http.Error(w, "channel not found", http.StatusNotFound)
+			return
+		}
+		memberInfo := make([]map[string]any, 0, len(ch.Members))
+		for _, member := range ch.Members {
+			memberInfo = append(memberInfo, map[string]any{
+				"slug":     member,
+				"disabled": !b.channelMemberEnabledLocked(channel, member),
+			})
+		}
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": memberInfo})
+	case http.MethodPost:
+		var body struct {
+			Channel string `json:"channel"`
+			Action  string `json:"action"`
+			Slug    string `json:"slug"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		channel := normalizeChannelSlug(body.Channel)
+		member := normalizeChannelSlug(body.Slug)
+		action := strings.TrimSpace(body.Action)
+		if member == "" {
+			http.Error(w, "slug required", http.StatusBadRequest)
+			return
+		}
+		b.mu.Lock()
+		ch := b.findChannelLocked(channel)
+		if ch == nil {
+			b.mu.Unlock()
+			http.Error(w, "channel not found", http.StatusNotFound)
+			return
+		}
+		if b.findMemberLocked(member) == nil {
+			b.mu.Unlock()
+			http.Error(w, "member not found", http.StatusNotFound)
+			return
+		}
+		if member == "ceo" && (action == "remove" || action == "disable") {
+			b.mu.Unlock()
+			http.Error(w, "cannot remove or disable CEO", http.StatusBadRequest)
+			return
+		}
+		switch action {
+		case "add":
+			ch.Members = uniqueSlugs(append(ch.Members, member))
+		case "remove":
+			filtered := ch.Members[:0]
+			for _, existing := range ch.Members {
+				if existing != member {
+					filtered = append(filtered, existing)
+				}
+			}
+			ch.Members = filtered
+			disabled := ch.Disabled[:0]
+			for _, existing := range ch.Disabled {
+				if existing != member {
+					disabled = append(disabled, existing)
+				}
+			}
+			ch.Disabled = disabled
+		case "disable":
+			if !b.channelHasMemberLocked(channel, member) {
+				ch.Members = uniqueSlugs(append(ch.Members, member))
+			}
+			ch.Disabled = uniqueSlugs(append(ch.Disabled, member))
+		case "enable":
+			filtered := ch.Disabled[:0]
+			for _, existing := range ch.Disabled {
+				if existing != member {
+					filtered = append(filtered, existing)
+				}
+			}
+			ch.Disabled = filtered
+		default:
+			b.mu.Unlock()
+			http.Error(w, "unknown action", http.StatusBadRequest)
+			return
+		}
+		ch.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		if err := b.saveLocked(); err != nil {
+			b.mu.Unlock()
+			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			return
+		}
+		state := map[string]any{
+			"channel":  ch.Slug,
+			"members":  ch.Members,
+			"disabled": ch.Disabled,
+		}
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(state)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
 func (b *Broker) NotificationCursor() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -330,6 +1749,22 @@ func (b *Broker) SetNotificationCursor(cursor string) error {
 		return nil
 	}
 	b.notificationSince = cursor
+	return b.saveLocked()
+}
+
+func (b *Broker) InsightsCursor() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.insightsSince
+}
+
+func (b *Broker) SetInsightsCursor(cursor string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if cursor == "" || cursor == b.insightsSince {
+		return nil
+	}
+	b.insightsSince = cursor
 	return b.saveLocked()
 }
 
@@ -381,6 +1816,7 @@ func (b *Broker) handleNexNotifications(w http.ResponseWriter, r *http.Request) 
 	}
 
 	var body struct {
+		Channel     string   `json:"channel"`
 		EventID     string   `json:"event_id"`
 		Title       string   `json:"title"`
 		Content     string   `json:"content"`
@@ -394,7 +1830,7 @@ func (b *Broker) handleNexNotifications(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	msg, duplicate, err := b.PostAutomationMessage("nex", body.Title, body.Content, body.EventID, body.Source, body.SourceLabel, body.Tagged, body.ReplyTo)
+	msg, duplicate, err := b.PostAutomationMessage("nex", body.Channel, body.Title, body.Content, body.EventID, body.Source, body.SourceLabel, body.Tagged, body.ReplyTo)
 	if err != nil {
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 		return
@@ -535,6 +1971,7 @@ func otlpFloatValue(raw string) float64 {
 func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		From    string   `json:"from"`
+		Channel string   `json:"channel"`
 		Content string   `json:"content"`
 		Tagged  []string `json:"tagged"`
 		ReplyTo string   `json:"reply_to"`
@@ -545,16 +1982,26 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.mu.Lock()
-	if b.pendingInterview != nil && b.pendingInterview.Answered == nil {
+	if firstBlockingRequest(b.requests) != nil {
 		b.mu.Unlock()
-		http.Error(w, "interview pending; answer required before chat resumes", http.StatusConflict)
+		http.Error(w, "request pending; answer required before chat resumes", http.StatusConflict)
 		return
 	}
 
 	b.counter++
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if b.findChannelLocked(channel) == nil {
+		b.mu.Unlock()
+		http.Error(w, "channel not found", http.StatusNotFound)
+		return
+	}
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      body.From,
+		Channel:   channel,
 		Content:   body.Content,
 		Tagged:    body.Tagged,
 		ReplyTo:   strings.TrimSpace(body.ReplyTo),
@@ -576,7 +2023,38 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (b *Broker) PostAutomationMessage(from, title, content, eventID, source, sourceLabel string, tagged []string, replyTo string) (channelMessage, bool, error) {
+func (b *Broker) PostMessage(from, channel, content string, tagged []string, replyTo string) (channelMessage, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if firstBlockingRequest(b.requests) != nil {
+		return channelMessage{}, fmt.Errorf("request pending; answer required before chat resumes")
+	}
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if b.findChannelLocked(channel) == nil {
+		return channelMessage{}, fmt.Errorf("channel not found")
+	}
+	b.counter++
+	msg := channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      from,
+		Channel:   channel,
+		Content:   strings.TrimSpace(content),
+		Tagged:    uniqueSlugs(tagged),
+		ReplyTo:   strings.TrimSpace(replyTo),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	b.messages = append(b.messages, msg)
+	b.appendActionLocked("automation", msg.Source, channel, msg.From, truncateSummary(msg.Title+" "+msg.Content, 140), msg.ID)
+	if err := b.saveLocked(); err != nil {
+		return channelMessage{}, err
+	}
+	return msg, nil
+}
+
+func (b *Broker) PostAutomationMessage(from, channel, title, content, eventID, source, sourceLabel string, tagged []string, replyTo string) (channelMessage, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -589,9 +2067,14 @@ func (b *Broker) PostAutomationMessage(from, title, content, eventID, source, so
 	}
 
 	b.counter++
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
 	msg := channelMessage{
 		ID:          fmt.Sprintf("msg-%d", b.counter),
 		From:        from,
+		Channel:     channel,
 		Kind:        "automation",
 		Source:      strings.TrimSpace(source),
 		SourceLabel: strings.TrimSpace(sourceLabel),
@@ -619,6 +2102,40 @@ func (b *Broker) PostAutomationMessage(from, title, content, eventID, source, so
 	return msg, false, nil
 }
 
+func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel := normalizeChannelSlug(req.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if b.findChannelLocked(channel) == nil {
+		return humanInterview{}, fmt.Errorf("channel not found")
+	}
+	b.counter++
+	now := time.Now().UTC().Format(time.RFC3339)
+	req.ID = fmt.Sprintf("request-%d", b.counter)
+	req.Channel = channel
+	req.CreatedAt = now
+	req.UpdatedAt = now
+	if strings.TrimSpace(req.Kind) == "" {
+		req.Kind = "choice"
+	}
+	if strings.TrimSpace(req.Status) == "" {
+		req.Status = "pending"
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		req.Title = "Request"
+	}
+	b.requests = append(b.requests, req)
+	b.pendingInterview = firstBlockingRequest(b.requests)
+	b.appendActionLocked("request_created", "office", channel, req.From, truncateSummary(req.Title+" "+req.Question, 140), req.ID)
+	if err := b.saveLocked(); err != nil {
+		return humanInterview{}, err
+	}
+	return req, nil
+}
+
 func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := 20
@@ -631,9 +2148,18 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 
 	sinceID := q.Get("since_id")
 	mySlug := q.Get("my_slug")
+	channel := normalizeChannelSlug(q.Get("channel"))
+	if channel == "" {
+		channel = "general"
+	}
 
 	b.mu.Lock()
-	messages := b.messages
+	messages := make([]channelMessage, 0, len(b.messages))
+	for _, msg := range b.messages {
+		if normalizeChannelSlug(msg.Channel) == channel {
+			messages = append(messages, msg)
+		}
+	}
 	if sinceID != "" {
 		for i, m := range messages {
 			if m.ID == sinceID {
@@ -664,6 +2190,7 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{
+		"channel":      channel,
 		"messages":     result,
 		"tagged_count": taggedCount,
 	})
@@ -671,8 +2198,32 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
-	members := make(map[string]struct{ lastMessage, lastTime string })
+	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = "general"
+	}
+	type memberView struct {
+		name        string
+		role        string
+		lastMessage string
+		lastTime    string
+		disabled    bool
+	}
+	members := make(map[string]memberView)
+	if ch := b.findChannelLocked(channel); ch != nil {
+		for _, member := range ch.Members {
+			info := memberView{disabled: containsString(ch.Disabled, member)}
+			if office := b.findMemberLocked(member); office != nil {
+				info.name = office.Name
+				info.role = office.Role
+			}
+			members[member] = info
+		}
+	}
 	for _, msg := range b.messages {
+		if normalizeChannelSlug(msg.Channel) != channel {
+			continue
+		}
 		if msg.Kind == "automation" || msg.From == "nex" {
 			continue
 		}
@@ -684,12 +2235,24 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		if len(ts) > 19 {
 			ts = ts[11:19]
 		}
-		members[msg.From] = struct{ lastMessage, lastTime string }{content, ts}
+		info := members[msg.From]
+		info.lastMessage = content
+		info.lastTime = ts
+		if info.name == "" {
+			if office := b.findMemberLocked(msg.From); office != nil {
+				info.name = office.Name
+				info.role = office.Role
+			}
+		}
+		members[msg.From] = info
 	}
 	b.mu.Unlock()
 
 	type memberEntry struct {
 		Slug        string `json:"slug"`
+		Name        string `json:"name,omitempty"`
+		Role        string `json:"role,omitempty"`
+		Disabled    bool   `json:"disabled,omitempty"`
 		LastMessage string `json:"lastMessage"`
 		LastTime    string `json:"lastTime"`
 	}
@@ -698,13 +2261,516 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	for slug, info := range members {
 		list = append(list, memberEntry{
 			Slug:        slug,
+			Name:        info.name,
+			Role:        info.role,
+			Disabled:    info.disabled,
 			LastMessage: info.lastMessage,
 			LastTime:    info.lastTime,
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"members": list})
+	json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": list})
+}
+
+func (b *Broker) handleTasks(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		b.handleGetTasks(w, r)
+	case http.MethodPost:
+		b.handlePostTask(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
+	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	mySlug := strings.TrimSpace(r.URL.Query().Get("my_slug"))
+	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = "general"
+	}
+	includeDone := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_done")), "true")
+
+	b.mu.Lock()
+	result := make([]teamTask, 0, len(b.tasks))
+	for _, task := range b.tasks {
+		if normalizeChannelSlug(task.Channel) != channel {
+			continue
+		}
+		if task.Status == "done" && !includeDone && statusFilter == "" {
+			continue
+		}
+		if statusFilter != "" && task.Status != statusFilter {
+			continue
+		}
+		if mySlug != "" && task.Owner != "" && task.Owner != mySlug {
+			continue
+		}
+		result = append(result, task)
+	}
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"channel": channel, "tasks": result})
+}
+
+func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action    string `json:"action"`
+		Channel   string `json:"channel"`
+		ID        string `json:"id"`
+		Title     string `json:"title"`
+		Details   string `json:"details"`
+		Owner     string `json:"owner"`
+		CreatedBy string `json:"created_by"`
+		ThreadID  string `json:"thread_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	action := strings.TrimSpace(body.Action)
+	now := time.Now().UTC().Format(time.RFC3339)
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.findChannelLocked(channel) == nil {
+		http.Error(w, "channel not found", http.StatusNotFound)
+		return
+	}
+
+	if action == "create" {
+		if strings.TrimSpace(body.Title) == "" || strings.TrimSpace(body.CreatedBy) == "" {
+			http.Error(w, "title and created_by required", http.StatusBadRequest)
+			return
+		}
+		if existing := b.findReusableTaskLocked(channel, strings.TrimSpace(body.Title), strings.TrimSpace(body.ThreadID), strings.TrimSpace(body.Owner)); existing != nil {
+			if details := strings.TrimSpace(body.Details); details != "" {
+				existing.Details = details
+			}
+			if owner := strings.TrimSpace(body.Owner); owner != "" {
+				existing.Owner = owner
+				existing.Status = "in_progress"
+			}
+			if existing.ThreadID == "" && strings.TrimSpace(body.ThreadID) != "" {
+				existing.ThreadID = strings.TrimSpace(body.ThreadID)
+			}
+			existing.UpdatedAt = now
+			b.scheduleTaskLifecycleLocked(existing)
+			b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"task": *existing})
+			return
+		}
+		b.counter++
+		task := teamTask{
+			ID:        fmt.Sprintf("task-%d", b.counter),
+			Channel:   channel,
+			Title:     strings.TrimSpace(body.Title),
+			Details:   strings.TrimSpace(body.Details),
+			Owner:     strings.TrimSpace(body.Owner),
+			Status:    "open",
+			CreatedBy: strings.TrimSpace(body.CreatedBy),
+			ThreadID:  strings.TrimSpace(body.ThreadID),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if task.Owner != "" {
+			task.Status = "in_progress"
+		}
+		b.scheduleTaskLifecycleLocked(&task)
+		b.tasks = append(b.tasks, task)
+		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
+		if err := b.saveLocked(); err != nil {
+			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"task": task})
+		return
+	}
+
+	for i := range b.tasks {
+		if b.tasks[i].ID != strings.TrimSpace(body.ID) {
+			continue
+		}
+		if normalizeChannelSlug(b.tasks[i].Channel) != channel {
+			continue
+		}
+		task := &b.tasks[i]
+		switch action {
+		case "claim", "assign":
+			if strings.TrimSpace(body.Owner) == "" {
+				http.Error(w, "owner required", http.StatusBadRequest)
+				return
+			}
+			task.Owner = strings.TrimSpace(body.Owner)
+			task.Status = "in_progress"
+		case "complete":
+			task.Status = "done"
+		case "block":
+			task.Status = "blocked"
+		case "release":
+			task.Owner = ""
+			task.Status = "open"
+		default:
+			http.Error(w, "unknown action", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(body.Details) != "" {
+			task.Details = strings.TrimSpace(body.Details)
+		}
+		task.UpdatedAt = now
+		b.scheduleTaskLifecycleLocked(task)
+		b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
+		if err := b.saveLocked(); err != nil {
+			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"task": *task})
+		return
+	}
+
+	http.Error(w, "task not found", http.StatusNotFound)
+}
+
+func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID string) (teamTask, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if b.findChannelLocked(channel) == nil {
+		return teamTask{}, false, fmt.Errorf("channel not found")
+	}
+	title = strings.TrimSpace(title)
+	if existing := b.findReusableTaskLocked(channel, title, strings.TrimSpace(threadID), strings.TrimSpace(owner)); existing != nil {
+		if existing.Details == "" && strings.TrimSpace(details) != "" {
+			existing.Details = strings.TrimSpace(details)
+		}
+		if existing.Owner == "" && strings.TrimSpace(owner) != "" {
+			existing.Owner = strings.TrimSpace(owner)
+			existing.Status = "in_progress"
+		}
+		if existing.ThreadID == "" && strings.TrimSpace(threadID) != "" {
+			existing.ThreadID = strings.TrimSpace(threadID)
+		}
+		existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		b.scheduleTaskLifecycleLocked(existing)
+		if err := b.saveLocked(); err != nil {
+			return teamTask{}, false, err
+		}
+		return *existing, true, nil
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.counter++
+	task := teamTask{
+		ID:        fmt.Sprintf("task-%d", b.counter),
+		Channel:   channel,
+		Title:     title,
+		Details:   strings.TrimSpace(details),
+		Owner:     strings.TrimSpace(owner),
+		Status:    "open",
+		CreatedBy: strings.TrimSpace(createdBy),
+		ThreadID:  strings.TrimSpace(threadID),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if task.Owner != "" {
+		task.Status = "in_progress"
+	}
+	b.scheduleTaskLifecycleLocked(&task)
+	b.tasks = append(b.tasks, task)
+	b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
+	if err := b.saveLocked(); err != nil {
+		return teamTask{}, false, err
+	}
+	return task, false, nil
+}
+
+func (b *Broker) findReusableTaskLocked(channel, title, threadID, owner string) *teamTask {
+	channel = normalizeChannelSlug(channel)
+	title = strings.TrimSpace(title)
+	threadID = strings.TrimSpace(threadID)
+	owner = strings.TrimSpace(owner)
+	for i := range b.tasks {
+		task := &b.tasks[i]
+		if normalizeChannelSlug(task.Channel) != channel {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+			continue
+		}
+		if threadID != "" && strings.TrimSpace(task.ThreadID) == threadID {
+			return task
+		}
+		if title != "" && strings.EqualFold(strings.TrimSpace(task.Title), title) {
+			if owner == "" || strings.TrimSpace(task.Owner) == owner || strings.TrimSpace(task.Owner) == "" {
+				return task
+			}
+		}
+	}
+	return nil
+}
+
+func (b *Broker) handleRequests(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		b.handleGetRequests(w, r)
+	case http.MethodPost:
+		b.handlePostRequest(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
+	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = "general"
+	}
+	includeResolved := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_resolved")), "true")
+	b.mu.Lock()
+	requests := make([]humanInterview, 0, len(b.requests))
+	for _, req := range b.requests {
+		reqChannel := normalizeChannelSlug(req.Channel)
+		if reqChannel == "" {
+			reqChannel = "general"
+		}
+		if reqChannel != channel {
+			continue
+		}
+		if !includeResolved && !requestIsActive(req) {
+			continue
+		}
+		requests = append(requests, req)
+	}
+	pending := firstBlockingRequest(requests)
+	b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"channel":  channel,
+		"requests": requests,
+		"pending":  pending,
+	})
+}
+
+func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action        string            `json:"action"`
+		ID            string            `json:"id"`
+		Kind          string            `json:"kind"`
+		From          string            `json:"from"`
+		Channel       string            `json:"channel"`
+		Title         string            `json:"title"`
+		Question      string            `json:"question"`
+		Context       string            `json:"context"`
+		Options       []interviewOption `json:"options"`
+		RecommendedID string            `json:"recommended_id"`
+		Blocking      bool              `json:"blocking"`
+		Required      bool              `json:"required"`
+		Secret        bool              `json:"secret"`
+		ReplyTo       string            `json:"reply_to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	action := strings.TrimSpace(body.Action)
+	if action == "" {
+		action = "create"
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	switch action {
+	case "create":
+		if strings.TrimSpace(body.From) == "" || strings.TrimSpace(body.Question) == "" {
+			http.Error(w, "from and question required", http.StatusBadRequest)
+			return
+		}
+		channel := normalizeChannelSlug(body.Channel)
+		if channel == "" {
+			channel = "general"
+		}
+		if b.findChannelLocked(channel) == nil {
+			http.Error(w, "channel not found", http.StatusNotFound)
+			return
+		}
+		b.counter++
+		req := humanInterview{
+			ID:            fmt.Sprintf("request-%d", b.counter),
+			Kind:          strings.TrimSpace(body.Kind),
+			Status:        "pending",
+			From:          strings.TrimSpace(body.From),
+			Channel:       channel,
+			Title:         strings.TrimSpace(body.Title),
+			Question:      strings.TrimSpace(body.Question),
+			Context:       strings.TrimSpace(body.Context),
+			Options:       body.Options,
+			RecommendedID: strings.TrimSpace(body.RecommendedID),
+			Blocking:      body.Blocking,
+			Required:      body.Required,
+			Secret:        body.Secret,
+			ReplyTo:       strings.TrimSpace(body.ReplyTo),
+			CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+			UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		}
+		if req.Kind == "" {
+			req.Kind = "choice"
+		}
+		if req.Title == "" {
+			req.Title = "Request"
+		}
+		b.scheduleRequestLifecycleLocked(&req)
+		b.requests = append(b.requests, req)
+		b.pendingInterview = firstBlockingRequest(b.requests)
+		b.appendActionLocked("request_created", "office", channel, req.From, truncateSummary(req.Title+" "+req.Question, 140), req.ID)
+		if err := b.saveLocked(); err != nil {
+			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"request": req, "id": req.ID})
+	case "cancel":
+		id := strings.TrimSpace(body.ID)
+		if id == "" {
+			http.Error(w, "id required", http.StatusBadRequest)
+			return
+		}
+		for i := range b.requests {
+			if b.requests[i].ID != id {
+				continue
+			}
+			b.requests[i].Status = "canceled"
+			b.requests[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+			b.requests[i].ReminderAt = ""
+			b.requests[i].FollowUpAt = ""
+			b.requests[i].RecheckAt = ""
+			b.requests[i].DueAt = ""
+			b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
+			b.pendingInterview = firstBlockingRequest(b.requests)
+			b.appendActionLocked("request_canceled", "office", b.requests[i].Channel, b.requests[i].From, truncateSummary(b.requests[i].Title+" "+b.requests[i].Question, 140), b.requests[i].ID)
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"request": b.requests[i]})
+			return
+		}
+		http.Error(w, "request not found", http.StatusNotFound)
+	default:
+		http.Error(w, "unknown action", http.StatusBadRequest)
+	}
+}
+
+func (b *Broker) handleRequestAnswer(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		b.handleGetRequestAnswer(w, r)
+	case http.MethodPost:
+		b.handlePostRequestAnswer(w, r)
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleGetRequestAnswer(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	for _, req := range b.requests {
+		if req.ID == id && req.Answered != nil {
+			json.NewEncoder(w).Encode(map[string]any{"answered": req.Answered})
+			return
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]any{"answered": nil})
+}
+
+func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		ID         string `json:"id"`
+		ChoiceID   string `json:"choice_id"`
+		ChoiceText string `json:"choice_text"`
+		CustomText string `json:"custom_text"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	for i := range b.requests {
+		if b.requests[i].ID != body.ID {
+			continue
+		}
+		answer := &interviewAnswer{
+			ChoiceID:   body.ChoiceID,
+			ChoiceText: body.ChoiceText,
+			CustomText: body.CustomText,
+			AnsweredAt: time.Now().UTC().Format(time.RFC3339),
+		}
+		b.requests[i].Answered = answer
+		b.requests[i].Status = "answered"
+		b.requests[i].UpdatedAt = answer.AnsweredAt
+		b.requests[i].ReminderAt = ""
+		b.requests[i].FollowUpAt = ""
+		b.requests[i].RecheckAt = ""
+		b.requests[i].DueAt = ""
+		b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
+		b.pendingInterview = firstBlockingRequest(b.requests)
+
+		b.counter++
+		msg := channelMessage{
+			ID:        fmt.Sprintf("msg-%d", b.counter),
+			From:      "you",
+			Channel:   normalizeChannelSlug(b.requests[i].Channel),
+			Tagged:    []string{b.requests[i].From},
+			ReplyTo:   strings.TrimSpace(b.requests[i].ReplyTo),
+			Timestamp: time.Now().UTC().Format(time.RFC3339),
+		}
+		switch {
+		case b.requests[i].Secret:
+			msg.Content = fmt.Sprintf("Answered @%s's request privately.", b.requests[i].From)
+		case strings.TrimSpace(body.CustomText) != "":
+			msg.Content = fmt.Sprintf("Answered @%s's request: %s", b.requests[i].From, body.CustomText)
+		case strings.TrimSpace(body.ChoiceText) != "":
+			msg.Content = fmt.Sprintf("Answered @%s's request: %s", b.requests[i].From, body.ChoiceText)
+		default:
+			msg.Content = fmt.Sprintf("Answered @%s's request.", b.requests[i].From)
+		}
+		b.messages = append(b.messages, msg)
+		b.appendActionLocked("request_answered", "office", b.requests[i].Channel, "you", truncateSummary(msg.Content, 140), b.requests[i].ID)
+		if err := b.saveLocked(); err != nil {
+			b.mu.Unlock()
+			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			return
+		}
+		b.mu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		return
+	}
+	b.mu.Unlock()
+	http.Error(w, "request not found", http.StatusNotFound)
 }
 
 func (b *Broker) handleInterview(w http.ResponseWriter, r *http.Request) {
@@ -721,6 +2787,7 @@ func (b *Broker) handleInterview(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) handlePostInterview(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		From          string            `json:"from"`
+		Channel       string            `json:"channel"`
 		Question      string            `json:"question"`
 		Context       string            `json:"context"`
 		Options       []interviewOption `json:"options"`
@@ -734,41 +2801,34 @@ func (b *Broker) handlePostInterview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "from and question required", http.StatusBadRequest)
 		return
 	}
-
-	b.mu.Lock()
-	b.counter++
-	id := fmt.Sprintf("interview-%d", b.counter)
-	b.pendingInterview = &humanInterview{
-		ID:            id,
-		From:          body.From,
-		Question:      body.Question,
-		Context:       body.Context,
-		Options:       body.Options,
-		RecommendedID: body.RecommendedID,
-		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
-	}
-	if err := b.saveLocked(); err != nil {
-		b.mu.Unlock()
-		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-		return
-	}
-	b.mu.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
-		"id": id,
+	reqBody, _ := json.Marshal(map[string]any{
+		"action":         "create",
+		"kind":           "interview",
+		"title":          "Human interview",
+		"from":           body.From,
+		"channel":        body.Channel,
+		"question":       body.Question,
+		"context":        body.Context,
+		"options":        body.Options,
+		"recommended_id": body.RecommendedID,
+		"blocking":       true,
+		"required":       true,
 	})
+	r2 := r.Clone(r.Context())
+	r2.Body = io.NopCloser(bytes.NewReader(reqBody))
+	b.handlePostRequest(w, r2)
 }
 
 func (b *Broker) handleGetInterview(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	if b.pendingInterview == nil || b.pendingInterview.Answered != nil {
+	pending := firstBlockingRequest(b.requests)
+	if pending == nil {
 		json.NewEncoder(w).Encode(map[string]any{"pending": nil})
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]any{"pending": b.pendingInterview})
+	json.NewEncoder(w).Encode(map[string]any{"pending": pending})
 }
 
 func (b *Broker) handleInterviewAnswer(w http.ResponseWriter, r *http.Request) {
@@ -783,70 +2843,11 @@ func (b *Broker) handleInterviewAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Broker) handleGetInterviewAnswer(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	if b.pendingInterview == nil || b.pendingInterview.ID != id || b.pendingInterview.Answered == nil {
-		json.NewEncoder(w).Encode(map[string]any{"answered": nil})
-		return
-	}
-	json.NewEncoder(w).Encode(map[string]any{"answered": b.pendingInterview.Answered})
+	b.handleGetRequestAnswer(w, r)
 }
 
 func (b *Broker) handlePostInterviewAnswer(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		ID         string `json:"id"`
-		ChoiceID   string `json:"choice_id"`
-		ChoiceText string `json:"choice_text"`
-		CustomText string `json:"custom_text"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
-		return
-	}
-
-	b.mu.Lock()
-	if b.pendingInterview == nil || b.pendingInterview.ID != body.ID {
-		b.mu.Unlock()
-		http.Error(w, "interview not found", http.StatusNotFound)
-		return
-	}
-	answer := &interviewAnswer{
-		ChoiceID:   body.ChoiceID,
-		ChoiceText: body.ChoiceText,
-		CustomText: body.CustomText,
-		AnsweredAt: time.Now().UTC().Format(time.RFC3339),
-	}
-	b.pendingInterview.Answered = answer
-	b.counter++
-	msg := channelMessage{
-		ID:   fmt.Sprintf("msg-%d", b.counter),
-		From: "you",
-		Tagged: []string{
-			b.pendingInterview.From,
-		},
-		ReplyTo:   "",
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-	switch {
-	case strings.TrimSpace(body.CustomText) != "":
-		msg.Content = fmt.Sprintf("Answered @%s's question: %s", b.pendingInterview.From, body.CustomText)
-	case strings.TrimSpace(body.ChoiceText) != "":
-		msg.Content = fmt.Sprintf("Answered @%s's question: %s", b.pendingInterview.From, body.ChoiceText)
-	default:
-		msg.Content = fmt.Sprintf("Answered @%s's question.", b.pendingInterview.From)
-	}
-	b.messages = append(b.messages, msg)
-	if err := b.saveLocked(); err != nil {
-		b.mu.Unlock()
-		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
-		return
-	}
-	b.mu.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	b.handlePostRequestAnswer(w, r)
 }
 
 // FormatChannelView returns a clean, Slack-style rendering of recent messages.

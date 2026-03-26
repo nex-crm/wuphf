@@ -25,11 +25,11 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		var typing string
 		switch len(typingAgents) {
 		case 1:
-			typing = typingAgents[0] + " is typing..."
+			typing = typingAgents[0] + " is cooking something..."
 		case 2:
-			typing = typingAgents[0] + ", " + typingAgents[1] + " are typing..."
+			typing = typingAgents[0] + " and " + typingAgents[1] + " are huddling..."
 		default:
-			typing = fmt.Sprintf("%s, %s +%d are typing...",
+			typing = fmt.Sprintf("%s, %s +%d are circling this...",
 				typingAgents[0], typingAgents[1], len(typingAgents)-2)
 		}
 		typingStyle := lipgloss.NewStyle().
@@ -49,7 +49,7 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		Foreground(lipgloss.Color(slackActive)).
 		Bold(true)
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
-	parts = append(parts, "  "+labelStyle.Render(label)+"  "+hintStyle.Render("Use / for commands · @ to mention"))
+	parts = append(parts, "  "+labelStyle.Render(label)+"  "+hintStyle.Render("Use / for commands · @ to mention · Enter sends"))
 
 	// ── Input field with rounded border ───────────────────────────────
 	innerW := width - 6 // border (2) + padding (2) + outer margin (2)
@@ -62,7 +62,7 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		cursorStyle := lipgloss.NewStyle().Reverse(true)
 		placeholder := "Type a message... (/ commands, @ mention)"
 		if pending != nil {
-			placeholder = "Type a custom answer, or Enter to accept"
+			placeholder = "Type your answer here, or Enter to accept the highlighted option"
 		} else if replyToID != "" {
 			placeholder = fmt.Sprintf("Reply in thread %s... (/cancel to go back)", replyToID)
 		}
@@ -144,7 +144,11 @@ func typingAgentsFromMembers(members []channelMember) []string {
 		}
 		act := classifyActivity(m)
 		if act.Label == "talking" {
-			typing = append(typing, sidebarName(m.Slug))
+			if m.Name != "" {
+				typing = append(typing, m.Name)
+			} else {
+				typing = append(typing, displayName(m.Slug))
+			}
 		}
 	}
 	return typing

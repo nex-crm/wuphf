@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/api"
 )
 
@@ -39,6 +40,35 @@ func TestResetBrokerStateUsesAuthToken(t *testing.T) {
 
 	if err := resetBrokerState("http://"+b.Addr(), b.Token()); err != nil {
 		t.Fatalf("expected authenticated reset to succeed, got %v", err)
+	}
+}
+
+func TestResetSessionOnlyClearsOfficeState(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if _, err := b.PostMessage("you", "general", "hello", nil, ""); err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+	l := &Launcher{broker: b}
+
+	if err := l.ResetSession(); err != nil {
+		t.Fatalf("ResetSession: %v", err)
+	}
+	if got := len(b.Messages()); got != 0 {
+		t.Fatalf("expected messages cleared, got %d", got)
+	}
+	if got := len(b.ChannelTasks("general")); got != 0 {
+		t.Fatalf("expected tasks cleared, got %d", got)
+	}
+	if got := len(b.Requests("general", false)); got != 0 {
+		t.Fatalf("expected requests cleared, got %d", got)
+	}
+	if got := len(b.OfficeMembers()); got == 0 {
+		t.Fatal("expected default members to remain after reset")
 	}
 }
 
@@ -212,4 +242,159 @@ func TestChannelPaneLogPaths(t *testing.T) {
 func TestPrimeVisibleAgentsWithoutBrokerDoesNotPanic(t *testing.T) {
 	l := &Launcher{sessionName: SessionName}
 	l.primeVisibleAgents()
+}
+
+func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "be", Name: "Backend Engineer"},
+				{Slug: "cmo", Name: "CMO"},
+			},
+		},
+	}
+
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Content: "Build the landing page",
+		Tagged:  []string{"fe", "be"},
+	})
+
+	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
+		t.Fatalf("expected CEO immediate target, got %+v", immediate)
+	}
+	if len(delayed) != 2 {
+		t.Fatalf("expected 2 delayed specialists, got %+v", delayed)
+	}
+	if delayed[0].Slug != "fe" || delayed[1].Slug != "be" {
+		t.Fatalf("expected FE and BE delayed, got %+v", delayed)
+	}
+}
+
+func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "cmo", Name: "CMO"},
+			},
+		},
+	}
+
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Content: "We need a positioning shift and launch campaign.",
+		Tagged:  []string{"fe", "cmo"},
+	})
+
+	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
+		t.Fatalf("expected CEO immediate target, got %+v", immediate)
+	}
+	if len(delayed) != 1 || delayed[0].Slug != "cmo" {
+		t.Fatalf("expected only matching CMO delayed target, got %+v", delayed)
+	}
+}
+
+func TestNotificationTargetsForCEOMessageNotifyTaggedOnly(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "be", Name: "Backend Engineer"},
+				{Slug: "cmo", Name: "CMO"},
+			},
+		},
+	}
+
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "ceo",
+		Content: "Frontend take this",
+		Tagged:  []string{"fe"},
+	})
+
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets, got %+v", delayed)
+	}
+	if len(immediate) != 1 || immediate[0].Slug != "fe" {
+		t.Fatalf("expected only FE immediate target, got %+v", immediate)
+	}
+}
+
+func TestShouldDeliverDelayedNotificationSkipsAfterCEOAlreadyAnswered(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	msg1, err := b.PostMessage("you", "general", "Build the landing page", []string{"fe"}, "")
+	if err != nil {
+		t.Fatalf("post human message: %v", err)
+	}
+	if _, err := b.PostMessage("ceo", "general", "I have this. PM and CMO first.", []string{"pm", "cmo"}, msg1.ID); err != nil {
+		t.Fatalf("post ceo message: %v", err)
+	}
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "pm", Name: "Product Manager"},
+				{Slug: "cmo", Name: "CMO"},
+			},
+		},
+	}
+	if l.shouldDeliverDelayedNotification("fe", msg1) {
+		t.Fatal("expected FE delayed notification to be skipped after CEO answered without FE tag")
+	}
+}
+
+func TestShouldDeliverDelayedNotificationSkipsWrongDomainAndTaskOwnerConflict(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	task, _, err := b.EnsureTask("general", "Positioning work", "Marketing follow-up", "cmo", "ceo", "")
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	b.mu.Lock()
+	if ch := b.findChannelLocked("general"); ch != nil && !containsString(ch.Members, "cmo") {
+		ch.Members = append(ch.Members, "cmo")
+	}
+	b.mu.Unlock()
+	if task.Owner != "cmo" {
+		t.Fatalf("expected task owner cmo, got %+v", task)
+	}
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "cmo", Name: "CMO"},
+			},
+		},
+	}
+	msg := channelMessage{From: "you", Channel: "general", Content: "We need a positioning shift and launch campaign.", ID: "msg-1"}
+	if l.shouldDeliverDelayedNotification("fe", msg) {
+		t.Fatal("expected FE delayed notification to be skipped for marketing work owned by CMO")
+	}
+	if !l.shouldDeliverDelayedNotification("cmo", msg) {
+		t.Fatal("expected CMO delayed notification to be allowed for matching domain owner")
+	}
 }

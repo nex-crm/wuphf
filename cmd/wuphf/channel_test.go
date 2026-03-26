@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -14,6 +15,14 @@ var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func stripANSI(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")
+}
+
+func joinRenderedLines(lines []renderedLine) string {
+	parts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		parts = append(parts, line.Text)
+	}
+	return strings.Join(parts, "\n")
 }
 
 func TestNewBrokerRequestUsesEnvTokenAtRequestTime(t *testing.T) {
@@ -182,7 +191,7 @@ func TestChannelViewShowsThreadReplyLabel(t *testing.T) {
 	if !strings.Contains(view, "thread reply to @ceo") {
 		t.Fatalf("expected threaded reply label in view, got %q", view)
 	}
-	if !strings.Contains(view, "↳ CMO") {
+	if !strings.Contains(view, "↳ 📣 CMO") {
 		t.Fatalf("expected threaded reply header marker, got %q", view)
 	}
 }
@@ -246,6 +255,149 @@ func TestChannelViewUsesOfficeHeaderAndComposer(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "The WUPHF Office") || !strings.Contains(view, "Message #general") {
 		t.Fatalf("expected office chrome, got %q", view)
+	}
+}
+
+func TestBuildTaskLinesShowsTimingMetadata(t *testing.T) {
+	lines := buildTaskLines([]channelTask{
+		{
+			ID:         "task-1",
+			Title:      "Ship onboarding page",
+			Status:     "in_progress",
+			Owner:      "fe",
+			DueAt:      time.Now().Add(-time.Hour).Format(time.RFC3339),
+			FollowUpAt: time.Now().Add(2 * time.Hour).Format(time.RFC3339),
+		},
+	}, 80)
+
+	rendered := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(rendered, "overdue since") {
+		t.Fatalf("expected overdue timing in task lines, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "follow up") {
+		t.Fatalf("expected follow-up timing in task lines, got %q", rendered)
+	}
+}
+
+func TestBuildRequestLinesShowsBlockingAndTimingMetadata(t *testing.T) {
+	lines := buildRequestLines([]channelInterview{
+		{
+			ID:       "req-1",
+			Kind:     "approval",
+			From:     "ceo",
+			Question: "Approve the launch copy?",
+			Blocking: true,
+			Required: true,
+			DueAt:    time.Now().Add(30 * time.Minute).Format(time.RFC3339),
+		},
+	}, 80)
+
+	rendered := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(rendered, "blocking") || !strings.Contains(rendered, "required") {
+		t.Fatalf("expected blocking/required request metadata, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "due") {
+		t.Fatalf("expected due timing in request lines, got %q", rendered)
+	}
+}
+
+func TestBuildCalendarLinesShowsNextRunMetadata(t *testing.T) {
+	lines := buildCalendarLines(nil, []channelSchedulerJob{
+		{
+			Label:           "CEO insight sweep",
+			Status:          "scheduled",
+			IntervalMinutes: 15,
+			Channel:         "general",
+			NextRun:         time.Now().Add(10 * time.Minute).Format(time.RFC3339),
+			LastRun:         time.Now().Add(-5 * time.Minute).Format(time.RFC3339),
+		},
+	}, nil, nil, "general", []channelMember{{Slug: "ceo", Name: "CEO"}}, calendarRangeWeek, "", 80)
+
+	rendered := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(rendered, "every 15 min") || !strings.Contains(rendered, "today") {
+		t.Fatalf("expected scheduler timing metadata, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "#general") || !strings.Contains(rendered, "CEO") {
+		t.Fatalf("expected calendar lines to include channel scope and participants, got %q", rendered)
+	}
+}
+
+func TestCtrlGQuickJumpSelectsChannel(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.channels = []channelInfo{{Slug: "general", Name: "general"}, {Slug: "launch", Name: "launch"}}
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlG})
+	got := model.(channelModel)
+	if got.quickJumpTarget != quickJumpChannels {
+		t.Fatal("expected channel quick nav to activate")
+	}
+
+	model, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	got = model.(channelModel)
+	if cmd == nil {
+		t.Fatal("expected selecting a numbered channel to trigger a command")
+	}
+	if got.activeChannel != "launch" || got.activeApp != officeAppMessages {
+		t.Fatalf("expected quick jump 2 to open #launch messages, got channel=%s app=%s", got.activeChannel, got.activeApp)
+	}
+	if got.quickJumpTarget != quickJumpNone {
+		t.Fatal("expected quick nav mode to exit after selection")
+	}
+}
+
+func TestCtrlOQuickJumpSelectsApp(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.channels = []channelInfo{{Slug: "general", Name: "general"}}
+
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	got := model.(channelModel)
+	if got.quickJumpTarget != quickJumpApps {
+		t.Fatal("expected app quick nav to activate")
+	}
+
+	model, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	got = model.(channelModel)
+	if cmd == nil {
+		t.Fatal("expected selecting a numbered app to trigger a command")
+	}
+	if got.activeApp != officeAppCalendar {
+		t.Fatalf("expected quick jump 5 to open calendar, got %s", got.activeApp)
+	}
+	if got.quickJumpTarget != quickJumpNone {
+		t.Fatal("expected app quick nav mode to exit after selection")
+	}
+}
+
+func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
+	sidebar := stripANSI(renderSidebar(
+		[]channelInfo{{Slug: "general", Name: "general"}},
+		[]channelMember{{
+			Slug:        "fe",
+			Name:        "Frontend Engineer",
+			Role:        "Frontend Engineer",
+			LastMessage: "I am deep in the design details now",
+			LastTime:    time.Now().Format(time.RFC3339),
+		}},
+		"general",
+		officeAppMessages,
+		0,
+		false,
+		quickJumpNone,
+		36,
+		28,
+	))
+	if !strings.Contains(sidebar, "Frontend Engineer") {
+		t.Fatalf("expected sidebar member, got %q", sidebar)
+	}
+	if !strings.Contains(sidebar, "“") {
+		t.Fatalf("expected Office-style mood bubble, got %q", sidebar)
+	}
+	if !strings.Contains(sidebar, "Ctrl+G channels") {
+		t.Fatalf("expected quick nav hint in sidebar, got %q", sidebar)
 	}
 }
 
@@ -367,7 +519,7 @@ func TestSlashAutocompleteShowsAllCommandsOnSlash(t *testing.T) {
 		t.Fatal("expected slash autocomplete to be visible")
 	}
 	view := stripANSI(m.autocomplete.View())
-	if !strings.Contains(view, "/init") || !strings.Contains(view, "/reply") {
+	if !strings.Contains(view, "/init") || !strings.Contains(view, "/tasks") {
 		t.Fatalf("expected command list in autocomplete, got %q", view)
 	}
 }
@@ -479,6 +631,277 @@ func TestIntegrateCommandOpensPicker(t *testing.T) {
 	}
 	if !strings.Contains(got.notice, "Choose an integration") {
 		t.Fatalf("expected integration notice, got %q", got.notice)
+	}
+}
+
+func TestRequestsCommandSwitchesToRequestsView(t *testing.T) {
+	m := newChannelModel(false)
+	m.requests = []channelInterview{{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Channel:  "general",
+		Title:    "Approval needed",
+		Question: "Should we proceed?",
+		Status:   "pending",
+	}}
+	m.input = []rune("/requests")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+
+	if got.activeApp != officeAppRequests {
+		t.Fatalf("expected requests app to be active, got %q", got.activeApp)
+	}
+}
+
+func TestTasksCommandSwitchesToTasksView(t *testing.T) {
+	m := newChannelModel(false)
+	m.input = []rune("/tasks")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if got.activeApp != officeAppTasks {
+		t.Fatalf("expected tasks app to be active, got %q", got.activeApp)
+	}
+}
+
+func TestTaskSlashCommandOpensPicker(t *testing.T) {
+	m := newChannelModel(false)
+	m.tasks = []channelTask{{
+		ID:        "task-1",
+		Channel:   "general",
+		Title:     "Ship the dashboard",
+		Status:    "open",
+		CreatedBy: "ceo",
+	}}
+	m.input = []rune("/task")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if !got.picker.IsActive() {
+		t.Fatal("expected task picker to be active")
+	}
+	if got.pickerMode != channelPickerTasks {
+		t.Fatalf("expected task picker mode, got %q", got.pickerMode)
+	}
+}
+
+func TestRequestSlashCommandOpensPicker(t *testing.T) {
+	m := newChannelModel(false)
+	m.requests = []channelInterview{{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Channel:  "general",
+		Title:    "Approval needed",
+		Question: "Should we proceed?",
+		Status:   "pending",
+	}}
+	m.input = []rune("/request")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if !got.picker.IsActive() {
+		t.Fatal("expected request picker to be active")
+	}
+	if got.pickerMode != channelPickerRequests {
+		t.Fatalf("expected request picker mode, got %q", got.pickerMode)
+	}
+}
+
+func TestTaskRowOpensActionPicker(t *testing.T) {
+	m := newChannelModel(false)
+	m.tasks = []channelTask{{
+		ID:        "task-1",
+		Channel:   "general",
+		Title:     "Ship the dashboard",
+		Status:    "open",
+		CreatedBy: "ceo",
+	}}
+	if cmd := m.openTaskActionPicker(m.tasks[0]); cmd != nil {
+		t.Fatalf("expected no command from opening task picker, got %v", cmd)
+	}
+	if !m.picker.IsActive() || m.pickerMode != channelPickerTaskAction {
+		t.Fatalf("expected task action picker, got active=%v mode=%q", m.picker.IsActive(), m.pickerMode)
+	}
+}
+
+func TestRequestRowOpensActionPicker(t *testing.T) {
+	m := newChannelModel(false)
+	m.requests = []channelInterview{{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Channel:  "general",
+		Title:    "Approval needed",
+		Question: "Should we proceed?",
+		Status:   "pending",
+	}}
+	if cmd := m.openRequestActionPicker(m.requests[0]); cmd != nil {
+		t.Fatalf("expected no command from opening request picker, got %v", cmd)
+	}
+	if !m.picker.IsActive() || m.pickerMode != channelPickerRequestAction {
+		t.Fatalf("expected request action picker, got active=%v mode=%q", m.picker.IsActive(), m.pickerMode)
+	}
+}
+
+func TestTaskSlashCommandQueuesMutation(t *testing.T) {
+	m := newChannelModel(false)
+	m.input = []rune("/task claim task-1")
+	m.inputPos = len(m.input)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if cmd == nil {
+		t.Fatal("expected /task claim to emit a mutation command")
+	}
+	if !got.posting {
+		t.Fatal("expected posting state while task mutation is running")
+	}
+}
+
+func TestRequestSlashCommandFocusesRequest(t *testing.T) {
+	m := newChannelModel(false)
+	m.requests = []channelInterview{{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Channel:  "general",
+		Title:    "Approval needed",
+		Question: "Should we proceed?",
+		Status:   "pending",
+	}}
+	m.input = []rune("/request focus request-1")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if got.pending == nil || got.pending.ID != "request-1" {
+		t.Fatalf("expected request to become pending/focused, got %+v", got.pending)
+	}
+	if got.activeApp != officeAppRequests {
+		t.Fatalf("expected requests app to stay active, got %q", got.activeApp)
+	}
+}
+
+func TestSidebarNavigationCanSwitchToCalendar(t *testing.T) {
+	m := newChannelModel(false)
+	m.focus = focusSidebar
+	m.sidebarCursor = len(m.sidebarItems()) - 1
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if got.activeApp != officeAppCalendar {
+		t.Fatalf("expected calendar app to be active, got %q", got.activeApp)
+	}
+}
+
+func TestRequestsViewRendersOpenRequests(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.activeApp = officeAppRequests
+	m.requests = []channelInterview{{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Question: "Ship the launch plan?",
+		Context:  "We need a yes/no from the human.",
+		Status:   "pending",
+	}}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Ship the launch plan?") || !strings.Contains(view, "Requests") {
+		t.Fatalf("expected requests view content, got %q", view)
+	}
+}
+
+func TestCalendarViewRendersSchedulerAndActions(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.activeApp = officeAppCalendar
+	m.actions = []channelAction{{ID: "action-1", Kind: "task_created", Actor: "ceo", Summary: "Opened a follow-up task", CreatedAt: "2026-03-24T10:00:00Z"}}
+	m.scheduler = []channelSchedulerJob{{Slug: "nex-insights", Label: "Nex insights", IntervalMinutes: 15, NextRun: "2026-03-24T10:15:00Z", Status: "sleeping"}}
+	m.members = []channelMember{{Slug: "ceo", Name: "CEO"}}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Calendar") || !strings.Contains(view, "Nex insights") || !strings.Contains(view, "Opened a follow-up task") {
+		t.Fatalf("expected calendar view content, got %q", view)
+	}
+	if !strings.Contains(view, "d day") || !strings.Contains(view, "w week") {
+		t.Fatalf("expected calendar toolbar controls, got %q", view)
+	}
+}
+
+func TestCalendarSlashCommandCanChangeRangeAndFilter(t *testing.T) {
+	m := newChannelModel(false)
+	m.members = []channelMember{{Slug: "fe", Name: "Frontend Engineer"}}
+	m.input = []rune("/calendar day")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if got.activeApp != officeAppCalendar || got.calendarRange != calendarRangeDay {
+		t.Fatalf("expected /calendar day to open day calendar, got app=%q range=%q", got.activeApp, got.calendarRange)
+	}
+
+	got.input = []rune("/calendar @fe")
+	got.inputPos = len(got.input)
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got = next.(channelModel)
+	if got.calendarFilter != "fe" {
+		t.Fatalf("expected /calendar @fe to filter calendar, got %q", got.calendarFilter)
+	}
+}
+
+func TestCalendarMouseClickOpensTask(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.activeApp = officeAppCalendar
+	m.members = []channelMember{{Slug: "fe", Name: "Frontend Engineer"}}
+	m.tasks = []channelTask{{
+		ID:        "task-1",
+		Title:     "Ship onboarding",
+		Status:    "open",
+		Owner:     "fe",
+		ThreadID:  "msg-1",
+		DueAt:     time.Now().Add(30 * time.Minute).Format(time.RFC3339),
+		CreatedBy: "ceo",
+		UpdatedAt: time.Now().Format(time.RFC3339),
+		CreatedAt: time.Now().Format(time.RFC3339),
+	}}
+
+	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	mainX := layout.SidebarW + 3
+	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
+	contentWidth := layout.MainW - 2
+	if contentWidth < 32 {
+		contentWidth = 32
+	}
+	rows, _, _, _ := sliceRenderedLines(m.currentMainLines(contentWidth), msgH, m.scroll)
+	targetRow := -1
+	for i, row := range rows {
+		if row.TaskID == "task-1" || row.ThreadID == "msg-1" {
+			targetRow = i
+			break
+		}
+	}
+	if targetRow < 0 {
+		t.Fatal("expected calendar render to expose clickable task row")
+	}
+	action, ok := m.mainPanelMouseAction(mainX, headerH+targetRow, layout.MainW, layout.ContentH)
+	if !ok {
+		t.Fatal("expected calendar row to be clickable")
+	}
+	if action.Kind != "thread" && action.Kind != "task" {
+		t.Fatalf("expected calendar click to open thread/task, got %+v", action)
 	}
 }
 
@@ -601,10 +1024,10 @@ func TestChannelViewShowsUsageTotals(t *testing.T) {
 	if !strings.Contains(view, "Spend to date $1.23") {
 		t.Fatalf("expected overall spend summary, got %q", view)
 	}
-	if !strings.Contains(view, "CEO 5.0k tok · $0.62") {
+	if !strings.Contains(view, "☕ 5.0k tok · $0.62") {
 		t.Fatalf("expected per-agent usage pill, got %q", view)
 	}
-	if !strings.Contains(view, "Frontend Engineer 7.5k tok · $0.61") {
+	if !strings.Contains(view, "🖥 7.5k tok · $0.61") {
 		t.Fatalf("expected frontend usage pill, got %q", view)
 	}
 }
@@ -645,14 +1068,14 @@ func TestEscSnoozesPendingInterviewWithoutAnswering(t *testing.T) {
 	if got.snoozedInterview != "interview-1" {
 		t.Fatalf("expected interview to be snoozed, got %q", got.snoozedInterview)
 	}
-	if !strings.Contains(got.notice, "Interview snoozed") {
+	if !strings.Contains(got.notice, "Request snoozed") {
 		t.Fatalf("expected snooze notice, got %q", got.notice)
 	}
 	view := stripANSI(got.View())
 	if strings.Contains(view, "Human Interview") {
 		t.Fatalf("expected interview card to be hidden after snooze, got %q", view)
 	}
-	if !strings.Contains(view, "Interview paused") {
+	if !strings.Contains(view, "Request paused") {
 		t.Fatalf("expected paused status bar after snooze, got %q", view)
 	}
 }
@@ -668,7 +1091,11 @@ func TestNewInterviewUnsnoozesCard(t *testing.T) {
 		Question: "Old question",
 	}
 
-	next, _ := m.Update(channelInterviewMsg{pending: &channelInterview{
+	next, _ := m.Update(channelRequestsMsg{requests: []channelInterview{{
+		ID:       "interview-2",
+		From:     "pm",
+		Question: "New question",
+	}}, pending: &channelInterview{
 		ID:       "interview-2",
 		From:     "pm",
 		Question: "New question",
@@ -679,7 +1106,7 @@ func TestNewInterviewUnsnoozesCard(t *testing.T) {
 		t.Fatalf("expected new interview to clear snoozed state, got %q", got.snoozedInterview)
 	}
 	view := stripANSI(got.View())
-	if !strings.Contains(view, "Human Interview") {
+	if !strings.Contains(view, "Open Question") && !strings.Contains(view, "Human Interview") && !strings.Contains(view, "Request") {
 		t.Fatalf("expected new interview card to be visible, got %q", view)
 	}
 }

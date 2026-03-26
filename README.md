@@ -16,6 +16,8 @@ The joke still fits. It is one thing hitting a bunch of people at once.
 - shows live agent panes in the same tmux window
 - keeps discussions in threads so the main channel does not become soup
 - lets the team pause and ask you a real blocking question
+- keeps a real office task list and request queue so not everyone dogpiles the same thing
+- separates company defaults from live office state, so the office has a stable roster/channels and a separate “what is happening right now” layer
 - can optionally use Nex for memory, notifications, and integrations
 
 This is not “one chatbot with a fancy prompt.” The point is to make the team visible.
@@ -58,6 +60,35 @@ What you keep:
 - the channel
 - the team
 - the arguments
+
+## Company State
+
+WUPHF now has two different kinds of state on purpose:
+
+- company manifest: who is on the team and which channels exist by default
+- live office state: messages, tasks, requests, disabled members, costs, cursors, and in-flight work
+
+The company manifest lives at:
+
+```text
+~/.wuphf/company.json
+```
+
+If that file does not exist, WUPHF falls back to the built-in founding team.
+
+## Requests, Not Just Interviews
+
+The office now has a real request system.
+
+That means the team can open:
+
+- approvals
+- confirmations
+- freeform questions
+- private/secret answers
+- classic blocking interviews
+
+The old blocking interview behavior still works, but under the hood it is now just one kind of request.
 
 So no, this repo is not trying to trap people into using Nex. If you want the multi-agent office without it, that is supported on purpose.
 
@@ -141,7 +172,14 @@ Then check a few basics:
 - type `/qui` and hit `Enter`; it should submit `/quit`
 - type `@` and make sure teammate autocomplete opens
 - use `/reply <message-id>` to reply inside a thread
+- use `/requests` and make sure open requests are visible
 - use `/reset` and make sure the office clears without killing the channel pane
+
+If Nex is enabled, leave the office running long enough for the CEO insight sweep and make sure:
+
+- Nex summaries land in `#general`
+- the CEO assigns tasks instead of just dumping a wall of text
+- if something really needs a human decision, it opens a request instead of guessing
 
 ## Automated Tests
 

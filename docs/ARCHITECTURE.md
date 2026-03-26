@@ -44,12 +44,25 @@ Navigation:
 
 ## Communication Stack
 
-### Ephemeral: Broker (localhost:7890)
-- In-memory HTTP message store, started by `./wuphf`
+### Live Office State: Broker (localhost:7890)
+- Persistent local HTTP office-state store, started by `./wuphf`
 - Agents post via `team_broadcast` MCP tool → broker stores message
 - Channel TUI polls broker every 1s → displays messages
 - Notification loop pushes new messages to agent panes via `tmux send-keys`
-- Dies with the session. That's intentional.
+- Stores:
+  - messages
+  - office-wide members
+  - channel memberships
+  - tasks
+  - requests
+  - usage/costs
+  - Nex cursors
+
+### Desired State: Company Manifest
+- `~/.wuphf/company.json`
+- Defines the default office roster and channels
+- WUPHF treats this as “what the company should look like”
+- The broker state is “what the office is doing right now”
 
 ### Durable: WUPHF Knowledge Graph
 - Agents use `add_context` MCP tool to persist decisions/facts
@@ -61,7 +74,9 @@ Navigation:
 - `team_poll` — read recent messages
 - `team_status` — share current activity
 - `team_members` — see who's active
-- `human_interview` — block on a human answer when the team cannot proceed responsibly
+- `team_requests` — see open human requests
+- `team_request` — create structured approvals/confirmations/freeform requests
+- `human_interview` — blocking request wrapper when the team cannot proceed responsibly
 
 These tools now run from the main Go binary via the hidden `wuphf mcp-team` subcommand.
 Generic Nex tools come from the installed `nex-mcp` binary when Nex is enabled.
@@ -130,6 +145,11 @@ internal/
 - `./wuphf kill` stops from outside
 - `./wuphf --cmd` non-interactive dispatch
 - 340+ unit tests pass
+
+## Current Direction
+- CEO gets first look at new human and Nex-triggered work
+- specialists are nudged later and are expected to stay in their lane
+- Nex insights go through an action policy that turns them into summaries, tasks, and sometimes requests
 
 ## Known Issues
 - Agent panes are small when terminal is narrow (<200 cols)

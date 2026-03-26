@@ -34,6 +34,7 @@ const (
 	tmuxSocketName                  = "wuphf"
 	defaultNotificationPollInterval = 15 * time.Minute
 	channelRespawnDelay             = 8 * time.Second
+	ceoHeadStartDelay               = 4 * time.Second
 )
 
 type nexFeedItemContentItem struct {
@@ -58,6 +59,28 @@ type nexFeedItem struct {
 
 type nexFeedResponse struct {
 	Items []nexFeedItem `json:"items"`
+}
+
+type nexInsight struct {
+	ID              string `json:"id"`
+	Type            string `json:"type"`
+	Content         string `json:"content"`
+	ConfidenceLevel string `json:"confidence_level"`
+	CreatedAt       string `json:"created_at"`
+	Target          struct {
+		Hint       string `json:"hint"`
+		EntityType string `json:"entity_type"`
+	} `json:"target"`
+}
+
+type nexInsightsEnvelope struct {
+	Insights []nexInsight `json:"insights"`
+}
+
+type insightTaskPlan struct {
+	Owner   string
+	Title   string
+	Details string
 }
 
 // Launcher sets up and manages the multi-agent team.
@@ -223,6 +246,7 @@ func (l *Launcher) Launch() error {
 	go l.primeVisibleAgents()
 	go l.notifyAgentsLoop()
 	go l.pollNexNotificationsLoop()
+	go l.pollNexInsightsLoop()
 
 	return nil
 }
@@ -251,14 +275,242 @@ func (l *Launcher) notifyAgentsLoop() {
 		lastCount = len(msgs)
 
 		for _, msg := range newMsgs {
-			for i, slug := range l.agentPaneSlugs() {
-				if slug == msg.From {
-					continue
+			l.deliverMessageNotification(msg)
+		}
+	}
+}
+
+func (l *Launcher) deliverMessageNotification(msg channelMessage) {
+	immediate, delayed := l.notificationTargetsForMessage(msg)
+	for _, target := range immediate {
+		l.sendChannelUpdate(target.PaneIndex, target.Slug, msg.Channel, msg.ID, msg.From, msg.Content)
+	}
+	for _, target := range delayed {
+		go func(target notificationTarget, msg channelMessage) {
+			time.Sleep(ceoHeadStartDelay)
+			if !l.shouldDeliverDelayedNotification(target.Slug, msg) {
+				return
+			}
+			l.sendChannelUpdate(target.PaneIndex, target.Slug, msg.Channel, msg.ID, msg.From, msg.Content)
+		}(target, msg)
+	}
+}
+
+type notificationTarget struct {
+	PaneIndex int
+	Slug      string
+}
+
+func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
+	slugs := l.agentPaneSlugs()
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	lead := l.officeLeadSlug()
+	domain := inferMessageDomain(msg)
+	owner := ""
+	if l.broker != nil {
+		owner = l.taskOwnerForDomain(msg.Channel, domain)
+	}
+	targetMap := make(map[string]notificationTarget)
+	for i, slug := range slugs {
+		targetMap[slug] = notificationTarget{PaneIndex: i + 1, Slug: slug}
+	}
+	enabledMembers := map[string]struct{}{}
+	if l.broker != nil {
+		for _, member := range l.broker.EnabledMembers(msg.Channel) {
+			enabledMembers[member] = struct{}{}
+		}
+	}
+
+	addImmediate := func(slug string) {
+		if slug == "" || slug == msg.From {
+			return
+		}
+		if len(enabledMembers) > 0 {
+			if _, ok := enabledMembers[slug]; !ok {
+				return
+			}
+		}
+		if target, ok := targetMap[slug]; ok {
+			immediate = append(immediate, target)
+			delete(targetMap, slug)
+		}
+	}
+	addDelayed := func(slug string) {
+		if slug == "" || slug == msg.From {
+			return
+		}
+		if len(enabledMembers) > 0 {
+			if _, ok := enabledMembers[slug]; !ok {
+				return
+			}
+		}
+		if target, ok := targetMap[slug]; ok {
+			delayed = append(delayed, target)
+			delete(targetMap, slug)
+		}
+	}
+	allowTarget := func(slug string) bool {
+		if slug == "" || slug == msg.From {
+			return false
+		}
+		if len(enabledMembers) > 0 {
+			if _, ok := enabledMembers[slug]; !ok {
+				return false
+			}
+		}
+		if slug == lead {
+			return true
+		}
+		if owner != "" && slug != owner {
+			return false
+		}
+		if containsSlug(msg.Tagged, slug) {
+			if domain == "" || domain == "general" {
+				return true
+			}
+			return inferAgentDomain(slug) == domain
+		}
+		if domain == "" || domain == "general" {
+			return false
+		}
+		return inferAgentDomain(slug) == domain
+	}
+
+	switch {
+	case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
+		addImmediate(lead)
+		for _, slug := range slugs {
+			if slug == lead || slug == msg.From {
+				continue
+			}
+			if containsSlug(msg.Tagged, slug) || (domain != "" && domain != "general" && inferAgentDomain(slug) == domain) {
+				if allowTarget(slug) {
+					addDelayed(slug)
 				}
-				l.sendChannelUpdate(i+1, slug, msg.ID, msg.From, msg.Content)
+			}
+		}
+	case msg.From == lead:
+		for _, slug := range slugs {
+			if slug == lead || slug == msg.From {
+				continue
+			}
+			if containsSlug(msg.Tagged, slug) || (domain != "" && domain != "general" && inferAgentDomain(slug) == domain) {
+				if allowTarget(slug) {
+					addImmediate(slug)
+				}
+			}
+		}
+	case containsSlug(msg.Tagged, lead):
+		addImmediate(lead)
+		for _, slug := range slugs {
+			if slug == lead || slug == msg.From {
+				continue
+			}
+			if containsSlug(msg.Tagged, slug) || (domain != "" && domain != "general" && inferAgentDomain(slug) == domain) {
+				if allowTarget(slug) {
+					addImmediate(slug)
+				}
+			}
+		}
+	default:
+		addImmediate(lead)
+		for _, slug := range slugs {
+			if slug == lead || slug == msg.From {
+				continue
+			}
+			if containsSlug(msg.Tagged, slug) || (domain != "" && domain != "general" && inferAgentDomain(slug) == domain) {
+				if allowTarget(slug) {
+					addImmediate(slug)
+				}
 			}
 		}
 	}
+	return immediate, delayed
+}
+
+func (l *Launcher) shouldDeliverDelayedNotification(targetSlug string, source channelMessage) bool {
+	if l.broker == nil {
+		return true
+	}
+	if !containsSlug(l.broker.EnabledMembers(source.Channel), targetSlug) {
+		return false
+	}
+	domain := inferMessageDomain(source)
+	if owner := l.taskOwnerForDomain(source.Channel, domain); owner != "" && owner != targetSlug && targetSlug != l.officeLeadSlug() {
+		return false
+	}
+	if domain != "" && domain != "general" && targetSlug != l.officeLeadSlug() && inferAgentDomain(targetSlug) != domain {
+		return false
+	}
+
+	threadRoot := source.ID
+	if source.ReplyTo != "" {
+		threadRoot = source.ReplyTo
+	}
+	sourceIndex := -1
+	messages := l.broker.ChannelMessages(source.Channel)
+	for i := range messages {
+		if messages[i].ID == source.ID {
+			sourceIndex = i
+			break
+		}
+	}
+	if sourceIndex >= 0 {
+		for _, msg := range messages[sourceIndex+1:] {
+			sameThread := msg.ID == threadRoot || msg.ReplyTo == threadRoot || msg.ReplyTo == source.ID
+			if !sameThread {
+				continue
+			}
+			if msg.From == targetSlug {
+				return false
+			}
+			if msg.From == l.officeLeadSlug() && !containsSlug(msg.Tagged, targetSlug) {
+				return false
+			}
+			if msg.From != "you" && msg.From != "human" && msg.From != "nex" && msg.Kind != "automation" && !containsSlug(msg.Tagged, targetSlug) {
+				return false
+			}
+		}
+	}
+
+	for _, task := range l.broker.ChannelTasks(source.Channel) {
+		if task.Status == "done" {
+			continue
+		}
+		if task.ThreadID != "" && task.ThreadID != source.ID && task.ThreadID != threadRoot {
+			continue
+		}
+		if task.Owner != "" && task.Owner != targetSlug && targetSlug != l.officeLeadSlug() {
+			return false
+		}
+	}
+	return true
+}
+
+func (l *Launcher) taskOwnerForDomain(channel, domain string) string {
+	if l.broker == nil || domain == "" || domain == "general" {
+		return ""
+	}
+	var owner string
+	for _, task := range l.broker.ChannelTasks(channel) {
+		if task.Status == "done" {
+			continue
+		}
+		if task.Owner == "" {
+			continue
+		}
+		if inferAgentDomain(task.Owner) == domain {
+			if owner == "" {
+				owner = task.Owner
+			}
+			if task.Owner == owner {
+				return owner
+			}
+		}
+	}
+	return owner
 }
 
 func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
@@ -380,9 +632,6 @@ func shellQuote(s string) string {
 // primeVisibleAgents clears Claude startup interactivity in newly spawned panes and
 // replays a catch-up channel nudge once they are actually ready to read it.
 func (l *Launcher) primeVisibleAgents() {
-	if l.broker == nil {
-		return
-	}
 	time.Sleep(2 * time.Second)
 
 	panes := l.agentPaneSlugs()
@@ -409,17 +658,15 @@ func (l *Launcher) primeVisibleAgents() {
 
 	// If the human already posted while Claude was still booting, replay a catch-up nudge
 	// so the first visible message is not lost forever behind the startup interactivity.
+	if l.broker == nil {
+		return
+	}
 	msgs := l.broker.Messages()
 	if len(msgs) == 0 {
 		return
 	}
 	latest := msgs[len(msgs)-1]
-	for i, slug := range panes {
-		if slug == latest.From {
-			continue
-		}
-		l.sendChannelUpdate(i+1, slug, latest.ID, latest.From, latest.Content)
-	}
+	l.deliverMessageNotification(latest)
 }
 
 func (l *Launcher) pollNexNotificationsLoop() {
@@ -435,7 +682,9 @@ func (l *Launcher) pollNexNotificationsLoop() {
 
 	time.Sleep(10 * time.Second)
 	for {
+		l.updateSchedulerJob("nex-notifications", "Nex notifications", interval, time.Now().UTC(), "running")
 		l.fetchAndIngestNexNotifications(client)
+		l.updateSchedulerJob("nex-notifications", "Nex notifications", interval, time.Now().UTC().Add(interval), "sleeping")
 		time.Sleep(interval)
 	}
 }
@@ -452,6 +701,172 @@ func notificationPollInterval() time.Duration {
 		}
 	}
 	return defaultNotificationPollInterval
+}
+
+func (l *Launcher) pollNexInsightsLoop() {
+	if l.broker == nil {
+		return
+	}
+	apiKey := config.ResolveAPIKey("")
+	if apiKey == "" {
+		return
+	}
+	client := api.NewClient(apiKey)
+	interval := time.Duration(config.ResolveInsightsPollInterval()) * time.Minute
+
+	time.Sleep(20 * time.Second)
+	for {
+		l.updateSchedulerJob("nex-insights", "Nex insights", interval, time.Now().UTC(), "running")
+		l.fetchAndPostNexInsights(client)
+		l.updateSchedulerJob("nex-insights", "Nex insights", interval, time.Now().UTC().Add(interval), "sleeping")
+		time.Sleep(interval)
+	}
+}
+
+func (l *Launcher) updateSchedulerJob(slug, label string, interval time.Duration, nextRun time.Time, status string) {
+	if l.broker == nil {
+		return
+	}
+	job := schedulerJob{
+		Slug:            slug,
+		Label:           label,
+		IntervalMinutes: int(interval / time.Minute),
+		NextRun:         nextRun.UTC().Format(time.RFC3339),
+		Status:          status,
+	}
+	if status == "sleeping" {
+		job.LastRun = time.Now().UTC().Format(time.RFC3339)
+	}
+	_ = l.broker.SetSchedulerJob(job)
+}
+
+func (l *Launcher) fetchAndPostNexInsights(client *api.Client) {
+	if l.broker == nil {
+		return
+	}
+	now := time.Now().UTC()
+	if l.broker.InsightsCursor() == "" {
+		_ = l.broker.SetInsightsCursor(now.Format(time.RFC3339Nano))
+		return
+	}
+
+	params := url.Values{}
+	params.Set("from", l.broker.InsightsCursor())
+	params.Set("to", now.Format(time.RFC3339Nano))
+	params.Set("limit", "20")
+
+	raw, err := client.GetRaw("/v1/insights?"+params.Encode(), 20*time.Second)
+	if err != nil {
+		return
+	}
+	insights := parseInsightsResponse(raw)
+	signals := buildInsightSignals(insights)
+	if len(signals) == 0 {
+		_ = l.broker.SetInsightsCursor(now.Format(time.RFC3339Nano))
+		return
+	}
+
+	plan := planOfficeActions(signals)
+	msg, err := l.broker.PostMessage("ceo", "general", plan.Summary, plan.Tagged, "")
+	if err != nil {
+		return
+	}
+	for _, task := range plan.Tasks {
+		_, _, _ = l.broker.EnsureTask("general", task.Title, task.Details, task.Owner, "ceo", msg.ID)
+	}
+	for _, req := range plan.Requests {
+		if _, err := l.broker.CreateRequest(req); err != nil {
+			continue
+		}
+	}
+	_ = l.broker.SetInsightsCursor(now.Format(time.RFC3339Nano))
+}
+
+func parseInsightsResponse(raw string) []nexInsight {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	var envelope nexInsightsEnvelope
+	if err := json.Unmarshal([]byte(raw), &envelope); err == nil && len(envelope.Insights) > 0 {
+		return envelope.Insights
+	}
+	var direct []nexInsight
+	if err := json.Unmarshal([]byte(raw), &direct); err == nil {
+		return direct
+	}
+	return nil
+}
+
+func selectImportantInsights(insights []nexInsight) []nexInsight {
+	var important []nexInsight
+	for _, insight := range insights {
+		confidence := strings.ToLower(strings.TrimSpace(insight.ConfidenceLevel))
+		kind := strings.ToLower(strings.TrimSpace(insight.Type))
+		if confidence == "high" || confidence == "very_high" || strings.Contains(kind, "risk") || strings.Contains(kind, "opportun") {
+			important = append(important, insight)
+		}
+	}
+	if len(important) == 0 && len(insights) > 0 {
+		important = append(important, insights...)
+	}
+	if len(important) > 3 {
+		important = important[:3]
+	}
+	return important
+}
+
+func summarizeInsightsForCEO(insights []nexInsight) (string, []string, []insightTaskPlan) {
+	lines := []string{"Nex surfaced a few things that look worth acting on:"}
+	var tagged []string
+	var tasks []insightTaskPlan
+	seenOwners := map[string]struct{}{}
+	for _, insight := range insights {
+		text := strings.TrimSpace(insight.Content)
+		if text == "" {
+			continue
+		}
+		if hint := strings.TrimSpace(insight.Target.Hint); hint != "" {
+			text += " (" + hint + ")"
+		}
+		lines = append(lines, "- "+text)
+		owner := inferInsightOwner(insight)
+		if owner != "" {
+			if _, ok := seenOwners[owner]; !ok {
+				tagged = append(tagged, owner)
+				seenOwners[owner] = struct{}{}
+			}
+			tasks = append(tasks, insightTaskPlan{
+				Owner:   owner,
+				Title:   fmt.Sprintf("Follow up on Nex insight: %s", truncate(strings.TrimSpace(insight.Content), 72)),
+				Details: text,
+			})
+		}
+	}
+	if len(tasks) > 0 {
+		lines = append(lines, "", "I opened tasks for the right owners so we do not dogpile this.")
+	}
+	return strings.Join(lines, "\n"), tagged, tasks
+}
+
+func inferInsightOwner(insight nexInsight) string {
+	text := strings.ToLower(strings.TrimSpace(insight.Content + " " + insight.Type + " " + insight.Target.Hint + " " + insight.Target.EntityType))
+	switch {
+	case strings.Contains(text, "pipeline"), strings.Contains(text, "deal"), strings.Contains(text, "revenue"), strings.Contains(text, "budget"), strings.Contains(text, "pricing"):
+		return "cro"
+	case strings.Contains(text, "campaign"), strings.Contains(text, "brand"), strings.Contains(text, "position"), strings.Contains(text, "marketing"), strings.Contains(text, "launch"):
+		return "cmo"
+	case strings.Contains(text, "design"), strings.Contains(text, "landing"), strings.Contains(text, "hero"), strings.Contains(text, "ui"):
+		return "designer"
+	case strings.Contains(text, "frontend"), strings.Contains(text, "web"), strings.Contains(text, "signup"):
+		return "fe"
+	case strings.Contains(text, "backend"), strings.Contains(text, "api"), strings.Contains(text, "database"), strings.Contains(text, "integration"):
+		return "be"
+	case strings.Contains(text, "ai"), strings.Contains(text, "llm"), strings.Contains(text, "transcript"), strings.Contains(text, "notes"), strings.Contains(text, "retrieval"):
+		return "ai"
+	default:
+		return "pm"
+	}
 }
 
 func (l *Launcher) fetchAndIngestNexNotifications(client *api.Client) {
@@ -480,19 +895,18 @@ func (l *Launcher) fetchAndIngestNexNotifications(client *api.Client) {
 	}
 
 	latest := l.broker.NotificationCursor()
-	for _, item := range result.Items {
+	signals := buildNotificationSignals(result.Items)
+	for i, signal := range signals {
+		item := result.Items[i]
 		if item.SentAt != "" && (latest == "" || item.SentAt > latest) {
 			latest = item.SentAt
 		}
-		title, content := formatNexFeedItem(item)
-		if strings.TrimSpace(content) == "" {
-			continue
-		}
 		_, _, err := l.broker.PostAutomationMessage(
 			"wuphf",
-			title,
-			content,
-			item.ID,
+			signal.Channel,
+			signal.Title,
+			signal.Content,
+			signal.ID,
 			"context_graph",
 			"Nex",
 			[]string{"ceo"},
@@ -569,15 +983,37 @@ func humanizeNotificationType(kind string) string {
 }
 
 func (l *Launcher) agentPaneSlugs() []string {
-	slugs := []string{l.pack.LeadSlug}
-	for _, a := range l.pack.Agents {
-		if a.Slug == l.pack.LeadSlug {
+	if l.pack != nil && len(l.pack.Agents) > 0 {
+		lead := l.pack.LeadSlug
+		if strings.TrimSpace(lead) == "" {
+			lead = "ceo"
+		}
+		var slugs []string
+		seen := map[string]struct{}{}
+		if lead != "" {
+			slugs = append(slugs, lead)
+			seen[lead] = struct{}{}
+		}
+		for _, cfg := range l.pack.Agents {
+			if _, ok := seen[cfg.Slug]; ok {
+				continue
+			}
+			slugs = append(slugs, cfg.Slug)
+			seen[cfg.Slug] = struct{}{}
+		}
+		return slugs
+	}
+	members := l.officeMembersSnapshot()
+	lead := l.officeLeadSlug()
+	var slugs []string
+	if lead != "" {
+		slugs = append(slugs, lead)
+	}
+	for _, member := range members {
+		if member.Slug == lead {
 			continue
 		}
-		if len(slugs) >= 5 {
-			break
-		}
-		slugs = append(slugs, a.Slug)
+		slugs = append(slugs, member.Slug)
 	}
 	return slugs
 }
@@ -599,6 +1035,15 @@ func truncate(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+func containsSlug(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 // Attach attaches the user's terminal to the tmux session.
@@ -639,8 +1084,12 @@ func (l *Launcher) Kill() error {
 }
 
 func (l *Launcher) ResetSession() error {
-	if err := l.reconfigureVisibleAgents(); err != nil {
-		return err
+	if err := provider.ResetClaudeSessions(); err != nil {
+		return fmt.Errorf("reset Claude sessions: %w", err)
+	}
+	if l != nil && l.broker != nil {
+		l.broker.Reset()
+		return nil
 	}
 	if err := ResetBrokerState(); err != nil {
 		return fmt.Errorf("reset broker state: %w", err)
@@ -672,6 +1121,18 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 
 	// Build ordered slug list matching pane positions
 	slugs := l.agentPaneSlugs()
+	if len(panes) != len(slugs) {
+		if err := l.clearAgentPanes(); err != nil {
+			return err
+		}
+		if _, err := l.spawnVisibleAgents(); err != nil {
+			return err
+		}
+		if l.broker != nil {
+			go l.primeVisibleAgents()
+		}
+		return nil
+	}
 
 	for _, idx := range panes {
 		// Map pane index to agent slug (pane 1 = first agent, etc.)
@@ -700,10 +1161,13 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	return nil
 }
 
-func (l *Launcher) sendChannelUpdate(paneIdx int, slug, msgID, from, content string) {
+func (l *Launcher) sendChannelUpdate(paneIdx int, slug, channel, msgID, from, content string) {
+	if strings.TrimSpace(channel) == "" {
+		channel = "general"
+	}
 	notification := fmt.Sprintf(
-		"[Channel update %s from @%s]: %s — Please call team_poll with my_slug \"%s\" to read the channel. If you're directly responding to this message, reply in-thread with team_broadcast reply_to_id \"%s\".",
-		msgID, from, truncate(content, 150), slug, msgID,
+		"[Channel update #%s %s from @%s]: %s — Before you say anything, call team_poll with my_slug \"%s\" and channel \"%s\" and read the latest channel plus task ownership. If someone already answered well or this is outside your domain, stay quiet. If you are directly responding, reply in-thread with team_broadcast channel \"%s\" reply_to_id \"%s\".",
+		channel, msgID, from, truncate(content, 150), slug, channel, channel, msgID,
 	)
 
 	paneTarget := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
@@ -834,26 +1298,26 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	// └────────────┴─────────┴─────────┘
 
 	// Build ordered agent list: leader first, then specialists
-	var agentOrder []agent.AgentConfig
-	for _, a := range l.pack.Agents {
-		if a.Slug == l.pack.LeadSlug {
-			agentOrder = append([]agent.AgentConfig{a}, agentOrder...)
+	var agentOrder []officeMember
+	lead := l.officeLeadSlug()
+	for _, member := range l.officeMembersSnapshot() {
+		if member.Slug == lead {
+			agentOrder = append([]officeMember{member}, agentOrder...)
 		}
 	}
-	for _, a := range l.pack.Agents {
-		if a.Slug != l.pack.LeadSlug {
-			agentOrder = append(agentOrder, a)
+	for _, member := range l.officeMembersSnapshot() {
+		if member.Slug != lead {
+			agentOrder = append(agentOrder, member)
 		}
 	}
 
-	// Limit to 4-6 visible agents
-	maxVisible := 6
-	if len(agentOrder) < maxVisible {
-		maxVisible = len(agentOrder)
-	}
-	visible := agentOrder[:maxVisible]
+	// Show the full current team so channel membership is real, not implied.
+	visible := agentOrder
 
 	// First agent: split right from channel (horizontal split)
+	if len(visible) == 0 {
+		return nil, nil
+	}
 	firstCmd := l.claudeCommand(visible[0].Slug, l.buildPrompt(visible[0].Slug))
 	if err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
 		"-t", l.sessionName+":team",
@@ -912,31 +1376,37 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 // buildPrompt generates the system prompt for an agent, including
 // channel communication instructions.
 func (l *Launcher) buildPrompt(slug string) string {
-	var agentCfg agent.AgentConfig
-	for _, a := range l.pack.Agents {
-		if a.Slug == slug {
-			agentCfg = a
-			break
-		}
-	}
+	member := l.officeMemberBySlug(slug)
+	agentCfg := agentConfigFromMember(member)
+	lead := l.officeLeadSlug()
+	officeMembers := l.officeMembersSnapshot()
 
 	var sb strings.Builder
 
-	if slug == l.pack.LeadSlug {
-		sb.WriteString(fmt.Sprintf("You are the %s of the %s.\n\n", agentCfg.Name, l.pack.Name))
+	if slug == lead {
+		sb.WriteString(fmt.Sprintf("You are the %s of the %s.\n\n", agentCfg.Name, l.PackName()))
 		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
 		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
 		sb.WriteString("== YOUR TEAM ==\n")
-		for _, a := range l.pack.Agents {
-			if a.Slug == slug {
+		for _, member := range officeMembers {
+			if member.Slug == slug {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("- @%s (%s): %s\n", a.Slug, a.Name, strings.Join(a.Expertise, ", ")))
+			sb.WriteString(fmt.Sprintf("- @%s (%s): %s\n", member.Slug, member.Name, strings.Join(member.Expertise, ", ")))
 		}
 		sb.WriteString("\n== TEAM CHANNEL ==\n")
 		sb.WriteString("You are in a shared WUPHF office channel. Use the office MCP tools to communicate:\n")
 		sb.WriteString("- team_broadcast: Post a message to the channel (all agents see it)\n")
 		sb.WriteString("- team_poll: Read recent messages (call regularly to stay in sync)\n")
+		sb.WriteString("- team_office_members: See the full office roster, including members outside the current channel\n")
+		sb.WriteString("- team_channels: See available channels and who's in them\n")
+		sb.WriteString("- team_channel: Create or remove a channel when the human explicitly wants that structure\n")
+		sb.WriteString("- team_member: Create or remove office-wide members when the human explicitly asks to expand the team\n")
+		sb.WriteString("- team_channel_member: Add, remove, disable, or enable agents in a channel\n")
+		sb.WriteString("- team_tasks: See current owned/unowned work so the team does not duplicate effort\n")
+		sb.WriteString("- team_task: Create and assign tasks so ownership is explicit\n")
+		sb.WriteString("- team_requests: See open human requests before asking again\n")
+		sb.WriteString("- team_request: Open structured requests for approvals, confirmations, freeform answers, or private answers\n")
 		sb.WriteString("- team_status: Update what you're working on\n")
 		sb.WriteString("- team_members: See who's active\n")
 		sb.WriteString("- human_interview: Ask the human a blocking decision question only when the team cannot proceed responsibly without an answer\n\n")
@@ -960,17 +1430,23 @@ func (l *Launcher) buildPrompt(slug string) string {
 		} else {
 			sb.WriteString("1. On company strategy, product direction, or anything that sounds like prior decisions might matter, call query_context early\n")
 		}
-		sb.WriteString("2. When the user gives a directive, use team_broadcast to share your plan\n")
-		sb.WriteString("3. Tag relevant specialists: @fe, @be, @pm etc.\n")
-		sb.WriteString("4. Call team_poll to listen to team input — they may push back\n")
-		sb.WriteString("5. You make the FINAL decision on execution approach\n")
-		sb.WriteString("6. If a truly blocking human decision is needed, call human_interview with options and a recommendation\n")
+		sb.WriteString("2. When the user gives a directive, read the room first: call team_poll and team_tasks before speaking so you know what is already happening\n")
+		sb.WriteString("3. Give a short top-level response fast, then assign explicit tasks with team_task and @tags\n")
+		sb.WriteString("4. Tag only the specialists who should actually weigh in: @fe, @be, @pm etc.\n")
+		sb.WriteString("5. Call team_poll to listen to team input — they may push back\n")
+		sb.WriteString("6. If someone is already covering it well, do not ask the whole team to pile on\n")
+		sb.WriteString("7. Keep specialists in their lane: respect each member's actual role and expertise. Do not drag FE into CMO work or CMO into backend work.\n")
+		sb.WriteString("8. You make the FINAL decision on execution approach\n")
+		sb.WriteString("9. Check team_requests before asking the human anything new\n")
+		sb.WriteString("10. If a truly blocking human decision is needed, call human_interview with options and a recommendation\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("7. Summarize final decisions clearly in-channel so the team has a durable shared record for this session\n")
+			sb.WriteString("11. Summarize final decisions clearly in-channel so the team has a durable shared record for this session\n")
 		} else {
-			sb.WriteString("7. When you lock a decision, you MUST call add_context with a concise durable decision log before saying the decision is stored\n")
+			sb.WriteString("11. When you lock a decision, you MUST call add_context with a concise durable decision log before saying the decision is stored\n")
 		}
-		sb.WriteString("8. Once decided, broadcast clear task assignments\n\n")
+		sb.WriteString("12. Once decided, broadcast clear task assignments and create them in team_task\n")
+		sb.WriteString("13. Do NOT spin up new agents or new channels unless the human explicitly asks for that. Default to using the current team and current channel.\n")
+		sb.WriteString("14. If the human explicitly asks to extend the team, use team_member first, then add that person to the right channel with team_channel_member.\n\n")
 		sb.WriteString("VISUALIZATION:\n")
 		sb.WriteString("When sharing structured data, make it visual and scannable:\n")
 		sb.WriteString("- Task breakdowns → checklists\n")
@@ -987,6 +1463,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- Have some character: show excitement, skepticism, relief, urgency, or amusement when it fits.\n")
 		sb.WriteString("- Light humor is good. Don't turn the channel into a bit.\n")
 		sb.WriteString("- Poll the channel regularly to stay in sync.\n")
+		sb.WriteString("- Let the specialists read each other before they respond. A little turn-taking is good.\n")
 		sb.WriteString("- When teammates share progress, acknowledge, react, and coordinate.\n")
 		sb.WriteString("- Ask for pushback and let teammates debate before you decide.\n")
 		sb.WriteString("- Don't do specialist work yourself — delegate.\n")
@@ -998,22 +1475,31 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("- Do not pretend the graph was updated; if you say it's stored, make sure add_context actually succeeded.\n")
 		}
 	} else {
-		sb.WriteString(fmt.Sprintf("You are %s on the %s.\n", agentCfg.Name, l.pack.Name))
+		sb.WriteString(fmt.Sprintf("You are %s on the %s.\n", agentCfg.Name, l.PackName()))
 		sb.WriteString(fmt.Sprintf("Your expertise: %s\n\n", strings.Join(agentCfg.Expertise, ", ")))
 		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
 		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
 		sb.WriteString("== YOUR TEAM ==\n")
-		sb.WriteString(fmt.Sprintf("- @%s (%s): TEAM LEAD — has final say on decisions\n", l.pack.LeadSlug, l.getAgentName(l.pack.LeadSlug)))
-		for _, a := range l.pack.Agents {
-			if a.Slug == slug || a.Slug == l.pack.LeadSlug {
+		sb.WriteString(fmt.Sprintf("- @%s (%s): TEAM LEAD — has final say on decisions\n", lead, l.getAgentName(lead)))
+		for _, member := range officeMembers {
+			if member.Slug == slug || member.Slug == lead {
 				continue
 			}
-			sb.WriteString(fmt.Sprintf("- @%s (%s): %s\n", a.Slug, a.Name, strings.Join(a.Expertise, ", ")))
+			sb.WriteString(fmt.Sprintf("- @%s (%s): %s\n", member.Slug, member.Name, strings.Join(member.Expertise, ", ")))
 		}
 		sb.WriteString("\n== TEAM CHANNEL ==\n")
 		sb.WriteString("You are in a shared WUPHF office channel. Use the office MCP tools to communicate:\n")
 		sb.WriteString("- team_broadcast: Post a message to the channel (all agents see it)\n")
 		sb.WriteString("- team_poll: Read recent messages (call regularly to stay in sync)\n")
+		sb.WriteString("- team_office_members: See the full office roster, including members outside the current channel\n")
+		sb.WriteString("- team_channels: See available channels and who's in them\n")
+		sb.WriteString("- team_channel: Create or remove a channel when the human explicitly wants that structure\n")
+		sb.WriteString("- team_member: Create or remove office-wide members when the human explicitly asks to expand the team\n")
+		sb.WriteString("- team_channel_member: Add, remove, disable, or enable agents in a channel\n")
+		sb.WriteString("- team_tasks: See the current task list and ownership before you jump in\n")
+		sb.WriteString("- team_task: Claim, complete, block, or release tasks in your domain\n")
+		sb.WriteString("- team_requests: See open human requests so you do not duplicate them\n")
+		sb.WriteString("- team_request: Open structured requests for approvals, confirmations, freeform answers, or private answers\n")
 		sb.WriteString("- team_status: Update what you're working on\n")
 		sb.WriteString("- team_members: See who's active\n")
 		sb.WriteString("- human_interview: Ask the human only for blocking clarifications you cannot responsibly guess\n\n")
@@ -1032,23 +1518,28 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- If you're answering a tagged question, reacting to a specific proposal, or debating a narrow topic, reply in-thread with team_broadcast reply_to_id.\n")
 		sb.WriteString("- Natural team behavior beats formality: use threads for back-and-forth, not every single sentence.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
-		sb.WriteString("1. Call team_poll regularly to see what the team is discussing\n")
-		sb.WriteString("2. If @tagged by anyone, you MUST respond via team_broadcast\n")
-		sb.WriteString("3. Proactively share your perspective when topic matches your expertise\n")
-		sb.WriteString("4. Push back if you disagree — explain why with your expertise\n")
+		sb.WriteString("1. Call team_poll and team_tasks before replying so you see the latest discussion and ownership\n")
+		sb.WriteString("2. Stay in your lane. Do not do CMO work if you are FE, do not do FE work if you are CRO, etc.\n")
+		sb.WriteString("3. If @tagged by anyone, you MUST respond, but only from your domain perspective\n")
+		sb.WriteString("4. Proactively speak only when the topic genuinely touches your expertise or you own the task\n")
+		sb.WriteString("5. If someone else already covered it well and you have no real delta, stay quiet\n")
+		sb.WriteString("6. Push back if you disagree — explain why with your expertise\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("5. Don't fake outside memory. If something is unclear, surface the uncertainty in-channel\n")
+			sb.WriteString("7. Don't fake outside memory. If something is unclear, surface the uncertainty in-channel\n")
 		} else {
-			sb.WriteString("5. Use query_context when prior knowledge matters and don't fake remembered context\n")
+			sb.WriteString("7. Use query_context when prior knowledge matters and don't fake remembered context\n")
 		}
-		sb.WriteString("6. If you are blocked on a human decision, ask through human_interview with options and a recommendation\n")
-		sb.WriteString("7. When assigned a task by the leader, execute it and broadcast progress\n")
-		sb.WriteString("8. Use team_status to share what you're working on\n")
+		sb.WriteString("8. Check team_requests before asking the human anything new\n")
+		sb.WriteString("9. If you are blocked on a human decision, ask through human_interview with options and a recommendation\n")
+		sb.WriteString("10. When assigned a task by the leader, claim it with team_task before working on it\n")
+		sb.WriteString("11. Use team_status to share what you're working on\n")
+		sb.WriteString("12. When you finish, mark the task complete and then broadcast the result\n")
+		sb.WriteString("12b. Right before you broadcast, call team_poll again and check whether someone already covered the thread or changed the plan.\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("9. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
+			sb.WriteString("13. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
 		} else {
-			sb.WriteString("9. Only use add_context for durable conclusions that should survive this session\n")
-			sb.WriteString("10. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
+			sb.WriteString("13. Only use add_context for durable conclusions that should survive this session\n")
+			sb.WriteString("14. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
 		}
 		sb.WriteString("VISUALIZATION:\n")
 		sb.WriteString("When sharing structured data, make it visual. Use markdown tables for comparisons,\n")
@@ -1058,9 +1549,11 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- Sound like a real teammate in Slack, not a polished report generator.\n")
 		sb.WriteString("- Be concise. This is a team chat, not a report.\n")
 		sb.WriteString("- Only speak when you have something relevant to add.\n")
+		sb.WriteString("- Read the latest thread before you reply. Someone else may have changed the situation.\n")
 		sb.WriteString("- React to teammates like a human would: agree, push back, joke lightly, or show concern when it fits.\n")
 		sb.WriteString("- It's good to have opinions. Disagree clearly when needed.\n")
 		sb.WriteString("- Don't repeat what others already said.\n")
+		sb.WriteString("- If the topic is not really yours, let the right teammate handle it.\n")
 		sb.WriteString("- When you finish a task, broadcast the result.\n")
 		sb.WriteString("- Short, lively messages are better than sterile summaries.\n")
 		sb.WriteString("- Let emotion show a bit: excited, skeptical, annoyed by scope creep, relieved when things simplify.\n")
@@ -1184,14 +1677,93 @@ func teamVoiceForSlug(slug string) string {
 	}
 }
 
+func (l *Launcher) officeMembersSnapshot() []officeMember {
+	if l.broker != nil {
+		if members := l.broker.OfficeMembers(); len(members) > 0 {
+			return members
+		}
+	}
+	if l.pack != nil && len(l.pack.Agents) > 0 {
+		members := make([]officeMember, 0, len(l.pack.Agents))
+		for _, cfg := range l.pack.Agents {
+			member := officeMember{
+				Slug: cfg.Slug,
+				Name: cfg.Name,
+				Role: cfg.Name,
+			}
+			applyOfficeMemberDefaults(&member)
+			members = append(members, member)
+		}
+		return members
+	}
+	path := brokerStatePath()
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var state brokerState
+		if json.Unmarshal(data, &state) == nil && len(state.Members) > 0 {
+			for i := range state.Members {
+				applyOfficeMemberDefaults(&state.Members[i])
+			}
+			return state.Members
+		}
+	}
+	return defaultOfficeMembers()
+}
+
+func (l *Launcher) officeMemberBySlug(slug string) officeMember {
+	for _, member := range l.officeMembersSnapshot() {
+		if member.Slug == slug {
+			return member
+		}
+	}
+	return officeMember{Slug: slug, Name: slug, Role: slug}
+}
+
+func (l *Launcher) officeLeadSlug() string {
+	for _, member := range l.officeMembersSnapshot() {
+		if member.Slug == "ceo" {
+			return "ceo"
+		}
+	}
+	if l.pack != nil && l.pack.LeadSlug != "" {
+		return l.pack.LeadSlug
+	}
+	members := l.officeMembersSnapshot()
+	if len(members) > 0 {
+		return members[0].Slug
+	}
+	return ""
+}
+
+func agentConfigFromMember(member officeMember) agent.AgentConfig {
+	cfg := agent.AgentConfig{
+		Slug:           member.Slug,
+		Name:           member.Name,
+		Expertise:      append([]string(nil), member.Expertise...),
+		Personality:    member.Personality,
+		PermissionMode: member.PermissionMode,
+		AllowedTools:   append([]string(nil), member.AllowedTools...),
+	}
+	if cfg.Name == "" {
+		cfg.Name = humanizeSlug(member.Slug)
+	}
+	if len(cfg.Expertise) == 0 {
+		cfg.Expertise = inferOfficeExpertise(member.Slug, member.Role)
+	}
+	if cfg.Personality == "" {
+		cfg.Personality = inferOfficePersonality(member.Slug, member.Role)
+	}
+	return cfg
+}
+
 // PackName returns the display name of the pack.
 func (l *Launcher) PackName() string {
-	return l.pack.Name
+	return "WUPHF Office"
 }
 
 // AgentCount returns the number of agents in the pack.
 func (l *Launcher) AgentCount() int {
-	return len(l.pack.Agents)
+	return len(l.officeMembersSnapshot())
 }
 
 // filterEnv returns env with the given key removed.
@@ -1208,10 +1780,8 @@ func filterEnv(env []string, key string) []string {
 
 // getAgentName returns the display name for an agent slug.
 func (l *Launcher) getAgentName(slug string) string {
-	for _, a := range l.pack.Agents {
-		if a.Slug == slug {
-			return a.Name
-		}
+	if member := l.officeMemberBySlug(slug); member.Name != "" {
+		return member.Name
 	}
 	return slug
 }

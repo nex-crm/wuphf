@@ -35,8 +35,29 @@ type channelMembersMsg struct {
 	members []channelMember
 }
 
-type channelInterviewMsg struct {
-	pending *channelInterview
+type channelOfficeMembersMsg struct {
+	members []officeMemberInfo
+}
+
+type channelChannelsMsg struct {
+	channels []channelInfo
+}
+
+type channelRequestsMsg struct {
+	requests []channelInterview
+	pending  *channelInterview
+}
+
+type channelTasksMsg struct {
+	tasks []channelTask
+}
+
+type channelActionsMsg struct {
+	actions []channelAction
+}
+
+type channelSchedulerMsg struct {
+	jobs []channelSchedulerJob
 }
 
 type channelUsageMsg struct {
@@ -59,8 +80,27 @@ type brokerMessage struct {
 
 type channelMember struct {
 	Slug        string `json:"slug"`
+	Name        string `json:"name,omitempty"`
+	Role        string `json:"role,omitempty"`
+	Disabled    bool   `json:"disabled,omitempty"`
 	LastMessage string `json:"lastMessage"`
 	LastTime    string `json:"lastTime"`
+}
+
+type officeMemberInfo struct {
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Role        string   `json:"role"`
+	Expertise   []string `json:"expertise,omitempty"`
+	Personality string   `json:"personality,omitempty"`
+	BuiltIn     bool     `json:"built_in,omitempty"`
+}
+
+type channelInfo struct {
+	Slug     string   `json:"slug"`
+	Name     string   `json:"name"`
+	Members  []string `json:"members"`
+	Disabled []string `json:"disabled"`
 }
 
 type channelInterviewOption struct {
@@ -71,12 +111,24 @@ type channelInterviewOption struct {
 
 type channelInterview struct {
 	ID            string                   `json:"id"`
+	Kind          string                   `json:"kind,omitempty"`
+	Status        string                   `json:"status,omitempty"`
 	From          string                   `json:"from"`
+	Channel       string                   `json:"channel"`
+	Title         string                   `json:"title,omitempty"`
 	Question      string                   `json:"question"`
 	Context       string                   `json:"context"`
 	Options       []channelInterviewOption `json:"options"`
 	RecommendedID string                   `json:"recommended_id"`
+	Blocking      bool                     `json:"blocking,omitempty"`
+	Required      bool                     `json:"required,omitempty"`
+	Secret        bool                     `json:"secret,omitempty"`
+	ReplyTo       string                   `json:"reply_to,omitempty"`
 	CreatedAt     string                   `json:"created_at"`
+	DueAt         string                   `json:"due_at,omitempty"`
+	FollowUpAt    string                   `json:"follow_up_at,omitempty"`
+	ReminderAt    string                   `json:"reminder_at,omitempty"`
+	RecheckAt     string                   `json:"recheck_at,omitempty"`
 }
 
 type channelUsageTotals struct {
@@ -94,10 +146,55 @@ type channelUsageState struct {
 	Agents map[string]channelUsageTotals `json:"agents"`
 }
 
+type channelTask struct {
+	ID         string `json:"id"`
+	Channel    string `json:"channel,omitempty"`
+	Title      string `json:"title"`
+	Details    string `json:"details,omitempty"`
+	Owner      string `json:"owner,omitempty"`
+	Status     string `json:"status"`
+	CreatedBy  string `json:"created_by"`
+	ThreadID   string `json:"thread_id,omitempty"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
+	DueAt      string `json:"due_at,omitempty"`
+	FollowUpAt string `json:"follow_up_at,omitempty"`
+	ReminderAt string `json:"reminder_at,omitempty"`
+	RecheckAt  string `json:"recheck_at,omitempty"`
+}
+
+type channelAction struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Source    string `json:"source,omitempty"`
+	Channel   string `json:"channel,omitempty"`
+	Actor     string `json:"actor,omitempty"`
+	Summary   string `json:"summary"`
+	RelatedID string `json:"related_id,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+type channelSchedulerJob struct {
+	Slug            string `json:"slug"`
+	Label           string `json:"label"`
+	Kind            string `json:"kind,omitempty"`
+	TargetType      string `json:"target_type,omitempty"`
+	TargetID        string `json:"target_id,omitempty"`
+	Channel         string `json:"channel,omitempty"`
+	IntervalMinutes int    `json:"interval_minutes"`
+	DueAt           string `json:"due_at,omitempty"`
+	NextRun         string `json:"next_run,omitempty"`
+	LastRun         string `json:"last_run,omitempty"`
+	Status          string `json:"status,omitempty"`
+}
+
 type channelTickMsg time.Time
 type channelPostDoneMsg struct{ err error }
 type channelInterviewAnswerDoneMsg struct{ err error }
-type channelResetDoneMsg struct{ err error }
+type channelResetDoneMsg struct {
+	err    error
+	notice string
+}
 type channelInitDoneMsg struct {
 	err    error
 	notice string
@@ -108,9 +205,32 @@ type channelIntegrationDoneMsg struct {
 	err   error
 }
 
+type channelTaskMutationDoneMsg struct {
+	notice string
+	err    error
+}
+
+type channelMemberDraftDoneMsg struct {
+	err    error
+	notice string
+}
+
+type channelMemberDraft struct {
+	Mode           string
+	OriginalSlug   string
+	Step           int
+	Slug           string
+	Name           string
+	Role           string
+	Expertise      string
+	Personality    string
+	PermissionMode string
+}
+
 var mentionPattern = regexp.MustCompile(`@([A-Za-z0-9_-]+)`)
 
 var brokerTokenPath = "/tmp/wuphf-broker-token"
+var officeDirectory = map[string]officeMemberInfo{}
 
 func currentBrokerAuthToken() string {
 	if token := strings.TrimSpace(os.Getenv("WUPHF_BROKER_TOKEN")); token != "" {
@@ -144,6 +264,19 @@ func newBrokerRequest(method, url string, body io.Reader) (*http.Request, error)
 var channelSlashCommands = []tui.SlashCommand{
 	{Name: "init", Description: "Run setup"},
 	{Name: "integrate", Description: "Connect an integration"},
+	{Name: "messages", Description: "Show the main office feed"},
+	{Name: "tasks", Description: "Show active work in this channel"},
+	{Name: "channels", Description: "Browse and manage channels"},
+	{Name: "channel", Description: "Create or remove a channel"},
+	{Name: "agents", Description: "Manage channel agents"},
+	{Name: "agent", Description: "Add, remove, enable, or disable an agent"},
+	{Name: "agent prompt", Description: "Generate a new agent from a prompt"},
+	{Name: "task", Description: "Claim, release, or complete a task"},
+	{Name: "requests", Description: "Show open office requests"},
+	{Name: "request", Description: "Focus, answer, or snooze a request"},
+	{Name: "insights", Description: "Show Nex and office automation updates"},
+	{Name: "calendar", Description: "Show the office schedule and team calendars"},
+	{Name: "queue", Description: "Alias for /calendar"},
 	{Name: "reply", Description: "Reply in thread by message ID"},
 	{Name: "threads", Description: "Browse and manage threads"},
 	{Name: "expand", Description: "Expand a collapsed thread"},
@@ -156,12 +289,44 @@ var channelSlashCommands = []tui.SlashCommand{
 type channelPickerMode string
 
 const (
-	channelPickerNone         channelPickerMode = ""
-	channelPickerInitProvider channelPickerMode = "init_provider"
-	channelPickerInitPack     channelPickerMode = "init_pack"
-	channelPickerIntegrations channelPickerMode = "integrations"
-	channelPickerThreads      channelPickerMode = "threads"
-	channelPickerThreadAction channelPickerMode = "thread_action"
+	channelPickerNone          channelPickerMode = ""
+	channelPickerInitProvider  channelPickerMode = "init_provider"
+	channelPickerInitPack      channelPickerMode = "init_pack"
+	channelPickerIntegrations  channelPickerMode = "integrations"
+	channelPickerRequests      channelPickerMode = "requests"
+	channelPickerTasks         channelPickerMode = "tasks"
+	channelPickerTaskAction    channelPickerMode = "task_action"
+	channelPickerRequestAction channelPickerMode = "request_action"
+	channelPickerThreads       channelPickerMode = "threads"
+	channelPickerThreadAction  channelPickerMode = "thread_action"
+	channelPickerChannels      channelPickerMode = "channels"
+	channelPickerAgents        channelPickerMode = "agents"
+	channelPickerCalendarAgent channelPickerMode = "calendar_agent"
+)
+
+type officeApp string
+
+const (
+	officeAppMessages officeApp = "messages"
+	officeAppTasks    officeApp = "tasks"
+	officeAppRequests officeApp = "requests"
+	officeAppInsights officeApp = "insights"
+	officeAppCalendar officeApp = "calendar"
+)
+
+type quickJumpTarget string
+
+const (
+	quickJumpNone     quickJumpTarget = ""
+	quickJumpChannels quickJumpTarget = "channels"
+	quickJumpApps     quickJumpTarget = "apps"
+)
+
+type calendarRange string
+
+const (
+	calendarRangeDay  calendarRange = "day"
+	calendarRangeWeek calendarRange = "week"
 )
 
 type channelIntegrationSpec struct {
@@ -195,8 +360,16 @@ const (
 type channelModel struct {
 	messages             []brokerMessage
 	members              []channelMember
+	officeMembers        []officeMemberInfo
+	channels             []channelInfo
+	requests             []channelInterview
+	tasks                []channelTask
+	actions              []channelAction
+	scheduler            []channelSchedulerJob
 	pending              *channelInterview
 	lastID               string
+	activeChannel        string
+	activeApp            officeApp
 	replyToID            string
 	expandedThreads      map[string]bool
 	clickableThreads     map[int]string // rendered line index → message ID for click-to-expand
@@ -213,6 +386,7 @@ type channelModel struct {
 	selectedOption       int
 	notice               string
 	snoozedInterview     string
+	memberDraft          *channelMemberDraft
 	initFlow             tui.InitFlowModel
 	picker               tui.PickerModel
 	pickerMode           channelPickerMode
@@ -220,6 +394,7 @@ type channelModel struct {
 	// 3-column layout state
 	focus            focusArea
 	sidebarCollapsed bool
+	sidebarCursor    int
 	threadPanelOpen  bool
 	threadPanelID    string
 	threadInput      []rune
@@ -227,6 +402,9 @@ type channelModel struct {
 	threadScroll     int
 	usage            channelUsageState
 	lastCtrlCAt      time.Time
+	quickJumpTarget  quickJumpTarget
+	calendarRange    calendarRange
+	calendarFilter   string
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
@@ -236,6 +414,9 @@ func newChannelModel(threadsCollapsed bool) channelModel {
 		autocomplete:         tui.NewAutocomplete(channelSlashCommands),
 		mention:              tui.NewMention(channelMentionAgents(nil)),
 		initFlow:             tui.NewInitFlow(),
+		activeChannel:        "general",
+		activeApp:            officeAppMessages,
+		calendarRange:        calendarRangeWeek,
 	}
 	if config.ResolveNoNex() {
 		m.notice = "Running in office-only mode. Nex tools are disabled for this session."
@@ -243,14 +424,20 @@ func newChannelModel(threadsCollapsed bool) channelModel {
 		m.notice = "No WUPHF API key configured. Starting setup..."
 		m.initFlow, _ = m.initFlow.Start()
 	}
+	m.syncSidebarCursorToActive()
 	return m
 }
 
 func (m channelModel) Init() tea.Cmd {
 	return tea.Batch(
-		pollBroker(""),
-		pollMembers(),
-		pollInterview(),
+		pollChannels(),
+		pollOfficeMembers(),
+		pollBroker("", m.activeChannel),
+		pollMembers(m.activeChannel),
+		pollRequests(m.activeChannel),
+		pollTasks(m.activeChannel),
+		pollActions(),
+		pollScheduler(),
 
 		tickChannel(),
 	)
@@ -329,6 +516,28 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					return m, nil
+				case "task":
+					if task, ok := m.findTaskByID(action.Value); ok {
+						m.focus = focusMain
+						return m, m.openTaskActionPicker(task)
+					}
+					return m, nil
+				case "request":
+					if req, ok := m.findRequestByID(action.Value); ok {
+						m.focus = focusMain
+						return m, m.openRequestActionPicker(req)
+					}
+					return m, nil
+				case "channel", "app":
+					items := m.sidebarItems()
+					for idx, item := range items {
+						if item.Kind == action.Kind && item.Value == action.Value {
+							m.sidebarCursor = idx
+							break
+						}
+					}
+					m.focus = focusSidebar
+					return m, m.selectSidebarItem(sidebarItem{Kind: action.Kind, Value: action.Value})
 				}
 			}
 		}
@@ -349,6 +558,46 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+b":
 			m.sidebarCollapsed = !m.sidebarCollapsed
 			return m, nil
+		case "ctrl+g":
+			if m.quickJumpTarget == quickJumpChannels {
+				m.quickJumpTarget = quickJumpNone
+			} else {
+				m.quickJumpTarget = quickJumpChannels
+				m.notice = "Quick nav: 1-9 switches channels."
+			}
+			return m, nil
+		case "ctrl+o":
+			if m.quickJumpTarget == quickJumpApps {
+				m.quickJumpTarget = quickJumpNone
+			} else {
+				m.quickJumpTarget = quickJumpApps
+				m.notice = "Quick nav: 1-9 switches office apps."
+			}
+			return m, nil
+		}
+
+		if m.quickJumpTarget != quickJumpNone {
+			target := m.quickJumpTarget
+			items := m.quickJumpItems()
+			switch msg.String() {
+			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+				idx := int(msg.String()[0] - '1')
+				m.quickJumpTarget = quickJumpNone
+				if idx >= 0 && idx < len(items) {
+					m.setSidebarCursorForItem(items[idx])
+					return m, m.selectSidebarItem(items[idx])
+				}
+				if target == quickJumpChannels {
+					m.notice = "No channel on that number."
+				} else {
+					m.notice = "No app on that number."
+				}
+				return m, nil
+			case "esc":
+				m.quickJumpTarget = quickJumpNone
+			default:
+				m.quickJumpTarget = quickJumpNone
+			}
 		}
 
 		// ── Esc: close overlays/thread, then cycle ────────────────────
@@ -372,9 +621,16 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mention, _ = m.mention.Update(msg)
 				return m, nil
 			}
+			if m.memberDraft != nil {
+				m.memberDraft = nil
+				m.input = nil
+				m.inputPos = 0
+				m.notice = "Agent setup canceled."
+				return m, nil
+			}
 			if m.pending != nil && m.pending.ID != "" {
 				m.snoozedInterview = m.pending.ID
-				m.notice = "Interview snoozed. Team remains paused until it is answered."
+				m.notice = "Request snoozed. Team remains paused until it is answered."
 				return m, nil
 			}
 			// Close thread panel
@@ -395,6 +651,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ── Tab: cycle focus 0→1→2→0 (only visible panels) ───────────
 		if msg.String() == "tab" && !m.autocomplete.IsVisible() && !m.mention.IsVisible() && !m.picker.IsActive() {
 			m.focus = m.nextFocus()
+			m.quickJumpTarget = quickJumpNone
 			m.updateOverlaysForCurrentInput()
 			return m, nil
 		}
@@ -451,6 +708,33 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.focus == focusMain && m.activeApp == officeAppCalendar && len(m.input) == 0 && !m.posting {
+			switch msg.String() {
+			case "d":
+				m.calendarRange = calendarRangeDay
+				m.notice = "Calendar now shows today."
+				return m, nil
+			case "w":
+				m.calendarRange = calendarRangeWeek
+				m.notice = "Calendar now shows this week."
+				return m, nil
+			case "f":
+				options := m.buildCalendarAgentPickerOptions()
+				if len(options) == 0 {
+					m.notice = "No teammate filters available."
+					return m, nil
+				}
+				m.picker = tui.NewPicker("Filter Calendar", options)
+				m.picker.SetActive(true)
+				m.pickerMode = channelPickerCalendarAgent
+				return m, nil
+			case "a":
+				m.calendarFilter = ""
+				m.notice = "Showing all teammate calendars."
+				return m, nil
+			}
+		}
+
 		// ── Route by focus area ───────────────────────────────────────
 		if m.focus == focusThread && m.threadPanelOpen {
 			return m.updateThread(msg)
@@ -463,6 +747,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "enter":
 			m.lastCtrlCAt = time.Time{}
+			if m.memberDraft != nil {
+				return m.submitMemberDraft()
+			}
 			if len(m.input) > 0 {
 				text := string(m.input)
 				trimmed := strings.TrimSpace(text)
@@ -482,7 +769,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.pending != nil {
 					return m, postInterviewAnswer(*m.pending, "", "", text)
 				}
-				return m, postToChannel(text, m.replyToID)
+				return m, postToChannel(text, m.replyToID, m.activeChannel)
 			} else if m.pending != nil {
 				opt := m.selectedInterviewOption()
 				if opt != nil {
@@ -587,15 +874,17 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.replyToID != "" {
 			m.notice = fmt.Sprintf("Reply sent to %s. Use /cancel to leave the thread.", m.replyToID)
 		}
+		return m, tea.Batch(pollChannels(), pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollActions(), pollScheduler())
 
 	case channelInterviewAnswerDoneMsg:
 		m.posting = false
 		if msg.err != nil {
-			m.notice = "Interview answer failed: " + msg.err.Error()
+			m.notice = "Request answer failed: " + msg.err.Error()
 		} else {
 			m.pending = nil
 			m.input = nil
 			m.inputPos = 0
+			return m, tea.Batch(pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollActions(), pollScheduler())
 		}
 
 	case channelResetDoneMsg:
@@ -603,6 +892,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.messages = nil
 			m.members = nil
+			m.requests = nil
 			m.pending = nil
 			m.lastID = ""
 			m.replyToID = ""
@@ -622,6 +912,13 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focus = focusMain
 			m.pickerMode = channelPickerNone
 			m.snoozedInterview = ""
+			m.tasks = nil
+			m.actions = nil
+			m.scheduler = nil
+			m.notice = strings.TrimSpace(msg.notice)
+			if m.notice == "" {
+				m.notice = "Office reset. Team panes reloaded in place."
+			}
 		} else {
 			m.notice = "Reset failed: " + msg.err.Error()
 		}
@@ -652,6 +949,27 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = fmt.Sprintf("%s connected.", msg.label)
 		}
 
+	case channelMemberDraftDoneMsg:
+		m.posting = false
+		if msg.err != nil {
+			m.notice = "Agent update failed: " + msg.err.Error()
+		} else {
+			m.notice = msg.notice
+			m.memberDraft = nil
+			m.input = nil
+			m.inputPos = 0
+			return m, tea.Batch(pollOfficeMembers(), pollChannels(), pollMembers(m.activeChannel), pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollActions(), pollScheduler())
+		}
+
+	case channelTaskMutationDoneMsg:
+		m.posting = false
+		if msg.err != nil {
+			m.notice = "Task update failed: " + msg.err.Error()
+		} else if strings.TrimSpace(msg.notice) != "" {
+			m.notice = msg.notice
+		}
+		return m, tea.Batch(pollTasks(m.activeChannel), pollActions(), pollScheduler())
+
 	case channelMsg:
 		if len(msg.messages) > 0 {
 			if m.scroll > 0 {
@@ -666,11 +984,40 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.members = msg.members
 		m.updateOverlaysForCurrentInput()
 
+	case channelOfficeMembersMsg:
+		m.officeMembers = msg.members
+		officeDirectory = make(map[string]officeMemberInfo, len(msg.members))
+		for _, member := range msg.members {
+			officeDirectory[member.Slug] = member
+		}
+		m.updateOverlaysForCurrentInput()
+
+	case channelChannelsMsg:
+		m.channels = msg.channels
+		m.clampSidebarCursor()
+		if m.activeChannel == "" {
+			m.activeChannel = "general"
+		}
+		if !channelExists(msg.channels, m.activeChannel) && len(msg.channels) > 0 {
+			m.activeChannel = msg.channels[0].Slug
+			m.lastID = ""
+			return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel))
+		}
+
 	case channelUsageMsg:
 		m.usage = msg.usage
 		if m.usage.Agents == nil {
 			m.usage.Agents = make(map[string]channelUsageTotals)
 		}
+
+	case channelTasksMsg:
+		m.tasks = msg.tasks
+
+	case channelActionsMsg:
+		m.actions = msg.actions
+
+	case channelSchedulerMsg:
+		m.scheduler = msg.jobs
 
 	case tui.PickerSelectMsg:
 		switch m.pickerMode {
@@ -685,6 +1032,133 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.posting = true
 			m.notice = fmt.Sprintf("Opening %s OAuth flow in your browser...", spec.Label)
 			return m, connectIntegration(spec)
+		case channelPickerChannels:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			switch {
+			case strings.HasPrefix(msg.Value, "switch:"):
+				m.activeChannel = strings.TrimPrefix(msg.Value, "switch:")
+				m.lastID = ""
+				m.messages = nil
+				m.members = nil
+				m.replyToID = ""
+				m.threadPanelOpen = false
+				m.threadPanelID = ""
+				m.notice = "Switched to #" + m.activeChannel
+				return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel))
+			case strings.HasPrefix(msg.Value, "remove:"):
+				m.posting = true
+				return m, mutateChannel("remove", strings.TrimPrefix(msg.Value, "remove:"))
+			}
+			return m, nil
+		case channelPickerAgents:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			if msg.Value == "create:new" {
+				m.notice = "Use /agent create <slug> <Display Name> to add a new office member."
+				return m, nil
+			}
+			parts := strings.SplitN(msg.Value, ":", 2)
+			if len(parts) != 2 {
+				return m, nil
+			}
+			if parts[0] == "edit" {
+				draft, ok := m.startEditMemberDraft(parts[1])
+				if !ok {
+					m.notice = fmt.Sprintf("Office member %s not found.", parts[1])
+					return m, nil
+				}
+				m.memberDraft = draft
+				m.notice = "Editing teammate profile."
+				return m, nil
+			}
+			m.posting = true
+			return m, mutateChannelMember(m.activeChannel, parts[0], parts[1])
+		case channelPickerRequests:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			for _, req := range m.requests {
+				if req.ID == msg.Value {
+					return m, m.openRequestActionPicker(req)
+				}
+			}
+			return m, nil
+		case channelPickerCalendarAgent:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			if msg.Value == "all" {
+				m.calendarFilter = ""
+				m.notice = "Showing all teammate calendars."
+				return m, nil
+			}
+			m.calendarFilter = strings.TrimSpace(msg.Value)
+			if m.calendarFilter == "" {
+				m.notice = "Showing all teammate calendars."
+			} else {
+				m.notice = "Filtering calendar for " + displayName(m.calendarFilter) + "."
+			}
+			return m, nil
+		case channelPickerTasks:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			for _, task := range m.tasks {
+				if task.ID == msg.Value {
+					return m, m.openTaskActionPicker(task)
+				}
+			}
+			return m, nil
+		case channelPickerTaskAction:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			parts := strings.SplitN(msg.Value, ":", 2)
+			if len(parts) != 2 {
+				return m, nil
+			}
+			action, taskID := parts[0], parts[1]
+			switch action {
+			case "claim", "release", "complete", "block":
+				m.posting = true
+				return m, mutateTask(action, taskID, "you", m.activeChannel)
+			case "open":
+				if task, ok := m.findTaskByID(taskID); ok && task.ThreadID != "" {
+					m.threadPanelOpen = true
+					m.threadPanelID = task.ThreadID
+					m.replyToID = task.ThreadID
+				}
+				return m, nil
+			}
+			return m, nil
+		case channelPickerRequestAction:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			parts := strings.SplitN(msg.Value, ":", 2)
+			if len(parts) != 2 {
+				return m, nil
+			}
+			action, reqID := parts[0], parts[1]
+			switch action {
+			case "focus":
+				if req, ok := m.findRequestByID(reqID); ok {
+					return m.focusRequest(req, "Focused request "+req.ID)
+				}
+			case "answer":
+				if req, ok := m.findRequestByID(reqID); ok {
+					return m.answerRequest(req)
+				}
+			case "snooze":
+				m.snoozedInterview = reqID
+				m.notice = "Request snoozed."
+				return m, nil
+			case "open":
+				if req, ok := m.findRequestByID(reqID); ok && req.ReplyTo != "" {
+					m.threadPanelOpen = true
+					m.threadPanelID = req.ReplyTo
+					m.replyToID = req.ReplyTo
+					m.notice = "Opened thread for request " + req.ID
+				}
+				return m, nil
+			}
+			return m, nil
 		case channelPickerThreads:
 			// User selected a thread — show action sub-picker
 			m.picker.SetActive(false)
@@ -746,11 +1220,12 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, cmd
 
-	case channelInterviewMsg:
+	case channelRequestsMsg:
 		prevID := ""
 		if m.pending != nil {
 			prevID = m.pending.ID
 		}
+		m.requests = msg.requests
 		m.pending = msg.pending
 		if m.pending == nil {
 			m.snoozedInterview = ""
@@ -764,9 +1239,15 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelTickMsg:
 		return m, tea.Batch(
-			pollBroker(m.lastID),
-			pollMembers(),
-			pollInterview(),
+			pollChannels(),
+			pollOfficeMembers(),
+			pollBroker(m.lastID, m.activeChannel),
+			pollMembers(m.activeChannel),
+			pollRequests(m.activeChannel),
+			pollTasks(m.activeChannel),
+			pollActions(),
+			pollScheduler(),
+			pollUsage(),
 
 			tickChannel(),
 		)
@@ -785,7 +1266,7 @@ func (m channelModel) View() string {
 	// ── Sidebar ──────────────────────────────────────────────────────
 	sidebar := ""
 	if layout.ShowSidebar {
-		sidebar = renderSidebar(mergePackMembers(m.members), "general", layout.SidebarW, layout.ContentH)
+		sidebar = renderSidebar(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.activeChannel, m.activeApp, m.sidebarCursor, m.focus == focusSidebar, m.quickJumpTarget, layout.SidebarW, layout.ContentH)
 	}
 
 	// ── Thread panel ─────────────────────────────────────────────────
@@ -801,6 +1282,7 @@ func (m channelModel) View() string {
 			threadPopup, m.focus == focusThread)
 	}
 
+	activePending := m.visiblePendingRequest()
 	// ── Main panel: header + messages + composer ─────────────────────
 	mainW := layout.MainW
 	if mainW < 1 {
@@ -810,15 +1292,15 @@ func (m channelModel) View() string {
 	// Channel header (2 lines)
 	headerStyle := channelHeaderStyle(mainW)
 	headerLine1 := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).
-		Render("# general")
+		Render(appIcon(m.activeApp) + " " + m.currentHeaderTitle())
 	headerMeta := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).
-		Render("  The WUPHF Office · Founding Team building together")
+		Render(m.currentHeaderMeta())
 	if m.usage.Total.TotalTokens > 0 || m.usage.Total.CostUsd > 0 {
 		headerMeta += "  " + lipgloss.NewStyle().
 			Foreground(lipgloss.Color(slackActive)).
 			Render(fmt.Sprintf("Spend to date %s · %s", formatUsd(m.usage.Total.CostUsd), formatTokenCount(m.usage.Total.TotalTokens)))
 	}
-	if m.unreadCount > 0 && m.scroll > 0 {
+	if m.activeApp == officeAppMessages && m.unreadCount > 0 && m.scroll > 0 {
 		headerMeta += "  " + lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color(slackActive)).
@@ -827,7 +1309,9 @@ func (m channelModel) View() string {
 			Render(fmt.Sprintf("%d new", m.unreadCount))
 	}
 	if m.pending != nil {
-		headerMeta += "  " + lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Bold(true).Render("Interview pending")
+		headerMeta += "  " + accentPill("request pending", "#B45309")
+	} else if len(m.requests) > 0 {
+		headerMeta += "  " + subtlePill(fmt.Sprintf("%d open requests", len(m.requests)), "#FDE68A", "#78350F")
 	}
 	channelHeader := headerStyle.Render(headerLine1 + headerMeta)
 	if usageLine := renderUsageStrip(m.usage, m.members, mainW); usageLine != "" {
@@ -837,14 +1321,22 @@ func (m channelModel) View() string {
 
 	// Composer
 	typingAgents := typingAgentsFromMembers(m.members)
-	composerStr := renderComposer(mainW, m.input, m.inputPos, "general",
-		m.replyToID, typingAgents, m.pending, m.selectedOption,
+	composerStr := renderComposer(mainW, m.input, m.inputPos, m.activeChannel,
+		m.replyToID, typingAgents, activePending, m.selectedOption,
 		m.focus == focusMain)
+	if m.memberDraft != nil {
+		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
+			"", typingAgents, nil, 0, m.focus == focusMain)
+	}
 
 	// Interview card (above composer)
 	interviewCard := ""
-	if m.pending != nil && m.pending.ID != m.snoozedInterview {
-		interviewCard = renderInterviewCard(*m.pending, m.selectedOption, mainW-4)
+	if activePending != nil {
+		interviewCard = renderInterviewCard(*activePending, m.selectedOption, mainW-4)
+	}
+	memberDraftCard := ""
+	if m.memberDraft != nil {
+		memberDraftCard = renderMemberDraftCard(*m.memberDraft, mainW-4)
 	}
 
 	// Init/picker overlays
@@ -857,10 +1349,11 @@ func (m channelModel) View() string {
 
 	composerH := lipgloss.Height(composerStr)
 	interviewH := lipgloss.Height(interviewCard)
+	memberDraftH := lipgloss.Height(memberDraftCard)
 	initH := lipgloss.Height(initPanel)
 
 	// Message area height
-	msgH := layout.ContentH - headerH - composerH - interviewH - initH - 1 // 1 for status bar
+	msgH := layout.ContentH - headerH - composerH - interviewH - memberDraftH - initH - 1 // 1 for status bar
 	if msgH < 1 {
 		msgH = 1
 	}
@@ -869,7 +1362,7 @@ func (m channelModel) View() string {
 	if contentWidth < 32 {
 		contentWidth = 32
 	}
-	allLines := buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand)
+	allLines := m.currentMainLines(contentWidth)
 	visibleRows, scroll, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
 	var visible []string
 	for _, row := range visibleRows {
@@ -878,7 +1371,7 @@ func (m channelModel) View() string {
 	for len(visible) < msgH {
 		visible = append(visible, "")
 	}
-	if m.unreadCount > 0 && scroll > 0 && len(visible) > 0 {
+	if m.activeApp == officeAppMessages && m.unreadCount > 0 && scroll > 0 && len(visible) > 0 {
 		jumpLabel := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Background(lipgloss.Color(slackActive)).
@@ -897,6 +1390,9 @@ func (m channelModel) View() string {
 	mainParts := []string{channelHeader, msgPanel}
 	if interviewCard != "" {
 		mainParts = append(mainParts, interviewCard)
+	}
+	if memberDraftCard != "" {
+		mainParts = append(mainParts, memberDraftCard)
 	}
 	if initPanel != "" {
 		mainParts = append(mainParts, initPanel)
@@ -918,7 +1414,7 @@ func (m channelModel) View() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Top, panels...)
 
 	// ── Status bar ───────────────────────────────────────────────────
-	agentCount := countUniqueAgents(m.messages)
+	agentCount := len(m.members)
 	onlineCount := len(m.members)
 	scrollHint := "PgUp/PgDn"
 	if scroll > 0 {
@@ -931,13 +1427,13 @@ func (m channelModel) View() string {
 		focusLabel = "thread"
 	}
 	statusBar := statusBarStyle(m.width).Render(fmt.Sprintf(
-		" %s %d online │ %d msgs │ %d agents │ %s │ Tab focus:%s │ Ctrl+B sidebar │ /quit",
+		" %s %d around │ %d msgs │ %d agents │ %s │ Tab focus:%s │ Ctrl+G channels │ Ctrl+O apps │ /quit",
 		"\u25CF", onlineCount, len(m.messages), agentCount, scrollHint, focusLabel,
 	))
 	if m.pending != nil {
-		statusText := " Interview pending │ ↑/↓ choose │ Enter submit"
+		statusText := " Request pending │ ↑/↓ choose │ Enter submit"
 		if m.pending.ID == m.snoozedInterview {
-			statusText = " Interview paused │ Esc snoozed it │ team remains blocked until answered"
+			statusText = " Request paused │ Esc snoozed it │ team remains blocked until answered"
 		}
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Render(statusText),
@@ -947,6 +1443,16 @@ func (m channelModel) View() string {
 			" %s %d online │ bill %s │ tokens %s │ %s │ Tab focus:%s │ /quit",
 			"\u25CF", onlineCount, formatUsd(m.usage.Total.CostUsd), formatTokenCount(m.usage.Total.TotalTokens), scrollHint, focusLabel,
 		))
+	} else if m.quickJumpTarget != quickJumpNone {
+		label := "channels"
+		if m.quickJumpTarget == quickJumpApps {
+			label = "apps"
+		}
+		statusBar = statusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
+				fmt.Sprintf(" Quick nav │ Ctrl+G channels · Ctrl+O apps │ 1-9 switch %s │ Esc cancel", label),
+			),
+		)
 	} else if m.notice != "" {
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(" " + m.notice),
@@ -957,9 +1463,139 @@ func (m channelModel) View() string {
 				fmt.Sprintf(" ↩ Reply mode │ thread %s │ /cancel to return", m.replyToID),
 			),
 		)
+	} else if m.activeApp != officeAppMessages {
+		message := fmt.Sprintf(" Viewing %s │ Tab focus:%s │ /messages to return", m.currentAppLabel(), focusLabel)
+		if m.activeApp == officeAppCalendar {
+			filter := "all"
+			if strings.TrimSpace(m.calendarFilter) != "" {
+				filter = "@" + m.calendarFilter
+			}
+			message = fmt.Sprintf(" Calendar │ d day · w week · f filter · a all │ current %s/%s", m.calendarRange, filter)
+		}
+		statusBar = statusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
+				message,
+			),
+		)
 	}
 
 	return content + "\n" + statusBar
+}
+
+func (m channelModel) currentHeaderTitle() string {
+	switch m.activeApp {
+	case officeAppTasks:
+		return "# " + m.activeChannel + " · Tasks"
+	case officeAppRequests:
+		return "# " + m.activeChannel + " · Requests"
+	case officeAppInsights:
+		return "# " + m.activeChannel + " · Insights"
+	case officeAppCalendar:
+		return "# " + m.activeChannel + " · Calendar"
+	default:
+		return "# " + m.activeChannel
+	}
+}
+
+func (m channelModel) currentHeaderMeta() string {
+	switch m.activeApp {
+	case officeAppTasks:
+		open, inProgress, blocked, overdue := 0, 0, 0, 0
+		for _, task := range m.tasks {
+			switch task.Status {
+			case "in_progress":
+				inProgress++
+			case "blocked":
+				blocked++
+			default:
+				open++
+			}
+			if parsed, ok := parseChannelTime(task.DueAt); ok && parsed.Before(time.Now()) && task.Status != "done" {
+				overdue++
+			}
+		}
+		return fmt.Sprintf("  Clear ownership, no duplicate work · %d open · %d moving · %d blocked · %d overdue", open, inProgress, blocked, overdue)
+	case officeAppRequests:
+		blocking, urgent := 0, 0
+		for _, req := range m.requests {
+			if req.Blocking {
+				blocking++
+			}
+			if parsed, ok := parseChannelTime(req.DueAt); ok && parsed.Before(time.Now().Add(2*time.Hour)) {
+				urgent++
+			}
+		}
+		return fmt.Sprintf("  Decisions and approvals the team is waiting on · %d open · %d blocking · %d soon", len(m.requests), blocking, urgent)
+	case officeAppInsights:
+		highSignal := 0
+		for _, msg := range filterInsightMessages(m.messages) {
+			text := strings.ToLower(msg.Title + " " + msg.Content)
+			if strings.Contains(text, "important") || strings.Contains(text, "risk") || strings.Contains(text, "urgent") || strings.Contains(text, "blocked") {
+				highSignal++
+			}
+		}
+		return fmt.Sprintf("  Nex and office automation signals worth paying attention to · %d recent · %d high signal", len(filterInsightMessages(m.messages)), highSignal)
+	case officeAppCalendar:
+		events := filterCalendarEvents(collectCalendarEvents(m.scheduler, m.tasks, m.requests, m.activeChannel, m.members), m.calendarRange, m.calendarFilter)
+		dueSoon := 0
+		now := time.Now()
+		for _, event := range events {
+			if !event.When.After(now.Add(15 * time.Minute)) {
+				dueSoon++
+			}
+		}
+		view := "week"
+		if m.calendarRange == calendarRangeDay {
+			view = "day"
+		}
+		filter := "everyone"
+		if strings.TrimSpace(m.calendarFilter) != "" {
+			filter = displayName(m.calendarFilter)
+		}
+		return fmt.Sprintf("  %s view · %s · %d upcoming · %d due soon · %d recent actions", view, filter, len(events), dueSoon, len(m.actions))
+	default:
+		return fmt.Sprintf("  The WUPHF Office · Founding Team building together · %d teammates in #%s", len(m.members), m.activeChannel)
+	}
+}
+
+func (m channelModel) currentAppLabel() string {
+	switch m.activeApp {
+	case officeAppTasks:
+		return "tasks"
+	case officeAppRequests:
+		return "requests"
+	case officeAppInsights:
+		return "insights"
+	case officeAppCalendar:
+		return "calendar"
+	default:
+		return "messages"
+	}
+}
+
+func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
+	switch m.activeApp {
+	case officeAppTasks:
+		return buildTaskLines(m.tasks, contentWidth)
+	case officeAppRequests:
+		return buildRequestLines(m.requests, contentWidth)
+	case officeAppInsights:
+		return buildOfficeMessageLines(filterInsightMessages(m.messages), m.expandedThreads, contentWidth, false)
+	case officeAppCalendar:
+		return buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
+	default:
+		return buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand)
+	}
+}
+
+func filterInsightMessages(messages []brokerMessage) []brokerMessage {
+	filtered := make([]brokerMessage, 0, len(messages))
+	for _, msg := range messages {
+		if msg.Kind == "automation" || msg.From == "nex" {
+			filtered = append(filtered, msg)
+		}
+	}
+	return filtered
 }
 
 type mouseAction struct {
@@ -985,6 +1621,9 @@ func (m channelModel) mouseActionAt(x, y int) (mouseAction, bool) {
 	if layout.ShowSidebar {
 		sidebarW = layout.SidebarW
 		if x < sidebarW {
+			if item, ok := m.sidebarItemAt(y); ok {
+				return mouseAction{Kind: item.Kind, Value: item.Value}, true
+			}
 			return mouseAction{Kind: "focus", Value: "sidebar"}, true
 		}
 		x -= sidebarW + 1
@@ -1011,6 +1650,35 @@ func (m channelModel) mouseActionAt(x, y int) (mouseAction, bool) {
 	return mouseAction{}, false
 }
 
+func (m channelModel) sidebarItemAt(y int) (sidebarItem, bool) {
+	lines := 0
+	lines++ // blank
+	lines++ // WUPHF
+	lines++ // subtitle
+	lines++ // blank
+	lines++ // Channels header
+	items := m.sidebarItems()
+	channelCount := len(m.channels)
+	if channelCount == 0 {
+		channelCount = 1
+	}
+	for i := 0; i < channelCount; i++ {
+		if y == lines {
+			return items[i], true
+		}
+		lines++
+	}
+	lines++ // blank before Apps
+	lines++ // Apps header
+	for i := channelCount; i < len(items); i++ {
+		if y == lines {
+			return items[i], true
+		}
+		lines++
+	}
+	return sidebarItem{}, false
+}
+
 func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseAction, bool) {
 	headerH, msgH, popupRows := m.mainPanelGeometry(mainW, contentH)
 	if y < headerH {
@@ -1021,7 +1689,7 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 	msgBottom := headerH + msgH
 	if y >= msgTop && y < msgBottom {
 		row := y - msgTop
-		if m.unreadCount > 0 && m.scroll > 0 && row == 0 {
+		if m.activeApp == officeAppMessages && m.unreadCount > 0 && m.scroll > 0 && row == 0 {
 			return mouseAction{Kind: "jump-latest"}, true
 		}
 		if len(popupRows) > 0 {
@@ -1047,10 +1715,33 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 		if contentWidth < 32 {
 			contentWidth = 32
 		}
-		allLines := buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand)
+		allLines := m.currentMainLines(contentWidth)
 		visibleRows, _, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
-		if row >= 0 && row < len(visibleRows) && visibleRows[row].ThreadID != "" {
-			return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
+		if row >= 0 && row < len(visibleRows) {
+			switch m.activeApp {
+			case officeAppMessages:
+				if visibleRows[row].ThreadID != "" {
+					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
+				}
+			case officeAppTasks:
+				if visibleRows[row].TaskID != "" {
+					return mouseAction{Kind: "task", Value: visibleRows[row].TaskID}, true
+				}
+			case officeAppRequests:
+				if visibleRows[row].RequestID != "" {
+					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
+				}
+			case officeAppCalendar:
+				if visibleRows[row].ThreadID != "" {
+					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
+				}
+				if visibleRows[row].TaskID != "" {
+					return mouseAction{Kind: "task", Value: visibleRows[row].TaskID}, true
+				}
+				if visibleRows[row].RequestID != "" {
+					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
+				}
+			}
 		}
 	}
 
@@ -1060,9 +1751,9 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int, popupRows []string) {
 	headerStyle := channelHeaderStyle(mainW)
 	headerLine1 := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).
-		Render("# general")
+		Render(m.currentHeaderTitle())
 	headerMeta := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).
-		Render("  The WUPHF Office · Founding Team building together")
+		Render(m.currentHeaderMeta())
 	if m.usage.Total.TotalTokens > 0 || m.usage.Total.CostUsd > 0 {
 		headerMeta += "  " + lipgloss.NewStyle().
 			Foreground(lipgloss.Color(slackActive)).
@@ -1074,13 +1765,22 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 	}
 	headerH = lipgloss.Height(channelHeader)
 
+	activePending := m.visiblePendingRequest()
 	typingAgents := typingAgentsFromMembers(m.members)
-	composerStr := renderComposer(mainW, m.input, m.inputPos, "general",
-		m.replyToID, typingAgents, m.pending, m.selectedOption,
+	composerStr := renderComposer(mainW, m.input, m.inputPos, m.activeChannel,
+		m.replyToID, typingAgents, activePending, m.selectedOption,
 		m.focus == focusMain)
+	if m.memberDraft != nil {
+		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
+			"", typingAgents, nil, 0, m.focus == focusMain)
+	}
 	interviewCard := ""
-	if m.pending != nil && m.pending.ID != m.snoozedInterview {
-		interviewCard = renderInterviewCard(*m.pending, m.selectedOption, mainW-4)
+	if activePending != nil {
+		interviewCard = renderInterviewCard(*activePending, m.selectedOption, mainW-4)
+	}
+	memberDraftCard := ""
+	if m.memberDraft != nil {
+		memberDraftCard = renderMemberDraftCard(*m.memberDraft, mainW-4)
 	}
 	initPanel := ""
 	if m.picker.IsActive() {
@@ -1088,7 +1788,7 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 	} else if m.initFlow.IsActive() || m.initFlow.Phase() == tui.InitDone {
 		initPanel = m.initFlow.View()
 	}
-	msgH = contentH - headerH - lipgloss.Height(composerStr) - lipgloss.Height(interviewCard) - lipgloss.Height(initPanel) - 1
+	msgH = contentH - headerH - lipgloss.Height(composerStr) - lipgloss.Height(interviewCard) - lipgloss.Height(memberDraftCard) - lipgloss.Height(initPanel) - 1
 	if msgH < 1 {
 		msgH = 1
 	}
@@ -1101,6 +1801,19 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 		popupRows = strings.Split(popup, "\n")
 	}
 	return headerH, msgH, popupRows
+}
+
+func (m channelModel) visiblePendingRequest() *channelInterview {
+	if m.pending == nil {
+		return nil
+	}
+	if m.pending.ID == m.snoozedInterview {
+		return nil
+	}
+	if m.pending.Channel != "" && m.pending.Channel != m.activeChannel {
+		return nil
+	}
+	return m.pending
 }
 
 func (m channelModel) recommendedOptionIndex() int {
@@ -1200,10 +1913,14 @@ func renderUsageStrip(usage channelUsageState, members []channelMember, width in
 		if totals.TotalTokens == 0 && totals.CostUsd == 0 {
 			continue
 		}
-		label := fmt.Sprintf("%s %s · %s", displayName(slug), formatTokenCount(totals.TotalTokens), formatUsd(totals.CostUsd))
+		label := fmt.Sprintf("%s %s · %s", agentAvatar(slug), formatTokenCount(totals.TotalTokens), formatUsd(totals.CostUsd))
 		pills = append(pills, pillStyle.Render(label))
 	}
-	return strings.Join(pills, " ")
+	if len(pills) == 0 {
+		return ""
+	}
+	prefix := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Render("  Spend by teammate")
+	return prefix + "  " + strings.Join(pills, " ")
 }
 
 // nextFocus cycles through visible panels: main → sidebar → thread → main.
@@ -1236,7 +1953,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.threadInput = nil
 			m.threadInputPos = 0
 			m.posting = true
-			return m, postToChannel(text, m.threadPanelID)
+			return m, postToChannel(text, m.threadPanelID, m.activeChannel)
 		}
 	case "backspace":
 		if m.threadInputPos > 0 {
@@ -1302,11 +2019,20 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // updateSidebar handles key events when the sidebar is focused.
 func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Sidebar is currently display-only; arrow keys could navigate members
-	// but there is no action to take. For now, just consume the keys.
 	switch msg.String() {
-	case "up", "down":
-		// Reserved for future sidebar navigation
+	case "up", "k":
+		m.sidebarCursor--
+		m.clampSidebarCursor()
+	case "down", "j":
+		m.sidebarCursor++
+		m.clampSidebarCursor()
+	case "enter":
+		items := m.sidebarItems()
+		m.clampSidebarCursor()
+		if len(items) == 0 {
+			return m, nil
+		}
+		return m, m.selectSidebarItem(items[m.sidebarCursor])
 	}
 	return m, nil
 }
@@ -1326,6 +2052,138 @@ type threadedMessage struct {
 	Collapsed          bool
 	HiddenReplies      int
 	ThreadParticipants []string
+}
+
+type sidebarItem struct {
+	Kind  string
+	Value string
+	Label string
+}
+
+func (m channelModel) sidebarItems() []sidebarItem {
+	items := make([]sidebarItem, 0, len(m.channels)+5)
+	items = append(items, m.channelSidebarItems()...)
+	items = append(items, m.appSidebarItems()...)
+	return items
+}
+
+func (m channelModel) channelSidebarItems() []sidebarItem {
+	items := make([]sidebarItem, 0, len(m.channels))
+	channels := m.channels
+	if len(channels) == 0 {
+		channels = []channelInfo{{Slug: "general", Name: "general"}}
+	}
+	for _, ch := range channels {
+		items = append(items, sidebarItem{Kind: "channel", Value: ch.Slug, Label: "# " + ch.Slug})
+	}
+	return items
+}
+
+func (m channelModel) appSidebarItems() []sidebarItem {
+	return []sidebarItem{
+		sidebarItem{Kind: "app", Value: string(officeAppMessages), Label: "Messages"},
+		sidebarItem{Kind: "app", Value: string(officeAppTasks), Label: "Tasks"},
+		sidebarItem{Kind: "app", Value: string(officeAppRequests), Label: "Requests"},
+		sidebarItem{Kind: "app", Value: string(officeAppInsights), Label: "Insights"},
+		sidebarItem{Kind: "app", Value: string(officeAppCalendar), Label: "Calendar"},
+	}
+}
+
+func sidebarShortcutLabel(index int) string {
+	if index < 0 || index > 8 {
+		return ""
+	}
+	return fmt.Sprintf("%d", index+1)
+}
+
+func (m channelModel) quickJumpItems() []sidebarItem {
+	switch m.quickJumpTarget {
+	case quickJumpChannels:
+		return m.channelSidebarItems()
+	case quickJumpApps:
+		return m.appSidebarItems()
+	default:
+		return nil
+	}
+}
+
+func (m *channelModel) setSidebarCursorForItem(target sidebarItem) {
+	items := m.sidebarItems()
+	for i, item := range items {
+		if item.Kind == target.Kind && item.Value == target.Value {
+			m.sidebarCursor = i
+			return
+		}
+	}
+}
+
+func (m *channelModel) clampSidebarCursor() {
+	items := m.sidebarItems()
+	if len(items) == 0 {
+		m.sidebarCursor = 0
+		return
+	}
+	if m.sidebarCursor < 0 {
+		m.sidebarCursor = 0
+	}
+	if m.sidebarCursor >= len(items) {
+		m.sidebarCursor = len(items) - 1
+	}
+}
+
+func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
+	switch item.Kind {
+	case "channel":
+		m.activeChannel = item.Value
+		m.activeApp = officeAppMessages
+		m.syncSidebarCursorToActive()
+		m.lastID = ""
+		m.messages = nil
+		m.members = nil
+		m.requests = nil
+		m.tasks = nil
+		m.replyToID = ""
+		m.threadPanelOpen = false
+		m.threadPanelID = ""
+		m.notice = "Switched to #" + m.activeChannel
+		return tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel))
+	case "app":
+		m.activeApp = officeApp(item.Value)
+		m.syncSidebarCursorToActive()
+		switch m.activeApp {
+		case officeAppMessages:
+			m.notice = "Viewing #" + m.activeChannel + "."
+			return pollBroker("", m.activeChannel)
+		case officeAppTasks:
+			m.notice = "Viewing tasks in #" + m.activeChannel + "."
+			return pollTasks(m.activeChannel)
+		case officeAppRequests:
+			m.notice = "Viewing requests in #" + m.activeChannel + "."
+			return pollRequests(m.activeChannel)
+		case officeAppInsights:
+			m.notice = "Viewing Nex and office insights."
+			return pollBroker("", m.activeChannel)
+		case officeAppCalendar:
+			m.notice = "Viewing the office calendar."
+			return tea.Batch(pollActions(), pollScheduler())
+		}
+	}
+	return nil
+}
+
+func (m *channelModel) syncSidebarCursorToActive() {
+	items := m.sidebarItems()
+	for i, item := range items {
+		if item.Kind == "channel" && item.Value == m.activeChannel && m.activeApp == officeAppMessages {
+			m.sidebarCursor = i
+			return
+		}
+		if item.Kind == "app" && item.Value == string(m.activeApp) {
+			m.sidebarCursor = i
+			return
+		}
+	}
+	m.clampSidebarCursor()
 }
 
 func flattenThreadMessages(messages []brokerMessage, expanded map[string]bool) []threadedMessage {
@@ -1452,6 +2310,163 @@ func (m channelModel) buildThreadPickerOptions() []tui.PickerOption {
 	return options
 }
 
+func (m channelModel) buildRequestPickerOptions() []tui.PickerOption {
+	options := make([]tui.PickerOption, 0, len(m.requests))
+	for _, req := range m.requests {
+		if req.Channel != "" && req.Channel != m.activeChannel {
+			continue
+		}
+		if req.Status != "" && req.Status != "pending" && req.Status != "open" {
+			continue
+		}
+		label := req.Question
+		if strings.TrimSpace(req.Title) != "" {
+			label = req.Title
+		}
+		desc := fmt.Sprintf("%s from @%s", req.Kind, req.From)
+		if req.Blocking {
+			desc += " · blocking"
+		}
+		options = append(options, tui.PickerOption{
+			Label:       truncateText(label, 56),
+			Value:       req.ID,
+			Description: desc,
+		})
+	}
+	return options
+}
+
+func (m channelModel) buildTaskPickerOptions() []tui.PickerOption {
+	options := make([]tui.PickerOption, 0, len(m.tasks))
+	for _, task := range m.tasks {
+		taskChannel := strings.ToLower(strings.TrimSpace(task.Channel))
+		if taskChannel == "" {
+			taskChannel = "general"
+		}
+		if taskChannel != strings.ToLower(strings.TrimSpace(m.activeChannel)) {
+			continue
+		}
+		label := task.Title
+		if strings.TrimSpace(task.Owner) != "" {
+			label = fmt.Sprintf("%s · %s", task.Title, displayName(task.Owner))
+		}
+		desc := task.Status
+		if task.ThreadID != "" {
+			desc += " · thread " + task.ThreadID
+		}
+		options = append(options, tui.PickerOption{
+			Label:       truncateText(label, 56),
+			Value:       task.ID,
+			Description: desc,
+		})
+	}
+	return options
+}
+
+func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.PickerOption {
+	options := []tui.PickerOption{
+		{Label: "Claim task", Value: "claim:" + task.ID, Description: "Take ownership as you"},
+		{Label: "Complete task", Value: "complete:" + task.ID, Description: "Mark this task done"},
+		{Label: "Release task", Value: "release:" + task.ID, Description: "Clear the current owner"},
+	}
+	if task.Status != "done" {
+		options = append(options, tui.PickerOption{Label: "Block task", Value: "block:" + task.ID, Description: "Mark this work blocked"})
+	}
+	if task.ThreadID != "" {
+		options = append(options, tui.PickerOption{Label: "Open thread", Value: "open:" + task.ID, Description: "Jump to the thread for this task"})
+	}
+	return options
+}
+
+func (m channelModel) buildRequestActionPickerOptions(req channelInterview) []tui.PickerOption {
+	options := []tui.PickerOption{
+		{Label: "Focus request", Value: "focus:" + req.ID, Description: "Open this request in the app"},
+		{Label: "Answer request", Value: "answer:" + req.ID, Description: "Bring it into the composer"},
+		{Label: "Snooze request", Value: "snooze:" + req.ID, Description: "Hide it locally until you revisit it"},
+	}
+	if req.ReplyTo != "" {
+		options = append(options, tui.PickerOption{Label: "Open thread", Value: "open:" + req.ID, Description: "Jump to the related thread"})
+	}
+	return options
+}
+
+func (m channelModel) findTaskByID(id string) (channelTask, bool) {
+	for _, task := range m.tasks {
+		if task.ID == id {
+			return task, true
+		}
+	}
+	return channelTask{}, false
+}
+
+func (m channelModel) findRequestByID(id string) (channelInterview, bool) {
+	for _, req := range m.requests {
+		if req.ID == id {
+			return req, true
+		}
+	}
+	return channelInterview{}, false
+}
+
+func (m channelModel) focusRequest(req channelInterview, notice string) (tea.Model, tea.Cmd) {
+	m.activeApp = officeAppRequests
+	m.syncSidebarCursorToActive()
+	m.pending = &req
+	m.snoozedInterview = ""
+	m.selectedOption = m.recommendedOptionIndex()
+	m.notice = notice
+	if req.ReplyTo != "" {
+		m.threadPanelOpen = true
+		m.threadPanelID = req.ReplyTo
+	}
+	return m, tea.Batch(pollRequests(m.activeChannel))
+}
+
+func (m channelModel) answerRequest(req channelInterview) (tea.Model, tea.Cmd) {
+	m.activeApp = officeAppRequests
+	m.syncSidebarCursorToActive()
+	m.pending = &req
+	m.snoozedInterview = ""
+	m.selectedOption = m.recommendedOptionIndex()
+	m.notice = "Answering request " + req.ID + ". Type your answer and press Enter."
+	if req.ReplyTo != "" {
+		m.threadPanelOpen = true
+		m.threadPanelID = req.ReplyTo
+	}
+	return m, nil
+}
+
+func (m *channelModel) openTaskActionPicker(task channelTask) tea.Cmd {
+	actions := m.buildTaskActionPickerOptions(task)
+	if len(actions) == 0 {
+		return nil
+	}
+	m.picker = tui.NewPicker("Task: "+truncateText(task.Title, 40), actions)
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerTaskAction
+	m.notice = "Choose a task action."
+	return nil
+}
+
+func (m *channelModel) openRequestActionPicker(req channelInterview) tea.Cmd {
+	actions := m.buildRequestActionPickerOptions(req)
+	if len(actions) == 0 {
+		return nil
+	}
+	m.picker = tui.NewPicker("Request: "+truncateText(req.TitleOrQuestion(), 40), actions)
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerRequestAction
+	m.notice = "Choose a request action."
+	return nil
+}
+
+func (req channelInterview) TitleOrQuestion() string {
+	if strings.TrimSpace(req.Title) != "" {
+		return req.Title
+	}
+	return req.Question
+}
+
 func truncateText(s string, max int) string {
 	if len(s) <= max {
 		return s
@@ -1462,6 +2477,15 @@ func truncateText(s string, max int) string {
 func hasThreadReplies(messages []brokerMessage, id string) bool {
 	for _, msg := range messages {
 		if msg.ReplyTo == id {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSlug(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
 			return true
 		}
 	}
@@ -1496,48 +2520,60 @@ func clampScroll(total, viewHeight, scroll int) int {
 	return scroll
 }
 
-// mergePackMembers returns all pack agents as members, enriched with
-// broker activity data when available. Agents who haven't posted yet
-// show as "idle" instead of being absent from the sidebar.
-func mergePackMembers(brokerMembers []channelMember) []channelMember {
-	// Default pack agents (founding team)
-	packSlugs := []string{"ceo", "pm", "fe", "be", "ai", "designer", "cmo", "cro"}
-
-	// Build lookup from broker data
-	brokerMap := make(map[string]channelMember)
-	for _, m := range brokerMembers {
-		brokerMap[m.Slug] = m
-	}
-
-	var result []channelMember
-	for _, slug := range packSlugs {
-		if bm, ok := brokerMap[slug]; ok {
-			result = append(result, bm)
-		} else {
-			result = append(result, channelMember{
-				Slug:        slug,
-				LastMessage: "",
-				LastTime:    "",
-			})
+// mergeOfficeMembers returns all current channel members enriched with office roster
+// metadata and broker activity. Members who have not posted yet still appear as idle.
+func mergeOfficeMembers(officeMembers []officeMemberInfo, brokerMembers []channelMember, channel *channelInfo) []channelMember {
+	memberOrder := make([]string, 0)
+	if channel != nil && len(channel.Members) > 0 {
+		memberOrder = append(memberOrder, channel.Members...)
+	} else {
+		for _, member := range officeMembers {
+			memberOrder = append(memberOrder, member.Slug)
 		}
 	}
-	// Add any broker members not in the pack (e.g., "you")
-	for _, m := range brokerMembers {
-		found := false
-		for _, s := range packSlugs {
-			if m.Slug == s {
-				found = true
-				break
+
+	officeMap := make(map[string]officeMemberInfo, len(officeMembers))
+	for _, member := range officeMembers {
+		officeMap[member.Slug] = member
+	}
+	brokerMap := make(map[string]channelMember, len(brokerMembers))
+	for _, member := range brokerMembers {
+		brokerMap[member.Slug] = member
+	}
+
+	result := make([]channelMember, 0, len(memberOrder))
+	for _, slug := range memberOrder {
+		member := brokerMap[slug]
+		member.Slug = slug
+		if meta, ok := officeMap[slug]; ok {
+			if member.Name == "" {
+				member.Name = meta.Name
+			}
+			if member.Role == "" {
+				member.Role = meta.Role
 			}
 		}
-		if !found {
-			result = append(result, m)
+		if member.Name == "" {
+			member.Name = displayName(slug)
 		}
+		if member.Role == "" {
+			member.Role = roleLabel(slug)
+		}
+		result = append(result, member)
+	}
+	for _, member := range brokerMembers {
+		if containsSlug(memberOrder, member.Slug) {
+			continue
+		}
+		result = append(result, member)
 	}
 	return result
 }
 
 func displayName(slug string) string {
+	if member, ok := officeDirectory[slug]; ok && member.Name != "" {
+		return member.Name
+	}
 	switch slug {
 	case "ceo":
 		return "CEO"
@@ -1565,6 +2601,9 @@ func displayName(slug string) string {
 }
 
 func roleLabel(slug string) string {
+	if member, ok := officeDirectory[slug]; ok && member.Role != "" {
+		return member.Role
+	}
 	switch slug {
 	case "ceo":
 		return "strategy"
@@ -1634,15 +2673,42 @@ func renderInterviewCard(interview channelInterview, selected int, width int) st
 	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#E2E8F0"))
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8"))
 
+	cardLabel := "Request"
+	switch strings.TrimSpace(interview.Kind) {
+	case "interview":
+		cardLabel = "Human Interview"
+	case "approval":
+		cardLabel = "Approval Request"
+	case "confirm":
+		cardLabel = "Confirmation Request"
+	case "secret":
+		cardLabel = "Private Request"
+	case "freeform":
+		cardLabel = "Open Question"
+	}
+	title := fmt.Sprintf("@%s needs your decision", interview.From)
+	if strings.TrimSpace(interview.Title) != "" {
+		title = interview.Title + " · @" + interview.From
+	}
+	headerBits := []string{labelStyle.Render(cardLabel)}
+	if interview.Blocking {
+		headerBits = append(headerBits, accentPill("blocking", "#B45309"))
+	}
+	if interview.Secret {
+		headerBits = append(headerBits, accentPill("private", "#6D28D9"))
+	}
 	lines := []string{
-		labelStyle.Render("Human Interview"),
-		titleStyle.Render(fmt.Sprintf("@%s needs your decision", interview.From)),
+		strings.Join(headerBits, "  "),
+		titleStyle.Render(title),
 		"",
 		textStyle.Width(cardWidth - 4).Render(interview.Question),
 	}
 	if strings.TrimSpace(interview.Context) != "" {
 		lines = append(lines, "")
 		lines = append(lines, muted.Width(cardWidth-4).Render(interview.Context))
+	}
+	if timing := renderTimingSummary(interview.DueAt, interview.FollowUpAt, interview.ReminderAt, interview.RecheckAt); timing != "" {
+		lines = append(lines, "", muted.Render(timing))
 	}
 	lines = append(lines, "", muted.Render("Options"))
 	for i, option := range interview.Options {
@@ -1691,9 +2757,10 @@ func highlightMentions(text string, agentColors map[string]string) string {
 	})
 }
 
-func postToChannel(text string, replyTo string) tea.Cmd {
+func postToChannel(text string, replyTo string, channel string) tea.Cmd {
 	return func() tea.Msg {
 		body, _ := json.Marshal(map[string]any{
+			"channel":  channel,
 			"from":     "you",
 			"content":  text,
 			"tagged":   extractTagsFromText(text),
@@ -1900,6 +2967,45 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	case trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q":
 		killTeamSession()
 		return m, tea.Quit
+	case trimmed == "/messages" || trimmed == "/general":
+		clearCurrent()
+		m.activeApp = officeAppMessages
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing #general."
+		return m, nil
+	case trimmed == "/tasks":
+		clearCurrent()
+		m.activeApp = officeAppTasks
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing tasks in #" + m.activeChannel + "."
+		return m, tea.Batch(pollTasks(m.activeChannel))
+	case trimmed == "/task":
+		clearCurrent()
+		options := m.buildTaskPickerOptions()
+		if len(options) == 0 {
+			m.notice = "No open tasks in #" + m.activeChannel + "."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Tasks in #"+m.activeChannel, options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerTasks
+		return m, nil
+	case strings.HasPrefix(trimmed, "/task "):
+		clearCurrent()
+		parts := strings.Fields(trimmed)
+		if len(parts) < 3 {
+			m.notice = "Usage: /task <claim|release|complete|block> <task-id>"
+			return m, nil
+		}
+		action, taskID := parts[1], parts[2]
+		switch action {
+		case "claim", "release", "complete", "block":
+			m.posting = true
+			return m, mutateTask(action, taskID, "you", m.activeChannel)
+		default:
+			m.notice = "Usage: /task <claim|release|complete|block> <task-id>"
+			return m, nil
+		}
 	case trimmed == "/reset":
 		clearCurrent()
 		m.notice = ""
@@ -1921,6 +3027,202 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.pickerMode = channelPickerIntegrations
 		m.notice = "Choose an integration to connect."
 		return m, nil
+	case trimmed == "/channels":
+		clearCurrent()
+		options := m.buildChannelPickerOptions()
+		if len(options) == 0 {
+			m.notice = "No channels yet."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Channels", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerChannels
+		return m, nil
+	case trimmed == "/requests":
+		clearCurrent()
+		m.activeApp = officeAppRequests
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing requests in #" + m.activeChannel + "."
+		return m, tea.Batch(pollRequests(m.activeChannel))
+	case trimmed == "/request":
+		clearCurrent()
+		options := m.buildRequestPickerOptions()
+		if len(options) == 0 {
+			m.notice = "No open requests in #" + m.activeChannel + "."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Requests in #"+m.activeChannel, options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerRequests
+		return m, nil
+	case strings.HasPrefix(trimmed, "/request "):
+		clearCurrent()
+		parts := strings.Fields(trimmed)
+		if len(parts) < 3 {
+			m.notice = "Usage: /request <focus|answer|snooze> <request-id>"
+			return m, nil
+		}
+		action, reqID := parts[1], parts[2]
+		req, ok := m.findRequestByID(reqID)
+		if !ok {
+			m.notice = "Request not found: " + reqID
+			return m, nil
+		}
+		switch action {
+		case "focus":
+			return m.focusRequest(req, "Focused request "+req.ID)
+		case "answer":
+			return m.answerRequest(req)
+		case "snooze":
+			m.snoozedInterview = req.ID
+			m.notice = "Request snoozed."
+			return m, nil
+		default:
+			m.notice = "Usage: /request <focus|answer|snooze> <request-id>"
+			return m, nil
+		}
+	case trimmed == "/insights":
+		clearCurrent()
+		m.activeApp = officeAppInsights
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing Nex and office insights."
+		return m, tea.Batch(pollBroker("", m.activeChannel))
+	case trimmed == "/calendar" || trimmed == "/queue":
+		clearCurrent()
+		m.activeApp = officeAppCalendar
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing the office calendar."
+		return m, tea.Batch(pollActions(), pollScheduler())
+	case strings.HasPrefix(trimmed, "/calendar "):
+		clearCurrent()
+		parts := strings.Fields(trimmed)
+		m.activeApp = officeAppCalendar
+		m.syncSidebarCursorToActive()
+		if len(parts) < 2 {
+			m.notice = "Usage: /calendar [day|week|all|@agent|agent]"
+			return m, nil
+		}
+		arg := strings.TrimSpace(parts[1])
+		switch {
+		case arg == "day" || arg == "today":
+			m.calendarRange = calendarRangeDay
+			m.notice = "Calendar now shows today."
+			return m, tea.Batch(pollActions(), pollScheduler())
+		case arg == "week":
+			m.calendarRange = calendarRangeWeek
+			m.notice = "Calendar now shows this week."
+			return m, tea.Batch(pollActions(), pollScheduler())
+		case arg == "all":
+			m.calendarFilter = ""
+			m.notice = "Showing all teammate calendars."
+			return m, tea.Batch(pollActions(), pollScheduler())
+		case arg == "filter":
+			options := m.buildCalendarAgentPickerOptions()
+			if len(options) == 0 {
+				m.notice = "No teammate filters available."
+				return m, nil
+			}
+			m.picker = tui.NewPicker("Filter Calendar", options)
+			m.picker.SetActive(true)
+			m.pickerMode = channelPickerCalendarAgent
+			return m, nil
+		default:
+			filter := strings.TrimPrefix(arg, "@")
+			if filter == "" {
+				m.notice = "Usage: /calendar [day|week|all|@agent|agent]"
+				return m, nil
+			}
+			m.calendarFilter = filter
+			m.notice = "Filtering calendar for " + displayName(filter) + "."
+			return m, tea.Batch(pollActions(), pollScheduler())
+		}
+	case strings.HasPrefix(trimmed, "/channel "):
+		clearCurrent()
+		parts := strings.Fields(trimmed)
+		if len(parts) < 3 {
+			m.notice = "Usage: /channel add <slug> or /channel remove <slug>"
+			return m, nil
+		}
+		switch parts[1] {
+		case "add":
+			m.posting = true
+			return m, mutateChannel("create", parts[2])
+		case "remove":
+			m.posting = true
+			return m, mutateChannel("remove", parts[2])
+		default:
+			m.notice = "Usage: /channel add <slug> or /channel remove <slug>"
+			return m, nil
+		}
+	case trimmed == "/agents":
+		clearCurrent()
+		options := m.buildAgentPickerOptions()
+		if len(options) == 0 {
+			m.notice = "No agent actions available for this channel."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Agents in #"+m.activeChannel, options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerAgents
+		return m, nil
+	case strings.HasPrefix(trimmed, "/agent "):
+		clearCurrent()
+		parts := strings.Fields(trimmed)
+		if len(parts) < 2 {
+			m.notice = "Usage: /agent <add|remove|disable|enable> <slug>, /agent create, /agent edit <slug>, or /agent prompt <request>"
+			return m, nil
+		}
+		if parts[1] == "prompt" {
+			prompt := strings.TrimSpace(strings.TrimPrefix(trimmed, "/agent prompt"))
+			if prompt == "" {
+				m.notice = "Usage: /agent prompt <describe the teammate you want>"
+				return m, nil
+			}
+			m.posting = true
+			return m, generateOfficeMemberFromPrompt(prompt, m.activeChannel)
+		}
+		if parts[1] == "create" {
+			if len(parts) == 2 {
+				m.memberDraft = &channelMemberDraft{Mode: "create"}
+				m.input = nil
+				m.inputPos = 0
+				m.notice = "New teammate setup started."
+				return m, nil
+			}
+			if len(parts) < 4 {
+				m.notice = "Usage: /agent create <slug> <Display Name>"
+				return m, nil
+			}
+			m.posting = true
+			return m, mutateOfficeMemberSpec(channelMemberDraft{
+				Mode: "create",
+				Slug: parts[2],
+				Name: strings.Join(parts[3:], " "),
+				Role: strings.Join(parts[3:], " "),
+			}, m.activeChannel)
+		}
+		if parts[1] == "edit" {
+			if len(parts) < 3 {
+				m.notice = "Usage: /agent edit <slug>"
+				return m, nil
+			}
+			draft, ok := m.startEditMemberDraft(parts[2])
+			if !ok {
+				m.notice = fmt.Sprintf("Office member %s not found.", parts[2])
+				return m, nil
+			}
+			m.memberDraft = draft
+			m.input = nil
+			m.inputPos = 0
+			m.notice = "Editing teammate profile."
+			return m, nil
+		}
+		if parts[1] == "retire" {
+			m.posting = true
+			return m, mutateOfficeMember("remove", parts[2], "")
+		}
+		m.posting = true
+		return m, mutateChannelMember(m.activeChannel, parts[1], parts[2])
 	case trimmed == "/init":
 		clearCurrent()
 		if config.ResolveNoNex() {
@@ -2040,9 +3342,9 @@ func extractTagsFromText(text string) []string {
 	return tags
 }
 
-func pollBroker(sinceID string) tea.Cmd {
+func pollBroker(sinceID string, channel string) tea.Cmd {
 	return func() tea.Msg {
-		url := "http://127.0.0.1:7890/messages?limit=100"
+		url := "http://127.0.0.1:7890/messages?limit=100&channel=" + channel
 		if sinceID != "" {
 			url += "&since_id=" + sinceID
 		}
@@ -2072,9 +3374,9 @@ func pollBroker(sinceID string) tea.Cmd {
 	}
 }
 
-func pollMembers() tea.Cmd {
+func pollMembers(channel string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/members", nil)
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/members?channel="+channel, nil)
 		if err != nil {
 			return channelMembersMsg{}
 		}
@@ -2097,6 +3399,317 @@ func pollMembers() tea.Cmd {
 			return channelMembersMsg{}
 		}
 		return channelMembersMsg{members: result.Members}
+	}
+}
+
+func pollOfficeMembers() tea.Cmd {
+	return func() tea.Msg {
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/office-members", nil)
+		if err != nil {
+			return channelOfficeMembersMsg{}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelOfficeMembersMsg{}
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return channelOfficeMembersMsg{}
+		}
+
+		var result struct {
+			Members []officeMemberInfo `json:"members"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return channelOfficeMembersMsg{}
+		}
+		return channelOfficeMembersMsg{members: result.Members}
+	}
+}
+
+func pollChannels() tea.Cmd {
+	return func() tea.Msg {
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/channels", nil)
+		if err != nil {
+			return channelChannelsMsg{}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelChannelsMsg{}
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return channelChannelsMsg{}
+		}
+
+		var result struct {
+			Channels []channelInfo `json:"channels"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return channelChannelsMsg{}
+		}
+		return channelChannelsMsg{channels: result.Channels}
+	}
+}
+
+func channelExists(channels []channelInfo, slug string) bool {
+	for _, ch := range channels {
+		if ch.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+func (m channelModel) currentChannelInfo() *channelInfo {
+	for i := range m.channels {
+		if m.channels[i].Slug == m.activeChannel {
+			return &m.channels[i]
+		}
+	}
+	return nil
+}
+
+func (m channelModel) buildChannelPickerOptions() []tui.PickerOption {
+	var options []tui.PickerOption
+	for _, ch := range m.channels {
+		options = append(options, tui.PickerOption{
+			Label:       "#" + ch.Slug,
+			Value:       "switch:" + ch.Slug,
+			Description: fmt.Sprintf("%d members", len(ch.Members)),
+		})
+		if ch.Slug != "general" {
+			options = append(options, tui.PickerOption{
+				Label:       "Remove #" + ch.Slug,
+				Value:       "remove:" + ch.Slug,
+				Description: "Delete this channel and its messages/tasks",
+			})
+		}
+	}
+	return options
+}
+
+func (m channelModel) buildAgentPickerOptions() []tui.PickerOption {
+	ch := m.currentChannelInfo()
+	if ch == nil {
+		return nil
+	}
+	officeMap := make(map[string]officeMemberInfo, len(m.officeMembers))
+	for _, member := range m.officeMembers {
+		officeMap[member.Slug] = member
+	}
+	disabled := make(map[string]bool, len(ch.Disabled))
+	for _, slug := range ch.Disabled {
+		disabled[slug] = true
+	}
+	var options []tui.PickerOption
+	for _, slug := range ch.Members {
+		name := displayName(slug)
+		if meta, ok := officeMap[slug]; ok && meta.Name != "" {
+			name = meta.Name
+		}
+		if slug != "ceo" && disabled[slug] {
+			options = append(options, tui.PickerOption{
+				Label:       "Enable " + name,
+				Value:       "enable:" + slug,
+				Description: "Allow this teammate to participate in #" + m.activeChannel,
+			})
+		} else if slug != "ceo" {
+			options = append(options, tui.PickerOption{
+				Label:       "Disable " + name,
+				Value:       "disable:" + slug,
+				Description: "Keep them in the channel but stop notifications there",
+			})
+		}
+		if slug != "ceo" {
+			options = append(options, tui.PickerOption{
+				Label:       "Remove " + name,
+				Value:       "remove:" + slug,
+				Description: "Take them out of #" + m.activeChannel,
+			})
+		}
+	}
+	for _, member := range m.officeMembers {
+		slug := member.Slug
+		found := false
+		for _, member := range ch.Members {
+			if member == slug {
+				found = true
+				break
+			}
+		}
+		if !found {
+			options = append(options, tui.PickerOption{
+				Label:       "Add " + member.Name,
+				Value:       "add:" + slug,
+				Description: "Add them to #" + m.activeChannel,
+			})
+		}
+		if !member.BuiltIn {
+			options = append(options, tui.PickerOption{
+				Label:       "Edit " + member.Name,
+				Value:       "edit:" + slug,
+				Description: "Update role, expertise, personality, and permissions",
+			})
+		}
+	}
+	options = append(options, tui.PickerOption{
+		Label:       "Create new office member…",
+		Value:       "create:new",
+		Description: "Use /agent create <slug> <Display Name> to add a brand-new teammate",
+	})
+	return options
+}
+
+func (m channelModel) buildCalendarAgentPickerOptions() []tui.PickerOption {
+	options := []tui.PickerOption{{
+		Label:       "All teammates",
+		Value:       "all",
+		Description: "Show every participant across the office calendar",
+	}}
+	for _, member := range m.members {
+		name := member.Name
+		if strings.TrimSpace(name) == "" {
+			name = displayName(member.Slug)
+		}
+		description := member.Role
+		if strings.TrimSpace(description) == "" {
+			description = "Show only " + name + "'s calendar"
+		}
+		options = append(options, tui.PickerOption{
+			Label:       name,
+			Value:       member.Slug,
+			Description: description,
+		})
+	}
+	return options
+}
+
+func mutateChannel(action, slug string) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"action":     action,
+			"slug":       slug,
+			"name":       slug,
+			"created_by": "you",
+		})
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
+		if err != nil {
+			return channelPostDoneMsg{err: err}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelPostDoneMsg{err: err}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			return channelPostDoneMsg{err: fmt.Errorf("%s", strings.TrimSpace(string(body)))}
+		}
+		return channelPostDoneMsg{}
+	}
+}
+
+func mutateChannelMember(channel, action, slug string) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"action":  action,
+			"channel": channel,
+			"slug":    slug,
+		})
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channel-members", bytes.NewReader(body))
+		if err != nil {
+			return channelPostDoneMsg{err: err}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelPostDoneMsg{err: err}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			return channelPostDoneMsg{err: fmt.Errorf("%s", strings.TrimSpace(string(body)))}
+		}
+		return channelPostDoneMsg{}
+	}
+}
+
+func mutateOfficeMember(action, slug, name string) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"action":     action,
+			"slug":       slug,
+			"name":       name,
+			"role":       name,
+			"created_by": "you",
+		})
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/office-members", bytes.NewReader(body))
+		if err != nil {
+			return channelPostDoneMsg{err: err}
+		}
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelPostDoneMsg{err: err}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			return channelPostDoneMsg{err: fmt.Errorf("%s", strings.TrimSpace(string(body)))}
+		}
+		l, err := team.NewLauncher("")
+		if err != nil {
+			return channelPostDoneMsg{err: err}
+		}
+		if err := l.ReconfigureSession(); err != nil {
+			return channelPostDoneMsg{err: err}
+		}
+		return channelPostDoneMsg{}
+	}
+}
+
+func mutateTask(action, taskID, owner, channel string) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"action":     action,
+			"channel":    channel,
+			"id":         taskID,
+			"owner":      owner,
+			"created_by": "you",
+		})
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/tasks", bytes.NewReader(body))
+		if err != nil {
+			return channelTaskMutationDoneMsg{err: err}
+		}
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelTaskMutationDoneMsg{err: err}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			body, _ := io.ReadAll(resp.Body)
+			return channelTaskMutationDoneMsg{err: fmt.Errorf("%s", strings.TrimSpace(string(body)))}
+		}
+		label := map[string]string{
+			"claim":    "Task claimed.",
+			"assign":   "Task assigned.",
+			"complete": "Task completed.",
+			"block":    "Task marked blocked.",
+			"release":  "Task released.",
+		}[action]
+		if label == "" {
+			label = "Task updated."
+		}
+		return channelTaskMutationDoneMsg{notice: label}
 	}
 }
 
@@ -2129,31 +3742,104 @@ func pollUsage() tea.Cmd {
 	}
 }
 
-func pollInterview() tea.Cmd {
+func pollTasks(channel string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/interview", nil)
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/tasks?channel="+channel, nil)
 		if err != nil {
-			return channelInterviewMsg{}
+			return channelTasksMsg{}
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return channelTasksMsg{}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return channelTasksMsg{}
+		}
+		var result struct {
+			Tasks []channelTask `json:"tasks"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelTasksMsg{}
+		}
+		return channelTasksMsg{tasks: result.Tasks}
+	}
+}
+
+func pollActions() tea.Cmd {
+	return func() tea.Msg {
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/actions", nil)
+		if err != nil {
+			return channelActionsMsg{}
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return channelActionsMsg{}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return channelActionsMsg{}
+		}
+		var result struct {
+			Actions []channelAction `json:"actions"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelActionsMsg{}
+		}
+		return channelActionsMsg{actions: result.Actions}
+	}
+}
+
+func pollScheduler() tea.Cmd {
+	return func() tea.Msg {
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/scheduler", nil)
+		if err != nil {
+			return channelSchedulerMsg{}
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return channelSchedulerMsg{}
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return channelSchedulerMsg{}
+		}
+		var result struct {
+			Jobs []channelSchedulerJob `json:"jobs"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelSchedulerMsg{}
+		}
+		return channelSchedulerMsg{jobs: result.Jobs}
+	}
+}
+
+func pollRequests(channel string) tea.Cmd {
+	return func() tea.Msg {
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/requests?channel="+channel, nil)
+		if err != nil {
+			return channelRequestsMsg{}
 		}
 		client := &http.Client{Timeout: 2 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
-			return channelInterviewMsg{}
+			return channelRequestsMsg{}
 		}
 		defer resp.Body.Close()
 
 		body, err := io.ReadAll(resp.Body)
 		if err != nil {
-			return channelInterviewMsg{}
+			return channelRequestsMsg{}
 		}
 
 		var result struct {
-			Pending *channelInterview `json:"pending"`
+			Requests []channelInterview `json:"requests"`
+			Pending  *channelInterview  `json:"pending"`
 		}
 		if err := json.Unmarshal(body, &result); err != nil {
-			return channelInterviewMsg{}
+			return channelRequestsMsg{}
 		}
-		return channelInterviewMsg{pending: result.Pending}
+		return channelRequestsMsg{requests: result.Requests, pending: result.Pending}
 	}
 }
 
@@ -2165,7 +3851,7 @@ func postInterviewAnswer(interview channelInterview, choiceID, choiceText, custo
 			"choice_text": choiceText,
 			"custom_text": customText,
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/interview/answer", bytes.NewReader(body))
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/requests/answer", bytes.NewReader(body))
 		if err != nil {
 			return channelInterviewAnswerDoneMsg{err: err}
 		}
@@ -2267,8 +3953,8 @@ func connectIntegration(spec channelIntegrationSpec) tea.Cmd {
 
 func resetTeamSession() tea.Cmd {
 	return func() tea.Msg {
-		// Clear broker messages + restart agent Claude sessions
-		// but keep the channel TUI pane alive
+		// Clear broker + Claude resume state and then rebuild the visible
+		// team panes in place so reset does not leave dead panes behind.
 		l, err := team.NewLauncher("")
 		if err != nil {
 			return channelResetDoneMsg{err: err}
@@ -2276,7 +3962,10 @@ func resetTeamSession() tea.Cmd {
 		if err := l.ResetSession(); err != nil {
 			return channelResetDoneMsg{err: err}
 		}
-		return channelResetDoneMsg{}
+		if err := l.ReconfigureSession(); err != nil {
+			return channelResetDoneMsg{err: err}
+		}
+		return channelResetDoneMsg{notice: "Office reset. Team panes reloaded in place."}
 	}
 }
 

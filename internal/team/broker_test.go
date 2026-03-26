@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 func TestFormatChannelViewIncludesThreadReference(t *testing.T) {
@@ -54,6 +57,32 @@ func TestBrokerPersistsAndReloadsState(t *testing.T) {
 	}
 }
 
+func TestOfficeMemberLifecycle(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{
+		Slug:      "growthops",
+		Name:      "Growth Ops",
+		Role:      "Growth Ops",
+		CreatedBy: "you",
+	})
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("saveLocked failed: %v", err)
+	}
+	b.mu.Unlock()
+
+	reloaded := NewBroker()
+	if reloaded.findMemberLocked("growthops") == nil {
+		t.Fatal("expected custom office member to persist")
+	}
+}
+
 func TestBrokerPersistsNotificationCursorWithoutMessages(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -68,6 +97,37 @@ func TestBrokerPersistsNotificationCursorWithoutMessages(t *testing.T) {
 	reloaded := NewBroker()
 	if got := reloaded.NotificationCursor(); got != "2026-03-24T10:00:00Z" {
 		t.Fatalf("expected persisted notification cursor, got %q", got)
+	}
+}
+
+func TestChannelMembersRejectUnknownOfficeMember(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	body, _ := json.Marshal(map[string]any{
+		"action":  "add",
+		"channel": "general",
+		"slug":    "ghost",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/channel-members", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 for unknown member, got %d", resp.StatusCode)
 	}
 }
 
@@ -217,24 +277,24 @@ func TestBrokerUsageEndpointAggregatesTelemetry(t *testing.T) {
 	req, _ := http.NewRequest(http.MethodPost, base+"/v1/logs", bytes.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+b.Token())
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("telemetry post failed: %v", err)
+	teleResp, teleErr := http.DefaultClient.Do(req)
+	if teleErr != nil {
+		t.Fatalf("telemetry post failed: %v", teleErr)
 	}
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("expected 200 from usage ingest, got %d", resp.StatusCode)
+	teleResp.Body.Close()
+	if teleResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from usage ingest, got %d", teleResp.StatusCode)
 	}
 
 	req, _ = http.NewRequest(http.MethodGet, base+"/usage", nil)
 	req.Header.Set("Authorization", "Bearer "+b.Token())
-	resp, err = http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("usage request failed: %v", err)
+	usageResp, usageErr := http.DefaultClient.Do(req)
+	if usageErr != nil {
+		t.Fatalf("usage request failed: %v", usageErr)
 	}
-	defer resp.Body.Close()
+	defer usageResp.Body.Close()
 	var usage teamUsageState
-	if err := json.NewDecoder(resp.Body).Decode(&usage); err != nil {
+	if err := json.NewDecoder(usageResp.Body).Decode(&usage); err != nil {
 		t.Fatalf("decode usage response: %v", err)
 	}
 	if usage.Total.TotalTokens != 1000 {
@@ -242,6 +302,91 @@ func TestBrokerUsageEndpointAggregatesTelemetry(t *testing.T) {
 	}
 	if usage.Agents["be"].CostUsd != 0.18 {
 		t.Fatalf("expected backend cost 0.18, got %+v", usage.Agents["be"])
+	}
+}
+
+func TestBrokerActionsAndSchedulerEndpoints(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.appendActionLocked("request_created", "office", "general", "ceo", "Asked for approval", "request-1")
+	b.mu.Unlock()
+	if err := b.SetSchedulerJob(schedulerJob{
+		Slug:            "nex-insights",
+		Label:           "Nex insights",
+		IntervalMinutes: 15,
+		Status:          "sleeping",
+		NextRun:         "2026-03-24T10:15:00Z",
+	}); err != nil {
+		t.Fatalf("SetSchedulerJob failed: %v", err)
+	}
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	for _, path := range []string{"/actions", "/scheduler"} {
+		req, _ := http.NewRequest(http.MethodGet, base+path, nil)
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("%s request failed: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200 on %s, got %d: %s", path, resp.StatusCode, body)
+		}
+	}
+}
+
+func TestSchedulerDueOnlyFiltersFutureJobs(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.SetSchedulerJob(schedulerJob{
+		Slug:            "task-follow-up:general:task-1",
+		Kind:            "task_follow_up",
+		Label:           "Follow up",
+		TargetType:      "task",
+		TargetID:        "task-1",
+		Channel:         "general",
+		IntervalMinutes: 15,
+		DueAt:           time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
+		NextRun:         time.Now().UTC().Add(10 * time.Minute).Format(time.RFC3339),
+		Status:          "scheduled",
+	}); err != nil {
+		t.Fatalf("SetSchedulerJob failed: %v", err)
+	}
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	req, _ := http.NewRequest(http.MethodGet, base+"/scheduler?due_only=true", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("scheduler request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var listing struct {
+		Jobs []schedulerJob `json:"jobs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		t.Fatalf("decode scheduler list: %v", err)
+	}
+	if len(listing.Jobs) != 0 {
+		t.Fatalf("expected future job to be filtered out, got %+v", listing.Jobs)
 	}
 }
 
@@ -291,5 +436,325 @@ func TestBrokerPostsAndDedupesNexNotifications(t *testing.T) {
 	}
 	if msgs[0].EventID != "feed-item-1" {
 		t.Fatalf("expected event id to persist, got %+v", msgs[0])
+	}
+}
+
+func TestBrokerTaskLifecycle(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func(payload map[string]any) teamTask {
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("task post failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("unexpected status %d: %s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Task teamTask `json:"task"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode task response: %v", err)
+		}
+		return result.Task
+	}
+
+	created := post(map[string]any{
+		"action":     "create",
+		"title":      "Own the landing page",
+		"details":    "Frontend only",
+		"created_by": "ceo",
+		"owner":      "fe",
+		"thread_id":  "msg-1",
+	})
+	if created.Status != "in_progress" || created.Owner != "fe" {
+		t.Fatalf("unexpected created task: %+v", created)
+	}
+	if created.FollowUpAt == "" || created.ReminderAt == "" || created.RecheckAt == "" {
+		t.Fatalf("expected follow-up timestamps on task create, got %+v", created)
+	}
+	req, _ := http.NewRequest(http.MethodGet, base+"/queue", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("queue request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var queue struct {
+		Actions   []officeActionLog `json:"actions"`
+		Scheduler []schedulerJob    `json:"scheduler"`
+		Due       []schedulerJob    `json:"due"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&queue); err != nil {
+		t.Fatalf("decode queue response: %v", err)
+	}
+	if len(queue.Scheduler) == 0 {
+		t.Fatalf("expected queue to expose scheduler state, got %+v", queue)
+	}
+
+	completed := post(map[string]any{
+		"action": "complete",
+		"id":     created.ID,
+	})
+	if completed.Status != "done" {
+		t.Fatalf("expected done task, got %+v", completed)
+	}
+	if completed.FollowUpAt != "" || completed.ReminderAt != "" || completed.RecheckAt != "" {
+		t.Fatalf("expected completion to clear follow-up timestamps, got %+v", completed)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/tasks", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("tasks get failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var listing struct {
+		Tasks []teamTask `json:"tasks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		t.Fatalf("decode tasks list: %v", err)
+	}
+	if len(listing.Tasks) != 0 {
+		t.Fatalf("expected done task to be hidden by default, got %+v", listing.Tasks)
+	}
+}
+
+func TestBrokerTaskCreateReusesExistingOpenTask(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func(payload map[string]any) teamTask {
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("task post failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("unexpected status %d: %s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Task teamTask `json:"task"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode task response: %v", err)
+		}
+		return result.Task
+	}
+
+	first := post(map[string]any{
+		"action":     "create",
+		"title":      "Own the landing page",
+		"details":    "Initial FE pass",
+		"created_by": "ceo",
+		"owner":      "fe",
+		"thread_id":  "msg-1",
+	})
+	second := post(map[string]any{
+		"action":     "create",
+		"title":      "Own the landing page",
+		"details":    "Updated details",
+		"created_by": "ceo",
+		"owner":      "fe",
+		"thread_id":  "msg-1",
+	})
+
+	if first.ID != second.ID {
+		t.Fatalf("expected task reuse, got %s and %s", first.ID, second.ID)
+	}
+	if second.Details != "Updated details" {
+		t.Fatalf("expected task details to update, got %+v", second)
+	}
+	if got := len(b.ChannelTasks("general")); got != 1 {
+		t.Fatalf("expected one open task after reuse, got %d", got)
+	}
+}
+
+func TestBrokerRequestsLifecycle(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	body, _ := json.Marshal(map[string]any{
+		"kind":     "approval",
+		"from":     "ceo",
+		"channel":  "general",
+		"title":    "Approval needed",
+		"question": "Should we proceed?",
+		"blocking": true,
+		"required": true,
+		"reply_to": "msg-1",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request create failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 creating request, got %d: %s", resp.StatusCode, raw)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/requests?channel=general", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request list failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var listing struct {
+		Requests []humanInterview `json:"requests"`
+		Pending  *humanInterview  `json:"pending"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listing); err != nil {
+		t.Fatalf("decode requests: %v", err)
+	}
+	if len(listing.Requests) != 1 || listing.Pending == nil {
+		t.Fatalf("expected one pending request, got %+v", listing)
+	}
+	if listing.Requests[0].ReminderAt == "" || listing.Requests[0].FollowUpAt == "" || listing.Requests[0].RecheckAt == "" {
+		t.Fatalf("expected reminder timestamps on request create, got %+v", listing.Requests[0])
+	}
+
+	answerBody, _ := json.Marshal(map[string]any{
+		"id":          listing.Requests[0].ID,
+		"choice_text": "Yes",
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/requests/answer", bytes.NewReader(answerBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request answer failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 answering request, got %d", resp.StatusCode)
+	}
+	req, _ = http.NewRequest(http.MethodGet, base+"/queue", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("queue request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var queue struct {
+		Actions   []officeActionLog `json:"actions"`
+		Scheduler []schedulerJob    `json:"scheduler"`
+		Due       []schedulerJob    `json:"due"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&queue); err != nil {
+		t.Fatalf("decode queue response: %v", err)
+	}
+	for _, job := range queue.Scheduler {
+		if job.TargetType == "request" && job.TargetID == listing.Requests[0].ID && !strings.EqualFold(job.Status, "done") {
+			t.Fatalf("expected answered request scheduler jobs to complete, got %+v", job)
+		}
+	}
+
+	if b.HasBlockingRequest() {
+		t.Fatal("expected blocking request to clear after answer")
+	}
+}
+
+func TestQueueEndpointShowsDueJobs(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.SetSchedulerJob(schedulerJob{
+		Slug:       "request-follow-up:general:request-1",
+		Kind:       "request_follow_up",
+		Label:      "Follow up on approval",
+		TargetType: "request",
+		TargetID:   "request-1",
+		Channel:    "general",
+		DueAt:      time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339),
+		NextRun:    time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339),
+		Status:     "scheduled",
+	}); err != nil {
+		t.Fatalf("SetSchedulerJob failed: %v", err)
+	}
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	req, _ := http.NewRequest(http.MethodGet, base+"/queue", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("queue request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var queue struct {
+		Due []schedulerJob `json:"due"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&queue); err != nil {
+		t.Fatalf("decode queue response: %v", err)
+	}
+	if len(queue.Due) != 1 {
+		t.Fatalf("expected due scheduler job to surface, got %+v", queue.Due)
+	}
+}
+
+func TestResolveTaskIntervalsRespectMinimumFloor(t *testing.T) {
+	t.Setenv("WUPHF_TASK_FOLLOWUP_MINUTES", "1")
+	t.Setenv("WUPHF_TASK_REMINDER_MINUTES", "1")
+	t.Setenv("WUPHF_TASK_RECHECK_MINUTES", "1")
+
+	if got := config.ResolveTaskFollowUpInterval(); got != 2 {
+		t.Fatalf("expected follow-up interval floor of 2, got %d", got)
+	}
+	if got := config.ResolveTaskReminderInterval(); got != 2 {
+		t.Fatalf("expected reminder interval floor of 2, got %d", got)
+	}
+	if got := config.ResolveTaskRecheckInterval(); got != 2 {
+		t.Fatalf("expected recheck interval floor of 2, got %d", got)
 	}
 }

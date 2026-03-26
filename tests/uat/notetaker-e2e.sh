@@ -180,13 +180,35 @@ log_test "Channel eventually shows an agent reply"
 sleep 3
 CHAN3=$(tmux -L wuphf capture-pane -p -t wuphf-team:team.0 2>&1)
 echo "$CHAN3" > "$ARTIFACTS/channel-final.txt"
-if echo "$CHAN3" | grep -qi "@ceo\|@pm\|@fe\|@be\|@designer\|@cmo\|@cro"; then
+if echo "$CHAN3" | grep -qi "CEO\|Product Manager\|Frontend Engineer\|Backend Engineer\|AI Engineer\|Designer\|CMO\|CRO"; then
   pass
 else
   fail "channel never rendered an agent reply"
 fi
 
-echo "--- Phase 6: Quality Checks ---"
+echo "--- Phase 6: Reset ---"
+
+log_test "Reset team session without killing panes"
+tmux -L wuphf send-keys -t "wuphf-team:team.0" "/reset" Enter
+sleep 12
+RESET_STATUS=$(tmux -L wuphf list-panes -t wuphf-team:team -F "#{pane_index} #{pane_dead} #{pane_current_command}" 2>/dev/null || true)
+echo "$RESET_STATUS" > "$ARTIFACTS/reset-panes.txt"
+if echo "$RESET_STATUS" | awk '{ if ($2 != 0) bad=1 } END { exit bad }'; then
+  pass
+else
+  fail "one or more panes died after /reset"
+fi
+
+log_test "Channel still renders after reset"
+RESET_CHAN=$(tmux -L wuphf capture-pane -p -t wuphf-team:team.0 2>&1)
+echo "$RESET_CHAN" > "$ARTIFACTS/channel-after-reset.txt"
+if echo "$RESET_CHAN" | grep -qi "#general\|The WUPHF Office\|Message #general"; then
+  pass
+else
+  fail "channel not visible after reset"
+fi
+
+echo "--- Phase 7: Quality Checks ---"
 
 log_test "No raw JSON in channel"
 if echo "$CHAN3" | grep -qE '^\{.*"type"'; then fail "raw JSON"; else pass; fi
@@ -203,7 +225,7 @@ else
   fail "empty"
 fi
 
-echo "--- Phase 7: Clean Exit ---"
+echo "--- Phase 8: Clean Exit ---"
 
 log_test "Kill team"
 "$BINARY" kill 2>/dev/null

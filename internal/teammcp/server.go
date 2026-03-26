@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -20,6 +21,7 @@ const defaultBrokerTokenFile = "/tmp/wuphf-broker-token"
 type brokerMessage struct {
 	ID          string   `json:"id"`
 	From        string   `json:"from"`
+	Channel     string   `json:"channel,omitempty"`
 	Kind        string   `json:"kind,omitempty"`
 	Source      string   `json:"source,omitempty"`
 	SourceLabel string   `json:"source_label,omitempty"`
@@ -39,8 +41,23 @@ type brokerMessagesResponse struct {
 type brokerMembersResponse struct {
 	Members []struct {
 		Slug        string `json:"slug"`
+		Name        string `json:"name"`
+		Role        string `json:"role"`
+		Disabled    bool   `json:"disabled"`
 		LastMessage string `json:"lastMessage"`
 		LastTime    string `json:"lastTime"`
+	} `json:"members"`
+}
+
+type brokerOfficeMembersResponse struct {
+	Members []struct {
+		Slug           string   `json:"slug"`
+		Name           string   `json:"name"`
+		Role           string   `json:"role"`
+		Expertise      []string `json:"expertise"`
+		Personality    string   `json:"personality"`
+		PermissionMode string   `json:"permission_mode"`
+		BuiltIn        bool     `json:"built_in"`
 	} `json:"members"`
 }
 
@@ -53,7 +70,55 @@ type brokerInterviewAnswerResponse struct {
 	} `json:"answered"`
 }
 
+type brokerRequestsResponse struct {
+	Requests []struct {
+		ID            string                 `json:"id"`
+		Kind          string                 `json:"kind"`
+		Status        string                 `json:"status"`
+		From          string                 `json:"from"`
+		Channel       string                 `json:"channel"`
+		Title         string                 `json:"title"`
+		Question      string                 `json:"question"`
+		Context       string                 `json:"context"`
+		Options       []HumanInterviewOption `json:"options"`
+		RecommendedID string                 `json:"recommended_id"`
+		Blocking      bool                   `json:"blocking"`
+		Required      bool                   `json:"required"`
+		Secret        bool                   `json:"secret"`
+	} `json:"requests"`
+	Pending *struct {
+		ID            string                 `json:"id"`
+		Kind          string                 `json:"kind"`
+		From          string                 `json:"from"`
+		Channel       string                 `json:"channel"`
+		Title         string                 `json:"title"`
+		Question      string                 `json:"question"`
+		Context       string                 `json:"context"`
+		Options       []HumanInterviewOption `json:"options"`
+		RecommendedID string                 `json:"recommended_id"`
+		Blocking      bool                   `json:"blocking"`
+		Required      bool                   `json:"required"`
+		Secret        bool                   `json:"secret"`
+	} `json:"pending"`
+}
+
+type brokerTasksResponse struct {
+	Tasks []brokerTaskSummary `json:"tasks"`
+}
+
+type brokerTaskSummary struct {
+	ID        string `json:"id"`
+	Channel   string `json:"channel"`
+	Title     string `json:"title"`
+	Details   string `json:"details"`
+	Owner     string `json:"owner"`
+	Status    string `json:"status"`
+	CreatedBy string `json:"created_by"`
+	ThreadID  string `json:"thread_id"`
+}
+
 type TeamBroadcastArgs struct {
+	Channel   string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	Content   string   `json:"content" jsonschema:"Message to post to the shared team channel"`
 	MySlug    string   `json:"my_slug,omitempty" jsonschema:"Agent slug sending the message. Defaults to WUPHF_AGENT_SLUG."`
 	Tagged    []string `json:"tagged,omitempty" jsonschema:"Optional list of tagged agent slugs who should respond"`
@@ -62,14 +127,16 @@ type TeamBroadcastArgs struct {
 }
 
 type TeamPollArgs struct {
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug so tagged_count can be computed. Defaults to WUPHF_AGENT_SLUG."`
 	SinceID string `json:"since_id,omitempty" jsonschema:"Only return messages after this message ID"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"Maximum messages to return (default 20, max 100)"`
 }
 
 type TeamStatusArgs struct {
-	Status string `json:"status" jsonschema:"Short status like 'reviewing onboarding flow' or 'implementing search index'"`
-	MySlug string `json:"my_slug,omitempty" jsonschema:"Agent slug sending the status. Defaults to WUPHF_AGENT_SLUG."`
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	Status  string `json:"status" jsonschema:"Short status like 'reviewing onboarding flow' or 'implementing search index'"`
+	MySlug  string `json:"my_slug,omitempty" jsonschema:"Agent slug sending the status. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type HumanInterviewOption struct {
@@ -79,11 +146,82 @@ type HumanInterviewOption struct {
 }
 
 type HumanInterviewArgs struct {
+	Channel             string                 `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	Question            string                 `json:"question" jsonschema:"The specific decision or clarification needed from the human"`
 	Context             string                 `json:"context,omitempty" jsonschema:"Short context explaining why the team is asking now"`
 	MySlug              string                 `json:"my_slug,omitempty" jsonschema:"Agent slug asking the question. Defaults to WUPHF_AGENT_SLUG."`
 	Options             []HumanInterviewOption `json:"options,omitempty" jsonschema:"Suggested answer options to show the human"`
 	RecommendedOptionID string                 `json:"recommended_option_id,omitempty" jsonschema:"Which option you recommend, if any"`
+}
+
+type TeamRequestsArgs struct {
+	Channel         string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	IncludeResolved bool   `json:"include_resolved,omitempty" jsonschema:"Include already answered or canceled requests."`
+}
+
+type TeamRequestArgs struct {
+	Kind                string                 `json:"kind,omitempty" jsonschema:"One of: choice, confirm, freeform, approval, secret. Defaults to choice."`
+	Channel             string                 `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	Title               string                 `json:"title,omitempty" jsonschema:"Short request title"`
+	Question            string                 `json:"question" jsonschema:"The actual question or approval the human needs to respond to"`
+	Context             string                 `json:"context,omitempty" jsonschema:"Short context for why the request exists"`
+	MySlug              string                 `json:"my_slug,omitempty" jsonschema:"Agent slug asking the question. Defaults to WUPHF_AGENT_SLUG."`
+	Options             []HumanInterviewOption `json:"options,omitempty" jsonschema:"Suggested answer options for choice-style requests"`
+	RecommendedOptionID string                 `json:"recommended_option_id,omitempty" jsonschema:"Which option you recommend, if any"`
+	Blocking            bool                   `json:"blocking,omitempty" jsonschema:"Whether this request should pause channel work until answered"`
+	Required            bool                   `json:"required,omitempty" jsonschema:"Whether an answer is truly required before continuing"`
+	Secret              bool                   `json:"secret,omitempty" jsonschema:"Whether the answer should be treated as private in channel history"`
+	ReplyToID           string                 `json:"reply_to_id,omitempty" jsonschema:"Optional message ID this request belongs to"`
+}
+
+type TeamTasksArgs struct {
+	Channel     string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	MySlug      string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+	IncludeDone bool   `json:"include_done,omitempty" jsonschema:"Include completed tasks as well"`
+}
+
+type TeamTaskArgs struct {
+	Action   string `json:"action" jsonschema:"One of: create, claim, assign, complete, block, release"`
+	Channel  string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	ID       string `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
+	Title    string `json:"title,omitempty" jsonschema:"Task title when creating a task"`
+	Details  string `json:"details,omitempty" jsonschema:"Optional detail or update"`
+	Owner    string `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
+	ThreadID string `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
+	MySlug   string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamChannelsArgs struct{}
+
+type TeamMembersArgs struct {
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+}
+
+type TeamChannelArgs struct {
+	Action  string `json:"action" jsonschema:"One of: create, remove"`
+	Channel string `json:"channel" jsonschema:"Channel slug"`
+	Name    string `json:"name,omitempty" jsonschema:"Optional channel display name on create"`
+	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamChannelMemberArgs struct {
+	Action     string `json:"action" jsonschema:"One of: add, remove, disable, enable"`
+	Channel    string `json:"channel" jsonschema:"Channel slug"`
+	MemberSlug string `json:"member_slug" jsonschema:"Agent slug to modify"`
+	MySlug     string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamOfficeMembersArgs struct{}
+
+type TeamMemberArgs struct {
+	Action         string   `json:"action" jsonschema:"One of: create, remove"`
+	Slug           string   `json:"slug" jsonschema:"Stable agent slug like growthops or research-lead"`
+	Name           string   `json:"name,omitempty" jsonschema:"Display name for the office member"`
+	Role           string   `json:"role,omitempty" jsonschema:"Role/job title"`
+	Expertise      []string `json:"expertise,omitempty" jsonschema:"Optional expertise list"`
+	Personality    string   `json:"personality,omitempty" jsonschema:"Optional short personality description"`
+	PermissionMode string   `json:"permission_mode,omitempty" jsonschema:"Optional Claude permission mode"`
+	MySlug         string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 func Run(ctx context.Context) error {
@@ -113,6 +251,51 @@ func Run(ctx context.Context) error {
 	}, handleTeamMembers)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_office_members",
+		Description: "List the office-wide roster, including members who are not in the current channel.",
+	}, handleTeamOfficeMembers)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_channels",
+		Description: "List available office channels and their memberships.",
+	}, handleTeamChannels)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_channel",
+		Description: "Create or remove an office channel. Only do this when the human explicitly wants channel structure.",
+	}, handleTeamChannel)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_channel_member",
+		Description: "Add, remove, disable, or enable an agent in a specific office channel.",
+	}, handleTeamChannelMember)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_member",
+		Description: "Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
+	}, handleTeamMember)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_tasks",
+		Description: "List the current shared tasks and who owns them so the team does not duplicate work.",
+	}, handleTeamTasks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_task",
+		Description: "Create, claim, assign, complete, block, or release a shared task in the office task list.",
+	}, handleTeamTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_requests",
+		Description: "List the current office requests so you know whether the human already owes the team a decision.",
+	}, handleTeamRequests)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_request",
+		Description: "Create a structured request for the human: confirmation, choice, approval, freeform answer, or private/secret answer.",
+	}, handleTeamRequest)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "human_interview",
 		Description: "Ask the human a blocking interview question when the team cannot proceed responsibly without a decision.",
 	}, handleHumanInterview)
@@ -125,19 +308,27 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	if err != nil {
 		return toolError(err), nil, nil
 	}
+	channel := resolveChannel(args.Channel)
 
 	replyTo := strings.TrimSpace(args.ReplyToID)
 	if replyTo == "" && !args.NewTopic {
-		replyTo, _ = inferReplyTarget(ctx, slug)
+		replyTo, _ = inferReplyTarget(ctx, slug, channel)
 	}
 	if replyTo == "" && !args.NewTopic {
-		replyTo, _ = inferDefaultThreadTarget(ctx, slug)
+		replyTo, _ = inferDefaultThreadTarget(ctx, slug, channel)
+	}
+
+	if messages, tasks, err := fetchBroadcastContext(ctx, channel, slug); err == nil {
+		if reason := suppressBroadcastReason(slug, args.Content, replyTo, messages, tasks); reason != "" {
+			return textResult(fmt.Sprintf("Held reply for @%s: %s. Poll again if the thread changes or if the CEO tags you in.", slug, reason)), nil, nil
+		}
 	}
 
 	var result struct {
 		ID string `json:"id"`
 	}
 	err = brokerPostJSON(ctx, "/messages", map[string]any{
+		"channel":  channel,
 		"from":     slug,
 		"content":  args.Content,
 		"tagged":   args.Tagged,
@@ -147,7 +338,7 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 		return toolError(err), nil, nil
 	}
 
-	text := fmt.Sprintf("Posted to team channel as @%s", slug)
+	text := fmt.Sprintf("Posted to #%s as @%s", channel, slug)
 	if result.ID != "" {
 		text += " (" + result.ID + ")"
 	}
@@ -158,8 +349,200 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	return textResult(text), nil, nil
 }
 
-func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollArgs) (*mcp.CallToolResult, any, error) {
+func fetchBroadcastContext(ctx context.Context, channel, mySlug string) ([]brokerMessage, []brokerTaskSummary, error) {
 	values := url.Values{}
+	values.Set("channel", channel)
+	values.Set("limit", "40")
+	if mySlug != "" {
+		values.Set("my_slug", mySlug)
+	}
+	var messages brokerMessagesResponse
+	if err := brokerGetJSON(ctx, "/messages?"+values.Encode(), &messages); err != nil {
+		return nil, nil, err
+	}
+	var tasks brokerTasksResponse
+	if err := brokerGetJSON(ctx, "/tasks?channel="+url.QueryEscape(channel), &tasks); err != nil {
+		return messages.Messages, nil, err
+	}
+	return messages.Messages, tasks.Tasks, nil
+}
+
+func suppressBroadcastReason(slug, content, replyTo string, messages []brokerMessage, tasks []brokerTaskSummary) string {
+	if strings.TrimSpace(slug) == "" || slug == "ceo" {
+		return ""
+	}
+	myDomain := inferOfficeAgentDomain(slug)
+	latest := latestRelevantMessage(messages, replyTo)
+	latestDomain := inferOfficeTextDomain(content)
+	if latestDomain == "general" && latest != nil {
+		latestDomain = inferOfficeTextDomain(latest.Title + " " + latest.Content)
+	}
+	explicitNeed := latest != nil && containsSlug(latest.Tagged, slug)
+	ownsTask := ownsRelevantTask(slug, replyTo, latestDomain, tasks)
+
+	if replyTo != "" && latest != nil && latest.From != slug {
+		switch latest.From {
+		case "ceo":
+			if !explicitNeed && !ownsTask {
+				return "the CEO already steered this thread"
+			}
+		case "you", "human", "nex":
+			// still fair game if domain matches
+		default:
+			if !explicitNeed && !ownsTask {
+				return "someone else already covered this thread"
+			}
+		}
+	}
+
+	if explicitNeed || ownsTask {
+		return ""
+	}
+	if latestDomain != "" && latestDomain != "general" && myDomain != latestDomain {
+		return "this is outside your domain"
+	}
+	if latestDomain == "general" {
+		return "there is no clear need for your role yet"
+	}
+	return ""
+}
+
+func latestRelevantMessage(messages []brokerMessage, replyTo string) *brokerMessage {
+	replyTo = strings.TrimSpace(replyTo)
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if strings.HasPrefix(strings.TrimSpace(msg.Content), "[STATUS]") {
+			continue
+		}
+		if replyTo != "" {
+			if msg.ID != replyTo && strings.TrimSpace(msg.ReplyTo) != replyTo {
+				continue
+			}
+		} else if strings.TrimSpace(msg.ReplyTo) != "" {
+			continue
+		}
+		return &messages[i]
+	}
+	return nil
+}
+
+func ownsRelevantTask(slug, replyTo, domain string, tasks []brokerTaskSummary) bool {
+	slug = strings.TrimSpace(slug)
+	replyTo = strings.TrimSpace(replyTo)
+	for _, task := range tasks {
+		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+			continue
+		}
+		if strings.TrimSpace(task.Owner) != slug {
+			continue
+		}
+		if replyTo != "" {
+			if strings.TrimSpace(task.ThreadID) == replyTo {
+				return true
+			}
+			continue
+		}
+		taskDomain := inferOfficeTextDomain(task.Title + " " + task.Details)
+		if taskDomain == domain || taskDomain == "general" || domain == "" {
+			return true
+		}
+	}
+	return false
+}
+
+func inferOfficeAgentDomain(slug string) string {
+	switch strings.ToLower(strings.TrimSpace(slug)) {
+	case "fe", "frontend":
+		return "frontend"
+	case "be", "backend":
+		return "backend"
+	case "ai", "ml", "llm":
+		return "ai"
+	case "designer", "design":
+		return "design"
+	case "cmo", "growth", "marketing":
+		return "marketing"
+	case "cro", "sales", "revenue":
+		return "sales"
+	case "pm", "product", "ceo":
+		return "product"
+	default:
+		return "general"
+	}
+}
+
+func inferOfficeTextDomain(text string) string {
+	text = strings.ToLower(strings.TrimSpace(text))
+	tokens := tokenizeOfficeText(text)
+	switch {
+	case hasAnyOfficeToken(tokens, "frontend", "ui", "ux", "web", "component") || containsAnyFragment(text, "hero", "cta", "signup page"):
+		return "frontend"
+	case hasAnyOfficeToken(tokens, "backend", "database", "api", "sync", "queue", "service", "auth", "integration"):
+		return "backend"
+	case hasAnyOfficeToken(tokens, "model", "prompt", "llm", "ai", "transcript", "embedding", "rag"):
+		return "ai"
+	case hasAnyOfficeToken(tokens, "design", "visual", "typography", "layout") || containsAnyFragment(text, "brand system"):
+		return "design"
+	case hasAnyOfficeToken(tokens, "positioning", "campaign", "launch", "brand", "marketing", "copy", "persona", "messaging", "growth"):
+		return "marketing"
+	case hasAnyOfficeToken(tokens, "sales", "pipeline", "pricing", "revenue", "deal", "budget", "buyer"):
+		return "sales"
+	case hasAnyOfficeToken(tokens, "product", "roadmap", "scope", "planning", "priority"):
+		return "product"
+	default:
+		return "general"
+	}
+}
+
+func tokenizeOfficeText(text string) map[string]bool {
+	var b strings.Builder
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToLower(r))
+		} else {
+			b.WriteRune(' ')
+		}
+	}
+	parts := strings.Fields(b.String())
+	out := make(map[string]bool, len(parts))
+	for _, part := range parts {
+		out[part] = true
+	}
+	return out
+}
+
+func hasAnyOfficeToken(tokens map[string]bool, words ...string) bool {
+	for _, word := range words {
+		if tokens[word] {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAnyFragment(text string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsSlug(items []string, want string) bool {
+	want = strings.TrimSpace(strings.ToLower(want))
+	for _, item := range items {
+		if strings.TrimSpace(strings.ToLower(item)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollArgs) (*mcp.CallToolResult, any, error) {
+	channel := resolveChannel(args.Channel)
+	values := url.Values{}
+	values.Set("channel", channel)
 	if slug := strings.TrimSpace(resolveSlugOptional(args.MySlug)); slug != "" {
 		values.Set("my_slug", slug)
 	}
@@ -180,7 +563,9 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 	}
 
 	summary := formatMessages(result.Messages, resolveSlugOptional(args.MySlug))
-	return textResult(fmt.Sprintf("%s\n\nTagged messages for you: %d", summary, result.TaggedCount)), nil, nil
+	taskSummary := formatTaskSummary(ctx, resolveSlugOptional(args.MySlug), channel)
+	requestSummary := formatRequestSummary(ctx, channel)
+	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary)), nil, nil
 }
 
 func handleTeamStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamStatusArgs) (*mcp.CallToolResult, any, error) {
@@ -188,19 +573,22 @@ func handleTeamStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamStat
 	if err != nil {
 		return toolError(err), nil, nil
 	}
+	channel := resolveChannel(args.Channel)
 	if err := brokerPostJSON(ctx, "/messages", map[string]any{
+		"channel": channel,
 		"from":    slug,
 		"content": "[STATUS] " + args.Status,
 		"tagged":  []string{},
 	}, nil); err != nil {
 		return toolError(err), nil, nil
 	}
-	return textResult(fmt.Sprintf("Updated team status for @%s: %s", slug, args.Status)), nil, nil
+	return textResult(fmt.Sprintf("Updated #%s status for @%s: %s", channel, slug, args.Status)), nil, nil
 }
 
-func handleTeamMembers(ctx context.Context, _ *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, any, error) {
+func handleTeamMembers(ctx context.Context, _ *mcp.CallToolRequest, args TeamMembersArgs) (*mcp.CallToolResult, any, error) {
+	channel := resolveChannel(args.Channel)
 	var result brokerMembersResponse
-	if err := brokerGetJSON(ctx, "/members", &result); err != nil {
+	if err := brokerGetJSON(ctx, "/members?channel="+url.QueryEscape(channel), &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	if len(result.Members) == 0 {
@@ -209,6 +597,15 @@ func handleTeamMembers(ctx context.Context, _ *mcp.CallToolRequest, _ map[string
 	lines := make([]string, 0, len(result.Members))
 	for _, member := range result.Members {
 		line := "- @" + member.Slug
+		if member.Name != "" {
+			line += " (" + member.Name + ")"
+		}
+		if member.Role != "" {
+			line += " · " + member.Role
+		}
+		if member.Disabled {
+			line += " · disabled"
+		}
 		if member.LastTime != "" {
 			line += " at " + member.LastTime
 		}
@@ -217,7 +614,195 @@ func handleTeamMembers(ctx context.Context, _ *mcp.CallToolRequest, _ map[string
 		}
 		lines = append(lines, line)
 	}
-	return textResult("Active team members:\n" + strings.Join(lines, "\n")), nil, nil
+	return textResult("Active team members in #" + channel + ":\n" + strings.Join(lines, "\n")), nil, nil
+}
+
+func handleTeamOfficeMembers(ctx context.Context, _ *mcp.CallToolRequest, _ TeamOfficeMembersArgs) (*mcp.CallToolResult, any, error) {
+	var result brokerOfficeMembersResponse
+	if err := brokerGetJSON(ctx, "/office-members", &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	if len(result.Members) == 0 {
+		return textResult("No office members."), nil, nil
+	}
+	lines := make([]string, 0, len(result.Members))
+	for _, member := range result.Members {
+		line := fmt.Sprintf("- @%s (%s)", member.Slug, member.Name)
+		if member.Role != "" {
+			line += " · " + member.Role
+		}
+		if len(member.Expertise) > 0 {
+			line += " · " + strings.Join(member.Expertise, ", ")
+		}
+		if member.BuiltIn {
+			line += " · built-in"
+		}
+		lines = append(lines, line)
+	}
+	return textResult("Office members:\n" + strings.Join(lines, "\n")), nil, nil
+}
+
+func handleTeamTasks(ctx context.Context, _ *mcp.CallToolRequest, args TeamTasksArgs) (*mcp.CallToolResult, any, error) {
+	mySlug := strings.TrimSpace(resolveSlugOptional(args.MySlug))
+	channel := resolveChannel(args.Channel)
+	values := url.Values{}
+	values.Set("channel", channel)
+	if mySlug != "" {
+		values.Set("my_slug", mySlug)
+	}
+	if args.IncludeDone {
+		values.Set("include_done", "true")
+	}
+	var result brokerTasksResponse
+	path := "/tasks"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	if err := brokerGetJSON(ctx, path, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	if len(result.Tasks) == 0 {
+		return textResult("No active team tasks."), nil, nil
+	}
+	lines := make([]string, 0, len(result.Tasks))
+	for _, task := range result.Tasks {
+		line := fmt.Sprintf("- %s [%s]", task.ID, task.Status)
+		if task.Owner != "" {
+			line += " @" + task.Owner
+		}
+		line += " — " + task.Title
+		if task.ThreadID != "" {
+			line += " ↳ " + task.ThreadID
+		}
+		if task.Details != "" {
+			line += " (" + task.Details + ")"
+		}
+		lines = append(lines, line)
+	}
+	return textResult("Current team tasks in #" + channel + ":\n" + strings.Join(lines, "\n")), nil, nil
+}
+
+func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	action := strings.TrimSpace(args.Action)
+	payload := map[string]any{
+		"action":     action,
+		"channel":    channel,
+		"id":         strings.TrimSpace(args.ID),
+		"title":      strings.TrimSpace(args.Title),
+		"details":    strings.TrimSpace(args.Details),
+		"thread_id":  strings.TrimSpace(args.ThreadID),
+		"created_by": mySlug,
+	}
+	switch action {
+	case "claim":
+		payload["owner"] = mySlug
+	case "assign":
+		payload["owner"] = strings.TrimSpace(args.Owner)
+	default:
+		if owner := strings.TrimSpace(args.Owner); owner != "" {
+			payload["owner"] = owner
+		}
+	}
+
+	var result struct {
+		Task struct {
+			ID     string `json:"id"`
+			Title  string `json:"title"`
+			Owner  string `json:"owner"`
+			Status string `json:"status"`
+		} `json:"task"`
+	}
+	if err := brokerPostJSON(ctx, "/tasks", payload, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	text := fmt.Sprintf("Task %s in #%s is now %s", result.Task.ID, channel, result.Task.Status)
+	if result.Task.Owner != "" {
+		text += " @" + result.Task.Owner
+	}
+	text += " — " + result.Task.Title
+	return textResult(text), nil, nil
+}
+
+func handleTeamRequests(ctx context.Context, _ *mcp.CallToolRequest, args TeamRequestsArgs) (*mcp.CallToolResult, any, error) {
+	channel := resolveChannel(args.Channel)
+	values := url.Values{}
+	values.Set("channel", channel)
+	if args.IncludeResolved {
+		values.Set("include_resolved", "true")
+	}
+	var result brokerRequestsResponse
+	path := "/requests"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	if err := brokerGetJSON(ctx, path, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	if len(result.Requests) == 0 {
+		return textResult("No active office requests in #" + channel + "."), nil, nil
+	}
+	lines := make([]string, 0, len(result.Requests))
+	for _, req := range result.Requests {
+		line := fmt.Sprintf("- %s [%s] @%s", req.ID, req.Kind, req.From)
+		if req.Blocking {
+			line += " · blocking"
+		}
+		if req.Required {
+			line += " · required"
+		}
+		if req.Title != "" {
+			line += " — " + req.Title
+		} else {
+			line += " — " + req.Question
+		}
+		lines = append(lines, line)
+	}
+	text := "Office requests in #" + channel + ":\n" + strings.Join(lines, "\n")
+	if result.Pending != nil {
+		text += fmt.Sprintf("\n\nBlocking request pending: %s", result.Pending.Question)
+	}
+	return textResult(text), nil, nil
+}
+
+func handleTeamRequest(ctx context.Context, _ *mcp.CallToolRequest, args TeamRequestArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	replyTo := strings.TrimSpace(args.ReplyToID)
+	if replyTo == "" {
+		replyTo, _ = inferReplyTarget(ctx, slug, channel)
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := brokerPostJSON(ctx, "/requests", map[string]any{
+		"kind":           strings.TrimSpace(args.Kind),
+		"channel":        channel,
+		"from":           slug,
+		"title":          strings.TrimSpace(args.Title),
+		"question":       args.Question,
+		"context":        args.Context,
+		"options":        args.Options,
+		"recommended_id": args.RecommendedOptionID,
+		"blocking":       args.Blocking,
+		"required":       args.Required,
+		"secret":         args.Secret,
+		"reply_to":       replyTo,
+	}, &created); err != nil {
+		return toolError(err), nil, nil
+	}
+	if strings.TrimSpace(created.ID) == "" {
+		return toolError(fmt.Errorf("request did not return an ID")), nil, nil
+	}
+	return textResult(fmt.Sprintf("Created %s request %s in #%s.", defaultRequestKind(args.Kind), created.ID, channel)), nil, nil
 }
 
 func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args HumanInterviewArgs) (*mcp.CallToolResult, any, error) {
@@ -225,16 +810,22 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 	if err != nil {
 		return toolError(err), nil, nil
 	}
+	channel := resolveChannel(args.Channel)
 
 	var created struct {
 		ID string `json:"id"`
 	}
-	if err := brokerPostJSON(ctx, "/interview", map[string]any{
+	if err := brokerPostJSON(ctx, "/requests", map[string]any{
+		"kind":           "interview",
+		"channel":        channel,
 		"from":           slug,
+		"title":          "Human interview",
 		"question":       args.Question,
 		"context":        args.Context,
 		"options":        args.Options,
 		"recommended_id": args.RecommendedOptionID,
+		"blocking":       true,
+		"required":       true,
 	}, &created); err != nil {
 		return toolError(err), nil, nil
 	}
@@ -274,6 +865,108 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 			}, "", "  ")
 			return textResult(string(payload)), nil, nil
 		}
+	}
+}
+
+func handleTeamChannels(ctx context.Context, _ *mcp.CallToolRequest, _ TeamChannelsArgs) (*mcp.CallToolResult, any, error) {
+	var result struct {
+		Channels []struct {
+			Slug     string   `json:"slug"`
+			Name     string   `json:"name"`
+			Members  []string `json:"members"`
+			Disabled []string `json:"disabled"`
+		} `json:"channels"`
+	}
+	if err := brokerGetJSON(ctx, "/channels", &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	if len(result.Channels) == 0 {
+		return textResult("No office channels."), nil, nil
+	}
+	lines := make([]string, 0, len(result.Channels))
+	for _, ch := range result.Channels {
+		line := fmt.Sprintf("- #%s", ch.Slug)
+		if len(ch.Members) > 0 {
+			line += " @" + strings.Join(ch.Members, ", @")
+		}
+		if len(ch.Disabled) > 0 {
+			line += " (disabled: @" + strings.Join(ch.Disabled, ", @") + ")"
+		}
+		lines = append(lines, line)
+	}
+	return textResult("Office channels:\n" + strings.Join(lines, "\n")), nil, nil
+}
+
+func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamChannelArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	if err := brokerPostJSON(ctx, "/channels", map[string]any{
+		"action":     strings.TrimSpace(args.Action),
+		"slug":       channel,
+		"name":       strings.TrimSpace(args.Name),
+		"created_by": slug,
+	}, nil); err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(fmt.Sprintf("%s channel #%s", strings.Title(strings.TrimSpace(args.Action)), channel)), nil, nil
+}
+
+func handleTeamChannelMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamChannelMemberArgs) (*mcp.CallToolResult, any, error) {
+	if _, err := resolveSlug(args.MySlug); err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	member := normalizeSlug(args.MemberSlug)
+	if member == "" {
+		return toolError(fmt.Errorf("member_slug is required")), nil, nil
+	}
+	if err := brokerPostJSON(ctx, "/channel-members", map[string]any{
+		"action":  strings.TrimSpace(args.Action),
+		"channel": channel,
+		"slug":    member,
+	}, nil); err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(fmt.Sprintf("%s @%s in #%s", strings.Title(strings.TrimSpace(args.Action)), member, channel)), nil, nil
+}
+
+func handleTeamMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemberArgs) (*mcp.CallToolResult, any, error) {
+	if _, err := resolveSlug(args.MySlug); err != nil {
+		return toolError(err), nil, nil
+	}
+	slug := normalizeSlug(args.Slug)
+	if slug == "" {
+		return toolError(fmt.Errorf("slug is required")), nil, nil
+	}
+	action := strings.ToLower(strings.TrimSpace(args.Action))
+	switch action {
+	case "create":
+		if err := brokerPostJSON(ctx, "/office-members", map[string]any{
+			"action":          "create",
+			"slug":            slug,
+			"name":            strings.TrimSpace(args.Name),
+			"role":            strings.TrimSpace(args.Role),
+			"expertise":       args.Expertise,
+			"personality":     strings.TrimSpace(args.Personality),
+			"permission_mode": strings.TrimSpace(args.PermissionMode),
+			"created_by":      strings.TrimSpace(resolveSlugOptional(args.MySlug)),
+		}, nil); err != nil {
+			return toolError(err), nil, nil
+		}
+		return textResult(fmt.Sprintf("Created office member @%s.", slug)), nil, nil
+	case "remove":
+		if err := brokerPostJSON(ctx, "/office-members", map[string]any{
+			"action": "remove",
+			"slug":   slug,
+		}, nil); err != nil {
+			return toolError(err), nil, nil
+		}
+		return textResult(fmt.Sprintf("Removed office member @%s.", slug)), nil, nil
+	default:
+		return toolError(fmt.Errorf("unknown action %q", args.Action)), nil, nil
 	}
 }
 
@@ -335,6 +1028,36 @@ func resolveSlugOptional(input string) string {
 	return strings.TrimSpace(os.Getenv("NEX_AGENT_SLUG"))
 }
 
+func resolveChannel(input string) string {
+	channel := strings.TrimSpace(input)
+	if channel == "" {
+		channel = strings.TrimSpace(os.Getenv("WUPHF_CHANNEL"))
+	}
+	if channel == "" {
+		channel = strings.TrimSpace(os.Getenv("NEX_CHANNEL"))
+	}
+	if channel == "" {
+		channel = "general"
+	}
+	channel = strings.ToLower(strings.ReplaceAll(channel, " ", "-"))
+	return channel
+}
+
+func normalizeSlug(input string) string {
+	slug := strings.ToLower(strings.TrimSpace(input))
+	slug = strings.ReplaceAll(slug, " ", "-")
+	slug = strings.ReplaceAll(slug, "_", "-")
+	return slug
+}
+
+func defaultRequestKind(kind string) string {
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return "choice"
+	}
+	return kind
+}
+
 func brokerGetJSON(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerBaseURL()+path, nil)
 	if err != nil {
@@ -382,9 +1105,9 @@ func brokerPostJSON(ctx context.Context, path string, body any, out any) error {
 	return json.NewDecoder(res.Body).Decode(out)
 }
 
-func inferReplyTarget(ctx context.Context, slug string) (string, error) {
+func inferReplyTarget(ctx context.Context, slug string, channel string) (string, error) {
 	var result brokerMessagesResponse
-	if err := brokerGetJSON(ctx, "/messages?my_slug="+url.QueryEscape(slug)+"&limit=25", &result); err != nil {
+	if err := brokerGetJSON(ctx, "/messages?channel="+url.QueryEscape(channel)+"&my_slug="+url.QueryEscape(slug)+"&limit=25", &result); err != nil {
 		return "", err
 	}
 	for i := len(result.Messages) - 1; i >= 0; i-- {
@@ -403,9 +1126,9 @@ func inferReplyTarget(ctx context.Context, slug string) (string, error) {
 	return "", nil
 }
 
-func inferDefaultThreadTarget(ctx context.Context, slug string) (string, error) {
+func inferDefaultThreadTarget(ctx context.Context, slug string, channel string) (string, error) {
 	var result brokerMessagesResponse
-	if err := brokerGetJSON(ctx, "/messages?my_slug="+url.QueryEscape(slug)+"&limit=40", &result); err != nil {
+	if err := brokerGetJSON(ctx, "/messages?channel="+url.QueryEscape(channel)+"&my_slug="+url.QueryEscape(slug)+"&limit=40", &result); err != nil {
 		return "", err
 	}
 	for i := len(result.Messages) - 1; i >= 0; i-- {
@@ -469,6 +1192,56 @@ func formatMessages(messages []brokerMessage, mySlug string) string {
 		lines = append(lines, fmt.Sprintf("%s %s%s @%s: %s%s", ts, msg.ID, threadNote, msg.From, msg.Content, tagNote))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatTaskSummary(ctx context.Context, mySlug string, channel string) string {
+	values := url.Values{}
+	values.Set("channel", channel)
+	if strings.TrimSpace(mySlug) != "" {
+		values.Set("my_slug", mySlug)
+	}
+	var result brokerTasksResponse
+	path := "/tasks"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	if err := brokerGetJSON(ctx, path, &result); err != nil || len(result.Tasks) == 0 {
+		return "Open tasks: none"
+	}
+	lines := make([]string, 0, len(result.Tasks))
+	for _, task := range result.Tasks {
+		line := fmt.Sprintf("- %s [%s]", task.ID, task.Status)
+		if task.Owner != "" {
+			line += " @" + task.Owner
+		}
+		line += " — " + task.Title
+		lines = append(lines, line)
+	}
+	return "Open tasks:\n" + strings.Join(lines, "\n")
+}
+
+func formatRequestSummary(ctx context.Context, channel string) string {
+	values := url.Values{}
+	values.Set("channel", channel)
+	var result brokerRequestsResponse
+	path := "/requests?" + values.Encode()
+	if err := brokerGetJSON(ctx, path, &result); err != nil || len(result.Requests) == 0 {
+		return "Open requests: none"
+	}
+	lines := make([]string, 0, len(result.Requests))
+	for _, req := range result.Requests {
+		line := fmt.Sprintf("- %s [%s] @%s", req.ID, req.Kind, req.From)
+		if req.Blocking {
+			line += " · blocking"
+		}
+		if req.Title != "" {
+			line += " — " + req.Title
+		} else {
+			line += " — " + req.Question
+		}
+		lines = append(lines, line)
+	}
+	return "Open requests:\n" + strings.Join(lines, "\n")
 }
 
 func contains(items []string, want string) bool {

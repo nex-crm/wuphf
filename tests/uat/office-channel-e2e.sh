@@ -64,13 +64,12 @@ termwright daemon --socket "$SOCKET" --cols 120 --rows 40 --background -- "$BINA
 sleep 5
 
 assert_contains "# general" "boot"
-assert_contains "Founding Team" "boot"
 assert_contains "Message #general" "boot"
 
 send_raw "/"
 sleep 1
 assert_contains "/integrate" "slash-autocomplete"
-assert_contains "/reset" "slash-autocomplete"
+assert_contains "/agents" "slash-autocomplete"
 
 send_raw "hello team"
 sleep 1

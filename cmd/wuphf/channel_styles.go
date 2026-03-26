@@ -146,3 +146,109 @@ func threadIndicatorStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
 		Foreground(lipgloss.Color(slackActive))
 }
+
+func agentAvatar(slug string) string {
+	switch slug {
+	case "ceo":
+		return "☕"
+	case "pm":
+		return "📋"
+	case "fe":
+		return "🖥"
+	case "be":
+		return "🛠"
+	case "ai":
+		return "🤖"
+	case "designer":
+		return "✏️"
+	case "cmo":
+		return "📣"
+	case "cro":
+		return "💼"
+	case "nex":
+		return "🛰"
+	case "you":
+		return "🙂"
+	default:
+		return "•"
+	}
+}
+
+func appIcon(app officeApp) string {
+	switch app {
+	case officeAppTasks:
+		return "☑"
+	case officeAppRequests:
+		return "✋"
+	case officeAppInsights:
+		return "✦"
+	case officeAppCalendar:
+		return "🗓"
+	case officeAppMessages:
+		return "💬"
+	default:
+		return "#"
+	}
+}
+
+func accentPill(label, color string) string {
+	if label == "" {
+		return ""
+	}
+	if color == "" {
+		color = slackActive
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(lipgloss.Color(color)).
+		Padding(0, 1).
+		Bold(true).
+		Render(label)
+}
+
+func subtlePill(label, fg, bg string) string {
+	if label == "" {
+		return ""
+	}
+	if fg == "" {
+		fg = slackText
+	}
+	if bg == "" {
+		bg = slackHover
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(fg)).
+		Background(lipgloss.Color(bg)).
+		Padding(0, 1).
+		Render(label)
+}
+
+func taskStatusPill(status string) string {
+	switch status {
+	case "in_progress":
+		return accentPill("moving", "#D97706")
+	case "blocked":
+		return accentPill("blocked", "#B91C1C")
+	case "done":
+		return accentPill("done", "#15803D")
+	default:
+		return subtlePill("open", "#CBD5E1", "#334155")
+	}
+}
+
+func requestKindPill(kind string) string {
+	switch kind {
+	case "approval":
+		return accentPill("approval", "#B45309")
+	case "confirm":
+		return accentPill("confirm", "#1D4ED8")
+	case "secret":
+		return accentPill("private", "#7C3AED")
+	case "freeform":
+		return subtlePill("open question", "#E5E7EB", "#374151")
+	case "interview":
+		return subtlePill("interview", "#F8FAFC", "#4B5563")
+	default:
+		return subtlePill(kind, "#E5E7EB", "#374151")
+	}
+}
