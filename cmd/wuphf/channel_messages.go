@@ -103,20 +103,24 @@ func renderMessageGroups(
 			}
 
 			if i == 0 {
-				// First message in group: show name + timestamp header
+				// First message in group: show character face + name + timestamp
 				name := displayName(msg.From)
+				face := agentCharacter(msg.From, "", 0) // idle face for messages
+				faceRendered := nameStyle.Render(face)
 				nameRendered := nameStyle.Render(name)
 				tsRendered := timestampStyle.Render(ts)
 
-				// Name left, timestamp right on the same line
+				// Face + name left, timestamp right on the same line
+				faceWidth := lipgloss.Width(faceRendered)
 				nameWidth := lipgloss.Width(nameRendered)
 				tsWidth := lipgloss.Width(tsRendered)
-				gap := width - nameWidth - tsWidth - 4 // 2 padding each side
+				gap := width - faceWidth - 1 - nameWidth - tsWidth - 4 // face + space + name + ts + padding
 				if gap < 2 {
 					gap = 2
 				}
 				lines = append(lines, "")
-				lines = append(lines, fmt.Sprintf("  %s%s%s",
+				lines = append(lines, fmt.Sprintf("  %s %s%s%s",
+					faceRendered,
 					nameRendered,
 					strings.Repeat(" ", gap),
 					tsRendered,

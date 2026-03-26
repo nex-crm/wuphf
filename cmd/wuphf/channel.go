@@ -4256,6 +4256,15 @@ func runChannelView(threadsCollapsed bool) {
 			reportChannelCrash(fmt.Sprintf("panic: %v\n\n%s", r, debug.Stack()))
 		}
 	}()
+
+	// Run splash screen first (skippable with any key)
+	splash := tea.NewProgram(newSplashModel(), tea.WithAltScreen())
+	if _, err := splash.Run(); err == nil {
+		// Small pause between splash and channel
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Then launch the main channel view
 	p := tea.NewProgram(newChannelModel(threadsCollapsed), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		reportChannelCrash(fmt.Sprintf("channel view error: %v\n", err))

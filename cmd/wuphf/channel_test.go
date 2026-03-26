@@ -394,7 +394,7 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 	if !strings.Contains(sidebar, "Frontend Engineer") {
 		t.Fatalf("expected sidebar member, got %q", sidebar)
 	}
-	if !strings.Contains(sidebar, "“") {
+	if !strings.Contains(sidebar, "\u201c") {
 		t.Fatalf("expected Office-style mood bubble, got %q", sidebar)
 	}
 	if !strings.Contains(sidebar, "Ctrl+G channels") {
@@ -418,7 +418,7 @@ func TestRenderSidebarUsesCompactRosterWhenSpaceIsTight(t *testing.T) {
 	if !strings.Contains(sidebar, "People · office roster") {
 		t.Fatalf("expected compact sidebar still to render people section, got %q", sidebar)
 	}
-	if strings.Contains(sidebar, "“") {
+	if strings.Contains(sidebar, "\u201c") {
 		t.Fatalf("expected compact sidebar to omit speech bubbles, got %q", sidebar)
 	}
 	if !strings.Contains(sidebar, "CEO") {

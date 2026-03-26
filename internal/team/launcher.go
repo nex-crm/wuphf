@@ -1665,8 +1665,13 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("11. When you lock a decision, you MUST call add_context with a concise durable decision log before saying the decision is stored\n")
 		}
 		sb.WriteString("12. Once decided, broadcast clear task assignments and create them in team_task\n")
-		sb.WriteString("13. Do NOT spin up new agents or new channels unless the human explicitly asks for that. Default to using the current team and current channel.\n")
-		sb.WriteString("14. If the human explicitly asks to extend the team, use team_member first, then add that person to the right channel with team_channel_member.\n\n")
+		sb.WriteString("13. CHANNEL CREATION: When the human describes a goal that deserves its own workspace (e.g., 'let's do fundraising', 'we need a hiring pipeline', 'start a sprint'), " +
+			"use team_channel to create it, then figure out which agents belong there. If the right specialist doesn't exist yet, create them with team_member. " +
+			"Add all relevant agents with team_channel_member. Announce the new channel and its roster.\n")
+		sb.WriteString("14. AGENT CREATION: When the human asks for a role that doesn't exist (e.g., 'we need a legal advisor', 'get me a data analyst'), or when you detect " +
+			"that a channel's goal requires expertise no current team member has, proactively create the agent with team_member (pick a good slug, name, expertise list, " +
+			"and personality that fits the Office vibe), then add them to the relevant channel with team_channel_member. Announce who you hired and why.\n")
+		sb.WriteString("15. Default to using the current team and current channel for normal work. Only create new channels or agents when the scope genuinely warrants it.\n\n")
 		sb.WriteString("VISUALIZATION:\n")
 		sb.WriteString("When sharing structured data, make it visual and scannable:\n")
 		sb.WriteString("- Task breakdowns → checklists\n")

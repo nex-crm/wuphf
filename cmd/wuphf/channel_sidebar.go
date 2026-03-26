@@ -411,51 +411,63 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 			}
 			lines = append(lines, " "+leftPart+strings.Repeat(" ", pad)+meta)
 		} else {
-			// Full: line 1 = accent + dot + name + activity
+			// Full mode: multi-line sprite alongside name/role/bubble
+			sprite := spriteLines(m.Slug, act.Label, int(now.Unix()%2))
+			spriteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor))
+			bubbleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7A7A7E")).Italic(true)
+
+			// Line 1: accent + dot + name + activity
 			pad := innerW - ansi.StringWidth(leftPart) - ansi.StringWidth(act.Label)
 			if pad < 1 {
 				pad = 1
 			}
 			lines = append(lines, " "+leftPart+strings.Repeat(" ", pad)+memberMetaStyle.Render(act.Label))
-			// Line 2: character face + role
-			charFace := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Render(character.Avatar)
-			lines = append(lines, "   "+charFace+" "+roleRendered)
-			// Line 3+: mood bubble — wrap across lines instead of truncating
+
+			// Lines 2-4: sprite hat/face/body with role + bubble alongside
+			const spriteW = 8
+			textW := innerW - spriteW
+			if textW < 6 {
+				textW = 6
+			}
+
+			// Line 2: hat + role
+			lines = append(lines, " "+spriteStyle.Render(sprite[0])+" "+roleRendered)
+
+			// Line 3: face + bubble
+			bubbleText := ""
 			if character.Bubble != "" {
-				bubbleStyle := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#7A7A7E")).
-					Italic(true)
-				bubbleWidth := innerW - 5 // 3 indent + 2 quote chars
-				if bubbleWidth < 12 {
-					bubbleWidth = 12
-				}
-				quoted := "\u201c" + character.Bubble + "\u201d"
-				// Wrap long bubbles across two lines max
-				if len([]rune(quoted)) <= bubbleWidth {
-					lines = append(lines, "   "+bubbleStyle.Render(quoted))
+				bubbleText = "\u201c" + character.Bubble + "\u201d"
+			}
+			faceRendered := spriteStyle.Render(sprite[1])
+			if bubbleText == "" {
+				lines = append(lines, " "+faceRendered)
+			} else {
+				bRunes := []rune(bubbleText)
+				if len(bRunes) <= textW {
+					lines = append(lines, " "+faceRendered+" "+bubbleStyle.Render(bubbleText))
 				} else {
-					// Split at word boundary near bubbleWidth
-					runes := []rune(quoted)
-					splitAt := bubbleWidth
-					for splitAt > bubbleWidth/2 {
-						if runes[splitAt] == ' ' {
+					sp := textW
+					for sp > textW/2 {
+						if bRunes[sp] == ' ' {
 							break
 						}
-						splitAt--
+						sp--
 					}
-					if splitAt <= bubbleWidth/2 {
-						splitAt = bubbleWidth // no good split point, hard break
+					if sp <= textW/2 {
+						sp = textW
 					}
-					lines = append(lines, "   "+bubbleStyle.Render(string(runes[:splitAt])))
-					remainder := strings.TrimSpace(string(runes[splitAt:]))
-					if len([]rune(remainder)) > bubbleWidth {
-						remainder = string([]rune(remainder)[:bubbleWidth-1]) + "…"
+					lines = append(lines, " "+faceRendered+" "+bubbleStyle.Render(string(bRunes[:sp])))
+					rest := strings.TrimSpace(string(bRunes[sp:]))
+					if len([]rune(rest)) > textW {
+						rest = string([]rune(rest)[:textW-1]) + "\u2026"
 					}
-					if remainder != "" {
-						lines = append(lines, "   "+bubbleStyle.Render(remainder))
-					}
+					bodyRendered := spriteStyle.Render(sprite[2])
+					lines = append(lines, " "+bodyRendered+" "+bubbleStyle.Render(rest))
+					continue
 				}
 			}
+			// Line 4: body
+			lines = append(lines, " "+spriteStyle.Render(sprite[2]))
 		}
 	}
 
