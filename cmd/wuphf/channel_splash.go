@@ -11,27 +11,27 @@ import (
 	"github.com/nex-crm/wuphf/internal/company"
 )
 
-// ── Big mascots (8 lines tall) for the splash screen ──────────────
+// ── Splash portraits (6 lines tall) ───────────────────────────────
 //
-// These are not random hats anymore. Each role gets a clean mascot-like
-// portrait with one visual grammar: top accent, rounded head, expression,
-// and a small prop/pose.
+// The splash should read like a clean cast photo, not a stack of ASCII limbs.
+// Each teammate gets the same portrait card shape with small role-specific
+// trait differences. Fixed slot width keeps the lineup tidy.
 
 type bigSprite struct {
-	Lines [8]string // 8 lines tall, each ~9 chars wide
+	Lines [6]string // 6 lines tall, each 9 chars wide
 }
 
 func bigSpriteForSlug(slug string, pose int) bigSprite {
-	top := map[string]string{
-		"ceo":      "  /^^\\\\  ",
-		"pm":       "  /^^\\\\  ",
-		"fe":       "  /^^\\\\  ",
-		"be":       "  /^^\\\\  ",
-		"ai":       "  /~~\\\\  ",
-		"designer": "  /~~\\\\  ",
-		"cmo":      "  /^^\\\\  ",
-		"cro":      "  /^^\\\\  ",
-		"nex":      "  /~~\\\\  ",
+	accent := map[string]string{
+		"ceo":      "⌐",
+		"pm":       "□",
+		"fe":       "=",
+		"be":       "#",
+		"ai":       "*",
+		"designer": "~",
+		"cmo":      "!",
+		"cro":      "$",
+		"nex":      "◎",
 	}
 	eyes := map[string]string{
 		"ceo":      "■ ■",
@@ -41,49 +41,51 @@ func bigSpriteForSlug(slug string, pose int) bigSprite {
 		"cmo":      "✶ ✶",
 	}
 	prop := map[string]string{
-		"ceo":      "  /|$\\  ",
-		"pm":       "  /|]\\  ",
-		"fe":       "  /|=\\  ",
-		"be":       "  /|#\\  ",
-		"ai":       "  /|*\\  ",
-		"designer": "  /|~\\  ",
-		"cmo":      "  /|!\\  ",
-		"cro":      "  /|%\\  ",
-		"nex":      "  /|o\\  ",
+		"ceo":      "$",
+		"pm":       "]",
+		"fe":       "=",
+		"be":       "#",
+		"ai":       "*",
+		"designer": "~",
+		"cmo":      "!",
+		"cro":      "%",
+		"nex":      "o",
 	}
-	feet := [4]string{"  / \\   ", "  / \\   ", "  | |   ", "  / \\   "}
-	stance := [4]string{"   ||    ", "   ||    ", "   ||    ", "   ||    "}
-	body := [4]string{"  /|\\   ", "  \\|/   ", "  /|=   ", "  /|>   "}
-	mouths := [4]string{"  ‿  ", "  o  ", "  ▿  ", "  ᴗ  "}
+	mouths := [4]string{" ‿ ", " o ", " ▿ ", " ᴗ "}
 
-	header := top[slug]
-	if header == "" {
-		header = "  ····  "
+	roleAccent := accent[slug]
+	if roleAccent == "" {
+		roleAccent = "•"
 	}
 	eyeLine := eyes[slug]
 	if eyeLine == "" {
 		eyeLine = "• •"
 	}
-	p := pose % 4
+	propGlyph := prop[slug]
+	if propGlyph == "" {
+		propGlyph = "·"
+	}
+	p := pose % len(mouths)
 	return bigSprite{
-		Lines: [8]string{
-			header,
-			"  /___\\  ",
-			" / " + eyeLine + " \\ ",
-			"| " + mouths[p] + " |",
-			stance[p],
-			coalesceSpriteLine(prop[slug], body[p]),
-			feet[p],
-			"  ‾ ‾   ",
+		Lines: [6]string{
+			"╭───────╮",
+			splashPortraitLine("  " + roleAccent + " " + roleAccent + "  "),
+			splashPortraitLine("  " + eyeLine + "  "),
+			splashPortraitLine("  " + mouths[p] + "  "),
+			splashPortraitLine("   " + propGlyph + "   "),
+			"╰───────╯",
 		},
 	}
 }
 
-func coalesceSpriteLine(primary, fallback string) string {
-	if strings.TrimSpace(primary) != "" {
-		return primary
+func splashPortraitLine(inner string) string {
+	runes := []rune(inner)
+	if len(runes) > 7 {
+		inner = string(runes[:7])
+	} else if len(runes) < 7 {
+		inner = inner + strings.Repeat(" ", 7-len(runes))
 	}
-	return fallback
+	return "│" + inner + "│"
 }
 
 // ── Splash model ──────────────────────────────────────────────────
@@ -239,11 +241,11 @@ func (m splashModel) renderCast() string {
 	}
 
 	// Render sprite lines (8 lines tall)
-	spriteHeight := 8
+	spriteHeight := 6
 	var lines []string
 
 	// Vertical centering: put sprites in the middle of the screen
-	topPad := (m.height - spriteHeight - 4) / 2 // -4 for name labels + spacing
+	topPad := (m.height - spriteHeight - 4) / 2 // -4 for labels + spacing
 	if topPad < 0 {
 		topPad = 0
 	}
@@ -261,27 +263,18 @@ func (m splashModel) renderCast() string {
 			}
 			style := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor))
 
-			// Entrance animation: slide up from bottom
+			// Entrance animation: reveal whole portraits, not disembodied rows.
 			visibleAge := m.shown - i
 			if visibleAge <= 0 {
 				lineParts = append(lineParts, strings.Repeat(" ", spriteW))
 				continue
 			}
-
-			// Animate: first few frames show bottom lines only (slide up)
-			revealedRows := visibleAge * 3 // reveal 3 rows per tick
-			rowFromBottom := spriteHeight - 1 - row
-			if rowFromBottom >= revealedRows {
-				lineParts = append(lineParts, strings.Repeat(" ", spriteW))
-			} else {
-				rendered := style.Render(sp.Lines[row])
-				// Pad to spriteW
-				w := ansi.StringWidth(rendered)
-				if w < spriteW {
-					rendered += strings.Repeat(" ", spriteW-w)
-				}
-				lineParts = append(lineParts, rendered)
+			rendered := style.Render(sp.Lines[row])
+			w := ansi.StringWidth(rendered)
+			if w < spriteW {
+				rendered += strings.Repeat(" ", spriteW-w)
 			}
+			lineParts = append(lineParts, rendered)
 		}
 		line := strings.Repeat(" ", leftPad) + strings.Join(lineParts, strings.Repeat(" ", spacing))
 		lines = append(lines, line)
