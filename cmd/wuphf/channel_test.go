@@ -191,7 +191,7 @@ func TestChannelViewShowsThreadReplyLabel(t *testing.T) {
 	if !strings.Contains(view, "thread reply to @ceo") {
 		t.Fatalf("expected threaded reply label in view, got %q", view)
 	}
-	if !strings.Contains(view, "↳ 📣 CMO") {
+	if !strings.Contains(view, "↳ ✶ CMO") {
 		t.Fatalf("expected threaded reply header marker, got %q", view)
 	}
 }
@@ -1078,10 +1078,10 @@ func TestChannelViewShowsUsageTotals(t *testing.T) {
 	if !strings.Contains(view, "Spend to date $1.23") {
 		t.Fatalf("expected overall spend summary, got %q", view)
 	}
-	if !strings.Contains(view, "☕ 5.0k tok · $0.62") {
+	if !strings.Contains(view, "◆ 5.0k tok · $0.62") {
 		t.Fatalf("expected per-agent usage pill, got %q", view)
 	}
-	if !strings.Contains(view, "🖥 7.5k tok · $0.61") {
+	if !strings.Contains(view, "▤ 7.5k tok · $0.61") {
 		t.Fatalf("expected frontend usage pill, got %q", view)
 	}
 }

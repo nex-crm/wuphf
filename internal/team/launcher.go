@@ -1339,20 +1339,9 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 		return err
 	}
 
-	// Build ordered slug list matching pane positions
+	// Respawn each agent pane in place, preserving layout.
+	// Never clear+recreate panes — that destroys the channel's layout.
 	slugs := l.agentPaneSlugs()
-	if len(panes) != len(slugs) {
-		if err := l.clearAgentPanes(); err != nil {
-			return err
-		}
-		if _, err := l.spawnVisibleAgents(); err != nil {
-			return err
-		}
-		if l.broker != nil {
-			go l.primeVisibleAgents()
-		}
-		return nil
-	}
 
 	for _, idx := range panes {
 		// Map pane index to agent slug (pane 1 = first agent, etc.)

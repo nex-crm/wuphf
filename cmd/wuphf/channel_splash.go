@@ -11,88 +11,79 @@ import (
 	"github.com/nex-crm/wuphf/internal/company"
 )
 
-// ── Big sprites (8 lines tall) for the splash screen ──────────────
+// ── Big mascots (8 lines tall) for the splash screen ──────────────
 //
-// Each big sprite has a hat, head, face, neck, torso, arms, legs, feet.
-// These are the "cast photo" versions — bigger, more detailed.
+// These are not random hats anymore. Each role gets a clean mascot-like
+// portrait with one visual grammar: top accent, rounded head, expression,
+// and a small prop/pose.
 
 type bigSprite struct {
 	Lines [8]string // 8 lines tall, each ~9 chars wide
 }
 
-// bigSpriteForHat returns an 8-line character based on the hat index.
-// The hat defines identity. Body is a shared base with pose variations.
-func bigSpriteForHat(hatIdx int, pose int) bigSprite {
-	hats := [16][2]string{
-		// idx 0: sunglasses (CEO)
-		{"   ___   ", "  |___|  "},
-		// idx 1: beanie
-		{"  .▓▓▓.  ", "  '---'  "},
-		// idx 2: mohawk
-		{"   /|\\   ", "  '   '  "},
-		// idx 3: flat cap
-		{"  .----, ", "  '----' "},
-		// idx 4: crown
-		{"  \\|^|/  ", "   '''   "},
-		// idx 5: top hat
-		{"  |===|  ", "  .----, "},
-		// idx 6: beret
-		{"   .@    ", "  '  '   "},
-		// idx 7: antenna
-		{"    |    ", "   (o)   "},
-		// idx 8: headphones
-		{"  .--.   ", "  |  |   "},
-		// idx 9: pointy ears
-		{"  /\\  /\\ ", "   '--'  "},
-		// idx 10: flower
-		{"   *@*   ", "   '|'   "},
-		// idx 11: backwards cap
-		{"  ,---.  ", "  '---=  "},
-		// idx 12: wavy hair
-		{"  ~~~~~  ", "  '   '  "},
-		// idx 13: visor
-		{"  =====  ", "  '---'  "},
-		// idx 14: round goggles
-		{" -(O O)- ", "   '-'   "},
-		// idx 15: flat top
-		{"  _____  ", "  |   |  "},
+func bigSpriteForSlug(slug string, pose int) bigSprite {
+	top := map[string]string{
+		"ceo":      "  /^^\\\\  ",
+		"pm":       "  /^^\\\\  ",
+		"fe":       "  /^^\\\\  ",
+		"be":       "  /^^\\\\  ",
+		"ai":       "  /~~\\\\  ",
+		"designer": "  /~~\\\\  ",
+		"cmo":      "  /^^\\\\  ",
+		"cro":      "  /^^\\\\  ",
+		"nex":      "  /~~\\\\  ",
 	}
-
-	hat := hats[hatIdx%16]
-
-	// Pose variations for the body
-	faces := [4]string{
-		" ( o_o) ", // 0: neutral
-		" ( o.o) ", // 1: curious
-		" ( >_<) ", // 2: focused
-		" ( ^_^) ", // 3: happy
+	eyes := map[string]string{
+		"ceo":      "■ ■",
+		"ai":       "◉ ◉",
+		"nex":      "◉ ◉",
+		"designer": "◕ ◕",
+		"cmo":      "✶ ✶",
 	}
-
-	bodies := [4][4]string{
-		// Pose 0: standing
-		{"   ||   ", "  /|\\   ", "  / \\   ", "  d b   "},
-		// Pose 1: waving
-		{"   ||   ", " \\|/   ", "  / \\   ", "  d b   "},
-		// Pose 2: typing
-		{"   ||   ", "  |=|   ", "  | |   ", "  d b   "},
-		// Pose 3: pointing
-		{"   ||   ", "  |\\>  ", "  / \\   ", "  d b   "},
+	prop := map[string]string{
+		"ceo":      "  /|$\\  ",
+		"pm":       "  /|]\\  ",
+		"fe":       "  /|=\\  ",
+		"be":       "  /|#\\  ",
+		"ai":       "  /|*\\  ",
+		"designer": "  /|~\\  ",
+		"cmo":      "  /|!\\  ",
+		"cro":      "  /|%\\  ",
+		"nex":      "  /|o\\  ",
 	}
+	feet := [4]string{"  / \\   ", "  / \\   ", "  | |   ", "  / \\   "}
+	stance := [4]string{"   ||    ", "   ||    ", "   ||    ", "   ||    "}
+	body := [4]string{"  /|\\   ", "  \\|/   ", "  /|=   ", "  /|>   "}
+	mouths := [4]string{"  ‿  ", "  o  ", "  ▿  ", "  ᴗ  "}
 
+	header := top[slug]
+	if header == "" {
+		header = "  ····  "
+	}
+	eyeLine := eyes[slug]
+	if eyeLine == "" {
+		eyeLine = "• •"
+	}
 	p := pose % 4
-
 	return bigSprite{
 		Lines: [8]string{
-			hat[0],
-			hat[1],
-			faces[p],
-			"   ||   ", // neck
-			bodies[p][0],
-			bodies[p][1],
-			bodies[p][2],
-			bodies[p][3],
+			header,
+			"  /___\\  ",
+			" / " + eyeLine + " \\ ",
+			"| " + mouths[p] + " |",
+			stance[p],
+			coalesceSpriteLine(prop[slug], body[p]),
+			feet[p],
+			"  ‾ ‾   ",
 		},
 	}
+}
+
+func coalesceSpriteLine(primary, fallback string) string {
+	if strings.TrimSpace(primary) != "" {
+		return primary
+	}
+	return fallback
 }
 
 // ── Splash model ──────────────────────────────────────────────────
@@ -242,10 +233,9 @@ func (m splashModel) renderCast() string {
 	var spriteColumns []bigSprite
 	for i := 0; i < count; i++ {
 		member := m.members[i]
-		hatIdx := assignSpriteIndex(member.Slug)
 		// Assign a different pose to each character
 		pose := i % 4
-		spriteColumns = append(spriteColumns, bigSpriteForHat(hatIdx, pose))
+		spriteColumns = append(spriteColumns, bigSpriteForSlug(member.Slug, pose))
 	}
 
 	// Render sprite lines (8 lines tall)

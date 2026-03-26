@@ -389,7 +389,11 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 		if name == "" {
 			name = displayName(m.Slug)
 		}
-		name = truncateLabel(name, innerW-8)
+		nameMax := innerW - 8 - ansi.StringWidth(act.Label)
+		if nameMax < 8 {
+			nameMax = 8
+		}
+		name = truncateLabel(name, nameMax)
 		nameStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(agentColor)).
 			Bold(true)
@@ -398,22 +402,21 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 		if role == "" {
 			role = roleLabel(m.Slug)
 		}
-		role = truncateLabel(role, innerW-8)
-		roleRendered := memberMetaStyle.Render(role)
 		accent := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Render("▎")
 		leftPart := accent + " " + dot + " " + nameRendered
 		if compact {
-			// Compact: single line per member (name + activity, no face)
+			// Compact: single line per member with a compact mascot.
 			meta := memberMetaStyle.Render(act.Label)
-			pad := innerW - ansi.StringWidth(leftPart) - ansi.StringWidth(meta)
+			mini := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Render(character.Avatar)
+			line := leftPart + " " + mini
+			pad := innerW - ansi.StringWidth(line) - ansi.StringWidth(meta)
 			if pad < 1 {
 				pad = 1
 			}
-			lines = append(lines, " "+leftPart+strings.Repeat(" ", pad)+meta)
+			lines = append(lines, " "+line+strings.Repeat(" ", pad)+meta)
 		} else {
-			// Full mode: multi-line sprite alongside name/role/bubble
-			sprite := spriteLines(m.Slug, act.Label, int(now.Unix()%2))
-			spriteStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor))
+			// Full mode: one clean mascot line + role + aside.
+			avatarStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Bold(true)
 			bubbleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7A7A7E")).Italic(true)
 
 			// Line 1: accent + dot + name + activity
@@ -424,50 +427,25 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 			lines = append(lines, " "+leftPart+strings.Repeat(" ", pad)+memberMetaStyle.Render(act.Label))
 
 			// Lines 2-4: sprite hat/face/body with role + bubble alongside
-			const spriteW = 8
-			textW := innerW - spriteW
+			const avatarW = 10
+			textW := innerW - avatarW
 			if textW < 6 {
 				textW = 6
 			}
+			roleRendered := memberMetaStyle.Render(truncateLabel(role, textW))
+			avatarRendered := avatarStyle.Render(character.Avatar)
+			lines = append(lines, " "+avatarRendered+" "+roleRendered)
 
-			// Line 2: hat + role
-			lines = append(lines, " "+spriteStyle.Render(sprite[0])+" "+roleRendered)
-
-			// Line 3: face + bubble
+			// Line 3+: aside bubble
 			bubbleText := ""
 			if character.Bubble != "" {
 				bubbleText = "\u201c" + character.Bubble + "\u201d"
 			}
-			faceRendered := spriteStyle.Render(sprite[1])
 			if bubbleText == "" {
-				lines = append(lines, " "+faceRendered)
+				lines = append(lines, " "+strings.Repeat(" ", avatarW)+memberMetaStyle.Render("Quiet for now."))
 			} else {
-				bRunes := []rune(bubbleText)
-				if len(bRunes) <= textW {
-					lines = append(lines, " "+faceRendered+" "+bubbleStyle.Render(bubbleText))
-				} else {
-					sp := textW
-					for sp > textW/2 {
-						if bRunes[sp] == ' ' {
-							break
-						}
-						sp--
-					}
-					if sp <= textW/2 {
-						sp = textW
-					}
-					lines = append(lines, " "+faceRendered+" "+bubbleStyle.Render(string(bRunes[:sp])))
-					rest := strings.TrimSpace(string(bRunes[sp:]))
-					if len([]rune(rest)) > textW {
-						rest = string([]rune(rest)[:textW-1]) + "\u2026"
-					}
-					bodyRendered := spriteStyle.Render(sprite[2])
-					lines = append(lines, " "+bodyRendered+" "+bubbleStyle.Render(rest))
-					continue
-				}
+				lines = append(lines, " "+strings.Repeat(" ", avatarW)+bubbleStyle.Render(truncateLabel(bubbleText, textW)))
 			}
-			// Line 4: body
-			lines = append(lines, " "+spriteStyle.Render(sprite[2]))
 		}
 	}
 
