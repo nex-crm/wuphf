@@ -245,6 +245,7 @@ func (l *Launcher) Launch() error {
 	go l.watchChannelPaneLoop(channelCmd)
 	go l.primeVisibleAgents()
 	go l.notifyAgentsLoop()
+	go l.notifyTaskActionsLoop()
 	go l.pollNexNotificationsLoop()
 	go l.pollNexInsightsLoop()
 
@@ -280,6 +281,40 @@ func (l *Launcher) notifyAgentsLoop() {
 	}
 }
 
+func (l *Launcher) notifyTaskActionsLoop() {
+	lastCount := 0
+
+	for {
+		time.Sleep(3 * time.Second)
+
+		if l.broker == nil || l.broker.HasPendingInterview() {
+			continue
+		}
+
+		actions := l.broker.Actions()
+		if len(actions) < lastCount {
+			lastCount = len(actions)
+		}
+		if len(actions) <= lastCount {
+			continue
+		}
+
+		newActions := actions[lastCount:]
+		lastCount = len(actions)
+
+		for _, action := range newActions {
+			if action.Kind != "task_created" && action.Kind != "task_updated" {
+				continue
+			}
+			task, ok := l.taskForAction(action)
+			if !ok || strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+				continue
+			}
+			l.deliverTaskNotification(action, task)
+		}
+	}
+}
+
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 	for _, target := range immediate {
@@ -296,9 +331,194 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	}
 }
 
+func (l *Launcher) deliverTaskNotification(action officeActionLog, task teamTask) {
+	immediate, delayed := l.taskNotificationTargets(action, task)
+	if len(immediate) == 0 && len(delayed) == 0 {
+		return
+	}
+	content := l.taskNotificationContent(action, task)
+	for _, target := range immediate {
+		l.sendTaskUpdate(target.PaneIndex, target.Slug, task.Channel, task.ID, action.Actor, content)
+	}
+	for _, target := range delayed {
+		go func(target notificationTarget, action officeActionLog, task teamTask) {
+			time.Sleep(ceoHeadStartDelay)
+			if !l.shouldDeliverDelayedTaskNotification(target.Slug, action, task) {
+				return
+			}
+			l.sendTaskUpdate(target.PaneIndex, target.Slug, task.Channel, task.ID, action.Actor, content)
+		}(target, action, task)
+	}
+}
+
 type notificationTarget struct {
 	PaneIndex int
 	Slug      string
+}
+
+func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask) (immediate []notificationTarget, delayed []notificationTarget) {
+	slugs := l.agentPaneSlugs()
+	if len(slugs) == 0 {
+		return nil, nil
+	}
+	lead := l.officeLeadSlug()
+	targetMap := make(map[string]notificationTarget)
+	for i, slug := range slugs {
+		targetMap[slug] = notificationTarget{PaneIndex: i + 1, Slug: slug}
+	}
+	enabledMembers := map[string]struct{}{}
+	if l.broker != nil {
+		for _, member := range l.broker.EnabledMembers(task.Channel) {
+			enabledMembers[member] = struct{}{}
+		}
+	}
+	addImmediate := func(slug string) {
+		if slug == "" {
+			return
+		}
+		if len(enabledMembers) > 0 {
+			if _, ok := enabledMembers[slug]; !ok {
+				return
+			}
+		}
+		if target, ok := targetMap[slug]; ok {
+			immediate = append(immediate, target)
+			delete(targetMap, slug)
+		}
+	}
+	addDelayed := func(slug string) {
+		if slug == "" {
+			return
+		}
+		if len(enabledMembers) > 0 {
+			if _, ok := enabledMembers[slug]; !ok {
+				return
+			}
+		}
+		if target, ok := targetMap[slug]; ok {
+			delayed = append(delayed, target)
+			delete(targetMap, slug)
+		}
+	}
+	actor := strings.TrimSpace(action.Actor)
+	owner := strings.TrimSpace(task.Owner)
+
+	if owner == "" {
+		if lead != "" && lead != actor {
+			addImmediate(lead)
+		}
+		return immediate, delayed
+	}
+
+	if owner == lead {
+		if lead != "" && lead != actor {
+			addImmediate(lead)
+		}
+		return immediate, delayed
+	}
+
+	// Assigned owners should start immediately when new work lands, especially
+	// for CEO-created or automation-created tasks. This is the bridge between
+	// "policy created work" and "the specialist actually begins moving."
+	if action.Kind == "task_created" && owner != actor {
+		addImmediate(owner)
+	} else if owner != actor {
+		addDelayed(owner)
+	}
+
+	if lead != "" && lead != owner && lead != actor {
+		addImmediate(lead)
+	}
+
+	return immediate, delayed
+}
+
+func (l *Launcher) taskForAction(action officeActionLog) (teamTask, bool) {
+	if l.broker == nil || strings.TrimSpace(action.RelatedID) == "" {
+		return teamTask{}, false
+	}
+	channel := normalizeChannelSlug(action.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	for _, task := range l.broker.ChannelTasks(channel) {
+		if task.ID == strings.TrimSpace(action.RelatedID) {
+			return task, true
+		}
+	}
+	return teamTask{}, false
+}
+
+func (l *Launcher) shouldDeliverDelayedTaskNotification(targetSlug string, action officeActionLog, task teamTask) bool {
+	if l.broker == nil {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		return false
+	}
+	current, ok := l.taskForAction(action)
+	if !ok {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(current.Status), "done") {
+		return false
+	}
+	if strings.TrimSpace(current.Owner) != "" && strings.TrimSpace(current.Owner) != targetSlug && targetSlug != l.officeLeadSlug() {
+		return false
+	}
+	if strings.TrimSpace(current.Owner) == "" && targetSlug != l.officeLeadSlug() {
+		return false
+	}
+	return true
+}
+
+func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask) string {
+	channel := normalizeChannelSlug(task.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	verb := "Task update"
+	switch action.Kind {
+	case "task_created":
+		verb = "Task created"
+	case "task_updated":
+		verb = "Task updated"
+	}
+	owner := strings.TrimSpace(task.Owner)
+	if owner == "" {
+		owner = "unassigned"
+	} else {
+		owner = "@" + owner
+	}
+	status := strings.TrimSpace(task.Status)
+	if status == "" {
+		status = "open"
+	}
+	details := strings.TrimSpace(task.Details)
+	if details != "" {
+		details = " — " + truncate(details, 120)
+	}
+	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s). Before you speak, call team_poll and team_tasks, confirm whether you own this work, and stay in your lane.", verb, task.ID, channel, task.Title, details, owner, status)
+}
+
+func (l *Launcher) sendTaskUpdate(paneIdx int, slug, channel, taskID, from, content string) {
+	if strings.TrimSpace(channel) == "" {
+		channel = "general"
+	}
+	notification := fmt.Sprintf(
+		"[Task update #%s %s from @%s]: %s — Before you say anything, call team_poll with my_slug \"%s\" and channel \"%s\", then call team_tasks for the current ownership. If the task is outside your lane or someone else owns it, stay quiet. If you are the owner, reply with the concrete next step and update the task.",
+		channel, taskID, from, truncate(content, 150), slug, channel,
+	)
+	paneTarget := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
+	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget,
+		"-l",
+		notification,
+	).Run()
+	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget,
+		"Enter",
+	).Run()
 }
 
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {

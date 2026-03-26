@@ -144,7 +144,9 @@ func dateSeparatorStyle() lipgloss.Style {
 
 func threadIndicatorStyle() lipgloss.Style {
 	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color(slackActive))
+		Foreground(lipgloss.Color(slackActive)).
+		Bold(true).
+		Underline(true)
 }
 
 func agentAvatar(slug string) string {
@@ -174,18 +176,137 @@ func agentAvatar(slug string) string {
 	}
 }
 
+// agentCharacter returns an animated character face for the sidebar.
+// Each persona has a distinct visual identity using Unicode box/bracket
+// characters as "frames" — the accessory/bracket style encodes the role,
+// and the internal expression changes with activity state.
+//
+// Two frames per state create subtle aliveness (alternating each second).
+//
+// Design language:
+//   CEO:      [⌐■_■]  sunglasses founder — cool, decisive
+//   PM:       [°□°]   wide-eyed organizer — seeing everything
+//   FE:      <°_°>    angle brackets — code-brained
+//   BE:      {¬_¬}    curly braces — skeptical systems thinker
+//   AI:      «○_○»    guillemets — data/model vibes
+//   Designer: ~°‿°~   tildes — creative, flowing
+//   CMO:      ♪°_°    music note — storyteller energy
+//   CRO:      $°_°    dollar — revenue-focused
+func agentCharacter(slug, activity string, frame int) string {
+	f := frame % 2
+	switch slug {
+	case "ceo":
+		switch activity {
+		case "talking":
+			return pick(f, "[⌐■ᗜ■]", "[⌐■ᗜ■]ᐊ")
+		case "shipping":
+			return pick(f, "[⌐■▿■]", "[⌐■▿■]▸")
+		case "plotting":
+			return pick(f, "[⌐■_■]…", "[⌐■‸■] ")
+		default:
+			return pick(f, "[⌐■_■]", "[⌐■_■] ")
+		}
+	case "pm":
+		switch activity {
+		case "talking":
+			return pick(f, "[°ᗜ°]▐", "[°ᗜ°]▐!")
+		case "shipping":
+			return pick(f, "[°▿°]▐", "[°▿°]▸")
+		case "plotting":
+			return pick(f, "[°‸°]▐", "[°_°]▐…")
+		default:
+			return pick(f, "[°□°]▐", "[°□°]▐")
+		}
+	case "fe":
+		switch activity {
+		case "talking":
+			return pick(f, "<°ᗜ°>", "<°ᗜ°>ᐊ")
+		case "shipping":
+			return pick(f, "<°▿°>█", "<°▿°>▊")
+		case "plotting":
+			return pick(f, "<°‸°>", "<°_°>…")
+		default:
+			return pick(f, "<°_°>", "<°_°> ")
+		}
+	case "be":
+		switch activity {
+		case "talking":
+			return pick(f, "{¬ᗜ¬}", "{¬ᗜ¬}ᐊ")
+		case "shipping":
+			return pick(f, "{¬▿¬}█", "{¬▿¬}▊")
+		case "plotting":
+			return pick(f, "{¬‸¬}", "{¬_¬}…")
+		default:
+			return pick(f, "{¬_¬}", "{¬_¬} ")
+		}
+	case "ai":
+		switch activity {
+		case "talking":
+			return pick(f, "«○ᗜ○»", "«○ᗜ○»ᐊ")
+		case "shipping":
+			return pick(f, "«●_●»", "«○_○»")
+		case "plotting":
+			return pick(f, "«○‸○»", "«○_○»…")
+		default:
+			return pick(f, "«○_○»", "«○_○» ")
+		}
+	case "designer":
+		switch activity {
+		case "talking":
+			return pick(f, "~°ᗜ°~", "~°ᗜ°~ᐊ")
+		case "shipping":
+			return pick(f, "~°▿°~✎", "~°▿°~✎")
+		case "plotting":
+			return pick(f, "~°‸°~", "~°_°~…")
+		default:
+			return pick(f, "~°‿°~", "~°‿°~ ")
+		}
+	case "cmo":
+		switch activity {
+		case "talking":
+			return pick(f, "♪°ᗜ°", "♫°ᗜ°ᐊ")
+		case "shipping":
+			return pick(f, "♪°▿°►", "♫°▿°▸")
+		case "plotting":
+			return pick(f, "♪°‸°", "♫°_°…")
+		default:
+			return pick(f, "♪°ᴗ°", "♫°ᴗ° ")
+		}
+	case "cro":
+		switch activity {
+		case "talking":
+			return pick(f, "$°ᗜ°", "$°ᗜ°ᐊ")
+		case "shipping":
+			return pick(f, "$°▿°▸", "$°▿°►")
+		case "plotting":
+			return pick(f, "$°‸°", "$°_°…")
+		default:
+			return pick(f, "$°_°", "$°_° ")
+		}
+	default:
+		return pick(f, "(°_°)", "(°_°) ")
+	}
+}
+
+func pick(frame int, a, b string) string {
+	if frame == 0 {
+		return a
+	}
+	return b
+}
+
 func appIcon(app officeApp) string {
 	switch app {
 	case officeAppTasks:
 		return "☑"
 	case officeAppRequests:
-		return "✋"
+		return "?"
 	case officeAppInsights:
 		return "✦"
 	case officeAppCalendar:
-		return "🗓"
+		return "◷"
 	case officeAppMessages:
-		return "💬"
+		return "•"
 	default:
 		return "#"
 	}

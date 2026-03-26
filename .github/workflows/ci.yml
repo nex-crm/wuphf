@@ -17,4 +17,4 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
-      - run: go build -o wuphf ./cmd/nex
+      - run: go build -o wuphf ./cmd/wuphf

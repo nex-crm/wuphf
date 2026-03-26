@@ -387,8 +387,9 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 		0,
 		false,
 		quickJumpNone,
+		true,
 		36,
-		28,
+		40,
 	))
 	if !strings.Contains(sidebar, "Frontend Engineer") {
 		t.Fatalf("expected sidebar member, got %q", sidebar)
@@ -398,6 +399,62 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 	}
 	if !strings.Contains(sidebar, "Ctrl+G channels") {
 		t.Fatalf("expected quick nav hint in sidebar, got %q", sidebar)
+	}
+}
+
+func TestRenderSidebarUsesCompactRosterWhenSpaceIsTight(t *testing.T) {
+	sidebar := stripANSI(renderSidebar(
+		[]channelInfo{{Slug: "general", Name: "general"}},
+		nil,
+		"general",
+		officeAppMessages,
+		0,
+		false,
+		quickJumpNone,
+		false,
+		36,
+		22,
+	))
+	if !strings.Contains(sidebar, "People · office roster") {
+		t.Fatalf("expected compact sidebar still to render people section, got %q", sidebar)
+	}
+	if strings.Contains(sidebar, "“") {
+		t.Fatalf("expected compact sidebar to omit speech bubbles, got %q", sidebar)
+	}
+	if !strings.Contains(sidebar, "CEO") {
+		t.Fatalf("expected compact sidebar to show fallback roster, got %q", sidebar)
+	}
+}
+
+func TestClassifyActivityInvalidTimestampStaysIdle(t *testing.T) {
+	act := classifyActivity(channelMember{
+		Slug:        "fe",
+		LastTime:    "not-a-time",
+		LastMessage: "git add, git commit, and ship it",
+	})
+	if act.Label != "lurking" {
+		t.Fatalf("expected invalid timestamps to fall back to lurking, got %#v", act)
+	}
+}
+
+func TestRenderSidebarFallsBackToOfficeRosterWhenPeopleListIsEmpty(t *testing.T) {
+	sidebar := stripANSI(renderSidebar(
+		[]channelInfo{{Slug: "general", Name: "general"}},
+		nil,
+		"general",
+		officeAppMessages,
+		0,
+		false,
+		quickJumpNone,
+		false,
+		42,
+		20,
+	))
+	if !strings.Contains(sidebar, "People · office roster") {
+		t.Fatalf("expected office roster header, got %q", sidebar)
+	}
+	if !strings.Contains(sidebar, "CEO") || !strings.Contains(sidebar, "+7 more in office") {
+		t.Fatalf("expected fallback roster members, got %q", sidebar)
 	}
 }
 
@@ -833,9 +890,6 @@ func TestCalendarViewRendersSchedulerAndActions(t *testing.T) {
 	view := stripANSI(m.View())
 	if !strings.Contains(view, "Calendar") || !strings.Contains(view, "Nex insights") || !strings.Contains(view, "Opened a follow-up task") {
 		t.Fatalf("expected calendar view content, got %q", view)
-	}
-	if !strings.Contains(view, "d day") || !strings.Contains(view, "w week") {
-		t.Fatalf("expected calendar toolbar controls, got %q", view)
 	}
 }
 

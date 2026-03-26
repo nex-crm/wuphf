@@ -658,7 +658,15 @@ func dedupeCalendarEvents(events []calendarEvent) []calendarEvent {
 	seen := make(map[string]bool)
 	var out []calendarEvent
 	for _, event := range events {
-		key := event.Kind + "|" + event.Title + "|" + event.Secondary + "|" + event.When.Format(time.RFC3339)
+		identity := event.Kind + "|" + event.Title
+		if strings.TrimSpace(event.TaskID) != "" {
+			identity = "task|" + strings.TrimSpace(event.TaskID)
+		} else if strings.TrimSpace(event.RequestID) != "" {
+			identity = "request|" + strings.TrimSpace(event.RequestID)
+		} else if strings.TrimSpace(event.ThreadID) != "" {
+			identity = identity + "|thread:" + strings.TrimSpace(event.ThreadID)
+		}
+		key := identity + "|" + event.Secondary + "|" + event.When.Format(time.RFC3339)
 		if seen[key] {
 			continue
 		}

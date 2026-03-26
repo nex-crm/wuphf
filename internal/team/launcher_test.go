@@ -398,3 +398,98 @@ func TestShouldDeliverDelayedNotificationSkipsWrongDomainAndTaskOwnerConflict(t 
 		t.Fatal("expected CMO delayed notification to be allowed for matching domain owner")
 	}
 }
+
+func TestTaskNotificationTargetsFollowOwnerAndCEOHeadStart(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "cmo", Name: "CMO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+	task := teamTask{
+		ID:        "task-1",
+		Channel:   "general",
+		Title:     "Positioning work",
+		Details:   "Draft a tighter launch narrative",
+		Owner:     "cmo",
+		Status:    "in_progress",
+		CreatedBy: "you",
+	}
+
+	immediate, delayed := l.taskNotificationTargets(officeActionLog{
+		Kind:      "task_created",
+		Actor:     "you",
+		Channel:   "general",
+		RelatedID: "task-1",
+	}, task)
+
+	if len(immediate) != 2 || !containsNotificationTarget(immediate, "ceo") || !containsNotificationTarget(immediate, "cmo") {
+		t.Fatalf("expected CEO immediate target, got %+v", immediate)
+	}
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed target after immediate owner kickoff, got %+v", delayed)
+	}
+
+	immediate, delayed = l.taskNotificationTargets(officeActionLog{
+		Kind:      "task_created",
+		Actor:     "ceo",
+		Channel:   "general",
+		RelatedID: "task-1",
+	}, task)
+	if len(immediate) != 1 || !containsNotificationTarget(immediate, "cmo") {
+		t.Fatalf("expected owner immediate target when CEO created the task, got %+v", immediate)
+	}
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed target when CEO created the task, got %+v", delayed)
+	}
+
+	immediate, delayed = l.taskNotificationTargets(officeActionLog{
+		Kind:      "task_updated",
+		Actor:     "cmo",
+		Channel:   "general",
+		RelatedID: "task-1",
+	}, task)
+	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
+		t.Fatalf("expected CEO immediate target on owner update, got %+v", immediate)
+	}
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed target on owner update, got %+v", delayed)
+	}
+}
+
+func containsNotificationTarget(targets []notificationTarget, slug string) bool {
+	for _, target := range targets {
+		if target.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+func TestTaskNotificationContentIncludesOwnershipAndGuidance(t *testing.T) {
+	l := &Launcher{}
+	got := l.taskNotificationContent(officeActionLog{
+		Kind:  "task_created",
+		Actor: "you",
+	}, teamTask{
+		ID:      "task-9",
+		Channel: "general",
+		Title:   "Launch page",
+		Details: "Tighten the story and assign follow-up",
+		Owner:   "cmo",
+		Status:  "in_progress",
+	})
+	if !strings.Contains(got, "Task created #task-9 on #general") {
+		t.Fatalf("unexpected content prefix: %q", got)
+	}
+	if !strings.Contains(got, "owner @cmo") || !strings.Contains(got, "status in_progress") {
+		t.Fatalf("expected ownership/status in content: %q", got)
+	}
+	if !strings.Contains(got, "team_poll") || !strings.Contains(got, "team_tasks") {
+		t.Fatalf("expected routing guidance in content: %q", got)
+	}
+}

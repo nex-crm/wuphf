@@ -21,6 +21,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/nex-crm/wuphf/internal/api"
+	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/team"
@@ -62,6 +63,10 @@ type channelSchedulerMsg struct {
 
 type channelUsageMsg struct {
 	usage channelUsageState
+}
+
+type channelHealthMsg struct {
+	Connected bool
 }
 
 type brokerMessage struct {
@@ -401,6 +406,7 @@ type channelModel struct {
 	threadInputPos   int
 	threadScroll     int
 	usage            channelUsageState
+	brokerConnected  bool
 	lastCtrlCAt      time.Time
 	quickJumpTarget  quickJumpTarget
 	calendarRange    calendarRange
@@ -408,6 +414,13 @@ type channelModel struct {
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
+	manifest, _ := company.LoadManifest()
+	officeMembers := officeMembersFromManifest(manifest)
+	channels := channelInfosFromManifest(manifest)
+	officeDirectory = make(map[string]officeMemberInfo, len(officeMembers))
+	for _, member := range officeMembers {
+		officeDirectory[member.Slug] = member
+	}
 	m := channelModel{
 		expandedThreads:      make(map[string]bool),
 		threadsDefaultExpand: !threadsCollapsed,
@@ -417,6 +430,8 @@ func newChannelModel(threadsCollapsed bool) channelModel {
 		activeChannel:        "general",
 		activeApp:            officeAppMessages,
 		calendarRange:        calendarRangeWeek,
+		officeMembers:        officeMembers,
+		channels:             channels,
 	}
 	if config.ResolveNoNex() {
 		m.notice = "Running in office-only mode. Nex tools are disabled for this session."
@@ -430,6 +445,7 @@ func newChannelModel(threadsCollapsed bool) channelModel {
 
 func (m channelModel) Init() tea.Cmd {
 	return tea.Batch(
+		pollHealth(),
 		pollChannels(),
 		pollOfficeMembers(),
 		pollBroker("", m.activeChannel),
@@ -448,6 +464,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		return m, tea.ClearScreen
 
 	case tea.MouseMsg:
 		switch msg.Button {
@@ -985,6 +1002,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateOverlaysForCurrentInput()
 
 	case channelOfficeMembersMsg:
+		if len(msg.members) == 0 {
+			msg.members = officeMembersFallback(m.officeMembers)
+		}
 		m.officeMembers = msg.members
 		officeDirectory = make(map[string]officeMemberInfo, len(msg.members))
 		for _, member := range msg.members {
@@ -993,6 +1013,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateOverlaysForCurrentInput()
 
 	case channelChannelsMsg:
+		if len(msg.channels) == 0 {
+			msg.channels = channelInfosFallback(m.channels)
+		}
 		m.channels = msg.channels
 		m.clampSidebarCursor()
 		if m.activeChannel == "" {
@@ -1009,6 +1032,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.usage.Agents == nil {
 			m.usage.Agents = make(map[string]channelUsageTotals)
 		}
+
+	case channelHealthMsg:
+		m.brokerConnected = msg.Connected
 
 	case channelTasksMsg:
 		m.tasks = msg.tasks
@@ -1239,6 +1265,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelTickMsg:
 		return m, tea.Batch(
+			pollHealth(),
 			pollChannels(),
 			pollOfficeMembers(),
 			pollBroker(m.lastID, m.activeChannel),
@@ -1266,7 +1293,7 @@ func (m channelModel) View() string {
 	// ── Sidebar ──────────────────────────────────────────────────────
 	sidebar := ""
 	if layout.ShowSidebar {
-		sidebar = renderSidebar(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.activeChannel, m.activeApp, m.sidebarCursor, m.focus == focusSidebar, m.quickJumpTarget, layout.SidebarW, layout.ContentH)
+		sidebar = renderSidebar(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.activeChannel, m.activeApp, m.sidebarCursor, m.focus == focusSidebar, m.quickJumpTarget, m.brokerConnected, layout.SidebarW, layout.ContentH)
 	}
 
 	// ── Thread panel ─────────────────────────────────────────────────
@@ -1414,7 +1441,6 @@ func (m channelModel) View() string {
 	content := lipgloss.JoinHorizontal(lipgloss.Top, panels...)
 
 	// ── Status bar ───────────────────────────────────────────────────
-	agentCount := len(m.members)
 	onlineCount := len(m.members)
 	scrollHint := "PgUp/PgDn"
 	if scroll > 0 {
@@ -1427,8 +1453,8 @@ func (m channelModel) View() string {
 		focusLabel = "thread"
 	}
 	statusBar := statusBarStyle(m.width).Render(fmt.Sprintf(
-		" %s %d around │ %d msgs │ %d agents │ %s │ Tab focus:%s │ Ctrl+G channels │ Ctrl+O apps │ /quit",
-		"\u25CF", onlineCount, len(m.messages), agentCount, scrollHint, focusLabel,
+		" %s %d around │ %d msgs │ focus:%s",
+		"\u25CF", onlineCount, len(m.messages), focusLabel,
 	))
 	if m.pending != nil {
 		statusText := " Request pending │ ↑/↓ choose │ Enter submit"
@@ -1456,6 +1482,10 @@ func (m channelModel) View() string {
 	} else if m.notice != "" {
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(" " + m.notice),
+		)
+	} else if !m.brokerConnected {
+		statusBar = statusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(" Team offline │ showing manifest roster │ launch WUPHF to connect"),
 		)
 	} else if m.replyToID != "" {
 		statusBar = statusBarStyle(m.width).Render(
@@ -1554,6 +1584,9 @@ func (m channelModel) currentHeaderMeta() string {
 		}
 		return fmt.Sprintf("  %s view · %s · %d upcoming · %d due soon · %d recent actions", view, filter, len(events), dueSoon, len(m.actions))
 	default:
+		if !m.brokerConnected {
+			return fmt.Sprintf("  Offline preview · manifest roster loaded · %d teammates ready for #%s", len(m.officeMembers), m.activeChannel)
+		}
 		return fmt.Sprintf("  The WUPHF Office · Founding Team building together · %d teammates in #%s", len(m.members), m.activeChannel)
 	}
 }
@@ -2568,6 +2601,56 @@ func mergeOfficeMembers(officeMembers []officeMemberInfo, brokerMembers []channe
 		result = append(result, member)
 	}
 	return result
+}
+
+func officeMembersFromManifest(manifest company.Manifest) []officeMemberInfo {
+	members := make([]officeMemberInfo, 0, len(manifest.Members))
+	for _, member := range manifest.Members {
+		members = append(members, officeMemberInfo{
+			Slug:        member.Slug,
+			Name:        member.Name,
+			Role:        member.Role,
+			Expertise:   append([]string(nil), member.Expertise...),
+			Personality: member.Personality,
+			BuiltIn:     member.System,
+		})
+	}
+	return members
+}
+
+func channelInfosFromManifest(manifest company.Manifest) []channelInfo {
+	channels := make([]channelInfo, 0, len(manifest.Channels))
+	for _, channel := range manifest.Channels {
+		channels = append(channels, channelInfo{
+			Slug:     channel.Slug,
+			Name:     channel.Name,
+			Members:  append([]string(nil), channel.Members...),
+			Disabled: append([]string(nil), channel.Disabled...),
+		})
+	}
+	return channels
+}
+
+func officeMembersFallback(existing []officeMemberInfo) []officeMemberInfo {
+	if len(existing) > 0 {
+		return existing
+	}
+	manifest, err := company.LoadManifest()
+	if err != nil {
+		manifest = company.DefaultManifest()
+	}
+	return officeMembersFromManifest(manifest)
+}
+
+func channelInfosFallback(existing []channelInfo) []channelInfo {
+	if len(existing) > 0 {
+		return existing
+	}
+	manifest, err := company.LoadManifest()
+	if err != nil {
+		manifest = company.DefaultManifest()
+	}
+	return channelInfosFromManifest(manifest)
 }
 
 func displayName(slug string) string {
@@ -3589,6 +3672,18 @@ func (m channelModel) buildCalendarAgentPickerOptions() []tui.PickerOption {
 		})
 	}
 	return options
+}
+
+func pollHealth() tea.Cmd {
+	return func() tea.Msg {
+		client := &http.Client{Timeout: 1200 * time.Millisecond}
+		resp, err := client.Get("http://127.0.0.1:7890/health")
+		if err != nil {
+			return channelHealthMsg{}
+		}
+		defer resp.Body.Close()
+		return channelHealthMsg{Connected: resp.StatusCode == http.StatusOK}
+	}
 }
 
 func mutateChannel(action, slug string) tea.Cmd {
