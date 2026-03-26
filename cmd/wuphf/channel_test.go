@@ -404,6 +404,25 @@ func TestCtrlOQuickJumpSelectsApp(t *testing.T) {
 	}
 }
 
+func TestBuildChannelPickerOptionsUsesChannelDescriptions(t *testing.T) {
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Description: "Company-wide coordination", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Launch planning and release work", Members: []string{"ceo", "pm", "fe"}},
+	}
+
+	options := m.buildChannelPickerOptions()
+	if len(options) == 0 {
+		t.Fatal("expected channel picker options")
+	}
+	if !strings.Contains(options[0].Description, "Company-wide coordination") {
+		t.Fatalf("expected channel description in picker, got %q", options[0].Description)
+	}
+	if !strings.Contains(options[0].Description, "2 members") {
+		t.Fatalf("expected member count in picker description, got %q", options[0].Description)
+	}
+}
+
 func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 	sidebar := stripANSI(renderSidebar(
 		[]channelInfo{{Slug: "general", Name: "general"}},

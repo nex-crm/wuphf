@@ -191,6 +191,144 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestChannelDescriptionsAreVisibleButContentStaysRestricted(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	createBody, _ := json.Marshal(map[string]any{
+		"action":      "create",
+		"slug":        "launch",
+		"name":        "launch",
+		"description": "Launch planning and launch-readiness work.",
+		"created_by":  "ceo",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/channels", bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create channel failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 creating channel, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/channels", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get channels failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var channelList struct {
+		Channels []teamChannel `json:"channels"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&channelList); err != nil {
+		t.Fatalf("decode channels: %v", err)
+	}
+	var launch *teamChannel
+	for i := range channelList.Channels {
+		if channelList.Channels[i].Slug == "launch" {
+			launch = &channelList.Channels[i]
+			break
+		}
+	}
+	if launch == nil {
+		t.Fatal("expected launch channel in channel list")
+	}
+	if launch.Description != "Launch planning and launch-readiness work." {
+		t.Fatalf("unexpected launch description: %q", launch.Description)
+	}
+	if !containsString(launch.Members, "ceo") {
+		t.Fatalf("expected CEO to be forced into new channel, got %+v", launch.Members)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/messages?channel=launch&my_slug=fe", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get messages as non-member failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-member channel messages, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/messages?channel=launch&my_slug=ceo", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get messages as ceo failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for CEO channel messages, got %d", resp.StatusCode)
+	}
+}
+
+func TestTaskAndRequestViewsRejectNonMembers(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	createBody, _ := json.Marshal(map[string]any{
+		"action":      "create",
+		"slug":        "deals",
+		"name":        "deals",
+		"description": "Deal strategy and pipeline work.",
+		"created_by":  "ceo",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/channels", bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create channel failed: %v", err)
+	}
+	resp.Body.Close()
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/tasks?channel=deals&viewer_slug=fe", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get tasks as non-member failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-member task access, got %d", resp.StatusCode)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/requests?channel=deals&viewer_slug=fe", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get requests as non-member failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-member request access, got %d", resp.StatusCode)
+	}
+}
+
 func TestParseOTLPUsageEvents(t *testing.T) {
 	payload := map[string]any{
 		"resourceLogs": []any{

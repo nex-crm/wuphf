@@ -157,6 +157,7 @@ type HumanInterviewArgs struct {
 type TeamRequestsArgs struct {
 	Channel         string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	IncludeResolved bool   `json:"include_resolved,omitempty" jsonschema:"Include already answered or canceled requests."`
+	MySlug          string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamRequestArgs struct {
@@ -195,13 +196,15 @@ type TeamChannelsArgs struct{}
 
 type TeamMembersArgs struct {
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamChannelArgs struct {
-	Action  string `json:"action" jsonschema:"One of: create, remove"`
-	Channel string `json:"channel" jsonschema:"Channel slug"`
-	Name    string `json:"name,omitempty" jsonschema:"Optional channel display name on create"`
-	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+	Action      string `json:"action" jsonschema:"One of: create, remove"`
+	Channel     string `json:"channel" jsonschema:"Channel slug"`
+	Name        string `json:"name,omitempty" jsonschema:"Optional channel display name on create"`
+	Description string `json:"description,omitempty" jsonschema:"One-sentence explanation of what the channel is for. Required in practice when creating channels."`
+	MySlug      string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamChannelMemberArgs struct {
@@ -257,12 +260,12 @@ func Run(ctx context.Context) error {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_channels",
-		Description: "List available office channels and their memberships.",
+		Description: "List available office channels, their descriptions, and their memberships. Agents can see channel metadata even when they are not members.",
 	}, handleTeamChannels)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_channel",
-		Description: "Create or remove an office channel. Only do this when the human explicitly wants channel structure.",
+		Description: "Create or remove an office channel. When creating a channel, include a clear description of what work belongs there. Only do this when the human explicitly wants channel structure.",
 	}, handleTeamChannel)
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -587,8 +590,14 @@ func handleTeamStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamStat
 
 func handleTeamMembers(ctx context.Context, _ *mcp.CallToolRequest, args TeamMembersArgs) (*mcp.CallToolResult, any, error) {
 	channel := resolveChannel(args.Channel)
+	viewer := strings.TrimSpace(resolveSlugOptional(args.MySlug))
 	var result brokerMembersResponse
-	if err := brokerGetJSON(ctx, "/members?channel="+url.QueryEscape(channel), &result); err != nil {
+	values := url.Values{}
+	values.Set("channel", channel)
+	if viewer != "" {
+		values.Set("viewer_slug", viewer)
+	}
+	if err := brokerGetJSON(ctx, "/members?"+values.Encode(), &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	if len(result.Members) == 0 {
@@ -647,6 +656,9 @@ func handleTeamTasks(ctx context.Context, _ *mcp.CallToolRequest, args TeamTasks
 	channel := resolveChannel(args.Channel)
 	values := url.Values{}
 	values.Set("channel", channel)
+	if mySlug != "" {
+		values.Set("viewer_slug", mySlug)
+	}
 	if mySlug != "" {
 		values.Set("my_slug", mySlug)
 	}
@@ -730,8 +742,12 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 
 func handleTeamRequests(ctx context.Context, _ *mcp.CallToolRequest, args TeamRequestsArgs) (*mcp.CallToolResult, any, error) {
 	channel := resolveChannel(args.Channel)
+	viewer := strings.TrimSpace(resolveSlugOptional(args.MySlug))
 	values := url.Values{}
 	values.Set("channel", channel)
+	if viewer != "" {
+		values.Set("viewer_slug", viewer)
+	}
 	if args.IncludeResolved {
 		values.Set("include_resolved", "true")
 	}
@@ -879,10 +895,11 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 func handleTeamChannels(ctx context.Context, _ *mcp.CallToolRequest, _ TeamChannelsArgs) (*mcp.CallToolResult, any, error) {
 	var result struct {
 		Channels []struct {
-			Slug     string   `json:"slug"`
-			Name     string   `json:"name"`
-			Members  []string `json:"members"`
-			Disabled []string `json:"disabled"`
+			Slug        string   `json:"slug"`
+			Name        string   `json:"name"`
+			Description string   `json:"description"`
+			Members     []string `json:"members"`
+			Disabled    []string `json:"disabled"`
 		} `json:"channels"`
 	}
 	if err := brokerGetJSON(ctx, "/channels", &result); err != nil {
@@ -894,15 +911,18 @@ func handleTeamChannels(ctx context.Context, _ *mcp.CallToolRequest, _ TeamChann
 	lines := make([]string, 0, len(result.Channels))
 	for _, ch := range result.Channels {
 		line := fmt.Sprintf("- #%s", ch.Slug)
+		if strings.TrimSpace(ch.Description) != "" {
+			line += " — " + strings.TrimSpace(ch.Description)
+		}
 		if len(ch.Members) > 0 {
-			line += " @" + strings.Join(ch.Members, ", @")
+			line += " · members: @" + strings.Join(ch.Members, ", @")
 		}
 		if len(ch.Disabled) > 0 {
-			line += " (disabled: @" + strings.Join(ch.Disabled, ", @") + ")"
+			line += " · disabled: @" + strings.Join(ch.Disabled, ", @")
 		}
 		lines = append(lines, line)
 	}
-	return textResult("Office channels:\n" + strings.Join(lines, "\n")), nil, nil
+	return textResult("Office channels:\n" + strings.Join(lines, "\n") + "\n\nYou can inspect channel names and descriptions even if you are not a member. Only the CEO has full cross-channel content context by default."), nil, nil
 }
 
 func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamChannelArgs) (*mcp.CallToolResult, any, error) {
@@ -912,10 +932,11 @@ func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamCha
 	}
 	channel := resolveChannel(args.Channel)
 	if err := brokerPostJSON(ctx, "/channels", map[string]any{
-		"action":     strings.TrimSpace(args.Action),
-		"slug":       channel,
-		"name":       strings.TrimSpace(args.Name),
-		"created_by": slug,
+		"action":      strings.TrimSpace(args.Action),
+		"slug":        channel,
+		"name":        strings.TrimSpace(args.Name),
+		"description": strings.TrimSpace(args.Description),
+		"created_by":  slug,
 	}, nil); err != nil {
 		return toolError(err), nil, nil
 	}

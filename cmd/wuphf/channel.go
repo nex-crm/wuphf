@@ -102,10 +102,11 @@ type officeMemberInfo struct {
 }
 
 type channelInfo struct {
-	Slug     string   `json:"slug"`
-	Name     string   `json:"name"`
-	Members  []string `json:"members"`
-	Disabled []string `json:"disabled"`
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Members     []string `json:"members"`
+	Disabled    []string `json:"disabled"`
 }
 
 type channelInterviewOption struct {
@@ -397,21 +398,21 @@ type channelModel struct {
 	pickerMode           channelPickerMode
 
 	// 3-column layout state
-	focus            focusArea
-	sidebarCollapsed bool
-	sidebarCursor    int
+	focus               focusArea
+	sidebarCollapsed    bool
+	sidebarCursor       int
 	sidebarRosterOffset int
-	threadPanelOpen  bool
-	threadPanelID    string
-	threadInput      []rune
-	threadInputPos   int
-	threadScroll     int
-	usage            channelUsageState
-	brokerConnected  bool
-	lastCtrlCAt      time.Time
-	quickJumpTarget  quickJumpTarget
-	calendarRange    calendarRange
-	calendarFilter   string
+	threadPanelOpen     bool
+	threadPanelID       string
+	threadInput         []rune
+	threadInputPos      int
+	threadScroll        int
+	usage               channelUsageState
+	brokerConnected     bool
+	lastCtrlCAt         time.Time
+	quickJumpTarget     quickJumpTarget
+	calendarRange       calendarRange
+	calendarFilter      string
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
@@ -1087,7 +1088,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel))
 			case strings.HasPrefix(msg.Value, "remove:"):
 				m.posting = true
-				return m, mutateChannel("remove", strings.TrimPrefix(msg.Value, "remove:"))
+				return m, mutateChannel("remove", strings.TrimPrefix(msg.Value, "remove:"), "")
 			}
 			return m, nil
 		case channelPickerAgents:
@@ -1450,7 +1451,9 @@ func (m channelModel) View() string {
 	if initPanel != "" {
 		mainParts = append(mainParts, initPanel)
 	}
-	mainParts = append(mainParts, composerStr)
+	if m.activeApp == officeAppMessages || m.memberDraft != nil {
+		mainParts = append(mainParts, composerStr)
+	}
 	mainCol := strings.Join(mainParts, "\n")
 
 	// ── Compose 3 columns ────────────────────────────────────────────
@@ -3277,18 +3280,23 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		parts := strings.Fields(trimmed)
 		if len(parts) < 3 {
-			m.notice = "Usage: /channel add <slug> or /channel remove <slug>"
+			m.notice = "Usage: /channel add <slug> <description...> or /channel remove <slug>"
 			return m, nil
 		}
 		switch parts[1] {
 		case "add":
+			description := strings.TrimSpace(strings.Join(parts[3:], " "))
+			if description == "" {
+				m.notice = "Usage: /channel add <slug> <description...>"
+				return m, nil
+			}
 			m.posting = true
-			return m, mutateChannel("create", parts[2])
+			return m, mutateChannel("create", parts[2], description)
 		case "remove":
 			m.posting = true
-			return m, mutateChannel("remove", parts[2])
+			return m, mutateChannel("remove", parts[2], "")
 		default:
-			m.notice = "Usage: /channel add <slug> or /channel remove <slug>"
+			m.notice = "Usage: /channel add <slug> <description...> or /channel remove <slug>"
 			return m, nil
 		}
 	case trimmed == "/agents":
@@ -3616,10 +3624,16 @@ func (m channelModel) currentChannelInfo() *channelInfo {
 func (m channelModel) buildChannelPickerOptions() []tui.PickerOption {
 	var options []tui.PickerOption
 	for _, ch := range m.channels {
+		description := strings.TrimSpace(ch.Description)
+		if description == "" {
+			description = fmt.Sprintf("%d members", len(ch.Members))
+		} else {
+			description = fmt.Sprintf("%s · %d members", description, len(ch.Members))
+		}
 		options = append(options, tui.PickerOption{
 			Label:       "#" + ch.Slug,
 			Value:       "switch:" + ch.Slug,
-			Description: fmt.Sprintf("%d members", len(ch.Members)),
+			Description: description,
 		})
 		if ch.Slug != "general" {
 			options = append(options, tui.PickerOption{
@@ -3740,13 +3754,14 @@ func pollHealth() tea.Cmd {
 	}
 }
 
-func mutateChannel(action, slug string) tea.Cmd {
+func mutateChannel(action, slug, description string) tea.Cmd {
 	return func() tea.Msg {
 		body, _ := json.Marshal(map[string]any{
-			"action":     action,
-			"slug":       slug,
-			"name":       slug,
-			"created_by": "you",
+			"action":      action,
+			"slug":        slug,
+			"name":        slug,
+			"description": description,
+			"created_by":  "you",
 		})
 		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
 		if err != nil {

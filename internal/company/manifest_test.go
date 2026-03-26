@@ -51,4 +51,12 @@ func TestSaveAndLoadManifestRoundTrips(t *testing.T) {
 	if len(loaded.Channels) != 2 {
 		t.Fatalf("expected 2 channels, got %d", len(loaded.Channels))
 	}
+	for _, ch := range loaded.Channels {
+		if ch.Description == "" {
+			t.Fatalf("expected channel description for %s", ch.Slug)
+		}
+		if !containsSlug(ch.Members, "ceo") {
+			t.Fatalf("expected CEO to be present in channel %s", ch.Slug)
+		}
+	}
 }

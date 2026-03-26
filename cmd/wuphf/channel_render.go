@@ -817,6 +817,9 @@ func calendarParticipantNames(primary []string, channel string, members []channe
 		}
 		names = append(names, name)
 	}
+	// Sort for stable display (slugs already sorted when fallback, but
+	// names may differ from slug sort order)
+	sort.Strings(names)
 	if len(names) > 4 {
 		return append(names[:4], fmt.Sprintf("+%d more", len(names)-4))
 	}
@@ -844,6 +847,8 @@ func calendarParticipantSlugs(primary []string, channel string, members []channe
 			}
 			addSlug(member.Slug)
 		}
+		// Sort alphabetically so order is stable across poll ticks
+		sort.Strings(slugs)
 	}
 	return slugs
 }
@@ -865,26 +870,14 @@ func nextCalendarEventByParticipant(events []calendarEvent) map[string]calendarE
 }
 
 func orderedCalendarParticipants(byParticipant map[string]calendarEvent, members []channelMember) []string {
-	seen := make(map[string]bool)
-	var ordered []string
-	for _, member := range members {
-		name := strings.TrimSpace(member.Name)
-		if name == "" {
-			name = displayName(member.Slug)
-		}
-		if _, ok := byParticipant[name]; ok && !seen[name] {
-			ordered = append(ordered, name)
-			seen[name] = true
-		}
-	}
-	var rest []string
+	// Collect all participant names, then sort alphabetically for stable display.
+	// Previously this followed member poll order which shifts every tick.
+	var names []string
 	for name := range byParticipant {
-		if !seen[name] {
-			rest = append(rest, name)
-		}
+		names = append(names, name)
 	}
-	sort.Strings(rest)
-	return append(ordered, rest...)
+	sort.Strings(names)
+	return names
 }
 
 func schedulerTargetTaskID(job channelSchedulerJob) string {

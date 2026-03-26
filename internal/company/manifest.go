@@ -23,10 +23,11 @@ type MemberSpec struct {
 }
 
 type ChannelSpec struct {
-	Slug     string   `json:"slug"`
-	Name     string   `json:"name,omitempty"`
-	Members  []string `json:"members,omitempty"`
-	Disabled []string `json:"disabled,omitempty"`
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name,omitempty"`
+	Description string   `json:"description,omitempty"`
+	Members     []string `json:"members,omitempty"`
+	Disabled    []string `json:"disabled,omitempty"`
 }
 
 type Manifest struct {
@@ -132,9 +133,10 @@ func DefaultManifest() Manifest {
 		generalMembers = append(generalMembers, member.Slug)
 	}
 	manifest.Channels = []ChannelSpec{{
-		Slug:    "general",
-		Name:    "general",
-		Members: generalMembers,
+		Slug:        "general",
+		Name:        "general",
+		Description: "The default company-wide room for top-level coordination, announcements, and cross-functional discussion.",
+		Members:     generalMembers,
 	}}
 	return normalizeManifest(manifest)
 }
@@ -191,8 +193,14 @@ func normalizeManifest(manifest Manifest) Manifest {
 		if channel.Name == "" {
 			channel.Name = channel.Slug
 		}
+		channel.Description = strings.TrimSpace(channel.Description)
+		if channel.Description == "" {
+			channel.Description = defaultChannelDescription(channel.Slug, channel.Name)
+		}
 		channel.Members = normalizeSlugs(channel.Members)
 		channel.Disabled = normalizeSlugs(channel.Disabled)
+		channel.Members = ensureLeadMember(channel.Members, manifest.Lead)
+		channel.Disabled = removeSlug(channel.Disabled, manifest.Lead)
 		channels = append(channels, channel)
 	}
 	if !containsChannel(channels, "general") {
@@ -201,9 +209,10 @@ func normalizeManifest(manifest Manifest) Manifest {
 			members = append(members, member.Slug)
 		}
 		channels = append([]ChannelSpec{{
-			Slug:    "general",
-			Name:    "general",
-			Members: members,
+			Slug:        "general",
+			Name:        "general",
+			Description: defaultChannelDescription("general", "general"),
+			Members:     ensureLeadMember(members, manifest.Lead),
 		}}, channels...)
 	}
 	manifest.Channels = channels
@@ -213,6 +222,54 @@ func normalizeManifest(manifest Manifest) Manifest {
 func containsChannel(channels []ChannelSpec, slug string) bool {
 	for _, channel := range channels {
 		if channel.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+func defaultChannelDescription(slug, name string) string {
+	if strings.TrimSpace(slug) == "" {
+		slug = strings.TrimSpace(name)
+	}
+	switch normalizeSlug(slug) {
+	case "general":
+		return "The default company-wide room for top-level coordination, announcements, and cross-functional discussion."
+	default:
+		label := strings.TrimSpace(name)
+		if label == "" {
+			label = humanizeSlug(slug)
+		}
+		return label + " focused work. Use this channel for discussion, decisions, and execution specific to that stream."
+	}
+}
+
+func ensureLeadMember(members []string, lead string) []string {
+	lead = normalizeSlug(lead)
+	if lead == "" {
+		lead = "ceo"
+	}
+	if containsSlug(members, lead) {
+		return normalizeSlugs(members)
+	}
+	return append([]string{lead}, normalizeSlugs(members)...)
+}
+
+func removeSlug(items []string, slug string) []string {
+	slug = normalizeSlug(slug)
+	var out []string
+	for _, item := range normalizeSlugs(items) {
+		if item != slug {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func containsSlug(items []string, want string) bool {
+	want = normalizeSlug(want)
+	for _, item := range normalizeSlugs(items) {
+		if item == want {
 			return true
 		}
 	}

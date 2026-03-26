@@ -95,13 +95,14 @@ type teamTask struct {
 }
 
 type teamChannel struct {
-	Slug      string   `json:"slug"`
-	Name      string   `json:"name"`
-	Members   []string `json:"members,omitempty"`
-	Disabled  []string `json:"disabled,omitempty"`
-	CreatedBy string   `json:"created_by,omitempty"`
-	CreatedAt string   `json:"created_at,omitempty"`
-	UpdatedAt string   `json:"updated_at,omitempty"`
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Members     []string `json:"members,omitempty"`
+	Disabled    []string `json:"disabled,omitempty"`
+	CreatedBy   string   `json:"created_by,omitempty"`
+	CreatedAt   string   `json:"created_at,omitempty"`
+	UpdatedAt   string   `json:"updated_at,omitempty"`
 }
 
 type officeMember struct {
@@ -594,13 +595,14 @@ func defaultTeamChannels() []teamChannel {
 	channels := make([]teamChannel, 0, len(manifest.Channels))
 	for _, channel := range manifest.Channels {
 		channels = append(channels, teamChannel{
-			Slug:      channel.Slug,
-			Name:      channel.Name,
-			Members:   append([]string(nil), channel.Members...),
-			Disabled:  append([]string(nil), channel.Disabled...),
-			CreatedBy: "wuphf",
-			CreatedAt: now,
-			UpdatedAt: now,
+			Slug:        channel.Slug,
+			Name:        channel.Name,
+			Description: channel.Description,
+			Members:     append([]string(nil), channel.Members...),
+			Disabled:    append([]string(nil), channel.Disabled...),
+			CreatedBy:   "wuphf",
+			CreatedAt:   now,
+			UpdatedAt:   now,
 		})
 	}
 	return channels
@@ -612,7 +614,7 @@ func isDefaultChannelState(channels []teamChannel) bool {
 		return false
 	}
 	for i := range defaults {
-		if channels[i].Slug != defaults[i].Slug || channels[i].Name != defaults[i].Name {
+		if channels[i].Slug != defaults[i].Slug || channels[i].Name != defaults[i].Name || channels[i].Description != defaults[i].Description {
 			return false
 		}
 		if strings.Join(channels[i].Members, ",") != strings.Join(defaults[i].Members, ",") {
@@ -645,6 +647,13 @@ func normalizeChannelSlug(slug string) string {
 	if slug == "" {
 		return "general"
 	}
+	return slug
+}
+
+func normalizeActorSlug(slug string) string {
+	slug = strings.ToLower(strings.TrimSpace(slug))
+	slug = strings.ReplaceAll(slug, " ", "-")
+	slug = strings.ReplaceAll(slug, "_", "-")
 	return slug
 }
 
@@ -705,6 +714,9 @@ func (b *Broker) normalizeLoadedStateLocked() {
 		if strings.TrimSpace(b.channels[i].Name) == "" {
 			b.channels[i].Name = b.channels[i].Slug
 		}
+		if strings.TrimSpace(b.channels[i].Description) == "" {
+			b.channels[i].Description = defaultTeamChannelDescription(b.channels[i].Slug, b.channels[i].Name)
+		}
 		if b.channels[i].Slug == "general" && len(b.channels[i].Members) == 0 {
 			b.channels[i].Members = append([]string(nil), defaultOfficeMemberSlugs()...)
 		}
@@ -714,10 +726,13 @@ func (b *Broker) normalizeLoadedStateLocked() {
 				filteredMembers = append(filteredMembers, slug)
 			}
 		}
-		b.channels[i].Members = filteredMembers
+		b.channels[i].Members = uniqueSlugs(append([]string{"ceo"}, filteredMembers...))
 		filteredDisabled := make([]string, 0, len(b.channels[i].Disabled))
 		for _, slug := range uniqueSlugs(b.channels[i].Disabled) {
-			if b.findMemberLocked(slug) != nil && containsString(filteredMembers, slug) {
+			if slug == "ceo" {
+				continue
+			}
+			if b.findMemberLocked(slug) != nil && containsString(b.channels[i].Members, slug) {
 				filteredDisabled = append(filteredDisabled, slug)
 			}
 		}
@@ -873,6 +888,37 @@ func humanizeSlug(slug string) string {
 		parts[i] = strings.ToUpper(part[:1]) + part[1:]
 	}
 	return strings.Join(parts, " ")
+}
+
+func defaultTeamChannelDescription(slug, name string) string {
+	manifest, err := company.LoadManifest()
+	if err == nil {
+		for _, ch := range manifest.Channels {
+			if normalizeChannelSlug(ch.Slug) == normalizeChannelSlug(slug) && strings.TrimSpace(ch.Description) != "" {
+				return strings.TrimSpace(ch.Description)
+			}
+		}
+	}
+	if normalizeChannelSlug(slug) == "general" {
+		return "The default company-wide room for top-level coordination, announcements, and cross-functional discussion."
+	}
+	label := strings.TrimSpace(name)
+	if label == "" {
+		label = humanizeSlug(slug)
+	}
+	return label + " focused work. Use this channel for discussion, decisions, and execution specific to that stream."
+}
+
+func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
+	slug = normalizeActorSlug(slug)
+	channel = normalizeChannelSlug(channel)
+	if slug == "" || slug == "you" || slug == "human" || slug == "nex" {
+		return true
+	}
+	if slug == "ceo" {
+		return true
+	}
+	return b.channelHasMemberLocked(channel, slug)
 }
 
 func truncateSummary(s string, max int) string {
@@ -1536,10 +1582,11 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"channels": channels})
 	case http.MethodPost:
 		var body struct {
-			Action    string `json:"action"`
-			Slug      string `json:"slug"`
-			Name      string `json:"name"`
-			CreatedBy string `json:"created_by"`
+			Action      string `json:"action"`
+			Slug        string `json:"slug"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			CreatedBy   string `json:"created_by"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -1565,15 +1612,19 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				members = append(members, creator)
 			}
 			ch := teamChannel{
-				Slug:      slug,
-				Name:      strings.TrimSpace(body.Name),
-				Members:   uniqueSlugs(members),
-				CreatedBy: strings.TrimSpace(body.CreatedBy),
-				CreatedAt: now,
-				UpdatedAt: now,
+				Slug:        slug,
+				Name:        strings.TrimSpace(body.Name),
+				Description: strings.TrimSpace(body.Description),
+				Members:     uniqueSlugs(members),
+				CreatedBy:   strings.TrimSpace(body.CreatedBy),
+				CreatedAt:   now,
+				UpdatedAt:   now,
 			}
 			if ch.Name == "" {
 				ch.Name = slug
+			}
+			if ch.Description == "" {
+				ch.Description = defaultTeamChannelDescription(ch.Slug, ch.Name)
 			}
 			b.channels = append(b.channels, ch)
 			if err := b.saveLocked(); err != nil {
@@ -2007,6 +2058,11 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel not found", http.StatusNotFound)
 		return
 	}
+	if !b.canAccessChannelLocked(body.From, channel) {
+		b.mu.Unlock()
+		http.Error(w, "channel access denied", http.StatusForbidden)
+		return
+	}
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      body.From,
@@ -2044,6 +2100,9 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	}
 	if b.findChannelLocked(channel) == nil {
 		return channelMessage{}, fmt.Errorf("channel not found")
+	}
+	if !b.canAccessChannelLocked(from, channel) {
+		return channelMessage{}, fmt.Errorf("channel access denied")
 	}
 	b.counter++
 	msg := channelMessage{
@@ -2163,6 +2222,11 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.mu.Lock()
+	if !b.canAccessChannelLocked(mySlug, channel) {
+		b.mu.Unlock()
+		http.Error(w, "channel access denied", http.StatusForbidden)
+		return
+	}
 	messages := make([]channelMessage, 0, len(b.messages))
 	for _, msg := range b.messages {
 		if normalizeChannelSlug(msg.Channel) == channel {
@@ -2210,6 +2274,12 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
 	if channel == "" {
 		channel = "general"
+	}
+	viewerSlug := strings.TrimSpace(r.URL.Query().Get("viewer_slug"))
+	if !b.canAccessChannelLocked(viewerSlug, channel) {
+		b.mu.Unlock()
+		http.Error(w, "channel access denied", http.StatusForbidden)
+		return
 	}
 	type memberView struct {
 		name        string
@@ -2296,6 +2366,7 @@ func (b *Broker) handleTasks(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
 	mySlug := strings.TrimSpace(r.URL.Query().Get("my_slug"))
+	viewerSlug := strings.TrimSpace(r.URL.Query().Get("viewer_slug"))
 	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
 	if channel == "" {
 		channel = "general"
@@ -2303,6 +2374,11 @@ func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	includeDone := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_done")), "true")
 
 	b.mu.Lock()
+	if !b.canAccessChannelLocked(viewerSlug, channel) {
+		b.mu.Unlock()
+		http.Error(w, "channel access denied", http.StatusForbidden)
+		return
+	}
 	result := make([]teamTask, 0, len(b.tasks))
 	for _, task := range b.tasks {
 		if normalizeChannelSlug(task.Channel) != channel {
@@ -2352,6 +2428,10 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 	defer b.mu.Unlock()
 	if b.findChannelLocked(channel) == nil {
 		http.Error(w, "channel not found", http.StatusNotFound)
+		return
+	}
+	if !b.canAccessChannelLocked(body.CreatedBy, channel) {
+		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
 
@@ -2465,6 +2545,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 	if b.findChannelLocked(channel) == nil {
 		return teamTask{}, false, fmt.Errorf("channel not found")
 	}
+	if !b.canAccessChannelLocked(createdBy, channel) {
+		return teamTask{}, false, fmt.Errorf("channel access denied")
+	}
 	title = strings.TrimSpace(title)
 	if existing := b.findReusableTaskLocked(channel, title, strings.TrimSpace(threadID), strings.TrimSpace(owner)); existing != nil {
 		if existing.Details == "" && strings.TrimSpace(details) != "" {
@@ -2551,8 +2634,14 @@ func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 	if channel == "" {
 		channel = "general"
 	}
+	viewerSlug := strings.TrimSpace(r.URL.Query().Get("viewer_slug"))
 	includeResolved := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_resolved")), "true")
 	b.mu.Lock()
+	if !b.canAccessChannelLocked(viewerSlug, channel) {
+		b.mu.Unlock()
+		http.Error(w, "channel access denied", http.StatusForbidden)
+		return
+	}
 	requests := make([]humanInterview, 0, len(b.requests))
 	for _, req := range b.requests {
 		reqChannel := normalizeChannelSlug(req.Channel)
@@ -2618,6 +2707,10 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		if b.findChannelLocked(channel) == nil {
 			http.Error(w, "channel not found", http.StatusNotFound)
+			return
+		}
+		if !b.canAccessChannelLocked(body.From, channel) {
+			http.Error(w, "channel access denied", http.StatusForbidden)
 			return
 		}
 		b.counter++
