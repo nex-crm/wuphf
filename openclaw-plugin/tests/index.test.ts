@@ -27,8 +27,8 @@ describe("config", () => {
     expect(cfg.debug).toBe(false);
   });
 
-  test("falls back to NEX_API_KEY env var", () => {
-    process.env.NEX_API_KEY = "sk-from-env";
+  test("falls back to WUPHF_API_KEY env var", () => {
+    process.env.WUPHF_API_KEY = "sk-from-env";
     const cfg = parseConfig({});
     expect(cfg.apiKey).toBe("sk-from-env");
   });
@@ -40,9 +40,9 @@ describe("config", () => {
   });
 
   test("resolves ${VAR} syntax in baseUrl", () => {
-    process.env.MY_URL = "https://staging.nex.io";
+    process.env.MY_URL = "https://staging.wuphf.io";
     const cfg = parseConfig({ apiKey: "sk-test", baseUrl: "${MY_URL}" });
-    expect(cfg.baseUrl).toBe("https://staging.nex.io");
+    expect(cfg.baseUrl).toBe("https://staging.wuphf.io");
   });
 
   test("strips trailing slash from baseUrl", () => {
@@ -51,7 +51,7 @@ describe("config", () => {
   });
 
   test("throws on missing API key", () => {
-    delete process.env.NEX_API_KEY;
+    delete process.env.WUPHF_API_KEY;
     expect(() => parseConfig({})).toThrow(ConfigError);
   });
 
@@ -98,8 +98,8 @@ describe("context-format", () => {
       answer: "John works at Acme Corp.",
       entityCount: 2,
     });
-    expect(result).toContain("<nex-context>");
-    expect(result).toContain("</nex-context>");
+    expect(result).toContain("<wuphf-context>");
+    expect(result).toContain("</wuphf-context>");
     expect(result).toContain("John works at Acme Corp.");
     expect(result).toContain("[2 related entities found]");
   });
@@ -109,23 +109,23 @@ describe("context-format", () => {
     expect(result).not.toContain("related entities");
   });
 
-  test("strips complete nex-context blocks", () => {
-    const text = "Before <nex-context>injected stuff</nex-context> After";
+  test("strips complete wuphf-context blocks", () => {
+    const text = "Before <wuphf-context>injected stuff</wuphf-context> After";
     expect(stripNexContext(text)).toBe("Before  After");
   });
 
-  test("strips unclosed nex-context tags", () => {
-    const text = "Before <nex-context>injected but no close";
+  test("strips unclosed wuphf-context tags", () => {
+    const text = "Before <wuphf-context>injected but no close";
     expect(stripNexContext(text)).toBe("Before");
   });
 
   test("strips multiline blocks", () => {
-    const text = "Start\n<nex-context>\nline1\nline2\n</nex-context>\nEnd";
+    const text = "Start\n<wuphf-context>\nline1\nline2\n</wuphf-context>\nEnd";
     expect(stripNexContext(text)).toBe("Start\n\nEnd");
   });
 
-  test("detects presence of nex-context", () => {
-    expect(hasNexContext("hello <nex-context>x</nex-context>")).toBe(true);
+  test("detects presence of wuphf-context", () => {
+    expect(hasNexContext("hello <wuphf-context>x</wuphf-context>")).toBe(true);
     expect(hasNexContext("hello world")).toBe(false);
   });
 });
@@ -170,15 +170,15 @@ describe("capture-filter", () => {
     }
   });
 
-  test("strips nex-context before capture", () => {
+  test("strips wuphf-context before capture", () => {
     const messages: AgentMessage[] = [
-      { role: "user", content: "<nex-context>injected</nex-context>What color?" },
+      { role: "user", content: "<wuphf-context>injected</wuphf-context>What color?" },
       { role: "assistant", content: "Blue is your favorite." },
     ];
     const result = captureFilter(messages, defaultConfig);
     expect(result.skipped).toBe(false);
     if (!result.skipped) {
-      expect(result.text).not.toContain("<nex-context>");
+      expect(result.text).not.toContain("<wuphf-context>");
     }
   });
 
@@ -395,7 +395,7 @@ describe("session-store", () => {
 
 describe("plugin", () => {
   test("has correct id and kind", () => {
-    expect(plugin.id).toBe("nex");
+    expect(plugin.id).toBe("wuphf");
     expect(plugin.kind).toBe("memory");
   });
 
@@ -404,7 +404,7 @@ describe("plugin", () => {
   });
 
   test("has name, description, and version", () => {
-    expect(plugin.name).toBe("Nex Memory");
+    expect(plugin.name).toBe("WUPHF Memory");
     expect(plugin.version).toBe("0.1.0");
     expect(plugin.description).toBeTruthy();
   });

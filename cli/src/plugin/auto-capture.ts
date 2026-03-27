@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Claude Code Stop hook — auto-capture conversation to Nex + plan file ingestion.
+ * Claude Code Stop hook — auto-capture conversation to WUPHF + plan file ingestion.
  *
  * Reads { last_assistant_message, session_id } from stdin,
- * filters and sends to Nex for ingestion. Also checks .claude/plans/
+ * filters and sends to WUPHF for ingestion. Also checks .claude/plans/
  * for changed plan files and ingests up to 2.
  *
  * On ANY error: outputs {} and exits 0 (graceful degradation).
@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     process.stdout.write("{}");
   } catch (err) {
     process.stderr.write(
-      `[nex-capture] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
+      `[wuphf-capture] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.stdout.write("{}");
   }

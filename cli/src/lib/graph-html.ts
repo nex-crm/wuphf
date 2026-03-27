@@ -1,6 +1,6 @@
 /**
  * Self-contained HTML graph visualization using D3.js with SVG rendering.
- * Exact clone of Zep's graph approach, adapted for Nex entity/insight structure.
+ * Exact clone of Zep's graph approach, adapted for WUPHF entity/insight structure.
  * Generates a single HTML string that can be opened in any browser.
  */
 
@@ -121,7 +121,7 @@ export function generateGraphHtml(data: GraphData): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Nex — Workspace Graph</title>
+<title>WUPHF — Workspace Graph</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{background:#0f172a;color:#e2e8f0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}

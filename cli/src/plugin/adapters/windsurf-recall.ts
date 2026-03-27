@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Windsurf pre_user_prompt hook — auto-recall from Nex.
+ * Windsurf pre_user_prompt hook — auto-recall from WUPHF.
  * Input: { tool_info: { user_prompt: string } }
  * Output: context string on stdout (displayed via show_output) or {}
  */
@@ -29,7 +29,7 @@ async function main(): Promise<void> {
     // Windsurf displays stdout content via show_output
     process.stdout.write(JSON.stringify({ additional_context: result.context }));
   } catch (err) {
-    process.stderr.write(`[nex-windsurf] Recall error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wuphf-windsurf] Recall error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.stdout.write("{}");
   }
 }

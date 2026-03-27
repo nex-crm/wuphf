@@ -1,6 +1,6 @@
 /**
- * Mock HTTP server for nex-as-a-skill integration tests.
- * Same data shapes as nex-cli tests for cross-validation.
+ * Mock HTTP server for wuphf integration tests.
+ * Same data shapes as wuphf-cli tests for cross-validation.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";

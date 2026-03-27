@@ -10,7 +10,7 @@ const rateLimiter = new RateLimiter();
 export function registerScanTools(server: McpServer, client: NexApiClient) {
   server.tool(
     "scan_files",
-    "Scan a directory for text files and ingest changed ones into the Nex knowledge base. Uses manifest-based change detection — unchanged files are skipped automatically.",
+    "Scan a directory for text files and ingest changed ones into the WUPHF knowledge base. Uses manifest-based change detection — unchanged files are skipped automatically.",
     {
       directory: z.string().optional().describe("Directory to scan (default: current working directory)"),
       max_files: z.number().optional().describe("Maximum files to ingest per scan (default: 5)"),
@@ -34,7 +34,7 @@ export function registerScanTools(server: McpServer, client: NexApiClient) {
 
   server.tool(
     "ingest_context_files",
-    "Ingest CLAUDE.md and memory files from the current project into Nex. Uses manifest-based change detection.",
+    "Ingest CLAUDE.md and memory files from the current project into WUPHF. Uses manifest-based change detection.",
     {
       directory: z.string().optional().describe("Project directory (default: current working directory)"),
     },

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cursor sessionStart hook — load baseline context from Nex.
+ * Cursor sessionStart hook — load baseline context from WUPHF.
  * Input: { session_id?: string }
  * Output: { additional_context: "..." } or {}
  */
@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     const context = result.registrationPrompt ?? result.context;
     process.stdout.write(JSON.stringify({ additional_context: context }));
   } catch (err) {
-    process.stderr.write(`[nex-cursor] Session start error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wuphf-cursor] Session start error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.stdout.write("{}");
   }
 }

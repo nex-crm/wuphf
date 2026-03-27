@@ -988,7 +988,7 @@ async function executeGraph(args: string[], ctx: CommandContext): Promise<Comman
     const { writeFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const { tmpdir } = await import("node:os");
-    const filePath = outPath ?? join(tmpdir(), `nex-graph-${Date.now()}.html`);
+    const filePath = outPath ?? join(tmpdir(), `wuphf-graph-${Date.now()}.html`);
     writeFileSync(filePath, html, "utf-8");
 
     if (!noOpen) {
@@ -1242,7 +1242,7 @@ register("config set", { execute: executeConfigSet, description: "Set a configur
 register("config path", { execute: executeConfigPath, description: "Print the config file path", category: "config" });
 
 // -- Init / Setup --
-register("init", { execute: executeInit, description: "Set up Nex for all detected AI platforms", category: "config", usage: "init [email] [--email <email>]" });
+register("init", { execute: executeInit, description: "Set up WUPHF for all detected AI platforms", category: "config", usage: "init [email] [--email <email>]" });
 register("detect", { execute: executeDetectPlatforms, description: "Detect installed AI coding platforms", category: "config" });
 
 // -- Integrations --
@@ -1324,7 +1324,7 @@ async function executeRegister(args: string[], ctx: CommandContext): Promise<Com
   }
 }
 
-register("register", { execute: executeRegister, description: "Register a new Nex workspace", category: "config", usage: "register --email <email> [--name <name>] [--company <company>]" });
+register("register", { execute: executeRegister, description: "Register a new WUPHF workspace", category: "config", usage: "register --email <email> [--name <name>] [--company <company>]" });
 
 // -- Session --
 

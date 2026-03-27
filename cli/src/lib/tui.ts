@@ -1,5 +1,5 @@
 /**
- * Zero-dependency TUI primitives for the Nex CLI.
+ * Zero-dependency TUI primitives for the WUPHF CLI.
  *
  * Respects NO_COLOR, TERM=dumb, and non-TTY pipes.
  * Ephemeral output (spinners) goes to stderr; structured output to stdout.

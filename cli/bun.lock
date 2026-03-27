@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@nex-ai/nex",
+      "name": "@wuphf/wuphf",
       "dependencies": {
         "@inkjs/ui": "^2.0.0",
         "commander": "^14.0.3",

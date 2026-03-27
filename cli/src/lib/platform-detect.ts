@@ -1,5 +1,5 @@
 /**
- * Detect installed AI coding platforms and check Nex installation status.
+ * Detect installed AI coding platforms and check WUPHF installation status.
  */
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -39,11 +39,11 @@ function whichExists(cmd: string): boolean {
   }
 }
 
-function hasNexMcpEntry(configPath: string, key = "nex"): boolean {
+function hasNexMcpEntry(configPath: string, key = "wuphf"): boolean {
   try {
     const raw = readFileSync(configPath, "utf-8");
     const config = JSON.parse(raw);
-    // Check mcpServers.nex or context_servers.nex
+    // Check mcpServers.wuphf or context_servers.wuphf
     return !!(config?.mcpServers?.[key] || config?.context_servers?.[key]);
   } catch {
     return false;
@@ -54,7 +54,7 @@ function hasNexRules(rulesPath: string | null): boolean {
   if (!rulesPath) return false;
   try {
     const content = readFileSync(rulesPath, "utf-8");
-    return content.includes("Nex") && (content.includes("nex_ask") || content.includes("Nex Context"));
+    return content.includes("WUPHF") && (content.includes("nex_ask") || content.includes("WUPHF Context"));
   } catch {
     return false;
   }
@@ -64,7 +64,7 @@ function hasClaudeCodePlugin(): boolean {
   const settingsPath = join(home, ".claude", "settings.json");
   try {
     const raw = readFileSync(settingsPath, "utf-8");
-    return raw.includes("nex") && raw.includes("auto-recall");
+    return raw.includes("wuphf") && raw.includes("auto-recall");
   } catch {
     return false;
   }
@@ -110,7 +110,7 @@ function hasOpenClawNexPlugin(): boolean {
   try {
     const raw = readFileSync(openclawConfigPath(), "utf-8");
     const config = JSON.parse(raw);
-    return !!(config?.plugins?.entries?.nex);
+    return !!(config?.plugins?.entries?.wuphf);
   } catch {
     return false;
   }
@@ -120,14 +120,14 @@ export function detectPlatforms(): Platform[] {
   const cwd = process.cwd();
 
   // Rules paths (project-local)
-  const cursorRulesPath = join(cwd, ".cursor", "rules", "nex.md");
-  const vscodeRulesPath = join(cwd, ".github", "instructions", "nex.instructions.md");
-  const windsurfRulesPath = join(cwd, ".windsurf", "rules", "nex.md");
-  const clineRulesPath = join(cwd, ".clinerules", "nex.md");
+  const cursorRulesPath = join(cwd, ".cursor", "rules", "wuphf.md");
+  const vscodeRulesPath = join(cwd, ".github", "instructions", "wuphf.instructions.md");
+  const windsurfRulesPath = join(cwd, ".windsurf", "rules", "wuphf.md");
+  const clineRulesPath = join(cwd, ".clinerules", "wuphf.md");
   const continueBase = exists(join(cwd, ".continue")) ? join(cwd, ".continue") : join(home, ".continue");
-  const continueRulesPath = join(continueBase, "rules", "nex.md");
+  const continueRulesPath = join(continueBase, "rules", "wuphf.md");
   const zedRulesPath = join(cwd, ".rules");
-  const kilocodeRulesPath = join(cwd, ".kilocode", "rules", "nex.md");
+  const kilocodeRulesPath = join(cwd, ".kilocode", "rules", "wuphf.md");
   const opencodeRulesPath = join(cwd, "AGENTS.md");
 
   // Hook config paths
@@ -236,7 +236,7 @@ export function detectPlatforms(): Platform[] {
       id: "zed",
       displayName: "Zed",
       detected: exists(join(home, ".config", "zed")),
-      nexInstalled: hasNexMcpEntry(join(home, ".config", "zed", "settings.json"), "nex") || hasNexRules(zedRulesPath),
+      nexInstalled: hasNexMcpEntry(join(home, ".config", "zed", "settings.json"), "wuphf") || hasNexRules(zedRulesPath),
       pluginSupport: false,
       supportsRules: true,
       supportsHooks: false,

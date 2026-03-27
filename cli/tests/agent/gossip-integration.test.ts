@@ -64,7 +64,7 @@ describe('Gossip integration in AgentLoop', () => {
   let queues: MessageQueues;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-gossip-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-gossip-test-'));
     config = {
       slug: 'test-agent',
       name: 'Test Agent',
@@ -204,7 +204,7 @@ describe('Gossip publishing in handleDone', () => {
   let queues: MessageQueues;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-gossip-done-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-gossip-done-'));
     config = {
       slug: 'publisher-agent',
       name: 'Publisher Agent',
@@ -284,7 +284,7 @@ describe('CredibilityTracker updates on task completion', () => {
   let queues: MessageQueues;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-cred-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-cred-test-'));
     config = {
       slug: 'cred-agent',
       name: 'Cred Agent',

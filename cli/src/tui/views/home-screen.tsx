@@ -179,7 +179,7 @@ function AgentMessage({ msg, channelColor }: { msg: HomeMessage; channelColor?: 
     );
   }
 
-  // Agent/nex response — render via Markdown or ErrorBox
+  // Agent/wuphf response — render via Markdown or ErrorBox
   const isError = msg.isError || msg.content.startsWith("Error:");
   const agentColor = getAgentColor(msg.sender);
   return (

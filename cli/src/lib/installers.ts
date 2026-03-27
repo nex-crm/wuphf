@@ -1,5 +1,5 @@
 /**
- * Platform-specific installers for Nex MCP server, hooks, plugins, agents, and workflows.
+ * Platform-specific installers for WUPHF MCP server, hooks, plugins, agents, and workflows.
  *
  * Installation hierarchy (per platform):
  *   1. Hooks (event-driven scripts)
@@ -22,7 +22,7 @@ const __dirname = dirname(__filename);
 
 const MCP_SERVER_ENTRY = {
   command: "npx",
-  args: ["-y", "@nex-ai/mcp-server"],
+  args: ["-y", "@wuphf/mcp-server"],
   env: {} as Record<string, string>,
 };
 
@@ -79,7 +79,7 @@ export function installMcpServer(
 
   const entry = {
     ...MCP_SERVER_ENTRY,
-    env: { NEX_API_KEY: apiKey },
+    env: { WUPHF_API_KEY: apiKey },
   };
 
   if (platform.configFormat === "zed") {
@@ -96,7 +96,7 @@ export function installMcpServer(
   if (!config.mcpServers || typeof config.mcpServers !== "object") {
     config.mcpServers = {};
   }
-  (config.mcpServers as Record<string, unknown>).nex = entry;
+  (config.mcpServers as Record<string, unknown>).wuphf = entry;
 
   writeJsonFile(platform.configPath, config);
   return { installed: true, configPath: platform.configPath };
@@ -111,7 +111,7 @@ function installZedMcp(
   if (!config.context_servers || typeof config.context_servers !== "object") {
     config.context_servers = {};
   }
-  (config.context_servers as Record<string, unknown>).nex = {
+  (config.context_servers as Record<string, unknown>).wuphf = {
     command: { path: entry.command, args: entry.args, env: entry.env },
   };
 
@@ -129,9 +129,9 @@ function installContinueMcp(
   if (!config.mcpServers || typeof config.mcpServers !== "object") {
     config.mcpServers = {};
   }
-  (config.mcpServers as Record<string, unknown>).nex = {
+  (config.mcpServers as Record<string, unknown>).wuphf = {
     ...MCP_SERVER_ENTRY,
-    env: { NEX_API_KEY: apiKey },
+    env: { WUPHF_API_KEY: apiKey },
   };
 
   writeJsonFile(mcpPath, config);
@@ -189,7 +189,7 @@ export function installClaudeCodePlugin(): {
 
   const hooksAdded: string[] = [];
 
-  // 2. Add hooks (idempotent — remove stale nex hooks, then add fresh ones)
+  // 2. Add hooks (idempotent — remove stale wuphf hooks, then add fresh ones)
   const hookDefs: Array<{
     event: string;
     script: string;
@@ -224,7 +224,7 @@ export function installClaudeCodePlugin(): {
 
     const groups = settings.hooks![def.event];
 
-    // Remove any existing nex hook entries (handles path updates on upgrade)
+    // Remove any existing wuphf hook entries (handles path updates on upgrade)
     const filtered = groups.filter((g) =>
       !g.hooks.some((h) => h.command.includes("auto-recall") || h.command.includes("auto-capture") || h.command.includes("auto-session-start"))
     );
@@ -327,9 +327,9 @@ function installCursorHooks(
 
     if (!hooks[def.event]) hooks[def.event] = [];
 
-    // Remove existing nex hooks
+    // Remove existing wuphf hooks
     hooks[def.event] = (hooks[def.event] as Array<Record<string, unknown>>).filter(
-      (h) => !String(h.command ?? "").includes("nex")
+      (h) => !String(h.command ?? "").includes("wuphf")
     );
 
     (hooks[def.event] as unknown[]).push({
@@ -371,7 +371,7 @@ function installWindsurfHooks(
     if (!hooks[def.event]) hooks[def.event] = [];
 
     hooks[def.event] = (hooks[def.event] as Array<Record<string, unknown>>).filter(
-      (h) => !String(h.command ?? "").includes("nex")
+      (h) => !String(h.command ?? "").includes("wuphf")
     );
 
     (hooks[def.event] as unknown[]).push({
@@ -408,7 +408,7 @@ function installClineHooks(
     if (!existsSync(scriptPath)) continue;
 
     // Write a shell wrapper that invokes node with the adapter script
-    const wrapperPath = join(hookDir, `nex-${def.event.toLowerCase()}`);
+    const wrapperPath = join(hookDir, `wuphf-${def.event.toLowerCase()}`);
     const wrapper = `#!/usr/bin/env sh\nexec node "${scriptPath}" "$@"\n`;
     writeFileSync(wrapperPath, wrapper, { mode: 0o755 });
     hooksAdded.push(def.event);
@@ -420,7 +420,7 @@ function installClineHooks(
 // ── 4. Custom Tool/Plugin Installers ───────────────────────────────────
 
 /**
- * Install OpenCode plugin template to .opencode/plugins/nex.ts.
+ * Install OpenCode plugin template to .opencode/plugins/wuphf.ts.
  */
 export function installOpenCodePlugin(): {
   installed: boolean;
@@ -432,7 +432,7 @@ export function installOpenCodePlugin(): {
   }
 
   const targetDir = join(process.cwd(), ".opencode", "plugins");
-  const targetPath = join(targetDir, "nex.ts");
+  const targetPath = join(targetDir, "wuphf.ts");
 
   mkdirSync(targetDir, { recursive: true });
   copyFileSync(templatePath, targetPath);
@@ -466,10 +466,10 @@ export function installOpenClawPlugin(
   const plugins = (config.plugins ?? {}) as Record<string, unknown>;
   const entries = (plugins.entries ?? {}) as Record<string, Record<string, unknown>>;
 
-  if (!entries.nex) {
+  if (!entries.wuphf) {
     // Install the plugin
     try {
-      execFileSync("openclaw", ["plugins", "install", "@nex-ai/openclaw-plugin"], {
+      execFileSync("openclaw", ["plugins", "install", "@wuphf-ai/openclaw-plugin"], {
         stdio: "ignore",
         timeout: 30_000,
       });
@@ -483,10 +483,10 @@ export function installOpenClawPlugin(
   const freshPlugins = (freshConfig.plugins ?? {}) as Record<string, unknown>;
   const freshEntries = (freshPlugins.entries ?? {}) as Record<string, Record<string, unknown>>;
 
-  if (!freshEntries.nex) freshEntries.nex = {};
-  if (!freshEntries.nex.config) freshEntries.nex.config = {};
-  (freshEntries.nex.config as Record<string, unknown>).apiKey = apiKey;
-  freshEntries.nex.enabled = true;
+  if (!freshEntries.wuphf) freshEntries.wuphf = {};
+  if (!freshEntries.wuphf.config) freshEntries.wuphf.config = {};
+  (freshEntries.wuphf.config as Record<string, unknown>).apiKey = apiKey;
+  freshEntries.wuphf.enabled = true;
 
   freshPlugins.entries = freshEntries;
   freshConfig.plugins = freshPlugins;
@@ -498,7 +498,7 @@ export function installOpenClawPlugin(
 // ── 5. Custom Agent/Mode Installers ────────────────────────────────────
 
 /**
- * Install VS Code custom agent (.github/agents/nex.agent.md).
+ * Install VS Code custom agent (.github/agents/wuphf.agent.md).
  */
 export function installVSCodeAgent(): {
   installed: boolean;
@@ -510,7 +510,7 @@ export function installVSCodeAgent(): {
   }
 
   const targetDir = join(process.cwd(), ".github", "agents");
-  const targetPath = join(targetDir, "nex.agent.md");
+  const targetPath = join(targetDir, "wuphf.agent.md");
 
   mkdirSync(targetDir, { recursive: true });
   copyFileSync(templatePath, targetPath);
@@ -538,8 +538,8 @@ export function installKiloCodeMode(): {
     existing = readFileSync(targetPath, "utf-8");
   } catch { /* doesn't exist */ }
 
-  // If already has nex-crm mode, skip
-  if (existing.includes("nex-crm")) {
+  // If already has wuphf-crm mode, skip
+  if (existing.includes("wuphf-crm")) {
     return { installed: true, modePath: targetPath };
   }
 
@@ -574,7 +574,7 @@ export function installContinueProvider(): {
     : join(homedir(), ".continue");
 
   const targetDir = join(continueBase, ".plugins");
-  const targetPath = join(targetDir, "nex-provider.ts");
+  const targetPath = join(targetDir, "wuphf-provider.ts");
 
   mkdirSync(targetDir, { recursive: true });
   copyFileSync(templatePath, targetPath);
@@ -614,8 +614,8 @@ export function installWindsurfWorkflows(): {
 
 // ── 7. Rules File Installer ────────────────────────────────────────────
 
-const NEX_RULES_MARKER_START = "# --- Nex Context & Memory ---";
-const NEX_RULES_MARKER_END = "# --- End Nex ---";
+const NEX_RULES_MARKER_START = "# --- WUPHF Context & Memory ---";
+const NEX_RULES_MARKER_END = "# --- End WUPHF ---";
 
 /**
  * Map platform ID to its rules template filename.
@@ -667,7 +667,7 @@ export function installRulesFile(
       // File doesn't exist — will create
     }
 
-    // Check if nex section already exists
+    // Check if wuphf section already exists
     const startIdx = existing.indexOf(NEX_RULES_MARKER_START);
     const endIdx = existing.indexOf(NEX_RULES_MARKER_END);
 
@@ -678,8 +678,8 @@ export function installRulesFile(
       const updated = before + template.trim() + after;
       mkdirSync(dirname(rulesPath), { recursive: true });
       writeFileSync(rulesPath, updated, "utf-8");
-    } else if (existing.includes("nex_ask") || existing.includes("Nex Context")) {
-      // Already has nex content without markers — skip to avoid duplicates
+    } else if (existing.includes("nex_ask") || existing.includes("WUPHF Context")) {
+      // Already has wuphf content without markers — skip to avoid duplicates
       return { installed: true, rulesPath };
     } else {
       // Append to end
@@ -696,14 +696,14 @@ export function installRulesFile(
   return { installed: true, rulesPath };
 }
 
-// ── 8. Sync API key to ~/.nex/config.json ──────────────────────────────
+// ── 8. Sync API key to ~/.wuphf/config.json ──────────────────────────────
 
 /**
- * Persist API key to the canonical config file (~/.nex/config.json).
+ * Persist API key to the canonical config file (~/.wuphf/config.json).
  * Name kept as syncApiKeyToMcpConfig for backward compatibility with callers.
  */
 export function syncApiKeyToMcpConfig(apiKey: string): void {
-  const configPath = join(homedir(), ".nex", "config.json");
+  const configPath = join(homedir(), ".wuphf", "config.json");
   const config = readJsonFile(configPath);
   config.api_key = apiKey;
   writeJsonFile(configPath, config);

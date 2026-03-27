@@ -1,12 +1,12 @@
 /**
- * Nex context provider for Continue.dev
+ * WUPHF context provider for Continue.dev
  *
- * Add this to your ~/.continue/config.ts to enable @nex context:
+ * Add this to your ~/.continue/config.ts to enable @wuphf context:
  *
- * import { nexProvider } from "./.plugins/nex-provider";
+ * import { nexProvider } from "./.plugins/wuphf-provider";
  * export default { contextProviders: [nexProvider] };
  *
- * This file is copied to ~/.continue/.plugins/nex-provider.ts by `nex setup`.
+ * This file is copied to ~/.continue/.plugins/wuphf-provider.ts by `wuphf setup`.
  */
 
 import { readFileSync } from "node:fs";
@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 
 function loadApiKey(): string | null {
   try {
-    const raw = readFileSync(join(homedir(), ".nex-mcp.json"), "utf-8");
+    const raw = readFileSync(join(homedir(), ".wuphf-mcp.json"), "utf-8");
     return JSON.parse(raw).api_key ?? null;
   } catch {
     return null;
@@ -23,9 +23,9 @@ function loadApiKey(): string | null {
 }
 
 export const nexProvider = {
-  title: "nex",
-  displayTitle: "Nex Context",
-  description: "Query organizational context, CRM, and memory from Nex",
+  title: "wuphf",
+  displayTitle: "WUPHF Context",
+  description: "Query organizational context, CRM, and memory from WUPHF",
   type: "query" as const,
 
   async getContextItems(query: string) {
@@ -33,7 +33,7 @@ export const nexProvider = {
     if (!apiKey || !query.trim()) return [];
 
     try {
-      const baseUrl = process.env.NEX_API_BASE_URL ?? "https://app.nex.ai";
+      const baseUrl = process.env.WUPHF_API_BASE_URL ?? "https://app.nex.ai";
       const res = await fetch(`${baseUrl}/api/developers/v1/context/ask`, {
         method: "POST",
         headers: {
@@ -50,7 +50,7 @@ export const nexProvider = {
 
       return [
         {
-          name: "Nex Context",
+          name: "WUPHF Context",
           description: `Results for: ${query}`,
           content: data.answer,
         },

@@ -39,8 +39,8 @@ describe("ErrorBox", () => {
       <ErrorBox message="No API key" category="auth" />,
     );
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("nex init"), "should suggest nex init for auth errors");
-    assert.ok(frame.includes("NEX_API_KEY"), "should suggest env var for auth errors");
+    assert.ok(frame.includes("wuphf init"), "should suggest wuphf init for auth errors");
+    assert.ok(frame.includes("WUPHF_API_KEY"), "should suggest env var for auth errors");
   });
 
   it("shows suggestions for rate-limit category", () => {
@@ -127,7 +127,7 @@ describe("categorizeError", () => {
   });
 
   it("detects server errors", () => {
-    const err = new Error("Nex API error 500");
+    const err = new Error("WUPHF API error 500");
     err.name = "ServerError";
     assert.equal(categorizeError(err), "server");
   });

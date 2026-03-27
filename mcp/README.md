@@ -1,6 +1,6 @@
-# Nex MCP Server
+# WUPHF MCP Server
 
-Give any MCP-compatible AI client access to your Nex CRM — contacts, companies, deals, notes, tasks, and the context graph.
+Give any MCP-compatible AI client access to your WUPHF CRM — contacts, companies, deals, notes, tasks, and the context graph.
 
 ## Quick Start
 
@@ -16,13 +16,13 @@ bun run build
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `NEX_API_KEY` | Yes | — | Your Nex Developer API key |
+| `WUPHF_API_KEY` | Yes | — | Your WUPHF Developer API key |
 | `MCP_TRANSPORT` | No | `stdio` | Transport mode: `stdio` or `http` |
 | `MCP_PORT` | No | `3001` | HTTP server port (only when `MCP_TRANSPORT=http`) |
 
 ### Get Your API Key
 
-1. Log in to [Nex](https://app.nex.ai)
+1. Log in to [WUPHF](https://app.nex.ai)
 2. Go to **Settings > Developer**
 3. Create a new API key with `record.read` and `record.write` scopes
 
@@ -35,11 +35,11 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 ```json
 {
   "mcpServers": {
-    "nex": {
+    "wuphf": {
       "command": "node",
-      "args": ["/absolute/path/to/nex-as-a-skill/mcp/dist/index.js"],
+      "args": ["/absolute/path/to/wuphf/mcp/dist/index.js"],
       "env": {
-        "NEX_API_KEY": "nex_dev_your_key_here"
+        "WUPHF_API_KEY": "nex_dev_your_key_here"
       }
     }
   }
@@ -49,13 +49,13 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
 ### Claude Code
 
 ```bash
-claude mcp add nex -- node /absolute/path/to/nex-as-a-skill/mcp/dist/index.js
+claude mcp add wuphf -- node /absolute/path/to/wuphf/mcp/dist/index.js
 ```
 
 Set the env var before launching, or add it to your shell profile:
 
 ```bash
-export NEX_API_KEY="nex_dev_your_key_here"
+export WUPHF_API_KEY="nex_dev_your_key_here"
 ```
 
 ### Cursor
@@ -65,11 +65,11 @@ Add to `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for glob
 ```json
 {
   "mcpServers": {
-    "nex": {
+    "wuphf": {
       "command": "node",
-      "args": ["/absolute/path/to/nex-as-a-skill/mcp/dist/index.js"],
+      "args": ["/absolute/path/to/wuphf/mcp/dist/index.js"],
       "env": {
-        "NEX_API_KEY": "nex_dev_your_key_here"
+        "WUPHF_API_KEY": "nex_dev_your_key_here"
       }
     }
   }
@@ -81,7 +81,7 @@ Add to `.cursor/mcp.json` in your project root (or `~/.cursor/mcp.json` for glob
 ChatGPT uses Streamable HTTP transport. Start the server in HTTP mode:
 
 ```bash
-NEX_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http bun start
+WUPHF_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http bun start
 ```
 
 Then in ChatGPT Desktop, add a new MCP server pointing to:
@@ -95,7 +95,7 @@ http://localhost:3001/mcp
 Start the server in HTTP mode and point your client at the `/mcp` endpoint:
 
 ```bash
-NEX_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http MCP_PORT=3001 bun start
+WUPHF_API_KEY="nex_dev_your_key_here" MCP_TRANSPORT=http MCP_PORT=3001 bun start
 ```
 
 - MCP endpoint: `http://localhost:3001/mcp`
@@ -212,7 +212,7 @@ bun start
 Debug tools interactively using the MCP Inspector:
 
 ```bash
-NEX_API_KEY="nex_dev_your_key_here" bun run inspect
+WUPHF_API_KEY="nex_dev_your_key_here" bun run inspect
 ```
 
 This opens a browser UI where you can list tools, call them with test inputs, and inspect responses.
@@ -223,7 +223,7 @@ This opens a browser UI where you can list tools, call them with test inputs, an
 src/
   index.ts          # Entry point — stdio or HTTP transport
   server.ts         # McpServer creation and tool registration
-  client.ts         # Nex Developer API HTTP client
+  client.ts         # WUPHF Developer API HTTP client
   tools/
     context.ts      # Context graph: query, ingest, artifacts, AI lists
     search.ts       # Cross-object search

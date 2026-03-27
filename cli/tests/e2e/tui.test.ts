@@ -1,5 +1,5 @@
 /**
- * E2E tests for the Nex TUI.
+ * E2E tests for the WUPHF TUI.
  *
  * These launch the real TUI in a PTY and test interactive flows:
  * keystrokes, navigation, slash commands, and rendering.
@@ -13,8 +13,8 @@ describe("TUI E2E", () => {
   it("launches and shows welcome message", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      const found = await tui.waitForText("Welcome to Nex", 10000);
-      assert.ok(found, `Expected 'Welcome to Nex' in output. Got:\n${tui.text().slice(-500)}`);
+      const found = await tui.waitForText("Welcome to WUPHF", 10000);
+      assert.ok(found, `Expected 'Welcome to WUPHF' in output. Got:\n${tui.text().slice(-500)}`);
     } finally {
       tui.kill();
     }
@@ -33,7 +33,7 @@ describe("TUI E2E", () => {
   it("/help lists available slash commands", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       tui.type("/help");
       tui.enter();
       const found = await tui.waitForText("/agents", 5000);
@@ -46,7 +46,7 @@ describe("TUI E2E", () => {
   it("/agents pushes agent list view", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       tui.type("/agents");
       tui.enter();
       const found = await tui.waitForText("Agents", 5000);
@@ -59,7 +59,7 @@ describe("TUI E2E", () => {
   it("Escape returns from agent list to home", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       tui.type("/agents");
       tui.enter();
       await tui.waitForText("Agents", 5000);
@@ -92,8 +92,8 @@ describe("TUI E2E", () => {
       timeout: 10000,
     });
     try {
-      const found = await tui.waitForText("Usage: nex", 5000);
-      assert.ok(found, `Expected 'Usage: nex'. Got:\n${tui.text().slice(-300)}`);
+      const found = await tui.waitForText("Usage: wuphf", 5000);
+      assert.ok(found, `Expected 'Usage: wuphf'. Got:\n${tui.text().slice(-300)}`);
     } finally {
       tui.kill();
     }
@@ -115,7 +115,7 @@ describe("TUI E2E", () => {
   it("double Ctrl+C exits the TUI", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       tui.ctrlC();
       await tui.wait(200);
       tui.ctrlC();
@@ -130,7 +130,7 @@ describe("TUI E2E", () => {
   it("/clear resets conversation", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       await tui.wait(300);
       tui.type("/clear");
       await tui.wait(200);
@@ -145,7 +145,7 @@ describe("TUI E2E", () => {
   it("unknown slash command shows error", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       await tui.wait(300);
       tui.type("/nonexistent");
       await tui.wait(200);
@@ -175,7 +175,7 @@ describe("TUI E2E", () => {
   it("/login shows email prompt", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       tui.type("/login");
       tui.enter();
       // Should show email prompt (either "Enter your email" or "Already logged in")
@@ -189,7 +189,7 @@ describe("TUI E2E", () => {
   it("#general channel appears on home screen", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       const found = await tui.waitForText("general", 3000);
       assert.ok(found, `Expected '#general' channel on home screen. Got:\n${tui.text().slice(-500)}`);
     } finally {
@@ -200,7 +200,7 @@ describe("TUI E2E", () => {
   it("/cal toggles calendar strip", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       tui.type("/cal");
       tui.enter();
       // /cal toggles the calendar strip; check that it doesn't error
@@ -230,7 +230,7 @@ describe("TUI E2E", () => {
   it("natural language message shows thinking or auth error", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       tui.type("hello world");
       tui.enter();
       // Should show either "thinking..." spinner, a response, or "No API key" auth error
@@ -244,7 +244,7 @@ describe("TUI E2E", () => {
   it("Tab cycles focus sections", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       // Status bar should show Tab=focus hint
       const hasHint = await tui.waitForText("Tab=focus", 3000);
       assert.ok(hasHint, `Expected Tab=focus hint. Got:\n${tui.text().slice(-500)}`);
@@ -263,7 +263,7 @@ describe("TUI E2E", () => {
     const token = `e2e_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       await tui.wait(500);
       tui.type(token);
       tui.enter();
@@ -288,12 +288,12 @@ describe("TUI E2E", () => {
   it("/init shows setup or key status", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       tui.type("/init");
       tui.enter();
       // Should show either setup prompt (no key) or validation (has key)
       const found = await tui.waitForMatch(
-        /email|set up|API key|valid|expired|Welcome to Nex! Let/i,
+        /email|set up|API key|valid|expired|Welcome to WUPHF! Let/i,
         8000,
       );
       assert.ok(found, `Expected /init output. Got:\n${tui.text().slice(-500)}`);
@@ -305,7 +305,7 @@ describe("TUI E2E", () => {
   it("first Ctrl+C shows exit hint or gracefully handles exit", async () => {
     const tui = new TuiTest({ timeout: 15000 });
     try {
-      await tui.waitForText("Welcome to Nex", 10000);
+      await tui.waitForText("Welcome to WUPHF", 10000);
       await tui.wait(500);
       tui.ctrlC();
       await tui.wait(1000);
@@ -313,7 +313,7 @@ describe("TUI E2E", () => {
       // Should show the exit hint OR the process should still be alive
       // (Ink may handle Ctrl+C differently depending on exitOnCtrlC setting)
       const hasHint = text.includes("Ctrl+C again") || text.includes("interrupted");
-      const stillAlive = text.includes(">") || text.includes("nex");
+      const stillAlive = text.includes(">") || text.includes("wuphf");
       assert.ok(
         hasHint || stillAlive,
         `Expected exit hint or TUI still active after single Ctrl+C. Got:\n${text.slice(-500)}`,

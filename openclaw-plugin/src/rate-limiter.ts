@@ -1,6 +1,6 @@
 /**
  * Sliding window rate limiter with async queue.
- * Designed for Nex /text endpoint (10 req/min).
+ * Designed for WUPHF /text endpoint (10 req/min).
  */
 
 export interface RateLimiterConfig {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cline UserPromptSubmit hook — auto-recall from Nex.
+ * Cline UserPromptSubmit hook — auto-recall from WUPHF.
  * Input: { userPromptSubmit: { prompt: string } }
  * Output: { contextModification: "..." } or {}
  */
@@ -28,7 +28,7 @@ async function main(): Promise<void> {
 
     process.stdout.write(JSON.stringify({ contextModification: result.context }));
   } catch (err) {
-    process.stderr.write(`[nex-cline] Recall error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wuphf-cline] Recall error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.stdout.write("{}");
   }
 }

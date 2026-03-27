@@ -6,14 +6,14 @@
  * skips recall if a successful recall happened within the debounce window,
  * unless the current prompt contains question words.
  *
- * Persistence: last-recall timestamp stored in ~/.nex/recall-state.json
+ * Persistence: last-recall timestamp stored in ~/.wuphf/recall-state.json
  */
 
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const DATA_DIR = join(homedir(), ".nex");
+const DATA_DIR = join(homedir(), ".wuphf");
 const STATE_FILE = join(DATA_DIR, "recall-state.json");
 const DEBOUNCE_MS = 30_000; // 30 seconds
 
@@ -69,7 +69,7 @@ export function recordRecall(sessionId?: string): void {
 }
 
 /**
- * Determine whether this prompt should trigger a Nex /ask recall.
+ * Determine whether this prompt should trigger a WUPHF /ask recall.
  */
 export function shouldRecall(prompt: string, isFirstPrompt: boolean): RecallDecision {
   const trimmed = prompt.trim();

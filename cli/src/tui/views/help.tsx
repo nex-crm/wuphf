@@ -18,7 +18,7 @@ export function HelpView({
       {/* Title */}
       <Box paddingX={2} marginBottom={1}>
         <Text bold color="cyan">
-          {"Nex CLI Help"}
+          {"WUPHF CLI Help"}
         </Text>
       </Box>
 

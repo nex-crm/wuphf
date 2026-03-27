@@ -1,6 +1,6 @@
 /**
  * Core file scanner — walks project directories, detects changed files,
- * and ingests them into Nex via the developer API.
+ * and ingests them into WUPHF via the developer API.
  */
 import { readdirSync, statSync, readFileSync, type Stats } from "node:fs";
 import { join, relative, extname } from "node:path";
@@ -79,7 +79,7 @@ export async function scanAndIngest(
 
   for (const file of changed) {
     if (!rateLimiter.canProceed()) {
-      process.stderr.write(`[nex-scan] Rate limited — stopping after ${result.ingested} files\n`);
+      process.stderr.write(`[wuphf-scan] Rate limited — stopping after ${result.ingested} files\n`);
       result.skipped += changed.length - result.ingested - result.errors;
       break;
     }
@@ -94,7 +94,7 @@ export async function scanAndIngest(
       markIngested(file.absolutePath, file.stat, context, manifest);
       result.ingested++;
     } catch (err) {
-      process.stderr.write(`[nex-scan] Failed to ingest ${file.relativePath}: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`[wuphf-scan] Failed to ingest ${file.relativePath}: ${err instanceof Error ? err.message : String(err)}\n`);
       result.errors++;
     }
   }

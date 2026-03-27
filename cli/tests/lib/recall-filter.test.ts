@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { shouldRecall } from "../../src/lib/recall-filter.ts";
 
-const DATA_DIR = join(homedir(), ".nex");
+const DATA_DIR = join(homedir(), ".wuphf");
 const STATE_FILE = join(DATA_DIR, "recall-state.json");
 
 describe("shouldRecall", () => {

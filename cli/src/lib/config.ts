@@ -1,14 +1,17 @@
 /**
  * Configuration resolution: CLI flags > env vars > config file.
- * Base URL is hardcoded to production (NEX_DEV_URL escape hatch for local dev).
+ * Base URL defaults to the Nex backend, with WUPHF_* env aliases first and legacy NEX_* fallbacks.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 
-export const CONFIG_PATH = join(homedir(), ".nex", "config.json");
-export const BASE_URL = process.env.NEX_DEV_URL ?? loadConfig().dev_url ?? "https://app.nex.ai";
+const NEW_CONFIG_PATH = join(homedir(), ".wuphf", "config.json");
+const LEGACY_CONFIG_PATH = join(homedir(), ".nex", "config.json");
+
+export const CONFIG_PATH = NEW_CONFIG_PATH;
+export const BASE_URL = process.env.WUPHF_DEV_URL ?? process.env.NEX_DEV_URL ?? loadConfig().dev_url ?? "https://app.nex.ai";
 export const API_BASE = `${BASE_URL}/api/developers`;
 export const REGISTER_URL = `${BASE_URL}/api/v1/agents/register`;
 
@@ -24,7 +27,8 @@ export interface NexConfig {
 
 export function loadConfig(): NexConfig {
   try {
-    const raw = readFileSync(CONFIG_PATH, "utf-8");
+    const path = existsSync(NEW_CONFIG_PATH) ? NEW_CONFIG_PATH : LEGACY_CONFIG_PATH;
+    const raw = readFileSync(path, "utf-8");
     return JSON.parse(raw) as NexConfig;
   } catch {
     return {};
@@ -32,15 +36,15 @@ export function loadConfig(): NexConfig {
 }
 
 export function saveConfig(config: NexConfig): void {
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  mkdirSync(dirname(NEW_CONFIG_PATH), { recursive: true });
+  writeFileSync(NEW_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
 
 /**
  * Resolve API key from: flag > env > config file.
  */
 export function resolveApiKey(flagValue?: string): string | undefined {
-  return flagValue || process.env.NEX_API_KEY || loadConfig().api_key || undefined;
+  return flagValue || process.env.WUPHF_API_KEY || process.env.NEX_API_KEY || loadConfig().api_key || undefined;
 }
 
 /**

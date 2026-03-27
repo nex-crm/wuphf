@@ -42,23 +42,24 @@ export class ConfigError extends Error {
 
 /**
  * Parse raw plugin config into a validated NexPluginConfig.
- * Falls back to process.env.NEX_API_KEY if no apiKey in config.
+ * Falls back to process.env.WUPHF_API_KEY / process.env.NEX_API_KEY if no apiKey in config.
  */
 export function parseConfig(raw?: Record<string, unknown>): NexPluginConfig {
   const cfg = raw ?? {};
 
-  // Resolve API key: config → env var interpolation → NEX_API_KEY env
+  // Resolve API key: config → env var interpolation → WUPHF_API_KEY/NEX_API_KEY env
   let apiKey = typeof cfg.apiKey === "string" ? resolveEnvVars(cfg.apiKey) : undefined;
   if (!apiKey) {
-    apiKey = process.env.NEX_API_KEY;
+    apiKey = process.env.WUPHF_API_KEY ?? process.env.NEX_API_KEY;
   }
   if (!apiKey) {
     throw new ConfigError(
-      "No API key configured. Set 'apiKey' in plugin config or export NEX_API_KEY environment variable."
+      "No API key configured. Set 'apiKey' in plugin config or export WUPHF_API_KEY environment variable."
     );
   }
 
-  let baseUrl = process.env.NEX_DEV_URL
+  let baseUrl = process.env.WUPHF_DEV_URL
+    ?? process.env.NEX_DEV_URL
     ?? (typeof cfg.baseUrl === "string" ? resolveEnvVars(cfg.baseUrl).replace(/\/+$/, "") : undefined)
     ?? DEFAULTS.baseUrl;
 

@@ -18,7 +18,7 @@ describe("error handling", () => {
   test("auth error — fails with exit code 2 when no API key", async () => {
     const { exitCode, stderr } = await runNex(
       ["object", "list"],
-      { env: { NEX_DEV_URL: mockUrl } },
+      { env: { WUPHF_DEV_URL: mockUrl } },
     );
     expect(exitCode).not.toBe(0);
     expect(stderr.includes("API key") || stderr.includes("setup")).toBeTruthy();
@@ -27,7 +27,7 @@ describe("error handling", () => {
   test("auth error — fails with bad API key", async () => {
     const { exitCode, stderr } = await runNex(
       ["object", "list"],
-      { env: { NEX_DEV_URL: mockUrl, NEX_API_KEY: "wrong-key" } },
+      { env: { WUPHF_DEV_URL: mockUrl, WUPHF_API_KEY: "wrong-key" } },
     );
     expect(exitCode).not.toBe(0);
     expect(stderr.length > 0).toBeTruthy();

@@ -1,8 +1,10 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 
-const CONFIG_PATH = join(homedir(), ".nex", "config.json");
+const NEW_CONFIG_PATH = join(homedir(), ".wuphf", "config.json");
+const LEGACY_CONFIG_PATH = join(homedir(), ".nex", "config.json");
+const CONFIG_PATH = NEW_CONFIG_PATH;
 
 interface NexMcpConfig {
   api_key?: string;
@@ -15,7 +17,8 @@ interface NexMcpConfig {
 
 export function loadConfig(): NexMcpConfig {
   try {
-    const raw = readFileSync(CONFIG_PATH, "utf-8");
+    const path = existsSync(NEW_CONFIG_PATH) ? NEW_CONFIG_PATH : LEGACY_CONFIG_PATH;
+    const raw = readFileSync(path, "utf-8");
     return JSON.parse(raw) as NexMcpConfig;
   } catch {
     return {};
@@ -23,12 +26,12 @@ export function loadConfig(): NexMcpConfig {
 }
 
 export function saveConfig(config: NexMcpConfig): void {
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  mkdirSync(dirname(NEW_CONFIG_PATH), { recursive: true });
+  writeFileSync(NEW_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
 
 export function loadApiKey(): string | undefined {
-  return process.env.NEX_API_KEY || loadConfig().api_key || undefined;
+  return process.env.WUPHF_API_KEY || process.env.NEX_API_KEY || loadConfig().api_key || undefined;
 }
 
 export function persistRegistration(data: Record<string, unknown>): void {

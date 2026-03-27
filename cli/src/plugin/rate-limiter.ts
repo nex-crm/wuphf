@@ -1,6 +1,6 @@
 /**
  * File-based sliding window rate limiter.
- * Designed for Nex /text endpoint (10 req/min).
+ * Designed for WUPHF /text endpoint (10 req/min).
  *
  * Since Claude Code hooks are short-lived processes (start, run, exit),
  * in-memory state is lost between invocations. This implementation persists
@@ -20,7 +20,7 @@ export interface RateLimiterConfig {
 const DEFAULTS: RateLimiterConfig = {
   maxRequests: 10,
   windowMs: 60_000,
-  dataDir: join(homedir(), ".nex"),
+  dataDir: join(homedir(), ".wuphf"),
 };
 
 export class RateLimiter {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cline TaskStart hook — load baseline context from Nex.
+ * Cline TaskStart hook — load baseline context from WUPHF.
  * Input: { taskStart: { task: string } }
  * Output: { contextModification: "..." } or {}
  */
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
     const context = result.registrationPrompt ?? result.context;
     process.stdout.write(JSON.stringify({ contextModification: context }));
   } catch (err) {
-    process.stderr.write(`[nex-cline] Task start error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wuphf-cline] Task start error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.stdout.write("{}");
   }
 }

@@ -1,5 +1,5 @@
 /**
- * Subprocess test helpers for nex CLI integration tests.
+ * Subprocess test helpers for wuphf CLI integration tests.
  */
 
 import { spawn } from "node:child_process";
@@ -16,7 +16,7 @@ export interface RunResult {
 }
 
 /**
- * Run the nex CLI as a subprocess and capture output.
+ * Run the wuphf CLI as a subprocess and capture output.
  */
 export function runNex(
   args: string[],
@@ -46,7 +46,7 @@ export function runNex(
  */
 export function nexEnv(mockUrl: string): Record<string, string> {
   return {
-    NEX_DEV_URL: mockUrl,
-    NEX_API_KEY: "test-key",
+    WUPHF_DEV_URL: mockUrl,
+    WUPHF_API_KEY: "test-key",
   };
 }

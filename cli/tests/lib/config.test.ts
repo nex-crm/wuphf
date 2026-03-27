@@ -12,35 +12,35 @@ describe("config resolution", () => {
   let originalEnv: string | undefined;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "nex-config-test-"));
-    originalEnv = process.env.NEX_API_KEY;
-    delete process.env.NEX_API_KEY;
+    tmpDir = mkdtempSync(join(tmpdir(), "wuphf-config-test-"));
+    originalEnv = process.env.WUPHF_API_KEY;
+    delete process.env.WUPHF_API_KEY;
   });
 
   afterEach(() => {
     rmSync(tmpDir, { recursive: true, force: true });
     if (originalEnv !== undefined) {
-      process.env.NEX_API_KEY = originalEnv;
+      process.env.WUPHF_API_KEY = originalEnv;
     } else {
-      delete process.env.NEX_API_KEY;
+      delete process.env.WUPHF_API_KEY;
     }
   });
 
   test("resolveApiKey: flag takes priority", async () => {
     const { resolveApiKey } = await import("../../src/lib/config.ts");
-    process.env.NEX_API_KEY = "env-key";
+    process.env.WUPHF_API_KEY = "env-key";
     expect(resolveApiKey("flag-key")).toBe("flag-key");
   });
 
   test("resolveApiKey: env var used when no flag", async () => {
     const { resolveApiKey } = await import("../../src/lib/config.ts");
-    process.env.NEX_API_KEY = "env-key";
+    process.env.WUPHF_API_KEY = "env-key";
     expect(resolveApiKey(undefined)).toBe("env-key");
   });
 
   test("resolveApiKey: returns undefined when nothing set", async () => {
     const { resolveApiKey } = await import("../../src/lib/config.ts");
-    delete process.env.NEX_API_KEY;
+    delete process.env.WUPHF_API_KEY;
     // Config file may or may not have a key, but flag and env are empty
     const result = resolveApiKey(undefined);
     // Result is either from config file or undefined - both valid

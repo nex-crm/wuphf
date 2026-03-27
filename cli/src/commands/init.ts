@@ -1,12 +1,12 @@
 /**
  * /init command — complete setup flow that takes a user from "nothing configured"
- * to "Nex is fully integrated with all their AI agents."
+ * to "WUPHF is fully integrated with all their AI agents."
  *
  * Steps:
  *   1. Registration (if no API key)
  *   2. Platform detection
  *   3. Installation per platform (hooks, commands, rules, MCP)
- *   4. Persist config to ~/.nex/config.json
+ *   4. Persist config to ~/.wuphf/config.json
  */
 
 import { NexClient } from "../lib/client.js";
@@ -99,7 +99,7 @@ export async function registerUser(
     throw new Error("Registration did not return an API key.");
   }
 
-  // Persist to ~/.nex/config.json (canonical config)
+  // Persist to ~/.wuphf/config.json (canonical config)
   persistRegistration({
     api_key: apiKey,
     email,
@@ -285,7 +285,7 @@ export function installForPlatform(
   }
 }
 
-// ── Step 4: Persist config to ~/.nex/config.json ─────────────────────
+// ── Step 4: Persist config to ~/.wuphf/config.json ─────────────────────
 
 export function writeMcpConfig(
   apiKey: string,
@@ -373,24 +373,24 @@ export async function runInit(
     if (platform.nexInstalled) {
       onProgress({
         step: "install",
-        detail: `${platform.name}: Nex already installed, updating...`,
+        detail: `${platform.name}: WUPHF already installed, updating...`,
       });
     } else {
       onProgress({
         step: "install",
-        detail: `Installing Nex for ${platform.name}...`,
+        detail: `Installing WUPHF for ${platform.name}...`,
       });
     }
 
     installForPlatform(platform, apiKey, onProgress);
   }
 
-  // Step 4: Ensure ~/.nex/config.json is written
+  // Step 4: Ensure ~/.wuphf/config.json is written
   writeMcpConfig(apiKey, workspaceId, workspaceSlug);
 
   onProgress({
     step: "complete",
-    detail: `Nex installed for ${found.length} platform(s).`,
+    detail: `WUPHF installed for ${found.length} platform(s).`,
     done: true,
   });
 }

@@ -125,7 +125,7 @@ export function StreamHome({ push }: StreamHomeProps): React.JSX.Element {
       senderType: "system",
       content: apiKey
         ? "What would you like to do?"
-        : "Welcome to Nex. Type /init to get started.",
+        : "Welcome to WUPHF. Type /init to get started.",
       timestamp: Date.now(),
     }]);
 
@@ -229,7 +229,7 @@ export function StreamHome({ push }: StreamHomeProps): React.JSX.Element {
       return;
     }
 
-    // Natural language → Team-Lead (via Nex Ask API)
+    // Natural language → Team-Lead (via WUPHF Ask API)
     addMessage({ sender: "you", senderType: "human", content: trimmed });
     setIsLoading(true);
     setLoadingHint("thinking...");

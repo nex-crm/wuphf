@@ -1,6 +1,6 @@
 /**
  * Channel management for the Slack-style chat system.
- * Channels are persisted to ~/.nex-cli/chat/channels.json
+ * Channels are persisted to ~/.wuphf/chat/channels.json
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -15,7 +15,7 @@ export class ChannelManager {
   private channels: Channel[];
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? join(homedir(), '.nex-cli', 'chat');
+    this.baseDir = baseDir ?? join(homedir(), '.wuphf', 'chat');
     this.filePath = join(this.baseDir, 'channels.json');
     this.channels = this.load();
   }

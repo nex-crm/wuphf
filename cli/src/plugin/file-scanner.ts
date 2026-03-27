@@ -1,6 +1,6 @@
 /**
  * Core file scanner — walks project directories, detects changed files,
- * and ingests them into Nex via the developer API.
+ * and ingests them into WUPHF via the developer API.
  *
  * No new dependencies — uses only Node.js built-ins.
  */
@@ -8,7 +8,7 @@
 import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join, relative, extname } from "node:path";
 import type { Stats } from "node:fs";
-import type { NexClient } from "./nex-client.js";
+import type { NexClient } from "./wuphf-client.js";
 import type { RateLimiter } from "./rate-limiter.js";
 import type { ScanConfig } from "./config.js";
 import { readManifest, writeManifest, isChanged, markIngested } from "./file-manifest.js";
@@ -70,7 +70,7 @@ function walkDir(
 }
 
 /**
- * Scan project directory for text files and ingest changed ones into Nex.
+ * Scan project directory for text files and ingest changed ones into WUPHF.
  */
 export async function scanAndIngest(
   client: NexClient,
@@ -98,7 +98,7 @@ export async function scanAndIngest(
 
   for (const file of changed) {
     if (!rateLimiter.canProceed()) {
-      process.stderr.write(`[nex-scan] Rate limited — stopping after ${result.ingested} files\n`);
+      process.stderr.write(`[wuphf-scan] Rate limited — stopping after ${result.ingested} files\n`);
       result.skipped += changed.length - result.ingested - result.errors;
       break;
     }
@@ -117,7 +117,7 @@ export async function scanAndIngest(
       result.ingested++;
     } catch (err) {
       process.stderr.write(
-        `[nex-scan] Failed to ingest ${file.relativePath}: ${err instanceof Error ? err.message : String(err)}\n`
+        `[wuphf-scan] Failed to ingest ${file.relativePath}: ${err instanceof Error ? err.message : String(err)}\n`
       );
       result.errors++;
     }

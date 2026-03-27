@@ -163,12 +163,12 @@ describe("StatusBar", () => {
     assert.ok(frame.includes("Esc/back"), "should show hint text");
   });
 
-  it("shows nex brand", () => {
+  it("shows wuphf brand", () => {
     const { lastFrame } = render(
       <StatusBar mode="normal" breadcrumbs={["home"]} />,
     );
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("nex"), "should show nex brand");
+    assert.ok(frame.includes("wuphf"), "should show wuphf brand");
   });
 
   it("shows simplified bar in conversation mode", () => {
@@ -176,7 +176,7 @@ describe("StatusBar", () => {
       <StatusBar mode="normal" breadcrumbs={["home"]} conversationMode />,
     );
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("nex"), "should show nex brand");
+    assert.ok(frame.includes("wuphf"), "should show wuphf brand");
     assert.ok(!frame.includes("NORMAL"), "should NOT show mode badge in conversation mode");
   });
 
@@ -356,12 +356,12 @@ describe("MessageList", () => {
   it("renders messages with sender names", () => {
     const messages = [
       { id: "1", sender: "human", content: "Hello there", timestamp: Date.now() },
-      { id: "2", sender: "nex", content: "Hi! How can I help?", timestamp: Date.now() },
+      { id: "2", sender: "wuphf", content: "Hi! How can I help?", timestamp: Date.now() },
     ];
     const { lastFrame } = render(<MessageList messages={messages} />);
     const frame = strip(lastFrame() ?? "");
     assert.ok(frame.includes("human"), "should show human sender");
-    assert.ok(frame.includes("nex"), "should show nex sender");
+    assert.ok(frame.includes("wuphf"), "should show wuphf sender");
     assert.ok(frame.includes("Hello there"), "should show message content");
   });
 

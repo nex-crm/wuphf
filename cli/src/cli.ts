@@ -11,10 +11,10 @@ const { version } = require("../package.json") as { version: string };
 export const program = new Command();
 
 program
-  .name("nex")
-  .description("Nex CLI — command-line interface for the Nex Developer API")
+  .name("wuphf")
+  .description("WUPHF CLI — command-line interface for the WUPHF Developer API")
   .version(version)
-  .option("--api-key <key>", "Override API key (env: NEX_API_KEY)")
+  .option("--api-key <key>", "Override API key (env: WUPHF_API_KEY)")
   .option("--format <fmt>", "Output format: json, text, quiet")
   .option("--timeout <ms>", "Request timeout in milliseconds")
   .option("--session <id>", "Session ID for multi-turn context")

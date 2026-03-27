@@ -18,7 +18,7 @@ export class ChatService {
   private listeners: Array<() => void> = [];
 
   constructor(baseDir?: string) {
-    const dir = baseDir ?? join(process.env.NEX_CLI_DATA_DIR ?? join(homedir(), '.nex-cli'), 'chat');
+    const dir = baseDir ?? join(process.env.NEX_CLI_DATA_DIR ?? join(homedir(), '.wuphf'), 'chat');
     this.channelManager = new ChannelManager(dir);
     this.messageStore = new MessageStore(join(dir, 'messages'));
     this.chatRouter = new ChatRouter(this.channelManager, this.messageStore);

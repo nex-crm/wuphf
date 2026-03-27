@@ -1,5 +1,5 @@
 /**
- * nex insight — list insights from your Nex workspace.
+ * wuphf insight — list insights from your WUPHF workspace.
  */
 
 import { program } from "../cli.js";

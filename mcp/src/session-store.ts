@@ -1,6 +1,6 @@
 /**
  * File-based session store for MCP session ID mapping.
- * Persists session mappings to ~/.nex/mcp-sessions.json.
+ * Persists session mappings to ~/.wuphf/mcp-sessions.json.
  */
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ export interface SessionStoreConfig {
 }
 
 const DEFAULT_MAX = 100;
-const DEFAULT_DATA_DIR = join(homedir(), ".nex");
+const DEFAULT_DATA_DIR = join(homedir(), ".wuphf");
 
 export class SessionStore {
   private filePath: string;

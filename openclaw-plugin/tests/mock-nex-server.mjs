@@ -1,7 +1,7 @@
 /**
- * Mock Nex Developer API server for plugin testing.
+ * Mock WUPHF Developer API server for plugin testing.
  * Responds to /ask and /text with realistic payloads.
- * Run: node mock-nex-server.mjs
+ * Run: node mock-wuphf-server.mjs
  */
 
 import http from "node:http";
@@ -100,7 +100,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Mock Nex API running on http://localhost:${PORT}`);
+  console.log(`Mock WUPHF API running on http://localhost:${PORT}`);
   console.log(`Auth key: ${VALID_KEY}`);
   console.log(`Endpoints: POST /api/developers/v1/context/text, POST /api/developers/v1/context/ask`);
   console.log(`Memories stored: ${memories.length}`);

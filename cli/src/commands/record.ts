@@ -1,5 +1,5 @@
 /**
- * nex record — CRUD operations for records.
+ * wuphf record — CRUD operations for records.
  */
 
 import { program } from "../cli.js";

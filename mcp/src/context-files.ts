@@ -1,5 +1,5 @@
 /**
- * Ingests Claude Code context files (CLAUDE.md + memory files) into Nex.
+ * Ingests Claude Code context files (CLAUDE.md + memory files) into WUPHF.
  *
  * Reads from both global and project-level locations:
  * - ~/.claude/CLAUDE.md (global instructions)
@@ -81,7 +81,7 @@ export async function ingestContextFiles(
         continue;
       }
       if (!rateLimiter.canProceed()) {
-        process.stderr.write("[nex-context-files] Rate limited — stopping context file ingest\n");
+        process.stderr.write("[wuphf-context-files] Rate limited — stopping context file ingest\n");
         result.skipped += candidates.length - result.ingested - result.skipped - result.errors;
         break;
       }
@@ -96,7 +96,7 @@ export async function ingestContextFiles(
       result.files.push(contextTag);
       dirty = true;
     } catch (err) {
-      process.stderr.write(`[nex-context-files] Failed to ingest ${contextTag}: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.stderr.write(`[wuphf-context-files] Failed to ingest ${contextTag}: ${err instanceof Error ? err.message : String(err)}\n`);
       result.errors++;
     }
   }

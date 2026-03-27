@@ -33,21 +33,21 @@ describe("captureFilter", () => {
     if (!result.skipped) expect(result.text).toBe(text);
   });
 
-  test("strips <nex-context> blocks before length check", () => {
-    const nexBlock = "<nex-context>some long context data here</nex-context>";
+  test("strips <wuphf-context> blocks before length check", () => {
+    const nexBlock = "<wuphf-context>some long context data here</wuphf-context>";
     const shortContent = "hi";
     const result = captureFilter(shortContent + nexBlock);
     // After stripping, "hi" is too short
     expect(result.skipped).toBe(true);
   });
 
-  test("returns cleaned text without nex-context blocks", () => {
-    const nexBlock = "<nex-context>context data goes here</nex-context>";
+  test("returns cleaned text without wuphf-context blocks", () => {
+    const nexBlock = "<wuphf-context>context data goes here</wuphf-context>";
     const content = "This is a sufficiently long prompt for testing purposes.";
     const result = captureFilter(content + nexBlock);
     expect(result.skipped).toBe(false);
     if (!result.skipped) {
-      expect(!result.text.includes("<nex-context>")).toBeTruthy();
+      expect(!result.text.includes("<wuphf-context>")).toBeTruthy();
       expect(result.text.includes("sufficiently long")).toBeTruthy();
     }
   });

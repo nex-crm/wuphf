@@ -1,5 +1,5 @@
 /**
- * Runtime tool registry and built-in Nex tools.
+ * Runtime tool registry and built-in WUPHF tools.
  */
 
 import type { AgentTool } from './types.js';

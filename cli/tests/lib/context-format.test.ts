@@ -2,10 +2,10 @@ import { describe, test, expect } from "bun:test";
 import { formatNexContext, stripNexContext } from "../../src/lib/context-format.ts";
 
 describe("formatNexContext", () => {
-  test("wraps content in nex-context tags", () => {
+  test("wraps content in wuphf-context tags", () => {
     const result = formatNexContext({ answer: "Hello world", entityCount: 0 });
-    expect(result.startsWith("<nex-context>")).toBeTruthy();
-    expect(result.endsWith("</nex-context>")).toBeTruthy();
+    expect(result.startsWith("<wuphf-context>")).toBeTruthy();
+    expect(result.endsWith("</wuphf-context>")).toBeTruthy();
     expect(result.includes("Hello world")).toBeTruthy();
   });
 
@@ -21,14 +21,14 @@ describe("formatNexContext", () => {
 });
 
 describe("stripNexContext", () => {
-  test("removes complete nex-context blocks", () => {
-    const input = "before <nex-context>some context</nex-context> after";
+  test("removes complete wuphf-context blocks", () => {
+    const input = "before <wuphf-context>some context</wuphf-context> after";
     const result = stripNexContext(input);
     expect(result).toBe("before  after");
   });
 
-  test("removes unclosed nex-context tags", () => {
-    const input = "before <nex-context>unclosed context here";
+  test("removes unclosed wuphf-context tags", () => {
+    const input = "before <wuphf-context>unclosed context here";
     const result = stripNexContext(input);
     expect(result).toBe("before");
   });
@@ -39,7 +39,7 @@ describe("stripNexContext", () => {
   });
 
   test("handles multiple blocks", () => {
-    const input = "a <nex-context>x</nex-context> b <nex-context>y</nex-context> c";
+    const input = "a <wuphf-context>x</wuphf-context> b <wuphf-context>y</wuphf-context> c";
     const result = stripNexContext(input);
     expect(result).toBe("a  b  c");
   });

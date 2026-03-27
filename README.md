@@ -1,6 +1,6 @@
-# Nex: Compounding Intelligence for AI agents
+# WUPHF: Compounding Intelligence for AI agents
 
-[![npm version](https://img.shields.io/npm/v/@nex-ai/nex)](https://www.npmjs.com/package/@nex-ai/nex)
+[![npm version](https://img.shields.io/npm/v/@wuphf/wuphf)](https://www.npmjs.com/package/@wuphf/wuphf)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gjSySC3PzV)
 
 Turn all your AI agent conversations into a unified knowledge graph. Supports Claude Code, Codex, OpenClaw, Cursor, OpenCode, etc. Adds additional context from Email, Meetings, Slack, HubSpot, Salesforce.
@@ -9,7 +9,7 @@ Tell something to OpenClaw. Ask about it in Claude Code. Reference it from Curso
 
 <a href="https://discord.gg/gjSySC3PzV"><img src="https://img.shields.io/badge/Join%20our%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join our Discord" /></a>
 
-Talk to the team, share feedback, and connect with other developers building AI agents with Nex.
+Talk to the team, share feedback, and connect with other developers building AI agents with WUPHF.
 
 ## How It Works
 
@@ -31,27 +31,27 @@ One fact entered once. Available everywhere, instantly.
 | | CLI | MCP Server | OpenClaw Plugin | Claude Code Plugin | SKILL.md |
 |---|---|---|---|---|---|
 | **Platforms** | Any terminal / AI agent | Claude Desktop, ChatGPT, Cursor, Windsurf | OpenClaw | Claude Code CLI | OpenClaw (script-based) |
-| **Auto-recall** | Via `nex recall` | No (tool calls) | Yes (smart filter) | Yes (smart filter) | No (manual) |
-| **Auto-capture** | Via `nex capture` | No | Yes | Yes | No (manual) |
+| **Auto-recall** | Via `wuphf recall` | No (tool calls) | Yes (smart filter) | Yes (smart filter) | No (manual) |
+| **Auto-capture** | Via `wuphf capture` | No | Yes | Yes | No (manual) |
 | **Commands** | 50+ CLI commands | 50+ typed tools | 4 tools + 4 commands | 5 slash commands + MCP | bash scripts |
 | **Rate limiting** | File-based | File-based | Queue + file-based | File-based | N/A |
 | **Session tracking** | File-based | File-based | In-memory LRU | File-based | N/A |
-| **Setup** | `nex setup` | `nex setup --with-mcp` | Copy plugin | `nex setup` | Set `NEX_API_KEY` |
+| **Setup** | `wuphf setup` | `wuphf setup --with-mcp` | Copy plugin | `wuphf setup` | Set `WUPHF_API_KEY` |
 
 ## Quick Start (Recommended)
 
 ```bash
 # Install and run setup — handles everything in one step
-bun install -g @nex-ai/nex
-nex setup
+bun install -g @wuphf/wuphf
+wuphf setup
 ```
 
-`nex setup` registers your API key, auto-detects your AI platforms (Claude Code, Cursor, Windsurf, etc.), installs hooks, scans project files, and creates config. One command, fully configured.
+`wuphf setup` registers your API key, auto-detects your AI platforms (Claude Code, Cursor, Windsurf, etc.), installs hooks, scans project files, and creates config. One command, fully configured.
 
 ```bash
 # Now use it from any agent
-nex ask "who is Maria Rodriguez?"
-nex remember "Met with Maria, CTO of TechFlow. European expansion Q3, $2M budget."
+wuphf ask "who is Maria Rodriguez?"
+wuphf remember "Met with Maria, CTO of TechFlow. European expansion Q3, $2M budget."
 ```
 
 See [`cli/README.md`](cli/README.md) for all 50+ commands.
@@ -64,37 +64,37 @@ See [`cli/README.md`](cli/README.md) for all 50+ commands.
 ### CLI (any terminal, any AI agent)
 
 ```bash
-npx @nex-ai/nex register --email you@company.com
+npx @wuphf/wuphf register --email you@company.com
 ```
 
 That's it. Now use it:
 
 ```bash
 # Ask your knowledge graph
-nex ask "who is Maria Rodriguez?"
+wuphf ask "who is Maria Rodriguez?"
 
 # Ingest information
-nex remember "Met with Maria Rodriguez, CTO of TechFlow. European expansion Q3, $2M budget."
+wuphf remember "Met with Maria Rodriguez, CTO of TechFlow. European expansion Q3, $2M budget."
 
 # Or pipe from stdin
-cat meeting-notes.txt | nex remember
+cat meeting-notes.txt | wuphf remember
 
 # Search CRM records
-nex search "TechFlow"
+wuphf search "TechFlow"
 
 # CRUD operations
-nex record list person --limit 10
-nex task create --title "Follow up with Maria" --priority high
-nex insight list --last 24h
+wuphf record list person --limit 10
+wuphf task create --title "Follow up with Maria" --priority high
+wuphf insight list --last 24h
 
 # Build auto-recall hooks for any agent
-nex recall "what do I know about TechFlow?"  # Returns <nex-context> XML block
+wuphf recall "what do I know about TechFlow?"  # Returns <wuphf-context> XML block
 
 # Build auto-capture hooks
-nex capture "Agent conversation text..."  # Rate-limited, filtered
+wuphf capture "Agent conversation text..."  # Rate-limited, filtered
 ```
 
-Install globally: `bun install -g @nex-ai/nex`
+Install globally: `bun install -g @wuphf/wuphf`
 
 ### MCP Server (Claude Desktop, Cursor, Windsurf)
 
@@ -107,10 +107,10 @@ Add to your client config:
 ```json
 {
   "mcpServers": {
-    "nex": {
+    "wuphf": {
       "command": "bun",
-      "args": ["/path/to/nex-as-a-skill/mcp/src/index.ts"],
-      "env": { "NEX_API_KEY": "sk-your_key_here" }
+      "args": ["/path/to/wuphf/mcp/src/index.ts"],
+      "env": { "WUPHF_API_KEY": "sk-your_key_here" }
     }
   }
 }
@@ -123,8 +123,8 @@ See [`mcp/README.md`](mcp/README.md) for all tools.
 ### OpenClaw Plugin (auto-recall + auto-capture)
 
 ```bash
-cp -r openclaw-plugin /path/to/openclaw/plugins/nex
-cd /path/to/openclaw/plugins/nex && bun install && bun run build
+cp -r openclaw-plugin /path/to/openclaw/plugins/wuphf
+cd /path/to/openclaw/plugins/wuphf && bun install && bun run build
 ```
 
 Add to `openclaw.json`:
@@ -132,10 +132,10 @@ Add to `openclaw.json`:
 ```json
 {
   "plugins": {
-    "load": { "paths": ["/path/to/plugins/nex"] },
-    "slots": { "memory": "nex" },
+    "load": { "paths": ["/path/to/plugins/wuphf"] },
+    "slots": { "memory": "wuphf" },
     "entries": {
-      "nex": {
+      "wuphf": {
         "enabled": true,
         "config": {
           "apiKey": "sk-your_key_here"
@@ -163,7 +163,7 @@ Add hooks to `~/.claude/settings.json`:
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "NEX_API_KEY=sk-your_key node /path/to/claude-code-plugin/dist/auto-recall.js",
+        "command": "WUPHF_API_KEY=sk-your_key node /path/to/claude-code-plugin/dist/auto-recall.js",
         "timeout": 10000
       }]
     }],
@@ -171,7 +171,7 @@ Add hooks to `~/.claude/settings.json`:
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "NEX_API_KEY=sk-your_key node /path/to/claude-code-plugin/dist/auto-capture.js",
+        "command": "WUPHF_API_KEY=sk-your_key node /path/to/claude-code-plugin/dist/auto-capture.js",
         "timeout": 5000,
         "async": true
       }]
@@ -184,7 +184,7 @@ Slash commands and MCP server:
 
 ```bash
 cp claude-code-plugin/commands/*.md ~/.claude/commands/    # /recall, /remember, /scan, /entities
-claude mcp add nex -- node /path/to/mcp/dist/index.js      # Full toolset
+claude mcp add wuphf -- node /path/to/mcp/dist/index.js      # Full toolset
 ```
 
 See [`claude-code-plugin/README.md`](claude-code-plugin/README.md) for details.
@@ -195,16 +195,16 @@ For OpenClaw agents without the plugin, SKILL.md provides bash-script-based acce
 
 ```bash
 # Register and get API key
-bash scripts/nex-openclaw-register.sh your@email.com "Your Name"
+bash scripts/wuphf-openclaw-register.sh your@email.com "Your Name"
 
 # Query context
-printf '{"query":"who is Maria?"}' | bash scripts/nex-api.sh POST /v1/context/ask
+printf '{"query":"who is Maria?"}' | bash scripts/wuphf-api.sh POST /v1/context/ask
 
 # Ingest text
-printf '{"content":"Meeting notes..."}' | bash scripts/nex-api.sh POST /v1/context/text
+printf '{"content":"Meeting notes..."}' | bash scripts/wuphf-api.sh POST /v1/context/text
 
 # Scan project files
-bash scripts/nex-scan-files.sh --dir . --max-files 10
+bash scripts/wuphf-scan-files.sh --dir . --max-files 10
 ```
 
 See [`SKILL.md`](SKILL.md) for the full API reference.
@@ -217,10 +217,10 @@ All surfaces share configuration for cross-tool compatibility:
 
 | File | Purpose | Shared by |
 |------|---------|-----------|
-| `~/.nex-mcp.json` | API key + workspace info | All surfaces |
-| `~/.nex/file-scan-manifest.json` | File change tracking | All surfaces |
-| `~/.nex/rate-limiter.json` | Rate limit timestamps | OC, MCP, CC |
-| `~/.nex/recall-state.json` | Recall debounce state | CC |
+| `~/.wuphf-mcp.json` | API key + workspace info | All surfaces |
+| `~/.wuphf/file-scan-manifest.json` | File change tracking | All surfaces |
+| `~/.wuphf/rate-limiter.json` | Rate limit timestamps | OC, MCP, CC |
+| `~/.wuphf/recall-state.json` | Recall debounce state | CC |
 
 Register once via any surface → all other surfaces pick up the key automatically.
 
@@ -228,7 +228,7 @@ Register once via any surface → all other surfaces pick up the key automatical
 
 ```
                     ┌─────────────────────┐
-                    │   Nex Context Graph  │
+                    │   WUPHF Context Graph  │
                     │  (people, companies, │
                     │  insights, tasks...) │
                     └──────────┬──────────┘
@@ -251,20 +251,20 @@ Register once via any surface → all other surfaces pick up the key automatical
 
 | Variable | Required | Default |
 |----------|----------|---------|
-| `NEX_API_KEY` | Yes (or register) | — |
-| `NEX_DEV_URL` | No (dev only) | `https://app.nex.ai` |
-| `NEX_SCAN_ENABLED` | No | `true` |
-| `NEX_SCAN_EXTENSIONS` | No | `.md,.txt,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.js,.ts,.jsx,.tsx,.py,.rb,.go,.rs,.java,.sh,.bash,.zsh,.fish,.org,.rst,.adoc,.tex,.log,.env,.ini,.cfg,.conf,.properties` |
-| `NEX_SCAN_MAX_FILES` | No | `5` |
-| `NEX_SCAN_DEPTH` | No | `20` |
-| `NEX_SCAN_MAX_FILE_SIZE` | No | `100000` (bytes) |
-| `NEX_SCAN_IGNORE_DIRS` | No | `node_modules,.git,dist,build,.next,__pycache__,vendor,.venv,.claude,coverage,.turbo,.cache` |
+| `WUPHF_API_KEY` | Yes (or register) | — |
+| `WUPHF_DEV_URL` | No (dev only) | `https://app.nex.ai` |
+| `WUPHF_SCAN_ENABLED` | No | `true` |
+| `WUPHF_SCAN_EXTENSIONS` | No | `.md,.txt,.rtf,.html,.htm,.csv,.tsv,.json,.yaml,.yml,.toml,.xml,.js,.ts,.jsx,.tsx,.py,.rb,.go,.rs,.java,.sh,.bash,.zsh,.fish,.org,.rst,.adoc,.tex,.log,.env,.ini,.cfg,.conf,.properties` |
+| `WUPHF_SCAN_MAX_FILES` | No | `5` |
+| `WUPHF_SCAN_DEPTH` | No | `20` |
+| `WUPHF_SCAN_MAX_FILE_SIZE` | No | `100000` (bytes) |
+| `WUPHF_SCAN_IGNORE_DIRS` | No | `node_modules,.git,dist,build,.next,__pycache__,vendor,.venv,.claude,coverage,.turbo,.cache` |
 
 ## Testing
 
 - **CLI**: 119 tests (`cd cli && bun test`)
 - **OpenClaw plugin**: 38/38 unit tests (`cd openclaw-plugin && npx vitest run`)
-- **Claude Code plugin**: 21/21 E2E tests (see `docs/nex-plugin-test-results.md`)
+- **Claude Code plugin**: 21/21 E2E tests (see `docs/wuphf-plugin-test-results.md`)
 - **MCP server**: Builds clean, all tools typed with Zod schemas
 - **SKILL scripts**: Syntax validated, injection-resistant, cross-platform (macOS + Linux)
 

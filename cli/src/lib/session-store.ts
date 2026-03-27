@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_MAX = 100;
-const DEFAULT_DATA_DIR = join(homedir(), ".nex");
+const DEFAULT_DATA_DIR = join(homedir(), ".wuphf");
 
 export class SessionStore {
   private filePath: string;

@@ -1,14 +1,14 @@
 /**
  * File scanner for OpenClaw plugin.
  * Discovers text files, tracks changes via SHA-256 content hash,
- * and ingests new/changed files into Nex.
+ * and ingests new/changed files into WUPHF.
  */
 
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, statSync, readdirSync } from "node:fs";
 import { join, extname, resolve, dirname } from "node:path";
 import { homedir } from "node:os";
-import { NexClient, type IngestResponse } from "./nex-client.js";
+import { NexClient, type IngestResponse } from "./wuphf-client.js";
 
 // --- Types ---
 
@@ -32,7 +32,7 @@ export interface ScanResult {
 
 // --- Constants ---
 
-const MANIFEST_PATH = join(homedir(), ".nex", "file-scan-manifest.json");
+const MANIFEST_PATH = join(homedir(), ".wuphf", "file-scan-manifest.json");
 const DEFAULT_EXTENSIONS = [
   ".md", ".txt", ".rtf", ".html", ".htm",
   ".csv", ".tsv", ".json", ".yaml", ".yml", ".toml", ".xml",

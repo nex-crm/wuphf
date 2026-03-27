@@ -1,5 +1,5 @@
 /**
- * Smart capture filtering — decides what content to send to Nex for ingestion.
+ * Smart capture filtering — decides what content to send to WUPHF for ingestion.
  * Cherry-picked from Supermemory (provider skip), Engram (dedup), MemOS Cloud (capture modes).
  */
 

@@ -1,5 +1,5 @@
 /**
- * nex rel — manage relationship definitions and instances.
+ * wuphf rel — manage relationship definitions and instances.
  */
 
 import { program } from "../cli.js";

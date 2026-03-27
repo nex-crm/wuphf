@@ -1,10 +1,10 @@
 {
-  "name": "@nex-ai/nex",
+  "name": "@wuphf/wuphf",
   "version": "0.1.33",
-  "description": "Nex CLI provides organizational context & memory to AI agents",
+  "description": "WUPHF CLI provides organizational context & memory to AI agents",
   "type": "module",
   "bin": {
-    "nex": "dist/index.js"
+    "wuphf": "dist/index.js"
   },
   "files": [
     "dist",
@@ -30,12 +30,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/nex-crm/nex-as-a-skill.git",
+    "url": "https://github.com/najmuzzaman-mohammad/wuphf.git",
     "directory": "cli"
   },
-  "homepage": "https://github.com/nex-crm/nex-as-a-skill#readme",
+  "homepage": "https://github.com/najmuzzaman-mohammad/wuphf#readme",
   "bugs": {
-    "url": "https://github.com/nex-crm/nex-as-a-skill/issues"
+    "url": "https://github.com/najmuzzaman-mohammad/wuphf/issues"
   },
   "engines": {
     "node": ">=18"

@@ -11,8 +11,8 @@ export type ErrorCategory = "auth" | "rate-limit" | "network" | "server" | "unkn
 
 const SUGGESTIONS: Record<ErrorCategory, string[]> = {
   auth: [
-    "Run 'nex init' to configure your API key",
-    "Or set NEX_API_KEY in your environment",
+    "Run 'wuphf init' to configure your API key",
+    "Or set WUPHF_API_KEY in your environment",
   ],
   "rate-limit": [
     "Wait a moment and retry the request",
@@ -29,7 +29,7 @@ const SUGGESTIONS: Record<ErrorCategory, string[]> = {
   ],
   unknown: [
     "Run with --verbose for more details",
-    "Report the issue at https://github.com/nex-crm/nex-as-a-skill/issues",
+    "Report the issue at https://github.com/najmuzzaman-mohammad/wuphf/issues",
   ],
 };
 

@@ -115,13 +115,13 @@ describe("ChannelMessage", () => {
       channel: "general",
       sender: "system",
       senderType: "system",
-      content: "Welcome to Nex!",
+      content: "Welcome to WUPHF!",
       timestamp: Date.now(),
     };
     const { lastFrame } = render(<ChannelMessage message={msg} />);
     const frame = strip(lastFrame() ?? "");
     assert.ok(frame.includes("[#general]"), "should show channel tag");
-    assert.ok(frame.includes("Welcome to Nex!"), "should show content");
+    assert.ok(frame.includes("Welcome to WUPHF!"), "should show content");
   });
 
   it("shows colored left border (▌)", () => {

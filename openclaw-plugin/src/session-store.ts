@@ -1,5 +1,5 @@
 /**
- * In-memory session store mapping OpenClaw sessionKeys to Nex session IDs.
+ * In-memory session store mapping OpenClaw sessionKeys to WUPHF session IDs.
  * LRU eviction at configurable max size.
  */
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Claude Code SessionStart hook — bulk context load from Nex + file scan.
+ * Claude Code SessionStart hook — bulk context load from WUPHF + file scan.
  *
- * Fires once when a new Claude Code session begins. Queries Nex for
+ * Fires once when a new Claude Code session begins. Queries WUPHF for
  * a baseline context summary and injects it so the agent "already knows"
  * relevant business context from the first message.
  *
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
     try {
       input = JSON.parse(raw) as HookInput;
     } catch {
-      process.stderr.write("[nex-session-start] Failed to parse stdin JSON, continuing with defaults\n");
+      process.stderr.write("[wuphf-session-start] Failed to parse stdin JSON, continuing with defaults\n");
     }
 
     const source = input.source ?? "startup";
@@ -43,7 +43,7 @@ async function main(): Promise<void> {
     process.stdout.write(claudeCodeOutput("SessionStart", result.context));
   } catch (err) {
     process.stderr.write(
-      `[nex-session-start] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
+      `[wuphf-session-start] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.stdout.write("{}");
   }

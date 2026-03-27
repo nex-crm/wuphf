@@ -1,5 +1,5 @@
 ---
-description: Search for entities (people, companies, topics) in Nex knowledge base
+description: Search for entities (people, companies, topics) in WUPHF knowledge base
 ---
 Search for entities matching: $ARGUMENTS
 If no query provided, respond: "Usage: /entities <search query>"

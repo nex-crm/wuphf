@@ -1,5 +1,5 @@
 /**
- * Ingests Claude Code context files (CLAUDE.md + memory files) into Nex.
+ * Ingests Claude Code context files (CLAUDE.md + memory files) into WUPHF.
  *
  * Reads from both global and project-level locations:
  * - ~/.claude/CLAUDE.md (global instructions)
@@ -13,7 +13,7 @@
 import { existsSync, readdirSync, statSync, readFileSync } from "node:fs";
 import { join, extname, basename } from "node:path";
 import { homedir } from "node:os";
-import type { NexClient } from "./nex-client.js";
+import type { NexClient } from "./wuphf-client.js";
 import type { RateLimiter } from "./rate-limiter.js";
 import { readManifest, writeManifest, isChanged, markIngested } from "./file-manifest.js";
 
@@ -76,7 +76,7 @@ function collectContextFiles(cwd: string): Array<{ path: string; contextTag: str
 }
 
 /**
- * Ingest changed CLAUDE.md and memory files into Nex.
+ * Ingest changed CLAUDE.md and memory files into WUPHF.
  */
 export async function ingestContextFiles(
   client: NexClient,
@@ -97,7 +97,7 @@ export async function ingestContextFiles(
       }
 
       if (!rateLimiter.canProceed()) {
-        process.stderr.write("[nex-context-files] Rate limited — stopping context file ingest\n");
+        process.stderr.write("[wuphf-context-files] Rate limited — stopping context file ingest\n");
         result.skipped += candidates.length - result.ingested - result.skipped - result.errors;
         break;
       }
@@ -114,7 +114,7 @@ export async function ingestContextFiles(
       dirty = true;
     } catch (err) {
       process.stderr.write(
-        `[nex-context-files] Failed to ingest ${contextTag}: ${err instanceof Error ? err.message : String(err)}\n`
+        `[wuphf-context-files] Failed to ingest ${contextTag}: ${err instanceof Error ? err.message : String(err)}\n`
       );
       result.errors++;
     }

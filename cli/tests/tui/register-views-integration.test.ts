@@ -105,7 +105,7 @@ await mock.module("../../src/lib/config.js", {
     resolveTimeout: () => 120_000,
     loadConfig: () => ({ api_key: "test-api-key" }),
     saveConfig: () => {},
-    CONFIG_PATH: "/tmp/.nex/config.json",
+    CONFIG_PATH: "/tmp/.wuphf/config.json",
     BASE_URL: "https://app.nex.ai",
   },
 });
@@ -180,7 +180,7 @@ describe("register-views: home adapter (conversation mode)", () => {
   it("shows welcome message", () => {
     const { lastFrame } = renderAdapter("home");
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("Welcome to Nex"), "should show welcome message");
+    assert.ok(frame.includes("Welcome to WUPHF"), "should show welcome message");
   });
 
   it("shows compose area", () => {
@@ -228,7 +228,7 @@ describe("register-views: ask-chat adapter", () => {
     };
 
     // Dispatch is tested directly (adapter now uses hooks, so can't be called outside render)
-    const answer = await mockDispatch("ask what is nex?");
+    const answer = await mockDispatch("ask what is wuphf?");
 
     assert.equal(mockDispatch.mock.callCount(), 1);
     assert.equal(answer.error, "API key missing");
@@ -236,13 +236,13 @@ describe("register-views: ask-chat adapter", () => {
 
   it("returns output for successful dispatch", async () => {
     mockDispatchResult = {
-      output: "Nex is a CRM tool",
+      output: "WUPHF is a CRM tool",
       exitCode: 0,
     };
 
-    const answer = await mockDispatch("ask what is nex?");
+    const answer = await mockDispatch("ask what is wuphf?");
 
-    assert.equal(answer.output, "Nex is a CRM tool");
+    assert.equal(answer.output, "WUPHF is a CRM tool");
   });
 
   it("returns (no response) for empty output", async () => {
@@ -268,10 +268,10 @@ describe("register-views: ask-chat adapter", () => {
     assert.ok(frame.includes("ask>"), "should show ask prompt");
   });
 
-  it("shows Ask Nex header", () => {
+  it("shows Ask WUPHF header", () => {
     const { lastFrame } = renderAdapter("ask-chat");
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("Ask Nex"), "should show Ask Nex header");
+    assert.ok(frame.includes("Ask WUPHF"), "should show Ask WUPHF header");
   });
 
   it("shows session ID when provided", () => {

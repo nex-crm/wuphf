@@ -1,7 +1,7 @@
 {
-  "name": "@nex-crm/claude-code-nex-plugin",
+  "name": "@wuphf/claude-code-plugin",
   "version": "1.0.0",
-  "description": "Claude Code plugin for Nex persistent memory — auto-recall, auto-capture, commands",
+  "description": "Claude Code plugin for WUPHF persistent memory — auto-recall, auto-capture, commands",
   "type": "module",
   "scripts": {
     "build": "tsc",

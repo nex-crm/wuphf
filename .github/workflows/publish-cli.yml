@@ -54,7 +54,7 @@ jobs:
       - name: Bump patch version
         id: bump
         run: |
-          PUBLISHED=$(npm view @nex-ai/nex version 2>/dev/null || echo "0.0.0")
+          PUBLISHED=$(npm view @wuphf/wuphf version 2>/dev/null || echo "0.0.0")
           LOCAL=$(bun -e "console.log(require('./package.json').version)")
 
           # Semver-aware comparison using node
@@ -89,7 +89,7 @@ jobs:
           VERSION="${{ steps.bump.outputs.version }}"
           if [ -z "$VERSION" ]; then echo "ERROR: version output is empty"; exit 1; fi
           # Check if this version already exists on npm
-          if npm view "@nex-ai/nex@$VERSION" version 2>/dev/null; then
+          if npm view "@wuphf/wuphf@$VERSION" version 2>/dev/null; then
             echo "Version $VERSION already published, skipping."
           else
             npm publish --access public

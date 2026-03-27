@@ -9,7 +9,7 @@ await mock.module("../../src/lib/config.js", {
     resolveApiKey: () => mockApiKey,
     loadConfig: () => ({ api_key: mockApiKey, email: mockConfigEmail, workspace_id: "ws-123", workspace_slug: "my-workspace" }),
     saveConfig: () => {}, persistRegistration: () => {},
-    CONFIG_PATH: "/tmp/.nex/config.json", BASE_URL: "https://app.nex.ai",
+    CONFIG_PATH: "/tmp/.wuphf/config.json", BASE_URL: "https://app.nex.ai",
     API_BASE: "https://app.nex.ai/api/developers",
     REGISTER_URL: "https://app.nex.ai/api/v1/agents/register",
     resolveFormat: () => "text", resolveTimeout: () => 120_000,

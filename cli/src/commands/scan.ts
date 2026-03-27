@@ -1,5 +1,5 @@
 /**
- * nex scan [dir] — Scan directory for text files and ingest into Nex.
+ * wuphf scan [dir] — Scan directory for text files and ingest into WUPHF.
  */
 
 import { program } from "../cli.js";
@@ -64,7 +64,7 @@ function formatScanTTY(data: unknown): string | undefined {
 
 program
   .command("scan")
-  .description("Scan a directory for text files and ingest new/changed files into Nex")
+  .description("Scan a directory for text files and ingest new/changed files into WUPHF")
   .argument("[dir]", "Directory to scan (default: current directory)", ".")
   .option("--extensions <exts>", "File extensions to scan (comma-separated)")
   .option("--max-files <n>", "Maximum files per scan run")
@@ -87,12 +87,12 @@ program
       const format = resolveFormat(globalOpts.format) as Format;
 
       if (!opts.dryRun && !apiKey) {
-        printError("No API key. Run 'nex register --email <email>' first or set NEX_API_KEY.");
+        printError("No API key. Run 'wuphf register --email <email>' first or set WUPHF_API_KEY.");
         process.exit(2);
       }
 
       if (!isScanEnabled()) {
-        printError("File scanning is disabled (NEX_SCAN_ENABLED=false).");
+        printError("File scanning is disabled (WUPHF_SCAN_ENABLED=false).");
         process.exit(0);
       }
 

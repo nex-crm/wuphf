@@ -85,7 +85,7 @@ describe('Scheduler', () => {
   let scheduler: Scheduler;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-scheduler-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-scheduler-test-'));
     store = new CalendarStore(join(tmpDir, 'calendar.json'));
     scheduler = new Scheduler(store);
   });

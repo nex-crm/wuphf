@@ -70,7 +70,7 @@ export class CredibilityTracker {
   private data: Record<string, CredibilityRecord>;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? join(homedir(), '.nex-cli', 'credibility');
+    this.baseDir = baseDir ?? join(homedir(), '.wuphf', 'credibility');
     this.filePath = join(this.baseDir, 'scores.json');
     this.data = this.load();
   }

@@ -1,5 +1,5 @@
 /**
- * nex attribute — CRUD operations for object attributes.
+ * wuphf attribute — CRUD operations for object attributes.
  */
 
 import { program } from "../cli.js";

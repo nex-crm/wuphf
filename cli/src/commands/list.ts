@@ -1,5 +1,5 @@
 /**
- * nex list — CRUD operations for lists and list records.
+ * wuphf list — CRUD operations for lists and list records.
  */
 
 import { program } from "../cli.js";

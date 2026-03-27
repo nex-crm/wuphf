@@ -7,7 +7,7 @@
  */
 
 import { loadConfig, loadScanConfig, ConfigError, isHookEnabled, type NexConfig } from "./config.js";
-import { NexClient, NexAuthError } from "./nex-client.js";
+import { NexClient, NexAuthError } from "./wuphf-client.js";
 import { formatNexContext } from "./context-format.js";
 import { captureFilter } from "./capture-filter.js";
 import { SessionStore } from "./session-store.js";
@@ -42,7 +42,7 @@ const sessions = new SessionStore();
 // ── Recall ──────────────────────────────────────────────────────────────
 
 /**
- * Run recall logic: filter prompt → query Nex /ask → return formatted context.
+ * Run recall logic: filter prompt → query WUPHF /ask → return formatted context.
  * Returns null if recall is skipped or fails.
  */
 export async function doRecall(
@@ -69,7 +69,7 @@ export async function doRecall(
   } catch (err) {
     if (err instanceof NexAuthError) {
       return {
-        context: "[Nex] API key expired or invalid. Run: nex register --email <email>",
+        context: "[WUPHF] API key expired or invalid. Run: wuphf register --email <email>",
       };
     }
     throw err;
@@ -98,7 +98,7 @@ const INGEST_TIMEOUT_MS = 3_000;
 const MAX_PLAN_FILES = 2;
 
 /**
- * Run capture logic: filter message → ingest to Nex + scan plan files.
+ * Run capture logic: filter message → ingest to WUPHF + scan plan files.
  */
 export async function doCapture(input: CaptureInput): Promise<void> {
   if (!isHookEnabled("capture")) return;
@@ -124,12 +124,12 @@ export async function doCapture(input: CaptureInput): Promise<void> {
         } catch (err) {
           if (err instanceof NexAuthError) {
             process.stderr.write(
-              `[nex-capture] API key expired or invalid. Run 'nex register --email <email>' to get a new key.\n`
+              `[wuphf-capture] API key expired or invalid. Run 'wuphf register --email <email>' to get a new key.\n`
             );
             return;
           }
           process.stderr.write(
-            `[nex-capture] Ingest failed: ${err instanceof Error ? err.message : String(err)}\n`
+            `[wuphf-capture] Ingest failed: ${err instanceof Error ? err.message : String(err)}\n`
           );
         }
       }
@@ -142,7 +142,7 @@ export async function doCapture(input: CaptureInput): Promise<void> {
     await ingestPlanFiles(client, rateLimiter, plansDir);
   } catch (err) {
     process.stderr.write(
-      `[nex-capture] Plan file scan error: ${err instanceof Error ? err.message : String(err)}\n`
+      `[wuphf-capture] Plan file scan error: ${err instanceof Error ? err.message : String(err)}\n`
     );
   }
 
@@ -207,7 +207,7 @@ async function ingestPlanFiles(
  * Read a Claude Code session transcript and ingest the full conversation.
  *
  * Extracts user and assistant messages from the JSONL transcript file,
- * builds a condensed conversation text, and sends it to Nex in one shot.
+ * builds a condensed conversation text, and sends it to WUPHF in one shot.
  * This captures the full context instead of just the last assistant message.
  */
 const MAX_TRANSCRIPT_LENGTH = 100_000;
@@ -247,8 +247,8 @@ async function ingestTranscript(client: NexClient, sessionId: string): Promise<v
       }
 
       if (!text.trim()) continue;
-      // Strip nex-context blocks to avoid feedback loops
-      text = text.replace(/<nex-context>[\s\S]*?<\/nex-context>/g, "").trim();
+      // Strip wuphf-context blocks to avoid feedback loops
+      text = text.replace(/<wuphf-context>[\s\S]*?<\/wuphf-context>/g, "").trim();
       if (!text) continue;
 
       lines.push(`[${role}]: ${text}`);
@@ -275,7 +275,7 @@ const SESSION_START_QUERY =
   "Summarize the key active context, recent interactions, and important updates for this user.";
 
 /**
- * Run session-start logic: scan files → query Nex baseline → return context.
+ * Run session-start logic: scan files → query WUPHF baseline → return context.
  * Returns null if disabled. Returns registrationPrompt if no API key.
  */
 export async function doSessionStart(
@@ -372,12 +372,12 @@ export async function doSessionStart(
 
 function buildRegistrationPrompt(): string {
   return [
-    "[Nex Memory Plugin] No API key configured. Registration is required to enable persistent memory.",
+    "[WUPHF Memory Plugin] No API key configured. Registration is required to enable persistent memory.",
     "",
-    "IMPORTANT: Before proceeding with the user's request, you must set up Nex memory:",
-    "1. Ask the user for their email address to register for a Nex account",
-    "2. Run: nex register --email <email>",
-    "3. Then run: nex setup",
+    "IMPORTANT: Before proceeding with the user's request, you must set up WUPHF memory:",
+    "1. Ask the user for their email address to register for a WUPHF account",
+    "2. Run: wuphf register --email <email>",
+    "3. Then run: wuphf setup",
     "",
     "Keep it brief — just ask for the email and register. No restart needed after registration.",
   ].join("\n");
@@ -385,12 +385,12 @@ function buildRegistrationPrompt(): string {
 
 function buildAuthExpiredPrompt(): string {
   return [
-    "[Nex Memory Plugin] API key expired or invalid. Re-registration is required to restore persistent memory.",
+    "[WUPHF Memory Plugin] API key expired or invalid. Re-registration is required to restore persistent memory.",
     "",
-    "IMPORTANT: Before proceeding with the user's request, you must renew the Nex API key:",
+    "IMPORTANT: Before proceeding with the user's request, you must renew the WUPHF API key:",
     "1. Ask the user for their email address",
-    "2. Run: nex register --email <email>",
-    "3. Then run: nex setup",
+    "2. Run: wuphf register --email <email>",
+    "3. Then run: wuphf setup",
     "",
     "Keep it brief — just ask for the email and register. No restart needed after registration.",
   ].join("\n");

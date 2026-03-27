@@ -1,10 +1,10 @@
 {
-  "name": "@nex-ai/mcp-server",
+  "name": "@wuphf/mcp-server",
   "version": "0.1.0",
-  "description": "Nex MCP server — use Nex as a tool in Claude Desktop, ChatGPT, Cursor, and any MCP client",
+  "description": "WUPHF MCP server — use WUPHF as a tool in Claude Desktop, ChatGPT, Cursor, and any MCP client",
   "type": "module",
   "bin": {
-    "nex-mcp": "./dist/index.js"
+    "wuphf-mcp": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",

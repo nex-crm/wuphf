@@ -42,7 +42,7 @@ export function AskChatView({
         const answer = onAsk ? await onAsk(value) : "No handler configured.";
         const agentMsg: Message = {
           id: `a-${Date.now()}`,
-          sender: "nex",
+          sender: "wuphf",
           content: answer,
           timestamp: Date.now(),
         };
@@ -59,7 +59,7 @@ export function AskChatView({
       {/* Header */}
       <Box paddingX={2} marginBottom={1}>
         <Text bold color="cyan">
-          {"Ask Nex"}
+          {"Ask WUPHF"}
         </Text>
         {sessionId && (
           <>

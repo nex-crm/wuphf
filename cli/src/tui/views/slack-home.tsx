@@ -126,7 +126,7 @@ export function SlackHome({ push }: SlackHomeProps): React.JSX.Element {
     {
       id: "welcome",
       role: "system",
-      content: "Welcome to Nex. Type a message or use /help for commands.",
+      content: "Welcome to WUPHF. Type a message or use /help for commands.",
       timestamp: Date.now(),
     },
   ]);
@@ -202,7 +202,7 @@ export function SlackHome({ push }: SlackHomeProps): React.JSX.Element {
         {
           id: "no-auth",
           role: "system",
-          content: "No API key found. Run /init to set up Nex.",
+          content: "No API key found. Run /init to set up WUPHF.",
           timestamp: Date.now(),
         },
       ]);
@@ -237,7 +237,7 @@ export function SlackHome({ push }: SlackHomeProps): React.JSX.Element {
   const localChatMessages: ChatMessageInput[] = useMemo(() => {
     return localMessages.map((m) => ({
       id: m.id,
-      sender: m.role === "user" ? "you" : m.role === "system" ? "system" : "nex",
+      sender: m.role === "user" ? "you" : m.role === "system" ? "system" : "wuphf",
       senderType: (m.role === "user" ? "human" : "system") as "agent" | "human" | "system",
       content: m.content,
       timestamp: m.timestamp,
@@ -498,7 +498,7 @@ export function SlackHome({ push }: SlackHomeProps): React.JSX.Element {
             id: msgId(),
             role: "assistant",
             content: isAuthError
-              ? "Your API key is missing or expired.\n\nTo fix:\n  1. Get a key at https://app.nex.ai\n  2. Run: nex config set api_key <key>\n  3. Then try again."
+              ? "Your API key is missing or expired.\n\nTo fix:\n  1. Get a key at https://app.nex.ai\n  2. Run: wuphf config set api_key <key>\n  3. Then try again."
               : result.error
                 ? `Error: ${result.error}`
                 : result.output || "(no response)",
@@ -661,7 +661,7 @@ export function SlackHome({ push }: SlackHomeProps): React.JSX.Element {
         <SlackSidebar
           width={layout.sidebarWidth}
           focused={focusSection === "sidebar"}
-          workspaceName="Nex Workspace"
+          workspaceName="WUPHF Workspace"
           sections={sidebarSections}
           collapsedSections={collapsedSections}
           activeChannelId={activeChannelId}

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cline TaskComplete hook — auto-capture to Nex.
+ * Cline TaskComplete hook — auto-capture to WUPHF.
  * Input: { taskComplete: { result: string } }
  * Output: {}
  */
@@ -20,7 +20,7 @@ async function main(): Promise<void> {
     await doCapture({ message: input.taskComplete?.result ?? "" });
     process.stdout.write("{}");
   } catch (err) {
-    process.stderr.write(`[nex-cline] Capture error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wuphf-cline] Capture error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.stdout.write("{}");
   }
 }

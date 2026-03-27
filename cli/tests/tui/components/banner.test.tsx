@@ -63,11 +63,11 @@ describe("generateLine", () => {
 // ─── buildBrandLine ───
 
 describe("buildBrandLine", () => {
-  it("includes the brand text 'nex'", () => {
+  it("includes the brand text 'wuphf'", () => {
     const segments = buildBrandLine(80, 42);
     const brandSeg = segments.find((s) => s.type === "brand");
     assert.ok(brandSeg, "should have a brand segment");
-    assert.equal(brandSeg.text, "nex");
+    assert.equal(brandSeg.text, "wuphf");
   });
 
   it("includes tagline in muted segment", () => {
@@ -77,7 +77,7 @@ describe("buildBrandLine", () => {
       .map((s) => s.text)
       .join("");
     assert.ok(
-      mutedTexts.includes("powered by nex.ai"),
+      mutedTexts.includes("powered by wuphf.ai"),
       "should include tagline",
     );
   });
@@ -93,7 +93,7 @@ describe("buildBrandLine", () => {
   it("degrades gracefully at narrow widths", () => {
     const segments = buildBrandLine(10, 42);
     const full = segments.map((s) => s.text).join("");
-    assert.ok(full.includes("nex"), "narrow banner still shows brand");
+    assert.ok(full.includes("wuphf"), "narrow banner still shows brand");
     assert.equal(full.length, 10);
   });
 });
@@ -142,17 +142,17 @@ describe("Banner", () => {
     assert.equal(lines.length, 6, `expected 6 lines, got ${lines.length}`);
   });
 
-  it("contains 'nex' brand text", () => {
+  it("contains 'wuphf' brand text", () => {
     const { lastFrame } = render(<Banner width={80} interval={0} />);
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("nex"), "should render brand name");
+    assert.ok(frame.includes("wuphf"), "should render brand name");
   });
 
   it("contains tagline", () => {
     const { lastFrame } = render(<Banner width={80} interval={0} />);
     const frame = strip(lastFrame() ?? "");
     assert.ok(
-      frame.includes("powered by nex.ai"),
+      frame.includes("powered by wuphf.ai"),
       "should render tagline",
     );
   });
@@ -185,6 +185,6 @@ describe("Banner", () => {
   it("renders at narrow width without crashing", () => {
     const { lastFrame } = render(<Banner width={15} interval={0} />);
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("nex"), "narrow banner still shows brand");
+    assert.ok(frame.includes("wuphf"), "narrow banner still shows brand");
   });
 });

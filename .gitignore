@@ -1,0 +1,29 @@
+# Environment & secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+
+# Databases
+*.db
+*.db-shm
+*.db-wal
+
+# WUPHF local state
+.vexp/
+wuphf-debug.log
+/tmp/wuphf-*
+
+# Test artifacts
+termwright-artifacts/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies (covered by subdirs but safety net)
+node_modules/
+
+# Build output
+dist/

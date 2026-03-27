@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Claude Code UserPromptSubmit hook — auto-recall from Nex.
+ * Claude Code UserPromptSubmit hook — auto-recall from WUPHF.
  *
  * Reads the user's prompt from stdin, runs it through the recall filter
- * to decide if recall is needed, queries Nex for relevant context,
+ * to decide if recall is needed, queries WUPHF for relevant context,
  * and outputs { additionalContext: "..." } to inject into the conversation.
  *
  * On ANY error: outputs {} and exits 0 (graceful degradation).
  */
 
 import { loadConfig, isHookEnabled } from "./config.js";
-import { NexClient } from "./nex-client.js";
+import { NexClient } from "./wuphf-client.js";
 import { formatNexContext } from "./context-format.js";
 import { SessionStore } from "./session-store.js";
 import { shouldRecall, recordRecall } from "./recall-filter.js";
@@ -24,7 +24,7 @@ interface HookInput {
 
 /**
  * Check if this is the first prompt for this session.
- * A session with no stored Nex session ID is considered "first prompt"
+ * A session with no stored WUPHF session ID is considered "first prompt"
  * (SessionStart may have already set one, but that's fine — it means
  * baseline context was loaded, and first user prompt still gets recall).
  */
@@ -46,12 +46,12 @@ async function main(): Promise<void> {
     try {
       input = JSON.parse(raw) as HookInput;
     } catch {
-      process.stderr.write("[nex-recall] Failed to parse stdin JSON\n");
+      process.stderr.write("[wuphf-recall] Failed to parse stdin JSON\n");
       process.stdout.write("{}");
       return;
     }
 
-    // Check .nex.toml kill switch
+    // Check .wuphf.toml kill switch
     if (!isHookEnabled("recall")) {
       process.stdout.write("{}");
       return;
@@ -81,7 +81,7 @@ async function main(): Promise<void> {
       cfg = loadConfig();
     } catch (err) {
       process.stderr.write(
-        `[nex-recall] Config error: ${err instanceof Error ? err.message : String(err)}\n`
+        `[wuphf-recall] Config error: ${err instanceof Error ? err.message : String(err)}\n`
       );
       process.stdout.write("{}");
       return;
@@ -125,7 +125,7 @@ async function main(): Promise<void> {
     process.stdout.write(output);
   } catch (err) {
     process.stderr.write(
-      `[nex-recall] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
+      `[wuphf-recall] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.stdout.write("{}");
   }

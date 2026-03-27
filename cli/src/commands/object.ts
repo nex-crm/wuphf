@@ -1,5 +1,5 @@
 /**
- * nex object — CRUD operations for object definitions.
+ * wuphf object — CRUD operations for object definitions.
  */
 
 import { program } from "../cli.js";

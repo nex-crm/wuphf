@@ -1,5 +1,5 @@
 /**
- * nex register — register a new developer account.
+ * wuphf register — register a new developer account.
  */
 
 import { program } from "../cli.js";
@@ -11,7 +11,7 @@ import { resolveFormat } from "../lib/config.js";
 
 program
   .command("register")
-  .description("Register a new Nex workspace and get an API key")
+  .description("Register a new WUPHF workspace and get an API key")
   .requiredOption("--email <email>", "Email address")
   .option("--name <name>", "Your name")
   .option("--company <company>", "Company name")

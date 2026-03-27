@@ -10,7 +10,7 @@ describe('ChatService', () => {
   let service: ChatService;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-chat-service-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-chat-service-test-'));
     service = new ChatService(tmpDir);
   });
 

@@ -1,6 +1,6 @@
 /**
  * Gossip layer for knowledge propagation between agents.
- * Uses Nex Ask/Remember APIs to publish and query insights.
+ * Uses WUPHF Ask/Remember APIs to publish and query insights.
  */
 
 import type { NexClient } from '../lib/client.js';

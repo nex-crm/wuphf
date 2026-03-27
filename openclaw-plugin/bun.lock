@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@nex-crm/nex",
+      "name": "@wuphf/openclaw-plugin",
       "dependencies": {
         "@sinclair/typebox": "^0.34.0",
       },

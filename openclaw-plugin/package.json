@@ -1,7 +1,7 @@
 {
-  "name": "@nex-crm/nex",
+  "name": "@wuphf/openclaw-plugin",
   "version": "0.1.0",
-  "description": "Nex memory plugin for OpenClaw — persistent context intelligence for AI agents",
+  "description": "WUPHF memory plugin for OpenClaw — persistent context intelligence for AI agents",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

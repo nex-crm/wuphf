@@ -1,5 +1,5 @@
 {
-  "id": "nex",
+  "id": "wuphf",
   "kind": "memory",
   "configSchema": {
     "type": "object",
@@ -7,12 +7,12 @@
     "properties": {
       "apiKey": {
         "type": "string",
-        "description": "Nex Developer API key. Falls back to NEX_API_KEY environment variable if not set."
+        "description": "WUPHF Developer API key. Falls back to WUPHF_API_KEY environment variable if not set."
       },
       "baseUrl": {
         "type": "string",
-        "description": "Nex API base URL.",
-        "default": "https://api.nex-crm.com"
+        "description": "WUPHF API base URL.",
+        "default": "https://api.wuphf-crm.com"
       },
       "autoRecall": {
         "type": "boolean",
@@ -39,7 +39,7 @@
       },
       "sessionTracking": {
         "type": "boolean",
-        "description": "Enable multi-turn session continuity via Nex session IDs.",
+        "description": "Enable multi-turn session continuity via WUPHF session IDs.",
         "default": true
       },
       "recallTimeoutMs": {
@@ -58,10 +58,10 @@
   },
   "uiHints": {
     "apiKey": {
-      "label": "Nex API Key",
+      "label": "WUPHF API Key",
       "sensitive": true,
       "placeholder": "sk-...",
-      "help": "Your Nex Developer API key. Get one at https://app.nex-crm.com/settings/developer. If running via Clawgent, this is set automatically."
+      "help": "Your WUPHF Developer API key. Get one at https://app.wuphf-crm.com/settings/developer. If running via Clawgent, this is set automatically."
     },
     "baseUrl": {
       "label": "API Base URL",

@@ -1,5 +1,5 @@
 /**
- * File-based session store mapping Claude Code session IDs to Nex session IDs.
+ * File-based session store mapping Claude Code session IDs to WUPHF session IDs.
  *
  * Since Claude Code hooks are short-lived processes (start, run, exit),
  * in-memory state is lost between invocations. This implementation persists
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 
 const DEFAULT_MAX = 100;
-const DEFAULT_DATA_DIR = join(homedir(), ".nex");
+const DEFAULT_DATA_DIR = join(homedir(), ".wuphf");
 
 export interface SessionStoreConfig {
   maxSize: number;

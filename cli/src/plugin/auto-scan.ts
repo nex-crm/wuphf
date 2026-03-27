@@ -3,13 +3,13 @@
  * Standalone entry point for the /scan slash command.
  *
  * Reads optional directory from argv[2] or stdin, scans for project files,
- * and ingests changed ones into Nex. Prints results to stdout.
+ * and ingests changed ones into WUPHF. Prints results to stdout.
  *
  * Usage: node dist/auto-scan.js [directory]
  */
 
 import { loadConfig, loadScanConfig } from "./config.js";
-import { NexClient } from "./nex-client.js";
+import { NexClient } from "./wuphf-client.js";
 import { RateLimiter } from "./rate-limiter.js";
 import { scanAndIngest } from "./file-scanner.js";
 
@@ -28,7 +28,7 @@ async function main(): Promise<void> {
 
     const scanConfig = loadScanConfig();
     if (!scanConfig.enabled) {
-      console.log("File scanning is disabled (NEX_SCAN_ENABLED=false).");
+      console.log("File scanning is disabled (WUPHF_SCAN_ENABLED=false).");
       return;
     }
 

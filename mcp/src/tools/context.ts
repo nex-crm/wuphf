@@ -5,7 +5,7 @@ import { NexApiClient } from "../client.js";
 export function registerContextTools(server: McpServer, client: NexApiClient) {
   server.tool(
     "query_context",
-    "Query the Nex context graph with a natural language question. Returns an AI-generated answer with supporting entities and evidence. Use for open-ended questions about contacts, companies, relationships, or history.",
+    "Query the WUPHF context graph with a natural language question. Returns an AI-generated answer with supporting entities and evidence. Use for open-ended questions about contacts, companies, relationships, or history.",
     {
       query: z.string().describe("Natural language question about your contacts, companies, or relationships"),
       session_id: z.string().optional().describe("Session ID for multi-turn conversational continuity"),
@@ -21,7 +21,7 @@ export function registerContextTools(server: McpServer, client: NexApiClient) {
 
   server.tool(
     "add_context",
-    "Ingest unstructured text (meeting notes, emails, conversation transcripts) into the Nex context graph. Automatically extracts entities, relationships, and insights. Returns an artifact_id — use get_artifact_status to check processing results.",
+    "Ingest unstructured text (meeting notes, emails, conversation transcripts) into the WUPHF context graph. Automatically extracts entities, relationships, and insights. Returns an artifact_id — use get_artifact_status to check processing results.",
     {
       content: z.string().describe("The text content to process (meeting notes, email, conversation transcript, etc.)"),
       context: z.string().optional().describe("Additional context about the text, e.g. 'Sales call notes' or 'Email from client'"),
@@ -86,7 +86,7 @@ export function registerContextTools(server: McpServer, client: NexApiClient) {
 
   server.tool(
     "search_entities",
-    "Search for entities (people, companies, topics) in the Nex knowledge base. Returns a structured list with names, types, and mention counts.",
+    "Search for entities (people, companies, topics) in the WUPHF knowledge base. Returns a structured list with names, types, and mention counts.",
     { query: z.string().describe("Search query to find entities") },
     { readOnlyHint: true },
     async ({ query }) => {

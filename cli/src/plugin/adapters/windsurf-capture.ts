@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Windsurf post_cascade_response hook — auto-capture to Nex.
+ * Windsurf post_cascade_response hook — auto-capture to WUPHF.
  * Input: { tool_info: { response: string } }
  * Output: {}
  */
@@ -20,7 +20,7 @@ async function main(): Promise<void> {
     await doCapture({ message: input.tool_info?.response ?? "" });
     process.stdout.write("{}");
   } catch (err) {
-    process.stderr.write(`[nex-windsurf] Capture error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wuphf-windsurf] Capture error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.stdout.write("{}");
   }
 }

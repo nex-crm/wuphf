@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@nex-crm/claude-code-nex-plugin",
+      "name": "@wuphf/claude-code-plugin",
       "devDependencies": {
         "@types/node": "^20.0.0",
         "typescript": "^5.4.0",

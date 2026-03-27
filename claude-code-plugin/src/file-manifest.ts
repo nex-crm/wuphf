@@ -2,7 +2,7 @@
  * Persistent file manifest — tracks which files have been ingested
  * using mtime + size as change detection.
  *
- * Stored at ~/.nex/file-scan-manifest.json. Follows session-store.ts pattern.
+ * Stored at ~/.wuphf/file-scan-manifest.json. Follows session-store.ts pattern.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, type Stats } from "node:fs";
@@ -21,7 +21,7 @@ export interface FileManifest {
   files: Record<string, FileManifestEntry>; // key = absolute path
 }
 
-const DATA_DIR = join(homedir(), ".nex");
+const DATA_DIR = join(homedir(), ".wuphf");
 const MANIFEST_PATH = join(DATA_DIR, "file-scan-manifest.json");
 
 export function readManifest(): FileManifest {

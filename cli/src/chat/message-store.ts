@@ -1,6 +1,6 @@
 /**
  * JSONL-based message persistence for chat channels.
- * Messages are stored per channel at ~/.nex-cli/chat/messages/<channelId>.jsonl
+ * Messages are stored per channel at ~/.wuphf/chat/messages/<channelId>.jsonl
  */
 
 import { readFileSync, readdirSync, appendFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -13,7 +13,7 @@ export class MessageStore {
   private baseDir: string;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? join(homedir(), '.nex-cli', 'chat', 'messages');
+    this.baseDir = baseDir ?? join(homedir(), '.wuphf', 'chat', 'messages');
   }
 
   private channelPath(channelId: string): string {

@@ -10,7 +10,7 @@ describe('AgentSessionStore', () => {
   let store: AgentSessionStore;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-agent-session-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-agent-session-test-'));
     store = new AgentSessionStore(tmpDir);
   });
 

@@ -68,7 +68,7 @@ export function RecordDetailView({
         <Text dimColor>
           {"Tip: run "}
         </Text>
-        <Text color="cyan">{`nex record timeline ${recordId}`}</Text>
+        <Text color="cyan">{`wuphf record timeline ${recordId}`}</Text>
         <Text dimColor>{" to see activity"}</Text>
       </Box>
     </Box>

@@ -74,8 +74,8 @@ describe("runInit", () => {
     const { runInit } = await import("../../src/commands/init.js");
     const { resolveApiKey } = await import("../../src/lib/config.js");
 
-    const originalKey = process.env.NEX_API_KEY;
-    delete process.env.NEX_API_KEY;
+    const originalKey = process.env.WUPHF_API_KEY;
+    delete process.env.WUPHF_API_KEY;
 
     const progress: Array<{ step: string; detail?: string; error?: string }> = [];
 
@@ -101,7 +101,7 @@ describe("runInit", () => {
     }
 
     if (originalKey !== undefined) {
-      process.env.NEX_API_KEY = originalKey;
+      process.env.WUPHF_API_KEY = originalKey;
     }
   });
 

@@ -1,5 +1,5 @@
 /**
- * nex search — fuzzy keyword search across CRM records by name.
+ * wuphf search — fuzzy keyword search across CRM records by name.
  */
 
 import { program } from "../cli.js";
@@ -36,7 +36,7 @@ function formatSearchTTY(data: unknown): string | undefined {
   const results = d.results;
   if (!results || !Array.isArray(results) || results.length === 0) {
     lines.push(`  ${style.dim("No records found.")}`);
-    lines.push(`  ${style.dim("Tip: use 'nex ask <query>' for AI-powered context lookups.")}`);
+    lines.push(`  ${style.dim("Tip: use 'wuphf ask <query>' for AI-powered context lookups.")}`);
     return lines.join("\n");
   }
 
@@ -70,7 +70,7 @@ program
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       process.stderr.write(`\n${sym.error} Search failed: ${message}\n`);
-      process.stderr.write(`  ${style.dim("Tip: use 'nex ask <query>' for AI-powered context lookups.")}\n\n`);
+      process.stderr.write(`  ${style.dim("Tip: use 'wuphf ask <query>' for AI-powered context lookups.")}\n\n`);
       process.exit(1);
     }
   });

@@ -1,5 +1,5 @@
 /**
- * Capture filtering for Claude Code — decides what content to send to Nex.
+ * Capture filtering for Claude Code — decides what content to send to WUPHF.
  * Adapted from openclaw-plugin for plain string input.
  */
 
@@ -22,7 +22,7 @@ export interface CaptureSkip {
  * Filter text for capture eligibility.
  * Works with plain strings (Claude Code messages).
  *
- * Note: Deduplication is handled server-side by the Nex extraction pipeline.
+ * Note: Deduplication is handled server-side by the WUPHF extraction pipeline.
  * Since hooks are short-lived processes (new process per invocation), in-memory
  * dedup caches would be empty on each run and provide no value.
  */

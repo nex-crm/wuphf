@@ -1,5 +1,5 @@
 /**
- * nex note — CRUD operations for notes.
+ * wuphf note — CRUD operations for notes.
  */
 
 import { program } from "../cli.js";

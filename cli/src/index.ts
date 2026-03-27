@@ -64,7 +64,7 @@ async function main(): Promise<void> {
 
   // --help flag
   if (args.includes("--help") || args.includes("-h")) {
-    console.log(`Usage: nex [command] [options]
+    console.log(`Usage: wuphf [command] [options]
 
 Commands:
   ask <query>           Query your context graph with AI
@@ -138,7 +138,7 @@ When no command is given, launches the interactive TUI.`);
     await import("./commands/register.js");
     await import("./commands/integrate.js");
     const { program } = await import("./cli.js");
-    program.parse(["node", "nex", ...args]);
+    program.parse(["node", "wuphf", ...args]);
     return;
   }
 

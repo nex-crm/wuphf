@@ -8,7 +8,7 @@ describe("RateLimiter", () => {
   let tmpDir: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "nex-rl-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "wuphf-rl-test-"));
   });
 
   afterEach(() => {

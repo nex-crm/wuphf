@@ -3,9 +3,9 @@
  *
  * Features:
  *  - Flowing line patterns with dots/connectors (─●───○──)
- *  - "nex · powered by nex.ai" centered
+ *  - "wuphf · powered by wuphf.ai" centered
  *  - Regenerates on interval (default: every 3 seconds)
- *  - Colors: cyan ("NexBlue") for "nex", muted for rest
+ *  - Colors: cyan ("NexBlue") for "wuphf", muted for rest
  *  - ~6 lines tall, responsive to terminal width
  */
 
@@ -64,8 +64,8 @@ export interface BrandSegment {
 }
 
 export function buildBrandLine(width: number, seed?: number): BrandSegment[] {
-  const brandText = "nex";
-  const tagline = " · powered by nex.ai";
+  const brandText = "wuphf";
+  const tagline = " · powered by wuphf.ai";
   const inner = brandText + tagline;
   const padding = 2; // space each side of inner text
   const innerWidth = inner.length + padding * 2;

@@ -1,5 +1,5 @@
 /**
- * nex config — view and update CLI configuration.
+ * wuphf config — view and update CLI configuration.
  */
 
 import { program } from "../cli.js";

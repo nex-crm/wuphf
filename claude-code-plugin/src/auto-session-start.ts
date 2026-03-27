@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Claude Code SessionStart hook — bulk context load from Nex + file scan.
+ * Claude Code SessionStart hook — bulk context load from WUPHF + file scan.
  *
- * Fires once when a new Claude Code session begins. Queries Nex for
+ * Fires once when a new Claude Code session begins. Queries WUPHF for
  * a baseline context summary and injects it so the agent "already knows"
  * relevant business context from the first message.
  *
@@ -13,7 +13,7 @@
  */
 
 import { loadConfig, loadScanConfig, ConfigError, isHookEnabled } from "./config.js";
-import { NexClient } from "./nex-client.js";
+import { NexClient } from "./wuphf-client.js";
 import { RateLimiter } from "./rate-limiter.js";
 import { formatNexContext } from "./context-format.js";
 import { SessionStore } from "./session-store.js";
@@ -41,7 +41,7 @@ async function main(): Promise<void> {
     }
     const raw = Buffer.concat(chunks).toString("utf-8");
 
-    // Check .nex.toml kill switch
+    // Check .wuphf.toml kill switch
     if (!isHookEnabled("session_start")) {
       process.stdout.write("{}");
       return;
@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     try {
       input = JSON.parse(raw) as HookInput;
     } catch {
-      process.stderr.write("[nex-session-start] Failed to parse stdin JSON, continuing with defaults\n");
+      process.stderr.write("[wuphf-session-start] Failed to parse stdin JSON, continuing with defaults\n");
     }
 
     let cfg;
@@ -63,10 +63,10 @@ async function main(): Promise<void> {
         const pluginDir = dirname(fileURLToPath(import.meta.url));
         const registerScript = join(pluginDir, "auto-register.js");
         const registrationPrompt = [
-          "[Nex Memory Plugin] No API key configured. Registration is required to enable persistent memory.",
+          "[WUPHF Memory Plugin] No API key configured. Registration is required to enable persistent memory.",
           "",
-          "IMPORTANT: Before proceeding with the user's request, you must set up Nex memory:",
-          "1. Ask the user for their email address to register for a Nex account",
+          "IMPORTANT: Before proceeding with the user's request, you must set up WUPHF memory:",
+          "1. Ask the user for their email address to register for a WUPHF account",
           "2. Run the registration command: node " + registerScript + " <email> [name] [company]",
           "3. Once registration succeeds, the API key is saved automatically — all memory features activate immediately",
           "",
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
         return;
       }
       process.stderr.write(
-        `[nex-session-start] Config error: ${err instanceof Error ? err.message : String(err)}\n`
+        `[wuphf-session-start] Config error: ${err instanceof Error ? err.message : String(err)}\n`
       );
       process.stdout.write("{}");
       return;
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
         }
       } catch (err) {
         process.stderr.write(
-          `[nex-session-start] Context files error: ${err instanceof Error ? err.message : String(err)}\n`
+          `[wuphf-session-start] Context files error: ${err instanceof Error ? err.message : String(err)}\n`
         );
       }
 
@@ -128,12 +128,12 @@ async function main(): Promise<void> {
         }
       } catch (err) {
         process.stderr.write(
-          `[nex-session-start] File scan error: ${err instanceof Error ? err.message : String(err)}\n`
+          `[wuphf-session-start] File scan error: ${err instanceof Error ? err.message : String(err)}\n`
         );
       }
     }
 
-    // --- Nex context query ---
+    // --- WUPHF context query ---
     const result = await client.ask(SESSION_START_QUERY, undefined, 10_000);
 
     if (!result.answer && contextParts.length === 0) {
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
     process.stdout.write(output);
   } catch (err) {
     process.stderr.write(
-      `[nex-session-start] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
+      `[wuphf-session-start] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.stdout.write("{}");
   }

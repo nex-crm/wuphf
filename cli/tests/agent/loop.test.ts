@@ -17,7 +17,7 @@ describe('AgentLoop', () => {
   let queues: MessageQueues;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-loop-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-loop-test-'));
     config = {
       slug: 'test-agent',
       name: 'Test Agent',

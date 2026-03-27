@@ -1,6 +1,6 @@
-# Nex — Organizational Context & Memory
+# WUPHF — Organizational Context & Memory
 
-Nex provides your AI agent with real-time organizational knowledge — contacts, deals, meetings, emails, notes, insights, patterns, and playbooks — via MCP tools. Context is proactively injected into your conversation, so relevant knowledge surfaces automatically even when you don't ask for it.
+WUPHF provides your AI agent with real-time organizational knowledge — contacts, deals, meetings, emails, notes, insights, patterns, and playbooks — via MCP tools. Context is proactively injected into your conversation, so relevant knowledge surfaces automatically even when you don't ask for it.
 
 ## MCP Tools Available
 
@@ -24,7 +24,7 @@ Initiate OAuth connection for Gmail, Google Calendar, Outlook, Slack, Salesforce
 
 ## Proactive Context
 
-Nex automatically surfaces relevant context from the user's knowledge graph on every prompt — not just questions. When you see a `<nex-context>` block, use it naturally to inform your response:
+WUPHF automatically surfaces relevant context from the user's knowledge graph on every prompt — not just questions. When you see a `<wuphf-context>` block, use it naturally to inform your response:
 
 - **Entity insights** — facts about people, companies, and deals mentioned or relevant to the task
 - **Knowledge insights** — patterns, lessons learned, and domain knowledge from past work
@@ -32,7 +32,7 @@ Nex automatically surfaces relevant context from the user's knowledge graph on e
 
 Leverage this context to provide more informed, personalized responses. If the context mentions a relevant pattern or past decision, incorporate it naturally without explicitly referencing the context block.
 
-## When to Use Nex Tools Directly
+## When to Use WUPHF Tools Directly
 
 Use `nex_ask` proactively when:
 - The user mentions a person, company, or project — look up their context

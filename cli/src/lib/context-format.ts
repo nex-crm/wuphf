@@ -1,5 +1,5 @@
-const OPEN_TAG = "<nex-context>";
-const CLOSE_TAG = "</nex-context>";
+const OPEN_TAG = "<wuphf-context>";
+const CLOSE_TAG = "</wuphf-context>";
 
 export interface NexRecallResult {
   answer: string;
@@ -22,7 +22,7 @@ export function formatNexContext(result: NexRecallResult): string {
 }
 
 export function stripNexContext(text: string): string {
-  let result = text.replace(/<nex-context>[\s\S]*?<\/nex-context>/g, "");
-  result = result.replace(/<nex-context>[\s\S]*/g, "");
+  let result = text.replace(/<wuphf-context>[\s\S]*?<\/wuphf-context>/g, "");
+  result = result.replace(/<wuphf-context>[\s\S]*/g, "");
   return result.trim();
 }

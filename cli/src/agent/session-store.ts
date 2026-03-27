@@ -1,6 +1,6 @@
 /**
  * DAG-based session persistence using JSONL files.
- * Each session is a JSONL file at ~/.nex-cli/sessions/<agentSlug>/<sessionId>.jsonl
+ * Each session is a JSONL file at ~/.wuphf/sessions/<agentSlug>/<sessionId>.jsonl
  * Branching creates a new session that copies history up to the branch point.
  */
 
@@ -14,7 +14,7 @@ export class AgentSessionStore {
   private baseDir: string;
 
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? join(homedir(), '.nex-cli', 'sessions');
+    this.baseDir = baseDir ?? join(homedir(), '.wuphf', 'sessions');
   }
 
   private agentDir(agentSlug: string): string {

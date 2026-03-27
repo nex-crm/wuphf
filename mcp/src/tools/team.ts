@@ -8,6 +8,7 @@ import { NexApiClient } from "../client.js";
 
 const BROKER_PORT = 7890;
 const BROKER_URL = `http://127.0.0.1:${BROKER_PORT}`;
+const BROKER_TOKEN = process.env.NEX_BROKER_TOKEN ?? "";
 
 interface ChannelMessage {
   id: string;
@@ -35,6 +36,14 @@ async function checkBroker(): Promise<boolean> {
   return brokerAvailable;
 }
 
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (BROKER_TOKEN) {
+    headers["Authorization"] = `Bearer ${BROKER_TOKEN}`;
+  }
+  return headers;
+}
+
 async function brokerPost(
   path: string,
   body: unknown,
@@ -42,7 +51,7 @@ async function brokerPost(
   try {
     const resp = await fetch(`${BROKER_URL}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(2000),
     });
@@ -55,7 +64,12 @@ async function brokerPost(
 
 async function brokerGet(path: string): Promise<unknown | null> {
   try {
+    const headers: Record<string, string> = {};
+    if (BROKER_TOKEN) {
+      headers["Authorization"] = `Bearer ${BROKER_TOKEN}`;
+    }
     const resp = await fetch(`${BROKER_URL}${path}`, {
+      headers,
       signal: AbortSignal.timeout(2000),
     });
     if (!resp.ok) return null;
@@ -133,7 +147,7 @@ export function registerTeamTools(server: McpServer, client: NexApiClient) {
         content: [
           {
             type: "text" as const,
-            text: `Posted to channel (local)${taggedStr}. ${localMessages.length} messages. Note: broker not running — messages only visible to you. Start broker with: nex team-broker`,
+            text: `Posted to channel (local)${taggedStr}. ${localMessages.length} messages. Note: broker not running — messages only visible to you. Start broker with: wuphf team-broker`,
           },
         ],
       };
@@ -322,7 +336,7 @@ export function startChannelPush(server: McpServer, agentSlug?: string) {
             meta: {
               from_id: msg.from,
               sent_at: msg.timestamp,
-              channel: "nex-team",
+              channel: "wuphf-team",
             },
           },
         });

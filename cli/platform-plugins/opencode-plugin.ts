@@ -1,7 +1,7 @@
 /**
- * Nex plugin for OpenCode — organizational context & memory.
+ * WUPHF plugin for OpenCode — organizational context & memory.
  *
- * This file is copied to .opencode/plugins/nex.ts by `nex setup`.
+ * This file is copied to .opencode/plugins/wuphf.ts by `wuphf setup`.
  * OpenCode's bun runtime resolves imports at load time.
  *
  * Provides:
@@ -13,10 +13,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-// Read API key from shared Nex config
+// Read API key from shared WUPHF config
 function loadApiKey(): string | null {
   try {
-    const raw = readFileSync(join(homedir(), ".nex-mcp.json"), "utf-8");
+    const raw = readFileSync(join(homedir(), ".wuphf-mcp.json"), "utf-8");
     const config = JSON.parse(raw);
     return config.api_key ?? null;
   } catch {
@@ -25,7 +25,7 @@ function loadApiKey(): string | null {
 }
 
 async function nexAsk(query: string, apiKey: string): Promise<string> {
-  const baseUrl = process.env.NEX_API_BASE_URL ?? "https://app.nex.ai";
+  const baseUrl = process.env.WUPHF_API_BASE_URL ?? "https://app.nex.ai";
   const res = await fetch(`${baseUrl}/api/developers/v1/context/ask`, {
     method: "POST",
     headers: {
@@ -41,7 +41,7 @@ async function nexAsk(query: string, apiKey: string): Promise<string> {
 }
 
 async function nexIngest(content: string, context: string, apiKey: string): Promise<void> {
-  const baseUrl = process.env.NEX_API_BASE_URL ?? "https://app.nex.ai";
+  const baseUrl = process.env.WUPHF_API_BASE_URL ?? "https://app.nex.ai";
   await fetch(`${baseUrl}/api/developers/v1/context/text`, {
     method: "POST",
     headers: {
@@ -56,7 +56,7 @@ async function nexIngest(content: string, context: string, apiKey: string): Prom
 let cachedContext = "";
 
 export default {
-  name: "nex",
+  name: "wuphf",
 
   async "session.created"() {
     const apiKey = loadApiKey();
@@ -68,7 +68,7 @@ export default {
         apiKey,
       );
       if (answer) {
-        cachedContext = `<nex-context>\n${answer}\n</nex-context>`;
+        cachedContext = `<wuphf-context>\n${answer}\n</wuphf-context>`;
       }
     } catch {
       // graceful degradation

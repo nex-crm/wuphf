@@ -109,7 +109,7 @@ export function StatusBar({
           <Text color={NEX_PURPLE} bold>
             {"\u258C"}
           </Text>
-          <Text bold>{"nex"}</Text>
+          <Text bold>{"wuphf"}</Text>
 
           <SessionStatsFragment session={session} />
 
@@ -163,7 +163,7 @@ export function StatusBar({
         <Text color={NEX_PURPLE} bold>
           {"\u258C"}
         </Text>
-        <Text bold>{"nex"}</Text>
+        <Text bold>{"wuphf"}</Text>
         <Text>{" "}</Text>
       </Box>
     </Box>

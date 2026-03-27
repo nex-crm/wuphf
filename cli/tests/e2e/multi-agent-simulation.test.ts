@@ -21,7 +21,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 // Isolate test data
-const testDir = mkdtempSync(join(tmpdir(), "nex-sim-"));
+const testDir = mkdtempSync(join(tmpdir(), "wuphf-sim-"));
 process.env.NEX_CLI_DATA_DIR = testDir;
 
 describe("Multi-Agent Collaboration Simulation", () => {

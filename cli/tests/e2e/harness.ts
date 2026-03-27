@@ -59,8 +59,8 @@ export class TuiTest {
         ...process.env,
         TERM: "xterm-256color",
         NO_COLOR: "", // Allow colors
-        // Use temp dir for chat/calendar/session data so E2E tests don't pollute ~/.nex-cli/
-        NEX_CLI_DATA_DIR: mkdtempSync(join(tmpdir(), "nex-e2e-")),
+        // Use temp dir for chat/calendar/session data so E2E tests don't pollute ~/.wuphf/
+        NEX_CLI_DATA_DIR: mkdtempSync(join(tmpdir(), "wuphf-e2e-")),
         ...opts.env,
       } as Record<string, string>,
     });

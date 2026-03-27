@@ -1,7 +1,7 @@
 /**
- * .nex.toml project config reader/writer.
+ * .wuphf.toml project config reader/writer.
  *
- * Resolution: CLI flags > .nex.toml > env vars > ~/.nex/config.json > defaults
+ * Resolution: CLI flags > .wuphf.toml > env vars > ~/.wuphf/config.json > defaults
  */
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 // --- Minimal TOML parser (read-only, no dependency) ---
 // Handles flat keys, dotted keys, strings, numbers, booleans, arrays.
-// Good enough for .nex.toml — not a full TOML spec parser.
+// Good enough for .wuphf.toml — not a full TOML spec parser.
 
 function parseLine(
   line: string,
@@ -110,11 +110,11 @@ export interface ProjectConfig {
 }
 
 /**
- * Find and parse .nex.toml from the given directory (defaults to cwd).
- * Returns undefined if no .nex.toml is found.
+ * Find and parse .wuphf.toml from the given directory (defaults to cwd).
+ * Returns undefined if no .wuphf.toml is found.
  */
 export function loadProjectConfig(dir?: string): ProjectConfig | undefined {
-  const configPath = join(dir ?? process.cwd(), ".nex.toml");
+  const configPath = join(dir ?? process.cwd(), ".wuphf.toml");
   if (!existsSync(configPath)) return undefined;
 
   try {
@@ -126,7 +126,7 @@ export function loadProjectConfig(dir?: string): ProjectConfig | undefined {
 }
 
 /**
- * Check if a specific hook is enabled in .nex.toml.
+ * Check if a specific hook is enabled in .wuphf.toml.
  * Returns true by default (hooks are opt-out, not opt-in).
  */
 export function isHookEnabled(
@@ -146,11 +146,11 @@ export function isHookEnabled(
   return true;
 }
 
-const DEFAULT_TOML = `# .nex.toml — Nex project configuration
+const DEFAULT_TOML = `# .wuphf.toml — WUPHF project configuration
 # All settings are optional. Defaults shown in comments.
 
 # [auth]
-# api_key = "sk-..."          # Prefer NEX_API_KEY env var or ~/.nex/config.json
+# api_key = "sk-..."          # Prefer WUPHF_API_KEY env var or ~/.wuphf/config.json
 
 # [hooks]
 # enabled = true              # Master kill switch for all hooks
@@ -184,11 +184,11 @@ const DEFAULT_TOML = `# .nex.toml — Nex project configuration
 `;
 
 /**
- * Write a default .nex.toml to the given directory.
+ * Write a default .wuphf.toml to the given directory.
  * Returns false if the file already exists.
  */
 export function writeDefaultProjectConfig(dir?: string): boolean {
-  const configPath = join(dir ?? process.cwd(), ".nex.toml");
+  const configPath = join(dir ?? process.cwd(), ".wuphf.toml");
   if (existsSync(configPath)) return false;
 
   writeFileSync(configPath, DEFAULT_TOML, "utf-8");

@@ -123,16 +123,16 @@ async function pollForConnection(
     }
   }
 
-  printError("Timed out after 5 minutes. Check status with 'nex integrate list'.");
+  printError("Timed out after 5 minutes. Check status with 'wuphf integrate list'.");
   process.exit(1);
 }
 
-/** Calendar integrations include the Nex Meeting Bot annotation. */
+/** Calendar integrations include the WUPHF Meeting Bot annotation. */
 const CALENDAR_TYPES = new Set(["calendar"]);
 
 function displayName(item: FullIntegrationEntry): string {
   if (CALENDAR_TYPES.has(item.type)) {
-    return `${item.display_name} (Nex Meeting Bot)`;
+    return `${item.display_name} (WUPHF Meeting Bot)`;
   }
   return item.display_name;
 }

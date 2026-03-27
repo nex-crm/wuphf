@@ -77,14 +77,14 @@ for (const obj of objectsRes.data) {
   objIdToSlug[obj.id] = obj.slug;
 }
 
-// 4. Build edges — connect Najmuzzaman to Nex (known from data)
+// 4. Build edges — connect Najmuzzaman to WUPHF (known from data)
 const allEdges: GraphEdge[] = [];
 const seenEdges = new Set<string>();
 
 const knownRelationships = [
   {
     source: "62869717286693892", // Najmuzzaman
-    target: "62869717437688836", // Nex
+    target: "62869717437688836", // WUPHF
     label: "works at",
     defId: relDefs.find((d: any) => d.entity_1_to_2_predicate === "employs")?.id ?? "",
   },
@@ -217,7 +217,7 @@ const graphData: GraphData = {
 
 // 8. Generate HTML and open
 const html = generateGraphHtml(graphData);
-const outPath = join(tmpdir(), `nex-graph-${Date.now()}.html`);
+const outPath = join(tmpdir(), `wuphf-graph-${Date.now()}.html`);
 writeFileSync(outPath, html, "utf-8");
 
 console.error(`Graph: ${allNodes.length} entities, ${allEdges.length + contextEdges.length} connections, ${insightNodes.length} insights`);

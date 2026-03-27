@@ -161,7 +161,7 @@ describe("HomeScreen", () => {
         id: "s1",
         sender: "system",
         senderType: "system",
-        content: "Welcome to Nex.",
+        content: "Welcome to WUPHF.",
         timestamp: now,
       },
     ];
@@ -177,7 +177,7 @@ describe("HomeScreen", () => {
       />,
     );
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("Welcome to Nex"), "should show system message");
+    assert.ok(frame.includes("Welcome to WUPHF"), "should show system message");
   });
 
   it("shows empty state when no messages", () => {

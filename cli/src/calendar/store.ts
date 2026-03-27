@@ -1,6 +1,6 @@
 /**
  * Calendar persistence layer.
- * Stores scheduled tasks in a JSON file at ~/.nex-cli/calendar.json
+ * Stores scheduled tasks in a JSON file at ~/.wuphf/calendar.json
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs';
@@ -12,7 +12,7 @@ export class CalendarStore {
   private filePath: string;
 
   constructor(filePath?: string) {
-    this.filePath = filePath ?? join(homedir(), '.nex-cli', 'calendar.json');
+    this.filePath = filePath ?? join(homedir(), '.wuphf', 'calendar.json');
   }
 
   load(): ScheduledTask[] {

@@ -1,12 +1,12 @@
 /**
- * Live integration test — hits the mock Nex server directly
+ * Live integration test — hits the mock WUPHF server directly
  * through the plugin's NexClient, capture filter, and context formatter.
  *
  * Usage: node tests/live-test.mjs
- * Requires: mock-nex-server.mjs running on port 31999
+ * Requires: mock-wuphf-server.mjs running on port 31999
  */
 
-import { NexClient } from "../dist/nex-client.js";
+import { NexClient } from "../dist/wuphf-client.js";
 import { RateLimiter } from "../dist/rate-limiter.js";
 import { SessionStore } from "../dist/session-store.js";
 import { formatNexContext, stripNexContext } from "../dist/context-format.js";
@@ -67,12 +67,12 @@ async function main() {
     entityCount: ask2.entity_references.length,
     sessionId: ask2.session_id,
   });
-  assert(context.includes("<nex-context>"), "formatted context has open tag");
-  assert(context.includes("</nex-context>"), "formatted context has close tag");
+  assert(context.includes("<wuphf-context>"), "formatted context has open tag");
+  assert(context.includes("</wuphf-context>"), "formatted context has close tag");
   assert(context.includes("related entities found"), "formatted context shows entity count");
 
   const stripped = stripNexContext(`User said: hello ${context} and goodbye`);
-  assert(!stripped.includes("<nex-context>"), "stripNexContext removes injected blocks");
+  assert(!stripped.includes("<wuphf-context>"), "stripNexContext removes injected blocks");
   assert(stripped.includes("hello"), "stripNexContext preserves surrounding text");
 
   console.log("\n=== Test 6: Capture Filter ===");

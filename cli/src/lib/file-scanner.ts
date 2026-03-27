@@ -1,8 +1,8 @@
 /**
  * File scanner — discovers text files, tracks changes via content hash,
- * and ingests new/changed files into Nex via POST /v1/context/text.
+ * and ingests new/changed files into WUPHF via POST /v1/context/text.
  *
- * Manifest stored at ~/.nex/file-scan-manifest.json.
+ * Manifest stored at ~/.wuphf/file-scan-manifest.json.
  */
 
 import { createHash } from "node:crypto";
@@ -44,7 +44,7 @@ export interface ScanResult {
 
 // --- Constants ---
 
-export const MANIFEST_PATH = join(homedir(), ".nex", "file-scan-manifest.json");
+export const MANIFEST_PATH = join(homedir(), ".wuphf", "file-scan-manifest.json");
 
 const DEFAULT_EXTENSIONS = [
   // Documents
@@ -67,20 +67,20 @@ const SKIP_DIRS = new Set([
 // --- Config from env ---
 
 export function loadScanConfig(overrides?: Partial<ScanOptions>): ScanOptions {
-  const envEnabled = process.env.NEX_SCAN_ENABLED;
+  const envEnabled = process.env.WUPHF_SCAN_ENABLED;
   if (envEnabled === "false" || envEnabled === "0") {
     // Caller should check this separately; config still resolves
   }
 
-  const envExts = process.env.NEX_SCAN_EXTENSIONS;
+  const envExts = process.env.WUPHF_SCAN_EXTENSIONS;
   const extensions = overrides?.extensions
     ?? (envExts ? envExts.split(",").map((e) => e.trim()) : DEFAULT_EXTENSIONS);
 
-  const envMaxFiles = process.env.NEX_SCAN_MAX_FILES;
+  const envMaxFiles = process.env.WUPHF_SCAN_MAX_FILES;
   const maxFiles = overrides?.maxFiles
     ?? (envMaxFiles ? parseInt(envMaxFiles, 10) : 1000);
 
-  const envDepth = process.env.NEX_SCAN_DEPTH;
+  const envDepth = process.env.WUPHF_SCAN_DEPTH;
   const depth = overrides?.depth
     ?? (envDepth ? parseInt(envDepth, 10) : 20);
 
@@ -94,7 +94,7 @@ export function loadScanConfig(overrides?: Partial<ScanOptions>): ScanOptions {
 }
 
 export function isScanEnabled(): boolean {
-  const v = process.env.NEX_SCAN_ENABLED;
+  const v = process.env.WUPHF_SCAN_ENABLED;
   return v !== "false" && v !== "0";
 }
 

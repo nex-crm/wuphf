@@ -1,14 +1,14 @@
 /**
- * `nex setup` command — detect platforms, install hooks/plugins/MCP, create .nex.toml.
+ * `wuphf setup` command — detect platforms, install hooks/plugins/MCP, create .wuphf.toml.
  *
- * nex setup                     Interactive: detect → install full stack + scan files + config
- * nex setup --platform <name>   Direct install for specific platform
- * nex setup --no-hooks          Skip hook installation
- * nex setup --no-rules          Skip rules/instruction file installation
- * nex setup --no-plugin         Skip hooks/commands (alias for --no-hooks)
- * nex setup --no-integrations    Skip integration connection step
- * nex setup --no-scan           Skip file scanning during setup
- * nex setup status              Show install status + integration connections
+ * wuphf setup                     Interactive: detect → install full stack + scan files + config
+ * wuphf setup --platform <name>   Direct install for specific platform
+ * wuphf setup --no-hooks          Skip hook installation
+ * wuphf setup --no-rules          Skip rules/instruction file installation
+ * wuphf setup --no-plugin         Skip hooks/commands (alias for --no-hooks)
+ * wuphf setup --no-integrations    Skip integration connection step
+ * wuphf setup --no-scan           Skip file scanning during setup
+ * wuphf setup status              Show install status + integration connections
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -24,9 +24,9 @@ import { openBrowser } from "./integrate.js";
 
 const INTEGRATIONS_MAP: Record<string, { type: string; provider: string; displayName: string; description: string }> = {
   gmail: { type: "email", provider: "google", displayName: "Gmail", description: "Connect your Gmail account to sync emails" },
-  "google-calendar": { type: "calendar", provider: "google", displayName: "Google Calendar (Nex Meeting Bot)", description: "Connect Google Calendar for meeting transcripts" },
+  "google-calendar": { type: "calendar", provider: "google", displayName: "Google Calendar (WUPHF Meeting Bot)", description: "Connect Google Calendar for meeting transcripts" },
   outlook: { type: "email", provider: "microsoft", displayName: "Outlook", description: "Connect your Outlook account to sync emails" },
-  "outlook-calendar": { type: "calendar", provider: "microsoft", displayName: "Outlook Calendar (Nex Meeting Bot)", description: "Connect Outlook Calendar for meeting transcripts" },
+  "outlook-calendar": { type: "calendar", provider: "microsoft", displayName: "Outlook Calendar (WUPHF Meeting Bot)", description: "Connect Outlook Calendar for meeting transcripts" },
   slack: { type: "messaging", provider: "slack", displayName: "Slack", description: "Connect Slack to sync messages" },
   salesforce: { type: "crm", provider: "salesforce", displayName: "Salesforce", description: "Connect Salesforce CRM" },
   hubspot: { type: "crm", provider: "hubspot", displayName: "HubSpot", description: "Connect HubSpot CRM" },
@@ -61,7 +61,7 @@ function hasNexMcpInConfig(platform: Platform): boolean {
   try {
     const raw = readFileSync(platform.configPath, "utf-8");
     const config = JSON.parse(raw);
-    return !!(config?.mcpServers?.nex || config?.context_servers?.nex);
+    return !!(config?.mcpServers?.wuphf || config?.context_servers?.wuphf);
   } catch {
     return false;
   }
@@ -107,7 +107,7 @@ async function showStatus(format: Format, overrideApiKey?: string): Promise<void
 
   // Text format
   const lines: string[] = [];
-  lines.push(heading("Nex Setup Status"));
+  lines.push(heading("WUPHF Setup Status"));
   lines.push("");
 
   // Auth
@@ -115,14 +115,14 @@ async function showStatus(format: Format, overrideApiKey?: string): Promise<void
   if (apiKey) {
     authEntries.push(["Auth", maskKey(apiKey)]);
   } else {
-    authEntries.push(["Auth", style.yellow("Not configured") + style.dim(" — run `nex register` first")]);
+    authEntries.push(["Auth", style.yellow("Not configured") + style.dim(" — run `wuphf register` first")]);
   }
   lines.push(keyValue(authEntries));
   lines.push("");
 
   // Project config
   lines.push(keyValue([
-    ["Project Config", projectConfigExists() ? style.green(".nex.toml found") : style.dim(".nex.toml not found")],
+    ["Project Config", projectConfigExists() ? style.green(".wuphf.toml found") : style.dim(".wuphf.toml not found")],
   ]));
   lines.push("");
 
@@ -204,7 +204,7 @@ async function showStatus(format: Format, overrideApiKey?: string): Promise<void
             ([, v]) => v.type === type && v.provider === provider
           );
           const connectHint = shortcut
-            ? style.dim(`→ nex integrate connect ${shortcut[0]}`)
+            ? style.dim(`→ wuphf integrate connect ${shortcut[0]}`)
             : "";
           return { label: `${label}     ${badge("not connected", "dim")} ${connectHint}` };
         });
@@ -235,7 +235,7 @@ async function registerAndPersist(globalOpts: { timeout?: string; apiKey?: strin
   const wsSlug = data.workspace_slug as string | undefined;
   process.stderr.write(`\n  ✓ Registered!${wsSlug ? ` (${wsSlug})` : ""}\n`);
   process.stderr.write(`    API key: ${apiKey}\n`);
-  process.stderr.write(`    Saved to: ~/.nex/config.json\n\n`);
+  process.stderr.write(`    Saved to: ~/.wuphf/config.json\n\n`);
   return apiKey;
 }
 
@@ -256,16 +256,16 @@ async function runSetup(opts: {
 
   // 1. Register or re-register
   if (!apiKey) {
-    process.stderr.write("\nNo API key found. Let's set up your Nex account.\n\n");
-    const wantsRegister = await confirm("Register a new Nex workspace?");
+    process.stderr.write("\nNo API key found. Let's set up your WUPHF account.\n\n");
+    const wantsRegister = await confirm("Register a new WUPHF workspace?");
 
     if (!wantsRegister) {
       process.stderr.write("\nSetup complete, but no API key configured.\n\n");
-      process.stderr.write("To use Nex, set your API key in one of these locations:\n");
-      process.stderr.write('  1. Environment variable: export NEX_API_KEY="sk-..."\n');
-      process.stderr.write('  2. Global config:        ~/.nex/config.json  → {"api_key": "sk-..."}\n');
-      process.stderr.write('  3. Project config:       .nex.toml        → [auth] api_key = "sk-..."\n');
-      process.stderr.write("\nGet an API key: nex register --email you@company.com\n\n");
+      process.stderr.write("To use WUPHF, set your API key in one of these locations:\n");
+      process.stderr.write('  1. Environment variable: export WUPHF_API_KEY="sk-..."\n');
+      process.stderr.write('  2. Global config:        ~/.wuphf/config.json  → {"api_key": "sk-..."}\n');
+      process.stderr.write('  3. Project config:       .wuphf.toml        → [auth] api_key = "sk-..."\n');
+      process.stderr.write("\nGet an API key: wuphf register --email you@company.com\n\n");
 
       // Still install plugin hooks/commands (they'll gracefully degrade without a key)
       const platforms = detectPlatforms().filter((p) => p.detected);
@@ -349,7 +349,7 @@ async function runSetup(opts: {
             installed.push(`commands (${result.commandsCopied.length} slash commands)`);
           }
         } else {
-          results.push(`${platform.displayName}: bundled plugin not found — reinstall @nex-ai/nex`);
+          results.push(`${platform.displayName}: bundled plugin not found — reinstall @wuphf/wuphf`);
           continue;
         }
       } else if (platform.supportsHooks) {
@@ -433,12 +433,12 @@ async function runSetup(opts: {
     await connectIntegrations(apiKey);
   }
 
-  // 5. Create .nex.toml
+  // 5. Create .wuphf.toml
   const created = writeDefaultProjectConfig();
   if (created) {
-    results.push("Created .nex.toml with default settings");
+    results.push("Created .wuphf.toml with default settings");
   } else {
-    results.push(".nex.toml already exists");
+    results.push(".wuphf.toml already exists");
   }
 
   // 6. Scan and ingest project files (requires API key)
@@ -522,12 +522,12 @@ async function connectIntegrations(apiKey: string): Promise<void> {
   try {
     const fetched = await client.get<IntegrationEntry[]>("/v1/integrations/", 10_000);
     if (!Array.isArray(fetched) || fetched.length === 0) {
-      process.stderr.write(`\n  ${style.dim("No integrations available yet.")} Run ${style.bold("nex integrate")} to connect integrations later.\n`);
+      process.stderr.write(`\n  ${style.dim("No integrations available yet.")} Run ${style.bold("wuphf integrate")} to connect integrations later.\n`);
       return;
     }
     integrations = fetched;
   } catch {
-    process.stderr.write(`\n  ${style.dim("Could not fetch integrations.")} Run ${style.bold("nex integrate")} to connect integrations later.\n`);
+    process.stderr.write(`\n  ${style.dim("Could not fetch integrations.")} Run ${style.bold("wuphf integrate")} to connect integrations later.\n`);
     return;
   }
 
@@ -591,7 +591,7 @@ async function connectIntegrations(apiKey: string): Promise<void> {
       if (connected) {
         process.stderr.write(`  ${sym.success} ${item.display_name} connected!\n\n`);
       } else {
-        process.stderr.write(`  ${sym.warning} ${item.display_name} timed out — connect later with: nex integrate connect ${shortcut[0]}\n\n`);
+        process.stderr.write(`  ${sym.warning} ${item.display_name} timed out — connect later with: wuphf integrate connect ${shortcut[0]}\n\n`);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -640,14 +640,14 @@ function maskKey(key: string): string {
 
 
 function projectConfigExists(): boolean {
-  return existsSync(join(process.cwd(), ".nex.toml"));
+  return existsSync(join(process.cwd(), ".wuphf.toml"));
 }
 
 // --- Command registration ---
 
 const setup = program
   .command("setup")
-  .description("Set up Nex integration for your development environment")
+  .description("Set up WUPHF integration for your development environment")
   .option("--platform <name>", `Target platform: ${VALID_PLATFORM_IDS.join(", ")}`)
   .option("--no-plugin", "Skip plugin (hooks/commands), only update config files")
   .option("--no-hooks", "Skip hook installation for all platforms")
@@ -670,7 +670,7 @@ const setup = program
 
 setup
   .command("status")
-  .description("Show Nex installation status across all platforms")
+  .description("Show WUPHF installation status across all platforms")
   .action(async () => {
     const globalOpts = program.opts();
     const format = resolveFormat(globalOpts.format) as Format;

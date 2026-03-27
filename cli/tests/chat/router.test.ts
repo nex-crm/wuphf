@@ -15,7 +15,7 @@ describe('ChatRouter', () => {
   let channelId: string;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-chat-router-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-chat-router-test-'));
     channels = new ChannelManager(tmpDir);
     messages = new MessageStore(join(tmpDir, 'messages'));
     router = new ChatRouter(channels, messages);

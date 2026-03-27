@@ -16,7 +16,7 @@ import { registerTeamTools, startChannelPush } from "./tools/team.js";
 
 export function createServer(apiKey?: string): McpServer {
   const server = new McpServer({
-    name: "nex",
+    name: "wuphf",
     version: "0.1.0",
   });
 

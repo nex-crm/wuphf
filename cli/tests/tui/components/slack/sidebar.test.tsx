@@ -78,10 +78,10 @@ const sections = [
 describe("WorkspaceHeader", () => {
   it("renders workspace name", () => {
     const { lastFrame } = render(
-      <WorkspaceHeader name="Nex Workspace" width={24} />,
+      <WorkspaceHeader name="WUPHF Workspace" width={24} />,
     );
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("Nex Workspace"), "should show workspace name");
+    assert.ok(frame.includes("WUPHF Workspace"), "should show workspace name");
   });
 
   it("renders a divider line", () => {
@@ -223,7 +223,7 @@ describe("SlackSidebar", () => {
       <SlackSidebar
         width={24}
         focused={false}
-        workspaceName="Nex Workspace"
+        workspaceName="WUPHF Workspace"
         sections={sections}
         collapsedSections={[]}
         activeChannelId=""
@@ -233,7 +233,7 @@ describe("SlackSidebar", () => {
       />,
     );
     const frame = strip(lastFrame() ?? "");
-    assert.ok(frame.includes("Nex Workspace"), "should show workspace name");
+    assert.ok(frame.includes("WUPHF Workspace"), "should show workspace name");
   });
 
   it("shows DM section with agents and online dots", () => {
@@ -241,7 +241,7 @@ describe("SlackSidebar", () => {
       <SlackSidebar
         width={24}
         focused={false}
-        workspaceName="Nex"
+        workspaceName="WUPHF"
         sections={sections}
         collapsedSections={[]}
         activeChannelId=""
@@ -262,7 +262,7 @@ describe("SlackSidebar", () => {
       <SlackSidebar
         width={28}
         focused={false}
-        workspaceName="Nex"
+        workspaceName="WUPHF"
         sections={sections}
         collapsedSections={[]}
         activeChannelId=""
@@ -282,7 +282,7 @@ describe("SlackSidebar", () => {
       <SlackSidebar
         width={24}
         focused={false}
-        workspaceName="Nex"
+        workspaceName="WUPHF"
         sections={sections}
         collapsedSections={[]}
         activeChannelId="dm-founding"
@@ -303,7 +303,7 @@ describe("SlackSidebar", () => {
       <SlackSidebar
         width={24}
         focused={false}
-        workspaceName="Nex"
+        workspaceName="WUPHF"
         sections={sections}
         collapsedSections={["Direct Messages"]}
         activeChannelId=""
@@ -327,7 +327,7 @@ describe("SlackSidebar", () => {
       <SlackSidebar
         width={24}
         focused={false}
-        workspaceName="Nex"
+        workspaceName="WUPHF"
         sections={sections}
         collapsedSections={["Channels"]}
         activeChannelId=""
@@ -357,7 +357,7 @@ describe("SlackSidebar", () => {
       <SlackSidebar
         width={24}
         focused={false}
-        workspaceName="Nex"
+        workspaceName="WUPHF"
         sections={sections}
         collapsedSections={[]}
         activeChannelId=""

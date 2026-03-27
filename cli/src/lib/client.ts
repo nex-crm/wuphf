@@ -1,5 +1,5 @@
 /**
- * HTTP client for the Nex Developer API.
+ * HTTP client for the WUPHF Developer API.
  * Hardcoded base URL with all HTTP methods.
  */
 
@@ -66,7 +66,7 @@ export class NexClient {
       });
 
       if (res.status === 401 || res.status === 403) {
-        throw new AuthError("Invalid or expired API key. Run 'nex setup' to re-authenticate.");
+        throw new AuthError("Invalid or expired API key. Run 'wuphf setup' to re-authenticate.");
       }
 
       if (res.status === 429) {
@@ -142,7 +142,7 @@ export class NexClient {
       });
 
       if (res.status === 401 || res.status === 403) {
-        throw new AuthError("Invalid or expired API key. Run 'nex setup' to re-authenticate.");
+        throw new AuthError("Invalid or expired API key. Run 'wuphf setup' to re-authenticate.");
       }
       if (res.status === 429) {
         const retryAfter = res.headers.get("retry-after");

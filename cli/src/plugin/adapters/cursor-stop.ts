@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cursor stop hook — auto-capture conversation to Nex.
+ * Cursor stop hook — auto-capture conversation to WUPHF.
  * Input: { last_message?: string, status?: string, session_id?: string }
  * Output: {}
  */
@@ -22,7 +22,7 @@ async function main(): Promise<void> {
     await doCapture({ message: input.last_message ?? "" });
     process.stdout.write("{}");
   } catch (err) {
-    process.stderr.write(`[nex-cursor] Capture error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wuphf-cursor] Capture error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.stdout.write("{}");
   }
 }

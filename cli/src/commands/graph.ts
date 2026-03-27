@@ -1,5 +1,5 @@
 /**
- * nex graph — Visualize the workspace entity graph in the browser.
+ * wuphf graph — Visualize the workspace entity graph in the browser.
  * Fetches server-rendered HTML visualization directly from the API.
  */
 
@@ -64,7 +64,7 @@ program
     }
 
     const outPath =
-      opts.out ?? join(tmpdir(), `nex-graph-${Date.now()}.html`);
+      opts.out ?? join(tmpdir(), `wuphf-graph-${Date.now()}.html`);
     writeFileSync(outPath, html, "utf-8");
 
     if (format === "json") {

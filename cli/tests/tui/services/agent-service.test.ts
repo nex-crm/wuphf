@@ -23,7 +23,7 @@ describe("AgentService", () => {
   };
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), "nex-agent-svc-test-"));
+    tmpDir = mkdtempSync(join(tmpdir(), "wuphf-agent-svc-test-"));
     toolRegistry = new ToolRegistry();
     sessionStore = new AgentSessionStore(tmpDir);
     queues = new MessageQueues();

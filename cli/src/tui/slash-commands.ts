@@ -122,7 +122,7 @@ async function runPlatformInstall(
   const { detectPlatforms, installForPlatform } = await import("../commands/init.js");
   const { syncApiKeyToMcpConfig } = await import("../lib/installers.js");
 
-  // Sync API key to ~/.nex/config.json
+  // Sync API key to ~/.wuphf/config.json
   syncApiKeyToMcpConfig(apiKey);
 
   let platforms: DetectedPlatform[];
@@ -571,8 +571,8 @@ export async function handleInitInput(
         content:
           `Logged in! API key: ${maskedKey}\n` +
           `Workspace: ${result.workspaceSlug}\n\n` +
-          `Saved to ~/.nex/config.json` +
-          (isLoginOnly ? "\n\nRun /init to install Nex into your AI agents." : ""),
+          `Saved to ~/.wuphf/config.json` +
+          (isLoginOnly ? "\n\nRun /init to install WUPHF into your AI agents." : ""),
         timestamp: Date.now(),
       });
 
@@ -1288,7 +1288,7 @@ registerSlashCommand({
           id: `init-welcome-${Date.now()}`,
           role: "system",
           content:
-            "Welcome to Nex! Let's get you set up.\n\nWhat's your email address?",
+            "Welcome to WUPHF! Let's get you set up.\n\nWhat's your email address?",
           timestamp: Date.now(),
         });
         initState = { phase: "awaiting_email" };
@@ -1375,8 +1375,8 @@ registerSlashCommand({
             `  API key:   ${maskedKey}\n` +
             `  Workspace: ${result.workspaceSlug}\n` +
             `  Email:     ${email}\n\n` +
-            `Saved to ~/.nex/config.json\n` +
-            `Run /init to install Nex into your AI agents.`,
+            `Saved to ~/.wuphf/config.json\n` +
+            `Run /init to install WUPHF into your AI agents.`,
         };
       } catch (err) {
         ctx.setLoading(false);
@@ -1671,7 +1671,7 @@ registerSlashCommand({
 
 registerSlashCommand({
   name: "quit",
-  description: "Exit Nex",
+  description: "Exit WUPHF",
   execute: async () => {
     process.exit(0);
     return { output: "" };
@@ -1680,7 +1680,7 @@ registerSlashCommand({
 
 registerSlashCommand({
   name: "q",
-  description: "Exit Nex (alias)",
+  description: "Exit WUPHF (alias)",
   execute: async () => {
     process.exit(0);
     return { output: "" };

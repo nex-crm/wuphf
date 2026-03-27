@@ -20,7 +20,7 @@ export function ChatInput({
   onChange,
   onSubmit,
   placeholder = "Type a command...",
-  prefix = "nex> ",
+  prefix = "wuphf> ",
   isActive,
 }: ChatInputProps): React.JSX.Element {
   // Counter to force TextInput remount after submit.

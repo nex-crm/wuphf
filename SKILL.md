@@ -1,26 +1,26 @@
 ---
-name: nex
+name: wuphf
 description: Share real-time organizational context with your AI agent — query your context graph, manage records, and receive live insights
-metadata: {"clawdbot": {"emoji": "\U0001F4CA", "homepage": "https://github.com/nex-crm/nex-as-a-skill", "primaryEnv": "NEX_API_KEY", "requires": {"env": [], "bins": ["curl", "jq", "bash"]}, "files": ["scripts/nex-api.sh", "scripts/nex-openclaw-register.sh", "scripts/nex-scan-files.sh"]}}
+metadata: {"clawdbot": {"emoji": "\U0001F4CA", "homepage": "https://github.com/najmuzzaman-mohammad/wuphf", "primaryEnv": "WUPHF_API_KEY", "requires": {"env": [], "bins": ["curl", "jq", "bash"]}, "files": ["scripts/wuphf-api.sh", "scripts/wuphf-openclaw-register.sh", "scripts/wuphf-scan-files.sh"]}}
 ---
 
-# Nex - Real-time Organizational Context for AI Agents
+# WUPHF - Real-time Organizational Context for AI Agents
 
-Nex shares real-time organizational context with your AI agent: query your context graph, process conversations, receive live insights, and manage the underlying records, schemas, relationships, tasks, and notes.
+WUPHF shares real-time organizational context with your AI agent: query your context graph, process conversations, receive live insights, and manage the underlying records, schemas, relationships, tasks, and notes.
 
 ## OpenClaw Bootstrap (Required)
 
-Run this flow only when `NEX_API_KEY` is missing.
+Run this flow only when `WUPHF_API_KEY` is missing.
 
 1. Prompt user for registration fields:
 - Required: `email`
 - Optional: `name`, `company_name`
-- `source` is required by API and is sent by the script as `openclaw` (override with `NEX_AGENT_SOURCE` if needed).
+- `source` is required by API and is sent by the script as `openclaw` (override with `WUPHF_AGENT_SOURCE` if needed).
 - Never infer/autofill from memory, prior chats, profile hints, defaults, or guesses.
 - If `email` is missing, stop and explain registration cannot proceed.
 
 2. Register:
-- Command: `bash {baseDir}/scripts/nex-openclaw-register.sh <email> [name] [company_name]`
+- Command: `bash {baseDir}/scripts/wuphf-openclaw-register.sh <email> [name] [company_name]`
 - Endpoint used by script: `POST /api/v1/agents/register`
 - Request payload sent by script:
   - `email` (required)
@@ -29,14 +29,14 @@ Run this flow only when `NEX_API_KEY` is missing.
   - `company_name` (optional)
 - Expected response fields: `api_key`, `workspace_id`, `workspace_slug`, `plan`, issued limits/scopes metadata.
 
-3. Persist returned key before any Nex API call:
-- Upsert `skills.entries.nex.enabled = true`.
-- Upsert `skills.entries.nex.env.NEX_API_KEY = <api_key>` in `~/.openclaw/openclaw.json`.
+3. Persist returned key before any WUPHF API call:
+- Upsert `skills.entries.wuphf.enabled = true`.
+- Upsert `skills.entries.wuphf.env.WUPHF_API_KEY = <api_key>` in `~/.openclaw/openclaw.json`.
 - Verify key exists and is non-empty; if verification fails, stop.
 
 ```bash
 # Register and capture JSON response.
-REG_JSON="$(bash {baseDir}/scripts/nex-openclaw-register.sh \"$EMAIL\" \"$NAME\" \"$COMPANY_NAME\")"
+REG_JSON="$(bash {baseDir}/scripts/wuphf-openclaw-register.sh \"$EMAIL\" \"$NAME\" \"$COMPANY_NAME\")"
 
 # Extract api_key and validate it.
 API_KEY="$(printf '%s' "$REG_JSON" | jq -r '.api_key // empty')"
@@ -54,29 +54,29 @@ fi
 # Upsert NEX skill key and enable flag.
 TMP_FILE="$(mktemp)"
 jq --arg api_key "$API_KEY" '
-  .skills.entries.nex.enabled = true
-  | .skills.entries.nex.env.NEX_API_KEY = $api_key
+  .skills.entries.wuphf.enabled = true
+  | .skills.entries.wuphf.env.WUPHF_API_KEY = $api_key
 ' "$HOME/.openclaw/openclaw.json" > "$TMP_FILE" && mv "$TMP_FILE" "$HOME/.openclaw/openclaw.json"
 
 # Verify write before continuing.
-jq -e '.skills.entries.nex.env.NEX_API_KEY | type == "string" and length > 0' "$HOME/.openclaw/openclaw.json" >/dev/null
+jq -e '.skills.entries.wuphf.env.WUPHF_API_KEY | type == "string" and length > 0' "$HOME/.openclaw/openclaw.json" >/dev/null
 ```
 
-**Shared Config**: Registration data is also saved to `~/.nex-mcp.json` for cross-tool compatibility. If `NEX_API_KEY` is not set, check this file as a fallback:
+**Shared Config**: Registration data is also saved to `~/.wuphf-mcp.json` for cross-tool compatibility. If `WUPHF_API_KEY` is not set, check this file as a fallback:
 ```bash
-API_KEY="$(jq -r '.api_key // empty' "$HOME/.nex-mcp.json" 2>/dev/null || true)"
+API_KEY="$(jq -r '.api_key // empty' "$HOME/.wuphf-mcp.json" 2>/dev/null || true)"
 ```
 
 4. Continue:
-- Use `scripts/nex-api.sh` with `Authorization: Bearer <NEX_API_KEY>` for Developer API endpoints (including context/text).
+- Use `scripts/wuphf-api.sh` with `Authorization: Bearer <WUPHF_API_KEY>` for Developer API endpoints (including context/text).
 - Re-registration is allowed; key rotation behavior depends on backend policy.
 
 ## Security & Privacy
 
-- All Nex Developer API calls are routed through a validated wrapper script (`scripts/nex-api.sh`)
-- OpenClaw registration calls must go through `scripts/nex-openclaw-register.sh`
+- All WUPHF Developer API calls are routed through a validated wrapper script (`scripts/wuphf-api.sh`)
+- OpenClaw registration calls must go through `scripts/wuphf-openclaw-register.sh`
 - The wrapper validates that all requests go to `https://app.nex.ai/api/developers` only
-- API key is read from `$NEX_API_KEY` environment variable (never from prompts)
+- API key is read from `$WUPHF_API_KEY` environment variable (never from prompts)
 - JSON request bodies are passed via stdin (`printf '%s'` pipe) to avoid shell injection
 - The wrapper uses `set -euo pipefail` for safe shell execution
 
@@ -88,7 +88,7 @@ API_KEY="$(jq -r '.api_key // empty' "$HOME/.nex-mcp.json" 2>/dev/null || true)"
 
 ## File Scanning
 
-Scan project directories and ingest changed files into the Nex knowledge base. Uses manifest-based change detection — unchanged files are automatically skipped on subsequent scans.
+Scan project directories and ingest changed files into the WUPHF knowledge base. Uses manifest-based change detection — unchanged files are automatically skipped on subsequent scans.
 
 ### When to Scan
 - First time working with a project (ingests docs, config, notes)
@@ -99,13 +99,13 @@ Scan project directories and ingest changed files into the Nex knowledge base. U
 
 ```bash
 # Scan current directory (default settings)
-bash {baseDir}/scripts/nex-scan-files.sh --dir .
+bash {baseDir}/scripts/wuphf-scan-files.sh --dir .
 
 # Scan with custom limits
-bash {baseDir}/scripts/nex-scan-files.sh --dir . --max-files 10 --max-depth 3
+bash {baseDir}/scripts/wuphf-scan-files.sh --dir . --max-files 10 --max-depth 3
 
 # Scan specific extensions only
-bash {baseDir}/scripts/nex-scan-files.sh --dir . --extensions ".md,.txt"
+bash {baseDir}/scripts/wuphf-scan-files.sh --dir . --extensions ".md,.txt"
 ```
 
 **IMPORTANT**: Set `timeout: 120` on exec tool calls — file ingestion can be slow.
@@ -120,7 +120,7 @@ bash {baseDir}/scripts/nex-scan-files.sh --dir . --extensions ".md,.txt"
 
 ### How It Works
 1. Walks the directory tree (respecting depth + ignore rules)
-2. Checks each file against `~/.nex/file-scan-manifest.json` (mtime + size)
+2. Checks each file against `~/.wuphf/file-scan-manifest.json` (mtime + size)
 3. Ingests changed files via `POST /v1/context/text` with context tag `file-scan:<relative-path>`
 4. Updates manifest to prevent re-ingestion
 
@@ -131,14 +131,14 @@ Files larger than 100KB are automatically truncated.
 
 ## Entity Search
 
-Search for entities (people, companies, topics) in the Nex knowledge base.
+Search for entities (people, companies, topics) in the WUPHF knowledge base.
 
 ### Usage
 Query the context graph and extract entity references from the response:
 
 ```bash
 # Search for entities related to a query
-printf '%s' '{"query":"who are the key contacts at Acme Corp?"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/context/ask
+printf '%s' '{"query":"who are the key contacts at Acme Corp?"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/context/ask
 ```
 
 The response includes an `entity_references` array:
@@ -170,15 +170,15 @@ Example: `- John Smith (Person) — 12 mentions`
 
 ## How to Make API Calls
 
-**CRITICAL**: The Nex API can take 10-60 seconds to respond. You MUST set `timeout: 120` on every exec tool call.
+**CRITICAL**: The WUPHF API can take 10-60 seconds to respond. You MUST set `timeout: 120` on every exec tool call.
 
-All API calls go through the wrapper script at `{baseDir}/scripts/nex-api.sh`:
+All API calls go through the wrapper script at `{baseDir}/scripts/wuphf-api.sh`:
 
 **GET request**:
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/objects",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/objects",
   "timeout": 120
 }
 ```
@@ -187,7 +187,7 @@ All API calls go through the wrapper script at `{baseDir}/scripts/nex-api.sh`:
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"query\":\"What do I know about John?\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/context/ask",
+  "command": "printf '%s' '{\"query\":\"What do I know about John?\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/context/ask",
   "timeout": 120
 }
 ```
@@ -196,7 +196,7 @@ All API calls go through the wrapper script at `{baseDir}/scripts/nex-api.sh`:
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/insights?last=1h' | jq '[.insights[] | {type, content}]'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/insights?last=1h' | jq '[.insights[] | {type, content}]'",
   "timeout": 120
 }
 ```
@@ -205,20 +205,20 @@ All API calls go through the wrapper script at `{baseDir}/scripts/nex-api.sh`:
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh sse /v1/insights/stream",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh sse /v1/insights/stream",
   "timeout": 120
 }
 ```
 
 ### Handling Large Responses
 
-Nex API responses (especially Insights and List Records) can be 10KB-100KB+. The exec tool may truncate output. **You MUST handle this properly.**
+WUPHF API responses (especially Insights and List Records) can be 10KB-100KB+. The exec tool may truncate output. **You MUST handle this properly.**
 
 **Pipe output through jq** to extract only what you need:
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/insights?last=1h' | jq '[.insights[] | {type, content, confidence_level, who: .target.hint}]'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/insights?last=1h' | jq '[.insights[] | {type, content, confidence_level, who: .target.hint}]'",
   "timeout": 120
 }
 ```
@@ -288,7 +288,7 @@ Create a new custom object type.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"name\":\"Project\",\"name_plural\":\"Projects\",\"slug\":\"project\",\"description\":\"Project tracker\",\"type\":\"custom\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/objects",
+  "command": "printf '%s' '{\"name\":\"Project\",\"name_plural\":\"Projects\",\"slug\":\"project\",\"description\":\"Project tracker\",\"type\":\"custom\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/objects",
   "timeout": 120
 }
 ```
@@ -303,7 +303,7 @@ Get a single object definition with its attributes.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/objects/project",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/objects/project",
   "timeout": 120
 }
 ```
@@ -321,7 +321,7 @@ Discover available object types (person, company, etc.) and their attribute sche
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/objects?include_attributes=true'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/objects?include_attributes=true'",
   "timeout": 120
 }
 ```
@@ -372,7 +372,7 @@ Update an existing object definition.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"name\":\"Updated Project\",\"description\":\"Updated description\"}' | bash {baseDir}/scripts/nex-api.sh PATCH /v1/objects/project",
+  "command": "printf '%s' '{\"name\":\"Updated Project\",\"description\":\"Updated description\"}' | bash {baseDir}/scripts/wuphf-api.sh PATCH /v1/objects/project",
   "timeout": 120
 }
 ```
@@ -387,7 +387,7 @@ Delete an object definition and all its records.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/objects/project",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/objects/project",
   "timeout": 120
 }
 ```
@@ -411,7 +411,7 @@ Add a new attribute to an object type.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"name\":\"Status\",\"slug\":\"status\",\"type\":\"select\",\"description\":\"Current status\",\"options\":{\"is_required\":true,\"select_options\":[{\"name\":\"Open\"},{\"name\":\"In Progress\"},{\"name\":\"Done\"}]}}' | bash {baseDir}/scripts/nex-api.sh POST /v1/objects/project/attributes",
+  "command": "printf '%s' '{\"name\":\"Status\",\"slug\":\"status\",\"type\":\"select\",\"description\":\"Current status\",\"options\":{\"is_required\":true,\"select_options\":[{\"name\":\"Open\"},{\"name\":\"In Progress\"},{\"name\":\"Done\"}]}}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/objects/project/attributes",
   "timeout": 120
 }
 ```
@@ -433,7 +433,7 @@ Update an existing attribute definition.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"name\":\"Updated Status\",\"options\":{\"is_required\":false}}' | bash {baseDir}/scripts/nex-api.sh PATCH /v1/objects/project/attributes/456",
+  "command": "printf '%s' '{\"name\":\"Updated Status\",\"options\":{\"is_required\":false}}' | bash {baseDir}/scripts/wuphf-api.sh PATCH /v1/objects/project/attributes/456",
   "timeout": 120
 }
 ```
@@ -448,7 +448,7 @@ Remove an attribute from an object type.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/objects/project/attributes/456",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/objects/project/attributes/456",
   "timeout": 120
 }
 ```
@@ -472,7 +472,7 @@ Create a new record for an object type.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"attributes\":{\"name\":{\"first_name\":\"Jane\",\"last_name\":\"Doe\"},\"email\":\"jane@example.com\",\"company\":\"Acme Corp\"}}' | bash {baseDir}/scripts/nex-api.sh POST /v1/objects/person",
+  "command": "printf '%s' '{\"attributes\":{\"name\":{\"first_name\":\"Jane\",\"last_name\":\"Doe\"},\"email\":\"jane@example.com\",\"company\":\"Acme Corp\"}}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/objects/person",
   "timeout": 120
 }
 ```
@@ -508,7 +508,7 @@ Create a record if it doesn't exist, or update it if a match is found on the spe
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"matching_attribute\":\"email\",\"attributes\":{\"name\":\"Jane Doe\",\"email\":\"jane@example.com\",\"job_title\":\"VP of Sales\"}}' | bash {baseDir}/scripts/nex-api.sh PUT /v1/objects/person",
+  "command": "printf '%s' '{\"matching_attribute\":\"email\",\"attributes\":{\"name\":\"Jane Doe\",\"email\":\"jane@example.com\",\"job_title\":\"VP of Sales\"}}' | bash {baseDir}/scripts/wuphf-api.sh PUT /v1/objects/person",
   "timeout": 120
 }
 ```
@@ -523,7 +523,7 @@ Retrieve a specific record by its ID.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/records/789",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/records/789",
   "timeout": 120
 }
 ```
@@ -541,7 +541,7 @@ Update specific attributes on an existing record. Only the provided attributes a
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"attributes\":{\"job_title\":\"CTO\",\"phone\":\"+1-555-0123\"}}' | bash {baseDir}/scripts/nex-api.sh PATCH /v1/records/789",
+  "command": "printf '%s' '{\"attributes\":{\"job_title\":\"CTO\",\"phone\":\"+1-555-0123\"}}' | bash {baseDir}/scripts/wuphf-api.sh PATCH /v1/records/789",
   "timeout": 120
 }
 ```
@@ -556,7 +556,7 @@ Permanently delete a record.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/records/789",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/records/789",
   "timeout": 120
 }
 ```
@@ -577,7 +577,7 @@ List records for an object type with optional filtering, sorting, and pagination
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"attributes\":\"all\",\"limit\":10,\"offset\":0,\"sort\":{\"attribute\":\"updated_at\",\"direction\":\"desc\"}}' | bash {baseDir}/scripts/nex-api.sh POST /v1/objects/person/records",
+  "command": "printf '%s' '{\"attributes\":\"all\",\"limit\":10,\"offset\":0,\"sort\":{\"attribute\":\"updated_at\",\"direction\":\"desc\"}}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/objects/person/records",
   "timeout": 120
 }
 ```
@@ -614,7 +614,7 @@ Get paginated timeline events for a record (tasks, notes, attribute changes, etc
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/records/1001/timeline?limit=20'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/records/1001/timeline?limit=20'",
   "timeout": 120
 }
 ```
@@ -666,7 +666,7 @@ Define a relationship type between two object types.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"type\":\"one_to_many\",\"entity_definition_1_id\":\"123\",\"entity_definition_2_id\":\"456\",\"entity_1_to_2_predicate\":\"has\",\"entity_2_to_1_predicate\":\"belongs to\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/relationships",
+  "command": "printf '%s' '{\"type\":\"one_to_many\",\"entity_definition_1_id\":\"123\",\"entity_definition_2_id\":\"456\",\"entity_1_to_2_predicate\":\"has\",\"entity_2_to_1_predicate\":\"belongs to\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/relationships",
   "timeout": 120
 }
 ```
@@ -694,7 +694,7 @@ Get all relationship definitions in the workspace.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/relationships",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/relationships",
   "timeout": 120
 }
 ```
@@ -709,7 +709,7 @@ Remove a relationship definition.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/relationships/789",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/relationships/789",
   "timeout": 120
 }
 ```
@@ -731,7 +731,7 @@ Link two records using an existing relationship definition.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"definition_id\":\"789\",\"entity_1_id\":\"1001\",\"entity_2_id\":\"2002\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/records/1001/relationships",
+  "command": "printf '%s' '{\"definition_id\":\"789\",\"entity_1_id\":\"1001\",\"entity_2_id\":\"2002\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/records/1001/relationships",
   "timeout": 120
 }
 ```
@@ -746,7 +746,7 @@ Remove a relationship between two records.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/records/1001/relationships/5001",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/records/1001/relationships/5001",
   "timeout": 120
 }
 ```
@@ -769,7 +769,7 @@ Get all lists associated with an object type.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/objects/person/lists?include_attributes=true'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/objects/person/lists?include_attributes=true'",
   "timeout": 120
 }
 ```
@@ -807,7 +807,7 @@ Create a new list under an object type.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"name\":\"VIP Contacts\",\"slug\":\"vip-contacts\",\"description\":\"High-value contacts\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/objects/contact/lists",
+  "command": "printf '%s' '{\"name\":\"VIP Contacts\",\"slug\":\"vip-contacts\",\"description\":\"High-value contacts\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/objects/contact/lists",
   "timeout": 120
 }
 ```
@@ -822,7 +822,7 @@ Get a list definition by ID.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/lists/300",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/lists/300",
   "timeout": 120
 }
 ```
@@ -837,7 +837,7 @@ Delete a list definition.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/lists/300",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/lists/300",
   "timeout": 120
 }
 ```
@@ -856,7 +856,7 @@ Add an existing record to a list.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"parent_id\":\"789\",\"attributes\":{\"status\":\"active\"}}' | bash {baseDir}/scripts/nex-api.sh POST /v1/lists/456",
+  "command": "printf '%s' '{\"parent_id\":\"789\",\"attributes\":{\"status\":\"active\"}}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/lists/456",
   "timeout": 120
 }
 ```
@@ -871,7 +871,7 @@ Add a record to a list, or update its list-specific attributes if already a memb
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"parent_id\":\"789\",\"attributes\":{\"priority\":\"high\"}}' | bash {baseDir}/scripts/nex-api.sh PUT /v1/lists/456",
+  "command": "printf '%s' '{\"parent_id\":\"789\",\"attributes\":{\"priority\":\"high\"}}' | bash {baseDir}/scripts/wuphf-api.sh PUT /v1/lists/456",
   "timeout": 120
 }
 ```
@@ -888,7 +888,7 @@ Get paginated records from a specific list.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"attributes\":\"all\",\"limit\":20}' | bash {baseDir}/scripts/nex-api.sh POST /v1/lists/456/records",
+  "command": "printf '%s' '{\"attributes\":\"all\",\"limit\":20}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/lists/456/records",
   "timeout": 120
 }
 ```
@@ -903,7 +903,7 @@ Update list-specific attributes for a record within a list.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"attributes\":{\"status\":\"closed-won\"}}' | bash {baseDir}/scripts/nex-api.sh PATCH /v1/lists/456/records/789",
+  "command": "printf '%s' '{\"attributes\":{\"status\":\"closed-won\"}}' | bash {baseDir}/scripts/wuphf-api.sh PATCH /v1/lists/456/records/789",
   "timeout": 120
 }
 ```
@@ -918,7 +918,7 @@ Remove a record from a list.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/lists/300/records/4001",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/lists/300/records/4001",
   "timeout": 120
 }
 ```
@@ -947,7 +947,7 @@ Create a new task, optionally linked to records and assigned to users.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"title\":\"Follow up with client\",\"description\":\"Discuss contract renewal\",\"priority\":\"high\",\"due_date\":\"2026-03-01T09:00:00Z\",\"entity_ids\":[\"1001\",\"1002\"],\"assignee_ids\":[\"50\"]}' | bash {baseDir}/scripts/nex-api.sh POST /v1/tasks",
+  "command": "printf '%s' '{\"title\":\"Follow up with client\",\"description\":\"Discuss contract renewal\",\"priority\":\"high\",\"due_date\":\"2026-03-01T09:00:00Z\",\"entity_ids\":[\"1001\",\"1002\"],\"assignee_ids\":[\"50\"]}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/tasks",
   "timeout": 120
 }
 ```
@@ -987,7 +987,7 @@ List tasks with optional filtering.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/tasks?entity_id=1001&is_completed=false&limit=20'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/tasks?entity_id=1001&is_completed=false&limit=20'",
   "timeout": 120
 }
 ```
@@ -1012,7 +1012,7 @@ Get a single task by ID.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/tasks/800",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/tasks/800",
   "timeout": 120
 }
 ```
@@ -1038,7 +1038,7 @@ Update a task's fields. All fields are optional.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"priority\":\"urgent\",\"is_completed\":true}' | bash {baseDir}/scripts/nex-api.sh PATCH /v1/tasks/800",
+  "command": "printf '%s' '{\"priority\":\"urgent\",\"is_completed\":true}' | bash {baseDir}/scripts/wuphf-api.sh PATCH /v1/tasks/800",
   "timeout": 120
 }
 ```
@@ -1053,7 +1053,7 @@ Archive a task (soft delete). Sets `archived_at` timestamp — the task is not p
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/tasks/800",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/tasks/800",
   "timeout": 120
 }
 ```
@@ -1079,7 +1079,7 @@ Create a new note, optionally linked to a record.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"title\":\"Meeting notes\",\"content\":\"Discussed Q3 roadmap...\",\"entity_id\":\"1001\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/notes",
+  "command": "printf '%s' '{\"title\":\"Meeting notes\",\"content\":\"Discussed Q3 roadmap...\",\"entity_id\":\"1001\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/notes",
   "timeout": 120
 }
 ```
@@ -1113,7 +1113,7 @@ Response capped at 200 notes max.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/notes?entity_id=1001'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/notes?entity_id=1001'",
   "timeout": 120
 }
 ```
@@ -1128,7 +1128,7 @@ Get a single note by ID.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/notes/900",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/notes/900",
   "timeout": 120
 }
 ```
@@ -1150,7 +1150,7 @@ Update a note's fields.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"title\":\"Updated meeting notes\",\"content\":\"Added action items...\"}' | bash {baseDir}/scripts/nex-api.sh PATCH /v1/notes/900",
+  "command": "printf '%s' '{\"title\":\"Updated meeting notes\",\"content\":\"Added action items...\"}' | bash {baseDir}/scripts/wuphf-api.sh PATCH /v1/notes/900",
   "timeout": 120
 }
 ```
@@ -1165,7 +1165,7 @@ Archive a note (soft delete). Sets `archived_at` timestamp — the note is not p
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/notes/900",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/notes/900",
   "timeout": 120
 }
 ```
@@ -1189,7 +1189,7 @@ Search records by name across all object types.
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"query\":\"john doe\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/search",
+  "command": "printf '%s' '{\"query\":\"john doe\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/search",
   "timeout": 120
 }
 ```
@@ -1237,7 +1237,7 @@ Use this when you need to recall information about contacts, companies, or relat
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"query\":\"What do I know about John Smith?\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/context/ask",
+  "command": "printf '%s' '{\"query\":\"What do I know about John Smith?\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/context/ask",
   "timeout": 120
 }
 ```
@@ -1277,7 +1277,7 @@ Use this to ingest new information from conversations, meeting notes, or other t
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"content\":\"Had a great call with John Smith from Acme Corp.\",\"context\":\"Sales call notes\"}' | bash {baseDir}/scripts/nex-api.sh POST /v1/context/text",
+  "command": "printf '%s' '{\"content\":\"Had a great call with John Smith from Acme Corp.\",\"context\":\"Sales call notes\"}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/context/text",
   "timeout": 120
 }
 ```
@@ -1301,7 +1301,7 @@ Check the processing status and results after calling ProcessText.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/context/artifacts/abc123",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/context/artifacts/abc123",
   "timeout": 120
 }
 ```
@@ -1353,7 +1353,7 @@ Use natural language to search your context graph and generate a curated list of
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{\"query\":\"high priority contacts in enterprise deals\",\"object_type\":\"contact\",\"limit\":20,\"include_attributes\":true}' | bash {baseDir}/scripts/nex-api.sh POST /v1/context/list/jobs",
+  "command": "printf '%s' '{\"query\":\"high priority contacts in enterprise deals\",\"object_type\":\"contact\",\"limit\":20,\"include_attributes\":true}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/context/list/jobs",
   "timeout": 120
 }
 ```
@@ -1381,7 +1381,7 @@ Check status and results of an AI list generation job. Poll until `status` is `c
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/context/list/jobs/12345678901234567?include_attributes=true'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/context/list/jobs/12345678901234567?include_attributes=true'",
   "timeout": 120
 }
 ```
@@ -1443,7 +1443,7 @@ Last 30 minutes:
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/insights?last=30m'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/insights?last=30m'",
   "timeout": 120
 }
 ```
@@ -1452,7 +1452,7 @@ Between two dates:
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/insights?from=2026-02-07T00:00:00Z&to=2026-02-08T00:00:00Z'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/insights?from=2026-02-07T00:00:00Z&to=2026-02-08T00:00:00Z'",
   "timeout": 120
 }
 ```
@@ -1461,7 +1461,7 @@ Between two dates:
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET '/v1/insights?last=1h' | jq '{insight_count: (.insights | length), insights: [.insights[] | {type, content, confidence_level, who: .target.hint, entity_type: .target.entity_type}]}'",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET '/v1/insights?last=1h' | jq '{insight_count: (.insights | length), insights: [.insights[] | {type, content, confidence_level, who: .target.hint, entity_type: .target.entity_type}]}'",
   "timeout": 120
 }
 ```
@@ -1489,7 +1489,7 @@ Receive insights as they are discovered in real time.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh sse /v1/insights/stream",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh sse /v1/insights/stream",
   "timeout": 120
 }
 ```
@@ -1549,7 +1549,7 @@ Lists available integration types and their current connection status.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/integrations/",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/integrations/",
   "timeout": 120
 }
 ```
@@ -1570,7 +1570,7 @@ Start an OAuth connection flow. Returns an `auth_url` for the user to open in th
 ```json
 {
   "tool": "exec",
-  "command": "printf '%s' '{}' | bash {baseDir}/scripts/nex-api.sh POST /v1/integrations/email/google/connect",
+  "command": "printf '%s' '{}' | bash {baseDir}/scripts/wuphf-api.sh POST /v1/integrations/email/google/connect",
   "timeout": 120
 }
 ```
@@ -1584,7 +1584,7 @@ Poll this endpoint to check if the user has completed the OAuth flow.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh GET /v1/integrations/connect/CONNECT_ID/status",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh GET /v1/integrations/connect/CONNECT_ID/status",
   "timeout": 120
 }
 ```
@@ -1598,7 +1598,7 @@ Remove an existing integration connection.
 ```json
 {
   "tool": "exec",
-  "command": "bash {baseDir}/scripts/nex-api.sh DELETE /v1/integrations/connections/CONNECTION_ID",
+  "command": "bash {baseDir}/scripts/wuphf-api.sh DELETE /v1/integrations/connections/CONNECTION_ID",
   "timeout": 120
 }
 ```
@@ -1608,13 +1608,13 @@ Remove an existing integration connection.
 | Status Code | Meaning | Action |
 |-------------|---------|--------|
 | 400 | Invalid request | Check request body and parameters |
-| 401 | Invalid API key | Check NEX_API_KEY is set correctly |
+| 401 | Invalid API key | Check WUPHF_API_KEY is set correctly |
 | 403 | Missing scope | Verify API key has the required scope |
 | 404 | Not found | Check the record/object/list ID exists |
 | 429 | Rate limited | Wait and retry with exponential backoff |
 | 500 | Server error | Retry after a brief delay |
 
-## When to Use Nex
+## When to Use WUPHF
 
 **Good use cases**:
 - Before responding to a message, query for context about the person
@@ -1630,4 +1630,4 @@ Remove an existing integration connection.
 **Not for**:
 - General knowledge questions (use web search)
 - Real-time calendar/scheduling (use calendar tools)
-- Bulk data entry that requires the full Nex UI
+- Bulk data entry that requires the full WUPHF UI

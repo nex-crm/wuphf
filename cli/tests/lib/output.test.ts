@@ -25,8 +25,8 @@ describe("formatOutput", () => {
     });
 
     test("renders objects as key-value pairs", () => {
-      const result = formatOutput({ name: "Nex", version: 1 }, "text")!;
-      expect(result.includes("name: Nex")).toBeTruthy();
+      const result = formatOutput({ name: "WUPHF", version: 1 }, "text")!;
+      expect(result.includes("name: WUPHF")).toBeTruthy();
       expect(result.includes("version: 1")).toBeTruthy();
     });
 

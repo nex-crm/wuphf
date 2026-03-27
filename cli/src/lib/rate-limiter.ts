@@ -11,7 +11,7 @@ export interface RateLimiterConfig {
 const DEFAULTS: RateLimiterConfig = {
   maxRequests: 10,
   windowMs: 60_000,
-  dataDir: join(homedir(), ".nex"),
+  dataDir: join(homedir(), ".wuphf"),
 };
 
 export class RateLimiter {

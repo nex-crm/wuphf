@@ -1,5 +1,5 @@
 /**
- * nex task — CRUD operations for tasks.
+ * wuphf task — CRUD operations for tasks.
  */
 
 import { program } from "../cli.js";

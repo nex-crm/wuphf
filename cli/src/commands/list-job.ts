@@ -1,5 +1,5 @@
 /**
- * nex list-job — AI-powered list generation jobs.
+ * wuphf list-job — AI-powered list generation jobs.
  */
 
 import { program } from "../cli.js";

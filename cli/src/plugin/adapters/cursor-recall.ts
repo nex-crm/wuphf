@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cursor userPromptSubmit hook — auto-recall from Nex.
+ * Cursor userPromptSubmit hook — auto-recall from WUPHF.
  * Input: { prompt?: string, attachments?: unknown[], session_id?: string }
  * Output: { continue: true, user_message: "<original + context>" } or {}
  */
@@ -30,7 +30,7 @@ async function main(): Promise<void> {
     // Inject context as additional_context (Cursor's context injection mechanism)
     process.stdout.write(JSON.stringify({ additional_context: result.context }));
   } catch (err) {
-    process.stderr.write(`[nex-cursor] Recall error: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`[wuphf-cursor] Recall error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.stdout.write("{}");
   }
 }

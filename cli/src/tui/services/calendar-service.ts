@@ -16,7 +16,7 @@ export class CalendarService {
   private listeners: Array<() => void> = [];
 
   constructor(calendarFilePath?: string) {
-    const filePath = calendarFilePath ?? join(homedir(), '.nex-cli', 'calendar.json');
+    const filePath = calendarFilePath ?? join(homedir(), '.wuphf', 'calendar.json');
     this.store = new CalendarStore(filePath);
     this.scheduler = new Scheduler(this.store);
   }

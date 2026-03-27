@@ -1,14 +1,14 @@
 /**
- * Nex Memory Plugin for OpenClaw
+ * WUPHF Memory Plugin for OpenClaw
  *
- * Gives OpenClaw agents persistent long-term memory powered by the Nex
+ * Gives OpenClaw agents persistent long-term memory powered by the WUPHF
  * context intelligence layer. Auto-recalls relevant context before each
  * agent turn and auto-captures conversation facts after each turn.
  */
 
 import { Type, type Static } from "@sinclair/typebox";
 import { parseConfig, type NexPluginConfig } from "./config.js";
-import { NexClient, NexAuthError } from "./nex-client.js";
+import { NexClient, NexAuthError } from "./wuphf-client.js";
 import { RateLimiter } from "./rate-limiter.js";
 import { SessionStore } from "./session-store.js";
 import { formatNexContext, stripNexContext } from "./context-format.js";
@@ -129,9 +129,9 @@ interface OpenClawPluginApi {
 // --- Plugin definition ---
 
 const plugin = {
-  id: "nex",
-  name: "Nex Memory",
-  description: "Persistent context intelligence for OpenClaw agents, powered by Nex",
+  id: "wuphf",
+  name: "WUPHF Memory",
+  description: "Persistent context intelligence for OpenClaw agents, powered by WUPHF",
   version: "0.1.0",
   kind: "memory" as const,
 
@@ -143,7 +143,7 @@ const plugin = {
     try {
       cfg = parseConfig(api.pluginConfig);
     } catch (err) {
-      log.error("Failed to parse Nex plugin config:", err);
+      log.error("Failed to parse WUPHF plugin config:", err);
       throw err;
     }
 
@@ -152,7 +152,7 @@ const plugin = {
     const sessions = new SessionStore();
 
     const debug = (...args: unknown[]) => {
-      if (cfg.debug && log.debug) log.debug("[nex]", ...args);
+      if (cfg.debug && log.debug) log.debug("[wuphf]", ...args);
     };
 
     debug("Plugin config loaded", { baseUrl: cfg.baseUrl, autoRecall: cfg.autoRecall, autoCapture: cfg.autoCapture });
@@ -160,26 +160,26 @@ const plugin = {
     // --- Service (health check on start, cleanup on stop) ---
 
     api.registerService({
-      id: "nex",
+      id: "wuphf",
       async start({ logger }) {
-        logger.info("Nex memory plugin starting...");
+        logger.info("WUPHF memory plugin starting...");
         try {
           const healthy = await client.healthCheck();
           if (healthy) {
-            logger.info("Nex API connection verified");
+            logger.info("WUPHF API connection verified");
           } else {
-            logger.warn("Nex API health check failed — recall/capture may not work");
+            logger.warn("WUPHF API health check failed — recall/capture may not work");
           }
         } catch (err) {
           if (err instanceof NexAuthError) {
-            logger.error("Nex API key is invalid. Check your apiKey config or NEX_API_KEY env var.");
+            logger.error("WUPHF API key is invalid. Check your apiKey config or WUPHF_API_KEY env var.");
           } else {
-            logger.warn("Could not reach Nex API:", err);
+            logger.warn("Could not reach WUPHF API:", err);
           }
         }
       },
       async stop({ logger }) {
-        logger.info("Nex memory plugin stopping — flushing capture queue...");
+        logger.info("WUPHF memory plugin stopping — flushing capture queue...");
         try {
           await Promise.race([
             rateLimiter.flush(),
@@ -236,7 +236,7 @@ const plugin = {
             if (err instanceof Error && err.name === "AbortError") {
               debug("Recall timed out");
             } else {
-              log.warn("Nex recall failed (agent will proceed without context):", err);
+              log.warn("WUPHF recall failed (agent will proceed without context):", err);
             }
             return;
           }
@@ -268,7 +268,7 @@ const plugin = {
             const res = await client.ingest(result.text, "openclaw-conversation");
             debug("Capture complete", { artifactId: res.artifact_id });
           } catch (err) {
-            log.warn("Nex capture failed:", err);
+            log.warn("WUPHF capture failed:", err);
           }
         }).catch(() => {
           // Queue full / dropped — already logged by rate limiter
@@ -280,9 +280,9 @@ const plugin = {
 
     api.registerTool({
       name: "nex_search",
-      label: "Search Nex Knowledge",
+      label: "Search WUPHF Knowledge",
       description:
-        "Search the user's Nex knowledge base for relevant context. Returns an AI-synthesized answer with entity references.",
+        "Search the user's WUPHF knowledge base for relevant context. Returns an AI-synthesized answer with entity references.",
       parameters: SearchParams,
       async execute(_toolCallId, params) {
         const { query } = params as Static<typeof SearchParams>;
@@ -305,9 +305,9 @@ const plugin = {
 
     api.registerTool({
       name: "nex_remember",
-      label: "Remember in Nex",
+      label: "Remember in WUPHF",
       description:
-        "Store information in the user's Nex knowledge base for long-term recall. Use this when the user explicitly asks you to remember something.",
+        "Store information in the user's WUPHF knowledge base for long-term recall. Use this when the user explicitly asks you to remember something.",
       parameters: RememberParams,
       async execute(_toolCallId, params) {
         const { content, label } = params as Static<typeof RememberParams>;
@@ -331,9 +331,9 @@ const plugin = {
 
     api.registerTool({
       name: "nex_entities",
-      label: "Find Nex Entities",
+      label: "Find WUPHF Entities",
       description:
-        "Search for entities (people, companies, topics) in the user's Nex knowledge base. Returns a structured list with types and mention counts.",
+        "Search for entities (people, companies, topics) in the user's WUPHF knowledge base. Returns a structured list with types and mention counts.",
       parameters: EntitiesParams,
       async execute(_toolCallId, params) {
         const { query } = params as Static<typeof EntitiesParams>;
@@ -359,9 +359,9 @@ const plugin = {
 
     api.registerTool({
       name: "nex_scan_files",
-      label: "Scan Files into Nex",
+      label: "Scan Files into WUPHF",
       description:
-        "Scan a directory for text files (.md, .txt, .csv, .json, .yaml, .yml) and ingest new or changed files into the Nex knowledge base. Uses SHA-256 content hashing to skip already-ingested files.",
+        "Scan a directory for text files (.md, .txt, .csv, .json, .yaml, .yml) and ingest new or changed files into the WUPHF knowledge base. Uses SHA-256 content hashing to skip already-ingested files.",
       parameters: ScanFilesParams,
       async execute(_toolCallId, params) {
         const { dir, extensions, max_files, depth, force } = params as Static<typeof ScanFilesParams>;
@@ -396,7 +396,7 @@ const plugin = {
     api.registerTool({
       name: "nex_list_integrations",
       label: "List Integrations",
-      description: "List available third-party integrations and their connection status. Calendar integrations (Google Calendar, Outlook Calendar) enable the Nex Meeting Bot which joins calls on any platform (Google Meet, Zoom, Webex, Teams, etc.) and feeds transcripts into the context graph.",
+      description: "List available third-party integrations and their connection status. Calendar integrations (Google Calendar, Outlook Calendar) enable the WUPHF Meeting Bot which joins calls on any platform (Google Meet, Zoom, Webex, Teams, etc.) and feeds transcripts into the context graph.",
       parameters: ListIntegrationsParams,
       async execute(_toolCallId, _params) {
         const result = await client.get("/v1/integrations/");
@@ -415,7 +415,7 @@ const plugin = {
     api.registerTool({
       name: "nex_connect_integration",
       label: "Connect Integration",
-      description: "Start connecting a third-party integration via OAuth. Returns an auth_url for the user to open in their browser. Calendar integrations (type: 'calendar') enable the Nex Meeting Bot which auto-joins calls and processes transcripts. Types: email, calendar, crm, messaging. Providers: google, microsoft, attio, slack, salesforce, hubspot.",
+      description: "Start connecting a third-party integration via OAuth. Returns an auth_url for the user to open in their browser. Calendar integrations (type: 'calendar') enable the WUPHF Meeting Bot which auto-joins calls and processes transcripts. Types: email, calendar, crm, messaging. Providers: google, microsoft, attio, slack, salesforce, hubspot.",
       parameters: ConnectIntegrationParams,
       async execute(_toolCallId, params) {
         const { type, provider } = params as Static<typeof ConnectIntegrationParams>;
@@ -1326,7 +1326,7 @@ const plugin = {
 
     api.registerCommand({
       name: "recall",
-      description: "Search your Nex knowledge base. Usage: /recall <query>",
+      description: "Search your WUPHF knowledge base. Usage: /recall <query>",
       acceptsArgs: true,
       async handler(ctx) {
         const query = ctx.args?.trim();
@@ -1369,7 +1369,7 @@ const plugin = {
 
     api.registerCommand({
       name: "remember",
-      description: "Store information in your Nex knowledge base. Usage: /remember <text>",
+      description: "Store information in your WUPHF knowledge base. Usage: /remember <text>",
       acceptsArgs: true,
       async handler(ctx) {
         const text = ctx.args?.trim();
@@ -1390,7 +1390,7 @@ const plugin = {
 
     api.registerCommand({
       name: "scan",
-      description: "Scan a directory for files and ingest into Nex. Usage: /scan [dir]",
+      description: "Scan a directory for files and ingest into WUPHF. Usage: /scan [dir]",
       acceptsArgs: true,
       async handler(ctx) {
         const dir = ctx.args?.trim() || ".";
@@ -1405,7 +1405,7 @@ const plugin = {
       },
     });
 
-    log.info(`Nex memory plugin registered (recall: ${cfg.autoRecall}, capture: ${cfg.autoCapture})`);
+    log.info(`WUPHF memory plugin registered (recall: ${cfg.autoRecall}, capture: ${cfg.autoCapture})`);
   },
 };
 

@@ -12,7 +12,7 @@ describe('CalendarService', () => {
   let service: CalendarService;
 
   beforeEach(() => {
-    tmpDir = mkdtempSync(join(tmpdir(), 'nex-calendar-service-test-'));
+    tmpDir = mkdtempSync(join(tmpdir(), 'wuphf-calendar-service-test-'));
     calendarFile = join(tmpDir, 'calendar.json');
     service = new CalendarService(calendarFile);
   });

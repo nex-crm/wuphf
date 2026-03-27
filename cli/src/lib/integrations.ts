@@ -5,9 +5,9 @@
 
 export const INTEGRATIONS_MAP: Record<string, { type: string; provider: string; displayName: string; description: string }> = {
   gmail: { type: "email", provider: "google", displayName: "Gmail", description: "Connect your Gmail account to sync emails" },
-  "google-calendar": { type: "calendar", provider: "google", displayName: "Google Calendar (Nex Meeting Bot)", description: "Connect Google Calendar for meeting transcripts" },
+  "google-calendar": { type: "calendar", provider: "google", displayName: "Google Calendar (WUPHF Meeting Bot)", description: "Connect Google Calendar for meeting transcripts" },
   outlook: { type: "email", provider: "microsoft", displayName: "Outlook", description: "Connect your Outlook account to sync emails" },
-  "outlook-calendar": { type: "calendar", provider: "microsoft", displayName: "Outlook Calendar (Nex Meeting Bot)", description: "Connect Outlook Calendar for meeting transcripts" },
+  "outlook-calendar": { type: "calendar", provider: "microsoft", displayName: "Outlook Calendar (WUPHF Meeting Bot)", description: "Connect Outlook Calendar for meeting transcripts" },
   slack: { type: "messaging", provider: "slack", displayName: "Slack", description: "Connect Slack to sync messages" },
   salesforce: { type: "crm", provider: "salesforce", displayName: "Salesforce", description: "Connect Salesforce CRM" },
   hubspot: { type: "crm", provider: "hubspot", displayName: "HubSpot", description: "Connect HubSpot CRM" },

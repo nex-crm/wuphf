@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Claude Code Stop hook — auto-capture conversation to Nex + plan file ingestion.
+ * Claude Code Stop hook — auto-capture conversation to WUPHF + plan file ingestion.
  *
  * Reads { last_assistant_message, session_id } from stdin,
- * filters and sends to Nex for ingestion. Also checks .claude/plans/
+ * filters and sends to WUPHF for ingestion. Also checks .claude/plans/
  * for changed plan files and ingests up to 2.
  *
  * On ANY error: outputs {} and exits 0 (graceful degradation).
@@ -12,7 +12,7 @@
 import { readdirSync, statSync, readFileSync } from "node:fs";
 import { join, extname } from "node:path";
 import { loadConfig, loadScanConfig, isHookEnabled } from "./config.js";
-import { NexClient } from "./nex-client.js";
+import { NexClient } from "./wuphf-client.js";
 import { captureFilter } from "./capture-filter.js";
 import { RateLimiter } from "./rate-limiter.js";
 import { readManifest, writeManifest, isChanged, markIngested } from "./file-manifest.js";
@@ -58,7 +58,7 @@ async function ingestPlanFiles(client: NexClient): Promise<void> {
       if (!isChanged(fullPath, stat, manifest)) continue;
 
       if (!rateLimiter.canProceed()) {
-        process.stderr.write("[nex-capture] Rate limited — skipping plan file ingest\n");
+        process.stderr.write("[wuphf-capture] Rate limited — skipping plan file ingest\n");
         break;
       }
 
@@ -73,7 +73,7 @@ async function ingestPlanFiles(client: NexClient): Promise<void> {
       ingested++;
     } catch (err) {
       process.stderr.write(
-        `[nex-capture] Plan file ingest failed (${entry.name}): ${err instanceof Error ? err.message : String(err)}\n`
+        `[wuphf-capture] Plan file ingest failed (${entry.name}): ${err instanceof Error ? err.message : String(err)}\n`
       );
     }
   }
@@ -92,7 +92,7 @@ async function main(): Promise<void> {
     }
     const raw = Buffer.concat(chunks).toString("utf-8");
 
-    // Check .nex.toml kill switch
+    // Check .wuphf.toml kill switch
     if (!isHookEnabled("capture")) {
       process.stdout.write("{}");
       return;
@@ -127,11 +127,11 @@ async function main(): Promise<void> {
             await client.ingest(filterResult.text, "claude-code-conversation", INGEST_TIMEOUT_MS);
           } catch (err) {
             process.stderr.write(
-              `[nex-capture] Ingest failed: ${err instanceof Error ? err.message : String(err)}\n`
+              `[wuphf-capture] Ingest failed: ${err instanceof Error ? err.message : String(err)}\n`
             );
           }
         } else {
-          process.stderr.write("[nex-capture] Rate limited — skipping conversation ingest\n");
+          process.stderr.write("[wuphf-capture] Rate limited — skipping conversation ingest\n");
         }
       }
     }
@@ -141,14 +141,14 @@ async function main(): Promise<void> {
       await ingestPlanFiles(client);
     } catch (err) {
       process.stderr.write(
-        `[nex-capture] Plan file scan error: ${err instanceof Error ? err.message : String(err)}\n`
+        `[wuphf-capture] Plan file scan error: ${err instanceof Error ? err.message : String(err)}\n`
       );
     }
 
     process.stdout.write("{}");
   } catch (err) {
     process.stderr.write(
-      `[nex-capture] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
+      `[wuphf-capture] Unexpected error: ${err instanceof Error ? err.message : String(err)}\n`
     );
     process.stdout.write("{}");
   }

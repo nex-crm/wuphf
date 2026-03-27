@@ -9,11 +9,11 @@ import { spawn } from "node:child_process";
 import { generateGraphHtml } from "../src/lib/graph-html.js";
 import type { GraphData, ContextEdge, InsightNode, EntityInsightSummary } from "../src/lib/graph-html.js";
 
-const WORKSPACE_ID = process.argv[2] || "62190363569316105"; // nex-1 by default
+const WORKSPACE_ID = process.argv[2] || "62190363569316105"; // wuphf-1 by default
 
 function pgQuery(sql: string): string {
   return execFileSync("docker", [
-    "exec", "nex-postgres",
+    "exec", "wuphf-postgres",
     "psql", "-U", "postgres", "-d", "main", "-t", "-A", "-c", sql,
   ], { encoding: "utf-8", timeout: 15_000 }).trim();
 }
@@ -224,7 +224,7 @@ const graphData: GraphData = {
 };
 
 const html = generateGraphHtml(graphData);
-const outPath = join(tmpdir(), `nex-graph-${Date.now()}.html`);
+const outPath = join(tmpdir(), `wuphf-graph-${Date.now()}.html`);
 writeFileSync(outPath, html, "utf-8");
 
 const totalInsights = insightNodes.length;
