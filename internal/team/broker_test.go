@@ -57,6 +57,32 @@ func TestBrokerPersistsAndReloadsState(t *testing.T) {
 	}
 }
 
+func TestNewBrokerSeedsDefaultOfficeRosterOnFreshState(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	members := b.OfficeMembers()
+	if len(members) < 2 {
+		t.Fatalf("expected default office roster on fresh state, got %d members", len(members))
+	}
+	b.mu.Lock()
+	ceo := b.findMemberLocked("ceo")
+	general := b.findChannelLocked("general")
+	b.mu.Unlock()
+	if members[0].Slug != "ceo" && ceo == nil {
+		t.Fatalf("expected ceo to be present in default office roster")
+	}
+	if general == nil {
+		t.Fatal("expected general channel to exist")
+	}
+	if len(general.Members) < len(members) {
+		t.Fatalf("expected general channel to include office roster, got %v for %d members", general.Members, len(members))
+	}
+}
+
 func TestOfficeMemberLifecycle(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()

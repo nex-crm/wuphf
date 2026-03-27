@@ -154,6 +154,15 @@ type HumanInterviewArgs struct {
 	RecommendedOptionID string                 `json:"recommended_option_id,omitempty" jsonschema:"Which option you recommend, if any"`
 }
 
+type HumanMessageArgs struct {
+	Kind      string `json:"kind,omitempty" jsonschema:"One of: report, decision, action. Defaults to report."`
+	Channel   string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	Title     string `json:"title,omitempty" jsonschema:"Short human-facing headline like 'Frontend ready for review' or 'Need your call on pricing'"`
+	Content   string `json:"content" jsonschema:"What you want to tell the human directly: completion update, recommendation, decision framing, or next action."`
+	MySlug    string `json:"my_slug,omitempty" jsonschema:"Agent slug speaking to the human. Defaults to WUPHF_AGENT_SLUG."`
+	ReplyToID string `json:"reply_to_id,omitempty" jsonschema:"Optional message ID this human-facing note belongs to."`
+}
+
 type TeamRequestsArgs struct {
 	Channel         string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	IncludeResolved bool   `json:"include_resolved,omitempty" jsonschema:"Include already answered or canceled requests."`
@@ -303,6 +312,11 @@ func Run(ctx context.Context) error {
 		Name:        "human_interview",
 		Description: "Ask the human a blocking interview question when the team cannot proceed responsibly without a decision.",
 	}, handleHumanInterview)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "human_message",
+		Description: "Send a direct human-facing note into the main chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
+	}, handleHumanMessage)
 
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
@@ -891,6 +905,66 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 			return textResult(string(payload)), nil, nil
 		}
 	}
+}
+
+func handleHumanMessage(ctx context.Context, _ *mcp.CallToolRequest, args HumanMessageArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	replyTo := strings.TrimSpace(args.ReplyToID)
+	if replyTo == "" {
+		replyTo, _ = inferReplyTarget(ctx, slug, channel)
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(args.Kind))
+	switch kind {
+	case "", "report":
+		kind = "human_report"
+	case "decision":
+		kind = "human_decision"
+	case "action":
+		kind = "human_action"
+	default:
+		return toolError(fmt.Errorf("unsupported human message kind %q", args.Kind)), nil, nil
+	}
+
+	title := strings.TrimSpace(args.Title)
+	if title == "" {
+		switch kind {
+		case "human_decision":
+			title = "Decision for you"
+		case "human_action":
+			title = "Action for you"
+		default:
+			title = "Update for you"
+		}
+	}
+
+	var result struct {
+		ID string `json:"id"`
+	}
+	if err := brokerPostJSON(ctx, "/messages", map[string]any{
+		"channel":  channel,
+		"from":     slug,
+		"kind":     kind,
+		"title":    title,
+		"content":  args.Content,
+		"reply_to": replyTo,
+	}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+
+	text := fmt.Sprintf("Sent %s to the human in #%s as @%s", strings.TrimPrefix(kind, "human_"), channel, slug)
+	if result.ID != "" {
+		text += " (" + result.ID + ")"
+	}
+	if replyTo != "" {
+		text += " in reply to " + replyTo
+	}
+	text += "."
+	return textResult(text), nil, nil
 }
 
 func handleTeamChannels(ctx context.Context, _ *mcp.CallToolRequest, _ TeamChannelsArgs) (*mcp.CallToolResult, any, error) {

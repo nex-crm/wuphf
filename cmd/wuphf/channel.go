@@ -1003,12 +1003,17 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelMsg:
 		if len(msg.messages) > 0 {
+			latestHumanFacing := latestHumanFacingMessage(msg.messages)
 			if m.scroll > 0 {
 				m.scroll += len(msg.messages)
 				m.unreadCount += len(msg.messages)
 			}
 			m.messages = append(m.messages, msg.messages...)
 			m.lastID = msg.messages[len(msg.messages)-1].ID
+			if latestHumanFacing != nil {
+				m.activeApp = officeAppMessages
+				m.notice = fmt.Sprintf("@%s has something for you", latestHumanFacing.From)
+			}
 		}
 
 	case channelMembersMsg:
@@ -1658,6 +1663,15 @@ func filterInsightMessages(messages []brokerMessage) []brokerMessage {
 		}
 	}
 	return filtered
+}
+
+func latestHumanFacingMessage(messages []brokerMessage) *brokerMessage {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if strings.HasPrefix(strings.TrimSpace(messages[i].Kind), "human_") {
+			return &messages[i]
+		}
+	}
+	return nil
 }
 
 type mouseAction struct {

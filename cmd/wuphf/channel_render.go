@@ -69,6 +69,48 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 			}
 		}
 
+		if strings.HasPrefix(msg.Kind, "human_") {
+			lines = append(lines, renderedLine{Text: ""})
+			headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
+			if tm.Depth > 0 {
+				headerPrefix += "↳ "
+			}
+			meta := fmt.Sprintf("for you · %s · %s", humanMessageLabel(msg.Kind), msg.ID)
+			if tm.Depth > 0 {
+				meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
+			}
+			appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s",
+				headerPrefix,
+				agentAvatar(msg.From),
+				nameStyle.Render(displayName(msg.From)),
+				mutedStyle.Render(ts),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(meta),
+			))
+
+			prefix := "  " + strings.Repeat("  ", tm.Depth)
+			if tm.Depth > 0 {
+				prefix += lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("┆") + " "
+			} else {
+				prefix += lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("│") + " "
+			}
+			titleLine := msg.Title
+			if titleLine == "" {
+				titleLine = defaultHumanMessageTitle(msg.Kind, msg.From)
+			}
+			appendWrappedLine(prefix + subtlePill("for you", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Render(titleLine))
+			textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
+			for _, paragraph := range strings.Split(textPart, "\n") {
+				paragraph = highlightMentions(paragraph, agentColorMap)
+				appendWrappedLine(prefix + paragraph)
+			}
+			if a2uiRendered != "" {
+				for _, lineText := range strings.Split(a2uiRendered, "\n") {
+					lines = append(lines, renderedLine{Text: prefix + lineText})
+				}
+			}
+			continue
+		}
+
 		if msg.Kind == "automation" || msg.From == "nex" {
 			lines = append(lines, renderedLine{Text: ""})
 			headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
@@ -184,6 +226,28 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 	}
 
 	return lines
+}
+
+func humanMessageLabel(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "human_decision":
+		return "decision"
+	case "human_action":
+		return "action"
+	default:
+		return "report"
+	}
+}
+
+func defaultHumanMessageTitle(kind, from string) string {
+	switch strings.TrimSpace(kind) {
+	case "human_decision":
+		return fmt.Sprintf("%s needs your call", displayName(from))
+	case "human_action":
+		return fmt.Sprintf("%s wants you to do something", displayName(from))
+	default:
+		return fmt.Sprintf("%s has an update for you", displayName(from))
+	}
 }
 
 func sliceRenderedLines(lines []renderedLine, msgH, scroll int) ([]renderedLine, int, int, int) {

@@ -212,6 +212,7 @@ func NewBroker() *Broker {
 	}
 	_ = b.loadState()
 	b.mu.Lock()
+	b.ensureDefaultOfficeMembersLocked()
 	b.ensureDefaultChannelsLocked()
 	b.normalizeLoadedStateLocked()
 	b.mu.Unlock()
@@ -2056,6 +2057,8 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		From    string   `json:"from"`
 		Channel string   `json:"channel"`
+		Kind    string   `json:"kind"`
+		Title   string   `json:"title"`
 		Content string   `json:"content"`
 		Tagged  []string `json:"tagged"`
 		ReplyTo string   `json:"reply_to"`
@@ -2091,8 +2094,10 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      body.From,
 		Channel:   channel,
+		Kind:      strings.TrimSpace(body.Kind),
+		Title:     strings.TrimSpace(body.Title),
 		Content:   body.Content,
-		Tagged:    body.Tagged,
+		Tagged:    uniqueSlugs(body.Tagged),
 		ReplyTo:   strings.TrimSpace(body.ReplyTo),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -2133,6 +2138,8 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      from,
 		Channel:   channel,
+		Kind:      "",
+		Title:     "",
 		Content:   strings.TrimSpace(content),
 		Tagged:    uniqueSlugs(tagged),
 		ReplyTo:   strings.TrimSpace(replyTo),
