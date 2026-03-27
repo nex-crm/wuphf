@@ -217,7 +217,6 @@ func (m splashModel) renderCast() string {
 		slug  string
 	}
 
-	// PM is excluded from the static cast until crash — they rush in separately
 	pmIsRushing := m.phase == splashRushIn
 	pmHasCrashed := m.phase >= splashCrash
 
@@ -232,65 +231,99 @@ func (m splashModel) renderCast() string {
 		ceoVariant = "fakesmile"
 	}
 
-	// Build the static cast blocks, excluding PM before crash
-	var pmBlock *avatarBlock
-	blocks := make([]avatarBlock, 0, count)
-	maxAvatarH := 0
+	// Separate members into: CEO (top row), PM (arrives late), rest (bottom row)
+	var ceoBlock, pmBlock *avatarBlock
+	rest := make([]avatarBlock, 0, count)
 	for i := 0; i < count; i++ {
 		member := m.members[i]
-
-		// Before crash, pull PM out of the static row
-		if member.Slug == "pm" && !pmHasCrashed {
-			pmLines := renderWuphfSplashAvatar(member.Name, member.Slug, m.frame)
-			if len(pmLines) > maxAvatarH {
-				maxAvatarH = len(pmLines)
-			}
-			name := member.Name
-			if name == "" {
-				name = member.Slug
-			}
-			pmBlock = &avatarBlock{lines: pmLines, name: name, slug: member.Slug}
-			continue
-		}
-
-		var lines []string
-		if member.Slug == "ceo" && ceoVariant != "normal" {
-			lines = renderCEOVariant(ceoVariant, m.frame)
-		} else {
-			lines = renderWuphfSplashAvatar(member.Name, member.Slug, m.frame)
-		}
-		if len(lines) > maxAvatarH {
-			maxAvatarH = len(lines)
-		}
 		name := member.Name
 		if name == "" {
 			name = member.Slug
 		}
-		blocks = append(blocks, avatarBlock{lines: lines, name: name, slug: member.Slug})
+		var spriteLines []string
+
+		switch {
+		case member.Slug == "ceo":
+			if ceoVariant != "normal" {
+				spriteLines = renderCEOVariant(ceoVariant, m.frame)
+			} else {
+				spriteLines = renderWuphfSplashAvatar(member.Name, member.Slug, m.frame)
+			}
+			ceoBlock = &avatarBlock{lines: spriteLines, name: name, slug: member.Slug}
+
+		case member.Slug == "pm":
+			spriteLines = renderWuphfSplashAvatar(member.Name, member.Slug, m.frame)
+			pmBlock = &avatarBlock{lines: spriteLines, name: name, slug: member.Slug}
+
+		default:
+			spriteLines = renderWuphfSplashAvatar(member.Name, member.Slug, m.frame)
+			rest = append(rest, avatarBlock{lines: spriteLines, name: name, slug: member.Slug})
+		}
 	}
 
-	// After crash, PM is back in the static row next to CEO
-	castCount := len(blocks)
-	totalW := castCount*(slotW+spacing) - spacing
-	leftPad := (m.width - totalW) / 2
-	if leftPad < 0 {
-		leftPad = 0
+	if ceoBlock == nil {
+		return ""
+	}
+
+	// ── Top row: CEO (+ PM after crash or during rush-in) ──
+	topBlocks := []avatarBlock{*ceoBlock}
+	// After crash, PM sits next to CEO permanently
+	if pmHasCrashed && pmBlock != nil {
+		topBlocks = append(topBlocks, *pmBlock)
+	}
+
+	topMaxH := 0
+	for _, b := range topBlocks {
+		if len(b.lines) > topMaxH {
+			topMaxH = len(b.lines)
+		}
+	}
+	if pmBlock != nil && len(pmBlock.lines) > topMaxH {
+		topMaxH = len(pmBlock.lines)
+	}
+
+	topW := len(topBlocks)*(slotW+spacing) - spacing
+	topLeftPad := (m.width - topW) / 2
+	if topLeftPad < 0 {
+		topLeftPad = 0
+	}
+
+	// ── Bottom row: rest of the cast ──
+	bottomMaxH := 0
+	for _, b := range rest {
+		if len(b.lines) > bottomMaxH {
+			bottomMaxH = len(b.lines)
+		}
+	}
+	bottomW := 0
+	if len(rest) > 0 {
+		bottomW = len(rest)*(slotW+spacing) - spacing
+	}
+	bottomLeftPad := (m.width - bottomW) / 2
+	if bottomLeftPad < 0 {
+		bottomLeftPad = 0
+	}
+
+	// Calculate vertical layout
+	gapBetweenRows := 2 // gap between top row and bottom row
+	nameLabelH := 2     // blank line + name
+	subtitleH := 3      // blank + subtitle + padding
+	totalH := topMaxH + nameLabelH + gapBetweenRows + bottomMaxH + nameLabelH + subtitleH
+	topPad := (m.height - totalH) / 2
+	if topPad < 2 {
+		topPad = 2
 	}
 
 	var lines []string
-	topPad := (m.height - maxAvatarH - 6) / 2
-	if topPad < 0 {
-		topPad = 0
-	}
 	for i := 0; i < topPad; i++ {
 		lines = append(lines, "")
 	}
 
-	// Render static cast sprite rows
-	for row := 0; row < maxAvatarH; row++ {
+	// ── Render top row sprites ──
+	for row := 0; row < topMaxH; row++ {
 		var parts []string
-		for _, block := range blocks {
-			offset := maxAvatarH - len(block.lines)
+		for _, block := range topBlocks {
+			offset := topMaxH - len(block.lines)
 			rendered := strings.Repeat(" ", slotW)
 			if row >= offset {
 				line := block.lines[row-offset]
@@ -302,20 +335,21 @@ func (m splashModel) renderCast() string {
 			}
 			parts = append(parts, rendered)
 		}
-		castLine := strings.Repeat(" ", leftPad) + strings.Join(parts, strings.Repeat(" ", spacing))
+		castLine := strings.Repeat(" ", topLeftPad) + strings.Join(parts, strings.Repeat(" ", spacing))
 
-		// Overlay PM rushing in from the right during rush-in phase
+		// During rush-in, overlay PM sliding from right toward CEO
 		if pmIsRushing && pmBlock != nil {
-			pmOffset := maxAvatarH - len(pmBlock.lines)
+			pmOffset := topMaxH - len(pmBlock.lines)
 			if row >= pmOffset {
 				pmLine := pmBlock.lines[row-pmOffset]
-				// PM slides from far right toward CEO (leftPad position)
-				pmX := leftPad + totalW + spacing + m.rushX
+				// PM slides from rushX toward slot right of CEO
+				targetX := topLeftPad + slotW + spacing
+				pmX := targetX + m.rushX
 				if pmX+slotW > m.width {
 					pmX = m.width - slotW
 				}
-				if pmX < 0 {
-					pmX = 0
+				if pmX < targetX {
+					pmX = targetX
 				}
 				lineW := ansi.StringWidth(castLine)
 				if pmX > lineW {
@@ -328,11 +362,11 @@ func (m splashModel) renderCast() string {
 		lines = append(lines, castLine)
 	}
 
-	// Coffee spill particles floating above CEO during crash
+	// Coffee spill particles above CEO during crash
 	if m.phase == splashCrash || m.phase == splashGrumpy {
 		spillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B4513"))
 		if topPad > 2 {
-			particleLine := strings.Repeat(" ", leftPad+2)
+			particleLine := strings.Repeat(" ", topLeftPad+2)
 			if m.phase == splashCrash {
 				particleLine += spillStyle.Render("  ~~ \u2615 ~~  ")
 			} else {
@@ -342,57 +376,68 @@ func (m splashModel) renderCast() string {
 		}
 	}
 
-	// Name labels
+	// Top row name labels
 	lines = append(lines, "")
-	var nameParts []string
-	for _, block := range blocks {
-		name := truncateLabel(block.name, slotW)
-		padL := (slotW - len([]rune(name))) / 2
-		padR := slotW - len([]rune(name)) - padL
-		if padL < 0 {
-			padL = 0
-		}
-		if padR < 0 {
-			padR = 0
-		}
-		label := strings.Repeat(" ", padL) + name + strings.Repeat(" ", padR)
-		agentColor := sidebarAgentColors[block.slug]
-		if agentColor == "" {
-			agentColor = "#64748B"
-		}
-		nameParts = append(nameParts, lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Bold(true).Render(label))
+	var topNames []string
+	for _, block := range topBlocks {
+		topNames = append(topNames, m.renderNameLabel(block.slug, block.name, slotW))
 	}
-	nameLine := strings.Repeat(" ", leftPad) + strings.Join(nameParts, strings.Repeat(" ", spacing))
+	topNameLine := strings.Repeat(" ", topLeftPad) + strings.Join(topNames, strings.Repeat(" ", spacing))
 
-	// Add PM name label during rush-in
+	// PM name during rush-in
 	if pmIsRushing && pmBlock != nil {
-		pmName := truncateLabel(pmBlock.name, slotW)
-		pmPadL := (slotW - len([]rune(pmName))) / 2
-		if pmPadL < 0 {
-			pmPadL = 0
-		}
-		pmLabel := strings.Repeat(" ", pmPadL) + pmName
-		pmColor := sidebarAgentColors[pmBlock.slug]
-		if pmColor == "" {
-			pmColor = "#64748B"
-		}
-		pmX := leftPad + totalW + spacing + m.rushX
+		pmLabel := m.renderNameLabel(pmBlock.slug, pmBlock.name, slotW)
+		targetX := topLeftPad + slotW + spacing
+		pmX := targetX + m.rushX
 		if pmX+slotW > m.width {
 			pmX = m.width - slotW
 		}
-		if pmX < 0 {
-			pmX = 0
+		if pmX < targetX {
+			pmX = targetX
 		}
-		nameLineW := ansi.StringWidth(nameLine)
-		if pmX > nameLineW {
-			nameLine += strings.Repeat(" ", pmX-nameLineW)
+		nameW := ansi.StringWidth(topNameLine)
+		if pmX > nameW {
+			topNameLine += strings.Repeat(" ", pmX-nameW)
 		}
-		nameLine += lipgloss.NewStyle().Foreground(lipgloss.Color(pmColor)).Bold(true).Render(pmLabel)
+		topNameLine += pmLabel
+	}
+	lines = append(lines, topNameLine)
+
+	// ── Gap between rows ──
+	for i := 0; i < gapBetweenRows; i++ {
+		lines = append(lines, "")
 	}
 
-	lines = append(lines, nameLine)
+	// ── Render bottom row sprites ──
+	if len(rest) > 0 {
+		for row := 0; row < bottomMaxH; row++ {
+			var parts []string
+			for _, block := range rest {
+				offset := bottomMaxH - len(block.lines)
+				rendered := strings.Repeat(" ", slotW)
+				if row >= offset {
+					line := block.lines[row-offset]
+					w := ansi.StringWidth(line)
+					if w < slotW {
+						line += strings.Repeat(" ", slotW-w)
+					}
+					rendered = line
+				}
+				parts = append(parts, rendered)
+			}
+			lines = append(lines, strings.Repeat(" ", bottomLeftPad)+strings.Join(parts, strings.Repeat(" ", spacing)))
+		}
 
-	// Subtitle based on phase
+		// Bottom row name labels
+		lines = append(lines, "")
+		var bottomNames []string
+		for _, block := range rest {
+			bottomNames = append(bottomNames, m.renderNameLabel(block.slug, block.name, slotW))
+		}
+		lines = append(lines, strings.Repeat(" ", bottomLeftPad)+strings.Join(bottomNames, strings.Repeat(" ", spacing)))
+	}
+
+	// ── Subtitle ──
 	subtitle := ""
 	subtitleColor := "#7A7A7E"
 	switch m.phase {
@@ -410,15 +455,34 @@ func (m splashModel) renderCast() string {
 	}
 	if subtitle != "" {
 		lines = append(lines, "")
-		subtitlePad := (m.width - len(subtitle)) / 2
-		if subtitlePad < 0 {
-			subtitlePad = 0
+		pad := (m.width - len(subtitle)) / 2
+		if pad < 0 {
+			pad = 0
 		}
-		lines = append(lines, strings.Repeat(" ", subtitlePad)+lipgloss.NewStyle().Foreground(lipgloss.Color(subtitleColor)).Italic(true).Render(subtitle))
+		lines = append(lines, strings.Repeat(" ", pad)+lipgloss.NewStyle().Foreground(lipgloss.Color(subtitleColor)).Italic(true).Render(subtitle))
 	}
 
 	return strings.Join(lines, "\n")
 }
+
+func (m splashModel) renderNameLabel(slug, name string, slotW int) string {
+	name = truncateLabel(name, slotW)
+	padL := (slotW - len([]rune(name))) / 2
+	padR := slotW - len([]rune(name)) - padL
+	if padL < 0 {
+		padL = 0
+	}
+	if padR < 0 {
+		padR = 0
+	}
+	label := strings.Repeat(" ", padL) + name + strings.Repeat(" ", padR)
+	agentColor := sidebarAgentColors[slug]
+	if agentColor == "" {
+		agentColor = "#64748B"
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Bold(true).Render(label)
+}
+
 
 // ── CEO sprite variants for the collision gag ───────────────────
 
