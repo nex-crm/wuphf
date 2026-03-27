@@ -57,6 +57,18 @@ type channelActionsMsg struct {
 	actions []channelAction
 }
 
+type channelSignalsMsg struct {
+	signals []channelSignal
+}
+
+type channelDecisionsMsg struct {
+	decisions []channelDecision
+}
+
+type channelWatchdogsMsg struct {
+	alerts []channelWatchdog
+}
+
 type channelSchedulerMsg struct {
 	jobs []channelSchedulerJob
 }
@@ -153,31 +165,85 @@ type channelUsageState struct {
 }
 
 type channelTask struct {
-	ID         string `json:"id"`
-	Channel    string `json:"channel,omitempty"`
-	Title      string `json:"title"`
-	Details    string `json:"details,omitempty"`
-	Owner      string `json:"owner,omitempty"`
-	Status     string `json:"status"`
-	CreatedBy  string `json:"created_by"`
-	ThreadID   string `json:"thread_id,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
-	DueAt      string `json:"due_at,omitempty"`
-	FollowUpAt string `json:"follow_up_at,omitempty"`
-	ReminderAt string `json:"reminder_at,omitempty"`
-	RecheckAt  string `json:"recheck_at,omitempty"`
+	ID               string `json:"id"`
+	Channel          string `json:"channel,omitempty"`
+	Title            string `json:"title"`
+	Details          string `json:"details,omitempty"`
+	Owner            string `json:"owner,omitempty"`
+	Status           string `json:"status"`
+	CreatedBy        string `json:"created_by"`
+	ThreadID         string `json:"thread_id,omitempty"`
+	TaskType         string `json:"task_type,omitempty"`
+	PipelineID       string `json:"pipeline_id,omitempty"`
+	PipelineStage    string `json:"pipeline_stage,omitempty"`
+	ExecutionMode    string `json:"execution_mode,omitempty"`
+	ReviewState      string `json:"review_state,omitempty"`
+	SourceSignalID   string `json:"source_signal_id,omitempty"`
+	SourceDecisionID string `json:"source_decision_id,omitempty"`
+	WorktreePath     string `json:"worktree_path,omitempty"`
+	WorktreeBranch   string `json:"worktree_branch,omitempty"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
+	DueAt            string `json:"due_at,omitempty"`
+	FollowUpAt       string `json:"follow_up_at,omitempty"`
+	ReminderAt       string `json:"reminder_at,omitempty"`
+	RecheckAt        string `json:"recheck_at,omitempty"`
 }
 
 type channelAction struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind"`
-	Source    string `json:"source,omitempty"`
-	Channel   string `json:"channel,omitempty"`
-	Actor     string `json:"actor,omitempty"`
-	Summary   string `json:"summary"`
-	RelatedID string `json:"related_id,omitempty"`
-	CreatedAt string `json:"created_at"`
+	ID         string   `json:"id"`
+	Kind       string   `json:"kind"`
+	Source     string   `json:"source,omitempty"`
+	Channel    string   `json:"channel,omitempty"`
+	Actor      string   `json:"actor,omitempty"`
+	Summary    string   `json:"summary"`
+	RelatedID  string   `json:"related_id,omitempty"`
+	SignalIDs  []string `json:"signal_ids,omitempty"`
+	DecisionID string   `json:"decision_id,omitempty"`
+	CreatedAt  string   `json:"created_at"`
+}
+
+type channelSignal struct {
+	ID            string `json:"id"`
+	Source        string `json:"source"`
+	SourceRef     string `json:"source_ref,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	Title         string `json:"title,omitempty"`
+	Content       string `json:"content"`
+	Channel       string `json:"channel,omitempty"`
+	Owner         string `json:"owner,omitempty"`
+	Confidence    string `json:"confidence,omitempty"`
+	Urgency       string `json:"urgency,omitempty"`
+	DedupeKey     string `json:"dedupe_key,omitempty"`
+	RequiresHuman bool   `json:"requires_human,omitempty"`
+	Blocking      bool   `json:"blocking,omitempty"`
+	CreatedAt     string `json:"created_at"`
+}
+
+type channelDecision struct {
+	ID            string   `json:"id"`
+	Kind          string   `json:"kind"`
+	Channel       string   `json:"channel,omitempty"`
+	Summary       string   `json:"summary"`
+	Reason        string   `json:"reason,omitempty"`
+	Owner         string   `json:"owner,omitempty"`
+	SignalIDs     []string `json:"signal_ids,omitempty"`
+	RequiresHuman bool     `json:"requires_human,omitempty"`
+	Blocking      bool     `json:"blocking,omitempty"`
+	CreatedAt     string   `json:"created_at"`
+}
+
+type channelWatchdog struct {
+	ID         string `json:"id"`
+	Kind       string `json:"kind"`
+	Channel    string `json:"channel,omitempty"`
+	TargetType string `json:"target_type,omitempty"`
+	TargetID   string `json:"target_id,omitempty"`
+	Owner      string `json:"owner,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Summary    string `json:"summary"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
 type channelSchedulerJob struct {
@@ -197,6 +263,7 @@ type channelSchedulerJob struct {
 type channelTickMsg time.Time
 type channelPostDoneMsg struct{ err error }
 type channelInterviewAnswerDoneMsg struct{ err error }
+type channelInterruptDoneMsg struct{ err error }
 type channelResetDoneMsg struct {
 	err    error
 	notice string
@@ -371,6 +438,9 @@ type channelModel struct {
 	requests             []channelInterview
 	tasks                []channelTask
 	actions              []channelAction
+	signals              []channelSignal
+	decisions            []channelDecision
+	watchdogs            []channelWatchdog
 	scheduler            []channelSchedulerJob
 	pending              *channelInterview
 	lastID               string
@@ -454,8 +524,7 @@ func (m channelModel) Init() tea.Cmd {
 		pollMembers(m.activeChannel),
 		pollRequests(m.activeChannel),
 		pollTasks(m.activeChannel),
-		pollActions(),
-		pollScheduler(),
+		pollOfficeLedger(),
 
 		tickChannel(),
 	)
@@ -675,6 +744,12 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.focus = focusMain
 				}
 				return m, nil
+			}
+			// Nothing to close — fire human interrupt to pause the whole team
+			if m.pending == nil {
+				m.posting = true
+				m.notice = "Pausing team..."
+				return m, postHumanInterrupt(m.activeChannel)
 			}
 			return m, nil
 		}
@@ -905,7 +980,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.replyToID != "" {
 			m.notice = fmt.Sprintf("Reply sent to %s. Use /cancel to leave the thread.", m.replyToID)
 		}
-		return m, tea.Batch(pollChannels(), pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollActions(), pollScheduler())
+		return m, tea.Batch(pollChannels(), pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
 
 	case channelInterviewAnswerDoneMsg:
 		m.posting = false
@@ -915,8 +990,17 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pending = nil
 			m.input = nil
 			m.inputPos = 0
-			return m, tea.Batch(pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollActions(), pollScheduler())
+			return m, tea.Batch(pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
 		}
+
+	case channelInterruptDoneMsg:
+		m.posting = false
+		if msg.err != nil {
+			m.notice = "Failed to pause team: " + msg.err.Error()
+		} else {
+			m.notice = "Team paused. Answer the interrupt to resume."
+		}
+		return m, tea.Batch(pollRequests(m.activeChannel), pollBroker(m.lastID, m.activeChannel))
 
 	case channelResetDoneMsg:
 		m.posting = false
@@ -989,7 +1073,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.memberDraft = nil
 			m.input = nil
 			m.inputPos = 0
-			return m, tea.Batch(pollOfficeMembers(), pollChannels(), pollMembers(m.activeChannel), pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollActions(), pollScheduler())
+			return m, tea.Batch(pollOfficeMembers(), pollChannels(), pollMembers(m.activeChannel), pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
 		}
 
 	case channelTaskMutationDoneMsg:
@@ -999,7 +1083,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if strings.TrimSpace(msg.notice) != "" {
 			m.notice = msg.notice
 		}
-		return m, tea.Batch(pollTasks(m.activeChannel), pollActions(), pollScheduler())
+		return m, tea.Batch(pollTasks(m.activeChannel), pollOfficeLedger())
 
 	case channelMsg:
 		if len(msg.messages) > 0 {
@@ -1060,6 +1144,15 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelActionsMsg:
 		m.actions = msg.actions
+
+	case channelSignalsMsg:
+		m.signals = msg.signals
+
+	case channelDecisionsMsg:
+		m.decisions = msg.decisions
+
+	case channelWatchdogsMsg:
+		m.watchdogs = msg.alerts
 
 	case channelSchedulerMsg:
 		m.scheduler = msg.jobs
@@ -1304,8 +1397,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pollMembers(m.activeChannel),
 			pollRequests(m.activeChannel),
 			pollTasks(m.activeChannel),
-			pollActions(),
-			pollScheduler(),
+			pollOfficeLedger(),
 			pollUsage(),
 
 			tickChannel(),
@@ -1564,11 +1656,13 @@ func (m channelModel) currentHeaderTitle() string {
 func (m channelModel) currentHeaderMeta() string {
 	switch m.activeApp {
 	case officeAppTasks:
-		open, inProgress, blocked, overdue := 0, 0, 0, 0
+		open, inProgress, review, blocked, overdue := 0, 0, 0, 0, 0
 		for _, task := range m.tasks {
 			switch task.Status {
 			case "in_progress":
 				inProgress++
+			case "review":
+				review++
 			case "blocked":
 				blocked++
 			default:
@@ -1578,7 +1672,7 @@ func (m channelModel) currentHeaderMeta() string {
 				overdue++
 			}
 		}
-		return fmt.Sprintf("  Clear ownership, no duplicate work · %d open · %d moving · %d blocked · %d overdue", open, inProgress, blocked, overdue)
+		return fmt.Sprintf("  Clear ownership, no duplicate work · %d open · %d moving · %d in review · %d blocked · %d overdue", open, inProgress, review, blocked, overdue)
 	case officeAppRequests:
 		blocking, urgent := 0, 0
 		for _, req := range m.requests {
@@ -1592,13 +1686,18 @@ func (m channelModel) currentHeaderMeta() string {
 		return fmt.Sprintf("  Decisions and approvals the team is waiting on · %d open · %d blocking · %d soon", len(m.requests), blocking, urgent)
 	case officeAppInsights:
 		highSignal := 0
-		for _, msg := range filterInsightMessages(m.messages) {
-			text := strings.ToLower(msg.Title + " " + msg.Content)
-			if strings.Contains(text, "important") || strings.Contains(text, "risk") || strings.Contains(text, "urgent") || strings.Contains(text, "blocked") {
+		for _, signal := range m.signals {
+			if signal.Urgency == "high" || signal.Blocking || signal.RequiresHuman {
 				highSignal++
 			}
 		}
-		return fmt.Sprintf("  Nex and office automation signals worth paying attention to · %d recent · %d high signal", len(filterInsightMessages(m.messages)), highSignal)
+		activeWatchdogs := 0
+		for _, alert := range m.watchdogs {
+			if strings.TrimSpace(alert.Status) != "resolved" {
+				activeWatchdogs++
+			}
+		}
+		return fmt.Sprintf("  Signals, decisions, and watchdogs driving the office · %d signals · %d decisions · %d active watchdogs · %d high signal", len(m.signals), len(m.decisions), activeWatchdogs, highSignal)
 	case officeAppCalendar:
 		events := filterCalendarEvents(collectCalendarEvents(m.scheduler, m.tasks, m.requests, m.activeChannel, m.members), m.calendarRange, m.calendarFilter)
 		dueSoon := 0
@@ -1647,7 +1746,7 @@ func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
 	case officeAppRequests:
 		return buildRequestLines(m.requests, contentWidth)
 	case officeAppInsights:
-		return buildOfficeMessageLines(filterInsightMessages(m.messages), m.expandedThreads, contentWidth, false)
+		return buildInsightLines(m.signals, m.decisions, m.watchdogs, contentWidth)
 	case officeAppCalendar:
 		return buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
 	default:
@@ -2257,7 +2356,7 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 			return pollBroker("", m.activeChannel)
 		case officeAppCalendar:
 			m.notice = "Viewing the office calendar."
-			return tea.Batch(pollActions(), pollScheduler())
+			return pollOfficeLedger()
 		}
 	}
 	return nil
@@ -2458,8 +2557,14 @@ func (m channelModel) buildTaskPickerOptions() []tui.PickerOption {
 func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.PickerOption {
 	options := []tui.PickerOption{
 		{Label: "Claim task", Value: "claim:" + task.ID, Description: "Take ownership as you"},
-		{Label: "Complete task", Value: "complete:" + task.ID, Description: "Mark this task done"},
 		{Label: "Release task", Value: "release:" + task.ID, Description: "Clear the current owner"},
+	}
+	if task.ReviewState == "ready_for_review" || task.Status == "review" {
+		options = append(options, tui.PickerOption{Label: "Approve task", Value: "approve:" + task.ID, Description: "Mark this review-ready task done"})
+	} else if task.ReviewState == "pending_review" || task.ExecutionMode == "local_worktree" {
+		options = append(options, tui.PickerOption{Label: "Ready for review", Value: "complete:" + task.ID, Description: "Move this task into review"})
+	} else {
+		options = append(options, tui.PickerOption{Label: "Complete task", Value: "complete:" + task.ID, Description: "Mark this task done"})
 	}
 	if task.Status != "done" {
 		options = append(options, tui.PickerOption{Label: "Block task", Value: "block:" + task.ID, Description: "Mark this work blocked"})
@@ -3144,16 +3249,16 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		parts := strings.Fields(trimmed)
 		if len(parts) < 3 {
-			m.notice = "Usage: /task <claim|release|complete|block> <task-id>"
+			m.notice = "Usage: /task <claim|release|complete|review|approve|block> <task-id>"
 			return m, nil
 		}
 		action, taskID := parts[1], parts[2]
 		switch action {
-		case "claim", "release", "complete", "block":
+		case "claim", "release", "complete", "review", "approve", "block":
 			m.posting = true
 			return m, mutateTask(action, taskID, "you", m.activeChannel)
 		default:
-			m.notice = "Usage: /task <claim|release|complete|block> <task-id>"
+			m.notice = "Usage: /task <claim|release|complete|review|approve|block> <task-id>"
 			return m, nil
 		}
 	case trimmed == "/reset":
@@ -3246,7 +3351,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.activeApp = officeAppCalendar
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing the office calendar."
-		return m, tea.Batch(pollActions(), pollScheduler())
+		return m, pollOfficeLedger()
 	case strings.HasPrefix(trimmed, "/calendar "):
 		clearCurrent()
 		parts := strings.Fields(trimmed)
@@ -3261,15 +3366,15 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		case arg == "day" || arg == "today":
 			m.calendarRange = calendarRangeDay
 			m.notice = "Calendar now shows today."
-			return m, tea.Batch(pollActions(), pollScheduler())
+			return m, pollOfficeLedger()
 		case arg == "week":
 			m.calendarRange = calendarRangeWeek
 			m.notice = "Calendar now shows this week."
-			return m, tea.Batch(pollActions(), pollScheduler())
+			return m, pollOfficeLedger()
 		case arg == "all":
 			m.calendarFilter = ""
 			m.notice = "Showing all teammate calendars."
-			return m, tea.Batch(pollActions(), pollScheduler())
+			return m, pollOfficeLedger()
 		case arg == "filter":
 			options := m.buildCalendarAgentPickerOptions()
 			if len(options) == 0 {
@@ -3288,7 +3393,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			}
 			m.calendarFilter = filter
 			m.notice = "Filtering calendar for " + displayName(filter) + "."
-			return m, tea.Batch(pollActions(), pollScheduler())
+			return m, pollOfficeLedger()
 		}
 	case strings.HasPrefix(trimmed, "/channel "):
 		clearCurrent()
@@ -3881,6 +3986,8 @@ func mutateTask(action, taskID, owner, channel string) tea.Cmd {
 			"claim":    "Task claimed.",
 			"assign":   "Task assigned.",
 			"complete": "Task completed.",
+			"review":   "Task moved into review.",
+			"approve":  "Task approved.",
 			"block":    "Task marked blocked.",
 			"release":  "Task released.",
 		}[action]
@@ -3944,6 +4051,16 @@ func pollTasks(channel string) tea.Cmd {
 	}
 }
 
+func pollOfficeLedger() tea.Cmd {
+	return tea.Batch(
+		pollActions(),
+		pollSignals(),
+		pollDecisions(),
+		pollWatchdogs(),
+		pollScheduler(),
+	)
+}
+
 func pollActions() tea.Cmd {
 	return func() tea.Msg {
 		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/actions", nil)
@@ -3965,6 +4082,72 @@ func pollActions() tea.Cmd {
 			return channelActionsMsg{}
 		}
 		return channelActionsMsg{actions: result.Actions}
+	}
+}
+
+func pollSignals() tea.Cmd {
+	return func() tea.Msg {
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/signals", nil)
+		if err != nil {
+			return channelSignalsMsg{}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelSignalsMsg{}
+		}
+		defer resp.Body.Close()
+		var result struct {
+			Signals []channelSignal `json:"signals"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelSignalsMsg{}
+		}
+		return channelSignalsMsg{signals: result.Signals}
+	}
+}
+
+func pollDecisions() tea.Cmd {
+	return func() tea.Msg {
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/decisions", nil)
+		if err != nil {
+			return channelDecisionsMsg{}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelDecisionsMsg{}
+		}
+		defer resp.Body.Close()
+		var result struct {
+			Decisions []channelDecision `json:"decisions"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelDecisionsMsg{}
+		}
+		return channelDecisionsMsg{decisions: result.Decisions}
+	}
+}
+
+func pollWatchdogs() tea.Cmd {
+	return func() tea.Msg {
+		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/watchdogs", nil)
+		if err != nil {
+			return channelWatchdogsMsg{}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelWatchdogsMsg{}
+		}
+		defer resp.Body.Close()
+		var result struct {
+			Watchdogs []channelWatchdog `json:"watchdogs"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelWatchdogsMsg{}
+		}
+		return channelWatchdogsMsg{alerts: result.Watchdogs}
 	}
 }
 
@@ -4018,6 +4201,34 @@ func pollRequests(channel string) tea.Cmd {
 			return channelRequestsMsg{}
 		}
 		return channelRequestsMsg{requests: result.Requests, pending: result.Pending}
+	}
+}
+
+
+func postHumanInterrupt(channel string) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"action":   "create",
+			"from":     "human",
+			"channel":  channel,
+			"question": "Human pressed Esc — all work paused. What should the team do now?",
+			"kind":     "interrupt",
+			"blocking": true,
+			"required": true,
+			"options": []map[string]string{
+				{"id": "resume", "label": "Resume — carry on where you left off"},
+				{"id": "stop", "label": "Stop — drop current tasks and wait"},
+				{"id": "redirect", "label": "Redirect — I'll type new instructions"},
+			},
+		})
+		req, _ := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/requests", bytes.NewReader(body))
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelInterruptDoneMsg{err: err}
+		}
+		defer resp.Body.Close()
+		return channelInterruptDoneMsg{}
 	}
 }
 
@@ -4339,13 +4550,6 @@ func runChannelView(threadsCollapsed bool) {
 			reportChannelCrash(fmt.Sprintf("panic: %v\n\n%s", r, debug.Stack()))
 		}
 	}()
-
-	// Run splash screen first (skippable with any key)
-	splash := tea.NewProgram(newSplashModel(), tea.WithAltScreen())
-	if _, err := splash.Run(); err == nil {
-		// Small pause between splash and channel
-		time.Sleep(100 * time.Millisecond)
-	}
 
 	// Then launch the main channel view
 	p := tea.NewProgram(newChannelModel(threadsCollapsed), tea.WithAltScreen(), tea.WithMouseCellMotion())

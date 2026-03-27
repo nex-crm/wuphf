@@ -49,7 +49,7 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		Foreground(lipgloss.Color(slackActive)).
 		Bold(true)
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
-	parts = append(parts, "  "+labelStyle.Render(label)+"  "+hintStyle.Render("Use / for commands · @ to mention · Enter sends"))
+	parts = append(parts, "  "+labelStyle.Render(label)+"  "+hintStyle.Render("/ commands · @ mention · Enter send · Esc pause all"))
 
 	// ── Input field with rounded border ───────────────────────────────
 	innerW := width - 6 // border (2) + padding (2) + outer margin (2)
