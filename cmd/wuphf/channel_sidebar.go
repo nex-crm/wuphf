@@ -277,6 +277,25 @@ func renderThoughtBubble(text string, width int) []string {
 	return lines
 }
 
+func padSidebarContent(text string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	visibleWidth := ansi.StringWidth(text)
+	if visibleWidth < width {
+		text += strings.Repeat(" ", width-visibleWidth)
+	}
+	return text
+}
+
+func sidebarPlainRow(text string, width int) string {
+	return " " + padSidebarContent(text, maxInt(1, width-1))
+}
+
+func sidebarStyledRow(style lipgloss.Style, text string, width int) string {
+	return style.Width(maxInt(1, width)).Render(text)
+}
+
 // renderSidebar renders the Slack-style sidebar with channels and team members.
 func renderSidebar(channels []channelInfo, members []channelMember, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, brokerConnected bool, width, height int) string {
 	if width < 2 {
@@ -313,21 +332,21 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 
 	var lines []string
 	lines = append(lines, "")
-	lines = append(lines, " "+workspaceStyle.Render("WUPHF"))
-	lines = append(lines, " "+workspaceMetaStyle.Render("The WUPHF Office"))
-	lines = append(lines, " "+workspaceMetaStyle.Italic(true).Render("Somehow still operational"))
-	lines = append(lines, " "+workspaceMetaStyle.Render("Ctrl+G channels · Ctrl+O apps"))
+	lines = append(lines, sidebarPlainRow(workspaceStyle.Render("WUPHF"), width))
+	lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("The WUPHF Office"), width))
+	lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Italic(true).Render("Somehow still operational"), width))
+	lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("Ctrl+G channels · Ctrl+O apps"), width))
 	if brokerConnected {
-		lines = append(lines, " "+workspaceMetaStyle.Render("Team connected"))
+		lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("Team connected"), width))
 	} else {
-		lines = append(lines, " "+workspaceMetaStyle.Render("Offline preview from manifest"))
+		lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("Offline preview from manifest"), width))
 	}
 	lines = append(lines, "")
 	channelHeaderText := "Channels"
 	if quickJump == quickJumpChannels {
 		channelHeaderText = "Channels · 1-9"
 	}
-	lines = append(lines, " "+sectionBandStyle.Width(innerW-1).Render(channelHeaderText))
+	lines = append(lines, sidebarStyledRow(sectionBandStyle, channelHeaderText, width))
 	if len(channels) == 0 {
 		channels = []channelInfo{{Slug: "general", Name: "general"}}
 	}
@@ -340,11 +359,11 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 		}
 		switch {
 		case ch.Slug == activeChannel:
-			lines = append(lines, " "+activeRowStyle.Width(innerW-1).Render(label))
+			lines = append(lines, sidebarStyledRow(activeRowStyle, label, width))
 		case focused && cursor == sidebarIndex:
-			lines = append(lines, " "+cursorRowStyle.Width(innerW-1).Render(label))
+			lines = append(lines, sidebarStyledRow(cursorRowStyle, label, width))
 		default:
-			lines = append(lines, " "+channelRowStyle.Render(label))
+			lines = append(lines, sidebarStyledRow(channelRowStyle, label, width))
 		}
 		sidebarIndex++
 	}
@@ -354,7 +373,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 	if quickJump == quickJumpApps {
 		appHeaderText = "Apps · 1-9"
 	}
-	lines = append(lines, " "+sectionBandStyle.Width(innerW-1).Render(appHeaderText))
+	lines = append(lines, sidebarStyledRow(sectionBandStyle, appHeaderText, width))
 	apps := []struct {
 		App   officeApp
 		Label string
@@ -374,11 +393,11 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 		}
 		switch {
 		case activeApp == app.App:
-			lines = append(lines, " "+activeRowStyle.Width(innerW-1).Render(label))
+			lines = append(lines, sidebarStyledRow(activeRowStyle, label, width))
 		case focused && cursor == sidebarIndex:
-			lines = append(lines, " "+cursorRowStyle.Width(innerW-1).Render(label))
+			lines = append(lines, sidebarStyledRow(cursorRowStyle, label, width))
 		default:
-			lines = append(lines, " "+channelRowStyle.Render(label))
+			lines = append(lines, sidebarStyledRow(channelRowStyle, label, width))
 		}
 		sidebarIndex++
 		appIndex++
@@ -386,7 +405,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 
 	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sidebarDivider))
 	divider := dividerStyle.Render(strings.Repeat("\u2500", innerW))
-	lines = append(lines, " "+divider)
+	lines = append(lines, sidebarPlainRow(divider, width))
 
 	usedLines := len(lines)
 	availableLines := height - usedLines - 1
@@ -432,7 +451,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 	} else if totalMembers > 0 && end > start {
 		peopleHeader = fmt.Sprintf("Agents · %d-%d/%d", start+1, end, totalMembers)
 	}
-	lines = append(lines, " "+sectionBandStyle.Width(innerW-1).Render(peopleHeader))
+	lines = append(lines, sidebarStyledRow(sectionBandStyle, peopleHeader, width))
 
 	now := time.Now()
 	for i := start; i < end; i++ {
@@ -471,7 +490,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 			if pad < 1 {
 				pad = 1
 			}
-			lines = append(lines, " "+line+strings.Repeat(" ", pad)+meta)
+			lines = append(lines, sidebarPlainRow(line+strings.Repeat(" ", pad)+meta, width))
 		} else {
 			// Full mode: first face line shares the row with name/activity.
 			const avatarW = 4
@@ -495,13 +514,13 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 			if pad < 1 {
 				pad = 1
 			}
-			lines = append(lines, " "+linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(act.Label))
+			lines = append(lines, sidebarPlainRow(linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(act.Label), width))
 			if avatarBottom != "" {
-				lines = append(lines, " "+avatarBottom)
+				lines = append(lines, sidebarPlainRow(avatarBottom, width))
 			}
 			if character.Bubble != "" {
 				for _, bubbleLine := range renderThoughtBubble(character.Bubble, innerW-2) {
-					lines = append(lines, " "+bubbleLine)
+					lines = append(lines, sidebarPlainRow(bubbleLine, width))
 				}
 			}
 			lines = append(lines, "")
@@ -510,7 +529,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, activeChanne
 
 	if totalMembers > maxMembers {
 		hint := memberMetaStyle.Render("PgUp/PgDn scroll agents")
-		lines = append(lines, " "+hint)
+		lines = append(lines, sidebarPlainRow(hint, width))
 	}
 
 	// Pad remaining height with empty lines.
