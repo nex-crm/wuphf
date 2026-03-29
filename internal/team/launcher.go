@@ -216,6 +216,7 @@ func (l *Launcher) Launch() error {
 	if err != nil {
 		return err
 	}
+	l.spawnOverflowAgents()
 
 	// Enable pane borders with labels and visible resize handles.
 	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
@@ -386,7 +387,7 @@ func (l *Launcher) notifyTaskActionsLoop() {
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 	for _, target := range immediate {
-		l.sendChannelUpdate(target.PaneIndex, target.Slug, msg.Channel, msg.ID, msg.From, msg.Content)
+		l.sendChannelUpdate(target.PaneTarget, target.Slug, msg.Channel, msg.ID, msg.From, msg.Content)
 	}
 	for _, target := range delayed {
 		go func(target notificationTarget, msg channelMessage) {
@@ -394,7 +395,7 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 			if !l.shouldDeliverDelayedNotification(target.Slug, msg) {
 				return
 			}
-			l.sendChannelUpdate(target.PaneIndex, target.Slug, msg.Channel, msg.ID, msg.From, msg.Content)
+			l.sendChannelUpdate(target.PaneTarget, target.Slug, msg.Channel, msg.ID, msg.From, msg.Content)
 		}(target, msg)
 	}
 }
@@ -406,7 +407,7 @@ func (l *Launcher) deliverTaskNotification(action officeActionLog, task teamTask
 	}
 	content := l.taskNotificationContent(action, task)
 	for _, target := range immediate {
-		l.sendTaskUpdate(target.PaneIndex, target.Slug, task.Channel, task.ID, action.Actor, content)
+		l.sendTaskUpdate(target.PaneTarget, target.Slug, task.Channel, task.ID, action.Actor, content)
 	}
 	for _, target := range delayed {
 		go func(target notificationTarget, action officeActionLog, task teamTask) {
@@ -414,26 +415,22 @@ func (l *Launcher) deliverTaskNotification(action officeActionLog, task teamTask
 			if !l.shouldDeliverDelayedTaskNotification(target.Slug, action, task) {
 				return
 			}
-			l.sendTaskUpdate(target.PaneIndex, target.Slug, task.Channel, task.ID, action.Actor, content)
+			l.sendTaskUpdate(target.PaneTarget, target.Slug, task.Channel, task.ID, action.Actor, content)
 		}(target, action, task)
 	}
 }
 
 type notificationTarget struct {
-	PaneIndex int
-	Slug      string
+	PaneTarget string
+	Slug       string
 }
 
 func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask) (immediate []notificationTarget, delayed []notificationTarget) {
-	slugs := l.agentPaneSlugs()
-	if len(slugs) == 0 {
+	targetMap := l.agentPaneTargets()
+	if len(targetMap) == 0 {
 		return nil, nil
 	}
 	lead := l.officeLeadSlug()
-	targetMap := make(map[string]notificationTarget)
-	for i, slug := range slugs {
-		targetMap[slug] = notificationTarget{PaneIndex: i + 1, Slug: slug}
-	}
 	enabledMembers := map[string]struct{}{}
 	if l.broker != nil {
 		for _, member := range l.broker.EnabledMembers(task.Channel) {
@@ -583,7 +580,7 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s). Before you speak, call team_poll and team_tasks, confirm whether you own this work, and stay in your lane.", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode)
 }
 
-func (l *Launcher) sendTaskUpdate(paneIdx int, slug, channel, taskID, from, content string) {
+func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, content string) {
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
@@ -591,7 +588,6 @@ func (l *Launcher) sendTaskUpdate(paneIdx int, slug, channel, taskID, from, cont
 		"[Task update #%s %s from @%s]: %s — Before you say anything, call team_poll with my_slug \"%s\" and channel \"%s\", then call team_tasks for the current ownership. If the task is outside your lane or someone else owns it, stay quiet. If you are the owner, reply with the concrete next step and update the task.",
 		channel, taskID, from, truncate(content, 150), slug, channel,
 	)
-	paneTarget := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
 		"-l",
@@ -604,26 +600,27 @@ func (l *Launcher) sendTaskUpdate(paneIdx int, slug, channel, taskID, from, cont
 }
 
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
-	slugs := l.agentPaneSlugs()
-	if len(slugs) == 0 {
+	targetMap := l.agentPaneTargets()
+	if len(targetMap) == 0 {
 		return nil, nil
 	}
+	slugs := l.agentPaneSlugs()
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
 		if slug == "" || slug == msg.From {
 			return nil, nil
 		}
-		return []notificationTarget{{PaneIndex: 1, Slug: slug}}, nil
+		target, ok := targetMap[slug]
+		if !ok {
+			return nil, nil
+		}
+		return []notificationTarget{target}, nil
 	}
 	lead := l.officeLeadSlug()
 	domain := inferMessageDomain(msg)
 	owner := ""
 	if l.broker != nil {
 		owner = l.taskOwnerForDomain(msg.Channel, domain)
-	}
-	targetMap := make(map[string]notificationTarget)
-	for i, slug := range slugs {
-		targetMap[slug] = notificationTarget{PaneIndex: i + 1, Slug: slug}
 	}
 	enabledMembers := map[string]struct{}{}
 	if l.broker != nil {
@@ -943,21 +940,20 @@ func shellQuote(s string) string {
 func (l *Launcher) primeVisibleAgents() {
 	time.Sleep(2 * time.Second)
 
-	panes := l.agentPaneSlugs()
-	if len(panes) == 0 {
+	targets := l.agentPaneTargets()
+	if len(targets) == 0 {
 		return
 	}
 
 	for attempt := 0; attempt < 4; attempt++ {
-		for i := range panes {
-			paneIdx := i + 1 // pane 0 is the office channel
-			content, err := l.capturePaneContent(paneIdx)
+		for _, target := range targets {
+			content, err := l.capturePaneTargetContent(target.PaneTarget)
 			if err != nil {
 				continue
 			}
 			if shouldPrimeClaudePane(content) {
 				exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
-					"-t", fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx),
+					"-t", target.PaneTarget,
 					"Enter",
 				).Run()
 			}
@@ -1477,26 +1473,6 @@ func (l *Launcher) agentPaneSlugs() []string {
 	if l.isOneOnOne() {
 		return []string{l.oneOnOneAgent()}
 	}
-	if l.pack != nil && len(l.pack.Agents) > 0 {
-		lead := l.pack.LeadSlug
-		if strings.TrimSpace(lead) == "" {
-			lead = "ceo"
-		}
-		var slugs []string
-		seen := map[string]struct{}{}
-		if lead != "" {
-			slugs = append(slugs, lead)
-			seen[lead] = struct{}{}
-		}
-		for _, cfg := range l.pack.Agents {
-			if _, ok := seen[cfg.Slug]; ok {
-				continue
-			}
-			slugs = append(slugs, cfg.Slug)
-			seen[cfg.Slug] = struct{}{}
-		}
-		return slugs
-	}
 	members := l.officeMembersSnapshot()
 	lead := l.officeLeadSlug()
 	var slugs []string
@@ -1510,6 +1486,78 @@ func (l *Launcher) agentPaneSlugs() []string {
 		slugs = append(slugs, member.Slug)
 	}
 	return slugs
+}
+
+const maxVisibleOfficeAgents = 5
+
+func (l *Launcher) officeAgentOrder() []officeMember {
+	var agentOrder []officeMember
+	lead := l.officeLeadSlug()
+	for _, member := range l.officeMembersSnapshot() {
+		if member.Slug == lead {
+			agentOrder = append([]officeMember{member}, agentOrder...)
+		}
+	}
+	for _, member := range l.officeMembersSnapshot() {
+		if member.Slug != lead {
+			agentOrder = append(agentOrder, member)
+		}
+	}
+	return agentOrder
+}
+
+func (l *Launcher) visibleOfficeMembers() []officeMember {
+	if l.isOneOnOne() {
+		member := l.officeMemberBySlug(l.oneOnOneAgent())
+		return []officeMember{member}
+	}
+	ordered := l.officeAgentOrder()
+	if len(ordered) <= maxVisibleOfficeAgents {
+		return ordered
+	}
+	return ordered[:maxVisibleOfficeAgents]
+}
+
+func (l *Launcher) overflowOfficeMembers() []officeMember {
+	if l.isOneOnOne() {
+		return nil
+	}
+	ordered := l.officeAgentOrder()
+	if len(ordered) <= maxVisibleOfficeAgents {
+		return nil
+	}
+	return ordered[maxVisibleOfficeAgents:]
+}
+
+func overflowWindowName(slug string) string {
+	return "agent-" + strings.TrimSpace(slug)
+}
+
+func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
+	targets := make(map[string]notificationTarget)
+	if l.isOneOnOne() {
+		slug := l.oneOnOneAgent()
+		if slug != "" {
+			targets[slug] = notificationTarget{
+				Slug:       slug,
+				PaneTarget: fmt.Sprintf("%s:team.1", l.sessionName),
+			}
+		}
+		return targets
+	}
+	for i, member := range l.visibleOfficeMembers() {
+		targets[member.Slug] = notificationTarget{
+			Slug:       member.Slug,
+			PaneTarget: fmt.Sprintf("%s:team.%d", l.sessionName, i+1),
+		}
+	}
+	for _, member := range l.overflowOfficeMembers() {
+		targets[member.Slug] = notificationTarget{
+			Slug:       member.Slug,
+			PaneTarget: fmt.Sprintf("%s:%s.0", l.sessionName, overflowWindowName(member.Slug)),
+		}
+	}
+	return targets
 }
 
 func (l *Launcher) isOneOnOne() bool {
@@ -1628,17 +1676,19 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	if err != nil {
 		return err
 	}
+	l.clearOverflowAgentWindows()
 
 	// Respawn each agent pane in place, preserving layout.
 	// Never clear+recreate panes — that destroys the channel's layout.
-	slugs := l.agentPaneSlugs()
-	if len(panes) != len(slugs) {
+	visibleMembers := l.visibleOfficeMembers()
+	if len(panes) != len(visibleMembers) {
 		if err := l.clearAgentPanes(); err != nil {
 			return err
 		}
 		if _, err := l.spawnVisibleAgents(); err != nil {
 			return err
 		}
+		l.spawnOverflowAgents()
 		if l.broker != nil {
 			go l.primeVisibleAgents()
 		}
@@ -1648,10 +1698,10 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	for _, idx := range panes {
 		// Map pane index to agent slug (pane 1 = first agent, etc.)
 		slugIdx := idx - 1 // pane 0 is channel
-		if slugIdx < 0 || slugIdx >= len(slugs) {
+		if slugIdx < 0 || slugIdx >= len(visibleMembers) {
 			continue
 		}
-		slug := slugs[slugIdx]
+		slug := visibleMembers[slugIdx].Slug
 		prompt := l.buildPrompt(slug)
 		cmd := l.claudeCommand(slug, prompt)
 
@@ -1664,6 +1714,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 			cmd,
 		).Run()
 	}
+	l.spawnOverflowAgents()
 
 	if l.broker != nil {
 		go l.primeVisibleAgents()
@@ -1672,7 +1723,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	return nil
 }
 
-func (l *Launcher) sendChannelUpdate(paneIdx int, slug, channel, msgID, from, content string) {
+func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, content string) {
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
@@ -1689,7 +1740,6 @@ func (l *Launcher) sendChannelUpdate(paneIdx int, slug, channel, msgID, from, co
 		)
 	}
 
-	paneTarget := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
 		"-l",
@@ -1701,8 +1751,7 @@ func (l *Launcher) sendChannelUpdate(paneIdx int, slug, channel, msgID, from, co
 	).Run()
 }
 
-func (l *Launcher) capturePaneContent(paneIdx int) (string, error) {
-	target := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
+func (l *Launcher) capturePaneTargetContent(target string) (string, error) {
 	out, err := exec.Command("tmux", "-L", tmuxSocketName, "capture-pane",
 		"-p", "-J",
 		"-t", target,
@@ -1711,6 +1760,11 @@ func (l *Launcher) capturePaneContent(paneIdx int) (string, error) {
 		return "", err
 	}
 	return string(out), nil
+}
+
+func (l *Launcher) capturePaneContent(paneIdx int) (string, error) {
+	target := fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx)
+	return l.capturePaneTargetContent(target)
 }
 
 func ResetBrokerState() error {
@@ -1755,6 +1809,25 @@ func (l *Launcher) clearAgentPanes() error {
 		exec.Command("tmux", "-L", tmuxSocketName, "kill-pane", "-t", target).Run()
 	}
 	return nil
+}
+
+func (l *Launcher) clearOverflowAgentWindows() {
+	out, err := exec.Command("tmux", "-L", tmuxSocketName, "list-windows",
+		"-t", l.sessionName,
+		"-F", "#{window_name}",
+	).CombinedOutput()
+	if err != nil {
+		return
+	}
+	for _, name := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		name = strings.TrimSpace(name)
+		if !strings.HasPrefix(name, "agent-") {
+			continue
+		}
+		exec.Command("tmux", "-L", tmuxSocketName, "kill-window",
+			"-t", fmt.Sprintf("%s:%s", l.sessionName, name),
+		).Run()
+	}
 }
 
 func (l *Launcher) listTeamPanes() ([]int, error) {
@@ -1848,22 +1921,7 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	// │            │         │         │
 	// └────────────┴─────────┴─────────┘
 
-	// Build ordered agent list: leader first, then specialists
-	var agentOrder []officeMember
-	lead := l.officeLeadSlug()
-	for _, member := range l.officeMembersSnapshot() {
-		if member.Slug == lead {
-			agentOrder = append([]officeMember{member}, agentOrder...)
-		}
-	}
-	for _, member := range l.officeMembersSnapshot() {
-		if member.Slug != lead {
-			agentOrder = append(agentOrder, member)
-		}
-	}
-
-	// Show the full current team so channel membership is real, not implied.
-	visible := agentOrder
+	visible := l.visibleOfficeMembers()
 
 	// First agent: split right from channel (horizontal split)
 	if len(visible) == 0 {
@@ -1922,6 +1980,19 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	).Run()
 
 	return visibleSlugs, nil
+}
+
+func (l *Launcher) spawnOverflowAgents() {
+	for _, member := range l.overflowOfficeMembers() {
+		agentCmd := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		windowName := overflowWindowName(member.Slug)
+		exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
+			"-t", l.sessionName,
+			"-n", windowName,
+			"-c", l.cwd,
+			agentCmd,
+		).Run()
+	}
 }
 
 // buildPrompt generates the system prompt for an agent, including
@@ -2295,6 +2366,17 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 			return members
 		}
 	}
+	path := brokerStatePath()
+	data, err := os.ReadFile(path)
+	if err == nil {
+		var state brokerState
+		if json.Unmarshal(data, &state) == nil && len(state.Members) > 0 {
+			for i := range state.Members {
+				applyOfficeMemberDefaults(&state.Members[i])
+			}
+			return state.Members
+		}
+	}
 	if l.pack != nil && len(l.pack.Agents) > 0 {
 		members := make([]officeMember, 0, len(l.pack.Agents))
 		for _, cfg := range l.pack.Agents {
@@ -2307,17 +2389,6 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 			members = append(members, member)
 		}
 		return members
-	}
-	path := brokerStatePath()
-	data, err := os.ReadFile(path)
-	if err == nil {
-		var state brokerState
-		if json.Unmarshal(data, &state) == nil && len(state.Members) > 0 {
-			for i := range state.Members {
-				applyOfficeMemberDefaults(&state.Members[i])
-			}
-			return state.Members
-		}
 	}
 	return defaultOfficeMembers()
 }

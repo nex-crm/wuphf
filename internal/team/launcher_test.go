@@ -98,6 +98,79 @@ func TestAgentPaneSlugsOneOnOneUsesOnlySelectedAgent(t *testing.T) {
 	}
 }
 
+func TestAgentPaneSlugsUsesOfficeRosterNotStaticPack(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+		broker: &Broker{
+			members: []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "growthops", Name: "Growth Ops"},
+			},
+		},
+	}
+
+	got := l.agentPaneSlugs()
+	want := []string{"ceo", "pm", "fe", "growthops"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d pane slugs, got %v", len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("pane[%d] = %q, want %q (full list %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestOfficeMembersSnapshotPrefersPersistedStateOverPack(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	state := brokerState{
+		Members: []officeMember{
+			{Slug: "ceo", Name: "CEO"},
+			{Slug: "pm", Name: "Product Manager"},
+			{Slug: "growthops", Name: "Growth Ops"},
+		},
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal state: %v", err)
+	}
+	if err := os.WriteFile(brokerStatePath(), data, 0o600); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	got := l.officeMembersSnapshot()
+	if len(got) != 3 {
+		t.Fatalf("expected persisted office members, got %+v", got)
+	}
+	if got[2].Slug != "growthops" {
+		t.Fatalf("expected persisted dynamic member, got %+v", got)
+	}
+}
+
 func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
 	l := &Launcher{
 		sessionMode: SessionModeOneOnOne,
@@ -113,7 +186,7 @@ func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
 	if len(delayed) != 0 {
 		t.Fatalf("expected no delayed targets in 1o1 mode, got %v", delayed)
 	}
-	if len(immediate) != 1 || immediate[0].Slug != "pm" || immediate[0].PaneIndex != 1 {
+	if len(immediate) != 1 || immediate[0].Slug != "pm" || immediate[0].PaneTarget == "" {
 		t.Fatalf("expected pm as the only immediate target, got %v", immediate)
 	}
 }
