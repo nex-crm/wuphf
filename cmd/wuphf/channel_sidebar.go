@@ -96,8 +96,7 @@ func classifyActivity(m channelMember) memberActivity {
 		return memberActivity{Label: "plotting", Color: dotThinking, Dot: "\U0001F7E1"}
 	default:
 		if m.LiveActivity != "" {
-			dots := strings.Repeat("\u00b7", int(time.Now().Unix()%3)+1) // animated ···
-			return memberActivity{Label: "thinking" + dots, Color: dotCoding, Dot: "\u26A1"}
+			return memberActivity{Label: "thinking", Color: dotCoding, Dot: "\u26A1"}
 		}
 		return memberActivity{Label: "lurking", Color: dotIdle, Dot: "\u25CB"}
 	}

@@ -22,25 +22,20 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 
 	// ── Typing indicator ──────────────────────────────────────────────
 	if len(typingAgents) > 0 {
-		// Animated dots: cycles through ·  ··  ···
-		dots := strings.Repeat("·", (tickFrame%3)+1)
 		var typing string
 		switch len(typingAgents) {
 		case 1:
-			typing = typingAgents[0] + " is thinking" + dots
+			typing = typingAgents[0] + " is working"
 		case 2:
-			typing = typingAgents[0] + " and " + typingAgents[1] + " are thinking" + dots
+			typing = typingAgents[0] + " and " + typingAgents[1] + " are working"
 		default:
-			typing = fmt.Sprintf("%s, %s +%d are thinking%s",
-				typingAgents[0], typingAgents[1], len(typingAgents)-2, dots)
+			typing = fmt.Sprintf("%s, %s +%d are working",
+				typingAgents[0], typingAgents[1], len(typingAgents)-2)
 		}
 		typingStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#EAB308")).
 			Italic(true)
-		// Animated spinner
-		spinners := []string{"\u25dc", "\u25dd", "\u25de", "\u25df"}
-		spinner := spinners[tickFrame%len(spinners)]
-		parts = append(parts, "  "+typingStyle.Render(spinner+" "+typing))
+		parts = append(parts, "  "+typingStyle.Render("\u26A1 "+typing))
 	}
 
 	// ── Composer label ────────────────────────────────────────────────
