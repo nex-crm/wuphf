@@ -58,8 +58,11 @@ type officeCharacter struct {
 
 // classifyActivity determines activity from last message time and content.
 func classifyActivity(m channelMember) memberActivity {
+	if m.Disabled {
+		return memberActivity{Label: "", Color: dotIdle, Dot: "○"} // ○ empty
+	}
+
 	now := time.Now()
-	// Default to stale/idle until we can prove the last activity is recent.
 	elapsed := 24 * time.Hour
 
 	if m.LastTime != "" {
@@ -75,36 +78,27 @@ func classifyActivity(m channelMember) memberActivity {
 		}
 	}
 
-	// Check for tool-use keywords indicating "coding".
-	if elapsed < 30*time.Second && m.LastMessage != "" {
+	// Active: recently posted or working in Claude Code
+	if elapsed < 10*time.Second {
+		return memberActivity{Label: "", Color: dotTalking, Dot: "●"} // ● green filled
+	}
+	if elapsed < 30*time.Second {
 		lower := strings.ToLower(m.LastMessage)
 		for _, kw := range []string{"bash", "edit", "read", "write", "grep", "glob"} {
 			if strings.Contains(lower, kw) {
-				return memberActivity{Label: "shipping", Color: dotCoding, Dot: "\u26A1"}
+				return memberActivity{Label: "", Color: dotCoding, Dot: "●"} // ● purple filled
 			}
 		}
+		return memberActivity{Label: "", Color: dotThinking, Dot: "●"} // ● yellow filled
+	}
+	if m.LiveActivity != "" {
+		return memberActivity{Label: "", Color: dotTalking, Dot: "●"} // ● green filled
 	}
 
-	if m.LastTime == "" {
-		return memberActivity{Label: "lurking", Color: dotIdle, Dot: "\u25CB"}
-	}
-
-	switch {
-	case elapsed < 10*time.Second:
-		return memberActivity{Label: "talking", Color: dotTalking, Dot: "\U0001F7E2"}
-	case elapsed < 30*time.Second:
-		return memberActivity{Label: "plotting", Color: dotThinking, Dot: "\U0001F7E1"}
-	default:
-		if m.LiveActivity != "" {
-			label := "thinking"
-			if time.Now().Unix()%4 < 2 {
-				label = "working"
-			}
-			return memberActivity{Label: label, Color: dotCoding, Dot: "\u26A1"}
-		}
-		return memberActivity{Label: "lurking", Color: dotIdle, Dot: "\u25CB"}
-	}
+	// Idle
+	return memberActivity{Label: "", Color: dotIdle, Dot: "●"} // ● grey filled
 }
+
 
 func defaultSidebarRoster() []channelMember {
 	return []channelMember{
