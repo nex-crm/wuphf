@@ -7,8 +7,6 @@ You run one command, it opens one tmux window, and suddenly you have a CEO, PM, 
 See it at work in below video (click image to open YouTube):
 <video width="630" height="300" src="https://github.com/user-attachments/assets/f4cdffbf-4388-49bc-891d-6bd050ff8247"></video>
 
-[![Watch the demo](https://github.com/user-attachments/assets/a169b4dd-ae2c-4530-af52-8a34b7bb3fb2)](https://youtu.be/3oActq_QXgk)
-
 The name is from *The Office*. If you know, you know. If you do not, this is the bit:
 
 - https://theoffice.fandom.com/wiki/WUPHF.com_(Website)
