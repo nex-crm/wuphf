@@ -348,6 +348,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/interview", b.requireAuth(b.handleInterview))
 	mux.HandleFunc("/interview/answer", b.requireAuth(b.handleInterviewAnswer))
 	mux.HandleFunc("/reset", b.requireAuth(b.handleReset))
+	mux.HandleFunc("/reset-dm", b.requireAuth(b.handleResetDM))
 	mux.HandleFunc("/usage", b.requireAuth(b.handleUsage))
 	mux.HandleFunc("/signals", b.requireAuth(b.handleSignals))
 	mux.HandleFunc("/decisions", b.requireAuth(b.handleDecisions))
@@ -1583,6 +1584,66 @@ func (b *Broker) handleReset(w http.ResponseWriter, r *http.Request) {
 	b.Reset()
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+
+func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Agent   string `json:"agent"`
+		Channel string `json:"channel"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	agent := strings.TrimSpace(body.Agent)
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+
+	b.mu.Lock()
+	// Keep only messages that are NOT direct exchanges between human and agent
+	filtered := make([]channelMessage, 0, len(b.messages))
+	removed := 0
+	for _, msg := range b.messages {
+		if normalizeChannelSlug(msg.Channel) != channel {
+			filtered = append(filtered, msg)
+			continue
+		}
+		// Remove if: human->agent or agent->human (direct messages only)
+		isHuman := msg.From == "you" || msg.From == "human"
+		isAgent := msg.From == agent
+		if isHuman || isAgent {
+			// Check if it's a direct message (not a delegation to others)
+			if isAgent && len(msg.Tagged) > 0 {
+				taggedHuman := false
+				for _, t := range msg.Tagged {
+					if t == "you" || t == "human" {
+						taggedHuman = true
+						break
+					}
+				}
+				if !taggedHuman {
+					// Agent message to other agents — keep it
+					filtered = append(filtered, msg)
+					continue
+				}
+			}
+			removed++
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+	b.messages = filtered
+	_ = b.saveLocked()
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "removed": removed})
 }
 
 func (b *Broker) handleUsage(w http.ResponseWriter, r *http.Request) {

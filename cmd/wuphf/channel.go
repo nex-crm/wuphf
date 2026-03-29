@@ -330,6 +330,10 @@ type channelResetDoneMsg struct {
 	err    error
 	notice string
 }
+type channelResetDMDoneMsg struct {
+	err     error
+	removed int
+}
 type channelInitDoneMsg struct {
 	err    error
 	notice string
@@ -421,6 +425,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "collapse", Description: "Collapse a thread"},
 	{Name: "cancel", Description: "Exit reply/setup mode"},
 	{Name: "reset", Description: "Reset channel and agents"},
+	{Name: "reset-dm", Description: "Clear direct messages with an agent"},
 	{Name: "quit", Description: "Exit WUPHF"},
 }
 
@@ -434,6 +439,7 @@ var oneOnOneSlashCommands = []tui.SlashCommand{
 	{Name: "reply", Description: "Reply in thread by message ID"},
 	{Name: "cancel", Description: "Exit reply/setup mode"},
 	{Name: "reset", Description: "Reset this direct session"},
+	{Name: "reset-dm", Description: "Clear this direct conversation"},
 	{Name: "quit", Description: "Exit WUPHF"},
 }
 
@@ -1230,6 +1236,17 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.notice = "Reset failed: " + msg.err.Error()
 		}
+
+	case channelResetDMDoneMsg:
+		m.posting = false
+		if msg.err != nil {
+			m.notice = "Failed to clear DMs: " + msg.err.Error()
+		} else {
+			m.notice = fmt.Sprintf("Cleared %d direct messages.", msg.removed)
+			m.messages = nil
+			m.lastID = ""
+		}
+		return m, m.pollCurrentState()
 
 	case channelInitDoneMsg:
 		m.posting = false
@@ -3535,6 +3552,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		switch {
 		case trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q":
 		case trimmed == "/reset":
+		case trimmed == "/reset-dm" || strings.HasPrefix(trimmed, "/reset-dm "):
 		case trimmed == "/init":
 		case trimmed == "/integrate":
 		case trimmed == "/cancel":
@@ -3611,6 +3629,22 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.notice = ""
 		m.posting = true
 		return m, resetTeamSession(m.isOneOnOne())
+	case trimmed == "/reset-dm" || strings.HasPrefix(trimmed, "/reset-dm "):
+		clearCurrent()
+		agent := ""
+		if strings.HasPrefix(trimmed, "/reset-dm ") {
+			agent = strings.TrimSpace(strings.TrimPrefix(trimmed, "/reset-dm "))
+			agent = strings.TrimPrefix(agent, "@")
+		}
+		if m.isOneOnOne() {
+			agent = m.oneOnOneAgentSlug()
+		}
+		if agent == "" {
+			m.notice = "Usage: /reset-dm <agent> or use in 1:1 mode"
+			return m, nil
+		}
+		m.posting = true
+		return m, resetDMSession(agent, m.activeChannel)
 	case trimmed == "/integrate":
 		clearCurrent()
 		if config.ResolveNoNex() {
@@ -4854,6 +4888,31 @@ func connectIntegration(spec channelIntegrationSpec) tea.Cmd {
 			return channelIntegrationDoneMsg{err: fmt.Errorf("%s connection timed out. Finish OAuth at %s", spec.Label, authURL)}
 		}
 		return channelIntegrationDoneMsg{err: fmt.Errorf("%s connection timed out", spec.Label)}
+	}
+}
+
+
+func resetDMSession(agent string, channel string) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"agent":   agent,
+			"channel": channel,
+		})
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/reset-dm", bytes.NewReader(body))
+		if err != nil {
+			return channelResetDMDoneMsg{err: err}
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelResetDMDoneMsg{err: err}
+		}
+		defer resp.Body.Close()
+		var result struct {
+			Removed int `json:"removed"`
+		}
+		json.NewDecoder(resp.Body).Decode(&result)
+		return channelResetDMDoneMsg{removed: result.Removed}
 	}
 }
 
