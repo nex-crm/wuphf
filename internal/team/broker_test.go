@@ -1300,3 +1300,43 @@ func TestParseSkillProposalFromMessage(t *testing.T) {
 		t.Fatalf("expected description 'Post-deploy checks', got %q", s.Description)
 	}
 }
+
+func TestIsClaudeCodeChrome(t *testing.T) {
+	// Should be filtered (chrome)
+	chrome := []string{
+		"⏵⏵ bypass      ·",
+		"● high · /effort",
+		"❯",
+		"❯  ",
+		"─────────────────────",
+		"shift+tab to cycle",
+		"  ⏵⏵ bypass",
+		"drag border to resize",
+		"        Claude Code",
+		" ▐▛███  v2.1.87",
+		"█▛▘     Claude Max",
+	}
+	for _, line := range chrome {
+		if !isClaudeCodeChrome(line) {
+			t.Errorf("expected chrome, got keep: %q", line)
+		}
+	}
+
+	// Should be kept (real activity)
+	activity := []string{
+		"✻ Crunching…",
+		"✶ Thinking…",
+		"· Crunching…",
+		"✢ Scurrying…",
+		"⏺ team_broadcast (MCP)",
+		"Reading internal/team/broker.go",
+		"Running go test ./...",
+		"Editing cmd/wuphf/channel.go",
+		"Searching for pattern in codebase",
+	}
+	for _, line := range activity {
+		if isClaudeCodeChrome(line) {
+			t.Errorf("expected keep, got chrome: %q", line)
+		}
+	}
+}

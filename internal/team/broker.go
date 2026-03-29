@@ -2757,38 +2757,77 @@ func captureLiveAgentActivity() map[string]string {
 // isClaudeCodeChrome returns true if the line is Claude Code UI chrome
 // (status bar, permission prompts, mode indicators) rather than actual work.
 func isClaudeCodeChrome(line string) bool {
+	// First: check if this is a Claude Code activity line we WANT to keep
+	// These are the spinner + status messages like "✻ Crunching…", "⏺ tool_name"
+	activityKeywords := []string{
+		"crunching", "thinking", "scurrying", "planning",
+		"researching", "analyzing", "processing", "generating",
+		"reading", "writing", "editing", "running",
+		"searching", "compiling", "building", "testing",
+	}
+	lower := strings.ToLower(line)
+	for _, kw := range activityKeywords {
+		if strings.Contains(lower, kw) {
+			return false // This is real activity — keep it
+		}
+	}
+
+	// Check for tool use indicators (⏺ tool_name)
+	if strings.Contains(line, "\u23fa") { // ⏺ record symbol = tool call
+		return false // Keep tool call lines
+	}
+
+	// Now filter out known chrome patterns
 	chromePatterns := []string{
-		"\u23f5\u23f5",       // ⏵⏵ fast-forward (bypass indicator)
-		"\u25cf",              // ● (mode dot)
+		"\u23f5\u23f5",    // ⏵⏵ (bypass indicator)
+		"\u25cf",           // ● (mode dot)
+		"\u276f",           // ❯ (prompt)
 		"shift+tab",
 		"/effort",
 		"bypass",
-		"permissions on",
-		"permissions off",
-		"(MCP)",
+		"permissions",
+		"(mcp)",
 		"wuphf-office",
 		"to cycle",
 		"press y",
 		"press n",
 		"esc to",
 		"tab to",
-		"$",
-		">",
-		"\u2500\u2500\u2500",  // ─── horizontal rule
-		"\u2501\u2501\u2501",  // ━━━ heavy horizontal rule
 		"drag border",
+		"claude code",
+		"claude max",
+		"contex",         // "contex…" truncated
+		"v2.1.",          // version string
+		"opus 4",         // model name
 	}
-	lower := strings.ToLower(line)
 	for _, pat := range chromePatterns {
 		if strings.Contains(lower, pat) {
 			return true
 		}
 	}
-	// Skip lines that are just box-drawing characters or whitespace
-	cleaned := strings.TrimFunc(line, func(r rune) bool {
-		return r == ' ' || r == '\t' || r == '\u2500' || r == '\u2501' || r == '\u2502' || r == '\u2503' || r == '\u250c' || r == '\u2510' || r == '\u2514' || r == '\u2518' || r == '\u251c' || r == '\u2524' || r == '\u252c' || r == '\u2534' || r == '\u253c' || r == '\u2550' || r == '\u2551' || r == '\u2552' || r == '\u2553' || r == '\u2554' || r == '\u2555' || r == '\u2556' || r == '\u2557' || r == '\u2558' || r == '\u2559' || r == '\u255a' || r == '\u255b' || r == '\u255c' || r == '\u255d' || r == '\u2588' || r == '\u2591' || r == '\u2592' || r == '\u2593' || r == '\u2580' || r == '\u2584'
-	})
-	return len(cleaned) < 3
+
+	// Skip lines that start with $ or ❯ (shell prompts)
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "\u276f") {
+		return true
+	}
+
+	// Skip lines made entirely of box-drawing chars, spaces, or very short
+	cleaned := strings.Map(func(r rune) rune {
+		if r == ' ' || r == '\t' || (r >= 0x2500 && r <= 0x257F) || // box drawing
+			(r >= 0x2580 && r <= 0x259F) || // block elements
+			r == '\u2588' || r == '\u2591' || r == '\u2592' || r == '\u2593' ||
+			r == '\u2580' || r == '\u2584' || r == '\u258c' || r == '\u2590' ||
+			r == '\u2596' || r == '\u2597' || r == '\u2598' || r == '\u259a' ||
+			r == '\u259b' || r == '\u259c' || r == '\u259d' || r == '\u259e' || r == '\u259f' ||
+			r == '\u25dc' || r == '\u25dd' || r == '\u25de' || r == '\u25df' || // corners
+			r == '\u2581' || r == '\u2582' || r == '\u2583' || r == '\u2585' ||
+			r == '\u2586' || r == '\u2587' || r == '\u2589' || r == '\u258a' || r == '\u258b' {
+			return -1
+		}
+		return r
+	}, line)
+	return len(strings.TrimSpace(cleaned)) < 3
 }
 
 // stripANSIBroker removes ANSI escape sequences from a string.
