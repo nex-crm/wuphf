@@ -2626,8 +2626,24 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	messages := make([]channelMessage, 0, len(b.messages))
 	for _, msg := range b.messages {
 		if normalizeChannelSlug(msg.Channel) == channel {
-			if b.sessionMode == SessionModeOneOnOne && msg.From != "you" && msg.From != "human" && msg.From != b.oneOnOneAgent {
-				continue
+			if b.sessionMode == SessionModeOneOnOne {
+				// Only show messages between the human and the 1:1 agent
+				if msg.From != "you" && msg.From != "human" && msg.From != b.oneOnOneAgent && msg.From != "system" {
+					continue
+				}
+				// Skip CEO delegation messages that tag other agents
+				if msg.From == b.oneOnOneAgent && len(msg.Tagged) > 0 {
+					isForHuman := false
+					for _, t := range msg.Tagged {
+						if t == "you" || t == "human" {
+							isForHuman = true
+							break
+						}
+					}
+					if !isForHuman {
+						continue
+					}
+				}
 			}
 			messages = append(messages, msg)
 		}
