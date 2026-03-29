@@ -429,18 +429,24 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "quit", Description: "Exit WUPHF"},
 }
 
-var oneOnOneSlashCommands = []tui.SlashCommand{
-	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode"},
-	{Name: "init", Description: "Run setup"},
-	{Name: "integrate", Description: "Connect an integration"},
-	{Name: "threads", Description: "Browse and manage threads"},
-	{Name: "expand", Description: "Expand a collapsed thread"},
-	{Name: "collapse", Description: "Collapse a thread"},
-	{Name: "reply", Description: "Reply in thread by message ID"},
-	{Name: "cancel", Description: "Exit reply/setup mode"},
-	{Name: "reset", Description: "Reset this direct session"},
-	{Name: "reset-dm", Description: "Clear this direct conversation"},
-	{Name: "quit", Description: "Exit WUPHF"},
+// oneOnOneBlacklist lists command names blocked in 1:1 mode.
+var oneOnOneBlacklist = map[string]bool{
+	"channels":     true,
+	"channel":      true,
+	"agents":       true,
+	"agent":        true,
+	"agent prompt": true,
+}
+
+func buildOneOnOneSlashCommands() []tui.SlashCommand {
+	var cmds []tui.SlashCommand
+	for _, cmd := range channelSlashCommands {
+		if oneOnOneBlacklist[cmd.Name] {
+			continue
+		}
+		cmds = append(cmds, cmd)
+	}
+	return cmds
 }
 
 type channelPickerMode string
@@ -615,7 +621,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 	if m.isOneOnOne() {
 		m.sidebarCollapsed = true
 		m.threadsDefaultExpand = true
-		m.autocomplete = tui.NewAutocomplete(oneOnOneSlashCommands)
+		m.autocomplete = tui.NewAutocomplete(buildOneOnOneSlashCommands())
 	}
 	if config.ResolveNoNex() {
 		m.notice = "Running in office-only mode. Nex tools are disabled for this session."
@@ -647,7 +653,7 @@ func (m channelModel) oneOnOneAgentName() string {
 
 func (m *channelModel) refreshSlashCommands() {
 	if m.isOneOnOne() {
-		m.autocomplete = tui.NewAutocomplete(oneOnOneSlashCommands)
+		m.autocomplete = tui.NewAutocomplete(buildOneOnOneSlashCommands())
 		return
 	}
 	m.autocomplete = tui.NewAutocomplete(channelSlashCommands)
@@ -3581,16 +3587,17 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	}
 
 	if m.isOneOnOne() && strings.HasPrefix(trimmed, "/") {
-		switch {
-		case trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q":
-		case trimmed == "/reset":
-		case trimmed == "/reset-dm" || strings.HasPrefix(trimmed, "/reset-dm "):
-		case trimmed == "/init":
-		case trimmed == "/integrate":
-		case trimmed == "/cancel":
-		case strings.HasPrefix(trimmed, "/1o1"):
-		default:
-			m.notice = "1:1 mode disables office, channel, agent, task, and thread commands. Quit and relaunch WUPHF for the full office."
+		// Blacklist: commands that only make sense in team/office mode
+		teamOnly := []string{"/channels", "/channel ", "/channel\n", "/agents", "/agent ", "/agent\n", "/agent prompt"}
+		blocked := false
+		for _, prefix := range teamOnly {
+			if trimmed == strings.TrimSpace(prefix) || strings.HasPrefix(trimmed, prefix) {
+				blocked = true
+				break
+			}
+		}
+		if blocked {
+			m.notice = "That command is only available in team mode."
 			return m, nil
 		}
 	}
