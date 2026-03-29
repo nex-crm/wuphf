@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -2667,6 +2668,80 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
+// captureLiveAgentActivity captures the last meaningful line from each agent's
+// tmux pane to show what they're working on in real-time.
+func captureLiveAgentActivity() map[string]string {
+	result := make(map[string]string)
+
+	// List tmux panes in the wuphf-team session
+	out, err := exec.Command("tmux", "-L", "wuphf", "list-panes",
+		"-t", "wuphf-team", "-F", "#{pane_index}").CombinedOutput()
+	if err != nil {
+		return result
+	}
+
+	// Get the agent manifest to map pane indices to slugs
+	manifest := company.DefaultManifest()
+	loaded, loadErr := company.LoadManifest()
+	if loadErr == nil && len(loaded.Members) > 0 {
+		manifest = loaded
+	}
+	agents := manifest.Members
+	if len(agents) == 0 {
+		return result
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || line == "0" {
+			continue // pane 0 is the channel view
+		}
+		paneIdx := 0
+		fmt.Sscanf(line, "%d", &paneIdx)
+		if paneIdx <= 0 {
+			continue
+		}
+
+		// Map pane index to agent slug (pane 1 = first agent)
+		agentIdx := paneIdx - 1
+		if agentIdx >= len(agents) {
+			continue
+		}
+		slug := agents[agentIdx].Slug
+
+		// Capture the last 5 lines of the pane
+		target := fmt.Sprintf("wuphf-team:team.%d", paneIdx)
+		paneOut, err := exec.Command("tmux", "-L", "wuphf", "capture-pane",
+			"-p", "-J", "-S", "-5",
+			"-t", target).CombinedOutput()
+		if err != nil {
+			continue
+		}
+
+		// Find the last non-empty line as the activity summary
+		paneLines := strings.Split(string(paneOut), "\n")
+		activity := ""
+		for i := len(paneLines) - 1; i >= 0; i-- {
+			trimmed := strings.TrimSpace(paneLines[i])
+			if trimmed != "" && !strings.HasPrefix(trimmed, "$") && !strings.HasPrefix(trimmed, ">") {
+				activity = trimmed
+				break
+			}
+		}
+
+		if activity != "" {
+			// Truncate to 60 chars for display
+			if len(activity) > 60 {
+				activity = activity[:57] + "..."
+			}
+			result[slug] = activity
+		}
+	}
+	return result
+}
+
 func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
@@ -2732,24 +2807,32 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	type memberEntry struct {
-		Slug        string `json:"slug"`
-		Name        string `json:"name,omitempty"`
-		Role        string `json:"role,omitempty"`
-		Disabled    bool   `json:"disabled,omitempty"`
-		LastMessage string `json:"lastMessage"`
-		LastTime    string `json:"lastTime"`
+		Slug         string `json:"slug"`
+		Name         string `json:"name,omitempty"`
+		Role         string `json:"role,omitempty"`
+		Disabled     bool   `json:"disabled,omitempty"`
+		LastMessage  string `json:"lastMessage"`
+		LastTime     string `json:"lastTime"`
+		LiveActivity string `json:"liveActivity,omitempty"`
 	}
+
+	// Capture live activity from tmux panes for agents that appear idle
+	paneActivity := captureLiveAgentActivity()
 
 	var list []memberEntry
 	for slug, info := range members {
-		list = append(list, memberEntry{
+		entry := memberEntry{
 			Slug:        slug,
 			Name:        info.name,
 			Role:        info.role,
 			Disabled:    info.disabled,
 			LastMessage: info.lastMessage,
 			LastTime:    info.lastTime,
-		})
+		}
+		if activity, ok := paneActivity[slug]; ok {
+			entry.LiveActivity = activity
+		}
+		list = append(list, entry)
 	}
 
 	w.Header().Set("Content-Type", "application/json")

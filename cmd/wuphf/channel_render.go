@@ -240,7 +240,7 @@ func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]boo
 			{Text: mutedStyle.Render("  This conversation is just you and " + agentName + ".")},
 		}
 	}
-	return buildOfficeMessageLines(messages, expanded, contentWidth, false)
+	return buildOfficeMessageLines(messages, expanded, contentWidth, true)
 }
 
 func humanMessageLabel(kind string) string {

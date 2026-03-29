@@ -11,8 +11,8 @@ import (
 // renderComposer renders the Slack-style input area with typing indicator,
 // label, rounded border, cursor, @mention popup, and interview options.
 func renderComposer(width int, input []rune, inputPos int, channelName string,
-	replyToID string, typingAgents []string, pending *channelInterview,
-	selectedOption int, focused bool) string {
+	replyToID string, typingAgents []string, liveActivities map[string]string,
+	pending *channelInterview, selectedOption int, focused bool) string {
 
 	if width < 10 {
 		width = 10
@@ -36,6 +36,16 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 			Foreground(lipgloss.Color(slackMuted)).
 			Italic(true)
 		parts = append(parts, "  "+typingStyle.Render(typing))
+	}
+
+	// Show live activity summaries for agents working in Claude Code
+	if len(liveActivities) > 0 {
+		activityStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#7C7C85")).
+			Italic(true)
+		for agentName, activity := range liveActivities {
+			parts = append(parts, "  "+activityStyle.Render("  \u2937 "+agentName+": "+activity))
+		}
 	}
 
 	// ── Composer label ────────────────────────────────────────────────
@@ -141,7 +151,8 @@ func renderComposerPopup(options []composerPopupOption, selectedIdx int, width i
 }
 
 // typingAgentsFromMembers returns a list of agent display names that are
-// currently typing (activity within the last 5 seconds).
+// currently typing (activity within the last 5 seconds) or working in their
+// Claude Code instance (live activity captured from tmux pane).
 func typingAgentsFromMembers(members []channelMember) []string {
 	var typing []string
 	for _, m := range members {
@@ -149,13 +160,33 @@ func typingAgentsFromMembers(members []channelMember) []string {
 			continue
 		}
 		act := classifyActivity(m)
-		if act.Label == "talking" {
+		if act.Label == "talking" || act.Label == "shipping" {
 			if m.Name != "" {
 				typing = append(typing, m.Name)
 			} else {
 				typing = append(typing, displayName(m.Slug))
 			}
+		} else if m.LiveActivity != "" {
+			// Agent is working in Claude Code but hasn't posted recently
+			name := m.Name
+			if name == "" {
+				name = displayName(m.Slug)
+			}
+			typing = append(typing, name)
 		}
 	}
 	return typing
+}
+
+// liveActivityFromMembers returns a map of agent slug -> live activity text
+// for agents currently working in their Claude Code instances.
+func liveActivityFromMembers(members []channelMember) map[string]string {
+	result := make(map[string]string)
+	for _, m := range members {
+		if m.Slug == "you" || m.LiveActivity == "" {
+			continue
+		}
+		result[m.Slug] = m.LiveActivity
+	}
+	return result
 }

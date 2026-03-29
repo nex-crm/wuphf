@@ -95,6 +95,9 @@ func classifyActivity(m channelMember) memberActivity {
 	case elapsed < 30*time.Second:
 		return memberActivity{Label: "plotting", Color: dotThinking, Dot: "\U0001F7E1"}
 	default:
+		if m.LiveActivity != "" {
+			return memberActivity{Label: "working", Color: dotCoding, Dot: "\u26A1"}
+		}
 		return memberActivity{Label: "lurking", Color: dotIdle, Dot: "\u25CB"}
 	}
 }
