@@ -34,7 +34,8 @@ var agentColorMap = map[string]string{
 	"cmo":      "#F97316",
 	"cro":      "#06B6D4",
 	"nex":      "#7C3AED",
-	"you":      "#FFFFFF",
+	"you":      "#38BDF8",
+	"human":    "#38BDF8",
 }
 
 // statusDotColors maps activity states to dot colors.

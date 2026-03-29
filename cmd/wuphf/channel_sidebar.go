@@ -41,7 +41,7 @@ const (
 var sidebarAgentColors = map[string]string{
 	"ceo": "#EAB308", "pm": "#22C55E", "fe": "#3B82F6",
 	"be": "#8B5CF6", "ai": "#14B8A6", "designer": "#EC4899",
-	"cmo": "#F97316", "cro": "#06B6D4", "you": "#FFFFFF",
+	"cmo": "#F97316", "cro": "#06B6D4", "you": "#38BDF8", "human": "#38BDF8",
 }
 
 // memberActivity describes what an agent is doing based on recency and content.

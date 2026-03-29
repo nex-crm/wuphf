@@ -2798,7 +2798,31 @@ func captureLiveAgentActivity() map[string]string {
 	return result
 }
 
-
+// captureLiveAgentActivityForPane checks tmux pane team.1 for a single agent.
+// In 1:1 mode the only agent always occupies pane 1 regardless of manifest
+// order, so the manifest-index-based captureLiveAgentActivity would look at
+// the wrong pane.
+func captureLiveAgentActivityForPane(slug string) map[string]string {
+	result := make(map[string]string)
+	target := fmt.Sprintf("%s:team.1", SessionName)
+	paneOut, err := exec.Command("tmux", "-L", tmuxSocketName, "capture-pane",
+		"-p", "-J", "-S", "-5",
+		"-t", target).CombinedOutput()
+	if err != nil {
+		return result
+	}
+	lines := strings.Split(string(paneOut), "\n")
+	for _, line := range lines {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		for _, kw := range []string{"crunching", "thinking", "scurrying", "planning"} {
+			if strings.Contains(lower, kw) {
+				result[slug] = "active"
+				return result
+			}
+		}
+	}
+	return result
+}
 
 func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
@@ -2862,6 +2886,8 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		members[msg.From] = info
 	}
+	isOneOnOne := b.sessionMode == SessionModeOneOnOne
+	oneOnOneSlug := b.oneOnOneAgent
 	b.mu.Unlock()
 
 	type memberEntry struct {
@@ -2874,8 +2900,17 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		LiveActivity string `json:"liveActivity,omitempty"`
 	}
 
-	// Capture live activity from tmux panes for agents that appear idle
-	paneActivity := captureLiveAgentActivity()
+	// Capture live activity from tmux panes for agents that appear idle.
+	// In 1:1 mode the only agent runs in pane team.1 regardless of its
+	// position in the manifest, so captureLiveAgentActivity (which maps
+	// pane indices from the manifest order) will look at the wrong pane.
+	// Probe pane 1 directly for the oneOnOneAgent instead.
+	var paneActivity map[string]string
+	if isOneOnOne && oneOnOneSlug != "" {
+		paneActivity = captureLiveAgentActivityForPane(oneOnOneSlug)
+	} else {
+		paneActivity = captureLiveAgentActivity()
+	}
 
 	var list []memberEntry
 	for slug, info := range members {
