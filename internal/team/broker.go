@@ -2711,27 +2711,38 @@ func captureLiveAgentActivity() map[string]string {
 		}
 		slug := agents[agentIdx].Slug
 
-		// Capture the last 5 lines of the pane
+		// Capture the last 20 lines of the pane for better filtering
 		target := fmt.Sprintf("wuphf-team:team.%d", paneIdx)
 		paneOut, err := exec.Command("tmux", "-L", "wuphf", "capture-pane",
-			"-p", "-J", "-S", "-5",
+			"-p", "-J", "-S", "-20",
 			"-t", target).CombinedOutput()
 		if err != nil {
 			continue
 		}
 
-		// Find the last non-empty line as the activity summary
+		// Find the last meaningful line, filtering out Claude Code UI chrome
 		paneLines := strings.Split(string(paneOut), "\n")
 		activity := ""
 		for i := len(paneLines) - 1; i >= 0; i-- {
 			trimmed := strings.TrimSpace(paneLines[i])
-			if trimmed != "" && !strings.HasPrefix(trimmed, "$") && !strings.HasPrefix(trimmed, ">") {
-				activity = trimmed
-				break
+			if trimmed == "" {
+				continue
 			}
+			// Skip Claude Code UI chrome and status bar elements
+			if isClaudeCodeChrome(trimmed) {
+				continue
+			}
+			activity = trimmed
+			break
 		}
 
 		if activity != "" {
+			// Clean up ANSI escape sequences
+			activity = stripANSIBroker(activity)
+			activity = strings.TrimSpace(activity)
+			if activity == "" {
+				continue
+			}
 			// Truncate to 60 chars for display
 			if len(activity) > 60 {
 				activity = activity[:57] + "..."
@@ -2740,6 +2751,64 @@ func captureLiveAgentActivity() map[string]string {
 		}
 	}
 	return result
+}
+
+
+// isClaudeCodeChrome returns true if the line is Claude Code UI chrome
+// (status bar, permission prompts, mode indicators) rather than actual work.
+func isClaudeCodeChrome(line string) bool {
+	chromePatterns := []string{
+		"\u23f5\u23f5",       // ⏵⏵ fast-forward (bypass indicator)
+		"\u25cf",              // ● (mode dot)
+		"shift+tab",
+		"/effort",
+		"bypass",
+		"permissions on",
+		"permissions off",
+		"(MCP)",
+		"wuphf-office",
+		"to cycle",
+		"press y",
+		"press n",
+		"esc to",
+		"tab to",
+		"$",
+		">",
+		"\u2500\u2500\u2500",  // ─── horizontal rule
+		"\u2501\u2501\u2501",  // ━━━ heavy horizontal rule
+		"drag border",
+	}
+	lower := strings.ToLower(line)
+	for _, pat := range chromePatterns {
+		if strings.Contains(lower, pat) {
+			return true
+		}
+	}
+	// Skip lines that are just box-drawing characters or whitespace
+	cleaned := strings.TrimFunc(line, func(r rune) bool {
+		return r == ' ' || r == '\t' || r == '\u2500' || r == '\u2501' || r == '\u2502' || r == '\u2503' || r == '\u250c' || r == '\u2510' || r == '\u2514' || r == '\u2518' || r == '\u251c' || r == '\u2524' || r == '\u252c' || r == '\u2534' || r == '\u253c' || r == '\u2550' || r == '\u2551' || r == '\u2552' || r == '\u2553' || r == '\u2554' || r == '\u2555' || r == '\u2556' || r == '\u2557' || r == '\u2558' || r == '\u2559' || r == '\u255a' || r == '\u255b' || r == '\u255c' || r == '\u255d' || r == '\u2588' || r == '\u2591' || r == '\u2592' || r == '\u2593' || r == '\u2580' || r == '\u2584'
+	})
+	return len(cleaned) < 3
+}
+
+// stripANSIBroker removes ANSI escape sequences from a string.
+func stripANSIBroker(s string) string {
+	var result strings.Builder
+	inEsc := false
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if (s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z') {
+				inEsc = false
+			}
+			continue
+		}
+		result.WriteByte(s[i])
+	}
+	return result.String()
 }
 
 func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
