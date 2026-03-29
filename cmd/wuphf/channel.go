@@ -532,6 +532,7 @@ type channelModel struct {
 	expandedThreads      map[string]bool
 	clickableThreads     map[int]string // rendered line index → message ID for click-to-expand
 	threadsDefaultExpand bool           // true = expand threads by default
+	tickFrame            int            // incremented each tick for animations
 	autocomplete         tui.AutocompleteModel
 	mention              tui.MentionModel
 	input                []rune
@@ -1643,6 +1644,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case channelTickMsg:
+		m.tickFrame++
 		return m, m.pollCurrentState()
 	}
 
@@ -1722,10 +1724,10 @@ func (m channelModel) View() string {
 	liveActivities := liveActivityFromMembers(m.members)
 	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
 		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption,
-		m.focus == focusMain)
+		m.focus == focusMain, m.tickFrame)
 	if m.memberDraft != nil {
 		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
-			"", typingAgents, nil, nil, 0, m.focus == focusMain)
+			"", typingAgents, nil, nil, 0, m.focus == focusMain, m.tickFrame)
 	}
 
 	// Interview card (above composer)
@@ -2242,10 +2244,10 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 	liveActivities := liveActivityFromMembers(m.members)
 	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
 		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption,
-		m.focus == focusMain)
+		m.focus == focusMain, m.tickFrame)
 	if m.memberDraft != nil {
 		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
-			"", typingAgents, nil, nil, 0, m.focus == focusMain)
+			"", typingAgents, nil, nil, 0, m.focus == focusMain, m.tickFrame)
 	}
 	interviewCard := ""
 	if activePending != nil {

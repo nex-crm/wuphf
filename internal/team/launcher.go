@@ -199,9 +199,11 @@ func (l *Launcher) Launch() error {
 		return fmt.Errorf("create tmux session: %w", err)
 	}
 
-	// Don't enable tmux mouse globally — it prevents native text selection.
-	// The channel pane uses Bubbletea's tea.WithMouseCellMotion() for scroll.
-	// Agent panes (Claude Code) handle their own mouse internally.
+	// Keep tmux mouse off for this session so native terminal selection/copy works.
+	// WUPHF is keyboard-first; we don't want the TUI or tmux to steal mouse events.
+	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+		"mouse", "off",
+	).Run()
 
 	// Hide tmux's default status bar — our channel TUI has its own.
 	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
@@ -222,9 +224,9 @@ func (l *Launcher) Launch() error {
 	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-status", "top",
 	).Run()
-	// Show agent name + drag hint in border
+	// Show agent name in the border; mouse drag is intentionally disabled.
 	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
-		"pane-border-format", " #{pane_title} #[fg=colour240]drag border to resize ",
+		"pane-border-format", " #{pane_title} ",
 	).Run()
 	// Make inactive border visible but subtle
 	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
@@ -234,7 +236,7 @@ func (l *Launcher) Launch() error {
 	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-active-border-style", "fg=colour45",
 	).Run()
-	// Use line-drawing characters for border (makes drag target clearer)
+	// Use line-drawing characters for clear keyboard-focused pane boundaries.
 	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-lines", "heavy",
 	).Run()

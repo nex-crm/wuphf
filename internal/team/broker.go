@@ -2685,17 +2685,12 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// captureLiveAgentActivity captures the last meaningful line from each agent's
-// tmux pane to show what they're working on in real-time.
+// captureLiveAgentActivity checks which agents have active tmux panes
+// (not idle at the shell prompt). Returns a map of slug -> "active" for
+// agents that are currently processing. We don't try to parse pane content
+// — just detect whether the agent is busy.
 func captureLiveAgentActivity() map[string]string {
 	result := make(map[string]string)
-
-	// List tmux panes in the wuphf-team session
-	out, err := exec.Command("tmux", "-L", "wuphf", "list-panes",
-		"-t", "wuphf-team", "-F", "#{pane_index}").CombinedOutput()
-	if err != nil {
-		return result
-	}
 
 	// Get the agent manifest to map pane indices to slugs
 	manifest := company.DefaultManifest()
@@ -2708,163 +2703,41 @@ func captureLiveAgentActivity() map[string]string {
 		return result
 	}
 
-	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" || line == "0" {
-			continue // pane 0 is the channel view
-		}
-		paneIdx := 0
-		fmt.Sscanf(line, "%d", &paneIdx)
-		if paneIdx <= 0 {
-			continue
-		}
-
-		// Map pane index to agent slug (pane 1 = first agent)
-		agentIdx := paneIdx - 1
-		if agentIdx >= len(agents) {
-			continue
-		}
-		slug := agents[agentIdx].Slug
-
-		// Capture the last 20 lines of the pane for better filtering
+	// Check each agent pane for activity by looking at cursor position changes
+	// A simpler approach: capture the pane and check if there's a spinner or
+	// thinking indicator (single-char lines with unicode symbols)
+	for i, agent := range agents {
+		paneIdx := i + 1 // pane 0 is the channel view
 		target := fmt.Sprintf("wuphf-team:team.%d", paneIdx)
+
 		paneOut, err := exec.Command("tmux", "-L", "wuphf", "capture-pane",
-			"-p", "-J", "-S", "-20",
+			"-p", "-J", "-S", "-5",
 			"-t", target).CombinedOutput()
 		if err != nil {
 			continue
 		}
 
-		// Find the last meaningful line, filtering out Claude Code UI chrome
-		paneLines := strings.Split(string(paneOut), "\n")
-		activity := ""
-		for i := len(paneLines) - 1; i >= 0; i-- {
-			trimmed := strings.TrimSpace(paneLines[i])
-			if trimmed == "" {
-				continue
+		// Check if any line contains a Claude Code thinking indicator
+		lines := strings.Split(string(paneOut), "\n")
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			lower := strings.ToLower(trimmed)
+			// Claude Code spinner words
+			for _, kw := range []string{"crunching", "thinking", "scurrying", "planning"} {
+				if strings.Contains(lower, kw) {
+					result[agent.Slug] = "active"
+					break
+				}
 			}
-			// Skip Claude Code UI chrome and status bar elements
-			if isClaudeCodeChrome(trimmed) {
-				continue
+			if _, ok := result[agent.Slug]; ok {
+				break
 			}
-			activity = trimmed
-			break
-		}
-
-		if activity != "" {
-			// Clean up ANSI escape sequences
-			activity = stripANSIBroker(activity)
-			activity = strings.TrimSpace(activity)
-			if activity == "" {
-				continue
-			}
-			// Truncate to 60 chars for display
-			if len(activity) > 60 {
-				activity = activity[:57] + "..."
-			}
-			result[slug] = activity
 		}
 	}
 	return result
 }
 
 
-// isClaudeCodeChrome returns true if the line is Claude Code UI chrome
-// (status bar, permission prompts, mode indicators) rather than actual work.
-func isClaudeCodeChrome(line string) bool {
-	// First: check if this is a Claude Code activity line we WANT to keep
-	// These are the spinner + status messages like "✻ Crunching…", "⏺ tool_name"
-	activityKeywords := []string{
-		"crunching", "thinking", "scurrying", "planning",
-		"researching", "analyzing", "processing", "generating",
-		"reading", "writing", "editing", "running",
-		"searching", "compiling", "building", "testing",
-	}
-	lower := strings.ToLower(line)
-	for _, kw := range activityKeywords {
-		if strings.Contains(lower, kw) {
-			return false // This is real activity — keep it
-		}
-	}
-
-	// Check for tool use indicators (⏺ tool_name)
-	if strings.Contains(line, "\u23fa") { // ⏺ record symbol = tool call
-		return false // Keep tool call lines
-	}
-
-	// Now filter out known chrome patterns
-	chromePatterns := []string{
-		"\u23f5\u23f5",    // ⏵⏵ (bypass indicator)
-		"\u25cf",           // ● (mode dot)
-		"\u276f",           // ❯ (prompt)
-		"shift+tab",
-		"/effort",
-		"bypass",
-		"permissions",
-		"(mcp)",
-		"wuphf-office",
-		"to cycle",
-		"press y",
-		"press n",
-		"esc to",
-		"tab to",
-		"drag border",
-		"claude code",
-		"claude max",
-		"contex",         // "contex…" truncated
-		"v2.1.",          // version string
-		"opus 4",         // model name
-	}
-	for _, pat := range chromePatterns {
-		if strings.Contains(lower, pat) {
-			return true
-		}
-	}
-
-	// Skip lines that start with $ or ❯ (shell prompts)
-	trimmed := strings.TrimSpace(line)
-	if strings.HasPrefix(trimmed, "$") || strings.HasPrefix(trimmed, "\u276f") {
-		return true
-	}
-
-	// Skip lines made entirely of box-drawing chars, spaces, or very short
-	cleaned := strings.Map(func(r rune) rune {
-		if r == ' ' || r == '\t' || (r >= 0x2500 && r <= 0x257F) || // box drawing
-			(r >= 0x2580 && r <= 0x259F) || // block elements
-			r == '\u2588' || r == '\u2591' || r == '\u2592' || r == '\u2593' ||
-			r == '\u2580' || r == '\u2584' || r == '\u258c' || r == '\u2590' ||
-			r == '\u2596' || r == '\u2597' || r == '\u2598' || r == '\u259a' ||
-			r == '\u259b' || r == '\u259c' || r == '\u259d' || r == '\u259e' || r == '\u259f' ||
-			r == '\u25dc' || r == '\u25dd' || r == '\u25de' || r == '\u25df' || // corners
-			r == '\u2581' || r == '\u2582' || r == '\u2583' || r == '\u2585' ||
-			r == '\u2586' || r == '\u2587' || r == '\u2589' || r == '\u258a' || r == '\u258b' {
-			return -1
-		}
-		return r
-	}, line)
-	return len(strings.TrimSpace(cleaned)) < 3
-}
-
-// stripANSIBroker removes ANSI escape sequences from a string.
-func stripANSIBroker(s string) string {
-	var result strings.Builder
-	inEsc := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == 0x1b {
-			inEsc = true
-			continue
-		}
-		if inEsc {
-			if (s[i] >= 'a' && s[i] <= 'z') || (s[i] >= 'A' && s[i] <= 'Z') {
-				inEsc = false
-			}
-			continue
-		}
-		result.WriteByte(s[i])
-	}
-	return result.String()
-}
 
 func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()

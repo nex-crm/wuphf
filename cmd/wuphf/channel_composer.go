@@ -12,7 +12,7 @@ import (
 // label, rounded border, cursor, @mention popup, and interview options.
 func renderComposer(width int, input []rune, inputPos int, channelName string,
 	replyToID string, typingAgents []string, liveActivities map[string]string,
-	pending *channelInterview, selectedOption int, focused bool) string {
+	pending *channelInterview, selectedOption int, focused bool, tickFrame int) string {
 
 	if width < 10 {
 		width = 10
@@ -22,30 +22,25 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 
 	// ── Typing indicator ──────────────────────────────────────────────
 	if len(typingAgents) > 0 {
+		// Animated dots: cycles through ·  ··  ···
+		dots := strings.Repeat("·", (tickFrame%3)+1)
 		var typing string
 		switch len(typingAgents) {
 		case 1:
-			typing = typingAgents[0] + " is cooking something..."
+			typing = typingAgents[0] + " is thinking" + dots
 		case 2:
-			typing = typingAgents[0] + " and " + typingAgents[1] + " are huddling..."
+			typing = typingAgents[0] + " and " + typingAgents[1] + " are thinking" + dots
 		default:
-			typing = fmt.Sprintf("%s, %s +%d are circling this...",
-				typingAgents[0], typingAgents[1], len(typingAgents)-2)
+			typing = fmt.Sprintf("%s, %s +%d are thinking%s",
+				typingAgents[0], typingAgents[1], len(typingAgents)-2, dots)
 		}
 		typingStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(slackMuted)).
+			Foreground(lipgloss.Color("#EAB308")).
 			Italic(true)
-		parts = append(parts, "  "+typingStyle.Render(typing))
-	}
-
-	// Show live activity summaries for agents working in Claude Code
-	if len(liveActivities) > 0 {
-		activityStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#7C7C85")).
-			Italic(true)
-		for agentName, activity := range liveActivities {
-			parts = append(parts, "  "+activityStyle.Render("  \u2937 "+agentName+": "+activity))
-		}
+		// Animated spinner
+		spinners := []string{"\u25dc", "\u25dd", "\u25de", "\u25df"}
+		spinner := spinners[tickFrame%len(spinners)]
+		parts = append(parts, "  "+typingStyle.Render(spinner+" "+typing))
 	}
 
 	// ── Composer label ────────────────────────────────────────────────
