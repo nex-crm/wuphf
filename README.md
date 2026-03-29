@@ -5,6 +5,7 @@ WUPHF is a weird little terminal office for a team of AI coworkers.
 You run one command, it opens one tmux window, and suddenly you have a CEO, PM, frontend engineer, backend engineer, AI engineer, designer, CMO, and CRO all sitting in the same place arguing about what to build. That is the product.
 
 See it at work in below video (click image to open YouTube):
+<video width="630" height="300" src="https://github.com/user-attachments/assets/f4cdffbf-4388-49bc-891d-6bd050ff8247"></video>
 
 [![Watch the demo](https://github.com/user-attachments/assets/a169b4dd-ae2c-4530-af52-8a34b7bb3fb2)](https://youtu.be/3oActq_QXgk)
 
