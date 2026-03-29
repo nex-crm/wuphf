@@ -1781,6 +1781,39 @@ func (m channelModel) View() string {
 		contentWidth = 32
 	}
 	allLines := m.currentMainLines(contentWidth)
+
+	// Append inline typing indicators for active agents (Slack-style)
+	if m.activeApp == officeAppMessages || m.isOneOnOne() {
+		for _, member := range m.members {
+			if member.Slug == "you" || member.Slug == "human" {
+				continue
+			}
+			act := classifyActivity(member)
+			if act.Label == "talking" || act.Label == "shipping" || act.Label == "thinking" || member.LiveActivity != "" {
+				name := member.Name
+				if name == "" {
+					name = displayName(member.Slug)
+				}
+				color := agentColorMap[member.Slug]
+				if color == "" {
+					color = "#64748B"
+				}
+				nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
+				dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+				dots := "..."
+				switch m.tickFrame % 3 {
+				case 0:
+					dots = ".  "
+				case 1:
+					dots = ".. "
+				case 2:
+					dots = "..."
+				}
+				indicator := "  " + nameStyle.Render(name) + " " + dotStyle.Render("is typing"+dots)
+				allLines = append(allLines, renderedLine{Text: indicator})
+			}
+		}
+	}
 	visibleRows, scroll, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
 	var visible []string
 	for _, row := range visibleRows {

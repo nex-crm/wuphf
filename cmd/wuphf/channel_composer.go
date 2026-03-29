@@ -21,26 +21,7 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 	var parts []string
 
 	// ── Typing indicator ──────────────────────────────────────────────
-	if len(typingAgents) > 0 {
-		verb := "working"
-		if tickFrame%4 < 2 {
-			verb = "thinking"
-		}
-		var typing string
-		switch len(typingAgents) {
-		case 1:
-			typing = typingAgents[0] + " is " + verb
-		case 2:
-			typing = typingAgents[0] + " and " + typingAgents[1] + " are " + verb
-		default:
-			typing = fmt.Sprintf("%s, %s +%d are %s",
-				typingAgents[0], typingAgents[1], len(typingAgents)-2, verb)
-		}
-		typingStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#EAB308")).
-			Italic(true)
-		parts = append(parts, "  "+typingStyle.Render("\u26A1 "+typing))
-	}
+
 
 	// ── Composer label ────────────────────────────────────────────────
 	label := fmt.Sprintf("Message #%s", channelName)
