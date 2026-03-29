@@ -268,6 +268,7 @@ type Broker struct {
 	watchdogs         []watchdogAlert
 	scheduler         []schedulerJob
 	skills            []teamSkill
+	lastTaggedAt      map[string]time.Time // when each agent was last @mentioned
 	counter           int
 	notificationSince string
 	insightsSince     string
@@ -2553,6 +2554,16 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	b.messages = append(b.messages, msg)
 	total := len(b.messages)
 
+	// Track which agents were tagged — they should show "typing" immediately
+	if len(msg.Tagged) > 0 && (msg.From == "you" || msg.From == "human") {
+		if b.lastTaggedAt == nil {
+			b.lastTaggedAt = make(map[string]time.Time)
+		}
+		for _, slug := range msg.Tagged {
+			b.lastTaggedAt[slug] = time.Now()
+		}
+	}
+
 	// Auto-detect skill proposals from CEO messages
 	b.parseSkillProposalLocked(msg)
 
@@ -2599,6 +2610,10 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	b.messages = append(b.messages, msg)
+	// Clear typing indicator — agent has replied
+	if b.lastTaggedAt != nil {
+		delete(b.lastTaggedAt, msg.From)
+	}
 	b.appendActionLocked("automation", msg.Source, channel, msg.From, truncateSummary(msg.Title+" "+msg.Content, 140), msg.ID)
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, err
@@ -2820,7 +2835,10 @@ func captureLiveAgentActivity() map[string]string {
 			if strings.Contains(lower, "bypass") || strings.Contains(lower, "/effort") ||
 				strings.Contains(lower, "permissions") || strings.Contains(lower, "shift+tab") ||
 				strings.Contains(lower, "(mcp)") || strings.HasPrefix(trimmed, "\u2500") ||
-				strings.HasPrefix(trimmed, "\u2501") {
+				strings.HasPrefix(trimmed, "\u2501") ||
+				strings.Contains(lower, "claude code") || strings.Contains(lower, "claude max") ||
+				strings.Contains(lower, "v2.1.") || strings.Contains(lower, "opus 4") ||
+				strings.Contains(lower, "contex") || strings.Contains(lower, "/users/") {
 				continue
 			}
 			// If the last meaningful line is the ❯ prompt, agent is idle
@@ -2861,7 +2879,10 @@ func captureLiveAgentActivityForPane(slug string) map[string]string {
 		if strings.Contains(lower, "bypass") || strings.Contains(lower, "/effort") ||
 			strings.Contains(lower, "permissions") || strings.Contains(lower, "shift+tab") ||
 			strings.Contains(lower, "(mcp)") || strings.HasPrefix(trimmed, "\u2500") ||
-			strings.HasPrefix(trimmed, "\u2501") {
+			strings.HasPrefix(trimmed, "\u2501") ||
+				strings.Contains(lower, "claude code") || strings.Contains(lower, "claude max") ||
+				strings.Contains(lower, "v2.1.") || strings.Contains(lower, "opus 4") ||
+				strings.Contains(lower, "contex") || strings.Contains(lower, "/users/") {
 			continue
 		}
 		if !strings.HasPrefix(trimmed, "\u276f") && trimmed != "\u276f" {
@@ -2936,6 +2957,7 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	isOneOnOne := b.sessionMode == SessionModeOneOnOne
 	oneOnOneSlug := b.oneOnOneAgent
+	taggedAt := b.lastTaggedAt
 	b.mu.Unlock()
 
 	type memberEntry struct {
@@ -2972,6 +2994,12 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		if activity, ok := paneActivity[slug]; ok {
 			entry.LiveActivity = activity
+		}
+		// Also mark as active if tagged recently and hasn't replied yet
+		if entry.LiveActivity == "" && taggedAt != nil {
+			if t, ok := taggedAt[slug]; ok && time.Since(t) < 60*time.Second {
+				entry.LiveActivity = "active"
+			}
 		}
 		list = append(list, entry)
 	}

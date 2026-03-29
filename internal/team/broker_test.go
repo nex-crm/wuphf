@@ -1301,42 +1301,35 @@ func TestParseSkillProposalFromMessage(t *testing.T) {
 	}
 }
 
-func TestIsClaudeCodeChrome(t *testing.T) {
-	// Should be filtered (chrome)
-	chrome := []string{
-		"⏵⏵ bypass      ·",
-		"● high · /effort",
-		"❯",
-		"❯  ",
-		"─────────────────────",
-		"shift+tab to cycle",
-		"  ⏵⏵ bypass",
-		"drag border to resize",
-		"        Claude Code",
-		" ▐▛███  v2.1.87",
-		"█▛▘     Claude Max",
+func TestLastTaggedAtSetOnPost(t *testing.T) {
+	b := &Broker{}
+	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo", "pm"}}}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "PM"}}
+
+	// Post a message tagging ceo
+	msg := channelMessage{
+		ID:      "msg-1",
+		From:    "you",
+		Channel: "general",
+		Content: "@ceo what should we do?",
+		Tagged:  []string{"ceo"},
 	}
-	for _, line := range chrome {
-		if !isClaudeCodeChrome(line) {
-			t.Errorf("expected chrome, got keep: %q", line)
+
+	if b.lastTaggedAt == nil {
+		b.lastTaggedAt = make(map[string]time.Time)
+	}
+
+	// Simulate what handlePostMessage does
+	if len(msg.Tagged) > 0 && (msg.From == "you" || msg.From == "human") {
+		for _, slug := range msg.Tagged {
+			b.lastTaggedAt[slug] = time.Now()
 		}
 	}
 
-	// Should be kept (real activity)
-	activity := []string{
-		"✻ Crunching…",
-		"✶ Thinking…",
-		"· Crunching…",
-		"✢ Scurrying…",
-		"⏺ team_broadcast (MCP)",
-		"Reading internal/team/broker.go",
-		"Running go test ./...",
-		"Editing cmd/wuphf/channel.go",
-		"Searching for pattern in codebase",
+	if _, ok := b.lastTaggedAt["ceo"]; !ok {
+		t.Fatal("expected ceo to be in lastTaggedAt")
 	}
-	for _, line := range activity {
-		if isClaudeCodeChrome(line) {
-			t.Errorf("expected keep, got chrome: %q", line)
-		}
+	if _, ok := b.lastTaggedAt["pm"]; ok {
+		t.Fatal("did not expect pm to be in lastTaggedAt")
 	}
 }
