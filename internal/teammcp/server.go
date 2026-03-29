@@ -262,17 +262,17 @@ func Run(ctx context.Context) error {
 		Version: "0.1.0",
 	}, nil)
 
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "team_broadcast",
-		Description: "Post a message into the current conversation. In 1:1 mode this is the direct chat with the human.",
-	}, handleTeamBroadcast)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "team_poll",
-		Description: "Read recent messages from the current conversation so you stay in sync before replying.",
-	}, handleTeamPoll)
-
 	if isOneOnOneMode() {
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "reply",
+			Description: "Send your reply to the human in the direct 1:1 conversation.",
+		}, handleTeamBroadcast)
+
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "read_conversation",
+			Description: "Read recent messages from the 1:1 conversation so you stay in sync before replying.",
+		}, handleTeamPoll)
+
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "human_interview",
 			Description: "Ask the human a blocking interview question when you truly cannot proceed responsibly without a decision.",
@@ -285,6 +285,16 @@ func Run(ctx context.Context) error {
 
 		return server.Run(ctx, &mcp.StdioTransport{})
 	}
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_broadcast",
+		Description: "Post a message into the team channel for all teammates to see.",
+	}, handleTeamBroadcast)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_poll",
+		Description: "Read recent messages from the team channel so you stay in sync before replying.",
+	}, handleTeamPoll)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_status",
