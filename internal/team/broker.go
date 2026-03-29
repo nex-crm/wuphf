@@ -1642,8 +1642,35 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 	_ = b.saveLocked()
 	b.mu.Unlock()
 
+	// Respawn the agent's Claude Code session to clear its context
+	go respawnAgentPane(agent)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true, "removed": removed})
+}
+
+// respawnAgentPane restarts an agent's Claude Code session in its tmux pane.
+func respawnAgentPane(slug string) {
+	manifest := company.DefaultManifest()
+	loaded, err := company.LoadManifest()
+	if err == nil && len(loaded.Members) > 0 {
+		manifest = loaded
+	}
+
+	for i, agent := range manifest.Members {
+		if agent.Slug == slug {
+			paneIdx := i + 1 // pane 0 is channel view
+			target := fmt.Sprintf("wuphf-team:team.%d", paneIdx)
+			// Send Ctrl+C to interrupt, then exit to terminate
+			exec.Command("tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
+			time.Sleep(500 * time.Millisecond)
+			exec.Command("tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
+			time.Sleep(500 * time.Millisecond)
+			// Respawn the pane with a fresh claude session
+			exec.Command("tmux", "-L", "wuphf", "respawn-pane", "-k", "-t", target).Run()
+			return
+		}
+	}
 }
 
 func (b *Broker) handleUsage(w http.ResponseWriter, r *http.Request) {
