@@ -151,12 +151,13 @@ type brokerMessage struct {
 }
 
 type channelMember struct {
-	Slug        string `json:"slug"`
-	Name        string `json:"name,omitempty"`
-	Role        string `json:"role,omitempty"`
-	Disabled    bool   `json:"disabled,omitempty"`
-	LastMessage string `json:"lastMessage"`
-	LastTime    string `json:"lastTime"`
+	Slug         string `json:"slug"`
+	Name         string `json:"name,omitempty"`
+	Role         string `json:"role,omitempty"`
+	Disabled     bool   `json:"disabled,omitempty"`
+	LastMessage  string `json:"lastMessage"`
+	LastTime     string `json:"lastTime"`
+	LiveActivity string `json:"liveActivity,omitempty"`
 }
 
 type officeMemberInfo struct {
@@ -427,6 +428,10 @@ var oneOnOneSlashCommands = []tui.SlashCommand{
 	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode"},
 	{Name: "init", Description: "Run setup"},
 	{Name: "integrate", Description: "Connect an integration"},
+	{Name: "threads", Description: "Browse and manage threads"},
+	{Name: "expand", Description: "Expand a collapsed thread"},
+	{Name: "collapse", Description: "Collapse a thread"},
+	{Name: "reply", Description: "Reply in thread by message ID"},
 	{Name: "cancel", Description: "Exit reply/setup mode"},
 	{Name: "reset", Description: "Reset this direct session"},
 	{Name: "quit", Description: "Exit WUPHF"},
@@ -1714,12 +1719,13 @@ func (m channelModel) View() string {
 
 	// Composer
 	typingAgents := typingAgentsFromMembers(m.members)
+	liveActivities := liveActivityFromMembers(m.members)
 	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
-		m.replyToID, typingAgents, activePending, m.selectedOption,
+		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption,
 		m.focus == focusMain)
 	if m.memberDraft != nil {
 		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
-			"", typingAgents, nil, 0, m.focus == focusMain)
+			"", typingAgents, nil, nil, 0, m.focus == focusMain)
 	}
 
 	// Interview card (above composer)
@@ -2233,12 +2239,13 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 
 	activePending := m.visiblePendingRequest()
 	typingAgents := typingAgentsFromMembers(m.members)
+	liveActivities := liveActivityFromMembers(m.members)
 	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
-		m.replyToID, typingAgents, activePending, m.selectedOption,
+		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption,
 		m.focus == focusMain)
 	if m.memberDraft != nil {
 		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
-			"", typingAgents, nil, 0, m.focus == focusMain)
+			"", typingAgents, nil, nil, 0, m.focus == focusMain)
 	}
 	interviewCard := ""
 	if activePending != nil {
