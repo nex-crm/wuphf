@@ -2805,21 +2805,34 @@ func captureLiveAgentActivity() map[string]string {
 			continue
 		}
 
-		// Check if any line contains a Claude Code thinking indicator
+		// Detect if the agent is actively working by checking if the pane
+		// is NOT sitting idle at a prompt. An idle Claude Code pane ends with
+		// ❯ on the last non-empty, non-chrome line. Anything else = active.
 		lines := strings.Split(string(paneOut), "\n")
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
+		isIdle := true
+		for i := len(lines) - 1; i >= 0; i-- {
+			trimmed := strings.TrimSpace(lines[i])
+			if trimmed == "" {
+				continue
+			}
+			// Skip known chrome lines
 			lower := strings.ToLower(trimmed)
-			// Claude Code spinner words
-			for _, kw := range []string{"crunching", "thinking", "scurrying", "planning"} {
-				if strings.Contains(lower, kw) {
-					result[agent.Slug] = "active"
-					break
-				}
+			if strings.Contains(lower, "bypass") || strings.Contains(lower, "/effort") ||
+				strings.Contains(lower, "permissions") || strings.Contains(lower, "shift+tab") ||
+				strings.Contains(lower, "(mcp)") || strings.HasPrefix(trimmed, "\u2500") ||
+				strings.HasPrefix(trimmed, "\u2501") {
+				continue
 			}
-			if _, ok := result[agent.Slug]; ok {
-				break
+			// If the last meaningful line is the ❯ prompt, agent is idle
+			if strings.HasPrefix(trimmed, "\u276f") || trimmed == "\u276f" {
+				isIdle = true
+			} else {
+				isIdle = false
 			}
+			break
+		}
+		if !isIdle {
+			result[agent.Slug] = "active"
 		}
 	}
 	return result
@@ -2839,14 +2852,22 @@ func captureLiveAgentActivityForPane(slug string) map[string]string {
 		return result
 	}
 	lines := strings.Split(string(paneOut), "\n")
-	for _, line := range lines {
-		lower := strings.ToLower(strings.TrimSpace(line))
-		for _, kw := range []string{"crunching", "thinking", "scurrying", "planning"} {
-			if strings.Contains(lower, kw) {
-				result[slug] = "active"
-				return result
-			}
+	for i := len(lines) - 1; i >= 0; i-- {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed == "" {
+			continue
 		}
+		lower := strings.ToLower(trimmed)
+		if strings.Contains(lower, "bypass") || strings.Contains(lower, "/effort") ||
+			strings.Contains(lower, "permissions") || strings.Contains(lower, "shift+tab") ||
+			strings.Contains(lower, "(mcp)") || strings.HasPrefix(trimmed, "\u2500") ||
+			strings.HasPrefix(trimmed, "\u2501") {
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "\u276f") && trimmed != "\u276f" {
+			result[slug] = "active"
+		}
+		break
 	}
 	return result
 }

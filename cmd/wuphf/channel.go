@@ -1788,8 +1788,7 @@ func (m channelModel) View() string {
 			if member.Slug == "you" || member.Slug == "human" {
 				continue
 			}
-			act := classifyActivity(member)
-			if act.Label == "talking" || act.Label == "shipping" || act.Label == "thinking" || member.LiveActivity != "" {
+			if member.LiveActivity != "" {
 				name := member.Name
 				if name == "" {
 					name = displayName(member.Slug)
