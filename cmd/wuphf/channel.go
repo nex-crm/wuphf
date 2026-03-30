@@ -228,6 +228,7 @@ type channelUsageState struct {
 	Session channelUsageTotals            `json:"session,omitempty"`
 	Total   channelUsageTotals            `json:"total"`
 	Agents  map[string]channelUsageTotals `json:"agents"`
+	Since   string                        `json:"since,omitempty"`
 }
 
 type channelTask struct {
@@ -1741,13 +1742,20 @@ func (m channelModel) View() string {
 	headerMeta := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).
 		Render(m.currentHeaderMeta())
 	if m.usage.Total.TotalTokens > 0 || m.usage.Total.CostUsd > 0 || m.usage.Session.TotalTokens > 0 || m.usage.Session.CostUsd > 0 {
+		sinceLabel := ""
+		if m.usage.Since != "" {
+			if t, err := time.Parse(time.RFC3339, m.usage.Since); err == nil {
+				sinceLabel = " since " + t.Local().Format("Jan 2 15:04")
+			}
+		}
 		headerMeta += "  " + lipgloss.NewStyle().
 			Foreground(lipgloss.Color(slackActive)).
-			Render(fmt.Sprintf("Session %s · %s  Total %s · %s",
+			Render(fmt.Sprintf("Session %s · %s  Total %s · %s%s",
 				formatUsd(m.usage.Session.CostUsd),
 				formatTokenCount(m.usage.Session.TotalTokens),
 				formatUsd(m.usage.Total.CostUsd),
 				formatTokenCount(m.usage.Total.TotalTokens),
+				sinceLabel,
 			))
 	}
 	if m.activeApp == officeAppMessages && m.unreadCount > 0 && m.scroll > 0 {
@@ -1951,12 +1959,18 @@ func (m channelModel) View() string {
 			lipgloss.NewStyle().Foreground(lipgloss.Color("#FBBF24")).Render(statusText),
 		)
 	} else if m.usage.Total.TotalTokens > 0 || m.usage.Total.CostUsd > 0 || m.usage.Session.TotalTokens > 0 || m.usage.Session.CostUsd > 0 {
+		sinceStatus := ""
+		if m.usage.Since != "" {
+			if t, err := time.Parse(time.RFC3339, m.usage.Since); err == nil {
+				sinceStatus = " since " + t.Local().Format("Jan 2 15:04")
+			}
+		}
 		statusBar = statusBarStyle(m.width).Render(fmt.Sprintf(
-			" %s %d online │ session %s · %s │ total %s · %s │ %s │ Tab focus:%s │ /quit",
+			" %s %d online │ session %s · %s │ total %s · %s%s │ %s │ Tab focus:%s │ /quit",
 			"\u25CF", onlineCount,
 			formatUsd(m.usage.Session.CostUsd), formatTokenCount(m.usage.Session.TotalTokens),
 			formatUsd(m.usage.Total.CostUsd), formatTokenCount(m.usage.Total.TotalTokens),
-			scrollHint, focusLabel,
+			sinceStatus, scrollHint, focusLabel,
 		))
 	} else if m.quickJumpTarget != quickJumpNone {
 		label := "channels"
@@ -2350,13 +2364,20 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 	headerMeta := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).
 		Render(m.currentHeaderMeta())
 	if m.usage.Total.TotalTokens > 0 || m.usage.Total.CostUsd > 0 || m.usage.Session.TotalTokens > 0 || m.usage.Session.CostUsd > 0 {
+		sinceLabel := ""
+		if m.usage.Since != "" {
+			if t, err := time.Parse(time.RFC3339, m.usage.Since); err == nil {
+				sinceLabel = " since " + t.Local().Format("Jan 2 15:04")
+			}
+		}
 		headerMeta += "  " + lipgloss.NewStyle().
 			Foreground(lipgloss.Color(slackActive)).
-			Render(fmt.Sprintf("Session %s · %s  Total %s · %s",
+			Render(fmt.Sprintf("Session %s · %s  Total %s · %s%s",
 				formatUsd(m.usage.Session.CostUsd),
 				formatTokenCount(m.usage.Session.TotalTokens),
 				formatUsd(m.usage.Total.CostUsd),
 				formatTokenCount(m.usage.Total.TotalTokens),
+				sinceLabel,
 			))
 	}
 	channelHeader := headerStyle.Render(headerLine1 + headerMeta)

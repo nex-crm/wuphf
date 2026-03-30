@@ -263,6 +263,7 @@ type teamUsageState struct {
 	Session usageTotals            `json:"session,omitempty"`
 	Total   usageTotals            `json:"total"`
 	Agents  map[string]usageTotals `json:"agents,omitempty"`
+	Since   string                 `json:"since,omitempty"`
 }
 
 // Broker is a lightweight HTTP message broker for the team channel.
@@ -2456,6 +2457,9 @@ type usageEvent struct {
 func (b *Broker) recordUsageLocked(event usageEvent) {
 	if b.usage.Agents == nil {
 		b.usage.Agents = make(map[string]usageTotals)
+	}
+	if b.usage.Since == "" {
+		b.usage.Since = time.Now().UTC().Format(time.RFC3339)
 	}
 	agentTotal := b.usage.Agents[event.AgentSlug]
 	applyUsageEvent(&agentTotal, event)
