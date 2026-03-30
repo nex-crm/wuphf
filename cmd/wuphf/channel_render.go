@@ -37,13 +37,10 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 
 	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Today")})
 
-	if threadsDefaultExpand {
-		for _, msg := range messages {
-			if msg.ReplyTo == "" && hasThreadReplies(messages, msg.ID) {
-				if _, explicit := expanded[msg.ID]; !explicit {
-					expanded[msg.ID] = true
-				}
-			}
+	// Always expand threads — collapsed is confusing, expanded is readable
+	for _, msg := range messages {
+		if msg.ReplyTo == "" && hasThreadReplies(messages, msg.ID) {
+			expanded[msg.ID] = true
 		}
 	}
 
