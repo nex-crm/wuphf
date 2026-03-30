@@ -14,6 +14,7 @@ import (
 // Config mirrors ~/.wuphf/config.json.
 type Config struct {
 	APIKey              string `json:"api_key,omitempty"`
+	OneAPIKey           string `json:"one_api_key,omitempty"`
 	Email               string `json:"email,omitempty"`
 	WorkspaceID         string `json:"workspace_id,omitempty"`
 	WorkspaceSlug       string `json:"workspace_slug,omitempty"`
@@ -133,6 +134,88 @@ func ResolveAPIKey(flagValue string) string {
 	}
 	cfg, _ := Load()
 	return cfg.APIKey
+}
+
+// ResolveOneSecret resolves the Nex-managed One secret.
+// One is disabled entirely when Nex is disabled for the session.
+// Resolution: WUPHF_ONE_SECRET env > ONE_SECRET env > config file.
+func ResolveOneSecret() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_ONE_SECRET")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("ONE_SECRET")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.OneAPIKey)
+}
+
+// ResolveOneIdentity resolves the identity scope WUPHF should use with One.
+// Resolution: WUPHF_ONE_IDENTITY env > ONE_IDENTITY env > config email.
+func ResolveOneIdentity() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_ONE_IDENTITY")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("ONE_IDENTITY")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.Email)
+}
+
+// ResolveOneIdentityType resolves the One identity type.
+// Resolution: WUPHF_ONE_IDENTITY_TYPE env > ONE_IDENTITY_TYPE env > "user".
+func ResolveOneIdentityType() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_ONE_IDENTITY_TYPE")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("ONE_IDENTITY_TYPE")); v != "" {
+		return v
+	}
+	if ResolveOneIdentity() == "" {
+		return ""
+	}
+	return "user"
+}
+
+// OneSetupSummary explains how integrations are handled for the current setup.
+func OneSetupSummary() string {
+	if ResolveNoNex() {
+		return "disabled with Nex (--no-nex)"
+	}
+	email := ResolveOneIdentity()
+	secret := ResolveOneSecret()
+	switch {
+	case email != "" && secret != "":
+		return fmt.Sprintf("managed by Nex via One (%s)", email)
+	case email != "":
+		return fmt.Sprintf("managed by Nex via One (%s), provisioning pending", email)
+	case secret != "":
+		return "managed by Nex via One"
+	default:
+		return "managed by Nex via One after Nex setup"
+	}
+}
+
+// OneSetupBlurb is the user-facing copy for setup and config surfaces.
+func OneSetupBlurb() string {
+	if ResolveNoNex() {
+		return "Nex is disabled for this session, so WUPHF-managed integrations are disabled too."
+	}
+	email := ResolveOneIdentity()
+	if email != "" {
+		return fmt.Sprintf("WUPHF uses One for integrations and manages it automatically with your Nex email (%s).", email)
+	}
+	return "WUPHF uses One for integrations and will manage it automatically once Nex setup is complete."
 }
 
 // ResolveFormat resolves the output format via: flag > config file > "text".

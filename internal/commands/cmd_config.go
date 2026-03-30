@@ -48,7 +48,6 @@ func configShow(ctx *SlashContext) error {
 			masked = "****"
 		}
 	}
-
 	workspace := cfg.WorkspaceSlug
 	if workspace == "" {
 		workspace = cfg.WorkspaceID
@@ -72,6 +71,7 @@ func configShow(ctx *SlashContext) error {
 	var sb strings.Builder
 	sb.WriteString("Configuration:\n")
 	sb.WriteString(fmt.Sprintf("  API Key:   %s\n", masked))
+	sb.WriteString(fmt.Sprintf("  Integrations: %s\n", config.OneSetupSummary()))
 	sb.WriteString(fmt.Sprintf("  Workspace: %s\n", workspace))
 	sb.WriteString(fmt.Sprintf("  Provider:  %s\n", provider))
 	sb.WriteString(fmt.Sprintf("  Pack:      %s\n", pack))

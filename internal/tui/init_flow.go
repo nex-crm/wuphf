@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -53,11 +54,13 @@ func (f InitFlowModel) Start() (InitFlowModel, tea.Cmd) {
 	cfg, _ := config.Load()
 	if cfg.APIKey != "" {
 		f.apiKey = cfg.APIKey
-		f.phase = InitProviderChoice
-		return f, f.emitPhase(InitProviderChoice)
 	}
-	f.phase = InitAPIKey
-	return f, f.emitPhase(InitAPIKey)
+	if f.apiKey == "" {
+		f.phase = InitAPIKey
+		return f, f.emitPhase(InitAPIKey)
+	}
+	f.phase = InitProviderChoice
+	return f, f.emitPhase(InitProviderChoice)
 }
 
 // Update advances the flow based on incoming messages.
@@ -87,11 +90,15 @@ func (f InitFlowModel) Update(msg tea.Msg) (InitFlowModel, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		if f.phase == InitAPIKey {
+		if f.requiresTextInput() {
 			return f.updateAPIKeyInput(m)
 		}
 	}
 	return f, nil
+}
+
+func (f InitFlowModel) requiresTextInput() bool {
+	return f.phase == InitAPIKey
 }
 
 // updateAPIKeyInput handles keystrokes during the API key entry phase.
@@ -99,7 +106,7 @@ func (f InitFlowModel) updateAPIKeyInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd
 	switch msg.String() {
 	case "enter":
 		key := string(f.keyInput)
-		if key == "" {
+		if strings.TrimSpace(key) == "" {
 			f.keyError = "API key cannot be empty."
 			return f, nil
 		}
@@ -203,7 +210,7 @@ func (f InitFlowModel) View() string {
 
 	view := labelStyle.Render(heading) + "\n" + muteStyle.Render(instructions)
 
-	if f.phase == InitAPIKey {
+	if f.requiresTextInput() {
 		view += "\n" + f.renderAPIKeyInput()
 	}
 
@@ -214,7 +221,8 @@ func (f InitFlowModel) View() string {
 func (f InitFlowModel) renderAPIKeyInput() string {
 	input := string(f.keyInput)
 	cursorStyle := lipgloss.NewStyle().Reverse(true)
-	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(NexBlue)).Bold(true).Render("API Key: ")
+	label := "API Key: "
+	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(NexBlue)).Bold(true).Render(label)
 
 	display := prompt + input + cursorStyle.Render(" ")
 
@@ -231,9 +239,9 @@ func (f InitFlowModel) phaseText() (heading, instructions string) {
 	case InitIdle:
 		return "Setup", "Run /init to begin."
 	case InitAPIKey:
-		return "Enter API Key", "Paste your WUPHF API key."
+		return "Enter Nex API Key", "Paste your WUPHF/Nex API key. WUPHF uses One for integrations and manages it automatically through your Nex identity."
 	case InitProviderChoice:
-		return "Choose LLM Provider", "Select your preferred AI provider."
+		return "Choose LLM Provider", "Select your preferred AI provider. Integrations are handled automatically through Nex using One."
 	case InitPackChoice:
 		return "Choose Agent Pack", "Select the team of agents to work with."
 	case InitDone:
@@ -241,7 +249,7 @@ func (f InitFlowModel) phaseText() (heading, instructions string) {
 		if p := agent.GetPack(f.pack); p != nil {
 			packName = p.Name
 		}
-		return "Setup Complete", "Provider: " + f.provider + " | Pack: " + packName + ". You're ready to go."
+		return "Setup Complete", "Provider: " + f.provider + " | Pack: " + packName + ". " + config.OneSetupBlurb()
 	default:
 		return "Setup", "Run /init to begin."
 	}

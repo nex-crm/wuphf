@@ -10,6 +10,7 @@
 package team
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -22,8 +23,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/api"
+	"github.com/nex-crm/wuphf/internal/calendar"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/tui"
@@ -276,6 +279,7 @@ func (l *Launcher) Launch() error {
 		go l.pollNexInsightsLoop()
 		go l.watchdogSchedulerLoop()
 	}
+	go l.pollOneRelayEventsLoop()
 
 	return nil
 }
@@ -1010,6 +1014,72 @@ func notificationPollInterval() time.Duration {
 	return defaultNotificationPollInterval
 }
 
+func (l *Launcher) pollOneRelayEventsLoop() {
+	if l.broker == nil {
+		return
+	}
+	provider := action.NewOneCLIFromEnv()
+	if _, err := provider.ListRelays(context.Background(), action.ListRelaysOptions{Limit: 1}); err != nil {
+		return
+	}
+	interval := time.Minute
+	time.Sleep(25 * time.Second)
+	for {
+		l.updateSchedulerJob("one-relay-events", "One relay events", interval, time.Now().UTC(), "running")
+		l.fetchAndRecordOneRelayEvents(provider)
+		l.updateSchedulerJob("one-relay-events", "One relay events", interval, time.Now().UTC().Add(interval), "sleeping")
+		time.Sleep(interval)
+	}
+}
+
+func (l *Launcher) fetchAndRecordOneRelayEvents(provider *action.OneCLI) {
+	if l.broker == nil || provider == nil {
+		return
+	}
+	result, err := provider.ListRelayEvents(context.Background(), action.RelayEventsOptions{Limit: 20})
+	if err != nil {
+		return
+	}
+	if len(result.Events) == 0 {
+		return
+	}
+	var signals []officeSignal
+	for _, event := range result.Events {
+		title := strings.TrimSpace(event.EventType)
+		if title == "" {
+			title = "Relay event"
+		}
+		content := fmt.Sprintf("One relay received %s on %s.", strings.TrimSpace(event.EventType), strings.TrimSpace(event.Platform))
+		signals = append(signals, officeSignal{
+			ID:         strings.TrimSpace(event.ID),
+			Source:     "one",
+			Kind:       "relay_event",
+			Title:      title,
+			Content:    content,
+			Channel:    "general",
+			Owner:      "ceo",
+			Confidence: "medium",
+			Urgency:    "medium",
+		})
+	}
+	records, err := l.broker.RecordSignals(signals)
+	if err != nil || len(records) == 0 {
+		return
+	}
+	for _, record := range records {
+		_ = l.broker.RecordAction(
+			"external_trigger_received",
+			"one",
+			record.Channel,
+			"one",
+			truncateSummary(record.Title+" "+record.Content, 140),
+			record.ID,
+			[]string{record.ID},
+			"",
+		)
+	}
+}
+
 func (l *Launcher) pollNexInsightsLoop() {
 	if l.broker == nil {
 		return
@@ -1072,6 +1142,8 @@ func (l *Launcher) processDueSchedulerJobs() {
 			l.processDueTaskJob(job)
 		case "request":
 			l.processDueRequestJob(job)
+		case "workflow":
+			l.processDueWorkflowJob(job)
 		default:
 			nextRun := time.Now().UTC().Add(time.Duration(config.ResolveTaskReminderInterval()) * time.Minute)
 			_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
@@ -1132,6 +1204,86 @@ func (l *Launcher) processDueRequestJob(job schedulerJob) {
 	}
 	nextRun := time.Now().UTC().Add(time.Duration(config.ResolveTaskReminderInterval()) * time.Minute)
 	_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
+}
+
+func (l *Launcher) processDueWorkflowJob(job schedulerJob) {
+	if l.broker == nil {
+		return
+	}
+	type workflowSchedulePayload struct {
+		Provider     string         `json:"provider"`
+		WorkflowKey  string         `json:"workflow_key"`
+		Inputs       map[string]any `json:"inputs"`
+		ScheduleExpr string         `json:"schedule_expr"`
+		CreatedBy    string         `json:"created_by"`
+		Channel      string         `json:"channel"`
+		SkillName    string         `json:"skill_name"`
+	}
+	var payload workflowSchedulePayload
+	if strings.TrimSpace(job.Payload) != "" {
+		_ = json.Unmarshal([]byte(job.Payload), &payload)
+	}
+	workflowKey := strings.TrimSpace(payload.WorkflowKey)
+	if workflowKey == "" {
+		workflowKey = strings.TrimSpace(job.WorkflowKey)
+	}
+	if workflowKey == "" {
+		_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
+		return
+	}
+	channel := normalizeChannelSlug(payload.Channel)
+	if channel == "" {
+		channel = normalizeChannelSlug(job.Channel)
+	}
+	if channel == "" {
+		channel = "general"
+	}
+	provider := action.NewOneCLIFromEnv()
+	result, err := provider.ExecuteWorkflow(context.Background(), action.WorkflowExecuteRequest{
+		KeyOrPath: workflowKey,
+		Inputs:    payload.Inputs,
+	})
+	now := time.Now().UTC()
+	nextRun, hasNext := nextWorkflowRun(strings.TrimSpace(payload.ScheduleExpr), now)
+	if err != nil {
+		summary := fmt.Sprintf("Scheduled workflow %s failed via One", workflowKey)
+		_ = l.broker.RecordAction("external_workflow_failed", "one", channel, "scheduler", summary, workflowKey, nil, "")
+		_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, "failed", now)
+		if hasNext {
+			_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
+		} else {
+			_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
+		}
+		return
+	}
+	status := strings.TrimSpace(result.Status)
+	if status == "" {
+		status = "completed"
+	}
+	summary := fmt.Sprintf("Scheduled workflow %s ran via One", workflowKey)
+	_ = l.broker.RecordAction("external_workflow_executed", "one", channel, "scheduler", summary, workflowKey, nil, "")
+	_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, status, now)
+	if hasNext {
+		_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
+	} else {
+		_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
+	}
+}
+
+func nextWorkflowRun(scheduleExpr string, after time.Time) (time.Time, bool) {
+	scheduleExpr = strings.TrimSpace(scheduleExpr)
+	if scheduleExpr == "" {
+		return time.Time{}, false
+	}
+	sched, err := calendar.ParseCron(scheduleExpr)
+	if err != nil {
+		return time.Time{}, false
+	}
+	next := sched.Next(after)
+	if next.IsZero() {
+		return time.Time{}, false
+	}
+	return next, true
 }
 
 func (l *Launcher) recordWatchdogLedger(channel, kind, targetID, owner, summary, sourceSignalID string) ([]string, string) {
@@ -2259,10 +2411,23 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 	if l.isOneOnOne() {
 		oneOnOneEnv = fmt.Sprintf("WUPHF_ONE_ON_ONE=1 WUPHF_ONE_ON_ONE_AGENT=%s ", l.oneOnOneAgent())
 	}
+	oneSecretEnv := ""
+	if secret := strings.TrimSpace(config.ResolveOneSecret()); secret != "" {
+		oneSecretEnv = "ONE_SECRET=" + shellQuote(secret) + " "
+	}
+	oneIdentityEnv := ""
+	if identity := strings.TrimSpace(config.ResolveOneIdentity()); identity != "" {
+		oneIdentityEnv = "ONE_IDENTITY=" + shellQuote(identity) + " "
+		if identityType := strings.TrimSpace(config.ResolveOneIdentityType()); identityType != "" {
+			oneIdentityEnv += "ONE_IDENTITY_TYPE=" + shellQuote(identityType) + " "
+		}
+	}
 
 	return fmt.Sprintf(
-		"%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
 		oneOnOneEnv,
+		oneSecretEnv,
+		oneIdentityEnv,
 		slug,
 		brokerToken,
 		config.ResolveNoNex(),
@@ -2293,6 +2458,23 @@ func (l *Launcher) ensureMCPConfig() (string, error) {
 	servers["wuphf-office"] = map[string]any{
 		"command": wuphfBinary,
 		"args":    []string{"mcp-team"},
+	}
+	if oneSecret := strings.TrimSpace(config.ResolveOneSecret()); oneSecret != "" {
+		servers["wuphf-office"].(map[string]any)["env"] = map[string]string{
+			"ONE_SECRET": oneSecret,
+		}
+	}
+	if identity := strings.TrimSpace(config.ResolveOneIdentity()); identity != "" {
+		entry := servers["wuphf-office"].(map[string]any)
+		env, _ := entry["env"].(map[string]string)
+		if env == nil {
+			env = map[string]string{}
+		}
+		env["ONE_IDENTITY"] = identity
+		if identityType := strings.TrimSpace(config.ResolveOneIdentityType()); identityType != "" {
+			env["ONE_IDENTITY_TYPE"] = identityType
+		}
+		entry["env"] = env
 	}
 
 	if !config.ResolveNoNex() {

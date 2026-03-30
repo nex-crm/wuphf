@@ -83,6 +83,15 @@ type channelSkill struct {
 	Channel     string   `json:"channel"`
 	Tags        []string `json:"tags"`
 	Trigger     string   `json:"trigger"`
+	WorkflowProvider    string   `json:"workflow_provider"`
+	WorkflowKey         string   `json:"workflow_key"`
+	WorkflowDefinition  string   `json:"workflow_definition"`
+	WorkflowSchedule    string   `json:"workflow_schedule"`
+	RelayID             string   `json:"relay_id"`
+	RelayPlatform       string   `json:"relay_platform"`
+	RelayEventTypes     []string `json:"relay_event_types"`
+	LastExecutionAt     string   `json:"last_execution_at"`
+	LastExecutionStatus string   `json:"last_execution_status"`
 	UsageCount  int      `json:"usage_count"`
 	Status      string   `json:"status"`
 	CreatedAt   string   `json:"created_at"`
@@ -310,6 +319,10 @@ type channelSchedulerJob struct {
 	TargetType      string `json:"target_type,omitempty"`
 	TargetID        string `json:"target_id,omitempty"`
 	Channel         string `json:"channel,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	ScheduleExpr    string `json:"schedule_expr,omitempty"`
+	WorkflowKey     string `json:"workflow_key,omitempty"`
+	SkillName       string `json:"skill_name,omitempty"`
 	IntervalMinutes int    `json:"interval_minutes"`
 	DueAt           string `json:"due_at,omitempty"`
 	NextRun         string `json:"next_run,omitempty"`
@@ -937,7 +950,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker, cmd = m.picker.Update(msg)
 			return m, cmd
 		}
-		if m.initFlow.Phase() == tui.InitAPIKey {
+		if m.initFlow.IsActive() && m.initFlow.Phase() == tui.InitAPIKey {
 			var cmd tea.Cmd
 			m.initFlow, cmd = m.initFlow.Update(msg)
 			return m, cmd
@@ -2028,7 +2041,13 @@ func (m channelModel) currentHeaderMeta() string {
 				activeWatchdogs++
 			}
 		}
-		return fmt.Sprintf("  Signals, decisions, and watchdogs driving the office · %d signals · %d decisions · %d active watchdogs · %d high signal", len(m.signals), len(m.decisions), activeWatchdogs, highSignal)
+		external := 0
+		for _, action := range m.actions {
+			if strings.HasPrefix(strings.TrimSpace(action.Kind), "external_") {
+				external++
+			}
+		}
+		return fmt.Sprintf("  Signals, decisions, external actions, and watchdogs driving the office · %d signals · %d decisions · %d external · %d active watchdogs · %d high signal", len(m.signals), len(m.decisions), external, activeWatchdogs, highSignal)
 	case officeAppCalendar:
 		events := filterCalendarEvents(collectCalendarEvents(m.scheduler, m.tasks, m.requests, m.activeChannel, m.members), m.calendarRange, m.calendarFilter)
 		dueSoon := 0
@@ -2046,15 +2065,25 @@ func (m channelModel) currentHeaderMeta() string {
 		if strings.TrimSpace(m.calendarFilter) != "" {
 			filter = displayName(m.calendarFilter)
 		}
-		return fmt.Sprintf("  %s view · %s · %d upcoming · %d due soon · %d recent actions", view, filter, len(events), dueSoon, len(m.actions))
+		scheduledWorkflows := 0
+		for _, job := range m.scheduler {
+			if strings.TrimSpace(job.Kind) == "one_workflow" {
+				scheduledWorkflows++
+			}
+		}
+		return fmt.Sprintf("  %s view · %s · %d upcoming · %d due soon · %d scheduled workflows · %d recent actions", view, filter, len(events), dueSoon, scheduledWorkflows, len(m.actions))
 	case officeAppSkills:
 		active := 0
+		workflowBacked := 0
 		for _, skill := range m.skills {
 			if skill.Status == "" || skill.Status == "active" {
 				active++
 			}
+			if strings.TrimSpace(skill.WorkflowKey) != "" {
+				workflowBacked++
+			}
 		}
-		return fmt.Sprintf("  Reusable team skills · %d total · %d active", len(m.skills), active)
+		return fmt.Sprintf("  Reusable team skills · %d total · %d active · %d workflow-backed", len(m.skills), active, workflowBacked)
 	default:
 		if !m.brokerConnected {
 			return fmt.Sprintf("  Offline preview · manifest roster loaded · %d teammates ready for #%s", len(m.officeMembers), m.activeChannel)
@@ -2093,7 +2122,7 @@ func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
 	case officeAppRequests:
 		return buildRequestLines(m.requests, contentWidth)
 	case officeAppInsights:
-		return buildInsightLines(m.signals, m.decisions, m.watchdogs, contentWidth)
+		return buildInsightLines(m.signals, m.decisions, m.watchdogs, m.actions, contentWidth)
 	case officeAppCalendar:
 		return buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
 	case officeAppSkills:
@@ -3597,7 +3626,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			}
 		}
 		if blocked {
-			m.notice = "That command is only available in team mode."
+			m.notice = "1:1 mode disables office collaboration commands. Switch back to the full team to use that."
 			return m, nil
 		}
 	}

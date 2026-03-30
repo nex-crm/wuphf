@@ -84,6 +84,7 @@ func cmdInit(ctx *SlashContext, args string) error {
 	if cfg.APIKey == "" {
 		ctx.AddMessage("system", "No WUPHF API key is configured yet. Run interactive /init inside WUPHF to add one.")
 	}
+	ctx.AddMessage("system", config.OneSetupBlurb())
 	return nil
 }
 

@@ -333,13 +333,13 @@ func buildRequestLines(requests []channelInterview, contentWidth int) []rendered
 	return lines
 }
 
-func buildInsightLines(signals []channelSignal, decisions []channelDecision, alerts []channelWatchdog, contentWidth int) []renderedLine {
+func buildInsightLines(signals []channelSignal, decisions []channelDecision, alerts []channelWatchdog, actions []channelAction, contentWidth int) []renderedLine {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
-	if len(signals) == 0 && len(decisions) == 0 && len(alerts) == 0 {
+	if len(signals) == 0 && len(decisions) == 0 && len(alerts) == 0 && len(recentExternalActions(actions, 8)) == 0 {
 		return []renderedLine{
 			{Text: ""},
 			{Text: muted.Render("  No office signals yet.")},
-			{Text: muted.Render("  When Nex or the office policy engine notices something important, it will land here with the reasoning trail.")},
+			{Text: muted.Render("  When Nex, One relays, or the office policy engine notices something important, it will land here with the reasoning trail.")},
 		}
 	}
 	var lines []renderedLine
@@ -410,6 +410,25 @@ func buildInsightLines(signals []channelSignal, decisions []channelDecision, ale
 			}
 			lines = append(lines, renderedLine{Text: ""})
 			appendWrappedLine("  " + subtlePill("watchdog", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Render(alert.Summary))
+			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
+		}
+	}
+	if external := recentExternalActions(actions, 8); len(external) > 0 {
+		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, renderedLine{Text: "  " + lipgloss.NewStyle().Bold(true).Render("External actions")})
+		for _, act := range external {
+			metaParts := []string{fallbackString(act.Source, "one")}
+			if act.Actor != "" {
+				metaParts = append(metaParts, "@"+act.Actor)
+			}
+			if act.Channel != "" {
+				metaParts = append(metaParts, "#"+act.Channel)
+			}
+			if act.RelatedID != "" {
+				metaParts = append(metaParts, act.RelatedID)
+			}
+			lines = append(lines, renderedLine{Text: ""})
+			appendWrappedLine("  " + subtlePill(strings.ReplaceAll(act.Kind, "_", " "), "#DBEAFE", "#1D4ED8") + " " + lipgloss.NewStyle().Bold(true).Render(act.Summary))
 			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
 		}
 	}
@@ -547,6 +566,35 @@ func buildSkillLines(skills []channelSkill, contentWidth int) []renderedLine {
 		if skill.Trigger != "" {
 			lines = append(lines, renderedLine{Text: "  " + muted.Render("trigger: "+skill.Trigger)})
 		}
+		if skill.WorkflowKey != "" {
+			lines = append(lines, renderedLine{Text: "  " + muted.Render(fmt.Sprintf("workflow: %s via %s", skill.WorkflowKey, fallbackString(skill.WorkflowProvider, "one")))})
+		}
+		if skill.WorkflowSchedule != "" {
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("schedule: " + skill.WorkflowSchedule)})
+		}
+		if skill.RelayID != "" || skill.RelayPlatform != "" || len(skill.RelayEventTypes) > 0 {
+			relayParts := []string{}
+			if skill.RelayPlatform != "" {
+				relayParts = append(relayParts, skill.RelayPlatform)
+			}
+			if len(skill.RelayEventTypes) > 0 {
+				relayParts = append(relayParts, strings.Join(skill.RelayEventTypes, ", "))
+			}
+			if skill.RelayID != "" {
+				relayParts = append(relayParts, skill.RelayID)
+			}
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("relay: " + strings.Join(relayParts, " · "))})
+		}
+		if skill.LastExecutionAt != "" || skill.LastExecutionStatus != "" {
+			runParts := []string{}
+			if skill.LastExecutionStatus != "" {
+				runParts = append(runParts, skill.LastExecutionStatus)
+			}
+			if skill.LastExecutionAt != "" {
+				runParts = append(runParts, prettyRelativeTime(skill.LastExecutionAt))
+			}
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("last run: " + strings.Join(runParts, " · "))})
+		}
 	}
 	return lines
 }
@@ -632,6 +680,20 @@ func renderCalendarEventCard(event calendarEvent, contentWidth int) []renderedLi
 		participants = "With " + strings.Join(event.Participants, ", ")
 	}
 	secondary := strings.TrimSpace(event.Secondary)
+	if event.Provider != "" || event.ScheduleExpr != "" {
+		extraParts := []string{}
+		if event.Provider != "" {
+			extraParts = append(extraParts, event.Provider)
+		}
+		if event.ScheduleExpr != "" {
+			extraParts = append(extraParts, event.ScheduleExpr)
+		}
+		if secondary != "" {
+			secondary = secondary + " · " + strings.Join(extraParts, " · ")
+		} else {
+			secondary = strings.Join(extraParts, " · ")
+		}
+	}
 	cta := mutedText("Open event")
 	if event.ThreadID != "" {
 		cta = mutedText("Open thread")
@@ -773,6 +835,8 @@ type calendarEvent struct {
 	Title            string
 	Secondary        string
 	Channel          string
+	Provider         string
+	ScheduleExpr     string
 	Status           string
 	IntervalLabel    string
 	Participants     []string
@@ -805,6 +869,8 @@ func collectCalendarEvents(jobs []channelSchedulerJob, tasks []channelTask, requ
 			Title:            job.Label,
 			Secondary:        strings.TrimSpace(job.Status),
 			Channel:          chooseCalendarChannel(job.Channel, activeChannel),
+			Provider:         strings.TrimSpace(job.Provider),
+			ScheduleExpr:     strings.TrimSpace(job.ScheduleExpr),
 			Status:           strings.TrimSpace(job.Status),
 			IntervalLabel:    interval,
 			Participants:     participants,
@@ -1245,6 +1311,28 @@ func prettyWhen(ts, prefix string) string {
 	return strings.TrimSpace(prefix + " " + label)
 }
 
+func prettyRelativeTime(ts string) string {
+	parsed, ok := parseChannelTime(ts)
+	if !ok {
+		return ts
+	}
+	now := time.Now()
+	diff := now.Sub(parsed)
+	if diff < 0 {
+		diff = -diff
+	}
+	switch {
+	case diff < time.Minute:
+		return "just now"
+	case diff < time.Hour:
+		return fmt.Sprintf("%dm ago", int(diff/time.Minute))
+	case diff < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(diff/time.Hour))
+	default:
+		return parsed.Format("Jan 2 15:04")
+	}
+}
+
 func parseChannelTime(ts string) (time.Time, bool) {
 	for _, layout := range []string{
 		time.RFC3339,
@@ -1305,6 +1393,22 @@ func reverseWatchdogs(alerts []channelWatchdog, limit int) []channelWatchdog {
 		alerts = alerts[len(alerts)-limit:]
 	}
 	out := append([]channelWatchdog(nil), alerts...)
+	reverseAny(out)
+	return out
+}
+
+func recentExternalActions(actions []channelAction, limit int) []channelAction {
+	var filtered []channelAction
+	for _, action := range actions {
+		if !strings.HasPrefix(strings.TrimSpace(action.Kind), "external_") {
+			continue
+		}
+		filtered = append(filtered, action)
+	}
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[len(filtered)-limit:]
+	}
+	out := append([]channelAction(nil), filtered...)
 	reverseAny(out)
 	return out
 }

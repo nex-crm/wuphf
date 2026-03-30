@@ -191,6 +191,10 @@ type schedulerJob struct {
 	TargetType      string `json:"target_type,omitempty"`
 	TargetID        string `json:"target_id,omitempty"`
 	Channel         string `json:"channel,omitempty"`
+	Provider        string `json:"provider,omitempty"`
+	ScheduleExpr    string `json:"schedule_expr,omitempty"`
+	WorkflowKey     string `json:"workflow_key,omitempty"`
+	SkillName       string `json:"skill_name,omitempty"`
 	IntervalMinutes int    `json:"interval_minutes"`
 	DueAt           string `json:"due_at,omitempty"`
 	NextRun         string `json:"next_run,omitempty"`
@@ -209,6 +213,15 @@ type teamSkill struct {
 	Channel     string   `json:"channel,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Trigger     string   `json:"trigger,omitempty"`
+	WorkflowProvider    string   `json:"workflow_provider,omitempty"`
+	WorkflowKey         string   `json:"workflow_key,omitempty"`
+	WorkflowDefinition  string   `json:"workflow_definition,omitempty"`
+	WorkflowSchedule    string   `json:"workflow_schedule,omitempty"`
+	RelayID             string   `json:"relay_id,omitempty"`
+	RelayPlatform       string   `json:"relay_platform,omitempty"`
+	RelayEventTypes     []string `json:"relay_event_types,omitempty"`
+	LastExecutionAt     string   `json:"last_execution_at,omitempty"`
+	LastExecutionStatus string   `json:"last_execution_status,omitempty"`
 	UsageCount  int      `json:"usage_count"`
 	Status      string   `json:"status"`
 	CreatedAt   string   `json:"created_at"`
@@ -1354,6 +1367,10 @@ func normalizeSchedulerJob(job schedulerJob) schedulerJob {
 	job.TargetType = strings.TrimSpace(job.TargetType)
 	job.TargetID = strings.TrimSpace(job.TargetID)
 	job.Channel = normalizeChannelSlug(job.Channel)
+	job.Provider = strings.TrimSpace(job.Provider)
+	job.ScheduleExpr = strings.TrimSpace(job.ScheduleExpr)
+	job.WorkflowKey = strings.TrimSpace(job.WorkflowKey)
+	job.SkillName = strings.TrimSpace(job.SkillName)
 	if job.Channel == "" {
 		job.Channel = "general"
 	}
@@ -1730,36 +1747,88 @@ func (b *Broker) handleWatchdogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	switch r.Method {
+	case http.MethodGet:
+		b.mu.Lock()
+		actions := make([]officeActionLog, len(b.actions))
+		copy(actions, b.actions)
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"actions": actions})
+	case http.MethodPost:
+		var body struct {
+			Kind       string   `json:"kind"`
+			Source     string   `json:"source"`
+			Channel    string   `json:"channel"`
+			Actor      string   `json:"actor"`
+			Summary    string   `json:"summary"`
+			RelatedID  string   `json:"related_id"`
+			SignalIDs  []string `json:"signal_ids"`
+			DecisionID string   `json:"decision_id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(body.Kind) == "" || strings.TrimSpace(body.Summary) == "" {
+			http.Error(w, "kind and summary required", http.StatusBadRequest)
+			return
+		}
+		if err := b.RecordAction(
+			body.Kind,
+			body.Source,
+			body.Channel,
+			body.Actor,
+			body.Summary,
+			body.RelatedID,
+			body.SignalIDs,
+			body.DecisionID,
+		); err != nil {
+			http.Error(w, "failed to persist action", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
 	}
-	b.mu.Lock()
-	actions := make([]officeActionLog, len(b.actions))
-	copy(actions, b.actions)
-	b.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"actions": actions})
 }
 
 func (b *Broker) handleScheduler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	b.mu.Lock()
-	jobs := make([]schedulerJob, 0, len(b.scheduler))
-	dueOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("due_only")), "true")
-	now := time.Now().UTC()
-	for _, job := range b.scheduler {
-		if dueOnly && !schedulerJobDue(job, now) {
-			continue
+	switch r.Method {
+	case http.MethodGet:
+		b.mu.Lock()
+		jobs := make([]schedulerJob, 0, len(b.scheduler))
+		dueOnly := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("due_only")), "true")
+		now := time.Now().UTC()
+		for _, job := range b.scheduler {
+			if dueOnly && !schedulerJobDue(job, now) {
+				continue
+			}
+			jobs = append(jobs, job)
 		}
-		jobs = append(jobs, job)
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"jobs": jobs})
+	case http.MethodPost:
+		var body schedulerJob
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(body.Slug) == "" || strings.TrimSpace(body.Label) == "" {
+			http.Error(w, "slug and label required", http.StatusBadRequest)
+			return
+		}
+		if err := b.SetSchedulerJob(body); err != nil {
+			http.Error(w, "failed to persist scheduler job", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	b.mu.Unlock()
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"jobs": jobs})
 }
 
 func (b *Broker) handleBridge(w http.ResponseWriter, r *http.Request) {
@@ -2562,6 +2631,11 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		for _, slug := range msg.Tagged {
 			b.lastTaggedAt[slug] = time.Now()
 		}
+	}
+
+	// Clear typing indicator when an agent posts a reply
+	if msg.From != "you" && msg.From != "human" && b.lastTaggedAt != nil {
+		delete(b.lastTaggedAt, msg.From)
 	}
 
 	// Auto-detect skill proposals from CEO messages
@@ -3871,6 +3945,19 @@ func (b *Broker) findSkillByNameLocked(name string) *teamSkill {
 	return nil
 }
 
+func (b *Broker) findSkillByWorkflowKeyLocked(key string) *teamSkill {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return nil
+	}
+	for i := range b.skills {
+		if strings.TrimSpace(b.skills[i].WorkflowKey) == key && b.skills[i].Status != "archived" {
+			return &b.skills[i]
+		}
+	}
+	return nil
+}
+
 func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	channelFilter := normalizeChannelSlug(r.URL.Query().Get("channel"))
 
@@ -3902,6 +3989,15 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		Channel     string   `json:"channel"`
 		Tags        []string `json:"tags"`
 		Trigger     string   `json:"trigger"`
+		WorkflowProvider    string   `json:"workflow_provider"`
+		WorkflowKey         string   `json:"workflow_key"`
+		WorkflowDefinition  string   `json:"workflow_definition"`
+		WorkflowSchedule    string   `json:"workflow_schedule"`
+		RelayID             string   `json:"relay_id"`
+		RelayPlatform       string   `json:"relay_platform"`
+		RelayEventTypes     []string `json:"relay_event_types"`
+		LastExecutionAt     string   `json:"last_execution_at"`
+		LastExecutionStatus string   `json:"last_execution_status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -3958,6 +4054,15 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		Channel:     channel,
 		Tags:        body.Tags,
 		Trigger:     strings.TrimSpace(body.Trigger),
+		WorkflowProvider:    strings.TrimSpace(body.WorkflowProvider),
+		WorkflowKey:         strings.TrimSpace(body.WorkflowKey),
+		WorkflowDefinition:  strings.TrimSpace(body.WorkflowDefinition),
+		WorkflowSchedule:    strings.TrimSpace(body.WorkflowSchedule),
+		RelayID:             strings.TrimSpace(body.RelayID),
+		RelayPlatform:       strings.TrimSpace(body.RelayPlatform),
+		RelayEventTypes:     append([]string(nil), body.RelayEventTypes...),
+		LastExecutionAt:     strings.TrimSpace(body.LastExecutionAt),
+		LastExecutionStatus: strings.TrimSpace(body.LastExecutionStatus),
 		UsageCount:  0,
 		Status:      status,
 		CreatedAt:   now,
@@ -3995,13 +4100,22 @@ func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 		Tags        []string `json:"tags"`
 		Trigger     string   `json:"trigger"`
 		Status      string   `json:"status"`
+		WorkflowProvider    string   `json:"workflow_provider"`
+		WorkflowKey         string   `json:"workflow_key"`
+		WorkflowDefinition  string   `json:"workflow_definition"`
+		WorkflowSchedule    string   `json:"workflow_schedule"`
+		RelayID             string   `json:"relay_id"`
+		RelayPlatform       string   `json:"relay_platform"`
+		RelayEventTypes     []string `json:"relay_event_types"`
+		LastExecutionAt     string   `json:"last_execution_at"`
+		LastExecutionStatus string   `json:"last_execution_status"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	if strings.TrimSpace(body.Name) == "" {
-		http.Error(w, "name required", http.StatusBadRequest)
+	if strings.TrimSpace(body.Name) == "" && strings.TrimSpace(body.WorkflowKey) == "" {
+		http.Error(w, "name or workflow_key required", http.StatusBadRequest)
 		return
 	}
 
@@ -4011,6 +4125,9 @@ func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 	defer b.mu.Unlock()
 
 	sk := b.findSkillByNameLocked(body.Name)
+	if sk == nil {
+		sk = b.findSkillByWorkflowKeyLocked(body.WorkflowKey)
+	}
 	if sk == nil {
 		http.Error(w, "skill not found", http.StatusNotFound)
 		return
@@ -4033,6 +4150,33 @@ func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	if t := strings.TrimSpace(body.Trigger); t != "" {
 		sk.Trigger = t
+	}
+	if p := strings.TrimSpace(body.WorkflowProvider); p != "" {
+		sk.WorkflowProvider = p
+	}
+	if key := strings.TrimSpace(body.WorkflowKey); key != "" {
+		sk.WorkflowKey = key
+	}
+	if def := strings.TrimSpace(body.WorkflowDefinition); def != "" {
+		sk.WorkflowDefinition = def
+	}
+	if sched := strings.TrimSpace(body.WorkflowSchedule); sched != "" {
+		sk.WorkflowSchedule = sched
+	}
+	if relayID := strings.TrimSpace(body.RelayID); relayID != "" {
+		sk.RelayID = relayID
+	}
+	if relayPlatform := strings.TrimSpace(body.RelayPlatform); relayPlatform != "" {
+		sk.RelayPlatform = relayPlatform
+	}
+	if body.RelayEventTypes != nil {
+		sk.RelayEventTypes = append([]string(nil), body.RelayEventTypes...)
+	}
+	if ts := strings.TrimSpace(body.LastExecutionAt); ts != "" {
+		sk.LastExecutionAt = ts
+	}
+	if status := strings.TrimSpace(body.LastExecutionStatus); status != "" {
+		sk.LastExecutionStatus = status
 	}
 	if s := strings.TrimSpace(body.Status); s != "" {
 		sk.Status = s
@@ -4288,4 +4432,3 @@ func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
 		Timestamp: now,
 	})
 }
-

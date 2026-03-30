@@ -112,6 +112,39 @@ func TestResolveAPIKeyConfigFile(t *testing.T) {
 	})
 }
 
+func TestResolveOneSecretDisabledWhenNoNex(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "1")
+		t.Setenv("WUPHF_ONE_SECRET", "env-secret")
+		_ = Save(Config{OneAPIKey: "file-secret"})
+		if got := ResolveOneSecret(); got != "" {
+			t.Fatalf("expected no One secret when Nex is disabled, got %q", got)
+		}
+	})
+}
+
+func TestResolveOneIdentityFallsBackToEmail(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{Email: "founder@example.com"})
+		if got := ResolveOneIdentity(); got != "founder@example.com" {
+			t.Fatalf("expected config email identity, got %q", got)
+		}
+		if got := ResolveOneIdentityType(); got != "user" {
+			t.Fatalf("expected default identity type user, got %q", got)
+		}
+	})
+}
+
+func TestOneSetupSummaryManagedPending(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{Email: "ops@example.com"})
+		got := OneSetupSummary()
+		if got != "managed by Nex via One (ops@example.com), provisioning pending" {
+			t.Fatalf("unexpected setup summary %q", got)
+		}
+	})
+}
+
 func TestResolveFormatFlag(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		if got := ResolveFormat("json"); got != "json" {

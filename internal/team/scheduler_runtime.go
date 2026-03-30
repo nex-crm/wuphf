@@ -72,3 +72,20 @@ func (b *Broker) FindRequest(channel, requestID string) (humanInterview, bool) {
 	}
 	return humanInterview{}, false
 }
+
+func (b *Broker) UpdateSkillExecutionByWorkflowKey(workflowKey, status string, when time.Time) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.skills {
+		if strings.TrimSpace(b.skills[i].WorkflowKey) != strings.TrimSpace(workflowKey) {
+			continue
+		}
+		if !when.IsZero() {
+			b.skills[i].LastExecutionAt = when.UTC().Format(time.RFC3339)
+		}
+		b.skills[i].LastExecutionStatus = strings.TrimSpace(status)
+		b.skills[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		return b.saveLocked()
+	}
+	return nil
+}

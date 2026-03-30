@@ -183,7 +183,7 @@ func (m StreamModel) Update(msg tea.Msg) (StreamModel, tea.Cmd) {
 			m.confirm, cmd = m.confirm.Update(msg)
 			return m, cmd
 		}
-		if m.initFlow.phase == InitAPIKey {
+		if m.initFlow.requiresTextInput() {
 			var cmd tea.Cmd
 			m.initFlow, cmd = m.initFlow.Update(msg)
 			return m, cmd
@@ -863,7 +863,7 @@ func (m StreamModel) View() string {
 	leftParts = append(leftParts, m.renderInput(lw))
 
 	// Init flow API key input overlay
-	if m.initFlow.phase == InitAPIKey {
+	if m.initFlow.requiresTextInput() {
 		leftParts = append(leftParts, m.initFlow.View())
 	}
 

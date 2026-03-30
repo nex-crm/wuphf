@@ -59,7 +59,7 @@ type officeCharacter struct {
 // classifyActivity determines activity from last message time and content.
 func classifyActivity(m channelMember) memberActivity {
 	if m.Disabled {
-		return memberActivity{Label: "", Color: dotIdle, Dot: "○"} // ○ empty
+		return memberActivity{Label: "away", Color: dotIdle, Dot: "○"} // ○ empty
 	}
 
 	now := time.Now()
@@ -80,23 +80,23 @@ func classifyActivity(m channelMember) memberActivity {
 
 	// Active: recently posted or working in Claude Code
 	if elapsed < 10*time.Second {
-		return memberActivity{Label: "", Color: dotTalking, Dot: "●"} // ● green filled
+		return memberActivity{Label: "talking", Color: dotTalking, Dot: "●"} // ● green filled
 	}
 	if elapsed < 30*time.Second {
 		lower := strings.ToLower(m.LastMessage)
 		for _, kw := range []string{"bash", "edit", "read", "write", "grep", "glob"} {
 			if strings.Contains(lower, kw) {
-				return memberActivity{Label: "", Color: dotCoding, Dot: "●"} // ● purple filled
+				return memberActivity{Label: "shipping", Color: dotCoding, Dot: "●"} // ● purple filled
 			}
 		}
-		return memberActivity{Label: "", Color: dotThinking, Dot: "●"} // ● yellow filled
+		return memberActivity{Label: "plotting", Color: dotThinking, Dot: "●"} // ● yellow filled
 	}
 	if m.LiveActivity != "" {
-		return memberActivity{Label: "", Color: dotTalking, Dot: "●"} // ● green filled
+		return memberActivity{Label: "talking", Color: dotTalking, Dot: "●"} // ● green filled
 	}
 
 	// Idle
-	return memberActivity{Label: "", Color: dotIdle, Dot: "●"} // ● grey filled
+	return memberActivity{Label: "lurking", Color: dotIdle, Dot: "●"} // ● grey filled
 }
 
 
@@ -545,7 +545,8 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		if name == "" {
 			name = displayName(m.Slug)
 		}
-		nameMax := innerW - 8 - ansi.StringWidth(act.Label)
+		sidebarLabel := act.Label
+		nameMax := innerW - 8 - ansi.StringWidth(sidebarLabel)
 		if nameMax < 8 {
 			nameMax = 8
 		}
@@ -558,10 +559,10 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		leftPart := accent + " " + dot + " " + nameRendered
 		if compact {
 			// Compact: single line per member with a simple glyph.
-			meta := memberMetaStyle.Render(act.Label)
+			meta := memberMetaStyle.Render(sidebarLabel)
 			mini := lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Render(agentAvatar(m.Slug))
 			line := leftPart + " " + mini
-			pad := innerW - ansi.StringWidth(line) - ansi.StringWidth(meta)
+			pad := innerW - ansi.StringWidth(line) - ansi.StringWidth(sidebarLabel)
 			if pad < 1 {
 				pad = 1
 			}
@@ -585,11 +586,11 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 			}
 
 			linePrefix := avatarTop + " " + leftPart
-			pad := innerW - ansi.StringWidth(linePrefix) - ansi.StringWidth(act.Label)
+			pad := innerW - ansi.StringWidth(linePrefix) - ansi.StringWidth(sidebarLabel)
 			if pad < 1 {
 				pad = 1
 			}
-			lines = append(lines, sidebarPlainRow(linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(act.Label), width))
+			lines = append(lines, sidebarPlainRow(linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(sidebarLabel), width))
 			if avatarBottom != "" {
 				lines = append(lines, sidebarPlainRow(avatarBottom, width))
 			}

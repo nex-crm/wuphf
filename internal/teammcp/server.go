@@ -283,6 +283,8 @@ func Run(ctx context.Context) error {
 			Description: "Send a direct human-facing note into the chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
 		}, handleHumanMessage)
 
+		registerActionTools(server)
+
 		return server.Run(ctx, &mcp.StdioTransport{})
 	}
 
@@ -365,6 +367,8 @@ func Run(ctx context.Context) error {
 		Name:        "human_message",
 		Description: "Send a direct human-facing note into the main chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
 	}, handleHumanMessage)
+
+	registerActionTools(server)
 
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
@@ -1332,6 +1336,32 @@ func brokerPostJSON(ctx context.Context, path string, body any, out any) error {
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		respBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
 		return fmt.Errorf("broker POST %s failed: %s %s", path, res.Status, strings.TrimSpace(string(respBody)))
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(res.Body).Decode(out)
+}
+
+func brokerPutJSON(ctx context.Context, path string, body any, out any) error {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, brokerBaseURL()+path, strings.NewReader(string(data)))
+	if err != nil {
+		return err
+	}
+	req.Header = authHeaders()
+	req.Header.Set("Content-Type", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		return fmt.Errorf("broker PUT %s failed: %s %s", path, res.Status, strings.TrimSpace(string(respBody)))
 	}
 	if out == nil {
 		return nil

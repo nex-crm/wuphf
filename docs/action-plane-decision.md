@@ -1,4 +1,4 @@
-# WUPHF Action Plane Decision: Composio vs One
+# WUPHF Action Plane Decision: One First
 
 ## Scope
 
@@ -112,43 +112,32 @@ If our only goal were:
 
 One would be a very strong first choice.
 
-## What Composio appears to be good at
+## Why One now
 
-Official sources:
+After looking more closely at the actual CLI surface, One is stronger than the first pass suggested.
 
-- Repo: <https://github.com/ComposioHQ/composio>
-- Docs: <https://docs.composio.dev/docs>
-- Triggers: <https://docs.composio.dev/docs/triggers>
-- CLI: <https://docs.composio.dev/docs/cli>
-
-What the public material supports:
-
-- broad connector and toolkit coverage
-- direct tool execution model
-- explicit trigger model
-  - webhook triggers
-  - polling triggers
-  - app-specific trigger docs
-- CLI and SDK support
-- workbench/runtime support for multi-step execution
-
-Important caveats:
-
-- it is a bigger platform surface than we strictly need
-- it can pull architecture toward "provider runtime as the center" if we are not disciplined
-- some of the richer workbench/runtime ideas are more than WUPHF needs for phase 1
-
-### Practical reading on Composio
-
-Composio is a better fit when the requirement is not just actions, but:
+The important update is that One's CLI is not just:
 
 - actions
-- triggers
-- workflow-ish execution
+- knowledge
+- execute
+- flows
 
-all together in one provider.
+It also has a real relay/event surface:
 
-## Side-by-side against our three actual requirements
+- `one relay create`
+- `one relay list`
+- `one relay activate`
+- `one relay event-types`
+- `one relay events`
+- `one relay event`
+- `one relay deliveries`
+
+And all of that is available in `--agent` mode with machine-readable JSON output.
+
+That changes the call.
+
+## One against our three actual requirements
 
 ### 1. Direct action execution
 
@@ -156,56 +145,38 @@ all together in one provider.
 - Strong fit.
 - Simpler, cleaner CLI model for terminal agents.
 
-**Composio**
-- Also strong.
-- Probably broader coverage.
-
 ### 2. Workflow creation
 
 **One**
 - Strong fit.
 - The explicit `flow create` / `flow execute` model maps nicely to WUPHF skills.
 
-**Composio**
-- Good enough, though the public product shape is less "workflow artifact" and more "tool execution + runtime/workbench."
-- Still usable for this requirement.
-
 ### 3. Trigger registration
 
 **One**
-- This is the weak point in the public evidence.
-- There are hints of relays/events, but the public docs are not as explicit or mature here.
-
-**Composio**
-- Stronger fit.
-- Trigger support is clearly documented and feels first-class rather than incidental.
+- Stronger than the first pass suggested.
+- The relay commands give us enough to:
+  - list supported event types
+  - create relay endpoints
+  - activate them with forwarding actions
+  - inspect received events
+  - inspect delivery status
 
 ## Decision
 
-There are actually two decisions here:
-
-1. **Which provider should back WUPHF's first action plane?**
-2. **What execution surface should WUPHF agents see?**
-
-Those should not be the same decision.
-
-### Provider decision
-
-If we want **one provider now** to solve all three missing abilities, WUPHF should start with **Composio**, not One.
+WUPHF should start with **One** for the first action-plane pilot.
 
 Reason:
 
-- both can help on direct actions
-- One looks cleaner for action + workflow alone
-- but triggers are one of the three explicit requirements, not an optional nice-to-have
-- Composio's trigger support is much more clearly documented and productized today
-- Composio's broader tool and runtime surface makes it less likely that we hit a hard coverage wall and need to swap providers quickly
+- it now appears to cover all three required abilities
+- its CLI is genuinely agent-native
+- its workflow model is the cleanest fit for WUPHF skills
+- its relay/event surface is good enough to start implementing triggers now
+- the machine-readable `--agent` mode makes it straightforward to wrap behind WUPHF MCP tools
 
-### Agent-facing surface decision
+WUPHF agents still should **not** talk directly to the vendor CLI as their permanent contract.
 
-WUPHF agents should **not** talk directly to a vendor CLI as their long-term interface.
-
-Instead, WUPHF should expose a **small One-like action surface** of its own:
+WUPHF should expose a **small One-shaped action surface** of its own:
 
 - search
 - knowledge
@@ -213,43 +184,20 @@ Instead, WUPHF should expose a **small One-like action surface** of its own:
 - workflow create / execute
 - trigger create / list / delete
 
-That gives us the best part of One:
-
-- clean, agent-native ergonomics
-- simple mental model
-- workflow-friendly shape
-
-without forcing WUPHF to bet on One's weaker public trigger story.
-
 So the real recommendation is:
 
-- **Use Composio as the backend provider for phase 1**
-- **Expose a One-like WUPHF-native tool surface to agents**
+- **Use One as the backend provider for phase 1**
+- **Expose a WUPHF-native One-backed tool surface to agents**
 - **Do not integrate One and Composio at the same time**
 - **Do not touch the Nex/Nango context plane yet**
 
 ## What that means strategically
 
-The real decision is not "Composio is better than One in general."
-
-It is:
-
-> For WUPHF's narrowly scoped missing capability set, Composio is the safer provider backend, while One is the better inspiration for the agent-facing interface.
-
-If later we find that:
-
-- Composio is too heavy,
-- the CLI/operator ergonomics are poor,
-- or One's trigger story is actually stronger in practice than its public docs suggest,
-
-then we can re-run the comparison with real pilot results.
-
-But phase 1 should not start with two providers.
-
 The important part is:
 
-- do **not** confuse provider backend choice with agent UX choice
-- do **not** let a vendor CLI become the permanent system contract
+- use One because it aligns with the current objective best
+- but still keep the WUPHF contract provider-agnostic enough that we can swap later if needed
+- do **not** let the vendor CLI become the permanent system contract
 
 ## Implementation plan
 
@@ -275,11 +223,11 @@ Core types:
 
 This layer must stay provider-agnostic even though phase 1 only implements Composio.
 
-### Phase 2: Implement a Composio provider wrapper
+### Phase 2: Implement a One provider wrapper
 
 Add:
 
-- `internal/action/composio.go`
+- `internal/action/one.go`
 
 Responsibilities:
 
@@ -297,7 +245,7 @@ Default posture:
 - external writes default to approval in phase 1
 - destructive or customer-facing actions always require approval in phase 1
 
-### Phase 3: Expose a WUPHF-native One-like tool surface to agents through team MCP
+### Phase 3: Expose a WUPHF-native One-backed tool surface to agents through team MCP
 
 Add provider-agnostic tools in:
 
@@ -317,7 +265,7 @@ Tool surface:
 
 These should describe capabilities in office/WUPHF terms, not provider marketing terms.
 
-The mental model for agents should mirror the simpler One-style flow:
+The mental model for agents should mirror the One flow:
 
 1. search
 2. inspect knowledge/schema
@@ -426,10 +374,11 @@ For this specific problem, the best next move is:
 1. stop evaluating multiple providers at once
 2. keep context ingestion separate
 3. implement a provider-agnostic `internal/action` layer
-4. use **Composio first as the backend**
-5. expose a **One-like WUPHF-native action UX** to agents
-6. keep One on the bench as a later alternative if we discover that:
-   - Composio is too heavyweight,
-   - or One's real trigger story is better than the current public docs suggest
+4. use **One first**
+5. expose a WUPHF-native action UX on top of it
+6. only revisit another provider if One fails in real use on:
+   - connector depth
+   - relay reliability
+   - workflow execution reliability
 
-That is the least confusing path and the one most likely to close the actual product gap without creating a vendor-shaped architecture we regret later.
+That is now the least confusing path and the one most aligned with what WUPHF agents actually need.
