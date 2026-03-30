@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"runtime"
 	"runtime/debug"
+	"sort"
 	"strings"
 	"time"
 
@@ -2841,14 +2842,22 @@ func flattenThreadMessages(messages []brokerMessage, expanded map[string]bool) [
 	if len(messages) == 0 {
 		return nil
 	}
-	byID := make(map[string]brokerMessage, len(messages))
+
+	// Sort all messages by timestamp first
+	sorted := make([]brokerMessage, len(messages))
+	copy(sorted, messages)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Timestamp < sorted[j].Timestamp
+	})
+
+	byID := make(map[string]brokerMessage, len(sorted))
 	children := make(map[string][]brokerMessage)
 	var roots []brokerMessage
 
-	for _, msg := range messages {
+	for _, msg := range sorted {
 		byID[msg.ID] = msg
 	}
-	for _, msg := range messages {
+	for _, msg := range sorted {
 		if msg.ReplyTo != "" {
 			if _, ok := byID[msg.ReplyTo]; ok {
 				children[msg.ReplyTo] = append(children[msg.ReplyTo], msg)
