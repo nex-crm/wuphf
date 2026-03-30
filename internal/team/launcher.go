@@ -37,7 +37,7 @@ const (
 	tmuxSocketName                  = "wuphf"
 	defaultNotificationPollInterval = 15 * time.Minute
 	channelRespawnDelay             = 8 * time.Second
-	ceoHeadStartDelay               = 4 * time.Second
+	ceoHeadStartDelay               = 2 * time.Second
 )
 
 type nexFeedItemContentItem struct {
@@ -977,17 +977,19 @@ func shellQuote(s string) string {
 // primeVisibleAgents clears Claude startup interactivity in newly spawned panes and
 // replays a catch-up channel nudge once they are actually ready to read it.
 func (l *Launcher) primeVisibleAgents() {
-	time.Sleep(2 * time.Second)
+	time.Sleep(1 * time.Second)
 
 	targets := l.agentPaneTargets()
 	if len(targets) == 0 {
 		return
 	}
 
-	for attempt := 0; attempt < 4; attempt++ {
+	for attempt := 0; attempt < 3; attempt++ {
+		allReady := true
 		for _, target := range targets {
 			content, err := l.capturePaneTargetContent(target.PaneTarget)
 			if err != nil {
+				allReady = false
 				continue
 			}
 			if shouldPrimeClaudePane(content) {
@@ -995,9 +997,13 @@ func (l *Launcher) primeVisibleAgents() {
 					"-t", target.PaneTarget,
 					"Enter",
 				).Run()
+				allReady = false
 			}
 		}
-		time.Sleep(2 * time.Second)
+		if allReady {
+			break
+		}
+		time.Sleep(1 * time.Second)
 	}
 
 	// If the human already posted while Claude was still booting, replay a catch-up nudge
