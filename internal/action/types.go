@@ -5,9 +5,30 @@ import (
 	"encoding/json"
 )
 
+type Capability string
+
+const (
+	CapabilityGuide            Capability = "guide"
+	CapabilityConnections      Capability = "connections"
+	CapabilityActionSearch     Capability = "action_search"
+	CapabilityActionKnowledge  Capability = "action_knowledge"
+	CapabilityActionExecute    Capability = "action_execute"
+	CapabilityWorkflowCreate   Capability = "workflow_create"
+	CapabilityWorkflowExecute  Capability = "workflow_execute"
+	CapabilityWorkflowRuns     Capability = "workflow_runs"
+	CapabilityRelayList        Capability = "relay_list"
+	CapabilityRelayEventTypes  Capability = "relay_event_types"
+	CapabilityRelayCreate      Capability = "relay_create"
+	CapabilityRelayActivate    Capability = "relay_activate"
+	CapabilityRelayEvents      Capability = "relay_events"
+	CapabilityRelayEvent       Capability = "relay_event"
+)
+
 // Provider exposes a provider-agnostic action plane for external systems.
 type Provider interface {
 	Name() string
+	Configured() bool
+	Supports(Capability) bool
 	Guide(ctx context.Context, topic string) (GuideResult, error)
 	ListConnections(ctx context.Context, opts ListConnectionsOptions) (ConnectionsResult, error)
 	SearchActions(ctx context.Context, platform, query, mode string) (ActionSearchResult, error)

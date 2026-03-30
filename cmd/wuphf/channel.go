@@ -5158,7 +5158,7 @@ func applyTeamSetup() tea.Cmd {
 }
 
 func tickChannel() tea.Cmd {
-	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
 		return channelTickMsg(t)
 	})
 }

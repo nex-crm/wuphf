@@ -64,6 +64,38 @@ func NewOneCLIFromEnv() *OneCLI {
 
 func (o *OneCLI) Name() string { return "one" }
 
+func (o *OneCLI) Configured() bool {
+	if config.ResolveNoNex() {
+		return false
+	}
+	if lookPathExists(o.Bin) {
+		return true
+	}
+	return o.Bin == "npx" && lookPathExists("npx")
+}
+
+func (o *OneCLI) Supports(cap Capability) bool {
+	switch cap {
+	case CapabilityGuide,
+		CapabilityConnections,
+		CapabilityActionSearch,
+		CapabilityActionKnowledge,
+		CapabilityActionExecute,
+		CapabilityWorkflowCreate,
+		CapabilityWorkflowExecute,
+		CapabilityWorkflowRuns,
+		CapabilityRelayList,
+		CapabilityRelayEventTypes,
+		CapabilityRelayCreate,
+		CapabilityRelayActivate,
+		CapabilityRelayEvents,
+		CapabilityRelayEvent:
+		return true
+	default:
+		return false
+	}
+}
+
 func (o *OneCLI) Guide(ctx context.Context, topic string) (GuideResult, error) {
 	if strings.TrimSpace(topic) == "" {
 		topic = "all"
@@ -163,8 +195,8 @@ func (o *OneCLI) ExecuteAction(ctx context.Context, req ExecuteRequest) (Execute
 		args = append(args, "--dry-run")
 	}
 	var result struct {
-		DryRun   bool `json:"dryRun"`
-		Request  struct {
+		DryRun  bool `json:"dryRun"`
+		Request struct {
 			Method  string         `json:"method"`
 			URL     string         `json:"url"`
 			Headers map[string]any `json:"headers"`

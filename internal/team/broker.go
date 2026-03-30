@@ -2784,7 +2784,7 @@ func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
 
 func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := 20
+	limit := 10
 	if l, err := strconv.Atoi(q.Get("limit")); err == nil && l > 0 {
 		limit = l
 	}

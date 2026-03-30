@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
@@ -172,5 +174,43 @@ func TestHandleTeamChannelCreateTriggersReconfigure(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected created channel to persist")
+	}
+}
+
+func TestHandleHumanMessageUsesDirectSessionLabelInOneOnOneMode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_ONE_ON_ONE", "1")
+	t.Setenv("WUPHF_AGENT_SLUG", "ceo")
+
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	result, _, err := handleHumanMessage(context.Background(), nil, HumanMessageArgs{
+		Content: "Action complete.",
+	})
+	if err != nil {
+		t.Fatalf("handleHumanMessage: %v", err)
+	}
+	if result == nil || len(result.Content) == 0 {
+		t.Fatal("expected text result")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content, got %T", result.Content[0])
+	}
+	if text.Text == "" {
+		t.Fatal("expected non-empty text")
+	}
+	if want := "this direct session"; !strings.Contains(text.Text, want) {
+		t.Fatalf("expected %q in %q", want, text.Text)
+	}
+	if strings.Contains(text.Text, "#general") {
+		t.Fatalf("did not expect office channel label in %q", text.Text)
 	}
 }

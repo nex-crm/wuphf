@@ -140,7 +140,7 @@ type TeamPollArgs struct {
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug so tagged_count can be computed. Defaults to WUPHF_AGENT_SLUG."`
 	SinceID string `json:"since_id,omitempty" jsonschema:"Only return messages after this message ID"`
-	Limit   int    `json:"limit,omitempty" jsonschema:"Maximum messages to return (default 20, max 100)"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"Maximum messages to return (default 10, max 100)"`
 }
 
 type TeamStatusArgs struct {
@@ -166,7 +166,7 @@ type HumanInterviewArgs struct {
 
 type HumanMessageArgs struct {
 	Kind      string `json:"kind,omitempty" jsonschema:"One of: report, decision, action. Defaults to report."`
-	Channel   string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	Channel   string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel, or the active direct session in 1:1 mode."`
 	Title     string `json:"title,omitempty" jsonschema:"Short human-facing headline like 'Frontend ready for review' or 'Need your call on pricing'"`
 	Content   string `json:"content" jsonschema:"What you want to tell the human directly: completion update, recommendation, decision framing, or next action."`
 	MySlug    string `json:"my_slug,omitempty" jsonschema:"Agent slug speaking to the human. Defaults to WUPHF_AGENT_SLUG."`
@@ -1028,7 +1028,11 @@ func handleHumanMessage(ctx context.Context, _ *mcp.CallToolRequest, args HumanM
 		return toolError(err), nil, nil
 	}
 
-	text := fmt.Sprintf("Sent %s to the human in #%s as @%s", strings.TrimPrefix(kind, "human_"), channel, slug)
+	location := "#" + channel
+	if isOneOnOneMode() {
+		location = "this direct session"
+	}
+	text := fmt.Sprintf("Sent %s to the human in %s as @%s", strings.TrimPrefix(kind, "human_"), location, slug)
 	if result.ID != "" {
 		text += " (" + result.ID + ")"
 	}

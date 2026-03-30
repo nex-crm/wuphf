@@ -192,11 +192,55 @@ func TestNewOneCLIFromEnvUsesManagedIdentity(t *testing.T) {
 	}
 }
 
-func TestOneCLIRequiresManagedProvisioning(t *testing.T) {
+func TestOneCLIRunsWithoutManagedProvisioning(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	oneBin := writeFakeOne(t)
+	client := &OneCLI{Bin: oneBin, WorkDir: t.TempDir()}
+	result, err := client.ListConnections(context.Background(), ListConnectionsOptions{})
+	if err != nil {
+		t.Fatalf("expected local One config/bin fallback to run, got %v", err)
+	}
+	if got := len(result.Connections); got != 1 {
+		t.Fatalf("expected 1 connection, got %d", got)
+	}
+}
+
+func TestNewOneCLIFromEnvFallsBackToNpx(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_ONE_BIN", "")
+	dir := t.TempDir()
+	npxPath := filepath.Join(dir, "npx")
+	script := `#!/bin/sh
+if [ "$1" != "-y" ] || [ "$2" != "@withone/cli" ] || [ "$3" != "--agent" ]; then
+  echo "unexpected prefix: $*" >&2
+  exit 1
+fi
+shift 3
+if [ "$1 $2" = "connection list" ]; then
+  echo '{"total":1,"showing":1,"connections":[{"platform":"gmail","state":"operational","key":"live::gmail::default::abc123"}]}'
+  exit 0
+fi
+echo "unexpected args: $*" >&2
+exit 1
+`
+	if err := os.WriteFile(npxPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir)
+
 	client := NewOneCLIFromEnv()
-	_, err := client.ListConnections(context.Background(), ListConnectionsOptions{})
-	if err == nil || !strings.Contains(err.Error(), "manages One integrations automatically through Nex") {
-		t.Fatalf("expected managed provisioning error, got %v", err)
+	if client.Bin != "npx" {
+		t.Fatalf("expected npx fallback, got %q", client.Bin)
+	}
+	if got := strings.Join(client.ArgsPrefix, " "); got != "-y @withone/cli" {
+		t.Fatalf("unexpected args prefix %q", got)
+	}
+
+	result, err := client.ListConnections(context.Background(), ListConnectionsOptions{})
+	if err != nil {
+		t.Fatalf("expected npx-backed one cli to run, got %v", err)
+	}
+	if got := len(result.Connections); got != 1 {
+		t.Fatalf("expected 1 connection, got %d", got)
 	}
 }

@@ -15,6 +15,8 @@ import (
 type Config struct {
 	APIKey              string `json:"api_key,omitempty"`
 	OneAPIKey           string `json:"one_api_key,omitempty"`
+	ComposioAPIKey      string `json:"composio_api_key,omitempty"`
+	ActionProvider      string `json:"action_provider,omitempty"`
 	Email               string `json:"email,omitempty"`
 	WorkspaceID         string `json:"workspace_id,omitempty"`
 	WorkspaceSlug       string `json:"workspace_slug,omitempty"`
@@ -216,6 +218,54 @@ func OneSetupBlurb() string {
 		return fmt.Sprintf("WUPHF uses One for integrations and manages it automatically with your Nex email (%s).", email)
 	}
 	return "WUPHF uses One for integrations and will manage it automatically once Nex setup is complete."
+}
+
+// ResolveComposioAPIKey resolves the Composio API key.
+// Resolution: WUPHF_COMPOSIO_API_KEY env > COMPOSIO_API_KEY env > config file.
+func ResolveComposioAPIKey() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_COMPOSIO_API_KEY")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("COMPOSIO_API_KEY")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.ComposioAPIKey)
+}
+
+// ResolveComposioUserID resolves the Composio user identity WUPHF should use.
+// Resolution: WUPHF_COMPOSIO_USER_ID env > COMPOSIO_USER_ID env > config email.
+func ResolveComposioUserID() string {
+	if ResolveNoNex() {
+		return ""
+	}
+	if v := strings.TrimSpace(os.Getenv("WUPHF_COMPOSIO_USER_ID")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("COMPOSIO_USER_ID")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.Email)
+}
+
+// ResolveActionProvider resolves the preferred external action provider.
+// Resolution: WUPHF_ACTION_PROVIDER env > ACTION_PROVIDER env > config file > auto.
+func ResolveActionProvider() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_ACTION_PROVIDER")); v != "" {
+		return strings.ToLower(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("ACTION_PROVIDER")); v != "" {
+		return strings.ToLower(v)
+	}
+	cfg, _ := Load()
+	if v := strings.TrimSpace(cfg.ActionProvider); v != "" {
+		return strings.ToLower(v)
+	}
+	return "auto"
 }
 
 // ResolveFormat resolves the output format via: flag > config file > "text".

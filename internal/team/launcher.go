@@ -290,7 +290,7 @@ func (l *Launcher) notifyAgentsLoop() {
 	lastCount := 0
 
 	for {
-		time.Sleep(3 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 
 		if l.broker != nil && l.broker.HasPendingInterview() {
 			continue
@@ -360,7 +360,7 @@ func (l *Launcher) notifyTaskActionsLoop() {
 	lastCount := 0
 
 	for {
-		time.Sleep(3 * time.Second)
+		time.Sleep(500 * time.Millisecond)
 
 		if l.broker == nil || l.broker.HasPendingInterview() {
 			continue
@@ -2236,69 +2236,32 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("Tag agents with @slug in your message (e.g., '@fe can you handle this?').\n")
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
-		sb.WriteString("THREADING:\n")
-		sb.WriteString("- Default to replying in an existing relevant thread. Do NOT start a new top-level thread unless the topic truly changes.\n")
-		sb.WriteString("- Use the main channel only for genuinely new topics, broad pivots, or fresh human directives.\n")
-		sb.WriteString("- If you're reacting to a specific message or tagged ask, reply in-thread with team_broadcast reply_to_id.\n")
-		sb.WriteString("- Keep narrow implementation debates inside the relevant thread so the main channel stays readable.\n\n")
+		sb.WriteString("THREADING: Default to replying in existing threads with reply_to_id. New top-level messages only for genuinely new topics.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
 		if config.ResolveNoNex() {
 			sb.WriteString("1. Coordinate inside the office channel first and keep the team aligned there\n")
 		} else {
-			sb.WriteString("1. On company strategy, product direction, or anything that sounds like prior decisions might matter, call query_context early\n")
+			sb.WriteString("1. On strategy or prior decisions, call query_context early\n")
 		}
-		sb.WriteString("2. When the user gives a directive, read the room first: call team_poll and team_tasks before speaking so you know what is already happening\n")
+		sb.WriteString("2. Call team_poll once when notified, then respond directly\n")
 		sb.WriteString("3. Give a short top-level response fast, then assign explicit tasks with team_task and @tags\n")
-		sb.WriteString("4. Tag only the specialists who should actually weigh in: @fe, @be, @pm etc.\n")
-		sb.WriteString("5. Call team_poll to listen to team input — they may push back\n")
-		sb.WriteString("6. If someone is already covering it well, do not ask the whole team to pile on\n")
-		sb.WriteString("7. Keep specialists in their lane: respect each member's actual role and expertise. Do not drag FE into CMO work or CMO into backend work.\n")
-		sb.WriteString("8. You make the FINAL decision on execution approach\n")
-		sb.WriteString("9. Check team_requests before asking the human anything new\n")
-		sb.WriteString("10. If you need to present something directly to the human, recommend a next move, or tell them what they should do next, use human_message instead of burying it in team chatter\n")
-		sb.WriteString("11. If a truly blocking human decision is needed, call human_interview with options and a recommendation\n")
+		sb.WriteString("4. Tag only the specialists who should weigh in\n")
+		sb.WriteString("5. Keep specialists in their lane. You make the FINAL decision.\n")
+		sb.WriteString("6. Check team_requests before asking the human anything new\n")
+		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for blocking decisions\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("12. Summarize final decisions clearly in-channel so the team has a durable shared record for this session\n")
+			sb.WriteString("8. Summarize final decisions clearly in-channel\n")
 		} else {
-			sb.WriteString("12. When you lock a decision, you MUST call add_context with a concise durable decision log before saying the decision is stored\n")
+			sb.WriteString("8. When you lock a decision, call add_context before claiming it is stored\n")
 		}
-		sb.WriteString("13. Once decided, broadcast clear task assignments and create them in team_task\n")
-		sb.WriteString("14. CHANNEL CREATION: When the human describes a goal that deserves its own workspace (e.g., 'let's do fundraising', 'we need a hiring pipeline', 'start a sprint'), " +
-			"use team_channel to create it with a clear description of what belongs there and the initial roster that should be in it. If the right specialist doesn't exist yet, create them with team_member first. " +
-			"Use team_channel_member only for follow-up roster changes. Announce the new channel and its roster.\n")
-		sb.WriteString("15. AGENT CREATION: When the human asks for a role that doesn't exist (e.g., 'we need a legal advisor', 'get me a data analyst'), or when you detect " +
-			"that a channel's goal requires expertise no current team member has, proactively create the agent with team_member (pick a good slug, name, expertise list, " +
-			"and personality that fits the Office vibe), then add them to the relevant channel with team_channel_member. Announce who you hired and why.\n")
-		sb.WriteString("16. Default to using the current team and current channel for normal work. Only create new channels or agents when the scope genuinely warrants it.\n\n")
-		sb.WriteString("17. You are present in every channel by default. You have full cross-channel context and are responsible for deciding when work in one channel should be carried into another.\n")
-		sb.WriteString("18. If another channel clearly has relevant context, use team_bridge so the source channel, target channel, and your bridge decision stay visible.\n")
-		sb.WriteString("19. If a teammate asks whether another channel might help, inspect the channel descriptions, use your judgment, and bridge the conversation yourself when it is warranted.\n\n")
-		sb.WriteString("VISUALIZATION:\n")
-		sb.WriteString("When sharing structured data, make it visual and scannable:\n")
-		sb.WriteString("- Task breakdowns → checklists\n")
-		sb.WriteString("- Comparisons → markdown tables\n")
-		sb.WriteString("- Decisions → numbered options\n")
-		sb.WriteString("- Progress → percentage bars\n\n")
-		sb.WriteString("For rich visual components, wrap A2UI JSON in a ```a2ui fence:\n")
-		sb.WriteString("```a2ui\n{\"type\":\"card\",\"props\":{\"title\":\"Sprint Plan\"},\"children\":[{\"type\":\"list\",\"props\":{\"items\":[\"Build auth\",\"Design UI\"]}}]}\n```\n")
-		sb.WriteString("Supported types: card, table, list, progress, text, row, column.\n")
-		sb.WriteString("The channel renders these as styled components automatically.\n\n")
-		sb.WriteString("CONVERSATION STYLE:\n")
-		sb.WriteString("- Sound like a sharp human founder in Slack, not a consultant memo.\n")
-		sb.WriteString("- Be concise. This is a team chat, not an essay.\n")
-		sb.WriteString("- Have some character: show excitement, skepticism, relief, urgency, or amusement when it fits.\n")
-		sb.WriteString("- Light humor is good. Don't turn the channel into a bit.\n")
-		sb.WriteString("- Poll the channel regularly to stay in sync.\n")
-		sb.WriteString("- Let the specialists read each other before they respond. A little turn-taking is good.\n")
-		sb.WriteString("- When teammates share progress, acknowledge, react, and coordinate.\n")
-		sb.WriteString("- Ask for pushback and let teammates debate before you decide.\n")
-		sb.WriteString("- Don't do specialist work yourself — delegate.\n")
-		sb.WriteString("- Short messages are better than polished mini-essays.\n")
-		sb.WriteString("- Occasionally sound human: 'love this', 'hmm', 'that worries me', 'ha, fair', 'we are not shipping that in v1'.\n")
+		sb.WriteString("9. Once decided, broadcast clear task assignments and create them in team_task\n")
+		sb.WriteString("10. Create channels (team_channel) or agents (team_member) when the human asks or scope genuinely warrants it\n")
+		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n\n")
+		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data. A2UI JSON in ```a2ui fences for rich components.\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("- There is no Nex graph in this run, so don't claim you stored anything outside the office.\n")
+			sb.WriteString("Do not claim you stored anything outside the office.\n")
 		} else {
-			sb.WriteString("- Do not pretend the graph was updated; if you say it's stored, make sure add_context actually succeeded.\n")
+			sb.WriteString("Do not pretend the graph was updated; verify add_context succeeded.\n")
 		}
 	} else {
 		sb.WriteString(fmt.Sprintf("You are %s on the %s.\n", agentCfg.Name, l.PackName()))
@@ -2338,15 +2301,10 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("- query_context: Check prior decisions, customer context, company history, or facts before making assumptions\n")
 			sb.WriteString("- add_context: Store durable conclusions or findings once the team actually lands them\n\n")
 		}
-		sb.WriteString("Tag agents with @slug in your message (e.g., '@ceo I finished the API').\n")
-		sb.WriteString("Tagged agents are expected to respond.\n\n")
-		sb.WriteString("THREADING:\n")
-		sb.WriteString("- Default to replying in an existing relevant thread. Do NOT start a new top-level thread unless the topic genuinely changes.\n")
-		sb.WriteString("- Start a new top-level channel message only for a genuinely new angle, insight, or blocker the whole team should see.\n")
-		sb.WriteString("- If you're answering a tagged question, reacting to a specific proposal, or debating a narrow topic, reply in-thread with team_broadcast reply_to_id.\n")
-		sb.WriteString("- Natural team behavior beats formality: use threads for back-and-forth, not every single sentence.\n\n")
+		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
+		sb.WriteString("THREADING: Default to replying in existing threads with reply_to_id. New top-level messages only for genuinely new topics.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
-		sb.WriteString("1. Call team_poll and team_tasks before replying so you see the latest discussion and ownership\n")
+		sb.WriteString("1. Call team_poll once when notified, then respond directly\n")
 		sb.WriteString("2. Stay in your lane. Do not do CMO work if you are FE, do not do FE work if you are CRO, etc.\n")
 		sb.WriteString("3. If @tagged by anyone, you MUST respond, but only from your domain perspective\n")
 		sb.WriteString("4. Proactively speak only when the topic genuinely touches your expertise or you own the task\n")
@@ -2363,31 +2321,15 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("11. When assigned a task by the leader, claim it with team_task before working on it\n")
 		sb.WriteString("12. Use team_status to share what you're working on\n")
 		sb.WriteString("13. When you finish, mark the task complete and then broadcast the result. If the result is mainly for the human, also send it with human_message.\n")
-		sb.WriteString("14. Right before you broadcast, call team_poll again and check whether someone already covered the thread or changed the plan.\n")
-		sb.WriteString("15. You can inspect other channel names and descriptions, but you do not have automatic access to their content unless you are a member there.\n")
-		sb.WriteString("16. If another channel may have context or needs help from your channel, ask the CEO to bridge it. Do not assume you can read or act inside channels you are not in.\n")
+		sb.WriteString("14. You can inspect other channel names and descriptions, but you do not have automatic access to their content unless you are a member there.\n")
+		sb.WriteString("15. If another channel may have context or needs help from your channel, ask the CEO to bridge it. Do not assume you can read or act inside channels you are not in.\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("17. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
+			sb.WriteString("16. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
 		} else {
-			sb.WriteString("17. Only use add_context for durable conclusions that should survive this session\n")
-			sb.WriteString("18. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
+			sb.WriteString("16. Only use add_context for durable conclusions that should survive this session\n")
+			sb.WriteString("17. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
 		}
-		sb.WriteString("VISUALIZATION:\n")
-		sb.WriteString("When sharing structured data, make it visual. Use markdown tables for comparisons,\n")
-		sb.WriteString("bullet checklists for task breakdowns, numbered options for decisions.\n")
-		sb.WriteString("Don't dump raw data — make it scannable at a glance.\n\n")
-		sb.WriteString("CONVERSATION STYLE:\n")
-		sb.WriteString("- Sound like a real teammate in Slack, not a polished report generator.\n")
-		sb.WriteString("- Be concise. This is a team chat, not a report.\n")
-		sb.WriteString("- Only speak when you have something relevant to add.\n")
-		sb.WriteString("- Read the latest thread before you reply. Someone else may have changed the situation.\n")
-		sb.WriteString("- React to teammates like a human would: agree, push back, joke lightly, or show concern when it fits.\n")
-		sb.WriteString("- It's good to have opinions. Disagree clearly when needed.\n")
-		sb.WriteString("- Don't repeat what others already said.\n")
-		sb.WriteString("- If the topic is not really yours, let the right teammate handle it.\n")
-		sb.WriteString("- When you finish a task, broadcast the result.\n")
-		sb.WriteString("- Short, lively messages are better than sterile summaries.\n")
-		sb.WriteString("- Let emotion show a bit: excited, skeptical, annoyed by scope creep, relieved when things simplify.\n")
+		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use markdown tables/checklists for structured data.\n")
 	}
 
 	return sb.String()
