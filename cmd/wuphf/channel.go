@@ -2852,7 +2852,19 @@ func flattenThreadMessages(messages []brokerMessage, expanded map[string]bool) [
 			Depth:       depth,
 			ParentLabel: parentLabel,
 		}
+		// Threads are expanded by default. Only collapse if explicitly set to false.
+		if len(children[msg.ID]) > 0 {
+			isExpanded, explicit := expanded[msg.ID]
+			if explicit && !isExpanded {
+				tm.Collapsed = true
+				tm.HiddenReplies = countThreadReplies(children, msg.ID)
+				tm.ThreadParticipants = threadParticipants(children, msg.ID)
+			}
+		}
 		out = append(out, tm)
+		if tm.Collapsed {
+			return
+		}
 		for _, child := range children[msg.ID] {
 			walk(child, depth+1)
 		}
