@@ -5,16 +5,49 @@ import { NexApiClient } from "../client.js";
 export function registerContextTools(server: McpServer, client: NexApiClient) {
   server.tool(
     "query_context",
-    "Query the WUPHF context graph with a natural language question. Returns an AI-generated answer with supporting entities and evidence. Use for open-ended questions about contacts, companies, relationships, or history.",
+    "Query the WUPHF context graph with a natural language question. Returns an AI-generated answer with supporting entities and evidence. Automatically enriches the response with relevant entity briefs and workspace playbooks when available. Use for open-ended questions about contacts, companies, relationships, or history.",
     {
       query: z.string().describe("Natural language question about your contacts, companies, or relationships"),
       session_id: z.string().optional().describe("Session ID for multi-turn conversational continuity"),
+      include_briefs: z.boolean().optional().describe("If true (default), enriches response with relevant entity briefs and workspace playbooks"),
     },
     { readOnlyHint: true, openWorldHint: true },
-    async ({ query, session_id }) => {
+    async ({ query, session_id, include_briefs }) => {
       const body: Record<string, unknown> = { query };
       if (session_id) body.session_id = session_id;
-      const result = await client.post("/v1/context/ask", body);
+      const result = await client.post("/v1/context/ask", body) as Record<string, unknown>;
+
+      // Enrich with briefs if available and not explicitly disabled
+      if (include_briefs !== false) {
+        const enrichments: string[] = [];
+
+        // Check if response references specific entities — fetch their briefs
+        const entityRefs = (result.entity_references ?? []) as Array<{ name: string; type: string; context_id?: string }>;
+        for (const ref of entityRefs.slice(0, 3)) { // max 3 entity briefs
+          if (ref.context_id) {
+            try {
+              const brief = await client.get(`/v1/playbooks/by-context/${encodeURIComponent(ref.context_id)}`) as Record<string, unknown>;
+              if (brief?.content) {
+                enrichments.push(`\n---\n**Entity Brief: ${ref.name}**\n${(brief.content as string).slice(0, 2000)}${(brief.content as string).length > 2000 ? "\n[... truncated]" : ""}`);
+              }
+            } catch { /* brief doesn't exist yet, skip */ }
+          }
+        }
+
+        // Fetch workspace playbooks (lightweight — just titles for awareness)
+        try {
+          const playbooks = await client.get("/v1/playbooks?scope_type=2&limit=5") as Record<string, unknown>;
+          const data = (playbooks?.data ?? []) as Array<{ title: string; id: string; slug: string }>;
+          if (data.length > 0) {
+            enrichments.push(`\n---\n**Available Workspace Playbooks:** ${data.map(p => p.title).join(", ")}. Use get_workspace_playbook to view any of these.`);
+          }
+        } catch { /* no playbooks, skip */ }
+
+        if (enrichments.length > 0) {
+          result._brief_enrichments = enrichments.join("\n");
+        }
+      }
+
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     },
   );

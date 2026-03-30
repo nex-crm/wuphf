@@ -13,6 +13,7 @@ import { registerRegistrationTools } from "./tools/register.js";
 import { registerScanTools } from "./tools/scan.js";
 import { registerIntegrationTools } from "./tools/integrations.js";
 import { registerTeamTools, startChannelPush } from "./tools/team.js";
+import { registerPlaybookTools } from "./tools/playbooks.js";
 
 export function createServer(apiKey?: string): McpServer {
   const server = new McpServer({
@@ -35,6 +36,7 @@ export function createServer(apiKey?: string): McpServer {
   registerScanTools(server, client);
   registerIntegrationTools(server, client);
   registerTeamTools(server, client);
+  registerPlaybookTools(server, client);
 
   // Start channel push — delivers broker messages to Claude via notifications.
   // Agent slug from env allows filtering own messages.

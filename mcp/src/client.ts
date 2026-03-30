@@ -144,4 +144,18 @@ export class NexApiClient {
   async delete(path: string): Promise<unknown> {
     return this.request("DELETE", path);
   }
+
+  async getRaw(path: string): Promise<string> {
+    this.requireAuth();
+    const url = `${getBaseUrl()}${path}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${this.apiKey}` },
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      throw new NexApiError(res.status, res.statusText, await res.text());
+    }
+    return res.text();
+  }
 }
