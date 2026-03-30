@@ -665,11 +665,24 @@ func (m channelModel) oneOnOneAgentName() string {
 }
 
 func (m *channelModel) refreshSlashCommands() {
+	var base []tui.SlashCommand
 	if m.isOneOnOne() {
-		m.autocomplete = tui.NewAutocomplete(buildOneOnOneSlashCommands())
-		return
+		base = buildOneOnOneSlashCommands()
+	} else {
+		base = make([]tui.SlashCommand, len(channelSlashCommands))
+		copy(base, channelSlashCommands)
 	}
-	m.autocomplete = tui.NewAutocomplete(channelSlashCommands)
+	// Append active skills as slash commands
+	for _, sk := range m.skills {
+		if sk.Status != "active" {
+			continue
+		}
+		base = append(base, tui.SlashCommand{
+			Name:        sk.Name,
+			Description: sk.Description,
+		})
+	}
+	m.autocomplete = tui.NewAutocomplete(base)
 }
 
 func (m channelModel) pollCurrentState() tea.Cmd {
@@ -1398,6 +1411,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelSkillsMsg:
 		m.skills = msg.skills
+		m.refreshSlashCommands()
 		return m, nil
 
 	case channelActionsMsg:
@@ -4098,6 +4112,17 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.pickerMode = channelPickerThreads
 		return m, nil
 	default:
+		// Check if the command matches a skill name
+		cmdName := strings.TrimPrefix(trimmed, "/")
+		cmdName = strings.Fields(cmdName)[0] // first word only
+		for _, sk := range m.skills {
+			if sk.Name == cmdName && sk.Status == "active" {
+				clearCurrent()
+				m.posting = true
+				m.notice = "Invoking skill: " + sk.Title
+				return m, invokeSkill(sk.Name)
+			}
+		}
 		return m, nil
 	}
 }
