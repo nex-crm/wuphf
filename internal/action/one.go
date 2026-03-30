@@ -19,20 +19,30 @@ import (
 const defaultOneBin = "one"
 
 type OneCLI struct {
-	Bin     string
-	WorkDir string
-	Env     []string
+	Bin        string
+	ArgsPrefix []string
+	WorkDir    string
+	Env        []string
 }
 
 func NewOneCLIFromEnv() *OneCLI {
 	bin := strings.TrimSpace(os.Getenv("WUPHF_ONE_BIN"))
-	if bin == "" {
-		bin = defaultOneBin
-	}
 	workDir := strings.TrimSpace(os.Getenv("WUPHF_ONE_WORKDIR"))
 	if workDir == "" {
 		cfgDir := filepath.Dir(config.ConfigPath())
 		workDir = filepath.Join(cfgDir, "one")
+	}
+	var argsPrefix []string
+	if bin == "" {
+		switch {
+		case lookPathExists(defaultOneBin):
+			bin = defaultOneBin
+		case lookPathExists("npx"):
+			bin = "npx"
+			argsPrefix = []string{"-y", "@withone/cli"}
+		default:
+			bin = defaultOneBin
+		}
 	}
 	var env []string
 	if secret := strings.TrimSpace(config.ResolveOneSecret()); secret != "" {
@@ -45,9 +55,10 @@ func NewOneCLIFromEnv() *OneCLI {
 		}
 	}
 	return &OneCLI{
-		Bin:     bin,
-		WorkDir: workDir,
-		Env:     env,
+		Bin:        bin,
+		ArgsPrefix: argsPrefix,
+		WorkDir:    workDir,
+		Env:        env,
 	}
 }
 
@@ -462,13 +473,15 @@ func (o *OneCLI) runJSONLines(ctx context.Context, args []string) ([]json.RawMes
 }
 
 func (o *OneCLI) run(ctx context.Context, args []string) ([]byte, error) {
-	if err := o.ensureReady(); err != nil {
+	if err := o.ensureConfigured(); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(o.WorkDir, 0o700); err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, o.Bin, append([]string{"--agent"}, args...)...)
+	cmdArgs := append(append([]string{}, o.ArgsPrefix...), "--agent")
+	cmdArgs = append(cmdArgs, args...)
+	cmd := exec.CommandContext(ctx, o.Bin, cmdArgs...)
 	cmd.Dir = o.WorkDir
 	cmd.Env = append(os.Environ(), o.Env...)
 	var stdout bytes.Buffer
@@ -477,7 +490,7 @@ func (o *OneCLI) run(ctx context.Context, args []string) ([]byte, error) {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if ee, ok := err.(*exec.Error); ok && ee.Err == exec.ErrNotFound {
-			return nil, fmt.Errorf("one CLI not found. Install it or set WUPHF_ONE_BIN")
+			return nil, fmt.Errorf("one CLI not found. Install One, make npx available, or set WUPHF_ONE_BIN")
 		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
@@ -491,19 +504,11 @@ func (o *OneCLI) run(ctx context.Context, args []string) ([]byte, error) {
 	return bytes.TrimSpace(stdout.Bytes()), nil
 }
 
-func (o *OneCLI) ensureReady() error {
+func (o *OneCLI) ensureConfigured() error {
 	if config.ResolveNoNex() {
 		return errors.New("Nex is disabled for this session (--no-nex), so WUPHF-managed integrations are unavailable")
 	}
-	if o.hasEnvPrefix("ONE_SECRET=") || strings.TrimSpace(config.ResolveOneSecret()) != "" {
-		return nil
-	}
-	msg := "WUPHF manages One integrations automatically through Nex, but this workspace is not provisioned yet"
-	if identity := strings.TrimSpace(config.ResolveOneIdentity()); identity != "" {
-		msg += fmt.Sprintf(" for %s", identity)
-	}
-	msg += ". Finish Nex setup and let WUPHF provision integrations for this workspace."
-	return errors.New(msg)
+	return nil
 }
 
 func (o *OneCLI) hasEnvPrefix(prefix string) bool {
@@ -518,6 +523,11 @@ func (o *OneCLI) hasEnvPrefix(prefix string) bool {
 func marshalCompact(v any) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+func lookPathExists(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }
 
 func marshalScalar(v any) string {

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -187,9 +188,10 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 		}
 
 		textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-		for _, paragraph := range strings.Split(textPart, "\n") {
+		rendered := renderMarkdown(textPart, contentWidth-6)
+		for _, paragraph := range strings.Split(rendered, "\n") {
 			paragraph = highlightMentions(paragraph, agentColorMap)
-			appendWrappedLine(prefix + paragraph)
+			lines = append(lines, renderedLine{Text: prefix + paragraph})
 		}
 		if a2uiRendered != "" {
 			for _, lineText := range strings.Split(a2uiRendered, "\n") {
@@ -1417,4 +1419,30 @@ func reverseAny[T any](items []T) {
 	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 		items[i], items[j] = items[j], items[i]
 	}
+}
+
+// renderMarkdown renders markdown text for terminal display using glamour.
+// Falls back to raw text if rendering fails.
+var mdRenderer *glamour.TermRenderer
+
+func renderMarkdown(text string, width int) string {
+	if width < 20 {
+		width = 20
+	}
+	if mdRenderer == nil {
+		r, err := glamour.NewTermRenderer(
+			glamour.WithAutoStyle(),
+			glamour.WithWordWrap(width),
+		)
+		if err != nil {
+			return text
+		}
+		mdRenderer = r
+	}
+	rendered, err := mdRenderer.Render(text)
+	if err != nil {
+		return text
+	}
+	// Trim trailing whitespace glamour adds
+	return strings.TrimRight(rendered, "\n ")
 }

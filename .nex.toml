@@ -1,0 +1,35 @@
+# .nex.toml — Nex project configuration
+# All settings are optional. Defaults shown in comments.
+
+# [auth]
+# api_key = "sk-..."          # Prefer NEX_API_KEY env var or ~/.nex/config.json
+
+# [hooks]
+# enabled = true              # Master kill switch for all hooks
+
+# [hooks.recall]
+# enabled = true              # Auto-recall context on each prompt
+# debounce_ms = 30000
+
+# [hooks.capture]
+# enabled = true              # Auto-capture on conversation stop
+# min_length = 20
+# max_length = 50000
+
+# [hooks.session_start]
+# enabled = true              # Load context on session start
+
+# [scan]
+# enabled = true
+# extensions = [".md", ".txt", ".csv", ".json", ".yaml", ".yml"]
+# ignore_dirs = ["node_modules", ".git", "dist", "build", "__pycache__"]
+# max_files = 5
+# max_file_size = 100000
+# depth = 2
+
+# [mcp]
+# enabled = true              # MCP installed by default; use --no-mcp to skip
+
+# [output]
+# format = "text"             # "text" | "json"
+# timeout = 120000
