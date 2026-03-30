@@ -2852,15 +2852,7 @@ func flattenThreadMessages(messages []brokerMessage, expanded map[string]bool) [
 			Depth:       depth,
 			ParentLabel: parentLabel,
 		}
-		if len(children[msg.ID]) > 0 && !expanded[msg.ID] {
-			tm.Collapsed = true
-			tm.HiddenReplies = countThreadReplies(children, msg.ID)
-			tm.ThreadParticipants = threadParticipants(children, msg.ID)
-		}
 		out = append(out, tm)
-		if tm.Collapsed {
-			return
-		}
 		for _, child := range children[msg.ID] {
 			walk(child, depth+1)
 		}
