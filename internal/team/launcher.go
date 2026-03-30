@@ -306,6 +306,10 @@ func (l *Launcher) notifyAgentsLoop() {
 		lastCount = len(msgs)
 
 		for _, msg := range newMsgs {
+			// Skip system/routing messages — they're progress signals, not real messages
+			if msg.From == "system" {
+				continue
+			}
 			l.persistHumanDirective(msg)
 			l.deliverMessageNotification(msg)
 		}
@@ -391,8 +395,8 @@ func (l *Launcher) notifyTaskActionsLoop() {
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 
-	// Broadcast stage update so the user sees immediate progress
-	if l.broker != nil && len(immediate) > 0 {
+	// Broadcast stage update so the user sees immediate progress (only for human messages)
+	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") {
 		names := make([]string, 0, len(immediate))
 		for _, t := range immediate {
 			names = append(names, "@"+t.Slug)
