@@ -312,8 +312,6 @@ func appIcon(app officeApp) string {
 	switch app {
 	case officeAppTasks:
 		return "☑"
-	case officeAppRequests:
-		return "?"
 	case officeAppPolicies:
 		return "✦"
 	case officeAppCalendar:

@@ -448,7 +448,6 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 	}{
 		{officeAppMessages, "Messages"},
 		{officeAppTasks, "Tasks"},
-		{officeAppRequests, "Requests"},
 		{officeAppSkills, "Skills"},
 		{officeAppPolicies, "Policies"},
 		{officeAppCalendar, "Calendar"},

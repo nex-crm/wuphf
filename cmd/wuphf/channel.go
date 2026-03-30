@@ -427,8 +427,6 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "agent", Description: "Add, remove, enable, or disable an agent"},
 	{Name: "agent prompt", Description: "Generate a new agent from a prompt"},
 	{Name: "task", Description: "Claim, release, or complete a task"},
-	{Name: "requests", Description: "Show open office requests"},
-	{Name: "request", Description: "Focus, answer, or snooze a request"},
 	{Name: "policies", Description: "Show team policies and rules"},
 	{Name: "calendar", Description: "Show the office schedule and team calendars"},
 	{Name: "queue", Description: "Alias for /calendar"},
@@ -2733,7 +2731,6 @@ func (m channelModel) appSidebarItems() []sidebarItem {
 	return []sidebarItem{
 		{Kind: "app", Value: string(officeAppMessages), Label: "Messages"},
 		{Kind: "app", Value: string(officeAppTasks), Label: "Tasks"},
-		{Kind: "app", Value: string(officeAppRequests), Label: "Requests"},
 		{Kind: "app", Value: string(officeAppSkills), Label: "Skills"},
 		{Kind: "app", Value: string(officeAppPolicies), Label: "Policies"},
 		{Kind: "app", Value: string(officeAppCalendar), Label: "Calendar"},
