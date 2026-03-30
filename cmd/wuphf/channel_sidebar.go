@@ -545,7 +545,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		if name == "" {
 			name = displayName(m.Slug)
 		}
-		sidebarLabel := act.Label
+		sidebarLabel := "" // dots only, no text labels in sidebar
 		nameMax := innerW - 8 - ansi.StringWidth(sidebarLabel)
 		if nameMax < 8 {
 			nameMax = 8
