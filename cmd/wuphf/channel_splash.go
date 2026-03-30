@@ -462,10 +462,6 @@ func (m splashModel) renderCast() string {
 	case splashCrash:
 		subtitle = "!! CRASH !!"
 		subtitleColor = "#EF4444"
-	case splashGrumpy:
-		subtitle = ""
-	case splashFakeSmile:
-		subtitle = ""
 	}
 	if subtitle != "" {
 		lines = append(lines, "")
