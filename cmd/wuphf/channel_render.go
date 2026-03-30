@@ -188,10 +188,10 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 		}
 
 		textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-		rendered := renderMarkdown(textPart, contentWidth-6)
+		rendered := renderMarkdown(textPart, contentWidth-len(prefix)-2)
 		for _, paragraph := range strings.Split(rendered, "\n") {
 			paragraph = highlightMentions(paragraph, agentColorMap)
-			lines = append(lines, renderedLine{Text: prefix + paragraph})
+			appendWrappedLine(prefix + paragraph)
 		}
 		if a2uiRendered != "" {
 			for _, lineText := range strings.Split(a2uiRendered, "\n") {

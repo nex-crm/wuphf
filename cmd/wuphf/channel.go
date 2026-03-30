@@ -1832,11 +1832,19 @@ func (m channelModel) View() string {
 				indicator := "  " + nameStyle.Render(name) + " " + dotStyle.Render("is typing"+dots)
 				allLines = append(allLines, renderedLine{Text: indicator})
 
-				// Show last 5 lines from pane as a live stream
+				// Show last 5 meaningful lines from pane as a live stream
 				paneLines := strings.Split(member.LiveActivity, "\n")
 				for _, pl := range paneLines {
 					pl = strings.TrimSpace(pl)
 					if pl == "" {
+						continue
+					}
+					// Filter out Claude Code chrome
+					lower := strings.ToLower(pl)
+					if strings.Contains(lower, "bypass") || strings.Contains(lower, "/effort") ||
+						strings.Contains(lower, "shift+tab") || strings.Contains(lower, "permissions") ||
+						strings.HasPrefix(pl, "\u276f") || pl == "\u276f" ||
+						strings.HasPrefix(pl, "\u2500") || strings.HasPrefix(pl, "\u2501") {
 						continue
 					}
 					if len(pl) > contentWidth-6 {
