@@ -363,16 +363,32 @@ func (m splashModel) renderCast() string {
 	}
 
 	// Coffee spill particles above CEO during crash
-	if m.phase == splashCrash || m.phase == splashGrumpy {
+	if m.phase == splashCrash {
 		spillStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B4513"))
 		if topPad > 2 {
 			particleLine := strings.Repeat(" ", topLeftPad+2)
-			if m.phase == splashCrash {
-				particleLine += spillStyle.Render("  ~~ \u2615 ~~  ")
-			} else {
-				particleLine += spillStyle.Render("    \u2022 \u2022    ")
-			}
+			particleLine += spillStyle.Render("  ~~ \u2615 ~~  ")
 			lines[topPad-2] = particleLine
+		}
+	}
+
+	// Angry speech bubble above CEO during grumpy/fakesmile phases
+	if m.phase == splashGrumpy || m.phase == splashFakeSmile {
+		angryStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")).Bold(true)
+		bubbleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444"))
+		if topPad > 4 {
+			bubble := []string{
+				bubbleStyle.Render("  \u250c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510"),
+				bubbleStyle.Render("  \u2502 ") + angryStyle.Render("STAY IN YOUR LANE") + bubbleStyle.Render("  \u2502"),
+				bubbleStyle.Render("  \u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u252c\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518"),
+				bubbleStyle.Render("              \u2570\u2500\u256f"),
+			}
+			for i, bline := range bubble {
+				idx := topPad - 5 + i
+				if idx >= 0 && idx < len(lines) {
+					lines[idx] = strings.Repeat(" ", topLeftPad) + bline
+				}
+			}
 		}
 	}
 
@@ -447,11 +463,9 @@ func (m splashModel) renderCast() string {
 		subtitle = "!! CRASH !!"
 		subtitleColor = "#EF4444"
 	case splashGrumpy:
-		subtitle = "CEO: ...seriously?"
-		subtitleColor = "#EAB308"
+		subtitle = ""
 	case splashFakeSmile:
-		subtitle = "CEO: :)  (this is fine)"
-		subtitleColor = "#EAB308"
+		subtitle = ""
 	}
 	if subtitle != "" {
 		lines = append(lines, "")
