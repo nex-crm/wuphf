@@ -395,8 +395,9 @@ func (l *Launcher) notifyTaskActionsLoop() {
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 
-	// Broadcast stage update so the user sees immediate progress (only for human messages in team mode)
-	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() {
+	// Broadcast stage update only for untagged messages in team mode
+	// (tagged messages go directly to the agent — user already knows who's handling it)
+	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && len(msg.Tagged) == 0 {
 		names := make([]string, 0, len(immediate))
 		for _, t := range immediate {
 			names = append(names, "@"+t.Slug)
