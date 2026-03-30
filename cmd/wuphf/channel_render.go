@@ -1423,26 +1423,28 @@ func reverseAny[T any](items []T) {
 
 // renderMarkdown renders markdown text for terminal display using glamour.
 // Falls back to raw text if rendering fails.
-var mdRenderer *glamour.TermRenderer
-
 func renderMarkdown(text string, width int) string {
 	if width < 20 {
 		width = 20
 	}
-	if mdRenderer == nil {
-		r, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
-			glamour.WithWordWrap(width),
-		)
-		if err != nil {
-			return text
-		}
-		mdRenderer = r
+	// Short messages without markdown syntax — skip rendering overhead
+	if !strings.ContainsAny(text, "*_`#|-[]>") {
+		return text
 	}
-	rendered, err := mdRenderer.Render(text)
+	r, err := glamour.NewTermRenderer(
+		glamour.WithAutoStyle(),
+		glamour.WithWordWrap(width),
+	)
+	if err != nil {
+		return text
+	}
+	rendered, err := r.Render(text)
 	if err != nil {
 		return text
 	}
 	// Trim trailing whitespace glamour adds
-	return strings.TrimRight(rendered, "\n ")
+	result := strings.TrimRight(rendered, "\n ")
+	// Remove glamour's auto-linked mailto: URLs that duplicate email addresses
+	result = strings.ReplaceAll(result, "mailto:", "")
+	return result
 }
