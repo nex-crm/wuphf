@@ -127,7 +127,7 @@ assert "Messages" "Messages app"
 assert "Tasks" "Tasks app"
 assert "Requests" "Requests app"
 assert "Skills" "Skills app"
-assert "Insights" "Insights app"
+assert "Policies" "Policies app"
 assert "Calendar" "Calendar app"
 
 echo ""
