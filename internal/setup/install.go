@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const defaultCLIPackage = "@wuphf/wuphf"
+const defaultCLIPackage = "@nex-ai/nex"
 
 // InstallLatestCLI installs the latest published CLI from npm.
 // The package and installer binary can be overridden for tests via env vars.

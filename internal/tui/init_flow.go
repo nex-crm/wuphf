@@ -17,8 +17,9 @@ type InitPhase string
 const (
 	InitIdle           InitPhase = "idle"
 	InitAPIKey         InitPhase = "api_key"
-	InitProviderChoice InitPhase = "provider_choice"
-	InitPackChoice     InitPhase = "pack_choice"
+	InitProviderChoice InitPhase = "provider_choice" // kept for backward compat, skipped in flow
+	InitOneAPIKey      InitPhase = "one_api_key"     // kept for backward compat, skipped in flow
+	InitPackChoice     InitPhase = "pack_choice"     // kept for backward compat, skipped in flow
 	InitDone           InitPhase = "done"
 )
 
@@ -49,18 +50,21 @@ func (f InitFlowModel) IsActive() bool {
 	return f.phase != InitIdle && f.phase != InitDone
 }
 
-// Start begins the init flow. If an API key already exists, skips to provider choice.
+// Start begins the init flow. Only asks for API key, then finishes.
+// Provider is always claude-code. Pack is always founding-team.
 func (f InitFlowModel) Start() (InitFlowModel, tea.Cmd) {
 	cfg, _ := config.Load()
 	if cfg.APIKey != "" {
 		f.apiKey = cfg.APIKey
 	}
+	f.provider = "claude-code"
+	f.pack = "founding-team"
 	if f.apiKey == "" {
 		f.phase = InitAPIKey
 		return f, f.emitPhase(InitAPIKey)
 	}
-	f.phase = InitProviderChoice
-	return f, f.emitPhase(InitProviderChoice)
+	// Already have API key — go straight to done
+	return f.finish()
 }
 
 // Update advances the flow based on incoming messages.
@@ -113,8 +117,9 @@ func (f InitFlowModel) updateAPIKeyInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd
 		f.apiKey = key
 		f.keyError = ""
 		f.keyInput = nil
-		f.phase = InitProviderChoice
-		return f, f.emitPhase(InitProviderChoice)
+		f.provider = "claude-code"
+		f.pack = "founding-team"
+		return f.finish()
 	case "backspace":
 		if len(f.keyInput) > 0 {
 			f.keyInput = f.keyInput[:len(f.keyInput)-1]
