@@ -562,34 +562,12 @@ func upsertWorkflowSkill(ctx context.Context, spec workflowSkillSpec) error {
 		return nil
 	}
 	payload := map[string]any{
-		"action":               "create",
-		"name":                 strings.TrimSpace(spec.Name),
-		"title":                strings.TrimSpace(spec.Title),
-		"description":          strings.TrimSpace(spec.Description),
-		"content":              workflowSkillContent(spec),
-		"created_by":           strings.TrimSpace(spec.CreatedBy),
-		"channel":              resolveChannel(spec.Channel),
-		"tags":                 compactStrings(spec.Tags),
-		"trigger":              strings.TrimSpace(spec.Trigger),
-		"workflow_provider":    strings.TrimSpace(spec.WorkflowProvider),
-		"workflow_key":         strings.TrimSpace(spec.WorkflowKey),
-		"workflow_definition":  strings.TrimSpace(spec.WorkflowDef),
-		"workflow_schedule":    strings.TrimSpace(spec.WorkflowSchedule),
-		"relay_id":             strings.TrimSpace(spec.RelayID),
-		"relay_platform":       strings.TrimSpace(spec.RelayPlatform),
-		"relay_event_types":    compactStrings(spec.RelayEventTypes),
-		"last_execution_status": "",
-	}
-	if err := brokerPostJSON(ctx, "/skills", payload, nil); err == nil {
-		return nil
-	} else if !strings.Contains(err.Error(), "409") {
-		return err
-	}
-	return brokerPutJSON(ctx, "/skills", map[string]any{
+		"action":                "create",
 		"name":                  strings.TrimSpace(spec.Name),
 		"title":                 strings.TrimSpace(spec.Title),
 		"description":           strings.TrimSpace(spec.Description),
 		"content":               workflowSkillContent(spec),
+		"created_by":            strings.TrimSpace(spec.CreatedBy),
 		"channel":               resolveChannel(spec.Channel),
 		"tags":                  compactStrings(spec.Tags),
 		"trigger":               strings.TrimSpace(spec.Trigger),
@@ -600,6 +578,28 @@ func upsertWorkflowSkill(ctx context.Context, spec workflowSkillSpec) error {
 		"relay_id":              strings.TrimSpace(spec.RelayID),
 		"relay_platform":        strings.TrimSpace(spec.RelayPlatform),
 		"relay_event_types":     compactStrings(spec.RelayEventTypes),
+		"last_execution_status": "",
+	}
+	if err := brokerPostJSON(ctx, "/skills", payload, nil); err == nil {
+		return nil
+	} else if !strings.Contains(err.Error(), "409") {
+		return err
+	}
+	return brokerPutJSON(ctx, "/skills", map[string]any{
+		"name":                strings.TrimSpace(spec.Name),
+		"title":               strings.TrimSpace(spec.Title),
+		"description":         strings.TrimSpace(spec.Description),
+		"content":             workflowSkillContent(spec),
+		"channel":             resolveChannel(spec.Channel),
+		"tags":                compactStrings(spec.Tags),
+		"trigger":             strings.TrimSpace(spec.Trigger),
+		"workflow_provider":   strings.TrimSpace(spec.WorkflowProvider),
+		"workflow_key":        strings.TrimSpace(spec.WorkflowKey),
+		"workflow_definition": strings.TrimSpace(spec.WorkflowDef),
+		"workflow_schedule":   strings.TrimSpace(spec.WorkflowSchedule),
+		"relay_id":            strings.TrimSpace(spec.RelayID),
+		"relay_platform":      strings.TrimSpace(spec.RelayPlatform),
+		"relay_event_types":   compactStrings(spec.RelayEventTypes),
 	}, nil)
 }
 

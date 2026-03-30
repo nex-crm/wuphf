@@ -429,7 +429,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "task", Description: "Claim, release, or complete a task"},
 	{Name: "requests", Description: "Show open office requests"},
 	{Name: "request", Description: "Focus, answer, or snooze a request"},
-	{Name: "insights", Description: "Show Nex and office automation updates"},
+	{Name: "policies", Description: "Show team policies and rules"},
 	{Name: "calendar", Description: "Show the office schedule and team calendars"},
 	{Name: "queue", Description: "Alias for /calendar"},
 	{Name: "skills", Description: "Show available skills"},
@@ -490,7 +490,7 @@ const (
 	officeAppMessages officeApp = "messages"
 	officeAppTasks    officeApp = "tasks"
 	officeAppRequests officeApp = "requests"
-	officeAppInsights officeApp = "insights"
+	officeAppPolicies officeApp = "policies"
 	officeAppCalendar officeApp = "calendar"
 	officeAppSkills   officeApp = "skills"
 )
@@ -2038,7 +2038,7 @@ func (m channelModel) currentHeaderTitle() string {
 		return "# " + m.activeChannel + " · Tasks"
 	case officeAppRequests:
 		return "# " + m.activeChannel + " · Requests"
-	case officeAppInsights:
+	case officeAppPolicies:
 		return "# " + m.activeChannel + " · Insights"
 	case officeAppCalendar:
 		return "# " + m.activeChannel + " · Calendar"
@@ -2086,7 +2086,7 @@ func (m channelModel) currentHeaderMeta() string {
 			}
 		}
 		return fmt.Sprintf("  Decisions and approvals the team is waiting on · %d open · %d blocking · %d soon", len(m.requests), blocking, urgent)
-	case officeAppInsights:
+	case officeAppPolicies:
 		highSignal := 0
 		for _, signal := range m.signals {
 			if signal.Urgency == "high" || signal.Blocking || signal.RequiresHuman {
@@ -2159,8 +2159,8 @@ func (m channelModel) currentAppLabel() string {
 		return "tasks"
 	case officeAppRequests:
 		return "requests"
-	case officeAppInsights:
-		return "insights"
+	case officeAppPolicies:
+		return "policies"
 	case officeAppCalendar:
 		return "calendar"
 	case officeAppSkills:
@@ -2179,7 +2179,7 @@ func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
 		return buildTaskLines(m.tasks, contentWidth)
 	case officeAppRequests:
 		return buildRequestLines(m.requests, contentWidth)
-	case officeAppInsights:
+	case officeAppPolicies:
 		return buildInsightLines(m.signals, m.decisions, m.watchdogs, m.actions, contentWidth)
 	case officeAppCalendar:
 		return buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
@@ -2731,11 +2731,12 @@ func (m channelModel) channelSidebarItems() []sidebarItem {
 
 func (m channelModel) appSidebarItems() []sidebarItem {
 	return []sidebarItem{
-		sidebarItem{Kind: "app", Value: string(officeAppMessages), Label: "Messages"},
-		sidebarItem{Kind: "app", Value: string(officeAppTasks), Label: "Tasks"},
-		sidebarItem{Kind: "app", Value: string(officeAppRequests), Label: "Requests"},
-		sidebarItem{Kind: "app", Value: string(officeAppInsights), Label: "Insights"},
-		sidebarItem{Kind: "app", Value: string(officeAppCalendar), Label: "Calendar"},
+		{Kind: "app", Value: string(officeAppMessages), Label: "Messages"},
+		{Kind: "app", Value: string(officeAppTasks), Label: "Tasks"},
+		{Kind: "app", Value: string(officeAppRequests), Label: "Requests"},
+		{Kind: "app", Value: string(officeAppSkills), Label: "Skills"},
+		{Kind: "app", Value: string(officeAppPolicies), Label: "Policies"},
+		{Kind: "app", Value: string(officeAppCalendar), Label: "Calendar"},
 	}
 }
 
@@ -2810,7 +2811,7 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 		case officeAppRequests:
 			m.notice = "Viewing requests in #" + m.activeChannel + "."
 			return pollRequests(m.activeChannel)
-		case officeAppInsights:
+		case officeAppPolicies:
 			m.notice = "Viewing Nex and office insights."
 			return pollOfficeLedger()
 		case officeAppCalendar:
@@ -3864,9 +3865,9 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Usage: /request <focus|answer|snooze> <request-id>"
 			return m, nil
 		}
-	case trimmed == "/insights":
+	case trimmed == "/policies":
 		clearCurrent()
-		m.activeApp = officeAppInsights
+		m.activeApp = officeAppPolicies
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing Nex and office insights."
 		return m, pollOfficeLedger()
@@ -5328,7 +5329,7 @@ func isA2UIType(t string) bool {
 
 func resolveInitialOfficeApp(name string) officeApp {
 	switch officeApp(strings.ToLower(strings.TrimSpace(name))) {
-	case officeAppMessages, officeAppTasks, officeAppRequests, officeAppInsights, officeAppCalendar:
+	case officeAppMessages, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar:
 		return officeApp(strings.ToLower(strings.TrimSpace(name)))
 	default:
 		return officeAppMessages

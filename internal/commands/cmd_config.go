@@ -67,11 +67,16 @@ func configShow(ctx *SlashContext) error {
 	}
 
 	baseURL := config.BaseURL()
+	actionProvider := config.ResolveActionProvider()
+	if actionProvider == "" {
+		actionProvider = "auto"
+	}
 
 	var sb strings.Builder
 	sb.WriteString("Configuration:\n")
 	sb.WriteString(fmt.Sprintf("  API Key:   %s\n", masked))
 	sb.WriteString(fmt.Sprintf("  Integrations: %s\n", config.OneSetupSummary()))
+	sb.WriteString(fmt.Sprintf("  Action provider: %s\n", actionProvider))
 	sb.WriteString(fmt.Sprintf("  Workspace: %s\n", workspace))
 	sb.WriteString(fmt.Sprintf("  Provider:  %s\n", provider))
 	sb.WriteString(fmt.Sprintf("  Pack:      %s\n", pack))
@@ -89,6 +94,10 @@ func configSet(ctx *SlashContext, key, value string) error {
 	switch key {
 	case "api_key":
 		cfg.APIKey = value
+	case "composio_api_key":
+		cfg.ComposioAPIKey = value
+	case "action_provider":
+		cfg.ActionProvider = value
 	case "workspace_id":
 		cfg.WorkspaceID = value
 	case "workspace_slug":
@@ -107,7 +116,7 @@ func configSet(ctx *SlashContext, key, value string) error {
 		cfg.DefaultFormat = value
 	default:
 		ctx.AddMessage("system", "Unknown config key: "+key+
-			"\nValid keys: api_key, workspace_id, workspace_slug, llm_provider, gemini_api_key, pack, team_lead_slug, dev_url, default_format")
+			"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, llm_provider, gemini_api_key, pack, team_lead_slug, dev_url, default_format")
 		return nil
 	}
 

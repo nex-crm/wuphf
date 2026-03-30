@@ -342,7 +342,7 @@ func buildInsightLines(signals []channelSignal, decisions []channelDecision, ale
 		}
 	}
 	var lines []renderedLine
-	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Insights")})
+	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Policies")})
 	appendWrappedLine := func(text string) {
 		wrapped := appendWrapped(nil, maxInt(20, contentWidth-4), text)
 		for _, line := range wrapped {

@@ -450,7 +450,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		{officeAppTasks, "Tasks"},
 		{officeAppRequests, "Requests"},
 		{officeAppSkills, "Skills"},
-		{officeAppInsights, "Insights"},
+		{officeAppPolicies, "Policies"},
 		{officeAppCalendar, "Calendar"},
 	}
 	appIndex := 0

@@ -12,7 +12,9 @@ import (
 
 type stubActionProvider struct{}
 
-func (stubActionProvider) Name() string { return "one" }
+func (stubActionProvider) Name() string                    { return "one" }
+func (stubActionProvider) Configured() bool                { return true }
+func (stubActionProvider) Supports(action.Capability) bool { return true }
 func (stubActionProvider) Guide(context.Context, string) (action.GuideResult, error) {
 	return action.GuideResult{}, nil
 }

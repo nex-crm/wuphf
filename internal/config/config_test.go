@@ -33,15 +33,15 @@ func TestLoadMissingFileReturnsEmpty(t *testing.T) {
 func TestRoundtrip(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		in := Config{
-			APIKey:        "test-key",
-			Email:         "user@example.com",
-			WorkspaceID:   "ws-123",
-			WorkspaceSlug: "my-ws",
-			LLMProvider:   "gemini",
-			GeminiAPIKey:  "gemini-key",
-			DefaultFormat: "json",
+			APIKey:         "test-key",
+			Email:          "user@example.com",
+			WorkspaceID:    "ws-123",
+			WorkspaceSlug:  "my-ws",
+			LLMProvider:    "gemini",
+			GeminiAPIKey:   "gemini-key",
+			DefaultFormat:  "json",
 			DefaultTimeout: 30_000,
-			DevURL:        "http://localhost:3000",
+			DevURL:         "http://localhost:3000",
 		}
 		if err := Save(in); err != nil {
 			t.Fatalf("Save failed: %v", err)
@@ -141,6 +141,32 @@ func TestOneSetupSummaryManagedPending(t *testing.T) {
 		got := OneSetupSummary()
 		if got != "managed by Nex via One (ops@example.com), provisioning pending" {
 			t.Fatalf("unexpected setup summary %q", got)
+		}
+	})
+}
+
+func TestResolveComposioAPIKeyFallsBackToConfig(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{ComposioAPIKey: "cmp-key"})
+		if got := ResolveComposioAPIKey(); got != "cmp-key" {
+			t.Fatalf("expected composio key from config, got %q", got)
+		}
+	})
+}
+
+func TestResolveActionProviderDefaultsToAuto(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		if got := ResolveActionProvider(); got != "auto" {
+			t.Fatalf("expected auto provider, got %q", got)
+		}
+	})
+}
+
+func TestResolveActionProviderUsesConfig(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{ActionProvider: "composio"})
+		if got := ResolveActionProvider(); got != "composio" {
+			t.Fatalf("expected composio provider, got %q", got)
 		}
 	})
 }

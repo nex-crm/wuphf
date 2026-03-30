@@ -314,7 +314,7 @@ func appIcon(app officeApp) string {
 		return "☑"
 	case officeAppRequests:
 		return "?"
-	case officeAppInsights:
+	case officeAppPolicies:
 		return "✦"
 	case officeAppCalendar:
 		return "◷"

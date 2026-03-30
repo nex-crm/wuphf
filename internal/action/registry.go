@@ -75,15 +75,15 @@ func preferredProvidersFor(cap Capability) []string {
 	case CapabilityConnections,
 		CapabilityActionSearch,
 		CapabilityActionKnowledge,
-		CapabilityActionExecute:
+		CapabilityActionExecute,
+		CapabilityRelayList,
+		CapabilityRelayEventTypes,
+		CapabilityRelayCreate,
+		CapabilityRelayActivate:
 		return []string{"composio", "one"}
 	case CapabilityWorkflowCreate,
 		CapabilityWorkflowExecute,
 		CapabilityWorkflowRuns,
-		CapabilityRelayList,
-		CapabilityRelayEventTypes,
-		CapabilityRelayCreate,
-		CapabilityRelayActivate,
 		CapabilityRelayEvents,
 		CapabilityRelayEvent:
 		return []string{"one", "composio"}

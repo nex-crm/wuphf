@@ -89,9 +89,9 @@ func (c *ComposioREST) ListConnections(ctx context.Context, opts ListConnections
 	}
 	var result struct {
 		Items []struct {
-			ID        string `json:"id"`
-			Status    string `json:"status"`
-			Toolkit    struct {
+			ID      string `json:"id"`
+			Status  string `json:"status"`
+			Toolkit struct {
 				Slug string `json:"slug"`
 				Name string `json:"name"`
 			} `json:"toolkit"`
@@ -250,11 +250,11 @@ func (c *ComposioREST) ListRelays(ctx context.Context, opts ListRelaysOptions) (
 	}
 	var result struct {
 		Items []struct {
-			ID                 string          `json:"id"`
-			TriggerName        string          `json:"trigger_name"`
-			ConnectedAccountID string          `json:"connected_account_id"`
-			UpdatedAt          string          `json:"updated_at"`
-			DisabledAt         string          `json:"disabled_at"`
+			ID                 string `json:"id"`
+			TriggerName        string `json:"trigger_name"`
+			ConnectedAccountID string `json:"connected_account_id"`
+			UpdatedAt          string `json:"updated_at"`
+			DisabledAt         string `json:"disabled_at"`
 		} `json:"items"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
