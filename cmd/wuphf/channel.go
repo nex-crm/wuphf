@@ -704,7 +704,7 @@ func (m channelModel) pollCurrentState() tea.Cmd {
 		pollMembers(m.activeChannel),
 		pollRequests(m.activeChannel),
 		pollTasks(m.activeChannel),
-		pollSkills(m.activeChannel),
+		pollSkills(""),
 		pollOfficeLedger(),
 		pollUsage(),
 		tickChannel(),
@@ -2180,7 +2180,7 @@ func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
 	case officeAppRequests:
 		return buildRequestLines(m.requests, contentWidth)
 	case officeAppPolicies:
-		return buildInsightLines(m.signals, m.decisions, m.watchdogs, m.actions, contentWidth)
+		return buildPolicyLines(m.decisions, contentWidth)
 	case officeAppCalendar:
 		return buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
 	case officeAppSkills:
@@ -2819,7 +2819,7 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 			return pollOfficeLedger()
 		case officeAppSkills:
 			m.notice = "Viewing skills."
-			return pollSkills(m.activeChannel)
+			return pollSkills("")
 		}
 	}
 	return nil
@@ -3925,7 +3925,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.activeApp = officeAppSkills
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing skills."
-		return m, pollSkills(m.activeChannel)
+		return m, pollSkills("")
 	case strings.HasPrefix(trimmed, "/skill create "):
 		clearCurrent()
 		desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "/skill create "))
