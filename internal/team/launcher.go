@@ -1902,13 +1902,13 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 	notification := ""
 	if l.isOneOnOne() {
 		notification = fmt.Sprintf(
-			"[%s @%s]: %s — Reply with team_broadcast channel \"%s\" reply_to_id \"%s\".",
-			msgID, from, truncate(content, 150), channel, msgID,
+			"[%s @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\" to read context, then reply using team_broadcast channel \"%s\" reply_to_id \"%s\".",
+			msgID, from, truncate(content, 150), slug, channel, channel, msgID,
 		)
 	} else {
 		notification = fmt.Sprintf(
-			"[%s @%s]: %s — Reply with team_broadcast channel \"%s\" reply_to_id \"%s\". Stay quiet if outside your domain.",
-			msgID, from, truncate(content, 150), channel, msgID,
+			"[%s @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\" to read context. If this is your domain, reply using team_broadcast channel \"%s\" reply_to_id \"%s\". If not your domain, stay quiet.",
+			msgID, from, truncate(content, 150), slug, channel, channel, msgID,
 		)
 	}
 
