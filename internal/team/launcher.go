@@ -692,12 +692,30 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 
 	switch {
 	case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
-		addImmediate(lead)
+		// Direct routing: if user tags specific agents, route to them directly
+		// without CEO bottleneck. CEO only gets untagged or multi-tagged messages.
+		directRouted := false
+		if len(msg.Tagged) > 0 && !containsSlug(msg.Tagged, lead) {
+			for _, slug := range slugs {
+				if slug == lead || slug == msg.From {
+					continue
+				}
+				if containsSlug(msg.Tagged, slug) {
+					if allowTarget(slug) {
+						addImmediate(slug)
+						directRouted = true
+					}
+				}
+			}
+		}
+		if !directRouted {
+			addImmediate(lead)
+		}
 		for _, slug := range slugs {
 			if slug == lead || slug == msg.From {
 				continue
 			}
-			if containsSlug(msg.Tagged, slug) || (domain != "" && domain != "general" && inferAgentDomain(slug) == domain) {
+			if containsSlug(msg.Tagged, slug) && !directRouted {
 				if allowTarget(slug) {
 					addDelayed(slug)
 				}
@@ -1884,13 +1902,13 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 	notification := ""
 	if l.isOneOnOne() {
 		notification = fmt.Sprintf(
-			"[Direct update %s from @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\", read the latest 1:1 exchange, and if you can answer the human directly, do that now. Use team_broadcast channel \"%s\" reply_to_id \"%s\" for the normal reply, or human_message if you are presenting completion or a recommendation. Do not disappear into a long research loop unless the answer truly depends on it.",
-			msgID, from, truncate(content, 150), slug, channel, channel, msgID,
+			"[%s @%s]: %s — Reply with team_broadcast channel \"%s\" reply_to_id \"%s\".",
+			msgID, from, truncate(content, 150), channel, msgID,
 		)
 	} else {
 		notification = fmt.Sprintf(
-			"[Channel update #%s %s from @%s]: %s — Before you say anything, call team_poll with my_slug \"%s\" and channel \"%s\" and read the latest channel plus task ownership. If someone already answered well or this is outside your domain, stay quiet. If you are directly responding, reply in-thread with team_broadcast channel \"%s\" reply_to_id \"%s\".",
-			channel, msgID, from, truncate(content, 150), slug, channel, channel, msgID,
+			"[%s @%s]: %s — Reply with team_broadcast channel \"%s\" reply_to_id \"%s\". Stay quiet if outside your domain.",
+			msgID, from, truncate(content, 150), channel, msgID,
 		)
 	}
 
@@ -2365,8 +2383,14 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		}
 	}
 
+	// Use Sonnet for specialists, Opus for CEO — faster + cheaper
+	model := "claude-sonnet-4-6"
+	if slug == l.officeLeadSlug() {
+		model = "claude-opus-4-6"
+	}
+
 	return fmt.Sprintf(
-		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
 		oneOnOneEnv,
 		oneSecretEnv,
 		oneIdentityEnv,
@@ -2376,6 +2400,7 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		BrokerPort,
 		brokerToken,
 		slug,
+		model,
 		permFlags,
 		escaped,
 		mcpConfig,
