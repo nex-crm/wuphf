@@ -1804,11 +1804,16 @@ func (m channelModel) View() string {
 	// Append inline typing indicators for active agents (Slack-style)
 	// Shows "Name is typing..." + last 5 lines from their tmux pane as a stream
 	if m.activeApp == officeAppMessages || m.isOneOnOne() {
+		hasTyping := false
 		for _, member := range m.members {
 			if member.Slug == "you" || member.Slug == "human" {
 				continue
 			}
 			if member.LiveActivity != "" {
+				if !hasTyping {
+					allLines = append(allLines, renderedLine{Text: ""})
+					hasTyping = true
+				}
 				name := member.Name
 				if name == "" {
 					name = displayName(member.Slug)
