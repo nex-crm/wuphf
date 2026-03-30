@@ -1933,7 +1933,8 @@ func (m channelModel) View() string {
 		panels = append(panels, border, thread)
 	}
 
-	content := lipgloss.JoinHorizontal(lipgloss.Top, panels...)
+	content := lipgloss.NewStyle().MaxWidth(m.width).Render(
+		lipgloss.JoinHorizontal(lipgloss.Top, panels...))
 
 	// ── Status bar ───────────────────────────────────────────────────
 	onlineCount := len(m.members)

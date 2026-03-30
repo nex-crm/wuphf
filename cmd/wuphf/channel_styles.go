@@ -60,6 +60,7 @@ func sidebarStyle(width, height int) lipgloss.Style {
 func mainPanelStyle(width, height int) lipgloss.Style {
 	return lipgloss.NewStyle().
 		Width(width).
+		MaxWidth(width).
 		Height(height).
 		Background(lipgloss.Color(slackMainBg)).
 		Foreground(lipgloss.Color(slackText))
@@ -101,6 +102,7 @@ func composerBorderStyle(width int, focused bool) lipgloss.Style {
 	}
 	return lipgloss.NewStyle().
 		Width(width).
+		MaxWidth(width + 4). // account for border + padding
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(borderColor)).
 		Background(lipgloss.Color("#17161C")).
