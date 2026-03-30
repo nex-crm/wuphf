@@ -281,7 +281,8 @@ type Broker struct {
 	watchdogs         []watchdogAlert
 	scheduler         []schedulerJob
 	skills            []teamSkill
-	lastTaggedAt      map[string]time.Time // when each agent was last @mentioned
+	lastTaggedAt      map[string]time.Time   // when each agent was last @mentioned
+	lastPaneSnapshot  map[string]string      // last captured pane content per agent (for change detection)
 	counter           int
 	notificationSince string
 	insightsSince     string
@@ -2862,107 +2863,80 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// captureLiveAgentActivity checks which agents have active tmux panes
-// (not idle at the shell prompt). Returns a map of slug -> "active" for
-// agents that are currently processing. We don't try to parse pane content
-// — just detect whether the agent is busy.
-func captureLiveAgentActivity() map[string]string {
+// capturePaneActivity captures tmux pane content for each agent and detects
+// activity by comparing with the previous snapshot. If content changed,
+// the agent is active and we return the last 5 non-empty lines as a stream.
+// If content is the same as last time, agent is idle — return nothing.
+func (b *Broker) capturePaneActivity(slugOverride string) map[string]string {
 	result := make(map[string]string)
 
-	// Get the agent manifest to map pane indices to slugs
-	manifest := company.DefaultManifest()
-	loaded, loadErr := company.LoadManifest()
-	if loadErr == nil && len(loaded.Members) > 0 {
-		manifest = loaded
-	}
-	agents := manifest.Members
-	if len(agents) == 0 {
-		return result
+	type paneCheck struct {
+		slug   string
+		target string
 	}
 
-	// Check each agent pane for activity by looking at cursor position changes
-	// A simpler approach: capture the pane and check if there's a spinner or
-	// thinking indicator (single-char lines with unicode symbols)
-	for i, agent := range agents {
-		paneIdx := i + 1 // pane 0 is the channel view
-		target := fmt.Sprintf("wuphf-team:team.%d", paneIdx)
+	var checks []paneCheck
+	if slugOverride != "" {
+		// 1:1 mode: only check pane 1
+		checks = append(checks, paneCheck{slug: slugOverride, target: fmt.Sprintf("%s:team.1", SessionName)})
+	} else {
+		manifest := company.DefaultManifest()
+		loaded, loadErr := company.LoadManifest()
+		if loadErr == nil && len(loaded.Members) > 0 {
+			manifest = loaded
+		}
+		for i, agent := range manifest.Members {
+			checks = append(checks, paneCheck{
+				slug:   agent.Slug,
+				target: fmt.Sprintf("wuphf-team:team.%d", i+1),
+			})
+		}
+	}
 
+	b.mu.Lock()
+	if b.lastPaneSnapshot == nil {
+		b.lastPaneSnapshot = make(map[string]string)
+	}
+	b.mu.Unlock()
+
+	for _, check := range checks {
 		paneOut, err := exec.Command("tmux", "-L", "wuphf", "capture-pane",
-			"-p", "-J", "-S", "-5",
-			"-t", target).CombinedOutput()
+			"-p", "-J",
+			"-t", check.target).CombinedOutput()
 		if err != nil {
 			continue
 		}
 
-		// Detect if the agent is actively working by checking if the pane
-		// is NOT sitting idle at a prompt. An idle Claude Code pane ends with
-		// ❯ on the last non-empty, non-chrome line. Anything else = active.
-		lines := strings.Split(string(paneOut), "\n")
-		isIdle := true
-		for i := len(lines) - 1; i >= 0; i-- {
+		content := string(paneOut)
+
+		// Compare with previous snapshot
+		b.mu.Lock()
+		prev := b.lastPaneSnapshot[check.slug]
+		b.lastPaneSnapshot[check.slug] = content
+		b.mu.Unlock()
+
+		if content == prev {
+			// No change — agent is idle
+			continue
+		}
+
+		// Content changed — agent is active. Extract last 5 meaningful lines.
+		lines := strings.Split(content, "\n")
+		var meaningful []string
+		for i := len(lines) - 1; i >= 0 && len(meaningful) < 5; i-- {
 			trimmed := strings.TrimSpace(lines[i])
 			if trimmed == "" {
 				continue
 			}
-			// Skip known chrome lines
-			lower := strings.ToLower(trimmed)
-			if strings.Contains(lower, "bypass") || strings.Contains(lower, "/effort") ||
-				strings.Contains(lower, "permissions") || strings.Contains(lower, "shift+tab") ||
-				strings.Contains(lower, "(mcp)") || strings.HasPrefix(trimmed, "\u2500") ||
-				strings.HasPrefix(trimmed, "\u2501") ||
-				strings.Contains(lower, "claude code") || strings.Contains(lower, "claude max") ||
-				strings.Contains(lower, "v2.1.") || strings.Contains(lower, "opus 4") ||
-				strings.Contains(lower, "contex") || strings.Contains(lower, "/users/") {
-				continue
-			}
-			// If the last meaningful line is the ❯ prompt, agent is idle
-			if strings.HasPrefix(trimmed, "\u276f") || trimmed == "\u276f" {
-				isIdle = true
-			} else {
-				isIdle = false
-			}
-			break
+			meaningful = append(meaningful, trimmed)
 		}
-		if !isIdle {
-			result[agent.Slug] = "active"
+		// Reverse to chronological order
+		for i, j := 0, len(meaningful)-1; i < j; i, j = i+1, j-1 {
+			meaningful[i], meaningful[j] = meaningful[j], meaningful[i]
 		}
-	}
-	return result
-}
-
-// captureLiveAgentActivityForPane checks tmux pane team.1 for a single agent.
-// In 1:1 mode the only agent always occupies pane 1 regardless of manifest
-// order, so the manifest-index-based captureLiveAgentActivity would look at
-// the wrong pane.
-func captureLiveAgentActivityForPane(slug string) map[string]string {
-	result := make(map[string]string)
-	target := fmt.Sprintf("%s:team.1", SessionName)
-	paneOut, err := exec.Command("tmux", "-L", tmuxSocketName, "capture-pane",
-		"-p", "-J", "-S", "-5",
-		"-t", target).CombinedOutput()
-	if err != nil {
-		return result
-	}
-	lines := strings.Split(string(paneOut), "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == "" {
-			continue
+		if len(meaningful) > 0 {
+			result[check.slug] = strings.Join(meaningful, "\n")
 		}
-		lower := strings.ToLower(trimmed)
-		if strings.Contains(lower, "bypass") || strings.Contains(lower, "/effort") ||
-			strings.Contains(lower, "permissions") || strings.Contains(lower, "shift+tab") ||
-			strings.Contains(lower, "(mcp)") || strings.HasPrefix(trimmed, "\u2500") ||
-			strings.HasPrefix(trimmed, "\u2501") ||
-				strings.Contains(lower, "claude code") || strings.Contains(lower, "claude max") ||
-				strings.Contains(lower, "v2.1.") || strings.Contains(lower, "opus 4") ||
-				strings.Contains(lower, "contex") || strings.Contains(lower, "/users/") {
-			continue
-		}
-		if !strings.HasPrefix(trimmed, "\u276f") && trimmed != "\u276f" {
-			result[slug] = "active"
-		}
-		break
 	}
 	return result
 }
@@ -3044,16 +3018,13 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		LiveActivity string `json:"liveActivity,omitempty"`
 	}
 
-	// Capture live activity from tmux panes for agents that appear idle.
-	// In 1:1 mode the only agent runs in pane team.1 regardless of its
-	// position in the manifest, so captureLiveAgentActivity (which maps
-	// pane indices from the manifest order) will look at the wrong pane.
-	// Probe pane 1 directly for the oneOnOneAgent instead.
+	// Capture pane activity via diff detection.
+	// If content changed since last poll, agent is active — return last 5 lines.
 	var paneActivity map[string]string
 	if isOneOnOne && oneOnOneSlug != "" {
-		paneActivity = captureLiveAgentActivityForPane(oneOnOneSlug)
+		paneActivity = b.capturePaneActivity(oneOnOneSlug)
 	} else {
-		paneActivity = captureLiveAgentActivity()
+		paneActivity = b.capturePaneActivity("")
 	}
 
 	var list []memberEntry

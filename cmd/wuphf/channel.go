@@ -1802,6 +1802,7 @@ func (m channelModel) View() string {
 	allLines := m.currentMainLines(contentWidth)
 
 	// Append inline typing indicators for active agents (Slack-style)
+	// Shows "Name is typing..." + last 5 lines from their tmux pane as a stream
 	if m.activeApp == officeAppMessages || m.isOneOnOne() {
 		for _, member := range m.members {
 			if member.Slug == "you" || member.Slug == "human" {
@@ -1818,6 +1819,7 @@ func (m channelModel) View() string {
 				}
 				nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
 				dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+				streamStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7C7C85")).Italic(true)
 				dots := "..."
 				switch m.tickFrame % 3 {
 				case 0:
@@ -1829,6 +1831,19 @@ func (m channelModel) View() string {
 				}
 				indicator := "  " + nameStyle.Render(name) + " " + dotStyle.Render("is typing"+dots)
 				allLines = append(allLines, renderedLine{Text: indicator})
+
+				// Show last 5 lines from pane as a live stream
+				paneLines := strings.Split(member.LiveActivity, "\n")
+				for _, pl := range paneLines {
+					pl = strings.TrimSpace(pl)
+					if pl == "" {
+						continue
+					}
+					if len(pl) > contentWidth-6 {
+						pl = pl[:contentWidth-9] + "..."
+					}
+					allLines = append(allLines, renderedLine{Text: "    " + streamStyle.Render("\u2502 "+pl)})
+				}
 			}
 		}
 	}
