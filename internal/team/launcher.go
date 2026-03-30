@@ -276,10 +276,8 @@ func (l *Launcher) Launch() error {
 	if !l.isOneOnOne() {
 		go l.notifyTaskActionsLoop()
 		go l.pollNexNotificationsLoop()
-		go l.pollNexInsightsLoop()
 		go l.watchdogSchedulerLoop()
 	}
-	go l.pollOneRelayEventsLoop()
 
 	return nil
 }
@@ -392,6 +390,23 @@ func (l *Launcher) notifyTaskActionsLoop() {
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
+
+	// Broadcast stage update so the user sees immediate progress
+	if l.broker != nil && len(immediate) > 0 {
+		names := make([]string, 0, len(immediate))
+		for _, t := range immediate {
+			names = append(names, "@"+t.Slug)
+		}
+		channel := msg.Channel
+		if channel == "" {
+			channel = "general"
+		}
+		l.broker.PostSystemMessage(channel,
+			fmt.Sprintf("Routing to %s...", strings.Join(names, ", ")),
+			"routing",
+		)
+	}
+
 	for _, target := range immediate {
 		l.sendChannelUpdate(target.PaneTarget, target.Slug, msg.Channel, msg.ID, msg.From, msg.Content)
 	}

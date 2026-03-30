@@ -2660,6 +2660,25 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// PostSystemMessage posts a lightweight system message that shows progress without blocking.
+func (b *Broker) PostSystemMessage(channel, content, kind string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.counter++
+	if channel == "" {
+		channel = "general"
+	}
+	msg := channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   normalizeChannelSlug(channel),
+		Kind:      kind,
+		Content:   content,
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	b.messages = append(b.messages, msg)
+}
+
 func (b *Broker) PostMessage(from, channel, content string, tagged []string, replyTo string) (channelMessage, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

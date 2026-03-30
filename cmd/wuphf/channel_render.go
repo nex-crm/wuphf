@@ -158,6 +158,13 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 			continue
 		}
 
+		// System/routing messages — render as subtle inline updates
+		if msg.From == "system" && (msg.Kind == "routing" || msg.Kind == "stage") {
+			sysStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7C7C85")).Italic(true)
+			appendWrappedLine("  " + sysStyle.Render("  → "+msg.Content))
+			continue
+		}
+
 		mood := inferMood(msg.Content)
 		meta := roleLabel(msg.From) + " · " + msg.ID
 		if mood != "" {
