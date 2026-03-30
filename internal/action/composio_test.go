@@ -10,11 +10,13 @@ import (
 
 func TestComposioRESTActionHappyPath(t *testing.T) {
 	mux := http.NewServeMux()
+	var executeUserID string
 	mux.HandleFunc("/connected_accounts", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"items": []map[string]any{{
 				"id":     "ca_123",
 				"status": "ACTIVE",
+				"user_id": "cmp_user_123",
 				"toolkit": map[string]any{
 					"slug": "gmail",
 					"name": "Gmail",
@@ -23,6 +25,13 @@ func TestComposioRESTActionHappyPath(t *testing.T) {
 					"name": "Founder Gmail",
 				},
 			}},
+		})
+	})
+	mux.HandleFunc("/connected_accounts/ca_123", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      "ca_123",
+			"user_id": "cmp_user_123",
+			"status":  "ACTIVE",
 		})
 	})
 	mux.HandleFunc("/tools", func(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +63,11 @@ func TestComposioRESTActionHappyPath(t *testing.T) {
 		})
 	})
 	mux.HandleFunc("/tools/execute/GMAIL_SEND_EMAIL", func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		if userID, _ := body["user_id"].(string); userID != "" {
+			executeUserID = userID
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"successful": true,
 			"data": map[string]any{
@@ -120,5 +134,8 @@ func TestComposioRESTActionHappyPath(t *testing.T) {
 	}
 	if result.DryRun || len(result.Response) == 0 {
 		t.Fatalf("unexpected execute %+v", result)
+	}
+	if executeUserID != "cmp_user_123" {
+		t.Fatalf("expected resolved composio user id cmp_user_123, got %q", executeUserID)
 	}
 }

@@ -79,7 +79,6 @@ func (c *ComposioREST) Guide(_ context.Context, topic string) (GuideResult, erro
 
 func (c *ComposioREST) ListConnections(ctx context.Context, opts ListConnectionsOptions) (ConnectionsResult, error) {
 	query := url.Values{}
-	query.Add("user_ids", c.UserID)
 	if opts.Limit > 0 {
 		query.Set("limit", fmt.Sprintf("%d", opts.Limit))
 	}
@@ -108,6 +107,9 @@ func (c *ComposioREST) ListConnections(ctx context.Context, opts ListConnections
 	for _, item := range result.Items {
 		platform := strings.TrimSpace(item.Toolkit.Slug)
 		name := strings.TrimSpace(item.Connection.Name)
+		if name == "" {
+			name = strings.TrimSpace(item.ID)
+		}
 		if search != "" && !strings.Contains(strings.ToLower(platform), search) && !strings.Contains(strings.ToLower(name), search) {
 			continue
 		}
@@ -201,6 +203,11 @@ func (c *ComposioREST) ExecuteAction(ctx context.Context, req ExecuteRequest) (E
 		"user_id": c.UserID,
 	}
 	if key := strings.TrimSpace(req.ConnectionKey); key != "" {
+		if meta, err := c.connectedAccount(ctx, key); err == nil {
+			if userID := strings.TrimSpace(meta.UserID); userID != "" {
+				requestPayload["user_id"] = userID
+			}
+		}
 		requestPayload["connected_account_id"] = key
 	}
 	if len(req.Data) > 0 {
@@ -239,7 +246,6 @@ func (c *ComposioREST) ListWorkflowRuns(context.Context, string) (WorkflowRunsRe
 
 func (c *ComposioREST) ListRelays(ctx context.Context, opts ListRelaysOptions) (RelayListResult, error) {
 	query := url.Values{}
-	query.Add("user_ids", c.UserID)
 	if opts.Limit > 0 {
 		query.Set("limit", fmt.Sprintf("%d", opts.Limit))
 	}
@@ -393,6 +399,24 @@ func (c *ComposioREST) do(ctx context.Context, method, path string, query url.Va
 		return nil, fmt.Errorf("composio API failed: %s %s", resp.Status, strings.TrimSpace(string(raw)))
 	}
 	return raw, nil
+}
+
+type composioConnectedAccount struct {
+	ID     string `json:"id"`
+	UserID string `json:"user_id"`
+	Status string `json:"status"`
+}
+
+func (c *ComposioREST) connectedAccount(ctx context.Context, id string) (composioConnectedAccount, error) {
+	raw, err := c.get(ctx, "/connected_accounts/"+url.PathEscape(strings.TrimSpace(id)), nil)
+	if err != nil {
+		return composioConnectedAccount{}, err
+	}
+	var result composioConnectedAccount
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return composioConnectedAccount{}, fmt.Errorf("parse composio connected account: %w", err)
+	}
+	return result, nil
 }
 
 func normalizeComposioPlatform(platform string) string {
