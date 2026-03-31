@@ -358,6 +358,17 @@ type channelIntegrationDoneMsg struct {
 	url   string
 	err   error
 }
+type telegramDiscoverMsg struct {
+	botName string
+	groups  []team.TelegramGroup
+	token   string
+	err     error
+}
+type telegramConnectDoneMsg struct {
+	channelSlug string
+	groupTitle  string
+	err         error
+}
 
 type channelTaskMutationDoneMsg struct {
 	notice string
@@ -418,6 +429,7 @@ func newBrokerRequest(method, url string, body io.Reader) (*http.Request, error)
 var channelSlashCommands = []tui.SlashCommand{
 	{Name: "init", Description: "Run setup"},
 	{Name: "integrate", Description: "Connect an integration"},
+	{Name: "connect telegram", Description: "Connect a Telegram group"},
 	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode"},
 	{Name: "messages", Description: "Show the main office feed"},
 	{Name: "tasks", Description: "Show active work in this channel"},
@@ -480,6 +492,7 @@ const (
 	channelPickerCalendarAgent channelPickerMode = "calendar_agent"
 	channelPickerOneOnOneMode  channelPickerMode = "one_on_one_mode"
 	channelPickerOneOnOneAgent channelPickerMode = "one_on_one_agent"
+	channelPickerTelegramGroup channelPickerMode = "telegram_group"
 )
 
 type officeApp string
@@ -593,6 +606,10 @@ type channelModel struct {
 	quickJumpTarget     quickJumpTarget
 	calendarRange       calendarRange
 	calendarFilter      string
+
+	// Telegram connect flow state
+	telegramGroups []team.TelegramGroup
+	telegramToken  string
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
@@ -1306,6 +1323,55 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = fmt.Sprintf("%s connected.", msg.label)
 		}
 
+	case telegramDiscoverMsg:
+		m.posting = false
+		if msg.err != nil {
+			m.notice = "Telegram error: " + msg.err.Error()
+			return m, nil
+		}
+		if len(msg.groups) == 0 {
+			m.notice = fmt.Sprintf("Bot \"%s\" verified. No groups found. Add your bot to a Telegram group, send a message, then try /connect telegram again.", msg.botName)
+			return m, nil
+		}
+		m.telegramGroups = msg.groups
+		m.telegramToken = msg.token
+		options := make([]tui.PickerOption, 0, len(msg.groups))
+		for _, g := range msg.groups {
+			options = append(options, tui.PickerOption{
+				Label:       g.Title,
+				Value:       fmt.Sprintf("%d", g.ChatID),
+				Description: fmt.Sprintf("%s (ID: %d)", g.Type, g.ChatID),
+			})
+		}
+		m.picker = tui.NewPicker(fmt.Sprintf("Bot \"%s\" verified. Choose a group to connect:", msg.botName), options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerTelegramGroup
+		return m, nil
+
+	case telegramConnectDoneMsg:
+		m.posting = false
+		if msg.err != nil {
+			m.notice = "Telegram connect failed: " + msg.err.Error()
+			return m, nil
+		}
+		m.notice = fmt.Sprintf("Connected Telegram group \"%s\" as #%s.", msg.groupTitle, msg.channelSlug)
+		m.activeChannel = msg.channelSlug
+		m.activeApp = officeAppMessages
+		m.messages = nil
+		m.members = nil
+		m.tasks = nil
+		m.requests = nil
+		m.lastID = ""
+		m.replyToID = ""
+		m.threadPanelOpen = false
+		m.threadPanelID = ""
+		m.scroll = 0
+		m.unreadCount = 0
+		m.syncSidebarCursorToActive()
+		manifest, _ := company.LoadManifest()
+		m.channels = channelInfosFromManifest(manifest)
+		return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel), pollChannels())
+
 	case channelMemberDraftDoneMsg:
 		m.posting = false
 		if msg.err != nil {
@@ -1541,6 +1607,23 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.posting = true
 			return m, switchSessionMode(team.SessionModeOneOnOne, agent)
+		case channelPickerTelegramGroup:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			var selected *team.TelegramGroup
+			for i := range m.telegramGroups {
+				if fmt.Sprintf("%d", m.telegramGroups[i].ChatID) == msg.Value {
+					selected = &m.telegramGroups[i]
+					break
+				}
+			}
+			if selected == nil {
+				m.notice = "Unknown group selection."
+				return m, nil
+			}
+			m.posting = true
+			m.notice = fmt.Sprintf("Connecting \"%s\"...", selected.Title)
+			return m, connectTelegramGroup(m.telegramToken, *selected)
 		case channelPickerTasks:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
@@ -3804,6 +3887,16 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.pickerMode = channelPickerIntegrations
 		m.notice = "Choose an integration to connect."
 		return m, nil
+	case trimmed == "/connect telegram":
+		clearCurrent()
+		token := os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN")
+		if token == "" {
+			m.notice = "Set WUPHF_TELEGRAM_BOT_TOKEN env var with your bot token from @BotFather, then try again."
+			return m, nil
+		}
+		m.posting = true
+		m.notice = "Verifying bot token and discovering groups..."
+		return m, discoverTelegramGroups(token)
 	case trimmed == "/channels":
 		clearCurrent()
 		options := m.buildChannelPickerOptions()
@@ -5045,6 +5138,108 @@ func connectIntegration(spec channelIntegrationSpec) tea.Cmd {
 	}
 }
 
+func discoverTelegramGroups(token string) tea.Cmd {
+	return func() tea.Msg {
+		botName, err := team.VerifyBot(token)
+		if err != nil {
+			return telegramDiscoverMsg{err: fmt.Errorf("bot verification failed: %w", err)}
+		}
+		groups, err := team.DiscoverGroups(token)
+		if err != nil {
+			return telegramDiscoverMsg{err: fmt.Errorf("group discovery failed: %w", err)}
+		}
+		return telegramDiscoverMsg{
+			botName: botName,
+			groups:  groups,
+			token:   token,
+		}
+	}
+}
+
+func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
+	return func() tea.Msg {
+		slug := slugifyGroupTitle(group.Title)
+
+		// Load manifest and add the new channel with telegram surface
+		manifest, err := company.LoadManifest()
+		if err != nil {
+			manifest = company.DefaultManifest()
+		}
+
+		// Check if channel slug already exists
+		for _, ch := range manifest.Channels {
+			if ch.Slug == slug {
+				return telegramConnectDoneMsg{err: fmt.Errorf("channel #%s already exists", slug)}
+			}
+		}
+
+		// Build default members: lead + all manifest members
+		members := []string{manifest.Lead}
+		for _, member := range manifest.Members {
+			if member.Slug != manifest.Lead {
+				members = append(members, member.Slug)
+			}
+		}
+
+		newChannel := company.ChannelSpec{
+			Slug:        slug,
+			Name:        group.Title,
+			Description: fmt.Sprintf("Telegram bridge for %s.", group.Title),
+			Members:     members,
+			Surface: &company.ChannelSurfaceSpec{
+				Provider:    "telegram",
+				RemoteID:    fmt.Sprintf("%d", group.ChatID),
+				RemoteTitle: group.Title,
+				BotTokenEnv: "WUPHF_TELEGRAM_BOT_TOKEN",
+			},
+		}
+		manifest.Channels = append(manifest.Channels, newChannel)
+		if err := company.SaveManifest(manifest); err != nil {
+			return telegramConnectDoneMsg{err: fmt.Errorf("failed to save manifest: %w", err)}
+		}
+
+		// Create channel in the live broker
+		body, _ := json.Marshal(map[string]any{
+			"action":      "create",
+			"slug":        slug,
+			"name":        group.Title,
+			"description": fmt.Sprintf("Telegram bridge for %s.", group.Title),
+			"members":     members,
+			"created_by":  "you",
+		})
+		req, reqErr := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
+		if reqErr == nil {
+			client := &http.Client{Timeout: 3 * time.Second}
+			resp, err := client.Do(req)
+			if err == nil {
+				resp.Body.Close()
+			}
+		}
+
+		// Reconfigure the live office session so the launcher picks up the new surface channel
+		_ = reconfigureLiveOfficeSession()
+
+		// Send confirmation message to the Telegram group
+		_ = team.SendTelegramMessage(token, group.ChatID,
+			"Connected to WUPHF Office. Messages here will be visible to the team.")
+
+		return telegramConnectDoneMsg{
+			channelSlug: slug,
+			groupTitle:  group.Title,
+		}
+	}
+}
+
+func slugifyGroupTitle(title string) string {
+	slug := strings.ToLower(strings.TrimSpace(title))
+	slug = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "telegram"
+	}
+	// Prefix with tg- to make it clear it's a telegram channel
+	return "tg-" + slug
+}
 
 func resetDMSession(agent string, channel string) tea.Cmd {
 	return func() tea.Msg {
