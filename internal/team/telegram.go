@@ -302,3 +302,132 @@ func (t *TelegramTransport) sendMessage(chatID, text string) error {
 	}
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// Exported helpers for the /connect telegram onboarding flow
+// ---------------------------------------------------------------------------
+
+// TelegramGroup represents a Telegram group discovered via getUpdates.
+type TelegramGroup struct {
+	ChatID int64
+	Title  string
+	Type   string // "group" or "supergroup"
+}
+
+// VerifyBot checks the bot token by calling getMe and returns the bot's display name.
+func VerifyBot(token string) (string, error) {
+	url := fmt.Sprintf("%s/bot%s/getMe", telegramAPIBase, token)
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("telegram getMe: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("telegram getMe read: %w", err)
+	}
+
+	var apiResp telegramAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("telegram getMe decode: %w", err)
+	}
+	if !apiResp.OK {
+		return "", fmt.Errorf("telegram getMe error: %s", apiResp.Desc)
+	}
+
+	var bot struct {
+		FirstName string `json:"first_name"`
+		Username  string `json:"username"`
+	}
+	if err := json.Unmarshal(apiResp.Result, &bot); err != nil {
+		return "", fmt.Errorf("telegram getMe result decode: %w", err)
+	}
+	name := bot.FirstName
+	if name == "" {
+		name = bot.Username
+	}
+	return name, nil
+}
+
+// DiscoverGroups calls getUpdates and extracts unique groups/supergroups
+// the bot has received messages from.
+func DiscoverGroups(token string) ([]TelegramGroup, error) {
+	url := fmt.Sprintf("%s/bot%s/getUpdates?timeout=0", telegramAPIBase, token)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("telegram getUpdates: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("telegram getUpdates read: %w", err)
+	}
+
+	var apiResp telegramAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return nil, fmt.Errorf("telegram getUpdates decode: %w", err)
+	}
+	if !apiResp.OK {
+		return nil, fmt.Errorf("telegram getUpdates error: %s", apiResp.Desc)
+	}
+
+	var updates []telegramUpdate
+	if err := json.Unmarshal(apiResp.Result, &updates); err != nil {
+		return nil, fmt.Errorf("telegram updates decode: %w", err)
+	}
+
+	seen := make(map[int64]bool)
+	var groups []TelegramGroup
+	for _, upd := range updates {
+		if upd.Message == nil {
+			continue
+		}
+		chat := upd.Message.Chat
+		if chat.Type != "group" && chat.Type != "supergroup" {
+			continue
+		}
+		if seen[chat.ID] {
+			continue
+		}
+		seen[chat.ID] = true
+		groups = append(groups, TelegramGroup{
+			ChatID: chat.ID,
+			Title:  chat.Title,
+			Type:   chat.Type,
+		})
+	}
+	return groups, nil
+}
+
+// SendTelegramMessage sends a text message to a Telegram chat using the given bot token.
+func SendTelegramMessage(token string, chatID int64, text string) error {
+	url := fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBase, token)
+	payload, err := json.Marshal(map[string]any{
+		"chat_id": chatID,
+		"text":    text,
+	})
+	if err != nil {
+		return err
+	}
+	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("telegram send: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("telegram send read: %w", err)
+	}
+
+	var apiResp telegramAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return fmt.Errorf("telegram send decode: %w", err)
+	}
+	if !apiResp.OK {
+		return fmt.Errorf("telegram send error: %s", apiResp.Desc)
+	}
+	return nil
+}
