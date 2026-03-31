@@ -98,6 +98,7 @@ func (t *TelegramTransport) Start(ctx context.Context) error {
 	errCh := make(chan error, 2)
 	go func() { errCh <- t.pollInbound(ctx) }()
 	go func() { errCh <- t.drainOutbound(ctx) }()
+	go t.typingLoop(ctx)
 
 	select {
 	case <-ctx.Done():
@@ -166,12 +167,45 @@ func (t *TelegramTransport) drainOutbound(ctx context.Context) error {
 			if !ok {
 				continue
 			}
+			// Send typing indicator before the message
+			if chatIDInt, err := strconv.ParseInt(chatID, 10, 64); err == nil {
+				_ = SendTypingAction(t.BotToken, chatIDInt)
+			}
 			if err := t.SendToTelegram(chatID, msg); err != nil {
 				// Transient send failure — message was already dequeued,
 				// so we log and move on. In a future version we could
 				// implement retry with dead-letter semantics.
 				continue
 			}
+		}
+	}
+}
+
+// typingLoop periodically sends "typing" actions to Telegram chats when
+// agents are actively processing (recently tagged and haven't replied yet).
+func (t *TelegramTransport) typingLoop(ctx context.Context) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+
+		// Check if any agents are "typing" (tagged within last 30s, no reply yet)
+		if !t.Broker.HasRecentlyTaggedAgents(30 * time.Second) {
+			continue
+		}
+
+		// Send typing to all mapped Telegram chats
+		for chatIDStr := range t.ChatMap {
+			chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+			if err != nil {
+				continue
+			}
+			_ = SendTypingAction(t.BotToken, chatID)
 		}
 	}
 }
@@ -189,10 +223,10 @@ func (t *TelegramTransport) HandleInbound(chatID int64, from *telegramUser, text
 	return err
 }
 
-// SendToTelegram sends a broker message to the specified Telegram chat.
+// SendToTelegram sends a broker message to the specified Telegram chat with HTML formatting.
 func (t *TelegramTransport) SendToTelegram(chatID string, msg channelMessage) error {
 	text := formatTelegramOutbound(msg)
-	return t.sendMessage(chatID, text)
+	return t.sendMessageHTML(chatID, text)
 }
 
 // resolveUser maps a Telegram user to an office member slug.
@@ -217,21 +251,82 @@ func (t *TelegramTransport) resolveUser(user *telegramUser) string {
 	return name
 }
 
-// formatTelegramOutbound formats a broker message for Telegram display.
+// formatTelegramOutbound formats a broker message as Telegram HTML.
 func formatTelegramOutbound(msg channelMessage) string {
+	switch {
+	case msg.Kind == "skill_invocation":
+		return fmt.Sprintf("⚡ <b>@%s</b> invoked a skill", escapeTelegramHTML(msg.From))
+
+	case msg.Kind == "skill_proposal":
+		return fmt.Sprintf("💡 <b>Skill proposed</b>: %s", escapeTelegramHTML(msg.Content))
+
+	case msg.Kind == "automation":
+		source := msg.Source
+		if msg.SourceLabel != "" {
+			source = msg.SourceLabel
+		}
+		if source == "" {
+			source = "automation"
+		}
+		return fmt.Sprintf("🤖 <b>[%s]</b>: %s", escapeTelegramHTML(source), escapeTelegramHTML(msg.Content))
+
+	case isHumanDecisionKind(msg.Kind):
+		return formatTelegramDecision(msg)
+
+	case msg.From == "system":
+		return fmt.Sprintf("→ <i>%s</i>", escapeTelegramHTML(msg.Content))
+
+	default:
+		// Regular agent message
+		var sb strings.Builder
+		if msg.From != "" {
+			sb.WriteString("<b>@")
+			sb.WriteString(escapeTelegramHTML(msg.From))
+			sb.WriteString("</b>: ")
+		}
+		if msg.Title != "" {
+			sb.WriteString("[")
+			sb.WriteString(escapeTelegramHTML(msg.Title))
+			sb.WriteString("] ")
+		}
+		sb.WriteString(escapeTelegramHTML(msg.Content))
+		return sb.String()
+	}
+}
+
+// isHumanDecisionKind returns true for interview/decision message kinds.
+func isHumanDecisionKind(kind string) bool {
+	switch strings.TrimSpace(kind) {
+	case "interview", "approval", "confirm", "choice":
+		return true
+	}
+	return strings.Contains(kind, "human")
+}
+
+// formatTelegramDecision formats a human decision/interview message.
+func formatTelegramDecision(msg channelMessage) string {
 	var sb strings.Builder
+	sb.WriteString("📋 <b>Decision needed</b>")
 	if msg.From != "" {
-		sb.WriteString("@")
-		sb.WriteString(msg.From)
-		sb.WriteString(": ")
+		sb.WriteString(" from @")
+		sb.WriteString(escapeTelegramHTML(msg.From))
 	}
+	sb.WriteString("\n\n")
+	sb.WriteString(escapeTelegramHTML(msg.Content))
 	if msg.Title != "" {
-		sb.WriteString("[")
-		sb.WriteString(msg.Title)
-		sb.WriteString("] ")
+		sb.WriteString("\n\n<i>")
+		sb.WriteString(escapeTelegramHTML(msg.Title))
+		sb.WriteString("</i>")
 	}
-	sb.WriteString(msg.Content)
 	return sb.String()
+}
+
+// escapeTelegramHTML escapes characters that are special in Telegram HTML parse mode.
+func escapeTelegramHTML(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 // getUpdates calls the Telegram getUpdates endpoint with long-polling.
@@ -270,19 +365,34 @@ func (t *TelegramTransport) getUpdates(ctx context.Context, offset int64) ([]tel
 	return updates, nil
 }
 
-// sendMessage calls the Telegram sendMessage endpoint.
+// sendMessage calls the Telegram sendMessage endpoint (plain text).
 func (t *TelegramTransport) sendMessage(chatID, text string) error {
+	return t.sendMessageWithMode(chatID, text, "")
+}
+
+// sendMessageHTML calls the Telegram sendMessage endpoint with HTML parse mode.
+func (t *TelegramTransport) sendMessageHTML(chatID, text string) error {
+	return t.sendMessageWithMode(chatID, text, "HTML")
+}
+
+// sendMessageWithMode calls the Telegram sendMessage endpoint with an optional parse_mode.
+func (t *TelegramTransport) sendMessageWithMode(chatID, text, parseMode string) error {
 	url := fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBase, t.BotToken)
 
-	payload, err := json.Marshal(map[string]string{
+	payload := map[string]string{
 		"chat_id": chatID,
 		"text":    text,
-	})
+	}
+	if parseMode != "" {
+		payload["parse_mode"] = parseMode
+	}
+
+	data, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
 
-	resp, err := t.client.Post(url, "application/json", bytes.NewReader(payload))
+	resp, err := t.client.Post(url, "application/json", bytes.NewReader(data))
 	if err != nil {
 		return fmt.Errorf("telegram send: %w", err)
 	}
@@ -299,6 +409,39 @@ func (t *TelegramTransport) sendMessage(chatID, text string) error {
 	}
 	if !apiResp.OK {
 		return fmt.Errorf("telegram send error: %s", apiResp.Desc)
+	}
+	return nil
+}
+
+// SendTypingAction sends a "typing" chat action to a Telegram chat.
+func SendTypingAction(token string, chatID int64) error {
+	url := fmt.Sprintf("%s/bot%s/sendChatAction", telegramAPIBase, token)
+
+	data, err := json.Marshal(map[string]any{
+		"chat_id": chatID,
+		"action":  "typing",
+	})
+	if err != nil {
+		return err
+	}
+
+	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("telegram typing: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("telegram typing read: %w", err)
+	}
+
+	var apiResp telegramAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return fmt.Errorf("telegram typing decode: %w", err)
+	}
+	if !apiResp.OK {
+		return fmt.Errorf("telegram typing error: %s", apiResp.Desc)
 	}
 	return nil
 }

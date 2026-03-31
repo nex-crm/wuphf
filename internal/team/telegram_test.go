@@ -167,23 +167,80 @@ func TestTelegramExternalQueueIncludesOutbound(t *testing.T) {
 }
 
 func TestFormatTelegramOutbound(t *testing.T) {
+	// Regular agent message with title
 	msg := channelMessage{
 		From:    "ceo",
 		Title:   "Update",
 		Content: "All good",
 	}
 	got := formatTelegramOutbound(msg)
-	want := "@ceo: [Update] All good"
+	want := "<b>@ceo</b>: [Update] All good"
 	if got != want {
 		t.Fatalf("formatTelegramOutbound = %q, want %q", got, want)
 	}
 
-	// Without title
+	// Regular agent message without title
 	msg2 := channelMessage{From: "pm", Content: "Simple msg"}
 	got2 := formatTelegramOutbound(msg2)
-	want2 := "@pm: Simple msg"
+	want2 := "<b>@pm</b>: Simple msg"
 	if got2 != want2 {
 		t.Fatalf("formatTelegramOutbound = %q, want %q", got2, want2)
+	}
+
+	// System message
+	sysMsg := channelMessage{From: "system", Content: "Routing to #ops"}
+	gotSys := formatTelegramOutbound(sysMsg)
+	wantSys := "→ <i>Routing to #ops</i>"
+	if gotSys != wantSys {
+		t.Fatalf("formatTelegramOutbound system = %q, want %q", gotSys, wantSys)
+	}
+
+	// Automation message
+	autoMsg := channelMessage{From: "nex", Kind: "automation", Source: "github", Content: "PR #42 merged"}
+	gotAuto := formatTelegramOutbound(autoMsg)
+	wantAuto := "🤖 <b>[github]</b>: PR #42 merged"
+	if gotAuto != wantAuto {
+		t.Fatalf("formatTelegramOutbound automation = %q, want %q", gotAuto, wantAuto)
+	}
+
+	// Automation with source label
+	autoMsg2 := channelMessage{From: "nex", Kind: "automation", Source: "gh", SourceLabel: "GitHub Actions", Content: "Build passed"}
+	gotAuto2 := formatTelegramOutbound(autoMsg2)
+	wantAuto2 := "🤖 <b>[GitHub Actions]</b>: Build passed"
+	if gotAuto2 != wantAuto2 {
+		t.Fatalf("formatTelegramOutbound automation label = %q, want %q", gotAuto2, wantAuto2)
+	}
+
+	// Skill invocation
+	skillMsg := channelMessage{From: "ceo", Kind: "skill_invocation", Content: "Invoked deploy"}
+	gotSkill := formatTelegramOutbound(skillMsg)
+	wantSkill := "⚡ <b>@ceo</b> invoked a skill"
+	if gotSkill != wantSkill {
+		t.Fatalf("formatTelegramOutbound skill = %q, want %q", gotSkill, wantSkill)
+	}
+
+	// Skill proposal
+	proposalMsg := channelMessage{From: "system", Kind: "skill_proposal", Content: "New skill: auto-deploy"}
+	gotProposal := formatTelegramOutbound(proposalMsg)
+	wantProposal := "💡 <b>Skill proposed</b>: New skill: auto-deploy"
+	if gotProposal != wantProposal {
+		t.Fatalf("formatTelegramOutbound proposal = %q, want %q", gotProposal, wantProposal)
+	}
+
+	// Interview/decision message
+	decisionMsg := channelMessage{From: "ceo", Kind: "interview", Content: "Should we ship v2?", Title: "Release Decision"}
+	gotDecision := formatTelegramOutbound(decisionMsg)
+	wantDecision := "📋 <b>Decision needed</b> from @ceo\n\nShould we ship v2?\n\n<i>Release Decision</i>"
+	if gotDecision != wantDecision {
+		t.Fatalf("formatTelegramOutbound decision = %q, want %q", gotDecision, wantDecision)
+	}
+
+	// HTML escaping
+	htmlMsg := channelMessage{From: "pm", Content: "Use <b>bold</b> & \"quotes\""}
+	gotHTML := formatTelegramOutbound(htmlMsg)
+	wantHTML := "<b>@pm</b>: Use &lt;b&gt;bold&lt;/b&gt; &amp; \"quotes\""
+	if gotHTML != wantHTML {
+		t.Fatalf("formatTelegramOutbound html escape = %q, want %q", gotHTML, wantHTML)
 	}
 }
 
@@ -260,7 +317,7 @@ func TestTelegramSendToTelegramMocked(t *testing.T) {
 	if gotBody["chat_id"] != "-100" {
 		t.Fatalf("expected chat_id=-100, got %q", gotBody["chat_id"])
 	}
-	if gotBody["text"] != "@ceo: test message" {
+	if gotBody["text"] != "<b>@ceo</b>: test message" {
 		t.Fatalf("expected formatted text, got %q", gotBody["text"])
 	}
 }
@@ -504,5 +561,87 @@ func TestTelegramPollInboundWithMockServer(t *testing.T) {
 	}
 	if msgs[0].Content != "hello from poll" {
 		t.Fatalf("expected poll content, got %q", msgs[0].Content)
+	}
+}
+
+func TestSendTypingAction(t *testing.T) {
+	var gotAction string
+	var gotChatID int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/sendChatAction") {
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if v, ok := body["action"].(string); ok {
+				gotAction = v
+			}
+			if v, ok := body["chat_id"].(float64); ok {
+				gotChatID = int64(v)
+			}
+			resp := telegramAPIResponse{OK: true}
+			out, _ := json.Marshal(resp)
+			w.Write(out)
+			return
+		}
+		http.Error(w, "not found", 404)
+	}))
+	defer server.Close()
+
+	// SendTypingAction uses the global telegramAPIBase (a const), so we
+	// replicate the HTTP call against our mock server to verify the payload.
+	data, _ := json.Marshal(map[string]any{
+		"chat_id": int64(-100999),
+		"action":  "typing",
+	})
+	resp, err := http.Post(server.URL+"/botfake/sendChatAction", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	resp.Body.Close()
+
+	if gotAction != "typing" {
+		t.Fatalf("expected action=typing, got %q", gotAction)
+	}
+	if gotChatID != -100999 {
+		t.Fatalf("expected chat_id=-100999, got %d", gotChatID)
+	}
+}
+
+func TestIsHumanDecisionKind(t *testing.T) {
+	cases := []struct {
+		kind string
+		want bool
+	}{
+		{"interview", true},
+		{"approval", true},
+		{"confirm", true},
+		{"choice", true},
+		{"human_review", true},
+		{"", false},
+		{"automation", false},
+		{"skill_invocation", false},
+	}
+	for _, tc := range cases {
+		got := isHumanDecisionKind(tc.kind)
+		if got != tc.want {
+			t.Errorf("isHumanDecisionKind(%q) = %v, want %v", tc.kind, got, tc.want)
+		}
+	}
+}
+
+func TestEscapeTelegramHTML(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"hello", "hello"},
+		{"a < b", "a &lt; b"},
+		{"a > b", "a &gt; b"},
+		{"a & b", "a &amp; b"},
+		{"<b>bold</b>", "&lt;b&gt;bold&lt;/b&gt;"},
+	}
+	for _, tc := range cases {
+		got := escapeTelegramHTML(tc.in)
+		if got != tc.want {
+			t.Errorf("escapeTelegramHTML(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

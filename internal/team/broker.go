@@ -443,6 +443,23 @@ func (b *Broker) HasBlockingRequest() bool {
 	return false
 }
 
+// HasRecentlyTaggedAgents returns true if any agent was @mentioned within
+// the given duration and has not yet replied (i.e. is presumably "typing").
+func (b *Broker) HasRecentlyTaggedAgents(within time.Duration) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.lastTaggedAt) == 0 {
+		return false
+	}
+	cutoff := time.Now().Add(-within)
+	for _, t := range b.lastTaggedAt {
+		if t.After(cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Broker) EnabledMembers(channel string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
