@@ -199,20 +199,47 @@ func planOfficeActions(signals []officeSignal) officeActionPlan {
 		if signal.RequiresHuman {
 			kind := requestKindForSignal(signal)
 			plan.Requests = append(plan.Requests, humanInterview{
-				Kind:      kind,
-				Status:    "pending",
-				From:      "ceo",
-				Channel:   signal.Channel,
-				Title:     signalRequestTitle(signal),
-				Question:  signalQuestion(signal),
-				Context:   signal.Content,
-				Blocking:  signal.Blocking || kind == "approval" || kind == "choice" || kind == "confirm",
-				Required:  true,
-				Options:   signalRequestOptions(signal),
-				CreatedAt: "",
+				Kind:          kind,
+				Status:        "pending",
+				From:          "ceo",
+				Channel:       signal.Channel,
+				Title:         signalRequestTitle(signal),
+				Question:      signalQuestion(signal),
+				Context:       signal.Content,
+				Blocking:      signal.Blocking || kind == "approval" || kind == "choice" || kind == "confirm",
+				Required:      true,
+				Options:       signalRequestOptions(signal),
+				RecommendedID: recommendedIDForKind(kind),
+				CreatedAt:     "",
 			})
 		}
 	}
+
+	// When tasks were created but no explicit human requests exist, inject a
+	// confirmation request so the human can approve, adjust, or redirect
+	// the planned work before agents act on it.
+	if len(plan.Tasks) > 0 && len(plan.Requests) == 0 {
+		taskOwners := make([]string, 0, len(plan.Tasks))
+		for _, t := range plan.Tasks {
+			taskOwners = append(taskOwners, "@"+t.Owner)
+		}
+		confirmSig := officeSignal{Kind: "confirm"}
+		plan.Requests = append(plan.Requests, humanInterview{
+			Kind:          "confirm",
+			Status:        "pending",
+			From:          "ceo",
+			Channel:       "general",
+			Title:         "Confirmation needed",
+			Question:      fmt.Sprintf("The office is about to open tasks for %s. Does this look right?", strings.Join(uniqueSlugs(taskOwners), ", ")),
+			Context:       plan.Tasks[0].Details,
+			Blocking:      true,
+			Required:      true,
+			Options:       signalRequestOptions(confirmSig),
+			RecommendedID: "confirm_proceed",
+			CreatedAt:     "",
+		})
+	}
+
 	if len(plan.Tasks) > 0 {
 		lines = append(lines, "", "I opened tasks for the right owners so we do not dogpile this.")
 	}
@@ -227,9 +254,6 @@ func planOfficeActions(signals []officeSignal) officeActionPlan {
 	case len(plan.Requests) > 0:
 		plan.DecisionKind = "ask_human"
 		plan.DecisionReason = "The signal requires a human call before the office should proceed."
-	case len(plan.Tasks) > 0:
-		plan.DecisionKind = "create_task"
-		plan.DecisionReason = "The signal has a clear owner, so the office should open owned follow-up work immediately."
 	default:
 		plan.DecisionKind = "summarize"
 		plan.DecisionReason = "The signal is worth surfacing, but not strong enough to create new owned work."
@@ -260,6 +284,8 @@ func signalRequestTitle(signal officeSignal) string {
 		return "Approval needed"
 	case "choice":
 		return "Decision needed"
+	case "confirm":
+		return "Confirmation needed"
 	default:
 		return "Human input needed"
 	}
@@ -268,11 +294,26 @@ func signalRequestTitle(signal officeSignal) string {
 func signalQuestion(signal officeSignal) string {
 	switch requestKindForSignal(signal) {
 	case "approval":
-		return "Should the office act on this now?"
+		return "Should the office act on this now, or does this need a different call?"
 	case "choice":
-		return "What should the office optimize for here?"
+		return "What direction should the office take on this?"
+	case "confirm":
+		return "The office wants to act on this. Does the plan look right?"
 	default:
-		return "How should the office proceed?"
+		return "How should the office handle this?"
+	}
+}
+
+func recommendedIDForKind(kind string) string {
+	switch kind {
+	case "approval":
+		return "approve"
+	case "choice":
+		return "balanced"
+	case "confirm":
+		return "confirm_proceed"
+	default:
+		return "proceed"
 	}
 }
 
@@ -280,16 +321,34 @@ func signalRequestOptions(signal officeSignal) []interviewOption {
 	switch requestKindForSignal(signal) {
 	case "approval":
 		return []interviewOption{
-			{ID: "act_now", Label: "Act now", Description: "Proceed and let the team handle it immediately."},
-			{ID: "hold", Label: "Hold", Description: "Pause action until there is more context."},
+			{ID: "approve", Label: "Approve", Description: "Green-light this and let the team execute immediately."},
+			{ID: "approve_with_conditions", Label: "Approve with conditions", Description: "Proceed, but I will add constraints the team must follow."},
+			{ID: "needs_more_info", Label: "Need more info", Description: "Not enough context to decide — gather more details first."},
+			{ID: "delegate", Label: "Delegate", Description: "Route to a specific person for a closer look before deciding."},
+			{ID: "reject", Label: "Reject", Description: "Do not proceed with this."},
 		}
 	case "choice":
 		return []interviewOption{
-			{ID: "speed", Label: "Move fast", Description: "Bias toward momentum and follow-up speed."},
-			{ID: "careful", Label: "Be careful", Description: "Bias toward caution and a tighter review loop."},
+			{ID: "move_fast", Label: "Move fast", Description: "Bias toward speed — ship now, iterate later."},
+			{ID: "balanced", Label: "Balanced", Description: "Weigh trade-offs and aim for a reasonable middle ground."},
+			{ID: "be_careful", Label: "Be careful", Description: "Bias toward caution — tighter review loop before acting."},
+			{ID: "needs_more_info", Label: "Need more info", Description: "Not enough context to choose — investigate first."},
+			{ID: "delegate", Label: "Delegate", Description: "Let the owner or a specialist make this call."},
+		}
+	case "confirm":
+		return []interviewOption{
+			{ID: "confirm_proceed", Label: "Confirm", Description: "Looks good — proceed as planned."},
+			{ID: "adjust", Label: "Adjust", Description: "Proceed with modifications — I will add details."},
+			{ID: "reassign", Label: "Reassign", Description: "Wrong owner or scope — reroute this to someone else."},
+			{ID: "hold", Label: "Hold", Description: "Do not act yet — I need to review this further."},
 		}
 	default:
-		return nil
+		return []interviewOption{
+			{ID: "proceed", Label: "Proceed", Description: "Let the team handle it with their best judgment."},
+			{ID: "give_direction", Label: "Give direction", Description: "I will provide specific guidance for how to handle this."},
+			{ID: "delegate", Label: "Delegate", Description: "Route this to a specific person to own."},
+			{ID: "hold", Label: "Hold", Description: "Pause until I review this further."},
+		}
 	}
 }
 
@@ -298,8 +357,12 @@ func requestKindForSignal(signal officeSignal) string {
 	switch {
 	case signal.Blocking:
 		return "approval"
-	case strings.Contains(text, "choose"), strings.Contains(text, "decision"), strings.Contains(text, "which"), strings.Contains(text, "priorit"):
+	case strings.Contains(text, "choose"), strings.Contains(text, "decision"),
+		strings.Contains(text, "which"), strings.Contains(text, "priorit"):
 		return "choice"
+	case strings.Contains(text, "confirm"), strings.Contains(text, "verify"),
+		strings.Contains(text, "check"), strings.Contains(text, "review"):
+		return "confirm"
 	default:
 		return "approval"
 	}
@@ -307,14 +370,32 @@ func requestKindForSignal(signal officeSignal) string {
 
 func signalNeedsHuman(content, kind string) (requiresHuman bool, blocking bool) {
 	text := strings.ToLower(strings.TrimSpace(content + " " + kind))
+
+	// Blocking: explicit human gate-keeping required by policy.
 	switch {
-	case strings.Contains(text, "approval"), strings.Contains(text, "approve"), strings.Contains(text, "legal"), strings.Contains(text, "security review"), strings.Contains(text, "permission"), strings.Contains(text, "contract"):
+	case strings.Contains(text, "approval"), strings.Contains(text, "approve"),
+		strings.Contains(text, "legal"), strings.Contains(text, "security review"),
+		strings.Contains(text, "permission"), strings.Contains(text, "contract"):
 		return true, true
-	case strings.Contains(text, "should we"), strings.Contains(text, "choose"), strings.Contains(text, "decision"), strings.Contains(text, "confirm"):
+	}
+
+	// Non-blocking but still requires human decision.
+	switch {
+	case strings.Contains(text, "should we"), strings.Contains(text, "choose"),
+		strings.Contains(text, "decision"), strings.Contains(text, "confirm"):
 		return true, false
-	default:
+	}
+
+	// Autonomous-safe: purely informational signals that need no human action.
+	switch {
+	case strings.Contains(text, "fyi"), strings.Contains(text, "status update"),
+		strings.Contains(text, "summary"), strings.Contains(text, "no action needed"),
+		strings.Contains(text, "resolved"), strings.Contains(text, "completed"):
 		return false, false
 	}
+
+	// Default: route to human. Unless policy says otherwise, humans decide.
+	return true, false
 }
 
 func inferUrgency(content, kind string) string {
