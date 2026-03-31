@@ -279,7 +279,40 @@ func (l *Launcher) Launch() error {
 		go l.watchdogSchedulerLoop()
 	}
 
+	// Start Telegram transport if any channel has a telegram surface
+	l.startTelegramTransport()
+
 	return nil
+}
+
+// startTelegramTransport checks for channels with telegram surfaces and
+// starts a TelegramTransport goroutine if any are found.
+func (l *Launcher) startTelegramTransport() {
+	if l.broker == nil {
+		return
+	}
+	surfaceChannels := l.broker.SurfaceChannels("telegram")
+	if len(surfaceChannels) == 0 {
+		return
+	}
+	// Resolve the bot token. First channel's BotTokenEnv wins, with
+	// fallback to TELEGRAM_BOT_TOKEN.
+	tokenEnv := "TELEGRAM_BOT_TOKEN"
+	for _, ch := range surfaceChannels {
+		if ch.Surface != nil && ch.Surface.BotTokenEnv != "" {
+			tokenEnv = ch.Surface.BotTokenEnv
+			break
+		}
+	}
+	botToken := os.Getenv(tokenEnv)
+	if botToken == "" {
+		return
+	}
+	transport := NewTelegramTransport(l.broker, botToken)
+	go func() {
+		ctx := context.Background()
+		_ = transport.Start(ctx)
+	}()
 }
 
 // notifyAgentsLoop polls the broker for new messages and pushes them
