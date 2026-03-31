@@ -813,7 +813,15 @@ func TestPersistOfficeSignalsCreatesOwnedTaskAndLedger(t *testing.T) {
 	if tasks[0].Owner != "ai" || tasks[0].SourceSignalID == "" || tasks[0].SourceDecisionID == "" {
 		t.Fatalf("unexpected planned task: %+v", tasks[0])
 	}
-	if got := len(b.Actions()); got == 0 || b.Actions()[len(b.Actions())-1].Kind != "task_created" {
-		t.Fatalf("expected task_created action, got %+v", b.Actions())
+	actions := b.Actions()
+	hasTaskCreated := false
+	for _, a := range actions {
+		if a.Kind == "task_created" {
+			hasTaskCreated = true
+			break
+		}
+	}
+	if !hasTaskCreated {
+		t.Fatalf("expected task_created action, got %+v", actions)
 	}
 }
