@@ -50,6 +50,9 @@ func (c *ComposioREST) Supports(cap Capability) bool {
 		CapabilityActionSearch,
 		CapabilityActionKnowledge,
 		CapabilityActionExecute,
+		CapabilityWorkflowCreate,
+		CapabilityWorkflowExecute,
+		CapabilityWorkflowRuns,
 		CapabilityRelayList,
 		CapabilityRelayEventTypes,
 		CapabilityRelayCreate,
@@ -71,8 +74,17 @@ func (c *ComposioREST) Guide(_ context.Context, topic string) (GuideResult, erro
 			"Use search -> knowledge -> dry-run -> execute for external actions.",
 			"Use connected account IDs returned by team_action_connections as the connection_key.",
 			"Trigger registration is supported through the existing relay compatibility tools with one event filter per trigger.",
-			"Workflow creation and execution are not migrated to Composio yet in WUPHF; those still route to the workflow-capable provider.",
+			"Workflow creation and execution are WUPHF-native: save a workflow definition in WUPHF, then WUPHF executes external steps through Composio.",
+			`Supported workflow kind: "wuphf_digest_email_v1" for a daily digest that fetches Gmail from the last 24 hours, hydrates it with Nex context, and emails the human.`,
 		},
+		"workflow_examples": []map[string]any{{
+			"kind":            composioDigestWorkflowKind,
+			"connection_key":  "ca_...",
+			"recipient_email": config.ResolveComposioUserID(),
+			"subject":         "WUPHF Daily Digest",
+			"window_hours":    24,
+			"max_results":     20,
+		}},
 	})
 	return GuideResult{Topic: topic, Raw: raw}, nil
 }
@@ -230,18 +242,6 @@ func (c *ComposioREST) ExecuteAction(ctx context.Context, req ExecuteRequest) (E
 		Request:  envelope,
 		Response: raw,
 	}, nil
-}
-
-func (c *ComposioREST) CreateWorkflow(context.Context, WorkflowCreateRequest) (WorkflowCreateResult, error) {
-	return WorkflowCreateResult{}, fmt.Errorf("composio workflow creation is not wired into WUPHF yet")
-}
-
-func (c *ComposioREST) ExecuteWorkflow(context.Context, WorkflowExecuteRequest) (WorkflowExecuteResult, error) {
-	return WorkflowExecuteResult{}, fmt.Errorf("composio workflow execution is not wired into WUPHF yet")
-}
-
-func (c *ComposioREST) ListWorkflowRuns(context.Context, string) (WorkflowRunsResult, error) {
-	return WorkflowRunsResult{}, fmt.Errorf("composio workflow history is not wired into WUPHF yet")
 }
 
 func (c *ComposioREST) ListRelays(ctx context.Context, opts ListRelaysOptions) (RelayListResult, error) {
@@ -467,4 +467,11 @@ func compactStrings(ss []string) []string {
 		}
 	}
 	return out
+}
+
+func fallbackString(value, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return value
+	}
+	return fallback
 }

@@ -286,9 +286,10 @@ func (l *Launcher) Launch() error {
 // to agent Claude Code panes via tmux send-keys, prompting them to check the channel.
 func (l *Launcher) notifyAgentsLoop() {
 	lastCount := 0
+	lastNotified := make(map[string]time.Time) // slug -> last notification time
 
 	for {
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 
 		if l.broker != nil && l.broker.HasPendingInterview() {
 			continue
@@ -305,14 +306,20 @@ func (l *Launcher) notifyAgentsLoop() {
 		newMsgs := msgs[lastCount:]
 		lastCount = len(msgs)
 
+		// Only process the LAST message from each unique sender to avoid cascading
+		seen := make(map[string]channelMessage)
 		for _, msg := range newMsgs {
-			// Skip system/routing messages — they're progress signals, not real messages
 			if msg.From == "system" {
 				continue
 			}
+			seen[msg.From] = msg
+		}
+
+		for _, msg := range seen {
 			l.persistHumanDirective(msg)
 			l.deliverMessageNotification(msg)
 		}
+		_ = lastNotified
 	}
 }
 
@@ -392,8 +399,23 @@ func (l *Launcher) notifyTaskActionsLoop() {
 	}
 }
 
+var agentLastNotified = make(map[string]time.Time)
+const agentNotifyCooldown = 10 * time.Second
+
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
+
+	// Debounce: don't notify the same agent within 10 seconds
+	now := time.Now()
+	filtered := make([]notificationTarget, 0, len(immediate))
+	for _, t := range immediate {
+		if last, ok := agentLastNotified[t.Slug]; ok && now.Sub(last) < agentNotifyCooldown {
+			continue
+		}
+		agentLastNotified[t.Slug] = now
+		filtered = append(filtered, t)
+	}
+	immediate = filtered
 
 	// Broadcast stage update only for untagged messages in team mode
 	// (tagged messages go directly to the agent — user already knows who's handling it)
@@ -1282,7 +1304,27 @@ func (l *Launcher) processDueWorkflowJob(job schedulerJob) {
 	if channel == "" {
 		channel = "general"
 	}
-	provider := action.NewOneCLIFromEnv()
+	providerName := strings.TrimSpace(payload.Provider)
+	if providerName == "" {
+		providerName = strings.TrimSpace(job.Provider)
+	}
+	registry := action.NewRegistryFromEnv()
+	provider, err := registry.ProviderNamed(providerName, action.CapabilityWorkflowExecute)
+	if err != nil {
+		source := providerName
+		if strings.TrimSpace(source) == "" {
+			source = "workflow"
+		}
+		summary := fmt.Sprintf("Scheduled workflow %s could not start: %v", workflowKey, err)
+		_ = l.broker.RecordAction("external_workflow_failed", source, channel, "scheduler", truncate(summary, 140), workflowKey, nil, "")
+		_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, "failed", time.Now().UTC())
+		if nextRun, hasNext := nextWorkflowRun(strings.TrimSpace(payload.ScheduleExpr), time.Now().UTC()); hasNext {
+			_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
+		} else {
+			_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
+		}
+		return
+	}
 	result, err := provider.ExecuteWorkflow(context.Background(), action.WorkflowExecuteRequest{
 		KeyOrPath: workflowKey,
 		Inputs:    payload.Inputs,
@@ -1290,8 +1332,8 @@ func (l *Launcher) processDueWorkflowJob(job schedulerJob) {
 	now := time.Now().UTC()
 	nextRun, hasNext := nextWorkflowRun(strings.TrimSpace(payload.ScheduleExpr), now)
 	if err != nil {
-		summary := fmt.Sprintf("Scheduled workflow %s failed via One", workflowKey)
-		_ = l.broker.RecordAction("external_workflow_failed", "one", channel, "scheduler", summary, workflowKey, nil, "")
+		summary := fmt.Sprintf("Scheduled workflow %s failed via %s", workflowKey, strings.Title(provider.Name()))
+		_ = l.broker.RecordAction("external_workflow_failed", provider.Name(), channel, "scheduler", summary, workflowKey, nil, "")
 		_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, "failed", now)
 		if hasNext {
 			_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
@@ -1304,8 +1346,8 @@ func (l *Launcher) processDueWorkflowJob(job schedulerJob) {
 	if status == "" {
 		status = "completed"
 	}
-	summary := fmt.Sprintf("Scheduled workflow %s ran via One", workflowKey)
-	_ = l.broker.RecordAction("external_workflow_executed", "one", channel, "scheduler", summary, workflowKey, nil, "")
+	summary := fmt.Sprintf("Scheduled workflow %s ran via %s", workflowKey, strings.Title(provider.Name()))
+	_ = l.broker.RecordAction("external_workflow_executed", provider.Name(), channel, "scheduler", summary, workflowKey, nil, "")
 	_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, status, now)
 	if hasNext {
 		_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")

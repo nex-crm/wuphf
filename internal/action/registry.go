@@ -70,6 +70,29 @@ func (r *Registry) ProviderFor(cap Capability) (Provider, error) {
 	return nil, fmt.Errorf("no configured provider available for %s; supported providers: %s", cap, strings.Join(supported, ", "))
 }
 
+func (r *Registry) ProviderNamed(name string, cap Capability) (Provider, error) {
+	if r == nil {
+		return nil, fmt.Errorf("action registry is not configured")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return r.ProviderFor(cap)
+	}
+	for _, p := range r.providers {
+		if !strings.EqualFold(p.Name(), name) {
+			continue
+		}
+		if !p.Supports(cap) {
+			return nil, fmt.Errorf("%s does not support %s", p.Name(), cap)
+		}
+		if !p.Configured() {
+			return nil, fmt.Errorf("%s is selected for %s but is not configured", p.Name(), cap)
+		}
+		return p, nil
+	}
+	return nil, fmt.Errorf("unknown action provider %q", name)
+}
+
 func preferredProvidersFor(cap Capability) []string {
 	switch cap {
 	case CapabilityConnections,
@@ -86,7 +109,7 @@ func preferredProvidersFor(cap Capability) []string {
 		CapabilityWorkflowRuns,
 		CapabilityRelayEvents,
 		CapabilityRelayEvent:
-		return []string{"one", "composio"}
+		return []string{"composio", "one"}
 	default:
 		return []string{"composio", "one"}
 	}

@@ -54,7 +54,7 @@ type TeamActionExecuteArgs struct {
 
 type TeamActionWorkflowCreateArgs struct {
 	Key              string   `json:"key" jsonschema:"Stable workflow key like daily-digest or escalate-renewal-risk"`
-	DefinitionJSON   string   `json:"definition_json" jsonschema:"Full One workflow JSON definition as a string"`
+	DefinitionJSON   string   `json:"definition_json" jsonschema:"Full WUPHF workflow JSON definition as a string"`
 	Channel          string   `json:"channel,omitempty" jsonschema:"Optional office channel for logging"`
 	MySlug           string   `json:"my_slug,omitempty" jsonschema:"Agent slug creating the workflow. Defaults to WUPHF_AGENT_SLUG."`
 	Summary          string   `json:"summary,omitempty" jsonschema:"Optional short office log summary"`
@@ -152,7 +152,7 @@ func registerActionTools(server *mcp.Server) {
 	}, handleTeamActionExecute)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_action_workflow_create",
-		Description: "Save a reusable external workflow from a full JSON definition.",
+		Description: "Save a reusable external workflow from a full WUPHF workflow JSON definition.",
 	}, handleTeamActionWorkflowCreate)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_action_workflow_execute",
@@ -387,7 +387,7 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 		return toolError(err), nil, nil
 	}
 	job := map[string]any{
-		"slug":          schedulerSlug(channel, args.Key),
+		"slug":          schedulerSlug(provider.Name(), channel, args.Key),
 		"kind":          provider.Name() + "_workflow",
 		"label":         "Run " + humanizeWorkflowKey(args.Key),
 		"target_type":   "workflow",
@@ -617,8 +617,9 @@ func touchWorkflowSkill(ctx context.Context, workflowKey, status string, when ti
 }
 
 func workflowSkillContent(spec workflowSkillSpec) string {
+	label := strings.Title(fallbackString(spec.WorkflowProvider, "workflow"))
 	lines := []string{
-		fmt.Sprintf("One workflow skill: %s", humanizeWorkflowKey(fallbackString(spec.WorkflowKey, spec.Name))),
+		fmt.Sprintf("WUPHF workflow skill (%s): %s", label, humanizeWorkflowKey(fallbackString(spec.WorkflowKey, spec.Name))),
 		"Use team_action_workflow_execute to run it through WUPHF.",
 	}
 	if strings.TrimSpace(spec.WorkflowSchedule) != "" {
@@ -659,11 +660,15 @@ func humanizeWorkflowKey(key string) string {
 	return strings.Join(parts, " ")
 }
 
-func schedulerSlug(channel, workflowKey string) string {
+func schedulerSlug(provider, channel, workflowKey string) string {
 	channel = resolveChannel(channel)
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		provider = "workflow"
+	}
 	workflowKey = strings.ToLower(strings.TrimSpace(workflowKey))
 	workflowKey = strings.ReplaceAll(workflowKey, " ", "-")
-	return fmt.Sprintf("one-workflow:%s:%s", channel, workflowKey)
+	return fmt.Sprintf("%s-workflow:%s:%s", provider, channel, workflowKey)
 }
 
 func fallbackSummary(explicit, fallback string) string {

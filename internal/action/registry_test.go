@@ -86,7 +86,7 @@ func TestRegistryPrefersComposioForActionsInAutoMode(t *testing.T) {
 	}
 }
 
-func TestRegistryPrefersOneForWorkflowsInAutoMode(t *testing.T) {
+func TestRegistryPrefersComposioForWorkflowsInAutoMode(t *testing.T) {
 	t.Setenv("WUPHF_ACTION_PROVIDER", "auto")
 	registry := &Registry{
 		providers: []Provider{
@@ -94,7 +94,7 @@ func TestRegistryPrefersOneForWorkflowsInAutoMode(t *testing.T) {
 				name:       "composio",
 				configured: true,
 				supports: map[Capability]bool{
-					CapabilityActionExecute: true,
+					CapabilityWorkflowExecute: true,
 				},
 			},
 			registryStubProvider{
@@ -110,7 +110,28 @@ func TestRegistryPrefersOneForWorkflowsInAutoMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provider for workflow execute: %v", err)
 	}
-	if provider.Name() != "one" {
-		t.Fatalf("expected one, got %s", provider.Name())
+	if provider.Name() != "composio" {
+		t.Fatalf("expected composio, got %s", provider.Name())
+	}
+}
+
+func TestRegistryProviderNamedUsesRequestedProvider(t *testing.T) {
+	registry := &Registry{
+		providers: []Provider{
+			registryStubProvider{
+				name:       "composio",
+				configured: true,
+				supports: map[Capability]bool{
+					CapabilityWorkflowExecute: true,
+				},
+			},
+		},
+	}
+	provider, err := registry.ProviderNamed("composio", CapabilityWorkflowExecute)
+	if err != nil {
+		t.Fatalf("named provider: %v", err)
+	}
+	if provider.Name() != "composio" {
+		t.Fatalf("expected composio, got %s", provider.Name())
 	}
 }
