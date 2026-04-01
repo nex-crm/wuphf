@@ -99,9 +99,16 @@ func (p PickerModel) updateTextInput(msg tea.KeyMsg) (PickerModel, tea.Cmd) {
 			return PickerSelectMsg{Value: "", Label: ""}
 		}
 	default:
-		runes := []rune(msg.String())
-		if len(runes) == 1 && runes[0] >= 32 {
-			p.textBuf = append(p.textBuf, runes[0])
+		// Handle both single chars and pasted text (multi-rune burst)
+		if msg.Type == tea.KeyRunes {
+			p.textBuf = append(p.textBuf, msg.Runes...)
+		} else {
+			runes := []rune(msg.String())
+			for _, r := range runes {
+				if r >= 32 {
+					p.textBuf = append(p.textBuf, r)
+				}
+			}
 		}
 	}
 	return p, nil
