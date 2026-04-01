@@ -143,6 +143,36 @@ If for some reason you want the published CLI separately, there is still a scrip
 bash scripts/install-latest-wuphf-cli.sh
 ```
 
+## Telegram
+
+WUPHF can bridge to Telegram. A Telegram group or DM becomes a shared office channel — messages flow both ways, and all assigned agents participate.
+
+### Connect
+
+Run `/connect` in the TUI. Pick Telegram, paste your bot token from [@BotFather](https://t.me/BotFather), and select a group or DM mode. That's it.
+
+If the bot is already in a group and someone has sent a message, the group appears automatically in the picker. If not, add the bot to a group first, send a message, then try `/connect` again.
+
+### What flows to Telegram
+
+- Agent responses show with the agent name: **@CEO**: message
+- Human interviews show as decision prompts with options
+- Skill invocations and system messages are clearly labeled
+- Typing indicators appear when agents are working
+
+### What flows from Telegram
+
+- Group messages route to the mapped office channel
+- DM messages to the bot route to the DM channel
+- Telegram usernames are mapped to office members when possible
+
+### Setup details
+
+- Bot token is saved to `~/.wuphf/config.json` after first entry
+- Channel surface metadata is stored in the company manifest
+- The transport starts automatically on launch if a telegram channel exists
+- Privacy mode must be disabled on the bot (via @BotFather → `/setprivacy` → Disable) for group messages to work
+
 ## Integrations And Actions
 
 If you want agents to do real things across external systems, not just talk about them, you also need a Composio project key and at least one connected account.

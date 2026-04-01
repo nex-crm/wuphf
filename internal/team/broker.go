@@ -104,15 +104,25 @@ type teamTask struct {
 	UpdatedAt        string `json:"updated_at"`
 }
 
+type channelSurface struct {
+	Provider    string `json:"provider,omitempty"`
+	RemoteID    string `json:"remote_id,omitempty"`
+	RemoteTitle string `json:"remote_title,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	BotTokenEnv string `json:"bot_token_env,omitempty"`
+	WebhookURL  string `json:"webhook_url,omitempty"`
+}
+
 type teamChannel struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Members     []string `json:"members,omitempty"`
-	Disabled    []string `json:"disabled,omitempty"`
-	CreatedBy   string   `json:"created_by,omitempty"`
-	CreatedAt   string   `json:"created_at,omitempty"`
-	UpdatedAt   string   `json:"updated_at,omitempty"`
+	Slug        string          `json:"slug"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Members     []string        `json:"members,omitempty"`
+	Disabled    []string        `json:"disabled,omitempty"`
+	Surface     *channelSurface `json:"surface,omitempty"`
+	CreatedBy   string          `json:"created_by,omitempty"`
+	CreatedAt   string          `json:"created_at,omitempty"`
+	UpdatedAt   string          `json:"updated_at,omitempty"`
 }
 
 type officeMember struct {
@@ -284,11 +294,13 @@ type Broker struct {
 	skills            []teamSkill
 	lastTaggedAt      map[string]time.Time   // when each agent was last @mentioned
 	lastPaneSnapshot  map[string]string      // last captured pane content per agent (for change detection)
+	seenTelegramGroups map[int64]string      // chat_id -> title, populated by transport
 	counter           int
 	notificationSince string
 	insightsSince     string
 	pendingInterview  *humanInterview
 	usage             teamUsageState
+	externalDelivered map[string]struct{} // message IDs already queued for external delivery
 	mu                sync.Mutex
 	server            *http.Server
 	token             string // shared secret for authenticating requests
@@ -373,6 +385,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
 	mux.HandleFunc("/skills/", b.requireAuth(b.handleSkillsSubpath))
+	mux.HandleFunc("/telegram/groups", b.requireAuth(b.handleTelegramGroups))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
@@ -432,6 +445,23 @@ func (b *Broker) HasBlockingRequest() bool {
 	return false
 }
 
+// HasRecentlyTaggedAgents returns true if any agent was @mentioned within
+// the given duration and has not yet replied (i.e. is presumably "typing").
+func (b *Broker) HasRecentlyTaggedAgents(within time.Duration) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.lastTaggedAt) == 0 {
+		return false
+	}
+	cutoff := time.Now().Add(-within)
+	for _, t := range b.lastTaggedAt {
+		if t.After(cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Broker) EnabledMembers(channel string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -470,6 +500,87 @@ func (b *Broker) ChannelMessages(channel string) []channelMessage {
 		}
 	}
 	return out
+}
+
+// SurfaceChannels returns all channels that have a surface configured for the given provider.
+func (b *Broker) SurfaceChannels(provider string) []teamChannel {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []teamChannel
+	for _, ch := range b.channels {
+		if ch.Surface != nil && ch.Surface.Provider == provider {
+			cp := ch
+			cp.Members = append([]string(nil), ch.Members...)
+			cp.Disabled = append([]string(nil), ch.Disabled...)
+			s := *ch.Surface
+			cp.Surface = &s
+			out = append(out, cp)
+		}
+	}
+	return out
+}
+
+// ExternalQueue returns messages that need to be sent to external surfaces
+// for the given provider. Each message is returned at most once.
+func (b *Broker) ExternalQueue(provider string) []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.externalDelivered == nil {
+		b.externalDelivered = make(map[string]struct{})
+	}
+	surfaceChannels := make(map[string]struct{})
+	for _, ch := range b.channels {
+		if ch.Surface != nil && ch.Surface.Provider == provider {
+			surfaceChannels[ch.Slug] = struct{}{}
+		}
+	}
+	var out []channelMessage
+	for _, msg := range b.messages {
+		ch := normalizeChannelSlug(msg.Channel)
+		if _, ok := surfaceChannels[ch]; !ok {
+			continue
+		}
+		if _, delivered := b.externalDelivered[msg.ID]; delivered {
+			continue
+		}
+		b.externalDelivered[msg.ID] = struct{}{}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// PostInboundSurfaceMessage posts a message from an external surface into the broker channel.
+func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider string) (channelMessage, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		return channelMessage{}, fmt.Errorf("channel required for surface message")
+	}
+	if b.findChannelLocked(channel) == nil {
+		return channelMessage{}, fmt.Errorf("channel not found: %s", channel)
+	}
+	b.counter++
+	msg := channelMessage{
+		ID:          fmt.Sprintf("msg-%d", b.counter),
+		From:        from,
+		Channel:     channel,
+		Kind:        "surface",
+		Source:      provider,
+		SourceLabel: provider,
+		Content:     strings.TrimSpace(content),
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	b.messages = append(b.messages, msg)
+	// Mark as already delivered so it doesn't bounce back to the same surface
+	if b.externalDelivered == nil {
+		b.externalDelivered = make(map[string]struct{})
+	}
+	b.externalDelivered[msg.ID] = struct{}{}
+	if err := b.saveLocked(); err != nil {
+		return channelMessage{}, err
+	}
+	return msg, nil
 }
 
 func (b *Broker) ChannelTasks(channel string) []teamTask {
@@ -761,7 +872,7 @@ func defaultTeamChannels() []teamChannel {
 	}
 	channels := make([]teamChannel, 0, len(manifest.Channels))
 	for _, channel := range manifest.Channels {
-		channels = append(channels, teamChannel{
+		tc := teamChannel{
 			Slug:        channel.Slug,
 			Name:        channel.Name,
 			Description: channel.Description,
@@ -770,7 +881,17 @@ func defaultTeamChannels() []teamChannel {
 			CreatedBy:   "wuphf",
 			CreatedAt:   now,
 			UpdatedAt:   now,
-		})
+		}
+		if channel.Surface != nil {
+			tc.Surface = &channelSurface{
+				Provider:    channel.Surface.Provider,
+				RemoteID:    channel.Surface.RemoteID,
+				RemoteTitle: channel.Surface.RemoteTitle,
+				Mode:        channel.Surface.Mode,
+				BotTokenEnv: channel.Surface.BotTokenEnv,
+			}
+		}
+		channels = append(channels, tc)
 	}
 	return channels
 }
@@ -829,12 +950,38 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 		b.channels = defaultTeamChannels()
 		return
 	}
+	hasGeneral := false
 	for _, ch := range b.channels {
 		if ch.Slug == "general" {
-			return
+			hasGeneral = true
+			break
 		}
 	}
-	b.channels = append(defaultTeamChannels(), b.channels...)
+	if !hasGeneral {
+		b.channels = append(defaultTeamChannels(), b.channels...)
+		return
+	}
+	// Merge surface metadata from manifest into existing channels
+	// (handles case where state was saved without surfaces by an older binary)
+	defaults := defaultTeamChannels()
+	for _, def := range defaults {
+		if def.Surface == nil {
+			continue
+		}
+		found := false
+		for i := range b.channels {
+			if b.channels[i].Slug == def.Slug {
+				if b.channels[i].Surface == nil {
+					b.channels[i].Surface = def.Surface
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			b.channels = append(b.channels, def)
+		}
+	}
 }
 
 func (b *Broker) ensureDefaultOfficeMembersLocked() {
@@ -2106,12 +2253,13 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"channels": channels})
 	case http.MethodPost:
 		var body struct {
-			Action      string   `json:"action"`
-			Slug        string   `json:"slug"`
-			Name        string   `json:"name"`
-			Description string   `json:"description"`
-			Members     []string `json:"members"`
-			CreatedBy   string   `json:"created_by"`
+			Action      string           `json:"action"`
+			Slug        string           `json:"slug"`
+			Name        string           `json:"name"`
+			Description string           `json:"description"`
+			Members     []string         `json:"members"`
+			CreatedBy   string           `json:"created_by"`
+			Surface     *channelSurface  `json:"surface,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -2158,6 +2306,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				Name:        strings.TrimSpace(body.Name),
 				Description: strings.TrimSpace(body.Description),
 				Members:     uniqueSlugs(members),
+				Surface:     body.Surface,
 				CreatedBy:   strings.TrimSpace(body.CreatedBy),
 				CreatedAt:   now,
 				UpdatedAt:   now,
@@ -2658,6 +2807,31 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		"id":    msg.ID,
 		"total": total,
 	})
+}
+
+
+// RecordTelegramGroup saves a group chat ID and title seen by the transport.
+func (b *Broker) RecordTelegramGroup(chatID int64, title string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.seenTelegramGroups == nil {
+		b.seenTelegramGroups = make(map[int64]string)
+	}
+	b.seenTelegramGroups[chatID] = title
+}
+
+// SeenTelegramGroups returns all group chats the transport has seen.
+func (b *Broker) SeenTelegramGroups() map[int64]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.seenTelegramGroups == nil {
+		return nil
+	}
+	out := make(map[int64]string, len(b.seenTelegramGroups))
+	for k, v := range b.seenTelegramGroups {
+		out[k] = v
+	}
+	return out
 }
 
 // PostSystemMessage posts a lightweight system message that shows progress without blocking.
@@ -3897,6 +4071,21 @@ func FormatChannelView(messages []channelMessage) string {
 }
 
 // --------------- Skills ---------------
+
+func (b *Broker) handleTelegramGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b.mu.Lock()
+	groups := make([]map[string]any, 0)
+	for chatID, title := range b.seenTelegramGroups {
+		groups = append(groups, map[string]any{"chat_id": chatID, "title": title})
+	}
+	b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"groups": groups})
+}
 
 func (b *Broker) handleSkills(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
