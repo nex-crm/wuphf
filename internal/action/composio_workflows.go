@@ -1,68 +1,45 @@
 package action
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
-	"sort"
+	"regexp"
 	"strings"
+	"text/template"
 	"time"
-
-	"github.com/nex-crm/wuphf/internal/config"
 )
 
-const composioDigestWorkflowKind = "wuphf_digest_email_v1"
+const composioWorkflowVersion = "wuphf_workflow_v1"
 
-type composioDigestWorkflowDefinition struct {
-	Kind             string `json:"kind"`
-	Title            string `json:"title,omitempty"`
-	Description      string `json:"description,omitempty"`
-	ConnectionKey    string `json:"connection_key"`
-	RecipientEmail   string `json:"recipient_email,omitempty"`
-	Subject          string `json:"subject,omitempty"`
-	Query            string `json:"query,omitempty"`
-	WindowHours      int    `json:"window_hours,omitempty"`
-	MaxResults       int    `json:"max_results,omitempty"`
-	InsightLimit     int    `json:"insight_limit,omitempty"`
-	IncludeSpamTrash bool   `json:"include_spam_trash,omitempty"`
-	DigestPrompt     string `json:"digest_prompt,omitempty"`
+type composioWorkflowDefinition struct {
+	Version     string         `json:"version,omitempty"`
+	Title       string         `json:"title,omitempty"`
+	Description string         `json:"description,omitempty"`
+	Inputs      map[string]any `json:"inputs,omitempty"`
+	Steps       []workflowStep `json:"steps"`
 }
 
-type composioDigestWorkflowInputs struct {
-	ConnectionKey    string
-	RecipientEmail   string
-	Subject          string
-	Query            string
-	WindowHours      int
-	MaxResults       int
-	InsightLimit     int
-	IncludeSpamTrash bool
-	DigestPrompt     string
-}
-
-type composioFetchedMessage struct {
-	MessageID        string   `json:"messageId"`
-	ThreadID         string   `json:"threadId"`
-	Timestamp        string   `json:"messageTimestamp"`
-	Subject          string   `json:"subject"`
-	Sender           string   `json:"sender"`
-	To               string   `json:"to"`
-	MessageText      string   `json:"messageText"`
-	LabelIDs         []string `json:"labelIds"`
-	AttachmentList   []any    `json:"attachmentList"`
-	Preview          struct {
-		Body    string `json:"body"`
-		Subject string `json:"subject"`
-	} `json:"preview"`
-}
-
-type composioFetchEmailsResponse struct {
-	Data struct {
-		Messages           []composioFetchedMessage `json:"messages"`
-		NextPageToken      string                   `json:"nextPageToken"`
-		ResultSizeEstimate int                      `json:"resultSizeEstimate"`
-	} `json:"data"`
+type workflowStep struct {
+	ID              string         `json:"id"`
+	Type            string         `json:"type"`
+	Description     string         `json:"description,omitempty"`
+	Template        string         `json:"template,omitempty"`
+	Platform        string         `json:"platform,omitempty"`
+	ActionID        string         `json:"action_id,omitempty"`
+	ConnectionKey   any            `json:"connection_key,omitempty"`
+	Data            map[string]any `json:"data,omitempty"`
+	Params          map[string]any `json:"params,omitempty"`
+	PathVariables   map[string]any `json:"path_variables,omitempty"`
+	QueryParameters map[string]any `json:"query_parameters,omitempty"`
+	Headers         map[string]any `json:"headers,omitempty"`
+	FormData        bool           `json:"form_data,omitempty"`
+	FormURLEncoded  bool           `json:"form_url_encoded,omitempty"`
+	DryRun          *bool          `json:"dry_run,omitempty"`
+	QueryTemplate   string         `json:"query_template,omitempty"`
+	LookbackHours   any            `json:"lookback_hours,omitempty"`
+	InsightLimit    any            `json:"insight_limit,omitempty"`
 }
 
 type workflowRunRecord struct {
@@ -96,93 +73,49 @@ func (c *ComposioREST) ExecuteWorkflow(ctx context.Context, req WorkflowExecuteR
 	if err != nil {
 		return WorkflowExecuteResult{}, err
 	}
-	spec, err := c.decodeDigestWorkflowDefinition(definition)
+	spec, err := c.decodeWorkflowDefinition(definition)
 	if err != nil {
 		return WorkflowExecuteResult{}, err
 	}
-	inputs := mergeDigestWorkflowInputs(spec, req.Inputs)
-	if inputs.ConnectionKey == "" {
-		return WorkflowExecuteResult{}, fmt.Errorf("workflow %s is missing connection_key", key)
-	}
-	if inputs.RecipientEmail == "" {
-		return WorkflowExecuteResult{}, fmt.Errorf("workflow %s is missing recipient_email", key)
-	}
 
+	inputs := mergeWorkflowInputs(spec.Inputs, req.Inputs)
+	stepOutputs := map[string]any{}
+	stepLogs := map[string]json.RawMessage{}
 	runID := fmt.Sprintf("cmpwf_%d", time.Now().UTC().UnixNano())
 	startedAt := time.Now().UTC()
-	steps := map[string]json.RawMessage{}
-
-	fetchResult, err := c.ExecuteAction(ctx, ExecuteRequest{
-		Platform:      "gmail",
-		ActionID:      "GMAIL_FETCH_EMAILS",
-		ConnectionKey: inputs.ConnectionKey,
-		Data: map[string]any{
-			"query":              inputs.Query,
-			"max_results":        inputs.MaxResults,
-			"include_payload":    false,
-			"verbose":            false,
-			"include_spam_trash": inputs.IncludeSpamTrash,
-		},
-	})
-	if err != nil {
-		return WorkflowExecuteResult{}, err
+	events := []json.RawMessage{
+		mustMarshalJSON(map[string]any{
+			"event":        "workflow_started",
+			"provider":     c.Name(),
+			"workflow_key": key,
+			"run_id":       runID,
+		}),
 	}
-	steps["fetch_emails"] = mustMarshalJSON(map[string]any{
-		"request": fetchResult.Request,
-	})
 
-	var fetchPayload composioFetchEmailsResponse
-	if err := json.Unmarshal(fetchResult.Response, &fetchPayload); err != nil {
-		return WorkflowExecuteResult{}, fmt.Errorf("parse composio workflow fetch response: %w", err)
+	for _, step := range spec.Steps {
+		scope := workflowScope(key, inputs, stepOutputs)
+		output, err := c.executeWorkflowStep(ctx, step, scope, req.DryRun)
+		if err != nil {
+			return WorkflowExecuteResult{}, fmt.Errorf("workflow %s step %s failed: %w", key, step.ID, err)
+		}
+		stepOutputs[step.ID] = output
+		stepLogs[step.ID] = mustMarshalJSON(output)
+		events = append(events, mustMarshalJSON(map[string]any{
+			"event":   "workflow_step_completed",
+			"step_id": step.ID,
+			"type":    step.Type,
+		}))
 	}
-	messages := fetchPayload.Data.Messages
-	steps["fetch_emails"] = mustMarshalJSON(map[string]any{
-		"request":              fetchResult.Request,
-		"count":                len(messages),
-		"next_page_token":      fetchPayload.Data.NextPageToken,
-		"result_size_estimate": fetchPayload.Data.ResultSizeEstimate,
-		"messages":             summarizeFetchedMessages(messages),
-	})
-
-	digestBody, hydration, err := buildDigestBody(messages, inputs)
-	if err != nil {
-		return WorkflowExecuteResult{}, err
-	}
-	steps["hydrate_digest"] = mustMarshalJSON(hydration)
-
-	sendResult, err := c.ExecuteAction(ctx, ExecuteRequest{
-		Platform:      "gmail",
-		ActionID:      "GMAIL_SEND_EMAIL",
-		ConnectionKey: inputs.ConnectionKey,
-		DryRun:        req.DryRun,
-		Data: map[string]any{
-			"recipient_email": inputs.RecipientEmail,
-			"subject":         inputs.Subject,
-			"body":            digestBody,
-		},
-	})
-	if err != nil {
-		return WorkflowExecuteResult{}, err
-	}
-	steps["send_email"] = mustMarshalJSON(map[string]any{
-		"dry_run":  sendResult.DryRun,
-		"request":  sendResult.Request,
-		"response": json.RawMessage(sendResult.Response),
-	})
 
 	status := "completed"
 	if req.DryRun {
 		status = "planned"
 	}
-	result := WorkflowExecuteResult{
-		RunID:  runID,
-		Status: status,
-		Steps:  steps,
-		Events: []json.RawMessage{
-			mustMarshalJSON(map[string]any{"event": "workflow_started", "run_id": runID, "workflow_key": key}),
-			mustMarshalJSON(map[string]any{"event": "workflow_finished", "run_id": runID, "status": status}),
-		},
-	}
+	events = append(events, mustMarshalJSON(map[string]any{
+		"event":  "workflow_finished",
+		"run_id": runID,
+		"status": status,
+	}))
 
 	_ = appendWorkflowRun(c.Name(), key, workflowRunRecord{
 		Provider:    c.Name(),
@@ -191,9 +124,15 @@ func (c *ComposioREST) ExecuteWorkflow(ctx context.Context, req WorkflowExecuteR
 		Status:      status,
 		StartedAt:   startedAt.Format(time.RFC3339),
 		FinishedAt:  time.Now().UTC().Format(time.RFC3339),
-		Steps:       steps,
+		Steps:       stepLogs,
 	})
-	return result, nil
+
+	return WorkflowExecuteResult{
+		RunID:  runID,
+		Status: status,
+		Steps:  stepLogs,
+		Events: events,
+	}, nil
 }
 
 func (c *ComposioREST) ListWorkflowRuns(_ context.Context, key string) (WorkflowRunsResult, error) {
@@ -201,7 +140,7 @@ func (c *ComposioREST) ListWorkflowRuns(_ context.Context, key string) (Workflow
 }
 
 func (c *ComposioREST) normalizeWorkflowDefinition(definition json.RawMessage) (json.RawMessage, error) {
-	spec, err := c.decodeDigestWorkflowDefinition(definition)
+	spec, err := c.decodeWorkflowDefinition(definition)
 	if err != nil {
 		return nil, err
 	}
@@ -212,216 +151,594 @@ func (c *ComposioREST) normalizeWorkflowDefinition(definition json.RawMessage) (
 	return raw, nil
 }
 
-func (c *ComposioREST) decodeDigestWorkflowDefinition(definition json.RawMessage) (composioDigestWorkflowDefinition, error) {
-	var spec composioDigestWorkflowDefinition
+func (c *ComposioREST) decodeWorkflowDefinition(definition json.RawMessage) (composioWorkflowDefinition, error) {
+	var spec composioWorkflowDefinition
 	if !json.Valid(definition) {
 		return spec, fmt.Errorf("workflow definition must be valid JSON")
 	}
 	if err := json.Unmarshal(definition, &spec); err != nil {
 		return spec, fmt.Errorf("parse workflow definition: %w", err)
 	}
-	if strings.TrimSpace(spec.Kind) == "" {
-		return spec, fmt.Errorf("workflow definition must include kind")
+	spec.Version = fallbackString(spec.Version, composioWorkflowVersion)
+	if spec.Version != composioWorkflowVersion {
+		return spec, fmt.Errorf("unsupported composio workflow version %q", spec.Version)
 	}
-	if strings.TrimSpace(spec.Kind) != composioDigestWorkflowKind {
-		return spec, fmt.Errorf("unsupported composio workflow kind %q", spec.Kind)
+	spec.Inputs = normalizeWorkflowInputs(spec.Inputs)
+	if len(spec.Steps) == 0 {
+		return spec, fmt.Errorf("workflow definition must include at least one step")
 	}
-	spec.ConnectionKey = strings.TrimSpace(spec.ConnectionKey)
-	spec.RecipientEmail = fallbackString(spec.RecipientEmail, config.ResolveComposioUserID())
-	spec.Subject = fallbackString(spec.Subject, "WUPHF Daily Digest")
-	if spec.WindowHours <= 0 {
-		spec.WindowHours = 24
-	}
-	if spec.MaxResults <= 0 {
-		spec.MaxResults = 20
-	}
-	if spec.InsightLimit <= 0 {
-		spec.InsightLimit = 5
-	}
-	spec.Query = fallbackString(spec.Query, defaultDigestQuery(spec.WindowHours))
-	spec.DigestPrompt = strings.TrimSpace(spec.DigestPrompt)
-	if spec.ConnectionKey == "" {
-		return spec, fmt.Errorf("workflow definition must include connection_key")
-	}
-	if spec.RecipientEmail == "" {
-		return spec, fmt.Errorf("workflow definition must include recipient_email")
+	seen := map[string]struct{}{}
+	for i := range spec.Steps {
+		spec.Steps[i].ID = strings.TrimSpace(spec.Steps[i].ID)
+		spec.Steps[i].Type = normalizeWorkflowStepType(spec.Steps[i].Type)
+		if len(spec.Steps[i].Data) == 0 && len(spec.Steps[i].Params) > 0 {
+			spec.Steps[i].Data = spec.Steps[i].Params
+		}
+		spec.Steps[i].Template = normalizeWorkflowTemplateString(spec.Steps[i].Template)
+		spec.Steps[i].QueryTemplate = normalizeWorkflowTemplateString(spec.Steps[i].QueryTemplate)
+		spec.Steps[i].ConnectionKey = normalizeWorkflowValueSyntax(spec.Steps[i].ConnectionKey)
+		spec.Steps[i].Data = normalizeWorkflowMapSyntax(spec.Steps[i].Data)
+		spec.Steps[i].PathVariables = normalizeWorkflowMapSyntax(spec.Steps[i].PathVariables)
+		spec.Steps[i].QueryParameters = normalizeWorkflowMapSyntax(spec.Steps[i].QueryParameters)
+		spec.Steps[i].Headers = normalizeWorkflowMapSyntax(spec.Steps[i].Headers)
+		spec.Steps[i].LookbackHours = normalizeWorkflowValueSyntax(spec.Steps[i].LookbackHours)
+		spec.Steps[i].InsightLimit = normalizeWorkflowValueSyntax(spec.Steps[i].InsightLimit)
+		if spec.Steps[i].ID == "" {
+			return spec, fmt.Errorf("workflow step %d is missing id", i+1)
+		}
+		if _, ok := seen[spec.Steps[i].ID]; ok {
+			return spec, fmt.Errorf("workflow step id %q is duplicated", spec.Steps[i].ID)
+		}
+		seen[spec.Steps[i].ID] = struct{}{}
+		switch spec.Steps[i].Type {
+		case "action":
+			if strings.TrimSpace(spec.Steps[i].Platform) == "" {
+				return spec, fmt.Errorf("workflow step %q is missing platform", spec.Steps[i].ID)
+			}
+			if strings.TrimSpace(spec.Steps[i].ActionID) == "" {
+				return spec, fmt.Errorf("workflow step %q is missing action_id", spec.Steps[i].ID)
+			}
+		case "template":
+			if strings.TrimSpace(spec.Steps[i].Template) == "" {
+				return spec, fmt.Errorf("workflow step %q is missing template", spec.Steps[i].ID)
+			}
+		case "nex_ask":
+			if strings.TrimSpace(spec.Steps[i].QueryTemplate) == "" {
+				return spec, fmt.Errorf("workflow step %q is missing query_template", spec.Steps[i].ID)
+			}
+		case "nex_insights":
+		default:
+			return spec, fmt.Errorf("unsupported workflow step type %q", spec.Steps[i].Type)
+		}
 	}
 	return spec, nil
 }
 
-func mergeDigestWorkflowInputs(spec composioDigestWorkflowDefinition, overrides map[string]any) composioDigestWorkflowInputs {
-	inputs := composioDigestWorkflowInputs{
-		ConnectionKey:    spec.ConnectionKey,
-		RecipientEmail:   spec.RecipientEmail,
-		Subject:          spec.Subject,
-		Query:            spec.Query,
-		WindowHours:      spec.WindowHours,
-		MaxResults:       spec.MaxResults,
-		InsightLimit:     spec.InsightLimit,
-		IncludeSpamTrash: spec.IncludeSpamTrash,
-		DigestPrompt:     spec.DigestPrompt,
+func normalizeWorkflowStepType(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "composio", "one", "external_action", "provider_action":
+		return "action"
+	default:
+		return strings.TrimSpace(raw)
 	}
-	if v := strings.TrimSpace(stringInput(overrides["connection_key"])); v != "" {
-		inputs.ConnectionKey = v
-	}
-	if v := strings.TrimSpace(stringInput(overrides["recipient_email"])); v != "" {
-		inputs.RecipientEmail = v
-	}
-	if v := strings.TrimSpace(stringInput(overrides["subject"])); v != "" {
-		inputs.Subject = v
-	}
-	if v := strings.TrimSpace(stringInput(overrides["query"])); v != "" {
-		inputs.Query = v
-	}
-	if v := intInput(overrides["window_hours"]); v > 0 {
-		inputs.WindowHours = v
-	}
-	if v := intInput(overrides["max_results"]); v > 0 {
-		inputs.MaxResults = v
-	}
-	if v := intInput(overrides["insight_limit"]); v > 0 {
-		inputs.InsightLimit = v
-	}
-	if v, ok := boolInput(overrides["include_spam_trash"]); ok {
-		inputs.IncludeSpamTrash = v
-	}
-	if v := strings.TrimSpace(stringInput(overrides["digest_prompt"])); v != "" {
-		inputs.DigestPrompt = v
-	}
-	if inputs.Query == "" {
-		inputs.Query = defaultDigestQuery(inputs.WindowHours)
-	}
-	if inputs.Subject == "" {
-		inputs.Subject = "WUPHF Daily Digest"
-	}
-	return inputs
 }
 
-func summarizeFetchedMessages(messages []composioFetchedMessage) []map[string]any {
-	out := make([]map[string]any, 0, len(messages))
-	for _, msg := range messages {
-		out = append(out, map[string]any{
-			"message_id": msg.MessageID,
-			"thread_id":  msg.ThreadID,
-			"timestamp":  msg.Timestamp,
-			"subject":    fallbackString(msg.Subject, msg.Preview.Subject),
-			"sender":     msg.Sender,
-			"to":         msg.To,
-			"preview":    truncateText(fallbackString(msg.Preview.Body, msg.MessageText), 240),
-			"labels":     msg.LabelIDs,
-		})
+func normalizeWorkflowInputs(inputs map[string]any) map[string]any {
+	if len(inputs) == 0 {
+		return inputs
+	}
+	out := make(map[string]any, len(inputs))
+	for key, value := range inputs {
+		if obj, ok := value.(map[string]any); ok {
+			if def, ok := obj["default"]; ok {
+				out[key] = normalizeWorkflowValueSyntax(def)
+				continue
+			}
+		}
+		out[key] = normalizeWorkflowValueSyntax(value)
 	}
 	return out
 }
 
-func buildDigestBody(messages []composioFetchedMessage, inputs composioDigestWorkflowInputs) (string, map[string]any, error) {
-	summaries := summarizeFetchedMessages(messages)
-	sort.Slice(summaries, func(i, j int) bool {
-		return stringInput(summaries[i]["timestamp"]) > stringInput(summaries[j]["timestamp"])
+func normalizeWorkflowMapSyntax(in map[string]any) map[string]any {
+	if len(in) == 0 {
+		return in
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = normalizeWorkflowValueSyntax(value)
+	}
+	return out
+}
+
+func normalizeWorkflowValueSyntax(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return normalizeWorkflowTemplateString(typed)
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, normalizeWorkflowValueSyntax(item))
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = normalizeWorkflowValueSyntax(item)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+var workflowTemplateShorthandPatterns = []struct {
+	re   *regexp.Regexp
+	repl string
+}{
+	{regexp.MustCompile(`\{\{\s*inputs\.`), "{{ .inputs."},
+	{regexp.MustCompile(`\{\{\s*steps\.`), "{{ .steps."},
+	{regexp.MustCompile(`\{\{\s*workflow\.`), "{{ .workflow."},
+	{regexp.MustCompile(`\{\{\s*now\.`), "{{ .now."},
+	{regexp.MustCompile(`\{\{\s*today_date\s*\}\}`), "{{ .now.date }}"},
+	{regexp.MustCompile(`\{\{\s*today_rfc3339\s*\}\}`), "{{ .now.rfc3339 }}"},
+}
+
+var (
+	workflowHandlebarsEachOpenRe = regexp.MustCompile(`\{\{\s*#each\s+([^}]+?)\s*\}\}`)
+	workflowHandlebarsEachClose  = regexp.MustCompile(`\{\{\s*/each\s*\}\}`)
+	workflowHandlebarsThisRe     = regexp.MustCompile(`\{\{\s*this\.([^}]+?)\s*\}\}`)
+)
+
+func normalizeWorkflowTemplateString(raw string) string {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return raw
+	}
+	for _, pattern := range workflowTemplateShorthandPatterns {
+		text = pattern.re.ReplaceAllString(text, pattern.repl)
+	}
+	text = workflowHandlebarsEachOpenRe.ReplaceAllStringFunc(text, func(match string) string {
+		parts := workflowHandlebarsEachOpenRe.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		expr := strings.TrimSpace(parts[1])
+		if strings.HasPrefix(expr, "steps.") || strings.HasPrefix(expr, "inputs.") || strings.HasPrefix(expr, "workflow.") || strings.HasPrefix(expr, "now.") {
+			expr = "." + expr
+		}
+		return "{{- range $item := " + expr + " }}"
 	})
-	insights, insightsErr := nexInsightsSince(time.Now().UTC().Add(-time.Duration(inputs.WindowHours)*time.Hour), inputs.InsightLimit)
-	askPrompt := composeDigestPrompt(summaries, insights.Insights, inputs)
-	answer, askErr := nexAsk(askPrompt)
-
-	body := strings.TrimSpace(answer.Answer)
-	if body == "" || askErr != nil {
-		body = fallbackDigestBody(summaries, insights.Insights, inputs, askErr)
-	}
-	hydration := map[string]any{
-		"emails_considered": len(summaries),
-		"insights_considered": len(insights.Insights),
-		"nex_prompt": askPrompt,
-		"nex_answer": body,
-	}
-	if insightsErr != nil {
-		hydration["insights_error"] = insightsErr.Error()
-	}
-	if askErr != nil {
-		hydration["nex_error"] = askErr.Error()
-	}
-	return body, hydration, nil
+	text = workflowHandlebarsEachClose.ReplaceAllString(text, "{{- end }}")
+	text = workflowHandlebarsThisRe.ReplaceAllStringFunc(text, func(match string) string {
+		parts := workflowHandlebarsThisRe.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		return "{{ $item." + strings.TrimSpace(parts[1]) + " }}"
+	})
+	return text
 }
 
-func composeDigestPrompt(emails []map[string]any, insights []nexInsightItem, inputs composioDigestWorkflowInputs) string {
-	if strings.TrimSpace(inputs.DigestPrompt) != "" {
-		return strings.TrimSpace(inputs.DigestPrompt) + "\n\nRecent emails:\n" + string(mustMarshalJSON(emails)) + "\n\nRecent insights:\n" + string(mustMarshalJSON(insights))
+func mergeWorkflowInputs(defaults, overrides map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range defaults {
+		out[key] = value
 	}
-	return fmt.Sprintf(
-		"Create a plain-text daily digest email for the human operator.\n\n"+
-			"Use the recent emails and relevant organizational context to produce these sections exactly:\n"+
-			"1. Executive Summary\n2. Why This Matters\n3. What To Do Next\n4. Email Highlights\n5. Relevant Nex Insights\n\n"+
-			"Requirements:\n"+
-			"- focus on the last %d hours\n"+
-			"- explain why each priority matters now\n"+
-			"- give concrete, short next actions\n"+
-			"- mention sender and subject in Email Highlights\n"+
-			"- keep it concise but useful\n\n"+
-			"Recent emails:\n%s\n\nRecent Nex insights:\n%s\n",
-		inputs.WindowHours,
-		string(mustMarshalJSON(emails)),
-		string(mustMarshalJSON(insights)),
-	)
+	for key, value := range overrides {
+		out[key] = value
+	}
+	return out
 }
 
-func fallbackDigestBody(emails []map[string]any, insights []nexInsightItem, inputs composioDigestWorkflowInputs, askErr error) string {
-	var lines []string
-	lines = append(lines, "Executive Summary")
-	if len(emails) == 0 {
-		lines = append(lines, "- No new emails matched the digest window.")
-	} else {
-		lines = append(lines, fmt.Sprintf("- Reviewed %d recent emails from the last %d hours.", len(emails), inputs.WindowHours))
+func workflowScope(key string, inputs map[string]any, steps map[string]any) map[string]any {
+	now := time.Now().UTC()
+	return map[string]any{
+		"workflow": map[string]any{
+			"key":      key,
+			"provider": "composio",
+		},
+		"inputs": normalizeTemplateScopeValue(inputs),
+		"steps":  normalizeTemplateScopeValue(steps),
+		"now": map[string]any{
+			"rfc3339": now.Format(time.RFC3339),
+			"date":    now.Format("2006-01-02"),
+		},
+		"meta": map[string]any{
+			"rfc3339": now.Format(time.RFC3339),
+			"date":    now.Format("2006-01-02"),
+		},
 	}
-	lines = append(lines, "", "Why This Matters")
-	if len(insights) == 0 {
-		lines = append(lines, "- No recent Nex insights were available; this digest is based on email activity alone.")
-	} else {
-		for _, insight := range insights {
-			lines = append(lines, "- "+truncateText(insight.Content, 180))
+}
+
+func (c *ComposioREST) executeWorkflowStep(ctx context.Context, step workflowStep, scope map[string]any, workflowDryRun bool) (map[string]any, error) {
+	switch step.Type {
+	case "action":
+		return c.executeWorkflowActionStep(ctx, step, scope, workflowDryRun)
+	case "template":
+		return executeWorkflowTemplateStep(step, scope)
+	case "nex_ask":
+		return executeWorkflowNexAskStep(step, scope)
+	case "nex_insights":
+		return executeWorkflowNexInsightsStep(step, scope)
+	default:
+		return nil, fmt.Errorf("unsupported workflow step type %q", step.Type)
+	}
+}
+
+func (c *ComposioREST) executeWorkflowActionStep(ctx context.Context, step workflowStep, scope map[string]any, workflowDryRun bool) (map[string]any, error) {
+	connectionKey, err := renderWorkflowString(step.ConnectionKey, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render connection_key: %w", err)
+	}
+	if strings.TrimSpace(connectionKey) == "" {
+		connectionKey, err = c.autoResolveWorkflowConnection(ctx, step.Platform)
+		if err != nil {
+			return nil, err
 		}
 	}
-	lines = append(lines, "", "What To Do Next")
-	if len(emails) == 0 {
-		lines = append(lines, "- No immediate action required from email alone.")
-	} else {
-		for _, email := range emails[:minInt(len(emails), 5)] {
-			lines = append(lines, fmt.Sprintf("- Review %s from %s.", stringInput(email["subject"]), stringInput(email["sender"])))
-		}
+	data, err := renderWorkflowMap(step.Data, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render data: %w", err)
 	}
-	lines = append(lines, "", "Email Highlights")
-	for _, email := range emails[:minInt(len(emails), 8)] {
-		lines = append(lines, fmt.Sprintf("- %s | %s | %s", stringInput(email["sender"]), stringInput(email["subject"]), stringInput(email["preview"])))
+	pathVariables, err := renderWorkflowMap(step.PathVariables, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render path_variables: %w", err)
 	}
-	if askErr != nil {
-		lines = append(lines, "", "Note", "- Nex summary fallback used: "+truncateText(askErr.Error(), 160))
+	queryParameters, err := renderWorkflowMap(step.QueryParameters, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render query_parameters: %w", err)
 	}
-	return strings.Join(lines, "\n")
+	headers, err := renderWorkflowMap(step.Headers, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render headers: %w", err)
+	}
+	stepDryRun := actionStepDryRun(step, workflowDryRun)
+	result, err := c.ExecuteAction(ctx, ExecuteRequest{
+		Platform:        step.Platform,
+		ActionID:        step.ActionID,
+		ConnectionKey:   connectionKey,
+		Data:            data,
+		PathVariables:   pathVariables,
+		QueryParameters: queryParameters,
+		Headers:         headers,
+		FormData:        step.FormData,
+		FormURLEncoded:  step.FormURLEncoded,
+		DryRun:          stepDryRun,
+	})
+	if err != nil {
+		return nil, err
+	}
+	decoded := decodeJSONObject(result.Response)
+	return map[string]any{
+		"type":           "action",
+		"platform":       step.Platform,
+		"action_id":      step.ActionID,
+		"connection_key": connectionKey,
+		"dry_run":        result.DryRun,
+		"request":        result.Request,
+		"response":       decoded,
+		"result":         decoded,
+	}, nil
 }
 
-func defaultDigestQuery(windowHours int) string {
-	if windowHours <= 0 {
-		windowHours = 24
+func (c *ComposioREST) autoResolveWorkflowConnection(ctx context.Context, platform string) (string, error) {
+	result, err := c.ListConnections(ctx, ListConnectionsOptions{Search: platform, Limit: 20})
+	if err != nil {
+		return "", fmt.Errorf("resolve connection_key: %w", err)
 	}
-	days := int(math.Ceil(float64(windowHours) / 24.0))
-	if days <= 1 {
-		return "newer_than:1d"
+	platform = normalizeComposioPlatform(platform)
+	active := make([]Connection, 0, len(result.Connections))
+	for _, conn := range result.Connections {
+		if normalizeComposioPlatform(conn.Platform) != platform {
+			continue
+		}
+		switch strings.ToLower(strings.TrimSpace(conn.State)) {
+		case "", "active", "operational", "connected":
+			active = append(active, conn)
+		}
 	}
-	return fmt.Sprintf("newer_than:%dd", days)
+	if len(active) == 1 {
+		return strings.TrimSpace(active[0].Key), nil
+	}
+	if len(active) == 0 {
+		return "", fmt.Errorf("connection_key is required and no active %s connection was found", platform)
+	}
+	return "", fmt.Errorf("connection_key is required because %d active %s connections are available", len(active), platform)
+}
+
+func executeWorkflowTemplateStep(step workflowStep, scope map[string]any) (map[string]any, error) {
+	text, err := renderWorkflowTemplate(step.Template, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render template: %w", err)
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil, fmt.Errorf("template rendered empty")
+	}
+	return map[string]any{
+		"type":   "template",
+		"text":   text,
+		"result": text,
+	}, nil
+}
+
+func executeWorkflowNexAskStep(step workflowStep, scope map[string]any) (map[string]any, error) {
+	query, err := renderWorkflowTemplate(step.QueryTemplate, scope)
+	if err != nil {
+		return nil, fmt.Errorf("render query_template: %w", err)
+	}
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, fmt.Errorf("query_template rendered empty")
+	}
+	answer, err := nexAsk(query)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"type":       "nex_ask",
+		"query":      query,
+		"answer":     strings.TrimSpace(answer.Answer),
+		"session_id": strings.TrimSpace(answer.SessionID),
+		"result":     strings.TrimSpace(answer.Answer),
+	}, nil
+}
+
+func executeWorkflowNexInsightsStep(step workflowStep, scope map[string]any) (map[string]any, error) {
+	lookbackHours, err := renderWorkflowInt(step.LookbackHours, scope, 24)
+	if err != nil {
+		return nil, fmt.Errorf("render lookback_hours: %w", err)
+	}
+	insightLimit, err := renderWorkflowInt(step.InsightLimit, scope, 5)
+	if err != nil {
+		return nil, fmt.Errorf("render insight_limit: %w", err)
+	}
+	from := time.Now().UTC().Add(-time.Duration(lookbackHours) * time.Hour)
+	insights, err := nexInsightsSince(from, insightLimit)
+	if err != nil {
+		return nil, err
+	}
+	normalizedInsights := normalizeTemplateScopeValue(insights.Insights)
+	compactSummary := summarizeWorkflowInsights(insights.Insights)
+	return map[string]any{
+		"type":           "nex_insights",
+		"lookback_hours": lookbackHours,
+		"limit":          insightLimit,
+		"from":           from.Format(time.RFC3339),
+		"insights":       normalizedInsights,
+		"result":         compactSummary,
+	}, nil
+}
+
+func renderWorkflowMap(in map[string]any, scope map[string]any) (map[string]any, error) {
+	if len(in) == 0 {
+		return nil, nil
+	}
+	rendered, err := renderWorkflowValue(in, scope)
+	if err != nil {
+		return nil, err
+	}
+	out, _ := rendered.(map[string]any)
+	return out, nil
+}
+
+func renderWorkflowInt(value any, scope map[string]any, fallback int) (int, error) {
+	if value == nil {
+		return fallback, nil
+	}
+	rendered, err := renderWorkflowValue(value, scope)
+	if err != nil {
+		return 0, err
+	}
+	if n := intInput(rendered); n > 0 {
+		return n, nil
+	}
+	return fallback, nil
+}
+
+func renderWorkflowString(value any, scope map[string]any) (string, error) {
+	if value == nil {
+		return "", nil
+	}
+	rendered, err := renderWorkflowValue(value, scope)
+	if err != nil {
+		return "", err
+	}
+	return stringInput(rendered), nil
+}
+
+func renderWorkflowValue(value any, scope map[string]any) (any, error) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return renderWorkflowTemplate(typed, scope)
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			rendered, err := renderWorkflowValue(item, scope)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, rendered)
+		}
+		return out, nil
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			rendered, err := renderWorkflowValue(item, scope)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = rendered
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+
+func renderWorkflowTemplate(tpl string, scope map[string]any) (string, error) {
+	if !strings.Contains(tpl, "{{") {
+		return tpl, nil
+	}
+	t, err := template.New("workflow").Option("missingkey=error").Funcs(template.FuncMap{
+		"toJSON": func(v any) string {
+			if s, ok := v.(string); ok {
+				return s
+			}
+			raw, _ := json.Marshal(v)
+			return string(raw)
+		},
+		"toPrettyJSON": func(v any) string {
+			if s, ok := v.(string); ok {
+				return s
+			}
+			raw, _ := json.MarshalIndent(v, "", "  ")
+			return string(raw)
+		},
+		"trim":  strings.TrimSpace,
+		"upper": strings.ToUpper,
+		"lower": strings.ToLower,
+	}).Parse(tpl)
+	if err != nil {
+		return "", err
+	}
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, scope); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+func summarizeWorkflowInsights(items []nexInsightItem) string {
+	if len(items) == 0 {
+		return "No notable Nex insights in the requested window."
+	}
+	var b strings.Builder
+	b.WriteString("Relevant Nex insights:\n")
+	for _, item := range items {
+		content := truncateWorkflowInsight(strings.TrimSpace(item.Content), 240)
+		if content == "" {
+			continue
+		}
+		label := strings.TrimSpace(item.Type)
+		if label == "" {
+			label = "insight"
+		}
+		fmt.Fprintf(&b, "- [%s] %s\n", label, content)
+	}
+	text := strings.TrimSpace(b.String())
+	if text == "Relevant Nex insights:" || text == "" {
+		return "No notable Nex insights in the requested window."
+	}
+	return text
+}
+
+func truncateWorkflowInsight(text string, max int) string {
+	if max <= 0 || len(text) <= max {
+		return text
+	}
+	text = strings.TrimSpace(text)
+	if len(text) <= max {
+		return text
+	}
+	if max <= 1 {
+		return text[:max]
+	}
+	return strings.TrimSpace(text[:max-1]) + "…"
+}
+
+func actionStepDryRun(step workflowStep, workflowDryRun bool) bool {
+	if step.DryRun != nil {
+		return *step.DryRun
+	}
+	if !workflowDryRun {
+		return false
+	}
+	return actionLikelyWrites(step.ActionID)
+}
+
+func actionLikelyWrites(actionID string) bool {
+	actionID = strings.ToUpper(strings.TrimSpace(actionID))
+	writeMarkers := []string{
+		"SEND",
+		"CREATE",
+		"UPDATE",
+		"DELETE",
+		"PATCH",
+		"UPSERT",
+		"POST",
+		"INSERT",
+		"UPLOAD",
+		"COMPLETE",
+	}
+	for _, marker := range writeMarkers {
+		if strings.Contains(actionID, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func decodeJSONObject(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return string(raw)
+	}
+	return normalizeDecodedJSON(decoded, 0)
+}
+
+func normalizeDecodedJSON(value any, depth int) any {
+	if depth > 4 {
+		return value
+	}
+	switch typed := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed != "" && (strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")) {
+			var nested any
+			if err := json.Unmarshal([]byte(trimmed), &nested); err == nil {
+				return normalizeDecodedJSON(nested, depth+1)
+			}
+		}
+		return typed
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, normalizeDecodedJSON(item, depth+1))
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(typed))
+		for key, item := range typed {
+			out[key] = normalizeDecodedJSON(item, depth+1)
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+func normalizeTemplateScopeValue(value any) any {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return value
+	}
+	return decoded
 }
 
 func mustMarshalJSON(v any) json.RawMessage {
 	raw, _ := json.Marshal(v)
 	return raw
-}
-
-func truncateText(s string, limit int) string {
-	s = strings.TrimSpace(s)
-	if limit <= 0 || len(s) <= limit {
-		return s
-	}
-	if limit <= 3 {
-		return s[:limit]
-	}
-	return s[:limit-3] + "..."
 }
 
 func stringInput(v any) string {
@@ -456,26 +773,4 @@ func intInput(v any) int {
 	default:
 		return 0
 	}
-}
-
-func boolInput(v any) (bool, bool) {
-	switch t := v.(type) {
-	case bool:
-		return t, true
-	case string:
-		switch strings.ToLower(strings.TrimSpace(t)) {
-		case "true", "1", "yes":
-			return true, true
-		case "false", "0", "no":
-			return false, true
-		}
-	}
-	return false, false
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
