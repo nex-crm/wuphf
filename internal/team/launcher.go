@@ -313,9 +313,13 @@ func (l *Launcher) startTelegramTransport() {
 		return
 	}
 	transport := NewTelegramTransport(l.broker, botToken)
+	fmt.Printf("[telegram] transport starting: %d chat mappings, dm=%q, token=%s...\n",
+		len(transport.ChatMap), transport.DMChannel, botToken[:10])
 	go func() {
 		ctx := context.Background()
-		_ = transport.Start(ctx)
+		if err := transport.Start(ctx); err != nil {
+			fmt.Printf("[telegram] transport error: %v\n", err)
+		}
 	}()
 }
 

@@ -130,7 +130,7 @@ func (t *TelegramTransport) pollInbound(ctx context.Context) error {
 
 		updates, err := t.getUpdates(ctx, offset)
 		if err != nil {
-			// Transient errors: wait briefly and retry
+			fmt.Printf("[telegram] poll error: %v\n", err)
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -146,8 +146,11 @@ func (t *TelegramTransport) pollInbound(ctx context.Context) error {
 			if upd.Message == nil || upd.Message.Text == "" {
 				continue
 			}
+			fmt.Printf("[telegram] inbound: chat=%d type=%s from=%s text=%q\n",
+				upd.Message.Chat.ID, upd.Message.Chat.Type,
+				upd.Message.From.FirstName, upd.Message.Text[:min(len(upd.Message.Text), 50)])
 			if err := t.HandleInbound(upd.Message.Chat.ID, upd.Message.Chat.Type, upd.Message.From, upd.Message.Text); err != nil {
-				// Log but don't crash — individual message failures are non-fatal
+				fmt.Printf("[telegram] inbound error: %v\n", err)
 				continue
 			}
 		}
@@ -171,10 +174,14 @@ func (t *TelegramTransport) drainOutbound(ctx context.Context) error {
 		}
 
 		msgs := t.Broker.ExternalQueue("telegram")
+		if len(msgs) > 0 {
+			fmt.Printf("[telegram] outbound queue: %d messages, slugToChat=%v\n", len(msgs), slugToChat)
+		}
 		for _, msg := range msgs {
 			ch := normalizeChannelSlug(msg.Channel)
 			chatID, ok := slugToChat[ch]
 			if !ok {
+				fmt.Printf("[telegram] outbound skip: no chat for channel %q\n", ch)
 				continue
 			}
 			// Send typing indicator before the message
