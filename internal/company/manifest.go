@@ -22,12 +22,21 @@ type MemberSpec struct {
 	System         bool     `json:"system,omitempty"`
 }
 
+type ChannelSurfaceSpec struct {
+	Provider    string `json:"provider,omitempty"`
+	RemoteID    string `json:"remote_id,omitempty"`
+	RemoteTitle string `json:"remote_title,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	BotTokenEnv string `json:"bot_token_env,omitempty"`
+}
+
 type ChannelSpec struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name,omitempty"`
-	Description string   `json:"description,omitempty"`
-	Members     []string `json:"members,omitempty"`
-	Disabled    []string `json:"disabled,omitempty"`
+	Slug        string              `json:"slug"`
+	Name        string              `json:"name,omitempty"`
+	Description string              `json:"description,omitempty"`
+	Members     []string            `json:"members,omitempty"`
+	Disabled    []string            `json:"disabled,omitempty"`
+	Surface     *ChannelSurfaceSpec `json:"surface,omitempty"`
 }
 
 type Manifest struct {

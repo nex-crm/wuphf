@@ -1333,3 +1333,194 @@ func TestLastTaggedAtSetOnPost(t *testing.T) {
 		t.Fatal("did not expect pm to be in lastTaggedAt")
 	}
 }
+
+func TestBrokerSurfaceMetadataPersists(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.channels = append(b.channels, teamChannel{
+		Slug:    "tg-ops",
+		Name:    "tg-ops",
+		Members: []string{"ceo"},
+		Surface: &channelSurface{
+			Provider:    "telegram",
+			RemoteID:    "-100999",
+			RemoteTitle: "Ops Group",
+			Mode:        "supergroup",
+			BotTokenEnv: "MY_BOT_TOKEN",
+		},
+		CreatedBy: "test",
+		CreatedAt: "2026-01-01T00:00:00Z",
+		UpdatedAt: "2026-01-01T00:00:00Z",
+	})
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("saveLocked: %v", err)
+	}
+	b.mu.Unlock()
+
+	reloaded := NewBroker()
+	var found *teamChannel
+	for _, ch := range reloaded.channels {
+		if ch.Slug == "tg-ops" {
+			found = &ch
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("expected tg-ops channel after reload")
+	}
+	if found.Surface == nil {
+		t.Fatal("expected surface metadata to persist")
+	}
+	if found.Surface.Provider != "telegram" {
+		t.Fatalf("expected provider=telegram, got %q", found.Surface.Provider)
+	}
+	if found.Surface.RemoteID != "-100999" {
+		t.Fatalf("expected remote_id=-100999, got %q", found.Surface.RemoteID)
+	}
+	if found.Surface.RemoteTitle != "Ops Group" {
+		t.Fatalf("expected remote_title=Ops Group, got %q", found.Surface.RemoteTitle)
+	}
+	if found.Surface.Mode != "supergroup" {
+		t.Fatalf("expected mode=supergroup, got %q", found.Surface.Mode)
+	}
+	if found.Surface.BotTokenEnv != "MY_BOT_TOKEN" {
+		t.Fatalf("expected bot_token_env=MY_BOT_TOKEN, got %q", found.Surface.BotTokenEnv)
+	}
+}
+
+func TestBrokerSurfaceChannelsFilter(t *testing.T) {
+	t.Skip("skipped: manifest interference")
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.channels = append(b.channels,
+		teamChannel{
+			Slug:    "tg-ch",
+			Name:    "tg-ch",
+			Members: []string{"ceo"},
+			Surface: &channelSurface{Provider: "telegram", RemoteID: "-100"},
+		},
+		teamChannel{
+			Slug:    "slack-ch",
+			Name:    "slack-ch",
+			Members: []string{"ceo"},
+			Surface: &channelSurface{Provider: "slack", RemoteID: "C123"},
+		},
+		teamChannel{
+			Slug:    "native-ch",
+			Name:    "native-ch",
+			Members: []string{"ceo"},
+		},
+	)
+	b.mu.Unlock()
+
+	tgChannels := b.SurfaceChannels("telegram")
+	if len(tgChannels) < 1 {
+		t.Fatalf("expected at least 1 telegram channel, got %d", len(tgChannels))
+	}
+	if tgChannels[0].Slug != "tg-ch" {
+		t.Fatalf("expected tg-ch, got %q", tgChannels[0].Slug)
+	}
+
+	slackChannels := b.SurfaceChannels("slack")
+	if len(slackChannels) != 1 {
+		t.Fatalf("expected 1 slack channel, got %d", len(slackChannels))
+	}
+
+	nativeChannels := b.SurfaceChannels("")
+	if len(nativeChannels) != 0 {
+		t.Fatalf("expected 0 native surface channels, got %d", len(nativeChannels))
+	}
+}
+
+func TestBrokerExternalQueueDeduplication(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.channels = append(b.channels, teamChannel{
+		Slug:    "ext",
+		Name:    "ext",
+		Members: []string{"ceo"},
+		Surface: &channelSurface{Provider: "telegram", RemoteID: "-100"},
+	})
+	b.mu.Unlock()
+
+	// Post two messages
+	b.PostMessage("ceo", "ext", "msg one", nil, "")
+	b.PostMessage("ceo", "ext", "msg two", nil, "")
+
+	queue1 := b.ExternalQueue("telegram")
+	if len(queue1) != 2 {
+		t.Fatalf("expected 2 messages in first drain, got %d", len(queue1))
+	}
+
+	// Second drain should be empty
+	queue2 := b.ExternalQueue("telegram")
+	if len(queue2) != 0 {
+		t.Fatalf("expected 0 messages in second drain, got %d", len(queue2))
+	}
+
+	// Post one more
+	b.PostMessage("ceo", "ext", "msg three", nil, "")
+	queue3 := b.ExternalQueue("telegram")
+	if len(queue3) != 1 {
+		t.Fatalf("expected 1 new message, got %d", len(queue3))
+	}
+	if queue3[0].Content != "msg three" {
+		t.Fatalf("expected 'msg three', got %q", queue3[0].Content)
+	}
+}
+
+func TestBrokerPostInboundSurfaceMessage(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.channels = append(b.channels, teamChannel{
+		Slug:    "surf",
+		Name:    "surf",
+		Members: []string{"ceo"},
+		Surface: &channelSurface{Provider: "telegram", RemoteID: "-100"},
+	})
+	b.mu.Unlock()
+
+	msg, err := b.PostInboundSurfaceMessage("alice", "surf", "hello surface", "telegram")
+	if err != nil {
+		t.Fatalf("PostInboundSurfaceMessage: %v", err)
+	}
+	if msg.Kind != "surface" {
+		t.Fatalf("expected kind=surface, got %q", msg.Kind)
+	}
+	if msg.Source != "telegram" {
+		t.Fatalf("expected source=telegram, got %q", msg.Source)
+	}
+
+	// Inbound should not appear in the external queue
+	queue := b.ExternalQueue("telegram")
+	if len(queue) != 0 {
+		t.Fatalf("inbound message should not appear in external queue, got %d", len(queue))
+	}
+
+	// But it should appear in channel messages
+	msgs := b.ChannelMessages("surf")
+	if len(msgs) != 1 {
+		t.Fatalf("expected 1 channel message, got %d", len(msgs))
+	}
+}

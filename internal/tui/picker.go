@@ -15,11 +15,15 @@ type PickerOption struct {
 }
 
 type PickerModel struct {
-	Title    string
-	Options  []PickerOption
-	selected int
-	active   bool
-	OnSelect func(value string)
+	Title      string
+	Options    []PickerOption
+	selected   int
+	active     bool
+	OnSelect   func(value string)
+	TextInput  bool   // when true, shows a text input instead of options
+	TextPrompt string // label for the text input
+	textBuf    []rune
+	textPos    int
 }
 
 func NewPicker(title string, options []PickerOption) PickerModel {
@@ -35,6 +39,9 @@ func (p PickerModel) Update(msg tea.Msg) (PickerModel, tea.Cmd) {
 	}
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if p.TextInput {
+			return p.updateTextInput(msg)
+		}
 		switch msg.String() {
 		case "up", "k":
 			if p.selected > 0 {
@@ -58,7 +65,7 @@ func (p PickerModel) Update(msg tea.Msg) (PickerModel, tea.Cmd) {
 			// 1-9 quick-select
 			key := msg.String()
 			if len(key) == 1 && key[0] >= '1' && key[0] <= '9' {
-				idx := int(key[0]-'1')
+				idx := int(key[0] - '1')
 				if idx < len(p.Options) {
 					p.selected = idx
 					opt := p.Options[idx]
@@ -75,9 +82,61 @@ func (p PickerModel) Update(msg tea.Msg) (PickerModel, tea.Cmd) {
 	return p, nil
 }
 
+func (p PickerModel) updateTextInput(msg tea.KeyMsg) (PickerModel, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		value := strings.TrimSpace(string(p.textBuf))
+		return p, func() tea.Msg {
+			return PickerSelectMsg{Value: value, Label: value}
+		}
+	case "backspace":
+		if len(p.textBuf) > 0 {
+			p.textBuf = p.textBuf[:len(p.textBuf)-1]
+		}
+	case "esc":
+		p.active = false
+		return p, func() tea.Msg {
+			return PickerSelectMsg{Value: "", Label: ""}
+		}
+	default:
+		// Handle both single chars and pasted text (multi-rune burst)
+		if msg.Type == tea.KeyRunes {
+			p.textBuf = append(p.textBuf, msg.Runes...)
+		} else {
+			runes := []rune(msg.String())
+			for _, r := range runes {
+				if r >= 32 {
+					p.textBuf = append(p.textBuf, r)
+				}
+			}
+		}
+	}
+	return p, nil
+}
+
+// TextValue returns the current text input value.
+func (p PickerModel) TextValue() string {
+	return string(p.textBuf)
+}
+
 func (p PickerModel) View() string {
 	if !p.active {
 		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString(TitleStyle.Render(p.Title) + "\n")
+
+	if p.TextInput {
+		promptStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(NexBlue)).Bold(true)
+		cursorStyle := lipgloss.NewStyle().Reverse(true)
+		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(MutedColor))
+
+		sb.WriteString("\n")
+		sb.WriteString(promptStyle.Render(p.TextPrompt) + "\n\n")
+		sb.WriteString("  " + string(p.textBuf) + cursorStyle.Render(" ") + "\n\n")
+		sb.WriteString(mutedStyle.Render("  Enter to confirm · Esc to cancel") + "\n")
+		return sb.String()
 	}
 
 	highlighted := lipgloss.NewStyle().
@@ -91,9 +150,6 @@ func (p PickerModel) View() string {
 
 	descStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(MutedColor))
-
-	var sb strings.Builder
-	sb.WriteString(TitleStyle.Render(p.Title) + "\n")
 
 	for i, opt := range p.Options {
 		num := fmt.Sprintf("%d. ", i+1)
