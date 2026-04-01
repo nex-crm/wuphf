@@ -948,12 +948,38 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 		b.channels = defaultTeamChannels()
 		return
 	}
+	hasGeneral := false
 	for _, ch := range b.channels {
 		if ch.Slug == "general" {
-			return
+			hasGeneral = true
+			break
 		}
 	}
-	b.channels = append(defaultTeamChannels(), b.channels...)
+	if !hasGeneral {
+		b.channels = append(defaultTeamChannels(), b.channels...)
+		return
+	}
+	// Merge surface metadata from manifest into existing channels
+	// (handles case where state was saved without surfaces by an older binary)
+	defaults := defaultTeamChannels()
+	for _, def := range defaults {
+		if def.Surface == nil {
+			continue
+		}
+		found := false
+		for i := range b.channels {
+			if b.channels[i].Slug == def.Slug {
+				if b.channels[i].Surface == nil {
+					b.channels[i].Surface = def.Surface
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			b.channels = append(b.channels, def)
+		}
+	}
 }
 
 func (b *Broker) ensureDefaultOfficeMembersLocked() {
