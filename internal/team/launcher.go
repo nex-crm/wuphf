@@ -1086,6 +1086,34 @@ func (l *Launcher) primeVisibleAgents() {
 				"-t", target.PaneTarget,
 				"Enter",
 			).Run()
+
+			// After warmup completes, promote CEO from Sonnet → Opus.
+			go func(paneTarget string) {
+				for i := 0; i < 20; i++ {
+					time.Sleep(2 * time.Second)
+					content, err := l.capturePaneTargetContent(paneTarget)
+					if err != nil {
+						continue
+					}
+					lines := strings.Split(content, "\n")
+					for j := len(lines) - 1; j >= 0; j-- {
+						trimmed := strings.TrimSpace(lines[j])
+						if trimmed == "" {
+							continue
+						}
+						if strings.HasPrefix(trimmed, "\u276f") || strings.HasPrefix(trimmed, ">") {
+							exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+								"-t", paneTarget, "-l", "/model opus").Run()
+							time.Sleep(200 * time.Millisecond)
+							exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+								"-t", paneTarget, "Enter").Run()
+							fmt.Println("[ceo] promoted to Opus after warmup")
+							return
+						}
+						break
+					}
+				}
+			}(target.PaneTarget)
 			break
 		}
 	}
