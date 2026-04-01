@@ -5254,10 +5254,20 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 			manifest = company.DefaultManifest()
 		}
 
-		// Check if channel slug already exists
+		// Check if channel already exists (by slug or remote_id)
+		remoteID := fmt.Sprintf("%d", group.ChatID)
 		for _, ch := range manifest.Channels {
 			if ch.Slug == slug {
-				return telegramConnectDoneMsg{err: fmt.Errorf("channel #%s already exists", slug)}
+				return telegramConnectDoneMsg{
+					channelSlug: ch.Slug,
+					groupTitle:  group.Title,
+				}
+			}
+			if ch.Surface != nil && ch.Surface.Provider == "telegram" && ch.Surface.RemoteID == remoteID {
+				return telegramConnectDoneMsg{
+					channelSlug: ch.Slug,
+					groupTitle:  group.Title,
+				}
 			}
 		}
 
