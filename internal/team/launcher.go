@@ -2536,9 +2536,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("8. Check team_requests before asking the human anything new\n")
 		sb.WriteString("9. You can talk directly to the human — use human_message for updates, recommendations, or questions about approach\n")
 		sb.WriteString("10. If you need a decision from the human, use human_interview with clear options. Don't wait for the CEO to relay your question.\n")
-		sb.WriteString("11. When assigned a task by the leader, claim it with team_task before working on it\n")
-		sb.WriteString("12. Use team_status to share what you're working on\n")
-		sb.WriteString("13. ALWAYS broadcast your results when you finish ANY work — use team_broadcast. Never finish silently. The team and human need to see what you did.\n")
+		sb.WriteString("11. When you pick up work, ANNOUNCE it: 'Picking up X now.' via team_broadcast\n")
+		sb.WriteString("12. Give STATUS UPDATES as you work — every few tool calls, broadcast a quick update: 'Found Y, now checking Z.'\n")
+		sb.WriteString("13. When DONE, broadcast your results AND findings: 'Done. Here's what I found: ...' Never finish silently.\n")
 		sb.WriteString("14. You can inspect other channel names and descriptions, but you do not have automatic access to their content unless you are a member there.\n")
 		sb.WriteString("15. If another channel may have context or needs help from your channel, ask the CEO to bridge it. Do not assume you can read or act inside channels you are not in.\n")
 		if config.ResolveNoNex() {
