@@ -294,6 +294,7 @@ type Broker struct {
 	skills            []teamSkill
 	lastTaggedAt      map[string]time.Time   // when each agent was last @mentioned
 	lastPaneSnapshot  map[string]string      // last captured pane content per agent (for change detection)
+	seenTelegramGroups map[int64]string      // chat_id -> title, populated by transport
 	counter           int
 	notificationSince string
 	insightsSince     string
@@ -384,6 +385,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
 	mux.HandleFunc("/skills/", b.requireAuth(b.handleSkillsSubpath))
+	mux.HandleFunc("/telegram/groups", b.requireAuth(b.handleTelegramGroups))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
@@ -2807,6 +2809,31 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
+// RecordTelegramGroup saves a group chat ID and title seen by the transport.
+func (b *Broker) RecordTelegramGroup(chatID int64, title string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.seenTelegramGroups == nil {
+		b.seenTelegramGroups = make(map[int64]string)
+	}
+	b.seenTelegramGroups[chatID] = title
+}
+
+// SeenTelegramGroups returns all group chats the transport has seen.
+func (b *Broker) SeenTelegramGroups() map[int64]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.seenTelegramGroups == nil {
+		return nil
+	}
+	out := make(map[int64]string, len(b.seenTelegramGroups))
+	for k, v := range b.seenTelegramGroups {
+		out[k] = v
+	}
+	return out
+}
+
 // PostSystemMessage posts a lightweight system message that shows progress without blocking.
 func (b *Broker) PostSystemMessage(channel, content, kind string) {
 	b.mu.Lock()
@@ -4044,6 +4071,21 @@ func FormatChannelView(messages []channelMessage) string {
 }
 
 // --------------- Skills ---------------
+
+func (b *Broker) handleTelegramGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b.mu.Lock()
+	groups := make([]map[string]any, 0)
+	for chatID, title := range b.seenTelegramGroups {
+		groups = append(groups, map[string]any{"chat_id": chatID, "title": title})
+	}
+	b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"groups": groups})
+}
 
 func (b *Broker) handleSkills(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {

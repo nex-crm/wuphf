@@ -143,7 +143,14 @@ func (t *TelegramTransport) pollInbound(ctx context.Context) error {
 			if upd.UpdateID >= offset {
 				offset = upd.UpdateID + 1
 			}
-			if upd.Message == nil || upd.Message.Text == "" {
+			if upd.Message == nil {
+				continue
+			}
+			// Record every group/supergroup we see for /connect discovery
+			if upd.Message.Chat.Type == "group" || upd.Message.Chat.Type == "supergroup" {
+				t.Broker.RecordTelegramGroup(upd.Message.Chat.ID, upd.Message.Chat.Title)
+			}
+			if upd.Message.Text == "" {
 				continue
 			}
 			fmt.Printf("[telegram] inbound: chat=%d type=%s from=%s text=%q\n",
@@ -160,17 +167,20 @@ func (t *TelegramTransport) pollInbound(ctx context.Context) error {
 // drainOutbound periodically checks the broker's external queue and sends
 // messages to the appropriate Telegram chats.
 func (t *TelegramTransport) drainOutbound(ctx context.Context) error {
-	// Reverse map: channel slug -> chat_id
-	slugToChat := make(map[string]string, len(t.ChatMap))
-	for chatID, slug := range t.ChatMap {
-		slugToChat[slug] = chatID
-	}
-
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(2 * time.Second):
+		}
+
+		// Rebuild reverse map each cycle (picks up dynamically added DM chats)
+		slugToChat := make(map[string]string, len(t.ChatMap))
+		for chatID, slug := range t.ChatMap {
+			if chatID == "0" {
+				continue // skip the placeholder DM entry
+			}
+			slugToChat[slug] = chatID
 		}
 
 		msgs := t.Broker.ExternalQueue("telegram")
@@ -625,4 +635,23 @@ func VerifyChat(token string, chatID int64) (string, error) {
 		return "", nil
 	}
 	return chat.Title, nil
+}
+
+// DiscoverGroupsFromBroker returns groups the transport has seen during polling.
+// This is more reliable than getUpdates because the transport records every
+// group it encounters, even after the updates are consumed.
+func DiscoverGroupsFromBroker(broker *Broker) []TelegramGroup {
+	seen := broker.SeenTelegramGroups()
+	if len(seen) == 0 {
+		return nil
+	}
+	groups := make([]TelegramGroup, 0, len(seen))
+	for chatID, title := range seen {
+		groups = append(groups, TelegramGroup{
+			ChatID: chatID,
+			Title:  title,
+			Type:   "group",
+		})
+	}
+	return groups
 }

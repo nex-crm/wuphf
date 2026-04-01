@@ -5276,10 +5276,39 @@ func discoverTelegramGroups(token string) tea.Cmd {
 		if err != nil {
 			return telegramDiscoverMsg{err: fmt.Errorf("bot verification failed: %w", err)}
 		}
-		groups, err := team.DiscoverGroups(token)
-		if err != nil {
-			return telegramDiscoverMsg{err: fmt.Errorf("group discovery failed: %w", err)}
+		// Try getUpdates first
+		groups, _ := team.DiscoverGroups(token)
+
+		// Also fetch groups the transport has seen (via broker API)
+		seen := make(map[int64]bool)
+		for _, g := range groups {
+			seen[g.ChatID] = true
 		}
+		req, reqErr := newBrokerRequest("GET", "http://127.0.0.1:7890/telegram/groups", nil)
+		if reqErr == nil {
+			client := &http.Client{Timeout: 2 * time.Second}
+			if resp, err := client.Do(req); err == nil {
+				defer resp.Body.Close()
+				var result struct {
+					Groups []struct {
+						ChatID int64  `json:"chat_id"`
+						Title  string `json:"title"`
+					} `json:"groups"`
+				}
+				if json.NewDecoder(resp.Body).Decode(&result) == nil {
+					for _, g := range result.Groups {
+						if !seen[g.ChatID] {
+							groups = append(groups, team.TelegramGroup{
+								ChatID: g.ChatID,
+								Title:  g.Title,
+								Type:   "group",
+							})
+						}
+					}
+				}
+			}
+		}
+
 		return telegramDiscoverMsg{
 			botName: botName,
 			groups:  groups,
