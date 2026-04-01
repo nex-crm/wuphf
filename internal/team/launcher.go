@@ -1072,6 +1072,24 @@ func (l *Launcher) primeVisibleAgents() {
 		time.Sleep(1 * time.Second)
 	}
 
+	// Pre-warm the CEO session during splash so the first real message is fast.
+	// Send a quick warmup prompt that the CEO processes while the user watches the splash.
+	lead := l.officeLeadSlug()
+	for _, target := range targets {
+		if target.Slug == lead {
+			exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+				"-t", target.PaneTarget,
+				"-l",
+				"You are online. Call team_poll once to load context, then wait for messages.",
+			).Run()
+			exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+				"-t", target.PaneTarget,
+				"Enter",
+			).Run()
+			break
+		}
+	}
+
 	// If the human already posted while Claude was still booting, replay a catch-up nudge
 	// so the first visible message is not lost forever behind the startup interactivity.
 	if l.broker == nil {
@@ -2588,14 +2606,10 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		}
 	}
 
-	// Use Sonnet for specialists, Opus for CEO
-	// CEO gets medium effort (needs judgment), specialists don't need effort flag on Sonnet
+	// All agents start on Sonnet for fast cold start (~5s vs ~30s on Opus).
+	// CEO can self-escalate to Opus via /model when doing complex work.
 	model := "claude-sonnet-4-6"
 	effortFlag := ""
-	if slug == l.officeLeadSlug() {
-		model = "claude-opus-4-6"
-		effortFlag = "--effort medium"
-	}
 
 	return fmt.Sprintf(
 		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
