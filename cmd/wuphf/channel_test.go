@@ -15,6 +15,11 @@ import (
 
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+func init() {
+	_ = os.Setenv("WUPHF_API_KEY", "test-key")
+	_ = os.Unsetenv("WUPHF_NO_NEX")
+}
+
 func stripANSI(s string) string {
 	return ansiPattern.ReplaceAllString(s, "")
 }
