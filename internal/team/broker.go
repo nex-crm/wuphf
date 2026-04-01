@@ -2251,12 +2251,13 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"channels": channels})
 	case http.MethodPost:
 		var body struct {
-			Action      string   `json:"action"`
-			Slug        string   `json:"slug"`
-			Name        string   `json:"name"`
-			Description string   `json:"description"`
-			Members     []string `json:"members"`
-			CreatedBy   string   `json:"created_by"`
+			Action      string           `json:"action"`
+			Slug        string           `json:"slug"`
+			Name        string           `json:"name"`
+			Description string           `json:"description"`
+			Members     []string         `json:"members"`
+			CreatedBy   string           `json:"created_by"`
+			Surface     *channelSurface  `json:"surface,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -2303,6 +2304,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				Name:        strings.TrimSpace(body.Name),
 				Description: strings.TrimSpace(body.Description),
 				Members:     uniqueSlugs(members),
+				Surface:     body.Surface,
 				CreatedBy:   strings.TrimSpace(body.CreatedBy),
 				CreatedAt:   now,
 				UpdatedAt:   now,

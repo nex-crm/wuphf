@@ -1388,7 +1388,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Telegram connect failed: " + msg.err.Error()
 			return m, nil
 		}
-		m.notice = fmt.Sprintf("Connected Telegram group \"%s\" as #%s.", msg.groupTitle, msg.channelSlug)
+		m.notice = fmt.Sprintf("Connected \"%s\" as #%s. Restart WUPHF to activate the Telegram bridge.", msg.groupTitle, msg.channelSlug)
 		m.activeChannel = msg.channelSlug
 		m.activeApp = officeAppMessages
 		m.messages = nil
@@ -5296,7 +5296,7 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 			return telegramConnectDoneMsg{err: fmt.Errorf("failed to save manifest: %w", err)}
 		}
 
-		// Create channel in the live broker
+		// Create channel in the live broker WITH surface metadata
 		body, _ := json.Marshal(map[string]any{
 			"action":      "create",
 			"slug":        slug,
@@ -5304,6 +5304,13 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 			"description": fmt.Sprintf("Telegram bridge for %s.", group.Title),
 			"members":     members,
 			"created_by":  "you",
+			"surface": map[string]any{
+				"provider":     "telegram",
+				"remote_id":   fmt.Sprintf("%d", group.ChatID),
+				"remote_title": group.Title,
+				"mode":        group.Type,
+				"bot_token_env": "WUPHF_TELEGRAM_BOT_TOKEN",
+			},
 		})
 		req, reqErr := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
 		if reqErr == nil {
@@ -5314,12 +5321,14 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 			}
 		}
 
-		// Reconfigure the live office session so the launcher picks up the new surface channel
-		_ = reconfigureLiveOfficeSession()
-
 		// Send confirmation message to the Telegram group
-		_ = team.SendTelegramMessage(token, group.ChatID,
-			"Connected to WUPHF Office. Messages here will be visible to the team.")
+		if group.ChatID != 0 {
+			_ = team.SendTelegramMessage(token, group.ChatID,
+				"Connected to WUPHF Office. Messages here will be visible to the team.")
+		}
+
+		// Clear broker state so next restart picks up the manifest with surfaces
+		os.Remove(filepath.Join(os.Getenv("HOME"), ".wuphf", "team", "broker-state.json"))
 
 		return telegramConnectDoneMsg{
 			channelSlug: slug,
