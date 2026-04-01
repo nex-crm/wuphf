@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -1331,14 +1332,45 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Telegram error: " + msg.err.Error()
 			return m, nil
 		}
-		m.telegramGroups = msg.groups
 		m.telegramToken = msg.token
+
+		// Merge discovered groups with existing manifest channels
+		allGroups := msg.groups
+		manifest, _ := company.LoadManifest()
+		for _, ch := range manifest.Channels {
+			if ch.Surface == nil || ch.Surface.Provider != "telegram" || ch.Surface.RemoteID == "" || ch.Surface.RemoteID == "0" {
+				continue
+			}
+			// Check if already discovered
+			found := false
+			for _, g := range allGroups {
+				if fmt.Sprintf("%d", g.ChatID) == ch.Surface.RemoteID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				chatID, _ := strconv.ParseInt(ch.Surface.RemoteID, 10, 64)
+				if chatID != 0 {
+					title := ch.Surface.RemoteTitle
+					if title == "" {
+						title = ch.Name
+					}
+					allGroups = append(allGroups, team.TelegramGroup{
+						ChatID: chatID,
+						Title:  title,
+						Type:   "group",
+					})
+				}
+			}
+		}
+		m.telegramGroups = allGroups
 
 		// Build picker: DM mode always available, groups only if found
 		options := []tui.PickerOption{
-			{Label: "Direct messages (1:1 with bot)", Value: "dm", Description: "Anyone can message the bot directly"},
+			{Label: "Direct message with Telegram bot", Value: "dm", Description: "Anyone can DM the bot to reach the office"},
 		}
-		for _, g := range msg.groups {
+		for _, g := range allGroups {
 			options = append(options, tui.PickerOption{
 				Label:       g.Title,
 				Value:       fmt.Sprintf("%d", g.ChatID),
