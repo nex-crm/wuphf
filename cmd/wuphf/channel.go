@@ -493,7 +493,8 @@ const (
 	channelPickerOneOnOneMode  channelPickerMode = "one_on_one_mode"
 	channelPickerOneOnOneAgent channelPickerMode = "one_on_one_agent"
 	channelPickerTelegramGroup channelPickerMode = "telegram_group"
-	channelPickerConnect       channelPickerMode = "connect"
+	channelPickerConnect        channelPickerMode = "connect"
+	channelPickerTelegramToken  channelPickerMode = "telegram_token"
 )
 
 type officeApp string
@@ -585,7 +586,6 @@ type channelModel struct {
 	notice               string
 	snoozedInterview     string
 	memberDraft          *channelMemberDraft
-	telegramTokenEntry   bool
 	initFlow             tui.InitFlowModel
 	picker               tui.PickerModel
 	pickerMode           channelPickerMode
@@ -1067,22 +1067,6 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "enter":
 			m.lastCtrlCAt = time.Time{}
-			if m.telegramTokenEntry {
-				token := strings.TrimSpace(string(m.input))
-				m.telegramTokenEntry = false
-				m.input = nil
-				m.inputPos = 0
-				if token == "" {
-					m.notice = "Canceled Telegram connection."
-					return m, nil
-				}
-				// Save token to config and env
-				_ = os.Setenv("WUPHF_TELEGRAM_BOT_TOKEN", token)
-				config.SaveTelegramBotToken(token)
-				m.posting = true
-				m.notice = "Verifying bot token and discovering groups..."
-				return m, discoverTelegramGroups(token)
-			}
 			if m.memberDraft != nil {
 				return m.submitMemberDraft()
 			}
@@ -1635,6 +1619,19 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = msg.Label + " is not available yet."
 				return m, nil
 			}
+		case channelPickerTelegramToken:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			token := strings.TrimSpace(msg.Value)
+			if token == "" {
+				m.notice = "Telegram connection canceled."
+				return m, nil
+			}
+			_ = os.Setenv("WUPHF_TELEGRAM_BOT_TOKEN", token)
+			config.SaveTelegramBotToken(token)
+			m.posting = true
+			m.notice = "Verifying bot token..."
+			return m, discoverTelegramGroups(token)
 		case channelPickerTelegramGroup:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
@@ -2550,9 +2547,6 @@ func (m channelModel) visiblePendingRequest() *channelInterview {
 }
 
 func (m channelModel) composerTargetLabel() string {
-	if m.telegramTokenEntry {
-		return "Paste Telegram bot token"
-	}
 	if m.isOneOnOne() {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
@@ -5182,10 +5176,12 @@ func (m *channelModel) startTelegramConnect() tea.Cmd {
 		m.notice = "Verifying bot token and discovering groups..."
 		return discoverTelegramGroups(token)
 	}
-	m.notice = "Paste your Telegram bot token from @BotFather and press Enter."
-	m.telegramTokenEntry = true
-	m.input = nil
-	m.inputPos = 0
+	// Show token input inside the picker overlay
+	m.picker = tui.NewPicker("Connect Telegram", nil)
+	m.picker.TextInput = true
+	m.picker.TextPrompt = "Paste your bot token from @BotFather:"
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerTelegramToken
 	return nil
 }
 
