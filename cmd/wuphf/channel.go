@@ -1378,11 +1378,13 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Description: fmt.Sprintf("Shared %s channel", g.Type),
 			})
 		}
-		options = append(options, tui.PickerOption{
-			Label:       "Connect a group by chat ID",
-			Value:       "manual_group",
-			Description: "Paste the group chat ID (send /chatid in the group to find it)",
-		})
+		if len(allGroups) == 0 {
+			options = append(options, tui.PickerOption{
+				Label:       "Waiting for groups...",
+				Value:       "retry",
+				Description: "Add the bot to a Telegram group and send a message, then try again",
+			})
+		}
 		m.picker = tui.NewPicker(fmt.Sprintf("Bot \"%s\" verified. Choose how to connect:", msg.botName), options)
 		m.picker.SetActive(true)
 		m.pickerMode = channelPickerTelegramGroup
@@ -1710,14 +1712,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, connectTelegramGroup(m.telegramToken, dmGroup)
 			}
 
-			if msg.Value == "manual_group" {
-				// Show text input for chat ID
-				m.picker = tui.NewPicker("Connect Telegram Group", nil)
-				m.picker.TextInput = true
-				m.picker.TextPrompt = "Paste the group chat ID (e.g. -5093020979):"
-				m.picker.SetActive(true)
-				m.pickerMode = channelPickerTelegramChatID
-				return m, nil
+			if msg.Value == "retry" {
+				m.posting = true
+				m.notice = "Checking for groups..."
+				return m, discoverTelegramGroups(m.telegramToken)
 			}
 
 			var selected *team.TelegramGroup
