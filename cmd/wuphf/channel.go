@@ -429,7 +429,7 @@ func newBrokerRequest(method, url string, body io.Reader) (*http.Request, error)
 var channelSlashCommands = []tui.SlashCommand{
 	{Name: "init", Description: "Run setup"},
 	{Name: "integrate", Description: "Connect an integration"},
-	{Name: "connect telegram", Description: "Connect a Telegram group"},
+	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)"},
 	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode"},
 	{Name: "messages", Description: "Show the main office feed"},
 	{Name: "tasks", Description: "Show active work in this channel"},
@@ -493,6 +493,7 @@ const (
 	channelPickerOneOnOneMode  channelPickerMode = "one_on_one_mode"
 	channelPickerOneOnOneAgent channelPickerMode = "one_on_one_agent"
 	channelPickerTelegramGroup channelPickerMode = "telegram_group"
+	channelPickerConnect       channelPickerMode = "connect"
 )
 
 type officeApp string
@@ -1624,6 +1625,16 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.posting = true
 			return m, switchSessionMode(team.SessionModeOneOnOne, agent)
+		case channelPickerConnect:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			switch msg.Value {
+			case "telegram":
+				return m, m.startTelegramConnect()
+			default:
+				m.notice = msg.Label + " is not available yet."
+				return m, nil
+			}
 		case channelPickerTelegramGroup:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
@@ -3907,24 +3918,19 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.pickerMode = channelPickerIntegrations
 		m.notice = "Choose an integration to connect."
 		return m, nil
+	case trimmed == "/connect":
+		clearCurrent()
+		m.picker = tui.NewPicker("Connect a channel", []tui.PickerOption{
+			{Label: "Telegram", Value: "telegram", Description: "Connect a Telegram group as a shared office channel"},
+			{Label: "Slack (coming soon)", Value: "slack", Description: "Connect a Slack workspace channel"},
+			{Label: "Discord (coming soon)", Value: "discord", Description: "Connect a Discord server channel"},
+		})
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerConnect
+		return m, nil
 	case trimmed == "/connect telegram":
 		clearCurrent()
-		// Check if token already exists in env or config
-		token := os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN")
-		if token == "" {
-			token = config.ResolveTelegramBotToken()
-		}
-		if token != "" {
-			m.posting = true
-			m.notice = "Verifying bot token and discovering groups..."
-			return m, discoverTelegramGroups(token)
-		}
-		// No token — prompt user to paste it
-		m.notice = "Paste your Telegram bot token from @BotFather and press Enter."
-		m.telegramTokenEntry = true
-		m.input = nil
-		m.inputPos = 0
-		return m, nil
+		return m, m.startTelegramConnect()
 	case trimmed == "/channels":
 		clearCurrent()
 		options := m.buildChannelPickerOptions()
@@ -5164,6 +5170,23 @@ func connectIntegration(spec channelIntegrationSpec) tea.Cmd {
 		}
 		return channelIntegrationDoneMsg{err: fmt.Errorf("%s connection timed out", spec.Label)}
 	}
+}
+
+func (m *channelModel) startTelegramConnect() tea.Cmd {
+	token := os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN")
+	if token == "" {
+		token = config.ResolveTelegramBotToken()
+	}
+	if token != "" {
+		m.posting = true
+		m.notice = "Verifying bot token and discovering groups..."
+		return discoverTelegramGroups(token)
+	}
+	m.notice = "Paste your Telegram bot token from @BotFather and press Enter."
+	m.telegramTokenEntry = true
+	m.input = nil
+	m.inputPos = 0
+	return nil
 }
 
 func discoverTelegramGroups(token string) tea.Cmd {
