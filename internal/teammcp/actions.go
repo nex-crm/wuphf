@@ -80,6 +80,7 @@ type TeamActionWorkflowExecuteArgs struct {
 type TeamActionWorkflowScheduleArgs struct {
 	Key        string         `json:"key" jsonschema:"Saved workflow key to run on a schedule"`
 	Schedule   string         `json:"schedule" jsonschema:"Cron expression or shorthand like daily, hourly, 4h, or 0 9 * * 1-5"`
+	RunNow     bool           `json:"run_now,omitempty" jsonschema:"Also execute one immediate run after scheduling when the human asked for a manual test run now"`
 	Inputs     map[string]any `json:"inputs,omitempty" jsonschema:"Optional workflow inputs"`
 	Channel    string         `json:"channel,omitempty" jsonschema:"Optional office channel for logging"`
 	MySlug     string         `json:"my_slug,omitempty" jsonschema:"Agent slug scheduling the workflow. Defaults to WUPHF_AGENT_SLUG."`
@@ -160,7 +161,7 @@ func registerActionTools(server *mcp.Server) {
 	}, handleTeamActionWorkflowExecute)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_action_workflow_schedule",
-		Description: "Schedule a saved external workflow on a WUPHF-native cadence so it shows up in Calendar and runs through the office scheduler.",
+		Description: "Schedule a saved external workflow on a WUPHF-native cadence so it shows up in Calendar and runs through the office scheduler. Set run_now when the human also asked for an immediate first run.",
 	}, handleTeamActionWorkflowSchedule)
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_action_relays",
@@ -422,13 +423,35 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 		CreatedBy:        slug,
 	})
 	_ = brokerRecordAction(ctx, "external_workflow_scheduled", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Scheduled workflow %s via %s (%s)", args.Key, strings.Title(provider.Name()), args.Schedule)), args.Key)
-	return textResult(prettyObject(map[string]any{
+	result := map[string]any{
 		"ok":           true,
 		"workflow_key": strings.TrimSpace(args.Key),
 		"schedule":     strings.TrimSpace(args.Schedule),
 		"next_run":     nextRun.UTC().Format(time.RFC3339),
 		"skill_name":   skillName,
-	})), nil, nil
+	}
+	if args.RunNow {
+		runResult, execErr := provider.ExecuteWorkflow(ctx, action.WorkflowExecuteRequest{
+			KeyOrPath: strings.TrimSpace(args.Key),
+			Inputs:    args.Inputs,
+		})
+		if execErr != nil {
+			_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fmt.Sprintf("Scheduled workflow %s via %s, but the immediate run failed", args.Key, strings.Title(provider.Name())), args.Key)
+			result["run_now"] = map[string]any{
+				"ok":    false,
+				"error": execErr.Error(),
+			}
+			return textResult(prettyObject(result)), nil, nil
+		}
+		_ = brokerRecordAction(ctx, "external_workflow_executed", provider.Name(), channel, slug, fmt.Sprintf("Scheduled workflow %s via %s and ran it once immediately", args.Key, strings.Title(provider.Name())), args.Key)
+		_ = touchWorkflowSkill(ctx, args.Key, runResult.Status, time.Now().UTC())
+		result["run_now"] = map[string]any{
+			"ok":     true,
+			"status": runResult.Status,
+			"run_id": runResult.RunID,
+		}
+	}
+	return textResult(prettyObject(result)), nil, nil
 }
 
 func handleTeamActionRelays(ctx context.Context, _ *mcp.CallToolRequest, args TeamActionRelaysArgs) (*mcp.CallToolResult, any, error) {

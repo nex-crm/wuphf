@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/api"
@@ -188,6 +189,96 @@ func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
 	}
 	if len(immediate) != 1 || immediate[0].Slug != "pm" || immediate[0].PaneTarget == "" {
 		t.Fatalf("expected pm as the only immediate target, got %v", immediate)
+	}
+}
+
+func TestBuildPromptOneOnOneIncludesActionWorkflowGuidance(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO", Expertise: []string{"strategy", "ops"}, Personality: "sharp"},
+			},
+		},
+		sessionMode: SessionModeOneOnOne,
+		oneOnOne:    "ceo",
+	}
+
+	got := l.buildPrompt("ceo")
+	for _, needle := range []string{
+		"team_action_execute",
+		"team_action_workflow_create",
+		"team_action_workflow_schedule",
+		"run_now",
+		"generic WUPHF workflow JSON definition",
+		"complete the requested sequence end to end",
+		"generic template step",
+		".steps.<step_id>.result",
+		"10 recent emails and 5 recent insights",
+		"Do not dump raw JSON into nex_ask",
+		"do not stay in ad-hoc action mode",
+		"fetch external data -> nex_insights -> template summary -> nex_ask compose -> send action",
+		"type:\"action\", platform, action_id",
+		"query_template",
+		"Do not invent fields like action or query",
+		"{{- range $item := .steps.fetch_emails.result.data.messages }}",
+		"read_conversation",
+		"reply",
+	} {
+		if !strings.Contains(got, needle) {
+			t.Fatalf("expected %q in one-on-one prompt, got:\n%s", needle, got)
+		}
+	}
+}
+
+func TestDirectSessionNotificationHighlightsReusableAutomationRequests(t *testing.T) {
+	l := &Launcher{sessionMode: SessionModeOneOnOne, oneOnOne: "ceo"}
+	notification := l.directSessionNotification("msg-1", "you", "Create a reusable workflow that runs every day at 9am and run it manually once now.")
+	for _, needle := range []string{
+		"direct 1:1",
+		"reusable automation request",
+		"team_action_workflow_create",
+		"team_action_workflow_schedule",
+		"team_action_workflow_execute",
+		"action -> nex_insights -> template -> nex_ask -> action",
+	} {
+		if !strings.Contains(notification, needle) {
+			t.Fatalf("expected %q in notification, got:\n%s", needle, notification)
+		}
+	}
+}
+
+func TestLooksLikeReusableAutomationRequest(t *testing.T) {
+	if !looksLikeReusableAutomationRequest("Create a daily workflow and schedule it for 9am.") {
+		t.Fatalf("expected daily scheduled workflow request to be detected")
+	}
+	if looksLikeReusableAutomationRequest("Send one email to this customer right now.") {
+		t.Fatalf("did not expect one-off action request to be treated as reusable automation")
+	}
+}
+
+func TestCompactAgentNotificationContentFlattensMultilinePrompts(t *testing.T) {
+	got := compactAgentNotificationContent("Create a workflow\n\nthat runs every day at 9am\nand run it now.")
+	want := "Create a workflow that runs every day at 9am and run it now."
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+}
+
+func TestDirectSessionNotificationDoesNotContainEmbeddedNewlines(t *testing.T) {
+	l := &Launcher{sessionMode: SessionModeOneOnOne, oneOnOne: "ceo"}
+	notification := l.directSessionNotification("msg-1", "you", compactAgentNotificationContent("Line one\nLine two\n\nLine three"))
+	if strings.Contains(notification, "\n") {
+		t.Fatalf("expected single-line direct notification, got %q", notification)
+	}
+}
+
+func TestClearNotificationCooldownReleasesOneOnOneReplay(t *testing.T) {
+	agentLastNotified = map[string]time.Time{"ceo": time.Now()}
+	l := &Launcher{sessionMode: SessionModeOneOnOne, oneOnOne: "ceo"}
+	l.clearNotificationCooldown(channelMessage{ID: "msg-1", From: "you", Channel: "general", Content: "Need help"})
+	if _, ok := agentLastNotified["ceo"]; ok {
+		t.Fatal("expected one-on-one replay to clear ceo notify cooldown")
 	}
 }
 
@@ -387,7 +478,7 @@ func TestPrimeVisibleAgentsWithoutBrokerDoesNotPanic(t *testing.T) {
 	l.primeVisibleAgents()
 }
 
-func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
+func TestNotificationTargetsForHumanMessageRouteTaggedSpecialistsDirectly(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -406,18 +497,18 @@ func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
 		Tagged:  []string{"fe", "be"},
 	})
 
-	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
-		t.Fatalf("expected CEO immediate target, got %+v", immediate)
+	if len(immediate) != 2 {
+		t.Fatalf("expected 2 immediate tagged specialists, got %+v", immediate)
 	}
-	if len(delayed) != 2 {
-		t.Fatalf("expected 2 delayed specialists, got %+v", delayed)
+	if immediate[0].Slug != "fe" || immediate[1].Slug != "be" {
+		t.Fatalf("expected FE and BE immediate, got %+v", immediate)
 	}
-	if delayed[0].Slug != "fe" || delayed[1].Slug != "be" {
-		t.Fatalf("expected FE and BE delayed, got %+v", delayed)
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets, got %+v", delayed)
 	}
 }
 
-func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
+func TestNotificationTargetsPreferMatchingDomainOverWrongTaggedSpecialists(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -435,11 +526,11 @@ func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
 		Tagged:  []string{"fe", "cmo"},
 	})
 
-	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
-		t.Fatalf("expected CEO immediate target, got %+v", immediate)
+	if len(immediate) != 1 || immediate[0].Slug != "cmo" {
+		t.Fatalf("expected only matching CMO immediate target, got %+v", immediate)
 	}
-	if len(delayed) != 1 || delayed[0].Slug != "cmo" {
-		t.Fatalf("expected only matching CMO delayed target, got %+v", delayed)
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets, got %+v", delayed)
 	}
 }
 

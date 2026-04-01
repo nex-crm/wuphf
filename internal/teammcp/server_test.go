@@ -214,3 +214,46 @@ func TestHandleHumanMessageUsesDirectSessionLabelInOneOnOneMode(t *testing.T) {
 		t.Fatalf("did not expect office channel label in %q", text.Text)
 	}
 }
+
+func TestHandleTeamPollOneOnOneHighlightsLatestHumanRequest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_ONE_ON_ONE", "1")
+	t.Setenv("WUPHF_AGENT_SLUG", "ceo")
+
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	for _, msg := range []map[string]any{
+		{"channel": "general", "from": "you", "content": "Old unrelated ask."},
+		{"channel": "general", "from": "ceo", "content": "Acknowledged."},
+		{"channel": "general", "from": "you", "content": "Newest request wins."},
+	} {
+		if err := brokerPostJSON(context.Background(), "/messages", msg, nil); err != nil {
+			t.Fatalf("post message: %v", err)
+		}
+	}
+
+	result, _, err := handleTeamPoll(context.Background(), nil, TeamPollArgs{MySlug: "ceo"})
+	if err != nil {
+		t.Fatalf("handleTeamPoll: %v", err)
+	}
+	if result == nil || len(result.Content) == 0 {
+		t.Fatal("expected text result")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content, got %T", result.Content[0])
+	}
+	if !strings.Contains(text.Text, "Latest human request to answer now:") {
+		t.Fatalf("expected latest-request header, got %q", text.Text)
+	}
+	if !strings.Contains(text.Text, "Newest request wins.") {
+		t.Fatalf("expected latest human message in %q", text.Text)
+	}
+}
