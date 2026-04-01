@@ -32,6 +32,7 @@ type Config struct {
 	TaskFollowUpMinutes int    `json:"task_follow_up_minutes,omitempty"`
 	TaskReminderMinutes int    `json:"task_reminder_minutes,omitempty"`
 	TaskRecheckMinutes  int    `json:"task_recheck_minutes,omitempty"`
+	TelegramBotToken    string `json:"telegram_bot_token,omitempty"`
 }
 
 // ConfigPath returns the absolute path to ~/.wuphf/config.json, with a legacy
@@ -234,6 +235,22 @@ func ResolveComposioAPIKey() string {
 	}
 	cfg, _ := Load()
 	return strings.TrimSpace(cfg.ComposioAPIKey)
+}
+
+// ResolveTelegramBotToken returns the stored Telegram bot token from config.
+func ResolveTelegramBotToken() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.TelegramBotToken)
+}
+
+// SaveTelegramBotToken persists the bot token to config.json.
+func SaveTelegramBotToken(token string) {
+	cfg, _ := Load()
+	cfg.TelegramBotToken = strings.TrimSpace(token)
+	_ = Save(cfg)
 }
 
 // ResolveComposioUserID resolves the Composio user identity WUPHF should use.

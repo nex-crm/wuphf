@@ -306,6 +306,10 @@ func (l *Launcher) startTelegramTransport() {
 	}
 	botToken := os.Getenv(tokenEnv)
 	if botToken == "" {
+		// Fallback: check saved config
+		botToken = config.ResolveTelegramBotToken()
+	}
+	if botToken == "" {
 		return
 	}
 	transport := NewTelegramTransport(l.broker, botToken)

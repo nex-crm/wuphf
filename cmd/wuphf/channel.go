@@ -584,6 +584,7 @@ type channelModel struct {
 	notice               string
 	snoozedInterview     string
 	memberDraft          *channelMemberDraft
+	telegramTokenEntry   bool
 	initFlow             tui.InitFlowModel
 	picker               tui.PickerModel
 	pickerMode           channelPickerMode
@@ -1065,6 +1066,22 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "enter":
 			m.lastCtrlCAt = time.Time{}
+			if m.telegramTokenEntry {
+				token := strings.TrimSpace(string(m.input))
+				m.telegramTokenEntry = false
+				m.input = nil
+				m.inputPos = 0
+				if token == "" {
+					m.notice = "Canceled Telegram connection."
+					return m, nil
+				}
+				// Save token to config and env
+				_ = os.Setenv("WUPHF_TELEGRAM_BOT_TOKEN", token)
+				config.SaveTelegramBotToken(token)
+				m.posting = true
+				m.notice = "Verifying bot token and discovering groups..."
+				return m, discoverTelegramGroups(token)
+			}
 			if m.memberDraft != nil {
 				return m.submitMemberDraft()
 			}
@@ -2522,6 +2539,9 @@ func (m channelModel) visiblePendingRequest() *channelInterview {
 }
 
 func (m channelModel) composerTargetLabel() string {
+	if m.telegramTokenEntry {
+		return "Paste Telegram bot token"
+	}
 	if m.isOneOnOne() {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
@@ -3889,14 +3909,22 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		return m, nil
 	case trimmed == "/connect telegram":
 		clearCurrent()
+		// Check if token already exists in env or config
 		token := os.Getenv("WUPHF_TELEGRAM_BOT_TOKEN")
 		if token == "" {
-			m.notice = "Set WUPHF_TELEGRAM_BOT_TOKEN env var with your bot token from @BotFather, then try again."
-			return m, nil
+			token = config.ResolveTelegramBotToken()
 		}
-		m.posting = true
-		m.notice = "Verifying bot token and discovering groups..."
-		return m, discoverTelegramGroups(token)
+		if token != "" {
+			m.posting = true
+			m.notice = "Verifying bot token and discovering groups..."
+			return m, discoverTelegramGroups(token)
+		}
+		// No token — prompt user to paste it
+		m.notice = "Paste your Telegram bot token from @BotFather and press Enter."
+		m.telegramTokenEntry = true
+		m.input = nil
+		m.inputPos = 0
+		return m, nil
 	case trimmed == "/channels":
 		clearCurrent()
 		options := m.buildChannelPickerOptions()
