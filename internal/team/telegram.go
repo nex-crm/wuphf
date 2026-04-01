@@ -513,7 +513,9 @@ func VerifyBot(token string) (string, error) {
 // DiscoverGroups calls getUpdates and extracts unique groups/supergroups
 // the bot has received messages from.
 func DiscoverGroups(token string) ([]TelegramGroup, error) {
-	url := fmt.Sprintf("%s/bot%s/getUpdates?timeout=0", telegramAPIBase, token)
+	// Use offset=-100 to peek at recent updates without consuming them.
+	// This way the transport's pollInbound doesn't lose messages.
+	url := fmt.Sprintf("%s/bot%s/getUpdates?timeout=0&offset=-100", telegramAPIBase, token)
 	resp, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("telegram getUpdates: %w", err)
