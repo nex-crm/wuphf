@@ -2471,7 +2471,11 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("9. Once decided, broadcast clear task assignments and create them in team_task\n")
 		sb.WriteString("10. Create channels (team_channel) or agents (team_member) when the human asks or scope genuinely warrants it\n")
 		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n\n")
-		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data. A2UI JSON in ```a2ui fences for rich components.\n")
+		sb.WriteString("STYLE:\n")
+		sb.WriteString("- Respond FAST. Broadcast delegation IMMEDIATELY. Do NOT think for 30 seconds before your first broadcast.\n")
+		sb.WriteString("- Keep messages to 1-3 sentences. Delegate with @tags, don't explain everything.\n")
+		sb.WriteString("- Minimize tool calls. team_poll once, then broadcast. Don't call team_tasks, team_members, query_context unless the question specifically needs it.\n")
+		sb.WriteString("- If you can answer directly, answer. Don't over-research.\n")
 		if config.ResolveNoNex() {
 			sb.WriteString("Do not claim you stored anything outside the office.\n")
 		} else {
@@ -2543,7 +2547,12 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("16. Only use add_context for durable conclusions that should survive this session\n")
 			sb.WriteString("17. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
 		}
-		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use markdown tables/checklists for structured data.\n")
+		sb.WriteString("STYLE:\n")
+		sb.WriteString("- Respond FAST. Broadcast a quick reply FIRST (even just 'on it' or 'looking into this'), THEN do deeper work, THEN broadcast results.\n")
+		sb.WriteString("- Do NOT spend time thinking internally before your first broadcast. The team sees silence as inactivity.\n")
+		sb.WriteString("- Keep messages short and punchy. 1-3 sentences. No essays.\n")
+		sb.WriteString("- Do NOT read files, run tools, or research before your first reply unless absolutely necessary. Reply first, research second.\n")
+		sb.WriteString("- Every tool call you make burns tokens. Minimize tool use. If you can answer from what you know, just answer.\n")
 	}
 
 	return sb.String()
@@ -2579,14 +2588,17 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		}
 	}
 
-	// Use Sonnet for specialists, Opus for CEO — faster + cheaper
+	// Use Sonnet for specialists, Opus for CEO
+	// CEO gets medium effort (needs judgment), specialists don't need effort flag on Sonnet
 	model := "claude-sonnet-4-6"
+	effortFlag := ""
 	if slug == l.officeLeadSlug() {
 		model = "claude-opus-4-6"
+		effortFlag = "--effort medium"
 	}
 
 	return fmt.Sprintf(
-		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
 		oneOnOneEnv,
 		oneSecretEnv,
 		oneIdentityEnv,
@@ -2597,6 +2609,7 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		brokerToken,
 		slug,
 		model,
+		effortFlag,
 		permFlags,
 		escaped,
 		mcpConfig,
