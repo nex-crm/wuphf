@@ -2458,9 +2458,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("1. On strategy or prior decisions, call query_context early\n")
 		}
 		sb.WriteString("2. Call team_poll once when notified, then respond directly\n")
-		sb.WriteString("3. Give a short top-level response fast, then assign explicit tasks with team_task and @tags\n")
-		sb.WriteString("4. Tag only the specialists who should weigh in\n")
-		sb.WriteString("5. Keep specialists in their lane. You make the FINAL decision.\n")
+		sb.WriteString("3. Before assigning tasks, present your plan to the human via human_interview: 'I want to assign X to @fe and Y to @be. Approve?'\n")
+		sb.WriteString("4. Only assign tasks AFTER the human approves. Do not auto-assign without human sign-off.\n")
+		sb.WriteString("5. Tag the right specialists after approval. Keep them in their lane.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for blocking decisions\n")
 		if config.ResolveNoNex() {
@@ -2534,8 +2534,8 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("7. Use query_context when prior knowledge matters and don't fake remembered context\n")
 		}
 		sb.WriteString("8. Check team_requests before asking the human anything new\n")
-		sb.WriteString("9. If you need to present completion, flag a recommendation, or tell the human what they should do next, use human_message so it goes straight to the human in the main chat\n")
-		sb.WriteString("10. If you are blocked on a human decision, ask through human_interview with options and a recommendation\n")
+		sb.WriteString("9. You can talk directly to the human — use human_message for updates, recommendations, or questions about approach\n")
+		sb.WriteString("10. If you need a decision from the human, use human_interview with clear options. Don't wait for the CEO to relay your question.\n")
 		sb.WriteString("11. When assigned a task by the leader, claim it with team_task before working on it\n")
 		sb.WriteString("12. Use team_status to share what you're working on\n")
 		sb.WriteString("13. ALWAYS broadcast your results when you finish ANY work — use team_broadcast. Never finish silently. The team and human need to see what you did.\n")
