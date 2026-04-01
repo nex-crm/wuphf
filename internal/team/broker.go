@@ -3002,22 +3002,8 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	for _, msg := range b.messages {
 		if normalizeChannelSlug(msg.Channel) == channel {
 			if b.sessionMode == SessionModeOneOnOne {
-				// Only show messages between the human and the 1:1 agent
-				if msg.From != "you" && msg.From != "human" && msg.From != b.oneOnOneAgent && msg.From != "system" {
+				if !b.isOneOnOneDMMessage(msg) {
 					continue
-				}
-				// Skip CEO delegation messages that tag other agents
-				if msg.From == b.oneOnOneAgent && len(msg.Tagged) > 0 {
-					isForHuman := false
-					for _, t := range msg.Tagged {
-						if t == "you" || t == "human" {
-							isForHuman = true
-							break
-						}
-					}
-					if !isForHuman {
-						continue
-					}
 				}
 			}
 			messages = append(messages, msg)
@@ -3059,6 +3045,53 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
+// isOneOnOneDMMessage returns true if msg belongs in the 1:1 DM conversation.
+// Only messages exclusively between the human and the 1:1 agent pass through.
+// Caller must hold b.mu.
+func (b *Broker) isOneOnOneDMMessage(msg channelMessage) bool {
+	agent := b.oneOnOneAgent
+
+	switch msg.From {
+	case "you", "human":
+		// Human messages: only if untagged (direct conversation) or
+		// explicitly tagging the 1:1 agent.
+		if len(msg.Tagged) == 0 {
+			return true
+		}
+		for _, t := range msg.Tagged {
+			if t == agent {
+				return true
+			}
+		}
+		return false
+
+	case agent:
+		// Agent messages: only if untagged (direct reply to human) or
+		// explicitly tagging the human.
+		if len(msg.Tagged) == 0 {
+			return true
+		}
+		for _, t := range msg.Tagged {
+			if t == "you" || t == "human" {
+				return true
+			}
+		}
+		return false
+
+	case "system":
+		// System messages: only if they mention the 1:1 agent or human,
+		// or are general system announcements (no routing indicators).
+		if msg.Kind == "routing" {
+			return false
+		}
+		return true
+
+	default:
+		// Messages from any other agent do not belong in this DM.
+		return false
+	}
+}
 
 // capturePaneActivity captures tmux pane content for each agent and detects
 // activity by comparing with the previous snapshot. If content changed,
