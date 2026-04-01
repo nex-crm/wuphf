@@ -1072,6 +1072,41 @@ func (l *Launcher) primeVisibleAgents() {
 		time.Sleep(1 * time.Second)
 	}
 
+	// After warmup, promote CEO from Sonnet → Opus for higher quality reasoning.
+	// All agents start on Sonnet for fast cold start; CEO upgrades once ready.
+	leadSlug := l.officeLeadSlug()
+	for _, target := range targets {
+		if target.Slug == leadSlug {
+			go func(paneTarget string) {
+				for i := 0; i < 20; i++ {
+					time.Sleep(2 * time.Second)
+					content, err := l.capturePaneTargetContent(paneTarget)
+					if err != nil {
+						continue
+					}
+					lines := strings.Split(content, "\n")
+					for j := len(lines) - 1; j >= 0; j-- {
+						trimmed := strings.TrimSpace(lines[j])
+						if trimmed == "" {
+							continue
+						}
+						if strings.HasPrefix(trimmed, "\u276f") || strings.HasPrefix(trimmed, ">") {
+							exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+								"-t", paneTarget, "-l", "/model opus").Run()
+							time.Sleep(200 * time.Millisecond)
+							exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+								"-t", paneTarget, "Enter").Run()
+							fmt.Println("[ceo] promoted to Opus after warmup")
+							return
+						}
+						break
+					}
+				}
+			}(target.PaneTarget)
+			break
+		}
+	}
+
 	// If the human already posted while Claude was still booting, replay a catch-up nudge
 	// so the first visible message is not lost forever behind the startup interactivity.
 	if l.broker == nil {
@@ -2579,11 +2614,9 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		}
 	}
 
-	// Use Sonnet for specialists, Opus for CEO — faster + cheaper
+	// All agents start on Sonnet for fast cold start (~16s vs ~30s on Opus).
+	// CEO gets auto-promoted to Opus after warmup via primeVisibleAgents.
 	model := "claude-sonnet-4-6"
-	if slug == l.officeLeadSlug() {
-		model = "claude-opus-4-6"
-	}
 
 	return fmt.Sprintf(
 		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
