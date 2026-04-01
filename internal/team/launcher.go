@@ -2023,7 +2023,7 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 		notification = l.directSessionNotification(msgID, from, compactContent)
 	} else {
 		notification = fmt.Sprintf(
-			"[%s @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\" to read context. If this is your domain, reply using team_broadcast channel \"%s\" reply_to_id \"%s\". If not your domain, stay quiet.",
+			"[%s @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\" to read context, then reply with team_broadcast channel \"%s\" reply_to_id \"%s\". Share your perspective — the team needs to hear from you.",
 			msgID, from, truncate(compactContent, 150), slug, channel, channel, msgID,
 		)
 	}
@@ -2519,10 +2519,10 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("THREADING: Default to replying in existing threads with reply_to_id. New top-level messages only for genuinely new topics.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
 		sb.WriteString("1. Call team_poll once when notified, then respond directly\n")
-		sb.WriteString("2. Stay in your lane. Do not do CMO work if you are FE, do not do FE work if you are CRO, etc.\n")
-		sb.WriteString("3. If @tagged by anyone, you MUST respond, but only from your domain perspective\n")
-		sb.WriteString("4. Proactively speak only when the topic genuinely touches your expertise or you own the task\n")
-		sb.WriteString("5. If someone else already covered it well and you have no real delta, stay quiet\n")
+		sb.WriteString("2. Stay in your lane — but ALWAYS respond when your domain is touched\n")
+		sb.WriteString("3. If @tagged by anyone, you MUST respond with your domain perspective\n")
+		sb.WriteString("4. When the CEO delegates work to you, ALWAYS reply with what you're doing and report back when done\n")
+		sb.WriteString("5. React to other specialists' work — agree, build on it, or flag concerns from your perspective\n")
 		sb.WriteString("6. Push back if you disagree — explain why with your expertise\n")
 		if config.ResolveNoNex() {
 			sb.WriteString("7. Don't fake outside memory. If something is unclear, surface the uncertainty in-channel\n")
@@ -2534,7 +2534,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("10. If you are blocked on a human decision, ask through human_interview with options and a recommendation\n")
 		sb.WriteString("11. When assigned a task by the leader, claim it with team_task before working on it\n")
 		sb.WriteString("12. Use team_status to share what you're working on\n")
-		sb.WriteString("13. When you finish, mark the task complete and then broadcast the result. If the result is mainly for the human, also send it with human_message.\n")
+		sb.WriteString("13. ALWAYS broadcast your results when you finish ANY work — use team_broadcast. Never finish silently. The team and human need to see what you did.\n")
 		sb.WriteString("14. You can inspect other channel names and descriptions, but you do not have automatic access to their content unless you are a member there.\n")
 		sb.WriteString("15. If another channel may have context or needs help from your channel, ask the CEO to bridge it. Do not assume you can read or act inside channels you are not in.\n")
 		if config.ResolveNoNex() {
