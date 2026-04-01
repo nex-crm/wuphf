@@ -1331,21 +1331,21 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Telegram error: " + msg.err.Error()
 			return m, nil
 		}
-		if len(msg.groups) == 0 {
-			m.notice = fmt.Sprintf("Bot \"%s\" verified. No groups found. Add your bot to a Telegram group, send a message, then try /connect telegram again.", msg.botName)
-			return m, nil
-		}
 		m.telegramGroups = msg.groups
 		m.telegramToken = msg.token
-		options := make([]tui.PickerOption, 0, len(msg.groups))
+
+		// Build picker: DM mode always available, groups only if found
+		options := []tui.PickerOption{
+			{Label: "Direct messages (1:1 with bot)", Value: "dm", Description: "Anyone can message the bot directly"},
+		}
 		for _, g := range msg.groups {
 			options = append(options, tui.PickerOption{
 				Label:       g.Title,
 				Value:       fmt.Sprintf("%d", g.ChatID),
-				Description: fmt.Sprintf("%s (ID: %d)", g.Type, g.ChatID),
+				Description: fmt.Sprintf("Shared %s channel", g.Type),
 			})
 		}
-		m.picker = tui.NewPicker(fmt.Sprintf("Bot \"%s\" verified. Choose a group to connect:", msg.botName), options)
+		m.picker = tui.NewPicker(fmt.Sprintf("Bot \"%s\" verified. Choose how to connect:", msg.botName), options)
 		m.picker.SetActive(true)
 		m.pickerMode = channelPickerTelegramGroup
 		return m, nil
@@ -1635,6 +1635,15 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case channelPickerTelegramGroup:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
+
+			if msg.Value == "dm" {
+				// DM mode — connect bot for direct messages
+				m.posting = true
+				m.notice = "Setting up direct message channel..."
+				dmGroup := team.TelegramGroup{ChatID: 0, Title: "Telegram DM", Type: "private"}
+				return m, connectTelegramGroup(m.telegramToken, dmGroup)
+			}
+
 			var selected *team.TelegramGroup
 			for i := range m.telegramGroups {
 				if fmt.Sprintf("%d", m.telegramGroups[i].ChatID) == msg.Value {

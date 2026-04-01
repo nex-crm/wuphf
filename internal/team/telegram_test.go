@@ -66,7 +66,7 @@ func TestTelegramHandleInbound(t *testing.T) {
 		Username:  "alice_dev",
 	}
 
-	err := transport.HandleInbound(-100999, user, "Hello from Telegram!")
+	err := transport.HandleInbound(-100999, "group", user, "Hello from Telegram!")
 	if err != nil {
 		t.Fatalf("HandleInbound: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestTelegramHandleInboundWithUserMap(t *testing.T) {
 		Username:  "alice_dev",
 	}
 
-	err := transport.HandleInbound(-100999, user, "mapped user message")
+	err := transport.HandleInbound(-100999, "group", user, "mapped user message")
 	if err != nil {
 		t.Fatalf("HandleInbound: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestTelegramHandleInboundUnmappedChat(t *testing.T) {
 	b := newTestBrokerWithTelegramChannel(t, "-100999")
 	transport := NewTelegramTransport(b, "fake-token")
 
-	err := transport.HandleInbound(-999, nil, "should fail")
+	err := transport.HandleInbound(-999, "group", nil, "should fail")
 	if err == nil {
 		t.Fatal("expected error for unmapped chat")
 	}
@@ -129,7 +129,7 @@ func TestTelegramExternalQueueSkipsInbound(t *testing.T) {
 	transport := NewTelegramTransport(b, "fake-token")
 
 	// Post an inbound message via the transport
-	err := transport.HandleInbound(-100999, &telegramUser{FirstName: "Bob"}, "inbound msg")
+	err := transport.HandleInbound(-100999, "group", &telegramUser{FirstName: "Bob"}, "inbound msg")
 	if err != nil {
 		t.Fatalf("HandleInbound: %v", err)
 	}
@@ -554,7 +554,7 @@ func TestTelegramPollInboundWithMockServer(t *testing.T) {
 	}
 
 	// Simulate what pollInbound does with a single update
-	err := transport.HandleInbound(-100555, &telegramUser{FirstName: "Tester", Username: "tester"}, "hello from poll")
+	err := transport.HandleInbound(-100555, "group", &telegramUser{FirstName: "Tester", Username: "tester"}, "hello from poll")
 	if err != nil {
 		t.Fatalf("HandleInbound: %v", err)
 	}

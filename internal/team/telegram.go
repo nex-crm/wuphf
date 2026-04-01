@@ -59,6 +59,9 @@ type TelegramTransport struct {
 	Broker    *Broker
 	// ChatMap maps telegram chat_id (as string) -> office channel slug
 	ChatMap   map[string]string
+	// DMChannel is the office channel slug for direct messages (private chats).
+	// When set, any private message to the bot routes to this channel.
+	DMChannel string
 	// UserMap maps telegram username (lowercase) -> office member slug.
 	// If empty, display names are used verbatim as the "from" field.
 	UserMap   map[string]string
@@ -70,17 +73,24 @@ type TelegramTransport struct {
 // channels can override via their Surface.BotTokenEnv field.
 func NewTelegramTransport(broker *Broker, botToken string) *TelegramTransport {
 	chatMap := make(map[string]string)
+	dmChannel := ""
 	for _, ch := range broker.SurfaceChannels("telegram") {
-		if ch.Surface != nil && ch.Surface.RemoteID != "" {
+		if ch.Surface == nil {
+			continue
+		}
+		if ch.Surface.Mode == "private" || ch.Surface.RemoteID == "0" {
+			dmChannel = ch.Slug
+		} else if ch.Surface.RemoteID != "" {
 			chatMap[ch.Surface.RemoteID] = ch.Slug
 		}
 	}
 	return &TelegramTransport{
-		BotToken: botToken,
-		Broker:   broker,
-		ChatMap:  chatMap,
-		UserMap:  make(map[string]string),
-		client:   &http.Client{Timeout: time.Duration(telegramPollTimeout+10) * time.Second},
+		BotToken:  botToken,
+		Broker:    broker,
+		ChatMap:   chatMap,
+		DMChannel: dmChannel,
+		UserMap:   make(map[string]string),
+		client:    &http.Client{Timeout: time.Duration(telegramPollTimeout+10) * time.Second},
 	}
 }
 
@@ -91,7 +101,7 @@ func (t *TelegramTransport) Start(ctx context.Context) error {
 	if t.BotToken == "" {
 		return fmt.Errorf("telegram bot token is empty")
 	}
-	if len(t.ChatMap) == 0 {
+	if len(t.ChatMap) == 0 && t.DMChannel == "" {
 		return fmt.Errorf("no telegram channels configured")
 	}
 
@@ -136,7 +146,7 @@ func (t *TelegramTransport) pollInbound(ctx context.Context) error {
 			if upd.Message == nil || upd.Message.Text == "" {
 				continue
 			}
-			if err := t.HandleInbound(upd.Message.Chat.ID, upd.Message.From, upd.Message.Text); err != nil {
+			if err := t.HandleInbound(upd.Message.Chat.ID, upd.Message.Chat.Type, upd.Message.From, upd.Message.Text); err != nil {
 				// Log but don't crash — individual message failures are non-fatal
 				continue
 			}
@@ -211,11 +221,18 @@ func (t *TelegramTransport) typingLoop(ctx context.Context) {
 }
 
 // HandleInbound processes an incoming Telegram message and posts it to the broker.
-func (t *TelegramTransport) HandleInbound(chatID int64, from *telegramUser, text string) error {
+func (t *TelegramTransport) HandleInbound(chatID int64, chatType string, from *telegramUser, text string) error {
 	chatIDStr := strconv.FormatInt(chatID, 10)
 	channel, ok := t.ChatMap[chatIDStr]
 	if !ok {
-		return fmt.Errorf("unmapped telegram chat: %s", chatIDStr)
+		// Check if this is a private/DM message
+		if (chatType == "private") && t.DMChannel != "" {
+			channel = t.DMChannel
+			// Store the chat ID so we can reply to this user
+			t.ChatMap[chatIDStr] = t.DMChannel
+		} else {
+			return fmt.Errorf("unmapped telegram chat: %s", chatIDStr)
+		}
 	}
 
 	fromName := t.resolveUser(from)
