@@ -22,8 +22,8 @@ func TestInitFlowSkipsToProviderWhenAPIKeyExists(t *testing.T) {
 	}
 
 	flow, _ := NewInitFlow().Start()
-	if flow.Phase() != InitProviderChoice {
-		t.Fatalf("expected provider choice phase, got %q", flow.Phase())
+	if flow.Phase() != InitPackChoice {
+		t.Fatalf("expected pack choice phase, got %q", flow.Phase())
 	}
 }
 

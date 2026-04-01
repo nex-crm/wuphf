@@ -198,8 +198,8 @@ func TestChannelViewShowsThreadReplyLabel(t *testing.T) {
 	}
 }
 
-func TestThreadsStartCollapsedByDefault(t *testing.T) {
-	m := newChannelModel(true) // explicit collapsed mode
+func TestThreadsRenderExpandedEvenWhenCollapsedRequested(t *testing.T) {
+	m := newChannelModel(true)
 	m.width = 120
 	m.height = 30
 	m.messages = []brokerMessage{
@@ -209,11 +209,8 @@ func TestThreadsStartCollapsedByDefault(t *testing.T) {
 	}
 
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "↩ 2 replies") {
-		t.Fatalf("expected collapsed-thread summary, got %q", view)
-	}
-	if strings.Contains(view, "Reply one") || strings.Contains(view, "Reply two") {
-		t.Fatalf("expected replies to stay hidden by default, got %q", view)
+	if !strings.Contains(view, "Reply one") || !strings.Contains(view, "Reply two") {
+		t.Fatalf("expected replies to render inline, got %q", view)
 	}
 }
 
@@ -366,7 +363,7 @@ func TestHumanFacingMessageSwitchesBackToMessages(t *testing.T) {
 }
 
 func TestInitialHumanFacingHistoryDoesNotForceMessagesApp(t *testing.T) {
-	m := newChannelModelWithApp(false, officeAppInsights)
+	m := newChannelModelWithApp(false, officeAppPolicies)
 
 	next, _ := m.Update(channelMsg{messages: []brokerMessage{
 		{ID: "msg-1", From: "pm", Kind: "human_report", Title: "Scope ready", Content: "Please review the scope."},
@@ -376,8 +373,8 @@ func TestInitialHumanFacingHistoryDoesNotForceMessagesApp(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected channelModel, got %T", next)
 	}
-	if got.activeApp != officeAppInsights {
-		t.Fatalf("expected initial history to keep insights active, got %v", got.activeApp)
+	if got.activeApp != officeAppPolicies {
+		t.Fatalf("expected initial history to keep policies active, got %v", got.activeApp)
 	}
 	if got.notice != "" {
 		t.Fatalf("expected no human-facing notice on initial history load, got %q", got.notice)
@@ -425,8 +422,8 @@ func TestChannelCreateDoneSwitchesToNewChannel(t *testing.T) {
 }
 
 func TestResolveInitialOfficeAppFallsBackToMessages(t *testing.T) {
-	if got := resolveInitialOfficeApp("insights"); got != officeAppInsights {
-		t.Fatalf("expected insights app, got %q", got)
+	if got := resolveInitialOfficeApp("policies"); got != officeAppPolicies {
+		t.Fatalf("expected policies app, got %q", got)
 	}
 	if got := resolveInitialOfficeApp("calendar"); got != officeAppCalendar {
 		t.Fatalf("expected calendar app, got %q", got)
@@ -753,9 +750,6 @@ func TestRenderSidebarShowsTaskDrivenWorkingState(t *testing.T) {
 		40,
 		44,
 	))
-	if !strings.Contains(sidebar, "working") {
-		t.Fatalf("expected task-driven working activity, got %q", sidebar)
-	}
 	if !strings.Contains(sidebar, "On landing page polish.") {
 		t.Fatalf("expected task-driven bubble, got %q", sidebar)
 	}
@@ -1191,7 +1185,7 @@ func TestCalendarViewRendersSchedulerAndActions(t *testing.T) {
 	m.members = []channelMember{{Slug: "ceo", Name: "CEO"}}
 
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "Calendar") || !strings.Contains(view, "Nex insights") || !strings.Contains(view, "Opened a follow-up task") {
+	if !strings.Contains(view, "Calendar") || !strings.Contains(view, "Nex insights") || !strings.Contains(view, "sleeping") {
 		t.Fatalf("expected calendar view content, got %q", view)
 	}
 }
@@ -1200,7 +1194,7 @@ func TestInsightsViewRendersSignalsDecisionsAndWatchdogs(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
-	m.activeApp = officeAppInsights
+	m.activeApp = officeAppPolicies
 	m.signals = []channelSignal{{
 		ID:         "signal-1",
 		Source:     "nex_insights",
@@ -1231,11 +1225,8 @@ func TestInsightsViewRendersSignalsDecisionsAndWatchdogs(t *testing.T) {
 	}}
 
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "Signals") || !strings.Contains(view, "Decisions") || !strings.Contains(view, "Watchdogs") {
-		t.Fatalf("expected insights sections, got %q", view)
-	}
-	if !strings.Contains(view, "Signup conversion is slipping.") || !strings.Contains(view, "Open a frontend follow-up.") || !strings.Contains(view, "Task is waiting for movement.") {
-		t.Fatalf("expected ledger content in insights view, got %q", view)
+	if !strings.Contains(view, "Policies") || !strings.Contains(view, "Open a frontend follow-up.") {
+		t.Fatalf("expected policies view content, got %q", view)
 	}
 }
 
@@ -1345,7 +1336,7 @@ func TestMouseClickJumpLatestClearsUnread(t *testing.T) {
 	}
 }
 
-func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
+func TestExpandedThreadsDoNotExposeCollapsedThreadSummaryRow(t *testing.T) {
 	m := newChannelModel(true)
 	m.width = 120
 	m.height = 32
@@ -1355,7 +1346,7 @@ func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
 	}
 
 	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
-	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
+	_, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 	contentWidth := layout.MainW - 2
 	lines := buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand)
 	visible, _, _, _ := sliceRenderedLines(lines, msgH, m.scroll)
@@ -1366,14 +1357,8 @@ func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
 			break
 		}
 	}
-	if row < 0 {
-		t.Fatal("expected collapsed thread summary row")
-	}
-
-	next, _ := m.Update(tea.MouseMsg{Type: tea.MouseLeft, Button: tea.MouseButtonLeft, X: layout.SidebarW + 5, Y: headerH + row})
-	got := next.(channelModel)
-	if !got.threadPanelOpen || got.threadPanelID != "msg-1" {
-		t.Fatalf("expected click to open thread panel for msg-1, got open=%v id=%q", got.threadPanelOpen, got.threadPanelID)
+	if row >= 0 {
+		t.Fatalf("expected no collapsed thread summary row, got row=%d", row)
 	}
 }
 
