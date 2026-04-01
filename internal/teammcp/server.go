@@ -267,10 +267,18 @@ func Run(ctx context.Context) error {
 			Name:        "reply",
 			Description: "Send your reply to the human in the direct 1:1 conversation.",
 		}, handleTeamBroadcast)
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "team_broadcast",
+			Description: "Compatibility alias in 1:1 mode. Send your normal reply into the direct conversation.",
+		}, handleTeamBroadcast)
 
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "read_conversation",
 			Description: "Read recent messages from the 1:1 conversation so you stay in sync before replying.",
+		}, handleTeamPoll)
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "team_poll",
+			Description: "Compatibility alias in 1:1 mode. Read recent messages from the direct conversation before replying.",
 		}, handleTeamPoll)
 
 		mcp.AddTool(server, &mcp.Tool{
@@ -626,6 +634,8 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 	}
 	if args.Limit > 0 {
 		values.Set("limit", fmt.Sprintf("%d", args.Limit))
+	} else if isOneOnOneMode() {
+		values.Set("limit", "8")
 	}
 
 	var result brokerMessagesResponse
@@ -642,7 +652,11 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 		if strings.TrimSpace(summary) == "" {
 			return textResult("The 1:1 is quiet right now."), nil, nil
 		}
-		return textResult("Direct conversation\n\n" + summary), nil, nil
+		focus := latestHumanRequestSummary(result.Messages)
+		if focus == "" {
+			return textResult("Direct conversation\n\n" + summary), nil, nil
+		}
+		return textResult("Direct conversation\n\nLatest human request to answer now:\n" + focus + "\n\nOlder messages are background unless the latest request depends on them.\n\nRecent messages:\n" + summary), nil, nil
 	}
 	taskSummary := formatTaskSummary(ctx, resolveSlugOptional(args.MySlug), channel)
 	requestSummary := formatRequestSummary(ctx, channel)
@@ -1460,6 +1474,26 @@ func formatMessages(messages []brokerMessage, mySlug string) string {
 		lines = append(lines, fmt.Sprintf("%s %s%s @%s: %s%s", ts, msg.ID, threadNote, msg.From, msg.Content, tagNote))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func latestHumanRequestSummary(messages []brokerMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		from := strings.TrimSpace(strings.ToLower(msg.From))
+		if from != "you" && from != "human" {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		ts := msg.Timestamp
+		if len(ts) > 19 {
+			ts = ts[11:19]
+		}
+		return fmt.Sprintf("%s %s @%s: %s", ts, msg.ID, msg.From, content)
+	}
+	return ""
 }
 
 func formatTaskSummary(ctx context.Context, mySlug string, channel string) string {

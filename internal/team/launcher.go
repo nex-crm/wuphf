@@ -400,6 +400,7 @@ func (l *Launcher) notifyTaskActionsLoop() {
 }
 
 var agentLastNotified = make(map[string]time.Time)
+
 const agentNotifyCooldown = 10 * time.Second
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
@@ -641,10 +642,7 @@ func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, conte
 		"-l",
 		notification,
 	).Run()
-	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", paneTarget,
-		"Enter",
-	).Run()
+	submitAgentPanePrompt(paneTarget)
 }
 
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
@@ -1043,7 +1041,18 @@ func (l *Launcher) primeVisibleAgents() {
 		return
 	}
 	latest := msgs[len(msgs)-1]
+	l.clearNotificationCooldown(latest)
 	l.deliverMessageNotification(latest)
+}
+
+func (l *Launcher) clearNotificationCooldown(msg channelMessage) {
+	immediate, delayed := l.notificationTargetsForMessage(msg)
+	for _, target := range immediate {
+		delete(agentLastNotified, target.Slug)
+	}
+	for _, target := range delayed {
+		delete(agentLastNotified, target.Slug)
+	}
 }
 
 func (l *Launcher) pollNexNotificationsLoop() {
@@ -1967,16 +1976,14 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
+	compactContent := compactAgentNotificationContent(content)
 	notification := ""
 	if l.isOneOnOne() {
-		notification = fmt.Sprintf(
-			"[%s @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\" to read context, then reply using team_broadcast channel \"%s\" reply_to_id \"%s\".",
-			msgID, from, truncate(content, 150), slug, channel, channel, msgID,
-		)
+		notification = l.directSessionNotification(msgID, from, compactContent)
 	} else {
 		notification = fmt.Sprintf(
 			"[%s @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\" to read context. If this is your domain, reply using team_broadcast channel \"%s\" reply_to_id \"%s\". If not your domain, stay quiet.",
-			msgID, from, truncate(content, 150), slug, channel, channel, msgID,
+			msgID, from, truncate(compactContent, 150), slug, channel, channel, msgID,
 		)
 	}
 
@@ -1985,10 +1992,67 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 		"-l",
 		notification,
 	).Run()
+	submitAgentPanePrompt(paneTarget)
+}
+
+func (l *Launcher) directSessionNotification(msgID, from, content string) string {
+	notification := fmt.Sprintf(
+		"[%s @%s]: %s — This is a direct 1:1. First call read_conversation (or team_poll) to read the latest context. Focus on the newest human request and treat older unrelated asks as background only. Then answer using reply (or team_broadcast) or human_message. If the human is asking for an integration action or reusable automation, use the team_action_* tools directly in this session and complete the full requested sequence before reporting back.",
+		msgID, from, truncate(content, 180),
+	)
+	if looksLikeReusableAutomationRequest(content) {
+		notification += " This is clearly a reusable automation request. Do not stay in ad-hoc action mode. Build a generic WUPHF workflow JSON definition first, then call team_action_workflow_create, team_action_workflow_schedule if the human asked for a cadence, and team_action_workflow_execute if the human asked for a manual run. Prefer a compact flow like action -> nex_insights -> template -> nex_ask -> action."
+	}
+	return notification
+}
+
+func compactAgentNotificationContent(content string) string {
+	fields := strings.Fields(strings.TrimSpace(content))
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Join(fields, " ")
+}
+
+func submitAgentPanePrompt(paneTarget string) {
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
 		"Enter",
 	).Run()
+	time.Sleep(120 * time.Millisecond)
+	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget,
+		"Enter",
+	).Run()
+}
+
+func looksLikeReusableAutomationRequest(content string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(content))
+	if normalized == "" {
+		return false
+	}
+	needles := []string{
+		"workflow",
+		"automation",
+		"schedule",
+		"daily",
+		"every day",
+		"every weekday",
+		"9am",
+		"9:00",
+		"manual run",
+		"run it manually",
+		"trigger",
+		"relay",
+		"cron",
+	}
+	score := 0
+	for _, needle := range needles {
+		if strings.Contains(normalized, needle) {
+			score++
+		}
+	}
+	return score >= 2
 }
 
 func (l *Launcher) capturePaneTargetContent(target string) (string, error) {
@@ -2254,9 +2318,20 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("This is not the shared office. There are no teammates, no channels, and no collaboration mechanics in this mode.\n")
 		sb.WriteString("You are only talking to the human.\n")
 		sb.WriteString("- team_poll: Read the recent 1:1 conversation before replying\n")
+		sb.WriteString("- read_conversation: Alias for team_poll in direct mode\n")
 		sb.WriteString("- team_broadcast: Send a normal direct chat reply into the 1:1 conversation\n")
+		sb.WriteString("- reply: Alias for team_broadcast in direct mode\n")
 		sb.WriteString("- human_message: Send an emphasized report, recommendation, or action card directly to the human when you want it to stand out\n")
 		sb.WriteString("- human_interview: Ask a blocking decision question only when you truly cannot proceed responsibly without it\n\n")
+		sb.WriteString("External actions and reusable automations are available here too:\n")
+		sb.WriteString("- team_action_connections: List connected external accounts\n")
+		sb.WriteString("- team_action_search: Find integration actions like send email or create contact\n")
+		sb.WriteString("- team_action_knowledge: Load the schema before executing an action\n")
+		sb.WriteString("- team_action_execute: Dry-run or execute an external action\n")
+		sb.WriteString("- team_action_workflow_create: Save a reusable WUPHF workflow from JSON\n")
+		sb.WriteString("- team_action_workflow_execute: Run a saved workflow now\n")
+		sb.WriteString("- team_action_workflow_schedule: Schedule a saved workflow on a cadence, and set run_now when the human also asked for an immediate first run\n")
+		sb.WriteString("- team_action_relay_create / team_action_relay_activate: Register trigger-based automations when needed\n\n")
 		if config.ResolveNoNex() {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
 		} else {
@@ -2273,6 +2348,18 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("6. Use human_interview only for truly blocking decisions.\n")
 		sb.WriteString("7. If Nex is enabled, do not claim something is stored unless add_context actually succeeded.\n")
 		sb.WriteString("8. No fake collaboration language like 'I'll ask the team' or 'let me route this'. It is just you and the human here.\n\n")
+		sb.WriteString("9. If the human asks for an integration action, use search -> knowledge -> dry-run -> execute.\n")
+		sb.WriteString("10. If the human asks for reusable automation, build a generic WUPHF workflow JSON definition and use workflow_create, workflow_schedule, and workflow_execute instead of inventing a built-in kind.\n")
+		sb.WriteString("11. For reusable automation requests, do not stop at discovery. Once you have enough information, complete the requested sequence end to end: create it, schedule it if asked, execute it if asked, and then report the outcome.\n")
+		sb.WriteString("12. If an action returns bulky raw data, add a generic template step to compress it before passing it to nex_ask or another action.\n")
+		sb.WriteString("13. Prefer the generic workflow step output .steps.<step_id>.result unless you specifically need a provider-specific field like .response.data.\n")
+		sb.WriteString("14. For digest or report workflows, keep the compose prompt compact: default to about 10 recent emails and 5 recent insights unless the human explicitly asks for more.\n")
+		sb.WriteString("15. Do not dump raw JSON into nex_ask when a compact text summary will do. Use email_summary.result and recent_insights.result directly whenever possible.\n")
+		sb.WriteString("16. Do not disappear into schema hunting. Use the minimum tool lookups needed, then act.\n")
+		sb.WriteString("17. If the human clearly asked for a reusable scheduled workflow, do not stay in ad-hoc action mode. Build the workflow JSON first, then create it, schedule it, and use run_now on workflow_schedule (or workflow_execute) when the human asked for an immediate test run.\n")
+		sb.WriteString("18. For digest/report automations, default to this compact generic pattern unless the human asks otherwise: fetch external data -> nex_insights -> template summary -> nex_ask compose -> send action.\n\n")
+		sb.WriteString("19. In workflow JSON, use the exact schema names the tools expect: action steps use type:\"action\", platform, action_id, optional connection_key, and data; nex_ask steps use query_template; template steps use template. Do not invent fields like action or query.\n")
+		sb.WriteString("20. Prefer Go-style templates like {{ .steps.fetch_emails.result }}. If you need a loop, use {{- range $item := .steps.fetch_emails.result.data.messages }} ... {{- end }}.\n\n")
 		sb.WriteString("CONVERSATION STYLE:\n")
 		sb.WriteString("- Sound like a sharp human operator, not a formal assistant.\n")
 		sb.WriteString("- Be concise, direct, and a little alive.\n")

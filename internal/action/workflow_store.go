@@ -2,11 +2,11 @@ package action
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"bytes"
 	"strings"
 
 	"github.com/nex-crm/wuphf/internal/config"
