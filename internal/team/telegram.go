@@ -600,3 +600,29 @@ func SendTelegramMessage(token string, chatID int64, text string) error {
 	}
 	return nil
 }
+
+// VerifyChat checks if a chat ID is valid and returns its title.
+func VerifyChat(token string, chatID int64) (string, error) {
+	url := fmt.Sprintf("%s/bot%s/getChat?chat_id=%d", telegramAPIBase, token, chatID)
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", fmt.Errorf("telegram getChat: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	var apiResp telegramAPIResponse
+	if err := json.Unmarshal(body, &apiResp); err != nil {
+		return "", fmt.Errorf("telegram getChat decode: %w", err)
+	}
+	if !apiResp.OK {
+		return "", fmt.Errorf("chat not found: %s", apiResp.Desc)
+	}
+	var chat struct {
+		Title string `json:"title"`
+		Type  string `json:"type"`
+	}
+	if err := json.Unmarshal(apiResp.Result, &chat); err != nil {
+		return "", nil
+	}
+	return chat.Title, nil
+}

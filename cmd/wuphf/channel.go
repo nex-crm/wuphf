@@ -496,6 +496,7 @@ const (
 	channelPickerTelegramGroup channelPickerMode = "telegram_group"
 	channelPickerConnect        channelPickerMode = "connect"
 	channelPickerTelegramToken  channelPickerMode = "telegram_token"
+	channelPickerTelegramChatID channelPickerMode = "telegram_chat_id"
 )
 
 type officeApp string
@@ -1366,7 +1367,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.telegramGroups = allGroups
 
-		// Build picker: DM mode always available, groups only if found
+		// Build picker: DM + discovered groups + manual group entry
 		options := []tui.PickerOption{
 			{Label: "Direct message with Telegram bot", Value: "dm", Description: "Anyone can DM the bot to reach the office"},
 		}
@@ -1377,6 +1378,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Description: fmt.Sprintf("Shared %s channel", g.Type),
 			})
 		}
+		options = append(options, tui.PickerOption{
+			Label:       "Connect a group by chat ID",
+			Value:       "manual_group",
+			Description: "Paste the group chat ID (send /chatid in the group to find it)",
+		})
 		m.picker = tui.NewPicker(fmt.Sprintf("Bot \"%s\" verified. Choose how to connect:", msg.botName), options)
 		m.picker.SetActive(true)
 		m.pickerMode = channelPickerTelegramGroup
@@ -1664,16 +1670,54 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.posting = true
 			m.notice = "Verifying bot token..."
 			return m, discoverTelegramGroups(token)
+		case channelPickerTelegramChatID:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			chatIDStr := strings.TrimSpace(msg.Value)
+			if chatIDStr == "" {
+				m.notice = "Canceled."
+				return m, nil
+			}
+			chatID, err := strconv.ParseInt(chatIDStr, 10, 64)
+			if err != nil {
+				m.notice = "Invalid chat ID. Must be a number like -5093020979."
+				return m, nil
+			}
+			// Verify the chat exists using getChat
+			title, verifyErr := team.VerifyChat(m.telegramToken, chatID)
+			if verifyErr != nil {
+				m.notice = "Could not verify chat: " + verifyErr.Error()
+				return m, nil
+			}
+			if title == "" {
+				title = fmt.Sprintf("Telegram %d", chatID)
+			}
+			m.posting = true
+			m.notice = fmt.Sprintf("Connecting \"%s\"...", title)
+			return m, connectTelegramGroup(m.telegramToken, team.TelegramGroup{
+				ChatID: chatID,
+				Title:  title,
+				Type:   "group",
+			})
 		case channelPickerTelegramGroup:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
 
 			if msg.Value == "dm" {
-				// DM mode — connect bot for direct messages
 				m.posting = true
 				m.notice = "Setting up direct message channel..."
 				dmGroup := team.TelegramGroup{ChatID: 0, Title: "Telegram DM", Type: "private"}
 				return m, connectTelegramGroup(m.telegramToken, dmGroup)
+			}
+
+			if msg.Value == "manual_group" {
+				// Show text input for chat ID
+				m.picker = tui.NewPicker("Connect Telegram Group", nil)
+				m.picker.TextInput = true
+				m.picker.TextPrompt = "Paste the group chat ID (e.g. -5093020979):"
+				m.picker.SetActive(true)
+				m.pickerMode = channelPickerTelegramChatID
+				return m, nil
 			}
 
 			var selected *team.TelegramGroup
