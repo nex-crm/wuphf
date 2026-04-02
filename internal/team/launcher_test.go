@@ -384,7 +384,7 @@ func TestPrimeVisibleAgentsWithoutBrokerDoesNotPanic(t *testing.T) {
 	l.primeVisibleAgents()
 }
 
-func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
+func TestNotificationTargetsForHumanMessageBroadcastAll(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -397,15 +397,26 @@ func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
 		},
 	}
 
-	immediate, _ := l.notificationTargetsForMessage(channelMessage{
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
 		From:    "you",
 		Content: "Build the landing page",
 		Tagged:  []string{"fe", "be"},
 	})
 
-	// Direct routing: tagged agents go immediate, CEO skipped
-	if len(immediate) != 2 {
-		t.Fatalf("expected 2 immediate targets (fe, be), got %+v", immediate)
+	// Broadcast model: CEO immediate, everyone else delayed
+	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
+		t.Fatalf("expected CEO as only immediate target, got %+v", immediate)
+	}
+	if len(delayed) == 0 {
+		t.Fatal("expected delayed targets for other agents, got none")
+	}
+	// Verify fe and be are in delayed targets
+	slugs := make(map[string]bool)
+	for _, d := range delayed {
+		slugs[d.Slug] = true
+	}
+	if !slugs["fe"] || !slugs["be"] {
+		t.Fatalf("expected fe and be in delayed targets, got %+v", delayed)
 	}
 }
 
@@ -434,7 +445,7 @@ func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
 	
 }
 
-func TestNotificationTargetsForCEOMessageNotifyTaggedOnly(t *testing.T) {
+func TestNotificationTargetsForCEOMessageBroadcastsToAll(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -447,19 +458,30 @@ func TestNotificationTargetsForCEOMessageNotifyTaggedOnly(t *testing.T) {
 		},
 	}
 
-	immediate, _ := l.notificationTargetsForMessage(channelMessage{
+	// CEO sends a message — everyone else gets it (CEO excluded as sender)
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
 		From:    "ceo",
 		Content: "Frontend take this",
 		Tagged:  []string{"fe"},
 	})
 
-	// delayed targets not checked — direct routing may vary
-	if len(immediate) != 1 || immediate[0].Slug != "fe" {
-		t.Fatalf("expected only FE immediate target, got %+v", immediate)
+	// No immediate (CEO is lead but also sender), all others delayed
+	if len(immediate) != 0 {
+		t.Fatalf("expected no immediate targets (CEO is sender), got %+v", immediate)
+	}
+	if len(delayed) == 0 {
+		t.Fatal("expected delayed targets for other agents, got none")
+	}
+	slugs := make(map[string]bool)
+	for _, d := range delayed {
+		slugs[d.Slug] = true
+	}
+	if !slugs["fe"] || !slugs["be"] || !slugs["cmo"] {
+		t.Fatalf("expected fe, be, cmo in delayed targets, got %+v", delayed)
 	}
 }
 
-func TestShouldDeliverDelayedNotificationSkipsAfterCEOAlreadyAnswered(t *testing.T) {
+func TestShouldDeliverDelayedNotificationSkipsIfAgentAlreadyReplied(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
@@ -470,8 +492,9 @@ func TestShouldDeliverDelayedNotificationSkipsAfterCEOAlreadyAnswered(t *testing
 	if err != nil {
 		t.Fatalf("post human message: %v", err)
 	}
-	if _, err := b.PostMessage("ceo", "general", "I have this. PM and CMO first.", []string{"pm", "cmo"}, msg1.ID); err != nil {
-		t.Fatalf("post ceo message: %v", err)
+	// FE already replied in the same thread
+	if _, err := b.PostMessage("fe", "general", "On it!", nil, msg1.ID); err != nil {
+		t.Fatalf("post fe message: %v", err)
 	}
 
 	l := &Launcher{
@@ -481,35 +504,21 @@ func TestShouldDeliverDelayedNotificationSkipsAfterCEOAlreadyAnswered(t *testing
 			Agents: []agent.AgentConfig{
 				{Slug: "ceo", Name: "CEO"},
 				{Slug: "fe", Name: "Frontend Engineer"},
-				{Slug: "pm", Name: "Product Manager"},
-				{Slug: "cmo", Name: "CMO"},
 			},
 		},
 	}
 	if l.shouldDeliverDelayedNotification("fe", msg1) {
-		t.Fatal("expected FE delayed notification to be skipped after CEO answered without FE tag")
+		t.Fatal("expected FE delayed notification to be skipped — FE already replied")
 	}
 }
 
-func TestShouldDeliverDelayedNotificationSkipsWrongDomainAndTaskOwnerConflict(t *testing.T) {
+func TestShouldDeliverDelayedNotificationAllowsAllEnabledMembers(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
-	task, _, err := b.EnsureTask("general", "Positioning work", "Marketing follow-up", "cmo", "ceo", "")
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	b.mu.Lock()
-	if ch := b.findChannelLocked("general"); ch != nil && !containsString(ch.Members, "cmo") {
-		ch.Members = append(ch.Members, "cmo")
-	}
-	b.mu.Unlock()
-	if task.Owner != "cmo" {
-		t.Fatalf("expected task owner cmo, got %+v", task)
-	}
 
 	l := &Launcher{
 		broker: b,
@@ -522,12 +531,13 @@ func TestShouldDeliverDelayedNotificationSkipsWrongDomainAndTaskOwnerConflict(t 
 			},
 		},
 	}
-	msg := channelMessage{From: "you", Channel: "general", Content: "We need a positioning shift and launch campaign.", ID: "msg-1"}
-	if l.shouldDeliverDelayedNotification("fe", msg) {
-		t.Fatal("expected FE delayed notification to be skipped for marketing work owned by CMO")
+	msg := channelMessage{From: "you", Channel: "general", Content: "We need a positioning shift.", ID: "msg-1"}
+	// All enabled members should receive the delayed notification
+	if !l.shouldDeliverDelayedNotification("fe", msg) {
+		t.Fatal("expected FE delayed notification to be allowed")
 	}
 	if !l.shouldDeliverDelayedNotification("cmo", msg) {
-		t.Fatal("expected CMO delayed notification to be allowed for matching domain owner")
+		t.Fatal("expected CMO delayed notification to be allowed")
 	}
 }
 

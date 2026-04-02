@@ -459,23 +459,6 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	}
 	immediate = filtered
 
-	// Broadcast stage update only for untagged messages in team mode
-	// (tagged messages go directly to the agent — user already knows who's handling it)
-	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && len(msg.Tagged) == 0 {
-		names := make([]string, 0, len(immediate))
-		for _, t := range immediate {
-			names = append(names, "@"+t.Slug)
-		}
-		channel := msg.Channel
-		if channel == "" {
-			channel = "general"
-		}
-		l.broker.PostSystemMessage(channel,
-			fmt.Sprintf("Routing to %s...", strings.Join(names, ", ")),
-			"routing",
-		)
-	}
-
 	for _, target := range immediate {
 		l.sendChannelUpdate(target.PaneTarget, target.Slug, msg.Channel, msg.ID, msg.From, msg.Content)
 	}
@@ -704,11 +687,6 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		return []notificationTarget{target}, nil
 	}
 	lead := l.officeLeadSlug()
-	domain := inferMessageDomain(msg)
-	owner := ""
-	if l.broker != nil {
-		owner = l.taskOwnerForDomain(msg.Channel, domain)
-	}
 	enabledMembers := map[string]struct{}{}
 	if l.broker != nil {
 		for _, member := range l.broker.EnabledMembers(msg.Channel) {
@@ -716,7 +694,7 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		}
 	}
 
-	addImmediate := func(slug string) {
+	addTarget := func(slug string, list *[]notificationTarget) {
 		if slug == "" || slug == msg.From {
 			return
 		}
@@ -726,117 +704,20 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 			}
 		}
 		if target, ok := targetMap[slug]; ok {
-			immediate = append(immediate, target)
+			*list = append(*list, target)
 			delete(targetMap, slug)
 		}
-	}
-	addDelayed := func(slug string) {
-		if slug == "" || slug == msg.From {
-			return
-		}
-		if len(enabledMembers) > 0 {
-			if _, ok := enabledMembers[slug]; !ok {
-				return
-			}
-		}
-		if target, ok := targetMap[slug]; ok {
-			delayed = append(delayed, target)
-			delete(targetMap, slug)
-		}
-	}
-	allowTarget := func(slug string) bool {
-		if slug == "" || slug == msg.From {
-			return false
-		}
-		if len(enabledMembers) > 0 {
-			if _, ok := enabledMembers[slug]; !ok {
-				return false
-			}
-		}
-		if slug == lead {
-			return true
-		}
-		if owner != "" && slug != owner {
-			return false
-		}
-		if containsSlug(msg.Tagged, slug) {
-			if domain == "" || domain == "general" {
-				return true
-			}
-			return inferAgentDomain(slug) == domain
-		}
-		if domain == "" || domain == "general" {
-			return false
-		}
-		return inferAgentDomain(slug) == domain
 	}
 
-	switch {
-	case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
-		// Direct routing: if user tags specific agents, route to them directly
-		// without CEO bottleneck. CEO only gets untagged or multi-tagged messages.
-		directRouted := false
-		if len(msg.Tagged) > 0 && !containsSlug(msg.Tagged, lead) {
-			for _, slug := range slugs {
-				if slug == lead || slug == msg.From {
-					continue
-				}
-				if containsSlug(msg.Tagged, slug) {
-					if allowTarget(slug) {
-						addImmediate(slug)
-						directRouted = true
-					}
-				}
-			}
+	// Broadcast model: every message goes to every agent.
+	// CEO gets a small head start (immediate), everyone else is delayed.
+	// The sender is always excluded.
+	addTarget(lead, &immediate)
+	for _, slug := range slugs {
+		if slug == lead {
+			continue
 		}
-		if !directRouted {
-			addImmediate(lead)
-		}
-		for _, slug := range slugs {
-			if slug == lead || slug == msg.From {
-				continue
-			}
-			if containsSlug(msg.Tagged, slug) && !directRouted {
-				if allowTarget(slug) {
-					addDelayed(slug)
-				}
-			}
-		}
-	case msg.From == lead:
-		for _, slug := range slugs {
-			if slug == lead || slug == msg.From {
-				continue
-			}
-			if containsSlug(msg.Tagged, slug) || (domain != "" && domain != "general" && inferAgentDomain(slug) == domain) {
-				if allowTarget(slug) {
-					addImmediate(slug)
-				}
-			}
-		}
-	case containsSlug(msg.Tagged, lead):
-		addImmediate(lead)
-		for _, slug := range slugs {
-			if slug == lead || slug == msg.From {
-				continue
-			}
-			if containsSlug(msg.Tagged, slug) || (domain != "" && domain != "general" && inferAgentDomain(slug) == domain) {
-				if allowTarget(slug) {
-					addImmediate(slug)
-				}
-			}
-		}
-	default:
-		addImmediate(lead)
-		for _, slug := range slugs {
-			if slug == lead || slug == msg.From {
-				continue
-			}
-			if containsSlug(msg.Tagged, slug) || (domain != "" && domain != "general" && inferAgentDomain(slug) == domain) {
-				if allowTarget(slug) {
-					addImmediate(slug)
-				}
-			}
-		}
+		addTarget(slug, &delayed)
 	}
 	return immediate, delayed
 }
@@ -845,55 +726,28 @@ func (l *Launcher) shouldDeliverDelayedNotification(targetSlug string, source ch
 	if l.broker == nil {
 		return true
 	}
+	// Only gate: the agent must be an enabled member of the channel.
 	if !containsSlug(l.broker.EnabledMembers(source.Channel), targetSlug) {
 		return false
 	}
-	domain := inferMessageDomain(source)
-	if owner := l.taskOwnerForDomain(source.Channel, domain); owner != "" && owner != targetSlug && targetSlug != l.officeLeadSlug() {
-		return false
-	}
-	if domain != "" && domain != "general" && targetSlug != l.officeLeadSlug() && inferAgentDomain(targetSlug) != domain {
-		return false
-	}
-
+	// If the agent already replied in the same thread since this message,
+	// skip the notification — they're already engaged.
 	threadRoot := source.ID
 	if source.ReplyTo != "" {
 		threadRoot = source.ReplyTo
 	}
-	sourceIndex := -1
 	messages := l.broker.ChannelMessages(source.Channel)
-	for i := range messages {
-		if messages[i].ID == source.ID {
-			sourceIndex = i
-			break
-		}
-	}
-	if sourceIndex >= 0 {
-		for _, msg := range messages[sourceIndex+1:] {
-			sameThread := msg.ID == threadRoot || msg.ReplyTo == threadRoot || msg.ReplyTo == source.ID
-			if !sameThread {
-				continue
-			}
-			if msg.From == targetSlug {
-				return false
-			}
-			if msg.From == l.officeLeadSlug() && !containsSlug(msg.Tagged, targetSlug) {
-				return false
-			}
-			if msg.From != "you" && msg.From != "human" && msg.From != "nex" && msg.Kind != "automation" && !containsSlug(msg.Tagged, targetSlug) {
-				return false
-			}
-		}
-	}
-
-	for _, task := range l.broker.ChannelTasks(source.Channel) {
-		if task.Status == "done" {
+	past := false
+	for _, msg := range messages {
+		if msg.ID == source.ID {
+			past = true
 			continue
 		}
-		if task.ThreadID != "" && task.ThreadID != source.ID && task.ThreadID != threadRoot {
+		if !past {
 			continue
 		}
-		if task.Owner != "" && task.Owner != targetSlug && targetSlug != l.officeLeadSlug() {
+		sameThread := msg.ID == threadRoot || msg.ReplyTo == threadRoot || msg.ReplyTo == source.ID
+		if sameThread && msg.From == targetSlug {
 			return false
 		}
 	}
