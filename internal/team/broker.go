@@ -26,19 +26,25 @@ const brokerTokenFile = "/tmp/wuphf-broker-token"
 
 var brokerStatePath = defaultBrokerStatePath
 
+type messageReaction struct {
+	Emoji string `json:"emoji"`
+	From  string `json:"from"`
+}
+
 type channelMessage struct {
-	ID          string   `json:"id"`
-	From        string   `json:"from"`
-	Channel     string   `json:"channel,omitempty"`
-	Kind        string   `json:"kind,omitempty"`
-	Source      string   `json:"source,omitempty"`
-	SourceLabel string   `json:"source_label,omitempty"`
-	EventID     string   `json:"event_id,omitempty"`
-	Title       string   `json:"title,omitempty"`
-	Content     string   `json:"content"`
-	Tagged      []string `json:"tagged"`
-	ReplyTo     string   `json:"reply_to,omitempty"`
-	Timestamp   string   `json:"timestamp"`
+	ID          string            `json:"id"`
+	From        string            `json:"from"`
+	Channel     string            `json:"channel,omitempty"`
+	Kind        string            `json:"kind,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	SourceLabel string            `json:"source_label,omitempty"`
+	EventID     string            `json:"event_id,omitempty"`
+	Title       string            `json:"title,omitempty"`
+	Content     string            `json:"content"`
+	Tagged      []string          `json:"tagged"`
+	ReplyTo     string            `json:"reply_to,omitempty"`
+	Timestamp   string            `json:"timestamp"`
+	Reactions   []messageReaction `json:"reactions,omitempty"`
 }
 
 type interviewOption struct {
@@ -365,6 +371,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
+	mux.HandleFunc("/reactions", b.requireAuth(b.handleReactions))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
 	mux.HandleFunc("/channels", b.requireAuth(b.handleChannels))
@@ -2809,6 +2816,58 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
+func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		MessageID string `json:"message_id"`
+		Emoji     string `json:"emoji"`
+		From      string `json:"from"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if body.MessageID == "" || body.Emoji == "" || body.From == "" {
+		http.Error(w, "message_id, emoji, and from are required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	found := false
+	for i := range b.messages {
+		if b.messages[i].ID == body.MessageID {
+			// Don't duplicate: same emoji from same agent
+			for _, r := range b.messages[i].Reactions {
+				if r.Emoji == body.Emoji && r.From == body.From {
+					b.mu.Unlock()
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]any{"ok": true, "duplicate": true})
+					return
+				}
+			}
+			b.messages[i].Reactions = append(b.messages[i].Reactions, messageReaction{
+				Emoji: body.Emoji,
+				From:  body.From,
+			})
+			found = true
+			break
+		}
+	}
+	if !found {
+		b.mu.Unlock()
+		http.Error(w, "message not found", http.StatusNotFound)
+		return
+	}
+	_ = b.saveLocked()
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
 
 // RecordTelegramGroup saves a group chat ID and title seen by the transport.
 func (b *Broker) RecordTelegramGroup(chatID int64, title string) {

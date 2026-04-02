@@ -136,6 +136,12 @@ type TeamBroadcastArgs struct {
 	NewTopic  bool     `json:"new_topic,omitempty" jsonschema:"Set true only when this genuinely needs to start a new top-level thread"`
 }
 
+type TeamReactArgs struct {
+	MessageID string `json:"message_id" jsonschema:"The message ID to react to"`
+	Emoji     string `json:"emoji" jsonschema:"Emoji reaction (e.g. 👍, 💯, 🔥, 👀, ✅)"`
+	MySlug    string `json:"my_slug,omitempty" jsonschema:"Agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
 type TeamPollArgs struct {
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug so tagged_count can be computed. Defaults to WUPHF_AGENT_SLUG."`
@@ -302,6 +308,11 @@ func Run(ctx context.Context) error {
 	}, handleTeamBroadcast)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_react",
+		Description: "React to a message with an emoji instead of posting a full reply. Use this when you agree with what someone said and have nothing new to add. Common reactions: 👍 (agree), 💯 (strongly agree), 🔥 (great idea), 👀 (noted/watching), ✅ (done/confirmed).",
+	}, handleTeamReact)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_poll",
 		Description: "Read recent messages from the team channel so you stay in sync before replying.",
 	}, handleTeamPoll)
@@ -432,6 +443,33 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	return textResult(text), nil, nil
 }
 
+func handleTeamReact(ctx context.Context, _ *mcp.CallToolRequest, args TeamReactArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	if args.MessageID == "" || args.Emoji == "" {
+		return toolError(fmt.Errorf("message_id and emoji are required")), nil, nil
+	}
+
+	var result struct {
+		OK        bool `json:"ok"`
+		Duplicate bool `json:"duplicate"`
+	}
+	err = brokerPostJSON(ctx, "/reactions", map[string]any{
+		"message_id": args.MessageID,
+		"emoji":      args.Emoji,
+		"from":       slug,
+	}, &result)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	if result.Duplicate {
+		return textResult(fmt.Sprintf("Already reacted %s to %s.", args.Emoji, args.MessageID)), nil, nil
+	}
+	return textResult(fmt.Sprintf("Reacted %s to %s as @%s.", args.Emoji, args.MessageID, slug)), nil, nil
+}
+
 func fetchBroadcastContext(ctx context.Context, channel, mySlug string) ([]brokerMessage, []brokerTaskSummary, error) {
 	values := url.Values{}
 	values.Set("channel", channel)
@@ -451,42 +489,32 @@ func fetchBroadcastContext(ctx context.Context, channel, mySlug string) ([]broke
 }
 
 func suppressBroadcastReason(slug, content, replyTo string, messages []brokerMessage, tasks []brokerTaskSummary) string {
+	// Never suppress CEO.
 	if strings.TrimSpace(slug) == "" || slug == "ceo" {
 		return ""
 	}
-	myDomain := inferOfficeAgentDomain(slug)
+	// Never suppress if the agent is explicitly tagged or owns the task.
 	latest := latestRelevantMessage(messages, replyTo)
 	latestDomain := inferOfficeTextDomain(content)
 	if latestDomain == "general" && latest != nil {
 		latestDomain = inferOfficeTextDomain(latest.Title + " " + latest.Content)
 	}
-	explicitNeed := latest != nil && containsSlug(latest.Tagged, slug)
-	ownsTask := ownsRelevantTask(slug, replyTo, latestDomain, tasks)
-
-	if replyTo != "" && latest != nil && latest.From != slug {
-		switch latest.From {
-		case "ceo":
-			if !explicitNeed && !ownsTask {
-				return "the CEO already steered this thread"
-			}
-		case "you", "human", "nex":
-			// still fair game if domain matches
-		default:
-			if !explicitNeed && !ownsTask {
-				return "someone else already covered this thread"
+	if latest != nil && (containsSlug(latest.Tagged, slug) || containsSlug(latest.Tagged, "all")) {
+		return ""
+	}
+	if ownsRelevantTask(slug, replyTo, latestDomain, tasks) {
+		return ""
+	}
+	// If the agent already posted in this thread, don't suppress follow-ups.
+	if replyTo != "" {
+		for _, msg := range messages {
+			if msg.From == slug && (msg.ReplyTo == replyTo || msg.ID == replyTo) {
+				return ""
 			}
 		}
 	}
-
-	if explicitNeed || ownsTask {
-		return ""
-	}
-	if latestDomain != "" && latestDomain != "general" && myDomain != latestDomain {
-		return "this is outside your domain"
-	}
-	if latestDomain == "general" {
-		return "there is no clear need for your role yet"
-	}
+	// Allow everything else — agents should share viewpoints.
+	// The specialist prompt tells them to use reactions for agreement instead.
 	return ""
 }
 

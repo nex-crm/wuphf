@@ -147,18 +147,24 @@ type channelHealthMsg struct {
 	OneOnOneAgent string
 }
 
+type brokerReaction struct {
+	Emoji string `json:"emoji"`
+	From  string `json:"from"`
+}
+
 type brokerMessage struct {
-	ID          string   `json:"id"`
-	From        string   `json:"from"`
-	Kind        string   `json:"kind,omitempty"`
-	Source      string   `json:"source,omitempty"`
-	SourceLabel string   `json:"source_label,omitempty"`
-	EventID     string   `json:"event_id,omitempty"`
-	Title       string   `json:"title,omitempty"`
-	Content     string   `json:"content"`
-	Tagged      []string `json:"tagged"`
-	ReplyTo     string   `json:"reply_to"`
-	Timestamp   string   `json:"timestamp"`
+	ID          string           `json:"id"`
+	From        string           `json:"from"`
+	Kind        string           `json:"kind,omitempty"`
+	Source      string           `json:"source,omitempty"`
+	SourceLabel string           `json:"source_label,omitempty"`
+	EventID     string           `json:"event_id,omitempty"`
+	Title       string           `json:"title,omitempty"`
+	Content     string           `json:"content"`
+	Tagged      []string         `json:"tagged"`
+	ReplyTo     string           `json:"reply_to"`
+	Timestamp   string           `json:"timestamp"`
+	Reactions   []brokerReaction `json:"reactions,omitempty"`
 }
 
 type channelMember struct {
