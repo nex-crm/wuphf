@@ -18,8 +18,8 @@ func TestBuildTeamLeadPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "@be") {
 		t.Error("expected prompt to contain @be")
 	}
-	if !strings.Contains(prompt, "delegate") || !strings.Contains(prompt, "MUST delegate") {
-		t.Error("expected delegation instructions in prompt")
+	if !strings.Contains(prompt, "do NOT need to forward") {
+		t.Error("expected broadcast instructions in prompt")
 	}
 	if !strings.Contains(prompt, "Never invent external teammates") {
 		t.Error("expected prompt to forbid invented teammates")
