@@ -2038,6 +2038,15 @@ func (m channelModel) View() string {
 		channelHeader += "\n" + usageLine
 	}
 	headerH := lipgloss.Height(channelHeader)
+	runtimeStrip := ""
+	if m.activeApp == officeAppMessages || m.isOneOnOne() {
+		focusSlug := ""
+		if m.isOneOnOne() {
+			focusSlug = m.oneOnOneAgentSlug()
+		}
+		runtimeStrip = renderRuntimeStrip(m.members, m.tasks, m.requests, m.actions, mainW-4, focusSlug)
+	}
+	runtimeH := lipgloss.Height(runtimeStrip)
 
 	// Composer
 	typingAgents := typingAgentsFromMembers(m.members)
@@ -2079,7 +2088,7 @@ func (m channelModel) View() string {
 	initH := lipgloss.Height(initPanel)
 
 	// Message area height
-	msgH := layout.ContentH - headerH - composerH - interviewH - memberDraftH - doctorH - initH - 1 // 1 for status bar
+	msgH := layout.ContentH - headerH - runtimeH - composerH - interviewH - memberDraftH - doctorH - initH - 1 // 1 for status bar
 	if msgH < 1 {
 		msgH = 1
 	}
@@ -2113,7 +2122,11 @@ func (m channelModel) View() string {
 	msgPanel := mainPanelStyle(mainW, msgH).Render(strings.Join(visible, "\n"))
 
 	// Assemble main column
-	mainParts := []string{channelHeader, msgPanel}
+	mainParts := []string{channelHeader}
+	if runtimeStrip != "" {
+		mainParts = append(mainParts, runtimeStrip)
+	}
+	mainParts = append(mainParts, msgPanel)
 	if interviewCard != "" {
 		mainParts = append(mainParts, interviewCard)
 	}

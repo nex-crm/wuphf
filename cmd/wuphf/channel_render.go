@@ -110,10 +110,6 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 
 		if msg.Kind == "automation" || msg.From == "nex" {
 			lines = append(lines, renderedLine{Text: ""})
-			headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				headerPrefix += "↳ "
-			}
 			source := msg.Source
 			if source == "" {
 				source = "context graph"
@@ -124,24 +120,14 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 			if tm.Depth > 0 {
 				meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
 			}
-			appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s", headerPrefix, agentAvatar(msg.From), nameStyle.Render(displayName(msg.From)), mutedStyle.Render(ts), mutedStyle.Render(meta)))
-
-			prefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				prefix += ruleStyle.Render("┆") + " "
-			} else {
-				prefix += ruleStyle.Render("│") + " "
-			}
-			if msg.Title != "" {
-				appendWrappedLine(prefix + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(msg.Title))
-			}
 			textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-			for _, paragraph := range strings.Split(textPart, "\n") {
-				appendWrappedLine(prefix + paragraph)
+			titleLine := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(fallbackString(msg.Title, "Automation update"))
+			for _, lineText := range renderRuntimeEventCard(contentWidth, subtlePill("automation", "#F8FAFC", "#334155")+" "+titleLine, meta, "#7C3AED", strings.Split(textPart, "\n")) {
+				lines = append(lines, renderedLine{Text: "  " + lineText})
 			}
 			if a2uiRendered != "" {
 				for _, lineText := range strings.Split(a2uiRendered, "\n") {
-					lines = append(lines, renderedLine{Text: prefix + lineText})
+					lines = append(lines, renderedLine{Text: "    " + lineText})
 				}
 			}
 			continue
@@ -149,18 +135,22 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 
 		if strings.HasPrefix(msg.Content, "[STATUS]") {
 			status := strings.TrimPrefix(msg.Content, "[STATUS] ")
-			statusPrefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				statusPrefix += "↳ "
+			titleLine := subtlePill("status", "#E2E8F0", "#334155") + " " + nameStyle.Render("@"+msg.From) + " " + statusStyle.Render("is "+status)
+			for _, lineText := range renderRuntimeEventCard(contentWidth, titleLine, mutedStyle.Render(ts), "#475569", nil) {
+				lines = append(lines, renderedLine{Text: "  " + lineText})
 			}
-			appendWrappedLine(fmt.Sprintf("%s%s  %s %s", statusPrefix, mutedStyle.Render(ts), nameStyle.Render("@"+msg.From), statusStyle.Render("is "+status)))
 			continue
 		}
 
 		// System/routing messages — render as subtle inline updates
 		if msg.From == "system" && (msg.Kind == "routing" || msg.Kind == "stage") {
-			sysStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7C7C85")).Italic(true)
-			appendWrappedLine("  " + sysStyle.Render("  → "+msg.Content))
+			label := "routing"
+			if msg.Kind == "stage" {
+				label = "stage"
+			}
+			for _, lineText := range renderRuntimeEventCard(contentWidth, subtlePill(label, "#E5E7EB", "#334155")+" "+mutedStyle.Render(ts), msg.Content, "#475569", nil) {
+				lines = append(lines, renderedLine{Text: "  " + lineText})
+			}
 			continue
 		}
 

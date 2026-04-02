@@ -160,10 +160,13 @@ func buildLiveWorkLines(members []channelMember, tasks []channelTask, actions []
 			if strings.TrimSpace(name) == "" {
 				name = displayName(member.Slug)
 			}
-			header := "  " + activityPill(summary.Activity) + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(nameColor)).Render(name)
-			lines = append(lines, renderedLine{Text: header})
-			if summary.Detail != "" {
-				lines = append(lines, renderedLine{Text: "    " + mutedText(summary.Detail)})
+			header := activityPill(summary.Activity) + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(nameColor)).Render(name)
+			body := summary.Detail
+			if body == "" {
+				body = "Working quietly"
+			}
+			for _, line := range renderRuntimeEventCard(contentWidth, header, body, "#334155", nil) {
+				lines = append(lines, renderedLine{Text: line})
 			}
 		}
 	}
@@ -173,7 +176,6 @@ func buildLiveWorkLines(members []channelMember, tasks []channelTask, actions []
 		lines = append(lines, renderedLine{Text: ""})
 		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Recent external actions")})
 		for _, action := range recent {
-			lines = append(lines, renderedLine{Text: "  " + actionStatePill(action.Kind) + " " + lipgloss.NewStyle().Bold(true).Render(action.Summary)})
 			metaParts := []string{}
 			if actor := strings.TrimSpace(action.Actor); actor != "" {
 				metaParts = append(metaParts, "@"+actor)
@@ -184,8 +186,9 @@ func buildLiveWorkLines(members []channelMember, tasks []channelTask, actions []
 			if created := strings.TrimSpace(action.CreatedAt); created != "" {
 				metaParts = append(metaParts, prettyRelativeTime(created))
 			}
-			if len(metaParts) > 0 {
-				lines = append(lines, renderedLine{Text: "    " + mutedText(strings.Join(metaParts, " · "))})
+			title := actionStatePill(action.Kind) + " " + lipgloss.NewStyle().Bold(true).Render(action.Summary)
+			for _, line := range renderRuntimeEventCard(contentWidth, title, strings.Join(metaParts, " · "), "#1E3A8A", nil) {
+				lines = append(lines, renderedLine{Text: line})
 			}
 		}
 	}
@@ -210,15 +213,123 @@ func buildDirectExecutionLines(actions []channelAction, focusSlug string, conten
 		if when == "" {
 			when = prettyRelativeTime(action.CreatedAt)
 		}
-		lines = append(lines, renderedLine{
-			Text: "  " + subtlePill(when, "#E2E8F0", "#1E293B") + " " + actionStatePill(action.Kind) + " " + lipgloss.NewStyle().Bold(true).Render(title),
-		})
 		meta := executionMetaLine(action)
-		if meta != "" {
-			lines = append(lines, renderedLine{Text: "    " + mutedText(meta)})
+		header := subtlePill(when, "#E2E8F0", "#1E293B") + " " + actionStatePill(action.Kind) + " " + lipgloss.NewStyle().Bold(true).Render(title)
+		for _, line := range renderRuntimeEventCard(contentWidth, header, meta, "#1D4ED8", nil) {
+			lines = append(lines, renderedLine{Text: line})
 		}
 	}
 	return lines
+}
+
+func renderRuntimeStrip(members []channelMember, tasks []channelTask, requests []channelInterview, actions []channelAction, width int, focusSlug string) string {
+	if width < 32 {
+		return ""
+	}
+	now := time.Now()
+	activeDetails := []string{}
+	blockedCount := 0
+	waitingHuman := 0
+	for _, member := range members {
+		if member.Slug == "you" || member.Slug == "human" {
+			continue
+		}
+		if focusSlug != "" && member.Slug != focusSlug {
+			continue
+		}
+		summary := deriveMemberRuntimeSummary(member, tasks, now)
+		if summary.Activity.Label == "blocked" {
+			blockedCount++
+		}
+		if summary.Activity.Label == "lurking" && summary.Detail == "" {
+			continue
+		}
+		name := member.Name
+		if strings.TrimSpace(name) == "" {
+			name = displayName(member.Slug)
+		}
+		detail := summary.Detail
+		if detail == "" {
+			detail = summary.Activity.Label
+		}
+		activeDetails = append(activeDetails, name+" · "+detail)
+	}
+	for _, req := range requests {
+		if req.Blocking || req.Required {
+			waitingHuman++
+		}
+	}
+
+	var pills []string
+	if len(activeDetails) > 0 {
+		pills = append(pills, subtlePill(fmt.Sprintf("%d active", len(activeDetails)), "#E2E8F0", "#334155"))
+	}
+	if blockedCount > 0 {
+		pills = append(pills, accentPill(fmt.Sprintf("%d blocked", blockedCount), "#B91C1C"))
+	}
+	if waitingHuman > 0 {
+		pills = append(pills, accentPill(fmt.Sprintf("%d need you", waitingHuman), "#B45309"))
+	}
+	if latest, ok := latestRelevantAction(actions, focusSlug); ok {
+		label := describeActionState(latest)
+		if len(label) > 52 {
+			label = label[:49] + "..."
+		}
+		pills = append(pills, subtlePill(label, "#D6E4FF", "#1E3A8A"))
+	}
+	if len(pills) == 0 && len(activeDetails) == 0 {
+		return ""
+	}
+
+	detail := "Quiet right now."
+	if len(activeDetails) > 0 {
+		if focusSlug != "" {
+			detail = activeDetails[0]
+		} else {
+			limit := minInt(2, len(activeDetails))
+			detail = strings.Join(activeDetails[:limit], "   ·   ")
+		}
+	}
+
+	line1 := strings.Join(pills, " ")
+	cardStyle := lipgloss.NewStyle().
+		Width(width).
+		Border(lipgloss.NormalBorder()).
+		BorderForeground(lipgloss.Color("#2F3946")).
+		Background(lipgloss.Color("#181A20")).
+		Padding(0, 1)
+	return cardStyle.Render(line1 + "\n" + mutedText(detail))
+}
+
+func renderRuntimeEventCard(width int, title, body, accent string, extra []string) []string {
+	if width < 28 {
+		return []string{"  " + title, "    " + body}
+	}
+	lines := []string{title}
+	if strings.TrimSpace(body) != "" {
+		lines = append(lines, mutedText(body))
+	}
+	for _, line := range extra {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines = append(lines, mutedText(line))
+	}
+	card := lipgloss.NewStyle().
+		Width(width-2).
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderForeground(lipgloss.Color(accent)).
+		Background(lipgloss.Color("#16181E")).
+		Padding(0, 1).
+		Render(strings.Join(lines, "\n"))
+	return strings.Split(card, "\n")
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func recentDirectExecutionActions(actions []channelAction, focusSlug string, limit int) []channelAction {
