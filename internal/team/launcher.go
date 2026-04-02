@@ -773,6 +773,17 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 
 	switch {
 	case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
+		// @all: notify every agent immediately, including lead.
+		if containsSlug(msg.Tagged, "all") {
+			addImmediate(lead)
+			for _, slug := range slugs {
+				if slug == lead || slug == msg.From {
+					continue
+				}
+				addImmediate(slug)
+			}
+			break
+		}
 		// Direct routing: if user tags specific agents, route to them directly
 		// without CEO bottleneck. CEO only gets untagged or multi-tagged messages.
 		directRouted := false
