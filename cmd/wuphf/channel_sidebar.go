@@ -564,7 +564,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 			}
 			lines = append(lines, sidebarPlainRow(line+strings.Repeat(" ", pad)+meta, width))
 		} else {
-			// Full mode: first face line shares the row with name/activity.
+			// Full mode: two dense rows per member, using the second row for real detail.
 			const avatarW = 4
 			avatarTop := ""
 			avatarBottom := ""
@@ -587,15 +587,26 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 				pad = 1
 			}
 			lines = append(lines, sidebarPlainRow(linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(sidebarLabel), width))
-			if avatarBottom != "" {
-				lines = append(lines, sidebarPlainRow(avatarBottom, width))
+			detail := strings.TrimSpace(summary.Detail)
+			if detail == "" {
+				detail = strings.TrimSpace(character.Bubble)
 			}
-			if character.Bubble != "" {
+			if detail == "" {
+				detail = "No updates yet."
+			}
+			detail = truncateLabel(detail, maxInt(12, innerW-avatarW-2))
+			secondLine := avatarBottom
+			if secondLine == "" {
+				secondLine = strings.Repeat(" ", avatarW)
+			}
+			secondLine = secondLine + " " + memberMetaStyle.Render(detail)
+			lines = append(lines, sidebarPlainRow(secondLine, width))
+			if character.Bubble != "" && detail != character.Bubble {
 				for _, bubbleLine := range renderThoughtBubble(character.Bubble, innerW-2) {
 					lines = append(lines, sidebarPlainRow(bubbleLine, width))
+					break
 				}
 			}
-			lines = append(lines, "")
 		}
 	}
 

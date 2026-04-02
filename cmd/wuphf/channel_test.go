@@ -783,7 +783,6 @@ func TestRenderSidebarFallsBackToOfficeRosterWhenPeopleListIsEmpty(t *testing.T)
 }
 
 func TestRenderSidebarShowsTaskDrivenWorkingState(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	sidebar := stripANSI(renderSidebar(
 		[]channelInfo{{Slug: "general", Name: "general"}},
 		[]channelMember{{
@@ -811,8 +810,48 @@ func TestRenderSidebarShowsTaskDrivenWorkingState(t *testing.T) {
 	if !strings.Contains(sidebar, "working") {
 		t.Fatalf("expected task-driven working activity, got %q", sidebar)
 	}
-	if !strings.Contains(sidebar, "On landing page polish.") {
-		t.Fatalf("expected task-driven bubble, got %q", sidebar)
+	if !strings.Contains(sidebar, "Working on landing page polish") {
+		t.Fatalf("expected task detail line, got %q", sidebar)
+	}
+}
+
+func TestChannelViewShowsRuntimeStripForOfficeMessages(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.activeApp = officeAppMessages
+	m.members = []channelMember{{
+		Slug:         "fe",
+		Name:         "Frontend Engineer",
+		LiveActivity: "go test ./cmd/wuphf",
+	}}
+	m.tasks = []channelTask{{
+		ID:      "task-1",
+		Channel: "general",
+		Title:   "landing page polish",
+		Owner:   "fe",
+		Status:  "in_progress",
+	}}
+	m.requests = []channelInterview{{
+		ID:       "req-1",
+		From:     "ceo",
+		Question: "Ship now?",
+		Blocking: true,
+	}}
+	m.actions = []channelAction{{
+		ID:        "action-1",
+		Kind:      "external_action_executed",
+		Actor:     "fe",
+		Summary:   "Sent customer follow-up",
+		CreatedAt: "2026-04-02T10:01:00Z",
+	}}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "1 active") || !strings.Contains(view, "1 need you") {
+		t.Fatalf("expected runtime strip summary, got %q", view)
+	}
+	if !strings.Contains(view, "Frontend Engineer · Working on landing page polish") {
+		t.Fatalf("expected runtime strip detail, got %q", view)
 	}
 }
 
@@ -834,7 +873,7 @@ func TestChannelViewRendersNexAutomationMessage(t *testing.T) {
 	}
 
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "Nex") || !strings.Contains(view, "automated") || !strings.Contains(view, "Context alert") {
+	if !strings.Contains(view, "automation") || !strings.Contains(view, "Context alert") || !strings.Contains(view, "Important: Acme mentioned budget pressure") {
 		t.Fatalf("expected Nex automation rendering, got %q", view)
 	}
 }
