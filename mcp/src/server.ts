@@ -17,12 +17,15 @@ import { registerPlaybookTools } from "./tools/playbooks.js";
 import { registerBriefSyncTools } from "./tools/brief-sync.js";
 import { registerSkillTools } from "./tools/skills.js";
 import { registerSkillSyncTools } from "./tools/skill-sync.js";
-export function createServer(apiKey) {
+
+export function createServer(apiKey?: string): McpServer {
   const server = new McpServer({
     name: "wuphf",
-    version: "0.1.0"
+    version: "0.1.0",
   });
+
   const client = new NexApiClient(apiKey);
+
   registerRegistrationTools(server, client);
   registerContextTools(server, client);
   registerSearchTools(server, client);
@@ -40,5 +43,6 @@ export function createServer(apiKey) {
   registerBriefSyncTools(server, client);
   registerSkillTools(server, client);
   registerSkillSyncTools(server, client);
+
   return server;
 }
