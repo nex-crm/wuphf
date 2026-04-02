@@ -12,7 +12,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-func TestSuppressBroadcastReasonBlocksOutOfDomainReply(t *testing.T) {
+func TestSuppressBroadcastReasonAllowsViewpoints(t *testing.T) {
 	reason := suppressBroadcastReason(
 		"fe",
 		"Here is my thought.",
@@ -22,8 +22,8 @@ func TestSuppressBroadcastReasonBlocksOutOfDomainReply(t *testing.T) {
 		},
 		nil,
 	)
-	if reason == "" {
-		t.Fatal("expected FE reply to be suppressed for marketing-only work")
+	if reason != "" {
+		t.Fatalf("expected FE reply to be allowed (agents should share viewpoints), got %q", reason)
 	}
 }
 
@@ -44,7 +44,7 @@ func TestSuppressBroadcastReasonAllowsOwnedTaskReply(t *testing.T) {
 	}
 }
 
-func TestSuppressBroadcastReasonBlocksAfterUntargetedCEOReply(t *testing.T) {
+func TestSuppressBroadcastReasonAllowsAfterCEOReply(t *testing.T) {
 	reason := suppressBroadcastReason(
 		"fe",
 		"I can take this too.",
@@ -55,8 +55,8 @@ func TestSuppressBroadcastReasonBlocksAfterUntargetedCEOReply(t *testing.T) {
 		},
 		nil,
 	)
-	if reason == "" {
-		t.Fatal("expected untargeted post-CEO specialist reply to be suppressed")
+	if reason != "" {
+		t.Fatalf("expected FE reply to be allowed after CEO (agents share viewpoints), got %q", reason)
 	}
 }
 

@@ -201,6 +201,9 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 				lines = append(lines, renderedLine{Text: prefix + lineText})
 			}
 		}
+		if reactionLine := renderReactions(msg.Reactions); reactionLine != "" {
+			appendWrappedLine(prefix + reactionLine)
+		}
 		if tm.Collapsed && tm.HiddenReplies > 0 {
 			var coloredNames []string
 			for _, p := range tm.ThreadParticipants {
@@ -231,6 +234,32 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 	}
 
 	return lines
+}
+
+func renderReactions(reactions []brokerReaction) string {
+	if len(reactions) == 0 {
+		return ""
+	}
+	// Group by emoji: 👍 @ceo @pm
+	groups := make(map[string][]string)
+	order := make([]string, 0)
+	for _, r := range reactions {
+		if _, exists := groups[r.Emoji]; !exists {
+			order = append(order, r.Emoji)
+		}
+		groups[r.Emoji] = append(groups[r.Emoji], r.From)
+	}
+	pillStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#2C2D31")).
+		Foreground(lipgloss.Color("#D1D2D3")).
+		Padding(0, 1)
+	var parts []string
+	for _, emoji := range order {
+		agents := groups[emoji]
+		label := emoji + " " + fmt.Sprintf("%d", len(agents))
+		parts = append(parts, pillStyle.Render(label))
+	}
+	return strings.Join(parts, " ")
 }
 
 func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, agentName string) []renderedLine {
