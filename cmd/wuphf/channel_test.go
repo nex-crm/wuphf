@@ -280,6 +280,56 @@ func TestChannelViewUsesOneOnOneChrome(t *testing.T) {
 	}
 }
 
+func TestOneOnOneViewShowsExecutionTimeline(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "ceo"
+	m.sidebarCollapsed = true
+	m.refreshSlashCommands()
+	m.actions = []channelAction{
+		{ID: "action-1", Kind: "external_action_planned", Source: "composio", Actor: "ceo", Summary: "Dry-run Gmail send ready.", RelatedID: "GMAIL_SEND_EMAIL", CreatedAt: "2026-04-02T10:00:00Z"},
+		{ID: "action-2", Kind: "external_action_executed", Source: "composio", Actor: "ceo", Summary: "Sent the test email.", RelatedID: "GMAIL_SEND_EMAIL", CreatedAt: "2026-04-02T10:01:00Z"},
+	}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Execution timeline") || !strings.Contains(view, "Sent the test email.") {
+		t.Fatalf("expected 1:1 execution timeline, got %q", view)
+	}
+	if !strings.Contains(view, "completed") || !strings.Contains(view, "planned") {
+		t.Fatalf("expected action state pills in 1:1 timeline, got %q", view)
+	}
+}
+
+func TestOneOnOneStatusBarShowsRuntimeSummary(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "ceo"
+	m.sidebarCollapsed = true
+	m.refreshSlashCommands()
+	m.brokerConnected = true
+	m.members = []channelMember{{
+		Slug:         "ceo",
+		Name:         "CEO",
+		LiveActivity: "go test ./cmd/wuphf",
+	}}
+	m.tasks = []channelTask{{
+		ID:      "task-1",
+		Channel: "general",
+		Title:   "launch review",
+		Owner:   "ceo",
+		Status:  "in_progress",
+	}}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Ctrl+J newline") || !strings.Contains(view, "Running tests") {
+		t.Fatalf("expected richer 1:1 status text, got %q", view)
+	}
+}
+
 func TestOneOnOneModeBlocksOfficeCommands(t *testing.T) {
 	m := newChannelModel(false)
 	m.sessionMode = team.SessionModeOneOnOne
@@ -891,6 +941,94 @@ func TestSlashAutocompleteShowsAllCommandsOnSlash(t *testing.T) {
 	if !strings.Contains(view, "/init") || !strings.Contains(view, "/tasks") {
 		t.Fatalf("expected command list in autocomplete, got %q", view)
 	}
+	if !strings.Contains(view, "setup") || !strings.Contains(view, "navigate") {
+		t.Fatalf("expected command categories in autocomplete, got %q", view)
+	}
+}
+
+func TestRefreshSlashCommandsPreservesAutocompleteQuery(t *testing.T) {
+	m := newChannelModel(false)
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
+	m.skills = []channelSkill{{Name: "daily-digest", Description: "Run the digest", Status: "active"}}
+
+	m.refreshSlashCommands()
+
+	if !m.autocomplete.IsVisible() {
+		t.Fatal("expected slash autocomplete to remain visible")
+	}
+	view := stripANSI(m.autocomplete.View())
+	if !strings.Contains(view, "/integrate") || !strings.Contains(view, "/daily-digest") {
+		t.Fatalf("expected refreshed command list, got %q", view)
+	}
+}
+
+func TestCtrlJInsertsNewlineInComposer(t *testing.T) {
+	m := newChannelModel(false)
+	m.input = []rune("hello")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	got := next.(channelModel)
+
+	if string(got.input) != "hello\n" {
+		t.Fatalf("expected newline in composer, got %q", string(got.input))
+	}
+}
+
+func TestCtrlJInsertsNewlineInThreadComposer(t *testing.T) {
+	m := newChannelModel(false)
+	m.threadPanelOpen = true
+	m.threadPanelID = "msg-1"
+	m.focus = focusThread
+	m.threadInput = []rune("hello")
+	m.threadInputPos = len(m.threadInput)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	got := next.(channelModel)
+
+	if string(got.threadInput) != "hello\n" {
+		t.Fatalf("expected newline in thread composer, got %q", string(got.threadInput))
+	}
+}
+
+func TestDoctorCommandStartsReadinessCheck(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, cmd := m.runCommand("/doctor", "")
+	if cmd == nil {
+		t.Fatal("expected /doctor to emit a follow-up command")
+	}
+	got := next.(channelModel)
+	if got.notice != "Checking readiness..." {
+		t.Fatalf("expected doctor notice, got %q", got.notice)
+	}
+}
+
+func TestChannelDoctorDoneShowsDoctorCard(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+
+	next, _ := m.Update(channelDoctorDoneMsg{report: channelDoctorReport{
+		GeneratedAt: time.Now(),
+		Checks: []doctorCheck{{
+			Label:    "Nex API key",
+			Severity: doctorWarn,
+			Detail:   "Missing WUPHF/Nex API key.",
+			NextStep: "Run /init and paste your WUPHF API key.",
+		}},
+	}})
+	got := next.(channelModel)
+
+	if got.doctor == nil {
+		t.Fatal("expected doctor report to be visible")
+	}
+	view := stripANSI(got.View())
+	if !strings.Contains(view, "Doctor") || !strings.Contains(view, "Nex API key") {
+		t.Fatalf("expected doctor card in view, got %q", view)
+	}
 }
 
 func TestSlashAutocompleteEnterSubmitsSelectedCommand(t *testing.T) {
@@ -1418,6 +1556,31 @@ func TestChannelErrorsSurfaceInNotice(t *testing.T) {
 	}
 }
 
+func TestChannelResetDoneImmediatelyRehydratesDirectMode(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+
+	next, _ := m.Update(channelResetDoneMsg{
+		notice:        "Direct 1:1 with Backend Engineer is ready.",
+		sessionMode:   team.SessionModeOneOnOne,
+		oneOnOneAgent: "be",
+	})
+	got := next.(channelModel)
+
+	if !got.isOneOnOne() {
+		t.Fatal("expected model to enter 1:1 mode immediately")
+	}
+
+	view := stripANSI(got.View())
+	if !strings.Contains(view, "Direct 1:1 with Backend Engineer.") {
+		t.Fatalf("expected direct-session empty state, got %q", view)
+	}
+	if strings.Contains(view, "Welcome to The WUPHF Office.") {
+		t.Fatalf("expected office welcome to disappear in direct mode, got %q", view)
+	}
+}
+
 func TestChannelViewShowsMessageIDInMeta(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
@@ -1620,5 +1783,7 @@ func TestMain(m *testing.M) {
 	// Use a temp home dir so tests don't read the real ~/.wuphf/config.json
 	tmp, _ := os.MkdirTemp("", "wuphf-test-*")
 	os.Setenv("HOME", tmp)
+	os.Setenv("WUPHF_API_KEY", "test-key")
+	os.Unsetenv("WUPHF_NO_NEX")
 	os.Exit(m.Run())
 }

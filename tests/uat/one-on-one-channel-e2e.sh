@@ -195,7 +195,7 @@ send_ctrl_u
 send_raw "/channels"
 send_enter
 sleep 2
-assert_screen_contains "1:1 mode disables office, channel, agent, task, and thread commands." "phase1-blocked"
+assert_screen_contains "1:1 mode disables office collaboration commands." "phase1-blocked"
 send_ctrl_u
 
 echo "--- Phase 2: Invalid agent falls back to CEO ---"
@@ -236,7 +236,7 @@ send_enter
 wait_for_health "1o1" "pm" "phase4-health"
 wait_for_pane_count 2 "phase4-panes"
 assert_screen_contains "1:1 with Product Manager" "phase4-screen"
-assert_screen_contains "Direct session reset. Agent pane reloaded in place." "phase4-screen"
+assert_screen_contains "Direct 1:1 with Product Manager." "phase4-screen"
 
 echo "--- Phase 5: Disable 1:1 mode from the picker ---"
 send_raw "/1o1"
