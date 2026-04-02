@@ -25,6 +25,7 @@ const (
 
 // agentColorMap maps agent slugs to their brand colors.
 var agentColorMap = map[string]string{
+	"all":      "#FFFFFF",
 	"ceo":      "#EAB308",
 	"pm":       "#22C55E",
 	"fe":       "#3B82F6",
