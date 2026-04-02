@@ -76,15 +76,15 @@ type channelSchedulerMsg struct {
 }
 
 type channelSkill struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Content     string   `json:"content"`
-	CreatedBy   string   `json:"created_by"`
-	Channel     string   `json:"channel"`
-	Tags        []string `json:"tags"`
-	Trigger     string   `json:"trigger"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Title               string   `json:"title"`
+	Description         string   `json:"description"`
+	Content             string   `json:"content"`
+	CreatedBy           string   `json:"created_by"`
+	Channel             string   `json:"channel"`
+	Tags                []string `json:"tags"`
+	Trigger             string   `json:"trigger"`
 	WorkflowProvider    string   `json:"workflow_provider"`
 	WorkflowKey         string   `json:"workflow_key"`
 	WorkflowDefinition  string   `json:"workflow_definition"`
@@ -94,10 +94,10 @@ type channelSkill struct {
 	RelayEventTypes     []string `json:"relay_event_types"`
 	LastExecutionAt     string   `json:"last_execution_at"`
 	LastExecutionStatus string   `json:"last_execution_status"`
-	UsageCount  int      `json:"usage_count"`
-	Status      string   `json:"status"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	UsageCount          int      `json:"usage_count"`
+	Status              string   `json:"status"`
+	CreatedAt           string   `json:"created_at"`
+	UpdatedAt           string   `json:"updated_at"`
 }
 
 type channelSkillsMsg struct {
@@ -343,8 +343,10 @@ type channelPostDoneMsg struct {
 type channelInterviewAnswerDoneMsg struct{ err error }
 type channelInterruptDoneMsg struct{ err error }
 type channelResetDoneMsg struct {
-	err    error
-	notice string
+	err           error
+	notice        string
+	sessionMode   string
+	oneOnOneAgent string
 }
 type channelResetDMDoneMsg struct {
 	err     error
@@ -428,31 +430,32 @@ func newBrokerRequest(method, url string, body io.Reader) (*http.Request, error)
 }
 
 var channelSlashCommands = []tui.SlashCommand{
-	{Name: "init", Description: "Run setup"},
-	{Name: "integrate", Description: "Connect an integration"},
-	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)"},
-	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode"},
-	{Name: "messages", Description: "Show the main office feed"},
-	{Name: "tasks", Description: "Show active work in this channel"},
-	{Name: "channels", Description: "Browse and manage channels"},
-	{Name: "channel", Description: "Create or remove a channel"},
-	{Name: "agents", Description: "Manage channel agents"},
-	{Name: "agent", Description: "Add, remove, enable, or disable an agent"},
-	{Name: "agent prompt", Description: "Generate a new agent from a prompt"},
-	{Name: "task", Description: "Claim, release, or complete a task"},
-	{Name: "policies", Description: "Show team policies and rules"},
-	{Name: "calendar", Description: "Show the office schedule and team calendars"},
-	{Name: "queue", Description: "Alias for /calendar"},
-	{Name: "skills", Description: "Show available skills"},
-	{Name: "skill", Description: "Create, invoke, or manage a skill"},
-	{Name: "reply", Description: "Reply in thread by message ID"},
-	{Name: "threads", Description: "Browse and manage threads"},
-	{Name: "expand", Description: "Expand a collapsed thread"},
-	{Name: "collapse", Description: "Collapse a thread"},
-	{Name: "cancel", Description: "Exit reply/setup mode"},
-	{Name: "reset", Description: "Reset channel and agents"},
-	{Name: "reset-dm", Description: "Clear direct messages with an agent"},
-	{Name: "quit", Description: "Exit WUPHF"},
+	{Name: "init", Description: "Run setup", Category: "setup"},
+	{Name: "doctor", Description: "Check readiness, integrations, and runtime health", Category: "setup"},
+	{Name: "integrate", Description: "Connect an integration", Category: "setup"},
+	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)", Category: "setup"},
+	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode", Category: "session"},
+	{Name: "messages", Description: "Show the main office feed", Category: "navigate"},
+	{Name: "tasks", Description: "Show active work in this channel", Category: "navigate"},
+	{Name: "channels", Description: "Browse and manage channels", Category: "navigate"},
+	{Name: "channel", Description: "Create or remove a channel", Category: "channels"},
+	{Name: "agents", Description: "Manage channel agents", Category: "people"},
+	{Name: "agent", Description: "Add, remove, enable, or disable an agent", Category: "people"},
+	{Name: "agent prompt", Description: "Generate a new agent from a prompt", Category: "people"},
+	{Name: "task", Description: "Claim, release, or complete a task", Category: "work"},
+	{Name: "policies", Description: "Show signals, decisions, external actions, and watchdogs", Category: "navigate"},
+	{Name: "calendar", Description: "Show the office schedule and team calendars", Category: "navigate"},
+	{Name: "queue", Description: "Alias for /calendar", Category: "navigate"},
+	{Name: "skills", Description: "Show available skills", Category: "navigate"},
+	{Name: "skill", Description: "Create, invoke, or manage a skill", Category: "work"},
+	{Name: "reply", Description: "Reply in thread by message ID", Category: "conversation"},
+	{Name: "threads", Description: "Browse and manage threads", Category: "conversation"},
+	{Name: "expand", Description: "Expand a collapsed thread", Category: "conversation"},
+	{Name: "collapse", Description: "Collapse a thread", Category: "conversation"},
+	{Name: "cancel", Description: "Exit reply/setup/doctor mode", Category: "conversation"},
+	{Name: "reset", Description: "Reset channel and agents", Category: "session"},
+	{Name: "reset-dm", Description: "Clear direct messages with an agent", Category: "session"},
+	{Name: "quit", Description: "Exit WUPHF", Category: "session"},
 }
 
 // oneOnOneBlacklist lists command names blocked in 1:1 mode.
@@ -478,22 +481,22 @@ func buildOneOnOneSlashCommands() []tui.SlashCommand {
 type channelPickerMode string
 
 const (
-	channelPickerNone          channelPickerMode = ""
-	channelPickerInitProvider  channelPickerMode = "init_provider"
-	channelPickerInitPack      channelPickerMode = "init_pack"
-	channelPickerIntegrations  channelPickerMode = "integrations"
-	channelPickerRequests      channelPickerMode = "requests"
-	channelPickerTasks         channelPickerMode = "tasks"
-	channelPickerTaskAction    channelPickerMode = "task_action"
-	channelPickerRequestAction channelPickerMode = "request_action"
-	channelPickerThreads       channelPickerMode = "threads"
-	channelPickerThreadAction  channelPickerMode = "thread_action"
-	channelPickerChannels      channelPickerMode = "channels"
-	channelPickerAgents        channelPickerMode = "agents"
-	channelPickerCalendarAgent channelPickerMode = "calendar_agent"
-	channelPickerOneOnOneMode  channelPickerMode = "one_on_one_mode"
-	channelPickerOneOnOneAgent channelPickerMode = "one_on_one_agent"
-	channelPickerTelegramGroup channelPickerMode = "telegram_group"
+	channelPickerNone           channelPickerMode = ""
+	channelPickerInitProvider   channelPickerMode = "init_provider"
+	channelPickerInitPack       channelPickerMode = "init_pack"
+	channelPickerIntegrations   channelPickerMode = "integrations"
+	channelPickerRequests       channelPickerMode = "requests"
+	channelPickerTasks          channelPickerMode = "tasks"
+	channelPickerTaskAction     channelPickerMode = "task_action"
+	channelPickerRequestAction  channelPickerMode = "request_action"
+	channelPickerThreads        channelPickerMode = "threads"
+	channelPickerThreadAction   channelPickerMode = "thread_action"
+	channelPickerChannels       channelPickerMode = "channels"
+	channelPickerAgents         channelPickerMode = "agents"
+	channelPickerCalendarAgent  channelPickerMode = "calendar_agent"
+	channelPickerOneOnOneMode   channelPickerMode = "one_on_one_mode"
+	channelPickerOneOnOneAgent  channelPickerMode = "one_on_one_agent"
+	channelPickerTelegramGroup  channelPickerMode = "telegram_group"
 	channelPickerConnect        channelPickerMode = "connect"
 	channelPickerTelegramToken  channelPickerMode = "telegram_token"
 	channelPickerTelegramChatID channelPickerMode = "telegram_chat_id"
@@ -587,6 +590,7 @@ type channelModel struct {
 	selectedOption       int
 	notice               string
 	snoozedInterview     string
+	doctor               *channelDoctorReport
 	memberDraft          *channelMemberDraft
 	initFlow             tui.InitFlowModel
 	picker               tui.PickerModel
@@ -686,6 +690,18 @@ func (m channelModel) oneOnOneAgentName() string {
 }
 
 func (m *channelModel) refreshSlashCommands() {
+	var activeInput []rune
+	activeCursor := 0
+	preserveOverlays := false
+	if m.focus == focusThread && m.threadPanelOpen {
+		activeInput = append([]rune(nil), m.threadInput...)
+		activeCursor = m.threadInputPos
+		preserveOverlays = true
+	} else if m.focus == focusMain {
+		activeInput = append([]rune(nil), m.input...)
+		activeCursor = m.inputPos
+		preserveOverlays = true
+	}
 	var base []tui.SlashCommand
 	if m.isOneOnOne() {
 		base = buildOneOnOneSlashCommands()
@@ -693,17 +709,22 @@ func (m *channelModel) refreshSlashCommands() {
 		base = make([]tui.SlashCommand, len(channelSlashCommands))
 		copy(base, channelSlashCommands)
 	}
-	// Append active skills as slash commands
+	var skillCommands []tui.SlashCommand
 	for _, sk := range m.skills {
 		if sk.Status != "active" {
 			continue
 		}
-		base = append(base, tui.SlashCommand{
+		skillCommands = append(skillCommands, tui.SlashCommand{
 			Name:        sk.Name,
 			Description: sk.Description,
+			Category:    "skills",
 		})
 	}
+	base = append(skillCommands, base...)
 	m.autocomplete = tui.NewAutocomplete(base)
+	if preserveOverlays {
+		m.updateOverlaysForInput(activeInput, activeCursor)
+	}
 }
 
 func (m channelModel) pollCurrentState() tea.Cmd {
@@ -846,7 +867,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		// ── Global keys (always active) ───────────────────────────────
-		switch msg.String() {
+		key := msg.String()
+		if msg.Type == tea.KeyCtrlJ {
+			key = "ctrl+j"
+		}
+		switch key {
 		case "ctrl+c":
 			now := time.Now()
 			if !m.lastCtrlCAt.IsZero() && now.Sub(m.lastCtrlCAt) <= 2*time.Second {
@@ -938,6 +963,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input = nil
 				m.inputPos = 0
 				m.notice = "Agent setup canceled."
+				return m, nil
+			}
+			if m.doctor != nil {
+				m.doctor = nil
+				m.notice = "Doctor closed."
 				return m, nil
 			}
 			if m.pending != nil && m.pending.ID != "" {
@@ -1119,6 +1149,14 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastCtrlCAt = time.Time{}
 			m.inputPos = len(m.input)
 			m.updateInputOverlays()
+		case "ctrl+j":
+			m.lastCtrlCAt = time.Time{}
+			ch := []rune{'\n'}
+			tail := make([]rune, len(m.input[m.inputPos:]))
+			copy(tail, m.input[m.inputPos:])
+			m.input = append(m.input[:m.inputPos], append(ch, tail...)...)
+			m.inputPos++
+			m.updateInputOverlays()
 		case "left":
 			m.lastCtrlCAt = time.Time{}
 			if m.inputPos > 0 {
@@ -1179,6 +1217,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.updateInputOverlays()
 			} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
 				ch := msg.Runes
+				if len(ch) == 0 {
+					ch = []rune(msg.String())
+				}
 				if len(ch) > 0 {
 					tail := make([]rune, len(m.input[m.inputPos:]))
 					copy(tail, m.input[m.inputPos:])
@@ -1257,6 +1298,12 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case channelResetDoneMsg:
 		m.posting = false
 		if msg.err == nil {
+			if normalized := team.NormalizeSessionMode(msg.sessionMode); normalized != "" {
+				m.sessionMode = normalized
+			}
+			if strings.TrimSpace(msg.oneOnOneAgent) != "" || m.sessionMode == team.SessionModeOneOnOne {
+				m.oneOnOneAgent = team.NormalizeOneOnOneAgent(msg.oneOnOneAgent)
+			}
 			m.messages = nil
 			m.members = nil
 			m.requests = nil
@@ -1279,9 +1326,18 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.focus = focusMain
 			m.pickerMode = channelPickerNone
 			m.snoozedInterview = ""
+			m.doctor = nil
 			m.tasks = nil
 			m.actions = nil
 			m.scheduler = nil
+			m.refreshSlashCommands()
+			if m.isOneOnOne() {
+				m.activeApp = officeAppMessages
+				m.sidebarCollapsed = true
+				m.threadPanelOpen = false
+				m.threadPanelID = ""
+				m.replyToID = ""
+			}
 			m.notice = strings.TrimSpace(msg.notice)
 			if m.notice == "" {
 				m.notice = "Office reset. Team panes reloaded in place."
@@ -1325,6 +1381,16 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = fmt.Sprintf("%s connected. Browser opened at %s", msg.label, msg.url)
 		} else {
 			m.notice = fmt.Sprintf("%s connected.", msg.label)
+		}
+
+	case channelDoctorDoneMsg:
+		if msg.err != nil {
+			m.notice = "Doctor failed: " + msg.err.Error()
+			m.doctor = nil
+		} else {
+			report := msg.report
+			m.doctor = &report
+			m.notice = "Doctor: " + report.StatusLine()
 		}
 
 	case telegramDiscoverMsg:
@@ -1902,7 +1968,7 @@ func (m channelModel) View() string {
 	// ── Sidebar ──────────────────────────────────────────────────────
 	sidebar := ""
 	if layout.ShowSidebar && !m.isOneOnOne() {
-		sidebar = renderSidebar(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, m.brokerConnected, layout.SidebarW, layout.ContentH)
+		sidebar = cachedSidebarRender(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, m.brokerConnected, layout.SidebarW, layout.ContentH)
 	}
 
 	// ── Thread panel ─────────────────────────────────────────────────
@@ -1987,6 +2053,10 @@ func (m channelModel) View() string {
 	if m.memberDraft != nil {
 		memberDraftCard = renderMemberDraftCard(*m.memberDraft, mainW-4)
 	}
+	doctorCard := ""
+	if m.doctor != nil {
+		doctorCard = renderDoctorCard(*m.doctor, mainW-4)
+	}
 
 	// Init/picker overlays
 	initPanel := ""
@@ -1999,10 +2069,11 @@ func (m channelModel) View() string {
 	composerH := lipgloss.Height(composerStr)
 	interviewH := lipgloss.Height(interviewCard)
 	memberDraftH := lipgloss.Height(memberDraftCard)
+	doctorH := lipgloss.Height(doctorCard)
 	initH := lipgloss.Height(initPanel)
 
 	// Message area height
-	msgH := layout.ContentH - headerH - composerH - interviewH - memberDraftH - initH - 1 // 1 for status bar
+	msgH := layout.ContentH - headerH - composerH - interviewH - memberDraftH - doctorH - initH - 1 // 1 for status bar
 	if msgH < 1 {
 		msgH = 1
 	}
@@ -2012,66 +2083,6 @@ func (m channelModel) View() string {
 		contentWidth = 32
 	}
 	allLines := m.currentMainLines(contentWidth)
-
-	// Append inline typing indicators for active agents (Slack-style)
-	// Shows "Name is typing..." + last 5 lines from their tmux pane as a stream
-	if m.activeApp == officeAppMessages || m.isOneOnOne() {
-		hasTyping := false
-		for _, member := range m.members {
-			if member.Slug == "you" || member.Slug == "human" {
-				continue
-			}
-			if member.LiveActivity != "" {
-				if !hasTyping {
-					allLines = append(allLines, renderedLine{Text: ""})
-					hasTyping = true
-				}
-				name := member.Name
-				if name == "" {
-					name = displayName(member.Slug)
-				}
-				color := agentColorMap[member.Slug]
-				if color == "" {
-					color = "#64748B"
-				}
-				nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true)
-				dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-				streamStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7C7C85")).Italic(true)
-				dots := "..."
-				switch m.tickFrame % 3 {
-				case 0:
-					dots = ".  "
-				case 1:
-					dots = ".. "
-				case 2:
-					dots = "..."
-				}
-				indicator := "  " + nameStyle.Render(name) + " " + dotStyle.Render("is typing"+dots)
-				allLines = append(allLines, renderedLine{Text: indicator})
-
-				// Show last 5 meaningful lines from pane as a live stream
-				paneLines := strings.Split(member.LiveActivity, "\n")
-				for _, pl := range paneLines {
-					pl = strings.TrimSpace(pl)
-					if pl == "" {
-						continue
-					}
-					// Filter out Claude Code chrome
-					lower := strings.ToLower(pl)
-					if strings.Contains(lower, "bypass") || strings.Contains(lower, "/effort") ||
-						strings.Contains(lower, "shift+tab") || strings.Contains(lower, "permissions") ||
-						strings.HasPrefix(pl, "\u276f") || pl == "\u276f" ||
-						strings.HasPrefix(pl, "\u2500") || strings.HasPrefix(pl, "\u2501") {
-						continue
-					}
-					if len(pl) > contentWidth-6 {
-						pl = pl[:contentWidth-9] + "..."
-					}
-					allLines = append(allLines, renderedLine{Text: "    " + streamStyle.Render("\u2502 "+pl)})
-				}
-			}
-		}
-	}
 	visibleRows, scroll, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
 	var visible []string
 	for _, row := range visibleRows {
@@ -2102,6 +2113,9 @@ func (m channelModel) View() string {
 	}
 	if memberDraftCard != "" {
 		mainParts = append(mainParts, memberDraftCard)
+	}
+	if doctorCard != "" {
+		mainParts = append(mainParts, doctorCard)
 	}
 	if initPanel != "" {
 		mainParts = append(mainParts, initPanel)
@@ -2138,8 +2152,8 @@ func (m channelModel) View() string {
 		focusLabel = "thread"
 	}
 	statusBar := statusBarStyle(m.width).Render(fmt.Sprintf(
-		" %s %d around │ %d msgs │ focus:%s",
-		"\u25CF", onlineCount, len(m.messages), focusLabel,
+		" %s %d online │ %d msgs │ focus:%s │ %s │ Ctrl+J newline │ /doctor",
+		"\u25CF", onlineCount, len(m.messages), focusLabel, scrollHint,
 	))
 	if m.pending != nil {
 		statusText := " Request pending │ ↑/↓ choose │ Enter submit"
@@ -2157,11 +2171,11 @@ func (m channelModel) View() string {
 			}
 		}
 		statusBar = statusBarStyle(m.width).Render(fmt.Sprintf(
-			" %s %d online │ session %s · %s │ total %s · %s%s │ %s │ Tab focus:%s │ /quit",
+			" %s %d online │ session %s · %s │ total %s · %s%s │ %s │ Ctrl+J newline │ /doctor",
 			"\u25CF", onlineCount,
 			formatUsd(m.usage.Session.CostUsd), formatTokenCount(m.usage.Session.TotalTokens),
 			formatUsd(m.usage.Total.CostUsd), formatTokenCount(m.usage.Total.TotalTokens),
-			sinceStatus, scrollHint, focusLabel,
+			sinceStatus, scrollHint,
 		))
 	} else if m.quickJumpTarget != quickJumpNone {
 		label := "channels"
@@ -2182,25 +2196,29 @@ func (m channelModel) View() string {
 		if m.brokerConnected {
 			label = "direct session live"
 		}
+		runtimeHint := "ready"
+		if runtimeLine := oneOnOneRuntimeLine(m.officeMembers, m.members, m.tasks, m.actions, m.oneOnOneAgentSlug()); runtimeLine != "" {
+			runtimeHint = runtimeLine
+		}
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
-				fmt.Sprintf(" %s │ %d msgs │ direct with %s │ /1o1 @agent to switch │ /quit",
-					label, len(m.messages), m.oneOnOneAgentName(),
+				fmt.Sprintf(" %s │ %d msgs │ %s │ Ctrl+J newline │ /1o1 switch │ /doctor",
+					label, len(m.messages), runtimeHint,
 				),
 			),
 		)
 	} else if !m.brokerConnected {
 		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(" Team offline │ showing manifest roster │ launch WUPHF to connect"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(" Team offline │ showing manifest roster │ launch WUPHF to connect │ /doctor"),
 		)
 	} else if m.replyToID != "" {
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
-				fmt.Sprintf(" ↩ Reply mode │ thread %s │ /cancel to return", m.replyToID),
+				fmt.Sprintf(" ↩ Reply mode │ thread %s │ Ctrl+J newline │ /cancel to return", m.replyToID),
 			),
 		)
 	} else if m.activeApp != officeAppMessages {
-		message := fmt.Sprintf(" Viewing %s │ Tab focus:%s │ /messages to return", m.currentAppLabel(), focusLabel)
+		message := fmt.Sprintf(" Viewing %s │ %s │ /messages to return │ /doctor", m.currentAppLabel(), scrollHint)
 		if m.activeApp == officeAppCalendar {
 			filter := "all"
 			if strings.TrimSpace(m.calendarFilter) != "" {
@@ -2243,7 +2261,11 @@ func (m channelModel) currentHeaderMeta() string {
 		if !m.brokerConnected {
 			return "  Direct session preview · only this agent can speak here"
 		}
-		return "  Direct conversation only · no channels, teammates, or office apps in this mode"
+		meta := "  Direct conversation only · no channels, teammates, or office apps in this mode"
+		if runtimeLine := oneOnOneRuntimeLine(m.officeMembers, m.members, m.tasks, m.actions, m.oneOnOneAgentSlug()); runtimeLine != "" {
+			meta += " · " + runtimeLine
+		}
+		return meta
 	}
 	switch m.activeApp {
 	case officeAppTasks:
@@ -2332,6 +2354,9 @@ func (m channelModel) currentHeaderMeta() string {
 		}
 		return fmt.Sprintf("  Reusable team skills · %d total · %d active · %d workflow-backed", len(m.skills), active, workflowBacked)
 	default:
+		if m.isOneOnOne() {
+			return fmt.Sprintf("  Direct session with %s · single-agent focus · external actions and reports stay in this conversation", m.oneOnOneAgentName())
+		}
 		if !m.brokerConnected {
 			return fmt.Sprintf("  Offline preview · manifest roster loaded · %d teammates ready for #%s", len(m.officeMembers), m.activeChannel)
 		}
@@ -2360,23 +2385,7 @@ func (m channelModel) currentAppLabel() string {
 }
 
 func (m channelModel) currentMainLines(contentWidth int) []renderedLine {
-	if m.isOneOnOne() {
-		return buildOneOnOneMessageLines(m.messages, m.expandedThreads, contentWidth, m.oneOnOneAgentName())
-	}
-	switch m.activeApp {
-	case officeAppTasks:
-		return buildTaskLines(m.tasks, contentWidth)
-	case officeAppRequests:
-		return buildRequestLines(m.requests, contentWidth)
-	case officeAppPolicies:
-		return buildPolicyLines(m.decisions, contentWidth)
-	case officeAppCalendar:
-		return buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
-	case officeAppSkills:
-		return buildSkillLines(m.skills, contentWidth)
-	default:
-		return buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand)
-	}
+	return m.cachedMainLines(contentWidth)
 }
 
 func filterInsightMessages(messages []brokerMessage) []brokerMessage {
@@ -2762,7 +2771,11 @@ func (m channelModel) nextFocus() focusArea {
 
 // updateThread handles key events when the thread panel is focused.
 func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+	if msg.Type == tea.KeyCtrlJ {
+		key = "ctrl+j"
+	}
+	switch key {
 	case "enter":
 		if len(m.threadInput) > 0 {
 			text := string(m.threadInput)
@@ -2790,6 +2803,13 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateThreadOverlays()
 	case "ctrl+e":
 		m.threadInputPos = len(m.threadInput)
+		m.updateThreadOverlays()
+	case "ctrl+j":
+		ch := []rune{'\n'}
+		tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
+		copy(tail, m.threadInput[m.threadInputPos:])
+		m.threadInput = append(m.threadInput[:m.threadInputPos], append(ch, tail...)...)
+		m.threadInputPos++
 		m.updateThreadOverlays()
 	case "left":
 		if m.threadInputPos > 0 {
@@ -2825,6 +2845,9 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.updateThreadOverlays()
 		} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
 			ch := msg.Runes
+			if len(ch) == 0 {
+				ch = []rune(msg.String())
+			}
 			if len(ch) > 0 {
 				tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
 				copy(tail, m.threadInput[m.threadInputPos:])
@@ -3818,9 +3841,13 @@ func (m channelModel) renderActivePopup(width int) string {
 	if m.autocomplete.IsVisible() {
 		var options []composerPopupOption
 		for _, cmd := range m.autocomplete.Matches() {
+			meta := cmd.Description
+			if strings.TrimSpace(cmd.Category) != "" {
+				meta = strings.ToUpper(cmd.Category) + " · " + meta
+			}
 			options = append(options, composerPopupOption{
 				Label: "/" + cmd.Name,
-				Meta:  cmd.Description,
+				Meta:  meta,
 			})
 		}
 		return renderComposerPopup(options, m.autocomplete.SelectedIndex(), width, slackActive)
@@ -3872,6 +3899,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.threadInputPos = 0
 	}
 	clearCurrent := func() {
+		m.doctor = nil
 		if threadTarget != "" {
 			clearThread()
 			m.updateThreadOverlays()
@@ -3995,6 +4023,10 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.pickerMode = channelPickerIntegrations
 		m.notice = "Choose an integration to connect."
 		return m, nil
+	case trimmed == "/doctor":
+		clearCurrent()
+		m.notice = "Checking readiness..."
+		return m, runDoctorChecks()
 	case trimmed == "/connect":
 		clearCurrent()
 		m.picker = tui.NewPicker("Connect a channel", []tui.PickerOption{
@@ -4267,6 +4299,9 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 				m.focus = focusMain
 			}
 			m.notice = "Reply mode cleared."
+		} else if m.doctor != nil {
+			m.doctor = nil
+			m.notice = "Doctor closed."
 		} else if m.initFlow.IsActive() || m.initFlow.Phase() == tui.InitDone || m.picker.IsActive() {
 			m.initFlow = tui.NewInitFlow()
 			m.picker.SetActive(false)
@@ -5376,10 +5411,10 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 			"members":     members,
 			"created_by":  "you",
 			"surface": map[string]any{
-				"provider":     "telegram",
-				"remote_id":   fmt.Sprintf("%d", group.ChatID),
-				"remote_title": group.Title,
-				"mode":        group.Type,
+				"provider":      "telegram",
+				"remote_id":     fmt.Sprintf("%d", group.ChatID),
+				"remote_title":  group.Title,
+				"mode":          group.Type,
 				"bot_token_env": "WUPHF_TELEGRAM_BOT_TOKEN",
 			},
 		})
@@ -5457,10 +5492,15 @@ func resetTeamSession(oneOnOne bool) tea.Cmd {
 		if err := l.ReconfigureSession(); err != nil {
 			return channelResetDoneMsg{err: err}
 		}
+		mode := team.SessionModeOffice
+		agent := ""
 		if oneOnOne {
-			return channelResetDoneMsg{notice: "Direct session reset. Agent pane reloaded in place."}
+			mode = team.SessionModeOneOnOne
 		}
-		return channelResetDoneMsg{notice: "Office reset. Team panes reloaded in place."}
+		if oneOnOne {
+			return channelResetDoneMsg{notice: "Direct session reset. Agent pane reloaded in place.", sessionMode: mode, oneOnOneAgent: agent}
+		}
+		return channelResetDoneMsg{notice: "Office reset. Team panes reloaded in place.", sessionMode: mode, oneOnOneAgent: agent}
 	}
 }
 
@@ -5504,9 +5544,17 @@ func switchSessionMode(mode, agent string) tea.Cmd {
 		}
 		switch team.NormalizeSessionMode(result.SessionMode) {
 		case team.SessionModeOneOnOne:
-			return channelResetDoneMsg{notice: "Direct 1:1 with " + displayName(team.NormalizeOneOnOneAgent(result.OneOnOneAgent)) + " is ready."}
+			return channelResetDoneMsg{
+				notice:        "Direct 1:1 with " + displayName(team.NormalizeOneOnOneAgent(result.OneOnOneAgent)) + " is ready.",
+				sessionMode:   result.SessionMode,
+				oneOnOneAgent: result.OneOnOneAgent,
+			}
 		default:
-			return channelResetDoneMsg{notice: "Office mode is ready."}
+			return channelResetDoneMsg{
+				notice:        "Office mode is ready.",
+				sessionMode:   result.SessionMode,
+				oneOnOneAgent: result.OneOnOneAgent,
+			}
 		}
 	}
 }

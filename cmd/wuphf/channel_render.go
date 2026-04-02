@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -516,7 +515,7 @@ func buildSkillLines(skills []channelSkill, contentWidth int) []renderedLine {
 			lines = append(lines, renderedLine{Text: "  " + muted.Render(fmt.Sprintf("workflow: %s via %s", skill.WorkflowKey, fallbackString(skill.WorkflowProvider, "one")))})
 		}
 		if skill.WorkflowSchedule != "" {
-			lines = append(lines, renderedLine{Text: "  " + muted.Render("schedule: " + skill.WorkflowSchedule)})
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("schedule: "+skill.WorkflowSchedule)})
 		}
 		if skill.RelayID != "" || skill.RelayPlatform != "" || len(skill.RelayEventTypes) > 0 {
 			relayParts := []string{}
@@ -529,7 +528,7 @@ func buildSkillLines(skills []channelSkill, contentWidth int) []renderedLine {
 			if skill.RelayID != "" {
 				relayParts = append(relayParts, skill.RelayID)
 			}
-			lines = append(lines, renderedLine{Text: "  " + muted.Render("relay: " + strings.Join(relayParts, " · "))})
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("relay: "+strings.Join(relayParts, " · "))})
 		}
 		if skill.LastExecutionAt != "" || skill.LastExecutionStatus != "" {
 			runParts := []string{}
@@ -539,7 +538,7 @@ func buildSkillLines(skills []channelSkill, contentWidth int) []renderedLine {
 			if skill.LastExecutionAt != "" {
 				runParts = append(runParts, prettyRelativeTime(skill.LastExecutionAt))
 			}
-			lines = append(lines, renderedLine{Text: "  " + muted.Render("last run: " + strings.Join(runParts, " · "))})
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("last run: "+strings.Join(runParts, " · "))})
 		}
 	}
 	return lines
@@ -1354,10 +1353,11 @@ func renderMarkdown(text string, width int) string {
 	if !strings.ContainsAny(text, "*_`#|-[]>") {
 		return text
 	}
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width),
-	)
+	key := markdownCacheKey(width, text)
+	if cached, ok := channelRenderCache.getMarkdown(key); ok {
+		return cached
+	}
+	r, err := channelRenderCache.renderer(width)
 	if err != nil {
 		return text
 	}
@@ -1369,5 +1369,6 @@ func renderMarkdown(text string, width int) string {
 	result := strings.TrimRight(rendered, "\n ")
 	// Remove glamour's auto-linked mailto: URLs that duplicate email addresses
 	result = strings.ReplaceAll(result, "mailto:", "")
+	channelRenderCache.putMarkdown(key, result)
 	return result
 }

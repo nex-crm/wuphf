@@ -99,7 +99,6 @@ func classifyActivity(m channelMember) memberActivity {
 	return memberActivity{Label: "lurking", Color: dotIdle, Dot: "●"} // ● grey filled
 }
 
-
 func defaultSidebarRoster() []channelMember {
 	return []channelMember{
 		{Slug: "ceo", Name: "CEO", Role: "strategy"},
@@ -524,13 +523,11 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 	now := time.Now()
 	for i := start; i < end; i++ {
 		m := members[i]
-		act := classifyActivity(m)
-		if task, ok := activeSidebarTask(tasks, m.Slug); ok {
-			act = applyTaskActivity(act, task)
-		}
+		summary := deriveMemberRuntimeSummary(m, tasks, now)
+		act := summary.Activity
 		character := renderOfficeCharacter(m, act, now)
-		if task, ok := activeSidebarTask(tasks, m.Slug); ok && character.Bubble == "" {
-			character.Bubble = taskBubbleText(task)
+		if summary.Bubble != "" {
+			character.Bubble = summary.Bubble
 		}
 
 		dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(act.Color))
@@ -544,7 +541,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		if name == "" {
 			name = displayName(m.Slug)
 		}
-		sidebarLabel := "" // dots only, no text labels in sidebar
+		sidebarLabel := act.Label
 		nameMax := innerW - 8 - ansi.StringWidth(sidebarLabel)
 		if nameMax < 8 {
 			nameMax = 8
