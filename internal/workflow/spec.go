@@ -1,5 +1,10 @@
 package workflow
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // WorkflowSpec is the top-level JSON schema for an interactive workflow.
 // Agents emit these specs; the runtime executes them step by step.
 //
@@ -109,3 +114,15 @@ const (
 
 // TransitionDone is the conventional target for "workflow complete."
 const TransitionDone = "done"
+
+// ParseSpec parses and validates a JSON workflow spec string.
+func ParseSpec(specJSON string) (*WorkflowSpec, error) {
+	var spec WorkflowSpec
+	if err := json.Unmarshal([]byte(specJSON), &spec); err != nil {
+		return nil, fmt.Errorf("parse workflow spec: %w", err)
+	}
+	if err := ValidateSpec(spec); err != nil {
+		return nil, err
+	}
+	return &spec, nil
+}

@@ -28,6 +28,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
+	"github.com/nex-crm/wuphf/internal/workflow"
 )
 
 type channelMsg struct {
@@ -624,6 +625,10 @@ type channelModel struct {
 	calendarRange       calendarRange
 	calendarFilter      string
 
+	// Workflow runtime state
+	activeWorkflow      *workflow.WorkflowView
+	workflowName        string
+
 	// Telegram connect flow state
 	telegramGroups []team.TelegramGroup
 	telegramToken  string
@@ -749,6 +754,23 @@ func (m channelModel) Init() tea.Cmd {
 }
 
 func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// If a workflow is active, delegate all messages to it.
+	if m.activeWorkflow != nil {
+		wv, cmd := m.activeWorkflow.Update(msg)
+		m.activeWorkflow = &wv
+		if wv.Quitting() {
+			rt := wv.Runtime()
+			completed := rt.State() == workflow.StateDone
+			m.activeWorkflow = nil
+			m.workflowName = ""
+			if completed {
+				m.notice = "Workflow complete!"
+			}
+			return m, tea.ClearScreen
+		}
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1535,6 +1557,30 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshSlashCommands()
 		return m, nil
 
+	case channelWorkflowLaunchMsg:
+		spec, err := workflow.ParseSpec(msg.spec)
+		if err != nil {
+			m.notice = "Workflow error: " + err.Error()
+			return m, nil
+		}
+		rt, err := workflow.NewRuntime(*spec)
+		if err != nil {
+			m.notice = "Workflow error: " + err.Error()
+			return m, nil
+		}
+		wv := workflow.NewWorkflowView(rt, m.width, m.height)
+		m.activeWorkflow = &wv
+		m.workflowName = msg.name
+		return m, m.activeWorkflow.Init()
+
+	case channelWorkflowDoneMsg:
+		m.activeWorkflow = nil
+		m.workflowName = ""
+		if msg.completed {
+			m.notice = "Workflow complete!"
+		}
+		return m, nil
+
 	case channelActionsMsg:
 		m.actions = msg.actions
 
@@ -1908,6 +1954,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m channelModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+
+	// Full-screen workflow view when active.
+	if m.activeWorkflow != nil {
+		return m.activeWorkflow.View()
 	}
 
 	layout := computeLayout(m.width, m.height, m.threadPanelOpen && !m.isOneOnOne(), m.sidebarCollapsed || m.isOneOnOne())
