@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/internal/workflow"
 )
 
 func TestComposioRESTActionHappyPath(t *testing.T) {
@@ -507,7 +509,7 @@ func TestComposioRESTWorkflowAutoResolvesSingleConnection(t *testing.T) {
 	if got := step["connection_key"]; got != "ca_123" {
 		t.Fatalf("expected auto-resolved connection_key ca_123, got %#v", got)
 	}
-	rendered, err := renderWorkflowTemplate("Daily Digest — {{ .meta.date }}", workflowScope("auto-resolve-connection", map[string]any{}, map[string]any{}))
+	rendered, err := workflow.RenderTemplate("Daily Digest — {{ .meta.date }}", workflow.BuildScope("auto-resolve-connection", "composio", map[string]any{}, map[string]any{}))
 	if err != nil {
 		t.Fatalf("render meta date template: %v", err)
 	}

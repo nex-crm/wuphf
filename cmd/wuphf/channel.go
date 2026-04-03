@@ -104,6 +104,19 @@ type channelSkillsMsg struct {
 	skills []channelSkill
 }
 
+// channelWorkflowLaunchMsg is sent when a skill with a workflow definition is invoked.
+type channelWorkflowLaunchMsg struct {
+	spec   string // JSON workflow spec
+	name   string // skill name
+	dryRun bool
+}
+
+// channelWorkflowDoneMsg is sent when a workflow view completes or is aborted.
+type channelWorkflowDoneMsg struct {
+	name      string
+	completed bool
+}
+
 type channelUsageMsg struct {
 	usage channelUsageState
 }
@@ -4924,9 +4937,14 @@ func pollSkills(channel string) tea.Cmd {
 
 func createSkill(description, channel string) tea.Cmd {
 	return func() tea.Msg {
+		// Derive a slug-style name from the description for the skill name.
+		name := skillNameFromDescription(description)
 		payload := map[string]string{
 			"action":      "create",
+			"name":        name,
 			"description": description,
+			"content":     description,
+			"created_by":  "you",
 			"channel":     channel,
 		}
 		body, _ := json.Marshal(payload)
@@ -4945,18 +4963,97 @@ func createSkill(description, channel string) tea.Cmd {
 	}
 }
 
-func invokeSkill(name string) tea.Cmd {
+// saveWorkflowAsSkill saves a workflow spec as a reusable skill in the broker.
+func saveWorkflowAsSkill(name, specJSON, channel string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/skills/"+name+"/invoke", nil)
+		payload := map[string]string{
+			"action":              "create",
+			"name":                name,
+			"title":               name,
+			"description":         "Interactive workflow: " + name,
+			"content":             "Workflow skill created from /save-skill",
+			"created_by":          "you",
+			"channel":             channel,
+			"workflow_provider":   "interactive",
+			"workflow_definition": specJSON,
+		}
+		body, _ := json.Marshal(payload)
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/skills", bytes.NewReader(body))
 		if err != nil {
 			return channelSkillsMsg{}
 		}
+		req.Header.Set("Content-Type", "application/json")
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
 			return channelSkillsMsg{}
 		}
 		defer resp.Body.Close()
+		return channelSkillsMsg{}
+	}
+}
+
+// skillNameFromDescription derives a kebab-case skill name from a description.
+func skillNameFromDescription(desc string) string {
+	words := strings.Fields(strings.ToLower(desc))
+	if len(words) > 4 {
+		words = words[:4]
+	}
+	name := strings.Join(words, "-")
+	// Remove non-alphanumeric except hyphens.
+	var b strings.Builder
+	lastDash := false
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+		} else if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	result := strings.Trim(b.String(), "-")
+	if result == "" {
+		return "skill"
+	}
+	return result
+}
+
+func invokeSkill(name string) tea.Cmd {
+	return func() tea.Msg {
+		payload := map[string]string{
+			"invoked_by": "you",
+			"channel":    "general",
+		}
+		body, _ := json.Marshal(payload)
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/skills/"+name+"/invoke", bytes.NewReader(body))
+		if err != nil {
+			return channelSkillsMsg{}
+		}
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelSkillsMsg{}
+		}
+		defer resp.Body.Close()
+
+		// Parse the response to check for a workflow definition.
+		var result struct {
+			Skill channelSkill `json:"skill"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelSkillsMsg{}
+		}
+
+		// If the skill has a workflow definition, launch it.
+		if result.Skill.WorkflowDefinition != "" {
+			return channelWorkflowLaunchMsg{
+				spec: result.Skill.WorkflowDefinition,
+				name: name,
+			}
+		}
+
 		return channelSkillsMsg{}
 	}
 }
