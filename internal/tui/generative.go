@@ -11,7 +11,16 @@ type A2UIComponent struct {
 	Children []A2UIComponent `json:"children,omitempty"`
 	Props    map[string]any  `json:"props,omitempty"`
 	DataRef  string          `json:"dataRef,omitempty"`
-	Action   string          `json:"action,omitempty"`
+	Action   string          `json:"action,omitempty"` // deprecated: use Actions
+	ID       string          `json:"id,omitempty"`
+	Actions  []ComponentAction `json:"actions,omitempty"`
+}
+
+// ComponentAction binds a key to a label and optional transition target.
+type ComponentAction struct {
+	Key        string `json:"key"`
+	Label      string `json:"label"`
+	Transition string `json:"transition,omitempty"`
 }
 
 // A2UIDataUpdate is a patch operation on the generative model's data store.
@@ -22,11 +31,20 @@ type A2UIDataUpdate struct {
 }
 
 // GenerativeModel holds a schema and its data, rendering inline TUI components.
+// The interaction layer adds focus tracking, selection state, and action hints
+// for workflow step rendering.
 type GenerativeModel struct {
 	schema   *A2UIComponent
 	data     map[string]any
 	width    int
 	registry *ComponentRegistry
+
+	// Interaction state (for workflow steps).
+	focusedID    string            // ID of the currently focused component
+	selectedIdx  int               // selected item index (for lists/tables)
+	itemCount    int               // total items in the focused list
+	actions      []ComponentAction // action hints to render at the bottom
+	interactive  bool              // true when this model is in interactive mode
 }
 
 // NewGenerativeModel creates an empty GenerativeModel with the default component registry.
@@ -91,6 +109,74 @@ func (g *GenerativeModel) Validate() error {
 		return fmt.Errorf("no schema set")
 	}
 	return g.registry.Validate(*g.schema)
+}
+
+// --- Interaction layer ---
+
+// SetInteractive enables interactive mode with action hints.
+func (g *GenerativeModel) SetInteractive(actions []ComponentAction) {
+	g.interactive = true
+	g.actions = actions
+}
+
+// SetFocus sets the focused component ID.
+func (g *GenerativeModel) SetFocus(id string) {
+	g.focusedID = id
+}
+
+// FocusedID returns the currently focused component ID.
+func (g *GenerativeModel) FocusedID() string {
+	return g.focusedID
+}
+
+// SetSelectedIndex sets the cursor position in a list.
+func (g *GenerativeModel) SetSelectedIndex(idx int) {
+	g.selectedIdx = idx
+}
+
+// SelectedIndex returns the current cursor position.
+func (g *GenerativeModel) SelectedIndex() int {
+	return g.selectedIdx
+}
+
+// SetItemCount sets the total number of selectable items.
+func (g *GenerativeModel) SetItemCount(n int) {
+	g.itemCount = n
+}
+
+// MoveSelection moves the cursor up or down within bounds.
+func (g *GenerativeModel) MoveSelection(delta int) {
+	if g.itemCount <= 0 {
+		return
+	}
+	g.selectedIdx += delta
+	if g.selectedIdx < 0 {
+		g.selectedIdx = 0
+	}
+	if g.selectedIdx >= g.itemCount {
+		g.selectedIdx = g.itemCount - 1
+	}
+}
+
+// RenderActionHints returns the formatted action bar string.
+// Example: "[a] Approve  [r] Reject  [d] Dismiss  [Esc] Cancel"
+func (g *GenerativeModel) RenderActionHints() string {
+	if len(g.actions) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, a := range g.actions {
+		if a.Key == "" || a.Label == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("[%s] %s", a.Key, a.Label))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// Interactive returns whether the model is in interactive mode.
+func (g *GenerativeModel) Interactive() bool {
+	return g.interactive
 }
 
 // View renders the current schema with resolved data via the component registry.
