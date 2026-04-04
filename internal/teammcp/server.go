@@ -729,7 +729,8 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 	}
 	taskSummary := formatTaskSummary(ctx, resolveSlugOptional(args.MySlug), channel)
 	requestSummary := formatRequestSummary(ctx, channel)
-	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary)), nil, nil
+	memorySummary := formatMemorySummary(ctx)
+	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary, memorySummary)), nil, nil
 }
 
 func handleTeamStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamStatusArgs) (*mcp.CallToolResult, any, error) {
@@ -1729,6 +1730,24 @@ func formatRequestSummary(ctx context.Context, channel string) string {
 		lines = append(lines, line)
 	}
 	return "Open requests:\n" + strings.Join(lines, "\n")
+}
+
+func formatMemorySummary(ctx context.Context) string {
+	var result struct {
+		Memory map[string]map[string]string `json:"memory"`
+	}
+	if err := brokerGetJSON(ctx, "/memory", &result); err != nil || len(result.Memory) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Shared Context\n")
+	for ns, entries := range result.Memory {
+		sb.WriteString("### " + ns + "\n")
+		for key, val := range entries {
+			sb.WriteString("- " + key + ": " + val + "\n")
+		}
+	}
+	return sb.String()
 }
 
 func contains(items []string, want string) bool {
