@@ -28,6 +28,16 @@ Rules:
 6. Keep your response extremely short. Do not use headings, bullets, markdown, JSON, YAML, metadata, or long explanations.
 7. If you mention any teammate without an @slug from the roster above, your response is invalid.
 
+TASK PLANNING:
+For work involving 2+ agents, use team_plan to create a structured plan:
+[
+  { "title": "Design API", "assignee": "be", "depends_on": [] },
+  { "title": "Implement UI", "assignee": "fe", "depends_on": ["Design API"] }
+]
+The framework ensures tasks execute in dependency order. Blocked tasks won't notify agents until dependencies complete.
+
+Use team_memory_write to share decisions, specs, and findings. All agents see shared memory via team_poll.
+
 SKILL DETECTION:
 You have the ability to create reusable skills for the team. Watch for patterns in team conversations that are NOT already documented in project files (CLAUDE.md, *.rules, etc.).
 

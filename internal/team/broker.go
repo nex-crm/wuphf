@@ -260,8 +260,9 @@ type brokerState struct {
 	Decisions         []officeDecisionRecord `json:"decisions,omitempty"`
 	Watchdogs         []watchdogAlert        `json:"watchdogs,omitempty"`
 	Scheduler         []schedulerJob         `json:"scheduler,omitempty"`
-	Skills            []teamSkill            `json:"skills,omitempty"`
-	Counter           int                    `json:"counter"`
+	Skills            []teamSkill                   `json:"skills,omitempty"`
+	SharedMemory      map[string]map[string]string  `json:"shared_memory,omitempty"`
+	Counter           int                           `json:"counter"`
 	NotificationSince string                 `json:"notification_since,omitempty"`
 	InsightsSince     string                 `json:"insights_since,omitempty"`
 	PendingInterview  *humanInterview        `json:"pending_interview,omitempty"`
@@ -301,6 +302,7 @@ type Broker struct {
 	watchdogs         []watchdogAlert
 	scheduler         []schedulerJob
 	skills            []teamSkill
+	sharedMemory      map[string]map[string]string // namespace → key → value
 	lastTaggedAt      map[string]time.Time   // when each agent was last @mentioned
 	lastPaneSnapshot  map[string]string      // last captured pane content per agent (for change detection)
 	seenTelegramGroups map[int64]string      // chat_id -> title, populated by transport
@@ -381,6 +383,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/channel-members", b.requireAuth(b.handleChannelMembers))
 	mux.HandleFunc("/members", b.requireAuth(b.handleMembers))
 	mux.HandleFunc("/tasks", b.requireAuth(b.handleTasks))
+	mux.HandleFunc("/tasks/ack", b.requireAuth(b.handleTaskAck))
+	mux.HandleFunc("/task-plan", b.requireAuth(b.handleTaskPlan))
+	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
 	mux.HandleFunc("/requests", b.requireAuth(b.handleRequests))
 	mux.HandleFunc("/requests/answer", b.requireAuth(b.handleRequestAnswer))
 	mux.HandleFunc("/interview", b.requireAuth(b.handleInterview))
@@ -777,6 +782,7 @@ func (b *Broker) loadState() error {
 	b.watchdogs = state.Watchdogs
 	b.scheduler = state.Scheduler
 	b.skills = state.Skills
+	b.sharedMemory = state.SharedMemory
 	b.counter = state.Counter
 	b.notificationSince = state.NotificationSince
 	b.insightsSince = state.InsightsSince
@@ -797,7 +803,7 @@ func (b *Broker) loadState() error {
 
 func (b *Broker) saveLocked() error {
 	path := brokerStatePath()
-	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
+	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -820,6 +826,7 @@ func (b *Broker) saveLocked() error {
 		Watchdogs:         b.watchdogs,
 		Scheduler:         b.scheduler,
 		Skills:            b.skills,
+		SharedMemory:      b.sharedMemory,
 		Counter:           b.counter,
 		NotificationSince: b.notificationSince,
 		InsightsSince:     b.insightsSince,
@@ -3612,6 +3619,195 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	http.Error(w, "task not found", http.StatusNotFound)
+}
+
+func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Channel   string `json:"channel"`
+		CreatedBy string `json:"created_by"`
+		Tasks     []struct {
+			Title     string   `json:"title"`
+			Assignee  string   `json:"assignee"`
+			Details   string   `json:"details"`
+			DependsOn []string `json:"depends_on"`
+		} `json:"tasks"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	createdBy := strings.TrimSpace(body.CreatedBy)
+	if createdBy == "" || len(body.Tasks) == 0 {
+		http.Error(w, "created_by and tasks required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.findChannelLocked(channel) == nil {
+		http.Error(w, "channel not found", http.StatusNotFound)
+		return
+	}
+
+	// Map title → task ID for resolving depends_on by title
+	titleToID := map[string]string{}
+	now := time.Now().UTC().Format(time.RFC3339)
+	created := make([]teamTask, 0, len(body.Tasks))
+
+	for _, item := range body.Tasks {
+		b.counter++
+		taskID := fmt.Sprintf("task-%d", b.counter)
+		titleToID[strings.TrimSpace(item.Title)] = taskID
+
+		// Resolve depends_on: accept both task IDs and titles
+		resolvedDeps := make([]string, 0, len(item.DependsOn))
+		for _, dep := range item.DependsOn {
+			dep = strings.TrimSpace(dep)
+			if id, ok := titleToID[dep]; ok {
+				resolvedDeps = append(resolvedDeps, id)
+			} else {
+				resolvedDeps = append(resolvedDeps, dep) // assume it's a task ID
+			}
+		}
+
+		task := teamTask{
+			ID:        taskID,
+			Channel:   channel,
+			Title:     strings.TrimSpace(item.Title),
+			Details:   strings.TrimSpace(item.Details),
+			Owner:     strings.TrimSpace(item.Assignee),
+			Status:    "open",
+			CreatedBy: createdBy,
+			DependsOn: resolvedDeps,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if task.Owner != "" && len(resolvedDeps) == 0 {
+			task.Status = "in_progress"
+		}
+		if len(resolvedDeps) > 0 && b.hasUnresolvedDepsLocked(&task) {
+			task.Blocked = true
+		}
+		b.scheduleTaskLifecycleLocked(&task)
+		b.tasks = append(b.tasks, task)
+		b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
+		created = append(created, task)
+	}
+
+	if err := b.saveLocked(); err != nil {
+		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"tasks": created})
+}
+
+func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
+		if channel == "" {
+			channel = "general"
+		}
+		b.mu.Lock()
+		mem := b.sharedMemory
+		b.mu.Unlock()
+		if mem == nil {
+			mem = make(map[string]map[string]string)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"memory": mem})
+	case http.MethodPost:
+		var body struct {
+			Namespace string `json:"namespace"`
+			Key       string `json:"key"`
+			Value     string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		ns := strings.TrimSpace(body.Namespace)
+		key := strings.TrimSpace(body.Key)
+		if ns == "" || key == "" {
+			http.Error(w, "namespace and key required", http.StatusBadRequest)
+			return
+		}
+		b.mu.Lock()
+		if b.sharedMemory == nil {
+			b.sharedMemory = make(map[string]map[string]string)
+		}
+		if b.sharedMemory[ns] == nil {
+			b.sharedMemory[ns] = make(map[string]string)
+		}
+		b.sharedMemory[ns][key] = body.Value
+		if err := b.saveLocked(); err != nil {
+			b.mu.Unlock()
+			http.Error(w, "failed to persist", http.StatusInternalServerError)
+			return
+		}
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "namespace": ns, "key": key})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleTaskAck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		ID      string `json:"id"`
+		Channel string `json:"channel"`
+		Slug    string `json:"slug"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	taskID := strings.TrimSpace(body.ID)
+	slug := strings.TrimSpace(body.Slug)
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if taskID == "" || slug == "" {
+		http.Error(w, "id and slug required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == taskID && normalizeChannelSlug(b.tasks[i].Channel) == channel {
+			if b.tasks[i].Owner != slug {
+				http.Error(w, "only the task owner can ack", http.StatusForbidden)
+				return
+			}
+			now := time.Now().UTC().Format(time.RFC3339)
+			b.tasks[i].AckedAt = now
+			b.tasks[i].UpdatedAt = now
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"task": b.tasks[i]})
+			return
+		}
+	}
 	http.Error(w, "task not found", http.StatusNotFound)
 }
 

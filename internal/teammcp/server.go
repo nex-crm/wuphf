@@ -220,6 +220,29 @@ type TeamTaskArgs struct {
 	MySlug    string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
+type TeamPlanArgs struct {
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	Tasks   []struct {
+		Title     string   `json:"title" jsonschema:"Task title"`
+		Assignee  string   `json:"assignee" jsonschema:"Agent slug to own this task"`
+		Details   string   `json:"details,omitempty" jsonschema:"Optional task details"`
+		DependsOn []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
+	} `json:"tasks" jsonschema:"List of tasks to create in dependency order"`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamMemoryWriteArgs struct {
+	Key    string `json:"key" jsonschema:"Key to store under your namespace"`
+	Value  string `json:"value" jsonschema:"Value to store"`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug (used as namespace). Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamTaskAckArgs struct {
+	ID      string `json:"id" jsonschema:"Task ID to acknowledge"`
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
 type TeamChannelsArgs struct{}
 
 type TeamMembersArgs struct {
@@ -369,6 +392,21 @@ func Run(ctx context.Context) error {
 		Name:        "team_task",
 		Description: "Create, claim, assign, complete, block, or release a shared task in the office task list.",
 	}, handleTeamTask)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_plan",
+		Description: "Create a structured task plan with dependencies in one call. Tasks execute in dependency order. Use this for work involving 2+ agents.",
+	}, handleTeamPlan)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_memory_write",
+		Description: "Write a key-value pair into the shared team memory under your namespace. All agents can read all namespaces via team_poll.",
+	}, handleTeamMemoryWrite)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_task_ack",
+		Description: "Acknowledge a task assigned to you, confirming you have seen it and will begin work.",
+	}, handleTeamTaskAck)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_requests",
@@ -883,6 +921,109 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 	}
 	text += " — " + result.Task.Title
 	return textResult(text), nil, nil
+}
+
+func handleTeamPlan(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlanArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	if len(args.Tasks) == 0 {
+		return toolError(fmt.Errorf("tasks list is empty")), nil, nil
+	}
+
+	type planItem struct {
+		Title     string   `json:"title"`
+		Assignee  string   `json:"assignee"`
+		Details   string   `json:"details,omitempty"`
+		DependsOn []string `json:"depends_on,omitempty"`
+	}
+	items := make([]planItem, 0, len(args.Tasks))
+	for _, t := range args.Tasks {
+		items = append(items, planItem{
+			Title:     strings.TrimSpace(t.Title),
+			Assignee:  strings.TrimSpace(t.Assignee),
+			Details:   strings.TrimSpace(t.Details),
+			DependsOn: t.DependsOn,
+		})
+	}
+
+	var result struct {
+		Tasks []struct {
+			ID      string `json:"id"`
+			Title   string `json:"title"`
+			Owner   string `json:"owner"`
+			Status  string `json:"status"`
+			Blocked bool   `json:"blocked"`
+		} `json:"tasks"`
+	}
+	if err := brokerPostJSON(ctx, "/task-plan", map[string]any{
+		"channel":    channel,
+		"created_by": mySlug,
+		"tasks":      items,
+	}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+
+	lines := make([]string, 0, len(result.Tasks))
+	for _, t := range result.Tasks {
+		line := fmt.Sprintf("- %s [%s]", t.ID, t.Status)
+		if t.Blocked {
+			line += " BLOCKED"
+		}
+		if t.Owner != "" {
+			line += " @" + t.Owner
+		}
+		line += " — " + t.Title
+		lines = append(lines, line)
+	}
+	return textResult(fmt.Sprintf("Created %d tasks in #%s:\n%s", len(result.Tasks), channel, strings.Join(lines, "\n"))), nil, nil
+}
+
+func handleTeamMemoryWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemoryWriteArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	key := strings.TrimSpace(args.Key)
+	if key == "" {
+		return toolError(fmt.Errorf("key is required")), nil, nil
+	}
+	if err := brokerPostJSON(ctx, "/memory", map[string]any{
+		"namespace": mySlug,
+		"key":       key,
+		"value":     args.Value,
+	}, nil); err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(fmt.Sprintf("Saved %s/%s to shared memory.", mySlug, key)), nil, nil
+}
+
+func handleTeamTaskAck(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAckArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	taskID := strings.TrimSpace(args.ID)
+	if taskID == "" {
+		return toolError(fmt.Errorf("task ID is required")), nil, nil
+	}
+	var result struct {
+		Task struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"task"`
+	}
+	if err := brokerPostJSON(ctx, "/tasks/ack", map[string]any{
+		"id":      taskID,
+		"channel": channel,
+		"slug":    mySlug,
+	}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(fmt.Sprintf("Acknowledged task %s — %s", result.Task.ID, result.Task.Title)), nil, nil
 }
 
 func handleTeamRequests(ctx context.Context, _ *mcp.CallToolRequest, args TeamRequestsArgs) (*mcp.CallToolResult, any, error) {
