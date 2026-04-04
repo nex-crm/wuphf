@@ -215,6 +215,36 @@ func TestHandleHumanMessageUsesDirectSessionLabelInOneOnOneMode(t *testing.T) {
 	}
 }
 
+func TestHandleTeamConclude(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+	t.Setenv("WUPHF_AGENT_SLUG", "fe")
+
+	msg, _ := b.PostMessage("fe", "general", "Thread root", nil, "")
+
+	result, _, err := handleTeamConclude(context.Background(), nil, TeamConcludeArgs{
+		ThreadID:  msg.ID,
+		Discussed: "Landing page",
+		Decided:   "3 sections",
+		Done:      "Built and deployed",
+	})
+	if err != nil {
+		t.Fatalf("handleTeamConclude: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("expected success, got error: %v", result.Content)
+	}
+	if !b.IsThreadConcluded("general", msg.ID) {
+		t.Fatal("expected thread to be concluded")
+	}
+}
+
 func TestHandleTeamPollOneOnOneHighlightsLatestHumanRequest(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_ONE_ON_ONE", "1")

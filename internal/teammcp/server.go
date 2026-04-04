@@ -243,6 +243,33 @@ type TeamTaskAckArgs struct {
 	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
+type TeamConcludeArgs struct {
+	Channel   string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	ThreadID  string `json:"thread_id" jsonschema:"Root message ID of the thread to conclude"`
+	Discussed string `json:"discussed" jsonschema:"What topics were covered"`
+	Decided   string `json:"decided" jsonschema:"What decisions were made"`
+	Done      string `json:"done" jsonschema:"What concrete work was completed"`
+	OpenItems string `json:"open_items,omitempty" jsonschema:"Anything remaining or handed off"`
+	MySlug    string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamHandoffArgs struct {
+	Channel  string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	TaskID   string `json:"task_id" jsonschema:"Task ID to hand off"`
+	ToAgent  string `json:"to_agent" jsonschema:"Agent slug receiving the handoff"`
+	WhatIDid string `json:"what_i_did" jsonschema:"What you completed"`
+	WhatToDo string `json:"what_to_do" jsonschema:"What the receiving agent should do next"`
+	Context  string `json:"context,omitempty" jsonschema:"Relevant details, gotchas, dependencies"`
+	MySlug   string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamReopenArgs struct {
+	Channel  string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	ThreadID string `json:"thread_id" jsonschema:"Root message ID of the thread to reopen"`
+	Reason   string `json:"reason" jsonschema:"Why the thread needs to be reopened"`
+	MySlug   string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
 type TeamChannelsArgs struct{}
 
 type TeamMembersArgs struct {
@@ -407,6 +434,21 @@ func Run(ctx context.Context) error {
 		Name:        "team_task_ack",
 		Description: "Acknowledge a task assigned to you, confirming you have seen it and will begin work.",
 	}, handleTeamTaskAck)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_conclude",
+		Description: "Conclude a thread with a structured summary. The summary is shown directly to the human. Write it for them, not for agents.",
+	}, handleTeamConclude)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_handoff",
+		Description: "Hand off a task to another agent with full context: what you did, what they need to do, and relevant details.",
+	}, handleTeamHandoff)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_reopen",
+		Description: "Reopen a previously concluded thread. CEO/lead only.",
+	}, handleTeamReopen)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_requests",
@@ -1025,6 +1067,89 @@ func handleTeamTaskAck(ctx context.Context, _ *mcp.CallToolRequest, args TeamTas
 		return toolError(err), nil, nil
 	}
 	return textResult(fmt.Sprintf("Acknowledged task %s — %s", result.Task.ID, result.Task.Title)), nil, nil
+}
+
+func handleTeamConclude(ctx context.Context, _ *mcp.CallToolRequest, args TeamConcludeArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	threadID := strings.TrimSpace(args.ThreadID)
+	if threadID == "" {
+		return toolError(fmt.Errorf("thread_id is required")), nil, nil
+	}
+	var result struct {
+		Conclusion struct {
+			ThreadID    string `json:"thread_id"`
+			ConcludedAt string `json:"concluded_at"`
+		} `json:"conclusion"`
+	}
+	if err := brokerPostJSON(ctx, "/conclude", map[string]any{
+		"channel":      channel,
+		"thread_id":    threadID,
+		"discussed":    strings.TrimSpace(args.Discussed),
+		"decided":      strings.TrimSpace(args.Decided),
+		"done":         strings.TrimSpace(args.Done),
+		"open_items":   strings.TrimSpace(args.OpenItems),
+		"concluded_by": mySlug,
+	}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(fmt.Sprintf("Thread %s in #%s concluded.", result.Conclusion.ThreadID, channel)), nil, nil
+}
+
+func handleTeamHandoff(ctx context.Context, _ *mcp.CallToolRequest, args TeamHandoffArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	taskID := strings.TrimSpace(args.TaskID)
+	toAgent := strings.TrimSpace(args.ToAgent)
+	if taskID == "" || toAgent == "" {
+		return toolError(fmt.Errorf("task_id and to_agent are required")), nil, nil
+	}
+	var result struct {
+		Task struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+			Owner string `json:"owner"`
+		} `json:"task"`
+	}
+	if err := brokerPostJSON(ctx, "/handoff", map[string]any{
+		"channel":    channel,
+		"task_id":    taskID,
+		"from_agent": mySlug,
+		"to_agent":   toAgent,
+		"what_i_did": strings.TrimSpace(args.WhatIDid),
+		"what_to_do": strings.TrimSpace(args.WhatToDo),
+		"context":    strings.TrimSpace(args.Context),
+	}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(fmt.Sprintf("Handed off %s to @%s — %s", result.Task.ID, result.Task.Owner, result.Task.Title)), nil, nil
+}
+
+func handleTeamReopen(ctx context.Context, _ *mcp.CallToolRequest, args TeamReopenArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	channel := resolveChannel(args.Channel)
+	threadID := strings.TrimSpace(args.ThreadID)
+	if threadID == "" {
+		return toolError(fmt.Errorf("thread_id is required")), nil, nil
+	}
+	if err := brokerPostJSON(ctx, "/conclude/reopen", map[string]any{
+		"channel":   channel,
+		"thread_id": threadID,
+		"reason":    strings.TrimSpace(args.Reason),
+		"slug":      mySlug,
+	}, nil); err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(fmt.Sprintf("Thread %s in #%s reopened.", threadID, channel)), nil, nil
 }
 
 func handleTeamRequests(ctx context.Context, _ *mcp.CallToolRequest, args TeamRequestsArgs) (*mcp.CallToolResult, any, error) {
