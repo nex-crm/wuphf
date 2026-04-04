@@ -1722,3 +1722,73 @@ func TestHandleConcludeReopenRejectsNonLead(t *testing.T) {
 		t.Fatalf("expected 403 for non-lead reopen, got %d", resp.StatusCode)
 	}
 }
+
+func TestHandleHandoffTransfersOwnership(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	task, _, _ := b.EnsureTask("general", "Build landing page", "details", "designer", "ceo", "")
+
+	body := fmt.Sprintf(`{"channel":"general","task_id":"%s","from_agent":"designer","to_agent":"fe","what_i_did":"Figma spec done","what_to_do":"Build HTML","context":"Mobile-first"}`, task.ID)
+	req, _ := http.NewRequest("POST", "http://"+b.Addr()+"/handoff", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /handoff: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, respBody)
+	}
+
+	// Verify ownership transferred
+	tasks := b.ChannelTasks("general")
+	for _, tt := range tasks {
+		if tt.ID == task.ID {
+			if tt.Owner != "fe" {
+				t.Fatalf("expected owner fe, got %s", tt.Owner)
+			}
+			if len(tt.Handoffs) != 1 {
+				t.Fatalf("expected 1 handoff, got %d", len(tt.Handoffs))
+			}
+			if tt.Handoffs[0].WhatIDid != "Figma spec done" {
+				t.Fatalf("handoff what_i_did mismatch")
+			}
+			return
+		}
+	}
+	t.Fatal("task not found")
+}
+
+func TestHandleHandoffRejectsNonOwner(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	task, _, _ := b.EnsureTask("general", "Build landing page", "", "designer", "ceo", "")
+
+	body := fmt.Sprintf(`{"channel":"general","task_id":"%s","from_agent":"be","to_agent":"fe","what_i_did":"X","what_to_do":"Y","context":"Z"}`, task.ID)
+	req, _ := http.NewRequest("POST", "http://"+b.Addr()+"/handoff", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-owner handoff, got %d", resp.StatusCode)
+	}
+}
