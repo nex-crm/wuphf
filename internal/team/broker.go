@@ -109,8 +109,33 @@ type teamTask struct {
 	FollowUpAt       string `json:"follow_up_at,omitempty"`
 	ReminderAt       string `json:"reminder_at,omitempty"`
 	RecheckAt        string `json:"recheck_at,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	CreatedAt        string       `json:"created_at"`
+	UpdatedAt        string       `json:"updated_at"`
+	Handoffs         []taskHandoff `json:"handoffs,omitempty"`
+}
+
+type conclusionSummary struct {
+	Discussed string `json:"discussed"`
+	Decided   string `json:"decided"`
+	Done      string `json:"done"`
+	OpenItems string `json:"open_items,omitempty"`
+}
+
+type threadConclusion struct {
+	ThreadID    string            `json:"thread_id"`
+	Channel     string            `json:"channel"`
+	Summary     conclusionSummary `json:"summary"`
+	ConcludedBy string            `json:"concluded_by"`
+	ConcludedAt string            `json:"concluded_at"`
+}
+
+type taskHandoff struct {
+	FromAgent string `json:"from_agent"`
+	ToAgent   string `json:"to_agent"`
+	WhatIDid  string `json:"what_i_did"`
+	WhatToDo  string `json:"what_to_do"`
+	Context   string `json:"context"`
+	CreatedAt string `json:"created_at"`
 }
 
 type channelSurface struct {
@@ -261,6 +286,7 @@ type brokerState struct {
 	Watchdogs         []watchdogAlert        `json:"watchdogs,omitempty"`
 	Scheduler         []schedulerJob         `json:"scheduler,omitempty"`
 	Skills            []teamSkill                   `json:"skills,omitempty"`
+	Conclusions       []threadConclusion            `json:"conclusions,omitempty"`
 	SharedMemory      map[string]map[string]string  `json:"shared_memory,omitempty"`
 	Counter           int                           `json:"counter"`
 	NotificationSince string                 `json:"notification_since,omitempty"`
@@ -302,6 +328,7 @@ type Broker struct {
 	watchdogs         []watchdogAlert
 	scheduler         []schedulerJob
 	skills            []teamSkill
+	conclusions       []threadConclusion
 	sharedMemory      map[string]map[string]string // namespace → key → value
 	lastTaggedAt      map[string]time.Time   // when each agent was last @mentioned
 	lastPaneSnapshot  map[string]string      // last captured pane content per agent (for change detection)
@@ -491,6 +518,18 @@ func (b *Broker) EnabledMembers(channel string) []string {
 		return b.enabledChannelMembersLocked(channel, ch.Members)
 	}
 	return nil
+}
+
+func (b *Broker) IsThreadConcluded(channel, threadID string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	for _, c := range b.conclusions {
+		if normalizeChannelSlug(c.Channel) == channel && c.ThreadID == threadID {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Broker) OfficeMembers() []officeMember {
@@ -804,6 +843,7 @@ func (b *Broker) loadState() error {
 	b.watchdogs = state.Watchdogs
 	b.scheduler = state.Scheduler
 	b.skills = state.Skills
+	b.conclusions = state.Conclusions
 	b.sharedMemory = state.SharedMemory
 	b.counter = state.Counter
 	b.notificationSince = state.NotificationSince
@@ -825,7 +865,7 @@ func (b *Broker) loadState() error {
 
 func (b *Broker) saveLocked() error {
 	path := brokerStatePath()
-	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
+	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.conclusions) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -848,6 +888,7 @@ func (b *Broker) saveLocked() error {
 		Watchdogs:         b.watchdogs,
 		Scheduler:         b.scheduler,
 		Skills:            b.skills,
+		Conclusions:       b.conclusions,
 		SharedMemory:      b.sharedMemory,
 		Counter:           b.counter,
 		NotificationSince: b.notificationSince,

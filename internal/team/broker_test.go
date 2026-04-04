@@ -1524,3 +1524,35 @@ func TestBrokerPostInboundSurfaceMessage(t *testing.T) {
 		t.Fatalf("expected 1 channel message, got %d", len(msgs))
 	}
 }
+
+func TestConclusionPersistsAcrossReload(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.conclusions = []threadConclusion{{
+		ThreadID:    "msg-1",
+		Channel:     "general",
+		Summary:     conclusionSummary{Discussed: "API design", Decided: "REST", Done: "Spec written", OpenItems: ""},
+		ConcludedBy: "be",
+		ConcludedAt: "2026-04-05T00:00:00Z",
+	}}
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("saveLocked: %v", err)
+	}
+	b.mu.Unlock()
+
+	reloaded := NewBroker()
+	reloaded.mu.Lock()
+	defer reloaded.mu.Unlock()
+	if len(reloaded.conclusions) != 1 {
+		t.Fatalf("expected 1 conclusion after reload, got %d", len(reloaded.conclusions))
+	}
+	if reloaded.conclusions[0].ThreadID != "msg-1" {
+		t.Fatalf("expected thread_id msg-1, got %s", reloaded.conclusions[0].ThreadID)
+	}
+}
