@@ -709,9 +709,33 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		}
 	}
 
-	// Broadcast model: every message goes to every agent.
-	// CEO gets a small head start (immediate), everyone else is delayed.
-	// The sender is always excluded.
+	// Context-aware notification gating:
+	// 1. CEO/lead messages always broadcast to all (they're directives)
+	// 2. If message tags specific agents → notify tagged + CEO
+	// 3. If message is in a thread → notify thread participants + CEO
+	// 4. Otherwise → broadcast all (fallback)
+	// CEO always gets immediate delivery on non-CEO messages.
+
+	broadcastAll := msg.From == lead
+
+	if !broadcastAll && len(msg.Tagged) > 0 {
+		addTarget(lead, &immediate)
+		for _, slug := range msg.Tagged {
+			addTarget(slug, &delayed)
+		}
+		return immediate, delayed
+	}
+
+	if !broadcastAll && msg.ReplyTo != "" && l.broker != nil {
+		threadParticipants := l.threadParticipants(msg.Channel, msg.ReplyTo)
+		addTarget(lead, &immediate)
+		for _, slug := range threadParticipants {
+			addTarget(slug, &delayed)
+		}
+		return immediate, delayed
+	}
+
+	// Broadcast to all enabled agents.
 	addTarget(lead, &immediate)
 	for _, slug := range slugs {
 		if slug == lead {
@@ -720,6 +744,25 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		addTarget(slug, &delayed)
 	}
 	return immediate, delayed
+}
+
+// threadParticipants returns the slugs of agents who have posted in a given thread.
+func (l *Launcher) threadParticipants(channel, threadRoot string) []string {
+	if l.broker == nil {
+		return nil
+	}
+	messages := l.broker.ChannelMessages(channel)
+	seen := map[string]struct{}{}
+	for _, msg := range messages {
+		if msg.ID == threadRoot || msg.ReplyTo == threadRoot {
+			seen[msg.From] = struct{}{}
+		}
+	}
+	slugs := make([]string, 0, len(seen))
+	for slug := range seen {
+		slugs = append(slugs, slug)
+	}
+	return slugs
 }
 
 func (l *Launcher) shouldDeliverDelayedNotification(targetSlug string, source channelMessage) bool {
