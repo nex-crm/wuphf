@@ -1660,3 +1660,65 @@ func TestConclusionPersistsAcrossReload(t *testing.T) {
 		t.Fatalf("expected thread_id msg-1, got %s", reloaded.conclusions[0].ThreadID)
 	}
 }
+
+func TestHandleConcludeReopenRemovesConclusion(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	msg, _ := b.PostMessage("ceo", "general", "Thread", nil, "")
+
+	// Conclude
+	body := fmt.Sprintf(`{"channel":"general","thread_id":"%s","discussed":"X","decided":"Y","done":"Z","concluded_by":"ceo"}`, msg.ID)
+	req, _ := http.NewRequest("POST", "http://"+b.Addr()+"/conclude", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	http.DefaultClient.Do(req)
+
+	// Reopen (CEO only)
+	body = fmt.Sprintf(`{"channel":"general","thread_id":"%s","reason":"need more work","slug":"ceo"}`, msg.ID)
+	req, _ = http.NewRequest("POST", "http://"+b.Addr()+"/conclude/reopen", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+	if b.IsThreadConcluded("general", msg.ID) {
+		t.Fatal("expected thread to be reopened")
+	}
+}
+
+func TestHandleConcludeReopenRejectsNonLead(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	msg, _ := b.PostMessage("fe", "general", "Thread", nil, "")
+	body := fmt.Sprintf(`{"channel":"general","thread_id":"%s","discussed":"X","decided":"Y","done":"Z","concluded_by":"fe"}`, msg.ID)
+	req, _ := http.NewRequest("POST", "http://"+b.Addr()+"/conclude", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	http.DefaultClient.Do(req)
+
+	body = fmt.Sprintf(`{"channel":"general","thread_id":"%s","reason":"reasons","slug":"fe"}`, msg.ID)
+	req, _ = http.NewRequest("POST", "http://"+b.Addr()+"/conclude/reopen", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, _ := http.DefaultClient.Do(req)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-lead reopen, got %d", resp.StatusCode)
+	}
+}
