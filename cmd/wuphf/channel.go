@@ -29,6 +29,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
+	"github.com/nex-crm/wuphf/internal/workflow"
 )
 
 type channelMsg struct {
@@ -103,6 +104,20 @@ type channelSkill struct {
 
 type channelSkillsMsg struct {
 	skills []channelSkill
+}
+
+// channelWorkflowLaunchMsg is sent when a skill with a workflow definition is invoked.
+type channelWorkflowLaunchMsg struct {
+	spec    string            // JSON workflow spec
+	name    string            // skill name
+	dryRun  bool
+	runtime *workflow.Runtime // pre-built runtime (optional, for demo)
+}
+
+// channelWorkflowDoneMsg is sent when a workflow view completes or is aborted.
+type channelWorkflowDoneMsg struct {
+	name      string
+	completed bool
 }
 
 type channelUsageMsg struct {
@@ -630,6 +645,10 @@ type channelModel struct {
 	calendarRange       calendarRange
 	calendarFilter      string
 
+	// Workflow runtime state
+	activeWorkflow      *workflow.WorkflowView
+	workflowName        string
+
 	// Telegram connect flow state
 	telegramGroups []team.TelegramGroup
 	telegramToken  string
@@ -775,6 +794,23 @@ func (m channelModel) Init() tea.Cmd {
 }
 
 func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// If a workflow is active, delegate all messages to it.
+	if m.activeWorkflow != nil {
+		wv, cmd := m.activeWorkflow.Update(msg)
+		m.activeWorkflow = &wv
+		if wv.Quitting() {
+			rt := wv.Runtime()
+			completed := rt.State() == workflow.StateDone
+			m.activeWorkflow = nil
+			m.workflowName = ""
+			if completed {
+				m.notice = "Workflow complete!"
+			}
+			return m, tea.ClearScreen
+		}
+		return m, cmd
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -1621,6 +1657,36 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshSlashCommands()
 		return m, nil
 
+	case channelWorkflowLaunchMsg:
+		var rt *workflow.Runtime
+		if msg.runtime != nil {
+			rt = msg.runtime
+		} else {
+			spec, err := workflow.ParseSpec(msg.spec)
+			if err != nil {
+				m.notice = "Workflow error: " + err.Error()
+				return m, nil
+			}
+			var rterr error
+			rt, rterr = workflow.NewRuntime(*spec)
+			if rterr != nil {
+				m.notice = "Workflow error: " + rterr.Error()
+				return m, nil
+			}
+		}
+		wv := workflow.NewWorkflowView(rt, m.width, m.height)
+		m.activeWorkflow = &wv
+		m.workflowName = msg.name
+		return m, m.activeWorkflow.Init()
+
+	case channelWorkflowDoneMsg:
+		m.activeWorkflow = nil
+		m.workflowName = ""
+		if msg.completed {
+			m.notice = "Workflow complete!"
+		}
+		return m, nil
+
 	case channelActionsMsg:
 		m.actions = msg.actions
 
@@ -1994,6 +2060,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m channelModel) View() string {
 	if m.width == 0 {
 		return "Loading..."
+	}
+
+	// Full-screen workflow view when active.
+	if m.activeWorkflow != nil {
+		return m.activeWorkflow.View()
 	}
 
 	layout := computeLayout(m.width, m.height, m.threadPanelOpen && !m.isOneOnOne(), m.sidebarCollapsed || m.isOneOnOne())
@@ -4360,6 +4431,17 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Filtering calendar for " + displayName(filter) + "."
 			return m, pollOfficeLedger()
 		}
+	case trimmed == "/workflow demo":
+		clearCurrent()
+		return m, launchDemoWorkflow()
+	case trimmed == "/workflow":
+		clearCurrent()
+		m.notice = "Usage: /workflow demo — launch a demo workflow"
+		return m, nil
+	case strings.HasPrefix(trimmed, "/workflow "):
+		clearCurrent()
+		m.notice = "Usage: /workflow demo — launch a demo workflow"
+		return m, nil
 	case trimmed == "/skills":
 		clearCurrent()
 		m.activeApp = officeAppSkills
@@ -5177,9 +5259,14 @@ func pollSkills(channel string) tea.Cmd {
 
 func createSkill(description, channel string) tea.Cmd {
 	return func() tea.Msg {
+		// Derive a slug-style name from the description for the skill name.
+		name := skillNameFromDescription(description)
 		payload := map[string]string{
 			"action":      "create",
+			"name":        name,
 			"description": description,
+			"content":     description,
+			"created_by":  "you",
 			"channel":     channel,
 		}
 		body, _ := json.Marshal(payload)
@@ -5198,18 +5285,97 @@ func createSkill(description, channel string) tea.Cmd {
 	}
 }
 
-func invokeSkill(name string) tea.Cmd {
+// saveWorkflowAsSkill saves a workflow spec as a reusable skill in the broker.
+func saveWorkflowAsSkill(name, specJSON, channel string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/skills/"+name+"/invoke", nil)
+		payload := map[string]string{
+			"action":              "create",
+			"name":                name,
+			"title":               name,
+			"description":         "Interactive workflow: " + name,
+			"content":             "Workflow skill created from /save-skill",
+			"created_by":          "you",
+			"channel":             channel,
+			"workflow_provider":   "interactive",
+			"workflow_definition": specJSON,
+		}
+		body, _ := json.Marshal(payload)
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/skills", bytes.NewReader(body))
 		if err != nil {
 			return channelSkillsMsg{}
 		}
+		req.Header.Set("Content-Type", "application/json")
 		client := &http.Client{Timeout: 5 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
 			return channelSkillsMsg{}
 		}
 		defer resp.Body.Close()
+		return channelSkillsMsg{}
+	}
+}
+
+// skillNameFromDescription derives a kebab-case skill name from a description.
+func skillNameFromDescription(desc string) string {
+	words := strings.Fields(strings.ToLower(desc))
+	if len(words) > 4 {
+		words = words[:4]
+	}
+	name := strings.Join(words, "-")
+	// Remove non-alphanumeric except hyphens.
+	var b strings.Builder
+	lastDash := false
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			lastDash = false
+		} else if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	result := strings.Trim(b.String(), "-")
+	if result == "" {
+		return "skill"
+	}
+	return result
+}
+
+func invokeSkill(name string) tea.Cmd {
+	return func() tea.Msg {
+		payload := map[string]string{
+			"invoked_by": "you",
+			"channel":    "general",
+		}
+		body, _ := json.Marshal(payload)
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/skills/"+name+"/invoke", bytes.NewReader(body))
+		if err != nil {
+			return channelSkillsMsg{}
+		}
+		req.Header.Set("Content-Type", "application/json")
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelSkillsMsg{}
+		}
+		defer resp.Body.Close()
+
+		// Parse the response to check for a workflow definition.
+		var result struct {
+			Skill channelSkill `json:"skill"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelSkillsMsg{}
+		}
+
+		// If the skill has a workflow definition, launch it.
+		if result.Skill.WorkflowDefinition != "" {
+			return channelWorkflowLaunchMsg{
+				spec: result.Skill.WorkflowDefinition,
+				name: name,
+			}
+		}
+
 		return channelSkillsMsg{}
 	}
 }
@@ -5791,6 +5957,76 @@ func applyTeamSetup() tea.Cmd {
 			return channelInitDoneMsg{err: err}
 		}
 		return channelInitDoneMsg{notice: notice + " Setup applied. Team reloaded with the new configuration."}
+	}
+}
+
+// demoWorkflowSpec is a self-contained workflow with inline data for testing.
+const demoWorkflowSpec = `{
+  "id": "demo-triage",
+  "title": "Email Triage (demo)",
+  "steps": [
+    {
+      "id": "list",
+      "type": "select",
+      "prompt": "Select an email to review:",
+      "dataRef": "/emails",
+      "display": {"component": "table", "dataRef": "/emailTable"},
+      "actions": [
+        {"key": "a", "label": "Approve", "transition": "review"},
+        {"key": "d", "label": "Dismiss", "transition": "list"},
+        {"key": "q", "label": "Finish", "transition": "done"}
+      ],
+      "allowLoop": true
+    },
+    {
+      "id": "review",
+      "type": "confirm",
+      "prompt": "Send a reply to this email?",
+      "allowLoop": true,
+      "display": {"component": "card", "props": {"title": "Draft Reply"}},
+      "actions": [
+        {"key": "y", "label": "Yes, send", "transition": "list"},
+        {"key": "e", "label": "Edit first", "transition": "edit"},
+        {"key": "n", "label": "Skip", "transition": "list"}
+      ]
+    },
+    {
+      "id": "edit",
+      "type": "edit",
+      "prompt": "Edit your reply:",
+      "dataRef": "/draftReply",
+      "display": {"component": "textfield", "props": {"label": "Reply", "multiline": true}},
+      "actions": [
+        {"key": "Enter", "label": "Done editing", "transition": "review"}
+      ]
+    }
+  ]
+}`
+
+// launchDemoWorkflow creates and launches a self-contained demo workflow.
+func launchDemoWorkflow() tea.Cmd {
+	return func() tea.Msg {
+		spec, err := workflow.ParseSpec(demoWorkflowSpec)
+		if err != nil {
+			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
+		}
+		rt, err := workflow.NewRuntime(*spec)
+		if err != nil {
+			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
+		}
+		rt.SetData("/emails", []any{
+			map[string]any{"from": "alice@acme.co", "subject": "Q2 Revenue Report", "priority": "high"},
+			map[string]any{"from": "bob@partner.io", "subject": "Partnership proposal", "priority": "medium"},
+			map[string]any{"from": "carol@team.co", "subject": "Standup notes", "priority": "low"},
+		})
+		rt.SetData("/emailTable", []any{
+			[]any{"From", "Subject", "Priority"},
+			[]any{"alice@acme.co", "Q2 Revenue Report", "HIGH"},
+			[]any{"bob@partner.io", "Partnership proposal", "medium"},
+			[]any{"carol@team.co", "Standup notes", "low"},
+		})
+		rt.SetData("/draftReply", "Thanks for sending this over. I'll review and get back to you by EOD.")
+		return channelWorkflowLaunchMsg{runtime: rt, name: "demo-triage"}
 	}
 }
 

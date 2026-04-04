@@ -1,14 +1,13 @@
 package action
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
-	"text/template"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/workflow"
 )
 
 const composioWorkflowVersion = "wuphf_workflow_v1"
@@ -78,7 +77,7 @@ func (c *ComposioREST) ExecuteWorkflow(ctx context.Context, req WorkflowExecuteR
 		return WorkflowExecuteResult{}, err
 	}
 
-	inputs := mergeWorkflowInputs(spec.Inputs, req.Inputs)
+	inputs := workflow.MergeInputs(spec.Inputs, req.Inputs)
 	stepOutputs := map[string]any{}
 	stepLogs := map[string]json.RawMessage{}
 	runID := fmt.Sprintf("cmpwf_%d", time.Now().UTC().UnixNano())
@@ -93,7 +92,7 @@ func (c *ComposioREST) ExecuteWorkflow(ctx context.Context, req WorkflowExecuteR
 	}
 
 	for _, step := range spec.Steps {
-		scope := workflowScope(key, inputs, stepOutputs)
+		scope := workflow.BuildScope(key, c.Name(), inputs, stepOutputs)
 		output, err := c.executeWorkflowStep(ctx, step, scope, req.DryRun)
 		if err != nil {
 			return WorkflowExecuteResult{}, fmt.Errorf("workflow %s step %s failed: %w", key, step.ID, err)
@@ -174,15 +173,15 @@ func (c *ComposioREST) decodeWorkflowDefinition(definition json.RawMessage) (com
 		if len(spec.Steps[i].Data) == 0 && len(spec.Steps[i].Params) > 0 {
 			spec.Steps[i].Data = spec.Steps[i].Params
 		}
-		spec.Steps[i].Template = normalizeWorkflowTemplateString(spec.Steps[i].Template)
-		spec.Steps[i].QueryTemplate = normalizeWorkflowTemplateString(spec.Steps[i].QueryTemplate)
-		spec.Steps[i].ConnectionKey = normalizeWorkflowValueSyntax(spec.Steps[i].ConnectionKey)
-		spec.Steps[i].Data = normalizeWorkflowMapSyntax(spec.Steps[i].Data)
-		spec.Steps[i].PathVariables = normalizeWorkflowMapSyntax(spec.Steps[i].PathVariables)
-		spec.Steps[i].QueryParameters = normalizeWorkflowMapSyntax(spec.Steps[i].QueryParameters)
-		spec.Steps[i].Headers = normalizeWorkflowMapSyntax(spec.Steps[i].Headers)
-		spec.Steps[i].LookbackHours = normalizeWorkflowValueSyntax(spec.Steps[i].LookbackHours)
-		spec.Steps[i].InsightLimit = normalizeWorkflowValueSyntax(spec.Steps[i].InsightLimit)
+		spec.Steps[i].Template = workflow.NormalizeTemplateString(spec.Steps[i].Template)
+		spec.Steps[i].QueryTemplate = workflow.NormalizeTemplateString(spec.Steps[i].QueryTemplate)
+		spec.Steps[i].ConnectionKey = workflow.NormalizeValueSyntax(spec.Steps[i].ConnectionKey)
+		spec.Steps[i].Data = workflow.NormalizeMapSyntax(spec.Steps[i].Data)
+		spec.Steps[i].PathVariables = workflow.NormalizeMapSyntax(spec.Steps[i].PathVariables)
+		spec.Steps[i].QueryParameters = workflow.NormalizeMapSyntax(spec.Steps[i].QueryParameters)
+		spec.Steps[i].Headers = workflow.NormalizeMapSyntax(spec.Steps[i].Headers)
+		spec.Steps[i].LookbackHours = workflow.NormalizeValueSyntax(spec.Steps[i].LookbackHours)
+		spec.Steps[i].InsightLimit = workflow.NormalizeValueSyntax(spec.Steps[i].InsightLimit)
 		if spec.Steps[i].ID == "" {
 			return spec, fmt.Errorf("workflow step %d is missing id", i+1)
 		}
@@ -231,124 +230,13 @@ func normalizeWorkflowInputs(inputs map[string]any) map[string]any {
 	for key, value := range inputs {
 		if obj, ok := value.(map[string]any); ok {
 			if def, ok := obj["default"]; ok {
-				out[key] = normalizeWorkflowValueSyntax(def)
+				out[key] = workflow.NormalizeValueSyntax(def)
 				continue
 			}
 		}
-		out[key] = normalizeWorkflowValueSyntax(value)
+		out[key] = workflow.NormalizeValueSyntax(value)
 	}
 	return out
-}
-
-func normalizeWorkflowMapSyntax(in map[string]any) map[string]any {
-	if len(in) == 0 {
-		return in
-	}
-	out := make(map[string]any, len(in))
-	for key, value := range in {
-		out[key] = normalizeWorkflowValueSyntax(value)
-	}
-	return out
-}
-
-func normalizeWorkflowValueSyntax(value any) any {
-	switch typed := value.(type) {
-	case string:
-		return normalizeWorkflowTemplateString(typed)
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, normalizeWorkflowValueSyntax(item))
-		}
-		return out
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			out[key] = normalizeWorkflowValueSyntax(item)
-		}
-		return out
-	default:
-		return value
-	}
-}
-
-var workflowTemplateShorthandPatterns = []struct {
-	re   *regexp.Regexp
-	repl string
-}{
-	{regexp.MustCompile(`\{\{\s*inputs\.`), "{{ .inputs."},
-	{regexp.MustCompile(`\{\{\s*steps\.`), "{{ .steps."},
-	{regexp.MustCompile(`\{\{\s*workflow\.`), "{{ .workflow."},
-	{regexp.MustCompile(`\{\{\s*now\.`), "{{ .now."},
-	{regexp.MustCompile(`\{\{\s*today_date\s*\}\}`), "{{ .now.date }}"},
-	{regexp.MustCompile(`\{\{\s*today_rfc3339\s*\}\}`), "{{ .now.rfc3339 }}"},
-}
-
-var (
-	workflowHandlebarsEachOpenRe = regexp.MustCompile(`\{\{\s*#each\s+([^}]+?)\s*\}\}`)
-	workflowHandlebarsEachClose  = regexp.MustCompile(`\{\{\s*/each\s*\}\}`)
-	workflowHandlebarsThisRe     = regexp.MustCompile(`\{\{\s*this\.([^}]+?)\s*\}\}`)
-)
-
-func normalizeWorkflowTemplateString(raw string) string {
-	text := strings.TrimSpace(raw)
-	if text == "" {
-		return raw
-	}
-	for _, pattern := range workflowTemplateShorthandPatterns {
-		text = pattern.re.ReplaceAllString(text, pattern.repl)
-	}
-	text = workflowHandlebarsEachOpenRe.ReplaceAllStringFunc(text, func(match string) string {
-		parts := workflowHandlebarsEachOpenRe.FindStringSubmatch(match)
-		if len(parts) != 2 {
-			return match
-		}
-		expr := strings.TrimSpace(parts[1])
-		if strings.HasPrefix(expr, "steps.") || strings.HasPrefix(expr, "inputs.") || strings.HasPrefix(expr, "workflow.") || strings.HasPrefix(expr, "now.") {
-			expr = "." + expr
-		}
-		return "{{- range $item := " + expr + " }}"
-	})
-	text = workflowHandlebarsEachClose.ReplaceAllString(text, "{{- end }}")
-	text = workflowHandlebarsThisRe.ReplaceAllStringFunc(text, func(match string) string {
-		parts := workflowHandlebarsThisRe.FindStringSubmatch(match)
-		if len(parts) != 2 {
-			return match
-		}
-		return "{{ $item." + strings.TrimSpace(parts[1]) + " }}"
-	})
-	return text
-}
-
-func mergeWorkflowInputs(defaults, overrides map[string]any) map[string]any {
-	out := map[string]any{}
-	for key, value := range defaults {
-		out[key] = value
-	}
-	for key, value := range overrides {
-		out[key] = value
-	}
-	return out
-}
-
-func workflowScope(key string, inputs map[string]any, steps map[string]any) map[string]any {
-	now := time.Now().UTC()
-	return map[string]any{
-		"workflow": map[string]any{
-			"key":      key,
-			"provider": "composio",
-		},
-		"inputs": normalizeTemplateScopeValue(inputs),
-		"steps":  normalizeTemplateScopeValue(steps),
-		"now": map[string]any{
-			"rfc3339": now.Format(time.RFC3339),
-			"date":    now.Format("2006-01-02"),
-		},
-		"meta": map[string]any{
-			"rfc3339": now.Format(time.RFC3339),
-			"date":    now.Format("2006-01-02"),
-		},
-	}
 }
 
 func (c *ComposioREST) executeWorkflowStep(ctx context.Context, step workflowStep, scope map[string]any, workflowDryRun bool) (map[string]any, error) {
@@ -367,7 +255,7 @@ func (c *ComposioREST) executeWorkflowStep(ctx context.Context, step workflowSte
 }
 
 func (c *ComposioREST) executeWorkflowActionStep(ctx context.Context, step workflowStep, scope map[string]any, workflowDryRun bool) (map[string]any, error) {
-	connectionKey, err := renderWorkflowString(step.ConnectionKey, scope)
+	connectionKey, err := workflow.RenderString(step.ConnectionKey, scope)
 	if err != nil {
 		return nil, fmt.Errorf("render connection_key: %w", err)
 	}
@@ -377,19 +265,19 @@ func (c *ComposioREST) executeWorkflowActionStep(ctx context.Context, step workf
 			return nil, err
 		}
 	}
-	data, err := renderWorkflowMap(step.Data, scope)
+	data, err := workflow.RenderMap(step.Data, scope)
 	if err != nil {
 		return nil, fmt.Errorf("render data: %w", err)
 	}
-	pathVariables, err := renderWorkflowMap(step.PathVariables, scope)
+	pathVariables, err := workflow.RenderMap(step.PathVariables, scope)
 	if err != nil {
 		return nil, fmt.Errorf("render path_variables: %w", err)
 	}
-	queryParameters, err := renderWorkflowMap(step.QueryParameters, scope)
+	queryParameters, err := workflow.RenderMap(step.QueryParameters, scope)
 	if err != nil {
 		return nil, fmt.Errorf("render query_parameters: %w", err)
 	}
-	headers, err := renderWorkflowMap(step.Headers, scope)
+	headers, err := workflow.RenderMap(step.Headers, scope)
 	if err != nil {
 		return nil, fmt.Errorf("render headers: %w", err)
 	}
@@ -448,7 +336,7 @@ func (c *ComposioREST) autoResolveWorkflowConnection(ctx context.Context, platfo
 }
 
 func executeWorkflowTemplateStep(step workflowStep, scope map[string]any) (map[string]any, error) {
-	text, err := renderWorkflowTemplate(step.Template, scope)
+	text, err := workflow.RenderTemplate(step.Template, scope)
 	if err != nil {
 		return nil, fmt.Errorf("render template: %w", err)
 	}
@@ -464,7 +352,7 @@ func executeWorkflowTemplateStep(step workflowStep, scope map[string]any) (map[s
 }
 
 func executeWorkflowNexAskStep(step workflowStep, scope map[string]any) (map[string]any, error) {
-	query, err := renderWorkflowTemplate(step.QueryTemplate, scope)
+	query, err := workflow.RenderTemplate(step.QueryTemplate, scope)
 	if err != nil {
 		return nil, fmt.Errorf("render query_template: %w", err)
 	}
@@ -486,11 +374,11 @@ func executeWorkflowNexAskStep(step workflowStep, scope map[string]any) (map[str
 }
 
 func executeWorkflowNexInsightsStep(step workflowStep, scope map[string]any) (map[string]any, error) {
-	lookbackHours, err := renderWorkflowInt(step.LookbackHours, scope, 24)
+	lookbackHours, err := workflow.RenderInt(step.LookbackHours, scope, 24)
 	if err != nil {
 		return nil, fmt.Errorf("render lookback_hours: %w", err)
 	}
-	insightLimit, err := renderWorkflowInt(step.InsightLimit, scope, 5)
+	insightLimit, err := workflow.RenderInt(step.InsightLimit, scope, 5)
 	if err != nil {
 		return nil, fmt.Errorf("render insight_limit: %w", err)
 	}
@@ -499,7 +387,7 @@ func executeWorkflowNexInsightsStep(step workflowStep, scope map[string]any) (ma
 	if err != nil {
 		return nil, err
 	}
-	normalizedInsights := normalizeTemplateScopeValue(insights.Insights)
+	normalizedInsights := workflow.NormalizeScopeValue(insights.Insights)
 	compactSummary := summarizeWorkflowInsights(insights.Insights)
 	return map[string]any{
 		"type":           "nex_insights",
@@ -509,107 +397,6 @@ func executeWorkflowNexInsightsStep(step workflowStep, scope map[string]any) (ma
 		"insights":       normalizedInsights,
 		"result":         compactSummary,
 	}, nil
-}
-
-func renderWorkflowMap(in map[string]any, scope map[string]any) (map[string]any, error) {
-	if len(in) == 0 {
-		return nil, nil
-	}
-	rendered, err := renderWorkflowValue(in, scope)
-	if err != nil {
-		return nil, err
-	}
-	out, _ := rendered.(map[string]any)
-	return out, nil
-}
-
-func renderWorkflowInt(value any, scope map[string]any, fallback int) (int, error) {
-	if value == nil {
-		return fallback, nil
-	}
-	rendered, err := renderWorkflowValue(value, scope)
-	if err != nil {
-		return 0, err
-	}
-	if n := intInput(rendered); n > 0 {
-		return n, nil
-	}
-	return fallback, nil
-}
-
-func renderWorkflowString(value any, scope map[string]any) (string, error) {
-	if value == nil {
-		return "", nil
-	}
-	rendered, err := renderWorkflowValue(value, scope)
-	if err != nil {
-		return "", err
-	}
-	return stringInput(rendered), nil
-}
-
-func renderWorkflowValue(value any, scope map[string]any) (any, error) {
-	switch typed := value.(type) {
-	case nil:
-		return nil, nil
-	case string:
-		return renderWorkflowTemplate(typed, scope)
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			rendered, err := renderWorkflowValue(item, scope)
-			if err != nil {
-				return nil, err
-			}
-			out = append(out, rendered)
-		}
-		return out, nil
-	case map[string]any:
-		out := make(map[string]any, len(typed))
-		for key, item := range typed {
-			rendered, err := renderWorkflowValue(item, scope)
-			if err != nil {
-				return nil, err
-			}
-			out[key] = rendered
-		}
-		return out, nil
-	default:
-		return value, nil
-	}
-}
-
-func renderWorkflowTemplate(tpl string, scope map[string]any) (string, error) {
-	if !strings.Contains(tpl, "{{") {
-		return tpl, nil
-	}
-	t, err := template.New("workflow").Option("missingkey=error").Funcs(template.FuncMap{
-		"toJSON": func(v any) string {
-			if s, ok := v.(string); ok {
-				return s
-			}
-			raw, _ := json.Marshal(v)
-			return string(raw)
-		},
-		"toPrettyJSON": func(v any) string {
-			if s, ok := v.(string); ok {
-				return s
-			}
-			raw, _ := json.MarshalIndent(v, "", "  ")
-			return string(raw)
-		},
-		"trim":  strings.TrimSpace,
-		"upper": strings.ToUpper,
-		"lower": strings.ToLower,
-	}).Parse(tpl)
-	if err != nil {
-		return "", err
-	}
-	var buf bytes.Buffer
-	if err := t.Execute(&buf, scope); err != nil {
-		return "", err
-	}
-	return buf.String(), nil
 }
 
 func summarizeWorkflowInsights(items []nexInsightItem) string {
@@ -724,53 +511,8 @@ func normalizeDecodedJSON(value any, depth int) any {
 	}
 }
 
-func normalizeTemplateScopeValue(value any) any {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return value
-	}
-	var decoded any
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return value
-	}
-	return decoded
-}
-
 func mustMarshalJSON(v any) json.RawMessage {
 	raw, _ := json.Marshal(v)
 	return raw
 }
 
-func stringInput(v any) string {
-	if v == nil {
-		return ""
-	}
-	switch t := v.(type) {
-	case string:
-		return t
-	default:
-		return fmt.Sprintf("%v", v)
-	}
-}
-
-func intInput(v any) int {
-	switch t := v.(type) {
-	case int:
-		return t
-	case int32:
-		return int(t)
-	case int64:
-		return int(t)
-	case float64:
-		return int(t)
-	case json.Number:
-		i, _ := t.Int64()
-		return int(i)
-	case string:
-		var n int
-		fmt.Sscanf(strings.TrimSpace(t), "%d", &n)
-		return n
-	default:
-		return 0
-	}
-}
