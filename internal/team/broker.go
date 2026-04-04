@@ -431,6 +431,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
+	mux.HandleFunc("/conclude", b.requireAuth(b.handleConclude))
+	mux.HandleFunc("/conclude/reopen", b.requireAuth(b.handleConcludeReopen))
+	mux.HandleFunc("/conclusions", b.requireAuth(b.handleGetConclusions))
+	mux.HandleFunc("/handoff", b.requireAuth(b.handleHandoff))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -815,6 +819,301 @@ func defaultBrokerStatePath() string {
 		return filepath.Join(".wuphf", "team", "broker-state.json")
 	}
 	return filepath.Join(home, ".wuphf", "team", "broker-state.json")
+}
+
+func (b *Broker) handleConclude(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Channel     string `json:"channel"`
+		ThreadID    string `json:"thread_id"`
+		Discussed   string `json:"discussed"`
+		Decided     string `json:"decided"`
+		Done        string `json:"done"`
+		OpenItems   string `json:"open_items"`
+		ConcludedBy string `json:"concluded_by"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	threadID := strings.TrimSpace(body.ThreadID)
+	concludedBy := strings.TrimSpace(body.ConcludedBy)
+	if threadID == "" || concludedBy == "" {
+		http.Error(w, "thread_id and concluded_by required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Idempotency: return existing conclusion if already concluded
+	for _, c := range b.conclusions {
+		if normalizeChannelSlug(c.Channel) == channel && c.ThreadID == threadID {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"conclusion": c})
+			return
+		}
+	}
+
+	// Authorization: concludedBy must have posted in the thread
+	participated := false
+	for _, msg := range b.messages {
+		if normalizeChannelSlug(msg.Channel) != channel {
+			continue
+		}
+		if (msg.ID == threadID || msg.ReplyTo == threadID) && msg.From == concludedBy {
+			participated = true
+			break
+		}
+	}
+	if !participated {
+		http.Error(w, "only thread participants can conclude", http.StatusForbidden)
+		return
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	conclusion := threadConclusion{
+		ThreadID: threadID,
+		Channel:  channel,
+		Summary: conclusionSummary{
+			Discussed: strings.TrimSpace(body.Discussed),
+			Decided:   strings.TrimSpace(body.Decided),
+			Done:      strings.TrimSpace(body.Done),
+			OpenItems: strings.TrimSpace(body.OpenItems),
+		},
+		ConcludedBy: concludedBy,
+		ConcludedAt: now,
+	}
+	b.conclusions = append(b.conclusions, conclusion)
+
+	// Post a [CONCLUSION] message into the thread for TUI visibility
+	b.counter++
+	conclusionContent := fmt.Sprintf("[CONCLUSION] Discussed: %s | Decided: %s | Done: %s",
+		conclusion.Summary.Discussed, conclusion.Summary.Decided, conclusion.Summary.Done)
+	if conclusion.Summary.OpenItems != "" {
+		conclusionContent += " | Open: " + conclusion.Summary.OpenItems
+	}
+	conclusionMsg := channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      concludedBy,
+		Channel:   channel,
+		Kind:      "conclusion",
+		Content:   conclusionContent,
+		ReplyTo:   threadID,
+		Timestamp: now,
+	}
+	b.messages = append(b.messages, conclusionMsg)
+
+	b.appendActionLocked("thread_concluded", "office", channel, concludedBy, truncateSummary("Concluded: "+conclusion.Summary.Done, 140), threadID)
+	if err := b.saveLocked(); err != nil {
+		http.Error(w, "failed to persist", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"conclusion": conclusion})
+}
+
+func (b *Broker) handleConcludeReopen(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Channel  string `json:"channel"`
+		ThreadID string `json:"thread_id"`
+		Reason   string `json:"reason"`
+		Slug     string `json:"slug"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	threadID := strings.TrimSpace(body.ThreadID)
+	slug := strings.TrimSpace(body.Slug)
+	if threadID == "" || slug == "" {
+		http.Error(w, "thread_id and slug required", http.StatusBadRequest)
+		return
+	}
+	if slug != "ceo" && slug != "you" {
+		http.Error(w, "only the CEO or human can reopen concluded threads", http.StatusForbidden)
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	removed := false
+	for i := range b.conclusions {
+		if normalizeChannelSlug(b.conclusions[i].Channel) == channel && b.conclusions[i].ThreadID == threadID {
+			b.conclusions = append(b.conclusions[:i], b.conclusions[i+1:]...)
+			removed = true
+			break
+		}
+	}
+	if !removed {
+		http.Error(w, "thread not concluded", http.StatusNotFound)
+		return
+	}
+	b.appendActionLocked("thread_reopened", "office", channel, slug, truncateSummary("Reopened: "+body.Reason, 140), threadID)
+	if err := b.saveLocked(); err != nil {
+		http.Error(w, "failed to persist", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"reopened": true})
+}
+
+func (b *Broker) handleGetConclusions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
+	if channel == "" {
+		channel = "general"
+	}
+	threadID := strings.TrimSpace(r.URL.Query().Get("thread_id"))
+	limitStr := r.URL.Query().Get("limit")
+	limit := 20
+	if n, err := strconv.Atoi(limitStr); err == nil && n > 0 {
+		limit = n
+	}
+
+	b.mu.Lock()
+	result := make([]threadConclusion, 0)
+	for _, c := range b.conclusions {
+		if normalizeChannelSlug(c.Channel) != channel {
+			continue
+		}
+		if threadID != "" && c.ThreadID != threadID {
+			continue
+		}
+		result = append(result, c)
+		if len(result) >= limit {
+			break
+		}
+	}
+	b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"conclusions": result})
+}
+
+func (b *Broker) enabledMembersLocked(channel string) []string {
+	channel = normalizeChannelSlug(channel)
+	ch := b.findChannelLocked(channel)
+	if ch == nil {
+		return nil
+	}
+	disabled := make(map[string]struct{}, len(ch.Disabled))
+	for _, d := range ch.Disabled {
+		disabled[d] = struct{}{}
+	}
+	if len(ch.Members) > 0 {
+		out := make([]string, 0, len(ch.Members))
+		for _, m := range ch.Members {
+			if _, ok := disabled[m]; !ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	}
+	out := make([]string, 0, len(b.members))
+	for _, m := range b.members {
+		if _, ok := disabled[m.Slug]; !ok {
+			out = append(out, m.Slug)
+		}
+	}
+	return out
+}
+
+func (b *Broker) handleHandoff(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Channel   string `json:"channel"`
+		TaskID    string `json:"task_id"`
+		FromAgent string `json:"from_agent"`
+		ToAgent   string `json:"to_agent"`
+		WhatIDid  string `json:"what_i_did"`
+		WhatToDo  string `json:"what_to_do"`
+		Context   string `json:"context"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	taskID := strings.TrimSpace(body.TaskID)
+	fromAgent := strings.TrimSpace(body.FromAgent)
+	toAgent := strings.TrimSpace(body.ToAgent)
+	if taskID == "" || fromAgent == "" || toAgent == "" {
+		http.Error(w, "task_id, from_agent, and to_agent required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Validate to_agent is enabled in channel
+	enabled := false
+	for _, member := range b.enabledMembersLocked(channel) {
+		if member == toAgent {
+			enabled = true
+			break
+		}
+	}
+	if !enabled {
+		http.Error(w, "to_agent is not an enabled member of the channel", http.StatusBadRequest)
+		return
+	}
+
+	for i := range b.tasks {
+		if b.tasks[i].ID != taskID || normalizeChannelSlug(b.tasks[i].Channel) != channel {
+			continue
+		}
+		task := &b.tasks[i]
+		if task.Owner != fromAgent {
+			http.Error(w, "only the task owner can handoff", http.StatusForbidden)
+			return
+		}
+		now := time.Now().UTC().Format(time.RFC3339)
+		handoff := taskHandoff{
+			FromAgent: fromAgent,
+			ToAgent:   toAgent,
+			WhatIDid:  strings.TrimSpace(body.WhatIDid),
+			WhatToDo:  strings.TrimSpace(body.WhatToDo),
+			Context:   strings.TrimSpace(body.Context),
+			CreatedAt: now,
+		}
+		task.Handoffs = append(task.Handoffs, handoff)
+		task.Owner = toAgent
+		task.AckedAt = "" // reset ack for new owner
+		task.UpdatedAt = now
+		b.appendActionLocked("task_handoff", "office", channel, fromAgent, truncateSummary(fmt.Sprintf("Handed off to @%s: %s", toAgent, task.Title), 140), task.ID)
+		if err := b.saveLocked(); err != nil {
+			http.Error(w, "failed to persist", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"task": *task})
+		return
+	}
+	http.Error(w, "task not found", http.StatusNotFound)
 }
 
 func (b *Broker) loadState() error {

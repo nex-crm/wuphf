@@ -1525,6 +1525,110 @@ func TestBrokerPostInboundSurfaceMessage(t *testing.T) {
 	}
 }
 
+func TestHandleConcludeCreatesConclusion(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	// Post a message to create a thread root
+	msg, err := b.PostMessage("fe", "general", "Let's build the landing page", nil, "")
+	if err != nil {
+		t.Fatalf("post message: %v", err)
+	}
+
+	// Conclude the thread
+	body := fmt.Sprintf(`{"channel":"general","thread_id":"%s","discussed":"Landing page","decided":"3 sections","done":"Built and deployed","concluded_by":"fe"}`, msg.ID)
+	req, _ := http.NewRequest("POST", "http://"+b.Addr()+"/conclude", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /conclude: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, respBody)
+	}
+
+	if !b.IsThreadConcluded("general", msg.ID) {
+		t.Fatal("expected thread to be concluded")
+	}
+}
+
+func TestHandleConcludeRejectsNonParticipant(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	msg, _ := b.PostMessage("fe", "general", "Thread root", nil, "")
+
+	body := fmt.Sprintf(`{"channel":"general","thread_id":"%s","discussed":"X","decided":"Y","done":"Z","concluded_by":"be"}`, msg.ID)
+	req, _ := http.NewRequest("POST", "http://"+b.Addr()+"/conclude", strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /conclude: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d", resp.StatusCode)
+	}
+}
+
+func TestHandleConcludeIdempotent(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	msg, _ := b.PostMessage("fe", "general", "Thread root", nil, "")
+	conclude := func() int {
+		body := fmt.Sprintf(`{"channel":"general","thread_id":"%s","discussed":"X","decided":"Y","done":"Z","concluded_by":"fe"}`, msg.ID)
+		req, _ := http.NewRequest("POST", "http://"+b.Addr()+"/conclude", strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		resp, _ := http.DefaultClient.Do(req)
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := conclude(); code != 200 {
+		t.Fatalf("first conclude: expected 200, got %d", code)
+	}
+	if code := conclude(); code != 200 {
+		t.Fatalf("second conclude: expected 200 (idempotent), got %d", code)
+	}
+	b.mu.Lock()
+	count := 0
+	for _, c := range b.conclusions {
+		if c.ThreadID == msg.ID {
+			count++
+		}
+	}
+	b.mu.Unlock()
+	if count != 1 {
+		t.Fatalf("expected 1 conclusion (idempotent), got %d", count)
+	}
+}
+
 func TestConclusionPersistsAcrossReload(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
