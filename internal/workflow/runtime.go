@@ -160,6 +160,13 @@ func (r *Runtime) DataStore() map[string]any {
 	return out
 }
 
+// SetData sets a value in the data store at the given JSON Pointer path.
+func (r *Runtime) SetData(pointer string, value any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	setPointerPath(r.dataStore, pointer, value)
+}
+
 // StepHistory returns a copy of the step history.
 func (r *Runtime) StepHistory() []StepEvent {
 	r.mu.RLock()

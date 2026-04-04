@@ -107,9 +107,10 @@ type channelSkillsMsg struct {
 
 // channelWorkflowLaunchMsg is sent when a skill with a workflow definition is invoked.
 type channelWorkflowLaunchMsg struct {
-	spec   string // JSON workflow spec
-	name   string // skill name
-	dryRun bool
+	spec    string            // JSON workflow spec
+	name    string            // skill name
+	dryRun  bool
+	runtime *workflow.Runtime // pre-built runtime (optional, for demo)
 }
 
 // channelWorkflowDoneMsg is sent when a workflow view completes or is aborted.
@@ -1558,15 +1559,21 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case channelWorkflowLaunchMsg:
-		spec, err := workflow.ParseSpec(msg.spec)
-		if err != nil {
-			m.notice = "Workflow error: " + err.Error()
-			return m, nil
-		}
-		rt, err := workflow.NewRuntime(*spec)
-		if err != nil {
-			m.notice = "Workflow error: " + err.Error()
-			return m, nil
+		var rt *workflow.Runtime
+		if msg.runtime != nil {
+			rt = msg.runtime
+		} else {
+			spec, err := workflow.ParseSpec(msg.spec)
+			if err != nil {
+				m.notice = "Workflow error: " + err.Error()
+				return m, nil
+			}
+			var rterr error
+			rt, rterr = workflow.NewRuntime(*spec)
+			if rterr != nil {
+				m.notice = "Workflow error: " + rterr.Error()
+				return m, nil
+			}
 		}
 		wv := workflow.NewWorkflowView(rt, m.width, m.height)
 		m.activeWorkflow = &wv
@@ -4185,6 +4192,17 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Filtering calendar for " + displayName(filter) + "."
 			return m, pollOfficeLedger()
 		}
+	case trimmed == "/workflow demo":
+		clearCurrent()
+		return m, launchDemoWorkflow()
+	case trimmed == "/workflow":
+		clearCurrent()
+		m.notice = "Usage: /workflow demo — launch a demo workflow"
+		return m, nil
+	case strings.HasPrefix(trimmed, "/workflow "):
+		clearCurrent()
+		m.notice = "Usage: /workflow demo — launch a demo workflow"
+		return m, nil
 	case trimmed == "/skills":
 		clearCurrent()
 		m.activeApp = officeAppSkills
@@ -5673,6 +5691,76 @@ func applyTeamSetup() tea.Cmd {
 			return channelInitDoneMsg{err: err}
 		}
 		return channelInitDoneMsg{notice: notice + " Setup applied. Team reloaded with the new configuration."}
+	}
+}
+
+// demoWorkflowSpec is a self-contained workflow with inline data for testing.
+const demoWorkflowSpec = `{
+  "id": "demo-triage",
+  "title": "Email Triage (demo)",
+  "steps": [
+    {
+      "id": "list",
+      "type": "select",
+      "prompt": "Select an email to review:",
+      "dataRef": "/emails",
+      "display": {"component": "table", "dataRef": "/emailTable"},
+      "actions": [
+        {"key": "a", "label": "Approve", "transition": "review"},
+        {"key": "d", "label": "Dismiss", "transition": "list"},
+        {"key": "q", "label": "Finish", "transition": "done"}
+      ],
+      "allowLoop": true
+    },
+    {
+      "id": "review",
+      "type": "confirm",
+      "prompt": "Send a reply to this email?",
+      "allowLoop": true,
+      "display": {"component": "card", "props": {"title": "Draft Reply"}},
+      "actions": [
+        {"key": "y", "label": "Yes, send", "transition": "list"},
+        {"key": "e", "label": "Edit first", "transition": "edit"},
+        {"key": "n", "label": "Skip", "transition": "list"}
+      ]
+    },
+    {
+      "id": "edit",
+      "type": "edit",
+      "prompt": "Edit your reply:",
+      "dataRef": "/draftReply",
+      "display": {"component": "textfield", "props": {"label": "Reply", "multiline": true}},
+      "actions": [
+        {"key": "Enter", "label": "Done editing", "transition": "review"}
+      ]
+    }
+  ]
+}`
+
+// launchDemoWorkflow creates and launches a self-contained demo workflow.
+func launchDemoWorkflow() tea.Cmd {
+	return func() tea.Msg {
+		spec, err := workflow.ParseSpec(demoWorkflowSpec)
+		if err != nil {
+			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
+		}
+		rt, err := workflow.NewRuntime(*spec)
+		if err != nil {
+			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
+		}
+		rt.SetData("/emails", []any{
+			map[string]any{"from": "alice@acme.co", "subject": "Q2 Revenue Report", "priority": "high"},
+			map[string]any{"from": "bob@partner.io", "subject": "Partnership proposal", "priority": "medium"},
+			map[string]any{"from": "carol@team.co", "subject": "Standup notes", "priority": "low"},
+		})
+		rt.SetData("/emailTable", []any{
+			[]any{"From", "Subject", "Priority"},
+			[]any{"alice@acme.co", "Q2 Revenue Report", "HIGH"},
+			[]any{"bob@partner.io", "Partnership proposal", "medium"},
+			[]any{"carol@team.co", "Standup notes", "low"},
+		})
+		rt.SetData("/draftReply", "Thanks for sending this over. I'll review and get back to you by EOD.")
+		return channelWorkflowLaunchMsg{runtime: rt, name: "demo-triage"}
 	}
 }
 

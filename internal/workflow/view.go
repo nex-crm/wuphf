@@ -243,7 +243,10 @@ func (v WorkflowView) executeAction(exec ExecuteSpec) tea.Cmd {
 }
 
 func (v WorkflowView) handleActionResult(msg actionResultMsg) (WorkflowView, tea.Cmd) {
-	v.runtime.CompleteAction(msg.result, msg.err)
+	// CompleteAction only applies when an action was pending.
+	// After Start(), we get an empty actionResultMsg but the runtime is
+	// already in awaiting_input, so CompleteAction would error. Ignore that.
+	_ = v.runtime.CompleteAction(msg.result, msg.err)
 	v.syncGenModel()
 
 	// If runtime auto-transitioned (submit/run steps), check for more auto-steps.
@@ -342,8 +345,12 @@ func (v WorkflowView) View() string {
 				sections = append(sections, "")
 				sections = append(sections, step.Prompt)
 			}
-			// Render A2UI component.
-			if step.Display != nil {
+			// For select steps, render an interactive list with cursor.
+			if step.Type == StepSelect {
+				sections = append(sections, "")
+				sections = append(sections, v.renderSelectList(step, w-4))
+			} else if step.Display != nil {
+				// Other steps use the A2UI component renderer.
 				sections = append(sections, "")
 				sections = append(sections, v.gen.View())
 			}
@@ -405,6 +412,74 @@ func (v WorkflowView) Quitting() bool {
 // Runtime returns the underlying runtime for inspection.
 func (v WorkflowView) Runtime() *Runtime {
 	return v.runtime
+}
+
+// renderSelectList draws an interactive list with a cursor for select steps.
+//
+//	 ▸ alice@acme.co    Q2 Revenue Report     HIGH
+//	   bob@partner.io   Partnership proposal  medium
+//	   carol@team.co    Standup notes          low
+func (v WorkflowView) renderSelectList(step *StepSpec, width int) string {
+	dataStore := v.runtime.DataStore()
+
+	// Resolve the items from the data store.
+	var items []any
+	if step.DataRef != "" {
+		key := strings.TrimPrefix(step.DataRef, "/")
+		if resolved, ok := dataStore[key].([]any); ok {
+			items = resolved
+		}
+	}
+
+	if len(items) == 0 {
+		return wfStatusStyle.Render("  No items to display.")
+	}
+
+	selected := v.gen.SelectedIndex()
+	var lines []string
+
+	for i, item := range items {
+		cursor := "  "
+		if i == selected {
+			cursor = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.NexPurple)).Bold(true).Render("▸ ")
+		}
+
+		var line string
+		switch row := item.(type) {
+		case map[string]any:
+			// Render map fields as columns.
+			var parts []string
+			for _, field := range []string{"from", "subject", "priority", "title", "name", "status"} {
+				if val, ok := row[field]; ok {
+					s := fmt.Sprintf("%v", val)
+					parts = append(parts, s)
+				}
+			}
+			if len(parts) == 0 {
+				// Fallback: show all values.
+				for _, val := range row {
+					parts = append(parts, fmt.Sprintf("%v", val))
+				}
+			}
+			line = strings.Join(parts, "  ")
+		default:
+			line = fmt.Sprintf("%v", item)
+		}
+
+		if i == selected {
+			line = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(tui.NexPurple)).Render(line)
+		} else {
+			line = lipgloss.NewStyle().Foreground(lipgloss.Color(tui.MutedColor)).Render(line)
+		}
+
+		lines = append(lines, cursor+line)
+	}
+
+	// Navigation hint.
+	lines = append(lines, "")
+	lines = append(lines, wfStatusStyle.Render(fmt.Sprintf("  ↑/↓ navigate  (%d/%d)", selected+1, len(items))))
+
+	return strings.Join(lines, "\n")
 }
 
 func clampWidth(w int) int {
