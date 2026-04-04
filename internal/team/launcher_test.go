@@ -636,6 +636,60 @@ func TestTaskNotificationContentIncludesOwnershipAndGuidance(t *testing.T) {
 	}
 }
 
+func TestTaskNotificationContentIncludesWorktreeDetails(t *testing.T) {
+	l := &Launcher{}
+	got := l.taskNotificationContent(officeActionLog{
+		Kind:  "task_updated",
+		Actor: "ceo",
+	}, teamTask{
+		ID:             "task-10",
+		Channel:        "general",
+		Title:          "Landing page polish",
+		Owner:          "fe",
+		Status:         "in_progress",
+		ExecutionMode:  "local_worktree",
+		WorktreeBranch: "wuphf-task-10",
+		WorktreePath:   "/tmp/wuphf-task-task-10",
+	})
+	if !strings.Contains(got, "execution local_worktree") {
+		t.Fatalf("expected execution mode in content: %q", got)
+	}
+	if !strings.Contains(got, "branch wuphf-task-10") || !strings.Contains(got, "path /tmp/wuphf-task-task-10") {
+		t.Fatalf("expected worktree details in content: %q", got)
+	}
+	if !strings.Contains(got, `working_directory="/tmp/wuphf-task-task-10"`) {
+		t.Fatalf("expected working_directory guidance in content: %q", got)
+	}
+}
+
+func TestBuildPromptIncludesTaskStatusAndWorktreeGuidance(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	specialist := l.buildPrompt("fe")
+	if !strings.Contains(specialist, "team_task_status") {
+		t.Fatalf("expected team_task_status guidance in specialist prompt: %q", specialist)
+	}
+	if !strings.Contains(specialist, "working_directory") {
+		t.Fatalf("expected working_directory guidance in specialist prompt: %q", specialist)
+	}
+
+	lead := l.buildPrompt("ceo")
+	if !strings.Contains(lead, "team_task_status") {
+		t.Fatalf("expected team_task_status guidance in lead prompt: %q", lead)
+	}
+	if !strings.Contains(lead, "working_directory") {
+		t.Fatalf("expected working_directory guidance in lead prompt: %q", lead)
+	}
+}
+
 func TestTaskNotificationTargetsWakeOwnerOnWatchdog(t *testing.T) {
 	l := &Launcher{
 		broker: &Broker{

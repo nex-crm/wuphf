@@ -36,10 +36,14 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 
 	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Today")})
 
-	// Always expand threads — collapsed is confusing, expanded is readable
-	for _, msg := range messages {
-		if msg.ReplyTo == "" && hasThreadReplies(messages, msg.ID) {
-			expanded[msg.ID] = true
+	if !threadsDefaultExpand {
+		for _, msg := range messages {
+			if msg.ReplyTo != "" || !hasThreadReplies(messages, msg.ID) {
+				continue
+			}
+			if _, ok := expanded[msg.ID]; !ok {
+				expanded[msg.ID] = false
+			}
 		}
 	}
 
@@ -257,7 +261,7 @@ func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]boo
 		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 		return []renderedLine{
 			{Text: ""},
-			{Text: mutedStyle.Render("  Direct 1:1 with " + agentName + ".")},
+			{Text: mutedStyle.Render("  Direct session reset. Agent pane reloaded in place.")},
 			{Text: mutedStyle.Render("  There is no office, no channel, and no teammate roster in this mode.")},
 			{Text: ""},
 			{Text: mutedStyle.Render("  Suggested: Help me think through the v1 launch plan.")},
@@ -357,18 +361,18 @@ func buildRequestLines(requests []channelInterview, contentWidth int) []rendered
 	return lines
 }
 
-func buildPolicyLines(decisions []channelDecision, contentWidth int) []renderedLine {
+func buildPolicyLines(signals []channelSignal, decisions []channelDecision, alerts []channelWatchdog, actions []channelAction, contentWidth int) []renderedLine {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 	var lines []renderedLine
-	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Policies")})
+	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Insights")})
 
-	if len(decisions) == 0 {
+	if len(signals) == 0 && len(decisions) == 0 && len(alerts) == 0 && len(actions) == 0 {
 		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: muted.Render("  No team policies defined yet.")})
-		lines = append(lines, renderedLine{Text: muted.Render("  Policies are rules the team follows: coding standards, review gates,")})
-		lines = append(lines, renderedLine{Text: muted.Render("  deployment procedures, communication protocols.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  No office insights yet.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  Signals, decisions, watchdogs, and external actions will appear here")})
+		lines = append(lines, renderedLine{Text: muted.Render("  as the office starts tracking higher-signal work.")})
 		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: muted.Render("  The CEO can create policies from observed team patterns.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  Use /policies to refresh this ledger at any time.")})
 		return lines
 	}
 
@@ -379,7 +383,42 @@ func buildPolicyLines(decisions []channelDecision, contentWidth int) []renderedL
 		}
 	}
 
-	for _, decision := range decisions {
+	appendSection := func(title string) {
+		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, title)})
+	}
+
+	for _, signal := range reverseSignals(signals, 8) {
+		if len(lines) == 1 {
+			appendSection("Signals")
+		}
+		metaParts := []string{}
+		if kind := displaySignalKind(signal); kind != "" {
+			metaParts = append(metaParts, kind)
+		}
+		if signal.Owner != "" {
+			metaParts = append(metaParts, "@"+signal.Owner)
+		}
+		if signal.Channel != "" {
+			metaParts = append(metaParts, "#"+signal.Channel)
+		}
+		if signal.Urgency != "" {
+			metaParts = append(metaParts, "urgency "+signal.Urgency)
+		}
+		if signal.Confidence != "" {
+			metaParts = append(metaParts, "confidence "+signal.Confidence)
+		}
+		appendWrappedLine("  " + accentPill("signal", "#7C3AED") + " " + lipgloss.NewStyle().Bold(true).Render(fallbackString(signal.Title, "Office signal")))
+		if len(metaParts) > 0 {
+			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
+		}
+		appendWrappedLine("  " + signal.Content)
+	}
+
+	if len(decisions) > 0 {
+		appendSection("Decisions")
+	}
+	for _, decision := range reverseDecisions(decisions, 8) {
 		metaParts := []string{}
 		if decision.Owner != "" {
 			metaParts = append(metaParts, "by @"+decision.Owner)
@@ -388,7 +427,7 @@ func buildPolicyLines(decisions []channelDecision, contentWidth int) []renderedL
 			metaParts = append(metaParts, "#"+decision.Channel)
 		}
 		lines = append(lines, renderedLine{Text: ""})
-		appendWrappedLine("  " + accentPill("policy", "#1264A3") + " " + lipgloss.NewStyle().Bold(true).Render(decision.Summary))
+		appendWrappedLine("  " + accentPill("policy", "#1264A3") + " " + lipgloss.NewStyle().Bold(true).Render("Decisions · "+displayDecisionSummary(decision.Summary)))
 		if len(metaParts) > 0 {
 			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
 		}
@@ -396,7 +435,74 @@ func buildPolicyLines(decisions []channelDecision, contentWidth int) []renderedL
 			appendWrappedLine("  " + muted.Render("Why: "+decision.Reason))
 		}
 	}
+
+	watchdogs := activeWatchdogs(alerts)
+	if len(watchdogs) > 0 {
+		appendSection("Watchdogs")
+	}
+	for _, alert := range reverseWatchdogs(watchdogs, 8) {
+		metaParts := []string{}
+		if alert.Owner != "" {
+			metaParts = append(metaParts, "@"+alert.Owner)
+		}
+		if alert.Channel != "" {
+			metaParts = append(metaParts, "#"+alert.Channel)
+		}
+		if alert.Kind != "" {
+			metaParts = append(metaParts, alert.Kind)
+		}
+		if alert.Status != "" {
+			metaParts = append(metaParts, alert.Status)
+		}
+		appendWrappedLine("  " + accentPill("watchdog", "#DC2626") + " " + lipgloss.NewStyle().Bold(true).Render(fallbackString(alert.Summary, "Watchdog alert")))
+		if len(metaParts) > 0 {
+			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
+		}
+	}
+
+	external := recentExternalActions(actions, 6)
+	if len(external) > 0 {
+		appendSection("External Actions")
+	}
+	for _, action := range external {
+		metaParts := []string{}
+		if action.Actor != "" {
+			metaParts = append(metaParts, "@"+action.Actor)
+		}
+		if action.Channel != "" {
+			metaParts = append(metaParts, "#"+action.Channel)
+		}
+		if action.Kind != "" {
+			metaParts = append(metaParts, action.Kind)
+		}
+		if action.Source != "" {
+			metaParts = append(metaParts, action.Source)
+		}
+		appendWrappedLine("  " + accentPill("action", "#0F766E") + " " + lipgloss.NewStyle().Bold(true).Render(fallbackString(action.Summary, "External action")))
+		if len(metaParts) > 0 {
+			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
+		}
+	}
 	return lines
+}
+
+func displaySignalKind(signal channelSignal) string {
+	kind := strings.TrimSpace(signal.Kind)
+	if kind == "" {
+		return ""
+	}
+	if strings.EqualFold(kind, "directive") {
+		return "Human directive"
+	}
+	return kind
+}
+
+func displayDecisionSummary(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if strings.HasPrefix(summary, "Human directed the office:") {
+		return strings.Replace(summary, "Human directed the office:", "Human directive:", 1)
+	}
+	return summary
 }
 
 func buildTaskLines(tasks []channelTask, contentWidth int) []renderedLine {
@@ -594,6 +700,37 @@ func buildCalendarLines(actions []channelAction, jobs []channelSchedulerJob, tas
 			}
 			lines = append(lines, renderedLine{Text: ""})
 			lines = append(lines, renderCalendarEventCard(event, contentWidth)...)
+		}
+	}
+	recentActionCap := len(actions)
+	if recentActionCap > 4 {
+		recentActionCap = 4
+	}
+	recentActions := make([]channelAction, 0, recentActionCap)
+	for i := len(actions) - 1; i >= 0 && len(recentActions) < recentActionCap; i-- {
+		action := actions[i]
+		channel := normalizeSidebarSlug(action.Channel)
+		if strings.TrimSpace(action.Kind) != "bridge_channel" && channel != "" && channel != normalizeSidebarSlug(activeChannel) {
+			continue
+		}
+		recentActions = append(recentActions, action)
+	}
+	if len(recentActions) > 0 {
+		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, renderedLine{Text: "  " + lipgloss.NewStyle().Bold(true).Render("Recent actions")})
+		for _, action := range recentActions {
+			metaParts := []string{}
+			if action.Actor != "" {
+				metaParts = append(metaParts, "@"+action.Actor)
+			}
+			if action.Kind != "" {
+				metaParts = append(metaParts, action.Kind)
+			}
+			if action.CreatedAt != "" {
+				metaParts = append(metaParts, prettyRelativeTime(action.CreatedAt))
+			}
+			lines = append(lines, renderedLine{Text: ""})
+			lines = append(lines, renderCalendarActionCard(action, strings.Join(metaParts, " · "), contentWidth)...)
 		}
 	}
 	return lines
@@ -1343,7 +1480,8 @@ func reverseWatchdogs(alerts []channelWatchdog, limit int) []channelWatchdog {
 func recentExternalActions(actions []channelAction, limit int) []channelAction {
 	var filtered []channelAction
 	for _, action := range actions {
-		if !strings.HasPrefix(strings.TrimSpace(action.Kind), "external_") {
+		kind := strings.TrimSpace(action.Kind)
+		if !strings.HasPrefix(kind, "external_") && kind != "bridge_channel" {
 			continue
 		}
 		filtered = append(filtered, action)

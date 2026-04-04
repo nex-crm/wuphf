@@ -125,6 +125,8 @@ type brokerTaskSummary struct {
 	ReviewState      string   `json:"review_state"`
 	SourceSignalID   string   `json:"source_signal_id"`
 	SourceDecisionID string   `json:"source_decision_id"`
+	WorktreePath     string   `json:"worktree_path"`
+	WorktreeBranch   string   `json:"worktree_branch"`
 	DependsOn        []string `json:"depends_on,omitempty"`
 	Blocked          bool     `json:"blocked,omitempty"`
 }
@@ -387,6 +389,11 @@ func Run(ctx context.Context) error {
 		Name:        "team_tasks",
 		Description: "List the current shared tasks and who owns them so the team does not duplicate work.",
 	}, handleTeamTasks)
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_task_status",
+		Description: "Summarize how many shared tasks are running and whether any are isolated in local worktrees.",
+	}, handleTeamTaskStatus)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_task",
@@ -814,61 +821,27 @@ func handleTeamOfficeMembers(ctx context.Context, _ *mcp.CallToolRequest, _ Team
 }
 
 func handleTeamTasks(ctx context.Context, _ *mcp.CallToolRequest, args TeamTasksArgs) (*mcp.CallToolResult, any, error) {
-	mySlug := strings.TrimSpace(resolveSlugOptional(args.MySlug))
-	channel := resolveChannel(args.Channel)
-	values := url.Values{}
-	values.Set("channel", channel)
-	if mySlug != "" {
-		values.Set("viewer_slug", mySlug)
-	}
-	if mySlug != "" {
-		values.Set("my_slug", mySlug)
-	}
-	if args.IncludeDone {
-		values.Set("include_done", "true")
-	}
-	var result brokerTasksResponse
-	path := "/tasks"
-	if encoded := values.Encode(); encoded != "" {
-		path += "?" + encoded
-	}
-	if err := brokerGetJSON(ctx, path, &result); err != nil {
+	channel, tasks, err := fetchTeamTasks(ctx, args)
+	if err != nil {
 		return toolError(err), nil, nil
 	}
-	if len(result.Tasks) == 0 {
+	if len(tasks) == 0 {
 		return textResult("No active team tasks."), nil, nil
 	}
-	lines := make([]string, 0, len(result.Tasks))
-	for _, task := range result.Tasks {
-		line := fmt.Sprintf("- %s [%s]", task.ID, task.Status)
-		if task.Blocked {
-			line += " BLOCKED"
-		}
-		if task.Owner != "" {
-			line += " @" + task.Owner
-		}
-		if task.PipelineStage != "" {
-			line += " · stage " + task.PipelineStage
-		}
-		if task.ReviewState != "" && task.ReviewState != "not_required" {
-			line += " · review " + task.ReviewState
-		}
-		if task.ExecutionMode != "" {
-			line += " · " + task.ExecutionMode
-		}
-		line += " — " + task.Title
-		if len(task.DependsOn) > 0 {
-			line += " (deps: " + strings.Join(task.DependsOn, ", ") + ")"
-		}
-		if task.ThreadID != "" {
-			line += " ↳ " + task.ThreadID
-		}
-		if task.Details != "" {
-			line += " (" + task.Details + ")"
-		}
-		lines = append(lines, line)
+	lines := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		lines = append(lines, formatTaskRuntimeLine(task))
 	}
-	return textResult("Current team tasks in #" + channel + ":\n" + strings.Join(lines, "\n")), nil, nil
+	status := summarizeTaskRuntime(channel, tasks)
+	return textResult(status + "\n\nCurrent team tasks:\n" + strings.Join(lines, "\n")), nil, nil
+}
+
+func handleTeamTaskStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamTasksArgs) (*mcp.CallToolResult, any, error) {
+	channel, tasks, err := fetchTeamTasks(ctx, args)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(summarizeTaskRuntime(channel, tasks)), nil, nil
 }
 
 func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskArgs) (*mcp.CallToolResult, any, error) {
@@ -903,11 +876,14 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 
 	var result struct {
 		Task struct {
-			ID      string `json:"id"`
-			Title   string `json:"title"`
-			Owner   string `json:"owner"`
-			Status  string `json:"status"`
-			Blocked bool   `json:"blocked"`
+			ID             string `json:"id"`
+			Title          string `json:"title"`
+			Owner          string `json:"owner"`
+			Status         string `json:"status"`
+			ExecutionMode  string `json:"execution_mode"`
+			WorktreePath   string `json:"worktree_path"`
+			WorktreeBranch string `json:"worktree_branch"`
+			Blocked        bool   `json:"blocked"`
 		} `json:"task"`
 	}
 	if err := brokerPostJSON(ctx, "/tasks", payload, &result); err != nil {
@@ -920,8 +896,136 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 	if result.Task.Owner != "" {
 		text += " @" + result.Task.Owner
 	}
+	if branch := strings.TrimSpace(result.Task.WorktreeBranch); branch != "" {
+		text += " · branch " + branch
+	}
+	if path := strings.TrimSpace(result.Task.WorktreePath); path != "" {
+		text += " · working_directory " + path
+	}
 	text += " — " + result.Task.Title
 	return textResult(text), nil, nil
+}
+
+func fetchTeamTasks(ctx context.Context, args TeamTasksArgs) (string, []brokerTaskSummary, error) {
+	mySlug := strings.TrimSpace(resolveSlugOptional(args.MySlug))
+	channel := resolveChannel(args.Channel)
+	values := url.Values{}
+	values.Set("channel", channel)
+	if mySlug != "" {
+		values.Set("viewer_slug", mySlug)
+		values.Set("my_slug", mySlug)
+	}
+	if args.IncludeDone {
+		values.Set("include_done", "true")
+	}
+	var result brokerTasksResponse
+	path := "/tasks"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	if err := brokerGetJSON(ctx, path, &result); err != nil {
+		return "", nil, err
+	}
+	return channel, result.Tasks, nil
+}
+
+func summarizeTaskRuntime(channel string, tasks []brokerTaskSummary) string {
+	if len(tasks) == 0 {
+		return "No active team tasks."
+	}
+
+	running := 0
+	isolated := 0
+	reviewing := 0
+	for _, task := range tasks {
+		if taskCountsAsRunning(task) {
+			running++
+		}
+		if taskUsesIsolation(task) {
+			isolated++
+		}
+		if strings.TrimSpace(task.ReviewState) != "" && task.ReviewState != "not_required" && task.ReviewState != "approved" {
+			reviewing++
+		}
+	}
+
+	lines := []string{
+		fmt.Sprintf("Team task status in #%s:", channel),
+		fmt.Sprintf("- Running tasks: %d of %d", running, len(tasks)),
+		fmt.Sprintf("- Isolated worktrees: %d", isolated),
+		fmt.Sprintf("- In review flow: %d", reviewing),
+	}
+
+	isolatedTasks := make([]string, 0, len(tasks))
+	for _, task := range tasks {
+		if !taskUsesIsolation(task) {
+			continue
+		}
+		line := fmt.Sprintf("- %s", task.ID)
+		if task.Owner != "" {
+			line += " @" + task.Owner
+		}
+		if branch := strings.TrimSpace(task.WorktreeBranch); branch != "" {
+			line += " · branch " + branch
+		}
+		if path := strings.TrimSpace(task.WorktreePath); path != "" {
+			line += " · working_directory " + path
+		}
+		isolatedTasks = append(isolatedTasks, line)
+	}
+	if len(isolatedTasks) > 0 {
+		lines = append(lines, "", "Isolated task worktrees:")
+		lines = append(lines, isolatedTasks...)
+		lines = append(lines, "", "For isolated tasks, use the listed worktree path as working_directory for local file and bash tools.")
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+func formatTaskRuntimeLine(task brokerTaskSummary) string {
+	line := fmt.Sprintf("- %s [%s]", task.ID, task.Status)
+	if task.Owner != "" {
+		line += " @" + task.Owner
+	}
+	if task.PipelineStage != "" {
+		line += " · stage " + task.PipelineStage
+	}
+	if task.ReviewState != "" && task.ReviewState != "not_required" {
+		line += " · review " + task.ReviewState
+	}
+	if task.ExecutionMode != "" {
+		line += " · " + task.ExecutionMode
+	}
+	if branch := strings.TrimSpace(task.WorktreeBranch); branch != "" {
+		line += " · branch " + branch
+	}
+	if path := strings.TrimSpace(task.WorktreePath); path != "" {
+		line += " · working_directory " + path
+	}
+	line += " — " + task.Title
+	if task.ThreadID != "" {
+		line += " ↳ " + task.ThreadID
+	}
+	if task.Details != "" {
+		line += " (" + task.Details + ")"
+	}
+	return line
+}
+
+func taskUsesIsolation(task brokerTaskSummary) bool {
+	return strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") ||
+		strings.TrimSpace(task.WorktreePath) != "" ||
+		strings.TrimSpace(task.WorktreeBranch) != ""
+}
+
+func taskCountsAsRunning(task brokerTaskSummary) bool {
+	status := strings.ToLower(strings.TrimSpace(task.Status))
+	switch status {
+	case "", "done", "completed", "canceled", "cancelled":
+		return false
+	default:
+		return true
+	}
 }
 
 func handleTeamPlan(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlanArgs) (*mcp.CallToolResult, any, error) {

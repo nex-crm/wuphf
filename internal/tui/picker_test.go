@@ -19,6 +19,9 @@ func TestPickerArrowNavigation(t *testing.T) {
 	if p.selected != 0 {
 		t.Fatal("expected initial selection to be 0")
 	}
+	if len(p.filtered) != len(testOptions) {
+		t.Fatalf("expected %d visible options, got %d", len(testOptions), len(p.filtered))
+	}
 
 	downMsg := tea.KeyMsg{Type: tea.KeyDown}
 	p2, _ := p.Update(downMsg)
@@ -33,30 +36,18 @@ func TestPickerArrowNavigation(t *testing.T) {
 	}
 }
 
-func TestPickerNumberKeySelection(t *testing.T) {
-	var got string
+func TestPickerFuzzyFilter(t *testing.T) {
 	p := NewPicker("Choose", testOptions)
-	p.SetActive(true)
-	p.OnSelect = func(v string) { got = v }
+	p.UpdateQuery("gm")
 
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}}
-	p2, cmd := p.Update(msg)
-	if p2.selected != 1 {
-		t.Fatalf("expected selected=1 after pressing '2', got %d", p2.selected)
+	if got := p.Query(); got != "gm" {
+		t.Fatalf("expected query to be %q, got %q", "gm", got)
 	}
-	if got != "beta" {
-		t.Fatalf("expected OnSelect called with 'beta', got %q", got)
+	if len(p.filtered) != 1 {
+		t.Fatalf("expected 1 fuzzy match, got %d", len(p.filtered))
 	}
-	if cmd == nil {
-		t.Fatal("expected a PickerSelectMsg command")
-	}
-	result := cmd()
-	sel, ok := result.(PickerSelectMsg)
-	if !ok {
-		t.Fatal("expected PickerSelectMsg")
-	}
-	if sel.Value != "beta" {
-		t.Fatalf("expected value 'beta', got %q", sel.Value)
+	if got := p.FilteredOptions()[0].Value; got != "gamma" {
+		t.Fatalf("expected fuzzy match to select gamma, got %q", got)
 	}
 }
 
@@ -79,6 +70,32 @@ func TestPickerEnterEmitsMsg(t *testing.T) {
 	}
 }
 
+func TestPickerEnterUsesFilteredSelection(t *testing.T) {
+	var got string
+	p := NewPicker("Choose", testOptions)
+	p.SetActive(true)
+	p.OnSelect = func(v string) { got = v }
+
+	p.UpdateQuery("gm")
+
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	_, cmd := p.Update(msg)
+	if cmd == nil {
+		t.Fatal("expected command on Enter")
+	}
+	result := cmd()
+	sel, ok := result.(PickerSelectMsg)
+	if !ok {
+		t.Fatal("expected PickerSelectMsg")
+	}
+	if sel.Value != "gamma" {
+		t.Fatalf("expected 'gamma', got %q", sel.Value)
+	}
+	if got != "gamma" {
+		t.Fatalf("expected OnSelect called with 'gamma', got %q", got)
+	}
+}
+
 func TestPickerInactiveIgnoresKeys(t *testing.T) {
 	p := NewPicker("Choose", testOptions)
 	// active is false by default
@@ -87,6 +104,16 @@ func TestPickerInactiveIgnoresKeys(t *testing.T) {
 	p2, _ := p.Update(msg)
 	if p2.selected != 0 {
 		t.Fatal("expected selection unchanged when picker is inactive")
+	}
+}
+
+func TestPickerEscCloses(t *testing.T) {
+	p := NewPicker("Choose", testOptions)
+	p.SetActive(true)
+
+	p2, _ := p.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if p2.IsActive() {
+		t.Fatal("expected picker to close on esc")
 	}
 }
 

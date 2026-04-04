@@ -1,6 +1,7 @@
 package teammcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +12,18 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nex-crm/wuphf/internal/team"
 )
+
+func textFromResult(t *testing.T, result *mcp.CallToolResult) string {
+	t.Helper()
+	if result == nil || len(result.Content) == 0 {
+		t.Fatal("expected text result")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content, got %T", result.Content[0])
+	}
+	return text.Text
+}
 
 func TestSuppressBroadcastReasonAllowsViewpoints(t *testing.T) {
 	reason := suppressBroadcastReason(
@@ -255,5 +268,194 @@ func TestHandleTeamPollOneOnOneHighlightsLatestHumanRequest(t *testing.T) {
 	}
 	if !strings.Contains(text.Text, "Newest request wins.") {
 		t.Fatalf("expected latest human message in %q", text.Text)
+	}
+}
+
+func TestSummarizeTaskRuntimeIncludesIsolationCounts(t *testing.T) {
+	summary := summarizeTaskRuntime("general", []brokerTaskSummary{
+		{
+			ID:             "task-1",
+			Owner:          "fe",
+			Status:         "in_progress",
+			ExecutionMode:  "local_worktree",
+			WorktreePath:   "/tmp/wuphf-task-1",
+			WorktreeBranch: "feat/task-1",
+			Title:          "Implement landing page",
+		},
+		{
+			ID:          "task-2",
+			Owner:       "pm",
+			Status:      "review",
+			ReviewState: "ready_for_review",
+			Title:       "Review launch scope",
+		},
+	})
+
+	if !strings.Contains(summary, "Running tasks: 2 of 2") {
+		t.Fatalf("expected running count in %q", summary)
+	}
+	if !strings.Contains(summary, "Isolated worktrees: 1") {
+		t.Fatalf("expected isolation count in %q", summary)
+	}
+	if !strings.Contains(summary, "branch feat/task-1") {
+		t.Fatalf("expected worktree branch in %q", summary)
+	}
+	if !strings.Contains(summary, "/tmp/wuphf-task-1") {
+		t.Fatalf("expected worktree path in %q", summary)
+	}
+	if !strings.Contains(summary, "working_directory") {
+		t.Fatalf("expected working_directory guidance in %q", summary)
+	}
+}
+
+func TestHandleTeamTaskStatusReportsWorktreeIsolation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	payload := map[string]any{
+		"action":          "create",
+		"channel":         "general",
+		"title":           "Implement worktree task",
+		"owner":           "fe",
+		"created_by":      "ceo",
+		"execution_mode":  "local_worktree",
+		"worktree_path":   "/tmp/wuphf-task-42",
+		"worktree_branch": "task/42",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal task payload: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 creating task, got %d", resp.StatusCode)
+	}
+
+	result, _, err := handleTeamTaskStatus(context.Background(), nil, TeamTasksArgs{
+		Channel: "general",
+		MySlug:  "fe",
+	})
+	if err != nil {
+		t.Fatalf("handleTeamTaskStatus: %v", err)
+	}
+	text := textFromResult(t, result)
+	if !strings.Contains(text, "Running tasks: 1 of 1") {
+		t.Fatalf("expected runtime count in %q", text)
+	}
+	if !strings.Contains(text, "Isolated worktrees: 1") {
+		t.Fatalf("expected isolation count in %q", text)
+	}
+	if !strings.Contains(text, "branch task/42") {
+		t.Fatalf("expected worktree branch in %q", text)
+	}
+	if !strings.Contains(text, "/tmp/wuphf-task-42") {
+		t.Fatalf("expected worktree path in %q", text)
+	}
+	if !strings.Contains(text, "working_directory") {
+		t.Fatalf("expected working_directory guidance in %q", text)
+	}
+
+	tasksResult, _, err := handleTeamTasks(context.Background(), nil, TeamTasksArgs{
+		Channel: "general",
+		MySlug:  "fe",
+	})
+	if err != nil {
+		t.Fatalf("handleTeamTasks: %v", err)
+	}
+	tasksText := textFromResult(t, tasksResult)
+	if !strings.Contains(tasksText, "Current team tasks:") {
+		t.Fatalf("expected task listing header in %q", tasksText)
+	}
+	if !strings.Contains(tasksText, "branch task/42") {
+		t.Fatalf("expected worktree branch in task listing %q", tasksText)
+	}
+	if !strings.Contains(tasksText, "working_directory /tmp/wuphf-task-42") {
+		t.Fatalf("expected working_directory path in task listing %q", tasksText)
+	}
+}
+
+func TestHandleTeamTaskReturnsWorktreeGuidance(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	payload := map[string]any{
+		"action":          "create",
+		"channel":         "general",
+		"title":           "Implement worktree task",
+		"owner":           "fe",
+		"created_by":      "ceo",
+		"execution_mode":  "local_worktree",
+		"worktree_path":   "/tmp/wuphf-task-99",
+		"worktree_branch": "task/99",
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal task payload: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, fmt.Sprintf("http://%s/tasks", b.Addr()), bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 creating task, got %d", resp.StatusCode)
+	}
+
+	var created struct {
+		Task struct {
+			ID string `json:"id"`
+		} `json:"task"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created task: %v", err)
+	}
+
+	result, _, err := handleTeamTask(context.Background(), nil, TeamTaskArgs{
+		Action:  "review",
+		Channel: "general",
+		ID:      created.Task.ID,
+		MySlug:  "fe",
+	})
+	if err != nil {
+		t.Fatalf("handleTeamTask: %v", err)
+	}
+	text := textFromResult(t, result)
+	if !strings.Contains(text, "branch task/99") {
+		t.Fatalf("expected worktree branch in %q", text)
+	}
+	if !strings.Contains(text, "working_directory /tmp/wuphf-task-99") {
+		t.Fatalf("expected working_directory guidance in %q", text)
 	}
 }

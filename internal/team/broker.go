@@ -223,15 +223,15 @@ type schedulerJob struct {
 }
 
 type teamSkill struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Title       string   `json:"title"`
-	Description string   `json:"description,omitempty"`
-	Content     string   `json:"content"`
-	CreatedBy   string   `json:"created_by"`
-	Channel     string   `json:"channel,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Trigger     string   `json:"trigger,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Title               string   `json:"title"`
+	Description         string   `json:"description,omitempty"`
+	Content             string   `json:"content"`
+	CreatedBy           string   `json:"created_by"`
+	Channel             string   `json:"channel,omitempty"`
+	Tags                []string `json:"tags,omitempty"`
+	Trigger             string   `json:"trigger,omitempty"`
 	WorkflowProvider    string   `json:"workflow_provider,omitempty"`
 	WorkflowKey         string   `json:"workflow_key,omitempty"`
 	WorkflowDefinition  string   `json:"workflow_definition,omitempty"`
@@ -241,10 +241,10 @@ type teamSkill struct {
 	RelayEventTypes     []string `json:"relay_event_types,omitempty"`
 	LastExecutionAt     string   `json:"last_execution_at,omitempty"`
 	LastExecutionStatus string   `json:"last_execution_status,omitempty"`
-	UsageCount  int      `json:"usage_count"`
-	Status      string   `json:"status"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	UsageCount          int      `json:"usage_count"`
+	Status              string   `json:"status"`
+	CreatedAt           string   `json:"created_at"`
+	UpdatedAt           string   `json:"updated_at"`
 }
 
 type brokerState struct {
@@ -316,6 +316,52 @@ type Broker struct {
 	server            *http.Server
 	token             string // shared secret for authenticating requests
 	addr              string // actual listen address (useful when port=0)
+}
+
+func taskNeedsLocalWorktree(task *teamTask) bool {
+	if task == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
+		return false
+	}
+	if strings.TrimSpace(task.Owner) == "" {
+		return false
+	}
+	switch strings.TrimSpace(task.Status) {
+	case "", "open", "done":
+		return false
+	default:
+		return true
+	}
+}
+
+func (b *Broker) syncTaskWorktreeLocked(task *teamTask) error {
+	if task == nil {
+		return nil
+	}
+	if taskNeedsLocalWorktree(task) {
+		if strings.TrimSpace(task.WorktreePath) != "" && strings.TrimSpace(task.WorktreeBranch) != "" {
+			return nil
+		}
+		path, branch, err := prepareTaskWorktree(task.ID)
+		if err != nil {
+			return err
+		}
+		task.WorktreePath = path
+		task.WorktreeBranch = branch
+		return nil
+	}
+
+	if strings.TrimSpace(task.WorktreePath) == "" && strings.TrimSpace(task.WorktreeBranch) == "" {
+		return nil
+	}
+	if err := cleanupTaskWorktree(task.WorktreePath, task.WorktreeBranch); err != nil {
+		return err
+	}
+	task.WorktreePath = ""
+	task.WorktreeBranch = ""
+	return nil
 }
 
 // generateToken returns a cryptographically random hex token.
@@ -2292,13 +2338,13 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"channels": channels})
 	case http.MethodPost:
 		var body struct {
-			Action      string           `json:"action"`
-			Slug        string           `json:"slug"`
-			Name        string           `json:"name"`
-			Description string           `json:"description"`
-			Members     []string         `json:"members"`
-			CreatedBy   string           `json:"created_by"`
-			Surface     *channelSurface  `json:"surface,omitempty"`
+			Action      string          `json:"action"`
+			Slug        string          `json:"slug"`
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Members     []string        `json:"members"`
+			CreatedBy   string          `json:"created_by"`
+			Surface     *channelSurface `json:"surface,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -2848,7 +2894,6 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -2900,7 +2945,6 @@ func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
-
 // RecordTelegramGroup saves a group chat ID and title seen by the transport.
 func (b *Broker) RecordTelegramGroup(chatID int64, title string) {
 	b.mu.Lock()
@@ -3135,7 +3179,6 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		"tagged_count": taggedCount,
 	})
 }
-
 
 // isOneOnOneDMMessage returns true if msg belongs in the 1:1 DM conversation.
 // Only messages exclusively between the human and the 1:1 agent pass through.
@@ -3508,6 +3551,10 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			}
 			existing.UpdatedAt = now
 			b.scheduleTaskLifecycleLocked(existing)
+			if err := b.syncTaskWorktreeLocked(existing); err != nil {
+				http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
+				return
+			}
 			b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -3545,6 +3592,10 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			task.Status = "in_progress"
 		}
 		b.scheduleTaskLifecycleLocked(&task)
+		if err := b.syncTaskWorktreeLocked(&task); err != nil {
+			http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
+			return
+		}
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
 		if err := b.saveLocked(); err != nil {
@@ -3631,6 +3682,10 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			b.unblockDependentsLocked(task.ID)
 		}
 		b.scheduleTaskLifecycleLocked(task)
+		if err := b.syncTaskWorktreeLocked(task); err != nil {
+			http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
+			return
+		}
 		b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
 		if err := b.saveLocked(); err != nil {
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -3860,6 +3915,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		}
 		existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		b.scheduleTaskLifecycleLocked(existing)
+		if err := b.syncTaskWorktreeLocked(existing); err != nil {
+			return teamTask{}, false, err
+		}
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
@@ -3883,6 +3941,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		task.Status = "in_progress"
 	}
 	b.scheduleTaskLifecycleLocked(&task)
+	if err := b.syncTaskWorktreeLocked(&task); err != nil {
+		return teamTask{}, false, err
+	}
 	b.tasks = append(b.tasks, task)
 	b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
 	if err := b.saveLocked(); err != nil {
@@ -3951,6 +4012,9 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		}
 		existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		b.scheduleTaskLifecycleLocked(existing)
+		if err := b.syncTaskWorktreeLocked(existing); err != nil {
+			return teamTask{}, false, err
+		}
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
@@ -3980,6 +4044,9 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		task.Status = "in_progress"
 	}
 	b.scheduleTaskLifecycleLocked(&task)
+	if err := b.syncTaskWorktreeLocked(&task); err != nil {
+		return teamTask{}, false, err
+	}
 	b.tasks = append(b.tasks, task)
 	b.appendActionWithRefsLocked("task_created", "office", channel, input.CreatedBy, truncateSummary(task.Title, 140), task.ID, compactStringList([]string{task.SourceSignalID}), task.SourceDecisionID)
 	if err := b.saveLocked(); err != nil {
@@ -4525,15 +4592,15 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Action      string   `json:"action"`
-		Name        string   `json:"name"`
-		Title       string   `json:"title"`
-		Description string   `json:"description"`
-		Content     string   `json:"content"`
-		CreatedBy   string   `json:"created_by"`
-		Channel     string   `json:"channel"`
-		Tags        []string `json:"tags"`
-		Trigger     string   `json:"trigger"`
+		Action              string   `json:"action"`
+		Name                string   `json:"name"`
+		Title               string   `json:"title"`
+		Description         string   `json:"description"`
+		Content             string   `json:"content"`
+		CreatedBy           string   `json:"created_by"`
+		Channel             string   `json:"channel"`
+		Tags                []string `json:"tags"`
+		Trigger             string   `json:"trigger"`
 		WorkflowProvider    string   `json:"workflow_provider"`
 		WorkflowKey         string   `json:"workflow_key"`
 		WorkflowDefinition  string   `json:"workflow_definition"`
@@ -4590,15 +4657,15 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 
 	b.counter++
 	sk := teamSkill{
-		ID:          fmt.Sprintf("skill-%s", skillSlug(body.Name)),
-		Name:        strings.TrimSpace(body.Name),
-		Title:       title,
-		Description: strings.TrimSpace(body.Description),
-		Content:     strings.TrimSpace(body.Content),
-		CreatedBy:   strings.TrimSpace(body.CreatedBy),
-		Channel:     channel,
-		Tags:        body.Tags,
-		Trigger:     strings.TrimSpace(body.Trigger),
+		ID:                  fmt.Sprintf("skill-%s", skillSlug(body.Name)),
+		Name:                strings.TrimSpace(body.Name),
+		Title:               title,
+		Description:         strings.TrimSpace(body.Description),
+		Content:             strings.TrimSpace(body.Content),
+		CreatedBy:           strings.TrimSpace(body.CreatedBy),
+		Channel:             channel,
+		Tags:                body.Tags,
+		Trigger:             strings.TrimSpace(body.Trigger),
 		WorkflowProvider:    strings.TrimSpace(body.WorkflowProvider),
 		WorkflowKey:         strings.TrimSpace(body.WorkflowKey),
 		WorkflowDefinition:  strings.TrimSpace(body.WorkflowDefinition),
@@ -4608,10 +4675,10 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		RelayEventTypes:     append([]string(nil), body.RelayEventTypes...),
 		LastExecutionAt:     strings.TrimSpace(body.LastExecutionAt),
 		LastExecutionStatus: strings.TrimSpace(body.LastExecutionStatus),
-		UsageCount:  0,
-		Status:      status,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		UsageCount:          0,
+		Status:              status,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	b.skills = append(b.skills, sk)
 
@@ -4637,14 +4704,14 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name        string   `json:"name"`
-		Title       string   `json:"title"`
-		Description string   `json:"description"`
-		Content     string   `json:"content"`
-		Channel     string   `json:"channel"`
-		Tags        []string `json:"tags"`
-		Trigger     string   `json:"trigger"`
-		Status      string   `json:"status"`
+		Name                string   `json:"name"`
+		Title               string   `json:"title"`
+		Description         string   `json:"description"`
+		Content             string   `json:"content"`
+		Channel             string   `json:"channel"`
+		Tags                []string `json:"tags"`
+		Trigger             string   `json:"trigger"`
+		Status              string   `json:"status"`
 		WorkflowProvider    string   `json:"workflow_provider"`
 		WorkflowKey         string   `json:"workflow_key"`
 		WorkflowDefinition  string   `json:"workflow_definition"`

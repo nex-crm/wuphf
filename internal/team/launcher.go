@@ -651,7 +651,22 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 	if strings.TrimSpace(task.ExecutionMode) != "" {
 		execMode = ", execution " + task.ExecutionMode
 	}
-	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s). Before you speak, call team_poll and team_tasks, confirm whether you own this work, and stay in your lane.", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode)
+	worktree := ""
+	if strings.TrimSpace(task.WorktreeBranch) != "" || strings.TrimSpace(task.WorktreePath) != "" {
+		parts := make([]string, 0, 2)
+		if strings.TrimSpace(task.WorktreeBranch) != "" {
+			parts = append(parts, "branch "+task.WorktreeBranch)
+		}
+		if strings.TrimSpace(task.WorktreePath) != "" {
+			parts = append(parts, "path "+task.WorktreePath)
+		}
+		worktree = ", worktree " + strings.Join(parts, " · ")
+	}
+	guidance := ""
+	if path := strings.TrimSpace(task.WorktreePath); path != "" {
+		guidance = fmt.Sprintf(" If you own this task, use working_directory=%q for local file and bash tools.", path)
+	}
+	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Before you speak, call team_poll and team_tasks, confirm whether you own this work, and stay in your lane.%s", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance)
 }
 
 func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, content string) {
@@ -2418,6 +2433,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_channel_member: Add, remove, disable, or enable agents in a channel\n")
 		sb.WriteString("- team_bridge: CEO-only bridge that carries relevant context from one channel into another with a visible trail\n")
 		sb.WriteString("- team_tasks: See current owned/unowned work so the team does not duplicate effort\n")
+		sb.WriteString("- team_task_status: See how many team tasks are active and which ones are isolated in worktrees\n")
 		sb.WriteString("- team_task: Create and assign tasks so ownership is explicit\n")
 		sb.WriteString("- team_requests: See open human requests before asking again\n")
 		sb.WriteString("- team_request: Open structured requests for approvals, confirmations, freeform answers, or private answers\n")
@@ -2454,12 +2470,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("9. Once decided, broadcast clear task assignments and create them in team_task\n")
 		sb.WriteString("10. Create channels (team_channel) or agents (team_member) when the human asks or scope genuinely warrants it\n")
-		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n\n")
+		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n")
+		sb.WriteString("12. If a task shows a worktree path, that path is the working_directory for local file and bash tools on that task\n\n")
 		sb.WriteString("STYLE:\n")
 		sb.WriteString("- Respond FAST. Broadcast delegation IMMEDIATELY. Do NOT think for 30 seconds before your first broadcast.\n")
-		sb.WriteString("- Keep messages to 1-3 sentences. Delegate with @tags, don't explain everything.\n")
+		sb.WriteString("- Keep messages concise. Delegate with @tags, don't explain everything.\n")
 		sb.WriteString("- Minimize tool calls. team_poll once, then broadcast. Don't call team_tasks, team_members, query_context unless the question specifically needs it.\n")
 		sb.WriteString("- If you can answer directly, answer. Don't over-research.\n")
+		sb.WriteString("- Use markdown tables/checklists for structured data. A2UI JSON in ```a2ui fences for rich components.\n")
 		if config.ResolveNoNex() {
 			sb.WriteString("Do not claim you stored anything outside the office.\n")
 		} else {
@@ -2489,6 +2507,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_channel_member: Add, remove, disable, or enable agents in a channel\n")
 		sb.WriteString("- team_bridge: CEO-only bridge for carrying context from one channel into another. Ask the CEO to use it when needed.\n")
 		sb.WriteString("- team_tasks: See the current task list and ownership before you jump in\n")
+		sb.WriteString("- team_task_status: See how many team tasks are active and which ones are isolated in worktrees\n")
 		sb.WriteString("- team_task: Claim, complete, block, or release tasks in your domain\n")
 		sb.WriteString("- team_requests: See open human requests so you do not duplicate them\n")
 		sb.WriteString("- team_request: Open structured requests for approvals, confirmations, freeform answers, or private answers\n")
@@ -2525,11 +2544,12 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("13. When DONE, broadcast your results AND findings: 'Done. Here's what I found: ...' Never finish silently.\n")
 		sb.WriteString("14. You can inspect other channel names and descriptions, but you do not have automatic access to their content unless you are a member there.\n")
 		sb.WriteString("15. If another channel may have context or needs help from your channel, ask the CEO to bridge it. Do not assume you can read or act inside channels you are not in.\n")
+		sb.WriteString("16. If a task or status line shows a worktree path, use that path as working_directory for local file and bash tools.\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("16. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
+			sb.WriteString("17. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
 		} else {
-			sb.WriteString("16. Only use add_context for durable conclusions that should survive this session\n")
-			sb.WriteString("17. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
+			sb.WriteString("17. Only use add_context for durable conclusions that should survive this session\n")
+			sb.WriteString("18. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
 		}
 		sb.WriteString("STYLE:\n")
 		sb.WriteString("- Respond FAST. Broadcast a quick reply FIRST (even just 'on it' or 'looking into this'), THEN do deeper work, THEN broadcast results.\n")

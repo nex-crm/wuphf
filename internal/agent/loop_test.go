@@ -2,6 +2,9 @@ package agent
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -290,12 +293,16 @@ func TestToolCallCycle(t *testing.T) {
 	if err := loop.Tick(); err != nil {
 		t.Fatalf("tick 1: %v", err)
 	}
+	state := loop.GetState()
+	if state.TaskID == "" {
+		t.Fatal("expected task ID after follow-up was drained")
+	}
 
 	// Tick 2: build_context → stream_llm (yields tool_call)
 	if err := loop.Tick(); err != nil {
 		t.Fatalf("tick 2: %v", err)
 	}
-	state := loop.GetState()
+	state = loop.GetState()
 	if state.Phase != PhaseStreamLLM {
 		t.Fatalf("expected stream_llm, got %s", state.Phase)
 	}
@@ -354,6 +361,108 @@ func TestToolCallCycle(t *testing.T) {
 	}
 	if !hasToolResult {
 		t.Error("expected tool_result entry with 'echo: hi'")
+	}
+}
+
+func TestToolCallCycleWritesTaskOutputLog(t *testing.T) {
+	t.Setenv(taskLogRootEnv, t.TempDir())
+
+	dir := t.TempDir()
+	sessions := NewSessionStoreAt(dir)
+	tools := NewToolRegistry()
+	queues := NewMessageQueues()
+
+	tools.Register(AgentTool{
+		Name:        "echo",
+		Description: "Echoes input",
+		Schema: map[string]any{
+			"type":     "object",
+			"required": []any{"text"},
+			"properties": map[string]any{
+				"text": map[string]any{"type": "string"},
+			},
+		},
+		Execute: func(params map[string]any, ctx context.Context, onUpdate func(string)) (string, error) {
+			return "echo: " + params["text"].(string), nil
+		},
+	})
+
+	loop := NewAgentLoop(AgentConfig{
+		Slug:  "logger",
+		Name:  "Logger",
+		Tools: []string{"echo"},
+	}, tools, sessions, queues, mockToolCallStreamFn("echo", map[string]any{"text": "hi"}), nil, nil)
+
+	queues.FollowUp("logger", "call echo")
+	loop.Start()
+
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+	taskID := loop.GetState().TaskID
+	if taskID == "" {
+		t.Fatal("expected task ID after build context")
+	}
+
+	for i := 0; i < 4; i++ {
+		if err := loop.Tick(); err != nil {
+			t.Fatalf("tick %d: %v", i+2, err)
+		}
+	}
+
+	logPath := filepath.Join(os.Getenv(taskLogRootEnv), taskID, "output.log")
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read output log: %v", err)
+	}
+	text := string(data)
+	if !strings.Contains(text, `"tool_name":"echo"`) {
+		t.Fatalf("expected tool log to contain tool name, got %q", text)
+	}
+	if !strings.Contains(text, `"result":"echo: hi"`) {
+		t.Fatalf("expected tool log to contain raw result, got %q", text)
+	}
+}
+
+func TestStreamLLMCompactsOldContext(t *testing.T) {
+	t.Setenv(compactionTokenLimitEnv, "80")
+
+	loop, _ := newTestLoop(t, mockStreamFn("ok"))
+	loop.queues.FollowUp("test-agent", "summarize prior work")
+	loop.Start()
+
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 1: %v", err)
+	}
+
+	state := loop.GetState()
+	for i := 0; i < 12; i++ {
+		if _, err := loop.sessions.Append(state.SessionID, SessionEntry{
+			Type:    "assistant",
+			Content: strings.Repeat("history line ", 12),
+		}); err != nil {
+			t.Fatalf("append history %d: %v", i, err)
+		}
+	}
+
+	if err := loop.Tick(); err != nil {
+		t.Fatalf("tick 2: %v", err)
+	}
+
+	entries, err := loop.sessions.GetHistory(state.SessionID, 0, "")
+	if err != nil {
+		t.Fatalf("get history: %v", err)
+	}
+
+	found := false
+	for _, entry := range entries {
+		if entry.Type == "system" && strings.Contains(entry.Content, "Office Insight") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("expected compaction to persist an Office Insight system entry")
 	}
 }
 

@@ -57,3 +57,28 @@ func TestBuildTeamLeadPromptMentionsAllAgents(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildOfficeCompactionPrompt(t *testing.T) {
+	prompt := BuildOfficeCompactionPrompt("PM decided to ship the launch page on Friday.")
+	if !strings.Contains(prompt, "Office Insight") {
+		t.Fatal("expected Office Insight instructions in compaction prompt")
+	}
+	if !strings.Contains(prompt, "mission summary") {
+		t.Fatal("expected mission-summary guidance in compaction prompt")
+	}
+	if !strings.Contains(prompt, "key decisions, current blockers, and open follow-ups") {
+		t.Fatal("expected compaction sections in prompt")
+	}
+	if !strings.Contains(prompt, "PM decided to ship the launch page on Friday.") {
+		t.Fatal("expected archived thread content in prompt")
+	}
+}
+
+func TestBuildCompactionPrompt(t *testing.T) {
+	prompt := BuildCompactionPrompt()
+	for _, want := range []string{"mission", "key decisions", "current blockers", "Office Insight"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected compaction prompt to mention %q", want)
+		}
+	}
+}

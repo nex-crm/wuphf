@@ -8,10 +8,15 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/orchestration"
 )
+
+func stripStreamANSI(s string) string {
+	return ansi.Strip(s)
+}
 
 func newTestStreamModel() StreamModel {
 	agentSvc := agent.NewAgentService()
@@ -202,6 +207,53 @@ func TestSlashThinkingTogglesVisibility(t *testing.T) {
 	expanded := m2.renderMessages(100, 10)
 	if !strings.Contains(expanded, "hidden reasoning") {
 		t.Fatal("expected thinking content when expanded")
+	}
+}
+
+func TestRenderMessageKeepsShortToolResultsExpanded(t *testing.T) {
+	m := newTestStreamModel()
+	msg := StreamMessage{
+		Role:      "tool_result",
+		AgentSlug: "fe",
+		AgentName: "Frontend Engineer",
+		Content:   "ok",
+	}
+
+	rendered := stripStreamANSI(m.renderMessage(msg, 100))
+	if !strings.Contains(rendered, "ok") {
+		t.Fatalf("expected short tool output to remain visible, got %q", rendered)
+	}
+	if strings.Contains(rendered, "[folded output:") {
+		t.Fatalf("expected short tool output not to fold, got %q", rendered)
+	}
+}
+
+func TestRenderMessageFoldsLargeToolResults(t *testing.T) {
+	m := newTestStreamModel()
+	var lines []string
+	for i := 0; i < 12; i++ {
+		lines = append(lines, strings.Repeat("line", 12)+strings.Repeat(string(rune('a'+i)), 8))
+	}
+	content := strings.Join(lines, "\n")
+	msg := StreamMessage{
+		Role:      "tool_result",
+		AgentSlug: "fe",
+		AgentName: "Frontend Engineer",
+		Content:   content,
+	}
+
+	rendered := stripStreamANSI(m.renderMessage(msg, 100))
+	if !strings.Contains(rendered, "[folded output: 12 lines") {
+		t.Fatalf("expected folded summary, got %q", rendered)
+	}
+	if !strings.Contains(rendered, lines[0]) {
+		t.Fatalf("expected first line in folded summary, got %q", rendered)
+	}
+	if !strings.Contains(rendered, lines[len(lines)-1]) {
+		t.Fatalf("expected last line in folded summary, got %q", rendered)
+	}
+	if msg.Content != content {
+		t.Fatal("expected folding to leave original tool content unchanged")
 	}
 }
 
