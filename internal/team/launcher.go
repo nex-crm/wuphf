@@ -277,6 +277,7 @@ func (l *Launcher) Launch() error {
 		go l.notifyTaskActionsLoop()
 		go l.pollNexNotificationsLoop()
 		go l.watchdogSchedulerLoop()
+		go l.taskAckWatchdogLoop()
 	}
 
 	// Start Telegram transport if any channel has a telegram surface
@@ -709,9 +710,33 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		}
 	}
 
-	// Broadcast model: every message goes to every agent.
-	// CEO gets a small head start (immediate), everyone else is delayed.
-	// The sender is always excluded.
+	// Context-aware notification gating:
+	// 1. CEO/lead messages always broadcast to all (they're directives)
+	// 2. If message tags specific agents → notify tagged + CEO
+	// 3. If message is in a thread → notify thread participants + CEO
+	// 4. Otherwise → broadcast all (fallback)
+	// CEO always gets immediate delivery on non-CEO messages.
+
+	broadcastAll := msg.From == lead
+
+	if !broadcastAll && len(msg.Tagged) > 0 {
+		addTarget(lead, &immediate)
+		for _, slug := range msg.Tagged {
+			addTarget(slug, &delayed)
+		}
+		return immediate, delayed
+	}
+
+	if !broadcastAll && msg.ReplyTo != "" && l.broker != nil {
+		threadParticipants := l.threadParticipants(msg.Channel, msg.ReplyTo)
+		addTarget(lead, &immediate)
+		for _, slug := range threadParticipants {
+			addTarget(slug, &delayed)
+		}
+		return immediate, delayed
+	}
+
+	// Broadcast to all enabled agents.
 	addTarget(lead, &immediate)
 	for _, slug := range slugs {
 		if slug == lead {
@@ -720,6 +745,65 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		addTarget(slug, &delayed)
 	}
 	return immediate, delayed
+}
+
+// threadParticipants returns the slugs of agents who have posted in a given thread.
+func (l *Launcher) threadParticipants(channel, threadRoot string) []string {
+	if l.broker == nil {
+		return nil
+	}
+	messages := l.broker.ChannelMessages(channel)
+	seen := map[string]struct{}{}
+	for _, msg := range messages {
+		if msg.ID == threadRoot || msg.ReplyTo == threadRoot {
+			seen[msg.From] = struct{}{}
+		}
+	}
+	slugs := make([]string, 0, len(seen))
+	for slug := range seen {
+		slugs = append(slugs, slug)
+	}
+	return slugs
+}
+
+const taskAckTimeout = 30 * time.Second
+
+// taskAckWatchdogLoop checks for in_progress tasks that haven't been acknowledged
+// by their owner within the ack timeout. Unacked tasks are escalated to the CEO.
+func (l *Launcher) taskAckWatchdogLoop() {
+	escalated := make(map[string]struct{}) // track which task IDs we already escalated
+	for {
+		time.Sleep(10 * time.Second)
+		if l.broker == nil {
+			continue
+		}
+		unacked := l.broker.UnackedTasks(taskAckTimeout)
+		if len(unacked) == 0 {
+			continue
+		}
+		lead := l.officeLeadSlug()
+		targetMap := l.agentPaneTargets()
+		ceoTarget, ok := targetMap[lead]
+		if !ok {
+			continue
+		}
+		for _, task := range unacked {
+			if _, done := escalated[task.ID]; done {
+				continue
+			}
+			escalated[task.ID] = struct{}{}
+			notification := fmt.Sprintf(
+				"[ACK TIMEOUT] Task %s (%s) assigned to @%s has not been acknowledged after %s. Consider reassigning or checking on the agent.",
+				task.ID, truncate(task.Title, 80), task.Owner, taskAckTimeout,
+			)
+			exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+				"-t", ceoTarget.PaneTarget,
+				"-l",
+				notification,
+			).Run()
+			submitAgentPanePrompt(ceoTarget.PaneTarget)
+		}
+	}
 }
 
 func (l *Launcher) shouldDeliverDelayedNotification(targetSlug string, source channelMessage) bool {
