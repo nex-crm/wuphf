@@ -277,6 +277,7 @@ func (l *Launcher) Launch() error {
 		go l.notifyTaskActionsLoop()
 		go l.pollNexNotificationsLoop()
 		go l.watchdogSchedulerLoop()
+		go l.taskAckWatchdogLoop()
 	}
 
 	// Start Telegram transport if any channel has a telegram surface
@@ -763,6 +764,46 @@ func (l *Launcher) threadParticipants(channel, threadRoot string) []string {
 		slugs = append(slugs, slug)
 	}
 	return slugs
+}
+
+const taskAckTimeout = 30 * time.Second
+
+// taskAckWatchdogLoop checks for in_progress tasks that haven't been acknowledged
+// by their owner within the ack timeout. Unacked tasks are escalated to the CEO.
+func (l *Launcher) taskAckWatchdogLoop() {
+	escalated := make(map[string]struct{}) // track which task IDs we already escalated
+	for {
+		time.Sleep(10 * time.Second)
+		if l.broker == nil {
+			continue
+		}
+		unacked := l.broker.UnackedTasks(taskAckTimeout)
+		if len(unacked) == 0 {
+			continue
+		}
+		lead := l.officeLeadSlug()
+		targetMap := l.agentPaneTargets()
+		ceoTarget, ok := targetMap[lead]
+		if !ok {
+			continue
+		}
+		for _, task := range unacked {
+			if _, done := escalated[task.ID]; done {
+				continue
+			}
+			escalated[task.ID] = struct{}{}
+			notification := fmt.Sprintf(
+				"[ACK TIMEOUT] Task %s (%s) assigned to @%s has not been acknowledged after %s. Consider reassigning or checking on the agent.",
+				task.ID, truncate(task.Title, 80), task.Owner, taskAckTimeout,
+			)
+			exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+				"-t", ceoTarget.PaneTarget,
+				"-l",
+				notification,
+			).Run()
+			submitAgentPanePrompt(ceoTarget.PaneTarget)
+		}
+	}
 }
 
 func (l *Launcher) shouldDeliverDelayedNotification(targetSlug string, source channelMessage) bool {
