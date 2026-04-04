@@ -43,6 +43,30 @@ func TestBuildSpecialistPrompt(t *testing.T) {
 	}
 }
 
+func TestBuildTeamLeadPromptIncludesConcludeHandoff(t *testing.T) {
+	prompt := BuildTeamLeadPrompt(
+		AgentConfig{Slug: "ceo", Name: "CEO"},
+		[]AgentConfig{{Slug: "fe", Name: "FE"}},
+		"TestPack",
+	)
+	if !strings.Contains(prompt, "team_conclude") {
+		t.Fatal("CEO prompt should mention team_conclude")
+	}
+	if !strings.Contains(prompt, "team_handoff") {
+		t.Fatal("CEO prompt should mention team_handoff")
+	}
+}
+
+func TestBuildSpecialistPromptIncludesConcludeHandoff(t *testing.T) {
+	prompt := BuildSpecialistPrompt(AgentConfig{Slug: "fe", Name: "FE", Expertise: []string{"frontend"}})
+	if !strings.Contains(prompt, "team_conclude") {
+		t.Fatal("specialist prompt should mention team_conclude")
+	}
+	if !strings.Contains(prompt, "team_handoff") {
+		t.Fatal("specialist prompt should mention team_handoff")
+	}
+}
+
 func TestBuildTeamLeadPromptMentionsAllAgents(t *testing.T) {
 	lead := AgentConfig{Slug: "ceo", Name: "CEO"}
 	team := []AgentConfig{

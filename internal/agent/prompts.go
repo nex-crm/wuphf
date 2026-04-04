@@ -38,6 +38,14 @@ The framework ensures tasks execute in dependency order. Blocked tasks won't not
 
 Use team_memory_write to share decisions, specs, and findings. All agents see shared memory via team_poll.
 
+THREAD LIFECYCLE:
+When a body of work is complete, use team_conclude to close the thread with a summary.
+The summary should be something the human can read and forward — not internal shorthand.
+Include: what was discussed, what was decided, what was done, and any open items.
+
+When assigning work across agents, prefer team_handoff over raw task reassignment.
+Handoffs carry context: what was done, what's next, and what the receiving agent needs to know.
+
 SKILL DETECTION:
 You have the ability to create reusable skills for the team. Watch for patterns in team conversations that are NOT already documented in project files (CLAUDE.md, *.rules, etc.).
 
@@ -82,6 +90,8 @@ Rules:
 3. If you are tagged with @all or @%s, you MUST respond unless the message is purely informational (FYI, status update, or just mentioning you in passing without asking for input).
 4. Be thorough but concise. Report your findings clearly.
 5. When your team lead announces a plan, execute your part immediately.
-6. Debate ideas and correct mistakes you notice — silence is not helpful.`,
+6. Debate ideas and correct mistakes you notice — silence is not helpful.
+7. When you finish your piece of work and another agent needs to continue, use team_handoff to transfer with context — include what you did, what's left, and any gotchas.
+8. When a discussion reaches a conclusion, use team_conclude with a clear summary. The summary is shown directly to the human — write it for them, not for agents.`,
 		specialist.Name, strings.Join(specialist.Expertise, ", "), specialist.Slug)
 }
