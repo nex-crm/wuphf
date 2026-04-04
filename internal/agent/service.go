@@ -183,6 +183,7 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 	loop.On(EventDone, func(args ...any) {
 		ma.State.Phase = PhaseDone
 		ma.State.CurrentTask = ""
+		ma.State.TaskID = ""
 		ma.State.Error = ""
 	})
 	s.agents[cfg.Slug] = ma

@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -443,6 +444,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode", Category: "session"},
 	{Name: "messages", Description: "Show the main office feed", Category: "navigate"},
 	{Name: "tasks", Description: "Show active work in this channel", Category: "navigate"},
+	{Name: "switch", Description: "Switch to another channel", Category: "navigate"},
 	{Name: "channels", Description: "Browse and manage channels", Category: "navigate"},
 	{Name: "channel", Description: "Create or remove a channel", Category: "channels"},
 	{Name: "agents", Description: "Manage channel agents", Category: "people"},
@@ -466,11 +468,18 @@ var channelSlashCommands = []tui.SlashCommand{
 
 // oneOnOneBlacklist lists command names blocked in 1:1 mode.
 var oneOnOneBlacklist = map[string]bool{
+	"switch":       true,
+	"tasks":        true,
+	"task":         true,
 	"channels":     true,
 	"channel":      true,
 	"agents":       true,
 	"agent":        true,
 	"agent prompt": true,
+	"reply":        true,
+	"threads":      true,
+	"expand":       true,
+	"collapse":     true,
 }
 
 func buildOneOnOneSlashCommands() []tui.SlashCommand {
@@ -666,6 +675,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		m.sidebarCollapsed = true
 		m.threadsDefaultExpand = true
 		m.autocomplete = tui.NewAutocomplete(buildOneOnOneSlashCommands())
+		m.notice = "Direct session reset. Agent pane reloaded in place."
 	}
 	if config.ResolveNoNex() {
 		m.notice = "Running in office-only mode. Nex tools are disabled for this session."
@@ -730,19 +740,21 @@ func (m *channelModel) refreshSlashCommands() {
 	m.autocomplete = tui.NewAutocomplete(base)
 	if preserveOverlays {
 		m.updateOverlaysForInput(activeInput, activeCursor)
+		return
 	}
+	m.updateOverlaysForCurrentInput()
 }
 
 func (m channelModel) pollCurrentState() tea.Cmd {
 	if m.isOneOnOne() {
-		return tea.Batch(
+		return tea.Sequence(
 			pollHealth(),
 			pollBroker(m.lastID, m.activeChannel),
 			pollMembers(m.activeChannel),
 			tickChannel(),
 		)
 	}
-	return tea.Batch(
+	return tea.Sequence(
 		pollHealth(),
 		pollChannels(),
 		pollOfficeMembers(),
@@ -1102,6 +1114,14 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// ── focusMain: existing behavior ──────────────────────────────
+		if motionKey, ok := composerMotionKey(msg); ok {
+			m.lastCtrlCAt = time.Time{}
+			if nextPos, handled := moveComposerCursor(m.input, m.inputPos, motionKey); handled {
+				m.inputPos = nextPos
+				m.updateInputOverlays()
+			}
+			return m, nil
+		}
 		switch msg.String() {
 		case "enter":
 			m.lastCtrlCAt = time.Time{}
@@ -1213,13 +1233,8 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		default:
 			m.lastCtrlCAt = time.Time{}
-			// Type character
-			if msg.Type == tea.KeySpace {
-				ch := []rune{' '}
-				tail := make([]rune, len(m.input[m.inputPos:]))
-				copy(tail, m.input[m.inputPos:])
-				m.input = append(m.input[:m.inputPos], append(ch, tail...)...)
-				m.inputPos++
+			if ch := composerInsertRunes(msg); len(ch) > 0 {
+				m.input, m.inputPos = insertComposerRunes(m.input, m.inputPos, ch)
 				m.updateInputOverlays()
 			} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
 				ch := msg.Runes
@@ -1233,6 +1248,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.inputPos += len(ch)
 					m.updateInputOverlays()
 				}
+			}
+			if m.maybeActivateChannelPickerFromInput() {
+				return m, nil
 			}
 		}
 
@@ -1348,6 +1366,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.notice == "" {
 				m.notice = "Office reset. Team panes reloaded in place."
 			}
+			return m, m.pollCurrentState()
 		} else {
 			m.notice = "Reset failed: " + msg.err.Error()
 		}
@@ -1579,10 +1598,18 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.replyToID = ""
 			}
 			if modeChanged {
+				m.messages = nil
+				m.members = nil
+				m.tasks = nil
+				m.requests = nil
+				m.lastID = ""
+				m.scroll = 0
+				m.unreadCount = 0
 				m.refreshSlashCommands()
-				if m.isOneOnOne() {
-					m.notice = "Direct 1:1 with " + m.oneOnOneAgentName() + "."
+				if m.isOneOnOne() && strings.TrimSpace(m.notice) == "" {
+					m.notice = "Direct session reset. Agent pane reloaded in place."
 				}
+				return m, m.pollCurrentState()
 			}
 		}
 
@@ -2335,7 +2362,7 @@ func (m channelModel) currentHeaderMeta() string {
 				external++
 			}
 		}
-		return fmt.Sprintf("  Signals, decisions, external actions, and watchdogs driving the office · %d signals · %d decisions · %d external · %d active watchdogs · %d high signal", len(m.signals), len(m.decisions), external, activeWatchdogs, highSignal)
+		return fmt.Sprintf("  Signals, Decisions, External Actions, and Watchdogs driving the office · %d signals · %d decisions · %d external · %d active watchdogs · %d high signal", len(m.signals), len(m.decisions), external, activeWatchdogs, highSignal)
 	case officeAppCalendar:
 		events := filterCalendarEvents(collectCalendarEvents(m.scheduler, m.tasks, m.requests, m.activeChannel, m.members), m.calendarRange, m.calendarFilter)
 		dueSoon := 0
@@ -2790,6 +2817,13 @@ func (m channelModel) nextFocus() focusArea {
 
 // updateThread handles key events when the thread panel is focused.
 func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if motionKey, ok := composerMotionKey(msg); ok {
+		if nextPos, handled := moveComposerCursor(m.threadInput, m.threadInputPos, motionKey); handled {
+			m.threadInputPos = nextPos
+			m.updateThreadOverlays()
+		}
+		return m, nil
+	}
 	key := msg.String()
 	if msg.Type == tea.KeyCtrlJ {
 		key = "ctrl+j"
@@ -2855,12 +2889,8 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.threadScroll = 0
 		}
 	default:
-		if msg.Type == tea.KeySpace {
-			ch := []rune{' '}
-			tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
-			copy(tail, m.threadInput[m.threadInputPos:])
-			m.threadInput = append(m.threadInput[:m.threadInputPos], append(ch, tail...)...)
-			m.threadInputPos++
+		if ch := composerInsertRunes(msg); len(ch) > 0 {
+			m.threadInput, m.threadInputPos = insertComposerRunes(m.threadInput, m.threadInputPos, ch)
 			m.updateThreadOverlays()
 		} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
 			ch := msg.Runes
@@ -3803,6 +3833,7 @@ func (m *channelModel) updateOverlaysForCurrentInput() {
 	}
 	if m.focus == focusMain {
 		m.updateInputOverlays()
+		m.maybeActivateChannelPickerFromInput()
 		return
 	}
 	m.autocomplete.Dismiss()
@@ -3819,6 +3850,7 @@ func (m *channelModel) setActiveInput(text string) {
 	m.input = []rune(text)
 	m.inputPos = len(m.input)
 	m.updateInputOverlays()
+	m.maybeActivateChannelPickerFromInput()
 }
 
 func (m *channelModel) activeInputString() string {
@@ -3852,6 +3884,142 @@ func replaceMentionInInput(input []rune, pos int, mention string) ([]rune, int) 
 	}
 	updated := []rune(text[:atIdx] + mention + " " + text[pos:])
 	return updated, atIdx + len([]rune(mention)) + 1
+}
+
+func normalizeCursorPos(input []rune, pos int) int {
+	if pos < 0 {
+		return 0
+	}
+	if pos > len(input) {
+		return len(input)
+	}
+	return pos
+}
+
+func isComposerWordRune(r rune) bool {
+	return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-'
+}
+
+func moveCursorBackwardWord(input []rune, pos int) int {
+	pos = normalizeCursorPos(input, pos)
+	for pos > 0 && !isComposerWordRune(input[pos-1]) {
+		pos--
+	}
+	for pos > 0 && isComposerWordRune(input[pos-1]) {
+		pos--
+	}
+	return pos
+}
+
+func moveCursorForwardWord(input []rune, pos int) int {
+	pos = normalizeCursorPos(input, pos)
+	for pos < len(input) && isComposerWordRune(input[pos]) {
+		pos++
+	}
+	for pos < len(input) && !isComposerWordRune(input[pos]) {
+		pos++
+	}
+	return pos
+}
+
+func moveComposerCursor(input []rune, pos int, key string) (int, bool) {
+	pos = normalizeCursorPos(input, pos)
+	switch key {
+	case "left", "ctrl+b", "alt+h":
+		if pos > 0 {
+			pos--
+		}
+		return pos, true
+	case "right", "ctrl+f", "alt+l":
+		if pos < len(input) {
+			pos++
+		}
+		return pos, true
+	case "ctrl+a", "alt+0":
+		return 0, true
+	case "ctrl+e", "alt+$":
+		return len(input), true
+	case "alt+b":
+		return moveCursorBackwardWord(input, pos), true
+	case "alt+w":
+		return moveCursorForwardWord(input, pos), true
+	default:
+		return pos, false
+	}
+}
+
+func composerMotionKey(msg tea.KeyMsg) (string, bool) {
+	if msg.Alt && len(msg.Runes) == 1 {
+		switch msg.Runes[0] {
+		case 'h':
+			return "alt+h", true
+		case 'l':
+			return "alt+l", true
+		case 'b':
+			return "alt+b", true
+		case 'w':
+			return "alt+w", true
+		case '0':
+			return "alt+0", true
+		case '$':
+			return "alt+$", true
+		}
+	}
+	switch msg.String() {
+	case "ctrl+a", "ctrl+e", "ctrl+b", "ctrl+f", "left", "right", "alt+h", "alt+l", "alt+b", "alt+w", "alt+0", "alt+$":
+		return msg.String(), true
+	default:
+		return "", false
+	}
+}
+
+func composerInsertRunes(msg tea.KeyMsg) []rune {
+	if msg.Type == tea.KeySpace || msg.String() == " " {
+		return []rune{' '}
+	}
+	if msg.Alt {
+		return nil
+	}
+	if len(msg.Runes) > 0 {
+		return msg.Runes
+	}
+	return nil
+}
+
+func insertComposerRunes(input []rune, pos int, ch []rune) ([]rune, int) {
+	pos = normalizeCursorPos(input, pos)
+	if len(ch) == 0 {
+		return input, pos
+	}
+	tail := make([]rune, len(input[pos:]))
+	copy(tail, input[pos:])
+	input = append(input[:pos], append(ch, tail...)...)
+	return input, pos + len(ch)
+}
+
+func (m *channelModel) maybeActivateChannelPickerFromInput() bool {
+	if m.focus != focusMain || m.picker.IsActive() || m.isOneOnOne() {
+		return false
+	}
+	switch string(m.input) {
+	case "/switch ", "/s ":
+		options := m.buildSwitchChannelPickerOptions()
+		if len(options) == 0 {
+			m.notice = "No channels yet."
+			return false
+		}
+		m.input = nil
+		m.inputPos = 0
+		m.autocomplete.Dismiss()
+		m.mention.Dismiss()
+		m.picker = tui.NewPicker("Switch Channel", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerChannels
+		m.notice = "Choose a channel to switch to."
+		return true
+	default:
+		return false
+	}
 }
 
 func (m channelModel) renderActivePopup(width int) string {
@@ -3931,7 +4099,14 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 
 	if m.isOneOnOne() && strings.HasPrefix(trimmed, "/") {
 		// Blacklist: commands that only make sense in team/office mode
-		teamOnly := []string{"/channels", "/channel ", "/channel\n", "/agents", "/agent ", "/agent\n", "/agent prompt"}
+		teamOnly := []string{
+			"/switch", "/s",
+			"/tasks", "/task ", "/task\n",
+			"/channels", "/channel ", "/channel\n",
+			"/agents", "/agent ", "/agent\n", "/agent prompt",
+			"/reply ", "/reply\n",
+			"/threads", "/expand ", "/expand\n", "/collapse ", "/collapse\n",
+		}
 		blocked := false
 		for _, prefix := range teamOnly {
 			if trimmed == strings.TrimSpace(prefix) || strings.HasPrefix(trimmed, prefix) {
@@ -3940,7 +4115,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			}
 		}
 		if blocked {
-			m.notice = "1:1 mode disables office collaboration commands. Switch back to the full team to use that."
+			m.notice = "1:1 mode disables office, channel, agent, task, and thread commands."
 			return m, nil
 		}
 	}
@@ -4060,6 +4235,18 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	case trimmed == "/connect telegram":
 		clearCurrent()
 		return m, m.startTelegramConnect()
+	case trimmed == "/switch" || trimmed == "/s":
+		clearCurrent()
+		options := m.buildSwitchChannelPickerOptions()
+		if len(options) == 0 {
+			m.notice = "No channels yet."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Switch Channel", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerChannels
+		m.notice = "Choose a channel to switch to."
+		return m, nil
 	case trimmed == "/channels":
 		clearCurrent()
 		options := m.buildChannelPickerOptions()
@@ -4584,6 +4771,17 @@ func (m channelModel) buildChannelPickerOptions() []tui.PickerOption {
 				Value:       "remove:" + ch.Slug,
 				Description: "Delete this channel and its messages/tasks",
 			})
+		}
+	}
+	return options
+}
+
+func (m channelModel) buildSwitchChannelPickerOptions() []tui.PickerOption {
+	all := m.buildChannelPickerOptions()
+	options := make([]tui.PickerOption, 0, len(all))
+	for _, option := range all {
+		if strings.HasPrefix(option.Value, "switch:") {
+			options = append(options, option)
 		}
 	}
 	return options
@@ -5766,9 +5964,13 @@ func isA2UIType(t string) bool {
 }
 
 func resolveInitialOfficeApp(name string) officeApp {
-	switch officeApp(strings.ToLower(strings.TrimSpace(name))) {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if normalized == "insights" {
+		return officeAppPolicies
+	}
+	switch officeApp(normalized) {
 	case officeAppMessages, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar:
-		return officeApp(strings.ToLower(strings.TrimSpace(name)))
+		return officeApp(normalized)
 	default:
 		return officeAppMessages
 	}

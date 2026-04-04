@@ -924,6 +924,17 @@ func TestBrokerTaskCreateReusesExistingOpenTask(t *testing.T) {
 }
 
 func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
+	oldPrepare := prepareTaskWorktree
+	oldCleanup := cleanupTaskWorktree
+	prepareTaskWorktree = func(taskID string) (string, string, error) {
+		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
+	}
+	cleanupTaskWorktree = func(path, branch string) error { return nil }
+	defer func() {
+		prepareTaskWorktree = oldPrepare
+		cleanupTaskWorktree = oldCleanup
+	}()
+
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
@@ -970,6 +981,9 @@ func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 	if task.PipelineStage != "implement" || task.ExecutionMode != "local_worktree" || task.SourceDecisionID != decision.ID {
 		t.Fatalf("expected structured task metadata, got %+v", task)
 	}
+	if task.WorktreePath == "" || task.WorktreeBranch == "" {
+		t.Fatalf("expected planned task worktree metadata, got %+v", task)
+	}
 
 	base := fmt.Sprintf("http://%s", b.Addr())
 	body, _ := json.Marshal(map[string]any{
@@ -1001,6 +1015,75 @@ func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 	}
 	if len(b.Decisions()) != 1 || len(b.Signals()) != 1 || len(b.Watchdogs()) != 1 {
 		t.Fatalf("expected ledger state, got signals=%d decisions=%d watchdogs=%d", len(b.Signals()), len(b.Decisions()), len(b.Watchdogs()))
+	}
+}
+
+func TestBrokerReleaseTaskCleansWorktree(t *testing.T) {
+	oldPrepare := prepareTaskWorktree
+	oldCleanup := cleanupTaskWorktree
+	var cleanedPath, cleanedBranch string
+	prepareTaskWorktree = func(taskID string) (string, string, error) {
+		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
+	}
+	cleanupTaskWorktree = func(path, branch string) error {
+		cleanedPath = path
+		cleanedBranch = branch
+		return nil
+	}
+	defer func() {
+		prepareTaskWorktree = oldPrepare
+		cleanupTaskWorktree = oldCleanup
+	}()
+
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:   "general",
+		Title:     "Build signup conversion fix",
+		Owner:     "fe",
+		CreatedBy: "ceo",
+		TaskType:  "feature",
+	})
+	if err != nil || reused {
+		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
+	}
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	body, _ := json.Marshal(map[string]any{
+		"action":     "release",
+		"channel":    "general",
+		"id":         task.ID,
+		"created_by": "ceo",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("release task: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode released task: %v", err)
+	}
+	if cleanedPath == "" || cleanedBranch == "" {
+		t.Fatalf("expected cleanup to run, got path=%q branch=%q", cleanedPath, cleanedBranch)
+	}
+	if result.Task.WorktreePath != "" || result.Task.WorktreeBranch != "" {
+		t.Fatalf("expected released task worktree metadata to clear, got %+v", result.Task)
 	}
 }
 

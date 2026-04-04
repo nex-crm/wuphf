@@ -27,6 +27,10 @@ func joinRenderedLines(lines []renderedLine) string {
 	return strings.Join(parts, "\n")
 }
 
+func altRuneKey(r rune) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true}
+}
+
 func TestNewBrokerRequestUsesEnvTokenAtRequestTime(t *testing.T) {
 	oldEnv := os.Getenv("WUPHF_BROKER_TOKEN")
 	oldPath := brokerTokenPath
@@ -343,6 +347,139 @@ func TestOneOnOneModeBlocksOfficeCommands(t *testing.T) {
 	}
 }
 
+func TestSwitchCommandOpensChannelPicker(t *testing.T) {
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+	}
+
+	next, cmd := m.runCommand("/switch", "")
+	if cmd != nil {
+		t.Fatalf("expected no immediate command from /switch, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if !got.picker.IsActive() || got.pickerMode != channelPickerChannels {
+		t.Fatalf("expected channel picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	if got.notice != "Choose a channel to switch to." {
+		t.Fatalf("expected switch notice, got %q", got.notice)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "Switch Channel") || !strings.Contains(view, "#launch") {
+		t.Fatalf("expected switch picker contents, got %q", view)
+	}
+}
+
+func TestSwitchAliasSelectsChannel(t *testing.T) {
+	m := newChannelModel(false)
+	m.activeChannel = "general"
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+	}
+	m.picker = tui.NewPicker("Switch Channel", m.buildChannelPickerOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerChannels
+	m.messages = []brokerMessage{{ID: "msg-1", Content: "hello"}}
+	m.members = []channelMember{{Slug: "ceo"}}
+	m.replyToID = "msg-1"
+	m.threadPanelOpen = true
+	m.threadPanelID = "thread-1"
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "switch:launch", Label: "#launch"})
+	if cmd == nil {
+		t.Fatal("expected channel switch polling command")
+	}
+	got := next.(channelModel)
+	if got.activeChannel != "launch" {
+		t.Fatalf("expected active channel launch, got %q", got.activeChannel)
+	}
+	if got.lastID != "" || len(got.messages) != 0 || len(got.members) != 0 {
+		t.Fatalf("expected channel state to reset on switch, got lastID=%q messages=%d members=%d", got.lastID, len(got.messages), len(got.members))
+	}
+	if got.replyToID != "" || got.threadPanelOpen || got.threadPanelID != "" {
+		t.Fatalf("expected thread context to clear on switch, got replyToID=%q threadOpen=%v threadID=%q", got.replyToID, got.threadPanelOpen, got.threadPanelID)
+	}
+	if got.notice != "Switched to #launch" {
+		t.Fatalf("expected switch notice, got %q", got.notice)
+	}
+	if got.picker.IsActive() || got.pickerMode != channelPickerNone {
+		t.Fatalf("expected picker to close after switch, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+}
+
+func TestBuildSwitchChannelPickerOptionsOnlyIncludesSwitchTargets(t *testing.T) {
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+	}
+
+	options := m.buildSwitchChannelPickerOptions()
+	if len(options) != 2 {
+		t.Fatalf("expected only switch targets, got %+v", options)
+	}
+	for _, option := range options {
+		if !strings.HasPrefix(option.Value, "switch:") {
+			t.Fatalf("expected switch-only values, got %+v", option)
+		}
+	}
+}
+
+func TestTypingSwitchShortcutOpensChannelPicker(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+	}
+	m.input = []rune("/switch")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	got := next.(channelModel)
+
+	if !got.picker.IsActive() || got.pickerMode != channelPickerChannels {
+		t.Fatalf("expected typed /switch shortcut to open picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	if got.inputPos != 0 || len(got.input) != 0 {
+		t.Fatalf("expected composer to clear once picker opens, got input=%q pos=%d", string(got.input), got.inputPos)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "#launch") {
+		t.Fatalf("expected switch picker contents, got %q", view)
+	}
+	if strings.Contains(view, "Remove #launch") {
+		t.Fatalf("expected switch shortcut picker to hide remove actions, got %q", view)
+	}
+}
+
+func TestPickerTypingDoesNotAppendToComposer(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+		{Slug: "ops", Name: "ops", Members: []string{"ceo"}},
+	}
+	m.input = []rune("/switch")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	got := next.(channelModel)
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	got = next.(channelModel)
+
+	if string(got.input) != "" || got.inputPos != 0 {
+		t.Fatalf("expected picker input to leave composer untouched, got input=%q pos=%d", string(got.input), got.inputPos)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "#launch") || strings.Contains(view, "#general") {
+		t.Fatalf("expected picker query to filter channels, got %q", view)
+	}
+}
+
 func TestOneOnOneCommandOpensModePicker(t *testing.T) {
 	m := newChannelModel(false)
 
@@ -478,7 +615,6 @@ func TestChannelCreateDoneSwitchesToNewChannel(t *testing.T) {
 }
 
 func TestResolveInitialOfficeAppFallsBackToMessages(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	if got := resolveInitialOfficeApp("insights"); got != officeAppPolicies {
 		t.Fatalf("expected policies app, got %q", got)
 	}
@@ -487,6 +623,56 @@ func TestResolveInitialOfficeAppFallsBackToMessages(t *testing.T) {
 	}
 	if got := resolveInitialOfficeApp("not-real"); got != officeAppMessages {
 		t.Fatalf("expected invalid app to fall back to messages, got %q", got)
+	}
+}
+
+func TestDisplaySignalKindUsesHumanDirectiveLabel(t *testing.T) {
+	got := displaySignalKind(channelSignal{Kind: "directive", Source: "human"})
+	if got != "Human directive" {
+		t.Fatalf("expected human directive label, got %q", got)
+	}
+	if got := displaySignalKind(channelSignal{Kind: "risk", Source: "nex_insights"}); got != "risk" {
+		t.Fatalf("expected raw signal kind for non-human signal, got %q", got)
+	}
+}
+
+func TestRecentExternalActionsIncludesBridgeChannel(t *testing.T) {
+	actions := []channelAction{
+		{ID: "action-1", Kind: "note_internal"},
+		{ID: "action-2", Kind: "bridge_channel"},
+		{ID: "action-3", Kind: "external_webhook"},
+	}
+	got := recentExternalActions(actions, 10)
+	if len(got) != 2 {
+		t.Fatalf("expected bridge and external actions, got %d", len(got))
+	}
+	if got[0].Kind != "external_webhook" || got[1].Kind != "bridge_channel" {
+		t.Fatalf("expected reverse chronological bridge/external actions, got %#v", got)
+	}
+}
+
+func TestDisplayDecisionSummaryUsesHumanDirectiveLabel(t *testing.T) {
+	got := displayDecisionSummary("Human directed the office:\n- tighten scope")
+	if !strings.Contains(got, "Human directive:") {
+		t.Fatalf("expected human directive heading, got %q", got)
+	}
+	if got := displayDecisionSummary("Open a frontend follow-up."); got != "Open a frontend follow-up." {
+		t.Fatalf("expected non-human decision summary to remain unchanged, got %q", got)
+	}
+}
+
+func TestCalendarRecentActionsIncludeBridgeChannel(t *testing.T) {
+	lines := buildCalendarLines([]channelAction{
+		{ID: "action-1", Kind: "human_directive", Channel: "general", Summary: "Human directed the office:", Actor: "you"},
+		{ID: "action-2", Kind: "bridge_channel", Channel: "launch", Summary: "Use the sharper product narrative.", Actor: "ceo"},
+		{ID: "action-3", Kind: "task_created", Channel: "general", Summary: "Tighten v1 scope", Actor: "ceo"},
+	}, nil, nil, nil, "general", nil, calendarRangeWeek, "", 90)
+	view := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(view, "bridge_channel") {
+		t.Fatalf("expected calendar recent actions to include bridge_channel, got %q", view)
+	}
+	if !strings.Contains(view, "task_created") {
+		t.Fatalf("expected calendar recent actions to include task_created, got %q", view)
 	}
 }
 
@@ -679,6 +865,24 @@ func TestBuildChannelPickerOptionsUsesChannelDescriptions(t *testing.T) {
 	}
 	if !strings.Contains(options[0].Description, "2 members") {
 		t.Fatalf("expected member count in picker description, got %q", options[0].Description)
+	}
+}
+
+func TestBuildSwitchChannelPickerOptionsExcludeRemoveActions(t *testing.T) {
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Description: "Company-wide coordination", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Launch planning", Members: []string{"ceo", "fe"}},
+	}
+
+	options := m.buildSwitchChannelPickerOptions()
+	if len(options) != 2 {
+		t.Fatalf("expected only switch entries, got %d options", len(options))
+	}
+	for _, option := range options {
+		if !strings.HasPrefix(option.Value, "switch:") {
+			t.Fatalf("expected only switch actions, got %+v", option)
+		}
 	}
 }
 
@@ -1070,6 +1274,54 @@ func TestChannelDoctorDoneShowsDoctorCard(t *testing.T) {
 	}
 }
 
+func TestOfficeSlashAutocompleteIncludesAgentsInVisibleMatches(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
+
+	view := stripANSI(m.autocomplete.View())
+	if !strings.Contains(view, "/agents") {
+		t.Fatalf("expected /agents in visible office autocomplete, got %q", view)
+	}
+}
+
+func TestOfficeViewRendersSlashAutocompletePopup(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 40
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "/integrate") || !strings.Contains(view, "/agents") {
+		t.Fatalf("expected office view to render slash popup, got %q", view)
+	}
+}
+
+func TestOneOnOneSlashAutocompleteShowsResetAndHidesChannels(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "pm"
+	m.sidebarCollapsed = true
+	m.refreshSlashCommands()
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
+
+	view := stripANSI(m.autocomplete.View())
+	if !strings.Contains(view, "/reset") {
+		t.Fatalf("expected /reset in visible 1:1 autocomplete, got %q", view)
+	}
+	if strings.Contains(view, "/channels") || strings.Contains(view, "/tasks") || strings.Contains(view, "/threads") {
+		t.Fatalf("expected blocked 1:1 commands to be hidden from autocomplete, got %q", view)
+	}
+}
+
 func TestSlashAutocompleteEnterSubmitsSelectedCommand(t *testing.T) {
 	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
@@ -1159,6 +1411,71 @@ func TestMentionAutocompleteFiltersAgents(t *testing.T) {
 	}
 	if strings.Contains(view, "@cmo") {
 		t.Fatalf("expected non-matching mention to be filtered out, got %q", view)
+	}
+}
+
+func TestComposerSupportsVimStyleWordMotions(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.input = []rune("ship landing page")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(altRuneKey('b'))
+	got := next.(channelModel)
+	if got.inputPos != len([]rune("ship landing ")) {
+		t.Fatalf("expected alt+b to jump to previous word, got %d", got.inputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('b'))
+	got = next.(channelModel)
+	if got.inputPos != len([]rune("ship ")) {
+		t.Fatalf("expected second alt+b to jump to prior word, got %d", got.inputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('w'))
+	got = next.(channelModel)
+	if got.inputPos != len([]rune("ship landing ")) {
+		t.Fatalf("expected alt+w to jump forward a word, got %d", got.inputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('0'))
+	got = next.(channelModel)
+	if got.inputPos != 0 {
+		t.Fatalf("expected alt+0 to jump to start, got %d", got.inputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('$'))
+	got = next.(channelModel)
+	if got.inputPos != len(got.input) {
+		t.Fatalf("expected alt+$ to jump to end, got %d", got.inputPos)
+	}
+}
+
+func TestThreadComposerSupportsVimStyleWordMotions(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.threadPanelOpen = true
+	m.threadPanelID = "msg-1"
+	m.focus = focusThread
+	m.threadInput = []rune("thread reply draft")
+	m.threadInputPos = len(m.threadInput)
+
+	next, _ := m.Update(altRuneKey('b'))
+	got := next.(channelModel)
+	if got.threadInputPos != len([]rune("thread reply ")) {
+		t.Fatalf("expected thread alt+b to jump to previous word, got %d", got.threadInputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('0'))
+	got = next.(channelModel)
+	if got.threadInputPos != 0 {
+		t.Fatalf("expected thread alt+0 to jump to start, got %d", got.threadInputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('$'))
+	got = next.(channelModel)
+	if got.threadInputPos != len(got.threadInput) {
+		t.Fatalf("expected thread alt+$ to jump to end, got %d", got.threadInputPos)
 	}
 }
 
@@ -1612,7 +1929,7 @@ func TestChannelResetDoneImmediatelyRehydratesDirectMode(t *testing.T) {
 	}
 
 	view := stripANSI(got.View())
-	if !strings.Contains(view, "Direct 1:1 with Backend Engineer.") {
+	if !strings.Contains(view, "Direct session reset. Agent pane reloaded in place.") {
 		t.Fatalf("expected direct-session empty state, got %q", view)
 	}
 	if strings.Contains(view, "Welcome to The WUPHF Office.") {

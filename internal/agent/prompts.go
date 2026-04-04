@@ -85,3 +85,30 @@ Rules:
 6. Debate ideas and correct mistakes you notice — silence is not helpful.`,
 		specialist.Name, strings.Join(specialist.Expertise, ", "), specialist.Slug)
 }
+
+// BuildOfficeCompactionPrompt generates instructions for summarizing archived office context.
+func BuildOfficeCompactionPrompt(archivedThread string) string {
+	return fmt.Sprintf(`Summarize the archived portion of this office thread into one "Office Insight" note.
+
+Output requirements:
+- Plain text only.
+- Start with a one-line mission summary.
+- Then capture key decisions, current blockers, and open follow-ups.
+- Keep concrete names, owners, channels, tasks, and deadlines when present.
+- Prefer compression over narration. Do not repeat raw logs.
+
+Archived thread:
+%s`, strings.TrimSpace(archivedThread))
+}
+
+// BuildCompactionPrompt returns the prompt used when older office context needs
+// to be compressed into a durable state-of-the-union summary.
+func BuildCompactionPrompt() string {
+	return `Summarize the archived portion of this office thread.
+
+Output requirements:
+- Capture the mission, key decisions, current blockers, open owners, and any human commitments.
+- Preserve facts the next turn would need in order to continue the work without re-reading the archive.
+- Keep it concise and operational. Prefer concrete nouns, owners, and statuses over narrative filler.
+- Call out anything that should be remembered long-term as an Office Insight.`
+}

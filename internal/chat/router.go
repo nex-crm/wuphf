@@ -53,6 +53,16 @@ func (r *Router) Route(senderSlug, senderName, content string) (RouteResult, err
 	return RouteResult{ChannelID: ch.ID, Mentions: nil}, nil
 }
 
+// InjectOfficeInsight appends a visible Office Insight system message to a
+// channel so humans and agents can see what was archived during compaction.
+func (r *Router) InjectOfficeInsight(channelID, content string) (Message, error) {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return Message{}, nil
+	}
+	return r.messages.Send(channelID, "office-insight", "Office Insight", content, MsgSystem)
+}
+
 // getOrCreateGeneral returns the #general public channel, creating it if needed.
 func (r *Router) getOrCreateGeneral() (Channel, error) {
 	for _, ch := range r.channels.List() {

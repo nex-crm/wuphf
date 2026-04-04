@@ -64,7 +64,7 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 		case officeAppRequests:
 			lines = buildRequestLines(m.requests, contentWidth)
 		case officeAppPolicies:
-			lines = buildPolicyLines(m.decisions, contentWidth)
+			lines = buildPolicyLines(m.signals, m.decisions, m.watchdogs, m.actions, contentWidth)
 		case officeAppCalendar:
 			lines = buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
 		case officeAppSkills:
@@ -109,7 +109,10 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 	case officeAppRequests:
 		h.addRequests(m.requests)
 	case officeAppPolicies:
+		h.addSignals(m.signals)
 		h.addDecisions(m.decisions)
+		h.addWatchdogs(m.watchdogs)
+		h.addActions(m.actions)
 	case officeAppCalendar:
 		h.addActions(m.actions)
 		h.addScheduler(m.scheduler)
@@ -335,6 +338,22 @@ func (s stateHasher) addDecisions(decisions []channelDecision) {
 		s.addBool(decision.RequiresHuman)
 		s.addBool(decision.Blocking)
 		s.add(strings.Join(decision.SignalIDs, ","))
+	}
+}
+
+func (s stateHasher) addSignals(signals []channelSignal) {
+	s.addInt(len(signals))
+	for _, signal := range signals {
+		s.add(signal.ID, signal.Source, signal.SourceRef, signal.Kind, signal.Title, signal.Content, signal.Channel, signal.Owner, signal.Confidence, signal.Urgency, signal.DedupeKey, signal.CreatedAt)
+		s.addBool(signal.RequiresHuman)
+		s.addBool(signal.Blocking)
+	}
+}
+
+func (s stateHasher) addWatchdogs(alerts []channelWatchdog) {
+	s.addInt(len(alerts))
+	for _, alert := range alerts {
+		s.add(alert.ID, alert.Kind, alert.Channel, alert.TargetType, alert.TargetID, alert.Owner, alert.Status, alert.Summary, alert.CreatedAt, alert.UpdatedAt)
 	}
 }
 
