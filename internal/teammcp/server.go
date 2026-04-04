@@ -111,20 +111,22 @@ type brokerTasksResponse struct {
 }
 
 type brokerTaskSummary struct {
-	ID               string `json:"id"`
-	Channel          string `json:"channel"`
-	Title            string `json:"title"`
-	Details          string `json:"details"`
-	Owner            string `json:"owner"`
-	Status           string `json:"status"`
-	CreatedBy        string `json:"created_by"`
-	ThreadID         string `json:"thread_id"`
-	TaskType         string `json:"task_type"`
-	PipelineStage    string `json:"pipeline_stage"`
-	ExecutionMode    string `json:"execution_mode"`
-	ReviewState      string `json:"review_state"`
-	SourceSignalID   string `json:"source_signal_id"`
-	SourceDecisionID string `json:"source_decision_id"`
+	ID               string   `json:"id"`
+	Channel          string   `json:"channel"`
+	Title            string   `json:"title"`
+	Details          string   `json:"details"`
+	Owner            string   `json:"owner"`
+	Status           string   `json:"status"`
+	CreatedBy        string   `json:"created_by"`
+	ThreadID         string   `json:"thread_id"`
+	TaskType         string   `json:"task_type"`
+	PipelineStage    string   `json:"pipeline_stage"`
+	ExecutionMode    string   `json:"execution_mode"`
+	ReviewState      string   `json:"review_state"`
+	SourceSignalID   string   `json:"source_signal_id"`
+	SourceDecisionID string   `json:"source_decision_id"`
+	DependsOn        []string `json:"depends_on,omitempty"`
+	Blocked          bool     `json:"blocked,omitempty"`
 }
 
 type TeamBroadcastArgs struct {
@@ -207,14 +209,15 @@ type TeamTasksArgs struct {
 }
 
 type TeamTaskArgs struct {
-	Action   string `json:"action" jsonschema:"One of: create, claim, assign, complete, block, release"`
-	Channel  string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
-	ID       string `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
-	Title    string `json:"title,omitempty" jsonschema:"Task title when creating a task"`
-	Details  string `json:"details,omitempty" jsonschema:"Optional detail or update"`
-	Owner    string `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
-	ThreadID string `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
-	MySlug   string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+	Action    string   `json:"action" jsonschema:"One of: create, claim, assign, complete, block, release"`
+	Channel   string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	ID        string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
+	Title     string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`
+	Details   string   `json:"details,omitempty" jsonschema:"Optional detail or update"`
+	Owner     string   `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
+	ThreadID  string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
+	DependsOn []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task depends on. Blocked until all dependencies are done."`
+	MySlug    string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamChannelsArgs struct{}
@@ -799,6 +802,9 @@ func handleTeamTasks(ctx context.Context, _ *mcp.CallToolRequest, args TeamTasks
 	lines := make([]string, 0, len(result.Tasks))
 	for _, task := range result.Tasks {
 		line := fmt.Sprintf("- %s [%s]", task.ID, task.Status)
+		if task.Blocked {
+			line += " BLOCKED"
+		}
 		if task.Owner != "" {
 			line += " @" + task.Owner
 		}
@@ -812,6 +818,9 @@ func handleTeamTasks(ctx context.Context, _ *mcp.CallToolRequest, args TeamTasks
 			line += " · " + task.ExecutionMode
 		}
 		line += " — " + task.Title
+		if len(task.DependsOn) > 0 {
+			line += " (deps: " + strings.Join(task.DependsOn, ", ") + ")"
+		}
 		if task.ThreadID != "" {
 			line += " ↳ " + task.ThreadID
 		}
@@ -839,6 +848,9 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		"thread_id":  strings.TrimSpace(args.ThreadID),
 		"created_by": mySlug,
 	}
+	if len(args.DependsOn) > 0 {
+		payload["depends_on"] = args.DependsOn
+	}
 	switch action {
 	case "claim":
 		payload["owner"] = mySlug
@@ -852,16 +864,20 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 
 	var result struct {
 		Task struct {
-			ID     string `json:"id"`
-			Title  string `json:"title"`
-			Owner  string `json:"owner"`
-			Status string `json:"status"`
+			ID      string `json:"id"`
+			Title   string `json:"title"`
+			Owner   string `json:"owner"`
+			Status  string `json:"status"`
+			Blocked bool   `json:"blocked"`
 		} `json:"task"`
 	}
 	if err := brokerPostJSON(ctx, "/tasks", payload, &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	text := fmt.Sprintf("Task %s in #%s is now %s", result.Task.ID, channel, result.Task.Status)
+	if result.Task.Blocked {
+		text += " (BLOCKED — waiting on dependencies)"
+	}
 	if result.Task.Owner != "" {
 		text += " @" + result.Task.Owner
 	}

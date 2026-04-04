@@ -101,8 +101,11 @@ type teamTask struct {
 	SourceSignalID   string `json:"source_signal_id,omitempty"`
 	SourceDecisionID string `json:"source_decision_id,omitempty"`
 	WorktreePath     string `json:"worktree_path,omitempty"`
-	WorktreeBranch   string `json:"worktree_branch,omitempty"`
-	DueAt            string `json:"due_at,omitempty"`
+	WorktreeBranch   string   `json:"worktree_branch,omitempty"`
+	DependsOn        []string `json:"depends_on,omitempty"`
+	Blocked          bool     `json:"blocked,omitempty"`
+	AckedAt          string   `json:"acked_at,omitempty"`
+	DueAt            string   `json:"due_at,omitempty"`
 	FollowUpAt       string `json:"follow_up_at,omitempty"`
 	ReminderAt       string `json:"reminder_at,omitempty"`
 	RecheckAt        string `json:"recheck_at,omitempty"`
@@ -3393,22 +3396,23 @@ func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Action           string `json:"action"`
-		Channel          string `json:"channel"`
-		ID               string `json:"id"`
-		Title            string `json:"title"`
-		Details          string `json:"details"`
-		Owner            string `json:"owner"`
-		CreatedBy        string `json:"created_by"`
-		ThreadID         string `json:"thread_id"`
-		TaskType         string `json:"task_type"`
-		PipelineID       string `json:"pipeline_id"`
-		ExecutionMode    string `json:"execution_mode"`
-		ReviewState      string `json:"review_state"`
-		SourceSignalID   string `json:"source_signal_id"`
-		SourceDecisionID string `json:"source_decision_id"`
-		WorktreePath     string `json:"worktree_path"`
-		WorktreeBranch   string `json:"worktree_branch"`
+		Action           string   `json:"action"`
+		Channel          string   `json:"channel"`
+		ID               string   `json:"id"`
+		Title            string   `json:"title"`
+		Details          string   `json:"details"`
+		Owner            string   `json:"owner"`
+		CreatedBy        string   `json:"created_by"`
+		ThreadID         string   `json:"thread_id"`
+		TaskType         string   `json:"task_type"`
+		PipelineID       string   `json:"pipeline_id"`
+		ExecutionMode    string   `json:"execution_mode"`
+		ReviewState      string   `json:"review_state"`
+		SourceSignalID   string   `json:"source_signal_id"`
+		SourceDecisionID string   `json:"source_decision_id"`
+		WorktreePath     string   `json:"worktree_path"`
+		WorktreeBranch   string   `json:"worktree_branch"`
+		DependsOn        []string `json:"depends_on"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -3502,10 +3506,13 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 			WorktreePath:     strings.TrimSpace(body.WorktreePath),
 			WorktreeBranch:   strings.TrimSpace(body.WorktreeBranch),
+			DependsOn:        body.DependsOn,
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}
-		if task.Owner != "" {
+		if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
+			task.Blocked = true
+		} else if task.Owner != "" {
 			task.Status = "in_progress"
 		}
 		b.scheduleTaskLifecycleLocked(&task)
@@ -3591,6 +3598,9 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			task.WorktreeBranch = worktreeBranch
 		}
 		task.UpdatedAt = now
+		if task.Status == "done" {
+			b.unblockDependentsLocked(task.ID)
+		}
 		b.scheduleTaskLifecycleLocked(task)
 		b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
 		if err := b.saveLocked(); err != nil {
@@ -3758,6 +3768,48 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		return teamTask{}, false, err
 	}
 	return task, false, nil
+}
+
+// hasUnresolvedDepsLocked returns true if any of the task's dependencies are not done.
+func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
+	for _, depID := range task.DependsOn {
+		found := false
+		for j := range b.tasks {
+			if b.tasks[j].ID == depID {
+				found = true
+				if b.tasks[j].Status != "done" {
+					return true
+				}
+				break
+			}
+		}
+		if !found {
+			return true // dependency doesn't exist yet — treat as unresolved
+		}
+	}
+	return false
+}
+
+// unblockDependentsLocked checks all blocked tasks and unblocks those whose dependencies are now resolved.
+func (b *Broker) unblockDependentsLocked(completedTaskID string) {
+	for i := range b.tasks {
+		if !b.tasks[i].Blocked {
+			continue
+		}
+		hasDep := false
+		for _, depID := range b.tasks[i].DependsOn {
+			if depID == completedTaskID {
+				hasDep = true
+				break
+			}
+		}
+		if !hasDep {
+			continue
+		}
+		if !b.hasUnresolvedDepsLocked(&b.tasks[i]) {
+			b.tasks[i].Blocked = false
+		}
+	}
 }
 
 func (b *Broker) findReusableTaskLocked(channel, title, threadID, owner string) *teamTask {
