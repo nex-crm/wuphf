@@ -245,6 +245,42 @@ func TestHandleTeamConclude(t *testing.T) {
 	}
 }
 
+func TestTeamPollIncludesConclusions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+	t.Setenv("WUPHF_AGENT_SLUG", "fe")
+
+	msg, _ := b.PostMessage("fe", "general", "Thread root", nil, "")
+	// Conclude via handler
+	handleTeamConclude(context.Background(), nil, TeamConcludeArgs{
+		ThreadID: msg.ID, Discussed: "API", Decided: "REST", Done: "Spec written",
+	})
+
+	result, _, err := handleTeamPoll(context.Background(), nil, TeamPollArgs{})
+	if err != nil {
+		t.Fatalf("handleTeamPoll: %v", err)
+	}
+	if result == nil || len(result.Content) == 0 {
+		t.Fatal("expected text result")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text content, got %T", result.Content[0])
+	}
+	if !strings.Contains(text.Text, "Recent Conclusions") {
+		t.Fatalf("expected conclusions in poll, got: %s", text.Text)
+	}
+	if !strings.Contains(text.Text, "Spec written") {
+		t.Fatalf("expected conclusion content in poll")
+	}
+}
+
 func TestHandleTeamPollOneOnOneHighlightsLatestHumanRequest(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_ONE_ON_ONE", "1")

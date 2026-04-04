@@ -127,6 +127,13 @@ type brokerTaskSummary struct {
 	SourceDecisionID string   `json:"source_decision_id"`
 	DependsOn        []string `json:"depends_on,omitempty"`
 	Blocked          bool     `json:"blocked,omitempty"`
+	Handoffs         []struct {
+		FromAgent string `json:"from_agent"`
+		ToAgent   string `json:"to_agent"`
+		WhatIDid  string `json:"what_i_did"`
+		WhatToDo  string `json:"what_to_do"`
+		Context   string `json:"context"`
+	} `json:"handoffs,omitempty"`
 }
 
 type TeamBroadcastArgs struct {
@@ -769,10 +776,13 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 		}
 		return textResult("Direct conversation\n\nLatest human request to answer now:\n" + focus + "\n\nOlder messages are background unless the latest request depends on them.\n\nRecent messages:\n" + summary), nil, nil
 	}
-	taskSummary := formatTaskSummary(ctx, resolveSlugOptional(args.MySlug), channel)
+	mySlug := resolveSlugOptional(args.MySlug)
+	taskSummary := formatTaskSummary(ctx, mySlug, channel)
 	requestSummary := formatRequestSummary(ctx, channel)
 	memorySummary := formatMemorySummary(ctx)
-	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary, memorySummary)), nil, nil
+	conclusionsSummary := formatConclusionsSummary(ctx, channel)
+	handoffsSummary := formatPendingHandoffs(ctx, mySlug, channel)
+	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s\n\n%s\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary, memorySummary, conclusionsSummary, handoffsSummary)), nil, nil
 }
 
 func handleTeamStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamStatusArgs) (*mcp.CallToolResult, any, error) {
@@ -1871,6 +1881,65 @@ func formatMemorySummary(ctx context.Context) string {
 		for key, val := range entries {
 			sb.WriteString("- " + key + ": " + val + "\n")
 		}
+	}
+	return sb.String()
+}
+
+func formatConclusionsSummary(ctx context.Context, channel string) string {
+	var result struct {
+		Conclusions []struct {
+			ThreadID string `json:"thread_id"`
+			Summary  struct {
+				Discussed string `json:"discussed"`
+				Decided   string `json:"decided"`
+				Done      string `json:"done"`
+				OpenItems string `json:"open_items"`
+			} `json:"summary"`
+			ConcludedBy string `json:"concluded_by"`
+		} `json:"conclusions"`
+	}
+	path := "/conclusions?channel=" + url.QueryEscape(channel) + "&limit=5"
+	if err := brokerGetJSON(ctx, path, &result); err != nil || len(result.Conclusions) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## Recent Conclusions\n")
+	for _, c := range result.Conclusions {
+		sb.WriteString(fmt.Sprintf("- Thread %s (@%s): Done: %s", c.ThreadID, c.ConcludedBy, c.Summary.Done))
+		if c.Summary.OpenItems != "" {
+			sb.WriteString(" | Open: " + c.Summary.OpenItems)
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
+func formatPendingHandoffs(ctx context.Context, mySlug, channel string) string {
+	if mySlug == "" {
+		return ""
+	}
+	var result brokerTasksResponse
+	path := "/tasks?channel=" + url.QueryEscape(channel) + "&my_slug=" + url.QueryEscape(mySlug)
+	if err := brokerGetJSON(ctx, path, &result); err != nil || len(result.Tasks) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, task := range result.Tasks {
+		if task.Owner != mySlug || len(task.Handoffs) == 0 {
+			continue
+		}
+		h := task.Handoffs[len(task.Handoffs)-1]
+		if h.ToAgent != mySlug {
+			continue
+		}
+		if sb.Len() == 0 {
+			sb.WriteString("## Pending Handoffs\n")
+		}
+		sb.WriteString(fmt.Sprintf("- %s from @%s: What was done: %s | What to do: %s", task.ID, h.FromAgent, h.WhatIDid, h.WhatToDo))
+		if h.Context != "" {
+			sb.WriteString(" | Context: " + h.Context)
+		}
+		sb.WriteString("\n")
 	}
 	return sb.String()
 }
