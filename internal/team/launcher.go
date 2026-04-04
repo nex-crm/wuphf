@@ -612,6 +612,16 @@ func (l *Launcher) shouldDeliverDelayedTaskNotification(targetSlug string, actio
 }
 
 func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask) string {
+	if action.Kind == "task_handoff" && len(task.Handoffs) > 0 {
+		channel := normalizeChannelSlug(task.Channel)
+		if channel == "" {
+			channel = "general"
+		}
+		h := task.Handoffs[len(task.Handoffs)-1]
+		return fmt.Sprintf("[Handoff from @%s → @%s on #%s %s]: What was done: %s | What to do: %s | Context: %s",
+			h.FromAgent, h.ToAgent, channel, task.Title,
+			truncate(h.WhatIDid, 200), truncate(h.WhatToDo, 200), truncate(h.Context, 200))
+	}
 	channel := normalizeChannelSlug(task.Channel)
 	if channel == "" {
 		channel = "general"
@@ -670,6 +680,13 @@ func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, conte
 	submitAgentPanePrompt(paneTarget)
 }
 
+func (l *Launcher) isThreadConcluded(channel, threadID string) bool {
+	if l.broker == nil || threadID == "" {
+		return false
+	}
+	return l.broker.IsThreadConcluded(channel, threadID)
+}
+
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
 	targetMap := l.agentPaneTargets()
 	if len(targetMap) == 0 {
@@ -718,6 +735,12 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 	// CEO always gets immediate delivery on non-CEO messages.
 
 	broadcastAll := msg.From == lead
+
+	// Suppress notifications for concluded threads unless CEO or tagged
+	concluded := l.isThreadConcluded(msg.Channel, msg.ReplyTo)
+	if concluded && !broadcastAll && len(msg.Tagged) == 0 {
+		return nil, nil
+	}
 
 	if !broadcastAll && len(msg.Tagged) > 0 {
 		addTarget(lead, &immediate)

@@ -824,3 +824,153 @@ func TestPersistOfficeSignalsCreatesOwnedTaskAndLedger(t *testing.T) {
 		t.Fatalf("expected task_created action, got %+v", actions)
 	}
 }
+
+func TestNotificationSuppressedForConcludedThread(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	// Post a root message to create a thread
+	root, err := b.PostMessage("fe", "general", "I finished the feature", nil, "")
+	if err != nil {
+		t.Fatalf("post root message: %v", err)
+	}
+
+	// Conclude the thread
+	b.mu.Lock()
+	b.conclusions = append(b.conclusions, threadConclusion{
+		ThreadID:    root.ID,
+		Channel:     "general",
+		ConcludedBy: "ceo",
+		ConcludedAt: "2026-04-05T00:00:00Z",
+	})
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "be", Name: "Backend Engineer"},
+			},
+		},
+	}
+
+	// Untagged reply from a non-lead agent in a concluded thread → suppressed
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "be",
+		Channel: "general",
+		Content: "Any update?",
+		ReplyTo: root.ID,
+	})
+	if immediate != nil || delayed != nil {
+		t.Fatalf("expected nil/nil for concluded thread, got immediate=%+v delayed=%+v", immediate, delayed)
+	}
+}
+
+func TestTaggedMessagePiercesConcludedThread(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	root, err := b.PostMessage("fe", "general", "Done with the feature", nil, "")
+	if err != nil {
+		t.Fatalf("post root message: %v", err)
+	}
+
+	b.mu.Lock()
+	b.conclusions = append(b.conclusions, threadConclusion{
+		ThreadID:    root.ID,
+		Channel:     "general",
+		ConcludedBy: "ceo",
+		ConcludedAt: "2026-04-05T00:00:00Z",
+	})
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "be", Name: "Backend Engineer"},
+			},
+		},
+	}
+
+	// CEO message broadcasts to all even in concluded thread (broadcastAll=true)
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "ceo",
+		Channel: "general",
+		Content: "Reopening this discussion",
+		ReplyTo: root.ID,
+	})
+	// CEO is sender so won't be in targets, but other agents should be
+	if len(delayed) == 0 {
+		t.Fatalf("expected CEO broadcast to pierce concluded thread, got immediate=%+v delayed=%+v", immediate, delayed)
+	}
+
+	// Tagged message from non-lead also pierces concluded thread
+	immediate2, delayed2 := l.notificationTargetsForMessage(channelMessage{
+		From:    "be",
+		Channel: "general",
+		Content: "@fe check this",
+		Tagged:  []string{"fe"},
+		ReplyTo: root.ID,
+	})
+	if len(immediate2) == 0 && len(delayed2) == 0 {
+		t.Fatalf("expected tagged message to pierce concluded thread, got nil/nil")
+	}
+}
+
+func TestHandoffNotificationContent(t *testing.T) {
+	l := &Launcher{}
+	task := teamTask{
+		ID:      "task-42",
+		Channel: "general",
+		Title:   "Build auth module",
+		Owner:   "be",
+		Status:  "in_progress",
+		Handoffs: []taskHandoff{
+			{
+				FromAgent: "fe",
+				ToAgent:   "be",
+				WhatIDid:  "Built the login form and hooked up the API client",
+				WhatToDo:  "Implement the JWT validation middleware and refresh token flow",
+				Context:   "Using RS256 keys stored in Vault, see /internal/auth/keys.go",
+				CreatedAt: "2026-04-05T00:00:00Z",
+			},
+		},
+	}
+	action := officeActionLog{
+		Kind:      "task_handoff",
+		Actor:     "fe",
+		Channel:   "general",
+		RelatedID: "task-42",
+	}
+
+	got := l.taskNotificationContent(action, task)
+
+	if !strings.Contains(got, "Handoff from @fe → @be") {
+		t.Fatalf("expected handoff header, got: %q", got)
+	}
+	if !strings.Contains(got, "#general Build auth module") {
+		t.Fatalf("expected channel and title, got: %q", got)
+	}
+	if !strings.Contains(got, "Built the login form") {
+		t.Fatalf("expected WhatIDid in content, got: %q", got)
+	}
+	if !strings.Contains(got, "JWT validation middleware") {
+		t.Fatalf("expected WhatToDo in content, got: %q", got)
+	}
+	if !strings.Contains(got, "RS256 keys") {
+		t.Fatalf("expected Context in content, got: %q", got)
+	}
+}
