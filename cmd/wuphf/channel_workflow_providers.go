@@ -1,13 +1,11 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -98,11 +96,28 @@ func newBrokerAgentDispatcher(addr, token, channel string) *brokerAgentDispatche
 }
 
 func (d *brokerAgentDispatcher) Dispatch(ctx context.Context, agentSlug string, prompt string) (map[string]any, error) {
-	body := fmt.Sprintf(`{"from":"you","channel":%q,"content":%q,"tagged":[%q]}`,
-		d.channel, prompt, "@"+agentSlug)
+	// Get the current message count so we know where to start polling for replies.
+	beforeID := d.getLastMessageID(ctx)
+
+	// Route through the CEO agent, which handles all workflow dispatches.
+	// The CEO sees tagged messages and responds in the same channel.
+	targetAgent := agentSlug
+	if targetAgent == "brainstorm" || targetAgent == "deploy-checker" ||
+		targetAgent == "deploy-runner" || targetAgent == "email-triage" {
+		targetAgent = "ceo"
+	}
+
+	payload := map[string]any{
+		"from":    "you",
+		"channel": d.channel,
+		"content": prompt,
+		"tagged":  []string{"@" + targetAgent},
+		"kind":    "workflow_agent_request",
+	}
+	body, _ := json.Marshal(payload)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		d.brokerAddr+"/messages", strings.NewReader(body))
+		d.brokerAddr+"/messages", strings.NewReader(string(body)))
 	if err != nil {
 		return nil, err
 	}
@@ -118,23 +133,108 @@ func (d *brokerAgentDispatcher) Dispatch(ctx context.Context, agentSlug string, 
 	}
 	resp.Body.Close()
 
-	// Poll for the agent's reply.
+	// Poll for the CEO's reply. Look for any message from a non-"you" sender
+	// that appeared after our request.
 	deadline := time.Now().Add(d.timeout)
-	lastID := ""
 	for time.Now().Before(deadline) {
-		reply, id, err := d.pollReply(ctx, agentSlug, lastID)
+		reply, err := d.pollAgentReply(ctx, targetAgent, beforeID)
 		if err != nil {
 			return nil, err
 		}
 		if reply != nil {
 			return reply, nil
 		}
-		if id != "" {
-			lastID = id
-		}
 		time.Sleep(2 * time.Second)
 	}
-	return nil, fmt.Errorf("agent %q did not respond within %s", agentSlug, d.timeout)
+	return nil, fmt.Errorf("@%s did not respond within %s", targetAgent, d.timeout)
+}
+
+func (d *brokerAgentDispatcher) getLastMessageID(ctx context.Context) string {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		d.brokerAddr+"/messages?channel="+d.channel, nil)
+	if err != nil {
+		return ""
+	}
+	if d.brokerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+d.brokerToken)
+	}
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Messages []struct {
+			ID string `json:"id"`
+		} `json:"messages"`
+	}
+	_ = json.Unmarshal(raw, &result)
+	if len(result.Messages) > 0 {
+		return result.Messages[len(result.Messages)-1].ID
+	}
+	return ""
+}
+
+func (d *brokerAgentDispatcher) pollAgentReply(ctx context.Context, agentSlug, afterID string) (map[string]any, error) {
+	url := d.brokerAddr + "/messages?channel=" + d.channel
+	if afterID != "" {
+		url += "&after=" + afterID
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, nil
+	}
+	if d.brokerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+d.brokerToken)
+	}
+
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, nil // Transient, keep polling.
+	}
+	defer resp.Body.Close()
+
+	raw, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Messages []struct {
+			ID      string `json:"id"`
+			From    string `json:"from"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, nil
+	}
+
+	// Look for any reply from the agent (not from "you" or "system").
+	for _, msg := range result.Messages {
+		if msg.From == "you" || msg.From == "system" || msg.From == "nex" {
+			continue
+		}
+		// Found an agent reply. Parse the content.
+		content := msg.Content
+
+		// Try JSON object.
+		var obj map[string]any
+		if err := json.Unmarshal([]byte(content), &obj); err == nil {
+			return obj, nil
+		}
+
+		// Try JSON array.
+		var arr []any
+		if err := json.Unmarshal([]byte(content), &arr); err == nil {
+			return map[string]any{"items": arr, "text": content}, nil
+		}
+
+		// Return as text for the parser to handle.
+		return map[string]any{"text": content}, nil
+	}
+
+	return nil, nil
 }
 
 func (d *brokerAgentDispatcher) pollReply(ctx context.Context, agentSlug, afterID string) (map[string]any, string, error) {
@@ -182,88 +282,6 @@ func (d *brokerAgentDispatcher) pollReply(ctx context.Context, agentSlug, afterI
 		}
 	}
 	return nil, latestID, nil
-}
-
-// inlineLLMDispatcher calls the Claude API directly for agent dispatch
-// without needing the full broker/agent office running.
-type inlineLLMDispatcher struct{}
-
-func newInlineLLMDispatcher() *inlineLLMDispatcher {
-	return &inlineLLMDispatcher{}
-}
-
-func (d *inlineLLMDispatcher) Dispatch(ctx context.Context, agentSlug string, prompt string) (map[string]any, error) {
-	// Use the Claude API via the chat package or direct HTTP call.
-	// For now, use a subprocess call to the Claude CLI which is always available.
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
-	if apiKey == "" {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY not set — cannot dispatch to agent %q", agentSlug)
-	}
-
-	reqBody := map[string]any{
-		"model":      "claude-sonnet-4-20250514",
-		"max_tokens": 1024,
-		"messages": []map[string]any{
-			{"role": "user", "content": prompt},
-		},
-		"system": fmt.Sprintf("You are a helpful AI assistant acting as the %q agent. Respond with structured JSON when possible. Be concise and actionable.", agentSlug),
-	}
-
-	raw, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.anthropic.com/v1/messages", bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
-
-	client := &http.Client{Timeout: 60 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("Claude API call failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("Claude API returned %d: %s", resp.StatusCode, string(respBody[:min(len(respBody), 200)]))
-	}
-
-	var apiResp struct {
-		Content []struct {
-			Text string `json:"text"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(respBody, &apiResp); err != nil {
-		return nil, fmt.Errorf("parse Claude response: %w", err)
-	}
-
-	if len(apiResp.Content) == 0 {
-		return nil, fmt.Errorf("Claude returned empty response")
-	}
-
-	text := apiResp.Content[0].Text
-
-	// Try to parse as JSON first.
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(text), &parsed); err == nil {
-		return parsed, nil
-	}
-
-	// Try to extract a JSON array of ideas/items.
-	var items []any
-	if err := json.Unmarshal([]byte(text), &items); err == nil {
-		return map[string]any{"items": items, "text": text}, nil
-	}
-
-	// Return as text.
-	return map[string]any{"text": text}, nil
 }
 
 // hydrateDataSources fetches real data from Composio for each DataSource.

@@ -1591,9 +1591,6 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				opts = append(opts, workflow.WithAgentDispatcher(
 					newBrokerAgentDispatcher("http://127.0.0.1:7890", brokerToken, m.activeChannel),
 				))
-			} else {
-				// Fallback: call Claude API directly for agent dispatch.
-				opts = append(opts, workflow.WithAgentDispatcher(newInlineLLMDispatcher()))
 			}
 
 			var rterr error

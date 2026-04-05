@@ -468,7 +468,7 @@ func (v WorkflowView) dispatchRunStep(step *StepSpec) tea.Cmd {
 		if step.Agent != "" {
 			dispatcher := rt.AgentDispatcher()
 			if dispatcher == nil {
-				return actionResultMsg{err: fmt.Errorf("no agent dispatcher configured")}
+				return actionResultMsg{err: fmt.Errorf("no agent available — launch the full WUPHF office (./wuphf) to use agent workflows")}
 			}
 			prompt := step.AgentPrompt
 			if prompt == "" {
