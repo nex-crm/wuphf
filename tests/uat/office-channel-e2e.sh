@@ -6,11 +6,23 @@ set -euo pipefail
 SOCKET="/tmp/wuphf-office-$$.sock"
 BINARY="$(cd "$(dirname "$0")/../.." && pwd)/wuphf"
 ARTIFACTS="$(cd "$(dirname "$0")/../.." && pwd)/termwright-artifacts/office-channel-$(date +%Y%m%d-%H%M%S)"
+TEST_HOME="$(mktemp -d /tmp/wuphf-office-home-XXXXXX)"
 mkdir -p "$ARTIFACTS"
+export HOME="$TEST_HOME"
+
+kill_stale_runtime() {
+  "$BINARY" kill >/dev/null 2>&1 || true
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -i :7890 -t 2>/dev/null | xargs -r kill -9 >/dev/null 2>&1 || true
+    sleep 1
+  fi
+}
 
 cleanup() {
+  kill_stale_runtime
   pkill -f "termwright daemon.*$SOCKET" 2>/dev/null || true
   rm -f "$SOCKET"
+  rm -rf "$TEST_HOME"
 }
 trap cleanup EXIT
 
@@ -26,7 +38,8 @@ fi
 
 screen() {
   termwright exec --socket "$SOCKET" --method screen --params '{}' 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('result',''))"
+    python3 -c "import sys,json; raw=sys.stdin.read().strip(); \
+print('' if not raw else json.loads(raw).get('result',''))" 2>/dev/null || true
 }
 
 send_raw() {
@@ -60,10 +73,12 @@ echo "=== Office Channel E2E ==="
 echo "Binary: $BINARY"
 echo "Artifacts: $ARTIFACTS"
 
-termwright daemon --socket "$SOCKET" --cols 120 --rows 40 --background -- "$BINARY" --channel-view --channel-app messages
+kill_stale_runtime
+
+termwright daemon --socket "$SOCKET" --cols 120 --rows 40 --background -- "$BINARY" --no-nex --channel-view --channel-app messages
 sleep 5
 
-assert_contains "# general" "boot"
+assert_contains "The WUPHF Office" "boot"
 assert_contains "Message #general" "boot"
 
 send_raw "/"

@@ -2,7 +2,7 @@
 # Human Judgment UAT Test Suite for wuphf TUI
 # Tests USABILITY, not just functionality.
 #
-# Runs against the CURRENT binary (classic StreamModel mode).
+# Runs against the current office channel surface.
 # Asserts readability, information density, layout quality, and junk-free output.
 #
 # New assertion types:
@@ -57,8 +57,41 @@ send_ctrl_c() {
   termwright exec --socket "$SOCKET" --method raw --params '{"bytes_base64": "Aw=="}' >/dev/null 2>&1
 }
 
+send_escape() {
+  termwright exec --socket "$SOCKET" --method key --params '{"key":"Escape"}' >/dev/null 2>&1
+}
+
+clear_input() {
+  send_ctrl_u
+  sleep 0.2
+}
+
+run_command() {
+  local cmd="$1"
+  local delay="${2:-1}"
+  clear_input
+  send_raw "$cmd"
+  sleep 0.3
+  send_enter
+  sleep "$delay"
+}
+
 get_screen() {
   termwright exec --socket "$SOCKET" --method screen --params '{}' 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('result',''))"
+}
+
+capture_screen() {
+  local content=""
+  for _ in 1 2 3 4 5 6 7 8; do
+    content="$(get_screen || true)"
+    if [ -n "$(printf '%s' "$content" | tr -d '[:space:]')" ]; then
+      printf '%s\n' "$content"
+      return 0
+    fi
+    sleep 1
+  done
+  printf '%s\n' "$content"
+  return 0
 }
 
 save_screenshot() {
@@ -73,7 +106,7 @@ if isinstance(r, dict) and 'png_base64' in r:
     with open('$ARTIFACTS/$name.png', 'wb') as f:
         f.write(data)
 " 2>/dev/null || true
-  get_screen > "$ARTIFACTS/$name.txt" 2>/dev/null || true
+  capture_screen > "$ARTIFACTS/$name.txt" 2>/dev/null || true
 }
 
 # ─── Basic Assertions ──────────────────────────────────────────────────
@@ -82,8 +115,8 @@ assert_text() {
   local text="$1"
   local label="${2:-check}"
   local screen
-  screen=$(get_screen)
-  if echo "$screen" | grep -qi "$text"; then
+  screen=$(capture_screen)
+  if echo "$screen" | grep -Eqi "$text"; then
     echo "    PASS: found '$text'"
     return 0
   else
@@ -97,8 +130,8 @@ assert_not_text() {
   local text="$1"
   local label="${2:-check}"
   local screen
-  screen=$(get_screen)
-  if echo "$screen" | grep -qi "$text"; then
+  screen=$(capture_screen)
+  if echo "$screen" | grep -Eqi "$text"; then
     echo "    FAIL: '$text' should NOT be on screen"
     echo "$screen" > "$ARTIFACTS/failure-$label.txt"
     return 1
@@ -111,7 +144,7 @@ assert_not_text() {
 assert_screen_not_blank() {
   local label="${1:-blank}"
   local screen
-  screen=$(get_screen)
+  screen=$(capture_screen)
   local linecount
   linecount=$(echo "$screen" | grep -cv "^$" || true)
   if [ "$linecount" -gt 5 ]; then
@@ -129,7 +162,7 @@ assert_screen_not_blank() {
 # Check readability: no raw JSON, NDJSON, or ANSI escape sequences visible
 assert_readable() {
   local label="$1"
-  local screen=$(get_screen)
+  local screen=$(capture_screen)
   local issues=""
 
   # Check no raw JSON objects visible
@@ -166,7 +199,7 @@ assert_readable() {
 # Check information density: not too much wasted space
 assert_density() {
   local label="$1"
-  local screen=$(get_screen)
+  local screen=$(capture_screen)
   local total=$(echo "$screen" | wc -l)
   local content=$(echo "$screen" | grep -v "^$" | wc -l)
 
@@ -189,7 +222,7 @@ assert_density() {
 # Check no junk: no raw protocol data, no debug output
 assert_no_junk() {
   local label="$1"
-  local screen=$(get_screen)
+  local screen=$(capture_screen)
   local issues=""
 
   # No raw JSON objects on their own line
@@ -228,9 +261,9 @@ assert_layout() {
   local lines=$(echo "$screen" | wc -l)
   local issues=""
 
-  # Last 3 lines should contain input field or status bar
-  local bottom3=$(echo "$screen" | tail -3)
-  if ! echo "$bottom3" | grep -qi "type a message\|INSERT\|NORMAL\|/help\|/quit\|wuphf v"; then
+  # Bottom lines should still show the active composer or footer affordances.
+  local bottom6=$(echo "$screen" | tail -6)
+  if ! echo "$bottom6" | grep -Eqi "Type a message|Talk directly to your agent here|Message #|Ctrl\+J newline|Team offline|/doctor"; then
     issues="$issues no-input-at-bottom"
   fi
 
@@ -307,7 +340,7 @@ assert_human_quality() {
 # ═══════════════════════════════════════════════════════════════════════
 echo "================================================================"
 echo "  NEX Human Judgment UAT Test Suite"
-echo "  Classic StreamModel Mode"
+echo "  Office Channel View"
 echo "  5 Personas / Readability / Density / Layout / Junk-free"
 echo "================================================================"
 echo ""
@@ -321,9 +354,9 @@ cd "$ROOT" && go build -o wuphf ./cmd/wuphf 2>&1
 echo "Build complete."
 echo ""
 
-# Start daemon with standard terminal size (120x40)
+# Start daemon with the reliable office channel surface (120x40)
 echo "Starting termwright daemon (120x40)..."
-termwright daemon --socket "$SOCKET" --cols 120 --rows 40 --background "$BINARY"
+termwright daemon --socket "$SOCKET" --cols 120 --rows 40 --background -- "$BINARY" --channel-view --channel-app messages
 echo "Waiting for TUI boot..."
 sleep 5
 
@@ -338,18 +371,18 @@ echo "  Focus: Is the first impression clean and understandable?"
 
 run_test "M1" "Boot: welcome message is readable (not JSON, not protocol)"
 save_screenshot "maya-01-boot"
-if assert_screen_not_blank "m1" && assert_readable "m1-boot"; then pass; else fail; fi
+if assert_screen_not_blank "m1" && assert_text "The WUPHF Office|Welcome to The WUPHF Office" "m1" && assert_text "Message #general" "m1" && assert_readable "m1-boot"; then pass; else fail; fi
 
-run_test "M2" "/help: commands grouped with clear descriptions"
-send_raw "/help"
+run_test "M2" "Slash autocomplete groups commands with clear descriptions"
+clear_input
+send_raw "/"
 sleep 0.5
-send_enter
-sleep 1
-save_screenshot "maya-02-help"
-if assert_text "help" "m2" && assert_readable "m2-help"; then pass; else fail; fi
+save_screenshot "maya-02-autocomplete"
+if assert_text "/doctor" "m2" && assert_text "SETUP|NAVIGATE|PEOPLE|WORK" "m2" && assert_readable "m2-autocomplete"; then pass; else fail; fi
+clear_input
 
 run_test "M3" "Type message: input appears cleanly in input field"
-send_ctrl_u; sleep 0.2
+clear_input
 send_raw "hello team"
 sleep 0.5
 save_screenshot "maya-03-type"
@@ -370,54 +403,41 @@ echo ""
 echo "--- PERSONA 2: Raj (Power user) ---"
 echo "  Focus: Rapid commands produce clean, junk-free output"
 
-run_test "R1" "/help then /agents then /config show: each output clean"
-# /help
-send_ctrl_u; sleep 0.2
-send_raw "/help"
-sleep 0.3
-send_enter
+run_test "R1" "/doctor then /agents then /switcher: each output stays clean"
+run_command "/doctor"
 sleep 1
-save_screenshot "raj-01a-help"
-if assert_no_junk "r1-help"; then
-  echo "    PASS: /help output junk-free"
+save_screenshot "raj-01a-doctor"
+if assert_text "Doctor" "r1-doctor" && assert_no_junk "r1-doctor"; then
+  echo "    PASS: /doctor output junk-free"
 else
-  echo "    INFO: /help had issues"
+  echo "    INFO: /doctor had issues"
 fi
-# /agents
-send_raw "/agents"
-sleep 0.3
-send_enter
-sleep 1
+run_command "/agents"
 save_screenshot "raj-01b-agents"
 if assert_no_junk "r1-agents"; then
   echo "    PASS: /agents output junk-free"
 else
   echo "    INFO: /agents had issues"
 fi
-# /config show
-send_raw "/config show"
-sleep 0.3
-send_enter
-sleep 1
-save_screenshot "raj-01c-config"
-if assert_no_junk "r1-config"; then pass; else fail; fi
+send_escape
+sleep 0.5
+run_command "/switcher"
+save_screenshot "raj-01c-switcher"
+if assert_text "Workspace Switcher" "r1-switcher" && assert_no_junk "r1-switcher"; then pass; else fail; fi
+send_escape
+sleep 0.5
 
 run_test "R2" "Autocomplete appears quickly after /"
-send_ctrl_u; sleep 0.2
+clear_input
 send_raw "/"
 sleep 0.5
 save_screenshot "raj-02-autocomplete"
-# Autocomplete should show command suggestions
-if assert_text "ask\|object\|record\|help" "r2"; then pass; else fail; fi
-send_ctrl_u; sleep 0.2
+if assert_text "/integrate|/agents|/switch" "r2"; then pass; else fail; fi
+clear_input
 
 run_test "R3" "After 5 commands, content still renders (no stuck state)"
-for cmd in "/help" "/agents" "/help" "/agents" "/help"; do
-  send_ctrl_u; sleep 0.1
-  send_raw "$cmd"
-  sleep 0.2
-  send_enter
-  sleep 0.5
+for cmd in "/messages" "/tasks" "/calendar" "/policies" "/skills"; do
+  run_command "$cmd" 1
 done
 save_screenshot "raj-03-rapid"
 if assert_screen_not_blank "r3" && assert_readable "r3-rapid"; then pass; else fail; fi
@@ -431,77 +451,62 @@ if assert_readable "r4-final"; then pass; else fail; fi
 # ═══════════════════════════════════════════════════════════════════════
 CURRENT_P=3
 echo ""
-echo "--- PERSONA 3: Sarah (SDR) ---"
-echo "  Focus: CRM command output is formatted, not raw JSON"
+echo "--- PERSONA 3: Sarah (Operator) ---"
+echo "  Focus: navigation and planning surfaces stay readable"
 
-run_test "S1" "/record list company: output formatted, not raw JSON"
-send_ctrl_u; sleep 0.2
-send_raw "/record list company"
-sleep 0.3
-send_enter
-sleep 2
-save_screenshot "sarah-01-record-list"
-if assert_readable "s1-record"; then pass; else fail; fi
+run_test "S1" "/channels opens a clean channel picker"
+run_command "/channels"
+save_screenshot "sarah-01-channels"
+if assert_text "Channels" "s1-channels" && assert_readable "s1-channels"; then pass; else fail; fi
+send_escape
+sleep 0.5
 
-run_test "S2" "/task create: feedback message is clear"
-send_ctrl_u; sleep 0.2
-send_raw "/task create test task"
-sleep 0.3
-send_enter
-sleep 2
-save_screenshot "sarah-02-task-create"
-# Should show some response, not raw JSON
-if assert_no_junk "s2-task"; then pass; else fail; fi
+run_test "S2" "/1o1 opens a clear direct-session picker"
+run_command "/1o1"
+save_screenshot "sarah-02-direct-session"
+if assert_text "Direct Session|Enable 1:1 mode" "s2-1o1" && assert_no_junk "s2-1o1"; then pass; else fail; fi
+send_escape
+sleep 0.5
 
-run_test "S3" "/note create: confirmation is readable"
-send_ctrl_u; sleep 0.2
-send_raw "/note create test note"
-sleep 0.3
-send_enter
-sleep 2
-save_screenshot "sarah-03-note-create"
-if assert_no_junk "s3-note"; then pass; else fail; fi
+run_test "S3" "/tasks view remains formatted and readable"
+run_command "/tasks"
+save_screenshot "sarah-03-tasks"
+if assert_readable "s3-tasks" && assert_no_junk "s3-tasks"; then pass; else fail; fi
 
-run_test "S4" "All CRM output junk-free"
-if assert_no_junk "s4-final"; then pass; else fail; fi
+run_test "S4" "/calendar day stays junk-free"
+run_command "/calendar day"
+save_screenshot "sarah-04-calendar-day"
+if assert_readable "s4-calendar" && assert_no_junk "s4-calendar"; then pass; else fail; fi
 
 # ═══════════════════════════════════════════════════════════════════════
-# PERSONA 4: Alex (Developer, building integrations)
-#   "I need dev commands to show clean, structured output"
+# PERSONA 4: Alex (Developer)
+#   "I need readiness and workspace tools to stay clear"
 # ═══════════════════════════════════════════════════════════════════════
 CURRENT_P=4
 echo ""
 echo "--- PERSONA 4: Alex (Developer) ---"
-echo "  Focus: Dev commands show formatted output, not raw data"
+echo "  Focus: runtime and workspace tooling stay formatted"
 
-run_test "A1" "/detect: shows platform names cleanly, not JSON"
-send_ctrl_u; sleep 0.2
-send_raw "/detect"
-sleep 0.3
-send_enter
-sleep 2
-save_screenshot "alex-01-detect"
-if assert_readable "a1-detect"; then pass; else fail; fi
+run_test "A1" "/doctor shows runtime checks cleanly"
+run_command "/doctor"
+save_screenshot "alex-01-doctor"
+if assert_text "Doctor" "a1-doctor" && assert_readable "a1-doctor"; then pass; else fail; fi
 
-run_test "A2" "/config show: key info visible without noise"
-send_ctrl_u; sleep 0.2
-send_raw "/config show"
-sleep 0.3
-send_enter
-sleep 2
-save_screenshot "alex-02-config"
-if assert_no_junk "a2-config" && assert_readable "a2-config"; then pass; else fail; fi
+run_test "A2" "/switcher shows the unified workspace picker"
+run_command "/switcher"
+save_screenshot "alex-02-switcher"
+if assert_text "Workspace Switcher" "a2-switcher" && assert_no_junk "a2-switcher"; then pass; else fail; fi
+send_escape
+sleep 0.5
 
-run_test "A3" "/object list: formatted output (or clean error)"
-send_ctrl_u; sleep 0.2
-send_raw "/object list"
-sleep 0.3
-send_enter
-sleep 2
-save_screenshot "alex-03-object"
-if assert_readable "a3-object"; then pass; else fail; fi
+run_test "A3" "/agents shows named teammate actions"
+run_command "/agents"
+save_screenshot "alex-03-agents"
+if assert_text "Agents in #general" "a3-agents" && assert_text "Disable Frontend Engineer|Disable Product Manager|Disable Backend Engineer" "a3-agents" && assert_readable "a3-agents"; then pass; else fail; fi
+send_escape
+sleep 0.5
 
-run_test "A4" "Layout still correct after dev commands"
+run_test "A4" "Layout still correct after developer/operator commands"
 if assert_layout "a4-layout"; then pass; else fail; fi
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -514,13 +519,12 @@ echo "--- PERSONA 5: Kim (Manager) ---"
 echo "  Focus: Agent list is clean, status indicators correct, good density"
 
 run_test "K1" "/agents: clean list with names and statuses"
-send_ctrl_u; sleep 0.2
-send_raw "/agents"
-sleep 0.3
-send_enter
+run_command "/agents"
 sleep 1
 save_screenshot "kim-01-agents"
-if assert_text "CEO\|Agent\|agent" "k1" && assert_readable "k1-agents"; then pass; else fail; fi
+if assert_text "Agents in #general" "k1" && assert_text "Disable Frontend Engineer|Disable Product Manager|Disable Backend Engineer" "k1" && assert_readable "k1-agents"; then pass; else fail; fi
+send_escape
+sleep 0.5
 
 run_test "K2" "Status indicators use proper symbols"
 screen_k2=$(get_screen)
@@ -536,15 +540,12 @@ else
 fi
 
 run_test "K3" "Agent messages well-formatted (name: content pattern)"
-# Submit a message to trigger agent response display
-send_ctrl_u; sleep 0.2
-send_raw "hello"
-sleep 0.3
-send_enter
-sleep 3
+run_command "/messages"
+clear_input
+send_raw "hello team"
+sleep 0.5
 save_screenshot "kim-03-messages"
-# Screen should still be clean after message flow
-if assert_no_junk "k3-messages" && assert_readable "k3-messages"; then pass; else fail; fi
+if assert_text "hello team" "k3" && assert_no_junk "k3-messages" && assert_readable "k3-messages"; then pass; else fail; fi
 
 run_test "K4" "Screen density: good use of space"
 if assert_density "k4-density"; then pass; else fail; fi

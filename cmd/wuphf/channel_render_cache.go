@@ -53,7 +53,7 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 
 	var lines []renderedLine
 	if m.isOneOnOne() {
-		lines = buildOneOnOneMessageLines(m.messages, m.expandedThreads, contentWidth, m.oneOnOneAgentName())
+		lines = buildOneOnOneMessageLines(m.messages, m.expandedThreads, contentWidth, m.oneOnOneAgentName(), m.unreadAnchorID, m.unreadCount)
 		focusSlug := m.oneOnOneAgentSlug()
 		lines = append(lines, buildDirectExecutionLines(m.actions, focusSlug, contentWidth)...)
 		lines = append(lines, buildLiveWorkLines(m.members, m.tasks, nil, contentWidth, focusSlug)...)
@@ -70,7 +70,7 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 		case officeAppSkills:
 			lines = buildSkillLines(m.skills, contentWidth)
 		default:
-			lines = buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand)
+			lines = buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount)
 			lines = append(lines, buildLiveWorkLines(m.members, m.tasks, m.actions, contentWidth, "")...)
 		}
 	}
@@ -94,6 +94,8 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 	if m.isOneOnOne() || m.activeApp == officeAppMessages {
 		h.addMessages(m.messages)
 		h.addExpandedThreads(m.expandedThreads)
+		h.add(m.unreadAnchorID)
+		h.addInt(m.unreadCount)
 		h.addMembers(m.members)
 		h.addTasks(m.tasks)
 		h.addActions(m.actions)

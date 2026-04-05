@@ -5,7 +5,9 @@ SOCKET="/tmp/wuphf-1o1-$$.sock"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BINARY="$ROOT/wuphf"
 ARTIFACTS="$ROOT/termwright-artifacts/one-on-one-channel-$(date +%Y%m%d-%H%M%S)"
+TEST_HOME="$(mktemp -d /tmp/wuphf-1o1-home-XXXXXX)"
 mkdir -p "$ARTIFACTS"
+export HOME="$TEST_HOME"
 
 WUPHF_PID=""
 PHASE=""
@@ -18,6 +20,7 @@ cleanup() {
     kill "$WUPHF_PID" >/dev/null 2>&1 || true
     wait "$WUPHF_PID" 2>/dev/null || true
   fi
+  rm -rf "$TEST_HOME"
 }
 trap cleanup EXIT
 
@@ -33,7 +36,8 @@ fi
 
 screen() {
   termwright exec --socket "$SOCKET" --method screen --params '{}' 2>/dev/null | \
-    python3 -c "import sys,json; print(json.load(sys.stdin).get('result',''))"
+    python3 -c "import sys,json; raw=sys.stdin.read().strip(); \
+print('' if not raw else json.loads(raw).get('result',''))" 2>/dev/null || true
 }
 
 save_screen() {
@@ -152,7 +156,7 @@ start_runtime() {
   shift
 
   cleanup
-  "$BINARY" "$@" > "$ARTIFACTS/$PHASE-wuphf-stdout.txt" 2> "$ARTIFACTS/$PHASE-wuphf-stderr.txt" &
+  "$BINARY" --no-nex "$@" > "$ARTIFACTS/$PHASE-wuphf-stdout.txt" 2> "$ARTIFACTS/$PHASE-wuphf-stderr.txt" &
   WUPHF_PID=$!
   sleep 8
   local attached=false
@@ -190,6 +194,8 @@ sleep 1
 assert_screen_contains "/1o1" "phase1-autocomplete"
 assert_screen_contains "/reset" "phase1-autocomplete"
 assert_screen_not_contains "/channels" "phase1-autocomplete"
+send_escape
+sleep 1
 send_ctrl_u
 
 send_raw "/channels"
@@ -233,10 +239,13 @@ assert_screen_not_contains "AI should be hidden in PM mode." "phase3-isolation"
 echo "--- Phase 4: Reset preserves direct mode and selected agent ---"
 send_raw "/reset"
 send_enter
+sleep 1
+assert_screen_contains "Reset Direct Session" "phase4-confirm"
+send_enter
 wait_for_health "1o1" "pm" "phase4-health"
 wait_for_pane_count 2 "phase4-panes"
 assert_screen_contains "1:1 with Product Manager" "phase4-screen"
-assert_screen_contains "Direct 1:1 with Product Manager." "phase4-screen"
+assert_screen_contains "Direct session reset. Agent pane reloaded in place." "phase4-screen"
 
 echo "--- Phase 5: Disable 1:1 mode from the picker ---"
 send_raw "/1o1"
@@ -245,6 +254,9 @@ sleep 1
 assert_screen_contains "Enable 1:1 mode" "phase5-picker"
 assert_screen_contains "Disable 1:1 mode" "phase5-picker"
 send_raw "2"
+sleep 1
+assert_screen_contains "Return To Main Office" "phase5-confirm"
+send_enter
 wait_for_health "office" "ceo" "phase5-health"
 wait_for_pane_count 6 "phase5-panes"
 assert_screen_contains "The WUPHF Office" "phase5-screen"
