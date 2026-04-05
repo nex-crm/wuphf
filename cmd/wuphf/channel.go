@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -629,6 +631,7 @@ type channelModel struct {
 	// Workflow runtime state
 	activeWorkflow      *workflow.WorkflowView
 	workflowName        string
+	actionRegistry      *action.Registry // lazily initialized
 
 	// Telegram connect flow state
 	telegramGroups []team.TelegramGroup
@@ -1568,12 +1571,36 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "Workflow error: " + err.Error()
 				return m, nil
 			}
+
+			// Initialize real providers.
+			if m.actionRegistry == nil {
+				m.actionRegistry = action.NewRegistryFromEnv()
+			}
+			brokerToken := ""
+			if raw, err := os.ReadFile("/tmp/wuphf-broker-token"); err == nil {
+				brokerToken = strings.TrimSpace(string(raw))
+			}
+
+			opts := []workflow.RuntimeOption{
+				workflow.WithActionProvider(newComposioActionProvider(m.actionRegistry)),
+			}
+			if brokerToken != "" {
+				opts = append(opts, workflow.WithAgentDispatcher(
+					newBrokerAgentDispatcher("http://127.0.0.1:7890", brokerToken, m.activeChannel),
+				))
+			}
+
 			var rterr error
-			rt, rterr = workflow.NewRuntime(*spec)
+			rt, rterr = workflow.NewRuntime(*spec, opts...)
 			if rterr != nil {
 				m.notice = "Workflow error: " + rterr.Error()
 				return m, nil
 			}
+
+			// Hydrate data sources from real APIs.
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			hydrateDataSources(ctx, *spec, m.actionRegistry, rt)
+			cancel()
 		}
 		wv := workflow.NewWorkflowView(rt, m.width, m.height)
 		m.activeWorkflow = &wv
