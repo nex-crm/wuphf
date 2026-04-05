@@ -16,10 +16,16 @@ cleanup() {
   pkill -f "termwright daemon.*$SOCKET" 2>/dev/null || true
   rm -f "$SOCKET"
   "$BINARY" kill >/dev/null 2>&1 || true
+  tmux -L wuphf kill-server >/dev/null 2>&1 || true
+  pkill -x wuphf >/dev/null 2>&1 || true
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -i :7890 -t 2>/dev/null | xargs -r kill -9 >/dev/null 2>&1 || true
+  fi
   if [ -n "${WUPHF_PID:-}" ]; then
     kill "$WUPHF_PID" >/dev/null 2>&1 || true
     wait "$WUPHF_PID" 2>/dev/null || true
   fi
+  rm -f /tmp/wuphf-broker-token
   rm -rf "$TEST_HOME"
 }
 trap cleanup EXIT

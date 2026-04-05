@@ -21,6 +21,7 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 	} else {
 		options = append(options,
 			tui.PickerOption{Label: "Office feed", Value: "app:messages", Description: "Main channel feed"},
+			tui.PickerOption{Label: "Recovery", Value: "app:recovery", Description: "Resume work with focus, changes, and next steps"},
 			tui.PickerOption{Label: "Tasks", Value: "app:tasks", Description: "Active work in #" + m.activeChannel},
 			tui.PickerOption{Label: "Requests", Value: "app:requests", Description: "Human decisions and interviews"},
 			tui.PickerOption{Label: "Policies", Value: "app:policies", Description: "Signals, decisions, and watchdogs"},
@@ -114,6 +115,8 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing " + strings.Title(string(app)) + "."
 		switch app {
+		case officeAppRecovery:
+			return m.pollCurrentState()
 		case officeAppTasks:
 			return pollTasks(m.activeChannel)
 		case officeAppRequests:

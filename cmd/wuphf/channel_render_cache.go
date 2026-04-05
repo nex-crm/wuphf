@@ -53,12 +53,18 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 
 	var lines []renderedLine
 	if m.isOneOnOne() {
-		lines = buildOneOnOneMessageLines(m.messages, m.expandedThreads, contentWidth, m.oneOnOneAgentName(), m.unreadAnchorID, m.unreadCount)
-		focusSlug := m.oneOnOneAgentSlug()
-		lines = append(lines, buildDirectExecutionLines(m.actions, focusSlug, contentWidth)...)
-		lines = append(lines, buildLiveWorkLines(m.members, m.tasks, nil, contentWidth, focusSlug)...)
+		if m.activeApp == officeAppRecovery {
+			lines = buildRecoveryLines(m.currentRuntimeSnapshot(), contentWidth, m.awaySummary, m.unreadCount, m.brokerConnected)
+		} else {
+			lines = buildOneOnOneMessageLines(m.messages, m.expandedThreads, contentWidth, m.oneOnOneAgentName(), m.unreadAnchorID, m.unreadCount)
+			focusSlug := m.oneOnOneAgentSlug()
+			lines = append(lines, buildDirectExecutionLines(m.actions, focusSlug, contentWidth)...)
+			lines = append(lines, buildLiveWorkLines(m.members, m.tasks, nil, contentWidth, focusSlug)...)
+		}
 	} else {
 		switch m.activeApp {
+		case officeAppRecovery:
+			lines = buildRecoveryLines(m.currentRuntimeSnapshot(), contentWidth, m.awaySummary, m.unreadCount, m.brokerConnected)
 		case officeAppTasks:
 			lines = buildTaskLines(m.tasks, contentWidth)
 		case officeAppRequests:
@@ -91,17 +97,20 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 	h.add(m.oneOnOneAgent)
 	h.addInt64(renderTimeBucket(m.activeApp, m.isOneOnOne()))
 
-	if m.isOneOnOne() || m.activeApp == officeAppMessages {
+	if m.isOneOnOne() || m.activeApp == officeAppMessages || m.activeApp == officeAppRecovery {
 		h.addMessages(m.messages)
 		h.addExpandedThreads(m.expandedThreads)
 		h.add(m.unreadAnchorID)
 		h.addInt(m.unreadCount)
+		h.add(m.awaySummary)
 		h.addMembers(m.members)
 		h.addTasks(m.tasks)
+		h.addRequests(m.requests)
 		h.addActions(m.actions)
 		if m.isOneOnOne() {
 			h.add(m.oneOnOneAgentName())
 		}
+		h.addBool(m.brokerConnected)
 		return h.sum()
 	}
 

@@ -13,7 +13,7 @@ func (m *channelModel) noteIncomingMessages(added []brokerMessage) {
 		m.unreadAnchorID = added[0].ID
 	}
 	m.unreadCount += len(added)
-	m.awaySummary = summarizeUnreadMessages(added)
+	m.awaySummary = summarizeAwayRecovery(m.unreadCount, m.currentRuntimeSnapshot().Recovery)
 }
 
 func (m *channelModel) clearUnreadState() {

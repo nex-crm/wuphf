@@ -911,13 +911,13 @@ func TestCtrlOQuickJumpSelectsApp(t *testing.T) {
 		t.Fatal("expected app quick nav to activate")
 	}
 
-	model, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	model, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	got = model.(channelModel)
 	if cmd == nil {
 		t.Fatal("expected selecting a numbered app to trigger a command")
 	}
 	if got.activeApp != officeAppCalendar {
-		t.Fatalf("expected quick jump 5 to open calendar, got %s", got.activeApp)
+		t.Fatalf("expected quick jump 6 to open calendar, got %s", got.activeApp)
 	}
 	if got.quickJumpTarget != quickJumpNone {
 		t.Fatal("expected app quick nav mode to exit after selection")

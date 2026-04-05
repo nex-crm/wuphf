@@ -12,10 +12,13 @@ export HOME="$TEST_HOME"
 
 kill_stale_runtime() {
   "$BINARY" kill >/dev/null 2>&1 || true
+  tmux -L wuphf kill-server >/dev/null 2>&1 || true
+  pkill -x wuphf >/dev/null 2>&1 || true
   if command -v lsof >/dev/null 2>&1; then
     lsof -i :7890 -t 2>/dev/null | xargs -r kill -9 >/dev/null 2>&1 || true
     sleep 1
   fi
+  rm -f /tmp/wuphf-broker-token
 }
 
 cleanup() {

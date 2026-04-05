@@ -445,6 +445,8 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)", Category: "setup"},
 	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode", Category: "session"},
 	{Name: "messages", Description: "Show the main office feed", Category: "navigate"},
+	{Name: "recover", Description: "Open the session recovery summary", Category: "navigate"},
+	{Name: "resume", Description: "Alias for /recover", Category: "navigate"},
 	{Name: "switcher", Description: "Open the unified office/direct switcher", Category: "navigate"},
 	{Name: "tasks", Description: "Show active work in this channel", Category: "navigate"},
 	{Name: "switch", Description: "Switch to another channel", Category: "navigate"},
@@ -524,6 +526,7 @@ type officeApp string
 
 const (
 	officeAppMessages officeApp = "messages"
+	officeAppRecovery officeApp = "recovery"
 	officeAppTasks    officeApp = "tasks"
 	officeAppRequests officeApp = "requests"
 	officeAppPolicies officeApp = "policies"
@@ -2156,10 +2159,10 @@ func (m channelModel) View() string {
 			Padding(0, 1).
 			Bold(true).
 			Render(fmt.Sprintf("%d new", m.unreadCount))
-		if strings.TrimSpace(m.awaySummary) != "" {
+		if awaySummary := m.currentAwaySummary(); strings.TrimSpace(awaySummary) != "" {
 			headerMeta += "  " + lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#BFDBFE")).
-				Render(m.awaySummary)
+				Render(awaySummary)
 		}
 	}
 	if m.pending != nil {
@@ -2247,13 +2250,7 @@ func (m channelModel) View() string {
 		visible = append(visible, "")
 	}
 	if m.activeApp == officeAppMessages && m.unreadCount > 0 && scroll > 0 && len(visible) > 0 {
-		jumpLabel := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color(slackActive)).
-			Padding(0, 1).
-			Bold(true).
-			Render(fmt.Sprintf("Jump to latest · %d new", m.unreadCount))
-		visible[0] = "  " + jumpLabel
+		visible[0] = renderAwayStrip(contentWidth, m.unreadCount, m.currentAwaySummary())
 	}
 	if popup := m.renderActivePopup(contentWidth); popup != "" && m.focus == focusMain {
 		visible = overlayBottomLines(visible, strings.Split(popup, "\n"))
@@ -2396,10 +2393,15 @@ func (m channelModel) View() string {
 }
 
 func (m channelModel) currentHeaderTitle() string {
-	if m.isOneOnOne() {
+	if m.isOneOnOne() && m.activeApp != officeAppRecovery {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
 	switch m.activeApp {
+	case officeAppRecovery:
+		if m.isOneOnOne() {
+			return "1:1 with " + m.oneOnOneAgentName() + " · Recovery"
+		}
+		return "# " + m.activeChannel + " · Recovery"
 	case officeAppTasks:
 		return "# " + m.activeChannel + " · Tasks"
 	case officeAppRequests:
@@ -2416,6 +2418,23 @@ func (m channelModel) currentHeaderTitle() string {
 }
 
 func (m channelModel) currentHeaderMeta() string {
+	if m.activeApp == officeAppRecovery {
+		snapshot := m.currentRuntimeSnapshot()
+		blocking := 0
+		for _, req := range snapshot.Requests {
+			status := strings.TrimSpace(strings.ToLower(req.Status))
+			if status != "" && status != "pending" && status != "open" {
+				continue
+			}
+			if req.Blocking || req.Required {
+				blocking++
+			}
+		}
+		if m.isOneOnOne() {
+			return fmt.Sprintf("  Re-entry summary for %s · %d running tasks · %d open requests · %d new since you looked", m.oneOnOneAgentName(), countRunningRuntimeTasks(snapshot.Tasks), len(snapshot.Requests), m.unreadCount)
+		}
+		return fmt.Sprintf("  Re-entry summary for #%s · %d blocking requests · %d running tasks · %d new since you looked", m.activeChannel, blocking, countRunningRuntimeTasks(snapshot.Tasks), m.unreadCount)
+	}
 	if m.isOneOnOne() {
 		if !m.brokerConnected {
 			return "  Direct session preview · only this agent can speak here"
@@ -2524,10 +2543,12 @@ func (m channelModel) currentHeaderMeta() string {
 }
 
 func (m channelModel) currentAppLabel() string {
-	if m.isOneOnOne() {
+	if m.isOneOnOne() && m.activeApp != officeAppRecovery {
 		return "messages"
 	}
 	switch m.activeApp {
+	case officeAppRecovery:
+		return "recovery"
 	case officeAppTasks:
 		return "tasks"
 	case officeAppRequests:
@@ -3123,6 +3144,7 @@ func (m channelModel) channelSidebarItems() []sidebarItem {
 func (m channelModel) appSidebarItems() []sidebarItem {
 	return []sidebarItem{
 		{Kind: "app", Value: string(officeAppMessages), Label: "Messages"},
+		{Kind: "app", Value: string(officeAppRecovery), Label: "Recovery"},
 		{Kind: "app", Value: string(officeAppTasks), Label: "Tasks"},
 		{Kind: "app", Value: string(officeAppSkills), Label: "Skills"},
 		{Kind: "app", Value: string(officeAppPolicies), Label: "Policies"},
@@ -3195,6 +3217,9 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 		case officeAppMessages:
 			m.notice = "Viewing #" + m.activeChannel + "."
 			return pollBroker("", m.activeChannel)
+		case officeAppRecovery:
+			m.notice = "Viewing the recovery summary."
+			return m.pollCurrentState()
 		case officeAppTasks:
 			m.notice = "Viewing tasks in #" + m.activeChannel + "."
 			return pollTasks(m.activeChannel)
@@ -4300,6 +4325,16 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Viewing #general."
 		}
 		return m, nil
+	case trimmed == "/recover" || trimmed == "/resume":
+		clearCurrent()
+		m.activeApp = officeAppRecovery
+		m.syncSidebarCursorToActive()
+		if m.isOneOnOne() {
+			m.notice = "Viewing the direct-session recovery summary."
+		} else {
+			m.notice = "Viewing the office recovery summary."
+		}
+		return m, m.pollCurrentState()
 	case trimmed == "/tasks":
 		clearCurrent()
 		m.activeApp = officeAppTasks
@@ -6158,7 +6193,7 @@ func resolveInitialOfficeApp(name string) officeApp {
 		return officeAppPolicies
 	}
 	switch officeApp(normalized) {
-	case officeAppMessages, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar:
+	case officeAppMessages, officeAppRecovery, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar:
 		return officeApp(normalized)
 	default:
 		return officeAppMessages

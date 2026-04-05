@@ -9,6 +9,9 @@ import (
 
 func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []renderedLine {
 	if m.isOneOnOne() {
+		if m.activeApp == officeAppRecovery {
+			return m.currentMainLines(contentWidth)
+		}
 		return buildOneOnOneViewportSuffix(m.messages, m.actions, m.tasks, m.members, m.expandedThreads, contentWidth, msgH, m.scroll, m.oneOnOneAgentName(), m.oneOnOneAgentSlug(), m.unreadAnchorID, m.unreadCount)
 	}
 	if m.activeApp == officeAppMessages {
