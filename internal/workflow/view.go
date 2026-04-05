@@ -197,7 +197,19 @@ func (v WorkflowView) handleKey(msg tea.KeyMsg) (WorkflowView, tea.Cmd) {
 		case "down", "j":
 			v.gen.MoveSelection(1)
 			return v, nil
+		case "enter":
+			// Enter triggers the first action (primary action) on the selected item.
+			// Store the selected item in the data store so downstream steps can reference it.
+			v.storeSelectedItem(step)
+			if len(step.Actions) > 0 {
+				key = step.Actions[0].Key
+			}
 		}
+	}
+
+	// Store selected item before dispatching action on select steps.
+	if step != nil && step.Type == StepSelect {
+		v.storeSelectedItem(step)
 	}
 
 	// Action dispatch.
@@ -349,6 +361,16 @@ func (v WorkflowView) View() string {
 			if step.Type == StepSelect {
 				sections = append(sections, "")
 				sections = append(sections, v.renderSelectList(step, w-4))
+			} else if step.Type == StepConfirm || step.Type == StepEdit {
+				// Show the selected item context on confirm/edit steps.
+				if sel, ok := v.runtime.DataStore()["selectedItem"]; ok {
+					sections = append(sections, "")
+					sections = append(sections, v.renderItemDetail(sel, w-4))
+				}
+				if step.Display != nil {
+					sections = append(sections, "")
+					sections = append(sections, v.gen.View())
+				}
 			} else if step.Display != nil {
 				// Other steps use the A2UI component renderer.
 				sections = append(sections, "")
@@ -412,6 +434,53 @@ func (v WorkflowView) Quitting() bool {
 // Runtime returns the underlying runtime for inspection.
 func (v WorkflowView) Runtime() *Runtime {
 	return v.runtime
+}
+
+// renderItemDetail shows the details of the selected item as a bordered card.
+func (v WorkflowView) renderItemDetail(item any, width int) string {
+	m, ok := item.(map[string]any)
+	if !ok {
+		return fmt.Sprintf("  %v", item)
+	}
+
+	var lines []string
+	for _, field := range []string{"from", "subject", "priority", "title", "name", "status", "description", "content"} {
+		if val, ok := m[field]; ok {
+			label := lipgloss.NewStyle().Bold(true).Render(field + ":")
+			lines = append(lines, fmt.Sprintf("  %s %v", label, val))
+		}
+	}
+	// Fallback for unknown fields.
+	if len(lines) == 0 {
+		for k, v := range m {
+			label := lipgloss.NewStyle().Bold(true).Render(k + ":")
+			lines = append(lines, fmt.Sprintf("  %s %v", label, v))
+		}
+	}
+
+	cardStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#374151")).
+		Padding(0, 1).
+		Width(min(width, 70))
+
+	return cardStyle.Render(strings.Join(lines, "\n"))
+}
+
+// storeSelectedItem saves the currently highlighted item to /selectedItem in the data store.
+func (v *WorkflowView) storeSelectedItem(step *StepSpec) {
+	if step.DataRef == "" {
+		return
+	}
+	key := strings.TrimPrefix(step.DataRef, "/")
+	items, ok := v.runtime.DataStore()[key].([]any)
+	if !ok || len(items) == 0 {
+		return
+	}
+	idx := v.gen.SelectedIndex()
+	if idx >= 0 && idx < len(items) {
+		v.runtime.SetData("/selectedItem", items[idx])
+	}
 }
 
 // renderSelectList draws an interactive list with a cursor for select steps.
