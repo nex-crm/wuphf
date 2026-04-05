@@ -462,6 +462,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "queue", Description: "Alias for /calendar"},
 	{Name: "skills", Description: "Show available skills"},
 	{Name: "skill", Description: "Create, invoke, or manage a skill"},
+	{Name: "workflow", Description: "Launch an interactive workflow"},
 	{Name: "reply", Description: "Reply in thread by message ID"},
 	{Name: "threads", Description: "Browse and manage threads"},
 	{Name: "expand", Description: "Expand a collapsed thread"},
@@ -514,6 +515,8 @@ const (
 	channelPickerConnect        channelPickerMode = "connect"
 	channelPickerTelegramToken  channelPickerMode = "telegram_token"
 	channelPickerTelegramChatID channelPickerMode = "telegram_chat_id"
+	channelPickerWorkflow       channelPickerMode = "workflow"
+	channelPickerWorkflowInput  channelPickerMode = "workflow_input"
 )
 
 type officeApp string
@@ -1924,6 +1927,17 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.expandedThreads[msgID] = true
 			case "collapse":
 				delete(m.expandedThreads, msgID)
+			}
+			return m, nil
+		case channelPickerWorkflow:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			switch msg.Value {
+			case "demo":
+				return m, launchDemoWorkflow()
+			case "create":
+				m.notice = "Type: /workflow <description>\n\nExamples:\n  /workflow brainstorm marketing ideas and rate them\n  /workflow first draft copy, then review, then publish\n  /workflow compare AWS vs GCP vs Azure for hosting"
+				return m, nil
 			}
 			return m, nil
 		default:
@@ -4219,25 +4233,22 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Filtering calendar for " + displayName(filter) + "."
 			return m, pollOfficeLedger()
 		}
-	case trimmed == "/workflow demo":
-		clearCurrent()
-		return m, launchDemoWorkflow()
-	case strings.HasPrefix(trimmed, "/workflow create "):
-		clearCurrent()
-		desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "/workflow create "))
-		if desc == "" {
-			m.notice = "Usage: /workflow create <description>"
-			return m, nil
-		}
-		return m, generateWorkflowFromDescription(desc)
 	case trimmed == "/workflow":
 		clearCurrent()
-		m.notice = "Usage: /workflow demo | /workflow create <description>"
+		m.pickerMode = channelPickerWorkflow
+		m.picker = tui.NewPicker("Launch a workflow", []tui.PickerOption{
+			{Label: "Create new", Value: "create", Description: "Describe what you need — a workflow is generated on the fly"},
+			{Label: "Email triage demo", Value: "demo", Description: "Demo: triage 3 sample emails with approve/dismiss/edit"},
+		})
 		return m, nil
 	case strings.HasPrefix(trimmed, "/workflow "):
 		clearCurrent()
-		m.notice = "Usage: /workflow demo | /workflow create <description>"
-		return m, nil
+		desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "/workflow "))
+		if desc == "" {
+			m.notice = "Usage: /workflow <description>"
+			return m, nil
+		}
+		return m, buildWorkflowFromPrompt(desc)
 	case trimmed == "/skills":
 		clearCurrent()
 		m.activeApp = officeAppSkills
@@ -5808,40 +5819,310 @@ func launchDemoWorkflow() tea.Cmd {
 	}
 }
 
-// generateWorkflowFromDescription builds a workflow spec dynamically from a
-// natural language description. This creates real interactive workflows on the
-// fly without hardcoded specs.
-func generateWorkflowFromDescription(description string) tea.Cmd {
+// buildWorkflowFromPrompt detects the intent of a description and generates
+// the appropriate workflow pattern. Supports:
+//   - brainstorm/generate: "come up with marketing ideas" → agent generates, you review
+//   - triage/review: "review PRs, bugs, tickets" → select list, approve/reject
+//   - sequential: "first X, then Y, then Z" → ordered checklist
+//   - compare: "compare options for hosting" → agent researches, you rate
+//   - custom list: "handle A, B, C" → triage-style with extracted items
+func buildWorkflowFromPrompt(description string) tea.Cmd {
 	return func() tea.Msg {
 		slug := strings.ToLower(strings.Join(strings.Fields(description), "-"))
-		if len(slug) > 30 {
-			slug = slug[:30]
+		if len(slug) > 40 {
+			slug = slug[:40]
 		}
 
-		spec := workflow.WorkflowSpec{
-			ID:    slug,
-			Title: description,
-		}
-
-		// Parse the description to understand what kind of workflow the user wants.
 		descLower := strings.ToLower(description)
-		items := extractItemsFromDescription(descLower)
+		pattern := detectWorkflowPattern(descLower)
 
-		if len(items) == 0 {
-			// No specific items found. Build a generic checklist workflow.
-			items = []workflowItem{
-				{Name: "Item 1", Detail: "First item to process"},
-				{Name: "Item 2", Detail: "Second item to process"},
-				{Name: "Item 3", Detail: "Third item to process"},
+		var spec workflow.WorkflowSpec
+		var rt *workflow.Runtime
+
+		switch pattern {
+		case "brainstorm":
+			spec, rt = buildBrainstormWorkflow(slug, description)
+		case "sequential":
+			spec, rt = buildSequentialWorkflow(slug, description, descLower)
+		case "compare":
+			spec, rt = buildCompareWorkflow(slug, description)
+		default: // "triage" or fallback
+			spec, rt = buildTriageWorkflow(slug, description, descLower)
+		}
+
+		if err := workflow.ValidateSpec(spec); err != nil {
+			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
+		}
+		if rt == nil {
+			var err error
+			rt, err = workflow.NewRuntime(spec)
+			if err != nil {
+				return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
 			}
 		}
 
-		// Build a triage-style workflow: list → review → (approve/dismiss) → back to list.
-		spec.Steps = []workflow.StepSpec{
+		return channelWorkflowLaunchMsg{runtime: rt, name: slug}
+	}
+}
+
+func detectWorkflowPattern(desc string) string {
+	brainstormWords := []string{"brainstorm", "come up with", "generate", "ideas for",
+		"think of", "create ideas", "suggest", "propose", "ideate", "dream up"}
+	for _, w := range brainstormWords {
+		if strings.Contains(desc, w) {
+			return "brainstorm"
+		}
+	}
+
+	sequentialWords := []string{"first ", "then ", "step 1", "step 2", "after that",
+		"followed by", "next ", "finally "}
+	seqCount := 0
+	for _, w := range sequentialWords {
+		if strings.Contains(desc, w) {
+			seqCount++
+		}
+	}
+	if seqCount >= 2 {
+		return "sequential"
+	}
+
+	compareWords := []string{"compare", "evaluate", "pros and cons", "side by side",
+		"which is better", "trade-off", "tradeoff", "versus", " vs "}
+	for _, w := range compareWords {
+		if strings.Contains(desc, w) {
+			return "compare"
+		}
+	}
+
+	return "triage"
+}
+
+// buildBrainstormWorkflow: agent generates ideas → you review each → rate → summary.
+// Pattern: generate (run) → review list (select) → rate (confirm with score) → done
+func buildBrainstormWorkflow(slug, description string) (workflow.WorkflowSpec, *workflow.Runtime) {
+	spec := workflow.WorkflowSpec{
+		ID:    slug,
+		Title: description,
+		Steps: []workflow.StepSpec{
+			{
+				ID:     "generate",
+				Type:   workflow.StepConfirm,
+				Prompt: "Ready to brainstorm? The agent will generate ideas for:\n\n  " + description,
+				Actions: []workflow.ActionSpec{
+					{Key: "Enter", Label: "Generate ideas", Transition: "review"},
+					{Key: "q", Label: "Cancel", Transition: "done"},
+				},
+			},
+			{
+				ID:      "review",
+				Type:    workflow.StepSelect,
+				Prompt:  "Review generated ideas. Rate or edit each one:",
+				DataRef: "/ideas",
+				Actions: []workflow.ActionSpec{
+					{Key: "a", Label: "Keep", Transition: "rate"},
+					{Key: "d", Label: "Discard", Transition: "review"},
+					{Key: "e", Label: "Edit", Transition: "edit-idea"},
+					{Key: "q", Label: "Finish", Transition: "summary"},
+				},
+				AllowLoop: true,
+			},
+			{
+				ID:        "rate",
+				Type:      workflow.StepConfirm,
+				Prompt:    "Rate this idea:",
+				AllowLoop: true,
+				Display: &workflow.DisplaySpec{
+					Component: "text",
+					DataRef:   "/currentRating",
+				},
+				Actions: []workflow.ActionSpec{
+					{Key: "1", Label: "★", Transition: "review"},
+					{Key: "2", Label: "★★", Transition: "review"},
+					{Key: "3", Label: "★★★", Transition: "review"},
+					{Key: "4", Label: "★★★★", Transition: "review"},
+					{Key: "5", Label: "★★★★★", Transition: "review"},
+				},
+			},
+			{
+				ID:      "edit-idea",
+				Type:    workflow.StepEdit,
+				Prompt:  "Edit this idea:",
+				DataRef: "/editBuffer",
+				Display: &workflow.DisplaySpec{
+					Component: "textfield",
+					Props:     map[string]any{"label": "Idea", "multiline": true},
+				},
+				Actions: []workflow.ActionSpec{
+					{Key: "Enter", Label: "Save", Transition: "review"},
+				},
+			},
+			{
+				ID:     "summary",
+				Type:   workflow.StepConfirm,
+				Prompt: "Brainstorm complete!",
+				Display: &workflow.DisplaySpec{
+					Component: "text",
+					DataRef:   "/summaryText",
+				},
+				Actions: []workflow.ActionSpec{
+					{Key: "Enter", Label: "Done", Transition: "done"},
+				},
+			},
+		},
+	}
+
+	rt, _ := workflow.NewRuntime(spec)
+	rt.SetData("/ideas", []any{
+		map[string]any{"name": "Idea 1: Think about this...", "status": "new", "detail": "Placeholder — in production, the CEO agent generates real ideas based on your prompt."},
+		map[string]any{"name": "Idea 2: Consider that...", "status": "new", "detail": "Placeholder — connect agents for real idea generation."},
+		map[string]any{"name": "Idea 3: What if we...", "status": "new", "detail": "Placeholder — the agent would analyze your domain and suggest specifics."},
+	})
+	rt.SetData("/currentRating", "Select a star rating for this idea.")
+	rt.SetData("/editBuffer", "")
+	rt.SetData("/summaryText", "Review complete. Your rated ideas are saved.")
+	return spec, rt
+}
+
+// buildSequentialWorkflow: ordered steps that must be done in sequence.
+// Pattern: step1 (confirm) → step2 (confirm) → ... → done
+func buildSequentialWorkflow(slug, description, descLower string) (workflow.WorkflowSpec, *workflow.Runtime) {
+	// Extract sequential steps from the description.
+	steps := extractSequentialSteps(descLower)
+	if len(steps) == 0 {
+		steps = []string{"Step 1", "Step 2", "Step 3"}
+	}
+
+	spec := workflow.WorkflowSpec{
+		ID:    slug,
+		Title: description,
+	}
+
+	for i, stepName := range steps {
+		stepID := fmt.Sprintf("step-%d", i+1)
+		nextID := fmt.Sprintf("step-%d", i+2)
+		if i == len(steps)-1 {
+			nextID = "done"
+		}
+
+		spec.Steps = append(spec.Steps, workflow.StepSpec{
+			ID:        stepID,
+			Type:      workflow.StepConfirm,
+			Prompt:    fmt.Sprintf("Step %d of %d: %s", i+1, len(steps), stepName),
+			AllowLoop: true,
+			Display: &workflow.DisplaySpec{
+				Component: "text",
+				DataRef:   fmt.Sprintf("/step%d_notes", i+1),
+			},
+			Actions: []workflow.ActionSpec{
+				{Key: "Enter", Label: "Done, next", Transition: nextID},
+				{Key: "e", Label: "Add note", Transition: fmt.Sprintf("note-%d", i+1)},
+				{Key: "s", Label: "Skip", Transition: nextID},
+			},
+		})
+		spec.Steps = append(spec.Steps, workflow.StepSpec{
+			ID:      fmt.Sprintf("note-%d", i+1),
+			Type:    workflow.StepEdit,
+			Prompt:  "Add a note for: " + stepName,
+			DataRef: fmt.Sprintf("/step%d_notes", i+1),
+			Display: &workflow.DisplaySpec{
+				Component: "textfield",
+				Props:     map[string]any{"label": "Note"},
+			},
+			Actions: []workflow.ActionSpec{
+				{Key: "Enter", Label: "Save", Transition: stepID},
+			},
+		})
+	}
+
+	rt, _ := workflow.NewRuntime(spec)
+	for i := range steps {
+		rt.SetData(fmt.Sprintf("/step%d_notes", i+1), "")
+	}
+	return spec, rt
+}
+
+// buildCompareWorkflow: evaluate options side by side.
+// Pattern: list options (select) → view detail (confirm) → rate → summary
+func buildCompareWorkflow(slug, description string) (workflow.WorkflowSpec, *workflow.Runtime) {
+	spec := workflow.WorkflowSpec{
+		ID:    slug,
+		Title: description,
+		Steps: []workflow.StepSpec{
+			{
+				ID:      "options",
+				Type:    workflow.StepSelect,
+				Prompt:  "Select an option to evaluate:",
+				DataRef: "/options",
+				Actions: []workflow.ActionSpec{
+					{Key: "Enter", Label: "Evaluate", Transition: "evaluate"},
+					{Key: "d", Label: "Eliminate", Transition: "options"},
+					{Key: "q", Label: "Decide", Transition: "done"},
+				},
+				AllowLoop: true,
+			},
+			{
+				ID:        "evaluate",
+				Type:      workflow.StepConfirm,
+				Prompt:    "Evaluate this option:",
+				AllowLoop: true,
+				Display: &workflow.DisplaySpec{
+					Component: "text",
+					DataRef:   "/verdict",
+				},
+				Actions: []workflow.ActionSpec{
+					{Key: "1", Label: "★ Weak", Transition: "options"},
+					{Key: "2", Label: "★★ OK", Transition: "options"},
+					{Key: "3", Label: "★★★ Good", Transition: "options"},
+					{Key: "4", Label: "★★★★ Strong", Transition: "options"},
+					{Key: "5", Label: "★★★★★ Best", Transition: "options"},
+					{Key: "n", Label: "Add notes", Transition: "note"},
+				},
+			},
+			{
+				ID:      "note",
+				Type:    workflow.StepEdit,
+				Prompt:  "Add evaluation notes:",
+				DataRef: "/verdict",
+				Display: &workflow.DisplaySpec{
+					Component: "textfield",
+					Props:     map[string]any{"label": "Notes"},
+				},
+				Actions: []workflow.ActionSpec{
+					{Key: "Enter", Label: "Save", Transition: "evaluate"},
+				},
+			},
+		},
+	}
+
+	rt, _ := workflow.NewRuntime(spec)
+	rt.SetData("/options", []any{
+		map[string]any{"name": "Option A", "status": "pending", "detail": "Placeholder — in production, the agent researches real options."},
+		map[string]any{"name": "Option B", "status": "pending", "detail": "Placeholder — connect agents for real comparison data."},
+		map[string]any{"name": "Option C", "status": "pending", "detail": "Placeholder — each option would have real pros/cons."},
+	})
+	rt.SetData("/verdict", "Rate this option after reviewing the details.")
+	return spec, rt
+}
+
+// buildTriageWorkflow: review a list of items, approve/reject each.
+func buildTriageWorkflow(slug, description, descLower string) (workflow.WorkflowSpec, *workflow.Runtime) {
+	items := extractListItems(descLower)
+	if len(items) == 0 {
+		items = []any{
+			map[string]any{"name": "Item 1", "status": "pending"},
+			map[string]any{"name": "Item 2", "status": "pending"},
+			map[string]any{"name": "Item 3", "status": "pending"},
+		}
+	}
+
+	spec := workflow.WorkflowSpec{
+		ID:    slug,
+		Title: description,
+		Steps: []workflow.StepSpec{
 			{
 				ID:      "list",
 				Type:    workflow.StepSelect,
-				Prompt:  fmt.Sprintf("Select an item to review:"),
+				Prompt:  "Select an item to review:",
 				DataRef: "/items",
 				Actions: []workflow.ActionSpec{
 					{Key: "a", Label: "Approve", Transition: "review"},
@@ -5860,7 +6141,7 @@ func generateWorkflowFromDescription(description string) tea.Cmd {
 					DataRef:   "/notes",
 				},
 				Actions: []workflow.ActionSpec{
-					{Key: "y", Label: "Yes, done", Transition: "list"},
+					{Key: "y", Label: "Done", Transition: "list"},
 					{Key: "e", Label: "Add note", Transition: "edit"},
 					{Key: "n", Label: "Skip", Transition: "list"},
 				},
@@ -5878,49 +6159,16 @@ func generateWorkflowFromDescription(description string) tea.Cmd {
 					{Key: "Enter", Label: "Done", Transition: "review"},
 				},
 			},
-		}
-
-		// Validate the generated spec.
-		if err := workflow.ValidateSpec(spec); err != nil {
-			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
-		}
-
-		rt, err := workflow.NewRuntime(spec)
-		if err != nil {
-			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
-		}
-
-		// Populate with the extracted items.
-		itemData := make([]any, len(items))
-		for i, it := range items {
-			itemData[i] = map[string]any{
-				"name":   it.Name,
-				"status": it.Status,
-				"detail": it.Detail,
-			}
-		}
-		rt.SetData("/items", itemData)
-		rt.SetData("/notes", "")
-
-		return channelWorkflowLaunchMsg{runtime: rt, name: slug}
+		},
 	}
+
+	rt, _ := workflow.NewRuntime(spec)
+	rt.SetData("/items", items)
+	rt.SetData("/notes", "")
+	return spec, rt
 }
 
-type workflowItem struct {
-	Name   string
-	Status string
-	Detail string
-}
-
-// extractItemsFromDescription tries to pull structured items from the user's
-// description. Looks for comma-separated lists, numbered items, etc.
-func extractItemsFromDescription(desc string) []workflowItem {
-	var items []workflowItem
-
-	// Check for comma or "and" separated lists:
-	// "review alice, bob, and carol" → 3 items
-	// "triage bugs, features, and docs" → 3 items
-	// Strip common prefixes.
+func extractListItems(desc string) []any {
 	content := desc
 	for _, prefix := range []string{
 		"review ", "triage ", "process ", "check ", "approve ",
@@ -5929,30 +6177,43 @@ func extractItemsFromDescription(desc string) []workflowItem {
 		content = strings.TrimPrefix(content, prefix)
 	}
 
-	// Split by comma, "and", newline.
 	content = strings.ReplaceAll(content, " and ", ",")
 	content = strings.ReplaceAll(content, " & ", ",")
 	parts := strings.Split(content, ",")
 
+	var items []any
 	for _, p := range parts {
 		name := strings.TrimSpace(p)
 		if name == "" {
 			continue
 		}
-		items = append(items, workflowItem{
-			Name:   name,
-			Status: "pending",
-			Detail: "",
-		})
+		items = append(items, map[string]any{"name": name, "status": "pending"})
 	}
 
-	// If we only got 1 item and it's multi-word, it might be a description
-	// not a list. In that case, return empty to trigger the generic workflow.
-	if len(items) == 1 && !strings.Contains(items[0].Name, " ") {
+	if len(items) <= 1 {
 		return nil
 	}
-
 	return items
+}
+
+func extractSequentialSteps(desc string) []string {
+	// Look for "first X, then Y, then Z" or "X, then Y, finally Z".
+	parts := strings.Split(desc, " then ")
+	if len(parts) >= 2 {
+		var steps []string
+		for _, p := range parts {
+			s := strings.TrimSpace(p)
+			s = strings.TrimPrefix(s, "first ")
+			s = strings.TrimPrefix(s, "finally ")
+			s = strings.TrimPrefix(s, "and ")
+			s = strings.TrimSuffix(s, ",")
+			if s != "" {
+				steps = append(steps, s)
+			}
+		}
+		return steps
+	}
+	return nil
 }
 
 func tickChannel() tea.Cmd {

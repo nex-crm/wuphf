@@ -390,10 +390,10 @@ func (r *Runtime) ActionProviderFor(provider string) ActionProvider {
 	return r.actionProvider
 }
 
-// findAction looks up an action by key within a step.
+// findAction looks up an action by key within a step (case-insensitive).
 func (r *Runtime) findAction(step *StepSpec, key string) *ActionSpec {
 	for i := range step.Actions {
-		if step.Actions[i].Key == key {
+		if strings.EqualFold(step.Actions[i].Key, key) {
 			return &step.Actions[i]
 		}
 	}

@@ -149,6 +149,10 @@ func (v WorkflowView) Update(msg tea.Msg) (WorkflowView, tea.Cmd) {
 }
 
 func (v WorkflowView) handleKey(msg tea.KeyMsg) (WorkflowView, tea.Cmd) {
+	if v.runtime == nil {
+		v.quitting = true
+		return v, nil
+	}
 	key := msg.String()
 
 	// Abort confirmation.
@@ -166,12 +170,14 @@ func (v WorkflowView) handleKey(msg tea.KeyMsg) (WorkflowView, tea.Cmd) {
 
 	state := v.runtime.State()
 
+	// Done/aborted: any key exits.
+	if state == StateDone || state == StateAborted {
+		v.quitting = true
+		return v, nil
+	}
+
 	// Esc handling: smart confirmation.
 	if key == "esc" {
-		if state == StateDone || state == StateAborted {
-			v.quitting = true
-			return v, nil
-		}
 		if v.runtime.NeedsAbortConfirmation() {
 			v.confirmAbort = true
 			return v, nil
@@ -349,6 +355,9 @@ func (v WorkflowView) executeAction(exec ExecuteSpec) tea.Cmd {
 }
 
 func (v WorkflowView) handleActionResult(msg actionResultMsg) (WorkflowView, tea.Cmd) {
+	if v.runtime == nil {
+		return v, nil
+	}
 	// CompleteAction only applies when an action was pending.
 	// After Start(), we get an empty actionResultMsg but the runtime is
 	// already in awaiting_input, so CompleteAction would error. Ignore that.
@@ -419,7 +428,7 @@ func (v *WorkflowView) syncGenModel() {
 
 // View renders the workflow TUI.
 func (v WorkflowView) View() string {
-	if v.quitting {
+	if v.quitting || v.runtime == nil {
 		return ""
 	}
 
