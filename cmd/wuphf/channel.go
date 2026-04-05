@@ -5717,7 +5717,7 @@ const demoWorkflowSpec = `{
       "type": "confirm",
       "prompt": "Send a reply to this email?",
       "allowLoop": true,
-      "display": {"component": "card", "props": {"title": "Draft Reply"}},
+      "display": {"component": "text", "dataRef": "/draftReply"},
       "actions": [
         {"key": "y", "label": "Yes, send", "transition": "list"},
         {"key": "e", "label": "Edit first", "transition": "edit"},
@@ -5749,9 +5749,18 @@ func launchDemoWorkflow() tea.Cmd {
 			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
 		}
 		rt.SetData("/emails", []any{
-			map[string]any{"from": "alice@acme.co", "subject": "Q2 Revenue Report", "priority": "high"},
-			map[string]any{"from": "bob@partner.io", "subject": "Partnership proposal", "priority": "medium"},
-			map[string]any{"from": "carol@team.co", "subject": "Standup notes", "priority": "low"},
+			map[string]any{
+				"from": "alice@acme.co", "subject": "Q2 Revenue Report", "priority": "high",
+				"body": "Hi team, please find attached the Q2 revenue report. Revenue is up 23% QoQ. Key highlights: Enterprise deals closed 4 new accounts, self-serve grew 18%. Need your sign-off by Friday.",
+			},
+			map[string]any{
+				"from": "bob@partner.io", "subject": "Partnership proposal", "priority": "medium",
+				"body": "Hey! We'd love to explore a co-marketing partnership. Our audience overlaps well with yours. Could we set up a 30-min call this week to discuss?",
+			},
+			map[string]any{
+				"from": "carol@team.co", "subject": "Standup notes", "priority": "low",
+				"body": "Standup summary: FE team shipped the new dashboard. BE team fixing auth timeout bug. Design review scheduled for Thursday.",
+			},
 		})
 		rt.SetData("/emailTable", []any{
 			[]any{"From", "Subject", "Priority"},

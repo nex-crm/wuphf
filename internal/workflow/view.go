@@ -444,10 +444,21 @@ func (v WorkflowView) renderItemDetail(item any, width int) string {
 	}
 
 	var lines []string
-	for _, field := range []string{"from", "subject", "priority", "title", "name", "status", "description", "content"} {
+	// Header fields (inline).
+	for _, field := range []string{"from", "subject", "priority", "title", "name", "status"} {
 		if val, ok := m[field]; ok {
 			label := lipgloss.NewStyle().Bold(true).Render(field + ":")
 			lines = append(lines, fmt.Sprintf("  %s %v", label, val))
+		}
+	}
+	// Body/content fields (block text, below a separator).
+	for _, field := range []string{"body", "content", "description"} {
+		if val, ok := m[field]; ok {
+			s := fmt.Sprintf("%v", val)
+			if s != "" {
+				lines = append(lines, "")
+				lines = append(lines, wfStatusStyle.Render("  "+s))
+			}
 		}
 	}
 	// Fallback for unknown fields.
