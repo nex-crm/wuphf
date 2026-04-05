@@ -34,6 +34,11 @@ type WorkflowView struct {
 	err          error
 	quitting     bool
 	confirmAbort bool
+
+	// Edit step state.
+	editing    bool
+	editBuffer []rune
+	editCursor int
 }
 
 // spinnerFrames are the dots-style spinner characters.
@@ -187,8 +192,74 @@ func (v WorkflowView) handleKey(msg tea.KeyMsg) (WorkflowView, tea.Cmd) {
 		return v, nil
 	}
 
-	// List navigation for select steps.
+	// Edit step: all typing goes to the edit buffer.
 	step := v.runtime.CurrentStep()
+	if step != nil && step.Type == StepEdit && v.editing {
+		switch key {
+		case "enter":
+			// Submit: save edited text back to data store, transition.
+			edited := string(v.editBuffer)
+			if step.DataRef != "" {
+				v.runtime.SetData(step.DataRef, edited)
+			}
+			v.editing = false
+			// Trigger the first action (Done editing).
+			if len(step.Actions) > 0 {
+				key = step.Actions[0].Key
+			} else {
+				return v, nil
+			}
+		case "backspace", "ctrl+h":
+			if v.editCursor > 0 {
+				v.editBuffer = append(v.editBuffer[:v.editCursor-1], v.editBuffer[v.editCursor:]...)
+				v.editCursor--
+			}
+			return v, nil
+		case "left":
+			if v.editCursor > 0 {
+				v.editCursor--
+			}
+			return v, nil
+		case "right":
+			if v.editCursor < len(v.editBuffer) {
+				v.editCursor++
+			}
+			return v, nil
+		case "ctrl+a":
+			v.editCursor = 0
+			return v, nil
+		case "ctrl+e":
+			v.editCursor = len(v.editBuffer)
+			return v, nil
+		case "ctrl+u":
+			v.editBuffer = v.editBuffer[v.editCursor:]
+			v.editCursor = 0
+			return v, nil
+		case "ctrl+k":
+			v.editBuffer = v.editBuffer[:v.editCursor]
+			return v, nil
+		case "esc":
+			// Cancel edit, go back without saving.
+			v.editing = false
+			if rt := v.runtime; rt != nil {
+				_ = rt.Abort()
+			}
+			v.quitting = true
+			return v, nil
+		default:
+			// Type character.
+			if len(key) == 1 {
+				ch := []rune(key)
+				// Insert at cursor.
+				tail := append([]rune{}, v.editBuffer[v.editCursor:]...)
+				v.editBuffer = append(v.editBuffer[:v.editCursor], append(ch, tail...)...)
+				v.editCursor++
+			}
+			return v, nil
+		}
+	}
+
+	// List navigation for select steps.
 	if step != nil && step.Type == StepSelect {
 		switch key {
 		case "up", "k":
@@ -300,6 +371,21 @@ func (v *WorkflowView) syncGenModel() {
 	actions = append(actions, tui.ComponentAction{Key: "Esc", Label: "Cancel"})
 	v.gen.SetInteractive(actions)
 
+	// Initialize edit buffer for edit steps.
+	if step.Type == StepEdit {
+		v.editing = true
+		val := ""
+		if step.DataRef != "" {
+			if resolved, ok := v.runtime.DataStore()[strings.TrimPrefix(step.DataRef, "/")]; ok {
+				val = fmt.Sprintf("%v", resolved)
+			}
+		}
+		v.editBuffer = []rune(val)
+		v.editCursor = len(v.editBuffer)
+	} else {
+		v.editing = false
+	}
+
 	// Set item count for select steps.
 	if step.Type == StepSelect && step.DataRef != "" {
 		if items, ok := v.runtime.DataStore()[strings.TrimPrefix(step.DataRef, "/")].([]any); ok {
@@ -361,8 +447,17 @@ func (v WorkflowView) View() string {
 			if step.Type == StepSelect {
 				sections = append(sections, "")
 				sections = append(sections, v.renderSelectList(step, w-4))
-			} else if step.Type == StepConfirm || step.Type == StepEdit {
-				// Show the selected item context on confirm/edit steps.
+			} else if step.Type == StepEdit {
+				// Show selected item context.
+				if sel, ok := v.runtime.DataStore()["selectedItem"]; ok {
+					sections = append(sections, "")
+					sections = append(sections, v.renderItemDetail(sel, w-4))
+				}
+				// Render the editable text input.
+				sections = append(sections, "")
+				sections = append(sections, v.renderEditInput(w-4))
+			} else if step.Type == StepConfirm {
+				// Show the selected item context on confirm steps.
 				if sel, ok := v.runtime.DataStore()["selectedItem"]; ok {
 					sections = append(sections, "")
 					sections = append(sections, v.renderItemDetail(sel, w-4))
@@ -434,6 +529,40 @@ func (v WorkflowView) Quitting() bool {
 // Runtime returns the underlying runtime for inspection.
 func (v WorkflowView) Runtime() *Runtime {
 	return v.runtime
+}
+
+// renderEditInput draws the text editor with cursor.
+func (v WorkflowView) renderEditInput(width int) string {
+	labelStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(tui.LabelColor))
+	fieldStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(tui.NexPurple)).
+		Padding(0, 1).
+		Width(min(width, 70))
+
+	label := "Reply"
+	step := v.runtime.CurrentStep()
+	if step != nil && step.Display != nil {
+		if l, ok := step.Display.Props["label"].(string); ok && l != "" {
+			label = l
+		}
+	}
+
+	// Render text with cursor.
+	text := string(v.editBuffer)
+	if v.editing {
+		// Insert a visible cursor character.
+		before := string(v.editBuffer[:v.editCursor])
+		after := string(v.editBuffer[v.editCursor:])
+		cursor := lipgloss.NewStyle().Reverse(true).Render(" ")
+		if v.editCursor < len(v.editBuffer) {
+			cursor = lipgloss.NewStyle().Reverse(true).Render(string(v.editBuffer[v.editCursor]))
+			after = string(v.editBuffer[v.editCursor+1:])
+		}
+		text = before + cursor + after
+	}
+
+	return labelStyle.Render(label) + "\n" + fieldStyle.Render(text)
 }
 
 // renderItemDetail shows the details of the selected item as a bordered card.
