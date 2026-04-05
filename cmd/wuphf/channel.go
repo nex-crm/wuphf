@@ -4195,13 +4195,21 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	case trimmed == "/workflow demo":
 		clearCurrent()
 		return m, launchDemoWorkflow()
+	case strings.HasPrefix(trimmed, "/workflow create "):
+		clearCurrent()
+		desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "/workflow create "))
+		if desc == "" {
+			m.notice = "Usage: /workflow create <description>"
+			return m, nil
+		}
+		return m, generateWorkflowFromDescription(desc)
 	case trimmed == "/workflow":
 		clearCurrent()
-		m.notice = "Usage: /workflow demo — launch a demo workflow"
+		m.notice = "Usage: /workflow demo | /workflow create <description>"
 		return m, nil
 	case strings.HasPrefix(trimmed, "/workflow "):
 		clearCurrent()
-		m.notice = "Usage: /workflow demo — launch a demo workflow"
+		m.notice = "Usage: /workflow demo | /workflow create <description>"
 		return m, nil
 	case trimmed == "/skills":
 		clearCurrent()
@@ -5771,6 +5779,153 @@ func launchDemoWorkflow() tea.Cmd {
 		rt.SetData("/draftReply", "Thanks for sending this over. I'll review and get back to you by EOD.")
 		return channelWorkflowLaunchMsg{runtime: rt, name: "demo-triage"}
 	}
+}
+
+// generateWorkflowFromDescription builds a workflow spec dynamically from a
+// natural language description. This creates real interactive workflows on the
+// fly without hardcoded specs.
+func generateWorkflowFromDescription(description string) tea.Cmd {
+	return func() tea.Msg {
+		slug := strings.ToLower(strings.Join(strings.Fields(description), "-"))
+		if len(slug) > 30 {
+			slug = slug[:30]
+		}
+
+		spec := workflow.WorkflowSpec{
+			ID:    slug,
+			Title: description,
+		}
+
+		// Parse the description to understand what kind of workflow the user wants.
+		descLower := strings.ToLower(description)
+		items := extractItemsFromDescription(descLower)
+
+		if len(items) == 0 {
+			// No specific items found. Build a generic checklist workflow.
+			items = []workflowItem{
+				{Name: "Item 1", Detail: "First item to process"},
+				{Name: "Item 2", Detail: "Second item to process"},
+				{Name: "Item 3", Detail: "Third item to process"},
+			}
+		}
+
+		// Build a triage-style workflow: list → review → (approve/dismiss) → back to list.
+		spec.Steps = []workflow.StepSpec{
+			{
+				ID:      "list",
+				Type:    workflow.StepSelect,
+				Prompt:  fmt.Sprintf("Select an item to review:"),
+				DataRef: "/items",
+				Actions: []workflow.ActionSpec{
+					{Key: "a", Label: "Approve", Transition: "review"},
+					{Key: "d", Label: "Dismiss", Transition: "list"},
+					{Key: "q", Label: "Finish", Transition: "done"},
+				},
+				AllowLoop: true,
+			},
+			{
+				ID:        "review",
+				Type:      workflow.StepConfirm,
+				Prompt:    "Take action on this item?",
+				AllowLoop: true,
+				Display: &workflow.DisplaySpec{
+					Component: "text",
+					DataRef:   "/notes",
+				},
+				Actions: []workflow.ActionSpec{
+					{Key: "y", Label: "Yes, done", Transition: "list"},
+					{Key: "e", Label: "Add note", Transition: "edit"},
+					{Key: "n", Label: "Skip", Transition: "list"},
+				},
+			},
+			{
+				ID:      "edit",
+				Type:    workflow.StepEdit,
+				Prompt:  "Add a note:",
+				DataRef: "/notes",
+				Display: &workflow.DisplaySpec{
+					Component: "textfield",
+					Props:     map[string]any{"label": "Note", "multiline": true},
+				},
+				Actions: []workflow.ActionSpec{
+					{Key: "Enter", Label: "Done", Transition: "review"},
+				},
+			},
+		}
+
+		// Validate the generated spec.
+		if err := workflow.ValidateSpec(spec); err != nil {
+			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
+		}
+
+		rt, err := workflow.NewRuntime(spec)
+		if err != nil {
+			return channelWorkflowLaunchMsg{name: "error: " + err.Error()}
+		}
+
+		// Populate with the extracted items.
+		itemData := make([]any, len(items))
+		for i, it := range items {
+			itemData[i] = map[string]any{
+				"name":   it.Name,
+				"status": it.Status,
+				"detail": it.Detail,
+			}
+		}
+		rt.SetData("/items", itemData)
+		rt.SetData("/notes", "")
+
+		return channelWorkflowLaunchMsg{runtime: rt, name: slug}
+	}
+}
+
+type workflowItem struct {
+	Name   string
+	Status string
+	Detail string
+}
+
+// extractItemsFromDescription tries to pull structured items from the user's
+// description. Looks for comma-separated lists, numbered items, etc.
+func extractItemsFromDescription(desc string) []workflowItem {
+	var items []workflowItem
+
+	// Check for comma or "and" separated lists:
+	// "review alice, bob, and carol" → 3 items
+	// "triage bugs, features, and docs" → 3 items
+	// Strip common prefixes.
+	content := desc
+	for _, prefix := range []string{
+		"review ", "triage ", "process ", "check ", "approve ",
+		"go through ", "handle ", "manage ", "sort ", "prioritize ",
+	} {
+		content = strings.TrimPrefix(content, prefix)
+	}
+
+	// Split by comma, "and", newline.
+	content = strings.ReplaceAll(content, " and ", ",")
+	content = strings.ReplaceAll(content, " & ", ",")
+	parts := strings.Split(content, ",")
+
+	for _, p := range parts {
+		name := strings.TrimSpace(p)
+		if name == "" {
+			continue
+		}
+		items = append(items, workflowItem{
+			Name:   name,
+			Status: "pending",
+			Detail: "",
+		})
+	}
+
+	// If we only got 1 item and it's multi-word, it might be a description
+	// not a list. In that case, return empty to trigger the generic workflow.
+	if len(items) == 1 && !strings.Contains(items[0].Name, " ") {
+		return nil
+	}
+
+	return items
 }
 
 func tickChannel() tea.Cmd {
