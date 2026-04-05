@@ -258,8 +258,22 @@ func (r *Runtime) CompleteAction(result map[string]any, actionErr error) error {
 
 	action := r.pendingAction
 	stepID := r.pendingStepID
+
+	// For auto-dispatched run steps, there's no pending action.
+	// Use the current step and its first action/transition.
 	if action == nil {
-		return fmt.Errorf("no pending action to complete")
+		step := r.findStep(r.currentStepID)
+		if step == nil {
+			return fmt.Errorf("no pending action to complete")
+		}
+		stepID = step.ID
+		// Use step-level transition or first action's transition.
+		transition := step.Transition
+		if transition == "" && len(step.Actions) > 0 {
+			transition = step.Actions[0].Transition
+		}
+		// Create a synthetic action for the completion flow.
+		action = &ActionSpec{Key: "(auto)", Label: "auto", Transition: transition}
 	}
 
 	if actionErr != nil {
@@ -390,6 +404,13 @@ func (r *Runtime) ActionProviderFor(provider string) ActionProvider {
 	return r.actionProvider
 }
 
+// AgentDispatcher returns the agent dispatcher, or nil if not configured.
+func (r *Runtime) AgentDispatcher() AgentDispatcher {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.agentDispatcher
+}
+
 // findAction looks up an action by key within a step (case-insensitive).
 func (r *Runtime) findAction(step *StepSpec, key string) *ActionSpec {
 	for i := range step.Actions {
@@ -446,6 +467,14 @@ func (r *Runtime) recordEvent(stepID, action string, result map[string]any, err 
 		event.Error = err.Error()
 	}
 	r.stepHistory = append(r.stepHistory, event)
+}
+
+// SetExecuting transitions to executing_action state for async operations.
+func (r *Runtime) SetExecuting() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.state = StateExecutingAction
+	r.pendingStartTime = time.Now()
 }
 
 // clearPending resets pending action state.

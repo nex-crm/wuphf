@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -180,6 +182,88 @@ func (d *brokerAgentDispatcher) pollReply(ctx context.Context, agentSlug, afterI
 		}
 	}
 	return nil, latestID, nil
+}
+
+// inlineLLMDispatcher calls the Claude API directly for agent dispatch
+// without needing the full broker/agent office running.
+type inlineLLMDispatcher struct{}
+
+func newInlineLLMDispatcher() *inlineLLMDispatcher {
+	return &inlineLLMDispatcher{}
+}
+
+func (d *inlineLLMDispatcher) Dispatch(ctx context.Context, agentSlug string, prompt string) (map[string]any, error) {
+	// Use the Claude API via the chat package or direct HTTP call.
+	// For now, use a subprocess call to the Claude CLI which is always available.
+	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	if apiKey == "" {
+		return nil, fmt.Errorf("ANTHROPIC_API_KEY not set — cannot dispatch to agent %q", agentSlug)
+	}
+
+	reqBody := map[string]any{
+		"model":      "claude-sonnet-4-20250514",
+		"max_tokens": 1024,
+		"messages": []map[string]any{
+			{"role": "user", "content": prompt},
+		},
+		"system": fmt.Sprintf("You are a helpful AI assistant acting as the %q agent. Respond with structured JSON when possible. Be concise and actionable.", agentSlug),
+	}
+
+	raw, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		"https://api.anthropic.com/v1/messages", bytes.NewReader(raw))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("Claude API call failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("Claude API returned %d: %s", resp.StatusCode, string(respBody[:min(len(respBody), 200)]))
+	}
+
+	var apiResp struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal(respBody, &apiResp); err != nil {
+		return nil, fmt.Errorf("parse Claude response: %w", err)
+	}
+
+	if len(apiResp.Content) == 0 {
+		return nil, fmt.Errorf("Claude returned empty response")
+	}
+
+	text := apiResp.Content[0].Text
+
+	// Try to parse as JSON first.
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(text), &parsed); err == nil {
+		return parsed, nil
+	}
+
+	// Try to extract a JSON array of ideas/items.
+	var items []any
+	if err := json.Unmarshal([]byte(text), &items); err == nil {
+		return map[string]any{"items": items, "text": text}, nil
+	}
+
+	// Return as text.
+	return map[string]any{"text": text}, nil
 }
 
 // hydrateDataSources fetches real data from Composio for each DataSource.

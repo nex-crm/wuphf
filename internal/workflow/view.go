@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -364,16 +365,138 @@ func (v WorkflowView) handleActionResult(msg actionResultMsg) (WorkflowView, tea
 	_ = v.runtime.CompleteAction(msg.result, msg.err)
 	v.syncGenModel()
 
-	// If runtime auto-transitioned (submit/run steps), check for more auto-steps.
+	// Post-processing: if the run step result contains items/ideas, parse them
+	// into the data store so downstream select steps can display them.
+	if msg.result != nil {
+		v.parseAgentResultIntoItems(msg.result)
+	}
+
+	// If runtime auto-transitioned to a submit/run step, execute it.
 	step := v.runtime.CurrentStep()
 	if step != nil && v.runtime.State() == StateActive {
-		if step.Type == StepSubmit || step.Type == StepRun {
-			if step.Execute != nil {
-				return v, v.executeAction(*step.Execute)
-			}
+		if step.Type == StepSubmit && step.Execute != nil {
+			return v, v.executeAction(*step.Execute)
+		}
+		if step.Type == StepRun {
+			return v, v.dispatchRunStep(step)
 		}
 	}
 	return v, nil
+}
+
+// parseAgentResultIntoItems converts agent output into selectable items.
+// Looks for: JSON array of objects, "items" field, or splits text into lines.
+func (v *WorkflowView) parseAgentResultIntoItems(result map[string]any) {
+	var items []any
+
+	// Check for "items" field (agent returned structured data).
+	if arr, ok := result["items"].([]any); ok {
+		items = arr
+	}
+
+	// Check for text response — try to parse ideas from it.
+	if text, ok := result["text"].(string); ok && len(items) == 0 {
+		// Try parsing the text as JSON array.
+		var parsed []any
+		if err := json.Unmarshal([]byte(text), &parsed); err == nil {
+			items = parsed
+		} else {
+			// Split by numbered lines or bullet points.
+			lines := strings.Split(text, "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line == "" {
+					continue
+				}
+				// Strip number prefixes like "1. " or "- ".
+				for _, prefix := range []string{"1. ", "2. ", "3. ", "4. ", "5. ", "6. ", "7. ", "8. ", "9. ", "- ", "* ", "• "} {
+					line = strings.TrimPrefix(line, prefix)
+				}
+				if len(line) > 5 {
+					items = append(items, map[string]any{
+						"name":   truncate(line, 60),
+						"detail": line,
+						"status": "new",
+					})
+				}
+			}
+		}
+	}
+
+	if len(items) > 0 {
+		// Normalize items: ensure each has name/detail/status fields.
+		normalized := make([]any, 0, len(items))
+		for _, item := range items {
+			switch v := item.(type) {
+			case map[string]any:
+				if v["name"] == nil && v["title"] != nil {
+					v["name"] = v["title"]
+				}
+				if v["status"] == nil {
+					v["status"] = "new"
+				}
+				normalized = append(normalized, v)
+			case string:
+				normalized = append(normalized, map[string]any{
+					"name":   truncate(v, 60),
+					"detail": v,
+					"status": "new",
+				})
+			}
+		}
+		v.runtime.SetData("/ideas", normalized)
+		v.runtime.SetData("/items", normalized) // Also set as /items for generic select steps.
+	}
+}
+
+func truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max-3] + "..."
+}
+
+// dispatchRunStep handles "run" steps: dispatches to an agent or executes an action.
+func (v WorkflowView) dispatchRunStep(step *StepSpec) tea.Cmd {
+	rt := v.runtime
+	rt.SetExecuting()
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+		defer cancel()
+
+		// Agent dispatch (primary path for run steps).
+		if step.Agent != "" {
+			dispatcher := rt.AgentDispatcher()
+			if dispatcher == nil {
+				return actionResultMsg{err: fmt.Errorf("no agent dispatcher configured")}
+			}
+			prompt := step.AgentPrompt
+			if prompt == "" {
+				prompt = step.Prompt
+			}
+			result, err := dispatcher.Dispatch(ctx, step.Agent, prompt)
+			if err != nil {
+				return actionResultMsg{err: err}
+			}
+			// Store the result at the output ref.
+			if step.OutputRef != "" {
+				rt.SetData(step.OutputRef, result)
+			}
+			return actionResultMsg{result: result}
+		}
+
+		// Fallback to execute spec.
+		if step.Execute != nil {
+			provider := rt.ActionProviderFor(step.Execute.Provider)
+			if provider == nil {
+				return actionResultMsg{err: fmt.Errorf("no provider for %q", step.Execute.Provider)}
+			}
+			result, err := provider.Execute(ctx, *step.Execute, rt.DataStore())
+			return actionResultMsg{result: result, err: err}
+		}
+
+		return actionResultMsg{err: fmt.Errorf("run step %q has no agent or execute spec", step.ID)}
+	}
 }
 
 // syncGenModel updates the GenerativeModel to match the current step.

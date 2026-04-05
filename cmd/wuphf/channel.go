@@ -1591,6 +1591,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				opts = append(opts, workflow.WithAgentDispatcher(
 					newBrokerAgentDispatcher("http://127.0.0.1:7890", brokerToken, m.activeChannel),
 				))
+			} else {
+				// Fallback: call Claude API directly for agent dispatch.
+				opts = append(opts, workflow.WithAgentDispatcher(newInlineLLMDispatcher()))
 			}
 
 			var rterr error
@@ -5905,12 +5908,14 @@ func buildBrainstormWorkflow(slug, description string) (workflow.WorkflowSpec, *
 		Title: description,
 		Steps: []workflow.StepSpec{
 			{
-				ID:     "generate",
-				Type:   workflow.StepConfirm,
-				Prompt: "Ready to brainstorm? The agent will generate ideas for:\n\n  " + description,
+				ID:          "generate",
+				Type:        workflow.StepRun,
+				Prompt:      "Generating ideas...",
+				Agent:       "brainstorm",
+				AgentPrompt: fmt.Sprintf("Generate 5 concrete, actionable ideas for: %s\n\nFor each idea, provide:\n- A short title (under 10 words)\n- A one-sentence description of what to do\n- Why it would work\n\nRespond as a JSON array of objects with fields: name, detail, why", description),
+				OutputRef:   "/agentResult",
 				Actions: []workflow.ActionSpec{
-					{Key: "Enter", Label: "Generate ideas", Transition: "review"},
-					{Key: "q", Label: "Cancel", Transition: "done"},
+					{Key: "Enter", Label: "Continue", Transition: "review"},
 				},
 			},
 			{
@@ -5922,7 +5927,7 @@ func buildBrainstormWorkflow(slug, description string) (workflow.WorkflowSpec, *
 					{Key: "a", Label: "Keep", Transition: "rate"},
 					{Key: "d", Label: "Discard", Transition: "review"},
 					{Key: "e", Label: "Edit", Transition: "edit-idea"},
-					{Key: "q", Label: "Finish", Transition: "summary"},
+					{Key: "q", Label: "Finish", Transition: "done"},
 				},
 				AllowLoop: true,
 			},
@@ -5956,30 +5961,14 @@ func buildBrainstormWorkflow(slug, description string) (workflow.WorkflowSpec, *
 					{Key: "Enter", Label: "Save", Transition: "review"},
 				},
 			},
-			{
-				ID:     "summary",
-				Type:   workflow.StepConfirm,
-				Prompt: "Brainstorm complete!",
-				Display: &workflow.DisplaySpec{
-					Component: "text",
-					DataRef:   "/summaryText",
-				},
-				Actions: []workflow.ActionSpec{
-					{Key: "Enter", Label: "Done", Transition: "done"},
-				},
-			},
 		},
 	}
 
+	// Don't pre-populate — the run step will populate /agentResult,
+	// then we parse it into /ideas after the agent returns.
 	rt, _ := workflow.NewRuntime(spec)
-	rt.SetData("/ideas", []any{
-		map[string]any{"name": "Idea 1: Think about this...", "status": "new", "detail": "Placeholder — in production, the CEO agent generates real ideas based on your prompt."},
-		map[string]any{"name": "Idea 2: Consider that...", "status": "new", "detail": "Placeholder — connect agents for real idea generation."},
-		map[string]any{"name": "Idea 3: What if we...", "status": "new", "detail": "Placeholder — the agent would analyze your domain and suggest specifics."},
-	})
 	rt.SetData("/currentRating", "Select a star rating for this idea.")
 	rt.SetData("/editBuffer", "")
-	rt.SetData("/summaryText", "Review complete. Your rated ideas are saved.")
 	return spec, rt
 }
 
