@@ -281,6 +281,15 @@ func (v WorkflowView) handleKey(msg tea.KeyMsg) (WorkflowView, tea.Cmd) {
 	// Store selected item before dispatching action on select steps.
 	if step != nil && step.Type == StepSelect {
 		v.storeSelectedItem(step)
+
+		// If the action loops back to this same list step (dismiss/skip),
+		// remove the selected item since the user is done with it.
+		for _, act := range step.Actions {
+			if act.Key == key && act.Transition == step.ID {
+				v.removeSelectedItem(step)
+				break
+			}
+		}
 	}
 
 	// Action dispatch.
@@ -302,6 +311,20 @@ func (v WorkflowView) handleKey(msg tea.KeyMsg) (WorkflowView, tea.Cmd) {
 		if transition == TransitionDone {
 			return v, nil
 		}
+
+		// If we're leaving a confirm/edit step back to a select step
+		// and the action was an "affirmative" (first action = approve/send),
+		// remove the processed item from the list.
+		if step != nil && (step.Type == StepConfirm || step.Type == StepSubmit) {
+			targetStep := v.runtime.findStep(transition)
+			if targetStep != nil && targetStep.Type == StepSelect {
+				// Check if this was the primary (affirmative) action.
+				if len(step.Actions) > 0 && key == step.Actions[0].Key {
+					v.removeSelectedItem(targetStep)
+				}
+			}
+		}
+
 		if err := v.runtime.Transition(transition); err != nil {
 			v.err = err
 		}
@@ -605,6 +628,50 @@ func (v WorkflowView) renderItemDetail(item any, width int) string {
 		Width(min(width, 70))
 
 	return cardStyle.Render(strings.Join(lines, "\n"))
+}
+
+// removeSelectedItem removes the currently selected item from the data arrays.
+// Called after an email has been replied to or dismissed.
+func (v *WorkflowView) removeSelectedItem(listStep *StepSpec) {
+	if listStep.DataRef == "" {
+		return
+	}
+	key := strings.TrimPrefix(listStep.DataRef, "/")
+	items, ok := v.runtime.DataStore()[key].([]any)
+	if !ok || len(items) == 0 {
+		return
+	}
+	idx := v.gen.SelectedIndex()
+	if idx < 0 || idx >= len(items) {
+		return
+	}
+	// Remove from the items list.
+	newItems := make([]any, 0, len(items)-1)
+	newItems = append(newItems, items[:idx]...)
+	newItems = append(newItems, items[idx+1:]...)
+	v.runtime.SetData("/"+key, newItems)
+
+	// Also remove from the table data if it exists.
+	tableKey := key + "Table"
+	if tableItems, ok := v.runtime.DataStore()[tableKey].([]any); ok && len(tableItems) > 1 {
+		// Table has header row + data rows. The data row index is idx+1.
+		tableIdx := idx + 1
+		if tableIdx < len(tableItems) {
+			newTable := make([]any, 0, len(tableItems)-1)
+			newTable = append(newTable, tableItems[:tableIdx]...)
+			newTable = append(newTable, tableItems[tableIdx+1:]...)
+			v.runtime.SetData("/"+tableKey, newTable)
+		}
+	}
+
+	// Adjust selection if needed.
+	if idx >= len(newItems) && len(newItems) > 0 {
+		v.gen.SetSelectedIndex(len(newItems) - 1)
+	}
+	v.gen.SetItemCount(len(newItems))
+
+	// Clear the selected item.
+	v.runtime.SetData("/selectedItem", nil)
 }
 
 // storeSelectedItem saves the currently highlighted item to /selectedItem in the data store.
