@@ -1616,6 +1616,510 @@ func TestBlockingRequestCannotBeSnoozedByCommand(t *testing.T) {
 	}
 }
 
+// ── Interview workflow converter tests ───────────────────────────────
+
+func TestInterviewToWorkflow_WithOptions(t *testing.T) {
+	interview := channelInterview{
+		ID:       "iv-1",
+		From:     "ceo",
+		Question: "Which market should we enter first?",
+		Options: []channelInterviewOption{
+			{ID: "smb", Label: "SMB", Description: "Small businesses"},
+			{ID: "enterprise", Label: "Enterprise", Description: "Large orgs"},
+			{ID: "mid", Label: "Mid-market", Description: "Medium sized"},
+		},
+		RecommendedID: "smb",
+		Blocking:      true,
+	}
+
+	spec := interviewToWorkflow(interview)
+
+	if spec.InterviewID != "iv-1" {
+		t.Fatalf("expected InterviewID iv-1, got %q", spec.InterviewID)
+	}
+	if spec.From != "ceo" {
+		t.Fatalf("expected From ceo, got %q", spec.From)
+	}
+	if len(spec.Steps) != 2 {
+		t.Fatalf("expected 2 steps (select + confirm), got %d", len(spec.Steps))
+	}
+
+	answerStep := spec.Steps[0]
+	if answerStep.Kind != stepKindSelect {
+		t.Fatalf("expected select step, got %q", answerStep.Kind)
+	}
+	if answerStep.Title != "Which market should we enter first?" {
+		t.Fatalf("expected question as title, got %q", answerStep.Title)
+	}
+	if len(answerStep.Options) != 3 {
+		t.Fatalf("expected 3 options, got %d", len(answerStep.Options))
+	}
+	if !answerStep.Options[0].Recommended {
+		t.Fatalf("expected first option (smb) to be recommended")
+	}
+	if answerStep.Options[1].Recommended || answerStep.Options[2].Recommended {
+		t.Fatalf("expected only smb to be recommended")
+	}
+
+	confirmStep := spec.Steps[1]
+	if confirmStep.Kind != stepKindConfirm {
+		t.Fatalf("expected confirm step, got %q", confirmStep.Kind)
+	}
+}
+
+func TestInterviewToWorkflow_FreeText(t *testing.T) {
+	interview := channelInterview{
+		ID:       "iv-2",
+		From:     "pm",
+		Question: "What should the tagline be?",
+	}
+
+	spec := interviewToWorkflow(interview)
+
+	if len(spec.Steps) != 2 {
+		t.Fatalf("expected 2 steps (edit + confirm), got %d", len(spec.Steps))
+	}
+
+	answerStep := spec.Steps[0]
+	if answerStep.Kind != stepKindEdit {
+		t.Fatalf("expected edit step for free-text interview, got %q", answerStep.Kind)
+	}
+	if answerStep.Title != "What should the tagline be?" {
+		t.Fatalf("expected question as title, got %q", answerStep.Title)
+	}
+	if len(answerStep.Options) != 0 {
+		t.Fatalf("expected no options for free-text, got %d", len(answerStep.Options))
+	}
+
+	if spec.Steps[1].Kind != stepKindConfirm {
+		t.Fatalf("expected confirm step, got %q", spec.Steps[1].Kind)
+	}
+}
+
+func TestInterviewToWorkflow_WithContext(t *testing.T) {
+	interview := channelInterview{
+		ID:       "iv-3",
+		From:     "eng",
+		Question: "Which database?",
+		Context:  "We need ACID compliance and strong read performance.",
+		Options: []channelInterviewOption{
+			{ID: "pg", Label: "PostgreSQL"},
+			{ID: "mysql", Label: "MySQL"},
+		},
+	}
+
+	spec := interviewToWorkflow(interview)
+
+	if spec.Context != "We need ACID compliance and strong read performance." {
+		t.Fatalf("expected context to be preserved, got %q", spec.Context)
+	}
+
+	// Context should also appear in the answer step description
+	answerStep := spec.Steps[0]
+	if answerStep.Description != spec.Context {
+		t.Fatalf("expected step description to contain context, got %q", answerStep.Description)
+	}
+
+	// Render the workflow and verify context appears
+	state := newInterviewWorkflowState(spec)
+	rendered := stripANSI(renderInterviewWorkflow(state, 80))
+	if !strings.Contains(rendered, "ACID compliance") {
+		t.Fatalf("expected context to appear in rendered workflow, got %q", rendered)
+	}
+}
+
+func TestInterviewToWorkflow_Blocking(t *testing.T) {
+	interview := channelInterview{
+		ID:       "iv-4",
+		From:     "ceo",
+		Question: "Approve the budget?",
+		Blocking: true,
+		Required: true,
+		Options: []channelInterviewOption{
+			{ID: "yes", Label: "Approve"},
+			{ID: "no", Label: "Reject"},
+		},
+	}
+
+	spec := interviewToWorkflow(interview)
+
+	if !spec.Blocking {
+		t.Fatalf("expected spec.Blocking to be true")
+	}
+	if !spec.Required {
+		t.Fatalf("expected spec.Required to be true")
+	}
+
+	// Render and verify blocking badge appears
+	state := newInterviewWorkflowState(spec)
+	rendered := stripANSI(renderInterviewWorkflow(state, 80))
+	if !strings.Contains(rendered, "blocking") {
+		t.Fatalf("expected blocking indicator in rendered workflow, got %q", rendered)
+	}
+	if !strings.Contains(rendered, "required") {
+		t.Fatalf("expected required indicator in rendered workflow, got %q", rendered)
+	}
+}
+
+func TestInterviewWorkflow_SelectAdvanceAndSubmit(t *testing.T) {
+	interview := channelInterview{
+		ID:       "iv-5",
+		From:     "pm",
+		Question: "Priority?",
+		Options: []channelInterviewOption{
+			{ID: "p0", Label: "Critical"},
+			{ID: "p1", Label: "High"},
+		},
+		RecommendedID: "p1",
+	}
+
+	spec := interviewToWorkflow(interview)
+	state := newInterviewWorkflowState(spec)
+
+	// Should pre-select recommended (p1 at index 1)
+	if state.SelectedIdx != 1 {
+		t.Fatalf("expected recommended option pre-selected at index 1, got %d", state.SelectedIdx)
+	}
+
+	// Select first option instead
+	state.SelectedIdx = 0
+
+	// Advance to confirm
+	completed := state.advance()
+	if completed {
+		t.Fatalf("expected not completed after first advance")
+	}
+	if state.CurrentStep != 1 {
+		t.Fatalf("expected step 1 (confirm), got %d", state.CurrentStep)
+	}
+
+	// Confirm step should show the answer
+	if state.Data["answer"] != "Critical" {
+		t.Fatalf("expected answer data to be Critical, got %q", state.Data["answer"])
+	}
+
+	// Advance past confirm = completed
+	completed = state.advance()
+	if !completed {
+		t.Fatalf("expected completed after confirm step")
+	}
+	if state.answerChoiceID() != "p0" {
+		t.Fatalf("expected choice ID p0, got %q", state.answerChoiceID())
+	}
+}
+
+func TestInterviewWorkflow_EditAdvanceAndSubmit(t *testing.T) {
+	interview := channelInterview{
+		ID:       "iv-6",
+		From:     "eng",
+		Question: "Describe the feature",
+	}
+
+	spec := interviewToWorkflow(interview)
+	state := newInterviewWorkflowState(spec)
+
+	// Type an answer
+	state.EditBuffer = []rune("Real-time notifications")
+	state.EditPos = len(state.EditBuffer)
+
+	// Advance to confirm
+	state.advance()
+	if state.Data["answer"] != "Real-time notifications" {
+		t.Fatalf("expected edit text to be collected, got %q", state.Data["answer"])
+	}
+
+	// Confirm
+	state.advance()
+	if !state.Completed {
+		t.Fatalf("expected completed")
+	}
+	if state.answerCustomText() != "Real-time notifications" {
+		t.Fatalf("expected custom text, got %q", state.answerCustomText())
+	}
+	if state.answerChoiceID() != "" {
+		t.Fatalf("expected no choice ID for free-text, got %q", state.answerChoiceID())
+	}
+}
+
+func TestInterviewWorkflow_GoBackRestoresEditBuffer(t *testing.T) {
+	interview := channelInterview{
+		ID:       "iv-7",
+		From:     "pm",
+		Question: "Name the feature",
+	}
+
+	spec := interviewToWorkflow(interview)
+	state := newInterviewWorkflowState(spec)
+
+	state.EditBuffer = []rune("Draft name")
+	state.EditPos = len(state.EditBuffer)
+	state.advance() // to confirm
+
+	if state.CurrentStep != 1 {
+		t.Fatalf("expected step 1, got %d", state.CurrentStep)
+	}
+
+	state.goBack() // back to edit
+
+	if state.CurrentStep != 0 {
+		t.Fatalf("expected step 0 after goBack, got %d", state.CurrentStep)
+	}
+	if string(state.EditBuffer) != "Draft name" {
+		t.Fatalf("expected edit buffer restored, got %q", string(state.EditBuffer))
+	}
+}
+
+func TestInterviewWorkflow_ProgressRendering(t *testing.T) {
+	interview := channelInterview{
+		ID:       "iv-8",
+		From:     "ceo",
+		Question: "Pick one",
+		Options: []channelInterviewOption{
+			{ID: "a", Label: "A"},
+			{ID: "b", Label: "B"},
+		},
+	}
+
+	spec := interviewToWorkflow(interview)
+	state := newInterviewWorkflowState(spec)
+
+	rendered := stripANSI(renderInterviewWorkflow(state, 80))
+	if !strings.Contains(rendered, "Step 1 of 2") {
+		t.Fatalf("expected progress indicator 'Step 1 of 2', got %q", rendered)
+	}
+
+	state.advance()
+	rendered = stripANSI(renderInterviewWorkflow(state, 80))
+	if !strings.Contains(rendered, "Step 2 of 2") {
+		t.Fatalf("expected progress indicator 'Step 2 of 2', got %q", rendered)
+	}
+}
+
+// ── Approval workflow tests ──────────────────────────────────────────────
+
+func TestApprovalToWorkflow_BasicApproval(t *testing.T) {
+	interview := channelInterview{
+		ID:       "approval-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Channel:  "general",
+		Question: "Deploy v2.3.1 to production?",
+	}
+	wf := buildApprovalWorkflow(interview)
+	if len(wf.Steps) != 5 {
+		t.Fatalf("expected 5 steps, got %d", len(wf.Steps))
+	}
+	// Step 0: context with approve/reject/steer/dismiss
+	if wf.Steps[0].ID != "context" {
+		t.Errorf("step 0 expected 'context', got %q", wf.Steps[0].ID)
+	}
+	if wf.Steps[0].Type != "confirm" {
+		t.Errorf("step 0 expected type 'confirm', got %q", wf.Steps[0].Type)
+	}
+	if len(wf.Steps[0].Actions) != 4 {
+		t.Errorf("context step expected 4 actions, got %d", len(wf.Steps[0].Actions))
+	}
+	// Step 1: approve (confirm)
+	if wf.Steps[1].ID != "approve" || wf.Steps[1].Type != "confirm" {
+		t.Errorf("step 1 expected approve/confirm, got %q/%q", wf.Steps[1].ID, wf.Steps[1].Type)
+	}
+	// Step 2: approve_note (edit)
+	if wf.Steps[2].ID != "approve_note" || wf.Steps[2].Type != "edit" {
+		t.Errorf("step 2 expected approve_note/edit, got %q/%q", wf.Steps[2].ID, wf.Steps[2].Type)
+	}
+	// Step 3: reject (edit)
+	if wf.Steps[3].ID != "reject" || wf.Steps[3].Type != "edit" {
+		t.Errorf("step 3 expected reject/edit, got %q/%q", wf.Steps[3].ID, wf.Steps[3].Type)
+	}
+	// Step 4: steer (edit)
+	if wf.Steps[4].ID != "steer" || wf.Steps[4].Type != "edit" {
+		t.Errorf("step 4 expected steer/edit, got %q/%q", wf.Steps[4].ID, wf.Steps[4].Type)
+	}
+
+	// Verify the decision resolution for a basic approve
+	d := resolveDecision("approve", "")
+	if d.Type != approvalDecisionApproved {
+		t.Errorf("expected approved, got %q", d.Type)
+	}
+	if d.Timestamp == "" {
+		t.Error("expected non-empty timestamp")
+	}
+}
+
+func TestApprovalToWorkflow_WithContext(t *testing.T) {
+	interview := channelInterview{
+		ID:       "approval-2",
+		Kind:     "approval",
+		From:     "ceo",
+		Channel:  "general",
+		Question: "Deploy v2.3.1 to production?",
+		Context:  "All tests passing, 3 PRs merged since last deploy.",
+	}
+	wf := buildApprovalWorkflow(interview)
+	// Context step description should contain the question
+	if wf.Steps[0].Description != interview.Question {
+		t.Errorf("context step description should be the question, got %q", wf.Steps[0].Description)
+	}
+	// The interview is preserved in the workflow for context card rendering
+	if wf.Interview.Context != "All tests passing, 3 PRs merged since last deploy." {
+		t.Errorf("expected interview context preserved, got %q", wf.Interview.Context)
+	}
+
+	// Render the approval context card and check it includes the context
+	card := stripANSI(renderApprovalContextCard(interview, 60))
+	if !strings.Contains(card, "Approval Required") {
+		t.Errorf("card missing 'Approval Required', got:\n%s", card)
+	}
+	if !strings.Contains(card, "@ceo") {
+		t.Errorf("card missing agent name, got:\n%s", card)
+	}
+	if !strings.Contains(card, "All tests passing") {
+		t.Errorf("card missing context, got:\n%s", card)
+	}
+	if !strings.Contains(card, "Review & decide") {
+		t.Errorf("card missing 'Review & decide' prompt, got:\n%s", card)
+	}
+}
+
+func TestApprovalToWorkflow_RejectRequiresRationale(t *testing.T) {
+	interview := channelInterview{
+		ID:       "approval-3",
+		Kind:     "approval",
+		From:     "pm",
+		Question: "Ship feature X?",
+	}
+	wf := buildApprovalWorkflow(interview)
+	// Find the reject step
+	var rejectStep *approvalWorkflowStep
+	for i := range wf.Steps {
+		if wf.Steps[i].ID == "reject" {
+			rejectStep = &wf.Steps[i]
+			break
+		}
+	}
+	if rejectStep == nil {
+		t.Fatal("reject step not found")
+	}
+	if rejectStep.Type != "edit" {
+		t.Errorf("reject step should be 'edit' type for text input, got %q", rejectStep.Type)
+	}
+	if !strings.Contains(strings.ToLower(rejectStep.Description), "required") {
+		t.Errorf("reject step description should indicate rationale is required, got %q", rejectStep.Description)
+	}
+
+	// Verify decision resolution captures the rationale
+	d := resolveDecision("reject", "Not ready for production yet")
+	if d.Type != approvalDecisionRejected {
+		t.Errorf("expected rejected, got %q", d.Type)
+	}
+	if d.Note != "Not ready for production yet" {
+		t.Errorf("expected rationale in note, got %q", d.Note)
+	}
+	// Verify custom text includes the note
+	ct := decisionCustomText(d)
+	if !strings.Contains(ct, "Rejected") || !strings.Contains(ct, "Not ready") {
+		t.Errorf("custom text should include decision type and note, got %q", ct)
+	}
+}
+
+func TestDetectApprovalInterview(t *testing.T) {
+	tests := []struct {
+		name     string
+		iv       channelInterview
+		wantAppr bool
+	}{
+		{
+			name:     "explicit approval kind",
+			iv:       channelInterview{Kind: "approval", Question: "Anything?"},
+			wantAppr: true,
+		},
+		{
+			name:     "explicit decision kind",
+			iv:       channelInterview{Kind: "decision", Question: "Anything?"},
+			wantAppr: true,
+		},
+		{
+			name:     "question contains approve",
+			iv:       channelInterview{Kind: "interview", Question: "Can you approve this change?"},
+			wantAppr: true,
+		},
+		{
+			name:     "question contains deploy",
+			iv:       channelInterview{Kind: "", Question: "Should we deploy to production?"},
+			wantAppr: true,
+		},
+		{
+			name:     "question contains proceed",
+			iv:       channelInterview{Kind: "freeform", Question: "Shall I proceed with the migration?"},
+			wantAppr: true,
+		},
+		{
+			name:     "question contains confirm",
+			iv:       channelInterview{Kind: "", Question: "Please confirm the database backup"},
+			wantAppr: true,
+		},
+		{
+			name:     "regular info-gathering interview",
+			iv:       channelInterview{Kind: "interview", Question: "What email address should we use?"},
+			wantAppr: false,
+		},
+		{
+			name:     "freeform question no keywords",
+			iv:       channelInterview{Kind: "freeform", Question: "What color scheme do you prefer?"},
+			wantAppr: false,
+		},
+		{
+			name:     "empty kind, no keywords",
+			iv:       channelInterview{Kind: "", Question: "How many retries should we allow?"},
+			wantAppr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isApprovalInterview(tt.iv)
+			if got != tt.wantAppr {
+				t.Errorf("isApprovalInterview() = %v, want %v", got, tt.wantAppr)
+			}
+		})
+	}
+}
+
+func TestApprovalDecisionTypes(t *testing.T) {
+	// Verify all decision paths produce correct structured output
+	cases := []struct {
+		stepID   string
+		text     string
+		wantType string
+		wantNote string
+	}{
+		{"approve", "", approvalDecisionApproved, ""},
+		{"approve_note", "LGTM", approvalDecisionApprovedWithNote, "LGTM"},
+		{"reject", "Not safe", approvalDecisionRejected, "Not safe"},
+		{"steer", "Use blue instead", approvalDecisionSteered, "Use blue instead"},
+	}
+	for _, c := range cases {
+		d := resolveDecision(c.stepID, c.text)
+		if d.Type != c.wantType {
+			t.Errorf("resolveDecision(%q) type = %q, want %q", c.stepID, d.Type, c.wantType)
+		}
+		if d.Note != c.wantNote {
+			t.Errorf("resolveDecision(%q) note = %q, want %q", c.stepID, d.Note, c.wantNote)
+		}
+		if d.Timestamp == "" {
+			t.Errorf("resolveDecision(%q) missing timestamp", c.stepID)
+		}
+		// Verify the choice helpers are consistent
+		cid := decisionChoiceID(d)
+		if cid != c.wantType {
+			t.Errorf("decisionChoiceID = %q, want %q", cid, c.wantType)
+		}
+		ct := decisionChoiceText(d)
+		if ct == "" {
+			t.Errorf("decisionChoiceText should not be empty for %q", c.stepID)
+		}
+	}
+}
+
 func TestMain(m *testing.M) {
 	// Use a temp home dir so tests don't read the real ~/.wuphf/config.json
 	tmp, _ := os.MkdirTemp("", "wuphf-test-*")

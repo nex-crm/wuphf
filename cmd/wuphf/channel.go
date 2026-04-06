@@ -638,6 +638,9 @@ type channelModel struct {
 	// Telegram connect flow state
 	telegramGroups []team.TelegramGroup
 	telegramToken  string
+
+	// Interview workflow state (nil when no active workflow)
+	interviewWorkflow *interviewWorkflowState
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
@@ -951,6 +954,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.quickJumpTarget = quickJumpNone
 			}
+		}
+
+		// ── Interview workflow key handling ───────────────────────────
+		if m.interviewWorkflow != nil && !m.interviewWorkflow.Completed && !m.interviewWorkflow.Cancelled {
+			return m.handleInterviewWorkflowKey(msg)
 		}
 
 		// ── Esc: close overlays/thread, then cycle ────────────────────
@@ -1281,6 +1289,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Request answer failed: " + msg.err.Error()
 		} else {
 			m.pending = nil
+			m.interviewWorkflow = nil
 			m.input = nil
 			m.inputPos = 0
 			return m, tea.Batch(pollBroker("", m.activeChannel), pollRequests(m.activeChannel), pollTasks(m.activeChannel), pollOfficeLedger())
@@ -1302,6 +1311,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.members = nil
 			m.requests = nil
 			m.pending = nil
+			m.interviewWorkflow = nil
 			m.lastID = ""
 			m.replyToID = ""
 			m.expandedThreads = make(map[string]bool)
@@ -1974,6 +1984,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input = nil
 			m.inputPos = 0
 			m.snoozedInterview = ""
+			// Launch interview workflow
+			spec := interviewToWorkflow(*m.pending)
+			wfState := newInterviewWorkflowState(spec)
+			m.interviewWorkflow = &wfState
 			if m.pending.Blocking || m.pending.Required {
 				m.activeApp = officeAppMessages
 				m.syncSidebarCursorToActive()
@@ -2084,9 +2098,11 @@ func (m channelModel) View() string {
 			"", typingAgents, nil, nil, 0, m.focus == focusMain, m.tickFrame)
 	}
 
-	// Interview card (above composer)
+	// Interview card (above composer) — use workflow when active
 	interviewCard := ""
-	if activePending != nil {
+	if m.interviewWorkflow != nil && !m.interviewWorkflow.Completed && !m.interviewWorkflow.Cancelled {
+		interviewCard = renderInterviewWorkflow(*m.interviewWorkflow, mainW-4)
+	} else if activePending != nil {
 		interviewCard = renderInterviewCard(*activePending, m.selectedOption, mainW-4)
 	}
 	memberDraftCard := ""
@@ -2694,7 +2710,9 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 			"", typingAgents, nil, nil, 0, m.focus == focusMain, m.tickFrame)
 	}
 	interviewCard := ""
-	if activePending != nil {
+	if m.interviewWorkflow != nil && !m.interviewWorkflow.Completed && !m.interviewWorkflow.Cancelled {
+		interviewCard = renderInterviewWorkflow(*m.interviewWorkflow, mainW-4)
+	} else if activePending != nil {
 		interviewCard = renderInterviewCard(*activePending, m.selectedOption, mainW-4)
 	}
 	memberDraftCard := ""
@@ -2733,6 +2751,93 @@ func (m channelModel) visiblePendingRequest() *channelInterview {
 		return nil
 	}
 	return m.pending
+}
+
+// handleInterviewWorkflowKey dispatches key events to the active interview workflow.
+func (m channelModel) handleInterviewWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	wf := m.interviewWorkflow
+	step := wf.currentStep()
+	if step == nil {
+		return m, nil
+	}
+
+	switch msg.String() {
+	case "esc":
+		if wf.Spec.Blocking || wf.Spec.Required {
+			m.notice = "Human decision required. Answer it before the team can continue."
+			return m, nil
+		}
+		wf.Cancelled = true
+		m.interviewWorkflow = nil
+		m.snoozedInterview = m.pending.ID
+		m.notice = "Request snoozed. Team remains paused until it is answered."
+		return m, nil
+
+	case "enter":
+		if step.Kind == stepKindEdit && len(wf.EditBuffer) == 0 {
+			m.notice = "Type an answer before continuing."
+			return m, nil
+		}
+		completed := wf.advance()
+		if completed {
+			// Submit answer back to broker
+			m.posting = true
+			m.interviewWorkflow = nil
+			choiceID := wf.answerChoiceID()
+			choiceText := wf.answerChoiceText()
+			customText := wf.answerCustomText()
+			return m, postInterviewAnswer(*m.pending, choiceID, choiceText, customText)
+		}
+		return m, nil
+
+	case "up":
+		if step.Kind == stepKindSelect && wf.SelectedIdx > 0 {
+			wf.SelectedIdx--
+		}
+		return m, nil
+
+	case "down":
+		if step.Kind == stepKindSelect && wf.SelectedIdx < len(step.Options)-1 {
+			wf.SelectedIdx++
+		}
+		return m, nil
+
+	case "backspace":
+		if step.Kind == stepKindEdit {
+			if wf.EditPos > 0 {
+				wf.EditBuffer = append(wf.EditBuffer[:wf.EditPos-1], wf.EditBuffer[wf.EditPos:]...)
+				wf.EditPos--
+			}
+		} else if step.Kind == stepKindConfirm {
+			// Go back to the answer step
+			wf.goBack()
+		}
+		return m, nil
+
+	case "left":
+		if step.Kind == stepKindEdit && wf.EditPos > 0 {
+			wf.EditPos--
+		}
+		return m, nil
+
+	case "right":
+		if step.Kind == stepKindEdit && wf.EditPos < len(wf.EditBuffer) {
+			wf.EditPos++
+		}
+		return m, nil
+
+	default:
+		if step.Kind == stepKindEdit {
+			// Type into the edit buffer
+			for _, r := range msg.Runes {
+				tail := make([]rune, len(wf.EditBuffer[wf.EditPos:]))
+				copy(tail, wf.EditBuffer[wf.EditPos:])
+				wf.EditBuffer = append(wf.EditBuffer[:wf.EditPos], append([]rune{r}, tail...)...)
+				wf.EditPos++
+			}
+		}
+		return m, nil
+	}
 }
 
 func (m channelModel) composerTargetLabel() string {
