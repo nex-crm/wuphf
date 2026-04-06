@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1574,37 +1573,32 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "Workflow error: " + err.Error()
 				return m, nil
 			}
-
-			// Initialize real providers.
-			if m.actionRegistry == nil {
-				m.actionRegistry = action.NewRegistryFromEnv()
-			}
-			brokerToken := ""
-			if raw, err := os.ReadFile("/tmp/wuphf-broker-token"); err == nil {
-				brokerToken = strings.TrimSpace(string(raw))
-			}
-
-			opts := []workflow.RuntimeOption{
-				workflow.WithActionProvider(newComposioActionProvider(m.actionRegistry)),
-			}
-			if brokerToken != "" {
-				opts = append(opts, workflow.WithAgentDispatcher(
-					newBrokerAgentDispatcher("http://127.0.0.1:7890", brokerToken, m.activeChannel),
-				))
-			}
-
 			var rterr error
-			rt, rterr = workflow.NewRuntime(*spec, opts...)
+			rt, rterr = workflow.NewRuntime(*spec)
 			if rterr != nil {
 				m.notice = "Workflow error: " + rterr.Error()
 				return m, nil
 			}
-
-			// Hydrate data sources from real APIs.
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			hydrateDataSources(ctx, *spec, m.actionRegistry, rt)
-			cancel()
 		}
+
+		// Always wire providers, whether runtime was pre-built or parsed from spec.
+		if m.actionRegistry == nil {
+			m.actionRegistry = action.NewRegistryFromEnv()
+		}
+		brokerToken := ""
+		if raw, err := os.ReadFile("/tmp/wuphf-broker-token"); err == nil {
+			brokerToken = strings.TrimSpace(string(raw))
+		}
+		rt.SetProviders(
+			newComposioActionProvider(m.actionRegistry),
+			func() workflow.AgentDispatcher {
+				if brokerToken != "" {
+					return newBrokerAgentDispatcher("http://127.0.0.1:7890", brokerToken, m.activeChannel)
+				}
+				return nil
+			}(),
+		)
+
 		wv := workflow.NewWorkflowView(rt, m.width, m.height)
 		m.activeWorkflow = &wv
 		m.workflowName = msg.name

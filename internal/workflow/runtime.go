@@ -469,6 +469,18 @@ func (r *Runtime) recordEvent(stepID, action string, result map[string]any, err 
 	r.stepHistory = append(r.stepHistory, event)
 }
 
+// SetProviders injects action provider and agent dispatcher after construction.
+func (r *Runtime) SetProviders(ap ActionProvider, ad AgentDispatcher) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ap != nil {
+		r.actionProvider = ap
+	}
+	if ad != nil {
+		r.agentDispatcher = ad
+	}
+}
+
 // SetExecuting transitions to executing_action state for async operations.
 func (r *Runtime) SetExecuting() {
 	r.mu.Lock()
