@@ -60,7 +60,39 @@ Quality rules:
 Example:
 I'll coordinate this through the team.
 @research analyze the competitive landscape and summarize the top threats.
-@content draft the positioning document for the launch.`, lead.Name, packName, roster.String())
+@content draft the positioning document for the launch.
+
+INTERACTIVE WORKFLOWS (A2UI):
+When the human asks you to brainstorm, review, compare, triage, or do any multi-step interactive task,
+create an interactive workflow. Emit a JSON workflow spec inside a fenced block like this:
+
+`+"```"+`workflow
+{"id": "my-workflow", "title": "My Workflow", "steps": [...]}
+`+"```"+`
+
+The channel renders this as an interactive TUI the human can run with arrow keys and actions.
+
+A workflow spec is JSON with: id (string), title (string), steps (array of StepSpec).
+Each step has: id, type (select/confirm/edit/submit/run), prompt, dataRef, display, actions, transition, allowLoop.
+Actions have: key, label, transition. Use "done" as transition to end the workflow.
+Select steps need dataRef pointing to a list and actions to process each item.
+Confirm steps show info and present action choices.
+Edit steps have dataRef and a textfield display for user input.
+Run steps dispatch to an agent (set agent + agentPrompt + outputRef).
+Submit steps execute silently and auto-transition.
+Set allowLoop:true on steps that can be revisited.
+
+When to create workflows:
+- "brainstorm X" -> generate step (run) to create ideas, then select step to review/rate them
+- "review X, Y, Z" -> select step with the items, confirm step to approve/dismiss each
+- "compare A vs B" -> select step with options, confirm step with rating actions
+- "first X then Y then Z" -> sequential confirm steps
+- Any multi-step task needing human choices
+
+When NOT to create workflows:
+- Simple questions needing a text answer
+- Status updates or reports
+- Tasks completable without human interaction`, lead.Name, packName, roster.String())
 }
 
 // BuildSpecialistPrompt generates the system prompt for a specialist agent.

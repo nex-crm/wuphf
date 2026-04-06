@@ -462,6 +462,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "skills", Description: "Show available skills"},
 	{Name: "skill", Description: "Create, invoke, or manage a skill"},
 	{Name: "workflow", Description: "Launch an interactive workflow"},
+	{Name: "run", Description: "Run the last workflow an agent created"},
 	{Name: "reply", Description: "Reply in thread by message ID"},
 	{Name: "threads", Description: "Browse and manage threads"},
 	{Name: "expand", Description: "Expand a collapsed thread"},
@@ -634,6 +635,7 @@ type channelModel struct {
 	activeWorkflow      *workflow.WorkflowView
 	workflowName        string
 	actionRegistry      *action.Registry // lazily initialized
+	lastDetectedWorkflow string          // JSON of last workflow spec detected in messages
 
 	// Telegram connect flow state
 	telegramGroups []team.TelegramGroup
@@ -1503,6 +1505,16 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if latestHumanFacing != nil && hadHistory {
 				m.activeApp = officeAppMessages
 				m.notice = fmt.Sprintf("@%s has something for you", latestHumanFacing.From)
+			}
+			// Scan new messages for embedded workflow specs.
+			for _, newMsg := range msg.messages {
+				if newMsg.From == "you" || newMsg.From == "system" {
+					continue
+				}
+				wfBlocks, _ := detectWorkflowBlocks(newMsg.Content)
+				if len(wfBlocks) > 0 {
+					m.lastDetectedWorkflow = wfBlocks[0].JSON
+				}
 			}
 		}
 
@@ -2769,8 +2781,10 @@ func (m channelModel) handleInterviewWorkflowKey(msg tea.KeyMsg) (tea.Model, tea
 		}
 		wf.Cancelled = true
 		m.interviewWorkflow = nil
-		m.snoozedInterview = m.pending.ID
-		m.notice = "Request snoozed. Team remains paused until it is answered."
+		if m.pending != nil {
+			m.snoozedInterview = m.pending.ID
+		}
+		m.notice = "Request snoozed."
 		return m, nil
 
 	case "enter":
@@ -2783,10 +2797,14 @@ func (m channelModel) handleInterviewWorkflowKey(msg tea.KeyMsg) (tea.Model, tea
 			// Submit answer back to broker
 			m.posting = true
 			m.interviewWorkflow = nil
-			choiceID := wf.answerChoiceID()
-			choiceText := wf.answerChoiceText()
-			customText := wf.answerCustomText()
-			return m, postInterviewAnswer(*m.pending, choiceID, choiceText, customText)
+			if m.pending != nil {
+				choiceID := wf.answerChoiceID()
+				choiceText := wf.answerChoiceText()
+				customText := wf.answerCustomText()
+				return m, postInterviewAnswer(*m.pending, choiceID, choiceText, customText)
+			}
+			m.notice = "Interview submitted."
+			return m, nil
 		}
 		return m, nil
 
@@ -4347,7 +4365,23 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Usage: /workflow <description>"
 			return m, nil
 		}
-		return m, buildWorkflowFromPrompt(desc)
+		// Post to the channel asking the CEO to generate a workflow.
+		// The CEO's system prompt includes the A2UI workflow schema.
+		// When the CEO replies with a ```workflow block, the channel
+		// detects it and makes it launchable via /run.
+		m.posting = true
+		m.notice = "Asking the CEO to create a workflow..."
+		prompt := fmt.Sprintf("Create an interactive workflow for: %s\n\nEmit the workflow spec inside a ```workflow fenced block.", desc)
+		return m, postToChannel(prompt, "", m.activeChannel)
+	case trimmed == "/run":
+		clearCurrent()
+		if m.lastDetectedWorkflow == "" {
+			m.notice = "No workflow detected in recent messages. Ask an agent to create one."
+			return m, nil
+		}
+		return m, func() tea.Msg {
+			return channelWorkflowLaunchMsg{spec: m.lastDetectedWorkflow, name: "agent-workflow"}
+		}
 	case trimmed == "/test-interview":
 		clearCurrent()
 		// Inject a fake interview to test the A2UI interview workflow.
@@ -6396,10 +6430,42 @@ func killTeamSession() {
 	http.Get("http://127.0.0.1:7890/health") // just to check; broker stops with the process
 }
 
-// renderA2UIBlocks extracts A2UI JSON blocks from message content,
+// renderA2UIBlocks extracts A2UI and workflow JSON blocks from message content,
 // renders them via the GenerativeModel, and returns remaining text + rendered output.
-// A2UI blocks are detected by ```a2ui ... ``` fences or inline {"type":"card",...} objects.
+// Detects: ```a2ui ... ```, ```workflow ... ```, and inline {"type":"..."} objects.
 func renderA2UIBlocks(content string, width int) (textPart string, rendered string) {
+	// First check for ```workflow blocks — render as launchable cards
+	wfBlocks, contentAfterWf := detectWorkflowBlocks(content)
+	if len(wfBlocks) > 0 {
+		var wfRendered []string
+		for _, block := range wfBlocks {
+			spec, err := parseWorkflowSpec(block.JSON)
+			if err != nil {
+				continue
+			}
+			card := renderEmbeddedWorkflowCard(spec, width, false)
+			if card != "" {
+				wfRendered = append(wfRendered, card)
+			}
+		}
+		if len(wfRendered) > 0 {
+			// Process remaining content for a2ui blocks too
+			remainText, remainRendered := renderA2UIBlocksInner(contentAfterWf, width)
+			textPart = remainText
+			all := strings.Join(wfRendered, "\n")
+			if remainRendered != "" {
+				all += "\n" + remainRendered
+			}
+			rendered = all
+			return
+		}
+		content = contentAfterWf
+	}
+
+	return renderA2UIBlocksInner(content, width)
+}
+
+func renderA2UIBlocksInner(content string, width int) (textPart string, rendered string) {
 	// Look for ```a2ui ... ``` fenced blocks
 	fenceRe := regexp.MustCompile("(?s)```a2ui\\s*\n(.*?)```")
 	matches := fenceRe.FindAllStringSubmatchIndex(content, -1)
