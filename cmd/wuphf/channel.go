@@ -4348,6 +4348,50 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			return m, nil
 		}
 		return m, buildWorkflowFromPrompt(desc)
+	case trimmed == "/test-interview":
+		clearCurrent()
+		// Inject a fake interview to test the A2UI interview workflow.
+		fakeInterview := &channelInterview{
+			ID:       "test-1",
+			From:     "ceo",
+			Question: "What should the team prioritize this sprint?",
+			Context:  "The team has 3 engineers available. There are 5 open bugs, 2 feature requests, and a tech debt item. The product launch is in 2 weeks.",
+			Options: []channelInterviewOption{
+				{ID: "bugs", Label: "Fix critical bugs first", Description: "Address the 5 open bugs before adding features"},
+				{ID: "features", Label: "Ship feature requests", Description: "Prioritize the 2 customer-requested features"},
+				{ID: "debt", Label: "Pay down tech debt", Description: "Refactor the auth module before it becomes a blocker"},
+				{ID: "split", Label: "Split the team", Description: "2 on bugs, 1 on the highest-priority feature"},
+			},
+			RecommendedID: "split",
+			Blocking:      true,
+			Required:      true,
+		}
+		m.pending = fakeInterview
+		m.selectedOption = 3 // recommended = split
+		spec := interviewToWorkflow(*m.pending)
+		wfState := newInterviewWorkflowState(spec)
+		m.interviewWorkflow = &wfState
+		m.notice = "Test interview launched."
+		return m, nil
+	case trimmed == "/test-approval":
+		clearCurrent()
+		// Inject a fake approval interview to test the approval context card.
+		fakeApproval := &channelInterview{
+			ID:       "approve-1",
+			Kind:     "approval",
+			From:     "ceo",
+			Question: "Deploy v2.3.1 to production?",
+			Context:  "All tests passing. 3 PRs merged since last deploy. No breaking changes detected. Last deploy was 4 days ago.",
+			Blocking: true,
+			Required: true,
+		}
+		m.pending = fakeApproval
+		m.selectedOption = 0
+		spec := interviewToWorkflow(*m.pending)
+		wfState := newInterviewWorkflowState(spec)
+		m.interviewWorkflow = &wfState
+		m.notice = "Test approval launched."
+		return m, nil
 	case trimmed == "/skills":
 		clearCurrent()
 		m.activeApp = officeAppSkills
