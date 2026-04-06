@@ -1511,9 +1511,21 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if newMsg.From == "you" || newMsg.From == "system" {
 					continue
 				}
+				// Check for ```workflow fenced blocks first.
 				wfBlocks, _ := detectWorkflowBlocks(newMsg.Content)
 				if len(wfBlocks) > 0 {
 					m.lastDetectedWorkflow = wfBlocks[0].JSON
+					m.notice = "Workflow detected! Type /run to launch it."
+					continue
+				}
+				// Fallback: detect bare JSON with workflow shape {"id":..., "steps":...}
+				content := strings.TrimSpace(newMsg.Content)
+				if strings.HasPrefix(content, "{") && strings.Contains(content, `"steps"`) && strings.Contains(content, `"id"`) {
+					// Try to parse as a workflow spec.
+					if _, err := workflow.ParseSpec(content); err == nil {
+						m.lastDetectedWorkflow = content
+						m.notice = "Workflow detected! Type /run to launch it."
+					}
 				}
 			}
 		}

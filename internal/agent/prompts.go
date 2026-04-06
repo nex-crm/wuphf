@@ -63,36 +63,57 @@ I'll coordinate this through the team.
 @content draft the positioning document for the launch.
 
 INTERACTIVE WORKFLOWS (A2UI):
-When the human asks you to brainstorm, review, compare, triage, or do any multi-step interactive task,
-create an interactive workflow. Emit a JSON workflow spec inside a fenced block like this:
+For brainstorm, review, compare, triage, or any multi-step interactive request, you MUST respond with a workflow spec. Do NOT respond with a plain list or raw JSON. Wrap it in a fenced code block with the language tag "workflow":
 
 `+"```"+`workflow
-{"id": "my-workflow", "title": "My Workflow", "steps": [...]}
+{
+  "id": "marketing-ideas",
+  "title": "Marketing Ideas",
+  "steps": [
+    {
+      "id": "review",
+      "type": "select",
+      "prompt": "Review these ideas:",
+      "dataRef": "/items",
+      "actions": [
+        {"key": "a", "label": "Keep", "transition": "detail"},
+        {"key": "d", "label": "Discard", "transition": "review"},
+        {"key": "q", "label": "Done", "transition": "done"}
+      ],
+      "allowLoop": true
+    },
+    {
+      "id": "detail",
+      "type": "confirm",
+      "prompt": "Take action on this item?",
+      "allowLoop": true,
+      "actions": [
+        {"key": "y", "label": "Approve", "transition": "review"},
+        {"key": "e", "label": "Edit", "transition": "edit"},
+        {"key": "n", "label": "Skip", "transition": "review"}
+      ]
+    },
+    {
+      "id": "edit",
+      "type": "edit",
+      "prompt": "Edit this item:",
+      "dataRef": "/editBuffer",
+      "display": {"component": "textfield", "props": {"label": "Note"}},
+      "actions": [{"key": "Enter", "label": "Save", "transition": "detail"}]
+    }
+  ]
+}
 `+"```"+`
 
-The channel renders this as an interactive TUI the human can run with arrow keys and actions.
+CRITICAL: Always use the `+"```"+`workflow fence. The channel auto-launches workflows from this format. Plain JSON will not work.
 
-A workflow spec is JSON with: id (string), title (string), steps (array of StepSpec).
-Each step has: id, type (select/confirm/edit/submit/run), prompt, dataRef, display, actions, transition, allowLoop.
-Actions have: key, label, transition. Use "done" as transition to end the workflow.
-Select steps need dataRef pointing to a list and actions to process each item.
-Confirm steps show info and present action choices.
-Edit steps have dataRef and a textfield display for user input.
-Run steps dispatch to an agent (set agent + agentPrompt + outputRef).
-Submit steps execute silently and auto-transition.
-Set allowLoop:true on steps that can be revisited.
+Populate the dataRef with real content. For "brainstorm marketing ideas", put actual ideas in /items as an array of objects with "name" and "detail" fields.
 
-When to create workflows:
-- "brainstorm X" -> generate step (run) to create ideas, then select step to review/rate them
-- "review X, Y, Z" -> select step with the items, confirm step to approve/dismiss each
-- "compare A vs B" -> select step with options, confirm step with rating actions
-- "first X then Y then Z" -> sequential confirm steps
-- Any multi-step task needing human choices
+Step types: select (pick from list), confirm (yes/no choice), edit (text input), submit (silent action), run (agent dispatch).
+Actions have: key, label, transition. Use "done" to end. Set allowLoop:true on steps that get revisited.
 
-When NOT to create workflows:
-- Simple questions needing a text answer
-- Status updates or reports
-- Tasks completable without human interaction`, lead.Name, packName, roster.String())
+When to create workflows: brainstorm, review, compare, triage, approval, any multi-step task.
+When NOT to: simple answers, status updates, single-response tasks.`, lead.Name, packName, roster.String())
 }
 
 // BuildSpecialistPrompt generates the system prompt for a specialist agent.
