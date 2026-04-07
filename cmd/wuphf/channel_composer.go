@@ -12,7 +12,7 @@ import (
 // label, rounded border, cursor, @mention popup, and interview options.
 func renderComposer(width int, input []rune, inputPos int, channelName string,
 	replyToID string, typingAgents []string, liveActivities map[string]string,
-	pending *channelInterview, selectedOption int, focused bool, tickFrame int) string {
+	pending *channelInterview, selectedOption int, hint string, focused bool, tickFrame int) string {
 
 	if width < 10 {
 		width = 10
@@ -36,11 +36,13 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		Foreground(lipgloss.Color(slackActive)).
 		Bold(true)
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
-	hint := "/ commands · @ mention · Ctrl+J newline · Enter send · Esc pause all"
-	if pending != nil {
-		hint = "↑/↓ pick option · Enter submit · type to answer freeform · Esc pause all"
-	} else if strings.HasPrefix(channelName, "1:1 ") {
-		hint = "/ commands · @ mention · Ctrl+J newline · Enter send direct · Esc pause all"
+	if strings.TrimSpace(hint) == "" {
+		hint = "/ commands · @ mention · Ctrl+J newline · Enter send · Esc pause all"
+		if pending != nil {
+			hint = "↑/↓ pick option · Enter submit · type to answer freeform · Esc pause all"
+		} else if strings.HasPrefix(channelName, "1:1 ") {
+			hint = "/ commands · @ mention · Ctrl+J newline · Enter send direct · Esc pause all"
+		}
 	}
 	parts = append(parts, "  "+labelStyle.Render(label)+"  "+hintStyle.Render(hint))
 

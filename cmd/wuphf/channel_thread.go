@@ -6,13 +6,14 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/nex-crm/wuphf/internal/tui"
 )
 
 // renderThreadPanel renders the thread side panel with parent message,
 // reply count divider, replies, and its own input field.
 func renderThreadPanel(allMessages []brokerMessage, parentID string,
 	width, height int, threadInput []rune, threadInputPos int,
-	threadScroll int, popup string, focused bool) string {
+	threadScroll int, popup string, focused bool, historyAvailable bool) string {
 
 	if width < 8 || height < 4 {
 		return ""
@@ -83,7 +84,7 @@ func renderThreadPanel(allMessages []brokerMessage, parentID string,
 	}
 
 	// ── Thread input field ────────────────────────────────────────────
-	threadInputRendered := renderThreadInput(threadInput, threadInputPos, innerW-2, focused)
+	threadInputRendered := renderThreadInput(threadInput, threadInputPos, innerW-2, focused, historyAvailable)
 	inputH := lipgloss.Height(threadInputRendered)
 	usedH := 3 // header line + header divider + blank
 	contentH := height - usedH - inputH
@@ -293,7 +294,7 @@ func renderThreadMessage(msg brokerMessage, width int, isParent bool) []string {
 }
 
 // renderThreadInput renders the input area at the bottom of the thread panel.
-func renderThreadInput(input []rune, inputPos int, width int, focused bool) string {
+func renderThreadInput(input []rune, inputPos int, width int, focused bool, historyAvailable bool) string {
 	if width < 6 {
 		width = 6
 	}
@@ -333,6 +334,11 @@ func renderThreadInput(input []rune, inputPos int, width int, focused bool) stri
 		Padding(0, 1)
 
 	label := lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Bold(true).Render("Reply")
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Render(" Enter send")
+	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted)).Render(
+		tui.ComposerHint(tui.ComposerHintState{
+			Context:          tui.ContextThreadCompose,
+			HistoryAvailable: historyAvailable,
+		}),
+	)
 	return " " + label + "  " + hint + "\n " + borderStyle.Render(inputStr)
 }

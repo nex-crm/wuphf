@@ -192,7 +192,75 @@ func buildLiveWorkLines(members []channelMember, tasks []channelTask, actions []
 			}
 		}
 	}
+
+	if waitLines := buildWaitStateLines(tasks, contentWidth, focusSlug, len(active) > 0, len(recent) > 0); len(waitLines) > 0 {
+		lines = append(lines, waitLines...)
+	}
 	return lines
+}
+
+func buildWaitStateLines(tasks []channelTask, contentWidth int, focusSlug string, hasActive bool, hasRecentActions bool) []renderedLine {
+	blocked := blockedWorkTasks(tasks, focusSlug, 2)
+	if len(blocked) > 0 {
+		lines := []renderedLine{
+			{Text: ""},
+			{Text: renderDateSeparator(contentWidth, "Blocked work")},
+		}
+		for _, task := range blocked {
+			extra := []string{"Owner @" + fallbackString(task.Owner, "unowned")}
+			if strings.TrimSpace(task.ThreadID) != "" {
+				extra = append(extra, "Thread "+task.ThreadID)
+			}
+			extra = append(extra, "Open task")
+			body := strings.TrimSpace(task.Details)
+			if body == "" {
+				body = "This work is stalled until the blocker is cleared."
+			}
+			for _, line := range renderRuntimeEventCard(contentWidth, accentPill("blocked", "#B91C1C")+" "+lipgloss.NewStyle().Bold(true).Render(task.Title), body, "#B91C1C", extra) {
+				lines = append(lines, renderedLine{Text: line, TaskID: task.ID})
+			}
+		}
+		return lines
+	}
+
+	if hasActive || hasRecentActions {
+		return nil
+	}
+
+	title := subtlePill("quiet", "#E2E8F0", "#334155") + " " + lipgloss.NewStyle().Bold(true).Render("Nothing is moving right now")
+	body := "This lane is idle. Use the quiet moment to recover context, choose the next conversation, or give the team a sharper direction."
+	extra := []string{"/switcher for active work · /recover for recap · /search to jump directly"}
+	if strings.TrimSpace(focusSlug) != "" {
+		title = subtlePill("idle", "#E2E8F0", "#334155") + " " + lipgloss.NewStyle().Bold(true).Render(displayName(focusSlug)+" is waiting for direction")
+		body = "This direct session is idle. Ask for a plan, request a review pass, or drop in a concrete decision to unlock the next move."
+		extra = []string{"Try: give one clear goal, ask for a brief, or request a tradeoff decision"}
+	}
+
+	lines := []renderedLine{
+		{Text: ""},
+		{Text: renderDateSeparator(contentWidth, "Wait state")},
+	}
+	for _, line := range renderRuntimeEventCard(contentWidth, title, body, "#475569", extra) {
+		lines = append(lines, renderedLine{Text: line})
+	}
+	return lines
+}
+
+func blockedWorkTasks(tasks []channelTask, focusSlug string, limit int) []channelTask {
+	filtered := make([]channelTask, 0, len(tasks))
+	for _, task := range tasks {
+		if !strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
+			continue
+		}
+		if strings.TrimSpace(focusSlug) != "" && strings.TrimSpace(task.Owner) != strings.TrimSpace(focusSlug) {
+			continue
+		}
+		filtered = append(filtered, task)
+	}
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered
 }
 
 func buildDirectExecutionLines(actions []channelAction, focusSlug string, contentWidth int) []renderedLine {

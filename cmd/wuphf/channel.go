@@ -196,9 +196,11 @@ type channelInfo struct {
 }
 
 type channelInterviewOption struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	Description  string `json:"description"`
+	RequiresText bool   `json:"requires_text,omitempty"`
+	TextHint     string `json:"text_hint,omitempty"`
 }
 
 type channelInterview struct {
@@ -443,6 +445,12 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)", Category: "setup"},
 	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode", Category: "session"},
 	{Name: "messages", Description: "Show the main office feed", Category: "navigate"},
+	{Name: "recover", Description: "Open the session recovery summary", Category: "navigate"},
+	{Name: "resume", Description: "Alias for /recover", Category: "navigate"},
+	{Name: "rewind", Description: "Insert a summarize-from-here recovery prompt", Category: "navigate"},
+	{Name: "search", Description: "Search channels, tasks, requests, and threads", Category: "navigate"},
+	{Name: "insert", Description: "Insert a channel, task, request, or message reference", Category: "navigate"},
+	{Name: "switcher", Description: "Open the unified office/direct switcher", Category: "navigate"},
 	{Name: "tasks", Description: "Show active work in this channel", Category: "navigate"},
 	{Name: "switch", Description: "Switch to another channel", Category: "navigate"},
 	{Name: "channels", Description: "Browse and manage channels", Category: "navigate"},
@@ -454,6 +462,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "policies", Description: "Show signals, decisions, external actions, and watchdogs", Category: "navigate"},
 	{Name: "calendar", Description: "Show the office schedule and team calendars", Category: "navigate"},
 	{Name: "queue", Description: "Alias for /calendar", Category: "navigate"},
+	{Name: "artifacts", Description: "Show recent task logs, approvals, and workflow artifacts", Category: "navigate"},
 	{Name: "skills", Description: "Show available skills", Category: "navigate"},
 	{Name: "skill", Description: "Create, invoke, or manage a skill", Category: "work"},
 	{Name: "reply", Description: "Reply in thread by message ID", Category: "conversation"},
@@ -468,7 +477,6 @@ var channelSlashCommands = []tui.SlashCommand{
 
 // oneOnOneBlacklist lists command names blocked in 1:1 mode.
 var oneOnOneBlacklist = map[string]bool{
-	"switch":       true,
 	"tasks":        true,
 	"task":         true,
 	"channels":     true,
@@ -507,6 +515,10 @@ const (
 	channelPickerThreads        channelPickerMode = "threads"
 	channelPickerThreadAction   channelPickerMode = "thread_action"
 	channelPickerChannels       channelPickerMode = "channels"
+	channelPickerSwitcher       channelPickerMode = "switcher"
+	channelPickerInsert         channelPickerMode = "insert"
+	channelPickerSearch         channelPickerMode = "search"
+	channelPickerRewind         channelPickerMode = "rewind"
 	channelPickerAgents         channelPickerMode = "agents"
 	channelPickerCalendarAgent  channelPickerMode = "calendar_agent"
 	channelPickerOneOnOneMode   channelPickerMode = "one_on_one_mode"
@@ -520,12 +532,14 @@ const (
 type officeApp string
 
 const (
-	officeAppMessages officeApp = "messages"
-	officeAppTasks    officeApp = "tasks"
-	officeAppRequests officeApp = "requests"
-	officeAppPolicies officeApp = "policies"
-	officeAppCalendar officeApp = "calendar"
-	officeAppSkills   officeApp = "skills"
+	officeAppMessages  officeApp = "messages"
+	officeAppRecovery  officeApp = "recovery"
+	officeAppTasks     officeApp = "tasks"
+	officeAppRequests  officeApp = "requests"
+	officeAppPolicies  officeApp = "policies"
+	officeAppCalendar  officeApp = "calendar"
+	officeAppArtifacts officeApp = "artifacts"
+	officeAppSkills    officeApp = "skills"
 )
 
 type quickJumpTarget string
@@ -597,14 +611,18 @@ type channelModel struct {
 	mention              tui.MentionModel
 	input                []rune
 	inputPos             int
+	inputHistory         composerHistory
 	width                int
 	height               int
 	scroll               int
 	unreadCount          int
+	unreadAnchorID       string
+	awaySummary          string
 	posting              bool
 	selectedOption       int
 	notice               string
 	snoozedInterview     string
+	confirm              *channelConfirm
 	doctor               *channelDoctorReport
 	memberDraft          *channelMemberDraft
 	initFlow             tui.InitFlowModel
@@ -620,6 +638,7 @@ type channelModel struct {
 	threadPanelID       string
 	threadInput         []rune
 	threadInputPos      int
+	threadInputHistory  composerHistory
 	threadScroll        int
 	usage               channelUsageState
 	brokerConnected     bool
@@ -662,6 +681,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		threadsDefaultExpand: !threadsCollapsed,
 		autocomplete:         tui.NewAutocomplete(channelSlashCommands),
 		mention:              tui.NewMention(channelMentionAgents(nil)),
+		inputHistory:         newComposerHistory(),
 		initFlow:             tui.NewInitFlow(),
 		activeChannel:        "general",
 		activeApp:            initialApp,
@@ -670,6 +690,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		channels:             channels,
 		sessionMode:          sessionMode,
 		oneOnOneAgent:        oneOnOneAgent,
+		threadInputHistory:   newComposerHistory(),
 	}
 	if m.isOneOnOne() {
 		m.sidebarCollapsed = true
@@ -806,7 +827,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.scroll > 0 {
 					m.scroll--
 					if m.scroll == 0 {
-						m.unreadCount = 0
+						m.clearUnreadState()
 					}
 				}
 			}
@@ -834,7 +855,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				case "jump-latest":
 					m.scroll = 0
-					m.unreadCount = 0
+					m.clearUnreadState()
 					return m, nil
 				case "autocomplete":
 					if idx, ok := popupActionIndex(action.Value); ok {
@@ -867,6 +888,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.focus = focusMain
 						return m, m.openRequestActionPicker(req)
 					}
+					return m, nil
+				case "prompt":
+					m.focus = focusMain
+					m.applyRecoveryPrompt(action.Value)
 					return m, nil
 				case "channel", "app":
 					items := m.sidebarItems()
@@ -957,8 +982,17 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// ── Esc: close overlays/thread, then cycle ────────────────────
 		if msg.String() == "esc" {
-			// Close overlays first
-			if m.picker.IsActive() {
+			switch m.activeInteractionContext() {
+			case contextConfirm:
+				if m.confirm != nil && m.confirm.Action == confirmActionSubmitRequest {
+					m.confirm = nil
+					m.notice = "Review closed. Keep editing before you send."
+					return m, nil
+				}
+				m.confirm = nil
+				m.notice = "Canceled."
+				return m, nil
+			case contextPicker:
 				m.picker.SetActive(false)
 				if m.pickerMode == channelPickerIntegrations {
 					m.notice = "Integration canceled."
@@ -968,27 +1002,23 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.pickerMode = channelPickerNone
 				return m, nil
-			}
-			if m.autocomplete.IsVisible() || m.mention.IsVisible() {
+			case contextAutocomplete, contextMention:
 				var cmd tea.Cmd
 				m.autocomplete, cmd = m.autocomplete.Update(msg)
 				_ = cmd
 				m.mention, _ = m.mention.Update(msg)
 				return m, nil
-			}
-			if m.memberDraft != nil {
+			case contextMemberDraft:
 				m.memberDraft = nil
 				m.input = nil
 				m.inputPos = 0
 				m.notice = "Agent setup canceled."
 				return m, nil
-			}
-			if m.doctor != nil {
+			case contextDoctor:
 				m.doctor = nil
 				m.notice = "Doctor closed."
 				return m, nil
-			}
-			if m.pending != nil && m.pending.ID != "" {
+			case contextInterview:
 				if m.pending.Blocking || m.pending.Required {
 					m.notice = "Human decision required. Answer it before the team can continue."
 					return m, nil
@@ -996,9 +1026,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.snoozedInterview = m.pending.ID
 				m.notice = "Request snoozed. Team remains paused until it is answered."
 				return m, nil
-			}
-			// Close thread panel
-			if m.threadPanelOpen {
+			case contextThread:
 				m.threadPanelOpen = false
 				m.threadPanelID = ""
 				m.threadInput = nil
@@ -1027,6 +1055,18 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// ── Global overlays/pickers before panel-specific handling ────
+		if m.confirm != nil {
+			switch msg.String() {
+			case "enter":
+				return m.executeConfirmation(*m.confirm)
+			case "ctrl+c", "esc":
+				m.confirm = nil
+				m.notice = "Canceled."
+				return m, nil
+			default:
+				return m, nil
+			}
+		}
 		if m.picker.IsActive() {
 			var cmd tea.Cmd
 			m.picker, cmd = m.picker.Update(msg)
@@ -1131,6 +1171,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.input) > 0 {
 				text := string(m.input)
 				trimmed := strings.TrimSpace(text)
+				m.inputHistory.record(m.input, m.inputPos)
 				if trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q" {
 					killTeamSession()
 					return m, tea.Quit
@@ -1138,35 +1179,55 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.HasPrefix(trimmed, "/") {
 					return m.runActiveCommand(trimmed)
 				}
+				if m.pending != nil {
+					m.confirm = confirmationForInterviewAnswer(*m.pending, m.selectedInterviewOption(), text)
+					m.notice = "Review your answer before sending."
+					return m, nil
+				}
 
 				m.input = nil
 				m.inputPos = 0
 				m.notice = ""
-
 				m.posting = true
-				if m.pending != nil {
-					return m, postInterviewAnswer(*m.pending, "", "", text)
-				}
 				return m, postToChannel(text, m.replyToID, m.activeChannel)
-			} else if m.pending != nil {
-				opt := m.selectedInterviewOption()
-				if opt != nil {
-					m.posting = true
-					return m, postInterviewAnswer(*m.pending, opt.ID, opt.Label, "")
+			}
+			if m.pending != nil {
+				if opt := m.selectedInterviewOption(); opt != nil {
+					if interviewOptionRequiresText(opt) {
+						m.notice = interviewOptionTextHint(opt)
+						return m, nil
+					}
+					m.confirm = confirmationForInterviewAnswer(*m.pending, opt, "")
+					m.notice = "Review your answer before sending."
+					return m, nil
 				}
+				m.notice = "Choose an option or type your own answer before sending."
+				return m, nil
 			}
 		case "backspace":
 			m.lastCtrlCAt = time.Time{}
 			if m.inputPos > 0 {
+				m.inputHistory.resetRecall()
 				m.input = append(m.input[:m.inputPos-1], m.input[m.inputPos:]...)
 				m.inputPos--
 				m.updateInputOverlays()
 			}
 		case "ctrl+u":
 			m.lastCtrlCAt = time.Time{}
+			m.inputHistory.resetRecall()
 			m.input = nil
 			m.inputPos = 0
 			m.updateInputOverlays()
+		case "ctrl+p":
+			m.lastCtrlCAt = time.Time{}
+			if snapshot, ok := m.inputHistory.previous(m.input, m.inputPos); ok {
+				m.restoreMainSnapshot(snapshot)
+			}
+		case "ctrl+n":
+			m.lastCtrlCAt = time.Time{}
+			if snapshot, ok := m.inputHistory.next(); ok {
+				m.restoreMainSnapshot(snapshot)
+			}
 		case "ctrl+a":
 			m.lastCtrlCAt = time.Time{}
 			m.inputPos = 0
@@ -1177,6 +1238,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateInputOverlays()
 		case "ctrl+j":
 			m.lastCtrlCAt = time.Time{}
+			m.inputHistory.resetRecall()
 			ch := []rune{'\n'}
 			tail := make([]rune, len(m.input[m.inputPos:]))
 			copy(tail, m.input[m.inputPos:])
@@ -1218,7 +1280,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "end":
 			m.lastCtrlCAt = time.Time{}
 			m.scroll = 0
-			m.unreadCount = 0
+			m.clearUnreadState()
 		case "pgup":
 			m.lastCtrlCAt = time.Time{}
 			m.scroll += maxInt(10, m.height/2)
@@ -1229,11 +1291,12 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.scroll = 0
 			}
 			if m.scroll == 0 {
-				m.unreadCount = 0
+				m.clearUnreadState()
 			}
 		default:
 			m.lastCtrlCAt = time.Time{}
 			if ch := composerInsertRunes(msg); len(ch) > 0 {
+				m.inputHistory.resetRecall()
 				m.input, m.inputPos = insertComposerRunes(m.input, m.inputPos, ch)
 				m.updateInputOverlays()
 			} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
@@ -1242,6 +1305,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					ch = []rune(msg.String())
 				}
 				if len(ch) > 0 {
+					m.inputHistory.resetRecall()
 					tail := make([]rune, len(m.input[m.inputPos:]))
 					copy(tail, m.input[m.inputPos:])
 					m.input = append(m.input[:m.inputPos], append(ch, tail...)...)
@@ -1277,7 +1341,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.threadPanelOpen = false
 				m.threadPanelID = ""
 				m.scroll = 0
-				m.unreadCount = 0
+				m.clearUnreadState()
 				m.syncSidebarCursorToActive()
 			}
 		case "remove":
@@ -1293,7 +1357,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.threadPanelOpen = false
 				m.threadPanelID = ""
 				m.scroll = 0
-				m.unreadCount = 0
+				m.clearUnreadState()
 				m.syncSidebarCursorToActive()
 			}
 		}
@@ -1321,6 +1385,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelResetDoneMsg:
 		m.posting = false
+		m.confirm = nil
 		if msg.err == nil {
 			if normalized := team.NormalizeSessionMode(msg.sessionMode); normalized != "" {
 				m.sessionMode = normalized
@@ -1338,7 +1403,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input = nil
 			m.inputPos = 0
 			m.scroll = 0
-			m.unreadCount = 0
+			m.clearUnreadState()
 			m.notice = ""
 			m.initFlow = tui.NewInitFlow()
 			m.picker.SetActive(false)
@@ -1373,6 +1438,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelResetDMDoneMsg:
 		m.posting = false
+		m.confirm = nil
 		if msg.err != nil {
 			m.notice = "Failed to clear DMs: " + msg.err.Error()
 		} else {
@@ -1499,7 +1565,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.threadPanelOpen = false
 		m.threadPanelID = ""
 		m.scroll = 0
-		m.unreadCount = 0
+		m.clearUnreadState()
 		m.syncSidebarCursorToActive()
 		manifest, _ := company.LoadManifest()
 		m.channels = channelInfosFromManifest(manifest)
@@ -1533,13 +1599,18 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if added == 0 {
 				break
 			}
-			latestHumanFacing := latestHumanFacingMessage(uniqueMessages[len(m.messages):])
+			addedMessages := uniqueMessages[len(m.messages):]
+			latestHumanFacing := latestHumanFacingMessage(addedMessages)
 			if m.scroll > 0 {
 				m.scroll += added
-				m.unreadCount += added
 			}
 			m.messages = uniqueMessages
 			m.lastID = msg.messages[len(msg.messages)-1].ID
+			if m.scroll > 0 || m.focus != focusMain || m.threadPanelOpen {
+				m.noteIncomingMessages(addedMessages)
+			} else {
+				m.clearUnreadState()
+			}
 			if latestHumanFacing != nil && hadHistory {
 				m.activeApp = officeAppMessages
 				m.notice = fmt.Sprintf("@%s has something for you", latestHumanFacing.From)
@@ -1604,7 +1675,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.requests = nil
 				m.lastID = ""
 				m.scroll = 0
-				m.unreadCount = 0
+				m.clearUnreadState()
 				m.refreshSlashCommands()
 				if m.isOneOnOne() && strings.TrimSpace(m.notice) == "" {
 					m.notice = "Direct session reset. Agent pane reloaded in place."
@@ -1653,6 +1724,46 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
 			switch {
+			case strings.HasPrefix(msg.Value, "app:"):
+				switch officeApp(strings.TrimPrefix(msg.Value, "app:")) {
+				case officeAppMessages:
+					m.activeApp = officeAppMessages
+					m.notice = "Viewing messages."
+					m.syncSidebarCursorToActive()
+					return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel))
+				case officeAppTasks:
+					m.activeApp = officeAppTasks
+					m.notice = "Viewing tasks in #" + m.activeChannel + "."
+					m.syncSidebarCursorToActive()
+					return m, pollTasks(m.activeChannel)
+				case officeAppRequests:
+					m.activeApp = officeAppRequests
+					m.notice = "Viewing requests in #" + m.activeChannel + "."
+					m.syncSidebarCursorToActive()
+					return m, pollRequests(m.activeChannel)
+				case officeAppPolicies:
+					m.activeApp = officeAppPolicies
+					m.notice = "Viewing policies and decisions."
+					m.syncSidebarCursorToActive()
+					return m, pollOfficeLedger()
+				case officeAppCalendar:
+					m.activeApp = officeAppCalendar
+					m.notice = "Viewing the office calendar."
+					m.syncSidebarCursorToActive()
+					return m, nil
+				}
+			case strings.HasPrefix(msg.Value, "session:1o1:"):
+				agent := strings.TrimSpace(strings.TrimPrefix(msg.Value, "session:1o1:"))
+				if agent == "" {
+					agent = team.DefaultOneOnOneAgent
+				}
+				m.confirm = confirmationForSessionSwitch(team.SessionModeOneOnOne, agent)
+				m.notice = "Confirm the direct session switch."
+				return m, nil
+			case msg.Value == "session:office":
+				m.confirm = confirmationForSessionSwitch(team.SessionModeOffice, team.DefaultOneOnOneAgent)
+				m.notice = "Confirm the session switch."
+				return m, nil
 			case strings.HasPrefix(msg.Value, "switch:"):
 				m.activeChannel = strings.TrimPrefix(msg.Value, "switch:")
 				m.lastID = ""
@@ -1667,6 +1778,29 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.posting = true
 				return m, mutateChannel("remove", strings.TrimPrefix(msg.Value, "remove:"), "")
 			}
+			return m, nil
+		case channelPickerSwitcher:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			return m, m.applyWorkspaceSwitcherSelection(msg.Value)
+		case channelPickerInsert:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			if strings.TrimSpace(msg.Value) == "" {
+				m.notice = "Nothing inserted."
+				return m, nil
+			}
+			m.insertIntoActiveComposer(msg.Value)
+			m.notice = "Inserted reference into the composer."
+			return m, nil
+		case channelPickerSearch:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			return m, m.applySearchSelection(msg.Value, msg.Label)
+		case channelPickerRewind:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			m.applyRecoveryPrompt(msg.Value)
 			return m, nil
 		case channelPickerAgents:
 			m.picker.SetActive(false)
@@ -1734,8 +1868,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.notice = "Already running the full office team."
 					return m, nil
 				}
-				m.posting = true
-				return m, switchSessionMode(team.SessionModeOffice, team.DefaultOneOnOneAgent)
+				m.confirm = confirmationForSessionSwitch(team.SessionModeOffice, team.DefaultOneOnOneAgent)
+				m.notice = "Confirm the session switch."
+				return m, nil
 			default:
 				return m, nil
 			}
@@ -1746,8 +1881,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if agent == "" {
 				agent = team.DefaultOneOnOneAgent
 			}
-			m.posting = true
-			return m, switchSessionMode(team.SessionModeOneOnOne, agent)
+			m.confirm = confirmationForSessionSwitch(team.SessionModeOneOnOne, agent)
+			m.notice = "Confirm the direct session switch."
+			return m, nil
 		case channelPickerConnect:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
@@ -1997,11 +2133,12 @@ func (m channelModel) View() string {
 	}
 
 	layout := computeLayout(m.width, m.height, m.threadPanelOpen && !m.isOneOnOne(), m.sidebarCollapsed || m.isOneOnOne())
+	workspaceState := m.currentWorkspaceUIState()
 
 	// ── Sidebar ──────────────────────────────────────────────────────
 	sidebar := ""
 	if layout.ShowSidebar && !m.isOneOnOne() {
-		sidebar = cachedSidebarRender(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, m.brokerConnected, layout.SidebarW, layout.ContentH)
+		sidebar = cachedSidebarRender(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, workspaceState, layout.SidebarW, layout.ContentH)
 	}
 
 	// ── Thread panel ─────────────────────────────────────────────────
@@ -2014,7 +2151,7 @@ func (m channelModel) View() string {
 		thread = renderThreadPanel(m.messages, m.threadPanelID,
 			layout.ThreadW, layout.ContentH,
 			m.threadInput, m.threadInputPos, m.threadScroll,
-			threadPopup, m.focus == focusThread)
+			threadPopup, m.focus == focusThread, len(m.threadInputHistory.entries) > 0)
 	}
 
 	activePending := m.visiblePendingRequest()
@@ -2054,6 +2191,11 @@ func (m channelModel) View() string {
 			Padding(0, 1).
 			Bold(true).
 			Render(fmt.Sprintf("%d new", m.unreadCount))
+		if awaySummary := m.currentAwaySummary(); strings.TrimSpace(awaySummary) != "" {
+			headerMeta += "  " + lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#BFDBFE")).
+				Render(awaySummary)
+		}
 	}
 	if m.pending != nil {
 		headerMeta += "  " + accentPill("request pending", "#B45309")
@@ -2079,17 +2221,17 @@ func (m channelModel) View() string {
 	typingAgents := typingAgentsFromMembers(m.members)
 	liveActivities := liveActivityFromMembers(m.members)
 	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
-		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption,
+		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption, m.composerHint(m.composerTargetLabel(), m.replyToID, activePending),
 		m.focus == focusMain, m.tickFrame)
 	if m.memberDraft != nil {
 		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
-			"", typingAgents, nil, nil, 0, m.focus == focusMain, m.tickFrame)
+			"", typingAgents, nil, nil, 0, m.composerHint(memberDraftComposerLabel(*m.memberDraft), "", nil), m.focus == focusMain, m.tickFrame)
 	}
 
 	// Interview card (above composer)
 	interviewCard := ""
 	if activePending != nil {
-		interviewCard = renderInterviewCard(*activePending, m.selectedOption, mainW-4)
+		interviewCard = renderInterviewCard(*activePending, m.selectedOption, m.interviewPhaseTitle(), mainW-4)
 	}
 	memberDraftCard := ""
 	if m.memberDraft != nil {
@@ -2099,10 +2241,16 @@ func (m channelModel) View() string {
 	if m.doctor != nil {
 		doctorCard = renderDoctorCard(*m.doctor, mainW-4)
 	}
+	confirmCard := ""
+	if m.confirm != nil {
+		confirmCard = renderConfirmCard(*m.confirm, mainW-4)
+	}
 
 	// Init/picker overlays
 	initPanel := ""
-	if m.picker.IsActive() {
+	if confirmCard != "" {
+		initPanel = confirmCard
+	} else if m.picker.IsActive() {
 		initPanel = m.picker.View()
 	} else if m.initFlow.IsActive() || m.initFlow.Phase() == tui.InitDone {
 		initPanel = m.initFlow.View()
@@ -2124,7 +2272,7 @@ func (m channelModel) View() string {
 	if contentWidth < 32 {
 		contentWidth = 32
 	}
-	allLines := m.currentMainLines(contentWidth)
+	allLines := m.currentMainViewportLines(contentWidth, msgH)
 	visibleRows, scroll, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
 	var visible []string
 	for _, row := range visibleRows {
@@ -2134,13 +2282,7 @@ func (m channelModel) View() string {
 		visible = append(visible, "")
 	}
 	if m.activeApp == officeAppMessages && m.unreadCount > 0 && scroll > 0 && len(visible) > 0 {
-		jumpLabel := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#FFFFFF")).
-			Background(lipgloss.Color(slackActive)).
-			Padding(0, 1).
-			Bold(true).
-			Render(fmt.Sprintf("Jump to latest · %d new", m.unreadCount))
-		visible[0] = "  " + jumpLabel
+		visible[0] = renderAwayStrip(contentWidth, m.unreadCount, m.currentAwaySummary())
 	}
 	if popup := m.renderActivePopup(contentWidth); popup != "" && m.focus == focusMain {
 		visible = overlayBottomLines(visible, strings.Split(popup, "\n"))
@@ -2202,7 +2344,7 @@ func (m channelModel) View() string {
 		"\u25CF", onlineCount, len(m.messages), focusLabel, scrollHint,
 	))
 	if m.pending != nil {
-		statusText := " Request pending │ ↑/↓ choose │ Enter submit"
+		statusText := m.interviewStatusLine()
 		if m.pending.ID == m.snoozedInterview {
 			statusText = " Request paused │ Esc snoozed it │ team remains blocked until answered"
 		}
@@ -2238,24 +2380,14 @@ func (m channelModel) View() string {
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(" " + m.notice),
 		)
 	} else if m.isOneOnOne() {
-		label := "offline preview"
-		if m.brokerConnected {
-			label = "direct session live"
-		}
-		runtimeHint := "ready"
-		if runtimeLine := oneOnOneRuntimeLine(m.officeMembers, m.members, m.tasks, m.actions, m.oneOnOneAgentSlug()); runtimeLine != "" {
-			runtimeHint = runtimeLine
-		}
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
-				fmt.Sprintf(" %s │ %d msgs │ %s │ Ctrl+J newline │ /1o1 switch │ /doctor",
-					label, len(m.messages), runtimeHint,
-				),
+				workspaceState.defaultStatusLine(scrollHint),
 			),
 		)
 	} else if !m.brokerConnected {
 		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(" Team offline │ showing manifest roster │ launch WUPHF to connect │ /doctor"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(workspaceState.defaultStatusLine(scrollHint)),
 		)
 	} else if m.replyToID != "" {
 		statusBar = statusBarStyle(m.width).Render(
@@ -2277,16 +2409,27 @@ func (m channelModel) View() string {
 				message,
 			),
 		)
+	} else {
+		statusBar = statusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(workspaceState.defaultStatusLine(scrollHint)),
+		)
 	}
 
 	return content + "\n" + statusBar
 }
 
 func (m channelModel) currentHeaderTitle() string {
-	if m.isOneOnOne() {
+	if m.isOneOnOne() && m.activeApp != officeAppRecovery {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
 	switch m.activeApp {
+	case officeAppRecovery:
+		if m.isOneOnOne() {
+			return "1:1 with " + m.oneOnOneAgentName() + " · Recovery"
+		}
+		return "# " + m.activeChannel + " · Recovery"
+	case officeAppArtifacts:
+		return "# " + m.activeChannel + " · Artifacts"
 	case officeAppTasks:
 		return "# " + m.activeChannel + " · Tasks"
 	case officeAppRequests:
@@ -2303,15 +2446,26 @@ func (m channelModel) currentHeaderTitle() string {
 }
 
 func (m channelModel) currentHeaderMeta() string {
+	workspace := m.currentWorkspaceUIState()
+	if m.activeApp == officeAppRecovery {
+		snapshot := m.currentRuntimeSnapshot()
+		blocking := 0
+		for _, req := range snapshot.Requests {
+			status := strings.TrimSpace(strings.ToLower(req.Status))
+			if status != "" && status != "pending" && status != "open" {
+				continue
+			}
+			if req.Blocking || req.Required {
+				blocking++
+			}
+		}
+		if m.isOneOnOne() {
+			return fmt.Sprintf("  Re-entry summary for %s · %d running tasks · %d open requests · %d new since you looked", m.oneOnOneAgentName(), countRunningRuntimeTasks(snapshot.Tasks), len(snapshot.Requests), m.unreadCount)
+		}
+		return fmt.Sprintf("  Re-entry summary for #%s · %d blocking requests · %d running tasks · %d new since you looked", m.activeChannel, blocking, countRunningRuntimeTasks(snapshot.Tasks), m.unreadCount)
+	}
 	if m.isOneOnOne() {
-		if !m.brokerConnected {
-			return "  Direct session preview · only this agent can speak here"
-		}
-		meta := "  Direct conversation only · no channels, teammates, or office apps in this mode"
-		if runtimeLine := oneOnOneRuntimeLine(m.officeMembers, m.members, m.tasks, m.actions, m.oneOnOneAgentSlug()); runtimeLine != "" {
-			meta += " · " + runtimeLine
-		}
-		return meta
+		return workspace.headerMeta()
 	}
 	switch m.activeApp {
 	case officeAppTasks:
@@ -2399,22 +2553,24 @@ func (m channelModel) currentHeaderMeta() string {
 			}
 		}
 		return fmt.Sprintf("  Reusable team skills · %d total · %d active · %d workflow-backed", len(m.skills), active, workflowBacked)
+	case officeAppArtifacts:
+		summary := m.currentArtifactSummary()
+		if summary == "" {
+			return "  Retained task logs, approvals, and workflow history for this office"
+		}
+		return "  " + summary
 	default:
-		if m.isOneOnOne() {
-			return fmt.Sprintf("  Direct session with %s · single-agent focus · external actions and reports stay in this conversation", m.oneOnOneAgentName())
-		}
-		if !m.brokerConnected {
-			return fmt.Sprintf("  Offline preview · manifest roster loaded · %d teammates ready for #%s", len(m.officeMembers), m.activeChannel)
-		}
-		return fmt.Sprintf("  The WUPHF Office · Founding Team building together · %d teammates in #%s", len(m.members), m.activeChannel)
+		return workspace.headerMeta()
 	}
 }
 
 func (m channelModel) currentAppLabel() string {
-	if m.isOneOnOne() {
+	if m.isOneOnOne() && m.activeApp != officeAppRecovery {
 		return "messages"
 	}
 	switch m.activeApp {
+	case officeAppRecovery:
+		return "recovery"
 	case officeAppTasks:
 		return "tasks"
 	case officeAppRequests:
@@ -2423,6 +2579,8 @@ func (m channelModel) currentAppLabel() string {
 		return "policies"
 	case officeAppCalendar:
 		return "calendar"
+	case officeAppArtifacts:
+		return "artifacts"
 	case officeAppSkills:
 		return "skills"
 	default:
@@ -2570,9 +2728,12 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 		if contentWidth < 32 {
 			contentWidth = 32
 		}
-		allLines := m.currentMainLines(contentWidth)
+		allLines := m.currentMainViewportLines(contentWidth, msgH)
 		visibleRows, _, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
 		if row >= 0 && row < len(visibleRows) {
+			if visibleRows[row].PromptValue != "" {
+				return mouseAction{Kind: "prompt", Value: visibleRows[row].PromptValue}, true
+			}
 			switch m.activeApp {
 			case officeAppMessages:
 				if visibleRows[row].ThreadID != "" {
@@ -2596,11 +2757,34 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 				if visibleRows[row].RequestID != "" {
 					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
 				}
+			case officeAppRecovery, officeAppArtifacts:
+				if visibleRows[row].ThreadID != "" {
+					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
+				}
+				if visibleRows[row].TaskID != "" {
+					return mouseAction{Kind: "task", Value: visibleRows[row].TaskID}, true
+				}
+				if visibleRows[row].RequestID != "" {
+					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
+				}
 			}
 		}
 	}
 
 	return mouseAction{}, false
+}
+
+func (m *channelModel) applyRecoveryPrompt(prompt string) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		m.notice = "Nothing inserted."
+		return
+	}
+	m.activeApp = officeAppMessages
+	m.syncSidebarCursorToActive()
+	m.focus = focusMain
+	m.insertIntoActiveComposer(prompt)
+	m.notice = "Inserted a recovery prompt into the composer."
 }
 
 func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int, popupRows []string) {
@@ -2636,22 +2820,24 @@ func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int,
 	typingAgents := typingAgentsFromMembers(m.members)
 	liveActivities := liveActivityFromMembers(m.members)
 	composerStr := renderComposer(mainW, m.input, m.inputPos, m.composerTargetLabel(),
-		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption,
+		m.replyToID, typingAgents, liveActivities, activePending, m.selectedOption, m.composerHint(m.composerTargetLabel(), m.replyToID, activePending),
 		m.focus == focusMain, m.tickFrame)
 	if m.memberDraft != nil {
 		composerStr = renderComposer(mainW, m.input, m.inputPos, memberDraftComposerLabel(*m.memberDraft),
-			"", typingAgents, nil, nil, 0, m.focus == focusMain, m.tickFrame)
+			"", typingAgents, nil, nil, 0, m.composerHint(memberDraftComposerLabel(*m.memberDraft), "", nil), m.focus == focusMain, m.tickFrame)
 	}
 	interviewCard := ""
 	if activePending != nil {
-		interviewCard = renderInterviewCard(*activePending, m.selectedOption, mainW-4)
+		interviewCard = renderInterviewCard(*activePending, m.selectedOption, m.interviewPhaseTitle(), mainW-4)
 	}
 	memberDraftCard := ""
 	if m.memberDraft != nil {
 		memberDraftCard = renderMemberDraftCard(*m.memberDraft, mainW-4)
 	}
 	initPanel := ""
-	if m.picker.IsActive() {
+	if m.confirm != nil {
+		initPanel = renderConfirmCard(*m.confirm, mainW-4)
+	} else if m.picker.IsActive() {
 		initPanel = m.picker.View()
 	} else if m.initFlow.IsActive() || m.initFlow.Phase() == tui.InitDone {
 		initPanel = m.initFlow.View()
@@ -2834,8 +3020,10 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			text := string(m.threadInput)
 			trimmed := strings.TrimSpace(text)
 			if strings.HasPrefix(trimmed, "/") {
+				m.threadInputHistory.record(m.threadInput, m.threadInputPos)
 				return m.runCommand(trimmed, m.threadPanelID)
 			}
+			m.threadInputHistory.record(m.threadInput, m.threadInputPos)
 			m.threadInput = nil
 			m.threadInputPos = 0
 			m.posting = true
@@ -2843,14 +3031,24 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "backspace":
 		if m.threadInputPos > 0 {
+			m.threadInputHistory.resetRecall()
 			m.threadInput = append(m.threadInput[:m.threadInputPos-1], m.threadInput[m.threadInputPos:]...)
 			m.threadInputPos--
 			m.updateThreadOverlays()
 		}
 	case "ctrl+u":
+		m.threadInputHistory.resetRecall()
 		m.threadInput = nil
 		m.threadInputPos = 0
 		m.updateThreadOverlays()
+	case "ctrl+p":
+		if snapshot, ok := m.threadInputHistory.previous(m.threadInput, m.threadInputPos); ok {
+			m.restoreThreadSnapshot(snapshot)
+		}
+	case "ctrl+n":
+		if snapshot, ok := m.threadInputHistory.next(); ok {
+			m.restoreThreadSnapshot(snapshot)
+		}
 	case "ctrl+a":
 		m.threadInputPos = 0
 		m.updateThreadOverlays()
@@ -2858,6 +3056,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.threadInputPos = len(m.threadInput)
 		m.updateThreadOverlays()
 	case "ctrl+j":
+		m.threadInputHistory.resetRecall()
 		ch := []rune{'\n'}
 		tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
 		copy(tail, m.threadInput[m.threadInputPos:])
@@ -2890,6 +3089,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	default:
 		if ch := composerInsertRunes(msg); len(ch) > 0 {
+			m.threadInputHistory.resetRecall()
 			m.threadInput, m.threadInputPos = insertComposerRunes(m.threadInput, m.threadInputPos, ch)
 			m.updateThreadOverlays()
 		} else if len(msg.String()) == 1 || msg.Type == tea.KeyRunes {
@@ -2898,6 +3098,7 @@ func (m channelModel) updateThread(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				ch = []rune(msg.String())
 			}
 			if len(ch) > 0 {
+				m.threadInputHistory.resetRecall()
 				tail := make([]rune, len(m.threadInput[m.threadInputPos:]))
 				copy(tail, m.threadInput[m.threadInputPos:])
 				m.threadInput = append(m.threadInput[:m.threadInputPos], append(ch, tail...)...)
@@ -2968,6 +3169,24 @@ type sidebarItem struct {
 	Label string
 }
 
+type officeSidebarApp struct {
+	App   officeApp
+	Label string
+}
+
+func officeSidebarApps() []officeSidebarApp {
+	return []officeSidebarApp{
+		{App: officeAppMessages, Label: "Messages"},
+		{App: officeAppRecovery, Label: "Recovery"},
+		{App: officeAppTasks, Label: "Tasks"},
+		{App: officeAppRequests, Label: "Requests"},
+		{App: officeAppPolicies, Label: "Policies"},
+		{App: officeAppCalendar, Label: "Calendar"},
+		{App: officeAppArtifacts, Label: "Artifacts"},
+		{App: officeAppSkills, Label: "Skills"},
+	}
+}
+
 func (m channelModel) sidebarItems() []sidebarItem {
 	if m.isOneOnOne() {
 		return nil
@@ -2991,13 +3210,12 @@ func (m channelModel) channelSidebarItems() []sidebarItem {
 }
 
 func (m channelModel) appSidebarItems() []sidebarItem {
-	return []sidebarItem{
-		{Kind: "app", Value: string(officeAppMessages), Label: "Messages"},
-		{Kind: "app", Value: string(officeAppTasks), Label: "Tasks"},
-		{Kind: "app", Value: string(officeAppSkills), Label: "Skills"},
-		{Kind: "app", Value: string(officeAppPolicies), Label: "Policies"},
-		{Kind: "app", Value: string(officeAppCalendar), Label: "Calendar"},
+	apps := officeSidebarApps()
+	items := make([]sidebarItem, 0, len(apps))
+	for _, app := range apps {
+		items = append(items, sidebarItem{Kind: "app", Value: string(app.App), Label: app.Label})
 	}
+	return items
 }
 
 func sidebarShortcutLabel(index int) string {
@@ -3065,6 +3283,9 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 		case officeAppMessages:
 			m.notice = "Viewing #" + m.activeChannel + "."
 			return pollBroker("", m.activeChannel)
+		case officeAppRecovery:
+			m.notice = "Viewing the recovery summary."
+			return m.pollCurrentState()
 		case officeAppTasks:
 			m.notice = "Viewing tasks in #" + m.activeChannel + "."
 			return pollTasks(m.activeChannel)
@@ -3077,6 +3298,9 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 		case officeAppCalendar:
 			m.notice = "Viewing the office calendar."
 			return pollOfficeLedger()
+		case officeAppArtifacts:
+			m.notice = "Viewing recent execution artifacts."
+			return m.pollCurrentState()
 		case officeAppSkills:
 			m.notice = "Viewing skills."
 			return pollSkills("")
@@ -3653,7 +3877,7 @@ func inferMood(text string) string {
 	}
 }
 
-func renderInterviewCard(interview channelInterview, selected int, width int) string {
+func renderInterviewCard(interview channelInterview, selected int, phaseTitle string, width int) string {
 	cardWidth := width
 	if cardWidth < 40 {
 		cardWidth = 40
@@ -3681,6 +3905,9 @@ func renderInterviewCard(interview channelInterview, selected int, width int) st
 		title = interview.Title + " · @" + interview.From
 	}
 	headerBits := []string{labelStyle.Render(cardLabel)}
+	if strings.TrimSpace(phaseTitle) != "" {
+		headerBits = append(headerBits, subtlePill(phaseTitle, "#DBEAFE", "#1D4ED8"))
+	}
 	if interview.Blocking {
 		headerBits = append(headerBits, accentPill("blocking", "#B45309"))
 	}
@@ -3714,6 +3941,9 @@ func renderInterviewCard(interview channelInterview, selected int, width int) st
 		if strings.TrimSpace(option.Description) != "" {
 			lines = append(lines, "    "+muted.Width(cardWidth-8).Render(option.Description))
 		}
+	}
+	if hint := interviewOptionTextHint(selectedInterviewOption(interview.Options, selected)); hint != "" {
+		lines = append(lines, "", muted.Width(cardWidth-4).Render(hint))
 	}
 	customPrefix := "  "
 	if selected >= len(interview.Options) {
@@ -3844,11 +4074,13 @@ func (m *channelModel) setActiveInput(text string) {
 	if m.focus == focusThread && m.threadPanelOpen {
 		m.threadInput = []rune(text)
 		m.threadInputPos = len(m.threadInput)
+		m.threadInputHistory.resetRecall()
 		m.updateThreadOverlays()
 		return
 	}
 	m.input = []rune(text)
 	m.inputPos = len(m.input)
+	m.inputHistory.resetRecall()
 	m.updateInputOverlays()
 	m.maybeActivateChannelPickerFromInput()
 }
@@ -3862,12 +4094,26 @@ func (m *channelModel) activeInputString() string {
 
 func (m *channelModel) insertAcceptedMention(mention string) {
 	if m.focus == focusThread && m.threadPanelOpen {
+		m.threadInputHistory.resetRecall()
 		m.threadInput, m.threadInputPos = replaceMentionInInput(m.threadInput, m.threadInputPos, mention)
 		m.updateThreadOverlays()
 		return
 	}
+	m.inputHistory.resetRecall()
 	m.input, m.inputPos = replaceMentionInInput(m.input, m.inputPos, mention)
 	m.updateInputOverlays()
+}
+
+func (m *channelModel) restoreMainSnapshot(snapshot composerSnapshot) {
+	m.input = append([]rune(nil), snapshot.input...)
+	m.inputPos = normalizeCursorPos(m.input, snapshot.pos)
+	m.updateInputOverlays()
+}
+
+func (m *channelModel) restoreThreadSnapshot(snapshot composerSnapshot) {
+	m.threadInput = append([]rune(nil), snapshot.input...)
+	m.threadInputPos = normalizeCursorPos(m.threadInput, snapshot.pos)
+	m.updateThreadOverlays()
 }
 
 func replaceMentionInInput(input []rune, pos int, mention string) ([]rune, int) {
@@ -4088,6 +4334,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	}
 	clearCurrent := func() {
 		m.doctor = nil
+		m.confirm = nil
 		if threadTarget != "" {
 			clearThread()
 			m.updateThreadOverlays()
@@ -4100,7 +4347,6 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	if m.isOneOnOne() && strings.HasPrefix(trimmed, "/") {
 		// Blacklist: commands that only make sense in team/office mode
 		teamOnly := []string{
-			"/switch", "/s",
 			"/tasks", "/task ", "/task\n",
 			"/channels", "/channel ", "/channel\n",
 			"/agents", "/agent ", "/agent\n", "/agent prompt",
@@ -4115,7 +4361,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			}
 		}
 		if blocked {
-			m.notice = "1:1 mode disables office, channel, agent, task, and thread commands."
+			m.notice = "1:1 mode disables office collaboration commands."
 			return m, nil
 		}
 	}
@@ -4147,6 +4393,52 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		} else {
 			m.notice = "Viewing #general."
 		}
+		return m, nil
+	case trimmed == "/recover" || trimmed == "/resume":
+		clearCurrent()
+		m.activeApp = officeAppRecovery
+		m.syncSidebarCursorToActive()
+		if m.isOneOnOne() {
+			m.notice = "Viewing the direct-session recovery summary."
+		} else {
+			m.notice = "Viewing the office recovery summary."
+		}
+		return m, m.pollCurrentState()
+	case trimmed == "/rewind":
+		clearCurrent()
+		options := m.buildRecoveryPromptPickerOptions()
+		if len(options) == 0 {
+			m.notice = "Nothing recent to rewind from yet."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Rewind From...", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerRewind
+		m.notice = "Choose where recovery should start."
+		return m, nil
+	case trimmed == "/insert":
+		clearCurrent()
+		options := m.buildInsertPickerOptions()
+		if len(options) == 0 {
+			m.notice = "Nothing useful to insert right now."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Insert Reference", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerInsert
+		m.notice = "Choose a reference to insert into the composer."
+		return m, nil
+	case trimmed == "/search":
+		clearCurrent()
+		options := m.buildSearchPickerOptions()
+		if len(options) == 0 {
+			m.notice = "Nothing searchable yet."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Search Workspace", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerSearch
+		m.notice = "Choose where to jump next."
 		return m, nil
 	case trimmed == "/tasks":
 		clearCurrent()
@@ -4183,9 +4475,9 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		}
 	case trimmed == "/reset":
 		clearCurrent()
-		m.notice = ""
-		m.posting = true
-		return m, resetTeamSession(m.isOneOnOne())
+		m.confirm = m.confirmationForReset()
+		m.notice = "Confirm reset."
+		return m, nil
 	case trimmed == "/reset-dm" || strings.HasPrefix(trimmed, "/reset-dm "):
 		clearCurrent()
 		agent := ""
@@ -4200,8 +4492,9 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Usage: /reset-dm <agent> or use in 1:1 mode"
 			return m, nil
 		}
-		m.posting = true
-		return m, resetDMSession(agent, m.activeChannel)
+		m.confirm = confirmationForResetDM(agent, m.activeChannel)
+		m.notice = "Confirm clearing the direct transcript."
+		return m, nil
 	case trimmed == "/integrate":
 		clearCurrent()
 		if config.ResolveNoNex() {
@@ -4246,6 +4539,18 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.picker.SetActive(true)
 		m.pickerMode = channelPickerChannels
 		m.notice = "Choose a channel to switch to."
+		return m, nil
+	case trimmed == "/switcher":
+		clearCurrent()
+		options := m.buildWorkspaceSwitcherOptions()
+		if len(options) == 0 {
+			m.notice = "No destinations are available."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Workspace Switcher", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerSwitcher
+		m.notice = "Choose where to jump next."
 		return m, nil
 	case trimmed == "/channels":
 		clearCurrent()
@@ -4366,6 +4671,12 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing skills."
 		return m, pollSkills("")
+	case trimmed == "/artifacts":
+		clearCurrent()
+		m.activeApp = officeAppArtifacts
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing recent execution artifacts."
+		return m, m.pollCurrentState()
 	case strings.HasPrefix(trimmed, "/skill create "):
 		clearCurrent()
 		desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "/skill create "))
@@ -4777,9 +5088,33 @@ func (m channelModel) buildChannelPickerOptions() []tui.PickerOption {
 }
 
 func (m channelModel) buildSwitchChannelPickerOptions() []tui.PickerOption {
-	all := m.buildChannelPickerOptions()
-	options := make([]tui.PickerOption, 0, len(all))
-	for _, option := range all {
+	options := []tui.PickerOption{
+		{Label: "Main office feed", Value: "app:messages", Description: "Return to the shared message stream"},
+		{Label: "Tasks", Value: "app:tasks", Description: "Review active work for this channel"},
+		{Label: "Requests", Value: "app:requests", Description: "Open pending approvals and interviews"},
+		{Label: "Policies", Value: "app:policies", Description: "Show signals, decisions, and watchdogs"},
+		{Label: "Calendar", Value: "app:calendar", Description: "View the office schedule and teammate calendars"},
+	}
+	if m.isOneOnOne() {
+		options = append(options, tui.PickerOption{
+			Label:       "Return to main office",
+			Value:       "session:office",
+			Description: "Leave direct mode and restore the shared office session",
+		})
+	} else {
+		for _, member := range m.officeMembers {
+			name := strings.TrimSpace(member.Name)
+			if name == "" {
+				name = displayName(member.Slug)
+			}
+			options = append(options, tui.PickerOption{
+				Label:       "1:1 with " + name,
+				Value:       "session:1o1:" + member.Slug,
+				Description: "Jump into a direct session with " + name,
+			})
+		}
+	}
+	for _, option := range m.buildChannelPickerOptions() {
 		if strings.HasPrefix(option.Value, "switch:") {
 			options = append(options, option)
 		}
@@ -5969,7 +6304,7 @@ func resolveInitialOfficeApp(name string) officeApp {
 		return officeAppPolicies
 	}
 	switch officeApp(normalized) {
-	case officeAppMessages, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar:
+	case officeAppMessages, officeAppRecovery, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar, officeAppArtifacts:
 		return officeApp(normalized)
 	default:
 		return officeAppMessages
