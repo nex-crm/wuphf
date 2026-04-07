@@ -6,8 +6,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/nex-crm/wuphf/internal/tui"
 	"github.com/nex-crm/wuphf/internal/team"
+	"github.com/nex-crm/wuphf/internal/tui"
 )
 
 func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
@@ -26,6 +26,7 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 			tui.PickerOption{Label: "Requests", Value: "app:requests", Description: "Human decisions and interviews"},
 			tui.PickerOption{Label: "Policies", Value: "app:policies", Description: "Signals, decisions, and watchdogs"},
 			tui.PickerOption{Label: "Calendar", Value: "app:calendar", Description: "Scheduled work and follow-ups"},
+			tui.PickerOption{Label: "Artifacts", Value: "app:artifacts", Description: "Task logs, workflow runs, and approvals"},
 			tui.PickerOption{Label: "Skills", Value: "app:skills", Description: "Reusable skills and workflows"},
 		)
 		for _, ch := range m.channels {
@@ -125,6 +126,8 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 			return pollOfficeLedger()
 		case officeAppCalendar:
 			return tea.Batch(pollTasks(m.activeChannel), pollRequests(m.activeChannel), pollOfficeLedger())
+		case officeAppArtifacts:
+			return m.pollCurrentState()
 		default:
 			return nil
 		}

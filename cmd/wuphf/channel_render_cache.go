@@ -73,6 +73,8 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 			lines = buildPolicyLines(m.signals, m.decisions, m.watchdogs, m.actions, contentWidth)
 		case officeAppCalendar:
 			lines = buildCalendarLines(m.actions, m.scheduler, m.tasks, m.requests, m.activeChannel, m.members, m.calendarRange, m.calendarFilter, contentWidth)
+		case officeAppArtifacts:
+			lines = m.buildArtifactLines(contentWidth)
 		case officeAppSkills:
 			lines = buildSkillLines(m.skills, contentWidth)
 		default:
@@ -130,6 +132,11 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 		h.addTasks(m.tasks)
 		h.addRequests(m.requests)
 		h.addMembers(m.members)
+	case officeAppArtifacts:
+		h.addTasks(m.tasks)
+		h.addRequests(m.requests)
+		h.addActions(m.actions)
+		h.addInt64(time.Now().Unix() / 10)
 	case officeAppSkills:
 		h.addSkills(m.skills)
 	}
