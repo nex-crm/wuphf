@@ -8,14 +8,24 @@ import (
 )
 
 func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []renderedLine {
+	needsYou := buildNeedsYouLines(m.requests, contentWidth)
+	bodyHeight := msgH
+	if len(needsYou) > 0 && bodyHeight-len(needsYou) >= 8 {
+		bodyHeight -= len(needsYou)
+	} else {
+		needsYou = nil
+	}
+
 	if m.isOneOnOne() {
 		if m.activeApp == officeAppRecovery {
 			return m.currentMainLines(contentWidth)
 		}
-		return buildOneOnOneViewportSuffix(m.messages, m.actions, m.tasks, m.members, m.expandedThreads, contentWidth, msgH, m.scroll, m.oneOnOneAgentName(), m.oneOnOneAgentSlug(), m.unreadAnchorID, m.unreadCount)
+		lines := buildOneOnOneViewportSuffix(m.messages, m.actions, m.tasks, m.members, m.expandedThreads, contentWidth, bodyHeight, m.scroll, m.oneOnOneAgentName(), m.oneOnOneAgentSlug(), m.unreadAnchorID, m.unreadCount)
+		return append(needsYou, lines...)
 	}
 	if m.activeApp == officeAppMessages {
-		return buildOfficeViewportSuffix(m.messages, m.expandedThreads, contentWidth, msgH, m.scroll, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount, m.members, m.tasks, m.actions)
+		lines := buildOfficeViewportSuffix(m.messages, m.expandedThreads, contentWidth, bodyHeight, m.scroll, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount, m.members, m.tasks, m.actions)
+		return append(needsYou, lines...)
 	}
 	return m.currentMainLines(contentWidth)
 }
