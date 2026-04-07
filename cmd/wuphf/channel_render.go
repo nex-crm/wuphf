@@ -10,16 +10,16 @@ import (
 )
 
 type renderedLine struct {
-	Text      string
-	ThreadID  string
-	TaskID    string
-	RequestID string
-	AgentSlug string
+	Text        string
+	ThreadID    string
+	TaskID      string
+	RequestID   string
+	AgentSlug   string
+	PromptValue string
 }
 
-func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, threadsDefaultExpand bool) []renderedLine {
+func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int) []renderedLine {
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1")).Italic(true)
 
 	var lines []renderedLine
 	if len(messages) == 0 {
@@ -35,196 +35,8 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 	}
 
 	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Today")})
-
-	if !threadsDefaultExpand {
-		for _, msg := range messages {
-			if msg.ReplyTo != "" || !hasThreadReplies(messages, msg.ID) {
-				continue
-			}
-			if _, ok := expanded[msg.ID]; !ok {
-				expanded[msg.ID] = false
-			}
-		}
-	}
-
-	for _, tm := range flattenThreadMessages(messages, expanded) {
-		msg := tm.Message
-		ts := msg.Timestamp
-		if len(ts) > 19 {
-			ts = ts[11:19]
-		}
-
-		color := agentColorMap[msg.From]
-		if color == "" {
-			color = "#9CA3AF"
-		}
-		nameStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(color)).
-			Bold(true)
-		ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-
-		appendWrappedLine := func(text string) {
-			wrapped := appendWrapped(nil, contentWidth, text)
-			for _, line := range wrapped {
-				lines = append(lines, renderedLine{Text: line})
-			}
-		}
-
-		if strings.HasPrefix(msg.Kind, "human_") {
-			lines = append(lines, renderedLine{Text: ""})
-			headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				headerPrefix += "↳ "
-			}
-			meta := fmt.Sprintf("for you · %s · %s", humanMessageLabel(msg.Kind), msg.ID)
-			if tm.Depth > 0 {
-				meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
-			}
-			appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s",
-				headerPrefix,
-				agentAvatar(msg.From),
-				nameStyle.Render(displayName(msg.From)),
-				mutedStyle.Render(ts),
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(meta),
-			))
-
-			prefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				prefix += lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("┆") + " "
-			} else {
-				prefix += lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("│") + " "
-			}
-			titleLine := msg.Title
-			if titleLine == "" {
-				titleLine = defaultHumanMessageTitle(msg.Kind, msg.From)
-			}
-			appendWrappedLine(prefix + subtlePill("for you", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Render(titleLine))
-			textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-			for _, paragraph := range strings.Split(textPart, "\n") {
-				paragraph = highlightMentions(paragraph, agentColorMap)
-				appendWrappedLine(prefix + paragraph)
-			}
-			if a2uiRendered != "" {
-				for _, lineText := range strings.Split(a2uiRendered, "\n") {
-					lines = append(lines, renderedLine{Text: prefix + lineText})
-				}
-			}
-			continue
-		}
-
-		if msg.Kind == "automation" || msg.From == "nex" {
-			lines = append(lines, renderedLine{Text: ""})
-			source := msg.Source
-			if source == "" {
-				source = "context graph"
-			} else {
-				source = strings.ReplaceAll(source, "_", " ")
-			}
-			meta := fmt.Sprintf("%s · automated · %s", source, msg.ID)
-			if tm.Depth > 0 {
-				meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
-			}
-			textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-			titleLine := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(fallbackString(msg.Title, "Automation update"))
-			for _, lineText := range renderRuntimeEventCard(contentWidth, subtlePill("automation", "#F8FAFC", "#334155")+" "+titleLine, meta, "#7C3AED", strings.Split(textPart, "\n")) {
-				lines = append(lines, renderedLine{Text: "  " + lineText})
-			}
-			if a2uiRendered != "" {
-				for _, lineText := range strings.Split(a2uiRendered, "\n") {
-					lines = append(lines, renderedLine{Text: "    " + lineText})
-				}
-			}
-			continue
-		}
-
-		if strings.HasPrefix(msg.Content, "[STATUS]") {
-			status := strings.TrimPrefix(msg.Content, "[STATUS] ")
-			titleLine := subtlePill("status", "#E2E8F0", "#334155") + " " + nameStyle.Render("@"+msg.From) + " " + statusStyle.Render("is "+status)
-			for _, lineText := range renderRuntimeEventCard(contentWidth, titleLine, mutedStyle.Render(ts), "#475569", nil) {
-				lines = append(lines, renderedLine{Text: "  " + lineText})
-			}
-			continue
-		}
-
-		// System/routing messages — render as subtle inline updates
-		if msg.From == "system" && (msg.Kind == "routing" || msg.Kind == "stage") {
-			label := "routing"
-			if msg.Kind == "stage" {
-				label = "stage"
-			}
-			for _, lineText := range renderRuntimeEventCard(contentWidth, subtlePill(label, "#E5E7EB", "#334155")+" "+mutedStyle.Render(ts), msg.Content, "#475569", nil) {
-				lines = append(lines, renderedLine{Text: "  " + lineText})
-			}
-			continue
-		}
-
-		mood := inferMood(msg.Content)
-		meta := roleLabel(msg.From) + " · " + msg.ID
-		if mood != "" {
-			meta += " · " + mood
-		}
-		if tm.Depth > 0 {
-			meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
-		}
-		metaStyle := mutedStyle
-		if mood != "" {
-			metaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-		}
-		lines = append(lines, renderedLine{Text: ""})
-		headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
-		if tm.Depth > 0 {
-			headerPrefix += "↳ "
-		}
-		appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s", headerPrefix, agentAvatar(msg.From), nameStyle.Render(displayName(msg.From)), mutedStyle.Render(ts), metaStyle.Render(meta)))
-
-		prefix := "  " + strings.Repeat("  ", tm.Depth)
-		if tm.Depth > 0 {
-			prefix += ruleStyle.Render("┆") + " "
-		} else {
-			prefix += ruleStyle.Render("│") + " "
-		}
-
-		textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-		rendered := renderMarkdown(textPart, contentWidth-len(prefix)-2)
-		for _, paragraph := range strings.Split(rendered, "\n") {
-			paragraph = highlightMentions(paragraph, agentColorMap)
-			appendWrappedLine(prefix + paragraph)
-		}
-		if a2uiRendered != "" {
-			for _, lineText := range strings.Split(a2uiRendered, "\n") {
-				lines = append(lines, renderedLine{Text: prefix + lineText})
-			}
-		}
-		if reactionLine := renderReactions(msg.Reactions); reactionLine != "" {
-			appendWrappedLine(prefix + reactionLine)
-		}
-		if tm.Collapsed && tm.HiddenReplies > 0 {
-			var coloredNames []string
-			for _, p := range tm.ThreadParticipants {
-				pColor := agentColorMap[strings.TrimPrefix(strings.ToLower(p), "@")]
-				if pColor == "" {
-					for slug, name := range map[string]string{
-						"ceo": "CEO", "pm": "Product Manager", "fe": "Frontend Engineer", "be": "Backend Engineer",
-						"ai": "AI Engineer", "designer": "Designer", "cmo": "CMO", "cro": "CRO",
-					} {
-						if p == name {
-							pColor = agentColorMap[slug]
-							break
-						}
-					}
-				}
-				if pColor == "" {
-					pColor = "#ABABAD"
-				}
-				coloredNames = append(coloredNames, lipgloss.NewStyle().Foreground(lipgloss.Color(pColor)).Bold(true).Render(p))
-			}
-			participantStr := ""
-			if len(coloredNames) > 0 {
-				participantStr = "  " + strings.Join(coloredNames, ", ")
-			}
-			label := fmt.Sprintf("  ↩ %d repl%s%s", tm.HiddenReplies, pluralSuffix(tm.HiddenReplies), participantStr)
-			lines = append(lines, renderedLine{Text: label, ThreadID: msg.ID})
-		}
+	for _, tm := range officeThreadedMessages(messages, expanded, threadsDefaultExpand) {
+		lines = append(lines, renderOfficeMessageBlock(tm, contentWidth, unreadAnchorID, unreadCount)...)
 	}
 
 	return lines
@@ -256,7 +68,7 @@ func renderReactions(reactions []brokerReaction) string {
 	return strings.Join(parts, " ")
 }
 
-func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, agentName string) []renderedLine {
+func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, agentName string, unreadAnchorID string, unreadCount int) []renderedLine {
 	if len(messages) == 0 {
 		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 		return []renderedLine{
@@ -268,7 +80,23 @@ func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]boo
 			{Text: mutedStyle.Render("  This conversation is just you and " + agentName + ".")},
 		}
 	}
-	return buildOfficeMessageLines(messages, expanded, contentWidth, true)
+	return buildOfficeMessageLines(messages, expanded, contentWidth, true, unreadAnchorID, unreadCount)
+}
+
+func renderUnreadDivider(contentWidth int, unreadCount int) string {
+	label := " New since you looked "
+	if unreadCount > 0 {
+		label = fmt.Sprintf(" %d new since you looked ", unreadCount)
+	}
+	lineLen := contentWidth - len(label) - 2
+	if lineLen < 4 {
+		lineLen = 4
+	}
+	left := strings.Repeat("─", lineLen/2)
+	right := strings.Repeat("─", lineLen-lineLen/2)
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#93C5FD")).
+		Render("  " + left + label + right)
 }
 
 func humanMessageLabel(kind string) string {
@@ -707,13 +535,35 @@ func buildCalendarLines(actions []channelAction, jobs []channelSchedulerJob, tas
 		recentActionCap = 4
 	}
 	recentActions := make([]channelAction, 0, recentActionCap)
-	for i := len(actions) - 1; i >= 0 && len(recentActions) < recentActionCap; i-- {
+	var pinnedBridge *channelAction
+	for i := len(actions) - 1; i >= 0; i-- {
 		action := actions[i]
 		channel := normalizeSidebarSlug(action.Channel)
 		if strings.TrimSpace(action.Kind) != "bridge_channel" && channel != "" && channel != normalizeSidebarSlug(activeChannel) {
 			continue
 		}
-		recentActions = append(recentActions, action)
+		if strings.TrimSpace(action.Kind) == "bridge_channel" && pinnedBridge == nil {
+			actionCopy := action
+			pinnedBridge = &actionCopy
+		}
+		if len(recentActions) < recentActionCap {
+			recentActions = append(recentActions, action)
+		}
+	}
+	if pinnedBridge != nil {
+		hasBridge := false
+		for _, action := range recentActions {
+			if strings.TrimSpace(action.Kind) == "bridge_channel" {
+				hasBridge = true
+				break
+			}
+		}
+		if !hasBridge {
+			recentActions = append([]channelAction{*pinnedBridge}, recentActions...)
+			if recentActionCap > 0 && len(recentActions) > recentActionCap {
+				recentActions = recentActions[:recentActionCap]
+			}
+		}
 	}
 	if len(recentActions) > 0 {
 		lines = append(lines, renderedLine{Text: ""})
@@ -847,14 +697,19 @@ func renderCalendarActionCard(action channelAction, meta string, contentWidth in
 }
 
 func renderedCardLines(card, taskID, requestID, threadID, agentSlug string) []renderedLine {
+	return renderedCardLinesWithPrompt(card, taskID, requestID, threadID, agentSlug, "")
+}
+
+func renderedCardLinesWithPrompt(card, taskID, requestID, threadID, agentSlug, promptValue string) []renderedLine {
 	var lines []renderedLine
 	for _, line := range strings.Split(card, "\n") {
 		lines = append(lines, renderedLine{
-			Text:      line,
-			TaskID:    taskID,
-			RequestID: requestID,
-			ThreadID:  threadID,
-			AgentSlug: agentSlug,
+			Text:        line,
+			TaskID:      taskID,
+			RequestID:   requestID,
+			ThreadID:    threadID,
+			AgentSlug:   agentSlug,
+			PromptValue: promptValue,
 		})
 	}
 	return lines
