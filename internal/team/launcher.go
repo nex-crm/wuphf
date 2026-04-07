@@ -2422,7 +2422,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString(fmt.Sprintf("- @%s (%s): %s\n", member.Slug, member.Name, strings.Join(member.Expertise, ", ")))
 		}
 		sb.WriteString("\n== TEAM CHANNEL ==\n")
-		sb.WriteString("You are in a shared WUPHF office channel. Use the office MCP tools to communicate:\n")
+		sb.WriteString("You are in a shared WUPHF office. Your tools default to the active conversation context: the channel, thread, or direct session that most recently needs your reply.\n")
 		sb.WriteString("- team_broadcast: Post a message to the channel (all agents see it)\n")
 		sb.WriteString("- team_poll: Read recent messages (call regularly to stay in sync)\n")
 		sb.WriteString("- team_office_members: See the full office roster, including members outside the current channel\n")
@@ -2450,7 +2450,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("Tag agents with @slug in your message (e.g., '@fe can you handle this?').\n")
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
-		sb.WriteString("THREADING: Default to replying in existing threads with reply_to_id. New top-level messages only for genuinely new topics.\n\n")
+		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
 		if config.ResolveNoNex() {
 			sb.WriteString("1. Coordinate inside the office channel first and keep the team aligned there\n")
@@ -2497,7 +2497,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString(fmt.Sprintf("- @%s (%s): %s\n", member.Slug, member.Name, strings.Join(member.Expertise, ", ")))
 		}
 		sb.WriteString("\n== TEAM CHANNEL ==\n")
-		sb.WriteString("You are in a shared WUPHF office channel. Use the office MCP tools to communicate:\n")
+		sb.WriteString("You are in a shared WUPHF office. Your tools default to the active conversation context: the channel, thread, or direct session that most recently needs your reply.\n")
 		sb.WriteString("- team_broadcast: Post a message to the channel (all agents see it)\n")
 		sb.WriteString("- team_poll: Read recent messages (call regularly to stay in sync)\n")
 		sb.WriteString("- team_office_members: See the full office roster, including members outside the current channel\n")
@@ -2523,7 +2523,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("- add_context: Store durable conclusions or findings once the team actually lands them\n\n")
 		}
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
-		sb.WriteString("THREADING: Default to replying in existing threads with reply_to_id. New top-level messages only for genuinely new topics.\n\n")
+		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
 		sb.WriteString("1. Call team_poll once when notified, then respond directly\n")
 		sb.WriteString("2. Stay in your lane — but ALWAYS respond when your domain is touched\n")

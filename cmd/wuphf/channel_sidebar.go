@@ -363,8 +363,30 @@ func sidebarStyledRow(style lipgloss.Style, text string, width int) string {
 	return style.Width(maxInt(1, width)).Render(text)
 }
 
+func visibleSidebarApps(apps []officeSidebarApp, activeApp officeApp, maxRows int) []officeSidebarApp {
+	if maxRows <= 0 || len(apps) == 0 {
+		return nil
+	}
+	if len(apps) <= maxRows {
+		return apps
+	}
+	visible := append([]officeSidebarApp(nil), apps[:maxRows]...)
+	for _, app := range visible {
+		if app.App == activeApp {
+			return visible
+		}
+	}
+	for _, app := range apps {
+		if app.App == activeApp {
+			visible[len(visible)-1] = app
+			return visible
+		}
+	}
+	return visible
+}
+
 // renderSidebar renders the Slack-style sidebar with channels and team members.
-func renderSidebar(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, brokerConnected bool, width, height int) string {
+func renderSidebar(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int) string {
 	if width < 2 {
 		return ""
 	}
@@ -382,6 +404,8 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		Bold(true)
 	workspaceMetaStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(sidebarMuted))
+	workspaceSummaryStyle := workspaceMetaStyle.Copy()
+	workspaceHintStyle := workspaceMetaStyle.Copy()
 	activeRowStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(lipgloss.Color(sidebarActive)).
@@ -397,17 +421,30 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 	memberMetaStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(sidebarMuted))
 
+	switch {
+	case !workspace.BrokerConnected:
+		workspaceSummaryStyle = workspaceSummaryStyle.Foreground(lipgloss.Color("#F59E0B"))
+		workspaceHintStyle = workspaceHintStyle.Foreground(lipgloss.Color("#FBBF24"))
+	case workspace.BlockingCount > 0:
+		workspaceSummaryStyle = workspaceSummaryStyle.Foreground(lipgloss.Color("#FBBF24"))
+		workspaceHintStyle = workspaceHintStyle.Foreground(lipgloss.Color("#FCD34D")).Bold(true)
+	case strings.TrimSpace(workspace.AwaySummary) != "":
+		workspaceSummaryStyle = workspaceSummaryStyle.Foreground(lipgloss.Color("#93C5FD"))
+		workspaceHintStyle = workspaceHintStyle.Foreground(lipgloss.Color("#BFDBFE"))
+	default:
+		workspaceHintStyle = workspaceHintStyle.Foreground(lipgloss.Color("#D1FAE5"))
+	}
+
+	summaryLine := truncateLabel(workspace.sidebarSummaryLine(activeApp), maxInt(8, innerW-1))
+	hintLine := truncateLabel(workspace.sidebarHintLine(), maxInt(8, innerW-1))
+
 	var lines []string
 	lines = append(lines, "")
 	lines = append(lines, sidebarPlainRow(workspaceStyle.Render("WUPHF"), width))
 	lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("The WUPHF Office"), width))
-	lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Italic(true).Render("Somehow still operational"), width))
+	lines = append(lines, sidebarPlainRow(workspaceSummaryStyle.Render(summaryLine), width))
 	lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("Ctrl+G channels · Ctrl+O apps"), width))
-	if brokerConnected {
-		lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("Team connected"), width))
-	} else {
-		lines = append(lines, sidebarPlainRow(workspaceMetaStyle.Render("Offline preview from manifest"), width))
-	}
+	lines = append(lines, sidebarPlainRow(workspaceHintStyle.Render(hintLine), width))
 	lines = append(lines, "")
 	channelHeaderText := "Channels"
 	if quickJump == quickJumpChannels {
@@ -441,19 +478,21 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		appHeaderText = "Apps · 1-9"
 	}
 	lines = append(lines, sidebarStyledRow(sectionBandStyle, appHeaderText, width))
-	apps := []struct {
-		App   officeApp
-		Label string
-	}{
-		{officeAppMessages, "Messages"},
-		{officeAppTasks, "Tasks"},
-		{officeAppSkills, "Skills"},
-		{officeAppPolicies, "Policies"},
-		{officeAppCalendar, "Calendar"},
+	apps := officeSidebarApps()
+	const minRosterReserve = 3
+	maxAppRows := height - len(lines) - minRosterReserve
+	if maxAppRows < 1 {
+		maxAppRows = 1
 	}
-	appIndex := 0
-	for _, app := range apps {
+	for _, app := range visibleSidebarApps(apps, activeApp, maxAppRows) {
 		label := appIcon(app.App) + " " + app.Label
+		appIndex := 0
+		for idx, candidate := range apps {
+			if candidate.App == app.App {
+				appIndex = idx
+				break
+			}
+		}
 		shortcut := sidebarShortcutLabel(appIndex)
 		if shortcut != "" {
 			label = shortcut + "  " + label
@@ -467,7 +506,6 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 			lines = append(lines, sidebarStyledRow(channelRowStyle, label, width))
 		}
 		sidebarIndex++
-		appIndex++
 	}
 
 	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sidebarDivider))

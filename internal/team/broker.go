@@ -48,9 +48,11 @@ type channelMessage struct {
 }
 
 type interviewOption struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Description string `json:"description"`
+	ID           string `json:"id"`
+	Label        string `json:"label"`
+	Description  string `json:"description"`
+	RequiresText bool   `json:"requires_text,omitempty"`
+	TextHint     string `json:"text_hint,omitempty"`
 }
 
 type interviewAnswer struct {
@@ -85,32 +87,32 @@ type humanInterview struct {
 }
 
 type teamTask struct {
-	ID               string `json:"id"`
-	Channel          string `json:"channel,omitempty"`
-	Title            string `json:"title"`
-	Details          string `json:"details,omitempty"`
-	Owner            string `json:"owner,omitempty"`
-	Status           string `json:"status"`
-	CreatedBy        string `json:"created_by"`
-	ThreadID         string `json:"thread_id,omitempty"`
-	TaskType         string `json:"task_type,omitempty"`
-	PipelineID       string `json:"pipeline_id,omitempty"`
-	PipelineStage    string `json:"pipeline_stage,omitempty"`
-	ExecutionMode    string `json:"execution_mode,omitempty"`
-	ReviewState      string `json:"review_state,omitempty"`
-	SourceSignalID   string `json:"source_signal_id,omitempty"`
-	SourceDecisionID string `json:"source_decision_id,omitempty"`
-	WorktreePath     string `json:"worktree_path,omitempty"`
+	ID               string   `json:"id"`
+	Channel          string   `json:"channel,omitempty"`
+	Title            string   `json:"title"`
+	Details          string   `json:"details,omitempty"`
+	Owner            string   `json:"owner,omitempty"`
+	Status           string   `json:"status"`
+	CreatedBy        string   `json:"created_by"`
+	ThreadID         string   `json:"thread_id,omitempty"`
+	TaskType         string   `json:"task_type,omitempty"`
+	PipelineID       string   `json:"pipeline_id,omitempty"`
+	PipelineStage    string   `json:"pipeline_stage,omitempty"`
+	ExecutionMode    string   `json:"execution_mode,omitempty"`
+	ReviewState      string   `json:"review_state,omitempty"`
+	SourceSignalID   string   `json:"source_signal_id,omitempty"`
+	SourceDecisionID string   `json:"source_decision_id,omitempty"`
+	WorktreePath     string   `json:"worktree_path,omitempty"`
 	WorktreeBranch   string   `json:"worktree_branch,omitempty"`
 	DependsOn        []string `json:"depends_on,omitempty"`
 	Blocked          bool     `json:"blocked,omitempty"`
 	AckedAt          string   `json:"acked_at,omitempty"`
 	DueAt            string   `json:"due_at,omitempty"`
-	FollowUpAt       string `json:"follow_up_at,omitempty"`
-	ReminderAt       string `json:"reminder_at,omitempty"`
-	RecheckAt        string `json:"recheck_at,omitempty"`
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	FollowUpAt       string   `json:"follow_up_at,omitempty"`
+	ReminderAt       string   `json:"reminder_at,omitempty"`
+	RecheckAt        string   `json:"recheck_at,omitempty"`
+	CreatedAt        string   `json:"created_at"`
+	UpdatedAt        string   `json:"updated_at"`
 }
 
 type channelSurface struct {
@@ -248,25 +250,25 @@ type teamSkill struct {
 }
 
 type brokerState struct {
-	Messages          []channelMessage       `json:"messages"`
-	Members           []officeMember         `json:"members,omitempty"`
-	Channels          []teamChannel          `json:"channels,omitempty"`
-	SessionMode       string                 `json:"session_mode,omitempty"`
-	OneOnOneAgent     string                 `json:"one_on_one_agent,omitempty"`
-	Tasks             []teamTask             `json:"tasks,omitempty"`
-	Requests          []humanInterview       `json:"requests,omitempty"`
-	Actions           []officeActionLog      `json:"actions,omitempty"`
-	Signals           []officeSignalRecord   `json:"signals,omitempty"`
-	Decisions         []officeDecisionRecord `json:"decisions,omitempty"`
-	Watchdogs         []watchdogAlert        `json:"watchdogs,omitempty"`
-	Scheduler         []schedulerJob         `json:"scheduler,omitempty"`
-	Skills            []teamSkill                   `json:"skills,omitempty"`
-	SharedMemory      map[string]map[string]string  `json:"shared_memory,omitempty"`
-	Counter           int                           `json:"counter"`
-	NotificationSince string                 `json:"notification_since,omitempty"`
-	InsightsSince     string                 `json:"insights_since,omitempty"`
-	PendingInterview  *humanInterview        `json:"pending_interview,omitempty"`
-	Usage             teamUsageState         `json:"usage,omitempty"`
+	Messages          []channelMessage             `json:"messages"`
+	Members           []officeMember               `json:"members,omitempty"`
+	Channels          []teamChannel                `json:"channels,omitempty"`
+	SessionMode       string                       `json:"session_mode,omitempty"`
+	OneOnOneAgent     string                       `json:"one_on_one_agent,omitempty"`
+	Tasks             []teamTask                   `json:"tasks,omitempty"`
+	Requests          []humanInterview             `json:"requests,omitempty"`
+	Actions           []officeActionLog            `json:"actions,omitempty"`
+	Signals           []officeSignalRecord         `json:"signals,omitempty"`
+	Decisions         []officeDecisionRecord       `json:"decisions,omitempty"`
+	Watchdogs         []watchdogAlert              `json:"watchdogs,omitempty"`
+	Scheduler         []schedulerJob               `json:"scheduler,omitempty"`
+	Skills            []teamSkill                  `json:"skills,omitempty"`
+	SharedMemory      map[string]map[string]string `json:"shared_memory,omitempty"`
+	Counter           int                          `json:"counter"`
+	NotificationSince string                       `json:"notification_since,omitempty"`
+	InsightsSince     string                       `json:"insights_since,omitempty"`
+	PendingInterview  *humanInterview              `json:"pending_interview,omitempty"`
+	Usage             teamUsageState               `json:"usage,omitempty"`
 }
 
 type usageTotals struct {
@@ -289,33 +291,33 @@ type teamUsageState struct {
 // Broker is a lightweight HTTP message broker for the team channel.
 // All agent MCP instances connect to this shared broker.
 type Broker struct {
-	messages          []channelMessage
-	members           []officeMember
-	channels          []teamChannel
-	sessionMode       string
-	oneOnOneAgent     string
-	tasks             []teamTask
-	requests          []humanInterview
-	actions           []officeActionLog
-	signals           []officeSignalRecord
-	decisions         []officeDecisionRecord
-	watchdogs         []watchdogAlert
-	scheduler         []schedulerJob
-	skills            []teamSkill
-	sharedMemory      map[string]map[string]string // namespace → key → value
-	lastTaggedAt      map[string]time.Time   // when each agent was last @mentioned
-	lastPaneSnapshot  map[string]string      // last captured pane content per agent (for change detection)
-	seenTelegramGroups map[int64]string      // chat_id -> title, populated by transport
-	counter           int
-	notificationSince string
-	insightsSince     string
-	pendingInterview  *humanInterview
-	usage             teamUsageState
-	externalDelivered map[string]struct{} // message IDs already queued for external delivery
-	mu                sync.Mutex
-	server            *http.Server
-	token             string // shared secret for authenticating requests
-	addr              string // actual listen address (useful when port=0)
+	messages           []channelMessage
+	members            []officeMember
+	channels           []teamChannel
+	sessionMode        string
+	oneOnOneAgent      string
+	tasks              []teamTask
+	requests           []humanInterview
+	actions            []officeActionLog
+	signals            []officeSignalRecord
+	decisions          []officeDecisionRecord
+	watchdogs          []watchdogAlert
+	scheduler          []schedulerJob
+	skills             []teamSkill
+	sharedMemory       map[string]map[string]string // namespace → key → value
+	lastTaggedAt       map[string]time.Time         // when each agent was last @mentioned
+	lastPaneSnapshot   map[string]string            // last captured pane content per agent (for change detection)
+	seenTelegramGroups map[int64]string             // chat_id -> title, populated by transport
+	counter            int
+	notificationSince  string
+	insightsSince      string
+	pendingInterview   *humanInterview
+	usage              teamUsageState
+	externalDelivered  map[string]struct{} // message IDs already queued for external delivery
+	mu                 sync.Mutex
+	server             *http.Server
+	token              string // shared secret for authenticating requests
+	addr               string // actual listen address (useful when port=0)
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -1278,6 +1280,184 @@ func requestNeedsHumanDecision(req humanInterview) bool {
 	}
 }
 
+func requestOptionDefaults(kind string) ([]interviewOption, string) {
+	switch normalizeRequestKind(kind) {
+	case "approval":
+		return []interviewOption{
+			{ID: "approve", Label: "Approve", Description: "Green-light this and let the team execute immediately."},
+			{ID: "approve_with_note", Label: "Approve with note", Description: "Proceed, but attach explicit constraints or guardrails.", RequiresText: true, TextHint: "Type the conditions, constraints, or guardrails the team must follow."},
+			{ID: "needs_more_info", Label: "Need more info", Description: "Gather more context before making the approval call."},
+			{ID: "reject", Label: "Reject", Description: "Do not proceed with this."},
+			{ID: "reject_with_steer", Label: "Reject with steer", Description: "Do not proceed as proposed. Redirect the team with clearer steering.", RequiresText: true, TextHint: "Type the steering, redirect, or rationale for rejecting this request."},
+		}, "approve"
+	case "confirm":
+		return []interviewOption{
+			{ID: "confirm_proceed", Label: "Confirm", Description: "Looks good. Proceed as planned."},
+			{ID: "adjust", Label: "Adjust", Description: "Proceed only after applying the changes you specify.", RequiresText: true, TextHint: "Type the changes that must happen before proceeding."},
+			{ID: "reassign", Label: "Reassign", Description: "Move this to a different owner or scope.", RequiresText: true, TextHint: "Type who should own this instead, or how the scope should change."},
+			{ID: "hold", Label: "Hold", Description: "Do not act yet. Keep this pending for review."},
+		}, "confirm_proceed"
+	case "choice":
+		return []interviewOption{
+			{ID: "move_fast", Label: "Move fast", Description: "Bias toward speed. Ship now and iterate later."},
+			{ID: "balanced", Label: "Balanced", Description: "Balance speed, risk, and quality."},
+			{ID: "be_careful", Label: "Be careful", Description: "Bias toward caution and a tighter review loop."},
+			{ID: "needs_more_info", Label: "Need more info", Description: "Gather more context before deciding.", RequiresText: true, TextHint: "Type what is missing or what should be investigated next."},
+			{ID: "delegate", Label: "Delegate", Description: "Hand this to a specific owner for a closer call.", RequiresText: true, TextHint: "Type who should own this decision and any guidance for them."},
+		}, "balanced"
+	case "interview":
+		return []interviewOption{
+			{ID: "answer_directly", Label: "Answer directly", Description: "Respond in your own words below."},
+			{ID: "need_more_context", Label: "Need more context", Description: "Ask the office to bring back more context before you decide.", RequiresText: true, TextHint: "Type what context is missing or what should be clarified next."},
+		}, "answer_directly"
+	case "freeform", "secret":
+		return []interviewOption{
+			{ID: "proceed", Label: "Proceed", Description: "Let the team handle it with their best judgment."},
+			{ID: "give_direction", Label: "Give direction", Description: "Proceed, but only after you provide specific guidance.", RequiresText: true, TextHint: "Type the direction or constraints the team should follow."},
+			{ID: "delegate", Label: "Delegate", Description: "Route this to a specific person.", RequiresText: true, TextHint: "Type who should own this and what they should do."},
+			{ID: "hold", Label: "Hold", Description: "Pause until you review this further."},
+		}, "proceed"
+	default:
+		return []interviewOption{
+			{ID: "proceed", Label: "Proceed", Description: "Let the team handle it with their best judgment."},
+			{ID: "give_direction", Label: "Give direction", Description: "Add specific guidance the team should follow.", RequiresText: true, TextHint: "Provide the direction or constraints the team should follow."},
+			{ID: "delegate", Label: "Delegate", Description: "Route this to a specific person or role.", RequiresText: true, TextHint: "Name the person or role that should own the next call."},
+			{ID: "hold", Label: "Hold", Description: "Pause until you review this further."},
+		}, "proceed"
+	}
+}
+
+func enrichRequestOptions(kind string, options []interviewOption) []interviewOption {
+	if len(options) == 0 {
+		defaults, _ := requestOptionDefaults(kind)
+		return defaults
+	}
+	defaults, _ := requestOptionDefaults(kind)
+	meta := make(map[string]interviewOption, len(defaults))
+	for _, option := range defaults {
+		meta[strings.TrimSpace(option.ID)] = option
+	}
+	out := make([]interviewOption, 0, len(options))
+	for _, option := range options {
+		id := strings.TrimSpace(option.ID)
+		option.Label = strings.TrimSpace(option.Label)
+		option.Description = strings.TrimSpace(option.Description)
+		option.TextHint = strings.TrimSpace(option.TextHint)
+		if id == "" && option.Label != "" {
+			id = normalizeRequestOptionID(option.Label)
+			option.ID = id
+		}
+		if base, ok := meta[id]; ok {
+			if !option.RequiresText {
+				option.RequiresText = base.RequiresText
+			}
+			if strings.TrimSpace(option.TextHint) == "" {
+				option.TextHint = base.TextHint
+			}
+			if strings.TrimSpace(option.Label) == "" {
+				option.Label = base.Label
+			}
+			if strings.TrimSpace(option.Description) == "" {
+				option.Description = base.Description
+			}
+		}
+		out = append(out, option)
+	}
+	return out
+}
+
+func normalizeRequestOptions(kind, recommendedID string, options []interviewOption) ([]interviewOption, string) {
+	normalized := enrichRequestOptions(kind, options)
+	recommendedID = strings.TrimSpace(recommendedID)
+	if recommendedID != "" {
+		for _, option := range normalized {
+			if strings.TrimSpace(option.ID) == recommendedID {
+				return normalized, recommendedID
+			}
+		}
+	}
+	_, fallback := requestOptionDefaults(kind)
+	for _, option := range normalized {
+		if strings.TrimSpace(option.ID) == fallback {
+			return normalized, fallback
+		}
+	}
+	if len(normalized) > 0 {
+		return normalized, strings.TrimSpace(normalized[0].ID)
+	}
+	return normalized, fallback
+}
+
+func findRequestOption(req humanInterview, choiceID string) *interviewOption {
+	choiceID = strings.TrimSpace(choiceID)
+	if choiceID == "" {
+		return nil
+	}
+	for i := range req.Options {
+		if strings.TrimSpace(req.Options[i].ID) == choiceID {
+			return &req.Options[i]
+		}
+	}
+	return nil
+}
+
+func formatRequestAnswerMessage(req humanInterview, answer interviewAnswer) string {
+	if req.Secret {
+		return fmt.Sprintf("Answered @%s's request privately.", req.From)
+	}
+	custom := strings.TrimSpace(answer.CustomText)
+	switch strings.TrimSpace(answer.ChoiceID) {
+	case "approve":
+		return fmt.Sprintf("Approved @%s's request.", req.From)
+	case "approve_with_note":
+		if custom != "" {
+			return fmt.Sprintf("Approved @%s's request with note: %s", req.From, custom)
+		}
+		return fmt.Sprintf("Approved @%s's request with a note.", req.From)
+	case "reject":
+		return fmt.Sprintf("Rejected @%s's request.", req.From)
+	case "reject_with_steer":
+		if custom != "" {
+			return fmt.Sprintf("Rejected @%s's request with steering: %s", req.From, custom)
+		}
+		return fmt.Sprintf("Rejected @%s's request with steering.", req.From)
+	case "confirm_proceed":
+		return fmt.Sprintf("Confirmed @%s's request.", req.From)
+	case "adjust":
+		if custom != "" {
+			return fmt.Sprintf("Requested adjustments from @%s: %s", req.From, custom)
+		}
+		return fmt.Sprintf("Requested adjustments from @%s.", req.From)
+	case "reassign":
+		if custom != "" {
+			return fmt.Sprintf("Reassigned @%s's request: %s", req.From, custom)
+		}
+		return fmt.Sprintf("Reassigned @%s's request.", req.From)
+	case "hold":
+		return fmt.Sprintf("Put @%s's request on hold.", req.From)
+	case "delegate":
+		if custom != "" {
+			return fmt.Sprintf("Delegated @%s's request: %s", req.From, custom)
+		}
+		return fmt.Sprintf("Delegated @%s's request.", req.From)
+	case "needs_more_info":
+		if custom != "" {
+			return fmt.Sprintf("Asked @%s for more information: %s", req.From, custom)
+		}
+		return fmt.Sprintf("Asked @%s for more information.", req.From)
+	}
+	if custom != "" && strings.TrimSpace(answer.ChoiceText) != "" {
+		return fmt.Sprintf("Answered @%s's request with %s: %s", req.From, answer.ChoiceText, custom)
+	}
+	if custom != "" {
+		return fmt.Sprintf("Answered @%s's request: %s", req.From, custom)
+	}
+	if strings.TrimSpace(answer.ChoiceText) != "" {
+		return fmt.Sprintf("Answered @%s's request: %s", req.From, answer.ChoiceText)
+	}
+	return fmt.Sprintf("Answered @%s's request.", req.From)
+}
+
 func activeRequests(requests []humanInterview) []humanInterview {
 	out := make([]humanInterview, 0, len(requests))
 	for _, req := range requests {
@@ -1296,6 +1476,21 @@ func firstBlockingRequest(requests []humanInterview) *humanInterview {
 		}
 	}
 	return nil
+}
+
+func normalizeRequestKind(kind string) string {
+	kind = strings.TrimSpace(strings.ToLower(kind))
+	if kind == "" {
+		return "choice"
+	}
+	return kind
+}
+
+func normalizeRequestOptionID(label string) string {
+	label = strings.TrimSpace(strings.ToLower(label))
+	label = strings.ReplaceAll(label, "-", "_")
+	label = strings.ReplaceAll(label, " ", "_")
+	return label
 }
 
 func containsString(items []string, want string) bool {
@@ -2945,6 +3140,7 @@ func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
+
 // RecordTelegramGroup saves a group chat ID and title seen by the transport.
 func (b *Broker) RecordTelegramGroup(chatID int64, title string) {
 	b.mu.Lock()
@@ -3092,9 +3288,8 @@ func (b *Broker) CreateRequest(req humanInterview) (humanInterview, error) {
 	req.Channel = channel
 	req.CreatedAt = now
 	req.UpdatedAt = now
-	if strings.TrimSpace(req.Kind) == "" {
-		req.Kind = "choice"
-	}
+	req.Kind = normalizeRequestKind(req.Kind)
+	req.Options, req.RecommendedID = normalizeRequestOptions(req.Kind, req.RecommendedID, req.Options)
 	if strings.TrimSpace(req.Status) == "" {
 		req.Status = "pending"
 	}
@@ -3121,28 +3316,57 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sinceID := q.Get("since_id")
-	mySlug := q.Get("my_slug")
+	mySlug := strings.TrimSpace(q.Get("my_slug"))
+	viewerSlug := strings.TrimSpace(q.Get("viewer_slug"))
+	threadID := strings.TrimSpace(q.Get("thread_id"))
+	if threadID == "" {
+		threadID = strings.TrimSpace(q.Get("reply_to"))
+	}
+	scope := normalizeMessageScope(q.Get("scope"))
+	if rawScope := strings.TrimSpace(q.Get("scope")); rawScope != "" && scope == "" {
+		http.Error(w, "invalid message scope", http.StatusBadRequest)
+		return
+	}
 	channel := normalizeChannelSlug(q.Get("channel"))
 	if channel == "" {
 		channel = "general"
 	}
+	accessSlug := mySlug
+	if accessSlug == "" {
+		accessSlug = viewerSlug
+	}
 
 	b.mu.Lock()
-	if !b.canAccessChannelLocked(mySlug, channel) {
+	if !b.canAccessChannelLocked(accessSlug, channel) {
 		b.mu.Unlock()
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
-	messages := make([]channelMessage, 0, len(b.messages))
+	channelMessages := make([]channelMessage, 0, len(b.messages))
 	for _, msg := range b.messages {
-		if normalizeChannelSlug(msg.Channel) == channel {
-			if b.sessionMode == SessionModeOneOnOne {
-				if !b.isOneOnOneDMMessage(msg) {
-					continue
-				}
-			}
-			messages = append(messages, msg)
+		if normalizeChannelSlug(msg.Channel) != channel {
+			continue
 		}
+		channelMessages = append(channelMessages, msg)
+	}
+	messageIndex := make(map[string]channelMessage, len(channelMessages))
+	for _, msg := range channelMessages {
+		if id := strings.TrimSpace(msg.ID); id != "" {
+			messageIndex[id] = msg
+		}
+	}
+	messages := make([]channelMessage, 0, len(channelMessages))
+	for _, msg := range channelMessages {
+		if b.sessionMode == SessionModeOneOnOne && !b.isOneOnOneDMMessage(msg) {
+			continue
+		}
+		if threadID != "" && !messageInThread(msg, threadID) {
+			continue
+		}
+		if scope != "" && viewerSlug != "" && !messageMatchesViewerScope(msg, viewerSlug, scope, messageIndex) {
+			continue
+		}
+		messages = append(messages, msg)
 	}
 	if sinceID != "" {
 		for i, m := range messages {
@@ -3161,10 +3385,14 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	taggedCount := 0
-	if mySlug != "" {
+	taggedSlug := mySlug
+	if taggedSlug == "" {
+		taggedSlug = viewerSlug
+	}
+	if taggedSlug != "" {
 		for _, m := range result {
 			for _, t := range m.Tagged {
-				if t == mySlug {
+				if t == taggedSlug {
 					taggedCount++
 					break
 				}
@@ -3178,6 +3406,95 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 		"messages":     result,
 		"tagged_count": taggedCount,
 	})
+}
+
+func messageInThread(msg channelMessage, threadID string) bool {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return true
+	}
+	return strings.TrimSpace(msg.ID) == threadID || strings.TrimSpace(msg.ReplyTo) == threadID
+}
+
+func normalizeMessageScope(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", "all", "channel":
+		return ""
+	case "agent", "inbox", "outbox":
+		return strings.TrimSpace(strings.ToLower(value))
+	default:
+		return ""
+	}
+}
+
+func messageMatchesViewerScope(msg channelMessage, viewerSlug, scope string, messagesByID map[string]channelMessage) bool {
+	scope = normalizeMessageScope(scope)
+	switch scope {
+	case "inbox":
+		return messageBelongsToViewerInbox(msg, viewerSlug, messagesByID)
+	case "outbox":
+		return messageBelongsToViewerOutbox(msg, viewerSlug)
+	case "agent":
+		return messageVisibleToViewer(msg, viewerSlug, messagesByID)
+	default:
+		return true
+	}
+}
+
+func messageVisibleToViewer(msg channelMessage, viewerSlug string, messagesByID map[string]channelMessage) bool {
+	return messageBelongsToViewerOutbox(msg, viewerSlug) || messageBelongsToViewerInbox(msg, viewerSlug, messagesByID)
+}
+
+func messageBelongsToViewerOutbox(msg channelMessage, viewerSlug string) bool {
+	viewerSlug = strings.TrimSpace(viewerSlug)
+	if viewerSlug == "" || viewerSlug == "ceo" {
+		return true
+	}
+	return strings.TrimSpace(msg.From) == viewerSlug
+}
+
+func messageBelongsToViewerInbox(msg channelMessage, viewerSlug string, messagesByID map[string]channelMessage) bool {
+	viewerSlug = strings.TrimSpace(viewerSlug)
+	if viewerSlug == "" || viewerSlug == "ceo" {
+		return true
+	}
+	from := strings.TrimSpace(msg.From)
+	switch from {
+	case viewerSlug:
+		return false
+	case "you", "human", "ceo":
+		return true
+	}
+	for _, tagged := range msg.Tagged {
+		tagged = strings.TrimSpace(tagged)
+		if tagged == viewerSlug || tagged == "all" {
+			return true
+		}
+	}
+	return messageRepliesToViewerThread(msg, viewerSlug, messagesByID)
+}
+
+func messageRepliesToViewerThread(msg channelMessage, viewerSlug string, messagesByID map[string]channelMessage) bool {
+	replyTo := strings.TrimSpace(msg.ReplyTo)
+	if replyTo == "" || viewerSlug == "" {
+		return false
+	}
+	seen := map[string]bool{}
+	for replyTo != "" {
+		if seen[replyTo] {
+			return false
+		}
+		seen[replyTo] = true
+		parent, ok := messagesByID[replyTo]
+		if !ok {
+			return false
+		}
+		if strings.TrimSpace(parent.From) == viewerSlug {
+			return true
+		}
+		replyTo = strings.TrimSpace(parent.ReplyTo)
+	}
+	return false
 }
 
 // isOneOnOneDMMessage returns true if msg belongs in the 1:1 DM conversation.
@@ -4220,7 +4537,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 		b.counter++
 		req := humanInterview{
 			ID:            fmt.Sprintf("request-%d", b.counter),
-			Kind:          strings.TrimSpace(body.Kind),
+			Kind:          normalizeRequestKind(body.Kind),
 			Status:        "pending",
 			From:          strings.TrimSpace(body.From),
 			Channel:       channel,
@@ -4228,7 +4545,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			Question:      strings.TrimSpace(body.Question),
 			Context:       strings.TrimSpace(body.Context),
 			Options:       body.Options,
-			RecommendedID: strings.TrimSpace(body.RecommendedID),
+			RecommendedID: "",
 			Blocking:      body.Blocking,
 			Required:      body.Required,
 			Secret:        body.Secret,
@@ -4236,9 +4553,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			CreatedAt:     time.Now().UTC().Format(time.RFC3339),
 			UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
 		}
-		if req.Kind == "" {
-			req.Kind = "choice"
-		}
+		req.Options, req.RecommendedID = normalizeRequestOptions(req.Kind, strings.TrimSpace(body.RecommendedID), req.Options)
 		if requestNeedsHumanDecision(req) {
 			req.Blocking = true
 			req.Required = true
@@ -4331,10 +4646,38 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		if b.requests[i].ID != body.ID {
 			continue
 		}
+		choiceID := strings.TrimSpace(body.ChoiceID)
+		choiceText := strings.TrimSpace(body.ChoiceText)
+		customText := strings.TrimSpace(body.CustomText)
+		option := findRequestOption(b.requests[i], choiceID)
+		if choiceID != "" && option == nil {
+			b.mu.Unlock()
+			http.Error(w, "unknown request option", http.StatusBadRequest)
+			return
+		}
+		if option != nil {
+			if choiceText == "" {
+				choiceText = strings.TrimSpace(option.Label)
+			}
+			if option.RequiresText && customText == "" {
+				hint := strings.TrimSpace(option.TextHint)
+				if hint == "" {
+					hint = "custom_text required for this response"
+				}
+				b.mu.Unlock()
+				http.Error(w, hint, http.StatusBadRequest)
+				return
+			}
+		}
+		if choiceID == "" && choiceText == "" && customText == "" {
+			b.mu.Unlock()
+			http.Error(w, "choice_text or custom_text required", http.StatusBadRequest)
+			return
+		}
 		answer := &interviewAnswer{
-			ChoiceID:   body.ChoiceID,
-			ChoiceText: body.ChoiceText,
-			CustomText: body.CustomText,
+			ChoiceID:   choiceID,
+			ChoiceText: choiceText,
+			CustomText: customText,
 			AnsweredAt: time.Now().UTC().Format(time.RFC3339),
 		}
 		b.requests[i].Answered = answer
@@ -4356,16 +4699,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			ReplyTo:   strings.TrimSpace(b.requests[i].ReplyTo),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
-		switch {
-		case b.requests[i].Secret:
-			msg.Content = fmt.Sprintf("Answered @%s's request privately.", b.requests[i].From)
-		case strings.TrimSpace(body.CustomText) != "":
-			msg.Content = fmt.Sprintf("Answered @%s's request: %s", b.requests[i].From, body.CustomText)
-		case strings.TrimSpace(body.ChoiceText) != "":
-			msg.Content = fmt.Sprintf("Answered @%s's request: %s", b.requests[i].From, body.ChoiceText)
-		default:
-			msg.Content = fmt.Sprintf("Answered @%s's request.", b.requests[i].From)
-		}
+		msg.Content = formatRequestAnswerMessage(b.requests[i], *answer)
 		b.messages = append(b.messages, msg)
 		b.appendActionLocked("request_answered", "office", b.requests[i].Channel, "you", truncateSummary(msg.Content, 140), b.requests[i].ID)
 		if err := b.saveLocked(); err != nil {
