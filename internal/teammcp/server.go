@@ -289,6 +289,33 @@ type TeamMemberArgs struct {
 	MySlug         string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
+type TeamPlanArgs struct {
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	Tasks   []struct {
+		Title     string   `json:"title" jsonschema:"Task title"`
+		Assignee  string   `json:"assignee" jsonschema:"Agent slug to own this task"`
+		Details   string   `json:"details,omitempty" jsonschema:"Optional task details"`
+		DependsOn []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
+	} `json:"tasks" jsonschema:"List of tasks to create in dependency order"`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamMemoryWriteArgs struct {
+	Key    string `json:"key" jsonschema:"Key to store under your namespace"`
+	Value  string `json:"value" jsonschema:"Value to store"`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug (used as namespace). Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamTaskAckArgs struct {
+	ID      string `json:"id" jsonschema:"Task ID to acknowledge"`
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamTaskStatusArgs struct {
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
 func Run(ctx context.Context) error {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "wuphf-team",
@@ -684,6 +711,10 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 	if isOneOnOneMode() {
 		if strings.TrimSpace(summary) == "" {
 			return textResult("The 1:1 is quiet right now."), nil, nil
+		}
+		focus := latestHumanRequestSummary(result.Messages)
+		if focus != "" {
+			return textResult("Direct conversation\n\nLatest human request to answer now:\n" + focus + "\n\nOlder messages are background unless the latest request depends on them.\n\nRecent messages:\n" + summary), nil, nil
 		}
 		return textResult("Direct conversation\n\n" + summary), nil, nil
 	}
@@ -2319,6 +2350,26 @@ func formatMessages(messages []brokerMessage, mySlug string) string {
 		lines = append(lines, fmt.Sprintf("%s %s%s @%s: %s%s", ts, msg.ID, threadNote, msg.From, msg.Content, tagNote))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func latestHumanRequestSummary(messages []brokerMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		from := strings.TrimSpace(strings.ToLower(msg.From))
+		if from != "you" && from != "human" {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		ts := msg.Timestamp
+		if len(ts) > 19 {
+			ts = ts[11:19]
+		}
+		return fmt.Sprintf("%s %s @%s: %s", ts, msg.ID, msg.From, content)
+	}
+	return ""
 }
 
 func formatTaskSummary(ctx context.Context, mySlug string, channel string) string {
