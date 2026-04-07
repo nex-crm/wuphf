@@ -70,7 +70,7 @@ func TestBuildRecoveryLinesShowsSummaryAndHighlights(t *testing.T) {
 
 	snapshot := m.currentRuntimeSnapshot()
 	awaySummary := summarizeAwayRecovery(m.unreadCount, snapshot.Recovery)
-	lines := buildRecoveryLines(snapshot, 88, awaySummary, m.unreadCount, true)
+	lines := buildRecoveryLines(snapshot, 88, awaySummary, m.unreadCount, true, m.tasks, m.requests, m.messages)
 	plain := stripANSI(joinRenderedLines(lines))
 
 	if !strings.Contains(plain, "What changed while you were gone") {

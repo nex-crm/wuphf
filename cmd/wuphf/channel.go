@@ -2772,6 +2772,16 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 				if visibleRows[row].RequestID != "" {
 					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
 				}
+			case officeAppRecovery, officeAppArtifacts:
+				if visibleRows[row].ThreadID != "" {
+					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
+				}
+				if visibleRows[row].TaskID != "" {
+					return mouseAction{Kind: "task", Value: visibleRows[row].TaskID}, true
+				}
+				if visibleRows[row].RequestID != "" {
+					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
+				}
 			}
 		}
 	}

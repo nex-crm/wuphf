@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -18,6 +19,10 @@ func (m channelModel) currentRuntimeSnapshot() team.RuntimeSnapshot {
 		Requests:    runtimeRequestsFromChannel(m.requests),
 		Recent:      runtimeMessagesFromChannel(m.messages, 6),
 	})
+}
+
+func (m channelModel) buildRecoveryLines(contentWidth int) []renderedLine {
+	return buildRecoveryLines(m.currentRuntimeSnapshot(), contentWidth, m.awaySummary, m.unreadCount, m.brokerConnected, m.tasks, m.requests, m.messages)
 }
 
 func runtimeTasksFromChannel(tasks []channelTask) []team.RuntimeTask {
@@ -127,7 +132,7 @@ func renderAwayStrip(width, unreadCount int, summary string) string {
 		Render(label)
 }
 
-func buildRecoveryLines(snapshot team.RuntimeSnapshot, contentWidth int, awaySummary string, unreadCount int, brokerConnected bool) []renderedLine {
+func buildRecoveryLines(snapshot team.RuntimeSnapshot, contentWidth int, awaySummary string, unreadCount int, brokerConnected bool, tasks []channelTask, requests []channelInterview, messages []brokerMessage) []renderedLine {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 	lines := []renderedLine{{Text: renderDateSeparator(contentWidth, "Recovery")}}
 
@@ -188,7 +193,151 @@ func buildRecoveryLines(snapshot team.RuntimeSnapshot, contentWidth int, awaySum
 		}
 	}
 
+	if actionLines := buildRecoveryActionLines(contentWidth, tasks, requests, messages); len(actionLines) > 0 {
+		lines = append(lines, actionLines...)
+	}
+
 	return lines
+}
+
+func buildRecoveryActionLines(contentWidth int, tasks []channelTask, requests []channelInterview, messages []brokerMessage) []renderedLine {
+	lines := []renderedLine{}
+
+	if req, ok := selectNeedsYouRequest(requests); ok {
+		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Resume human decisions")})
+		header := accentPill("needs you", "#B45309") + " " + lipgloss.NewStyle().Bold(true).Render(req.TitleOrQuestion())
+		body := strings.TrimSpace(req.Context)
+		if body == "" {
+			body = strings.TrimSpace(req.Question)
+		}
+		extra := []string{"Asked by @" + fallbackString(req.From, "unknown")}
+		if strings.TrimSpace(req.RecommendedID) != "" {
+			extra = append(extra, "Recommended: "+req.RecommendedID)
+		}
+		extra = append(extra, "Open request")
+		lines = append(lines, prefixedCardLines(renderedCardLines(renderRecoveryActionCard(contentWidth, header, body, "#B45309", extra), "", req.ID, strings.TrimSpace(req.ReplyTo), ""), "  ")...)
+	}
+
+	if activeTasks := recoveryActiveTasks(tasks, 3); len(activeTasks) > 0 {
+		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Resume active tasks")})
+		for _, task := range activeTasks {
+			header := taskStatusPill(task.Status) + " " + lipgloss.NewStyle().Bold(true).Render(task.Title)
+			body := strings.TrimSpace(task.Details)
+			if body == "" {
+				body = "Owner @" + fallbackString(task.Owner, "unowned")
+			}
+			extra := []string{"Owner @" + fallbackString(task.Owner, "unowned")}
+			if strings.TrimSpace(task.ThreadID) != "" {
+				extra = append(extra, "Thread "+task.ThreadID)
+			}
+			if strings.TrimSpace(task.WorktreePath) != "" {
+				extra = append(extra, "Worktree "+task.WorktreePath)
+			}
+			extra = append(extra, "Open task")
+			threadID := strings.TrimSpace(task.ThreadID)
+			lines = append(lines, prefixedCardLines(renderedCardLines(renderRecoveryActionCard(contentWidth, header, body, "#2563EB", extra), task.ID, "", threadID, ""), "  ")...)
+		}
+	}
+
+	if recent := recoveryRecentThreads(messages, 3); len(recent) > 0 {
+		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Return to recent threads")})
+		for _, msg := range recent {
+			header := subtlePill("@"+fallbackString(msg.From, "unknown"), "#E2E8F0", "#334155") + " " + lipgloss.NewStyle().Bold(true).Render("Thread "+msg.ID)
+			body := truncateText(strings.TrimSpace(msg.Content), 160)
+			extra := []string{}
+			if when := strings.TrimSpace(msg.Timestamp); when != "" {
+				extra = append(extra, prettyRelativeTime(when))
+			}
+			extra = append(extra, "Open thread")
+			lines = append(lines, prefixedCardLines(renderedCardLines(renderRecoveryActionCard(contentWidth, header, body, "#475569", extra), "", "", msg.ID, ""), "  ")...)
+		}
+	}
+
+	return lines
+}
+
+func renderRecoveryActionCard(contentWidth int, header, body, accent string, extra []string) string {
+	cardWidth := maxInt(24, contentWidth-6)
+	parts := []string{header}
+	if strings.TrimSpace(body) != "" {
+		parts = append(parts, mutedText(body))
+	}
+	for _, line := range extra {
+		if strings.TrimSpace(line) != "" {
+			parts = append(parts, mutedText(line))
+		}
+	}
+	return lipgloss.NewStyle().
+		Width(cardWidth).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(accent)).
+		Background(lipgloss.Color("#16181E")).
+		Padding(0, 1).
+		Render(strings.Join(parts, "\n"))
+}
+
+func prefixedCardLines(lines []renderedLine, prefix string) []renderedLine {
+	out := make([]renderedLine, 0, len(lines))
+	for _, line := range lines {
+		line.Text = prefix + line.Text
+		out = append(out, line)
+	}
+	return out
+}
+
+func recoveryActiveTasks(tasks []channelTask, limit int) []channelTask {
+	filtered := make([]channelTask, 0, len(tasks))
+	for _, task := range tasks {
+		switch strings.ToLower(strings.TrimSpace(task.Status)) {
+		case "", "done", "completed", "canceled", "cancelled":
+			continue
+		default:
+			filtered = append(filtered, task)
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		left, lok := parseChannelTime(filtered[i].UpdatedAt)
+		right, rok := parseChannelTime(filtered[j].UpdatedAt)
+		switch {
+		case lok && rok:
+			return left.After(right)
+		case lok:
+			return true
+		case rok:
+			return false
+		default:
+			return filtered[i].ID > filtered[j].ID
+		}
+	})
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered
+}
+
+func recoveryRecentThreads(messages []brokerMessage, limit int) []brokerMessage {
+	roots := []brokerMessage{}
+	seen := map[string]bool{}
+	for i := len(messages) - 1; i >= 0 && len(roots) < limit; i-- {
+		msg := messages[i]
+		rootID := threadRootMessageID(messages, msg.ID)
+		if rootID == "" || seen[rootID] {
+			continue
+		}
+		if !hasThreadReplies(messages, rootID) && strings.TrimSpace(msg.ReplyTo) == "" {
+			continue
+		}
+		root, ok := findMessageByID(messages, rootID)
+		if !ok {
+			continue
+		}
+		roots = append(roots, root)
+		seen[rootID] = true
+	}
+	return roots
 }
 
 func countRunningRuntimeTasks(tasks []team.RuntimeTask) int {

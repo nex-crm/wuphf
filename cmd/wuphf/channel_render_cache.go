@@ -54,7 +54,7 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 	var lines []renderedLine
 	if m.isOneOnOne() {
 		if m.activeApp == officeAppRecovery {
-			lines = buildRecoveryLines(m.currentRuntimeSnapshot(), contentWidth, m.awaySummary, m.unreadCount, m.brokerConnected)
+			lines = m.buildRecoveryLines(contentWidth)
 		} else {
 			lines = buildOneOnOneMessageLines(m.messages, m.expandedThreads, contentWidth, m.oneOnOneAgentName(), m.unreadAnchorID, m.unreadCount)
 			focusSlug := m.oneOnOneAgentSlug()
@@ -64,7 +64,7 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 	} else {
 		switch m.activeApp {
 		case officeAppRecovery:
-			lines = buildRecoveryLines(m.currentRuntimeSnapshot(), contentWidth, m.awaySummary, m.unreadCount, m.brokerConnected)
+			lines = m.buildRecoveryLines(contentWidth)
 		case officeAppTasks:
 			lines = buildTaskLines(m.tasks, contentWidth)
 		case officeAppRequests:

@@ -2,7 +2,9 @@ package main
 
 import (
 	"fmt"
+	"sort"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -16,12 +18,12 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 		options = append(options, tui.PickerOption{
 			Label:       "Back to office",
 			Value:       "mode:office",
-			Description: "Return to the full office feed and roster",
+			Description: m.officeFeedDescription(),
 		})
 	} else {
 		options = append(options,
-			tui.PickerOption{Label: "Office feed", Value: "app:messages", Description: "Main channel feed"},
-			tui.PickerOption{Label: "Recovery", Value: "app:recovery", Description: "Resume work with focus, changes, and next steps"},
+			tui.PickerOption{Label: "Office feed", Value: "app:messages", Description: m.officeFeedDescription()},
+			tui.PickerOption{Label: "Recovery", Value: "app:recovery", Description: m.recoverySwitcherDescription()},
 			tui.PickerOption{Label: "Tasks", Value: "app:tasks", Description: "Active work in #" + m.activeChannel},
 			tui.PickerOption{Label: "Requests", Value: "app:requests", Description: "Human decisions and interviews"},
 			tui.PickerOption{Label: "Policies", Value: "app:policies", Description: "Signals, decisions, and watchdogs"},
@@ -45,10 +47,61 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 		if member.Slug == "you" || strings.TrimSpace(member.Slug) == "" {
 			continue
 		}
+		description := "Direct session with @" + member.Slug
+		summary := deriveMemberRuntimeSummary(member, m.tasks, time.Now())
+		if strings.TrimSpace(summary.Detail) != "" {
+			description = summary.Detail
+		} else if strings.TrimSpace(member.LastMessage) != "" {
+			description = summarizeSentence(member.LastMessage)
+		}
 		options = append(options, tui.PickerOption{
 			Label:       "1:1 with " + member.Name,
 			Value:       "dm:" + member.Slug,
-			Description: "Direct session with @" + member.Slug,
+			Description: description,
+		})
+	}
+
+	for _, req := range m.switcherPendingRequests(3) {
+		label := "Request " + req.ID + " · " + truncateText(req.TitleOrQuestion(), 40)
+		description := strings.TrimSpace(strings.Join([]string{
+			strings.ReplaceAll(strings.TrimSpace(req.Kind), "_", " "),
+			"@" + fallbackString(req.From, "unknown"),
+			switcherTiming(req.CreatedAt, req.DueAt),
+		}, " · "))
+		if req.Blocking || req.Required {
+			description = "Needs you now · " + description
+		}
+		options = append(options, tui.PickerOption{
+			Label:       label,
+			Value:       "request:" + req.ID,
+			Description: strings.Trim(description, " ·"),
+		})
+	}
+
+	for _, task := range m.switcherActiveTasks(4) {
+		descriptionParts := []string{
+			strings.ReplaceAll(strings.TrimSpace(task.Status), "_", " "),
+			"@" + fallbackString(task.Owner, "unowned"),
+			switcherTiming(task.UpdatedAt, task.DueAt),
+		}
+		if strings.TrimSpace(task.WorktreePath) != "" {
+			descriptionParts = append(descriptionParts, "worktree")
+		}
+		if strings.TrimSpace(task.ThreadID) != "" {
+			descriptionParts = append(descriptionParts, "thread "+task.ThreadID)
+		}
+		options = append(options, tui.PickerOption{
+			Label:       "Task " + task.ID + " · " + truncateText(task.Title, 44),
+			Value:       "task:" + task.ID,
+			Description: strings.Trim(strings.Join(descriptionParts, " · "), " ·"),
+		})
+	}
+
+	for _, msg := range m.switcherRecentThreads(3) {
+		options = append(options, tui.PickerOption{
+			Label:       "Thread " + msg.ID + " · @" + fallbackString(msg.From, "unknown"),
+			Value:       "thread:" + msg.ID,
+			Description: truncateText(strings.TrimSpace(msg.Content), 72),
 		})
 	}
 
@@ -142,9 +195,133 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 		m.focus = focusThread
 		m.notice = "Replying in thread " + threadID
 		return nil
+	case strings.HasPrefix(value, "task:"), strings.HasPrefix(value, "request:"):
+		return m.applySearchSelection(value, value)
 	default:
 		return nil
 	}
+}
+
+func (m channelModel) officeFeedDescription() string {
+	if summary := strings.TrimSpace(m.currentAwaySummary()); summary != "" {
+		return summary
+	}
+	if req, ok := selectNeedsYouRequest(m.requests); ok {
+		return "Needs you: " + truncateText(req.TitleOrQuestion(), 64)
+	}
+	return "Main office feed"
+}
+
+func (m channelModel) recoverySwitcherDescription() string {
+	recovery := m.currentRuntimeSnapshot().Recovery
+	if focus := trimRecoverySentence(recovery.Focus); focus != "" {
+		return truncateText(focus, 72)
+	}
+	if len(recovery.NextSteps) > 0 {
+		return truncateText("Next: "+recovery.NextSteps[0], 72)
+	}
+	return "Resume work with focus, changes, and next steps"
+}
+
+func (m channelModel) switcherPendingRequests(limit int) []channelInterview {
+	requests := recentHumanArtifactRequests(m.requests, 0)
+	filtered := make([]channelInterview, 0, len(requests))
+	for _, req := range requests {
+		if !isOpenInterviewStatus(req.Status) {
+			continue
+		}
+		filtered = append(filtered, req)
+	}
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered
+}
+
+func (m channelModel) switcherActiveTasks(limit int) []channelTask {
+	filtered := make([]channelTask, 0, len(m.tasks))
+	for _, task := range m.tasks {
+		status := strings.ToLower(strings.TrimSpace(task.Status))
+		switch status {
+		case "", "done", "completed", "canceled", "cancelled":
+			continue
+		default:
+			filtered = append(filtered, task)
+		}
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		leftRank, rightRank := taskSwitcherRank(filtered[i]), taskSwitcherRank(filtered[j])
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		leftTime, lok := parseChannelTime(fallbackString(filtered[i].UpdatedAt, filtered[i].CreatedAt))
+		rightTime, rok := parseChannelTime(fallbackString(filtered[j].UpdatedAt, filtered[j].CreatedAt))
+		switch {
+		case lok && rok:
+			if !leftTime.Equal(rightTime) {
+				return leftTime.After(rightTime)
+			}
+		case lok:
+			return true
+		case rok:
+			return false
+		}
+		return filtered[i].ID > filtered[j].ID
+	})
+	if limit > 0 && len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered
+}
+
+func taskSwitcherRank(task channelTask) int {
+	status := strings.ToLower(strings.TrimSpace(task.Status))
+	switch status {
+	case "blocked":
+		return 0
+	case "review":
+		return 1
+	case "in_progress":
+		return 2
+	case "claimed", "pending", "open":
+		return 3
+	default:
+		return 4
+	}
+}
+
+func (m channelModel) switcherRecentThreads(limit int) []brokerMessage {
+	roots := make([]brokerMessage, 0, limit)
+	seen := map[string]bool{}
+	for _, msg := range m.recentRootMessages(24) {
+		rootID := threadRootMessageID(m.messages, msg.ID)
+		if rootID == "" || seen[rootID] {
+			continue
+		}
+		if !hasThreadReplies(m.messages, rootID) && strings.TrimSpace(msg.ReplyTo) == "" {
+			continue
+		}
+		root, ok := findMessageByID(m.messages, rootID)
+		if !ok {
+			continue
+		}
+		roots = append(roots, root)
+		seen[rootID] = true
+		if limit > 0 && len(roots) >= limit {
+			break
+		}
+	}
+	return roots
+}
+
+func switcherTiming(createdAt, dueAt string) string {
+	if due := strings.TrimSpace(dueAt); due != "" {
+		return "due " + prettyRelativeTime(due)
+	}
+	if created := strings.TrimSpace(createdAt); created != "" {
+		return prettyRelativeTime(created)
+	}
+	return ""
 }
 
 func normalizeWorkspaceChannel(slug string) string {
