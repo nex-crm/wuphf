@@ -22,7 +22,6 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 
 	// ── Typing indicator ──────────────────────────────────────────────
 
-
 	// ── Composer label ────────────────────────────────────────────────
 	label := fmt.Sprintf("Message #%s", channelName)
 	if strings.HasPrefix(channelName, "1:1 ") {
@@ -37,7 +36,13 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		Foreground(lipgloss.Color(slackActive)).
 		Bold(true)
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
-	parts = append(parts, "  "+labelStyle.Render(label)+"  "+hintStyle.Render("/ commands · @ mention · Enter send · Esc pause all"))
+	hint := "/ commands · @ mention · Ctrl+J newline · Enter send · Esc pause all"
+	if pending != nil {
+		hint = "↑/↓ pick option · Enter submit · type to answer freeform · Esc pause all"
+	} else if strings.HasPrefix(channelName, "1:1 ") {
+		hint = "/ commands · @ mention · Ctrl+J newline · Enter send direct · Esc pause all"
+	}
+	parts = append(parts, "  "+labelStyle.Render(label)+"  "+hintStyle.Render(hint))
 
 	// ── Input field with rounded border ───────────────────────────────
 	innerW := width - 6 // border (2) + padding (2) + outer margin (2)
@@ -50,12 +55,12 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		cursorStyle := lipgloss.NewStyle().Reverse(true)
 		placeholder := "Type a message... (/ commands, @ mention)"
 		if strings.HasPrefix(channelName, "1:1 ") {
-			placeholder = "Talk directly to your agent here..."
+			placeholder = "Talk directly to your agent here... (Ctrl+J for a new line)"
 		}
 		if pending != nil {
 			placeholder = "Type your answer here, or Enter to accept the highlighted option"
 		} else if replyToID != "" {
-			placeholder = fmt.Sprintf("Reply in thread %s... (/cancel to go back)", replyToID)
+			placeholder = fmt.Sprintf("Reply in thread %s... (Ctrl+J newline, /cancel to go back)", replyToID)
 		}
 		inputStr = cursorStyle.Render(" ") + lipgloss.NewStyle().
 			Foreground(lipgloss.Color(slackMuted)).Render(" "+placeholder)

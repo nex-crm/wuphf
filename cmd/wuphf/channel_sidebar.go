@@ -99,7 +99,6 @@ func classifyActivity(m channelMember) memberActivity {
 	return memberActivity{Label: "lurking", Color: dotIdle, Dot: "●"} // ● grey filled
 }
 
-
 func defaultSidebarRoster() []channelMember {
 	return []channelMember{
 		{Slug: "ceo", Name: "CEO", Role: "strategy"},
@@ -524,13 +523,11 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 	now := time.Now()
 	for i := start; i < end; i++ {
 		m := members[i]
-		act := classifyActivity(m)
-		if task, ok := activeSidebarTask(tasks, m.Slug); ok {
-			act = applyTaskActivity(act, task)
-		}
+		summary := deriveMemberRuntimeSummary(m, tasks, now)
+		act := summary.Activity
 		character := renderOfficeCharacter(m, act, now)
-		if task, ok := activeSidebarTask(tasks, m.Slug); ok && character.Bubble == "" {
-			character.Bubble = taskBubbleText(task)
+		if summary.Bubble != "" {
+			character.Bubble = summary.Bubble
 		}
 
 		dotStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(act.Color))
@@ -544,7 +541,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		if name == "" {
 			name = displayName(m.Slug)
 		}
-		sidebarLabel := "" // dots only, no text labels in sidebar
+		sidebarLabel := act.Label
 		nameMax := innerW - 8 - ansi.StringWidth(sidebarLabel)
 		if nameMax < 8 {
 			nameMax = 8
@@ -567,7 +564,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 			}
 			lines = append(lines, sidebarPlainRow(line+strings.Repeat(" ", pad)+meta, width))
 		} else {
-			// Full mode: first face line shares the row with name/activity.
+			// Full mode: two dense rows per member, using the second row for real detail.
 			const avatarW = 4
 			avatarTop := ""
 			avatarBottom := ""
@@ -590,15 +587,26 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 				pad = 1
 			}
 			lines = append(lines, sidebarPlainRow(linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(sidebarLabel), width))
-			if avatarBottom != "" {
-				lines = append(lines, sidebarPlainRow(avatarBottom, width))
+			detail := strings.TrimSpace(summary.Detail)
+			if detail == "" {
+				detail = strings.TrimSpace(character.Bubble)
 			}
-			if character.Bubble != "" {
+			if detail == "" {
+				detail = "No updates yet."
+			}
+			detail = truncateLabel(detail, maxInt(12, innerW-avatarW-2))
+			secondLine := avatarBottom
+			if secondLine == "" {
+				secondLine = strings.Repeat(" ", avatarW)
+			}
+			secondLine = secondLine + " " + memberMetaStyle.Render(detail)
+			lines = append(lines, sidebarPlainRow(secondLine, width))
+			if character.Bubble != "" && detail != character.Bubble {
 				for _, bubbleLine := range renderThoughtBubble(character.Bubble, innerW-2) {
 					lines = append(lines, sidebarPlainRow(bubbleLine, width))
+					break
 				}
 			}
-			lines = append(lines, "")
 		}
 	}
 

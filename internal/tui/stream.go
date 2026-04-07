@@ -977,10 +977,66 @@ func (m StreamModel) renderMessage(msg StreamMessage, width int) string {
 	case "tool_use":
 		return toolUseStyle.Render("  ⚡ " + msg.AgentName + " → " + msg.Content)
 	case "tool_result":
-		return toolResultStyle.Render("  ↳ " + msg.Content)
+		return toolResultStyle.Render("  ↳ " + summarizeToolResult(msg.Content))
 	default:
 		return msg.Content
 	}
+}
+
+func summarizeToolResult(content string) string {
+	if !shouldFoldToolResult(content) {
+		return content
+	}
+
+	lineCount := countLines(content)
+	first, last := summarizeEdgeLines(content)
+	summary := fmt.Sprintf("[folded output: %d lines, %d chars]", lineCount, len(content))
+	if first != "" {
+		summary += " " + first
+	}
+	if last != "" && last != first {
+		summary += " ... " + last
+	}
+	return summary
+}
+
+func shouldFoldToolResult(content string) bool {
+	return countLines(content) > 10 || len(content) > 500
+}
+
+func countLines(content string) int {
+	if content == "" {
+		return 0
+	}
+	return strings.Count(content, "\n") + 1
+}
+
+func summarizeEdgeLines(content string) (string, string) {
+	lines := strings.Split(content, "\n")
+	first := ""
+	last := ""
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if first == "" {
+			first = truncateToolSummaryLine(line, 60)
+		}
+		last = truncateToolSummaryLine(line, 60)
+	}
+	return first, last
+}
+
+func truncateToolSummaryLine(text string, max int) string {
+	runes := []rune(text)
+	if len(runes) <= max {
+		return text
+	}
+	if max <= 1 {
+		return string(runes[:max])
+	}
+	return string(runes[:max-1]) + "..."
 }
 
 // agentPrefix returns a styled name prefix based on the agent's role.

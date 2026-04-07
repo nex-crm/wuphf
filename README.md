@@ -143,6 +143,109 @@ If for some reason you want the published CLI separately, there is still a scrip
 bash scripts/install-latest-wuphf-cli.sh
 ```
 
+## Telegram
+
+WUPHF can bridge to Telegram. A Telegram group or DM becomes a shared office channel — messages flow both ways, and all assigned agents participate.
+
+### Connect
+
+Run `/connect` in the TUI. Pick Telegram, paste your bot token from [@BotFather](https://t.me/BotFather), and select a group or DM mode. That's it.
+
+If the bot is already in a group and someone has sent a message, the group appears automatically in the picker. If not, add the bot to a group first, send a message, then try `/connect` again.
+
+### What flows to Telegram
+
+- Agent responses show with the agent name: **@CEO**: message
+- Human interviews show as decision prompts with options
+- Skill invocations and system messages are clearly labeled
+- Typing indicators appear when agents are working
+
+### What flows from Telegram
+
+- Group messages route to the mapped office channel
+- DM messages to the bot route to the DM channel
+- Telegram usernames are mapped to office members when possible
+
+### Setup details
+
+- Bot token is saved to `~/.wuphf/config.json` after first entry
+- Channel surface metadata is stored in the company manifest
+- The transport starts automatically on launch if a telegram channel exists
+- Privacy mode must be disabled on the bot (via @BotFather → `/setprivacy` → Disable) for group messages to work
+
+## Integrations And Actions
+
+If you want agents to do real things across external systems, not just talk about them, you also need a Composio project key and at least one connected account.
+
+That is what powers:
+
+- external actions like sending an email
+- reusable workflows
+- trigger-based automations
+
+The minimum setup is:
+
+1. create a Composio project
+2. generate a project API key
+3. connect the accounts you want agents to use, such as Gmail
+4. tell WUPHF about the key
+
+Inside WUPHF:
+
+```text
+/config set composio_api_key <your-composio-project-key>
+/config set action_provider composio
+```
+
+You also need the connected account on the Composio side. For example, if you want Gmail actions to work, connect Gmail in Composio first. WUPHF can search and execute actions only after that account exists.
+
+If you run:
+
+```bash
+./wuphf --no-nex
+```
+
+then Nex-backed integrations are disabled for that run, and the action plane should be treated as off too.
+
+## AI-Assisted Setup Prompt
+
+If you are not technical, paste this into your AI tool of choice and follow it step by step:
+
+```text
+Help me set up WUPHF so the agents can actually take actions in external apps.
+
+I am not technical. Walk me through this slowly, one step at a time, and wait for me after each step.
+
+Goal:
+- WUPHF runs locally
+- Nex is configured
+- Composio is configured for the action plane
+- Gmail is connected
+- WUPHF can send a test email through an agent
+
+Please guide me through this exact flow:
+
+1. Confirm tmux, claude, and Go are installed.
+2. Help me build WUPHF from source.
+3. Help me run WUPHF and complete /init.
+4. Help me create or open a Composio project.
+5. Help me generate a Composio project API key.
+6. Help me connect Gmail inside Composio.
+7. Help me enter the Composio key into WUPHF using:
+   /config set composio_api_key <key>
+   /config set action_provider composio
+8. Help me start a 1:1 CEO session.
+9. Help me ask the CEO to send a test email through the Composio action plane.
+10. If anything fails, diagnose whether the problem is:
+   - missing WUPHF setup
+   - missing Nex setup
+   - missing Composio key
+   - missing connected account
+   - wrong provider selected
+
+Be explicit, do not skip steps, and give me the exact command or exact text to paste each time.
+```
+
 ## What You Should See
 
 When it works, you should get:
