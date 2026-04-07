@@ -25,7 +25,7 @@ func textFromResult(t *testing.T, result *mcp.CallToolResult) string {
 	return text.Text
 }
 
-func TestSuppressBroadcastReasonAllowsViewpoints(t *testing.T) {
+func TestSuppressBroadcastReasonBlocksOutOfDomainReply(t *testing.T) {
 	reason := suppressBroadcastReason(
 		"fe",
 		"Here is my thought.",
@@ -35,8 +35,8 @@ func TestSuppressBroadcastReasonAllowsViewpoints(t *testing.T) {
 		},
 		nil,
 	)
-	if reason != "" {
-		t.Fatalf("expected FE reply to be allowed (agents should share viewpoints), got %q", reason)
+	if reason == "" {
+		t.Fatal("expected FE reply to be suppressed for marketing-only work")
 	}
 }
 
@@ -57,10 +57,10 @@ func TestSuppressBroadcastReasonAllowsOwnedTaskReply(t *testing.T) {
 	}
 }
 
-func TestSuppressBroadcastReasonAllowsAfterCEOReply(t *testing.T) {
+func TestSuppressBroadcastReasonBlocksAfterUntargetedCEOReply(t *testing.T) {
 	reason := suppressBroadcastReason(
 		"fe",
-		"I can take this too.",
+		"I can take the UI piece.",
 		"msg-1",
 		[]brokerMessage{
 			{ID: "msg-1", From: "you", Content: "What should we do here?"},
@@ -68,8 +68,9 @@ func TestSuppressBroadcastReasonAllowsAfterCEOReply(t *testing.T) {
 		},
 		nil,
 	)
+	// CEO reply no longer suppresses specialists — agents collaborate, CEO takes final call
 	if reason != "" {
-		t.Fatalf("expected FE reply to be allowed after CEO (agents share viewpoints), got %q", reason)
+		t.Fatalf("expected CEO reply to NOT block specialist, got %q", reason)
 	}
 }
 

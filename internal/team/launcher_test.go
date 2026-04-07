@@ -2,6 +2,7 @@ package team
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -177,12 +178,15 @@ func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
 		oneOnOne:    "pm",
 	}
 
-	immediate, _ := l.notificationTargetsForMessage(channelMessage{
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
 		From:    "you",
 		Channel: "general",
 		Content: "Need a product call here.",
 	})
 
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets in 1o1 mode, got %v", delayed)
+	}
 	if len(immediate) != 1 || immediate[0].Slug != "pm" || immediate[0].PaneTarget == "" {
 		t.Fatalf("expected pm as the only immediate target, got %v", immediate)
 	}
@@ -384,7 +388,7 @@ func TestPrimeVisibleAgentsWithoutBrokerDoesNotPanic(t *testing.T) {
 	l.primeVisibleAgents()
 }
 
-func TestNotificationTargetsForHumanMessageBroadcastAll(t *testing.T) {
+func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -403,20 +407,12 @@ func TestNotificationTargetsForHumanMessageBroadcastAll(t *testing.T) {
 		Tagged:  []string{"fe", "be"},
 	})
 
-	// Broadcast model: CEO immediate, everyone else delayed
-	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
-		t.Fatalf("expected CEO as only immediate target, got %+v", immediate)
+	// CEO + tagged specialists are all immediate now
+	if len(immediate) != 3 {
+		t.Fatalf("expected 3 immediate targets (ceo + fe + be), got %+v", immediate)
 	}
-	if len(delayed) == 0 {
-		t.Fatal("expected delayed targets for other agents, got none")
-	}
-	// Verify fe and be are in delayed targets
-	slugs := make(map[string]bool)
-	for _, d := range delayed {
-		slugs[d.Slug] = true
-	}
-	if !slugs["fe"] || !slugs["be"] {
-		t.Fatalf("expected fe and be in delayed targets, got %+v", delayed)
+	if len(delayed) != 0 {
+		t.Fatalf("expected 0 delayed targets for tagged message, got %+v", delayed)
 	}
 }
 
@@ -432,20 +428,61 @@ func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
 		},
 	}
 
-	immediate, _ := l.notificationTargetsForMessage(channelMessage{
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
 		From:    "you",
 		Content: "We need a positioning shift and launch campaign.",
 		Tagged:  []string{"fe", "cmo"},
 	})
 
-	// Direct routing: tagged agents go immediate
-	if len(immediate) < 1 {
-		t.Fatalf("expected at least 1 immediate target, got %+v", immediate)
+	// CEO + domain-matching CMO are immediate; FE filtered out by domain mismatch
+	if len(immediate) != 2 {
+		t.Fatalf("expected 2 immediate targets (ceo + cmo), got %+v", immediate)
 	}
-	
+	if len(delayed) != 0 {
+		t.Fatalf("expected 0 delayed targets, got %+v", delayed)
+	}
 }
 
-func TestNotificationTargetsForCEOMessageBroadcastsToAll(t *testing.T) {
+func TestNotificationTargetsTaggedSpecialistsGetImmediateDelivery(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "be", Name: "Backend Engineer"},
+			},
+		},
+	}
+
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Content: "Build the landing page",
+		Tagged:  []string{"fe"},
+	})
+
+	ceoFound := false
+	feFound := false
+	for _, tgt := range immediate {
+		if tgt.Slug == "ceo" {
+			ceoFound = true
+		}
+		if tgt.Slug == "fe" {
+			feFound = true
+		}
+	}
+	if !ceoFound {
+		t.Fatal("expected CEO in immediate targets")
+	}
+	if !feFound {
+		t.Fatal("expected tagged @fe in immediate targets (not delayed)")
+	}
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets for tagged message, got %+v", delayed)
+	}
+}
+
+func TestNotificationTargetsForCEOMessageNotifyTaggedOnly(t *testing.T) {
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -458,30 +495,21 @@ func TestNotificationTargetsForCEOMessageBroadcastsToAll(t *testing.T) {
 		},
 	}
 
-	// CEO sends a message — everyone else gets it (CEO excluded as sender)
 	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
 		From:    "ceo",
 		Content: "Frontend take this",
 		Tagged:  []string{"fe"},
 	})
 
-	// No immediate (CEO is lead but also sender), all others delayed
-	if len(immediate) != 0 {
-		t.Fatalf("expected no immediate targets (CEO is sender), got %+v", immediate)
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets, got %+v", delayed)
 	}
-	if len(delayed) == 0 {
-		t.Fatal("expected delayed targets for other agents, got none")
-	}
-	slugs := make(map[string]bool)
-	for _, d := range delayed {
-		slugs[d.Slug] = true
-	}
-	if !slugs["fe"] || !slugs["be"] || !slugs["cmo"] {
-		t.Fatalf("expected fe, be, cmo in delayed targets, got %+v", delayed)
+	if len(immediate) != 1 || immediate[0].Slug != "fe" {
+		t.Fatalf("expected only FE immediate target, got %+v", immediate)
 	}
 }
 
-func TestShouldDeliverDelayedNotificationSkipsIfAgentAlreadyReplied(t *testing.T) {
+func TestShouldDeliverDelayedNotificationSkipsAfterCEOAlreadyAnswered(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
@@ -492,9 +520,8 @@ func TestShouldDeliverDelayedNotificationSkipsIfAgentAlreadyReplied(t *testing.T
 	if err != nil {
 		t.Fatalf("post human message: %v", err)
 	}
-	// FE already replied in the same thread
-	if _, err := b.PostMessage("fe", "general", "On it!", nil, msg1.ID); err != nil {
-		t.Fatalf("post fe message: %v", err)
+	if _, err := b.PostMessage("ceo", "general", "I have this. PM and CMO first.", []string{"pm", "cmo"}, msg1.ID); err != nil {
+		t.Fatalf("post ceo message: %v", err)
 	}
 
 	l := &Launcher{
@@ -504,21 +531,35 @@ func TestShouldDeliverDelayedNotificationSkipsIfAgentAlreadyReplied(t *testing.T
 			Agents: []agent.AgentConfig{
 				{Slug: "ceo", Name: "CEO"},
 				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "pm", Name: "Product Manager"},
+				{Slug: "cmo", Name: "CMO"},
 			},
 		},
 	}
 	if l.shouldDeliverDelayedNotification("fe", msg1) {
-		t.Fatal("expected FE delayed notification to be skipped — FE already replied")
+		t.Fatal("expected FE delayed notification to be skipped after CEO answered without FE tag")
 	}
 }
 
-func TestShouldDeliverDelayedNotificationAllowsAllEnabledMembers(t *testing.T) {
+func TestShouldDeliverDelayedNotificationSkipsWrongDomainAndTaskOwnerConflict(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
+	task, _, err := b.EnsureTask("general", "Positioning work", "Marketing follow-up", "cmo", "ceo", "")
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	b.mu.Lock()
+	if ch := b.findChannelLocked("general"); ch != nil && !containsString(ch.Members, "cmo") {
+		ch.Members = append(ch.Members, "cmo")
+	}
+	b.mu.Unlock()
+	if task.Owner != "cmo" {
+		t.Fatalf("expected task owner cmo, got %+v", task)
+	}
 
 	l := &Launcher{
 		broker: b,
@@ -531,13 +572,12 @@ func TestShouldDeliverDelayedNotificationAllowsAllEnabledMembers(t *testing.T) {
 			},
 		},
 	}
-	msg := channelMessage{From: "you", Channel: "general", Content: "We need a positioning shift.", ID: "msg-1"}
-	// All enabled members should receive the delayed notification
-	if !l.shouldDeliverDelayedNotification("fe", msg) {
-		t.Fatal("expected FE delayed notification to be allowed")
+	msg := channelMessage{From: "you", Channel: "general", Content: "We need a positioning shift and launch campaign.", ID: "msg-1"}
+	if l.shouldDeliverDelayedNotification("fe", msg) {
+		t.Fatal("expected FE delayed notification to be skipped for marketing work owned by CMO")
 	}
 	if !l.shouldDeliverDelayedNotification("cmo", msg) {
-		t.Fatal("expected CMO delayed notification to be allowed")
+		t.Fatal("expected CMO delayed notification to be allowed for matching domain owner")
 	}
 }
 
@@ -866,15 +906,119 @@ func TestPersistOfficeSignalsCreatesOwnedTaskAndLedger(t *testing.T) {
 	if tasks[0].Owner != "ai" || tasks[0].SourceSignalID == "" || tasks[0].SourceDecisionID == "" {
 		t.Fatalf("unexpected planned task: %+v", tasks[0])
 	}
-	actions := b.Actions()
 	hasTaskCreated := false
-	for _, a := range actions {
+	for _, a := range b.Actions() {
 		if a.Kind == "task_created" {
 			hasTaskCreated = true
 			break
 		}
 	}
 	if !hasTaskCreated {
-		t.Fatalf("expected task_created action, got %+v", actions)
+		t.Fatalf("expected task_created action among %+v", b.Actions())
+	}
+}
+
+func TestBuildNotificationContextEmpty(t *testing.T) {
+	l := &Launcher{}
+	ctx := l.buildNotificationContext("general", "msg-1", 5)
+	if ctx != "" {
+		t.Fatalf("expected empty context for nil broker, got %q", ctx)
+	}
+}
+
+func TestBuildNotificationContextFormatsMessages(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	if _, err := b.PostMessage("you", "general", "First message", nil, ""); err != nil {
+		t.Fatalf("post msg 1: %v", err)
+	}
+	if _, err := b.PostMessage("ceo", "general", "Second message", nil, ""); err != nil {
+		t.Fatalf("post msg 2: %v", err)
+	}
+	if _, err := b.PostMessage("human", "general", "Third message", nil, ""); err != nil {
+		t.Fatalf("post msg 3: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+	ctx := l.buildNotificationContext("general", "", 5)
+
+	if !strings.Contains(ctx, "@you") {
+		t.Error("expected @you in context")
+	}
+	if !strings.Contains(ctx, "@ceo") {
+		t.Error("expected @ceo in context")
+	}
+	if !strings.Contains(ctx, "@human") {
+		t.Error("expected @human in context")
+	}
+}
+
+func TestBuildNotificationContextFiltersSystem(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	if _, err := b.PostMessage("you", "general", "Real message", nil, ""); err != nil {
+		t.Fatalf("post msg: %v", err)
+	}
+	b.PostSystemMessage("general", "Routing to @ceo...", "routing")
+	if _, err := b.PostMessage("ceo", "general", "[STATUS] thinking", nil, ""); err != nil {
+		t.Fatalf("post status msg: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+	ctx := l.buildNotificationContext("general", "", 5)
+
+	if !strings.Contains(ctx, "@you") {
+		t.Error("expected @you in context")
+	}
+	if strings.Contains(ctx, "Routing") {
+		t.Error("expected system routing message to be filtered")
+	}
+	if strings.Contains(ctx, "[STATUS]") {
+		t.Error("expected STATUS message to be filtered")
+	}
+}
+
+func TestBuildNotificationContextRespectsLimit(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	for i := 0; i < 10; i++ {
+		if _, err := b.PostMessage("you", "general", fmt.Sprintf("Message %d", i), nil, ""); err != nil {
+			t.Fatalf("post msg %d: %v", i, err)
+		}
+	}
+
+	l := &Launcher{broker: b}
+	ctx := l.buildNotificationContext("general", "", 3)
+
+	count := strings.Count(ctx, "@you")
+	if count > 3 {
+		t.Fatalf("expected at most 3 messages, got %d", count)
 	}
 }

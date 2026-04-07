@@ -160,12 +160,6 @@ type TeamBroadcastArgs struct {
 	NewTopic  bool     `json:"new_topic,omitempty" jsonschema:"Set true only when this genuinely needs to start a new top-level thread"`
 }
 
-type TeamReactArgs struct {
-	MessageID string `json:"message_id" jsonschema:"The message ID to react to"`
-	Emoji     string `json:"emoji" jsonschema:"Emoji reaction (e.g. 👍, 💯, 🔥, 👀, ✅)"`
-	MySlug    string `json:"my_slug,omitempty" jsonschema:"Agent slug. Defaults to WUPHF_AGENT_SLUG."`
-}
-
 type TeamPollArgs struct {
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug so tagged_count can be computed. Defaults to WUPHF_AGENT_SLUG."`
@@ -240,38 +234,14 @@ type TeamRuntimeStateArgs struct {
 }
 
 type TeamTaskArgs struct {
-	Action    string   `json:"action" jsonschema:"One of: create, claim, assign, complete, block, release"`
-	Channel   string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
-	ID        string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
-	Title     string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`
-	Details   string   `json:"details,omitempty" jsonschema:"Optional detail or update"`
-	Owner     string   `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
-	ThreadID  string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
-	DependsOn []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task depends on. Blocked until all dependencies are done."`
-	MySlug    string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
-}
-
-type TeamPlanArgs struct {
-	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
-	Tasks   []struct {
-		Title     string   `json:"title" jsonschema:"Task title"`
-		Assignee  string   `json:"assignee" jsonschema:"Agent slug to own this task"`
-		Details   string   `json:"details,omitempty" jsonschema:"Optional task details"`
-		DependsOn []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
-	} `json:"tasks" jsonschema:"List of tasks to create in dependency order"`
-	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
-}
-
-type TeamMemoryWriteArgs struct {
-	Key    string `json:"key" jsonschema:"Key to store under your namespace"`
-	Value  string `json:"value" jsonschema:"Value to store"`
-	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug (used as namespace). Defaults to WUPHF_AGENT_SLUG."`
-}
-
-type TeamTaskAckArgs struct {
-	ID      string `json:"id" jsonschema:"Task ID to acknowledge"`
-	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
-	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+	Action   string `json:"action" jsonschema:"One of: create, claim, assign, complete, block, release"`
+	Channel  string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	ID       string `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
+	Title    string `json:"title,omitempty" jsonschema:"Task title when creating a task"`
+	Details  string `json:"details,omitempty" jsonschema:"Optional detail or update"`
+	Owner    string `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
+	ThreadID string `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
+	MySlug   string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamChannelsArgs struct{}
@@ -319,6 +289,33 @@ type TeamMemberArgs struct {
 	MySlug         string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
+type TeamPlanArgs struct {
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	Tasks   []struct {
+		Title     string   `json:"title" jsonschema:"Task title"`
+		Assignee  string   `json:"assignee" jsonschema:"Agent slug to own this task"`
+		Details   string   `json:"details,omitempty" jsonschema:"Optional task details"`
+		DependsOn []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
+	} `json:"tasks" jsonschema:"List of tasks to create in dependency order"`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamMemoryWriteArgs struct {
+	Key    string `json:"key" jsonschema:"Key to store under your namespace"`
+	Value  string `json:"value" jsonschema:"Value to store"`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug (used as namespace). Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamTaskAckArgs struct {
+	ID      string `json:"id" jsonschema:"Task ID to acknowledge"`
+	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamTaskStatusArgs struct {
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
 func Run(ctx context.Context) error {
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "wuphf-team",
@@ -330,18 +327,10 @@ func Run(ctx context.Context) error {
 			Name:        "reply",
 			Description: "Send your reply to the human in the direct 1:1 conversation.",
 		}, handleTeamBroadcast)
-		mcp.AddTool(server, &mcp.Tool{
-			Name:        "team_broadcast",
-			Description: "Compatibility alias in 1:1 mode. Send your normal reply into the direct conversation.",
-		}, handleTeamBroadcast)
 
 		mcp.AddTool(server, &mcp.Tool{
 			Name:        "read_conversation",
 			Description: "Read recent messages from the 1:1 conversation so you stay in sync before replying.",
-		}, handleTeamPoll)
-		mcp.AddTool(server, &mcp.Tool{
-			Name:        "team_poll",
-			Description: "Compatibility alias in 1:1 mode. Read recent messages from the direct conversation before replying.",
 		}, handleTeamPoll)
 
 		mcp.AddTool(server, &mcp.Tool{
@@ -368,11 +357,6 @@ func Run(ctx context.Context) error {
 		Name:        "team_broadcast",
 		Description: "Post a message into the team channel for all teammates to see.",
 	}, handleTeamBroadcast)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "team_react",
-		Description: "React to a message with an emoji instead of posting a full reply. Use this when you agree with what someone said and have nothing new to add. Common reactions: 👍 (agree), 💯 (strongly agree), 🔥 (great idea), 👀 (noted/watching), ✅ (done/confirmed).",
-	}, handleTeamReact)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_poll",
@@ -448,21 +432,6 @@ func Run(ctx context.Context) error {
 	}, handleTeamTask)
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "team_plan",
-		Description: "Create a structured task plan with dependencies in one call. Tasks execute in dependency order. Use this for work involving 2+ agents.",
-	}, handleTeamPlan)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "team_memory_write",
-		Description: "Write a key-value pair into the shared team memory under your namespace. All agents can read all namespaces via team_poll.",
-	}, handleTeamMemoryWrite)
-
-	mcp.AddTool(server, &mcp.Tool{
-		Name:        "team_task_ack",
-		Description: "Acknowledge a task assigned to you, confirming you have seen it and will begin work.",
-	}, handleTeamTaskAck)
-
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_requests",
 		Description: "List the current office requests so you know whether the human already owes the team a decision.",
 	}, handleTeamRequests)
@@ -535,33 +504,6 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	return textResult(text), nil, nil
 }
 
-func handleTeamReact(ctx context.Context, _ *mcp.CallToolRequest, args TeamReactArgs) (*mcp.CallToolResult, any, error) {
-	slug, err := resolveSlug(args.MySlug)
-	if err != nil {
-		return toolError(err), nil, nil
-	}
-	if args.MessageID == "" || args.Emoji == "" {
-		return toolError(fmt.Errorf("message_id and emoji are required")), nil, nil
-	}
-
-	var result struct {
-		OK        bool `json:"ok"`
-		Duplicate bool `json:"duplicate"`
-	}
-	err = brokerPostJSON(ctx, "/reactions", map[string]any{
-		"message_id": args.MessageID,
-		"emoji":      args.Emoji,
-		"from":       slug,
-	}, &result)
-	if err != nil {
-		return toolError(err), nil, nil
-	}
-	if result.Duplicate {
-		return textResult(fmt.Sprintf("Already reacted %s to %s.", args.Emoji, args.MessageID)), nil, nil
-	}
-	return textResult(fmt.Sprintf("Reacted %s to %s as @%s.", args.Emoji, args.MessageID, slug)), nil, nil
-}
-
 func fetchBroadcastContext(ctx context.Context, channel, mySlug string) ([]brokerMessage, []brokerTaskSummary, error) {
 	values := url.Values{}
 	values.Set("channel", channel)
@@ -581,32 +523,25 @@ func fetchBroadcastContext(ctx context.Context, channel, mySlug string) ([]broke
 }
 
 func suppressBroadcastReason(slug, content, replyTo string, messages []brokerMessage, tasks []brokerTaskSummary) string {
-	// Never suppress CEO.
 	if strings.TrimSpace(slug) == "" || slug == "ceo" {
 		return ""
 	}
-	// Never suppress if the agent is explicitly tagged or owns the task.
+	myDomain := inferOfficeAgentDomain(slug)
 	latest := latestRelevantMessage(messages, replyTo)
 	latestDomain := inferOfficeTextDomain(content)
 	if latestDomain == "general" && latest != nil {
 		latestDomain = inferOfficeTextDomain(latest.Title + " " + latest.Content)
 	}
-	if latest != nil && (containsSlug(latest.Tagged, slug) || containsSlug(latest.Tagged, "all")) {
+	explicitNeed := latest != nil && containsSlug(latest.Tagged, slug)
+	ownsTask := ownsRelevantTask(slug, replyTo, latestDomain, tasks)
+
+	if explicitNeed || ownsTask {
 		return ""
 	}
-	if ownsRelevantTask(slug, replyTo, latestDomain, tasks) {
-		return ""
+	// Safety net: only block hard domain mismatches
+	if latestDomain != "" && latestDomain != "general" && myDomain != latestDomain {
+		return "this is outside your domain"
 	}
-	// If the agent already posted in this thread, don't suppress follow-ups.
-	if replyTo != "" {
-		for _, msg := range messages {
-			if msg.From == slug && (msg.ReplyTo == replyTo || msg.ID == replyTo) {
-				return ""
-			}
-		}
-	}
-	// Allow everything else — agents should share viewpoints.
-	// The specialist prompt tells them to use reactions for agreement instead.
 	return ""
 }
 
@@ -761,8 +696,6 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 	}
 	if args.Limit > 0 {
 		values.Set("limit", fmt.Sprintf("%d", args.Limit))
-	} else if isOneOnOneMode() {
-		values.Set("limit", "8")
 	}
 
 	var result brokerMessagesResponse
@@ -780,10 +713,10 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 			return textResult("The 1:1 is quiet right now."), nil, nil
 		}
 		focus := latestHumanRequestSummary(result.Messages)
-		if focus == "" {
-			return textResult("Direct conversation\n\n" + summary), nil, nil
+		if focus != "" {
+			return textResult("Direct conversation\n\nLatest human request to answer now:\n" + focus + "\n\nOlder messages are background unless the latest request depends on them.\n\nRecent messages:\n" + summary), nil, nil
 		}
-		return textResult("Direct conversation\n\nLatest human request to answer now:\n" + focus + "\n\nOlder messages are background unless the latest request depends on them.\n\nRecent messages:\n" + summary), nil, nil
+		return textResult("Direct conversation\n\n" + summary), nil, nil
 	}
 	if scope == "inbox" || scope == "outbox" {
 		scopeTitle := strings.Title(scope)
@@ -794,8 +727,7 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 	}
 	taskSummary := formatTaskSummary(ctx, resolveSlugOptional(args.MySlug), channel)
 	requestSummary := formatRequestSummary(ctx, channel)
-	memorySummary := formatMemorySummary(ctx)
-	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary, memorySummary)), nil, nil
+	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary)), nil, nil
 }
 
 func handleTeamInbox(ctx context.Context, req *mcp.CallToolRequest, args TeamPollArgs) (*mcp.CallToolResult, any, error) {
@@ -972,9 +904,6 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		"thread_id":  strings.TrimSpace(args.ThreadID),
 		"created_by": mySlug,
 	}
-	if len(args.DependsOn) > 0 {
-		payload["depends_on"] = args.DependsOn
-	}
 	switch action {
 	case "claim":
 		payload["owner"] = mySlug
@@ -995,16 +924,12 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 			ExecutionMode  string `json:"execution_mode"`
 			WorktreePath   string `json:"worktree_path"`
 			WorktreeBranch string `json:"worktree_branch"`
-			Blocked        bool   `json:"blocked"`
 		} `json:"task"`
 	}
 	if err := brokerPostJSON(ctx, "/tasks", payload, &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	text := fmt.Sprintf("Task %s in #%s is now %s", result.Task.ID, channel, result.Task.Status)
-	if result.Task.Blocked {
-		text += " (BLOCKED — waiting on dependencies)"
-	}
 	if result.Task.Owner != "" {
 		text += " @" + result.Task.Owner
 	}
@@ -2495,24 +2420,6 @@ func formatRequestSummary(ctx context.Context, channel string) string {
 		lines = append(lines, line)
 	}
 	return "Open requests:\n" + strings.Join(lines, "\n")
-}
-
-func formatMemorySummary(ctx context.Context) string {
-	var result struct {
-		Memory map[string]map[string]string `json:"memory"`
-	}
-	if err := brokerGetJSON(ctx, "/memory", &result); err != nil || len(result.Memory) == 0 {
-		return ""
-	}
-	var sb strings.Builder
-	sb.WriteString("## Shared Context\n")
-	for ns, entries := range result.Memory {
-		sb.WriteString("### " + ns + "\n")
-		for key, val := range entries {
-			sb.WriteString("- " + key + ": " + val + "\n")
-		}
-	}
-	return sb.String()
 }
 
 func contains(items []string, want string) bool {
