@@ -18,7 +18,7 @@ func TestBuildTeamLeadPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "@be") {
 		t.Error("expected prompt to contain @be")
 	}
-	if !strings.Contains(prompt, "do NOT need to forward") {
+	if !strings.Contains(prompt, "They can see everything you say") {
 		t.Error("expected broadcast instructions in prompt")
 	}
 	if !strings.Contains(prompt, "Never invent external teammates") {
