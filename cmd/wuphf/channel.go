@@ -447,6 +447,9 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "messages", Description: "Show the main office feed", Category: "navigate"},
 	{Name: "recover", Description: "Open the session recovery summary", Category: "navigate"},
 	{Name: "resume", Description: "Alias for /recover", Category: "navigate"},
+	{Name: "rewind", Description: "Insert a summarize-from-here recovery prompt", Category: "navigate"},
+	{Name: "search", Description: "Search channels, tasks, requests, and threads", Category: "navigate"},
+	{Name: "insert", Description: "Insert a channel, task, request, or message reference", Category: "navigate"},
 	{Name: "switcher", Description: "Open the unified office/direct switcher", Category: "navigate"},
 	{Name: "tasks", Description: "Show active work in this channel", Category: "navigate"},
 	{Name: "switch", Description: "Switch to another channel", Category: "navigate"},
@@ -459,6 +462,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "policies", Description: "Show signals, decisions, external actions, and watchdogs", Category: "navigate"},
 	{Name: "calendar", Description: "Show the office schedule and team calendars", Category: "navigate"},
 	{Name: "queue", Description: "Alias for /calendar", Category: "navigate"},
+	{Name: "artifacts", Description: "Show recent task logs, approvals, and workflow artifacts", Category: "navigate"},
 	{Name: "skills", Description: "Show available skills", Category: "navigate"},
 	{Name: "skill", Description: "Create, invoke, or manage a skill", Category: "work"},
 	{Name: "reply", Description: "Reply in thread by message ID", Category: "conversation"},
@@ -512,6 +516,9 @@ const (
 	channelPickerThreadAction   channelPickerMode = "thread_action"
 	channelPickerChannels       channelPickerMode = "channels"
 	channelPickerSwitcher       channelPickerMode = "switcher"
+	channelPickerInsert         channelPickerMode = "insert"
+	channelPickerSearch         channelPickerMode = "search"
+	channelPickerRewind         channelPickerMode = "rewind"
 	channelPickerAgents         channelPickerMode = "agents"
 	channelPickerCalendarAgent  channelPickerMode = "calendar_agent"
 	channelPickerOneOnOneMode   channelPickerMode = "one_on_one_mode"
@@ -525,13 +532,14 @@ const (
 type officeApp string
 
 const (
-	officeAppMessages officeApp = "messages"
-	officeAppRecovery officeApp = "recovery"
-	officeAppTasks    officeApp = "tasks"
-	officeAppRequests officeApp = "requests"
-	officeAppPolicies officeApp = "policies"
-	officeAppCalendar officeApp = "calendar"
-	officeAppSkills   officeApp = "skills"
+	officeAppMessages  officeApp = "messages"
+	officeAppRecovery  officeApp = "recovery"
+	officeAppTasks     officeApp = "tasks"
+	officeAppRequests  officeApp = "requests"
+	officeAppPolicies  officeApp = "policies"
+	officeAppCalendar  officeApp = "calendar"
+	officeAppArtifacts officeApp = "artifacts"
+	officeAppSkills    officeApp = "skills"
 )
 
 type quickJumpTarget string
@@ -1771,6 +1779,30 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
 			return m, m.applyWorkspaceSwitcherSelection(msg.Value)
+		case channelPickerInsert:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			if strings.TrimSpace(msg.Value) == "" {
+				m.notice = "Nothing inserted."
+				return m, nil
+			}
+			m.insertIntoActiveComposer(msg.Value)
+			m.notice = "Inserted reference into the composer."
+			return m, nil
+		case channelPickerSearch:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			return m, m.applySearchSelection(msg.Value, msg.Label)
+		case channelPickerRewind:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			if strings.TrimSpace(msg.Value) == "" {
+				m.notice = "Nothing inserted."
+				return m, nil
+			}
+			m.insertIntoActiveComposer(msg.Value)
+			m.notice = "Inserted a recovery prompt into the composer."
+			return m, nil
 		case channelPickerAgents:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
@@ -2402,6 +2434,8 @@ func (m channelModel) currentHeaderTitle() string {
 			return "1:1 with " + m.oneOnOneAgentName() + " · Recovery"
 		}
 		return "# " + m.activeChannel + " · Recovery"
+	case officeAppArtifacts:
+		return "# " + m.activeChannel + " · Artifacts"
 	case officeAppTasks:
 		return "# " + m.activeChannel + " · Tasks"
 	case officeAppRequests:
@@ -2531,6 +2565,12 @@ func (m channelModel) currentHeaderMeta() string {
 			}
 		}
 		return fmt.Sprintf("  Reusable team skills · %d total · %d active · %d workflow-backed", len(m.skills), active, workflowBacked)
+	case officeAppArtifacts:
+		summary := m.currentArtifactSummary()
+		if summary == "" {
+			return "  Retained task logs, approvals, and workflow history for this office"
+		}
+		return "  " + summary
 	default:
 		if m.isOneOnOne() {
 			return fmt.Sprintf("  Direct session with %s · single-agent focus · external actions and reports stay in this conversation", m.oneOnOneAgentName())
@@ -2557,6 +2597,8 @@ func (m channelModel) currentAppLabel() string {
 		return "policies"
 	case officeAppCalendar:
 		return "calendar"
+	case officeAppArtifacts:
+		return "artifacts"
 	case officeAppSkills:
 		return "skills"
 	default:
@@ -3149,6 +3191,7 @@ func (m channelModel) appSidebarItems() []sidebarItem {
 		{Kind: "app", Value: string(officeAppSkills), Label: "Skills"},
 		{Kind: "app", Value: string(officeAppPolicies), Label: "Policies"},
 		{Kind: "app", Value: string(officeAppCalendar), Label: "Calendar"},
+		{Kind: "app", Value: string(officeAppArtifacts), Label: "Artifacts"},
 	}
 }
 
@@ -3232,6 +3275,9 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 		case officeAppCalendar:
 			m.notice = "Viewing the office calendar."
 			return pollOfficeLedger()
+		case officeAppArtifacts:
+			m.notice = "Viewing recent execution artifacts."
+			return m.pollCurrentState()
 		case officeAppSkills:
 			m.notice = "Viewing skills."
 			return pollSkills("")
@@ -4335,6 +4381,42 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Viewing the office recovery summary."
 		}
 		return m, m.pollCurrentState()
+	case trimmed == "/rewind":
+		clearCurrent()
+		options := m.buildRecoveryPromptPickerOptions()
+		if len(options) == 0 {
+			m.notice = "Nothing recent to rewind from yet."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Rewind From...", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerRewind
+		m.notice = "Choose where recovery should start."
+		return m, nil
+	case trimmed == "/insert":
+		clearCurrent()
+		options := m.buildInsertPickerOptions()
+		if len(options) == 0 {
+			m.notice = "Nothing useful to insert right now."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Insert Reference", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerInsert
+		m.notice = "Choose a reference to insert into the composer."
+		return m, nil
+	case trimmed == "/search":
+		clearCurrent()
+		options := m.buildSearchPickerOptions()
+		if len(options) == 0 {
+			m.notice = "Nothing searchable yet."
+			return m, nil
+		}
+		m.picker = tui.NewPicker("Search Workspace", options)
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerSearch
+		m.notice = "Choose where to jump next."
+		return m, nil
 	case trimmed == "/tasks":
 		clearCurrent()
 		m.activeApp = officeAppTasks
@@ -4566,6 +4648,12 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.syncSidebarCursorToActive()
 		m.notice = "Viewing skills."
 		return m, pollSkills("")
+	case trimmed == "/artifacts":
+		clearCurrent()
+		m.activeApp = officeAppArtifacts
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing recent execution artifacts."
+		return m, m.pollCurrentState()
 	case strings.HasPrefix(trimmed, "/skill create "):
 		clearCurrent()
 		desc := strings.TrimSpace(strings.TrimPrefix(trimmed, "/skill create "))
@@ -6193,7 +6281,7 @@ func resolveInitialOfficeApp(name string) officeApp {
 		return officeAppPolicies
 	}
 	switch officeApp(normalized) {
-	case officeAppMessages, officeAppRecovery, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar:
+	case officeAppMessages, officeAppRecovery, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar, officeAppArtifacts:
 		return officeApp(normalized)
 	default:
 		return officeAppMessages
