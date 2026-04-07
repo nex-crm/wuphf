@@ -304,9 +304,16 @@ func TestEnsureRunningDoesNotHoldServiceMutexDuringTick(t *testing.T) {
 
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
+	streamFinished := make(chan struct{}, 1)
 	mockStream := func(msgs []Message, tls []AgentTool) <-chan StreamChunk {
 		ch := make(chan StreamChunk)
 		go func() {
+			defer func() {
+				select {
+				case streamFinished <- struct{}{}:
+				default:
+				}
+			}()
 			select {
 			case started <- struct{}{}:
 			default:
@@ -367,6 +374,28 @@ func TestEnsureRunningDoesNotHoldServiceMutexDuringTick(t *testing.T) {
 	}
 
 	close(release)
+
+	select {
+	case <-streamFinished:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for blocked stream to finish")
+	}
+
+	if err := svc.Stop("blocking"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.mu.Lock()
+		_, running := svc.tickTimers["blocking"]
+		svc.mu.Unlock()
+		if !running {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("tick timer still running after Stop")
 }
 
 func TestListAgents(t *testing.T) {
