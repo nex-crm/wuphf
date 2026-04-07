@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,16 +39,17 @@ type AgentLoop struct {
 	gossipLayer        *GossipLayer
 	credibilityTracker *CredibilityTracker
 
-	running           bool
-	paused            bool
-	eventHandlers     map[EventName][]EventHandler
-	pendingToolCall   *ToolCall
-	cancelFunc        context.CancelFunc
-	taskHadError      bool
-	collectedInsights []string
-	taskLogRoot       string
-	lastCompactionAt  int
-	mu                sync.Mutex
+	running                 bool
+	paused                  bool
+	eventHandlers           map[EventName][]EventHandler
+	pendingToolCalls        []*ToolCall
+	cancelFunc              context.CancelFunc
+	taskHadError            bool
+	collectedInsights       []string
+	taskLogRoot             string
+	lastCompactionAt        int
+	recentToolFingerprints  []string
+	mu                      sync.Mutex
 }
 
 // NewAgentLoop creates a new agent loop with the given dependencies.
@@ -161,8 +163,8 @@ func (l *AgentLoop) Tick() error {
 	case PhaseBuildContext:
 		return l.streamLLM()
 	case PhaseStreamLLM:
-		if l.pendingToolCall != nil {
-			return l.executeTool()
+		if len(l.pendingToolCalls) > 0 {
+			return l.executeTools()
 		}
 		return l.handleDone()
 	case PhaseExecuteTool:
@@ -241,6 +243,7 @@ func (l *AgentLoop) buildContext() error {
 		l.state.CurrentTask = msg
 		l.state.TaskID = nextTaskID(slug)
 		l.lastCompactionAt = 0
+		l.recentToolFingerprints = nil
 		l.sessions.Append(l.state.SessionID, SessionEntry{
 			Type:    "user",
 			Content: msg,
@@ -359,13 +362,11 @@ func (l *AgentLoop) streamLLM() error {
 		case "tool_result":
 			l.emit(EventToolResult, chunk.Content)
 		case "tool_call":
-			l.pendingToolCall = &ToolCall{
+			l.pendingToolCalls = append(l.pendingToolCalls, &ToolCall{
 				ToolName:  chunk.ToolName,
 				Params:    chunk.ToolParams,
 				StartedAt: time.Now().UnixMilli(),
-			}
-			// Stop reading — tool needs to execute before continuing.
-			goto done
+			})
 		case "error":
 			l.state.Error = chunk.Content
 			l.setPhase(PhaseError)
@@ -374,7 +375,6 @@ func (l *AgentLoop) streamLLM() error {
 		}
 	}
 
-done:
 	// Append assistant text to session.
 	if fullText.Len() > 0 {
 		l.sessions.Append(l.state.SessionID, SessionEntry{
@@ -386,61 +386,103 @@ done:
 	return nil
 }
 
-// executeTool runs the pending tool call and records results in the session.
-func (l *AgentLoop) executeTool() error {
-	if l.pendingToolCall == nil {
+// toolFingerprint computes a deterministic fingerprint for a tool call.
+func toolFingerprint(name string, params map[string]any) string {
+	keys := make([]string, 0, len(params))
+	for k := range params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	b, _ := json.Marshal(params)
+	// Re-marshal with sorted keys for determinism.
+	sorted := make(map[string]any, len(params))
+	for _, k := range keys {
+		sorted[k] = params[k]
+	}
+	b, _ = json.Marshal(sorted)
+	return name + ":" + string(b)
+}
+
+// checkLoopDetection returns true if the last 3 fingerprints are identical.
+func (l *AgentLoop) checkLoopDetection(fp string) bool {
+	l.recentToolFingerprints = append(l.recentToolFingerprints, fp)
+	if len(l.recentToolFingerprints) > 10 {
+		l.recentToolFingerprints = l.recentToolFingerprints[len(l.recentToolFingerprints)-10:]
+	}
+	n := len(l.recentToolFingerprints)
+	if n < 3 {
+		return false
+	}
+	return l.recentToolFingerprints[n-1] == l.recentToolFingerprints[n-2] &&
+		l.recentToolFingerprints[n-2] == l.recentToolFingerprints[n-3]
+}
+
+// toolCallResult holds the outcome of a single tool execution.
+type toolCallResult struct {
+	tc     *ToolCall
+	tool   AgentTool
+	result string
+	err    error
+}
+
+// executeTools runs all pending tool calls. Single calls execute sequentially;
+// multiple calls execute in parallel.
+func (l *AgentLoop) executeTools() error {
+	if len(l.pendingToolCalls) == 0 {
 		return nil
 	}
 
 	l.setPhase(PhaseExecuteTool)
 	l.emit(EventThinking, l.progressNote(PhaseExecuteTool))
-	tc := l.pendingToolCall
 
-	l.emit(EventToolCall, tc.ToolName, tc.Params)
+	// Validate all tool calls first.
+	type validatedCall struct {
+		tc   *ToolCall
+		tool AgentTool
+	}
+	var validated []validatedCall
 
-	// Lookup and validate.
-	tool, ok := l.tools.Get(tc.ToolName)
-	if !ok {
-		errMsg := fmt.Sprintf("unknown tool: %q", tc.ToolName)
-		l.sessions.Append(l.state.SessionID, SessionEntry{
-			Type:    "tool_result",
-			Content: errMsg,
-			Metadata: map[string]any{
-				"toolName": tc.ToolName,
-				"error":    true,
-			},
-		})
-		l.taskHadError = true
-		l.pendingToolCall = nil
+	for _, tc := range l.pendingToolCalls {
+		l.emit(EventToolCall, tc.ToolName, tc.Params)
+
+		tool, ok := l.tools.Get(tc.ToolName)
+		if !ok {
+			errMsg := fmt.Sprintf("unknown tool: %q", tc.ToolName)
+			l.sessions.Append(l.state.SessionID, SessionEntry{
+				Type:    "tool_result",
+				Content: errMsg,
+				Metadata: map[string]any{
+					"toolName": tc.ToolName,
+					"error":    true,
+				},
+			})
+			l.taskHadError = true
+			continue
+		}
+
+		if valid, errs := l.tools.Validate(tc.ToolName, tc.Params); !valid {
+			errMsg := fmt.Sprintf("invalid params for %q: %s", tc.ToolName, strings.Join(errs, "; "))
+			l.sessions.Append(l.state.SessionID, SessionEntry{
+				Type:    "tool_result",
+				Content: errMsg,
+				Metadata: map[string]any{
+					"toolName": tc.ToolName,
+					"error":    true,
+				},
+			})
+			l.taskHadError = true
+			continue
+		}
+
+		validated = append(validated, validatedCall{tc: tc, tool: tool})
+	}
+
+	if len(validated) == 0 {
+		l.pendingToolCalls = nil
 		return nil
 	}
 
-	if valid, errs := l.tools.Validate(tc.ToolName, tc.Params); !valid {
-		errMsg := fmt.Sprintf("invalid params for %q: %s", tc.ToolName, strings.Join(errs, "; "))
-		l.sessions.Append(l.state.SessionID, SessionEntry{
-			Type:    "tool_result",
-			Content: errMsg,
-			Metadata: map[string]any{
-				"toolName": tc.ToolName,
-				"error":    true,
-			},
-		})
-		l.taskHadError = true
-		l.pendingToolCall = nil
-		return nil
-	}
-
-	// Append tool_call entry.
-	l.sessions.Append(l.state.SessionID, SessionEntry{
-		Type:    "tool_call",
-		Content: tc.ToolName,
-		Metadata: map[string]any{
-			"toolName": tc.ToolName,
-			"params":   tc.Params,
-		},
-	})
-
-	// Execute tool.
+	// Build execution context.
 	ctx := context.Background()
 	if l.cancelFunc != nil {
 		var cancel context.CancelFunc
@@ -448,42 +490,99 @@ func (l *AgentLoop) executeTool() error {
 		l.cancelFunc = cancel
 	}
 
-	result, err := tool.Execute(tc.Params, ctx, func(s string) {})
-	tc.CompletedAt = time.Now().UnixMilli()
+	// Execute: sequential for 1, parallel for 2+.
+	results := make([]toolCallResult, len(validated))
 
-	if err != nil {
-		tc.Error = err.Error()
-		l.emit(EventToolResult, err.Error())
+	if len(validated) == 1 {
+		vc := validated[0]
+		// Append tool_call entry.
 		l.sessions.Append(l.state.SessionID, SessionEntry{
-			Type:    "tool_result",
-			Content: err.Error(),
+			Type:    "tool_call",
+			Content: vc.tc.ToolName,
 			Metadata: map[string]any{
-				"toolName": tc.ToolName,
-				"error":    true,
+				"toolName": vc.tc.ToolName,
+				"params":   vc.tc.Params,
 			},
 		})
-		l.taskHadError = true
+		result, err := vc.tool.Execute(vc.tc.Params, ctx, func(s string) {})
+		vc.tc.CompletedAt = time.Now().UnixMilli()
+		results[0] = toolCallResult{tc: vc.tc, tool: vc.tool, result: result, err: err}
 	} else {
-		tc.Result = result
-		l.emit(EventToolResult, result)
-		l.sessions.Append(l.state.SessionID, SessionEntry{
-			Type:    "tool_result",
-			Content: result,
-			Metadata: map[string]any{
-				"toolName": tc.ToolName,
-			},
-		})
+		// Append all tool_call entries first.
+		for _, vc := range validated {
+			l.sessions.Append(l.state.SessionID, SessionEntry{
+				Type:    "tool_call",
+				Content: vc.tc.ToolName,
+				Metadata: map[string]any{
+					"toolName": vc.tc.ToolName,
+					"params":   vc.tc.Params,
+				},
+			})
+		}
 
-		// Collect gossip_publish insights.
-		if tc.ToolName == "nex_gossip_publish" {
-			if insight, ok := tc.Params["insight"].(string); ok {
-				l.collectedInsights = append(l.collectedInsights, insight)
+		var wg sync.WaitGroup
+		for i, vc := range validated {
+			wg.Add(1)
+			go func(idx int, vc validatedCall) {
+				defer wg.Done()
+				result, err := vc.tool.Execute(vc.tc.Params, ctx, func(s string) {})
+				vc.tc.CompletedAt = time.Now().UnixMilli()
+				results[idx] = toolCallResult{tc: vc.tc, tool: vc.tool, result: result, err: err}
+			}(i, vc)
+		}
+		wg.Wait()
+	}
+
+	// Record results sequentially.
+	for _, r := range results {
+		if r.err != nil {
+			r.tc.Error = r.err.Error()
+			l.emit(EventToolResult, r.err.Error())
+			l.sessions.Append(l.state.SessionID, SessionEntry{
+				Type:    "tool_result",
+				Content: r.err.Error(),
+				Metadata: map[string]any{
+					"toolName": r.tc.ToolName,
+					"error":    true,
+				},
+			})
+			l.taskHadError = true
+		} else {
+			r.tc.Result = r.result
+			l.emit(EventToolResult, r.result)
+			l.sessions.Append(l.state.SessionID, SessionEntry{
+				Type:    "tool_result",
+				Content: r.result,
+				Metadata: map[string]any{
+					"toolName": r.tc.ToolName,
+				},
+			})
+
+			// Collect gossip_publish insights.
+			if r.tc.ToolName == "nex_gossip_publish" {
+				if insight, ok := r.tc.Params["insight"].(string); ok {
+					l.collectedInsights = append(l.collectedInsights, insight)
+				}
 			}
 		}
-	}
-	l.logToolExecution(*tc)
+		l.logToolExecution(*r.tc)
 
-	l.pendingToolCall = nil
+		// Loop detection: compute fingerprint and check.
+		fp := toolFingerprint(r.tc.ToolName, r.tc.Params)
+		if l.checkLoopDetection(fp) {
+			errMsg := fmt.Sprintf("loop detected: tool %s called 3 times with same params", r.tc.ToolName)
+			l.emit(EventError, errMsg)
+			l.taskHadError = true
+			l.pendingToolCalls = nil
+			l.sessions.Append(l.state.SessionID, SessionEntry{
+				Type:    "system",
+				Content: fmt.Sprintf("[LOOP DETECTED] You called %s 3 times with identical parameters. Try a different approach.", r.tc.ToolName),
+			})
+			return nil
+		}
+	}
+
+	l.pendingToolCalls = nil
 	return nil
 }
 
@@ -537,8 +636,8 @@ func (l *AgentLoop) progressNote(phase AgentPhase) string {
 		}
 		return fmt.Sprintf("%s is drafting a response.", name)
 	case PhaseExecuteTool:
-		if l.pendingToolCall != nil && l.pendingToolCall.ToolName != "" {
-			return fmt.Sprintf("%s is using %s.", name, l.pendingToolCall.ToolName)
+		if len(l.pendingToolCalls) > 0 && l.pendingToolCalls[0].ToolName != "" {
+			return fmt.Sprintf("%s is using %s.", name, l.pendingToolCalls[0].ToolName)
 		}
 		return fmt.Sprintf("%s is using tools.", name)
 	default:

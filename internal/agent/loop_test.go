@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // mockStreamFn returns a StreamFn that yields a single text chunk.
@@ -604,5 +605,199 @@ func TestOffRemovesHandler(t *testing.T) {
 
 	if callCount != 0 {
 		t.Errorf("handler should not have been called after Off, was called %d times", callCount)
+	}
+}
+
+func TestLoopDetectionTriggersAfterThreeIdenticalCalls(t *testing.T) {
+	tools := NewToolRegistry()
+	tools.Register(AgentTool{
+		Name:        "echo",
+		Description: "echoes input",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"msg": map[string]any{"type": "string"},
+			},
+		},
+		Execute: func(params map[string]any, ctx context.Context, stream func(string)) (string, error) {
+			return "ok", nil
+		},
+	})
+	sessions := NewSessionStoreAt(t.TempDir())
+	q := NewMessageQueues()
+	loop := NewAgentLoop(AgentConfig{Slug: "test", Name: "Test"}, tools, sessions, q, nil, nil, nil)
+	loop.Start()
+	sid, _ := sessions.Create("test")
+	loop.state.SessionID = sid
+
+	// Simulate 3 identical tool calls
+	for i := 0; i < 3; i++ {
+		loop.pendingToolCalls = []*ToolCall{
+			{
+				ToolName:  "echo",
+				Params:    map[string]any{"msg": "hello"},
+				StartedAt: time.Now().UnixMilli(),
+			},
+		}
+		loop.executeTools()
+	}
+
+	if !loop.taskHadError {
+		t.Fatal("expected taskHadError after 3 identical tool calls")
+	}
+}
+
+func TestLoopDetectionResetsOnNewTask(t *testing.T) {
+	tools := NewToolRegistry()
+	tools.Register(AgentTool{
+		Name:        "echo",
+		Description: "echoes input",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"msg": map[string]any{"type": "string"},
+			},
+		},
+		Execute: func(params map[string]any, ctx context.Context, stream func(string)) (string, error) {
+			return "ok", nil
+		},
+	})
+	sessions := NewSessionStoreAt(t.TempDir())
+	q := NewMessageQueues()
+	loop := NewAgentLoop(AgentConfig{Slug: "test", Name: "Test"}, tools, sessions, q, nil, nil, nil)
+	loop.Start()
+	sid, _ := sessions.Create("test")
+	loop.state.SessionID = sid
+
+	// 2 identical calls (not enough to trigger)
+	for i := 0; i < 2; i++ {
+		loop.pendingToolCalls = []*ToolCall{
+			{
+				ToolName:  "echo",
+				Params:    map[string]any{"msg": "hello"},
+				StartedAt: time.Now().UnixMilli(),
+			},
+		}
+		loop.executeTools()
+	}
+
+	// Simulate new task starting (resets fingerprints)
+	loop.recentToolFingerprints = nil
+
+	// One more identical call — should NOT trigger (reset happened)
+	loop.pendingToolCalls = []*ToolCall{
+		{
+			ToolName:  "echo",
+			Params:    map[string]any{"msg": "hello"},
+			StartedAt: time.Now().UnixMilli(),
+		},
+	}
+	loop.executeTools()
+
+	if loop.taskHadError {
+		t.Fatal("did not expect loop detection after reset")
+	}
+}
+
+func TestParallelToolExecution(t *testing.T) {
+	var callOrder []string
+	var mu sync.Mutex
+
+	tools := NewToolRegistry()
+	for _, name := range []string{"tool_a", "tool_b", "tool_c"} {
+		n := name
+		tools.Register(AgentTool{
+			Name:        n,
+			Description: n,
+			Schema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+			Execute: func(params map[string]any, ctx context.Context, stream func(string)) (string, error) {
+				time.Sleep(50 * time.Millisecond) // simulate work
+				mu.Lock()
+				callOrder = append(callOrder, n)
+				mu.Unlock()
+				return n + " done", nil
+			},
+		})
+	}
+
+	sessions := NewSessionStoreAt(t.TempDir())
+	q := NewMessageQueues()
+	loop := NewAgentLoop(AgentConfig{Slug: "test", Name: "Test"}, tools, sessions, q, nil, nil, nil)
+	loop.Start()
+	sid, _ := sessions.Create("test")
+	loop.state.SessionID = sid
+
+	// Set up 3 pending tool calls
+	loop.pendingToolCalls = []*ToolCall{
+		{ToolName: "tool_a", Params: map[string]any{}, StartedAt: time.Now().UnixMilli()},
+		{ToolName: "tool_b", Params: map[string]any{}, StartedAt: time.Now().UnixMilli()},
+		{ToolName: "tool_c", Params: map[string]any{}, StartedAt: time.Now().UnixMilli()},
+	}
+
+	start := time.Now()
+	loop.executeTools()
+	elapsed := time.Since(start)
+
+	// If sequential, ~150ms. If parallel, ~50ms.
+	if elapsed > 120*time.Millisecond {
+		t.Fatalf("expected parallel execution (~50ms), took %v", elapsed)
+	}
+
+	if len(loop.pendingToolCalls) != 0 {
+		t.Fatal("expected pendingToolCalls to be cleared")
+	}
+
+	// Check all 3 tools executed
+	mu.Lock()
+	if len(callOrder) != 3 {
+		t.Fatalf("expected 3 tool calls, got %d", len(callOrder))
+	}
+	mu.Unlock()
+
+	// Check results in session
+	entries, _ := sessions.GetHistory(sid, 0, "")
+	toolResults := 0
+	for _, e := range entries {
+		if e.Type == "tool_result" {
+			toolResults++
+		}
+	}
+	if toolResults != 3 {
+		t.Fatalf("expected 3 tool_result entries, got %d", toolResults)
+	}
+}
+
+func TestSingleToolCallStaysSequential(t *testing.T) {
+	tools := NewToolRegistry()
+	tools.Register(AgentTool{
+		Name:        "solo",
+		Description: "solo tool",
+		Schema: map[string]any{
+			"type":       "object",
+			"properties": map[string]any{},
+		},
+		Execute: func(params map[string]any, ctx context.Context, stream func(string)) (string, error) {
+			return "done", nil
+		},
+	})
+
+	sessions := NewSessionStoreAt(t.TempDir())
+	q := NewMessageQueues()
+	loop := NewAgentLoop(AgentConfig{Slug: "test", Name: "Test"}, tools, sessions, q, nil, nil, nil)
+	loop.Start()
+	sid, _ := sessions.Create("test")
+	loop.state.SessionID = sid
+
+	loop.pendingToolCalls = []*ToolCall{
+		{ToolName: "solo", Params: map[string]any{}, StartedAt: time.Now().UnixMilli()},
+	}
+
+	loop.executeTools()
+
+	if len(loop.pendingToolCalls) != 0 {
+		t.Fatal("expected pendingToolCalls to be cleared")
 	}
 }
