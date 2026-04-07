@@ -26,19 +26,25 @@ const brokerTokenFile = "/tmp/wuphf-broker-token"
 
 var brokerStatePath = defaultBrokerStatePath
 
+type messageReaction struct {
+	Emoji string `json:"emoji"`
+	From  string `json:"from"`
+}
+
 type channelMessage struct {
-	ID          string   `json:"id"`
-	From        string   `json:"from"`
-	Channel     string   `json:"channel,omitempty"`
-	Kind        string   `json:"kind,omitempty"`
-	Source      string   `json:"source,omitempty"`
-	SourceLabel string   `json:"source_label,omitempty"`
-	EventID     string   `json:"event_id,omitempty"`
-	Title       string   `json:"title,omitempty"`
-	Content     string   `json:"content"`
-	Tagged      []string `json:"tagged"`
-	ReplyTo     string   `json:"reply_to,omitempty"`
-	Timestamp   string   `json:"timestamp"`
+	ID          string            `json:"id"`
+	From        string            `json:"from"`
+	Channel     string            `json:"channel,omitempty"`
+	Kind        string            `json:"kind,omitempty"`
+	Source      string            `json:"source,omitempty"`
+	SourceLabel string            `json:"source_label,omitempty"`
+	EventID     string            `json:"event_id,omitempty"`
+	Title       string            `json:"title,omitempty"`
+	Content     string            `json:"content"`
+	Tagged      []string          `json:"tagged"`
+	ReplyTo     string            `json:"reply_to,omitempty"`
+	Timestamp   string            `json:"timestamp"`
+	Reactions   []messageReaction `json:"reactions,omitempty"`
 }
 
 type interviewOption struct {
@@ -95,8 +101,11 @@ type teamTask struct {
 	SourceSignalID   string `json:"source_signal_id,omitempty"`
 	SourceDecisionID string `json:"source_decision_id,omitempty"`
 	WorktreePath     string `json:"worktree_path,omitempty"`
-	WorktreeBranch   string `json:"worktree_branch,omitempty"`
-	DueAt            string `json:"due_at,omitempty"`
+	WorktreeBranch   string   `json:"worktree_branch,omitempty"`
+	DependsOn        []string `json:"depends_on,omitempty"`
+	Blocked          bool     `json:"blocked,omitempty"`
+	AckedAt          string   `json:"acked_at,omitempty"`
+	DueAt            string   `json:"due_at,omitempty"`
 	FollowUpAt       string `json:"follow_up_at,omitempty"`
 	ReminderAt       string `json:"reminder_at,omitempty"`
 	RecheckAt        string `json:"recheck_at,omitempty"`
@@ -104,15 +113,25 @@ type teamTask struct {
 	UpdatedAt        string `json:"updated_at"`
 }
 
+type channelSurface struct {
+	Provider    string `json:"provider,omitempty"`
+	RemoteID    string `json:"remote_id,omitempty"`
+	RemoteTitle string `json:"remote_title,omitempty"`
+	Mode        string `json:"mode,omitempty"`
+	BotTokenEnv string `json:"bot_token_env,omitempty"`
+	WebhookURL  string `json:"webhook_url,omitempty"`
+}
+
 type teamChannel struct {
-	Slug        string   `json:"slug"`
-	Name        string   `json:"name"`
-	Description string   `json:"description,omitempty"`
-	Members     []string `json:"members,omitempty"`
-	Disabled    []string `json:"disabled,omitempty"`
-	CreatedBy   string   `json:"created_by,omitempty"`
-	CreatedAt   string   `json:"created_at,omitempty"`
-	UpdatedAt   string   `json:"updated_at,omitempty"`
+	Slug        string          `json:"slug"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Members     []string        `json:"members,omitempty"`
+	Disabled    []string        `json:"disabled,omitempty"`
+	Surface     *channelSurface `json:"surface,omitempty"`
+	CreatedBy   string          `json:"created_by,omitempty"`
+	CreatedAt   string          `json:"created_at,omitempty"`
+	UpdatedAt   string          `json:"updated_at,omitempty"`
 }
 
 type officeMember struct {
@@ -204,15 +223,15 @@ type schedulerJob struct {
 }
 
 type teamSkill struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Title       string   `json:"title"`
-	Description string   `json:"description,omitempty"`
-	Content     string   `json:"content"`
-	CreatedBy   string   `json:"created_by"`
-	Channel     string   `json:"channel,omitempty"`
-	Tags        []string `json:"tags,omitempty"`
-	Trigger     string   `json:"trigger,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Title               string   `json:"title"`
+	Description         string   `json:"description,omitempty"`
+	Content             string   `json:"content"`
+	CreatedBy           string   `json:"created_by"`
+	Channel             string   `json:"channel,omitempty"`
+	Tags                []string `json:"tags,omitempty"`
+	Trigger             string   `json:"trigger,omitempty"`
 	WorkflowProvider    string   `json:"workflow_provider,omitempty"`
 	WorkflowKey         string   `json:"workflow_key,omitempty"`
 	WorkflowDefinition  string   `json:"workflow_definition,omitempty"`
@@ -222,10 +241,10 @@ type teamSkill struct {
 	RelayEventTypes     []string `json:"relay_event_types,omitempty"`
 	LastExecutionAt     string   `json:"last_execution_at,omitempty"`
 	LastExecutionStatus string   `json:"last_execution_status,omitempty"`
-	UsageCount  int      `json:"usage_count"`
-	Status      string   `json:"status"`
-	CreatedAt   string   `json:"created_at"`
-	UpdatedAt   string   `json:"updated_at"`
+	UsageCount          int      `json:"usage_count"`
+	Status              string   `json:"status"`
+	CreatedAt           string   `json:"created_at"`
+	UpdatedAt           string   `json:"updated_at"`
 }
 
 type brokerState struct {
@@ -241,8 +260,9 @@ type brokerState struct {
 	Decisions         []officeDecisionRecord `json:"decisions,omitempty"`
 	Watchdogs         []watchdogAlert        `json:"watchdogs,omitempty"`
 	Scheduler         []schedulerJob         `json:"scheduler,omitempty"`
-	Skills            []teamSkill            `json:"skills,omitempty"`
-	Counter           int                    `json:"counter"`
+	Skills            []teamSkill                   `json:"skills,omitempty"`
+	SharedMemory      map[string]map[string]string  `json:"shared_memory,omitempty"`
+	Counter           int                           `json:"counter"`
 	NotificationSince string                 `json:"notification_since,omitempty"`
 	InsightsSince     string                 `json:"insights_since,omitempty"`
 	PendingInterview  *humanInterview        `json:"pending_interview,omitempty"`
@@ -282,17 +302,66 @@ type Broker struct {
 	watchdogs         []watchdogAlert
 	scheduler         []schedulerJob
 	skills            []teamSkill
+	sharedMemory      map[string]map[string]string // namespace → key → value
 	lastTaggedAt      map[string]time.Time   // when each agent was last @mentioned
 	lastPaneSnapshot  map[string]string      // last captured pane content per agent (for change detection)
+	seenTelegramGroups map[int64]string      // chat_id -> title, populated by transport
 	counter           int
 	notificationSince string
 	insightsSince     string
 	pendingInterview  *humanInterview
 	usage             teamUsageState
+	externalDelivered map[string]struct{} // message IDs already queued for external delivery
 	mu                sync.Mutex
 	server            *http.Server
 	token             string // shared secret for authenticating requests
 	addr              string // actual listen address (useful when port=0)
+}
+
+func taskNeedsLocalWorktree(task *teamTask) bool {
+	if task == nil {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
+		return false
+	}
+	if strings.TrimSpace(task.Owner) == "" {
+		return false
+	}
+	switch strings.TrimSpace(task.Status) {
+	case "", "open", "done":
+		return false
+	default:
+		return true
+	}
+}
+
+func (b *Broker) syncTaskWorktreeLocked(task *teamTask) error {
+	if task == nil {
+		return nil
+	}
+	if taskNeedsLocalWorktree(task) {
+		if strings.TrimSpace(task.WorktreePath) != "" && strings.TrimSpace(task.WorktreeBranch) != "" {
+			return nil
+		}
+		path, branch, err := prepareTaskWorktree(task.ID)
+		if err != nil {
+			return err
+		}
+		task.WorktreePath = path
+		task.WorktreeBranch = branch
+		return nil
+	}
+
+	if strings.TrimSpace(task.WorktreePath) == "" && strings.TrimSpace(task.WorktreeBranch) == "" {
+		return nil
+	}
+	if err := cleanupTaskWorktree(task.WorktreePath, task.WorktreeBranch); err != nil {
+		return err
+	}
+	task.WorktreePath = ""
+	task.WorktreeBranch = ""
+	return nil
 }
 
 // generateToken returns a cryptographically random hex token.
@@ -353,12 +422,16 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
+	mux.HandleFunc("/reactions", b.requireAuth(b.handleReactions))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
 	mux.HandleFunc("/channels", b.requireAuth(b.handleChannels))
 	mux.HandleFunc("/channel-members", b.requireAuth(b.handleChannelMembers))
 	mux.HandleFunc("/members", b.requireAuth(b.handleMembers))
 	mux.HandleFunc("/tasks", b.requireAuth(b.handleTasks))
+	mux.HandleFunc("/tasks/ack", b.requireAuth(b.handleTaskAck))
+	mux.HandleFunc("/task-plan", b.requireAuth(b.handleTaskPlan))
+	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
 	mux.HandleFunc("/requests", b.requireAuth(b.handleRequests))
 	mux.HandleFunc("/requests/answer", b.requireAuth(b.handleRequestAnswer))
 	mux.HandleFunc("/interview", b.requireAuth(b.handleInterview))
@@ -373,6 +446,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
 	mux.HandleFunc("/skills/", b.requireAuth(b.handleSkillsSubpath))
+	mux.HandleFunc("/telegram/groups", b.requireAuth(b.handleTelegramGroups))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
@@ -432,6 +506,23 @@ func (b *Broker) HasBlockingRequest() bool {
 	return false
 }
 
+// HasRecentlyTaggedAgents returns true if any agent was @mentioned within
+// the given duration and has not yet replied (i.e. is presumably "typing").
+func (b *Broker) HasRecentlyTaggedAgents(within time.Duration) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.lastTaggedAt) == 0 {
+		return false
+	}
+	cutoff := time.Now().Add(-within)
+	for _, t := range b.lastTaggedAt {
+		if t.After(cutoff) {
+			return true
+		}
+	}
+	return false
+}
+
 func (b *Broker) EnabledMembers(channel string) []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -472,6 +563,87 @@ func (b *Broker) ChannelMessages(channel string) []channelMessage {
 	return out
 }
 
+// SurfaceChannels returns all channels that have a surface configured for the given provider.
+func (b *Broker) SurfaceChannels(provider string) []teamChannel {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var out []teamChannel
+	for _, ch := range b.channels {
+		if ch.Surface != nil && ch.Surface.Provider == provider {
+			cp := ch
+			cp.Members = append([]string(nil), ch.Members...)
+			cp.Disabled = append([]string(nil), ch.Disabled...)
+			s := *ch.Surface
+			cp.Surface = &s
+			out = append(out, cp)
+		}
+	}
+	return out
+}
+
+// ExternalQueue returns messages that need to be sent to external surfaces
+// for the given provider. Each message is returned at most once.
+func (b *Broker) ExternalQueue(provider string) []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.externalDelivered == nil {
+		b.externalDelivered = make(map[string]struct{})
+	}
+	surfaceChannels := make(map[string]struct{})
+	for _, ch := range b.channels {
+		if ch.Surface != nil && ch.Surface.Provider == provider {
+			surfaceChannels[ch.Slug] = struct{}{}
+		}
+	}
+	var out []channelMessage
+	for _, msg := range b.messages {
+		ch := normalizeChannelSlug(msg.Channel)
+		if _, ok := surfaceChannels[ch]; !ok {
+			continue
+		}
+		if _, delivered := b.externalDelivered[msg.ID]; delivered {
+			continue
+		}
+		b.externalDelivered[msg.ID] = struct{}{}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// PostInboundSurfaceMessage posts a message from an external surface into the broker channel.
+func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider string) (channelMessage, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		return channelMessage{}, fmt.Errorf("channel required for surface message")
+	}
+	if b.findChannelLocked(channel) == nil {
+		return channelMessage{}, fmt.Errorf("channel not found: %s", channel)
+	}
+	b.counter++
+	msg := channelMessage{
+		ID:          fmt.Sprintf("msg-%d", b.counter),
+		From:        from,
+		Channel:     channel,
+		Kind:        "surface",
+		Source:      provider,
+		SourceLabel: provider,
+		Content:     strings.TrimSpace(content),
+		Timestamp:   time.Now().UTC().Format(time.RFC3339),
+	}
+	b.messages = append(b.messages, msg)
+	// Mark as already delivered so it doesn't bounce back to the same surface
+	if b.externalDelivered == nil {
+		b.externalDelivered = make(map[string]struct{})
+	}
+	b.externalDelivered[msg.ID] = struct{}{}
+	if err := b.saveLocked(); err != nil {
+		return channelMessage{}, err
+	}
+	return msg, nil
+}
+
 func (b *Broker) ChannelTasks(channel string) []teamTask {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -482,6 +654,28 @@ func (b *Broker) ChannelTasks(channel string) []teamTask {
 	out := make([]teamTask, 0, len(b.tasks))
 	for _, task := range b.tasks {
 		if normalizeChannelSlug(task.Channel) == channel {
+			out = append(out, task)
+		}
+	}
+	return out
+}
+
+// UnackedTasks returns in_progress tasks with an owner that have not been acked
+// and were created more than the given duration ago.
+func (b *Broker) UnackedTasks(timeout time.Duration) []teamTask {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	cutoff := time.Now().UTC().Add(-timeout)
+	out := make([]teamTask, 0)
+	for _, task := range b.tasks {
+		if task.Status != "in_progress" || task.Owner == "" || task.AckedAt != "" {
+			continue
+		}
+		created, err := time.Parse(time.RFC3339, task.CreatedAt)
+		if err != nil {
+			continue
+		}
+		if created.Before(cutoff) {
 			out = append(out, task)
 		}
 	}
@@ -656,6 +850,7 @@ func (b *Broker) loadState() error {
 	b.watchdogs = state.Watchdogs
 	b.scheduler = state.Scheduler
 	b.skills = state.Skills
+	b.sharedMemory = state.SharedMemory
 	b.counter = state.Counter
 	b.notificationSince = state.NotificationSince
 	b.insightsSince = state.InsightsSince
@@ -676,7 +871,7 @@ func (b *Broker) loadState() error {
 
 func (b *Broker) saveLocked() error {
 	path := brokerStatePath()
-	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
+	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -699,6 +894,7 @@ func (b *Broker) saveLocked() error {
 		Watchdogs:         b.watchdogs,
 		Scheduler:         b.scheduler,
 		Skills:            b.skills,
+		SharedMemory:      b.sharedMemory,
 		Counter:           b.counter,
 		NotificationSince: b.notificationSince,
 		InsightsSince:     b.insightsSince,
@@ -761,7 +957,7 @@ func defaultTeamChannels() []teamChannel {
 	}
 	channels := make([]teamChannel, 0, len(manifest.Channels))
 	for _, channel := range manifest.Channels {
-		channels = append(channels, teamChannel{
+		tc := teamChannel{
 			Slug:        channel.Slug,
 			Name:        channel.Name,
 			Description: channel.Description,
@@ -770,7 +966,17 @@ func defaultTeamChannels() []teamChannel {
 			CreatedBy:   "wuphf",
 			CreatedAt:   now,
 			UpdatedAt:   now,
-		})
+		}
+		if channel.Surface != nil {
+			tc.Surface = &channelSurface{
+				Provider:    channel.Surface.Provider,
+				RemoteID:    channel.Surface.RemoteID,
+				RemoteTitle: channel.Surface.RemoteTitle,
+				Mode:        channel.Surface.Mode,
+				BotTokenEnv: channel.Surface.BotTokenEnv,
+			}
+		}
+		channels = append(channels, tc)
 	}
 	return channels
 }
@@ -829,12 +1035,38 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 		b.channels = defaultTeamChannels()
 		return
 	}
+	hasGeneral := false
 	for _, ch := range b.channels {
 		if ch.Slug == "general" {
-			return
+			hasGeneral = true
+			break
 		}
 	}
-	b.channels = append(defaultTeamChannels(), b.channels...)
+	if !hasGeneral {
+		b.channels = append(defaultTeamChannels(), b.channels...)
+		return
+	}
+	// Merge surface metadata from manifest into existing channels
+	// (handles case where state was saved without surfaces by an older binary)
+	defaults := defaultTeamChannels()
+	for _, def := range defaults {
+		if def.Surface == nil {
+			continue
+		}
+		found := false
+		for i := range b.channels {
+			if b.channels[i].Slug == def.Slug {
+				if b.channels[i].Surface == nil {
+					b.channels[i].Surface = def.Surface
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			b.channels = append(b.channels, def)
+		}
+	}
 }
 
 func (b *Broker) ensureDefaultOfficeMembersLocked() {
@@ -2106,12 +2338,13 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"channels": channels})
 	case http.MethodPost:
 		var body struct {
-			Action      string   `json:"action"`
-			Slug        string   `json:"slug"`
-			Name        string   `json:"name"`
-			Description string   `json:"description"`
-			Members     []string `json:"members"`
-			CreatedBy   string   `json:"created_by"`
+			Action      string          `json:"action"`
+			Slug        string          `json:"slug"`
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			Members     []string        `json:"members"`
+			CreatedBy   string          `json:"created_by"`
+			Surface     *channelSurface `json:"surface,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -2158,6 +2391,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				Name:        strings.TrimSpace(body.Name),
 				Description: strings.TrimSpace(body.Description),
 				Members:     uniqueSlugs(members),
+				Surface:     body.Surface,
 				CreatedBy:   strings.TrimSpace(body.CreatedBy),
 				CreatedAt:   now,
 				UpdatedAt:   now,
@@ -2660,6 +2894,81 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		MessageID string `json:"message_id"`
+		Emoji     string `json:"emoji"`
+		From      string `json:"from"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if body.MessageID == "" || body.Emoji == "" || body.From == "" {
+		http.Error(w, "message_id, emoji, and from are required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	found := false
+	for i := range b.messages {
+		if b.messages[i].ID == body.MessageID {
+			// Don't duplicate: same emoji from same agent
+			for _, r := range b.messages[i].Reactions {
+				if r.Emoji == body.Emoji && r.From == body.From {
+					b.mu.Unlock()
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(map[string]any{"ok": true, "duplicate": true})
+					return
+				}
+			}
+			b.messages[i].Reactions = append(b.messages[i].Reactions, messageReaction{
+				Emoji: body.Emoji,
+				From:  body.From,
+			})
+			found = true
+			break
+		}
+	}
+	if !found {
+		b.mu.Unlock()
+		http.Error(w, "message not found", http.StatusNotFound)
+		return
+	}
+	_ = b.saveLocked()
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+}
+// RecordTelegramGroup saves a group chat ID and title seen by the transport.
+func (b *Broker) RecordTelegramGroup(chatID int64, title string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.seenTelegramGroups == nil {
+		b.seenTelegramGroups = make(map[int64]string)
+	}
+	b.seenTelegramGroups[chatID] = title
+}
+
+// SeenTelegramGroups returns all group chats the transport has seen.
+func (b *Broker) SeenTelegramGroups() map[int64]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.seenTelegramGroups == nil {
+		return nil
+	}
+	out := make(map[int64]string, len(b.seenTelegramGroups))
+	for k, v := range b.seenTelegramGroups {
+		out[k] = v
+	}
+	return out
+}
+
 // PostSystemMessage posts a lightweight system message that shows progress without blocking.
 func (b *Broker) PostSystemMessage(channel, content, kind string) {
 	b.mu.Lock()
@@ -2828,22 +3137,8 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	for _, msg := range b.messages {
 		if normalizeChannelSlug(msg.Channel) == channel {
 			if b.sessionMode == SessionModeOneOnOne {
-				// Only show messages between the human and the 1:1 agent
-				if msg.From != "you" && msg.From != "human" && msg.From != b.oneOnOneAgent && msg.From != "system" {
+				if !b.isOneOnOneDMMessage(msg) {
 					continue
-				}
-				// Skip CEO delegation messages that tag other agents
-				if msg.From == b.oneOnOneAgent && len(msg.Tagged) > 0 {
-					isForHuman := false
-					for _, t := range msg.Tagged {
-						if t == "you" || t == "human" {
-							isForHuman = true
-							break
-						}
-					}
-					if !isForHuman {
-						continue
-					}
 				}
 			}
 			messages = append(messages, msg)
@@ -2885,6 +3180,52 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// isOneOnOneDMMessage returns true if msg belongs in the 1:1 DM conversation.
+// Only messages exclusively between the human and the 1:1 agent pass through.
+// Caller must hold b.mu.
+func (b *Broker) isOneOnOneDMMessage(msg channelMessage) bool {
+	agent := b.oneOnOneAgent
+
+	switch msg.From {
+	case "you", "human":
+		// Human messages: only if untagged (direct conversation) or
+		// explicitly tagging the 1:1 agent.
+		if len(msg.Tagged) == 0 {
+			return true
+		}
+		for _, t := range msg.Tagged {
+			if t == agent {
+				return true
+			}
+		}
+		return false
+
+	case agent:
+		// Agent messages: only if untagged (direct reply to human) or
+		// explicitly tagging the human.
+		if len(msg.Tagged) == 0 {
+			return true
+		}
+		for _, t := range msg.Tagged {
+			if t == "you" || t == "human" {
+				return true
+			}
+		}
+		return false
+
+	case "system":
+		// System messages: only if they mention the 1:1 agent or human,
+		// or are general system announcements (no routing indicators).
+		if msg.Kind == "routing" {
+			return false
+		}
+		return true
+
+	default:
+		// Messages from any other agent do not belong in this DM.
+		return false
+	}
+}
 
 // capturePaneActivity captures tmux pane content for each agent and detects
 // activity by comparing with the previous snapshot. If content changed,
@@ -3127,22 +3468,23 @@ func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Action           string `json:"action"`
-		Channel          string `json:"channel"`
-		ID               string `json:"id"`
-		Title            string `json:"title"`
-		Details          string `json:"details"`
-		Owner            string `json:"owner"`
-		CreatedBy        string `json:"created_by"`
-		ThreadID         string `json:"thread_id"`
-		TaskType         string `json:"task_type"`
-		PipelineID       string `json:"pipeline_id"`
-		ExecutionMode    string `json:"execution_mode"`
-		ReviewState      string `json:"review_state"`
-		SourceSignalID   string `json:"source_signal_id"`
-		SourceDecisionID string `json:"source_decision_id"`
-		WorktreePath     string `json:"worktree_path"`
-		WorktreeBranch   string `json:"worktree_branch"`
+		Action           string   `json:"action"`
+		Channel          string   `json:"channel"`
+		ID               string   `json:"id"`
+		Title            string   `json:"title"`
+		Details          string   `json:"details"`
+		Owner            string   `json:"owner"`
+		CreatedBy        string   `json:"created_by"`
+		ThreadID         string   `json:"thread_id"`
+		TaskType         string   `json:"task_type"`
+		PipelineID       string   `json:"pipeline_id"`
+		ExecutionMode    string   `json:"execution_mode"`
+		ReviewState      string   `json:"review_state"`
+		SourceSignalID   string   `json:"source_signal_id"`
+		SourceDecisionID string   `json:"source_decision_id"`
+		WorktreePath     string   `json:"worktree_path"`
+		WorktreeBranch   string   `json:"worktree_branch"`
+		DependsOn        []string `json:"depends_on"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -3209,6 +3551,10 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			}
 			existing.UpdatedAt = now
 			b.scheduleTaskLifecycleLocked(existing)
+			if err := b.syncTaskWorktreeLocked(existing); err != nil {
+				http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
+				return
+			}
 			b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(existing.Title+" ["+existing.Status+"]", 140), existing.ID)
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -3236,13 +3582,20 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			SourceDecisionID: strings.TrimSpace(body.SourceDecisionID),
 			WorktreePath:     strings.TrimSpace(body.WorktreePath),
 			WorktreeBranch:   strings.TrimSpace(body.WorktreeBranch),
+			DependsOn:        body.DependsOn,
 			CreatedAt:        now,
 			UpdatedAt:        now,
 		}
-		if task.Owner != "" {
+		if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
+			task.Blocked = true
+		} else if task.Owner != "" {
 			task.Status = "in_progress"
 		}
 		b.scheduleTaskLifecycleLocked(&task)
+		if err := b.syncTaskWorktreeLocked(&task); err != nil {
+			http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
+			return
+		}
 		b.tasks = append(b.tasks, task)
 		b.appendActionLocked("task_created", "office", channel, task.CreatedBy, truncateSummary(task.Title, 140), task.ID)
 		if err := b.saveLocked(); err != nil {
@@ -3325,7 +3678,14 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			task.WorktreeBranch = worktreeBranch
 		}
 		task.UpdatedAt = now
+		if task.Status == "done" {
+			b.unblockDependentsLocked(task.ID)
+		}
 		b.scheduleTaskLifecycleLocked(task)
+		if err := b.syncTaskWorktreeLocked(task); err != nil {
+			http.Error(w, "failed to manage task worktree", http.StatusInternalServerError)
+			return
+		}
 		b.appendActionLocked("task_updated", "office", channel, strings.TrimSpace(body.CreatedBy), truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
 		if err := b.saveLocked(); err != nil {
 			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -3336,6 +3696,195 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	http.Error(w, "task not found", http.StatusNotFound)
+}
+
+func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Channel   string `json:"channel"`
+		CreatedBy string `json:"created_by"`
+		Tasks     []struct {
+			Title     string   `json:"title"`
+			Assignee  string   `json:"assignee"`
+			Details   string   `json:"details"`
+			DependsOn []string `json:"depends_on"`
+		} `json:"tasks"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	createdBy := strings.TrimSpace(body.CreatedBy)
+	if createdBy == "" || len(body.Tasks) == 0 {
+		http.Error(w, "created_by and tasks required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.findChannelLocked(channel) == nil {
+		http.Error(w, "channel not found", http.StatusNotFound)
+		return
+	}
+
+	// Map title → task ID for resolving depends_on by title
+	titleToID := map[string]string{}
+	now := time.Now().UTC().Format(time.RFC3339)
+	created := make([]teamTask, 0, len(body.Tasks))
+
+	for _, item := range body.Tasks {
+		b.counter++
+		taskID := fmt.Sprintf("task-%d", b.counter)
+		titleToID[strings.TrimSpace(item.Title)] = taskID
+
+		// Resolve depends_on: accept both task IDs and titles
+		resolvedDeps := make([]string, 0, len(item.DependsOn))
+		for _, dep := range item.DependsOn {
+			dep = strings.TrimSpace(dep)
+			if id, ok := titleToID[dep]; ok {
+				resolvedDeps = append(resolvedDeps, id)
+			} else {
+				resolvedDeps = append(resolvedDeps, dep) // assume it's a task ID
+			}
+		}
+
+		task := teamTask{
+			ID:        taskID,
+			Channel:   channel,
+			Title:     strings.TrimSpace(item.Title),
+			Details:   strings.TrimSpace(item.Details),
+			Owner:     strings.TrimSpace(item.Assignee),
+			Status:    "open",
+			CreatedBy: createdBy,
+			DependsOn: resolvedDeps,
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+		if task.Owner != "" && len(resolvedDeps) == 0 {
+			task.Status = "in_progress"
+		}
+		if len(resolvedDeps) > 0 && b.hasUnresolvedDepsLocked(&task) {
+			task.Blocked = true
+		}
+		b.scheduleTaskLifecycleLocked(&task)
+		b.tasks = append(b.tasks, task)
+		b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
+		created = append(created, task)
+	}
+
+	if err := b.saveLocked(); err != nil {
+		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"tasks": created})
+}
+
+func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
+		if channel == "" {
+			channel = "general"
+		}
+		b.mu.Lock()
+		mem := b.sharedMemory
+		b.mu.Unlock()
+		if mem == nil {
+			mem = make(map[string]map[string]string)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"memory": mem})
+	case http.MethodPost:
+		var body struct {
+			Namespace string `json:"namespace"`
+			Key       string `json:"key"`
+			Value     string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		ns := strings.TrimSpace(body.Namespace)
+		key := strings.TrimSpace(body.Key)
+		if ns == "" || key == "" {
+			http.Error(w, "namespace and key required", http.StatusBadRequest)
+			return
+		}
+		b.mu.Lock()
+		if b.sharedMemory == nil {
+			b.sharedMemory = make(map[string]map[string]string)
+		}
+		if b.sharedMemory[ns] == nil {
+			b.sharedMemory[ns] = make(map[string]string)
+		}
+		b.sharedMemory[ns][key] = body.Value
+		if err := b.saveLocked(); err != nil {
+			b.mu.Unlock()
+			http.Error(w, "failed to persist", http.StatusInternalServerError)
+			return
+		}
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "namespace": ns, "key": key})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleTaskAck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		ID      string `json:"id"`
+		Channel string `json:"channel"`
+		Slug    string `json:"slug"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	taskID := strings.TrimSpace(body.ID)
+	slug := strings.TrimSpace(body.Slug)
+	channel := normalizeChannelSlug(body.Channel)
+	if channel == "" {
+		channel = "general"
+	}
+	if taskID == "" || slug == "" {
+		http.Error(w, "id and slug required", http.StatusBadRequest)
+		return
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == taskID && normalizeChannelSlug(b.tasks[i].Channel) == channel {
+			if b.tasks[i].Owner != slug {
+				http.Error(w, "only the task owner can ack", http.StatusForbidden)
+				return
+			}
+			now := time.Now().UTC().Format(time.RFC3339)
+			b.tasks[i].AckedAt = now
+			b.tasks[i].UpdatedAt = now
+			if err := b.saveLocked(); err != nil {
+				http.Error(w, "failed to persist", http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{"task": b.tasks[i]})
+			return
+		}
+	}
 	http.Error(w, "task not found", http.StatusNotFound)
 }
 
@@ -3366,6 +3915,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		}
 		existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		b.scheduleTaskLifecycleLocked(existing)
+		if err := b.syncTaskWorktreeLocked(existing); err != nil {
+			return teamTask{}, false, err
+		}
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
@@ -3389,6 +3941,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		task.Status = "in_progress"
 	}
 	b.scheduleTaskLifecycleLocked(&task)
+	if err := b.syncTaskWorktreeLocked(&task); err != nil {
+		return teamTask{}, false, err
+	}
 	b.tasks = append(b.tasks, task)
 	b.appendActionLocked("task_created", "office", channel, createdBy, truncateSummary(task.Title, 140), task.ID)
 	if err := b.saveLocked(); err != nil {
@@ -3457,6 +4012,9 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		}
 		existing.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 		b.scheduleTaskLifecycleLocked(existing)
+		if err := b.syncTaskWorktreeLocked(existing); err != nil {
+			return teamTask{}, false, err
+		}
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
@@ -3486,12 +4044,57 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		task.Status = "in_progress"
 	}
 	b.scheduleTaskLifecycleLocked(&task)
+	if err := b.syncTaskWorktreeLocked(&task); err != nil {
+		return teamTask{}, false, err
+	}
 	b.tasks = append(b.tasks, task)
 	b.appendActionWithRefsLocked("task_created", "office", channel, input.CreatedBy, truncateSummary(task.Title, 140), task.ID, compactStringList([]string{task.SourceSignalID}), task.SourceDecisionID)
 	if err := b.saveLocked(); err != nil {
 		return teamTask{}, false, err
 	}
 	return task, false, nil
+}
+
+// hasUnresolvedDepsLocked returns true if any of the task's dependencies are not done.
+func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
+	for _, depID := range task.DependsOn {
+		found := false
+		for j := range b.tasks {
+			if b.tasks[j].ID == depID {
+				found = true
+				if b.tasks[j].Status != "done" {
+					return true
+				}
+				break
+			}
+		}
+		if !found {
+			return true // dependency doesn't exist yet — treat as unresolved
+		}
+	}
+	return false
+}
+
+// unblockDependentsLocked checks all blocked tasks and unblocks those whose dependencies are now resolved.
+func (b *Broker) unblockDependentsLocked(completedTaskID string) {
+	for i := range b.tasks {
+		if !b.tasks[i].Blocked {
+			continue
+		}
+		hasDep := false
+		for _, depID := range b.tasks[i].DependsOn {
+			if depID == completedTaskID {
+				hasDep = true
+				break
+			}
+		}
+		if !hasDep {
+			continue
+		}
+		if !b.hasUnresolvedDepsLocked(&b.tasks[i]) {
+			b.tasks[i].Blocked = false
+		}
+	}
 }
 
 func (b *Broker) findReusableTaskLocked(channel, title, threadID, owner string) *teamTask {
@@ -3898,6 +4501,21 @@ func FormatChannelView(messages []channelMessage) string {
 
 // --------------- Skills ---------------
 
+func (b *Broker) handleTelegramGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b.mu.Lock()
+	groups := make([]map[string]any, 0)
+	for chatID, title := range b.seenTelegramGroups {
+		groups = append(groups, map[string]any{"chat_id": chatID, "title": title})
+	}
+	b.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"groups": groups})
+}
+
 func (b *Broker) handleSkills(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -3974,15 +4592,15 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Action      string   `json:"action"`
-		Name        string   `json:"name"`
-		Title       string   `json:"title"`
-		Description string   `json:"description"`
-		Content     string   `json:"content"`
-		CreatedBy   string   `json:"created_by"`
-		Channel     string   `json:"channel"`
-		Tags        []string `json:"tags"`
-		Trigger     string   `json:"trigger"`
+		Action              string   `json:"action"`
+		Name                string   `json:"name"`
+		Title               string   `json:"title"`
+		Description         string   `json:"description"`
+		Content             string   `json:"content"`
+		CreatedBy           string   `json:"created_by"`
+		Channel             string   `json:"channel"`
+		Tags                []string `json:"tags"`
+		Trigger             string   `json:"trigger"`
 		WorkflowProvider    string   `json:"workflow_provider"`
 		WorkflowKey         string   `json:"workflow_key"`
 		WorkflowDefinition  string   `json:"workflow_definition"`
@@ -4039,15 +4657,15 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 
 	b.counter++
 	sk := teamSkill{
-		ID:          fmt.Sprintf("skill-%s", skillSlug(body.Name)),
-		Name:        strings.TrimSpace(body.Name),
-		Title:       title,
-		Description: strings.TrimSpace(body.Description),
-		Content:     strings.TrimSpace(body.Content),
-		CreatedBy:   strings.TrimSpace(body.CreatedBy),
-		Channel:     channel,
-		Tags:        body.Tags,
-		Trigger:     strings.TrimSpace(body.Trigger),
+		ID:                  fmt.Sprintf("skill-%s", skillSlug(body.Name)),
+		Name:                strings.TrimSpace(body.Name),
+		Title:               title,
+		Description:         strings.TrimSpace(body.Description),
+		Content:             strings.TrimSpace(body.Content),
+		CreatedBy:           strings.TrimSpace(body.CreatedBy),
+		Channel:             channel,
+		Tags:                body.Tags,
+		Trigger:             strings.TrimSpace(body.Trigger),
 		WorkflowProvider:    strings.TrimSpace(body.WorkflowProvider),
 		WorkflowKey:         strings.TrimSpace(body.WorkflowKey),
 		WorkflowDefinition:  strings.TrimSpace(body.WorkflowDefinition),
@@ -4057,10 +4675,10 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		RelayEventTypes:     append([]string(nil), body.RelayEventTypes...),
 		LastExecutionAt:     strings.TrimSpace(body.LastExecutionAt),
 		LastExecutionStatus: strings.TrimSpace(body.LastExecutionStatus),
-		UsageCount:  0,
-		Status:      status,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		UsageCount:          0,
+		Status:              status,
+		CreatedAt:           now,
+		UpdatedAt:           now,
 	}
 	b.skills = append(b.skills, sk)
 
@@ -4086,14 +4704,14 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name        string   `json:"name"`
-		Title       string   `json:"title"`
-		Description string   `json:"description"`
-		Content     string   `json:"content"`
-		Channel     string   `json:"channel"`
-		Tags        []string `json:"tags"`
-		Trigger     string   `json:"trigger"`
-		Status      string   `json:"status"`
+		Name                string   `json:"name"`
+		Title               string   `json:"title"`
+		Description         string   `json:"description"`
+		Content             string   `json:"content"`
+		Channel             string   `json:"channel"`
+		Tags                []string `json:"tags"`
+		Trigger             string   `json:"trigger"`
+		Status              string   `json:"status"`
 		WorkflowProvider    string   `json:"workflow_provider"`
 		WorkflowKey         string   `json:"workflow_key"`
 		WorkflowDefinition  string   `json:"workflow_definition"`

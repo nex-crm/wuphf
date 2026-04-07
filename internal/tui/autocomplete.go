@@ -7,11 +7,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const maxAutocompleteMatches = 8
+const maxAutocompleteMatches = 24
 
 type SlashCommand struct {
 	Name        string
 	Description string
+	Category    string
 }
 
 type AutocompleteModel struct {
@@ -61,14 +62,22 @@ func (a AutocompleteModel) View() string {
 	desc := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(MutedColor)).
 		Padding(0, 1)
+	category := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#D6E4FF")).
+		Background(lipgloss.Color("#22324A")).
+		Padding(0, 1)
 
 	var rows []string
 	for i, cmd := range a.matches {
 		name := "/" + cmd.Name
+		entry := ""
+		if cmd.Category != "" {
+			entry = category.Render(cmd.Category) + " "
+		}
 		if i == a.selected {
-			rows = append(rows, highlighted.Render(name)+" "+desc.Render(cmd.Description))
+			rows = append(rows, entry+highlighted.Render(name)+" "+desc.Render(cmd.Description))
 		} else {
-			rows = append(rows, normal.Render(name)+" "+desc.Render(cmd.Description))
+			rows = append(rows, entry+normal.Render(name)+" "+desc.Render(cmd.Description))
 		}
 	}
 

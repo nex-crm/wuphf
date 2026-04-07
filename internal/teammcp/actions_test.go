@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/team"
 )
@@ -40,7 +42,7 @@ func (stubActionProvider) CreateWorkflow(context.Context, action.WorkflowCreateR
 	return action.WorkflowCreateResult{Created: true, Key: "daily-digest"}, nil
 }
 func (stubActionProvider) ExecuteWorkflow(context.Context, action.WorkflowExecuteRequest) (action.WorkflowExecuteResult, error) {
-	return action.WorkflowExecuteResult{}, nil
+	return action.WorkflowExecuteResult{RunID: "run-1", Status: "completed"}, nil
 }
 func (stubActionProvider) ListWorkflowRuns(context.Context, string) (action.WorkflowRunsResult, error) {
 	return action.WorkflowRunsResult{}, nil
@@ -208,5 +210,51 @@ func TestHandleTeamActionWorkflowScheduleCreatesSchedulerJob(t *testing.T) {
 	job := result.Jobs[0]
 	if job.Kind != "one_workflow" || job.TargetType != "workflow" || job.TargetID != "daily-digest" || job.Provider != "one" || job.ScheduleExpr != "daily" {
 		t.Fatalf("unexpected scheduler job %+v", job)
+	}
+}
+
+func TestHandleTeamActionWorkflowScheduleRunNowExecutesImmediately(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	prev := externalActionProvider
+	externalActionProvider = stubActionProvider{}
+	defer func() { externalActionProvider = prev }()
+
+	res, _, err := handleTeamActionWorkflowSchedule(context.Background(), nil, TeamActionWorkflowScheduleArgs{
+		Key:      "daily-digest",
+		Schedule: "daily",
+		RunNow:   true,
+		MySlug:   "ceo",
+		Channel:  "general",
+	})
+	if err != nil {
+		t.Fatalf("schedule workflow with run_now: %v", err)
+	}
+	text, ok := res.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("expected text response, got %+v", res.Content)
+	}
+	if got := text.Text; !strings.Contains(got, "\"run_now\"") || !strings.Contains(got, "\"ok\": true") {
+		t.Fatalf("expected run_now block in response, got %s", got)
+	}
+	var sawScheduled, sawExecuted bool
+	for _, entry := range b.Actions() {
+		if entry.Kind == "external_workflow_scheduled" {
+			sawScheduled = true
+		}
+		if entry.Kind == "external_workflow_executed" {
+			sawExecuted = true
+		}
+	}
+	if !sawScheduled || !sawExecuted {
+		t.Fatalf("expected scheduled and executed actions, got %+v", b.Actions())
 	}
 }
