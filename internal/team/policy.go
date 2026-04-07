@@ -318,38 +318,8 @@ func recommendedIDForKind(kind string) string {
 }
 
 func signalRequestOptions(signal officeSignal) []interviewOption {
-	switch requestKindForSignal(signal) {
-	case "approval":
-		return []interviewOption{
-			{ID: "approve", Label: "Approve", Description: "Green-light this and let the team execute immediately."},
-			{ID: "approve_with_conditions", Label: "Approve with conditions", Description: "Proceed, but I will add constraints the team must follow."},
-			{ID: "needs_more_info", Label: "Need more info", Description: "Not enough context to decide — gather more details first."},
-			{ID: "delegate", Label: "Delegate", Description: "Route to a specific person for a closer look before deciding."},
-			{ID: "reject", Label: "Reject", Description: "Do not proceed with this."},
-		}
-	case "choice":
-		return []interviewOption{
-			{ID: "move_fast", Label: "Move fast", Description: "Bias toward speed — ship now, iterate later."},
-			{ID: "balanced", Label: "Balanced", Description: "Weigh trade-offs and aim for a reasonable middle ground."},
-			{ID: "be_careful", Label: "Be careful", Description: "Bias toward caution — tighter review loop before acting."},
-			{ID: "needs_more_info", Label: "Need more info", Description: "Not enough context to choose — investigate first."},
-			{ID: "delegate", Label: "Delegate", Description: "Let the owner or a specialist make this call."},
-		}
-	case "confirm":
-		return []interviewOption{
-			{ID: "confirm_proceed", Label: "Confirm", Description: "Looks good — proceed as planned."},
-			{ID: "adjust", Label: "Adjust", Description: "Proceed with modifications — I will add details."},
-			{ID: "reassign", Label: "Reassign", Description: "Wrong owner or scope — reroute this to someone else."},
-			{ID: "hold", Label: "Hold", Description: "Do not act yet — I need to review this further."},
-		}
-	default:
-		return []interviewOption{
-			{ID: "proceed", Label: "Proceed", Description: "Let the team handle it with their best judgment."},
-			{ID: "give_direction", Label: "Give direction", Description: "I will provide specific guidance for how to handle this."},
-			{ID: "delegate", Label: "Delegate", Description: "Route this to a specific person to own."},
-			{ID: "hold", Label: "Hold", Description: "Pause until I review this further."},
-		}
-	}
+	options, _ := requestOptionDefaults(requestKindForSignal(signal))
+	return options
 }
 
 func requestKindForSignal(signal officeSignal) string {

@@ -246,7 +246,7 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	provider, err := selectedActionProvider(action.CapabilityActionExecute)
 	if err != nil {
 		return toolError(err), nil, nil
@@ -282,7 +282,7 @@ func handleTeamActionWorkflowCreate(ctx context.Context, _ *mcp.CallToolRequest,
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	definition := json.RawMessage(strings.TrimSpace(args.DefinitionJSON))
 	if !json.Valid(definition) {
 		return toolError(fmt.Errorf("definition_json must be valid JSON")), nil, nil
@@ -326,7 +326,7 @@ func handleTeamActionWorkflowExecute(ctx context.Context, _ *mcp.CallToolRequest
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	provider, err := selectedActionProvider(action.CapabilityWorkflowExecute)
 	if err != nil {
 		return toolError(err), nil, nil
@@ -366,7 +366,7 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 	if strings.TrimSpace(args.Key) == "" {
 		return toolError(fmt.Errorf("key is required")), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	sched, err := calendar.ParseCron(args.Schedule)
 	if err != nil {
 		return toolError(fmt.Errorf("invalid schedule %q: %w", args.Schedule, err)), nil, nil
@@ -483,7 +483,7 @@ func handleTeamActionRelayCreate(ctx context.Context, _ *mcp.CallToolRequest, ar
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	provider, err := selectedActionProvider(action.CapabilityRelayCreate)
 	if err != nil {
 		return toolError(err), nil, nil
@@ -507,7 +507,7 @@ func handleTeamActionRelayActivate(ctx context.Context, _ *mcp.CallToolRequest, 
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	actions := json.RawMessage(strings.TrimSpace(args.ActionsJSON))
 	if !json.Valid(actions) {
 		return toolError(fmt.Errorf("actions_json must be valid JSON")), nil, nil

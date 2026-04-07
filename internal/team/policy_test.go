@@ -190,7 +190,7 @@ func TestSignalRequestOptionsRichApproval(t *testing.T) {
 			t.Fatalf("option %q missing label or description", o.ID)
 		}
 	}
-	for _, required := range []string{"approve", "approve_with_conditions", "needs_more_info", "delegate", "reject"} {
+	for _, required := range []string{"approve", "approve_with_note", "needs_more_info", "reject", "reject_with_steer"} {
 		if !ids[required] {
 			t.Errorf("missing required approval option %q", required)
 		}

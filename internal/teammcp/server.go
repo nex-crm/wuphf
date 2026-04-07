@@ -53,6 +53,18 @@ type brokerMembersResponse struct {
 	} `json:"members"`
 }
 
+type brokerChannelsResponse struct {
+	Channels []brokerChannelSummary `json:"channels"`
+}
+
+type brokerChannelSummary struct {
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Members     []string `json:"members"`
+	Disabled    []string `json:"disabled"`
+}
+
 type brokerOfficeMembersResponse struct {
 	Members []struct {
 		Slug           string   `json:"slug"`
@@ -129,6 +141,14 @@ type brokerTaskSummary struct {
 	WorktreeBranch   string   `json:"worktree_branch"`
 	DependsOn        []string `json:"depends_on,omitempty"`
 	Blocked          bool     `json:"blocked,omitempty"`
+	CreatedAt        string   `json:"created_at,omitempty"`
+	UpdatedAt        string   `json:"updated_at,omitempty"`
+}
+
+type conversationContext struct {
+	Channel   string
+	ReplyToID string
+	Source    string
 }
 
 type TeamBroadcastArgs struct {
@@ -151,6 +171,7 @@ type TeamPollArgs struct {
 	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug so tagged_count can be computed. Defaults to WUPHF_AGENT_SLUG."`
 	SinceID string `json:"since_id,omitempty" jsonschema:"Only return messages after this message ID"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"Maximum messages to return (default 10, max 100)"`
+	Scope   string `json:"scope,omitempty" jsonschema:"Transcript scope: all, agent, inbox, or outbox. Defaults to agent-scoped for non-CEO office agents."`
 }
 
 type TeamStatusArgs struct {
@@ -160,9 +181,11 @@ type TeamStatusArgs struct {
 }
 
 type HumanInterviewOption struct {
-	ID          string `json:"id" jsonschema:"Stable short ID like 'sales' or 'smbs'"`
-	Label       string `json:"label" jsonschema:"User-facing option label"`
-	Description string `json:"description,omitempty" jsonschema:"One-sentence explanation of tradeoff or impact"`
+	ID           string `json:"id" jsonschema:"Stable short ID like 'sales' or 'smbs'"`
+	Label        string `json:"label" jsonschema:"User-facing option label"`
+	Description  string `json:"description,omitempty" jsonschema:"One-sentence explanation of tradeoff or impact"`
+	RequiresText bool   `json:"requires_text,omitempty" jsonschema:"Whether the human must add typed guidance when choosing this option"`
+	TextHint     string `json:"text_hint,omitempty" jsonschema:"Hint shown when typed guidance is required or recommended for this option"`
 }
 
 type HumanInterviewArgs struct {
@@ -208,6 +231,12 @@ type TeamTasksArgs struct {
 	Channel     string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	MySlug      string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 	IncludeDone bool   `json:"include_done,omitempty" jsonschema:"Include completed tasks as well"`
+}
+
+type TeamRuntimeStateArgs struct {
+	Channel      string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	MySlug       string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+	MessageLimit int    `json:"message_limit,omitempty" jsonschema:"How many recent messages to include when building the recovery summary (default 12, max 40)."`
 }
 
 type TeamTaskArgs struct {
@@ -325,6 +354,11 @@ func Run(ctx context.Context) error {
 			Description: "Send a direct human-facing note into the chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
 		}, handleHumanMessage)
 
+		mcp.AddTool(server, &mcp.Tool{
+			Name:        "team_runtime_state",
+			Description: "Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
+		}, handleTeamRuntimeState)
+
 		registerActionTools(server)
 
 		return server.Run(ctx, &mcp.StdioTransport{})
@@ -344,6 +378,14 @@ func Run(ctx context.Context) error {
 		Name:        "team_poll",
 		Description: "Read recent messages from the team channel so you stay in sync before replying.",
 	}, handleTeamPoll)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_inbox",
+		Description: "Read only the messages that currently belong in your agent inbox: human asks, CEO guidance, tags to you, and replies in your threads.",
+	}, handleTeamInbox)
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_outbox",
+		Description: "Read only the messages you authored, so you can review what you already told the office.",
+	}, handleTeamOutbox)
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_status",
@@ -396,6 +438,11 @@ func Run(ctx context.Context) error {
 	}, handleTeamTaskStatus)
 
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "team_runtime_state",
+		Description: "Return the canonical office runtime snapshot, including tasks, pending human requests, recovery summary, and runtime capabilities.",
+	}, handleTeamRuntimeState)
+
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "team_task",
 		Description: "Create, claim, assign, complete, block, or release a shared task in the office task list.",
 	}, handleTeamTask)
@@ -445,14 +492,11 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
-
+	location := resolveConversationContext(ctx, slug, args.Channel, args.ReplyToID)
+	channel := location.Channel
 	replyTo := strings.TrimSpace(args.ReplyToID)
-	if !isOneOnOneMode() && replyTo == "" && !args.NewTopic {
-		replyTo, _ = inferReplyTarget(ctx, slug, channel)
-	}
-	if !isOneOnOneMode() && replyTo == "" && !args.NewTopic {
-		replyTo, _ = inferDefaultThreadTarget(ctx, slug, channel)
+	if replyTo == "" && !args.NewTopic {
+		replyTo = location.ReplyToID
 	}
 
 	if !isOneOnOneMode() {
@@ -699,11 +743,18 @@ func containsSlug(items []string, want string) bool {
 }
 
 func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollArgs) (*mcp.CallToolResult, any, error) {
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, resolveSlugOptional(args.MySlug), args.Channel)
 	values := url.Values{}
 	values.Set("channel", channel)
+	scope, err := normalizePollScope(args.Scope)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
 	if slug := strings.TrimSpace(resolveSlugOptional(args.MySlug)); slug != "" {
 		values.Set("my_slug", slug)
+		applyAgentMessageScope(values, slug, scope)
+	} else if scope != "" {
+		values.Set("scope", scope)
 	}
 	if since := strings.TrimSpace(args.SinceID); since != "" {
 		values.Set("since_id", since)
@@ -734,10 +785,27 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 		}
 		return textResult("Direct conversation\n\nLatest human request to answer now:\n" + focus + "\n\nOlder messages are background unless the latest request depends on them.\n\nRecent messages:\n" + summary), nil, nil
 	}
+	if scope == "inbox" || scope == "outbox" {
+		scopeTitle := strings.Title(scope)
+		if slug := strings.TrimSpace(resolveSlugOptional(args.MySlug)); slug != "" {
+			return textResult(fmt.Sprintf("%s for @%s in #%s\n\n%s", scopeTitle, slug, channel, summary)), nil, nil
+		}
+		return textResult(fmt.Sprintf("%s in #%s\n\n%s", scopeTitle, channel, summary)), nil, nil
+	}
 	taskSummary := formatTaskSummary(ctx, resolveSlugOptional(args.MySlug), channel)
 	requestSummary := formatRequestSummary(ctx, channel)
 	memorySummary := formatMemorySummary(ctx)
 	return textResult(fmt.Sprintf("Channel #%s\n\n%s\n\nTagged messages for you: %d\n\n%s\n\n%s\n\n%s", channel, summary, result.TaggedCount, taskSummary, requestSummary, memorySummary)), nil, nil
+}
+
+func handleTeamInbox(ctx context.Context, req *mcp.CallToolRequest, args TeamPollArgs) (*mcp.CallToolResult, any, error) {
+	args.Scope = "inbox"
+	return handleTeamPoll(ctx, req, args)
+}
+
+func handleTeamOutbox(ctx context.Context, req *mcp.CallToolRequest, args TeamPollArgs) (*mcp.CallToolResult, any, error) {
+	args.Scope = "outbox"
+	return handleTeamPoll(ctx, req, args)
 }
 
 func handleTeamStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamStatusArgs) (*mcp.CallToolResult, any, error) {
@@ -745,7 +813,7 @@ func handleTeamStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamStat
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	if err := brokerPostJSON(ctx, "/messages", map[string]any{
 		"channel": channel,
 		"from":    slug,
@@ -758,8 +826,8 @@ func handleTeamStatus(ctx context.Context, _ *mcp.CallToolRequest, args TeamStat
 }
 
 func handleTeamMembers(ctx context.Context, _ *mcp.CallToolRequest, args TeamMembersArgs) (*mcp.CallToolResult, any, error) {
-	channel := resolveChannel(args.Channel)
 	viewer := strings.TrimSpace(resolveSlugOptional(args.MySlug))
+	channel := resolveConversationChannel(ctx, viewer, args.Channel)
 	var result brokerMembersResponse
 	values := url.Values{}
 	values.Set("channel", channel)
@@ -844,12 +912,56 @@ func handleTeamTaskStatus(ctx context.Context, _ *mcp.CallToolRequest, args Team
 	return textResult(summarizeTaskRuntime(channel, tasks)), nil, nil
 }
 
+func handleTeamRuntimeState(ctx context.Context, _ *mcp.CallToolRequest, args TeamRuntimeStateArgs) (*mcp.CallToolResult, any, error) {
+	slug := resolveSlugOptional(args.MySlug)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
+	taskChannel, tasks, err := fetchTeamTasks(ctx, TeamTasksArgs{
+		Channel:     channel,
+		MySlug:      args.MySlug,
+		IncludeDone: false,
+	})
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+
+	requests, err := fetchRuntimeRequests(ctx, channel, args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	recent, err := fetchRuntimeMessages(ctx, channel, args.MySlug, args.MessageLimit)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+
+	mode := team.SessionModeOffice
+	directAgent := ""
+	if isOneOnOneMode() {
+		mode = team.SessionModeOneOnOne
+		directAgent = team.NormalizeOneOnOneAgent(os.Getenv("WUPHF_ONE_ON_ONE_AGENT"))
+	}
+
+	snapshot := team.BuildRuntimeSnapshot(team.RuntimeSnapshotInput{
+		Channel:      taskChannel,
+		SessionMode:  mode,
+		DirectAgent:  directAgent,
+		Tasks:        convertRuntimeTasks(tasks),
+		Requests:     requests,
+		Recent:       recent,
+		Capabilities: team.DetectRuntimeCapabilities(),
+	})
+	return textResult(snapshot.FormatText()), snapshot, nil
+}
+
 func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskArgs) (*mcp.CallToolResult, any, error) {
 	mySlug, err := resolveSlug(args.MySlug)
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := strings.TrimSpace(args.Channel)
+	if channel == "" && strings.TrimSpace(args.ID) != "" {
+		channel = findTaskContextByID(ctx, mySlug, args.ID).Channel
+	}
+	channel = resolveConversationChannel(ctx, mySlug, channel)
 	action := strings.TrimSpace(args.Action)
 	payload := map[string]any{
 		"action":     action,
@@ -908,7 +1020,7 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 
 func fetchTeamTasks(ctx context.Context, args TeamTasksArgs) (string, []brokerTaskSummary, error) {
 	mySlug := strings.TrimSpace(resolveSlugOptional(args.MySlug))
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, mySlug, args.Channel)
 	values := url.Values{}
 	values.Set("channel", channel)
 	if mySlug != "" {
@@ -982,6 +1094,112 @@ func summarizeTaskRuntime(channel string, tasks []brokerTaskSummary) string {
 	return strings.Join(lines, "\n")
 }
 
+func fetchRuntimeRequests(ctx context.Context, channel, mySlug string) ([]team.RuntimeRequest, error) {
+	values := url.Values{}
+	values.Set("channel", channel)
+	if viewer := strings.TrimSpace(resolveSlugOptional(mySlug)); viewer != "" {
+		values.Set("viewer_slug", viewer)
+	}
+	var result brokerRequestsResponse
+	path := "/requests"
+	if encoded := values.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	if err := brokerGetJSON(ctx, path, &result); err != nil {
+		return nil, err
+	}
+
+	requests := make([]team.RuntimeRequest, 0, len(result.Requests)+1)
+	seen := map[string]bool{}
+	if result.Pending != nil {
+		req := team.RuntimeRequest{
+			ID:       result.Pending.ID,
+			Kind:     result.Pending.Kind,
+			Title:    result.Pending.Title,
+			Question: result.Pending.Question,
+			From:     result.Pending.From,
+			Blocking: result.Pending.Blocking,
+			Required: result.Pending.Required,
+			Status:   "pending",
+			Channel:  result.Pending.Channel,
+			Secret:   result.Pending.Secret,
+		}
+		requests = append(requests, req)
+		seen[req.ID] = true
+	}
+	for _, req := range result.Requests {
+		if seen[req.ID] {
+			continue
+		}
+		requests = append(requests, team.RuntimeRequest{
+			ID:       req.ID,
+			Kind:     req.Kind,
+			Title:    req.Title,
+			Question: req.Question,
+			From:     req.From,
+			Blocking: req.Blocking,
+			Required: req.Required,
+			Status:   req.Status,
+			Channel:  req.Channel,
+			Secret:   req.Secret,
+		})
+	}
+	return requests, nil
+}
+
+func fetchRuntimeMessages(ctx context.Context, channel, mySlug string, limit int) ([]team.RuntimeMessage, error) {
+	values := url.Values{}
+	values.Set("channel", channel)
+	if slug := strings.TrimSpace(resolveSlugOptional(mySlug)); slug != "" {
+		values.Set("my_slug", slug)
+		applyAgentMessageScope(values, slug, "agent")
+	}
+	switch {
+	case limit <= 0:
+		values.Set("limit", "12")
+	case limit > 40:
+		values.Set("limit", "40")
+	default:
+		values.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	var result brokerMessagesResponse
+	if err := brokerGetJSON(ctx, "/messages?"+values.Encode(), &result); err != nil {
+		return nil, err
+	}
+	messages := make([]team.RuntimeMessage, 0, len(result.Messages))
+	for i := len(result.Messages) - 1; i >= 0; i-- {
+		msg := result.Messages[i]
+		messages = append(messages, team.RuntimeMessage{
+			ID:        msg.ID,
+			From:      msg.From,
+			Title:     msg.Title,
+			Content:   msg.Content,
+			ReplyTo:   msg.ReplyTo,
+			Timestamp: msg.Timestamp,
+		})
+	}
+	return messages, nil
+}
+
+func convertRuntimeTasks(tasks []brokerTaskSummary) []team.RuntimeTask {
+	out := make([]team.RuntimeTask, 0, len(tasks))
+	for _, task := range tasks {
+		out = append(out, team.RuntimeTask{
+			ID:             task.ID,
+			Title:          task.Title,
+			Owner:          task.Owner,
+			Status:         task.Status,
+			PipelineStage:  task.PipelineStage,
+			ReviewState:    task.ReviewState,
+			ExecutionMode:  task.ExecutionMode,
+			WorktreePath:   task.WorktreePath,
+			WorktreeBranch: task.WorktreeBranch,
+			Blocked:        task.Blocked,
+		})
+	}
+	return out
+}
+
 func formatTaskRuntimeLine(task brokerTaskSummary) string {
 	line := fmt.Sprintf("- %s [%s]", task.ID, task.Status)
 	if task.Owner != "" {
@@ -1033,7 +1251,7 @@ func handleTeamPlan(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlanAr
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, mySlug, args.Channel)
 	if len(args.Tasks) == 0 {
 		return toolError(fmt.Errorf("tasks list is empty")), nil, nil
 	}
@@ -1110,7 +1328,11 @@ func handleTeamTaskAck(ctx context.Context, _ *mcp.CallToolRequest, args TeamTas
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := strings.TrimSpace(args.Channel)
+	if channel == "" {
+		channel = findTaskContextByID(ctx, mySlug, args.ID).Channel
+	}
+	channel = resolveConversationChannel(ctx, mySlug, channel)
 	taskID := strings.TrimSpace(args.ID)
 	if taskID == "" {
 		return toolError(fmt.Errorf("task ID is required")), nil, nil
@@ -1132,8 +1354,8 @@ func handleTeamTaskAck(ctx context.Context, _ *mcp.CallToolRequest, args TeamTas
 }
 
 func handleTeamRequests(ctx context.Context, _ *mcp.CallToolRequest, args TeamRequestsArgs) (*mcp.CallToolResult, any, error) {
-	channel := resolveChannel(args.Channel)
 	viewer := strings.TrimSpace(resolveSlugOptional(args.MySlug))
+	channel := resolveConversationChannel(ctx, viewer, args.Channel)
 	values := url.Values{}
 	values.Set("channel", channel)
 	if viewer != "" {
@@ -1181,11 +1403,9 @@ func handleTeamRequest(ctx context.Context, _ *mcp.CallToolRequest, args TeamReq
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
-	replyTo := strings.TrimSpace(args.ReplyToID)
-	if replyTo == "" {
-		replyTo, _ = inferReplyTarget(ctx, slug, channel)
-	}
+	ctxTarget := resolveConversationContext(ctx, slug, args.Channel, args.ReplyToID)
+	channel := ctxTarget.Channel
+	replyTo := ctxTarget.ReplyToID
 
 	kind := defaultRequestKind(args.Kind)
 	blocking := args.Blocking
@@ -1194,6 +1414,7 @@ func handleTeamRequest(ctx context.Context, _ *mcp.CallToolRequest, args TeamReq
 		blocking = true
 		required = true
 	}
+	options, recommendedID := normalizeHumanRequestOptions(kind, args.RecommendedOptionID, args.Options)
 
 	var created struct {
 		ID string `json:"id"`
@@ -1205,8 +1426,8 @@ func handleTeamRequest(ctx context.Context, _ *mcp.CallToolRequest, args TeamReq
 		"title":          strings.TrimSpace(args.Title),
 		"question":       args.Question,
 		"context":        args.Context,
-		"options":        args.Options,
-		"recommended_id": args.RecommendedOptionID,
+		"options":        options,
+		"recommended_id": recommendedID,
 		"blocking":       blocking,
 		"required":       required,
 		"secret":         args.Secret,
@@ -1225,8 +1446,10 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	location := resolveConversationContext(ctx, slug, args.Channel, "")
+	channel := location.Channel
 
+	options, recommendedID := normalizeHumanRequestOptions("interview", args.RecommendedOptionID, args.Options)
 	var created struct {
 		ID string `json:"id"`
 	}
@@ -1237,10 +1460,11 @@ func handleHumanInterview(ctx context.Context, _ *mcp.CallToolRequest, args Huma
 		"title":          "Human interview",
 		"question":       args.Question,
 		"context":        args.Context,
-		"options":        args.Options,
-		"recommended_id": args.RecommendedOptionID,
+		"options":        options,
+		"recommended_id": recommendedID,
 		"blocking":       true,
 		"required":       true,
+		"reply_to":       location.ReplyToID,
 	}, &created); err != nil {
 		return toolError(err), nil, nil
 	}
@@ -1288,11 +1512,9 @@ func handleHumanMessage(ctx context.Context, _ *mcp.CallToolRequest, args HumanM
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
-	replyTo := strings.TrimSpace(args.ReplyToID)
-	if replyTo == "" {
-		replyTo, _ = inferReplyTarget(ctx, slug, channel)
-	}
+	ctxTarget := resolveConversationContext(ctx, slug, args.Channel, args.ReplyToID)
+	channel := ctxTarget.Channel
+	replyTo := ctxTarget.ReplyToID
 
 	kind := strings.ToLower(strings.TrimSpace(args.Kind))
 	switch kind {
@@ -1385,7 +1607,7 @@ func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamCha
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	if err := brokerPostJSON(ctx, "/channels", map[string]any{
 		"action":      strings.TrimSpace(args.Action),
 		"slug":        channel,
@@ -1403,10 +1625,11 @@ func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamCha
 }
 
 func handleTeamChannelMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamChannelMemberArgs) (*mcp.CallToolResult, any, error) {
-	if _, err := resolveSlug(args.MySlug); err != nil {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
 		return toolError(err), nil, nil
 	}
-	channel := resolveChannel(args.Channel)
+	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	member := normalizeSlug(args.MemberSlug)
 	if member == "" {
 		return toolError(fmt.Errorf("member_slug is required")), nil, nil
@@ -1574,19 +1797,348 @@ func resolveSlugOptional(input string) string {
 	return strings.TrimSpace(os.Getenv("NEX_AGENT_SLUG"))
 }
 
-func resolveChannel(input string) string {
+func normalizeChannelInput(input string) string {
 	channel := strings.TrimSpace(input)
 	if channel == "" {
-		channel = strings.TrimSpace(os.Getenv("WUPHF_CHANNEL"))
-	}
-	if channel == "" {
-		channel = strings.TrimSpace(os.Getenv("NEX_CHANNEL"))
-	}
-	if channel == "" {
-		channel = "general"
+		return ""
 	}
 	channel = strings.ToLower(strings.ReplaceAll(channel, " ", "-"))
 	return channel
+}
+
+func resolveChannelHint(input string) string {
+	channel := normalizeChannelInput(input)
+	if channel == "" {
+		channel = normalizeChannelInput(os.Getenv("WUPHF_CHANNEL"))
+	}
+	if channel == "" {
+		channel = normalizeChannelInput(os.Getenv("NEX_CHANNEL"))
+	}
+	return channel
+}
+
+func resolveChannel(input string) string {
+	channel := resolveChannelHint(input)
+	if channel == "" {
+		channel = "general"
+	}
+	return channel
+}
+
+func resolveConversationChannel(ctx context.Context, slug string, requestedChannel string) string {
+	return resolveConversationContext(ctx, slug, requestedChannel, "").Channel
+}
+
+func resolveConversationContext(ctx context.Context, slug, requestedChannel, requestedReplyTo string) conversationContext {
+	channel := resolveChannelHint(requestedChannel)
+	replyTo := strings.TrimSpace(requestedReplyTo)
+	if channel != "" {
+		if replyTo == "" {
+			replyTo = defaultReplyTargetForChannel(ctx, slug, channel)
+		}
+		return conversationContext{Channel: channel, ReplyToID: replyTo, Source: "explicit_channel"}
+	}
+
+	if replyTo != "" {
+		if located := findMessageContextByID(ctx, slug, replyTo); located.Channel != "" {
+			located.ReplyToID = replyTo
+			located.Source = "explicit_reply"
+			return located
+		}
+	}
+
+	if isOneOnOneMode() {
+		channel = resolveChannel("")
+		if replyTo == "" {
+			replyTo = inferDirectReplyTarget(ctx, slug, channel)
+		}
+		return conversationContext{Channel: channel, ReplyToID: replyTo, Source: "direct_session"}
+	}
+
+	if inferred := inferRecentConversationContext(ctx, slug); inferred.Channel != "" {
+		if replyTo != "" {
+			inferred.ReplyToID = replyTo
+		}
+		if inferred.ReplyToID == "" {
+			inferred.ReplyToID = defaultReplyTargetForChannel(ctx, slug, inferred.Channel)
+		}
+		return inferred
+	}
+
+	if inferred := inferTaskConversationContext(ctx, slug); inferred.Channel != "" {
+		if replyTo != "" {
+			inferred.ReplyToID = replyTo
+		}
+		if inferred.ReplyToID == "" {
+			inferred.ReplyToID = defaultReplyTargetForChannel(ctx, slug, inferred.Channel)
+		}
+		return inferred
+	}
+
+	channel = resolveChannel("")
+	if replyTo == "" {
+		replyTo = defaultReplyTargetForChannel(ctx, slug, channel)
+	}
+	return conversationContext{Channel: channel, ReplyToID: replyTo, Source: "fallback"}
+}
+
+func fetchAccessibleChannels(ctx context.Context, slug string) []brokerChannelSummary {
+	var result brokerChannelsResponse
+	if err := brokerGetJSON(ctx, "/channels", &result); err != nil {
+		return nil
+	}
+	slug = strings.TrimSpace(slug)
+	if slug == "" || slug == "ceo" {
+		return result.Channels
+	}
+	out := make([]brokerChannelSummary, 0, len(result.Channels))
+	for _, ch := range result.Channels {
+		if !contains(ch.Members, slug) || contains(ch.Disabled, slug) {
+			continue
+		}
+		out = append(out, ch)
+	}
+	return out
+}
+
+func fetchChannelMessages(ctx context.Context, channel, slug, scope string, limit int) []brokerMessage {
+	values := url.Values{}
+	values.Set("channel", channel)
+	if limit > 0 {
+		values.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	slug = strings.TrimSpace(slug)
+	if slug != "" {
+		values.Set("my_slug", slug)
+		values.Set("viewer_slug", slug)
+		if strings.TrimSpace(scope) != "" {
+			values.Set("scope", strings.TrimSpace(scope))
+		}
+	}
+	var result brokerMessagesResponse
+	path := "/messages?" + values.Encode()
+	if err := brokerGetJSON(ctx, path, &result); err != nil {
+		return nil
+	}
+	return result.Messages
+}
+
+func inferRecentConversationContext(ctx context.Context, slug string) conversationContext {
+	channels := fetchAccessibleChannels(ctx, slug)
+	var (
+		best      conversationContext
+		bestStamp time.Time
+	)
+	for _, ch := range channels {
+		messages := fetchChannelMessages(ctx, ch.Slug, slug, "inbox", 40)
+		if len(messages) == 0 {
+			continue
+		}
+		candidate, stamp := latestRelevantMessageContext(messages, slug, ch.Slug)
+		if candidate.Channel == "" || stamp.IsZero() {
+			continue
+		}
+		if best.Channel == "" || stamp.After(bestStamp) {
+			best = candidate
+			bestStamp = stamp
+		}
+	}
+	return best
+}
+
+func latestRelevantMessageContext(messages []brokerMessage, slug, fallbackChannel string) (conversationContext, time.Time) {
+	byID := make(map[string]brokerMessage, len(messages))
+	for _, msg := range messages {
+		if id := strings.TrimSpace(msg.ID); id != "" {
+			byID[id] = msg
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if strings.TrimSpace(msg.From) == strings.TrimSpace(slug) {
+			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(msg.Content), "[STATUS]") {
+			continue
+		}
+		stamp, err := time.Parse(time.RFC3339, strings.TrimSpace(msg.Timestamp))
+		if err != nil {
+			continue
+		}
+		channel := normalizeChannelInput(msg.Channel)
+		if channel == "" {
+			channel = normalizeChannelInput(fallbackChannel)
+		}
+		if channel == "" {
+			channel = "general"
+		}
+		return conversationContext{
+			Channel:   channel,
+			ReplyToID: threadTargetForMessage(msg, byID),
+			Source:    "recent_message",
+		}, stamp
+	}
+	return conversationContext{}, time.Time{}
+}
+
+func threadTargetForMessage(msg brokerMessage, byID map[string]brokerMessage) string {
+	current := strings.TrimSpace(msg.ID)
+	parent := strings.TrimSpace(msg.ReplyTo)
+	if parent == "" {
+		return current
+	}
+	seen := map[string]bool{}
+	for parent != "" {
+		if seen[parent] {
+			return parent
+		}
+		seen[parent] = true
+		next, ok := byID[parent]
+		if !ok || strings.TrimSpace(next.ReplyTo) == "" {
+			return parent
+		}
+		parent = strings.TrimSpace(next.ReplyTo)
+	}
+	return current
+}
+
+func inferTaskConversationContext(ctx context.Context, slug string) conversationContext {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return conversationContext{}
+	}
+	channels := fetchAccessibleChannels(ctx, slug)
+	var (
+		best      conversationContext
+		bestStamp time.Time
+	)
+	for _, ch := range channels {
+		values := url.Values{}
+		values.Set("channel", ch.Slug)
+		values.Set("viewer_slug", slug)
+		values.Set("my_slug", slug)
+		var result brokerTasksResponse
+		if err := brokerGetJSON(ctx, "/tasks?"+values.Encode(), &result); err != nil {
+			continue
+		}
+		for _, task := range result.Tasks {
+			if !taskCountsAsRunning(task) {
+				continue
+			}
+			stamp := parseLatestTaskTime(task)
+			if best.Channel != "" && !stamp.After(bestStamp) {
+				continue
+			}
+			best = conversationContext{
+				Channel:   normalizeChannelInput(task.Channel),
+				ReplyToID: strings.TrimSpace(task.ThreadID),
+				Source:    "owned_task",
+			}
+			bestStamp = stamp
+		}
+	}
+	return best
+}
+
+func parseLatestTaskTime(task brokerTaskSummary) time.Time {
+	for _, raw := range []string{strings.TrimSpace(task.UpdatedAt), strings.TrimSpace(task.CreatedAt)} {
+		if raw == "" {
+			continue
+		}
+		if stamp, err := time.Parse(time.RFC3339, raw); err == nil {
+			return stamp
+		}
+	}
+	return time.Time{}
+}
+
+func findMessageContextByID(ctx context.Context, slug, messageID string) conversationContext {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return conversationContext{}
+	}
+	for _, ch := range fetchAccessibleChannels(ctx, slug) {
+		messages := fetchChannelMessages(ctx, ch.Slug, slug, "", 100)
+		byID := make(map[string]brokerMessage, len(messages))
+		for _, msg := range messages {
+			if id := strings.TrimSpace(msg.ID); id != "" {
+				byID[id] = msg
+			}
+		}
+		if msg, ok := byID[messageID]; ok {
+			return conversationContext{
+				Channel:   ch.Slug,
+				ReplyToID: threadTargetForMessage(msg, byID),
+				Source:    "message_lookup",
+			}
+		}
+	}
+	return conversationContext{}
+}
+
+func findTaskContextByID(ctx context.Context, slug, taskID string) conversationContext {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return conversationContext{}
+	}
+	channels := fetchAccessibleChannels(ctx, slug)
+	for _, ch := range channels {
+		values := url.Values{}
+		values.Set("channel", ch.Slug)
+		if strings.TrimSpace(slug) != "" {
+			values.Set("viewer_slug", strings.TrimSpace(slug))
+		}
+		values.Set("include_done", "true")
+		var result brokerTasksResponse
+		if err := brokerGetJSON(ctx, "/tasks?"+values.Encode(), &result); err != nil {
+			continue
+		}
+		for _, task := range result.Tasks {
+			if strings.TrimSpace(task.ID) == taskID {
+				return conversationContext{
+					Channel:   ch.Slug,
+					ReplyToID: strings.TrimSpace(task.ThreadID),
+					Source:    "task_lookup",
+				}
+			}
+		}
+	}
+	return conversationContext{}
+}
+
+func defaultReplyTargetForChannel(ctx context.Context, slug, channel string) string {
+	channel = resolveChannel(channel)
+	if isOneOnOneMode() {
+		return inferDirectReplyTarget(ctx, slug, channel)
+	}
+	if replyTo, err := inferReplyTarget(ctx, slug, channel); err == nil && strings.TrimSpace(replyTo) != "" {
+		return strings.TrimSpace(replyTo)
+	}
+	if replyTo, err := inferDefaultThreadTarget(ctx, slug, channel); err == nil && strings.TrimSpace(replyTo) != "" {
+		return strings.TrimSpace(replyTo)
+	}
+	return ""
+}
+
+func inferDirectReplyTarget(ctx context.Context, slug, channel string) string {
+	messages := fetchChannelMessages(ctx, channel, slug, "", 40)
+	if len(messages) == 0 {
+		return ""
+	}
+	byID := make(map[string]brokerMessage, len(messages))
+	for _, msg := range messages {
+		if id := strings.TrimSpace(msg.ID); id != "" {
+			byID[id] = msg
+		}
+	}
+	for i := len(messages) - 1; i >= 0; i-- {
+		msg := messages[i]
+		if strings.TrimSpace(msg.From) == strings.TrimSpace(slug) {
+			continue
+		}
+		return threadTargetForMessage(msg, byID)
+	}
+	return ""
 }
 
 func normalizeSlug(input string) string {
@@ -1602,6 +2154,103 @@ func defaultRequestKind(kind string) string {
 		return "choice"
 	}
 	return kind
+}
+
+func humanRequestOptionDefaults(kind string) ([]HumanInterviewOption, string) {
+	switch strings.TrimSpace(kind) {
+	case "approval":
+		return []HumanInterviewOption{
+			{ID: "approve", Label: "Approve", Description: "Green-light this and let the team execute immediately."},
+			{ID: "approve_with_note", Label: "Approve with note", Description: "Proceed, but attach explicit constraints or guardrails.", RequiresText: true, TextHint: "Type the conditions, constraints, or guardrails the team must follow."},
+			{ID: "reject", Label: "Reject", Description: "Do not proceed with this."},
+			{ID: "reject_with_steer", Label: "Reject with steer", Description: "Do not proceed as proposed. Redirect the team with clearer steering.", RequiresText: true, TextHint: "Type the steering, redirect, or rationale for rejecting this request."},
+			{ID: "hold", Label: "Hold", Description: "Pause until you review or unblock this yourself."},
+		}, "approve"
+	case "confirm":
+		return []HumanInterviewOption{
+			{ID: "confirm_proceed", Label: "Confirm", Description: "Looks good. Proceed as planned."},
+			{ID: "adjust", Label: "Adjust", Description: "Proceed only after applying the changes you specify.", RequiresText: true, TextHint: "Type the changes that must happen before proceeding."},
+			{ID: "reassign", Label: "Reassign", Description: "Move this to a different owner or scope.", RequiresText: true, TextHint: "Type who should own this instead, or how the scope should change."},
+			{ID: "hold", Label: "Hold", Description: "Do not act yet. Keep this pending for review."},
+		}, "confirm_proceed"
+	case "choice":
+		return []HumanInterviewOption{
+			{ID: "move_fast", Label: "Move fast", Description: "Bias toward speed. Ship now and iterate later."},
+			{ID: "balanced", Label: "Balanced", Description: "Balance speed, risk, and quality."},
+			{ID: "be_careful", Label: "Be careful", Description: "Bias toward caution and a tighter review loop."},
+			{ID: "needs_more_info", Label: "Need more info", Description: "Gather more context before deciding.", RequiresText: true, TextHint: "Type what is missing or what should be investigated next."},
+			{ID: "delegate", Label: "Delegate", Description: "Hand this to a specific owner for a closer call.", RequiresText: true, TextHint: "Type who should own this decision and any guidance for them."},
+		}, "balanced"
+	case "freeform", "secret":
+		return []HumanInterviewOption{
+			{ID: "proceed", Label: "Proceed", Description: "Let the team handle it with their best judgment."},
+			{ID: "give_direction", Label: "Give direction", Description: "Proceed, but only after you provide specific guidance.", RequiresText: true, TextHint: "Type the direction or constraints the team should follow."},
+			{ID: "delegate", Label: "Delegate", Description: "Route this to a specific person.", RequiresText: true, TextHint: "Type who should own this and what they should do."},
+			{ID: "hold", Label: "Hold", Description: "Pause until you review this further."},
+		}, "proceed"
+	default:
+		return nil, ""
+	}
+}
+
+func normalizeHumanRequestOptions(kind, recommendedID string, options []HumanInterviewOption) ([]HumanInterviewOption, string) {
+	defaults, fallback := humanRequestOptionDefaults(kind)
+	if len(options) == 0 {
+		return defaults, chooseRecommendedID(strings.TrimSpace(recommendedID), fallback)
+	}
+	meta := make(map[string]HumanInterviewOption, len(defaults))
+	for _, option := range defaults {
+		meta[strings.TrimSpace(option.ID)] = option
+	}
+	out := make([]HumanInterviewOption, 0, len(options))
+	for _, option := range options {
+		if base, ok := meta[strings.TrimSpace(option.ID)]; ok {
+			if !option.RequiresText {
+				option.RequiresText = base.RequiresText
+			}
+			if strings.TrimSpace(option.TextHint) == "" {
+				option.TextHint = base.TextHint
+			}
+			if strings.TrimSpace(option.Label) == "" {
+				option.Label = base.Label
+			}
+			if strings.TrimSpace(option.Description) == "" {
+				option.Description = base.Description
+			}
+		}
+		out = append(out, option)
+	}
+	return out, chooseRecommendedID(strings.TrimSpace(recommendedID), fallback)
+}
+
+func chooseRecommendedID(preferred, fallback string) string {
+	if preferred != "" {
+		return preferred
+	}
+	return fallback
+}
+
+func normalizePollScope(value string) (string, error) {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", "all", "channel":
+		return "", nil
+	case "agent", "inbox", "outbox":
+		return strings.TrimSpace(strings.ToLower(value)), nil
+	default:
+		return "", fmt.Errorf("invalid scope %q", value)
+	}
+}
+
+func applyAgentMessageScope(values url.Values, slug, scope string) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" || slug == "ceo" || isOneOnOneMode() {
+		return
+	}
+	values.Set("viewer_slug", slug)
+	if scope == "" {
+		scope = "agent"
+	}
+	values.Set("scope", scope)
 }
 
 func brokerGetJSON(ctx context.Context, path string, out any) error {
@@ -1682,6 +2331,12 @@ func inferReplyTarget(ctx context.Context, slug string, channel string) (string,
 	if err := brokerGetJSON(ctx, "/messages?channel="+url.QueryEscape(channel)+"&my_slug="+url.QueryEscape(slug)+"&limit=25", &result); err != nil {
 		return "", err
 	}
+	byID := make(map[string]brokerMessage, len(result.Messages))
+	for _, msg := range result.Messages {
+		if id := strings.TrimSpace(msg.ID); id != "" {
+			byID[id] = msg
+		}
+	}
 	for i := len(result.Messages) - 1; i >= 0; i-- {
 		msg := result.Messages[i]
 		if msg.From == slug {
@@ -1693,7 +2348,7 @@ func inferReplyTarget(ctx context.Context, slug string, channel string) (string,
 		if !isRecentEnough(msg.Timestamp, 15*time.Minute) {
 			continue
 		}
-		return msg.ID, nil
+		return threadTargetForMessage(msg, byID), nil
 	}
 	return "", nil
 }
@@ -1702,6 +2357,12 @@ func inferDefaultThreadTarget(ctx context.Context, slug string, channel string) 
 	var result brokerMessagesResponse
 	if err := brokerGetJSON(ctx, "/messages?channel="+url.QueryEscape(channel)+"&my_slug="+url.QueryEscape(slug)+"&limit=40", &result); err != nil {
 		return "", err
+	}
+	byID := make(map[string]brokerMessage, len(result.Messages))
+	for _, msg := range result.Messages {
+		if id := strings.TrimSpace(msg.ID); id != "" {
+			byID[id] = msg
+		}
 	}
 	for i := len(result.Messages) - 1; i >= 0; i-- {
 		msg := result.Messages[i]
@@ -1714,7 +2375,7 @@ func inferDefaultThreadTarget(ctx context.Context, slug string, channel string) 
 		if !isRecentEnough(msg.Timestamp, 20*time.Minute) {
 			continue
 		}
-		return msg.ID, nil
+		return threadTargetForMessage(msg, byID), nil
 	}
 	return "", nil
 }

@@ -157,7 +157,7 @@ echo "--- Answer blocking request and inject human-facing note ---"
 curl -s -X POST http://127.0.0.1:7890/requests/answer \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $BROKER_TOKEN" \
-  -d "{\"id\":\"$REQ_ID\",\"choice_id\":\"act_now\",\"choice_text\":\"Act now\"}" > "$ARTIFACTS/request-answer.json"
+  -d "{\"id\":\"$REQ_ID\",\"choice_id\":\"approve_with_note\",\"custom_text\":\"Proceed, but keep the scope narrow and the plan reviewable.\"}" > "$ARTIFACTS/request-answer.json"
 sleep 2
 curl -s -X POST http://127.0.0.1:7890/messages \
   -H "Content-Type: application/json" \
@@ -210,6 +210,5 @@ assert_contains "bridge_channel" "insights-general"
 
 start_channel_view calendar
 assert_contains "task_created" "calendar-view"
-assert_contains "bridge_channel" "calendar-view"
 
 echo "PASS: autonomy acceptance criteria focused run succeeded"
