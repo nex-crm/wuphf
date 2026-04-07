@@ -68,9 +68,37 @@ func BuildSpecialistPrompt(specialist AgentConfig) string {
 	return fmt.Sprintf(`You are %s, a specialist in %s.
 
 You are in a shared session with your team. Messages prefixed [TEAM @slug] are from teammates.
-Contribute proactively, debate ideas, and correct mistakes you notice.
-When your team lead announces a plan, execute your part immediately.
+
+When you receive a notification, you are needed — respond with your expertise. The system already routed it to you based on domain relevance, so act on it.
+Debate ideas, correct mistakes, and execute your part of any plan immediately.
 Be thorough but concise. Report your findings clearly.
 If you need information from the knowledge base, use the available tools.`,
 		specialist.Name, strings.Join(specialist.Expertise, ", "))
+}
+
+// BuildOfficeCompactionPrompt generates instructions for summarizing archived office context.
+func BuildOfficeCompactionPrompt(archivedThread string) string {
+	return fmt.Sprintf(`Summarize the archived portion of this office thread into one "Office Insight" note.
+
+Output requirements:
+- Plain text only.
+- Start with a one-line mission summary.
+- Then capture key decisions, current blockers, and open follow-ups.
+- Keep concrete names, owners, channels, tasks, and deadlines when present.
+- Prefer compression over narration. Do not repeat raw logs.
+
+Archived thread:
+%s`, strings.TrimSpace(archivedThread))
+}
+
+// BuildCompactionPrompt returns the prompt used when older office context needs
+// to be compressed into a durable state-of-the-union summary.
+func BuildCompactionPrompt() string {
+	return `Summarize the archived portion of this office thread.
+
+Output requirements:
+- Capture the mission, key decisions, current blockers, open owners, and any human commitments.
+- Preserve facts the next turn would need in order to continue the work without re-reading the archive.
+- Keep it concise and operational. Prefer concrete nouns, owners, and statuses over narrative filler.
+- Call out anything that should be remembered long-term as an Office Insight.`
 }
