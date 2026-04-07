@@ -493,6 +493,21 @@ func (b *Broker) Messages() []channelMessage {
 	return out
 }
 
+// SharedMemory returns a snapshot of the shared memory map (namespace → key → value).
+func (b *Broker) SharedMemory() map[string]map[string]string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make(map[string]map[string]string, len(b.sharedMemory))
+	for ns, kv := range b.sharedMemory {
+		cp := make(map[string]string, len(kv))
+		for k, v := range kv {
+			cp[k] = v
+		}
+		out[ns] = cp
+	}
+	return out
+}
+
 func (b *Broker) HasPendingInterview() bool {
 	return b.HasBlockingRequest()
 }

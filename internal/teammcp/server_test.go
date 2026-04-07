@@ -947,3 +947,65 @@ func TestHandleTeamInboxAndOutboxExposeOwnedTranscriptSlices(t *testing.T) {
 		t.Fatalf("unexpected non-authored content in outbox slice: %q", outboxText)
 	}
 }
+
+func TestHandleTeamTaskAutoWritesResultToMemory(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	// Create a task via the MCP handler
+	_, _, err := handleTeamTask(context.Background(), nil, TeamTaskArgs{
+		Action:  "create",
+		Title:   "Build login page",
+		Details: "React component with email/password",
+		Channel: "general",
+		MySlug:  "fe",
+	})
+	if err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	// Get the task ID via the broker HTTP API
+	var tasksResp struct {
+		Tasks []struct {
+			ID string `json:"id"`
+		} `json:"tasks"`
+	}
+	if err := brokerGetJSON(context.Background(), "/tasks?channel=general", &tasksResp); err != nil {
+		t.Fatalf("get tasks: %v", err)
+	}
+	if len(tasksResp.Tasks) == 0 {
+		t.Fatal("expected at least one task")
+	}
+	taskID := tasksResp.Tasks[0].ID
+
+	// Mark task as done with result details
+	_, _, err = handleTeamTask(context.Background(), nil, TeamTaskArgs{
+		Action:  "complete",
+		ID:      taskID,
+		Details: "Login page shipped with OAuth support",
+		Channel: "general",
+		MySlug:  "fe",
+	})
+	if err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	// Verify shared memory has the result
+	mem := b.SharedMemory()
+	key := "task:" + taskID + ":result"
+	val, ok := mem["fe"][key]
+	if !ok {
+		t.Fatalf("expected shared memory key %q for namespace 'fe', got %+v", key, mem)
+	}
+	if !strings.Contains(val, "OAuth") {
+		t.Fatalf("expected result details in memory, got %q", val)
+	}
+}

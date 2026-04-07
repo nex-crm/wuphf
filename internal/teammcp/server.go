@@ -940,6 +940,21 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		text += " · working_directory " + path
 	}
 	text += " — " + result.Task.Title
+
+	// Auto-persist task result to shared memory when completed
+	taskStatus := strings.ToLower(strings.TrimSpace(result.Task.Status))
+	if taskStatus == "done" || taskStatus == "completed" || taskStatus == "review" {
+		memPayload := map[string]any{
+			"namespace": mySlug,
+			"key":       "task:" + result.Task.ID + ":result",
+			"value":     result.Task.Title,
+		}
+		if details := strings.TrimSpace(args.Details); details != "" {
+			memPayload["value"] = details
+		}
+		_ = brokerPostJSON(ctx, "/memory", memPayload, nil)
+	}
+
 	return textResult(text), nil, nil
 }
 
