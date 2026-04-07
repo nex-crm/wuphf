@@ -37,7 +37,7 @@ const (
 	tmuxSocketName                  = "wuphf"
 	defaultNotificationPollInterval = 15 * time.Minute
 	channelRespawnDelay             = 8 * time.Second
-	ceoHeadStartDelay               = 2 * time.Second
+	ceoHeadStartDelay               = 1 * time.Second
 )
 
 type nexFeedItemContentItem struct {
@@ -400,7 +400,8 @@ func (l *Launcher) notifyTaskActionsLoop() {
 }
 
 var agentLastNotified = make(map[string]time.Time)
-const agentNotifyCooldown = 10 * time.Second
+
+const agentNotifyCooldown = 3 * time.Second
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
@@ -625,7 +626,22 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 	if strings.TrimSpace(task.ExecutionMode) != "" {
 		execMode = ", execution " + task.ExecutionMode
 	}
-	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s). Before you speak, call team_poll and team_tasks, confirm whether you own this work, and stay in your lane.", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode)
+	worktree := ""
+	if strings.TrimSpace(task.WorktreeBranch) != "" || strings.TrimSpace(task.WorktreePath) != "" {
+		parts := make([]string, 0, 2)
+		if strings.TrimSpace(task.WorktreeBranch) != "" {
+			parts = append(parts, "branch "+task.WorktreeBranch)
+		}
+		if strings.TrimSpace(task.WorktreePath) != "" {
+			parts = append(parts, "path "+task.WorktreePath)
+		}
+		worktree = ", worktree " + strings.Join(parts, " · ")
+	}
+	guidance := ""
+	if path := strings.TrimSpace(task.WorktreePath); path != "" {
+		guidance = fmt.Sprintf(" If you own this task, use working_directory=%q for local file and bash tools.", path)
+	}
+	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Before you speak, call team_poll and team_tasks, confirm whether you own this work, and stay in your lane.%s", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance)
 }
 
 func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, content string) {
@@ -633,8 +649,8 @@ func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, conte
 		channel = "general"
 	}
 	notification := fmt.Sprintf(
-		"[Task update #%s %s from @%s]: %s — Before you say anything, call team_poll with my_slug \"%s\" and channel \"%s\", then call team_tasks for the current ownership. If the task is outside your lane or someone else owns it, stay quiet. If you are the owner, reply with the concrete next step and update the task.",
-		channel, taskID, from, truncate(content, 150), slug, channel,
+		"[Task #%s %s from @%s]: %s — You own this task. Reply with the concrete next step and update via team_task with my_slug \"%s\".",
+		channel, taskID, from, truncate(content, 150), slug,
 	)
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
@@ -691,20 +707,6 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 			delete(targetMap, slug)
 		}
 	}
-	addDelayed := func(slug string) {
-		if slug == "" || slug == msg.From {
-			return
-		}
-		if len(enabledMembers) > 0 {
-			if _, ok := enabledMembers[slug]; !ok {
-				return
-			}
-		}
-		if target, ok := targetMap[slug]; ok {
-			delayed = append(delayed, target)
-			delete(targetMap, slug)
-		}
-	}
 	allowTarget := func(slug string) bool {
 		if slug == "" || slug == msg.From {
 			return false
@@ -734,32 +736,14 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 
 	switch {
 	case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
-		// Direct routing: if user tags specific agents, route to them directly
-		// without CEO bottleneck. CEO only gets untagged or multi-tagged messages.
-		directRouted := false
-		if len(msg.Tagged) > 0 && !containsSlug(msg.Tagged, lead) {
-			for _, slug := range slugs {
-				if slug == lead || slug == msg.From {
-					continue
-				}
-				if containsSlug(msg.Tagged, slug) {
-					if allowTarget(slug) {
-						addImmediate(slug)
-						directRouted = true
-					}
-				}
-			}
-		}
-		if !directRouted {
-			addImmediate(lead)
-		}
+		addImmediate(lead)
 		for _, slug := range slugs {
 			if slug == lead || slug == msg.From {
 				continue
 			}
-			if containsSlug(msg.Tagged, slug) && !directRouted {
+			if containsSlug(msg.Tagged, slug) {
 				if allowTarget(slug) {
-					addDelayed(slug)
+					addImmediate(slug) // was addDelayed — tagged agents respond immediately
 				}
 			}
 		}
@@ -1963,6 +1947,50 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	return nil
 }
 
+// buildNotificationContext returns a compact summary of recent channel messages
+// for inline injection into agent notifications. Filters system and status messages.
+func (l *Launcher) buildNotificationContext(channel, triggerMsgID string, limit int) string {
+	if l.broker == nil {
+		return ""
+	}
+	if strings.TrimSpace(channel) == "" {
+		channel = "general"
+	}
+
+	msgs := l.broker.ChannelMessages(channel)
+	if len(msgs) == 0 {
+		return ""
+	}
+
+	// Filter: skip system messages, STATUS messages, and routing messages
+	filtered := make([]channelMessage, 0, len(msgs))
+	for _, msg := range msgs {
+		if msg.From == "system" {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if strings.HasPrefix(content, "[STATUS]") {
+			continue
+		}
+		filtered = append(filtered, msg)
+	}
+
+	// Take last N
+	if len(filtered) > limit {
+		filtered = filtered[len(filtered)-limit:]
+	}
+
+	if len(filtered) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, msg := range filtered {
+		b.WriteString(fmt.Sprintf("@%s: %s\n", msg.From, truncate(msg.Content, 120)))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
 func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, content string) {
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
@@ -1970,14 +1998,22 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 	notification := ""
 	if l.isOneOnOne() {
 		notification = fmt.Sprintf(
-			"[%s @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\" to read context, then reply using team_broadcast channel \"%s\" reply_to_id \"%s\".",
-			msgID, from, truncate(content, 150), slug, channel, channel, msgID,
+			"[New from @%s]: %s — Reply using team_broadcast with my_slug \"%s\" and channel \"%s\" reply_to_id \"%s\".",
+			from, truncate(content, 150), slug, channel, msgID,
 		)
 	} else {
-		notification = fmt.Sprintf(
-			"[%s @%s]: %s — Call team_poll with my_slug \"%s\" and channel \"%s\" to read context. If this is your domain, reply using team_broadcast channel \"%s\" reply_to_id \"%s\". If not your domain, stay quiet.",
-			msgID, from, truncate(content, 150), slug, channel, channel, msgID,
-		)
+		ctx := l.buildNotificationContext(channel, msgID, 5)
+		if ctx != "" {
+			notification = fmt.Sprintf(
+				"[#%s recent]\n%s\n---\n[New from @%s]: %s\nYou are @%s. Reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\".",
+				channel, ctx, from, truncate(content, 150), slug, slug, channel, msgID,
+			)
+		} else {
+			notification = fmt.Sprintf(
+				"[New from @%s]: %s\nYou are @%s. Reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\".",
+				from, truncate(content, 150), slug, slug, channel, msgID,
+			)
+		}
 	}
 
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
@@ -2306,6 +2342,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_channel_member: Add, remove, disable, or enable agents in a channel\n")
 		sb.WriteString("- team_bridge: CEO-only bridge that carries relevant context from one channel into another with a visible trail\n")
 		sb.WriteString("- team_tasks: See current owned/unowned work so the team does not duplicate effort\n")
+		sb.WriteString("- team_task_status: See how many team tasks are active and which ones are isolated in worktrees\n")
 		sb.WriteString("- team_task: Create and assign tasks so ownership is explicit\n")
 		sb.WriteString("- team_requests: See open human requests before asking again\n")
 		sb.WriteString("- team_request: Open structured requests for approvals, confirmations, freeform answers, or private answers\n")
@@ -2342,7 +2379,8 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("9. Once decided, broadcast clear task assignments and create them in team_task\n")
 		sb.WriteString("10. Create channels (team_channel) or agents (team_member) when the human asks or scope genuinely warrants it\n")
-		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n\n")
+		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n")
+		sb.WriteString("12. If a task shows a worktree path, that path is the working_directory for local file and bash tools on that task\n\n")
 		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data. A2UI JSON in ```a2ui fences for rich components.\n")
 		if config.ResolveNoNex() {
 			sb.WriteString("Do not claim you stored anything outside the office.\n")
@@ -2373,6 +2411,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_channel_member: Add, remove, disable, or enable agents in a channel\n")
 		sb.WriteString("- team_bridge: CEO-only bridge for carrying context from one channel into another. Ask the CEO to use it when needed.\n")
 		sb.WriteString("- team_tasks: See the current task list and ownership before you jump in\n")
+		sb.WriteString("- team_task_status: See how many team tasks are active and which ones are isolated in worktrees\n")
 		sb.WriteString("- team_task: Claim, complete, block, or release tasks in your domain\n")
 		sb.WriteString("- team_requests: See open human requests so you do not duplicate them\n")
 		sb.WriteString("- team_request: Open structured requests for approvals, confirmations, freeform answers, or private answers\n")
@@ -2409,11 +2448,12 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("13. When you finish, mark the task complete and then broadcast the result. If the result is mainly for the human, also send it with human_message.\n")
 		sb.WriteString("14. You can inspect other channel names and descriptions, but you do not have automatic access to their content unless you are a member there.\n")
 		sb.WriteString("15. If another channel may have context or needs help from your channel, ask the CEO to bridge it. Do not assume you can read or act inside channels you are not in.\n")
+		sb.WriteString("16. If a task or status line shows a worktree path, use that path as working_directory for local file and bash tools.\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("16. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
+			sb.WriteString("17. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
 		} else {
-			sb.WriteString("16. Only use add_context for durable conclusions that should survive this session\n")
-			sb.WriteString("17. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
+			sb.WriteString("17. Only use add_context for durable conclusions that should survive this session\n")
+			sb.WriteString("18. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
 		}
 		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use markdown tables/checklists for structured data.\n")
 	}
