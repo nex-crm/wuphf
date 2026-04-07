@@ -35,12 +35,12 @@ var channelRenderCache = channelRenderCacheStore{
 	renderers: make(map[int]*glamour.TermRenderer),
 }
 
-func cachedSidebarRender(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, brokerConnected bool, width, height int) string {
-	key := hashSidebarState(channels, members, tasks, activeChannel, activeApp, cursor, rosterOffset, focused, quickJump, brokerConnected, width, height)
+func cachedSidebarRender(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int) string {
+	key := hashSidebarState(channels, members, tasks, activeChannel, activeApp, cursor, rosterOffset, focused, quickJump, workspace, width, height)
 	if cached, ok := channelRenderCache.getSidebar(key); ok {
 		return cached
 	}
-	rendered := renderSidebar(channels, members, tasks, activeChannel, activeApp, cursor, rosterOffset, focused, quickJump, brokerConnected, width, height)
+	rendered := renderSidebar(channels, members, tasks, activeChannel, activeApp, cursor, rosterOffset, focused, quickJump, workspace, width, height)
 	channelRenderCache.putSidebar(key, rendered)
 	return rendered
 }
@@ -56,10 +56,7 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 		if m.activeApp == officeAppRecovery {
 			lines = m.buildRecoveryLines(contentWidth)
 		} else {
-			lines = buildOneOnOneMessageLines(m.messages, m.expandedThreads, contentWidth, m.oneOnOneAgentName(), m.unreadAnchorID, m.unreadCount)
-			focusSlug := m.oneOnOneAgentSlug()
-			lines = append(lines, buildDirectExecutionLines(m.actions, focusSlug, contentWidth)...)
-			lines = append(lines, buildLiveWorkLines(m.members, m.tasks, nil, contentWidth, focusSlug)...)
+			lines = m.buildDirectFeedLines(contentWidth)
 		}
 	} else {
 		switch m.activeApp {
@@ -78,8 +75,7 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 		case officeAppSkills:
 			lines = buildSkillLines(m.skills, contentWidth)
 		default:
-			lines = buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount)
-			lines = append(lines, buildLiveWorkLines(m.members, m.tasks, m.actions, contentWidth, "")...)
+			lines = m.buildOfficeFeedLines(contentWidth)
 		}
 	}
 
@@ -150,7 +146,7 @@ func renderTimeBucket(activeApp officeApp, direct bool) int64 {
 	return time.Now().Unix() / 30
 }
 
-func hashSidebarState(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, brokerConnected bool, width, height int) uint64 {
+func hashSidebarState(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int) uint64 {
 	h := newStateHasher()
 	h.add("sidebar")
 	h.addInt(width)
@@ -161,7 +157,23 @@ func hashSidebarState(channels []channelInfo, members []channelMember, tasks []c
 	h.addInt(rosterOffset)
 	h.addBool(focused)
 	h.add(string(quickJump))
-	h.addBool(brokerConnected)
+	h.addBool(workspace.BrokerConnected)
+	h.addBool(workspace.Direct)
+	h.add(workspace.Channel, workspace.AgentName, workspace.AgentSlug, workspace.AwaySummary, workspace.Focus, workspace.NextStep)
+	h.addInt(workspace.PeerCount)
+	h.addInt(workspace.RunningTasks)
+	h.addInt(workspace.OpenRequests)
+	h.addInt(workspace.BlockingCount)
+	h.addInt(workspace.IsolatedCount)
+	h.addInt(workspace.UnreadCount)
+	h.addBool(workspace.NoNex)
+	h.addBool(workspace.APIConfigured)
+	if workspace.NeedsYou != nil {
+		h.add(workspace.NeedsYou.ID, workspace.NeedsYou.TitleOrQuestion())
+	}
+	if workspace.PrimaryTask != nil {
+		h.add(workspace.PrimaryTask.ID, workspace.PrimaryTask.Title, workspace.PrimaryTask.Status)
+	}
 	h.addInt64(time.Now().Unix())
 	h.addChannels(channels)
 	h.addMembers(members)

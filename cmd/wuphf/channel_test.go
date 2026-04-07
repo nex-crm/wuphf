@@ -978,7 +978,7 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 		0,
 		false,
 		quickJumpNone,
-		true,
+		workspaceUIState{BrokerConnected: true, Channel: "general", PeerCount: 1},
 		36,
 		40,
 	))
@@ -990,6 +990,61 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 	}
 	if !strings.Contains(sidebar, "Ctrl+G channels") {
 		t.Fatalf("expected quick nav hint in sidebar, got %q", sidebar)
+	}
+}
+
+func TestRenderSidebarReflectsWorkspaceState(t *testing.T) {
+	sidebar := stripANSI(renderSidebar(
+		[]channelInfo{{Slug: "launch", Name: "launch"}},
+		nil,
+		nil,
+		"launch",
+		officeAppMessages,
+		0,
+		0,
+		false,
+		quickJumpNone,
+		workspaceUIState{
+			BrokerConnected: true,
+			Channel:         "launch",
+			PeerCount:       4,
+			BlockingCount:   1,
+			NeedsYou: &channelInterview{
+				ID:       "req-1",
+				Title:    "Approve launch copy",
+				Question: "Approve launch copy?",
+			},
+		},
+		72,
+		36,
+	))
+	if !strings.Contains(sidebar, "Message lane · #launch · 1 waiting") {
+		t.Fatalf("expected workspace summary in sidebar, got %q", sidebar)
+	}
+	if !strings.Contains(sidebar, "Need you: Approve launch copy") || !strings.Contains(sidebar, "/request answer req-1") {
+		t.Fatalf("expected action hint for blocking request, got %q", sidebar)
+	}
+}
+
+func TestRenderSidebarShowsRecoveryRequestsAndArtifactsApps(t *testing.T) {
+	sidebar := stripANSI(renderSidebar(
+		[]channelInfo{{Slug: "general", Name: "general"}},
+		nil,
+		nil,
+		"general",
+		officeAppMessages,
+		0,
+		0,
+		false,
+		quickJumpNone,
+		workspaceUIState{BrokerConnected: true, Channel: "general"},
+		48,
+		40,
+	))
+	for _, label := range []string{"Recovery", "Requests", "Artifacts"} {
+		if !strings.Contains(sidebar, label) {
+			t.Fatalf("expected sidebar to show %s app, got %q", label, sidebar)
+		}
 	}
 }
 
@@ -1012,7 +1067,7 @@ func TestRenderSidebarUsesCompactRosterWhenSpaceIsTight(t *testing.T) {
 		0,
 		false,
 		quickJumpNone,
-		false,
+		workspaceUIState{BrokerConnected: false, Channel: "general"},
 		36,
 		22,
 	))
@@ -1049,7 +1104,7 @@ func TestRenderSidebarFallsBackToOfficeRosterWhenPeopleListIsEmpty(t *testing.T)
 		0,
 		false,
 		quickJumpNone,
-		false,
+		workspaceUIState{BrokerConnected: false, Channel: "general"},
 		42,
 		20,
 	))
@@ -1082,7 +1137,7 @@ func TestRenderSidebarShowsTaskDrivenWorkingState(t *testing.T) {
 		0,
 		false,
 		quickJumpNone,
-		true,
+		workspaceUIState{BrokerConnected: true, Channel: "general", PeerCount: 1},
 		40,
 		44,
 	))

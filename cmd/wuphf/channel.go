@@ -2134,11 +2134,12 @@ func (m channelModel) View() string {
 	}
 
 	layout := computeLayout(m.width, m.height, m.threadPanelOpen && !m.isOneOnOne(), m.sidebarCollapsed || m.isOneOnOne())
+	workspaceState := m.currentWorkspaceUIState()
 
 	// ── Sidebar ──────────────────────────────────────────────────────
 	sidebar := ""
 	if layout.ShowSidebar && !m.isOneOnOne() {
-		sidebar = cachedSidebarRender(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, m.brokerConnected, layout.SidebarW, layout.ContentH)
+		sidebar = cachedSidebarRender(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, workspaceState, layout.SidebarW, layout.ContentH)
 	}
 
 	// ── Thread panel ─────────────────────────────────────────────────
@@ -2380,24 +2381,14 @@ func (m channelModel) View() string {
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(" " + m.notice),
 		)
 	} else if m.isOneOnOne() {
-		label := "offline preview"
-		if m.brokerConnected {
-			label = "direct session live"
-		}
-		runtimeHint := "ready"
-		if runtimeLine := oneOnOneRuntimeLine(m.officeMembers, m.members, m.tasks, m.actions, m.oneOnOneAgentSlug()); runtimeLine != "" {
-			runtimeHint = runtimeLine
-		}
 		statusBar = statusBarStyle(m.width).Render(
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
-				fmt.Sprintf(" %s │ %d msgs │ %s │ Ctrl+J newline │ /1o1 switch │ /doctor",
-					label, len(m.messages), runtimeHint,
-				),
+				workspaceState.defaultStatusLine(scrollHint),
 			),
 		)
 	} else if !m.brokerConnected {
 		statusBar = statusBarStyle(m.width).Render(
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(" Team offline │ showing manifest roster │ launch WUPHF to connect │ /doctor"),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(workspaceState.defaultStatusLine(scrollHint)),
 		)
 	} else if m.replyToID != "" {
 		statusBar = statusBarStyle(m.width).Render(
@@ -2418,6 +2409,10 @@ func (m channelModel) View() string {
 			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(
 				message,
 			),
+		)
+	} else {
+		statusBar = statusBarStyle(m.width).Render(
+			lipgloss.NewStyle().Foreground(lipgloss.Color(slackActive)).Render(workspaceState.defaultStatusLine(scrollHint)),
 		)
 	}
 
@@ -2452,6 +2447,7 @@ func (m channelModel) currentHeaderTitle() string {
 }
 
 func (m channelModel) currentHeaderMeta() string {
+	workspace := m.currentWorkspaceUIState()
 	if m.activeApp == officeAppRecovery {
 		snapshot := m.currentRuntimeSnapshot()
 		blocking := 0
@@ -2470,14 +2466,7 @@ func (m channelModel) currentHeaderMeta() string {
 		return fmt.Sprintf("  Re-entry summary for #%s · %d blocking requests · %d running tasks · %d new since you looked", m.activeChannel, blocking, countRunningRuntimeTasks(snapshot.Tasks), m.unreadCount)
 	}
 	if m.isOneOnOne() {
-		if !m.brokerConnected {
-			return "  Direct session preview · only this agent can speak here"
-		}
-		meta := "  Direct conversation only · no channels, teammates, or office apps in this mode"
-		if runtimeLine := oneOnOneRuntimeLine(m.officeMembers, m.members, m.tasks, m.actions, m.oneOnOneAgentSlug()); runtimeLine != "" {
-			meta += " · " + runtimeLine
-		}
-		return meta
+		return workspace.headerMeta()
 	}
 	switch m.activeApp {
 	case officeAppTasks:
@@ -2572,13 +2561,7 @@ func (m channelModel) currentHeaderMeta() string {
 		}
 		return "  " + summary
 	default:
-		if m.isOneOnOne() {
-			return fmt.Sprintf("  Direct session with %s · single-agent focus · external actions and reports stay in this conversation", m.oneOnOneAgentName())
-		}
-		if !m.brokerConnected {
-			return fmt.Sprintf("  Offline preview · manifest roster loaded · %d teammates ready for #%s", len(m.officeMembers), m.activeChannel)
-		}
-		return fmt.Sprintf("  The WUPHF Office · Founding Team building together · %d teammates in #%s", len(m.members), m.activeChannel)
+		return workspace.headerMeta()
 	}
 }
 
@@ -3171,6 +3154,24 @@ type sidebarItem struct {
 	Label string
 }
 
+type officeSidebarApp struct {
+	App   officeApp
+	Label string
+}
+
+func officeSidebarApps() []officeSidebarApp {
+	return []officeSidebarApp{
+		{App: officeAppMessages, Label: "Messages"},
+		{App: officeAppRecovery, Label: "Recovery"},
+		{App: officeAppTasks, Label: "Tasks"},
+		{App: officeAppRequests, Label: "Requests"},
+		{App: officeAppPolicies, Label: "Policies"},
+		{App: officeAppCalendar, Label: "Calendar"},
+		{App: officeAppArtifacts, Label: "Artifacts"},
+		{App: officeAppSkills, Label: "Skills"},
+	}
+}
+
 func (m channelModel) sidebarItems() []sidebarItem {
 	if m.isOneOnOne() {
 		return nil
@@ -3194,15 +3195,12 @@ func (m channelModel) channelSidebarItems() []sidebarItem {
 }
 
 func (m channelModel) appSidebarItems() []sidebarItem {
-	return []sidebarItem{
-		{Kind: "app", Value: string(officeAppMessages), Label: "Messages"},
-		{Kind: "app", Value: string(officeAppRecovery), Label: "Recovery"},
-		{Kind: "app", Value: string(officeAppTasks), Label: "Tasks"},
-		{Kind: "app", Value: string(officeAppSkills), Label: "Skills"},
-		{Kind: "app", Value: string(officeAppPolicies), Label: "Policies"},
-		{Kind: "app", Value: string(officeAppCalendar), Label: "Calendar"},
-		{Kind: "app", Value: string(officeAppArtifacts), Label: "Artifacts"},
+	apps := officeSidebarApps()
+	items := make([]sidebarItem, 0, len(apps))
+	for _, app := range apps {
+		items = append(items, sidebarItem{Kind: "app", Value: string(app.App), Label: app.Label})
 	}
+	return items
 }
 
 func sidebarShortcutLabel(index int) string {
