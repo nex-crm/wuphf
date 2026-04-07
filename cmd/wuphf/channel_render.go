@@ -10,11 +10,12 @@ import (
 )
 
 type renderedLine struct {
-	Text      string
-	ThreadID  string
-	TaskID    string
-	RequestID string
-	AgentSlug string
+	Text        string
+	ThreadID    string
+	TaskID      string
+	RequestID   string
+	AgentSlug   string
+	PromptValue string
 }
 
 func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int) []renderedLine {
@@ -696,14 +697,19 @@ func renderCalendarActionCard(action channelAction, meta string, contentWidth in
 }
 
 func renderedCardLines(card, taskID, requestID, threadID, agentSlug string) []renderedLine {
+	return renderedCardLinesWithPrompt(card, taskID, requestID, threadID, agentSlug, "")
+}
+
+func renderedCardLinesWithPrompt(card, taskID, requestID, threadID, agentSlug, promptValue string) []renderedLine {
 	var lines []renderedLine
 	for _, line := range strings.Split(card, "\n") {
 		lines = append(lines, renderedLine{
-			Text:      line,
-			TaskID:    taskID,
-			RequestID: requestID,
-			ThreadID:  threadID,
-			AgentSlug: agentSlug,
+			Text:        line,
+			TaskID:      taskID,
+			RequestID:   requestID,
+			ThreadID:    threadID,
+			AgentSlug:   agentSlug,
+			PromptValue: promptValue,
 		})
 	}
 	return lines

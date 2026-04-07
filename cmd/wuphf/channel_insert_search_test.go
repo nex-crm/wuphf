@@ -90,6 +90,7 @@ func TestRewindCommandOpensRecoveryPromptPicker(t *testing.T) {
 
 func TestRewindSelectionInsertsRecoveryPrompt(t *testing.T) {
 	m := newChannelModel(false)
+	m.activeApp = officeAppRecovery
 	m.pickerMode = channelPickerRewind
 	m.picker = tui.NewPicker("Rewind", []tui.PickerOption{{Label: "Since msg-1", Value: "Summarize everything since msg-1"}})
 	m.picker.SetActive(true)
@@ -99,6 +100,12 @@ func TestRewindSelectionInsertsRecoveryPrompt(t *testing.T) {
 
 	if !strings.Contains(string(got.input), "Summarize everything since msg-1") {
 		t.Fatalf("expected recovery prompt in composer, got %q", string(got.input))
+	}
+	if got.activeApp != officeAppMessages {
+		t.Fatalf("expected rewind selection to return to messages, got %q", got.activeApp)
+	}
+	if got.focus != focusMain {
+		t.Fatalf("expected focus to return to the main composer, got %v", got.focus)
 	}
 }
 

@@ -86,3 +86,34 @@ func TestBuildRecoveryLinesShowsSummaryAndHighlights(t *testing.T) {
 		t.Fatalf("expected runtime-state card, got %q", plain)
 	}
 }
+
+func TestBuildRecoveryLinesIncludesTranscriptSurgeryActions(t *testing.T) {
+	m := newChannelModel(false)
+	m.tasks = []channelTask{
+		{ID: "task-1", Title: "Ship launch checklist", Owner: "pm", Status: "in_progress"},
+	}
+	m.requests = []channelInterview{
+		{ID: "req-1", Title: "Review launch scope", Question: "Review the launch scope", From: "ceo", Blocking: true, Status: "pending"},
+	}
+	m.messages = []brokerMessage{
+		{ID: "msg-1", From: "ceo", Content: "Need final scope review before launch.", Timestamp: "2026-04-06T10:00:00Z"},
+		{ID: "msg-2", From: "pm", Content: "Checklist is nearly ready.", ReplyTo: "msg-1", Timestamp: "2026-04-06T10:01:00Z"},
+	}
+
+	lines := m.buildRecoveryLines(96)
+	plain := stripANSI(joinRenderedLines(lines))
+	hasPrompt := false
+	for _, line := range lines {
+		if strings.TrimSpace(line.PromptValue) != "" {
+			hasPrompt = true
+			break
+		}
+	}
+
+	if !strings.Contains(plain, "Transcript surgery") {
+		t.Fatalf("expected transcript surgery section, got %q", plain)
+	}
+	if !hasPrompt {
+		t.Fatalf("expected transcript surgery lines to carry recovery prompts, got %+v", lines)
+	}
+}

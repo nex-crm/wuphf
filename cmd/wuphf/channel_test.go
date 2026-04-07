@@ -2131,6 +2131,96 @@ func TestOfficeViewportWindowMatchesFullRenderAndMouseHitTesting(t *testing.T) {
 	}
 }
 
+func TestRecoveryMouseClickInsertsPromptAndReturnsToMessages(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 32
+	m.activeApp = officeAppRecovery
+	m.tasks = []channelTask{{
+		ID:        "task-1",
+		Title:     "Ship onboarding",
+		Status:    "in_progress",
+		Owner:     "fe",
+		UpdatedAt: time.Now().Format(time.RFC3339),
+	}}
+	m.messages = []brokerMessage{
+		{ID: "msg-1", From: "ceo", Content: "Need launch review.", Timestamp: time.Now().Add(-3 * time.Minute).Format(time.RFC3339)},
+		{ID: "msg-2", From: "pm", Content: "Reply in thread", ReplyTo: "msg-1", Timestamp: time.Now().Add(-2 * time.Minute).Format(time.RFC3339)},
+	}
+
+	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
+	contentWidth := layout.MainW - 2
+	if contentWidth < 32 {
+		contentWidth = 32
+	}
+	rows, _, _, _ := sliceRenderedLines(m.currentMainLines(contentWidth), msgH, m.scroll)
+	targetRow := -1
+	for i, row := range rows {
+		if strings.TrimSpace(row.PromptValue) != "" {
+			targetRow = i
+			break
+		}
+	}
+	if targetRow < 0 {
+		t.Fatal("expected recovery render to expose a prompt action")
+	}
+
+	mainX := layout.SidebarW + 3
+	action, ok := m.mainPanelMouseAction(mainX, headerH+targetRow, layout.MainW, layout.ContentH)
+	if !ok {
+		t.Fatal("expected recovery row to be clickable")
+	}
+	if action.Kind != "prompt" {
+		t.Fatalf("expected recovery click to draft a prompt, got %+v", action)
+	}
+
+	next, _ := m.Update(tea.MouseMsg{Type: tea.MouseLeft, Button: tea.MouseButtonLeft, X: mainX, Y: headerH + targetRow})
+	got := next.(channelModel)
+	if got.activeApp != officeAppMessages {
+		t.Fatalf("expected recovery click to return to messages, got %q", got.activeApp)
+	}
+	if !strings.Contains(string(got.input), "Restore context for task task-1") && !strings.Contains(string(got.input), "Summarize everything since") {
+		t.Fatalf("expected drafted recovery prompt in composer, got %q", string(got.input))
+	}
+}
+
+func TestBuildLiveWorkLinesShowsWaitStateWhenQuiet(t *testing.T) {
+	lines := buildLiveWorkLines(nil, nil, nil, 96, "")
+	plain := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(plain, "Wait state") {
+		t.Fatalf("expected wait-state section, got %q", plain)
+	}
+	if !strings.Contains(plain, "Nothing is moving right now") {
+		t.Fatalf("expected quiet-state guidance, got %q", plain)
+	}
+}
+
+func TestBuildLiveWorkLinesShowsBlockedWork(t *testing.T) {
+	lines := buildLiveWorkLines(nil, []channelTask{{
+		ID:       "task-1",
+		Title:    "Ship onboarding",
+		Status:   "blocked",
+		Owner:    "fe",
+		ThreadID: "msg-1",
+		Details:  "Waiting on an API schema decision.",
+	}}, nil, 96, "")
+	plain := stripANSI(joinRenderedLines(lines))
+	hasTask := false
+	for _, line := range lines {
+		if line.TaskID == "task-1" {
+			hasTask = true
+			break
+		}
+	}
+	if !strings.Contains(plain, "Blocked work") || !strings.Contains(plain, "Ship onboarding") {
+		t.Fatalf("expected blocked-work guidance, got %q", plain)
+	}
+	if !hasTask {
+		t.Fatalf("expected blocked-work lines to stay clickable, got %+v", lines)
+	}
+}
+
 func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
 	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	m := newChannelModel(true)

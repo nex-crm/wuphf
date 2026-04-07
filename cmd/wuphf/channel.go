@@ -889,6 +889,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.openRequestActionPicker(req)
 					}
 					return m, nil
+				case "prompt":
+					m.focus = focusMain
+					m.applyRecoveryPrompt(action.Value)
+					return m, nil
 				case "channel", "app":
 					items := m.sidebarItems()
 					for idx, item := range items {
@@ -1796,12 +1800,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case channelPickerRewind:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
-			if strings.TrimSpace(msg.Value) == "" {
-				m.notice = "Nothing inserted."
-				return m, nil
-			}
-			m.insertIntoActiveComposer(msg.Value)
-			m.notice = "Inserted a recovery prompt into the composer."
+			m.applyRecoveryPrompt(msg.Value)
 			return m, nil
 		case channelPickerAgents:
 			m.picker.SetActive(false)
@@ -2732,6 +2731,9 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 		allLines := m.currentMainViewportLines(contentWidth, msgH)
 		visibleRows, _, _, _ := sliceRenderedLines(allLines, msgH, m.scroll)
 		if row >= 0 && row < len(visibleRows) {
+			if visibleRows[row].PromptValue != "" {
+				return mouseAction{Kind: "prompt", Value: visibleRows[row].PromptValue}, true
+			}
 			switch m.activeApp {
 			case officeAppMessages:
 				if visibleRows[row].ThreadID != "" {
@@ -2770,6 +2772,19 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 	}
 
 	return mouseAction{}, false
+}
+
+func (m *channelModel) applyRecoveryPrompt(prompt string) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		m.notice = "Nothing inserted."
+		return
+	}
+	m.activeApp = officeAppMessages
+	m.syncSidebarCursorToActive()
+	m.focus = focusMain
+	m.insertIntoActiveComposer(prompt)
+	m.notice = "Inserted a recovery prompt into the composer."
 }
 
 func (m channelModel) mainPanelGeometry(mainW, contentH int) (headerH, msgH int, popupRows []string) {

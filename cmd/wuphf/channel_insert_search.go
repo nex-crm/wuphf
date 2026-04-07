@@ -123,17 +123,16 @@ func (m channelModel) buildSearchPickerOptions() []tui.PickerOption {
 func (m channelModel) buildRecoveryPromptPickerOptions() []tui.PickerOption {
 	options := []tui.PickerOption{}
 	for _, msg := range m.recentRootMessages(16) {
-		summary := fmt.Sprintf("Summarize everything since %s from @%s, focusing on decisions, blocked work, owner changes, and the next concrete actions. Message context: %s", msg.ID, msg.From, truncateText(msg.Content, 120))
 		options = append(options, tui.PickerOption{
 			Label:       "Since " + msg.ID + " · @" + msg.From,
-			Value:       summary,
+			Value:       buildRecoveryPromptForMessage(msg),
 			Description: truncateText(msg.Content, 64),
 		})
 	}
 	for _, req := range m.requests {
 		options = append(options, tui.PickerOption{
 			Label:       "Pending request " + req.ID,
-			Value:       fmt.Sprintf("Summarize the current state around request %s (%s), including arguments so far, blocked work, and the most important decision criteria.", req.ID, req.TitleOrQuestion()),
+			Value:       buildRecoveryPromptForRequest(req),
 			Description: truncateText(req.TitleOrQuestion(), 64),
 		})
 	}
@@ -143,7 +142,7 @@ func (m channelModel) buildRecoveryPromptPickerOptions() []tui.PickerOption {
 		}
 		options = append(options, tui.PickerOption{
 			Label:       "Task " + task.ID + " · " + truncateText(task.Title, 48),
-			Value:       fmt.Sprintf("Restore context for task %s (%s). Summarize the current status, work already done, blockers, review state, and the next best move.", task.ID, task.Title),
+			Value:       buildRecoveryPromptForTask(task),
 			Description: truncateText(task.Status, 32),
 		})
 	}
