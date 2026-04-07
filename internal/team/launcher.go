@@ -401,16 +401,25 @@ func (l *Launcher) notifyTaskActionsLoop() {
 
 var agentLastNotified = make(map[string]time.Time)
 
-const agentNotifyCooldown = 3 * time.Second
+const (
+	agentNotifyCooldown      = 3 * time.Second  // human/CEO-originated messages
+	agentNotifyCooldownAgent = 10 * time.Second // agent-originated messages (prevent feedback loops)
+)
 
 func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	immediate, delayed := l.notificationTargetsForMessage(msg)
 
-	// Debounce: don't notify the same agent within 10 seconds
+	// Debounce: use shorter cooldown for human/CEO messages, longer for agent-originated
+	// to prevent agent-to-agent feedback loops (devil's advocate finding #3)
+	isHumanOrCEO := msg.From == "you" || msg.From == "human" || msg.From == "nex" || msg.From == l.officeLeadSlug()
+	cooldown := agentNotifyCooldownAgent
+	if isHumanOrCEO {
+		cooldown = agentNotifyCooldown
+	}
 	now := time.Now()
 	filtered := make([]notificationTarget, 0, len(immediate))
 	for _, t := range immediate {
-		if last, ok := agentLastNotified[t.Slug]; ok && now.Sub(last) < agentNotifyCooldown {
+		if last, ok := agentLastNotified[t.Slug]; ok && now.Sub(last) < cooldown {
 			continue
 		}
 		agentLastNotified[t.Slug] = now
