@@ -671,8 +671,8 @@ func TestTaskNotificationContentIncludesOwnershipAndGuidance(t *testing.T) {
 	if !strings.Contains(got, "owner @cmo") || !strings.Contains(got, "status in_progress") {
 		t.Fatalf("expected ownership/status in content: %q", got)
 	}
-	if !strings.Contains(got, "team_poll") || !strings.Contains(got, "team_tasks") {
-		t.Fatalf("expected routing guidance in content: %q", got)
+	if !strings.Contains(got, "You own this") {
+		t.Fatalf("expected directive guidance in content: %q", got)
 	}
 }
 
