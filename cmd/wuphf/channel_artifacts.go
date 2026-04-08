@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/team"
 )
 
 type taskLogRecord struct {
@@ -55,12 +56,10 @@ type workflowRunArtifact struct {
 
 func (m channelModel) buildArtifactLines(contentWidth int) []renderedLine {
 	lines := []renderedLine{{Text: renderDateSeparator(contentWidth, "Execution artifacts")}}
-	taskLogs := m.recentTaskLogArtifacts(6)
-	workflowRuns := recentWorkflowRunArtifacts(6)
-	requests := recentHumanArtifactRequests(m.requests, 6)
-	requestActions := recentRequestArtifactActions(m.actions, 6)
+	snapshot := m.currentArtifactSnapshot(24)
+	artifacts := snapshot.Items
 
-	if len(taskLogs) == 0 && len(workflowRuns) == 0 && len(requests) == 0 && len(requestActions) == 0 {
+	if len(artifacts) == 0 {
 		muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 		return append(lines,
 			renderedLine{Text: ""},
@@ -69,118 +68,149 @@ func (m channelModel) buildArtifactLines(contentWidth int) []renderedLine {
 		)
 	}
 
-	if len(taskLogs) > 0 {
-		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Task output logs")})
-		for _, artifact := range taskLogs {
-			header := subtlePill(artifactClock(artifact.CompletedAt, artifact.UpdatedAt), "#E2E8F0", "#0F172A") +
-				" " + accentPill("log", "#0F766E") +
-				" " + lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("Task %s · %s", artifact.TaskID, fallbackString(artifact.ToolName, "tool run")))
-			extra := []string{
-				strings.TrimSpace(fmt.Sprintf("@%s · %d entr%s · %s", fallbackString(artifact.AgentSlug, "unknown"), artifact.EntryCount, pluralSuffix(artifact.EntryCount), prettyRelativeTime(artifactTime(artifact.CompletedAt, artifact.UpdatedAt)))),
-			}
-			if strings.TrimSpace(artifact.TaskTitle) != "" {
-				extra = append(extra, "Title: "+artifact.TaskTitle)
-			}
-			if strings.TrimSpace(artifact.WorktreePath) != "" {
-				extra = append(extra, "Worktree: "+artifact.WorktreePath)
-			}
-			if strings.TrimSpace(artifact.LogPath) != "" {
-				extra = append(extra, "Log: "+artifact.LogPath)
-			}
-			for i, line := range renderRuntimeEventCard(contentWidth, header, artifact.Summary, "#0F766E", extra) {
-				rendered := renderedLine{Text: "  " + line}
-				if i == 0 {
-					rendered.TaskID = artifact.TaskID
-				}
-				lines = append(lines, rendered)
-			}
-		}
-	}
-
-	if len(workflowRuns) > 0 {
-		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Workflow runs")})
-		for _, run := range workflowRuns {
-			header := subtlePill(artifactClock(run.FinishedAt, run.UpdatedAt), "#E2E8F0", "#0F172A") +
-				" " + actionStatePill("external_workflow_"+fallbackString(run.Status, "finished")) +
-				" " + lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("%s · %s", fallbackString(run.WorkflowKey, "workflow"), fallbackString(run.Status, "finished")))
-			body := strings.TrimSpace(fmt.Sprintf("%s via %s", fallbackString(run.RunID, "run"), fallbackString(run.Provider, "provider")))
-			extra := []string{
-				prettyRelativeTime(artifactTime(run.FinishedAt, run.UpdatedAt)),
-			}
-			if strings.TrimSpace(run.Path) != "" {
-				extra = append(extra, "Run log: "+run.Path)
-			}
-			for _, line := range renderRuntimeEventCard(contentWidth, header, body, "#7C3AED", extra) {
-				lines = append(lines, renderedLine{Text: "  " + line})
-			}
-		}
-	}
-
-	if len(requests) > 0 || len(requestActions) > 0 {
-		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Human decisions")})
-		for _, req := range requests {
-			status := strings.TrimSpace(req.Status)
-			if status == "" {
-				status = "pending"
-			}
-			header := subtlePill(strings.ReplaceAll(status, "_", " "), "#FEF3C7", "#78350F") +
-				" " + accentPill(req.Kind, "#92400E") +
-				" " + lipgloss.NewStyle().Bold(true).Render(fmt.Sprintf("%s · %s", req.ID, req.TitleOrQuestion()))
-			extra := []string{"Asked by @" + fallbackString(req.From, "unknown")}
-			if strings.TrimSpace(req.RecommendedID) != "" {
-				extra = append(extra, "Recommended: "+req.RecommendedID)
-			}
-			if due := strings.TrimSpace(req.DueAt); due != "" {
-				extra = append(extra, "Due "+prettyRelativeTime(due))
-			}
-			for _, line := range renderRuntimeEventCard(contentWidth, header, req.Context, "#B45309", extra) {
-				lines = append(lines, renderedLine{Text: "  " + line, RequestID: req.ID})
-			}
-		}
-		for _, action := range requestActions {
-			header := subtlePill(artifactClock(action.CreatedAt, time.Time{}), "#E2E8F0", "#0F172A") +
-				" " + actionStatePill(action.Kind) +
-				" " + lipgloss.NewStyle().Bold(true).Render(fallbackString(action.Summary, strings.ReplaceAll(action.Kind, "_", " ")))
-			extra := []string{}
-			if actor := strings.TrimSpace(action.Actor); actor != "" {
-				extra = append(extra, "@"+actor)
-			}
-			if channel := strings.TrimSpace(action.Channel); channel != "" {
-				extra = append(extra, "#"+channel)
-			}
-			if related := strings.TrimSpace(action.RelatedID); related != "" {
-				extra = append(extra, related)
-			}
-			if source := strings.TrimSpace(action.Source); source != "" {
-				extra = append(extra, source)
-			}
-			for _, line := range renderRuntimeEventCard(contentWidth, header, prettyRelativeTime(action.CreatedAt), "#1D4ED8", extra) {
-				lines = append(lines, renderedLine{Text: "  " + line})
-			}
-		}
-	}
+	lines = append(lines, renderArtifactSection(contentWidth, "Task execution", snapshot.Filter(team.RuntimeArtifactTask, team.RuntimeArtifactTaskLog))...)
+	lines = append(lines, renderArtifactSection(contentWidth, "Workflow runs", snapshot.Filter(team.RuntimeArtifactWorkflowRun))...)
+	lines = append(lines, renderArtifactSection(contentWidth, "Requests and approvals", snapshot.Filter(team.RuntimeArtifactRequest))...)
+	lines = append(lines, renderArtifactSection(contentWidth, "Action traces", snapshot.Filter(team.RuntimeArtifactHumanAction, team.RuntimeArtifactExternalAction))...)
 
 	return lines
 }
 
 func (m channelModel) currentArtifactSummary() string {
-	logCount := len(m.recentTaskLogArtifacts(4))
-	workflowCount := len(recentWorkflowRunArtifacts(4))
-	requestCount := len(recentHumanArtifactRequests(m.requests, 4)) + len(recentRequestArtifactActions(m.actions, 4))
+	snapshot := m.currentArtifactSnapshot(24)
+	logCount := snapshot.Count(team.RuntimeArtifactTask, team.RuntimeArtifactTaskLog)
+	workflowCount := snapshot.Count(team.RuntimeArtifactWorkflowRun)
+	requestCount := snapshot.Count(team.RuntimeArtifactRequest, team.RuntimeArtifactHumanAction, team.RuntimeArtifactExternalAction)
 	parts := make([]string, 0, 3)
 	if logCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d task log%s", logCount, pluralSuffix(logCount)))
+		parts = append(parts, fmt.Sprintf("%d task run%s", logCount, pluralSuffix(logCount)))
 	}
 	if workflowCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d workflow run%s", workflowCount, pluralSuffix(workflowCount)))
 	}
 	if requestCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d decision trace%s", requestCount, pluralSuffix(requestCount)))
+		parts = append(parts, fmt.Sprintf("%d action trace%s", requestCount, pluralSuffix(requestCount)))
 	}
 	return strings.Join(parts, " · ")
+}
+
+func (m channelModel) currentRuntimeArtifacts(limit int) []team.RuntimeArtifact {
+	return m.currentArtifactSnapshot(limit).Items
+}
+
+func renderArtifactSection(contentWidth int, title string, artifacts []team.RuntimeArtifact) []renderedLine {
+	if len(artifacts) == 0 {
+		return nil
+	}
+	lines := []renderedLine{{Text: ""}, {Text: renderDateSeparator(contentWidth, title)}}
+	for _, artifact := range artifacts {
+		header, accent := renderArtifactHeader(artifact)
+		extra := artifactExtraLines(artifact)
+		for i, line := range renderRuntimeEventCard(contentWidth, header, artifact.EffectiveSummary(), accent, extra) {
+			rendered := renderedLine{Text: "  " + line}
+			if (artifact.Kind == team.RuntimeArtifactTask || artifact.Kind == team.RuntimeArtifactTaskLog) && i == 0 {
+				rendered.TaskID = artifact.ID
+			}
+			if artifact.Kind == team.RuntimeArtifactRequest && i == 0 {
+				rendered.RequestID = artifact.ID
+			}
+			lines = append(lines, rendered)
+		}
+	}
+	return lines
+}
+
+func renderArtifactHeader(artifact team.RuntimeArtifact) (string, string) {
+	clock := subtlePill(artifactClock(artifact.UpdatedAt, parseArtifactTimestamp(artifact.UpdatedAt, artifact.StartedAt)), "#E2E8F0", "#0F172A")
+	title := lipgloss.NewStyle().Bold(true).Render(artifact.EffectiveTitle())
+	switch artifact.Kind {
+	case team.RuntimeArtifactTask:
+		return clock + " " + artifactLifecyclePill(artifact.State, "#0F766E", "#B45309", "#B91C1C", "#15803D") + " " + title, artifactAccentColor(artifact.State, "#0F766E")
+	case team.RuntimeArtifactTaskLog:
+		return clock + " " + accentPill("log", "#0F766E") + " " + title, "#0F766E"
+	case team.RuntimeArtifactWorkflowRun:
+		return clock + " " + artifactLifecyclePill(artifact.State, "#7C3AED", "#B45309", "#B91C1C", "#15803D") + " " + title, artifactAccentColor(artifact.State, "#7C3AED")
+	case team.RuntimeArtifactRequest:
+		return clock + " " + artifactLifecyclePill(artifact.State, "#B45309", "#B45309", "#B91C1C", "#15803D") + " " + title, artifactAccentColor(artifact.State, "#B45309")
+	case team.RuntimeArtifactExternalAction:
+		return clock + " " + artifactLifecyclePill(artifact.State, "#1D4ED8", "#B45309", "#B91C1C", "#15803D") + " " + title, artifactAccentColor(artifact.State, "#1D4ED8")
+	default:
+		return clock + " " + artifactLifecyclePill(artifact.State, "#475569", "#B45309", "#B91C1C", "#15803D") + " " + title, artifactAccentColor(artifact.State, "#475569")
+	}
+}
+
+func artifactExtraLines(artifact team.RuntimeArtifact) []string {
+	extra := []string{}
+	if progress := strings.TrimSpace(artifact.EffectiveProgress()); progress != "" && !strings.EqualFold(progress, strings.TrimSpace(artifact.EffectiveSummary())) {
+		extra = append(extra, "Progress: "+progress)
+	}
+	if output := strings.TrimSpace(artifact.PartialOutput); output != "" {
+		extra = append(extra, "Output: "+output)
+	}
+	if strings.TrimSpace(artifact.Owner) != "" {
+		extra = append(extra, "@"+artifact.Owner)
+	}
+	if strings.TrimSpace(artifact.Channel) != "" {
+		extra = append(extra, "#"+artifact.Channel)
+	}
+	if strings.TrimSpace(artifact.Worktree) != "" {
+		extra = append(extra, "Worktree: "+artifact.Worktree)
+	}
+	if strings.TrimSpace(artifact.Path) != "" {
+		extra = append(extra, "Path: "+artifact.Path)
+	}
+	if strings.TrimSpace(artifact.RelatedID) != "" {
+		extra = append(extra, "Related: "+artifact.RelatedID)
+	}
+	if artifact.Blocking {
+		extra = append(extra, "Blocking")
+	}
+	if strings.TrimSpace(artifact.ReviewHint) != "" {
+		extra = append(extra, artifact.ReviewHint)
+	}
+	if strings.TrimSpace(artifact.ResumeHint) != "" {
+		extra = append(extra, artifact.ResumeHint)
+	}
+	return extra
+}
+
+func artifactLifecyclePill(state, runningColor, pendingColor, failedColor, completedColor string) string {
+	label := strings.ReplaceAll(fallbackString(strings.TrimSpace(state), "retained"), "_", " ")
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "blocked", "failed", "canceled", "cancelled":
+		return accentPill(label, failedColor)
+	case "pending", "review", "started":
+		return subtlePill(label, "#FEF3C7", pendingColor)
+	case "completed":
+		return subtlePill(label, "#DCFCE7", completedColor)
+	default:
+		return subtlePill(label, "#DBEAFE", runningColor)
+	}
+}
+
+func artifactAccentColor(state, fallback string) string {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "blocked", "failed", "canceled", "cancelled":
+		return "#B91C1C"
+	case "pending", "review", "started":
+		return "#B45309"
+	case "completed":
+		return "#15803D"
+	default:
+		return fallback
+	}
+}
+
+func parseArtifactTimestamp(primary, fallback string) time.Time {
+	for _, candidate := range []string{strings.TrimSpace(primary), strings.TrimSpace(fallback)} {
+		if candidate == "" {
+			continue
+		}
+		if ts, ok := parseChannelTime(candidate); ok {
+			return ts
+		}
+	}
+	return time.Time{}
 }
 
 func (m channelModel) recentTaskLogArtifacts(limit int) []taskLogArtifact {
@@ -395,10 +425,11 @@ func recentHumanArtifactRequests(requests []channelInterview, limit int) []chann
 	return filtered
 }
 
-func recentRequestArtifactActions(actions []channelAction, limit int) []channelAction {
+func recentExecutionArtifactActions(actions []channelAction, limit int) []channelAction {
 	filtered := make([]channelAction, 0, len(actions))
 	for _, action := range actions {
-		if strings.HasPrefix(strings.TrimSpace(action.Kind), "request_") {
+		kind := strings.TrimSpace(action.Kind)
+		if strings.HasPrefix(kind, "request_") || strings.HasPrefix(kind, "external_") || strings.HasPrefix(kind, "interrupt_") || strings.HasPrefix(kind, "human_") {
 			filtered = append(filtered, action)
 		}
 	}

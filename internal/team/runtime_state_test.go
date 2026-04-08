@@ -5,16 +5,20 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/action"
 )
 
 func TestDetectRuntimeCapabilities(t *testing.T) {
 	oldLookPath := lookPathFn
 	oldCommandOutput := commandCombinedOutputFn
-	oldActionProbe := actionProviderProbe
+	oldActionProviderForCapability := actionProviderForCapabilityFn
+	oldActionProviders := actionProvidersFn
 	defer func() {
 		lookPathFn = oldLookPath
 		commandCombinedOutputFn = oldCommandOutput
-		actionProviderProbe = oldActionProbe
+		actionProviderForCapabilityFn = oldActionProviderForCapability
+		actionProvidersFn = oldActionProviders
 	}()
 
 	lookPathFn = func(name string) (string, error) {
@@ -39,18 +43,15 @@ func TestDetectRuntimeCapabilities(t *testing.T) {
 		}
 		return nil, errors.New("unexpected tmux probe")
 	}
-	actionProviderProbe = func() (string, error) {
-		return "", errors.New("no configured provider available")
+	actionProviderForCapabilityFn = func(action.Capability) (action.Provider, error) {
+		return nil, errors.New("no configured provider available")
 	}
+	actionProvidersFn = func() []action.Provider { return nil }
 
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,123,0")
 	t.Setenv("WUPHF_NO_NEX", "1")
 
 	got := DetectRuntimeCapabilities()
-	ready, warn, info := got.Counts()
-	if ready != 2 || warn != 1 || info != 1 {
-		t.Fatalf("unexpected capability counts: ready=%d warn=%d info=%d", ready, warn, info)
-	}
 	if got.Tmux.BinaryPath != "/usr/bin/tmux" {
 		t.Fatalf("expected tmux binary path to be recorded, got %q", got.Tmux.BinaryPath)
 	}
@@ -69,16 +70,24 @@ func TestDetectRuntimeCapabilities(t *testing.T) {
 	if got.Tmux.Sessions[0].Name != SessionName || got.Tmux.Sessions[0].Attached != 2 || got.Tmux.Sessions[0].Windows != 4 {
 		t.Fatalf("unexpected target tmux session: %+v", got.Tmux.Sessions[0])
 	}
+	if office, ok := got.Registry.Entry(CapabilityKeyOfficeRuntime); !ok || office.Level != CapabilityReady {
+		t.Fatalf("expected office runtime to be ready, got %+v", office)
+	}
+	if nex, ok := got.Registry.Entry(CapabilityKeyNex); !ok || nex.Lifecycle != CapabilityLifecycleDisabled {
+		t.Fatalf("expected Nex to be disabled in --no-nex mode, got %+v", nex)
+	}
 }
 
 func TestDetectRuntimeCapabilitiesWhenTmuxServerIsMissing(t *testing.T) {
 	oldLookPath := lookPathFn
 	oldCommandOutput := commandCombinedOutputFn
-	oldActionProbe := actionProviderProbe
+	oldActionProviderForCapability := actionProviderForCapabilityFn
+	oldActionProviders := actionProvidersFn
 	defer func() {
 		lookPathFn = oldLookPath
 		commandCombinedOutputFn = oldCommandOutput
-		actionProviderProbe = oldActionProbe
+		actionProviderForCapabilityFn = oldActionProviderForCapability
+		actionProvidersFn = oldActionProviders
 	}()
 
 	lookPathFn = func(name string) (string, error) {
@@ -103,25 +112,25 @@ func TestDetectRuntimeCapabilitiesWhenTmuxServerIsMissing(t *testing.T) {
 		}
 		return nil, errors.New("unexpected tmux probe")
 	}
-	actionProviderProbe = func() (string, error) {
-		return "", errors.New("no configured provider available")
+	actionProviderForCapabilityFn = func(action.Capability) (action.Provider, error) {
+		return nil, errors.New("no configured provider available")
 	}
+	actionProvidersFn = func() []action.Provider { return nil }
 
 	t.Setenv("WUPHF_NO_NEX", "1")
 
 	got := DetectRuntimeCapabilities()
-	ready, warn, info := got.Counts()
-	if ready != 1 || warn != 1 || info != 2 {
-		t.Fatalf("unexpected capability counts: ready=%d warn=%d info=%d", ready, warn, info)
-	}
 	if got.Tmux.ServerRunning {
 		t.Fatalf("expected tmux server to be marked missing")
 	}
-	if got.Items[0].Level != CapabilityInfo {
-		t.Fatalf("expected tmux capability to be informational when the server is absent, got %s", got.Items[0].Level)
-	}
 	if !strings.Contains(got.Tmux.ProbeError, "no server running") {
 		t.Fatalf("expected tmux probe note to keep the server error, got %q", got.Tmux.ProbeError)
+	}
+	if tmux, ok := got.Registry.Entry(CapabilityKeyTmux); !ok || tmux.Level != CapabilityInfo {
+		t.Fatalf("expected tmux capability to be informational when the server is absent, got %+v", tmux)
+	}
+	if office, ok := got.Registry.Entry(CapabilityKeyOfficeRuntime); !ok || office.Level != CapabilityWarn {
+		t.Fatalf("expected office runtime to stay warning-level when tmux session is missing, got %+v", office)
 	}
 }
 
@@ -152,6 +161,29 @@ func TestBuildRuntimeSnapshotFormatsRecoveryAndCapabilities(t *testing.T) {
 			From:    "ceo",
 			Content: "We need a final timing call before tomorrow.",
 		}},
+		Artifacts: []RuntimeArtifact{
+			{
+				ID:            "task-1",
+				Kind:          RuntimeArtifactTask,
+				Title:         "Polish launch checklist",
+				Summary:       "This task is retained as a live execution artifact with its current runtime context.",
+				State:         "review",
+				Progress:      "Stage: review · Review: pending review · Execution: local worktree",
+				PartialOutput: "Latest task output retained for review.",
+				Path:          "/tmp/wuphf-task-1/output.log",
+				Worktree:      "/tmp/wuphf-task-1",
+				ResumeHint:    "Resume in /tmp/wuphf-task-1 or reopen the task thread.",
+				ReviewHint:    "Review pending review.",
+			},
+			{
+				ID:         "req-1",
+				Kind:       RuntimeArtifactRequest,
+				Title:      "Approve launch timing",
+				Summary:    "Blocking approval before tomorrow.",
+				State:      "pending",
+				ResumeHint: "Answer the request or reopen it from Recovery.",
+			},
+		},
 		Capabilities: RuntimeCapabilities{
 			Tmux: TmuxCapability{
 				BinaryPath:    "/usr/bin/tmux",
@@ -172,6 +204,15 @@ func TestBuildRuntimeSnapshotFormatsRecoveryAndCapabilities(t *testing.T) {
 				Detail: "tmux 3.4a on socket wuphf is running with session wuphf-team (2 attached, 4 windows).",
 			}},
 		},
+		Registry: CapabilityRegistry{
+			Entries: []CapabilityDescriptor{{
+				Key:      "workflow_execute",
+				Label:    "Workflow execution",
+				Category: CapabilityCategoryWorkflow,
+				Level:    CapabilityReady,
+				Detail:   "Workflow execution is available via one.",
+			}},
+		},
 		Now: time.Unix(100, 0),
 	})
 
@@ -180,8 +221,12 @@ func TestBuildRuntimeSnapshotFormatsRecoveryAndCapabilities(t *testing.T) {
 		"Runtime state for #general",
 		"Session mode: 1:1 with @pm",
 		"Pending human requests: 1",
+		"Retained execution artifacts: 2",
 		"Approve launch timing from @ceo.",
 		"Use working_directory /tmp/wuphf-task-1",
+		"Execution artifacts:",
+		"Polish launch checklist [task] review: This task is retained as a live execution artifact with its current runtime context.",
+		"Approve launch timing [request] pending: Blocking approval before tomorrow.",
 		"Recent highlights:",
 		"Tmux runtime:",
 		"Binary: /usr/bin/tmux",
@@ -190,9 +235,21 @@ func TestBuildRuntimeSnapshotFormatsRecoveryAndCapabilities(t *testing.T) {
 		"WUPHF session: running (2 attached, 4 windows)",
 		"scratch: 1 attached, 1 windows",
 		"Runtime capabilities:",
+		"Capability registry:",
+		"Workflow execution (workflow) [ready]: Workflow execution is available via one.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in %q", want, text)
 		}
+	}
+	if len(snapshot.Memory.Tasks) != 1 {
+		t.Fatalf("expected task memory summary, got %+v", snapshot.Memory.Tasks)
+	}
+	restore := snapshot.Memory.RestorationContext()
+	if len(restore.ActiveTaskIDs) != 1 || restore.ActiveTaskIDs[0] != "task-1" {
+		t.Fatalf("expected restore context to keep active task, got %+v", restore)
+	}
+	if len(restore.PendingRequestIDs) != 1 || restore.PendingRequestIDs[0] != "req-1" {
+		t.Fatalf("expected restore context to keep pending request, got %+v", restore)
 	}
 }

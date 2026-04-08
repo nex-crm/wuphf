@@ -13,17 +13,35 @@ import (
 )
 
 func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
+	workspace := m.currentWorkspaceUIState()
 	options := []tui.PickerOption{}
 	if m.isOneOnOne() {
-		options = append(options, tui.PickerOption{
-			Label:       "Back to office",
-			Value:       "mode:office",
-			Description: m.officeFeedDescription(),
-		})
+		options = append(options,
+			tui.PickerOption{
+				Label:       "Back to office",
+				Value:       "mode:office",
+				Description: m.officeFeedDescription(workspace),
+			},
+			tui.PickerOption{
+				Label:       "Inbox",
+				Value:       "app:inbox",
+				Description: "Only the messages that currently belong in @" + m.oneOnOneAgentSlug() + "'s inbox",
+			},
+			tui.PickerOption{
+				Label:       "Outbox",
+				Value:       "app:outbox",
+				Description: "Only the messages currently authored by @" + m.oneOnOneAgentSlug(),
+			},
+			tui.PickerOption{
+				Label:       "Recovery",
+				Value:       "app:recovery",
+				Description: m.recoverySwitcherDescription(workspace),
+			},
+		)
 	} else {
 		options = append(options,
-			tui.PickerOption{Label: "Office feed", Value: "app:messages", Description: m.officeFeedDescription()},
-			tui.PickerOption{Label: "Recovery", Value: "app:recovery", Description: m.recoverySwitcherDescription()},
+			tui.PickerOption{Label: "Office feed", Value: "app:messages", Description: m.officeFeedDescription(workspace)},
+			tui.PickerOption{Label: "Recovery", Value: "app:recovery", Description: m.recoverySwitcherDescription(workspace)},
 			tui.PickerOption{Label: "Tasks", Value: "app:tasks", Description: "Active work in #" + m.activeChannel},
 			tui.PickerOption{Label: "Requests", Value: "app:requests", Description: "Human decisions and interviews"},
 			tui.PickerOption{Label: "Policies", Value: "app:policies", Description: "Signals, decisions, and watchdogs"},
@@ -171,6 +189,8 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 		switch app {
 		case officeAppRecovery:
 			return m.pollCurrentState()
+		case officeAppInbox, officeAppOutbox:
+			return pollBroker("", m.activeChannel)
 		case officeAppTasks:
 			return pollTasks(m.activeChannel)
 		case officeAppRequests:
@@ -202,18 +222,21 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 	}
 }
 
-func (m channelModel) officeFeedDescription() string {
-	if summary := strings.TrimSpace(m.currentAwaySummary()); summary != "" {
+func (m channelModel) officeFeedDescription(workspace workspaceUIState) string {
+	if summary := strings.TrimSpace(workspace.AwaySummary); summary != "" {
 		return summary
 	}
-	if req, ok := selectNeedsYouRequest(m.requests); ok {
-		return "Needs you: " + truncateText(req.TitleOrQuestion(), 64)
+	if workspace.NeedsYou != nil {
+		return "Needs you: " + truncateText(workspace.NeedsYou.TitleOrQuestion(), 64)
+	}
+	if strings.TrimSpace(workspace.Focus) != "" {
+		return truncateText(workspace.Focus, 64)
 	}
 	return "Main office feed"
 }
 
-func (m channelModel) recoverySwitcherDescription() string {
-	recovery := m.currentRuntimeSnapshot().Recovery
+func (m channelModel) recoverySwitcherDescription(workspace workspaceUIState) string {
+	recovery := workspace.Runtime.Recovery
 	if focus := trimRecoverySentence(recovery.Focus); focus != "" {
 		return truncateText(focus, 72)
 	}

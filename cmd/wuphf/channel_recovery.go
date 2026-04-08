@@ -22,7 +22,7 @@ func (m channelModel) currentRuntimeSnapshot() team.RuntimeSnapshot {
 }
 
 func (m channelModel) buildRecoveryLines(contentWidth int) []renderedLine {
-	return buildRecoveryLines(m.currentRuntimeSnapshot(), contentWidth, m.awaySummary, m.unreadCount, m.brokerConnected, m.tasks, m.requests, m.messages)
+	return buildRecoveryLines(m.currentWorkspaceUIState(), contentWidth, m.tasks, m.requests, m.messages)
 }
 
 func runtimeTasksFromChannel(tasks []channelTask) []team.RuntimeTask {
@@ -103,13 +103,7 @@ func summarizeAwayRecovery(unreadCount int, recovery team.SessionRecovery) strin
 }
 
 func (m channelModel) currentAwaySummary() string {
-	if m.unreadCount == 0 {
-		return ""
-	}
-	if text := strings.TrimSpace(m.awaySummary); text != "" {
-		return text
-	}
-	return summarizeAwayRecovery(m.unreadCount, m.currentRuntimeSnapshot().Recovery)
+	return m.currentWorkspaceUIState().AwaySummary
 }
 
 func trimRecoverySentence(text string) string {
@@ -132,11 +126,12 @@ func renderAwayStrip(width, unreadCount int, summary string) string {
 		Render(label)
 }
 
-func buildRecoveryLines(snapshot team.RuntimeSnapshot, contentWidth int, awaySummary string, unreadCount int, brokerConnected bool, tasks []channelTask, requests []channelInterview, messages []brokerMessage) []renderedLine {
+func buildRecoveryLines(workspace workspaceUIState, contentWidth int, tasks []channelTask, requests []channelInterview, messages []brokerMessage) []renderedLine {
+	snapshot := workspace.Runtime
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 	lines := []renderedLine{{Text: renderDateSeparator(contentWidth, "Recovery")}}
 
-	if !brokerConnected && len(snapshot.Tasks) == 0 && len(snapshot.Requests) == 0 && len(snapshot.Recent) == 0 {
+	if !workspace.BrokerConnected && len(snapshot.Tasks) == 0 && len(snapshot.Requests) == 0 && len(snapshot.Recent) == 0 {
 		lines = append(lines,
 			renderedLine{Text: ""},
 			renderedLine{Text: muted.Render("  Offline preview. Launch WUPHF to hydrate the runtime state and recovery summary.")},
@@ -145,9 +140,9 @@ func buildRecoveryLines(snapshot team.RuntimeSnapshot, contentWidth int, awaySum
 		return lines
 	}
 
-	if unreadCount > 0 || strings.TrimSpace(awaySummary) != "" {
+	if workspace.UnreadCount > 0 || strings.TrimSpace(workspace.AwaySummary) != "" {
 		title := subtlePill("while away", "#F8FAFC", "#1D4ED8") + " " + lipgloss.NewStyle().Bold(true).Render("What changed while you were gone")
-		body := strings.TrimSpace(awaySummary)
+		body := strings.TrimSpace(workspace.AwaySummary)
 		if body == "" {
 			body = "Use this view to regain context before you reply."
 		}
@@ -174,6 +169,11 @@ func buildRecoveryLines(snapshot team.RuntimeSnapshot, contentWidth int, awaySum
 		stateExtra = append(stateExtra, "Current focus: "+focus)
 	}
 	for _, line := range renderRuntimeEventCard(contentWidth, subtlePill("runtime", "#E2E8F0", "#334155")+" "+lipgloss.NewStyle().Bold(true).Render("Current state"), stateBody, "#475569", stateExtra) {
+		lines = append(lines, renderedLine{Text: "  " + line})
+	}
+
+	readinessTitle, readinessBody, readinessAccent, readinessExtra := workspace.readinessCard()
+	for _, line := range renderRuntimeEventCard(contentWidth, readinessTitle, readinessBody, readinessAccent, readinessExtra) {
 		lines = append(lines, renderedLine{Text: "  " + line})
 	}
 

@@ -6,9 +6,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-
-	"github.com/nex-crm/wuphf/internal/action"
-	"github.com/nex-crm/wuphf/internal/config"
 )
 
 type CapabilityLevel string
@@ -20,10 +17,11 @@ const (
 )
 
 type CapabilityStatus struct {
-	Name     string
-	Level    CapabilityLevel
-	Detail   string
-	NextStep string
+	Name      string
+	Level     CapabilityLevel
+	Lifecycle CapabilityLifecycle
+	Detail    string
+	NextStep  string
 }
 
 type TmuxSessionStatus struct {
@@ -45,25 +43,41 @@ type TmuxCapability struct {
 }
 
 type RuntimeCapabilities struct {
-	Tmux  TmuxCapability
-	Items []CapabilityStatus
+	Tmux     TmuxCapability
+	Items    []CapabilityStatus
+	Registry CapabilityRegistry
 }
 
 var lookPathFn = exec.LookPath
 var commandCombinedOutputFn = func(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
 }
-var actionProviderProbe = detectActionProvider
 
 func DetectRuntimeCapabilities() RuntimeCapabilities {
+	return DetectRuntimeCapabilitiesWithOptions(CapabilityProbeOptions{})
+}
+
+func DetectRuntimeCapabilitiesWithOptions(opts CapabilityProbeOptions) RuntimeCapabilities {
 	tmuxStatus, tmux := probeTmuxCapability()
-	items := []CapabilityStatus{
-		tmuxStatus,
-		probeBinaryCapability("claude", "Needed for teammate runtime sessions."),
-		probeNexCapability(),
-		probeActionCapability(),
+	claudeStatus := probeBinaryCapability("claude", "Install claude so WUPHF can start teammate runtime sessions.")
+	registry := buildCapabilityRegistry(tmuxStatus, claudeStatus, opts)
+	summaryKeys := []string{
+		CapabilityKeyOfficeRuntime,
+		CapabilityKeyDirectRuntime,
+		CapabilityKeyNex,
+		CapabilityKeyActions,
+		CapabilityKeyWorkflows,
+		CapabilityKeyOfficeActions,
+		CapabilityKeyDirectActions,
 	}
-	return RuntimeCapabilities{Tmux: tmux, Items: items}
+	if opts.IncludeConnections {
+		summaryKeys = append(summaryKeys[:4], append([]string{CapabilityKeyConnections}, summaryKeys[4:]...)...)
+	}
+	return RuntimeCapabilities{
+		Tmux:     tmux,
+		Items:    registry.SummaryStatuses(summaryKeys...),
+		Registry: registry,
+	}
 }
 
 func (c RuntimeCapabilities) Counts() (ready, warn, info int) {
@@ -282,62 +296,4 @@ func yesNo(v bool) string {
 		return "yes"
 	}
 	return "no"
-}
-
-func probeNexCapability() CapabilityStatus {
-	if config.ResolveNoNex() {
-		return CapabilityStatus{
-			Name:     "nex",
-			Level:    CapabilityInfo,
-			Detail:   "Disabled for this session with --no-nex.",
-			NextStep: "Restart without --no-nex to enable memory, integrations, and provider-backed actions.",
-		}
-	}
-	if apiKey := strings.TrimSpace(config.ResolveAPIKey("")); apiKey == "" {
-		return CapabilityStatus{
-			Name:     "nex",
-			Level:    CapabilityWarn,
-			Detail:   "Missing WUPHF/Nex API key.",
-			NextStep: "Run /init and save your WUPHF API key.",
-		}
-	}
-	email := strings.TrimSpace(config.ResolveComposioUserID())
-	if email == "" {
-		return CapabilityStatus{
-			Name:     "nex",
-			Level:    CapabilityWarn,
-			Detail:   "API key is configured, but workspace identity is missing.",
-			NextStep: "Finish /init so WUPHF can scope integrations to your Nex email.",
-		}
-	}
-	return CapabilityStatus{
-		Name:   "nex",
-		Level:  CapabilityReady,
-		Detail: fmt.Sprintf("Configured with workspace identity %s.", email),
-	}
-}
-
-func probeActionCapability() CapabilityStatus {
-	name, err := actionProviderProbe()
-	if err != nil {
-		return CapabilityStatus{
-			Name:     "actions",
-			Level:    CapabilityWarn,
-			Detail:   err.Error(),
-			NextStep: "Configure an external action provider or switch WUPHF to a working provider.",
-		}
-	}
-	return CapabilityStatus{
-		Name:   "actions",
-		Level:  CapabilityReady,
-		Detail: fmt.Sprintf("External actions available through %s.", name),
-	}
-}
-
-func detectActionProvider() (string, error) {
-	provider, err := action.NewRegistryFromEnv().ProviderFor(action.CapabilityConnections)
-	if err != nil {
-		return "", err
-	}
-	return provider.Name(), nil
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/calendar"
+	"github.com/nex-crm/wuphf/internal/team"
 )
 
 var externalActionProvider action.Provider
@@ -731,5 +732,14 @@ func selectedActionProvider(cap action.Capability) (action.Provider, error) {
 	if externalActionProvider != nil {
 		return externalActionProvider, nil
 	}
-	return action.NewRegistryFromEnv().ProviderFor(cap)
+	provider, err := team.ResolveActionProviderForCapability(cap)
+	if err == nil {
+		return provider, nil
+	}
+	caps := team.DetectRuntimeCapabilities()
+	entry, ok := caps.Registry.Entry(team.RegistryKeyForActionCapability(cap))
+	if !ok || strings.TrimSpace(entry.NextStep) == "" {
+		return nil, err
+	}
+	return nil, fmt.Errorf("%w. Next: %s", err, entry.NextStep)
 }

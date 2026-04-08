@@ -45,14 +45,14 @@ func TestCurrentArtifactSummaryUsesLogsAndWorkflows(t *testing.T) {
 	m.requests = []channelInterview{{ID: "req-1", Kind: "approval", Status: "pending", Title: "Approve copy", Question: "Approve copy?", From: "ceo"}}
 
 	got := m.currentArtifactSummary()
-	if !strings.Contains(got, "task log") {
-		t.Fatalf("expected task logs in summary, got %q", got)
+	if !strings.Contains(got, "task run") {
+		t.Fatalf("expected task runs in summary, got %q", got)
 	}
 	if !strings.Contains(got, "workflow run") {
 		t.Fatalf("expected workflow runs in summary, got %q", got)
 	}
-	if !strings.Contains(got, "decision trace") {
-		t.Fatalf("expected decision traces in summary, got %q", got)
+	if !strings.Contains(got, "action trace") {
+		t.Fatalf("expected action traces in summary, got %q", got)
 	}
 }
 
@@ -89,20 +89,32 @@ func TestBuildArtifactLinesShowsTaskLogsWorkflowRunsAndApprovals(t *testing.T) {
 	lines := m.buildArtifactLines(96)
 	plain := stripANSI(joinRenderedLines(lines))
 
-	if !strings.Contains(plain, "Task output logs") {
-		t.Fatalf("expected task output logs section, got %q", plain)
+	if !strings.Contains(plain, "Task execution") {
+		t.Fatalf("expected task execution section, got %q", plain)
 	}
 	if !strings.Contains(plain, "Workflow runs") {
 		t.Fatalf("expected workflow runs section, got %q", plain)
 	}
-	if !strings.Contains(plain, "Human decisions") {
-		t.Fatalf("expected human decisions section, got %q", plain)
+	if !strings.Contains(plain, "Requests and approvals") {
+		t.Fatalf("expected request section, got %q", plain)
+	}
+	if !strings.Contains(plain, "Action traces") {
+		t.Fatalf("expected action traces section, got %q", plain)
 	}
 	if !strings.Contains(plain, "Ship launch notes") {
 		t.Fatalf("expected task title in artifacts view, got %q", plain)
 	}
 	if !strings.Contains(plain, "launch-sync") {
 		t.Fatalf("expected workflow key in artifacts view, got %q", plain)
+	}
+	if !strings.Contains(plain, "Progress:") {
+		t.Fatalf("expected lifecycle progress metadata, got %q", plain)
+	}
+	if !strings.Contains(plain, "Output: ok") {
+		t.Fatalf("expected retained output summary, got %q", plain)
+	}
+	if !strings.Contains(plain, "Resume in /tmp/wuphf-task-1") {
+		t.Fatalf("expected resume hint, got %q", plain)
 	}
 }
 
