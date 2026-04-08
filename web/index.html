@@ -306,6 +306,11 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-thread-link:hover { background: var(--accent-bg); }
 .message-thread-link svg { flex-shrink: 0; }
 
+/* ─── Message grouping ─── */
+.message-grouped { margin-top: -12px; }
+.message-grouped .message-avatar { visibility: hidden; }
+.message-grouped .message-header { display: none; }
+
 .agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
 .agent-panel.open { display: flex; }
 .agent-panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
@@ -1321,6 +1326,10 @@ function hideDisconnectBanner() {
   if (banner) banner.remove();
 }
 
+// ─── Message grouping state ───
+var lastRenderedFrom = null;
+var lastRenderedTime = null;
+
 // ─── Thread state ───
 var threadReplyCounts = {}; // msgId -> count of replies
 var allMessages = {}; // msgId -> msg object
@@ -1365,13 +1374,24 @@ function appendBrokerMessage(msg) {
   }
 
   var container = document.getElementById('messages');
-  var msgDiv = appendMessageToContainer(msg, container);
+
+  // Detect grouping: same sender within 5 minutes
+  var isGrouped = false;
+  if (lastRenderedFrom === msg.from && msg.timestamp && lastRenderedTime) {
+    var delta = new Date(msg.timestamp) - new Date(lastRenderedTime);
+    if (delta >= 0 && delta < 5 * 60 * 1000) isGrouped = true;
+  }
+  lastRenderedFrom = msg.from;
+  lastRenderedTime = msg.timestamp || lastRenderedTime;
+
+  var msgDiv = appendMessageToContainer(msg, container, { grouped: isGrouped });
   container.scrollTop = container.scrollHeight;
 }
 
-function appendMessageToContainer(msg, container) {
+function appendMessageToContainer(msg, container, opts) {
+  opts = opts || {};
   var msgDiv = document.createElement('div');
-  msgDiv.className = 'message animate-fade';
+  msgDiv.className = 'message animate-fade' + (opts.grouped ? ' message-grouped' : '');
   msgDiv.dataset.msgId = msg.id;
 
   var agent = AGENTS.find(function(a) { return a.slug === msg.from; });
