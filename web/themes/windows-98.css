@@ -1,8 +1,8 @@
 /* ═══════════════════════════════════════════════════════════════
    WUPHF Theme: Windows 98
-   Full fidelity Win98 desktop. 3D beveled borders, classic title
-   bars, proper button states, system font, teal desktop, hourglass
-   cursor on load, everything.
+   Full fidelity Win98 desktop. 4-color bevel system, classic title
+   bars, proper button states, Tahoma 11px, teal desktop, dithered
+   scrollbar track, everything from the actual system spec.
    ═══════════════════════════════════════════════════════════════ */
 
 /* ─── Win98 Animations ─── */
@@ -45,10 +45,10 @@ html[data-theme="windows-98"] {
   --green-bg:       #C0C0C0;
   --red:            #FF0000;
   --yellow:         #808000;
-  --yellow-bg:      #FFFFE0;
-  --font-sans:  'Tahoma', 'MS Sans Serif', 'Arial', sans-serif;
-  --font-serif: 'Tahoma', 'MS Sans Serif', sans-serif;
-  --font-logo:  'Tahoma', 'MS Sans Serif', sans-serif;
+  --yellow-bg:      #FFFFE1;
+  --font-sans:  'Tahoma', 'Microsoft Sans Serif', 'MS Sans Serif', Arial, sans-serif;
+  --font-serif: 'Tahoma', 'Microsoft Sans Serif', sans-serif;
+  --font-logo:  'Tahoma', 'Microsoft Sans Serif', sans-serif;
   --font-mono:  'Fixedsys', 'Courier New', monospace;
   --radius-sm: 0px;
   --radius-md: 0px;
@@ -56,46 +56,53 @@ html[data-theme="windows-98"] {
   --radius-xl: 0px;
   --radius-full: 0px;
 
-  /* Win98 3D border helpers */
-  --bevel-raised: #FFFFFF #404040 #404040 #FFFFFF;
-  --bevel-sunken: #808080 #FFFFFF #FFFFFF #808080;
+  /* Win98 4-color bevel system */
+  --w98-highlight:    #FFFFFF;
+  --w98-light:        #DFDFDF;
+  --w98-shadow:       #808080;
+  --w98-dark-shadow:  #000000;
+  --w98-face:         #C0C0C0;
+  --w98-active-title: #000080;
+  --w98-title-grad:   #1084D0;
+  --w98-selection:    #000080;
+  --w98-sel-text:     #FFFFFF;
+  --w98-tooltip:      #FFFFE1;
+  --w98-window-bg:    #FFFFFF;
 }
 
 /* ─── Desktop ─── */
 html[data-theme="windows-98"] body {
   background: #008080;
-  font-family: Tahoma, 'MS Sans Serif', Arial, sans-serif;
+  font-family: Tahoma, 'Microsoft Sans Serif', Arial, sans-serif;
   font-size: 11px;
   cursor: default;
 }
 
-/* ─── Window Frame ─── */
+/* ─── Window Frame (outer raised bevel + shadow) ─── */
 html[data-theme="windows-98"] .office {
   border: 2px solid;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF;
+  border-color: var(--w98-light) var(--w98-dark-shadow) var(--w98-dark-shadow) var(--w98-light);
+  box-shadow: inset 1px 1px 0 var(--w98-highlight), 1px 1px 0 var(--w98-dark-shadow);
   margin: 8px;
   height: calc(100vh - 16px) !important;
-  box-shadow: 1px 1px 0 #000000;
   animation: win98-boot 0.3s ease-out;
 }
 
-/* ─── 3D Border Mixins via box-shadow ─── */
-
 /* ═══ SIDEBAR: Explorer Panel ═══ */
 html[data-theme="windows-98"] .sidebar {
-  background: #C0C0C0;
+  background: var(--w98-face);
   border-right: none;
   width: 200px !important;
-  box-shadow: inset -1px 0 0 #808080, inset -2px 0 0 #404040;
+  box-shadow: inset -1px 0 0 var(--w98-shadow), inset -2px 0 0 var(--border-dark);
 }
 
-/* Title bar */
+/* Title bar — gradient #000080 to #1084D0 */
 html[data-theme="windows-98"] .sidebar-header {
-  background: linear-gradient(90deg, #000080 0%, #1084D0 100%);
+  background: linear-gradient(90deg, var(--w98-active-title) 0%, var(--w98-title-grad) 100%);
   border-bottom: none;
   padding: 3px 4px 3px 6px !important;
   min-height: 22px;
-  box-shadow: inset 0 -1px 0 #404040;
+  box-shadow: inset 0 -1px 0 var(--border-dark);
 }
 html[data-theme="windows-98"] .sidebar-logo {
   font-family: Tahoma, sans-serif !important;
@@ -105,13 +112,13 @@ html[data-theme="windows-98"] .sidebar-logo {
   font-style: normal !important;
 }
 
-/* Sidebar collapse button as Win98 close button */
+/* Close button — 16x14 raised bevel */
 html[data-theme="windows-98"] .sidebar-header .sidebar-btn {
   width: 16px !important;
   height: 14px !important;
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border: 1px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-color: var(--w98-highlight) var(--border-dark) var(--border-dark) var(--w98-highlight) !important;
   border-radius: 0 !important;
   color: #000000 !important;
   padding: 0 !important;
@@ -119,7 +126,7 @@ html[data-theme="windows-98"] .sidebar-header .sidebar-btn {
   line-height: 1 !important;
 }
 html[data-theme="windows-98"] .sidebar-header .sidebar-btn:active {
-  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
+  border-color: var(--border-dark) var(--w98-highlight) var(--w98-highlight) var(--border-dark) !important;
 }
 html[data-theme="windows-98"] .sidebar-header .sidebar-btn svg {
   width: 8px !important;
@@ -137,12 +144,12 @@ html[data-theme="windows-98"] .sidebar-section-title {
   font-size: 11px !important;
   font-weight: 700 !important;
   padding: 2px 4px !important;
-  background: #C0C0C0;
-  border-bottom: 1px solid #808080;
+  background: var(--w98-face);
+  border-bottom: 1px solid var(--w98-shadow);
   margin-bottom: 2px !important;
 }
 
-/* Sidebar items — tree view style */
+/* Sidebar items — tree view, Win98 selection colors */
 html[data-theme="windows-98"] .sidebar-item,
 html[data-theme="windows-98"] .sidebar-agent {
   color: #000000 !important;
@@ -154,16 +161,16 @@ html[data-theme="windows-98"] .sidebar-agent {
 }
 html[data-theme="windows-98"] .sidebar-item:hover,
 html[data-theme="windows-98"] .sidebar-agent:hover {
-  background: #000080 !important;
-  color: #FFFFFF !important;
+  background: var(--w98-selection) !important;
+  color: var(--w98-sel-text) !important;
 }
 html[data-theme="windows-98"] .sidebar-item.active {
-  background: #000080 !important;
-  color: #FFFFFF !important;
+  background: var(--w98-selection) !important;
+  color: var(--w98-sel-text) !important;
   font-weight: normal !important;
 }
 
-/* Status dot */
+/* Status dot — bright green */
 html[data-theme="windows-98"] .status-dot.active {
   background: #00FF00 !important;
   border: 1px solid #008000;
@@ -175,16 +182,16 @@ html[data-theme="windows-98"] .status-dot.active {
 
 /* Sidebar bottom */
 html[data-theme="windows-98"] .sidebar-bottom {
-  background: #C0C0C0;
-  border-top: 1px solid #FFFFFF;
-  box-shadow: inset 0 1px 0 #808080;
+  background: var(--w98-face);
+  border-top: 1px solid var(--w98-highlight);
+  box-shadow: inset 0 1px 0 var(--w98-shadow);
   padding: 3px 4px !important;
 }
 html[data-theme="windows-98"] .sidebar-btn {
   color: #000000 !important;
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border: 1px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-color: var(--w98-highlight) var(--border-dark) var(--border-dark) var(--w98-highlight) !important;
   border-radius: 0 !important;
   width: 22px !important;
   height: 20px !important;
@@ -193,34 +200,35 @@ html[data-theme="windows-98"] .sidebar-btn:hover {
   background: #D4D0C8 !important;
 }
 html[data-theme="windows-98"] .sidebar-btn:active {
-  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
+  border-color: var(--border-dark) var(--w98-highlight) var(--w98-highlight) var(--border-dark) !important;
 }
 
-/* Theme switcher dropdown */
+/* Theme switcher — sunken field */
 html[data-theme="windows-98"] #theme-switcher {
   border: 2px solid !important;
-  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  border-color: var(--w98-shadow) var(--w98-highlight) var(--w98-highlight) var(--w98-shadow) !important;
   border-radius: 0 !important;
-  background: #FFFFFF !important;
+  background: var(--w98-window-bg) !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
   padding: 2px 4px !important;
   color: #000000 !important;
+  box-shadow: inset 1px 1px 0 var(--border-dark);
 }
 
 /* ═══ MAIN AREA ═══ */
 html[data-theme="windows-98"] .main {
-  background: #C0C0C0;
+  background: var(--w98-face);
 }
 
-/* Channel header — toolbar style */
+/* Channel header — toolbar style with bevel */
 html[data-theme="windows-98"] .channel-header {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border-bottom: none !important;
   backdrop-filter: none !important;
   padding: 2px 4px !important;
-  box-shadow: inset 0 -1px 0 #808080, inset 0 -2px 0 #404040,
-              inset 0 1px 0 #FFFFFF;
+  box-shadow: inset 0 -1px 0 var(--w98-shadow), inset 0 -2px 0 var(--border-dark),
+              inset 0 1px 0 var(--w98-highlight);
   min-height: 26px;
 }
 html[data-theme="windows-98"] .channel-title {
@@ -231,21 +239,21 @@ html[data-theme="windows-98"] .channel-title {
 }
 html[data-theme="windows-98"] .channel-desc {
   font-size: 11px !important;
-  color: #808080 !important;
+  color: #000000 !important;
 }
 html[data-theme="windows-98"] .channel-actions .sidebar-btn {
   width: 22px !important;
   height: 20px !important;
 }
 
-/* ─── Messages: Sunken panel ─── */
+/* ─── Messages: Sunken panel (white bg, inset bevel) ─── */
 html[data-theme="windows-98"] .messages {
-  background: #FFFFFF;
+  background: var(--w98-window-bg);
   border: 2px solid;
-  border-color: #808080 #FFFFFF #FFFFFF #808080;
+  border-color: var(--w98-shadow) var(--w98-light) var(--w98-light) var(--w98-shadow);
   margin: 3px 4px;
   padding: 4px 6px !important;
-  box-shadow: inset 1px 1px 0 #404040;
+  box-shadow: inset 1px 1px 0 var(--border-dark);
 }
 html[data-theme="windows-98"] .message {
   padding: 2px 0 !important;
@@ -254,46 +262,53 @@ html[data-theme="windows-98"] .message {
   animation: win98-cascade 0.15s ease-out;
 }
 html[data-theme="windows-98"] .message + .message {
-  border-top: 1px dotted #C0C0C0;
+  border-top: 1px dotted var(--w98-face);
   padding-top: 4px !important;
 }
 
-/* Avatars as 16x16 icons */
+/* Avatars — small icon style with raised bevel */
 html[data-theme="windows-98"] .message-avatar {
   width: 20px !important;
   height: 20px !important;
   min-width: 20px !important;
   border-radius: 0 !important;
   font-size: 11px !important;
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border: 1px solid;
-  border-color: #FFFFFF #808080 #808080 #FFFFFF;
+  border-color: var(--w98-highlight) var(--w98-shadow) var(--w98-shadow) var(--w98-highlight);
 }
 
+/* Author — navy blue, bold */
 html[data-theme="windows-98"] .message-author {
   font-family: Tahoma, sans-serif !important;
   font-weight: 700 !important;
   font-size: 11px !important;
-  color: #000080 !important;
+  color: var(--w98-active-title) !important;
 }
+
+/* Message text — black on white */
 html[data-theme="windows-98"] .message-text {
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
   line-height: 1.5 !important;
   color: #000000 !important;
 }
-html[data-theme="windows-98"] .message-text strong { color: #000080 !important; }
+html[data-theme="windows-98"] .message-text strong {
+  color: var(--w98-active-title) !important;
+}
 html[data-theme="windows-98"] .message-text code {
   font-family: 'Fixedsys', 'Courier New', monospace !important;
   font-size: 11px !important;
-  background: #FFFFE0 !important;
-  border: 1px solid #808080;
+  background: var(--w98-tooltip) !important;
+  border: 1px solid var(--w98-shadow);
   padding: 0 3px;
 }
+
+/* Timestamps — readable, not too faded */
 html[data-theme="windows-98"] .message-time {
   font-family: Tahoma, sans-serif !important;
-  font-size: 10px !important;
-  color: #808080 !important;
+  font-size: 11px !important;
+  color: var(--w98-shadow) !important;
 }
 
 /* System messages */
@@ -302,44 +317,46 @@ html[data-theme="windows-98"] .message-system {
 }
 html[data-theme="windows-98"] .message-system-text {
   font-family: Tahoma, sans-serif !important;
-  color: #808080 !important;
-  font-size: 10px !important;
+  color: var(--w98-shadow) !important;
+  font-size: 11px !important;
 }
 html[data-theme="windows-98"] .message-system-line {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   height: 2px !important;
-  box-shadow: 0 1px 0 #FFFFFF;
+  box-shadow: 0 1px 0 var(--w98-highlight);
 }
 
 /* Typing indicator */
 html[data-theme="windows-98"] .typing-indicator {
-  color: #808080 !important;
+  color: var(--w98-shadow) !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
 }
 html[data-theme="windows-98"] .typing-dot {
-  background: #000080 !important;
+  background: var(--w98-active-title) !important;
   width: 3px !important;
   height: 3px !important;
 }
 
 /* ─── Composer: Sunken input + raised Send ─── */
 html[data-theme="windows-98"] .composer {
-  background: #C0C0C0 !important;
-  border-top: 1px solid #FFFFFF !important;
-  box-shadow: inset 0 1px 0 #808080;
+  background: var(--w98-face) !important;
+  border-top: 1px solid var(--w98-highlight) !important;
+  box-shadow: inset 0 1px 0 var(--w98-shadow);
   padding: 3px 4px 4px !important;
 }
+
+/* Sunken text field */
 html[data-theme="windows-98"] .composer-inner {
-  background: #FFFFFF !important;
+  background: var(--w98-window-bg) !important;
   border: 2px solid !important;
-  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  border-color: var(--w98-shadow) var(--w98-light) var(--w98-light) var(--w98-shadow) !important;
   border-radius: 0 !important;
   padding: 2px 4px !important;
-  box-shadow: inset 1px 1px 0 #404040;
+  box-shadow: inset 1px 1px 0 var(--border-dark);
 }
 html[data-theme="windows-98"] .composer-inner:focus-within {
-  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  border-color: var(--w98-shadow) var(--w98-light) var(--w98-light) var(--w98-shadow) !important;
 }
 html[data-theme="windows-98"] .composer-input {
   font-family: Tahoma, sans-serif !important;
@@ -347,12 +364,14 @@ html[data-theme="windows-98"] .composer-input {
   color: #000000 !important;
 }
 html[data-theme="windows-98"] .composer-input::placeholder {
-  color: #808080 !important;
+  color: var(--w98-shadow) !important;
 }
+
+/* Send button — raised 4-color bevel */
 html[data-theme="windows-98"] .composer-send {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border: 2px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-color: var(--w98-light) var(--border-dark) var(--border-dark) var(--w98-light) !important;
   border-radius: 0 !important;
   color: #000000 !important;
   width: 60px !important;
@@ -360,15 +379,23 @@ html[data-theme="windows-98"] .composer-send {
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
   transition: none !important;
+  box-shadow: inset 1px 1px 0 var(--w98-highlight), 1px 1px 0 var(--w98-dark-shadow);
 }
 html[data-theme="windows-98"] .composer-send:hover {
   background: #D4D0C8 !important;
 }
 html[data-theme="windows-98"] .composer-send:active {
-  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
+  border-color: var(--border-dark) var(--w98-light) var(--w98-light) var(--border-dark) !important;
+  box-shadow: inset 1px 1px 0 var(--w98-shadow) !important;
+  padding: 1px 0 0 1px !important;
 }
 html[data-theme="windows-98"] .composer-send:disabled {
-  color: #808080 !important;
+  color: var(--w98-shadow) !important;
+  text-shadow: 1px 1px 0 var(--w98-highlight);
+}
+html[data-theme="windows-98"] .composer-send:focus-visible {
+  outline: 1px dotted #000000 !important;
+  outline-offset: -4px !important;
 }
 html[data-theme="windows-98"] .composer-send svg {
   width: 12px !important;
@@ -377,14 +404,14 @@ html[data-theme="windows-98"] .composer-send svg {
 
 /* ═══ AGENT PANEL: Properties Dialog ═══ */
 html[data-theme="windows-98"] .agent-panel {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border-left: 2px solid !important;
-  border-left-color: #FFFFFF !important;
-  box-shadow: inset 1px 0 0 #808080;
+  border-left-color: var(--w98-highlight) !important;
+  box-shadow: inset 1px 0 0 var(--w98-shadow);
   animation: win98-boot 0.2s ease-out;
 }
 html[data-theme="windows-98"] .agent-panel-header {
-  background: linear-gradient(90deg, #000080 0%, #1084D0 100%) !important;
+  background: linear-gradient(90deg, var(--w98-active-title) 0%, var(--w98-title-grad) 100%) !important;
   border-bottom: none !important;
   padding: 3px 4px 3px 6px !important;
   min-height: 22px;
@@ -396,9 +423,9 @@ html[data-theme="windows-98"] .agent-panel-header span {
   font-weight: 700 !important;
 }
 html[data-theme="windows-98"] .agent-panel-close {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border: 1px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-color: var(--w98-highlight) var(--border-dark) var(--border-dark) var(--w98-highlight) !important;
   color: #000000 !important;
   width: 16px !important;
   height: 14px !important;
@@ -406,7 +433,7 @@ html[data-theme="windows-98"] .agent-panel-close {
   transition: none !important;
 }
 html[data-theme="windows-98"] .agent-panel-close:active {
-  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
+  border-color: var(--border-dark) var(--w98-highlight) var(--w98-highlight) var(--border-dark) !important;
 }
 html[data-theme="windows-98"] .agent-panel-close svg {
   width: 8px !important;
@@ -418,11 +445,11 @@ html[data-theme="windows-98"] .agent-panel-body {
 html[data-theme="windows-98"] .agent-panel-avatar {
   border-radius: 0 !important;
   border: 2px solid;
-  border-color: #808080 #FFFFFF #FFFFFF #808080;
-  background: #FFFFFF !important;
+  border-color: var(--w98-shadow) var(--w98-light) var(--w98-light) var(--w98-shadow);
+  background: var(--w98-window-bg) !important;
   width: 48px !important;
   height: 48px !important;
-  box-shadow: inset 1px 1px 0 #404040;
+  box-shadow: inset 1px 1px 0 var(--border-dark);
 }
 html[data-theme="windows-98"] .agent-panel-name {
   font-family: Tahoma, sans-serif !important;
@@ -435,10 +462,10 @@ html[data-theme="windows-98"] .agent-panel-role {
 }
 html[data-theme="windows-98"] .agent-panel-section {
   border: 2px solid;
-  border-color: #808080 #FFFFFF #FFFFFF #808080;
+  border-color: var(--w98-shadow) var(--w98-light) var(--w98-light) var(--w98-shadow);
   padding: 6px !important;
   margin-bottom: 8px !important;
-  background: #C0C0C0;
+  background: var(--w98-face);
 }
 html[data-theme="windows-98"] .agent-panel-section-title {
   font-family: Tahoma, sans-serif !important;
@@ -447,7 +474,7 @@ html[data-theme="windows-98"] .agent-panel-section-title {
   color: #000000 !important;
   margin-bottom: 4px !important;
   padding-bottom: 2px;
-  border-bottom: 1px solid #808080;
+  border-bottom: 1px solid var(--w98-shadow);
 }
 html[data-theme="windows-98"] .agent-panel-stat {
   font-family: Tahoma, sans-serif !important;
@@ -457,8 +484,8 @@ html[data-theme="windows-98"] .agent-panel-stat {
 html[data-theme="windows-98"] .agent-panel-skill {
   border-radius: 0 !important;
   border: 1px solid !important;
-  border-color: #FFFFFF #808080 #808080 #FFFFFF !important;
-  background: #FFFFFF !important;
+  border-color: var(--w98-highlight) var(--w98-shadow) var(--w98-shadow) var(--w98-highlight) !important;
+  background: var(--w98-window-bg) !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
   padding: 1px 6px !important;
@@ -469,27 +496,27 @@ html[data-theme="windows-98"] .agent-panel-skill {
 html[data-theme="windows-98"] .badge {
   font-family: Tahoma, sans-serif !important;
   border-radius: 0 !important;
-  font-size: 10px !important;
+  font-size: 11px !important;
   padding: 0 4px !important;
   border: 1px solid;
 }
 html[data-theme="windows-98"] .badge-accent {
-  background: #C0C0C0 !important;
-  color: #000080 !important;
-  border-color: #808080 !important;
+  background: var(--w98-face) !important;
+  color: var(--w98-active-title) !important;
+  border-color: var(--w98-shadow) !important;
 }
 html[data-theme="windows-98"] .badge-green {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   color: #008000 !important;
-  border-color: #808080 !important;
+  border-color: var(--w98-shadow) !important;
 }
 html[data-theme="windows-98"] .badge-yellow {
-  background: #FFFFE0 !important;
+  background: var(--w98-tooltip) !important;
   color: #808000 !important;
-  border-color: #808080 !important;
+  border-color: var(--w98-shadow) !important;
 }
 
-/* ═══ BUTTONS: Raised 3D, press inward ═══ */
+/* ═══ BUTTONS: 4-color bevel, press inward ═══ */
 html[data-theme="windows-98"] .btn {
   transition: none !important;
   transform: none !important;
@@ -497,20 +524,22 @@ html[data-theme="windows-98"] .btn {
 html[data-theme="windows-98"] .btn:hover {
   transform: none !important;
 }
+
+/* Primary — raised with outer shadow */
 html[data-theme="windows-98"] .btn-primary {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border: 2px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-color: var(--w98-light) var(--border-dark) var(--border-dark) var(--w98-light) !important;
   border-radius: 0 !important;
   color: #000000 !important;
-  box-shadow: 1px 1px 0 #000000 !important;
+  box-shadow: inset 1px 1px 0 var(--w98-highlight), 1px 1px 0 var(--w98-dark-shadow) !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
   padding: 4px 16px !important;
 }
 html[data-theme="windows-98"] .btn-primary:active {
-  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
-  box-shadow: none !important;
+  border-color: var(--border-dark) var(--w98-light) var(--w98-light) var(--border-dark) !important;
+  box-shadow: inset 1px 1px 0 var(--w98-shadow) !important;
   padding: 5px 15px 3px 17px !important;
 }
 html[data-theme="windows-98"] .btn-primary:focus-visible {
@@ -522,79 +551,79 @@ html[data-theme="windows-98"] .btn-secondary {
   font-size: 11px !important;
   color: #000000 !important;
 }
+
+/* Ghost — same raised bevel */
 html[data-theme="windows-98"] .btn-ghost {
   border: 2px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-color: var(--w98-light) var(--border-dark) var(--border-dark) var(--w98-light) !important;
   border-radius: 0 !important;
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   color: #000000 !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
-  box-shadow: 1px 1px 0 #000000 !important;
+  box-shadow: inset 1px 1px 0 var(--w98-highlight), 1px 1px 0 var(--w98-dark-shadow) !important;
   padding: 3px 12px !important;
 }
 html[data-theme="windows-98"] .btn-ghost:active {
-  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
-  box-shadow: none !important;
+  border-color: var(--border-dark) var(--w98-light) var(--w98-light) var(--border-dark) !important;
+  box-shadow: inset 1px 1px 0 var(--w98-shadow) !important;
 }
 
 /* ═══ CARDS & INPUTS ═══ */
 html[data-theme="windows-98"] .card {
   border-radius: 0 !important;
   border: 2px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
-  box-shadow: 1px 1px 0 #000000 !important;
-  background: #C0C0C0 !important;
+  border-color: var(--w98-light) var(--border-dark) var(--border-dark) var(--w98-light) !important;
+  box-shadow: inset 1px 1px 0 var(--w98-highlight), 1px 1px 0 var(--w98-dark-shadow) !important;
+  background: var(--w98-face) !important;
 }
+
+/* Sunken text field */
 html[data-theme="windows-98"] .input {
   border: 2px solid !important;
-  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  border-color: var(--w98-shadow) var(--w98-light) var(--w98-light) var(--w98-shadow) !important;
   border-radius: 0 !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
   height: 22px !important;
   padding: 0 4px !important;
-  box-shadow: inset 1px 1px 0 #404040;
+  box-shadow: inset 1px 1px 0 var(--border-dark);
+  background: var(--w98-window-bg) !important;
 }
 html[data-theme="windows-98"] .label {
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
 }
 
-/* ═══ SCROLLBAR: Classic Win98 ═══ */
+/* ═══ SCROLLBAR: Classic Win98 with dithered track ═══ */
 html[data-theme="windows-98"] ::-webkit-scrollbar {
   width: 16px;
   height: 16px;
 }
 html[data-theme="windows-98"] ::-webkit-scrollbar-track {
-  background: #C0C0C0;
-  background-image:
-    linear-gradient(45deg, #A0A0A0 25%, transparent 25%),
-    linear-gradient(-45deg, #A0A0A0 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #A0A0A0 75%),
-    linear-gradient(-45deg, transparent 75%, #A0A0A0 75%);
-  background-size: 2px 2px;
+  /* Actual Win98 dithered pattern: alternating silver/white pixels */
+  background: repeating-conic-gradient(var(--w98-face) 0% 25%, var(--w98-window-bg) 0% 50%) 50% / 2px 2px;
 }
 html[data-theme="windows-98"] ::-webkit-scrollbar-thumb {
-  background: #C0C0C0;
+  background: var(--w98-face);
   border: 2px solid;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF;
+  border-color: var(--w98-highlight) var(--border-dark) var(--border-dark) var(--w98-highlight);
 }
 html[data-theme="windows-98"] ::-webkit-scrollbar-thumb:active {
-  border-color: #404040 #FFFFFF #FFFFFF #404040;
+  border-color: var(--border-dark) var(--w98-highlight) var(--w98-highlight) var(--border-dark);
 }
 html[data-theme="windows-98"] ::-webkit-scrollbar-button {
-  background: #C0C0C0;
+  background: var(--w98-face);
   border: 2px solid;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF;
+  border-color: var(--w98-highlight) var(--border-dark) var(--border-dark) var(--w98-highlight);
   width: 16px;
   height: 16px;
 }
 html[data-theme="windows-98"] ::-webkit-scrollbar-button:active {
-  border-color: #404040 #FFFFFF #FFFFFF #404040;
+  border-color: var(--border-dark) var(--w98-highlight) var(--w98-highlight) var(--border-dark);
 }
 html[data-theme="windows-98"] ::-webkit-scrollbar-corner {
-  background: #C0C0C0;
+  background: var(--w98-face);
 }
 
 /* ═══ ONBOARDING: Win98 Setup Wizard ═══ */
@@ -606,10 +635,10 @@ html[data-theme="windows-98"] .dot-grid {
   background-image: none !important;
 }
 html[data-theme="windows-98"] .progress-dot.active {
-  background: #000080 !important;
+  background: var(--w98-active-title) !important;
 }
 html[data-theme="windows-98"] .progress-dot.inactive {
-  background: #808080 !important;
+  background: var(--w98-shadow) !important;
 }
 html[data-theme="windows-98"] .dict-word {
   font-family: Tahoma, sans-serif !important;
@@ -636,8 +665,8 @@ html[data-theme="windows-98"] .welcome-tagline {
 }
 html[data-theme="windows-98"] .tagline-gradient {
   background: none !important;
-  -webkit-text-fill-color: #000080 !important;
-  color: #000080 !important;
+  -webkit-text-fill-color: var(--w98-active-title) !important;
+  color: var(--w98-active-title) !important;
 }
 html[data-theme="windows-98"] .step-title {
   font-family: Tahoma, sans-serif !important;
@@ -653,30 +682,30 @@ html[data-theme="windows-98"] .form-card {
   padding: 8px !important;
 }
 
-/* Team card */
+/* Team card — sunken selection */
 html[data-theme="windows-98"] .team-card {
   border: 2px solid !important;
-  border-color: #FFFFFF #808080 #808080 #FFFFFF !important;
+  border-color: var(--w98-highlight) var(--w98-shadow) var(--w98-shadow) var(--w98-highlight) !important;
   border-radius: 0 !important;
   padding: 4px 8px !important;
 }
 html[data-theme="windows-98"] .team-card.selected {
-  border-color: #000080 !important;
-  background: #000080 !important;
-  color: #FFFFFF !important;
+  border-color: var(--w98-active-title) !important;
+  background: var(--w98-selection) !important;
+  color: var(--w98-sel-text) !important;
 }
 html[data-theme="windows-98"] .team-card.selected .team-name,
 html[data-theme="windows-98"] .team-card.selected .team-role {
-  color: #FFFFFF !important;
+  color: var(--w98-sel-text) !important;
 }
 html[data-theme="windows-98"] .team-check {
   border-radius: 0 !important;
   border: 2px solid !important;
-  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  border-color: var(--w98-shadow) var(--w98-light) var(--w98-light) var(--w98-shadow) !important;
 }
 html[data-theme="windows-98"] .team-card.selected .team-check {
-  background: #000080 !important;
-  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  background: var(--w98-selection) !important;
+  border-color: var(--w98-shadow) var(--w98-light) var(--w98-light) var(--w98-shadow) !important;
 }
 html[data-theme="windows-98"] .team-name,
 html[data-theme="windows-98"] .team-role {
@@ -684,55 +713,58 @@ html[data-theme="windows-98"] .team-role {
   font-size: 11px !important;
 }
 
-/* Size buttons */
+/* Size buttons — raised, pressed when selected */
 html[data-theme="windows-98"] .size-btn {
   border: 2px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-color: var(--w98-light) var(--border-dark) var(--border-dark) var(--w98-light) !important;
   border-radius: 0 !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   color: #000000 !important;
   padding: 4px 8px !important;
+  box-shadow: inset 1px 1px 0 var(--w98-highlight);
 }
 html[data-theme="windows-98"] .size-btn.selected {
-  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
-  background: #000080 !important;
-  color: #FFFFFF !important;
+  border-color: var(--border-dark) var(--w98-light) var(--w98-light) var(--border-dark) !important;
+  background: var(--w98-selection) !important;
+  color: var(--w98-sel-text) !important;
+  box-shadow: inset 1px 1px 0 var(--w98-shadow) !important;
 }
 
-/* Prereq items */
+/* Prereq items — sunken list */
 html[data-theme="windows-98"] .prereq-item {
   border: 2px solid !important;
-  border-color: #FFFFFF #808080 #808080 #FFFFFF !important;
+  border-color: var(--w98-highlight) var(--w98-shadow) var(--w98-shadow) var(--w98-highlight) !important;
   border-radius: 0 !important;
   padding: 4px 8px !important;
 }
 html[data-theme="windows-98"] .prereq-icon {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border-radius: 0 !important;
-  border: 1px solid #808080;
+  border: 1px solid var(--w98-shadow);
 }
 html[data-theme="windows-98"] .prereq-name {
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
 }
 
-/* Community CTAs */
+/* Community CTAs — raised buttons */
 html[data-theme="windows-98"] .community-cta {
   border: 2px solid !important;
-  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-color: var(--w98-light) var(--border-dark) var(--border-dark) var(--w98-light) !important;
   border-radius: 0 !important;
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   padding: 8px 12px !important;
+  box-shadow: inset 1px 1px 0 var(--w98-highlight);
 }
 html[data-theme="windows-98"] .community-cta:hover {
   transform: none !important;
 }
 html[data-theme="windows-98"] .community-cta-icon {
   border-radius: 0 !important;
-  background: #FFFFFF !important;
-  border: 1px solid #808080;
+  background: var(--w98-window-bg) !important;
+  border: 1px solid var(--w98-shadow);
   box-shadow: none !important;
 }
 html[data-theme="windows-98"] .community-cta-title {
@@ -753,13 +785,13 @@ html[data-theme="windows-98"] .community-cta-badge {
 /* Emoji backdrop — disabled in Win98 */
 html[data-theme="windows-98"] .emoji-backdrop { display: none !important; }
 
-/* Launch screen */
+/* Launch screen — teal desktop */
 html[data-theme="windows-98"] .launch-screen {
   background: #008080 !important;
 }
 html[data-theme="windows-98"] .launch-spinner {
-  border-color: #808080 !important;
-  border-top-color: #FFFFFF !important;
+  border-color: var(--w98-shadow) !important;
+  border-top-color: var(--w98-highlight) !important;
   width: 24px !important;
   height: 24px !important;
   border-width: 2px !important;
@@ -768,29 +800,30 @@ html[data-theme="windows-98"] .launch-text {
   font-family: Tahoma, sans-serif !important;
   font-style: normal !important;
   font-size: 14px !important;
-  color: #FFFFFF !important;
+  color: var(--w98-highlight) !important;
 }
 html[data-theme="windows-98"] .launch-sub {
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
-  color: #C0C0C0 !important;
+  color: var(--w98-face) !important;
 }
 
-/* Disconnect banner */
+/* Disconnect banner — tooltip style */
 html[data-theme="windows-98"] #disconnect-banner {
-  background: #FFFFE0 !important;
+  background: var(--w98-tooltip) !important;
   border: 2px solid !important;
-  border-color: #FFFFFF #808080 #808080 #FFFFFF !important;
+  border-color: var(--w98-highlight) var(--w98-shadow) var(--w98-shadow) var(--w98-highlight) !important;
   border-radius: 0 !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
+  color: #000000 !important;
 }
 
 /* Request banner */
 html[data-theme="windows-98"] #request-banner {
-  background: #C0C0C0 !important;
+  background: var(--w98-face) !important;
   border-bottom: 2px solid !important;
-  border-bottom-color: #808080 !important;
+  border-bottom-color: var(--w98-shadow) !important;
   font-family: Tahoma, sans-serif !important;
   font-size: 11px !important;
 }
