@@ -247,7 +247,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .sidebar-item-icon { width: 14px; height: 14px; flex-shrink: 0; }
 .sidebar-item-emoji { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
 
-.sidebar-agents { padding: 0 12px 4px; }
+.sidebar-agents { padding: 0 12px 4px; max-height: 40vh; overflow-y: auto; }
 .sidebar-agent { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; margin-left: 12px; border-radius: 6px; font-size: 11px; border: none; background: transparent; cursor: pointer; transition: all 0.15s; color: var(--text-secondary); font-family: var(--font-sans); text-align: left; }
 .sidebar-agent:hover { background: rgba(0,0,0,0.04); color: var(--text); }
 .sidebar-agent.active { background: rgba(0,0,0,0.06); color: var(--text); font-weight: 500; }
@@ -2454,6 +2454,16 @@ function appendMessageToContainer(msg, container, opts) {
     return statusDiv;
   }
 
+  // Routing/stage cards (#9) — compact system-style
+  if (msg.kind === 'routing' || msg.kind === 'stage') {
+    var routeDiv = el('div', { className: 'message-card-routing animate-fade' });
+    routeDiv.dataset.msgId = msg.id;
+    routeDiv.appendChild(el('span', { className: 'message-card-routing-icon' }, msg.kind === 'routing' ? '\u2192' : '\u25CF'));
+    routeDiv.appendChild(el('span', { className: 'message-card-routing-text' }, msg.content || ''));
+    container.appendChild(routeDiv);
+    return routeDiv;
+  }
+
   var msgDiv = document.createElement('div');
   msgDiv.className = 'message animate-fade' + (opts.grouped ? ' message-grouped' : '');
   msgDiv.dataset.msgId = msg.id;
@@ -2550,7 +2560,39 @@ function appendMessageToContainer(msg, container, opts) {
   }
 
   content.appendChild(header);
-  content.appendChild(textDiv);
+
+  // Human message cards (#7)
+  if (msg.kind === 'human_decision' || msg.kind === 'human_action') {
+    var hCard = el('div', { className: 'message-card-human' + (msg.kind === 'human_action' ? ' action' : '') });
+    var hIcon = el('div', { className: 'message-card-human-icon' });
+    hIcon.textContent = (msg.kind === 'human_action' ? '\u2713 ACTION' : '\u2691 DECISION');
+    hCard.appendChild(hIcon);
+    hCard.appendChild(textDiv);
+    content.appendChild(hCard);
+  }
+  // Automation message cards (#8)
+  else if (msg.kind === 'automation' || msg.source === 'nex') {
+    var aCard = el('div', { className: 'message-card-auto' });
+    var aIcon = el('div', { className: 'message-card-auto-icon' });
+    aIcon.textContent = '\u2699 AUTOMATION';
+    aCard.appendChild(aIcon);
+    aCard.appendChild(textDiv);
+    content.appendChild(aCard);
+  }
+  else {
+    content.appendChild(textDiv);
+  }
+
+  // Thread reply-to indicator (#20)
+  if (msg.reply_to && container.id === 'thread-messages') {
+    var parentMsg = allMessages[msg.reply_to];
+    if (parentMsg) {
+      var replyToAgent = AGENTS.find(function(a) { return a.slug === parentMsg.from; });
+      var replyToLabel = el('div', { className: 'thread-reply-to' }, 'replied to @' + (replyToAgent ? replyToAgent.name : parentMsg.from));
+      // Insert before the header
+      content.insertBefore(replyToLabel, header);
+    }
+  }
 
   // Reactions display
   if (msg.reactions && msg.reactions.length > 0) {
@@ -3839,20 +3881,27 @@ document.addEventListener('keydown', function(e) {
 
   // Skip remaining shortcuts if in an input field
   if (inInput) {
-    // Up arrow in empty composer: edit last message
-    if (e.key === 'ArrowUp' && e.target.id === 'composer-input' && !e.target.value.trim()) {
-      // Find last human message and put it in the composer for editing
-      var msgKeys = Object.keys(allMessages);
-      for (var i = msgKeys.length - 1; i >= 0; i--) {
-        var m = allMessages[msgKeys[i]];
-        if (m.from === 'you' || m.from === 'human') {
-          e.preventDefault();
-          e.target.value = m.content || '';
-          e.target.style.height = 'auto';
-          e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-          composerSend.disabled = !e.target.value.trim();
-          break;
+    // Up/Down arrow in composer: navigate input history (#40)
+    if (e.target.id === 'composer-input' && composerHistory.length > 0) {
+      if (e.key === 'ArrowUp' && (!e.target.value.trim() || composerHistoryIdx >= 0)) {
+        e.preventDefault();
+        if (composerHistoryIdx < 0) composerHistoryDraft = e.target.value;
+        composerHistoryIdx = Math.min(composerHistoryIdx + 1, composerHistory.length - 1);
+        e.target.value = composerHistory[composerHistory.length - 1 - composerHistoryIdx];
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+        composerSend.disabled = !e.target.value.trim();
+      } else if (e.key === 'ArrowDown' && composerHistoryIdx >= 0) {
+        e.preventDefault();
+        composerHistoryIdx--;
+        if (composerHistoryIdx < 0) {
+          e.target.value = composerHistoryDraft;
+        } else {
+          e.target.value = composerHistory[composerHistory.length - 1 - composerHistoryIdx];
         }
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+        composerSend.disabled = !e.target.value.trim();
       }
     }
     return;
@@ -4695,6 +4744,139 @@ function inferMood(text) {
   // Shipping signals
   if (/\bdeploy|\bpush|\bmerge|\brelease|\bship\b|\blaunched\b/.test(t)) return { emoji: '\uD83D\uDE80', label: 'shipping' };
   return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   A2UI BLOCK RENDERING (#13)
+// ═══════════════════════════════════════════════════════════════
+function parseA2UIBlocks(text) {
+  // Detect ```a2ui ... ``` or [A2UI] ... [/A2UI] markers
+  var blocks = [];
+  var remaining = text;
+
+  // Pattern 1: ```a2ui\n...\n```
+  remaining = remaining.replace(/```a2ui\n([\s\S]*?)```/g, function(match, inner) {
+    blocks.push(inner.trim());
+    return '<!--A2UI_PLACEHOLDER_' + (blocks.length - 1) + '-->';
+  });
+
+  // Pattern 2: [A2UI]...[/A2UI]
+  remaining = remaining.replace(/\[A2UI\]([\s\S]*?)\[\/A2UI\]/gi, function(match, inner) {
+    blocks.push(inner.trim());
+    return '<!--A2UI_PLACEHOLDER_' + (blocks.length - 1) + '-->';
+  });
+
+  return { text: remaining, blocks: blocks };
+}
+
+function renderA2UIBlock(blockText) {
+  var container = document.createElement('div');
+  container.className = 'a2ui-block';
+
+  var lines = blockText.split('\n').filter(function(l) { return l.trim(); });
+  if (lines.length === 0) return null;
+
+  // Detect block type
+  var firstLine = lines[0].trim().toLowerCase();
+
+  // Table: lines with | separators
+  if (firstLine.indexOf('|') !== -1 && lines.length >= 2) {
+    var table = document.createElement('table');
+    table.className = 'a2ui-table';
+    lines.forEach(function(line, i) {
+      if (line.trim().match(/^[\|\-\s:]+$/)) return; // skip separator rows
+      var cells = line.split('|').map(function(c) { return c.trim(); }).filter(function(c) { return c; });
+      var tr = document.createElement('tr');
+      cells.forEach(function(cell) {
+        var td = document.createElement(i === 0 ? 'th' : 'td');
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    container.appendChild(table);
+    return container;
+  }
+
+  // Progress bar: "progress: N%" or "progress N/M"
+  var progressMatch = blockText.match(/progress[:\s]+(\d+)%/i);
+  if (!progressMatch) progressMatch = blockText.match(/progress[:\s]+(\d+)\s*\/\s*(\d+)/i);
+  if (progressMatch) {
+    var pct = progressMatch[2]
+      ? Math.round((parseInt(progressMatch[1]) / parseInt(progressMatch[2])) * 100)
+      : parseInt(progressMatch[1]);
+    var label = blockText.split('\n')[0].replace(/progress[:\s].*$/i, '').trim();
+
+    var progressDiv = document.createElement('div');
+    progressDiv.className = 'a2ui-progress';
+    if (label) {
+      var labelEl = document.createElement('span');
+      labelEl.style.cssText = 'font-size:12px;color:var(--text-secondary);min-width:60px;';
+      labelEl.textContent = label;
+      progressDiv.appendChild(labelEl);
+    }
+    var bar = document.createElement('div');
+    bar.className = 'a2ui-progress-bar';
+    var fill = document.createElement('div');
+    fill.className = 'a2ui-progress-fill';
+    fill.style.width = Math.min(pct, 100) + '%';
+    bar.appendChild(fill);
+    progressDiv.appendChild(bar);
+    var pctLabel = document.createElement('span');
+    pctLabel.className = 'a2ui-progress-label';
+    pctLabel.textContent = pct + '%';
+    progressDiv.appendChild(pctLabel);
+    container.appendChild(progressDiv);
+    return container;
+  }
+
+  // Status indicator: "status: ok/warn/error/info"
+  var statusMatch = blockText.match(/status[:\s]+(ok|success|warn|warning|error|fail|failed|info)/i);
+  if (statusMatch) {
+    var statusVal = statusMatch[1].toLowerCase();
+    var statusClass = 'a2ui-status-info';
+    if (statusVal === 'ok' || statusVal === 'success') statusClass = 'a2ui-status-ok';
+    else if (statusVal === 'warn' || statusVal === 'warning') statusClass = 'a2ui-status-warn';
+    else if (statusVal === 'error' || statusVal === 'fail' || statusVal === 'failed') statusClass = 'a2ui-status-error';
+    var statusLabel = blockText.replace(/status[:\s]+\S+/i, '').trim() || statusVal;
+    var statusDiv = document.createElement('div');
+    statusDiv.className = 'a2ui-status ' + statusClass;
+    var dot = document.createElement('span');
+    dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0;';
+    statusDiv.appendChild(dot);
+    statusDiv.appendChild(document.createTextNode(statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)));
+    container.appendChild(statusDiv);
+    return container;
+  }
+
+  // Key-value list: lines with "key: value" pattern
+  var kvLines = lines.filter(function(l) { return l.indexOf(':') !== -1; });
+  if (kvLines.length >= 2 && kvLines.length === lines.length) {
+    var kvDiv = document.createElement('div');
+    kvDiv.className = 'a2ui-kv';
+    kvLines.forEach(function(line) {
+      var colonIdx = line.indexOf(':');
+      var key = line.substring(0, colonIdx).trim();
+      var val = line.substring(colonIdx + 1).trim();
+      var keyEl = document.createElement('span');
+      keyEl.className = 'a2ui-kv-key';
+      keyEl.textContent = key;
+      var valEl = document.createElement('span');
+      valEl.className = 'a2ui-kv-val';
+      valEl.textContent = val;
+      kvDiv.appendChild(keyEl);
+      kvDiv.appendChild(valEl);
+    });
+    container.appendChild(kvDiv);
+    return container;
+  }
+
+  // Fallback: render as preformatted text
+  var pre = document.createElement('pre');
+  pre.style.cssText = 'font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;';
+  pre.textContent = blockText;
+  container.appendChild(pre);
+  return container;
 }
 
 initApp();
