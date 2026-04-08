@@ -318,6 +318,7 @@ type Broker struct {
 	server             *http.Server
 	token              string // shared secret for authenticating requests
 	addr               string // actual listen address (useful when port=0)
+	webUIOrigins       []string // allowed CORS origins for web UI (set by ServeWebUI)
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -463,7 +464,7 @@ func (b *Broker) StartOnPort(port int) error {
 
 	b.server = &http.Server{
 		Addr:         addr,
-		Handler:      corsMiddleware(mux),
+		Handler:      b.corsMiddleware(mux),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
@@ -485,12 +486,21 @@ func (b *Broker) Stop() {
 	}
 }
 
-// corsMiddleware adds CORS headers so the web UI on a different port can call the broker API.
-func corsMiddleware(next http.Handler) http.Handler {
+// corsMiddleware adds CORS headers only for the web UI origin.
+// If no web UI origins are configured, no CORS headers are set.
+func (b *Broker) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		origin := r.Header.Get("Origin")
+		if origin != "" && len(b.webUIOrigins) > 0 {
+			for _, allowed := range b.webUIOrigins {
+				if origin == allowed {
+					w.Header().Set("Access-Control-Allow-Origin", allowed)
+					w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+					break
+				}
+			}
+		}
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -513,6 +523,11 @@ func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
 
 // ServeWebUI starts a static file server for the web UI on the given port.
 func (b *Broker) ServeWebUI(port int) {
+	b.webUIOrigins = []string{
+		fmt.Sprintf("http://localhost:%d", port),
+		fmt.Sprintf("http://127.0.0.1:%d", port),
+	}
+
 	exePath, _ := os.Executable()
 	webDir := filepath.Join(filepath.Dir(exePath), "web")
 	if _, err := os.Stat(webDir); os.IsNotExist(err) {
