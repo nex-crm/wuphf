@@ -5141,6 +5141,13 @@ function getAgentColor(slug) {
 }
 
 function renderPixelAvatar(slug, size) {
+  // Guard: sprite data may not be loaded yet, or may not exist for this slug
+  if (typeof SPRITE_DATA === 'undefined' || typeof SPRITE_SLUG_MAP === 'undefined') {
+    var fallback = document.createElement('div');
+    fallback.style.cssText = 'width:' + size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center;font-size:' + Math.round(size * 0.6) + 'px;';
+    fallback.textContent = slug.charAt(0).toUpperCase();
+    return fallback;
+  }
   var key = SPRITE_SLUG_MAP[slug] || slug;
   var sprite = SPRITE_DATA[key] || SPRITE_GENERIC;
   var accentHex = getAgentColor(slug);
