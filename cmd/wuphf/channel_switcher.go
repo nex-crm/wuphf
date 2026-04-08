@@ -46,7 +46,7 @@ func (m channelModel) buildWorkspaceSwitcherOptions() []tui.PickerOption {
 			tui.PickerOption{Label: "Requests", Value: "app:requests", Description: "Human decisions and interviews"},
 			tui.PickerOption{Label: "Policies", Value: "app:policies", Description: "Signals, decisions, and watchdogs"},
 			tui.PickerOption{Label: "Calendar", Value: "app:calendar", Description: "Scheduled work and follow-ups"},
-			tui.PickerOption{Label: "Artifacts", Value: "app:artifacts", Description: "Task logs, workflow runs, and approvals"},
+			tui.PickerOption{Label: "Artifacts", Value: "app:artifacts", Description: fallbackString(m.currentArtifactFocusSummary(), fallbackString(m.currentArtifactSummary(), "Task logs, workflow runs, and approvals"))},
 			tui.PickerOption{Label: "Skills", Value: "app:skills", Description: "Reusable skills and workflows"},
 		)
 		for _, ch := range m.channels {
@@ -236,6 +236,13 @@ func (m channelModel) officeFeedDescription(workspace workspaceUIState) string {
 }
 
 func (m channelModel) recoverySwitcherDescription(workspace workspaceUIState) string {
+	artifacts := m.currentArtifactSnapshot(24)
+	if review := artifacts.ReviewCandidates(1); len(review) > 0 {
+		return truncateText("Review: "+review[0].EffectiveTitle(), 72)
+	}
+	if resume := artifacts.ResumeCandidates(1); len(resume) > 0 {
+		return truncateText("Resume: "+resume[0].EffectiveTitle(), 72)
+	}
 	recovery := workspace.Runtime.Recovery
 	if focus := trimRecoverySentence(recovery.Focus); focus != "" {
 		return truncateText(focus, 72)

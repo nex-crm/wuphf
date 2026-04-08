@@ -687,6 +687,34 @@ func TestOneOnOneAgentSelectionRequiresConfirmation(t *testing.T) {
 	}
 }
 
+func TestTaskActionPickerUsesReviewResumeLanguageForWorktreeTasks(t *testing.T) {
+	m := newChannelModel(false)
+	options := m.buildTaskActionPickerOptions(channelTask{
+		ID:            "task-1",
+		Title:         "Ship review-resume UX",
+		Status:        "in_progress",
+		ExecutionMode: "local_worktree",
+		WorktreePath:  "/tmp/wuphf-task-1",
+		ThreadID:      "msg-1",
+	})
+
+	joined := make([]string, 0, len(options))
+	for _, option := range options {
+		joined = append(joined, option.Label+" :: "+option.Description)
+	}
+	text := strings.Join(joined, "\n")
+
+	if !strings.Contains(text, "Resume task :: Take ownership and continue the retained worktree-backed run") {
+		t.Fatalf("expected resume-first copy for worktree task, got %q", text)
+	}
+	if !strings.Contains(text, "Hand off for review") {
+		t.Fatalf("expected review handoff copy for worktree task, got %q", text)
+	}
+	if !strings.Contains(text, "Open thread :: Jump to the handoff thread before resuming") {
+		t.Fatalf("expected open-thread handoff copy, got %q", text)
+	}
+}
+
 func TestHumanFacingMessageSwitchesBackToMessages(t *testing.T) {
 	m := newChannelModel(false)
 	m.activeApp = officeAppTasks

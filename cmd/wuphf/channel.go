@@ -3622,14 +3622,21 @@ func (m channelModel) buildTaskPickerOptions() []tui.PickerOption {
 }
 
 func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.PickerOption {
+	claimLabel := "Claim task"
+	claimDescription := "Take ownership as you"
+	if strings.TrimSpace(task.WorktreePath) != "" || strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
+		claimLabel = "Resume task"
+		claimDescription = "Take ownership and continue the retained worktree-backed run"
+	}
+
 	options := []tui.PickerOption{
-		{Label: "Claim task", Value: "claim:" + task.ID, Description: "Take ownership as you"},
+		{Label: claimLabel, Value: "claim:" + task.ID, Description: claimDescription},
 		{Label: "Release task", Value: "release:" + task.ID, Description: "Clear the current owner"},
 	}
 	if task.ReviewState == "ready_for_review" || task.Status == "review" {
-		options = append(options, tui.PickerOption{Label: "Approve task", Value: "approve:" + task.ID, Description: "Mark this review-ready task done"})
+		options = append(options, tui.PickerOption{Label: "Review and approve", Value: "approve:" + task.ID, Description: "Mark this review-ready task done"})
 	} else if task.ReviewState == "pending_review" || task.ExecutionMode == "local_worktree" {
-		options = append(options, tui.PickerOption{Label: "Ready for review", Value: "complete:" + task.ID, Description: "Move this task into review"})
+		options = append(options, tui.PickerOption{Label: "Hand off for review", Value: "complete:" + task.ID, Description: "Move this retained task into review"})
 	} else {
 		options = append(options, tui.PickerOption{Label: "Complete task", Value: "complete:" + task.ID, Description: "Mark this task done"})
 	}
@@ -3637,7 +3644,11 @@ func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.Picke
 		options = append(options, tui.PickerOption{Label: "Block task", Value: "block:" + task.ID, Description: "Mark this work blocked"})
 	}
 	if task.ThreadID != "" {
-		options = append(options, tui.PickerOption{Label: "Open thread", Value: "open:" + task.ID, Description: "Jump to the thread for this task"})
+		description := "Jump to the thread for this task"
+		if strings.TrimSpace(task.WorktreePath) != "" {
+			description = "Jump to the handoff thread before resuming"
+		}
+		options = append(options, tui.PickerOption{Label: "Open thread", Value: "open:" + task.ID, Description: description})
 	}
 	return options
 }
