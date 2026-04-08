@@ -680,9 +680,6 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 }
 
 func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, content string) {
-	if l.webMode {
-		return
-	}
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
@@ -692,6 +689,9 @@ func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, conte
 	)
 	if l.usesCodexRuntime() {
 		l.enqueueHeadlessCodexTurn(slug, notification)
+		return
+	}
+	if l.webMode {
 		return
 	}
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
@@ -2080,9 +2080,6 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID string, limit 
 }
 
 func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, content string) {
-	if l.webMode {
-		return // web mode agents poll the broker directly
-	}
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
@@ -2110,6 +2107,9 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 	if l.usesCodexRuntime() {
 		l.enqueueHeadlessCodexTurn(slug, notification)
 		return
+	}
+	if l.webMode {
+		return // non-codex web mode: agents poll the broker directly
 	}
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
