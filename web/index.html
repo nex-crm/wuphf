@@ -555,10 +555,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .request-item-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .request-item-from { font-size: 13px; font-weight: 600; }
 .request-kind-pill { display: inline-flex; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
-.request-kind-approval { background: var(--yellow-bg); color: var(--yellow); }
-.request-kind-confirm { background: var(--blue-bg); color: var(--blue); }
+.request-kind-approval { background: var(--blue-bg); color: var(--blue); }
+.request-kind-confirm { background: var(--green-bg); color: var(--green); }
 .request-kind-secret { background: var(--red-bg); color: var(--red); }
-.request-kind-input { background: var(--accent-bg); color: var(--accent); }
+.request-kind-input { background: var(--yellow-bg); color: var(--yellow); }
 .request-item-question { font-size: 14px; color: var(--text); margin-bottom: 8px; line-height: 1.5; }
 .request-item-timing { font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; }
 .request-item-actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -4420,10 +4420,7 @@ function renderTaskBoard(container, tasks) {
 
       var meta = el('div', { className: 'task-card-meta' });
       var status = normalizeTaskStatus(task.status);
-      if (status === 'blocked') {
-        var pill = el('span', { className: 'task-status-pill task-status-blocked' }, 'BLOCKED');
-        meta.appendChild(pill);
-      }
+      meta.appendChild(el('span', { className: 'task-status-pill task-status-' + status }, status.replace(/_/g, ' ').toUpperCase()));
       if (task.owner || task.assignee) {
         var owner = el('span', { className: 'task-card-owner' });
         var ownerAgent = AGENTS.find(function(a) { return a.slug === (task.owner || task.assignee); });
@@ -5185,21 +5182,16 @@ function renderPixelAvatar(slug, size) {
       var px = sprite[r][c];
       var idx = (r * cols + c) * 4;
       if (px === 0) {
-  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-no', onClick: hidePauseConfirm }, 'Cancel'));
-  composer.parentNode.insertBefore(bar, composer);
-}
-function hidePauseConfirm() { pauseConfirmVisible = false; var bar = document.getElementById('pause-confirm-bar'); if (bar) bar.remove(); }
-document.addEventListener('keydown', function(e) {
-  var officeActive = document.getElementById('office').classList.contains('active'); if (!officeActive) return;
-  var inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
-  if ((e.ctrlKey || e.metaKey) && e.key === 'g') { e.preventDefault(); quickJumpOverlay.classList.contains('open') ? closeQuickJump() : openQuickJump(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9' && !e.shiftKey && !e.altKey) { var ci = parseInt(e.key) - 1; if (ci < CHANNELS.length) { e.preventDefault(); switchChannel(CHANNELS[ci].name); renderSidebarChannels(); } return; }
-  if (e.key === 'Escape' && inInput && e.target.id === 'composer-input') {
-    var po = document.getElementById('thread-panel').classList.contains('open') || document.getElementById('agent-panel').classList.contains('open') || cmdPaletteOverlay.classList.contains('open') || quickJumpOverlay.classList.contains('open');
-    if (!po && !e.target.value.trim()) { e.preventDefault(); showPauseConfirm(); return; }
+        imgData.data[idx] = 0; imgData.data[idx+1] = 0; imgData.data[idx+2] = 0; imgData.data[idx+3] = 0;
+      } else {
+        var rgb = palette[px] || [128, 128, 128];
+        imgData.data[idx] = rgb[0]; imgData.data[idx+1] = rgb[1]; imgData.data[idx+2] = rgb[2]; imgData.data[idx+3] = 255;
+      }
+    }
   }
-  if (!inInput && (e.key === 'PageUp' || e.key === 'PageDown')) { var al = document.getElementById('sidebar-agents'); if (al && al.scrollHeight > al.clientHeight) { e.preventDefault(); al.scrollBy({ top: e.key === 'PageUp' ? -(al.clientHeight * 0.8) : (al.clientHeight * 0.8), behavior: 'smooth' }); } }
-});
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
 </script>
 
 </body>
