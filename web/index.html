@@ -1633,7 +1633,7 @@ function renderTeamGrid() {
 // ─── Launch ───
 function launchOffice() {
   document.getElementById('onboarding').style.display = 'none';
-  showOffice();
+  showSplashScreen(function() { showOffice(); });
 }
 
 function showSplashScreen(onDone) {
@@ -3640,11 +3640,13 @@ function renderSearchResults(query) {
   cmdPaletteResults.appendChild(groupDiv);
 }
 
-cmdPaletteInput.addEventListener('input', function() {
-  cmdSelectedIdx = -1;
-  if (searchMode) renderSearchResults(cmdPaletteInput.value.trim());
-  else renderCommandPaletteResults(cmdPaletteInput.value.trim());
-});
+if (cmdPaletteInput) {
+  cmdPaletteInput.addEventListener('input', function() {
+    cmdSelectedIdx = -1;
+    if (searchMode) renderSearchResults(cmdPaletteInput.value.trim());
+    else renderCommandPaletteResults(cmdPaletteInput.value.trim());
+  });
+}
 
 var _origCloseCP = closeCommandPalette;
 closeCommandPalette = function() {
@@ -3666,8 +3668,8 @@ function initApp() {
       if (data.status === 'ok') {
         brokerConnected = true;
         document.getElementById('onboarding').style.display = 'none';
-        console.log('[wuphf] broker connected, showing office directly');
-        showOffice();
+        console.log('[wuphf] broker connected, showing splash + office');
+        showSplashScreen(function() { showOffice(); });
       } else {
         console.log('[wuphf] health not ok, showing onboarding');
         renderProgress();
