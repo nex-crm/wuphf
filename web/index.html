@@ -2390,16 +2390,11 @@ function appendBrokerMessage(msg) {
     incrementUnreadCount(msg.channel);
   }
 
-  // If this is a reply, update parent's reply count but don't show in main feed
+  // If this is a reply, update parent's reply count but don't show in main feed.
+  // Thread panel has its own poll (threadPollTimer) that handles rendering + dedup.
   if (msg.reply_to) {
     threadReplyCounts[msg.reply_to] = (threadReplyCounts[msg.reply_to] || 0) + 1;
     updateThreadLink(msg.reply_to);
-    // If thread panel is open for this thread, append there too
-    if (activeThreadId === msg.reply_to) {
-      appendMessageToContainer(msg, document.getElementById('thread-messages'));
-      var tmsg = document.getElementById('thread-messages');
-      tmsg.scrollTop = tmsg.scrollHeight;
-    }
     return;
   }
 

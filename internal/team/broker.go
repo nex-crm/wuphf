@@ -3150,6 +3150,20 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
+	tagged := uniqueSlugs(body.Tagged)
+
+	// Auto-tag the parent message author when replying in a thread.
+	// This ensures the agent you're replying to gets notified.
+	replyTo := strings.TrimSpace(body.ReplyTo)
+	if replyTo != "" {
+		for _, existing := range b.messages {
+			if existing.ID == replyTo && existing.From != body.From {
+				tagged = uniqueSlugs(append(tagged, existing.From))
+				break
+			}
+		}
+	}
+
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      body.From,
@@ -3157,8 +3171,8 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		Kind:      strings.TrimSpace(body.Kind),
 		Title:     strings.TrimSpace(body.Title),
 		Content:   body.Content,
-		Tagged:    uniqueSlugs(body.Tagged),
-		ReplyTo:   strings.TrimSpace(body.ReplyTo),
+		Tagged:    tagged,
+		ReplyTo:   replyTo,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	b.messages = append(b.messages, msg)
