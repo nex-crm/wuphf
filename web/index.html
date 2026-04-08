@@ -274,6 +274,15 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .composer-send:hover { background: var(--accent-warm); }
 .composer-send:disabled { opacity: 0.3; cursor: not-allowed; }
 
+/* ─── Autocomplete dropdown ─── */
+.autocomplete { position: absolute; bottom: 100%; left: 0; right: 0; max-height: 240px; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 -4px 16px rgba(0,0,0,0.12); margin-bottom: 4px; display: none; z-index: 20; }
+.autocomplete.open { display: block; }
+.autocomplete-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; transition: background 0.1s; }
+.autocomplete-item:hover, .autocomplete-item.selected { background: var(--accent-bg); }
+.autocomplete-item-icon { width: 20px; text-align: center; flex-shrink: 0; font-size: 14px; }
+.autocomplete-item-label { font-weight: 600; color: var(--text); }
+.autocomplete-item-desc { font-size: 12px; color: var(--text-tertiary); margin-left: auto; }
+
 /* ─── Thread Panel ─── */
 .thread-panel { width: 380px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; height: 100vh; overflow: hidden; }
 .thread-panel.open { display: flex; }
@@ -629,7 +638,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <div class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
         <span id="typing-who">CEO is thinking&hellip;</span>
       </div>
-      <div class="composer">
+      <div class="composer" style="position:relative;">
+        <div class="autocomplete" id="autocomplete"></div>
         <div class="composer-inner">
           <textarea class="composer-input" id="composer-input" placeholder="Message #general &mdash; type / for commands, @ to mention" rows="1"></textarea>
           <button class="composer-send" id="composer-send" disabled>
@@ -1596,13 +1606,135 @@ function renderRequestBanner(pending) {
 var composerInput = document.getElementById('composer-input');
 var composerSend = document.getElementById('composer-send');
 
+// ─── Autocomplete state ───
+var acPanel = document.getElementById('autocomplete');
+var acSelectedIdx = -1;
+var acItems = [];
+var acMode = null; // 'slash' | 'mention' | null
+
+var SLASH_COMMANDS = [
+  { name: '/reply', desc: 'Reply in thread', icon: '💬' },
+  { name: '/requests', desc: 'View open requests', icon: '📋' },
+  { name: '/tasks', desc: 'View task board', icon: '✅' },
+  { name: '/reset', desc: 'Reset the office', icon: '🔄' },
+  { name: '/clear', desc: 'Clear messages', icon: '🧹' },
+  { name: '/help', desc: 'Show all commands', icon: '❓' },
+  { name: '/config', desc: 'View/set config', icon: '⚙️' },
+  { name: '/quit', desc: 'Exit WUPHF', icon: '👋' },
+  { name: '/connect', desc: 'Connect integration', icon: '🔗' },
+  { name: '/1o1', desc: 'Start 1:1 session', icon: '🤝' },
+];
+
+function updateAutocomplete() {
+  var val = composerInput.value;
+  var shouldShow = false;
+
+  // Slash commands: trigger when input starts with /
+  if (val.match(/^\/\S*$/) && val.length >= 1) {
+    acMode = 'slash';
+    var query = val.slice(1).toLowerCase();
+    acItems = SLASH_COMMANDS.filter(function(cmd) {
+      return cmd.name.slice(1).toLowerCase().indexOf(query) === 0;
+    });
+    shouldShow = acItems.length > 0;
+  }
+  // @mentions: trigger when last word starts with @
+  else if (val.match(/(^|\s)@\S*$/)) {
+    acMode = 'mention';
+    var match = val.match(/(^|\s)@(\S*)$/);
+    var query = match ? match[2].toLowerCase() : '';
+    acItems = AGENTS.filter(function(a) {
+      return a.slug.toLowerCase().indexOf(query) === 0 ||
+             a.name.toLowerCase().indexOf(query) === 0;
+    }).map(function(a) {
+      return { name: '@' + a.slug, desc: a.name + ' — ' + a.role, icon: a.emoji };
+    });
+    shouldShow = acItems.length > 0;
+  } else {
+    acMode = null;
+    acItems = [];
+  }
+
+  if (shouldShow) {
+    renderAutocomplete();
+    acPanel.classList.add('open');
+  } else {
+    acPanel.classList.remove('open');
+    acSelectedIdx = -1;
+  }
+}
+
+function renderAutocomplete() {
+  acPanel.textContent = '';
+  acItems.forEach(function(item, i) {
+    var row = document.createElement('div');
+    row.className = 'autocomplete-item' + (i === acSelectedIdx ? ' selected' : '');
+    var icon = document.createElement('span');
+    icon.className = 'autocomplete-item-icon';
+    icon.textContent = item.icon || '';
+    var label = document.createElement('span');
+    label.className = 'autocomplete-item-label';
+    label.textContent = item.name;
+    var desc = document.createElement('span');
+    desc.className = 'autocomplete-item-desc';
+    desc.textContent = item.desc || '';
+    row.appendChild(icon);
+    row.appendChild(label);
+    row.appendChild(desc);
+    row.addEventListener('click', function() { selectAutocomplete(i); });
+    acPanel.appendChild(row);
+  });
+}
+
+function selectAutocomplete(idx) {
+  if (idx < 0 || idx >= acItems.length) return;
+  var item = acItems[idx];
+  if (acMode === 'slash') {
+    composerInput.value = item.name + ' ';
+  } else if (acMode === 'mention') {
+    // Replace the @partial with the full @slug
+    composerInput.value = composerInput.value.replace(/(^|\s)@\S*$/, '$1' + item.name + ' ');
+  }
+  acPanel.classList.remove('open');
+  acSelectedIdx = -1;
+  acMode = null;
+  composerInput.focus();
+  composerSend.disabled = !composerInput.value.trim();
+}
+
 composerInput.addEventListener('input', function() {
   composerSend.disabled = !composerInput.value.trim();
   composerInput.style.height = 'auto';
   composerInput.style.height = Math.min(composerInput.scrollHeight, 120) + 'px';
+  updateAutocomplete();
 });
 
 composerInput.addEventListener('keydown', function(e) {
+  // Autocomplete navigation
+  if (acPanel.classList.contains('open')) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      acSelectedIdx = Math.min(acSelectedIdx + 1, acItems.length - 1);
+      renderAutocomplete();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      acSelectedIdx = Math.max(acSelectedIdx - 1, 0);
+      renderAutocomplete();
+      return;
+    }
+    if (e.key === 'Tab' || (e.key === 'Enter' && acSelectedIdx >= 0)) {
+      e.preventDefault();
+      selectAutocomplete(acSelectedIdx >= 0 ? acSelectedIdx : 0);
+      return;
+    }
+    if (e.key === 'Escape') {
+      acPanel.classList.remove('open');
+      acSelectedIdx = -1;
+      return;
+    }
+  }
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
@@ -1634,17 +1766,96 @@ function sendThreadReply() {
     .catch(function(e) { console.error('Thread reply failed:', e); });
 }
 
+function handleSlashCommand(input) {
+  var parts = input.split(/\s+/);
+  var cmd = parts[0].toLowerCase();
+  var args = parts.slice(1).join(' ');
+  var container = document.getElementById('messages');
+
+  function showSystem(text) {
+    var sysDiv = document.createElement('div');
+    sysDiv.className = 'message-system animate-fade';
+    var inner = document.createElement('div');
+    inner.className = 'message-system-inner';
+    var l1 = document.createElement('span'); l1.className = 'message-system-line';
+    var t = document.createElement('span'); t.className = 'message-system-text'; t.textContent = text;
+    var l2 = document.createElement('span'); l2.className = 'message-system-line';
+    inner.appendChild(l1); inner.appendChild(t); inner.appendChild(l2);
+    sysDiv.appendChild(inner); container.appendChild(sysDiv);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  switch (cmd) {
+    case '/clear':
+      container.textContent = '';
+      showSystem('Messages cleared');
+      break;
+    case '/help':
+      showSystem('Commands: /clear /help /requests /tasks /reset /reply <msg-id> /1o1 <agent>');
+      break;
+    case '/requests':
+      fetchRequests();
+      showSystem('Refreshing requests...');
+      break;
+    case '/reply':
+      if (args) openThread(args.trim());
+      else showSystem('Usage: /reply <message-id>');
+      break;
+    case '/reset':
+      WuphfAPI.post('/reset', {}).then(function() {
+        container.textContent = '';
+        lastMessageId = '';
+        allMessages = {};
+        threadReplyCounts = {};
+        showSystem('Office reset');
+      });
+      break;
+    default:
+      // Send unknown commands to broker as a message (agents may handle them)
+      WuphfAPI.postMessage(input, currentChannel);
+      break;
+  }
+}
+
 function sendMessage() {
   var raw = composerInput.value.trim();
   if (!raw) return;
+
+  // Close autocomplete
+  acPanel.classList.remove('open');
+  acSelectedIdx = -1;
+
+  // Handle slash commands locally
+  if (raw.charAt(0) === '/') {
+    composerInput.value = '';
+    composerInput.style.height = 'auto';
+    composerSend.disabled = true;
+    handleSlashCommand(raw);
+    return;
+  }
+
+  // Extract @mentions for tagged array
+  var tagged = [];
+  var mentionRe = /@(\S+)/g;
+  var mentionMatch;
+  while ((mentionMatch = mentionRe.exec(raw)) !== null) {
+    var mentionSlug = mentionMatch[1].toLowerCase();
+    var mentionAgent = AGENTS.find(function(a) { return a.slug === mentionSlug; });
+    if (mentionAgent) tagged.push(mentionAgent.slug);
+  }
 
   composerInput.value = '';
   composerInput.style.height = 'auto';
   composerSend.disabled = true;
 
   if (brokerConnected) {
-    // POST to broker — message will appear via next poll cycle
-    WuphfAPI.postMessage(raw, currentChannel)
+    // POST to broker with tagged agents — tagged agents get notified
+    WuphfAPI.post('/messages', {
+      from: 'you',
+      channel: currentChannel,
+      content: raw,
+      tagged: tagged
+    })
       .catch(function(err) {
         // Show error as system message
         var container = document.getElementById('messages');
