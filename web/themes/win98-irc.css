@@ -1,0 +1,547 @@
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Theme: Windows 98 + mIRC
+   IRC-style chat inside a Win98 window. Monospaced text, nick
+   colors, timestamp brackets, channel tree, /join vibes.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Import the base Win98 theme first — this layer adds IRC flavor */
+
+/* ─── IRC-specific animations ─── */
+@keyframes irc-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+@keyframes irc-join {
+  0% { opacity: 0; color: #008000; }
+  100% { opacity: 1; color: inherit; }
+}
+@keyframes win98-boot {
+  0% { opacity: 0; transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+html[data-theme="win98-irc"] {
+  --bg:             #008080;
+  --bg-warm:        #C0C0C0;
+  --bg-card:        #C0C0C0;
+  --text:           #000000;
+  --text-secondary: #000000;
+  --text-tertiary:  #808080;
+  --accent:         #000080;
+  --accent-warm:    #000060;
+  --accent-bg:      #C0C0C0;
+  --border:         #808080;
+  --border-light:   #FFFFFF;
+  --border-dark:    #404040;
+  --green:          #008000;
+  --green-bg:       #C0C0C0;
+  --font-sans:  'Fixedsys', 'Lucida Console', 'Courier New', monospace;
+  --font-serif: 'Fixedsys', 'Lucida Console', monospace;
+  --font-logo:  Tahoma, 'MS Sans Serif', sans-serif;
+  --font-mono:  'Fixedsys', 'Lucida Console', 'Courier New', monospace;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-full: 0px;
+}
+
+/* ─── Desktop ─── */
+html[data-theme="win98-irc"] body {
+  background: #008080;
+  font-family: 'Lucida Console', 'Courier New', monospace;
+  font-size: 12px;
+  cursor: default;
+}
+
+/* ─── Window Frame ─── */
+html[data-theme="win98-irc"] .office {
+  border: 2px solid;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF;
+  margin: 8px;
+  height: calc(100vh - 16px) !important;
+  box-shadow: 1px 1px 0 #000000;
+  animation: win98-boot 0.3s ease-out;
+}
+
+/* ═══ SIDEBAR: mIRC Server/Channel Tree ═══ */
+html[data-theme="win98-irc"] .sidebar {
+  background: #C0C0C0;
+  border-right: none;
+  width: 180px !important;
+  box-shadow: inset -1px 0 0 #808080, inset -2px 0 0 #404040;
+}
+
+/* mIRC title bar */
+html[data-theme="win98-irc"] .sidebar-header {
+  background: linear-gradient(90deg, #000080 0%, #1084D0 100%);
+  border-bottom: none;
+  padding: 3px 4px 3px 6px !important;
+  min-height: 22px;
+  box-shadow: inset 0 -1px 0 #404040;
+}
+html[data-theme="win98-irc"] .sidebar-logo {
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #FFFFFF !important;
+  font-style: normal !important;
+}
+html[data-theme="win98-irc"] .sidebar-header .sidebar-btn {
+  width: 16px !important; height: 14px !important;
+  background: #C0C0C0 !important;
+  border: 1px solid !important;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-radius: 0 !important; color: #000000 !important;
+  padding: 0 !important;
+}
+html[data-theme="win98-irc"] .sidebar-header .sidebar-btn:active {
+  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
+}
+html[data-theme="win98-irc"] .sidebar-header .sidebar-btn svg {
+  width: 8px !important; height: 8px !important;
+}
+
+/* Channel tree in sunken panel */
+html[data-theme="win98-irc"] .sidebar-section {
+  border-top: none !important;
+  padding: 2px !important;
+}
+html[data-theme="win98-irc"] .sidebar-section-title {
+  color: #000000 !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  margin-bottom: 2px !important;
+}
+html[data-theme="win98-irc"] .sidebar-agents,
+html[data-theme="win98-irc"] .sidebar-channels {
+  background: #FFFFFF;
+  border: 2px solid;
+  border-color: #808080 #FFFFFF #FFFFFF #808080;
+  margin: 0 3px 3px;
+  padding: 2px !important;
+  box-shadow: inset 1px 1px 0 #404040;
+}
+
+/* Tree items */
+html[data-theme="win98-irc"] .sidebar-item,
+html[data-theme="win98-irc"] .sidebar-agent {
+  color: #000000 !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  padding: 0 2px !important;
+  border-radius: 0 !important;
+  margin-left: 0 !important;
+  line-height: 18px !important;
+}
+html[data-theme="win98-irc"] .sidebar-item:hover,
+html[data-theme="win98-irc"] .sidebar-agent:hover {
+  background: #000080 !important;
+  color: #FFFFFF !important;
+}
+html[data-theme="win98-irc"] .sidebar-item.active {
+  background: #000080 !important;
+  color: #FFFFFF !important;
+  font-weight: normal !important;
+}
+
+/* Nicks with @ prefix for ops */
+html[data-theme="win98-irc"] .sidebar-item-emoji {
+  font-size: 10px !important;
+  font-family: 'Lucida Console', monospace !important;
+}
+
+/* Status dot */
+html[data-theme="win98-irc"] .status-dot.active {
+  background: #00FF00 !important;
+  border: 1px solid #008000;
+  box-shadow: none !important;
+  animation: none !important;
+  width: 5px !important; height: 5px !important;
+}
+
+/* Bottom */
+html[data-theme="win98-irc"] .sidebar-bottom {
+  background: #C0C0C0;
+  border-top: 1px solid #FFFFFF;
+  box-shadow: inset 0 1px 0 #808080;
+  padding: 3px !important;
+}
+html[data-theme="win98-irc"] .sidebar-btn {
+  color: #000000 !important;
+  background: #C0C0C0 !important;
+  border: 1px solid !important;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-radius: 0 !important;
+  width: 22px !important; height: 20px !important;
+}
+html[data-theme="win98-irc"] #theme-switcher {
+  border: 2px solid !important;
+  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  border-radius: 0 !important;
+  background: #FFFFFF !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  padding: 2px !important;
+}
+
+/* ═══ MAIN: IRC Chat Window ═══ */
+html[data-theme="win98-irc"] .main {
+  background: #C0C0C0;
+}
+
+/* Channel bar */
+html[data-theme="win98-irc"] .channel-header {
+  background: #C0C0C0 !important;
+  border-bottom: none !important;
+  backdrop-filter: none !important;
+  padding: 1px 4px !important;
+  box-shadow: inset 0 -1px 0 #808080, inset 0 -2px 0 #404040,
+              inset 0 1px 0 #FFFFFF;
+  min-height: 24px;
+}
+html[data-theme="win98-irc"] .channel-title {
+  font-family: Tahoma, sans-serif !important;
+  font-weight: 400 !important;
+  font-size: 11px !important;
+}
+html[data-theme="win98-irc"] .channel-desc {
+  font-size: 11px !important;
+  color: #808080 !important;
+  font-family: 'Lucida Console', monospace !important;
+}
+
+/* ─── IRC Messages: monospaced, nick-colored, timestamped ─── */
+html[data-theme="win98-irc"] .messages {
+  background: #FFFFFF;
+  border: 2px solid;
+  border-color: #808080 #FFFFFF #FFFFFF #808080;
+  margin: 2px 3px;
+  padding: 4px !important;
+  box-shadow: inset 1px 1px 0 #404040;
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+}
+
+html[data-theme="win98-irc"] .message {
+  padding: 0 !important;
+  gap: 0 !important;
+  border-bottom: none !important;
+  display: block !important;
+  animation: irc-join 0.2s ease-out;
+}
+
+/* Hide the avatar column — IRC doesn't have avatars */
+html[data-theme="win98-irc"] .message-avatar {
+  display: none !important;
+}
+
+/* IRC-style message layout: [time] <nick> message */
+html[data-theme="win98-irc"] .message-content {
+  display: block !important;
+}
+html[data-theme="win98-irc"] .message-header {
+  display: inline !important;
+  margin-bottom: 0 !important;
+}
+html[data-theme="win98-irc"] .message-author {
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+}
+/* Nick colors — rotating through classic mIRC palette */
+html[data-theme="win98-irc"] .message:nth-child(7n+1) .message-author { color: #0000FF !important; }
+html[data-theme="win98-irc"] .message:nth-child(7n+2) .message-author { color: #FF0000 !important; }
+html[data-theme="win98-irc"] .message:nth-child(7n+3) .message-author { color: #009300 !important; }
+html[data-theme="win98-irc"] .message:nth-child(7n+4) .message-author { color: #9C009C !important; }
+html[data-theme="win98-irc"] .message:nth-child(7n+5) .message-author { color: #FF7F00 !important; }
+html[data-theme="win98-irc"] .message:nth-child(7n+6) .message-author { color: #009393 !important; }
+html[data-theme="win98-irc"] .message:nth-child(7n) .message-author { color: #7F0000 !important; }
+
+/* Author gets angle brackets like IRC */
+html[data-theme="win98-irc"] .message-author::before { content: '<'; color: #808080; font-weight: 400; }
+html[data-theme="win98-irc"] .message-author::after { content: '>'; color: #808080; font-weight: 400; }
+
+/* Time in square brackets */
+html[data-theme="win98-irc"] .message-time {
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  font-size: 12px !important;
+  color: #808080 !important;
+  order: -1 !important;
+}
+html[data-theme="win98-irc"] .message-time::before { content: '['; }
+html[data-theme="win98-irc"] .message-time::after { content: ']'; }
+
+/* Hide badges — IRC doesn't have them */
+html[data-theme="win98-irc"] .message-header .badge {
+  display: none !important;
+}
+
+/* Message text inline after nick */
+html[data-theme="win98-irc"] .message-text {
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  font-size: 12px !important;
+  line-height: 1.4 !important;
+  color: #000000 !important;
+  display: inline !important;
+  margin-left: 4px;
+}
+html[data-theme="win98-irc"] .message-text strong { color: #000080 !important; }
+html[data-theme="win98-irc"] .message-text code {
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  background: #FFFFE0 !important;
+  border: none !important;
+  padding: 0 2px;
+  font-size: 12px !important;
+}
+
+/* System messages as IRC joins/parts */
+html[data-theme="win98-irc"] .message-system {
+  padding: 0 !important;
+}
+html[data-theme="win98-irc"] .message-system-inner {
+  padding: 0 !important;
+  gap: 0 !important;
+}
+html[data-theme="win98-irc"] .message-system-line {
+  display: none !important;
+}
+html[data-theme="win98-irc"] .message-system-text {
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  color: #008000 !important;
+  font-size: 12px !important;
+  white-space: normal !important;
+}
+html[data-theme="win98-irc"] .message-system-text::before {
+  content: '*** ';
+  color: #008000;
+}
+
+/* Typing as IRC /me action */
+html[data-theme="win98-irc"] .typing-indicator {
+  color: #9C009C !important;
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  font-size: 12px !important;
+  font-style: normal !important;
+  padding: 0 4px !important;
+}
+html[data-theme="win98-irc"] .typing-indicator::before {
+  content: '* ';
+}
+html[data-theme="win98-irc"] .typing-dots {
+  display: none !important;
+}
+
+/* ─── Composer: IRC command line ─── */
+html[data-theme="win98-irc"] .composer {
+  background: #C0C0C0 !important;
+  border-top: 1px solid #FFFFFF !important;
+  box-shadow: inset 0 1px 0 #808080;
+  padding: 2px 3px 3px !important;
+}
+html[data-theme="win98-irc"] .composer-inner {
+  background: #FFFFFF !important;
+  border: 2px solid !important;
+  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  border-radius: 0 !important;
+  padding: 1px 4px !important;
+  box-shadow: inset 1px 1px 0 #404040;
+}
+html[data-theme="win98-irc"] .composer-input {
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  font-size: 12px !important;
+  color: #000000 !important;
+  min-height: 16px !important;
+}
+html[data-theme="win98-irc"] .composer-input::placeholder {
+  color: #808080 !important;
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+}
+html[data-theme="win98-irc"] .composer-send {
+  display: none !important;
+}
+
+/* ═══ AGENT PANEL: mIRC Whois ═══ */
+html[data-theme="win98-irc"] .agent-panel {
+  background: #C0C0C0 !important;
+  border-left: 2px solid !important;
+  border-left-color: #FFFFFF !important;
+  box-shadow: inset 1px 0 0 #808080;
+  animation: win98-boot 0.2s ease-out;
+  width: 280px !important;
+}
+html[data-theme="win98-irc"] .agent-panel-header {
+  background: linear-gradient(90deg, #000080 0%, #1084D0 100%) !important;
+  border-bottom: none !important;
+  padding: 3px 4px 3px 6px !important;
+  min-height: 22px;
+}
+html[data-theme="win98-irc"] .agent-panel-header span {
+  color: #FFFFFF !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+html[data-theme="win98-irc"] .agent-panel-close {
+  background: #C0C0C0 !important;
+  border: 1px solid !important;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  color: #000000 !important;
+  width: 16px !important; height: 14px !important;
+  border-radius: 0 !important;
+}
+html[data-theme="win98-irc"] .agent-panel-close svg {
+  width: 8px !important; height: 8px !important;
+}
+html[data-theme="win98-irc"] .agent-panel-body {
+  padding: 6px !important;
+  font-family: 'Lucida Console', 'Courier New', monospace !important;
+  font-size: 12px !important;
+}
+html[data-theme="win98-irc"] .agent-panel-avatar {
+  display: none !important;
+}
+html[data-theme="win98-irc"] .agent-panel-name {
+  font-family: 'Lucida Console', monospace !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #0000FF !important;
+}
+html[data-theme="win98-irc"] .agent-panel-name::before {
+  content: '/whois ';
+  color: #808080;
+  font-weight: 400;
+}
+html[data-theme="win98-irc"] .agent-panel-role {
+  font-family: 'Lucida Console', monospace !important;
+  font-size: 12px !important;
+  color: #808080 !important;
+}
+html[data-theme="win98-irc"] .agent-panel-section {
+  border: none !important;
+  padding: 4px 0 !important;
+  margin-bottom: 4px !important;
+  border-top: 1px solid #C0C0C0;
+}
+html[data-theme="win98-irc"] .agent-panel-section-title {
+  font-family: 'Lucida Console', monospace !important;
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: #808080 !important;
+  border-bottom: none !important;
+}
+html[data-theme="win98-irc"] .agent-panel-stat {
+  font-family: 'Lucida Console', monospace !important;
+  font-size: 12px !important;
+}
+html[data-theme="win98-irc"] .agent-panel-skill {
+  border-radius: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  font-family: 'Lucida Console', monospace !important;
+  font-size: 12px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  color: #009393 !important;
+}
+html[data-theme="win98-irc"] .agent-panel-skill::before {
+  content: '#';
+  color: #808080;
+}
+
+/* ═══ BADGES ═══ */
+html[data-theme="win98-irc"] .badge {
+  font-family: 'Lucida Console', monospace !important;
+  border-radius: 0 !important;
+  font-size: 10px !important;
+  display: none !important;
+}
+
+/* ═══ BUTTONS ═══ */
+html[data-theme="win98-irc"] .btn { transition: none !important; transform: none !important; }
+html[data-theme="win98-irc"] .btn:hover { transform: none !important; }
+html[data-theme="win98-irc"] .btn-primary {
+  background: #C0C0C0 !important;
+  border: 2px solid !important;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-radius: 0 !important;
+  color: #000000 !important;
+  box-shadow: 1px 1px 0 #000000 !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  padding: 4px 16px !important;
+}
+html[data-theme="win98-irc"] .btn-primary:active {
+  border-color: #404040 #FFFFFF #FFFFFF #404040 !important;
+  box-shadow: none !important;
+}
+html[data-theme="win98-irc"] .btn-ghost {
+  border: 2px solid !important;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  border-radius: 0 !important;
+  background: #C0C0C0 !important;
+  color: #000000 !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+}
+
+/* ═══ CARDS & INPUTS ═══ */
+html[data-theme="win98-irc"] .card {
+  border-radius: 0 !important;
+  border: 2px solid !important;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF !important;
+  background: #C0C0C0 !important;
+}
+html[data-theme="win98-irc"] .input {
+  border: 2px solid !important;
+  border-color: #808080 #FFFFFF #FFFFFF #808080 !important;
+  border-radius: 0 !important;
+  font-family: 'Lucida Console', monospace !important;
+  font-size: 12px !important;
+  height: 22px !important;
+}
+
+/* ═══ SCROLLBAR ═══ */
+html[data-theme="win98-irc"] ::-webkit-scrollbar { width: 16px; height: 16px; }
+html[data-theme="win98-irc"] ::-webkit-scrollbar-track {
+  background: #C0C0C0;
+  background-image:
+    linear-gradient(45deg, #A0A0A0 25%, transparent 25%),
+    linear-gradient(-45deg, #A0A0A0 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #A0A0A0 75%),
+    linear-gradient(-45deg, transparent 75%, #A0A0A0 75%);
+  background-size: 2px 2px;
+}
+html[data-theme="win98-irc"] ::-webkit-scrollbar-thumb {
+  background: #C0C0C0;
+  border: 2px solid;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF;
+}
+html[data-theme="win98-irc"] ::-webkit-scrollbar-button {
+  background: #C0C0C0;
+  border: 2px solid;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF;
+  width: 16px; height: 16px;
+}
+html[data-theme="win98-irc"] ::-webkit-scrollbar-corner { background: #C0C0C0; }
+
+/* ═══ ONBOARDING ═══ */
+html[data-theme="win98-irc"] .onboarding { background: #008080 !important; background-image: none !important; }
+html[data-theme="win98-irc"] .dot-grid { background-image: none !important; }
+html[data-theme="win98-irc"] .progress-dot.active { background: #000080 !important; }
+html[data-theme="win98-irc"] .progress-dot.inactive { background: #808080 !important; }
+html[data-theme="win98-irc"] .dict-word { font-family: Tahoma, sans-serif !important; font-style: normal !important; font-weight: 700 !important; }
+html[data-theme="win98-irc"] .welcome-tagline { font-family: Tahoma, sans-serif !important; font-style: normal !important; }
+html[data-theme="win98-irc"] .tagline-gradient { background: none !important; -webkit-text-fill-color: #000080 !important; }
+html[data-theme="win98-irc"] .step-title { font-family: Tahoma, sans-serif !important; font-style: normal !important; font-size: 14px !important; }
+html[data-theme="win98-irc"] .emoji-backdrop { display: none !important; }
+html[data-theme="win98-irc"] .launch-screen { background: #008080 !important; }
+html[data-theme="win98-irc"] .launch-text { font-family: Tahoma, sans-serif !important; font-style: normal !important; color: #FFFFFF !important; }
+html[data-theme="win98-irc"] .launch-sub { color: #C0C0C0 !important; }
+
+/* No smooth animations */
+html[data-theme="win98-irc"] .animate-fade {
+  animation: irc-join 0.1s ease-out !important;
+}
