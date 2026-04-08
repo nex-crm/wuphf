@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="themes/slack.css" />
+<link rel="stylesheet" href="themes/slack-dark.css" />
 <link rel="stylesheet" href="themes/windows-98.css" />
 <style>
 /* ═══════════════════════════════════════════════════════════════
@@ -374,6 +375,45 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-status { padding: 4px 0 4px 48px; }
 .message-status-text { font-size: 13px; font-style: italic; color: var(--text-tertiary); }
 
+/* ─── Human message cards (#7) ─── */
+.message-card-human { border-left: 3px solid var(--blue); background: var(--blue-bg); border-radius: var(--radius-md); padding: 12px 14px; margin-top: 4px; }
+.message-card-human.action { border-left-color: var(--green); background: var(--green-bg); }
+.message-card-human-icon { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 4px; }
+.message-card-human.action .message-card-human-icon { color: var(--green); }
+.message-card-human:not(.action) .message-card-human-icon { color: var(--blue); }
+/* ─── Automation message cards (#8) ─── */
+.message-card-auto { border: 1px solid var(--border); background: var(--bg); border-radius: var(--radius-md); padding: 10px 14px; margin-top: 4px; opacity: 0.85; }
+.message-card-auto-icon { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-tertiary); margin-bottom: 4px; }
+/* ─── Routing/stage cards (#9) ─── */
+.message-card-routing { display: flex; align-items: center; gap: 8px; padding: 6px 0 6px 48px; }
+.message-card-routing-icon { font-size: 14px; flex-shrink: 0; }
+.message-card-routing-text { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
+/* ─── Quick jump modal (#29) ─── */
+.quick-jump-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); backdrop-filter: blur(4px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 20vh; }
+.quick-jump-overlay.open { display: flex; }
+.quick-jump { width: 400px; max-width: 90vw; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 16px 48px rgba(59,47,47,0.18); overflow: hidden; animation: fadeIn 0.15s ease-out; }
+.quick-jump-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.quick-jump-header kbd { font-family: var(--font-mono); font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; color: var(--text-tertiary); }
+.quick-jump-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 15px; color: var(--text); outline: none; }
+.quick-jump-input::placeholder { color: var(--text-tertiary); }
+.quick-jump-list { max-height: 280px; overflow-y: auto; padding: 4px 0; }
+.quick-jump-item { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 13px; transition: background 0.08s; }
+.quick-jump-item:hover, .quick-jump-item.selected { background: var(--accent-bg); }
+.quick-jump-item-hash { font-weight: 700; color: var(--text-tertiary); width: 20px; text-align: center; }
+.quick-jump-item-name { font-weight: 500; color: var(--text); }
+.quick-jump-item-shortcut { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+/* ─── Thread expand/collapse toggle (#19) ─── */
+.thread-toggle-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-family: var(--font-sans); color: var(--text-tertiary); background: none; border: 1px solid var(--border); border-radius: var(--radius-full); padding: 2px 10px; cursor: pointer; transition: all 0.15s; margin-left: 8px; }
+.thread-toggle-btn:hover { border-color: var(--border-dark); color: var(--text-secondary); }
+/* ─── Pause confirmation ─── */
+.pause-confirm { display: flex; align-items: center; gap: 8px; padding: 8px 20px; background: var(--yellow-bg); border-top: 1px solid var(--border); font-size: 13px; color: var(--yellow); animation: fadeIn 0.15s ease-out; }
+.pause-confirm-text { flex: 1; font-weight: 500; }
+.pause-confirm-btn { padding: 4px 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; border: 1px solid var(--yellow); cursor: pointer; font-family: var(--font-sans); transition: all 0.15s; }
+.pause-confirm-yes { background: var(--yellow); color: white; }
+.pause-confirm-no { background: transparent; color: var(--yellow); }
+/* ─── Thread reply-to indicator (#20) ─── */
+.thread-reply-to { font-size: 11px; color: var(--text-tertiary); font-style: italic; margin-bottom: 2px; }
+
 .agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
 .agent-panel.open { display: flex; }
 .agent-panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
@@ -424,6 +464,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .cmd-palette-item-desc { font-size: 11px; color: var(--text-tertiary); }
 .cmd-palette-item-shortcut { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
 .cmd-palette-empty { padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
+.cmd-palette-item-highlight { background: var(--yellow-bg); color: var(--yellow); padding: 0 1px; border-radius: 2px; }
 .cmd-palette-footer { display: flex; align-items: center; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); }
 .cmd-palette-footer kbd { font-family: var(--font-mono); font-size: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px; }
 
@@ -823,6 +864,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <select id="theme-switcher" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
           <option value="">Editorial</option>
           <option value="slack">Slack</option>
+          <option value="slack-dark">Slack (Dark)</option>
           <option value="windows-98">Windows 98</option>
         </select>
       </div>
@@ -853,7 +895,9 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <div class="messages" id="messages"></div>
       <div class="app-panel" id="app-tasks"></div>
       <div class="app-panel" id="app-requests"></div>
+      <div class="app-panel" id="app-policies"></div>
       <div class="app-panel" id="app-calendar"></div>
+      <div class="app-panel" id="app-skills"></div>
       <div class="recovery-panel" id="recovery-panel"></div>
       <div class="typing-indicator" id="typing-indicator" style="display:none;padding:0 20px 8px;">
         <div class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
@@ -919,6 +963,17 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <span><kbd>&crarr;</kbd> select</span>
         <span><kbd>esc</kbd> close</span>
       </div>
+    </div>
+  </div>
+
+  <!-- Quick Jump Modal (#29) -->
+  <div class="quick-jump-overlay" id="quick-jump-overlay">
+    <div class="quick-jump">
+      <div class="quick-jump-header">
+        <kbd>Ctrl+G</kbd>
+        <input class="quick-jump-input" id="quick-jump-input" placeholder="Jump to channel..." autocomplete="off" />
+      </div>
+      <div class="quick-jump-list" id="quick-jump-list"></div>
     </div>
   </div>
 </div>
@@ -1234,7 +1289,9 @@ var cachedTasks = []; // latest /tasks data
 var SIDEBAR_APPS = [
   { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
   { id: 'requests', icon: '\uD83D\uDCCB', name: 'Requests' },
+  { id: 'policies', icon: '\uD83D\uDEE1', name: 'Policies' },
   { id: 'calendar', icon: '\uD83D\uDCC5', name: 'Calendar' },
+  { id: 'skills',   icon: '\u26A1', name: 'Skills' },
   { id: 'recover',  icon: '\uD83D\uDD0D', name: 'Recovery' },
 ];
 
@@ -1608,7 +1665,7 @@ function switchApp(appId) {
   var messagesEl = document.getElementById('messages');
   var typingEl = document.getElementById('typing-indicator');
   var composerEl = document.querySelector('.composer');
-  ['app-tasks', 'app-requests', 'app-calendar'].forEach(function(pid) {
+  ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills'].forEach(function(pid) {
     var p = document.getElementById(pid);
     if (p) { p.classList.remove('active'); p.style.display = 'none'; }
   });
@@ -1641,7 +1698,9 @@ function renderAppContent(appId) {
   panel.textContent = '';
   if (appId === 'tasks') renderTasksApp(panel);
   else if (appId === 'requests') renderRequestsApp(panel);
+  else if (appId === 'policies') renderPoliciesApp(panel);
   else if (appId === 'calendar') renderCalendarApp(panel);
+  else if (appId === 'skills') renderSkillsApp(panel);
 }
 function renderTasksApp(panel) {
   if (!brokerConnected) {
@@ -2410,6 +2469,7 @@ var SLASH_COMMANDS = [
   { name: '/connect', desc: 'Connect integration', icon: '🔗' },
   { name: '/1o1', desc: 'Start 1:1 session', icon: '🤝' },
   { name: '/recover', desc: 'Show workspace recovery info', icon: '🔍' },
+  { name: '/search', desc: 'Search messages', icon: '🔎' },
 ];
 
 function updateAutocomplete() {
@@ -2621,6 +2681,9 @@ function handleSlashCommand(input) {
       break;
     case '/recover':
       openRecoveryView();
+      break;
+    case '/search':
+      openSearchMode(args || '');
       break;
     case '/1o1':
       if (args) {
