@@ -337,6 +337,12 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .date-separator-line { height: 1px; flex: 1; background: var(--border); }
 .date-separator-text { font-size: 12px; font-weight: 600; color: var(--text-tertiary); white-space: nowrap; }
 
+/* ─── Reactions ─── */
+.message-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.reaction-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-full); border: 1px solid var(--border); background: var(--bg); font-size: 12px; cursor: pointer; transition: all 0.15s; font-family: var(--font-sans); }
+.reaction-pill:hover { border-color: var(--accent); background: var(--accent-bg); }
+.reaction-pill-count { font-weight: 600; color: var(--text-secondary); }
+
 .agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
 .agent-panel.open { display: flex; }
 .agent-panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
@@ -900,6 +906,10 @@ var WuphfAPI = (function() {
     return get('/tasks');
   }
 
+  function toggleReaction(msgId, emoji, channel) {
+    return post('/messages/react', { message_id: msgId, emoji: emoji, channel: channel || 'general' });
+  }
+
   return {
     init: init,
     get: get,
@@ -912,7 +922,8 @@ var WuphfAPI = (function() {
     answerRequest: answerRequest,
     getHealth: getHealth,
     getThreadMessages: getThreadMessages,
-    getTasks: getTasks
+    getTasks: getTasks,
+    toggleReaction: toggleReaction
   };
 })();
 
@@ -1548,6 +1559,28 @@ function appendMessageToContainer(msg, container, opts) {
 
   content.appendChild(header);
   content.appendChild(textDiv);
+
+  // Reactions display
+  if (msg.reactions && msg.reactions.length > 0) {
+    var reactionsDiv = document.createElement('div');
+    reactionsDiv.className = 'message-reactions';
+    msg.reactions.forEach(function(r) {
+      var pill = document.createElement('button');
+      pill.className = 'reaction-pill';
+      var emojiSpan = document.createElement('span');
+      emojiSpan.textContent = r.emoji;
+      var countSpan = document.createElement('span');
+      countSpan.className = 'reaction-pill-count';
+      countSpan.textContent = r.count || 1;
+      pill.appendChild(emojiSpan);
+      pill.appendChild(countSpan);
+      pill.addEventListener('click', function() {
+        WuphfAPI.toggleReaction(msg.id, r.emoji, currentChannel);
+      });
+      reactionsDiv.appendChild(pill);
+    });
+    content.appendChild(reactionsDiv);
+  }
 
   // Thread link (shows "N replies" if this message has replies)
   if (container.id === 'messages') {
