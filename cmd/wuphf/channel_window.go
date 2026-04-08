@@ -8,7 +8,8 @@ import (
 )
 
 func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []renderedLine {
-	needsYou := buildNeedsYouLines(m.requests, contentWidth)
+	workspace := m.currentWorkspaceUIState()
+	needsYou := workspace.needsYouLines(contentWidth)
 	bodyHeight := msgH
 	if len(needsYou) > 0 && bodyHeight-len(needsYou) >= 8 {
 		bodyHeight -= len(needsYou)
@@ -19,6 +20,9 @@ func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []rendere
 	if m.isOneOnOne() {
 		if m.activeApp == officeAppRecovery {
 			return m.currentMainLines(contentWidth)
+		}
+		if m.activeApp == officeAppInbox || m.activeApp == officeAppOutbox {
+			return append(needsYou, m.currentMainLines(contentWidth)...)
 		}
 		if len(m.messages) == 0 {
 			return append(needsYou, m.buildDirectFeedLines(contentWidth)...)
@@ -38,7 +42,7 @@ func (m channelModel) currentMainViewportLines(contentWidth, msgH int) []rendere
 
 func buildOfficeViewportSuffix(messages []brokerMessage, expanded map[string]bool, contentWidth, msgH, scroll int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int, members []channelMember, tasks []channelTask, actions []channelAction) []renderedLine {
 	tail := buildLiveWorkLines(members, tasks, actions, contentWidth, "")
-	return buildOfficeViewportSuffixWithTail(messages, expanded, contentWidth, msgH, scroll, threadsDefaultExpand, unreadAnchorID, unreadCount, tail)
+	return buildVirtualizedOfficeViewport(messages, expanded, contentWidth, msgH, scroll, threadsDefaultExpand, unreadAnchorID, unreadCount, tail)
 }
 
 func buildOneOnOneViewportSuffix(messages []brokerMessage, actions []channelAction, tasks []channelTask, members []channelMember, expanded map[string]bool, contentWidth, msgH, scroll int, agentName, agentSlug, unreadAnchorID string, unreadCount int) []renderedLine {
@@ -56,61 +60,11 @@ func buildOneOnOneViewportSuffix(messages []brokerMessage, actions []channelActi
 		}
 		return lines
 	}
-	return buildOfficeViewportSuffixWithTail(messages, expanded, contentWidth, msgH, scroll, true, unreadAnchorID, unreadCount, tail)
-}
-
-func buildOfficeViewportSuffixWithTail(messages []brokerMessage, expanded map[string]bool, contentWidth, msgH, scroll int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int, tail []renderedLine) []renderedLine {
-	limit := msgH + scroll
-	if limit < 1 {
-		limit = 1
-	}
-
-	if len(messages) == 0 {
-		lines := append(buildOfficeMessageLines(messages, expanded, contentWidth, threadsDefaultExpand, unreadAnchorID, unreadCount), tail...)
-		if len(lines) > limit {
-			return cloneRenderedLines(lines[len(lines)-limit:])
-		}
-		return lines
-	}
-
-	threaded := officeThreadedMessages(messages, expanded, threadsDefaultExpand)
-	collected := append([]renderedLine(nil), tail...)
-	if len(collected) > limit {
-		collected = cloneRenderedLines(collected[len(collected)-limit:])
-	}
-	if len(collected) >= limit {
-		return collected
-	}
-
-	for i := len(threaded) - 1; i >= 0; i-- {
-		block := renderOfficeMessageBlock(threaded[i], contentWidth, unreadAnchorID, unreadCount)
-		if i == 0 {
-			block = append([]renderedLine{{Text: renderDateSeparator(contentWidth, "Today")}}, block...)
-		}
-		collected = prependRenderedLines(collected, block)
-		if len(collected) > limit {
-			collected = cloneRenderedLines(collected[len(collected)-limit:])
-		}
-		if len(collected) >= limit {
-			return collected
-		}
-	}
-
-	return collected
+	return buildVirtualizedOfficeViewport(messages, expanded, contentWidth, msgH, scroll, true, unreadAnchorID, unreadCount, tail)
 }
 
 func officeThreadedMessages(messages []brokerMessage, expanded map[string]bool, threadsDefaultExpand bool) []threadedMessage {
-	if !threadsDefaultExpand {
-		for _, msg := range messages {
-			if msg.ReplyTo != "" || !hasThreadReplies(messages, msg.ID) {
-				continue
-			}
-			if _, ok := expanded[msg.ID]; !ok {
-				expanded[msg.ID] = false
-			}
-		}
-	}
-	return flattenThreadMessages(messages, expanded)
+	return cachedThreadedMessages(messages, expanded, threadsDefaultExpand)
 }
 
 func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []renderedLine {

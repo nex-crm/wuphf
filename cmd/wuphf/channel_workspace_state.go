@@ -7,9 +7,28 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/team"
 )
 
+type workspaceReadinessLevel string
+
+const (
+	workspaceReadinessReady   workspaceReadinessLevel = "ready"
+	workspaceReadinessWarn    workspaceReadinessLevel = "warn"
+	workspaceReadinessPreview workspaceReadinessLevel = "preview"
+)
+
+type workspaceReadinessState struct {
+	Level    workspaceReadinessLevel
+	Headline string
+	Detail   string
+	NextStep string
+}
+
 type workspaceUIState struct {
+	Runtime         team.RuntimeSnapshot
+	Readiness       workspaceReadinessState
+	CurrentApp      officeApp
 	BrokerConnected bool
 	Direct          bool
 	Channel         string
@@ -32,7 +51,10 @@ type workspaceUIState struct {
 
 func (m channelModel) currentWorkspaceUIState() workspaceUIState {
 	snapshot := m.currentRuntimeSnapshot()
+	awaySummary := resolveWorkspaceAwaySummary(strings.TrimSpace(m.awaySummary), m.unreadCount, snapshot.Recovery)
 	state := workspaceUIState{
+		Runtime:         snapshot,
+		CurrentApp:      m.activeApp,
 		BrokerConnected: m.brokerConnected,
 		Direct:          m.isOneOnOne(),
 		Channel:         m.activeChannel,
@@ -43,14 +65,14 @@ func (m channelModel) currentWorkspaceUIState() workspaceUIState {
 		OpenRequests:    len(snapshot.Requests),
 		IsolatedCount:   countIsolatedRuntimeTasks(snapshot.Tasks),
 		UnreadCount:     m.unreadCount,
-		AwaySummary:     strings.TrimSpace(m.currentAwaySummary()),
+		AwaySummary:     awaySummary,
 		Focus:           trimRecoverySentence(snapshot.Recovery.Focus),
 		NoNex:           config.ResolveNoNex(),
 		APIConfigured:   strings.TrimSpace(config.ResolveAPIKey("")) != "",
 	}
 
-	for _, req := range m.requests {
-		if isOpenInterviewStatus(req.Status) && (req.Blocking || req.Required) {
+	for _, req := range snapshot.Requests {
+		if runtimeRequestIsOpen(req) && (req.Blocking || req.Required) {
 			state.BlockingCount++
 		}
 	}
@@ -77,7 +99,124 @@ func (m channelModel) currentWorkspaceUIState() workspaceUIState {
 	} else {
 		state.NextStep = "Tag a teammate, open /switcher, or use /recover to regain context."
 	}
+	state.Readiness = deriveWorkspaceReadiness(state, m.doctor)
 	return state
+}
+
+func resolveWorkspaceAwaySummary(cached string, unreadCount int, recovery team.SessionRecovery) string {
+	if unreadCount == 0 {
+		return ""
+	}
+	cached = strings.TrimSpace(cached)
+	if cached != "" {
+		return cached
+	}
+	return summarizeAwayRecovery(unreadCount, recovery)
+}
+
+func runtimeRequestIsOpen(req team.RuntimeRequest) bool {
+	status := strings.ToLower(strings.TrimSpace(req.Status))
+	return status == "" || status == "pending" || status == "open" || status == "draft"
+}
+
+func deriveWorkspaceReadiness(state workspaceUIState, doctor *channelDoctorReport) workspaceReadinessState {
+	if !state.BrokerConnected {
+		return workspaceReadinessState{
+			Level:    workspaceReadinessPreview,
+			Headline: "Offline preview",
+			Detail:   "The workspace is showing manifest-backed context, not the live tmux office runtime.",
+			NextStep: "Launch WUPHF to attach the live office, or run /doctor to inspect tmux and setup readiness.",
+		}
+	}
+	if state.NoNex {
+		return workspaceReadinessState{
+			Level:    workspaceReadinessReady,
+			Headline: "Local-only runtime",
+			Detail:   "The office is live, but Nex-backed memory and integrations are disabled for this run.",
+			NextStep: "Restart without --no-nex when you want memory, integrations, and provider-backed context.",
+		}
+	}
+	if !state.APIConfigured {
+		return workspaceReadinessState{
+			Level:    workspaceReadinessWarn,
+			Headline: "Finish setup",
+			Detail:   "The office runtime is up, but Nex-backed context and integrations are not configured yet.",
+			NextStep: "Run /init to finish API-key setup, or /doctor to inspect the remaining blockers.",
+		}
+	}
+	if doctor != nil {
+		ok, warn, fail := doctor.counts()
+		switch {
+		case fail > 0:
+			return workspaceReadinessState{
+				Level:    workspaceReadinessWarn,
+				Headline: "Runtime blocked",
+				Detail:   doctor.StatusLine(),
+				NextStep: firstDoctorNextStep(*doctor, "/doctor shows the full readiness report."),
+			}
+		case warn > 0:
+			return workspaceReadinessState{
+				Level:    workspaceReadinessWarn,
+				Headline: "Runtime has warnings",
+				Detail:   doctor.StatusLine(),
+				NextStep: firstDoctorNextStep(*doctor, fmt.Sprintf("%d checks are healthy; inspect /doctor for the warnings.", ok)),
+			}
+		}
+	}
+	if state.BlockingCount > 0 && state.NeedsYou != nil {
+		return workspaceReadinessState{
+			Level:    workspaceReadinessWarn,
+			Headline: "Waiting on you",
+			Detail:   fmt.Sprintf("The runtime is healthy, but %s is blocking the team.", state.NeedsYou.ID),
+			NextStep: fmt.Sprintf("Answer %s or open /recover before delegating more work.", state.NeedsYou.ID),
+		}
+	}
+	return workspaceReadinessState{
+		Level:    workspaceReadinessReady,
+		Headline: "Ready to work",
+		Detail:   "The live office runtime is attached and ready for collaboration.",
+		NextStep: "Use /switcher to move through the office, or /recover to regain context before replying.",
+	}
+}
+
+func firstDoctorNextStep(report channelDoctorReport, fallback string) string {
+	for _, check := range report.Checks {
+		if strings.TrimSpace(check.NextStep) == "" {
+			continue
+		}
+		if check.Severity == doctorFail || check.Severity == doctorWarn {
+			return check.NextStep
+		}
+	}
+	return fallback
+}
+
+func (s workspaceUIState) readinessCard() (title, body, accent string, extra []string) {
+	accent = "#15803D"
+	title = subtlePill("ready", "#DCFCE7", "#166534") + " " + lipgloss.NewStyle().Bold(true).Render(s.Readiness.Headline)
+	switch s.Readiness.Level {
+	case workspaceReadinessPreview:
+		accent = "#D97706"
+		title = subtlePill("preview", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Render(s.Readiness.Headline)
+	case workspaceReadinessWarn:
+		accent = "#B45309"
+		title = subtlePill("attention", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Render(s.Readiness.Headline)
+	}
+	body = s.Readiness.Detail
+	if body == "" {
+		body = "Workspace state is current."
+	}
+	if strings.TrimSpace(s.Readiness.NextStep) != "" {
+		extra = append(extra, s.Readiness.NextStep)
+	}
+	if strings.TrimSpace(s.Focus) != "" {
+		extra = append(extra, "Focus: "+s.Focus)
+	}
+	return title, body, accent, extra
+}
+
+func (s workspaceUIState) needsYouLines(contentWidth int) []renderedLine {
+	return buildNeedsYouLinesForRequest(s.NeedsYou, contentWidth)
 }
 
 func (s workspaceUIState) headerMeta() string {
@@ -92,6 +231,9 @@ func (s workspaceUIState) headerMeta() string {
 		if s.BlockingCount > 0 {
 			parts = append(parts, fmt.Sprintf("%d waiting on you", s.BlockingCount))
 		}
+		if strings.TrimSpace(s.Readiness.Headline) != "" && s.Readiness.Level != workspaceReadinessReady {
+			parts = append(parts, strings.ToLower(s.Readiness.Headline))
+		}
 		if strings.TrimSpace(s.Focus) != "" {
 			parts = append(parts, "focus: "+s.Focus)
 		}
@@ -104,6 +246,9 @@ func (s workspaceUIState) headerMeta() string {
 		fmt.Sprintf("%d teammates", s.PeerCount),
 		fmt.Sprintf("%d running", s.RunningTasks),
 		fmt.Sprintf("%d open requests", s.OpenRequests),
+	}
+	if strings.TrimSpace(s.Readiness.Headline) != "" && s.Readiness.Level != workspaceReadinessReady {
+		parts = append(parts, strings.ToLower(s.Readiness.Headline))
 	}
 	if s.BlockingCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d waiting on you", s.BlockingCount))
@@ -120,6 +265,9 @@ func (s workspaceUIState) defaultStatusLine(scrollHint string) string {
 		if s.BrokerConnected {
 			label = "direct session live"
 		}
+		if s.Readiness.Level == workspaceReadinessWarn {
+			label = "direct session attention"
+		}
 		runtimeHint := "ready"
 		if strings.TrimSpace(s.Focus) != "" {
 			runtimeHint = s.Focus
@@ -133,6 +281,9 @@ func (s workspaceUIState) defaultStatusLine(scrollHint string) string {
 	}
 	if s.BlockingCount > 0 && s.NeedsYou != nil {
 		return fmt.Sprintf(" Needs you now │ %s │ /request answer %s │ /recover", truncateText(s.NeedsYou.TitleOrQuestion(), 72), s.NeedsYou.ID)
+	}
+	if s.Readiness.Level == workspaceReadinessWarn && strings.TrimSpace(s.Readiness.NextStep) != "" {
+		return fmt.Sprintf(" Attention │ %s │ %s │ /doctor", truncateText(s.Readiness.Headline, 32), truncateText(s.Readiness.NextStep, 72))
 	}
 	if strings.TrimSpace(s.AwaySummary) != "" && s.UnreadCount > 0 {
 		return fmt.Sprintf(" While away │ %s │ %s │ /recover", truncateText(s.AwaySummary, 72), scrollHint)
@@ -153,6 +304,8 @@ func (s workspaceUIState) sidebarSummaryLine(activeApp officeApp) string {
 	switch {
 	case s.BlockingCount > 0:
 		parts = append(parts, fmt.Sprintf("%d waiting", s.BlockingCount))
+	case s.Readiness.Level == workspaceReadinessWarn:
+		parts = append(parts, "attention")
 	case s.RunningTasks > 0:
 		parts = append(parts, fmt.Sprintf("%d running", s.RunningTasks))
 	case s.OpenRequests > 0:
@@ -166,9 +319,11 @@ func (s workspaceUIState) sidebarSummaryLine(activeApp officeApp) string {
 func (s workspaceUIState) sidebarHintLine() string {
 	switch {
 	case !s.BrokerConnected:
-		return "/doctor explains tmux, provider, and setup readiness"
+		return s.Readiness.NextStep
 	case s.BlockingCount > 0 && s.NeedsYou != nil:
 		return fmt.Sprintf("Need you: %s · /request answer %s", s.NeedsYou.TitleOrQuestion(), s.NeedsYou.ID)
+	case s.Readiness.Level == workspaceReadinessWarn && strings.TrimSpace(s.Readiness.NextStep) != "":
+		return s.Readiness.NextStep
 	case strings.TrimSpace(s.AwaySummary) != "" && s.UnreadCount > 0:
 		return "While away: " + s.AwaySummary
 	case !s.NoNex && !s.APIConfigured:
@@ -225,29 +380,16 @@ func (m channelModel) buildOfficeIntroLines(contentWidth int) []renderedLine {
 		lines = append(lines, renderedLine{Text: "  " + line})
 	}
 
-	readinessBody := "The office is live and ready for real collaboration."
-	readinessAccent := "#15803D"
-	readinessTitle := subtlePill("ready", "#DCFCE7", "#166534") + " " + lipgloss.NewStyle().Bold(true).Render("Ready to work")
-	readinessExtra := []string{"Use /switcher to jump anywhere in the office."}
-	if !state.BrokerConnected {
-		readinessAccent = "#D97706"
-		readinessTitle = subtlePill("preview", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Render("Offline preview")
-		readinessBody = "You are looking at the manifest roster, not the live tmux-backed office."
-		readinessExtra = []string{"Launch WUPHF to connect the live office runtime.", "/doctor shows tmux, provider, and setup readiness."}
-	} else if state.NoNex {
+	readinessTitle, readinessBody, readinessAccent, readinessExtra := state.readinessCard()
+	if state.NoNex && state.BrokerConnected {
 		readinessExtra = append(readinessExtra, "Nex is disabled for this run; memory and integrations are local-only.")
-	} else if !state.APIConfigured {
-		readinessAccent = "#B45309"
-		readinessTitle = subtlePill("setup", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Render("Finish setup")
-		readinessBody = "The office is up, but Nex-backed memory and integrations are not configured yet."
-		readinessExtra = []string{"Run /init to finish API-key setup.", "/doctor explains what is still missing."}
 	}
 	for _, line := range renderRuntimeEventCard(contentWidth, readinessTitle, readinessBody, readinessAccent, readinessExtra) {
 		lines = append(lines, renderedLine{Text: "  " + line})
 	}
 
 	if state.NeedsYou != nil {
-		for _, line := range buildNeedsYouLines(m.requests, contentWidth) {
+		for _, line := range state.needsYouLines(contentWidth) {
 			lines = append(lines, line)
 		}
 	} else {
@@ -278,7 +420,8 @@ func (m channelModel) buildDirectIntroLines(contentWidth int) []renderedLine {
 	}
 
 	if !state.BrokerConnected {
-		for _, line := range renderRuntimeEventCard(contentWidth, subtlePill("preview", "#FEF3C7", "#92400E")+" "+lipgloss.NewStyle().Bold(true).Render("Direct preview only"), "The runtime is not attached yet, so this pane is a local preview of the direct session.", "#D97706", []string{"/doctor explains readiness.", "Launch WUPHF without stale tmux state to resume the live session."}) {
+		readinessTitle, readinessBody, readinessAccent, readinessExtra := state.readinessCard()
+		for _, line := range renderRuntimeEventCard(contentWidth, readinessTitle, readinessBody, readinessAccent, readinessExtra) {
 			lines = append(lines, renderedLine{Text: "  " + line})
 		}
 	} else {

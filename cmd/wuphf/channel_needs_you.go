@@ -11,6 +11,13 @@ func buildNeedsYouLines(requests []channelInterview, contentWidth int) []rendere
 	if !ok {
 		return nil
 	}
+	return buildNeedsYouLinesForRequest(&req, contentWidth)
+}
+
+func buildNeedsYouLinesForRequest(req *channelInterview, contentWidth int) []renderedLine {
+	if req == nil {
+		return nil
+	}
 
 	statusLabel := "needs your decision"
 	if !(req.Blocking || req.Required) {

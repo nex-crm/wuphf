@@ -873,13 +873,17 @@ func handleTeamRuntimeState(ctx context.Context, _ *mcp.CallToolRequest, args Te
 	}
 
 	snapshot := team.BuildRuntimeSnapshot(team.RuntimeSnapshotInput{
-		Channel:      taskChannel,
-		SessionMode:  mode,
-		DirectAgent:  directAgent,
-		Tasks:        convertRuntimeTasks(tasks),
-		Requests:     requests,
-		Recent:       recent,
-		Capabilities: team.DetectRuntimeCapabilities(),
+		Channel:     taskChannel,
+		SessionMode: mode,
+		DirectAgent: directAgent,
+		Tasks:       convertRuntimeTasks(tasks),
+		Requests:    requests,
+		Recent:      recent,
+		Capabilities: team.DetectRuntimeCapabilitiesWithOptions(team.CapabilityProbeOptions{
+			IncludeConnections: true,
+			ConnectionLimit:    5,
+			ConnectionTimeout:  3 * time.Second,
+		}),
 	})
 	return textResult(snapshot.FormatText()), snapshot, nil
 }

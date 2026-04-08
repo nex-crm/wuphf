@@ -21,7 +21,7 @@ func TestBuildOfficeIntroLinesUsesWorkspaceState(t *testing.T) {
 	if !strings.Contains(plain, "Ready to work") {
 		t.Fatalf("expected ready-to-work card, got %q", plain)
 	}
-	if !strings.Contains(plain, "Use /switcher to jump anywhere in the office.") {
+	if !strings.Contains(plain, "Use /switcher to move through the office, or /recover to regain context before replying.") {
 		t.Fatalf("expected switcher guidance, got %q", plain)
 	}
 }
@@ -36,7 +36,7 @@ func TestBuildOfficeIntroLinesShowsOfflinePreviewGuidance(t *testing.T) {
 	if !strings.Contains(plain, "Offline preview") {
 		t.Fatalf("expected offline preview messaging, got %q", plain)
 	}
-	if !strings.Contains(plain, "/doctor shows tmux, provider, and setup readiness.") {
+	if !strings.Contains(plain, "Launch WUPHF to attach the live office, or run /doctor to inspect tmux and setup readiness.") {
 		t.Fatalf("expected doctor guidance, got %q", plain)
 	}
 }
@@ -72,5 +72,29 @@ func TestCurrentHeaderMetaUsesWorkspaceStateForOfficeMessages(t *testing.T) {
 	}
 	if !strings.Contains(meta, "1 waiting on you") {
 		t.Fatalf("expected blocking request count in header meta, got %q", meta)
+	}
+}
+
+func TestCurrentWorkspaceUIStatePromotesDoctorWarningsIntoReadiness(t *testing.T) {
+	m := newChannelModel(false)
+	m.brokerConnected = true
+	m.activeChannel = "general"
+	m.doctor = &channelDoctorReport{
+		Checks: []doctorCheck{
+			{
+				Label:    "Connected accounts",
+				Severity: doctorWarn,
+				Detail:   "No accounts connected.",
+				NextStep: "Connect Gmail, CRM, or another account in the provider dashboard.",
+			},
+		},
+	}
+
+	state := m.currentWorkspaceUIState()
+	if state.Readiness.Level != workspaceReadinessWarn {
+		t.Fatalf("expected warning readiness, got %+v", state.Readiness)
+	}
+	if !strings.Contains(state.Readiness.NextStep, "Connect Gmail, CRM") {
+		t.Fatalf("expected doctor next step to flow into readiness, got %+v", state.Readiness)
 	}
 }
