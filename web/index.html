@@ -7,11 +7,8 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="themes/post-it-board.css" />
-<link rel="stylesheet" href="themes/interoffice-memo.css" />
-<link rel="stylesheet" href="themes/aol-messenger.css" />
+<link rel="stylesheet" href="themes/slack.css" />
 <link rel="stylesheet" href="themes/windows-98.css" />
-<link rel="stylesheet" href="themes/win98-irc.css" />
 <style>
 /* ═══════════════════════════════════════════════════════════════
    WUPHF Web — Design System
@@ -276,6 +273,29 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .composer-send { width: 32px; height: 32px; border: none; background: var(--accent); color: white; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
 .composer-send:hover { background: var(--accent-warm); }
 .composer-send:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ─── Thread Panel ─── */
+.thread-panel { width: 380px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; height: 100vh; overflow: hidden; }
+.thread-panel.open { display: flex; }
+.thread-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.thread-panel-title { font-size: 15px; font-weight: 700; }
+.thread-panel-close { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); }
+.thread-panel-close:hover { background: var(--bg); }
+.thread-panel-parent { padding: 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.thread-panel-divider { padding: 8px 16px; font-size: 12px; color: var(--text-tertiary); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.thread-panel-divider::before, .thread-panel-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.thread-panel-messages { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
+.thread-panel-composer { padding: 8px 12px 12px; border-top: 1px solid var(--border); }
+
+/* ─── Message thread indicators ─── */
+.message-actions { display: none; position: absolute; top: -4px; right: 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 2px; gap: 2px; z-index: 5; }
+.message:hover .message-actions { display: flex; }
+.message { position: relative; }
+.message-action-btn { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-tertiary); transition: all 0.1s; }
+.message-action-btn:hover { background: var(--bg); color: var(--text); }
+.message-thread-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: transparent; font-family: var(--font-sans); transition: background 0.15s; }
+.message-thread-link:hover { background: var(--accent-bg); }
+.message-thread-link svg { flex-shrink: 0; }
 
 .agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
 .agent-panel.open { display: flex; }
@@ -582,12 +602,9 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <div class="sidebar-channels" id="sidebar-channels"></div>
       <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
         <select id="theme-switcher" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
-          <option value="">Default (Editorial)</option>
-          <option value="post-it-board">Post-It Board</option>
-          <option value="interoffice-memo">Interoffice Memo</option>
-          <option value="aol-messenger">AOL Messenger</option>
+          <option value="">Editorial</option>
+          <option value="slack">Slack</option>
           <option value="windows-98">Windows 98</option>
-          <option value="win98-irc">Win98 + mIRC</option>
         </select>
       </div>
     </aside>
@@ -622,6 +639,30 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       </div>
     </div>
 
+    <!-- Thread Panel -->
+    <aside class="thread-panel" id="thread-panel">
+      <div class="thread-panel-header">
+        <span class="thread-panel-title">Thread</span>
+        <button class="thread-panel-close" onclick="closeThreadPanel()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="thread-panel-parent" id="thread-parent"></div>
+      <div class="thread-panel-divider">
+        <span class="thread-panel-reply-count" id="thread-reply-count"></span>
+      </div>
+      <div class="thread-panel-messages" id="thread-messages"></div>
+      <div class="thread-panel-composer">
+        <div class="composer-inner">
+          <textarea class="composer-input" id="thread-composer-input" placeholder="Reply in thread..." rows="1"></textarea>
+          <button class="composer-send" id="thread-composer-send" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Agent Panel -->
     <aside class="agent-panel" id="agent-panel">
       <div class="agent-panel-header">
         <span style="font-size:14px;font-weight:600;">Agent Detail</span>
@@ -730,11 +771,22 @@ var WuphfAPI = (function() {
     });
   }
 
-  function postMessage(content, channel) {
-    return post('/messages', {
+  function postMessage(content, channel, replyTo) {
+    var body = {
       from: 'you',
       channel: channel || 'general',
       content: content
+    };
+    if (replyTo) body.reply_to = replyTo;
+    return post('/messages', body);
+  }
+
+  function getThreadMessages(channel, threadId) {
+    return get('/messages', {
+      channel: channel || 'general',
+      thread_id: threadId,
+      viewer_slug: 'human',
+      limit: 50
     });
   }
 
@@ -771,7 +823,8 @@ var WuphfAPI = (function() {
     getChannels: getChannels,
     getRequests: getRequests,
     answerRequest: answerRequest,
-    getHealth: getHealth
+    getHealth: getHealth,
+    getThreadMessages: getThreadMessages
   };
 })();
 
@@ -1258,6 +1311,12 @@ function hideDisconnectBanner() {
   if (banner) banner.remove();
 }
 
+// ─── Thread state ───
+var threadReplyCounts = {}; // msgId -> count of replies
+var allMessages = {}; // msgId -> msg object
+var activeThreadId = null;
+var threadPollTimer = null;
+
 // ─── Live message polling ───
 function startMessagePolling() {
   fetchMessages();
@@ -1279,9 +1338,31 @@ function fetchMessages() {
 }
 
 function appendBrokerMessage(msg) {
+  // Track all messages for thread lookups
+  allMessages[msg.id] = msg;
+
+  // If this is a reply, update parent's reply count but don't show in main feed
+  if (msg.reply_to) {
+    threadReplyCounts[msg.reply_to] = (threadReplyCounts[msg.reply_to] || 0) + 1;
+    updateThreadLink(msg.reply_to);
+    // If thread panel is open for this thread, append there too
+    if (activeThreadId === msg.reply_to) {
+      appendMessageToContainer(msg, document.getElementById('thread-messages'));
+      var tmsg = document.getElementById('thread-messages');
+      tmsg.scrollTop = tmsg.scrollHeight;
+    }
+    return;
+  }
+
   var container = document.getElementById('messages');
+  var msgDiv = appendMessageToContainer(msg, container);
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendMessageToContainer(msg, container) {
   var msgDiv = document.createElement('div');
   msgDiv.className = 'message animate-fade';
+  msgDiv.dataset.msgId = msg.id;
 
   var agent = AGENTS.find(function(a) { return a.slug === msg.from; });
   var isHuman = msg.from === 'you' || msg.from === 'human';
@@ -1331,19 +1412,125 @@ function appendBrokerMessage(msg) {
   var textDiv = document.createElement('div');
   textDiv.className = 'message-text';
   if (isHuman) {
-    // User input: use textContent for safety
     textDiv.textContent = msg.content || '';
   } else {
-    // Agent messages from broker are trusted content
     textDiv.innerHTML = formatTrusted(msg.content || '');
   }
 
   content.appendChild(header);
   content.appendChild(textDiv);
+
+  // Thread link (shows "N replies" if this message has replies)
+  if (container.id === 'messages') {
+    var threadLink = document.createElement('button');
+    threadLink.className = 'message-thread-link';
+    threadLink.id = 'thread-link-' + msg.id;
+    threadLink.style.display = 'none';
+    threadLink.addEventListener('click', function() { openThread(msg.id); });
+    content.appendChild(threadLink);
+
+    // Action buttons (reply in thread)
+    var actions = document.createElement('div');
+    actions.className = 'message-actions';
+    var replyBtn = document.createElement('button');
+    replyBtn.className = 'message-action-btn';
+    replyBtn.title = 'Reply in thread';
+    replyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    replyBtn.addEventListener('click', function() { openThread(msg.id); });
+    actions.appendChild(replyBtn);
+    msgDiv.appendChild(actions);
+
+    // Show thread link if replies exist
+    if (threadReplyCounts[msg.id]) {
+      updateThreadLink(msg.id);
+    }
+  }
+
   msgDiv.appendChild(avatar);
   msgDiv.appendChild(content);
   container.appendChild(msgDiv);
-  container.scrollTop = container.scrollHeight;
+  return msgDiv;
+}
+
+function updateThreadLink(parentId) {
+  var link = document.getElementById('thread-link-' + parentId);
+  if (!link) return;
+  var count = threadReplyCounts[parentId] || 0;
+  if (count > 0) {
+    link.style.display = 'inline-flex';
+    link.textContent = '';
+    var icon = document.createElement('span');
+    icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    link.appendChild(icon);
+    var text = document.createElement('span');
+    text.textContent = count + (count === 1 ? ' reply' : ' replies');
+    link.appendChild(text);
+  }
+}
+
+// ─── Thread panel ───
+function openThread(msgId) {
+  activeThreadId = msgId;
+  closeAgentPanel();
+  var panel = document.getElementById('thread-panel');
+  var parentContainer = document.getElementById('thread-parent');
+  var messagesContainer = document.getElementById('thread-messages');
+  var replyCount = document.getElementById('thread-reply-count');
+
+  parentContainer.textContent = '';
+  messagesContainer.textContent = '';
+
+  // Render parent message
+  var parentMsg = allMessages[msgId];
+  if (parentMsg) {
+    appendMessageToContainer(parentMsg, parentContainer);
+  }
+
+  panel.classList.add('open');
+
+  // Fetch thread replies from broker
+  WuphfAPI.getThreadMessages(currentChannel, msgId)
+    .then(function(data) {
+      var msgs = data.messages || [];
+      var replies = msgs.filter(function(m) { return m.id !== msgId; });
+      replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
+      replies.forEach(function(m) {
+        allMessages[m.id] = m;
+        appendMessageToContainer(m, messagesContainer);
+      });
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    });
+
+  // Start thread polling
+  if (threadPollTimer) clearInterval(threadPollTimer);
+  threadPollTimer = setInterval(function() {
+    WuphfAPI.getThreadMessages(currentChannel, msgId)
+      .then(function(data) {
+        var msgs = data.messages || [];
+        var replies = msgs.filter(function(m) { return m.id !== msgId; });
+        replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
+        // Only append new messages
+        var existing = messagesContainer.querySelectorAll('[data-msg-id]');
+        var existingIds = {};
+        existing.forEach(function(el) { existingIds[el.dataset.msgId] = true; });
+        replies.forEach(function(m) {
+          if (!existingIds[m.id]) {
+            allMessages[m.id] = m;
+            appendMessageToContainer(m, messagesContainer);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          }
+        });
+      });
+  }, 2000);
+
+  // Focus thread composer
+  document.getElementById('thread-composer-input').focus();
+}
+
+function closeThreadPanel() {
+  activeThreadId = null;
+  document.getElementById('thread-panel').classList.remove('open');
+  if (threadPollTimer) { clearInterval(threadPollTimer); threadPollTimer = null; }
 }
 
 // ─── Request polling ───
@@ -1420,6 +1607,32 @@ composerInput.addEventListener('keydown', function(e) {
 });
 
 composerSend.addEventListener('click', sendMessage);
+
+// Thread composer
+var threadInput = document.getElementById('thread-composer-input');
+var threadSend = document.getElementById('thread-composer-send');
+if (threadInput) {
+  threadInput.addEventListener('input', function() {
+    threadSend.disabled = !threadInput.value.trim();
+    threadInput.style.height = 'auto';
+    threadInput.style.height = Math.min(threadInput.scrollHeight, 120) + 'px';
+  });
+  threadInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendThreadReply(); }
+  });
+  threadSend.addEventListener('click', sendThreadReply);
+}
+
+function sendThreadReply() {
+  if (!activeThreadId || !threadInput) return;
+  var raw = threadInput.value.trim();
+  if (!raw) return;
+  threadInput.value = '';
+  threadInput.style.height = 'auto';
+  threadSend.disabled = true;
+  WuphfAPI.postMessage(raw, currentChannel, activeThreadId)
+    .catch(function(e) { console.error('Thread reply failed:', e); });
+}
 
 function sendMessage() {
   var raw = composerInput.value.trim();
