@@ -1604,23 +1604,45 @@ function renderTeamGrid() {
 // ─── Launch ───
 function launchOffice() {
   document.getElementById('onboarding').style.display = 'none';
-  var launch = document.getElementById('launch-screen');
-  launch.classList.add('active');
-
-  var statuses = ['Assembling your team', 'Setting up channels', 'CEO is reviewing the strategy doc', 'PM is writing user stories', 'Opening the office doors'];
-  var i = 0;
-  var interval = setInterval(function() {
-    i++;
-    if (i < statuses.length) {
-      document.getElementById('launch-status').textContent = statuses[i];
-    }
-  }, 600);
-
-  setTimeout(function() {
-    clearInterval(interval);
-    launch.classList.remove('active');
+  showSplashScreen(function() {
     showOffice();
-  }, 3000);
+  });
+}
+
+function showSplashScreen(onDone) {
+  var teamCount = AGENTS.filter(function(a) { return a.checked; }).length;
+
+  var splash = document.createElement('div');
+  splash.className = 'splash-overlay';
+  splash.id = 'splash-screen';
+
+  var logo = document.createElement('div');
+  logo.className = 'splash-logo';
+  logo.textContent = 'wuphf';
+
+  var count = document.createElement('div');
+  count.className = 'splash-team-count';
+  count.textContent = teamCount + ' agent' + (teamCount !== 1 ? 's' : '') + ' ready';
+
+  var barTrack = document.createElement('div');
+  barTrack.className = 'splash-bar-track';
+  var barFill = document.createElement('div');
+  barFill.className = 'splash-bar-fill';
+  barTrack.appendChild(barFill);
+
+  splash.appendChild(logo);
+  splash.appendChild(count);
+  splash.appendChild(barTrack);
+  document.body.appendChild(splash);
+
+  // Fade out and remove after animation completes
+  setTimeout(function() {
+    splash.style.animation = 'splashFadeOut 0.4s ease-in forwards';
+    setTimeout(function() {
+      splash.remove();
+      if (onDone) onDone();
+    }, 400);
+  }, 2600);
 }
 
 // ─── Show office ───
@@ -2836,6 +2858,21 @@ var composerSend = document.getElementById('composer-send');
 var replyToMsgId = null;
 var replyToAgent = null;
 
+// ─── Composer input history (#40) ───
+var composerHistory = [];
+var composerHistoryIdx = -1;
+var composerHistoryMax = 20;
+var composerHistoryDraft = ''; // stash current input when navigating
+
+function pushComposerHistory(text) {
+  if (!text) return;
+  // Dedupe: don't add if same as last
+  if (composerHistory.length > 0 && composerHistory[composerHistory.length - 1] === text) return;
+  composerHistory.push(text);
+  if (composerHistory.length > composerHistoryMax) composerHistory.shift();
+  composerHistoryIdx = -1;
+}
+
 function setReplyMode(msgId) {
   var msg = allMessages[msgId];
   if (!msg) return;
@@ -3493,7 +3530,7 @@ function initApp() {
       if (data.status === 'ok') {
         brokerConnected = true;
         document.getElementById('onboarding').style.display = 'none';
-        showOffice();
+        showSplashScreen(function() { showOffice(); });
       } else {
         renderProgress();
         renderSizeOptions();
@@ -4876,79 +4913,6 @@ function renderPixelAvatar(slug, size) {
       var px = sprite[r][c];
       var idx = (r * cols + c) * 4;
       if (px === 0) {
-        imgData.data[idx + 3] = 0; // transparent
-      } else {
-        var rgb = palette[px] || [140, 140, 150];
-        imgData.data[idx] = rgb[0];
-        imgData.data[idx + 1] = rgb[1];
-        imgData.data[idx + 2] = rgb[2];
-        imgData.data[idx + 3] = 255;
-      }
-    }
-  }
-  ctx.putImageData(imgData, 0, 0);
-  return canvas;
-}
-
-initApp();
-
-// ═══════════════════════════════════════════════════════════════
-//   WAVE 3 POLISH — Quick Jump, Thread Toggle, Pause, PgUp/PgDn
-// ═══════════════════════════════════════════════════════════════
-var threadsDefaultExpand = localStorage.getItem('wuphf-threads-expand') !== 'false';
-(function initThreadToggle() {
-  var btn = document.getElementById('thread-toggle-btn');
-  if (!btn) return;
-  function updateLabel() { btn.textContent = threadsDefaultExpand ? 'Collapse threads' : 'Expand threads'; }
-  updateLabel();
-  btn.addEventListener('click', function() {
-    threadsDefaultExpand = !threadsDefaultExpand;
-    localStorage.setItem('wuphf-threads-expand', threadsDefaultExpand ? 'true' : 'false');
-    updateLabel();
-  });
-})();
-var quickJumpOverlay = document.getElementById('quick-jump-overlay');
-var quickJumpInput = document.getElementById('quick-jump-input');
-var quickJumpList = document.getElementById('quick-jump-list');
-var quickJumpSelectedIdx = -1;
-function openQuickJump() {
-  if (!document.getElementById('office').classList.contains('active')) return;
-  quickJumpOverlay.classList.add('open'); quickJumpInput.value = ''; quickJumpSelectedIdx = -1;
-  renderQuickJumpList(''); setTimeout(function() { quickJumpInput.focus(); }, 50);
-}
-function closeQuickJump() { quickJumpOverlay.classList.remove('open'); quickJumpSelectedIdx = -1; }
-function renderQuickJumpList(query) {
-  var q = (query || '').toLowerCase(); quickJumpList.textContent = '';
-  CHANNELS.filter(function(ch) { return !q || ch.name.toLowerCase().indexOf(q) !== -1; }).forEach(function(ch, idx) {
-    var item = el('div', { className: 'quick-jump-item' + (idx === quickJumpSelectedIdx ? ' selected' : ''), onClick: function() { closeQuickJump(); switchChannel(ch.name); renderSidebarChannels(); } });
-    item.appendChild(el('span', { className: 'quick-jump-item-hash' }, '#'));
-    item.appendChild(el('span', { className: 'quick-jump-item-name' }, ch.name));
-    var ci = CHANNELS.indexOf(ch); if (ci >= 0 && ci < 9) item.appendChild(el('span', { className: 'quick-jump-item-shortcut' }, String(ci + 1)));
-    quickJumpList.appendChild(item);
-  });
-}
-quickJumpInput.addEventListener('input', function() { quickJumpSelectedIdx = -1; renderQuickJumpList(quickJumpInput.value.trim()); });
-quickJumpInput.addEventListener('keydown', function(e) {
-  var items = quickJumpList.querySelectorAll('.quick-jump-item');
-  if (e.key === 'ArrowDown') { e.preventDefault(); quickJumpSelectedIdx = Math.min(quickJumpSelectedIdx + 1, items.length - 1); renderQuickJumpList(quickJumpInput.value.trim()); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); quickJumpSelectedIdx = Math.max(quickJumpSelectedIdx - 1, 0); renderQuickJumpList(quickJumpInput.value.trim()); }
-  else if (e.key === 'Enter') { e.preventDefault(); var sel = quickJumpSelectedIdx >= 0 ? quickJumpSelectedIdx : 0; var filtered = CHANNELS.filter(function(ch) { var q = (quickJumpInput.value || '').trim().toLowerCase(); return !q || ch.name.toLowerCase().indexOf(q) !== -1; }); if (filtered[sel]) { closeQuickJump(); switchChannel(filtered[sel].name); renderSidebarChannels(); } }
-  else if (e.key === 'Escape') { e.preventDefault(); closeQuickJump(); }
-});
-quickJumpOverlay.addEventListener('click', function(e) { if (e.target === quickJumpOverlay) closeQuickJump(); });
-var pauseConfirmVisible = false;
-function showPauseConfirm() {
-  if (pauseConfirmVisible) return; pauseConfirmVisible = true;
-  var composer = document.querySelector('.composer');
-  var bar = el('div', { className: 'pause-confirm', id: 'pause-confirm-bar' });
-  bar.appendChild(el('span', { className: 'pause-confirm-text' }, 'Pause all agents?'));
-  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-yes', onClick: function() {
-    hidePauseConfirm();
-    if (brokerConnected) WuphfAPI.post('/messages', { from: 'system', channel: currentChannel, content: '[PAUSE] All agents paused by human' }).catch(function() {});
-    var container = document.getElementById('messages'); var sysDiv = el('div', { className: 'message-system animate-fade' }); var inner = el('div', { className: 'message-system-inner' });
-    inner.appendChild(el('span', { className: 'message-system-line' })); inner.appendChild(el('span', { className: 'message-system-text' }, 'All agents paused')); inner.appendChild(el('span', { className: 'message-system-line' }));
-    sysDiv.appendChild(inner); container.appendChild(sysDiv); container.scrollTop = container.scrollHeight;
-  } }, 'Yes, pause'));
   bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-no', onClick: hidePauseConfirm }, 'Cancel'));
   composer.parentNode.insertBefore(bar, composer);
 }
