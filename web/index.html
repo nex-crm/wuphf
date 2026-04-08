@@ -1701,9 +1701,8 @@ function renderSidebarAgents() {
     btn.className = 'sidebar-agent';
     btn.title = a.name + ' — ' + ac.label;
     btn.addEventListener('click', function() { openAgentPanel(a.slug); });
-    var emoji = document.createElement('span');
-    emoji.className = 'sidebar-item-emoji';
-    emoji.textContent = a.emoji;
+    var avatarEl = renderPixelAvatar(a.slug, 24);
+    avatarEl.classList.add('pixel-avatar-sidebar');
     var wrap = document.createElement('div');
     wrap.className = 'sidebar-agent-wrap';
     var nameEl = document.createElement('span');
@@ -1718,7 +1717,7 @@ function renderSidebarAgents() {
     }
     var dot = document.createElement('span');
     dot.className = 'status-dot ' + ac.dotClass;
-    btn.appendChild(emoji);
+    btn.appendChild(avatarEl);
     btn.appendChild(wrap);
     btn.appendChild(dot);
     container.appendChild(btn);
@@ -3301,7 +3300,8 @@ function openAgentPanel(slug) {
 
   var avatar = document.createElement('div');
   avatar.className = 'agent-panel-avatar';
-  avatar.textContent = agent.emoji;
+  avatar.style.background = 'transparent';
+  avatar.appendChild(renderPixelAvatar(agent.slug, 56));
 
   var nameEl = document.createElement('h3');
   nameEl.className = 'agent-panel-name';
