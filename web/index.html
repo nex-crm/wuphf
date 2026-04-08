@@ -343,6 +343,11 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .reaction-pill:hover { border-color: var(--accent); background: var(--accent-bg); }
 .reaction-pill-count { font-weight: 600; color: var(--text-secondary); }
 
+/* ─── Unread divider ─── */
+.unread-divider { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+.unread-divider-line { height: 1px; flex: 1; background: var(--red); }
+.unread-divider-text { font-size: 12px; font-weight: 600; color: var(--red); white-space: nowrap; }
+
 .agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
 .agent-panel.open { display: flex; }
 .agent-panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
@@ -372,6 +377,56 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   .dict-word { font-size: 34px; }
   .welcome-tagline { font-size: 28px; }
 }
+
+/* ─── Command Palette ─── */
+.cmd-palette-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); backdrop-filter: blur(4px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 20vh; }
+.cmd-palette-overlay.open { display: flex; }
+.cmd-palette { width: 560px; max-width: 90vw; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 16px 48px rgba(59,47,47,0.18); overflow: hidden; animation: fadeIn 0.15s ease-out; }
+.cmd-palette-input-wrap { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.cmd-palette-input-wrap svg { flex-shrink: 0; color: var(--text-tertiary); }
+.cmd-palette-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 15px; color: var(--text); outline: none; }
+.cmd-palette-input::placeholder { color: var(--text-tertiary); }
+.cmd-palette-kbd { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.cmd-palette-results { max-height: 320px; overflow-y: auto; padding: 4px 0; }
+.cmd-palette-group { padding: 4px 0; }
+.cmd-palette-group-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding: 6px 16px 4px; }
+.cmd-palette-item { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 13px; transition: background 0.08s; }
+.cmd-palette-item:hover, .cmd-palette-item.selected { background: var(--accent-bg); }
+.cmd-palette-item-icon { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 14px; flex-shrink: 0; }
+.cmd-palette-item-text { flex: 1; min-width: 0; }
+.cmd-palette-item-label { font-weight: 500; color: var(--text); }
+.cmd-palette-item-desc { font-size: 11px; color: var(--text-tertiary); }
+.cmd-palette-item-shortcut { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+.cmd-palette-empty { padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
+.cmd-palette-footer { display: flex; align-items: center; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); }
+.cmd-palette-footer kbd { font-family: var(--font-mono); font-size: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px; }
+
+/* ─── 1:1 DM Mode ─── */
+.dm-banner { display: none; align-items: center; gap: 10px; padding: 8px 20px; background: var(--blue-bg); border-bottom: 1px solid var(--border); font-size: 13px; color: var(--blue); }
+.dm-banner.open { display: flex; }
+.dm-banner-text { flex: 1; font-weight: 500; }
+.dm-back-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px; font-family: var(--font-sans); }
+.dm-back-btn:hover { background: rgba(0,0,0,0.06); color: var(--text); }
+
+/* ─── Recovery View ─── */
+.recovery-panel { display: none; flex-direction: column; gap: 16px; padding: 20px; overflow-y: auto; flex: 1; animation: fadeIn 0.3s ease-out; }
+.recovery-panel.open { display: flex; }
+.recovery-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; }
+.recovery-card-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.recovery-card-body { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.recovery-stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+.recovery-stat-label { color: var(--text-secondary); }
+.recovery-stat-value { font-weight: 500; color: var(--text); }
+.recovery-task { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border-light); }
+.recovery-task:last-child { border-bottom: none; }
+.recovery-task-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.recovery-task-dot.active { background: var(--green); }
+.recovery-task-dot.blocked { background: var(--red); }
+.recovery-task-dot.pending { background: var(--yellow); }
+.recovery-task-dot.done { background: var(--text-tertiary); }
+
+/* ─── Notification Badge ─── */
+.sidebar-badge { min-width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--red); color: white; font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 5px; margin-left: auto; flex-shrink: 0; }
 </style>
 </head>
 <body>
@@ -1275,8 +1330,20 @@ function renderSidebarChannels() {
 }
 
 function switchChannel(name) {
+  // Save last-seen for previous channel before switching
+  if (lastMessageId) {
+    localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
+  }
   currentChannel = name;
   lastMessageId = null;
+  // Reset unread/grouping/date state for new channel
+  lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + name) || null;
+  unreadDividerInserted = false;
+  lastSeenPassed = false;
+  newMessageCount = 0;
+  lastRenderedFrom = null;
+  lastRenderedTime = null;
+  lastRenderedDate = null;
   document.getElementById('messages').textContent = '';
   var ch = CHANNELS.find(function(c) { return c.name === name; });
   document.getElementById('channel-title').textContent = '# ' + name;
@@ -1431,6 +1498,12 @@ var allMessages = {}; // msgId -> msg object
 var activeThreadId = null;
 var threadPollTimer = null;
 
+// ─── Unread tracking state ───
+var lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + currentChannel) || null;
+var unreadDividerInserted = false;
+var lastSeenPassed = false;
+var newMessageCount = 0;
+
 // ─── Live message polling ───
 function startMessagePolling() {
   fetchMessages();
@@ -1447,6 +1520,15 @@ function fetchMessages() {
         appendBrokerMessage(msg);
         lastMessageId = msg.id;
       });
+      // Update unread divider count text
+      if (newMessageCount > 0) {
+        var uTextEl = document.getElementById('unread-divider-text');
+        if (uTextEl) uTextEl.textContent = newMessageCount + ' new message' + (newMessageCount === 1 ? '' : 's');
+      }
+      // Persist last-seen message for next session
+      if (lastMessageId && document.hasFocus()) {
+        localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
+      }
     })
     .catch(function() { onBrokerFailure(); });
 }
@@ -1483,6 +1565,35 @@ function appendBrokerMessage(msg) {
       container.appendChild(createDateSeparator(msg.timestamp));
     }
     lastRenderedDate = msgDayKey;
+  }
+
+  // Unread divider: insert once after we've passed the last-seen message
+  if (lastSeenMessageId && !unreadDividerInserted) {
+    // We haven't seen this message yet and we've already rendered the last-seen one
+    if (lastSeenPassed) {
+      newMessageCount++;
+      if (newMessageCount === 1) {
+        var unreadDiv = document.createElement('div');
+        unreadDiv.className = 'unread-divider';
+        unreadDiv.id = 'unread-divider';
+        var uLine1 = document.createElement('div');
+        uLine1.className = 'unread-divider-line';
+        var uText = document.createElement('span');
+        uText.className = 'unread-divider-text';
+        uText.id = 'unread-divider-text';
+        uText.textContent = 'New';
+        var uLine2 = document.createElement('div');
+        uLine2.className = 'unread-divider-line';
+        unreadDiv.appendChild(uLine1);
+        unreadDiv.appendChild(uText);
+        unreadDiv.appendChild(uLine2);
+        container.appendChild(unreadDiv);
+        unreadDividerInserted = true;
+      }
+    }
+    if (msg.id === lastSeenMessageId) {
+      lastSeenPassed = true;
+    }
   }
 
   // Detect grouping: same sender within 5 minutes
