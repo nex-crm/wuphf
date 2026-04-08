@@ -98,6 +98,7 @@ type Launcher struct {
 	unsafe      bool
 	sessionMode string
 	oneOnOne    string
+	focusMode   bool
 	provider    string
 
 	headlessMu      sync.Mutex
@@ -111,6 +112,9 @@ type Launcher struct {
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
 func (l *Launcher) SetUnsafe(v bool) { l.unsafe = v }
+
+// SetFocusMode enables CEO-routed focus mode for a run.
+func (l *Launcher) SetFocusMode(v bool) { l.focusMode = v }
 
 func (l *Launcher) SetOneOnOne(slug string) {
 	l.sessionMode = SessionModeOneOnOne
@@ -137,6 +141,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		return nil, err
 	}
 	sessionMode, oneOnOne := loadRunningSessionMode()
+	focusMode := loadRunningFocusMode()
 
 	return &Launcher{
 		packSlug:        packSlug,
@@ -145,6 +150,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		cwd:             cwd,
 		sessionMode:     sessionMode,
 		oneOnOne:        oneOnOne,
+		focusMode:       focusMode,
 		provider:        config.ResolveLLMProvider(""),
 		headlessWorkers: make(map[string]bool),
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
@@ -190,6 +196,9 @@ func (l *Launcher) Launch() error {
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
+	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
+		return fmt.Errorf("set focus mode: %w", err)
+	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
@@ -207,6 +216,9 @@ func (l *Launcher) Launch() error {
 	// Pass broker token via env so channel view + agents can authenticate
 	channelEnv := []string{
 		fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()),
+	}
+	if l.focusMode {
+		channelEnv = append(channelEnv, "WUPHF_FOCUS_MODE=1")
 	}
 	if l.isOneOnOne() {
 		channelEnv = append(channelEnv,
@@ -676,6 +688,13 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		guidance = fmt.Sprintf(" If you own this task, use working_directory=%q for local file and bash tools.", path)
 	}
+	if l.isFocusModeEnabled() {
+		if strings.TrimSpace(task.Owner) == l.officeLeadSlug() {
+			guidance += " Focus mode is enabled. You are the routing hub: decide whether to delegate further or present the result to the human."
+		} else {
+			guidance += " Focus mode is enabled. Work directly, do not fan out to peers, and report completion or blockers back to @ceo."
+		}
+	}
 	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Before you speak, call team_poll and team_tasks, confirm whether you own this work, and stay in your lane.%s", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance)
 }
 
@@ -774,6 +793,37 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 			return false
 		}
 		return inferAgentDomain(slug) == domain
+	}
+
+	if l.isFocusModeEnabled() {
+		switch {
+		case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
+			addImmediate(lead)
+			for _, slug := range slugs {
+				if slug == lead || slug == msg.From {
+					continue
+				}
+				if containsSlug(msg.Tagged, slug) && allowTarget(slug) {
+					addImmediate(slug)
+				}
+			}
+		case msg.From == lead:
+			for _, slug := range slugs {
+				if slug == lead || slug == msg.From {
+					continue
+				}
+				if containsSlug(msg.Tagged, slug) && allowTarget(slug) {
+					addImmediate(slug)
+					continue
+				}
+				if owner != "" && slug == owner && allowTarget(slug) {
+					addImmediate(slug)
+				}
+			}
+		default:
+			addImmediate(lead)
+		}
+		return immediate, nil
 	}
 
 	switch {
@@ -2103,7 +2153,13 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 			)
 		}
 	}
-
+	if l.isFocusModeEnabled() && !l.isOneOnOne() {
+		if slug == l.officeLeadSlug() {
+			notification += "\nFocus mode is enabled. You are the routing hub: specialists should report back to you, and you should delegate intentionally."
+		} else {
+			notification += "\nFocus mode is enabled. Do not chatter with peers or wake other agents. Work the request directly and report completion or blockers back to @ceo."
+		}
+	}
 	if l.usesCodexRuntime() {
 		l.enqueueHeadlessCodexTurn(slug, notification)
 		return
@@ -2466,6 +2522,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("Tag agents with @slug in your message (e.g., '@fe can you handle this?').\n")
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
+		if l.isFocusModeEnabled() {
+			sb.WriteString("== FOCUS MODE ==\n")
+			sb.WriteString("Focus mode is enabled. You are the routing hub between specialists.\n")
+			sb.WriteString("- Default to taking human requests yourself first.\n")
+			sb.WriteString("- Delegate to a specialist only when you intentionally want that handoff.\n")
+			sb.WriteString("- Specialists should report completion, blockers, and handoff notes back to you, not to each other.\n")
+			sb.WriteString("- Keep the office out of cross-agent chatter.\n\n")
+		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
 		if config.ResolveNoNex() {
@@ -2532,6 +2596,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("Use the Nex context graph for durable memory:\n")
 			sb.WriteString("- query_context: Check prior decisions, customer context, company history, or facts before making assumptions\n")
 			sb.WriteString("- add_context: Store durable conclusions or findings once the team actually lands them\n\n")
+		}
+		if l.isFocusModeEnabled() {
+			sb.WriteString("== FOCUS MODE ==\n")
+			sb.WriteString("Focus mode is enabled.\n")
+			sb.WriteString("- You take work directly from the human only when they explicitly tag you, or from @ceo when delegated.\n")
+			sb.WriteString("- Do not debate with other specialists in the channel.\n")
+			sb.WriteString("- Do the work, then report completion, blockers, or handoff notes back to @ceo.\n")
+			sb.WriteString("- If another specialist should get involved, tell @ceo instead of routing it yourself.\n\n")
 		}
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
@@ -2791,6 +2863,35 @@ func loadRunningSessionMode() (string, string) {
 	return NormalizeSessionMode(result.SessionMode), NormalizeOneOnOneAgent(result.OneOnOneAgent)
 }
 
+func loadRunningFocusMode() bool {
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Get(brokerBaseURL() + "/health")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var result struct {
+		FocusMode bool `json:"focus_mode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false
+	}
+	return result.FocusMode
+}
+
+func (l *Launcher) isFocusModeEnabled() bool {
+	if l != nil && l.broker != nil {
+		return l.broker.FocusModeEnabled()
+	}
+	if l == nil {
+		return false
+	}
+	return l.focusMode
+}
+
 func brokerBaseURL() string {
 	if base := strings.TrimSpace(os.Getenv("WUPHF_BROKER_BASE_URL")); base != "" {
 		return strings.TrimRight(base, "/")
@@ -2910,6 +3011,12 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	killStaleBroker()
 
 	l.broker = NewBroker()
+	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
+		return fmt.Errorf("set session mode: %w", err)
+	}
+	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
+		return fmt.Errorf("set focus mode: %w", err)
+	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}

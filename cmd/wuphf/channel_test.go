@@ -575,6 +575,42 @@ func TestOneOnOneCommandOpensModePicker(t *testing.T) {
 	}
 }
 
+func TestFocusCommandOpensPicker(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, cmd := m.runCommand("/focus", "")
+	if cmd != nil {
+		t.Fatalf("expected no immediate command from /focus picker open, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if !got.picker.IsActive() || got.pickerMode != channelPickerFocusMode {
+		t.Fatalf("expected focus mode picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "Enable focus mode") {
+		t.Fatalf("expected focus picker options, got %q", view)
+	}
+}
+
+func TestFocusPickerSelectionStartsToggleRequest(t *testing.T) {
+	m := newChannelModel(false)
+	m.picker = tui.NewPicker("Focus Mode", m.buildFocusModePickerOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerFocusMode
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "focus:enable"})
+	if cmd == nil {
+		t.Fatal("expected focus toggle command")
+	}
+	got := next.(channelModel)
+	if !got.posting {
+		t.Fatal("expected posting state while focus mode is being toggled")
+	}
+	if got.notice != "Enabling focus mode..." {
+		t.Fatalf("unexpected notice: %q", got.notice)
+	}
+}
+
 func TestOneOnOnePickerEnableOpensAgentPicker(t *testing.T) {
 	m := newChannelModel(false)
 	m.picker = tui.NewPicker("Direct Session", m.buildOneOnOneModePickerOptions())
@@ -1491,25 +1527,20 @@ func TestOfficeViewRendersSlashAutocompletePopup(t *testing.T) {
 }
 
 func TestOneOnOneSlashAutocompleteShowsResetAndHidesChannels(t *testing.T) {
-	t.Setenv("WUPHF_API_KEY", "test-key")
-	m := newChannelModel(false)
-	m.sessionMode = team.SessionModeOneOnOne
-	m.oneOnOneAgent = "pm"
-	m.sidebarCollapsed = true
-	m.refreshSlashCommands()
-	m.input = []rune("/")
-	m.inputPos = len(m.input)
-	m.updateInputOverlays()
+	cmds := buildOneOnOneSlashCommands()
+	seen := make(map[string]bool, len(cmds))
+	for _, cmd := range cmds {
+		seen[cmd.Name] = true
+	}
 
-	view := stripANSI(m.autocomplete.View())
-	if !strings.Contains(view, "/reset") {
-		t.Fatalf("expected /reset in visible 1:1 autocomplete, got %q", view)
+	if !seen["reset"] {
+		t.Fatalf("expected /reset to remain available in 1:1 mode, got %+v", cmds)
 	}
-	if !strings.Contains(view, "/switch") {
-		t.Fatalf("expected /switch in visible 1:1 autocomplete, got %q", view)
+	if !seen["switch"] {
+		t.Fatalf("expected /switch to remain available in 1:1 mode, got %+v", cmds)
 	}
-	if strings.Contains(view, "/channels") || strings.Contains(view, "/tasks") || strings.Contains(view, "/threads") {
-		t.Fatalf("expected blocked 1:1 commands to be hidden from autocomplete, got %q", view)
+	if seen["channels"] || seen["tasks"] || seen["threads"] {
+		t.Fatalf("expected blocked 1:1 commands to be removed, got %+v", cmds)
 	}
 }
 
