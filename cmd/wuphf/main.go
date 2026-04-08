@@ -8,10 +8,12 @@ import (
 	"os"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/nex-crm/wuphf/internal/commands"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/teammcp"
+	"github.com/nex-crm/wuphf/internal/tui"
 )
 
 const version = "0.1.0"
@@ -28,6 +30,8 @@ func main() {
 	channelApp := flag.String("channel-app", "", "Start channel view on a specific app (internal)")
 	threadsCollapsed := flag.Bool("threads-collapsed", false, "Start with threads collapsed (default: expanded)")
 	unsafeMode := flag.Bool("unsafe", false, "Bypass all agent permission checks (use for local dev only)")
+	webMode := flag.Bool("web", false, "Launch web UI instead of tmux TUI")
+	webPort := flag.Int("web-port", 7891, "Port for the web UI (default 7891)")
 	noNex := flag.Bool("no-nex", false, "Disable Nex completely for this run")
 
 	flag.Usage = func() {
@@ -105,11 +109,23 @@ func main() {
 		return
 	}
 
+	// Web mode: browser-based UI instead of tmux
+	if *webMode {
+		runWeb(args, *packFlag, *unsafeMode, *webPort)
+		return
+	}
+
 	// Default: launch team or direct 1:1
 	runTeam(args, *packFlag, *unsafeMode, *oneOnOne)
 }
 
 func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
+	cfg, _ := config.Load()
+	if strings.TrimSpace(cfg.LLMProvider) == "codex" {
+		runHeadlessCodexRuntime(oneOnOne)
+		return
+	}
+
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -162,6 +178,38 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
 		fmt.Fprintf(os.Stderr, "Press Ctrl+C to stop.\n")
 		// Block forever — broker + notification loop stay alive
 		select {}
+	}
+}
+
+func runWeb(args []string, packSlug string, unsafe bool, webPort int) {
+	l, err := team.NewLauncher(packSlug)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if unsafe {
+		l.SetUnsafe(true)
+	}
+	if err := l.PreflightWeb(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Launching %s web view (%d agents)...\n", l.PackName(), l.AgentCount())
+	if err := l.LaunchWeb(webPort); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func runHeadlessCodexRuntime(oneOnOne bool) {
+	if oneOnOne {
+		fmt.Fprintln(os.Stderr, "error: direct 1:1 mode is not supported in the headless Codex runtime yet")
+		os.Exit(1)
+	}
+	program := tea.NewProgram(tui.NewModel(false), tea.WithAltScreen())
+	if _, err := program.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "error launching Codex runtime: %v\n", err)
+		os.Exit(1)
 	}
 }
 

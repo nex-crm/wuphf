@@ -452,6 +452,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
+	mux.HandleFunc("/web-token", b.handleWebToken)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -462,7 +463,7 @@ func (b *Broker) StartOnPort(port int) error {
 
 	b.server = &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      corsMiddleware(mux),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
@@ -482,6 +483,44 @@ func (b *Broker) Stop() {
 	if b.server != nil {
 		b.server.Close()
 	}
+}
+
+// corsMiddleware adds CORS headers so the web UI on a different port can call the broker API.
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleWebToken returns the broker token to localhost clients without requiring auth.
+// This lets the web UI fetch the token to authenticate subsequent API calls.
+func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if host != "127.0.0.1" && host != "::1" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": b.token})
+}
+
+// ServeWebUI starts a static file server for the web UI on the given port.
+func (b *Broker) ServeWebUI(port int) {
+	exePath, _ := os.Executable()
+	webDir := filepath.Join(filepath.Dir(exePath), "web")
+	if _, err := os.Stat(webDir); os.IsNotExist(err) {
+		webDir = "web"
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServer(http.Dir(webDir)))
+	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux)
 }
 
 // Messages returns all channel messages (for the Go TUI channel view).

@@ -98,6 +98,13 @@ type Launcher struct {
 	unsafe      bool
 	sessionMode string
 	oneOnOne    string
+	provider    string
+
+	headlessMu      sync.Mutex
+	headlessCtx     context.Context
+	headlessCancel  context.CancelFunc
+	headlessRunning map[string]bool
+	headlessPending map[string]string
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
@@ -136,14 +143,31 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		cwd:         cwd,
 		sessionMode: sessionMode,
 		oneOnOne:    oneOnOne,
+		provider:    firstNonEmpty(strings.TrimSpace(cfg.LLMProvider), "claude-code"),
+		headlessRunning: make(map[string]bool),
+		headlessPending: make(map[string]string),
 	}, nil
 }
 
 // Preflight checks that required tools are available.
 func (l *Launcher) Preflight() error {
+	if l.usesCodexRuntime() {
+		if _, err := exec.LookPath("codex"); err != nil {
+			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
+		}
+		return nil
+	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return fmt.Errorf("tmux not found. Install: brew install tmux")
 	}
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("claude not found. Install: npm install -g @anthropic-ai/claude-code")
+	}
+	return nil
+}
+
+// PreflightWeb checks that tools required for web mode are available (no tmux needed).
+func (l *Launcher) PreflightWeb() error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude not found. Install: npm install -g @anthropic-ai/claude-code")
 	}
@@ -154,6 +178,9 @@ func (l *Launcher) Preflight() error {
 //   - Window 0 "team": Channel on left, agent panes on the right
 //   - No extra windows: all team activity is visible in one place
 func (l *Launcher) Launch() error {
+	if l.usesCodexRuntime() {
+		return l.launchHeadlessCodex()
+	}
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)
@@ -281,6 +308,37 @@ func (l *Launcher) Launch() error {
 	}
 
 	return nil
+}
+
+// LaunchWeb starts the broker, web UI server, and background agents without tmux.
+// This is the entry point for --web mode.
+func (l *Launcher) LaunchWeb(webPort int) error {
+	mcpConfig, err := l.ensureMCPConfig()
+	if err != nil {
+		return fmt.Errorf("prepare mcp config: %w", err)
+	}
+	l.mcpConfig = mcpConfig
+
+	killStaleBroker()
+
+	l.broker = NewBroker()
+	if err := l.broker.Start(); err != nil {
+		return fmt.Errorf("start broker: %w", err)
+	}
+
+	l.broker.ServeWebUI(webPort)
+	l.spawnBackgroundAgents()
+
+	go l.notifyAgentsLoop()
+	go l.notifyTaskActionsLoop()
+	go l.pollNexNotificationsLoop()
+	go l.watchdogSchedulerLoop()
+
+	fmt.Printf("\n  Web UI:  http://localhost:%d\n", webPort)
+	fmt.Printf("  Broker:  http://localhost:%d\n", BrokerPort)
+	fmt.Printf("  Press Ctrl+C to stop.\n\n")
+
+	select {}
 }
 
 // notifyAgentsLoop polls the broker for new messages and pushes them
@@ -1863,8 +1921,14 @@ func (l *Launcher) Attach() error {
 
 // Kill destroys the tmux session, all agent processes, and the broker.
 func (l *Launcher) Kill() error {
+	if l.headlessCancel != nil {
+		l.headlessCancel()
+	}
 	if l.broker != nil {
 		l.broker.Stop()
+	}
+	if l.usesCodexRuntime() {
+		return nil
 	}
 	err := exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 	if err != nil {
@@ -1879,6 +1943,16 @@ func (l *Launcher) Kill() error {
 }
 
 func (l *Launcher) ResetSession() error {
+	if l.usesCodexRuntime() {
+		if l != nil && l.broker != nil {
+			l.broker.Reset()
+			return nil
+		}
+		if err := ResetBrokerState(); err != nil {
+			return fmt.Errorf("reset broker state: %w", err)
+		}
+		return nil
+	}
 	if err := provider.ResetClaudeSessions(); err != nil {
 		return fmt.Errorf("reset Claude sessions: %w", err)
 	}
@@ -1893,7 +1967,25 @@ func (l *Launcher) ResetSession() error {
 }
 
 func (l *Launcher) ReconfigureSession() error {
+	if l.usesCodexRuntime() {
+		return nil
+	}
 	return l.reconfigureVisibleAgents()
+}
+
+func (l *Launcher) usesCodexRuntime() bool {
+	return strings.EqualFold(strings.TrimSpace(l.provider), "codex")
+}
+
+func (l *Launcher) UsesTmuxRuntime() bool {
+	return !l.usesCodexRuntime()
+}
+
+func (l *Launcher) BrokerToken() string {
+	if l == nil || l.broker == nil {
+		return ""
+	}
+	return l.broker.Token()
 }
 
 func (l *Launcher) reconfigureVisibleAgents() error {
@@ -2281,6 +2373,32 @@ func (l *Launcher) spawnOverflowAgents() {
 			"-c", l.cwd,
 			agentCmd,
 		).Run()
+	}
+}
+
+// spawnBackgroundAgents starts all agents as background OS processes (no tmux).
+// Used by LaunchWeb for web mode.
+func (l *Launcher) spawnBackgroundAgents() {
+	for _, member := range l.visibleOfficeMembers() {
+		cmdStr := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		go l.runBackgroundAgent(member.Slug, cmdStr)
+	}
+	for _, member := range l.overflowOfficeMembers() {
+		cmdStr := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		go l.runBackgroundAgent(member.Slug, cmdStr)
+	}
+}
+
+// runBackgroundAgent runs a single agent as an OS process. On exit it waits 5s and restarts.
+func (l *Launcher) runBackgroundAgent(slug, cmdStr string) {
+	for {
+		cmd := exec.Command("bash", "-c", cmdStr)
+		cmd.Dir = l.cwd
+		cmd.Env = append(os.Environ(), fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		_ = cmd.Run()
+		time.Sleep(5 * time.Second)
 	}
 }
 
