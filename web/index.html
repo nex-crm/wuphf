@@ -877,6 +877,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <span class="channel-desc" id="channel-desc">The shared office channel</span>
         </div>
         <div class="channel-actions">
+          <button class="thread-toggle-btn" id="thread-toggle-btn" title="Toggle thread expand/collapse default">Collapse threads</button>
           <button class="sidebar-btn" title="Search">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
@@ -2983,6 +2984,80 @@ function openAgentPanel(slug) {
 function closeAgentPanel() {
   document.getElementById('agent-panel').classList.remove('open');
 }
+
+
+// ─── Search mode (#63 part) ───
+var searchMode = false;
+var searchCache = [];
+
+function openSearchMode(query) {
+  searchMode = true;
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = query || '';
+  cmdPaletteInput.placeholder = 'Search messages...';
+  cmdSelectedIdx = -1;
+  if (brokerConnected) {
+    WuphfAPI.getMessages(currentChannel, null, 100)
+      .then(function(data) { searchCache = data.messages || []; renderSearchResults(query || ''); })
+      .catch(function() { searchCache = []; renderSearchResults(query || ''); });
+  } else { searchCache = []; renderSearchResults(query || ''); }
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function renderSearchResults(query) {
+  if (!searchMode) return;
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+  var q = (query || '').toLowerCase().trim();
+  if (!q || q.length < 2) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'Type at least 2 characters to search...'));
+    return;
+  }
+  var combined = {};
+  Object.keys(allMessages).forEach(function(k) { combined[k] = allMessages[k]; });
+  searchCache.forEach(function(m) { if (m.id) combined[m.id] = m; });
+  var results = [];
+  var keys = Object.keys(combined);
+  for (var si = keys.length - 1; si >= 0 && results.length < 20; si--) {
+    var sm = combined[keys[si]];
+    if (sm.content && sm.content.toLowerCase().indexOf(q) !== -1) results.push(sm);
+  }
+  if (results.length === 0) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'No messages matching "' + query + '"'));
+    return;
+  }
+  var groupDiv = el('div', { className: 'cmd-palette-group' });
+  groupDiv.appendChild(el('div', { className: 'cmd-palette-group-title' }, results.length + ' result' + (results.length !== 1 ? 's' : '')));
+  results.forEach(function(m) {
+    var idx = cmdFlatItems.length;
+    var fromAgent = AGENTS.find(function(a) { return a.slug === m.from; });
+    var snippet = m.content.length > 80 ? m.content.substring(0, 80) + '...' : m.content;
+    cmdFlatItems.push({ icon: fromAgent ? fromAgent.emoji : '?', label: fromAgent ? fromAgent.name : m.from, desc: snippet,
+      action: (function(mid, rt) { return function() { closeCommandPalette(); var t = document.querySelector('[data-msg-id="' + mid + '"]'); if (t) { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); t.style.background = 'var(--yellow-bg)'; setTimeout(function() { t.style.background = ''; }, 2000); } else if (rt) { openThread(rt); } }; })(m.id, m.reply_to)
+    });
+    var row = el('div', { className: 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : ''), onClick: function() { selectCommandPaletteItem(idx); } });
+    row.appendChild(el('div', { className: 'cmd-palette-item-icon' }, cmdFlatItems[idx].icon));
+    var text = el('div', { className: 'cmd-palette-item-text' });
+    text.appendChild(el('div', { className: 'cmd-palette-item-label' }, cmdFlatItems[idx].label));
+    text.appendChild(el('div', { className: 'cmd-palette-item-desc' }, snippet));
+    row.appendChild(text);
+    groupDiv.appendChild(row);
+  });
+  cmdPaletteResults.appendChild(groupDiv);
+}
+
+cmdPaletteInput.addEventListener('input', function() {
+  cmdSelectedIdx = -1;
+  if (searchMode) renderSearchResults(cmdPaletteInput.value.trim());
+  else renderCommandPaletteResults(cmdPaletteInput.value.trim());
+});
+
+var _origCloseCP = closeCommandPalette;
+closeCommandPalette = function() {
+  searchMode = false;
+  cmdPaletteInput.placeholder = 'Search channels, agents, commands...';
+  _origCloseCP();
+};
 
 // ─── Init ───
 function initApp() {
