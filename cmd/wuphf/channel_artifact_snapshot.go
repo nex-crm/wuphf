@@ -355,8 +355,8 @@ func normalizeWorkflowArtifactState(status string) string {
 
 func requestArtifactProgress(req channelInterview) string {
 	parts := make([]string, 0, 3)
-	if choice := strings.TrimSpace(req.RecommendedID); choice != "" {
-		parts = append(parts, "Recommended: "+choice)
+	if recommended := req.recommendedOptionLabel(); recommended != "" {
+		parts = append(parts, "Recommended: "+recommended)
 	}
 	if due := strings.TrimSpace(req.DueAt); due != "" {
 		parts = append(parts, "Due "+prettyRelativeTime(due))
@@ -368,7 +368,7 @@ func requestArtifactProgress(req channelInterview) string {
 }
 
 func requestArtifactReviewHint(req channelInterview) string {
-	if recommended := strings.TrimSpace(req.RecommendedID); recommended != "" {
+	if recommended := req.recommendedOptionLabel(); recommended != "" {
 		return "Review recommendation " + recommended + " before answering."
 	}
 	if due := strings.TrimSpace(req.DueAt); due != "" {
