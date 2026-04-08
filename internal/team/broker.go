@@ -3152,16 +3152,24 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	tagged := uniqueSlugs(body.Tagged)
 
-	// Auto-tag the parent message author when replying in a thread.
-	// This ensures the agent you're replying to gets notified.
+	// Thread auto-tagging: ALL thread participants get notified about
+	// every new message in the thread. If CEO, PM, and you are in a
+	// thread, any new reply notifies the other two. This applies to
+	// both human and agent messages.
 	replyTo := strings.TrimSpace(body.ReplyTo)
 	if replyTo != "" {
+		threadRoot := replyTo
+		threadParticipants := []string{}
 		for _, existing := range b.messages {
-			if existing.ID == replyTo && existing.From != body.From {
-				tagged = uniqueSlugs(append(tagged, existing.From))
-				break
+			inThread := existing.ID == threadRoot || existing.ReplyTo == threadRoot
+			if inThread && existing.From != body.From {
+				// Include agents (skip "you"/"human" — they see via the web UI poll)
+				if existing.From != "you" && existing.From != "human" {
+					threadParticipants = append(threadParticipants, existing.From)
+				}
 			}
 		}
+		tagged = uniqueSlugs(append(tagged, threadParticipants...))
 	}
 
 	msg := channelMessage{
