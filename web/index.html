@@ -2785,44 +2785,35 @@ function openThread(msgId) {
 
   panel.classList.add('open');
 
-  // Fetch thread replies from broker
-  WuphfAPI.getThreadMessages(currentChannel, msgId)
-    .then(function(data) {
-      var msgs = data.messages || [];
-      var replies = msgs.filter(function(m) { return m.id !== msgId; });
-      replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
-      // Store all for depth calc
-      replies.forEach(function(m) { allMessages[m.id] = m; });
-      replies.forEach(function(m) {
-        var depth = calcReplyDepth(m, msgId);
-        var parentName = depth > 0 ? getReplyParentName(m) : null;
-        appendMessageToContainer(m, messagesContainer, { depth: depth, parentName: parentName });
-      });
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    });
-
-  // Start thread polling
-  if (threadPollTimer) clearInterval(threadPollTimer);
-  threadPollTimer = setInterval(function() {
+  // Single function to fetch and render thread replies with dedup
+  function fetchAndRenderThreadReplies() {
     WuphfAPI.getThreadMessages(currentChannel, msgId)
       .then(function(data) {
         var msgs = data.messages || [];
         var replies = msgs.filter(function(m) { return m.id !== msgId; });
         replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
+
+        // Dedup: only append messages not already in the DOM
         var existing = messagesContainer.querySelectorAll('[data-msg-id]');
         var existingIds = {};
         existing.forEach(function(el) { existingIds[el.dataset.msgId] = true; });
+
         replies.forEach(function(m) {
+          allMessages[m.id] = m;
           if (!existingIds[m.id]) {
-            allMessages[m.id] = m;
             var depth = calcReplyDepth(m, msgId);
             var parentName = depth > 0 ? getReplyParentName(m) : null;
             appendMessageToContainer(m, messagesContainer, { depth: depth, parentName: parentName });
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
           }
         });
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
       });
-  }, 2000);
+  }
+
+  // Initial fetch + poll every 2s (same dedup logic)
+  fetchAndRenderThreadReplies();
+  if (threadPollTimer) clearInterval(threadPollTimer);
+  threadPollTimer = setInterval(fetchAndRenderThreadReplies, 2000);
 
   // Focus thread composer
   document.getElementById('thread-composer-input').focus();
