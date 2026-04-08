@@ -1848,23 +1848,231 @@ function renderRequestsApp(panel) {
     });
 }
 function renderCalendarApp(panel) {
-  var header = document.createElement('h3');
-  header.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:4px;';
-  header.textContent = 'Calendar';
-  panel.appendChild(header);
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see scheduled jobs.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading schedule...');
+  panel.appendChild(loading);
+  WuphfAPI.getScheduler()
+    .then(function(data) {
+      panel.textContent = '';
+      var jobs = data.jobs || data.schedules || data || [];
+      if (!Array.isArray(jobs)) jobs = [];
+      renderCalendarTimeline(panel, jobs);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      renderCalendarTimeline(panel, []);
+    });
+}
+function renderCalendarTimeline(panel, jobs) {
   var today = new Date();
   var dateStr = today.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-  var card = document.createElement('div');
-  card.className = 'app-card';
-  var title = document.createElement('div');
-  title.className = 'app-card-title';
-  title.textContent = dateStr;
-  var meta = document.createElement('div');
-  meta.className = 'app-card-meta';
-  meta.textContent = 'No scheduled events.';
-  card.appendChild(title);
-  card.appendChild(meta);
-  panel.appendChild(card);
+  var header = el('div', { style: { padding: '0 0 12px', borderBottom: '1px solid var(--border)', marginBottom: '12px' } }, [
+    el('h3', { style: { fontSize: '16px', fontWeight: '600', marginBottom: '4px' } }, 'Schedule'),
+    el('p', { style: { fontSize: '13px', color: 'var(--text-secondary)' } }, dateStr)
+  ]);
+  panel.appendChild(header);
+
+  if (jobs.length === 0) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'No scheduled jobs.'));
+    return;
+  }
+
+  // Group by next_run date
+  var groups = {};
+  jobs.forEach(function(job) {
+    var key = 'Upcoming';
+    if (job.next_run) {
+      var d = new Date(job.next_run);
+      key = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(job);
+  });
+
+  Object.keys(groups).forEach(function(groupKey) {
+    var groupLabel = el('div', { style: { fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)', padding: '8px 0 6px' } }, groupKey);
+    panel.appendChild(groupLabel);
+    groups[groupKey].forEach(function(job) {
+      var card = el('div', { className: 'app-card', style: { marginBottom: '8px' } });
+      var titleRow = el('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' } });
+      titleRow.appendChild(el('span', { style: { fontSize: '14px' } }, '\u23F0'));
+      titleRow.appendChild(el('span', { className: 'app-card-title', style: { marginBottom: '0' } }, job.label || job.name || 'Job'));
+      if (job.status) {
+        var statusClass = job.status === 'active' ? 'policy-status-active' : 'policy-status-pending';
+        titleRow.appendChild(el('span', { className: 'policy-status-pill ' + statusClass }, job.status.toUpperCase()));
+      }
+      card.appendChild(titleRow);
+      var metaParts = [];
+      if (job.schedule) metaParts.push(job.schedule);
+      if (job.target) metaParts.push('Target: ' + job.target);
+      if (job.last_run) metaParts.push('Last: ' + new Date(job.last_run).toLocaleString());
+      if (job.next_run) metaParts.push('Next: ' + new Date(job.next_run).toLocaleString());
+      if (metaParts.length) {
+        card.appendChild(el('div', { className: 'app-card-meta' }, metaParts.join(' \u2022 ')));
+      }
+      panel.appendChild(card);
+    });
+  });
+}
+
+// ─── Policies View (#56) ───
+function renderPoliciesApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see policies.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var policyTabs = ['signals', 'decisions', 'watchdogs', 'actions'];
+  var activeTab = 'signals';
+  var cachedPolicyData = {};
+
+  var tabsDiv = el('div', { className: 'policy-tabs' });
+  var contentDiv = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } });
+
+  policyTabs.forEach(function(tab) {
+    var tabBtn = el('button', {
+      className: 'policy-tab' + (tab === activeTab ? ' active' : ''),
+      onClick: function() {
+        activeTab = tab;
+        tabsDiv.querySelectorAll('.policy-tab').forEach(function(t) { t.classList.remove('active'); });
+        tabBtn.classList.add('active');
+        renderPolicyTab(contentDiv, tab, cachedPolicyData);
+      }
+    }, tab.charAt(0).toUpperCase() + tab.slice(1));
+    tabsDiv.appendChild(tabBtn);
+  });
+
+  panel.appendChild(tabsDiv);
+  panel.appendChild(contentDiv);
+
+  // Fetch all data
+  contentDiv.textContent = '';
+  contentDiv.appendChild(el('div', { style: { padding: '20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading...'));
+
+  Promise.all([
+    WuphfAPI.getSignals().catch(function() { return { signals: [] }; }),
+    WuphfAPI.getDecisions().catch(function() { return { decisions: [] }; }),
+    WuphfAPI.getWatchdogs().catch(function() { return { watchdogs: [] }; }),
+    WuphfAPI.getActions().catch(function() { return { actions: [] }; })
+  ]).then(function(results) {
+    cachedPolicyData.signals = results[0].signals || results[0] || [];
+    cachedPolicyData.decisions = results[1].decisions || results[1] || [];
+    cachedPolicyData.watchdogs = results[2].watchdogs || results[2] || [];
+    cachedPolicyData.actions = results[3].actions || results[3] || [];
+    if (!Array.isArray(cachedPolicyData.signals)) cachedPolicyData.signals = [];
+    if (!Array.isArray(cachedPolicyData.decisions)) cachedPolicyData.decisions = [];
+    if (!Array.isArray(cachedPolicyData.watchdogs)) cachedPolicyData.watchdogs = [];
+    if (!Array.isArray(cachedPolicyData.actions)) cachedPolicyData.actions = [];
+    renderPolicyTab(contentDiv, activeTab, cachedPolicyData);
+  });
+}
+
+function renderPolicyTab(container, tab, data) {
+  container.textContent = '';
+  var items = data[tab] || [];
+  var icons = { signals: '\uD83D\uDCE1', decisions: '\u2696', watchdogs: '\uD83D\uDC15', actions: '\u26A1' };
+
+  if (items.length === 0) {
+    container.appendChild(el('div', { className: 'request-empty' }, 'No ' + tab + ' found.'));
+    return;
+  }
+
+  items.forEach(function(item) {
+    var row = el('div', { className: 'policy-item' });
+    var icon = el('div', { className: 'policy-item-icon' }, icons[tab] || '\uD83D\uDCCC');
+    var body = el('div', { className: 'policy-item-body' });
+    body.appendChild(el('div', { className: 'policy-item-title' }, item.name || item.title || item.kind || 'Unknown'));
+    if (item.summary || item.description) {
+      body.appendChild(el('div', { className: 'policy-item-summary' }, item.summary || item.description));
+    }
+    var meta = el('div', { className: 'policy-item-meta' });
+    if (item.kind) meta.appendChild(el('span', null, item.kind));
+    if (item.owner) meta.appendChild(el('span', null, 'by ' + item.owner));
+    if (item.timestamp || item.created_at || item.updated_at) {
+      var ts = item.timestamp || item.created_at || item.updated_at;
+      meta.appendChild(el('span', null, new Date(ts).toLocaleString()));
+    }
+    if (item.status) {
+      var sClass = 'policy-status-pending';
+      var sl = item.status.toLowerCase();
+      if (sl === 'active' || sl === 'enabled') sClass = 'policy-status-active';
+      else if (sl === 'fired' || sl === 'triggered') sClass = 'policy-status-fired';
+      else if (sl === 'resolved' || sl === 'done') sClass = 'policy-status-resolved';
+      meta.appendChild(el('span', { className: 'policy-status-pill ' + sClass }, item.status.toUpperCase()));
+    }
+    body.appendChild(meta);
+    row.appendChild(icon);
+    row.appendChild(body);
+    container.appendChild(row);
+  });
+}
+
+// ─── Skills View (#59) ───
+function renderSkillsApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see skills.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading skills...');
+  panel.appendChild(loading);
+  WuphfAPI.getSkills()
+    .then(function(data) {
+      panel.textContent = '';
+      var skills = data.skills || data || [];
+      if (!Array.isArray(skills)) skills = [];
+      renderSkillsList(panel, skills);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      renderSkillsList(panel, []);
+    });
+}
+
+function renderSkillsList(panel, skills) {
+  var header = el('div', { style: { padding: '0 0 12px', borderBottom: '1px solid var(--border)', marginBottom: '12px' } }, [
+    el('h3', { style: { fontSize: '16px', fontWeight: '600' } }, 'Skills')
+  ]);
+  panel.appendChild(header);
+
+  if (skills.length === 0) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'No skills registered yet.'));
+    return;
+  }
+
+  skills.forEach(function(skill) {
+    var card = el('div', { className: 'skill-card', style: { marginBottom: '8px' } });
+    var cardHeader = el('div', { className: 'skill-card-header' });
+    cardHeader.appendChild(el('span', { style: { fontSize: '16px' } }, '\u26A1'));
+    cardHeader.appendChild(el('span', { className: 'skill-card-name' }, skill.name || 'Untitled'));
+    if (skill.trigger) {
+      cardHeader.appendChild(el('span', { className: 'skill-card-trigger' }, skill.trigger));
+    }
+    card.appendChild(cardHeader);
+
+    if (skill.description) {
+      card.appendChild(el('div', { className: 'skill-card-desc' }, skill.description));
+    }
+
+    var meta = el('div', { className: 'skill-card-meta' });
+    if (skill.usage_count != null) {
+      meta.appendChild(el('span', { className: 'skill-card-stat' }, '\uD83D\uDD04 ' + skill.usage_count + ' uses'));
+    }
+    if (skill.last_status) {
+      var statusClass = skill.last_status === 'success' ? 'policy-status-active' : (skill.last_status === 'failed' ? 'policy-status-fired' : 'policy-status-pending');
+      meta.appendChild(el('span', { className: 'policy-status-pill ' + statusClass }, skill.last_status.toUpperCase()));
+    }
+    if (skill.last_run || skill.last_execution) {
+      var ts = skill.last_run || skill.last_execution;
+      meta.appendChild(el('span', null, new Date(ts).toLocaleString()));
+    }
+    card.appendChild(meta);
+    panel.appendChild(card);
+  });
 }
 // --- Workspace summary (#30) and hint (#31) ---
 function renderWorkspaceSummary() {
@@ -2781,6 +2989,15 @@ function handleSlashCommand(input) {
       break;
     case '/requests':
       switchApp('requests');
+      break;
+    case '/policies':
+      switchApp('policies');
+      break;
+    case '/skills':
+      switchApp('skills');
+      break;
+    case '/calendar':
+      switchApp('calendar');
       break;
     case '/tasks':
       switchApp('tasks');
