@@ -431,6 +431,92 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 
 /* ─── Notification Badge ─── */
 .sidebar-badge { min-width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--red); color: white; font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 5px; margin-left: auto; flex-shrink: 0; }
+
+/* ─── Confirmation Modal ─── */
+.confirm-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); z-index: 50; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.confirm-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(59,47,47,0.15); padding: 24px; width: 100%; max-width: 420px; animation: fadeIn 0.2s ease-out; }
+.confirm-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.confirm-message { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ─── Needs You Banner ─── */
+.needs-you-banner { padding: 12px 20px; background: var(--red-bg); border-bottom: 2px solid var(--red); display: flex; flex-direction: column; gap: 8px; animation: fadeIn 0.3s ease-out; }
+.needs-you-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--red); display: flex; align-items: center; gap: 6px; }
+.needs-you-question { font-size: 14px; font-weight: 500; color: var(--text); }
+.needs-you-from { font-size: 12px; color: var(--text-secondary); }
+.needs-you-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.needs-you-btn { padding: 6px 14px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; border: 1px solid var(--red); background: white; color: var(--red); cursor: pointer; transition: all 0.15s; font-family: var(--font-sans); }
+.needs-you-btn:hover { background: var(--red); color: white; }
+
+/* ─── Task Board ─── */
+.task-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 20px; height: 100%; overflow-y: auto; align-content: start; }
+.task-column { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.task-column-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding: 0 4px 8px; border-bottom: 2px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.task-column-count { font-family: var(--font-mono); font-size: 10px; background: var(--bg); padding: 1px 6px; border-radius: var(--radius-full); }
+.task-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; cursor: pointer; transition: all 0.15s; }
+.task-card:hover { border-color: var(--border-dark); box-shadow: 0 2px 8px rgba(59,47,47,0.06); }
+.task-card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; line-height: 1.4; }
+.task-card-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-tertiary); }
+.task-card-owner { display: flex; align-items: center; gap: 4px; }
+.task-status-pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
+.task-status-open { background: var(--bg); color: var(--text-tertiary); }
+.task-status-in_progress, .task-status-moving { background: var(--blue-bg); color: var(--blue); }
+.task-status-review { background: var(--yellow-bg); color: var(--yellow); }
+.task-status-done, .task-status-completed { background: var(--green-bg); color: var(--green); }
+.task-status-blocked { background: var(--red-bg); color: var(--red); }
+.task-detail-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); z-index: 50; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.task-detail-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(59,47,47,0.15); padding: 24px; width: 100%; max-width: 540px; max-height: 80vh; overflow-y: auto; animation: fadeIn 0.2s ease-out; }
+.task-detail-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+.task-detail-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 0; }
+.task-detail-label { color: var(--text-tertiary); min-width: 80px; }
+.task-detail-value { color: var(--text); font-weight: 500; }
+.task-detail-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* ─── Request List ─── */
+.request-list { padding: 20px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; height: 100%; }
+.request-list-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.request-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px; transition: all 0.15s; }
+.request-item:hover { border-color: var(--border-dark); }
+.request-item-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.request-item-from { font-size: 13px; font-weight: 600; }
+.request-kind-pill { display: inline-flex; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
+.request-kind-approval { background: var(--yellow-bg); color: var(--yellow); }
+.request-kind-confirm { background: var(--blue-bg); color: var(--blue); }
+.request-kind-secret { background: var(--red-bg); color: var(--red); }
+.request-kind-input { background: var(--accent-bg); color: var(--accent); }
+.request-item-question { font-size: 14px; color: var(--text); margin-bottom: 8px; line-height: 1.5; }
+.request-item-timing { font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; }
+.request-item-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.request-empty { text-align: center; padding: 40px 20px; color: var(--text-tertiary); font-size: 14px; }
+
+/* ─── Interview Modal ─── */
+.interview-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); z-index: 50; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.interview-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(59,47,47,0.15); padding: 24px; width: 100%; max-width: 520px; max-height: 85vh; overflow-y: auto; animation: fadeIn 0.2s ease-out; }
+.interview-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.interview-question { font-size: 14px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; }
+.interview-phase { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 12px; }
+.interview-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.interview-option { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; transition: all 0.15s; text-align: left; font-family: var(--font-sans); font-size: 14px; color: var(--text); width: 100%; }
+.interview-option:hover { border-color: var(--border-dark); background: var(--bg); }
+.interview-option.selected { border-color: var(--accent); background: var(--accent-bg); }
+.interview-option-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-dark); flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.interview-option.selected .interview-option-radio { border-color: var(--accent); background: var(--accent); }
+.interview-option-radio-inner { width: 8px; height: 8px; border-radius: 50%; background: white; display: none; }
+.interview-option.selected .interview-option-radio-inner { display: block; }
+.interview-option-label { flex: 1; }
+.interview-text { width: 100%; min-height: 80px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; font-family: var(--font-sans); font-size: 14px; color: var(--text); resize: vertical; outline: none; transition: border-color 0.2s; margin-bottom: 16px; background: var(--bg-card); }
+.interview-text:focus { border-color: var(--accent); }
+.interview-text::placeholder { color: var(--text-tertiary); }
+.interview-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.interview-review { background: var(--bg); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px; }
+.interview-review-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 6px; }
+.interview-review-value { font-size: 14px; color: var(--text); line-height: 1.5; }
+
+/* ─── App View (replaces messages) ─── */
+.app-view-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.app-view-title { font-size: 16px; font-weight: 600; }
+.app-view-close { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); transition: all 0.15s; }
+.app-view-close:hover { background: var(--bg); color: var(--text); }
 </style>
 </head>
 <body>
@@ -1031,6 +1117,7 @@ var SIDEBAR_APPS = [
   { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
   { id: 'requests', icon: '\uD83D\uDCCB', name: 'Requests' },
   { id: 'calendar', icon: '\uD83D\uDCC5', name: 'Calendar' },
+  { id: 'recover',  icon: '\uD83D\uDD0D', name: 'Recovery' },
 ];
 
 var AGENTS = [
@@ -1291,44 +1378,254 @@ function showOffice() {
         }
         renderSidebarAgents();
         renderSidebarChannels();
+        renderSidebarApps();
         startMessagePolling();
         startRequestPolling();
+        startMemberActivityPolling();
       })
       .catch(function() {
         renderSidebarAgents();
         renderSidebarChannels();
+        renderSidebarApps();
         animateMessages();
       });
   } else {
     renderSidebarAgents();
     renderSidebarChannels();
+    renderSidebarApps();
     animateMessages();
   }
 }
 
+// --- Activity classification (#23) ---
+function classifyActivity(member) {
+  if (!member || !member.status) return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
+  var activity = (member.activity || '').toLowerCase();
+  var status = (member.status || '').toLowerCase();
+  var lastTime = member.last_time ? new Date(member.last_time) : null;
+  var elapsed = lastTime ? (Date.now() - lastTime.getTime()) / 1000 : Infinity;
+  if (status === 'active' || elapsed < 10) return { state: 'talking', label: 'talking', dotClass: 'active pulse' };
+  if (elapsed < 30 && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity)) return { state: 'shipping', label: 'shipping', dotClass: 'shipping' };
+  if (elapsed < 30) return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
+  return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
+}
+function findAgentTask(slug) {
+  for (var i = 0; i < cachedTasks.length; i++) {
+    var t = cachedTasks[i];
+    if (t.owner === slug && t.status !== 'done' && t.status !== 'completed') return t;
+  }
+  return null;
+}
 function renderSidebarAgents() {
   var container = document.getElementById('sidebar-agents');
   container.textContent = '';
   AGENTS.filter(function(a) { return a.checked; }).forEach(function(a) {
+    var member = cachedMembers.find(function(m) { return m.slug === a.slug; });
+    var ac = classifyActivity(member);
+    var task = findAgentTask(a.slug);
     var btn = document.createElement('button');
     btn.className = 'sidebar-agent';
-    btn.title = a.name;
+    btn.title = a.name + ' — ' + ac.label;
     btn.addEventListener('click', function() { openAgentPanel(a.slug); });
-
     var emoji = document.createElement('span');
     emoji.className = 'sidebar-item-emoji';
     emoji.textContent = a.emoji;
-    var name = document.createElement('span');
-    name.className = 'sidebar-agent-name';
-    name.textContent = a.name;
+    var wrap = document.createElement('div');
+    wrap.className = 'sidebar-agent-wrap';
+    var nameEl = document.createElement('span');
+    nameEl.className = 'sidebar-agent-name';
+    nameEl.textContent = a.name;
+    wrap.appendChild(nameEl);
+    if (task) {
+      var taskText = document.createElement('span');
+      taskText.className = 'sidebar-agent-task';
+      taskText.textContent = 'working on: Task #' + (task.id || task.number || '?');
+      wrap.appendChild(taskText);
+    }
     var dot = document.createElement('span');
-    dot.className = 'status-dot active pulse';
-
+    dot.className = 'status-dot ' + ac.dotClass;
     btn.appendChild(emoji);
-    btn.appendChild(name);
+    btn.appendChild(wrap);
     btn.appendChild(dot);
     container.appendChild(btn);
   });
+  // Set up double-click handlers for DM mode
+  setupAgentDMHandlers();
+}
+// --- Apps sidebar (#28) ---
+function renderSidebarApps() {
+  var container = document.getElementById('sidebar-apps');
+  container.textContent = '';
+  SIDEBAR_APPS.forEach(function(app) {
+    var btn = document.createElement('button');
+    btn.className = 'sidebar-item' + (currentApp === app.id ? ' active' : '');
+    btn.addEventListener('click', function() { switchApp(app.id); });
+    var icon = document.createElement('span');
+    icon.className = 'sidebar-item-emoji';
+    icon.textContent = app.icon;
+    var lbl = document.createElement('span');
+    lbl.textContent = app.name;
+    btn.appendChild(icon);
+    btn.appendChild(lbl);
+    container.appendChild(btn);
+  });
+}
+function switchApp(appId) {
+  // Close recovery view if switching away
+  if (recoveryViewOpen && appId !== 'recover') closeRecoveryView();
+
+  // Handle recovery app specially
+  if (appId === 'recover') {
+    currentApp = (currentApp === 'recover') ? null : 'recover';
+    if (currentApp === 'recover') {
+      openRecoveryView();
+    } else {
+      closeRecoveryView();
+    }
+    renderSidebarApps();
+    return;
+  }
+
+  currentApp = (currentApp === appId) ? null : appId;
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+  var composerEl = document.querySelector('.composer');
+  ['app-tasks', 'app-requests', 'app-calendar'].forEach(function(pid) {
+    var p = document.getElementById(pid);
+    if (p) { p.classList.remove('active'); p.style.display = 'none'; }
+  });
+  if (currentApp) {
+    messagesEl.style.display = 'none';
+    typingEl.style.display = 'none';
+    composerEl.style.display = 'none';
+    var activePanel = document.getElementById('app-' + currentApp);
+    if (activePanel) { activePanel.style.display = 'flex'; activePanel.classList.add('active'); }
+    document.getElementById('channel-title').textContent = currentApp.charAt(0).toUpperCase() + currentApp.slice(1);
+    document.getElementById('channel-desc').textContent = '';
+    renderAppContent(currentApp);
+  } else {
+    messagesEl.style.display = '';
+    composerEl.style.display = '';
+    var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
+    document.getElementById('channel-title').textContent = '# ' + currentChannel;
+    document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+  }
+  renderSidebarApps();
+  if (currentApp) {
+    document.querySelectorAll('#sidebar-channels .sidebar-item').forEach(function(b) { b.classList.remove('active'); });
+  } else {
+    renderSidebarChannels();
+  }
+}
+function renderAppContent(appId) {
+  var panel = document.getElementById('app-' + appId);
+  if (!panel) return;
+  panel.textContent = '';
+  if (appId === 'tasks') renderTasksApp(panel);
+  else if (appId === 'requests') renderRequestsApp(panel);
+  else if (appId === 'calendar') renderCalendarApp(panel);
+}
+function renderTasksApp(panel) {
+  var header = document.createElement('h3');
+  header.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:4px;';
+  header.textContent = 'Task Board';
+  panel.appendChild(header);
+  if (!brokerConnected || cachedTasks.length === 0) {
+    var empty = document.createElement('p');
+    empty.style.cssText = 'font-size:13px;color:var(--text-tertiary);';
+    empty.textContent = brokerConnected ? 'No tasks yet.' : 'Connect to broker to see tasks.';
+    panel.appendChild(empty);
+    return;
+  }
+  cachedTasks.forEach(function(t) {
+    var card = document.createElement('div');
+    card.className = 'app-card';
+    var title = document.createElement('div');
+    title.className = 'app-card-title';
+    title.textContent = t.title || t.name || 'Task #' + (t.id || '?');
+    var meta = document.createElement('div');
+    meta.className = 'app-card-meta';
+    var parts = [];
+    if (t.status) parts.push(t.status);
+    if (t.owner) parts.push('owner: ' + t.owner);
+    meta.textContent = parts.join(' • ');
+    card.appendChild(title);
+    card.appendChild(meta);
+    panel.appendChild(card);
+  });
+}
+function renderRequestsApp(panel) {
+  var header = document.createElement('h3');
+  header.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:4px;';
+  header.textContent = 'Requests';
+  panel.appendChild(header);
+  if (!brokerConnected) {
+    var empty = document.createElement('p');
+    empty.style.cssText = 'font-size:13px;color:var(--text-tertiary);';
+    empty.textContent = 'Connect to broker to see requests.';
+    panel.appendChild(empty);
+    return;
+  }
+  WuphfAPI.getRequests(currentChannel).then(function(data) {
+    var requests = data.requests || [];
+    if (requests.length === 0 && !data.pending) {
+      var empty = document.createElement('p');
+      empty.style.cssText = 'font-size:13px;color:var(--text-tertiary);';
+      empty.textContent = 'No open requests.';
+      panel.appendChild(empty);
+      return;
+    }
+    if (data.pending) requests = [data.pending].concat(requests);
+    requests.forEach(function(r) {
+      var card = document.createElement('div');
+      card.className = 'app-card';
+      var title = document.createElement('div');
+      title.className = 'app-card-title';
+      title.textContent = r.question || r.title || 'Request';
+      var meta = document.createElement('div');
+      meta.className = 'app-card-meta';
+      var fromAgent = AGENTS.find(function(a) { return a.slug === r.from; });
+      meta.textContent = 'from: ' + (fromAgent ? fromAgent.name : (r.from || 'unknown'));
+      card.appendChild(title);
+      card.appendChild(meta);
+      panel.appendChild(card);
+    });
+  }).catch(function() {
+    var err = document.createElement('p');
+    err.style.cssText = 'font-size:13px;color:var(--text-tertiary);';
+    err.textContent = 'Failed to load requests.';
+    panel.appendChild(err);
+  });
+}
+function renderCalendarApp(panel) {
+  var header = document.createElement('h3');
+  header.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:4px;';
+  header.textContent = 'Calendar';
+  panel.appendChild(header);
+  var today = new Date();
+  var dateStr = today.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  var card = document.createElement('div');
+  card.className = 'app-card';
+  var title = document.createElement('div');
+  title.className = 'app-card-title';
+  title.textContent = dateStr;
+  var meta = document.createElement('div');
+  meta.className = 'app-card-meta';
+  meta.textContent = 'No scheduled events.';
+  card.appendChild(title);
+  card.appendChild(meta);
+  panel.appendChild(card);
+}
+// --- Workspace summary (#30) and hint (#31) ---
+function renderWorkspaceSummary() {
+  var summaryEl = document.getElementById('sidebar-summary');
+  var hintEl = document.getElementById('sidebar-hint');
+  if (!summaryEl || !hintEl) return;
+  var activeAgents = 0;
+  cachedMembers.forEach(function(m) { if (classifyActivity(m).state !== 'lurking') activeAgents++; });
+  var openTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; }).length;
+  summaryEl.textContent = activeAgents + ' agent' + (activeAgents !== 1 ? 's' : '') + ' active, ' + openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' open';
+  hintEl.textContent = openTasks > 0 ? (openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' in progress') : 'Type / for commands';
 }
 
 function renderSidebarChannels() {
@@ -1359,6 +1656,19 @@ function renderSidebarChannels() {
 }
 
 function switchChannel(name) {
+  // Exit app mode when switching channels
+  if (currentApp) {
+    currentApp = null;
+    var messagesEl = document.getElementById('messages');
+    var composerEl = document.querySelector('.composer');
+    ['app-tasks', 'app-requests', 'app-calendar'].forEach(function(pid) {
+      var p = document.getElementById(pid);
+      if (p) { p.classList.remove('active'); p.style.display = 'none'; }
+    });
+    if (messagesEl) messagesEl.style.display = '';
+    if (composerEl) composerEl.style.display = '';
+    renderSidebarApps();
+  }
   // Save last-seen for previous channel before switching
   if (lastMessageId) {
     localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
@@ -1378,6 +1688,12 @@ function switchChannel(name) {
   document.getElementById('channel-title').textContent = '# ' + name;
   document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
   document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
+  // Close recovery view if open
+  if (recoveryViewOpen) closeRecoveryView();
+
+  // Mark channel as seen and update badges
+  markChannelSeen(name);
+
   if (brokerConnected) {
     fetchMessages();
     fetchRequests();
@@ -1565,6 +1881,11 @@ function fetchMessages() {
 function appendBrokerMessage(msg) {
   // Track all messages for thread lookups
   allMessages[msg.id] = msg;
+
+  // Track unread counts for non-active channels
+  if (msg.channel && msg.channel !== currentChannel) {
+    incrementUnreadCount(msg.channel);
+  }
 
   // If this is a reply, update parent's reply count but don't show in main feed
   if (msg.reply_to) {
@@ -1856,10 +2177,35 @@ function startRequestPolling() {
   requestPollTimer = setInterval(fetchRequests, 2000);
 }
 
+// --- Member activity + task polling (#23, #27, #30, #31) ---
+function startMemberActivityPolling() {
+  fetchMemberActivity();
+  if (memberActivityPollTimer) clearInterval(memberActivityPollTimer);
+  memberActivityPollTimer = setInterval(fetchMemberActivity, 3000);
+}
+function fetchMemberActivity() {
+  Promise.all([
+    WuphfAPI.getMembers().catch(function() { return { members: [] }; }),
+    WuphfAPI.getTasks().catch(function() { return { tasks: [] }; })
+  ]).then(function(results) {
+    cachedMembers = (results[0].members || []);
+    cachedTasks = (results[1].tasks || results[1] || []);
+    if (Array.isArray(cachedTasks) === false) cachedTasks = [];
+    renderSidebarAgents();
+    renderWorkspaceSummary();
+  });
+}
+
 function fetchRequests() {
   WuphfAPI.getRequests(currentChannel)
     .then(function(data) {
       renderRequestBanner(data.pending);
+      // Render "needs you" banner for blocking requests
+      var allReqs = [];
+      if (data.pending) allReqs.push(data.pending);
+      if (data.requests) allReqs = allReqs.concat(data.requests);
+      if (data.all) allReqs = allReqs.concat(data.all);
+      renderNeedsYouBanner(allReqs);
     })
     .catch(function() {});  // failures tracked by fetchMessages
 }
@@ -1929,6 +2275,7 @@ var SLASH_COMMANDS = [
   { name: '/quit', desc: 'Exit WUPHF', icon: '👋' },
   { name: '/connect', desc: 'Connect integration', icon: '🔗' },
   { name: '/1o1', desc: 'Start 1:1 session', icon: '🤝' },
+  { name: '/recover', desc: 'Show workspace recovery info', icon: '🔍' },
 ];
 
 function updateAutocomplete() {
@@ -2100,8 +2447,10 @@ function handleSlashCommand(input) {
       showSystem('Commands: /clear /help /requests /tasks /reset /reply <msg-id> /1o1 <agent>');
       break;
     case '/requests':
-      fetchRequests();
-      showSystem('Refreshing requests...');
+      switchApp('requests');
+      break;
+    case '/tasks':
+      switchApp('tasks');
       break;
     case '/reply':
       if (args) openThread(args.trim());
@@ -2115,6 +2464,18 @@ function handleSlashCommand(input) {
         threadReplyCounts = {};
         showSystem('Office reset');
       });
+      break;
+    case '/recover':
+      openRecoveryView();
+      break;
+    case '/1o1':
+      if (args) {
+        var targetAgent = AGENTS.find(function(a) { return a.slug === args.trim().toLowerCase() || a.name.toLowerCase() === args.trim().toLowerCase(); });
+        if (targetAgent) enterDMMode(targetAgent.slug);
+        else showSystem('Agent not found: ' + args.trim());
+      } else {
+        showSystem('Usage: /1o1 <agent-slug>');
+      }
       break;
     default:
       // Send unknown commands to broker as a message (agents may handle them)
@@ -2445,6 +2806,1067 @@ if (themeSwitcher) {
     localStorage.setItem('wuphf-theme', theme);
   });
 }
+
+
+// ═══════════════════════════════════════════════════════════════
+//   COMMAND PALETTE (#63)
+// ═══════════════════════════════════════════════════════════════
+var cmdPaletteOverlay = document.getElementById('cmd-palette-overlay');
+var cmdPaletteInput = document.getElementById('cmd-palette-input');
+var cmdPaletteResults = document.getElementById('cmd-palette-results');
+var cmdSelectedIdx = -1;
+var cmdFlatItems = [];
+
+function openCommandPalette() {
+  if (!document.getElementById('office').classList.contains('active')) return;
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = '';
+  cmdSelectedIdx = -1;
+  renderCommandPaletteResults('');
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function closeCommandPalette() {
+  cmdPaletteOverlay.classList.remove('open');
+  cmdPaletteInput.value = '';
+  cmdSelectedIdx = -1;
+}
+
+function buildCommandPaletteItems(query) {
+  var q = (query || '').toLowerCase();
+  var groups = [];
+
+  // Channels
+  var channelItems = CHANNELS.filter(function(ch) {
+    return !q || ch.name.toLowerCase().indexOf(q) !== -1 || (ch.desc && ch.desc.toLowerCase().indexOf(q) !== -1);
+  }).map(function(ch) {
+    return { icon: '#', label: ch.name, desc: ch.desc, action: function() { switchChannel(ch.name); renderSidebarChannels(); } };
+  });
+  if (channelItems.length) groups.push({ title: 'Channels', items: channelItems });
+
+  // Agents
+  var agentItems = AGENTS.filter(function(a) {
+    return a.checked && (!q || a.name.toLowerCase().indexOf(q) !== -1 || a.slug.toLowerCase().indexOf(q) !== -1 || a.role.toLowerCase().indexOf(q) !== -1);
+  }).map(function(a) {
+    return { icon: a.emoji, label: a.name, desc: a.role, action: function() { openAgentPanel(a.slug); } };
+  });
+  if (agentItems.length) groups.push({ title: 'Agents', items: agentItems });
+
+  // Commands
+  var cmdItems = SLASH_COMMANDS.filter(function(cmd) {
+    return !q || cmd.name.toLowerCase().indexOf(q) !== -1 || cmd.desc.toLowerCase().indexOf(q) !== -1;
+  }).map(function(cmd) {
+    return { icon: cmd.icon, label: cmd.name, desc: cmd.desc, action: function() { handleSlashCommand(cmd.name); } };
+  });
+  // Add palette-specific commands
+  var extraCmds = [
+    { icon: '🔍', label: '/recover', desc: 'Show workspace recovery info', action: function() { openRecoveryView(); } },
+  ];
+  extraCmds.forEach(function(c) {
+    if (!q || c.label.toLowerCase().indexOf(q) !== -1 || c.desc.toLowerCase().indexOf(q) !== -1) {
+      cmdItems.push(c);
+    }
+  });
+  if (cmdItems.length) groups.push({ title: 'Commands', items: cmdItems });
+
+  // Recent messages (search through allMessages)
+  if (q && q.length >= 2) {
+    var msgItems = [];
+    var msgKeys = Object.keys(allMessages);
+    for (var i = msgKeys.length - 1; i >= 0 && msgItems.length < 5; i--) {
+      var m = allMessages[msgKeys[i]];
+      if (m.content && m.content.toLowerCase().indexOf(q) !== -1) {
+        var fromAgent = AGENTS.find(function(a) { return a.slug === m.from; });
+        msgItems.push({
+          icon: fromAgent ? fromAgent.emoji : '💬',
+          label: (fromAgent ? fromAgent.name : m.from) + ': ' + (m.content.length > 60 ? m.content.substring(0, 60) + '...' : m.content),
+          desc: 'message',
+          action: (function(mid) { return function() { if (m.reply_to) openThread(m.reply_to); }; })(m.id)
+        });
+      }
+    }
+    if (msgItems.length) groups.push({ title: 'Messages', items: msgItems });
+  }
+
+  return groups;
+}
+
+function renderCommandPaletteResults(query) {
+  var groups = buildCommandPaletteItems(query);
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+
+  if (groups.length === 0) {
+    var empty = document.createElement('div');
+    empty.className = 'cmd-palette-empty';
+    empty.textContent = query ? 'No results for "' + query + '"' : 'Start typing to search...';
+    cmdPaletteResults.appendChild(empty);
+    return;
+  }
+
+  groups.forEach(function(group) {
+    var groupDiv = document.createElement('div');
+    groupDiv.className = 'cmd-palette-group';
+    var title = document.createElement('div');
+    title.className = 'cmd-palette-group-title';
+    title.textContent = group.title;
+    groupDiv.appendChild(title);
+
+    group.items.forEach(function(item) {
+      var idx = cmdFlatItems.length;
+      cmdFlatItems.push(item);
+
+      var row = document.createElement('div');
+      row.className = 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : '');
+      row.addEventListener('click', function() { selectCommandPaletteItem(idx); });
+
+      var icon = document.createElement('div');
+      icon.className = 'cmd-palette-item-icon';
+      icon.textContent = item.icon;
+
+      var text = document.createElement('div');
+      text.className = 'cmd-palette-item-text';
+      var label = document.createElement('div');
+      label.className = 'cmd-palette-item-label';
+      label.textContent = item.label;
+      text.appendChild(label);
+      if (item.desc) {
+        var desc = document.createElement('div');
+        desc.className = 'cmd-palette-item-desc';
+        desc.textContent = item.desc;
+        text.appendChild(desc);
+      }
+
+      row.appendChild(icon);
+      row.appendChild(text);
+      groupDiv.appendChild(row);
+    });
+
+    cmdPaletteResults.appendChild(groupDiv);
+  });
+}
+
+function selectCommandPaletteItem(idx) {
+  if (idx < 0 || idx >= cmdFlatItems.length) return;
+  var item = cmdFlatItems[idx];
+  closeCommandPalette();
+  if (item.action) item.action();
+}
+
+cmdPaletteInput.addEventListener('input', function() {
+  cmdSelectedIdx = -1;
+  renderCommandPaletteResults(cmdPaletteInput.value.trim());
+});
+
+cmdPaletteInput.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    cmdSelectedIdx = Math.min(cmdSelectedIdx + 1, cmdFlatItems.length - 1);
+    renderCommandPaletteResults(cmdPaletteInput.value.trim());
+    // Scroll selected into view
+    var sel = cmdPaletteResults.querySelector('.cmd-palette-item.selected');
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    cmdSelectedIdx = Math.max(cmdSelectedIdx - 1, 0);
+    renderCommandPaletteResults(cmdPaletteInput.value.trim());
+    var sel = cmdPaletteResults.querySelector('.cmd-palette-item.selected');
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    selectCommandPaletteItem(cmdSelectedIdx >= 0 ? cmdSelectedIdx : 0);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeCommandPalette();
+  }
+});
+
+cmdPaletteOverlay.addEventListener('click', function(e) {
+  if (e.target === cmdPaletteOverlay) closeCommandPalette();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//   KEYBOARD SHORTCUTS (#64)
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('keydown', function(e) {
+  // Don't handle shortcuts when typing in inputs (except specific ones)
+  var inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
+  var officeActive = document.getElementById('office').classList.contains('active');
+  if (!officeActive) return;
+
+  // Ctrl+K / Cmd+K: open command palette (works even in inputs)
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    if (cmdPaletteOverlay.classList.contains('open')) {
+      closeCommandPalette();
+    } else {
+      openCommandPalette();
+    }
+    return;
+  }
+
+  // Ctrl+/ or Cmd+/: focus composer
+  if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+    e.preventDefault();
+    var ci = document.getElementById('composer-input');
+    if (ci) ci.focus();
+    return;
+  }
+
+  // Ctrl+Shift+T / Cmd+Shift+T: toggle thread panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
+    e.preventDefault();
+    var tp = document.getElementById('thread-panel');
+    if (tp.classList.contains('open')) {
+      closeThreadPanel();
+    } else if (activeThreadId) {
+      openThread(activeThreadId);
+    }
+    return;
+  }
+
+  // Escape: close panels (command palette handled by its own handler)
+  if (e.key === 'Escape' && !inInput) {
+    if (cmdPaletteOverlay.classList.contains('open')) {
+      closeCommandPalette();
+    } else if (document.getElementById('thread-panel').classList.contains('open')) {
+      closeThreadPanel();
+    } else if (document.getElementById('agent-panel').classList.contains('open')) {
+      closeAgentPanel();
+    } else if (document.getElementById('recovery-panel').classList.contains('open')) {
+      closeRecoveryView();
+    }
+    return;
+  }
+
+  // Skip remaining shortcuts if in an input field
+  if (inInput) {
+    // Up arrow in empty composer: edit last message
+    if (e.key === 'ArrowUp' && e.target.id === 'composer-input' && !e.target.value.trim()) {
+      // Find last human message and put it in the composer for editing
+      var msgKeys = Object.keys(allMessages);
+      for (var i = msgKeys.length - 1; i >= 0; i--) {
+        var m = allMessages[msgKeys[i]];
+        if (m.from === 'you' || m.from === 'human') {
+          e.preventDefault();
+          e.target.value = m.content || '';
+          e.target.style.height = 'auto';
+          e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+          composerSend.disabled = !e.target.value.trim();
+          break;
+        }
+      }
+    }
+    return;
+  }
+
+  // Number keys 1-9: switch to channel by position
+  if (e.key >= '1' && e.key <= '9' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+    var chIdx = parseInt(e.key) - 1;
+    if (chIdx < CHANNELS.length) {
+      e.preventDefault();
+      switchChannel(CHANNELS[chIdx].name);
+      renderSidebarChannels();
+    }
+    return;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//   1:1 DIRECT SESSION MODE (#65)
+// ═══════════════════════════════════════════════════════════════
+var dmModeActive = false;
+var dmAgent = null;
+var dmPreviousChannel = null;
+
+function enterDMMode(agentSlug) {
+  var agent = AGENTS.find(function(a) { return a.slug === agentSlug; });
+  if (!agent) return;
+
+  dmModeActive = true;
+  dmAgent = agent;
+  dmPreviousChannel = currentChannel;
+
+  // Update header
+  document.getElementById('channel-title').textContent = '@ ' + agent.name;
+  document.getElementById('channel-desc').textContent = '1:1 direct session';
+
+  // Show DM banner
+  document.getElementById('dm-banner-text').textContent = '1:1 session with ' + agent.name;
+  document.getElementById('dm-banner').classList.add('open');
+
+  // Update composer placeholder
+  document.getElementById('composer-input').placeholder = 'Message ' + agent.name + ' directly...';
+
+  // Clear messages and fetch DM channel
+  document.getElementById('messages').textContent = '';
+  lastMessageId = null;
+
+  // Try to switch mode via broker
+  if (brokerConnected) {
+    WuphfAPI.post('/session-mode', { mode: '1:1', agent: agentSlug })
+      .then(function() { fetchMessages(); })
+      .catch(function() {
+        // Fallback: just filter messages
+        fetchMessages();
+      });
+  }
+}
+
+function exitDMMode() {
+  if (!dmModeActive) return;
+  dmModeActive = false;
+  dmAgent = null;
+
+  // Hide DM banner
+  document.getElementById('dm-banner').classList.remove('open');
+
+  // Restore previous channel
+  if (dmPreviousChannel) {
+    switchChannel(dmPreviousChannel);
+  }
+
+  // Try to switch mode via broker
+  if (brokerConnected) {
+    WuphfAPI.post('/session-mode', { mode: 'office' }).catch(function() {});
+  }
+}
+
+// Double-click on sidebar agent to start DM
+function setupAgentDMHandlers() {
+  var agentButtons = document.querySelectorAll('#sidebar-agents .sidebar-agent');
+  agentButtons.forEach(function(btn) {
+    btn.addEventListener('dblclick', function(e) {
+      e.preventDefault();
+      var slug = btn.title;
+      // Find agent by name (title is set to agent.name)
+      var agent = AGENTS.find(function(a) { return a.name === slug; });
+      if (agent) enterDMMode(agent.slug);
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   RECOVERY VIEW (#55)
+// ═══════════════════════════════════════════════════════════════
+var recoveryViewOpen = false;
+
+function openRecoveryView() {
+  var panel = document.getElementById('recovery-panel');
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+
+  // Hide messages, show recovery
+  messagesEl.style.display = 'none';
+  typingEl.style.display = 'none';
+  panel.classList.add('open');
+  recoveryViewOpen = true;
+
+  // Update header
+  document.getElementById('channel-title').textContent = 'Recovery';
+  document.getElementById('channel-desc').textContent = 'Workspace state and recovery info';
+
+  panel.textContent = '';
+
+  // Header card
+  var headerCard = document.createElement('div');
+  headerCard.className = 'recovery-card';
+  var headerTitle = document.createElement('div');
+  headerTitle.className = 'recovery-card-title';
+  headerTitle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/></svg> Session Overview';
+  headerCard.appendChild(headerTitle);
+
+  var headerBody = document.createElement('div');
+  headerBody.className = 'recovery-card-body';
+  headerBody.textContent = 'Loading recovery data...';
+  headerCard.appendChild(headerBody);
+  panel.appendChild(headerCard);
+
+  // Fetch from broker
+  if (brokerConnected) {
+    Promise.all([
+      WuphfAPI.get('/state').catch(function() { return {}; }),
+      WuphfAPI.get('/tasks').catch(function() { return { tasks: [] }; }),
+      WuphfAPI.getMembers().catch(function() { return { members: [] }; })
+    ]).then(function(results) {
+      var state = results[0];
+      var tasksData = results[1];
+      var membersData = results[2];
+      renderRecoveryData(panel, state, tasksData, membersData);
+    });
+  } else {
+    renderRecoveryData(panel, {}, { tasks: [] }, { members: [] });
+  }
+}
+
+function renderRecoveryData(panel, state, tasksData, membersData) {
+  panel.textContent = '';
+
+  // Session card
+  var sessionCard = document.createElement('div');
+  sessionCard.className = 'recovery-card';
+  var sessionTitle = document.createElement('div');
+  sessionTitle.className = 'recovery-card-title';
+  sessionTitle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/></svg> Session State';
+  sessionCard.appendChild(sessionTitle);
+
+  var sessionBody = document.createElement('div');
+  sessionBody.className = 'recovery-card-body';
+
+  var recovery = state.recovery || {};
+  var stats = [
+    ['Current Channel', currentChannel],
+    ['Session Mode', dmModeActive ? '1:1 with ' + (dmAgent ? dmAgent.name : '?') : 'Office'],
+    ['Connected', brokerConnected ? 'Yes' : 'No (demo mode)'],
+    ['Messages Loaded', Object.keys(allMessages).length.toString()],
+    ['Active Threads', Object.keys(threadReplyCounts).length.toString()],
+  ];
+  if (recovery.focus) stats.push(['Focus', recovery.focus]);
+  if (recovery.away_since) stats.push(['Away Since', recovery.away_since]);
+
+  stats.forEach(function(s) {
+    var row = document.createElement('div');
+    row.className = 'recovery-stat';
+    var label = document.createElement('span');
+    label.className = 'recovery-stat-label';
+    label.textContent = s[0];
+    var val = document.createElement('span');
+    val.className = 'recovery-stat-value';
+    val.textContent = s[1];
+    row.appendChild(label);
+    row.appendChild(val);
+    sessionBody.appendChild(row);
+  });
+  sessionCard.appendChild(sessionBody);
+  panel.appendChild(sessionCard);
+
+  // Agent states card
+  var members = membersData.members || AGENTS.filter(function(a) { return a.checked; });
+  if (members.length > 0) {
+    var agentCard = document.createElement('div');
+    agentCard.className = 'recovery-card';
+    var agentTitle = document.createElement('div');
+    agentTitle.className = 'recovery-card-title';
+    agentTitle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg> Agent States';
+    agentCard.appendChild(agentTitle);
+
+    var agentBody = document.createElement('div');
+    agentBody.className = 'recovery-card-body';
+    members.forEach(function(m) {
+      var row = document.createElement('div');
+      row.className = 'recovery-stat';
+      var label = document.createElement('span');
+      label.className = 'recovery-stat-label';
+      label.textContent = m.name || m.slug;
+      var val = document.createElement('span');
+      val.className = 'recovery-stat-value';
+      val.textContent = m.state || m.status || 'active';
+      row.appendChild(label);
+      row.appendChild(val);
+      agentBody.appendChild(row);
+    });
+    agentCard.appendChild(agentBody);
+    panel.appendChild(agentCard);
+  }
+
+  // Tasks card
+  var tasks = tasksData.tasks || [];
+  if (tasks.length > 0) {
+    var taskCard = document.createElement('div');
+    taskCard.className = 'recovery-card';
+    var taskTitle = document.createElement('div');
+    taskTitle.className = 'recovery-card-title';
+    taskTitle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg> Pending Work';
+    taskCard.appendChild(taskTitle);
+
+    var taskBody = document.createElement('div');
+    taskBody.className = 'recovery-card-body';
+    tasks.forEach(function(t) {
+      var row = document.createElement('div');
+      row.className = 'recovery-task';
+      var dot = document.createElement('span');
+      dot.className = 'recovery-task-dot';
+      if (t.status === 'active' || t.status === 'in_progress') dot.className += ' active';
+      else if (t.status === 'blocked') dot.className += ' blocked';
+      else if (t.status === 'done' || t.status === 'completed') dot.className += ' done';
+      else dot.className += ' pending';
+      var text = document.createElement('span');
+      text.textContent = (t.title || t.subject || t.id) + (t.owner ? ' (' + t.owner + ')' : '');
+      row.appendChild(dot);
+      row.appendChild(text);
+      taskBody.appendChild(row);
+    });
+    taskCard.appendChild(taskBody);
+    panel.appendChild(taskCard);
+  }
+
+  // Next steps card from recovery
+  if (state.recovery && state.recovery.next_steps) {
+    var nextCard = document.createElement('div');
+    nextCard.className = 'recovery-card';
+    var nextTitle = document.createElement('div');
+    nextTitle.className = 'recovery-card-title';
+    nextTitle.textContent = 'Suggested Next Steps';
+    nextCard.appendChild(nextTitle);
+    var nextBody = document.createElement('div');
+    nextBody.className = 'recovery-card-body';
+    nextBody.textContent = state.recovery.next_steps;
+    nextCard.appendChild(nextBody);
+    panel.appendChild(nextCard);
+  }
+
+  // Close button
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-ghost';
+  closeBtn.textContent = 'Back to messages';
+  closeBtn.style.alignSelf = 'flex-start';
+  closeBtn.addEventListener('click', closeRecoveryView);
+  panel.appendChild(closeBtn);
+}
+
+function closeRecoveryView() {
+  var panel = document.getElementById('recovery-panel');
+  var messagesEl = document.getElementById('messages');
+  panel.classList.remove('open');
+  messagesEl.style.display = '';
+  recoveryViewOpen = false;
+
+  // Restore header
+  var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
+  document.getElementById('channel-title').textContent = '# ' + currentChannel;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   NOTIFICATION BADGES (#66)
+// ═══════════════════════════════════════════════════════════════
+var channelLastSeen = {};
+var channelUnreadCounts = {};
+
+function loadLastSeenState() {
+  try {
+    var saved = localStorage.getItem('wuphf-channel-last-seen');
+    if (saved) channelLastSeen = JSON.parse(saved);
+  } catch(e) {}
+}
+
+function saveLastSeenState() {
+  try {
+    localStorage.setItem('wuphf-channel-last-seen', JSON.stringify(channelLastSeen));
+  } catch(e) {}
+}
+
+function markChannelSeen(channelName) {
+  // Set last seen to the most recent message ID we know about
+  channelLastSeen[channelName] = lastMessageId || channelLastSeen[channelName] || '';
+  channelUnreadCounts[channelName] = 0;
+  saveLastSeenState();
+  updateChannelBadges();
+}
+
+function incrementUnreadCount(channelName) {
+  if (channelName === currentChannel) return; // Don't count for active channel
+  channelUnreadCounts[channelName] = (channelUnreadCounts[channelName] || 0) + 1;
+  updateChannelBadges();
+}
+
+function updateChannelBadges() {
+  var channelContainer = document.getElementById('sidebar-channels');
+  if (!channelContainer) return;
+  var items = channelContainer.querySelectorAll('.sidebar-item');
+  items.forEach(function(item, idx) {
+    if (idx >= CHANNELS.length) return;
+    var chName = CHANNELS[idx].name;
+    var count = channelUnreadCounts[chName] || 0;
+
+    // Remove existing badge
+    var existingBadge = item.querySelector('.sidebar-badge');
+    if (existingBadge) existingBadge.remove();
+
+    // Add badge if unread count > 0
+    if (count > 0) {
+      var badge = document.createElement('span');
+      badge.className = 'sidebar-badge';
+      badge.textContent = count > 99 ? '99+' : count.toString();
+      item.appendChild(badge);
+    }
+  });
+}
+
+// Hook into message polling to track unreads
+var _originalAppendBrokerMessage = typeof appendBrokerMessage === 'function' ? appendBrokerMessage : null;
+
+loadLastSeenState();
+
+// ─── SVG icon helper (static trusted icons only) ───
+function svgIcon(paths, size) {
+  var s = size || 16;
+  var ns = 'http://www.w3.org/2000/svg';
+  var svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('width', String(s));
+  svg.setAttribute('height', String(s));
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  paths.forEach(function(d) {
+    var p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+  });
+  return svg;
+}
+
+// ─── Confirmation Dialog (reusable) ───
+function showConfirmDialog(opts) {
+  var overlay = el('div', { className: 'confirm-overlay' });
+  var card = el('div', { className: 'confirm-card' });
+
+  var title = el('h3', { className: 'confirm-title' }, opts.title || 'Confirm');
+  var message = el('p', { className: 'confirm-message' }, opts.message || '');
+  card.appendChild(title);
+  card.appendChild(message);
+
+  var actions = el('div', { className: 'confirm-actions' });
+  var cancelBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: function() { overlay.remove(); if (opts.onCancel) opts.onCancel(); } }, opts.cancelLabel || 'Cancel');
+  var confirmBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: function() { overlay.remove(); if (opts.onConfirm) opts.onConfirm(); } }, opts.confirmLabel || 'Confirm');
+  actions.appendChild(cancelBtn);
+  actions.appendChild(confirmBtn);
+  card.appendChild(actions);
+
+  overlay.appendChild(card);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) { overlay.remove(); if (opts.onCancel) opts.onCancel(); } });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+// ─── Needs You Banner ───
+function renderNeedsYouBanner(requests) {
+  var existing = document.getElementById('needs-you-banner');
+  if (existing) existing.remove();
+
+  // Find blocking/required request
+  var blocking = null;
+  if (Array.isArray(requests)) {
+    blocking = requests.find(function(r) { return (r.blocking || r.required) && r.status === 'open'; });
+  } else if (requests && (requests.blocking || requests.required)) {
+    blocking = requests;
+  }
+  if (!blocking) return;
+
+  var banner = el('div', { className: 'needs-you-banner', id: 'needs-you-banner' });
+
+  var label = el('div', { className: 'needs-you-label' });
+  // Warning triangle icon
+  label.appendChild(svgIcon(['M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', 'M12 9v4', 'M12 17h.01'], 14));
+  label.appendChild(document.createTextNode(' NEEDS YOU'));
+  banner.appendChild(label);
+
+  var fromAgent = AGENTS.find(function(a) { return a.slug === blocking.from; });
+  var fromText = el('div', { className: 'needs-you-from' }, (fromAgent ? fromAgent.name : blocking.from) + ' is waiting for your response');
+  banner.appendChild(fromText);
+
+  var question = el('div', { className: 'needs-you-question' }, blocking.question || blocking.title || '');
+  banner.appendChild(question);
+
+  var options = blocking.options || [];
+  if (options.length > 0) {
+    var actionsDiv = el('div', { className: 'needs-you-actions' });
+    options.forEach(function(opt) {
+      var btn = el('button', { className: 'needs-you-btn', onClick: function() {
+        if (opt.requires_text || options.length > 1) {
+          openInterviewModal(blocking);
+        } else {
+          WuphfAPI.answerRequest(blocking.id, opt.id)
+            .then(function() { var b = document.getElementById('needs-you-banner'); if (b) b.remove(); fetchRequests(); });
+        }
+      } }, opt.label || opt.text || opt.id);
+      actionsDiv.appendChild(btn);
+    });
+    // Add "Answer" button that opens interview flow
+    var answerBtn = el('button', { className: 'needs-you-btn', style: { background: 'var(--red)', color: 'white' }, onClick: function() { openInterviewModal(blocking); } }, 'Answer');
+    actionsDiv.appendChild(answerBtn);
+    banner.appendChild(actionsDiv);
+  }
+
+  var mainEl = document.querySelector('.main');
+  var channelHeader = mainEl.querySelector('.channel-header');
+  channelHeader.parentNode.insertBefore(banner, channelHeader.nextSibling);
+}
+
+function normalizeTaskStatus(status) {
+  if (!status) return 'open';
+  var s = status.toLowerCase().replace(/[\s-]/g, '_');
+  if (s === 'moving' || s === 'in_progress' || s === 'active') return 'in_progress';
+  if (s === 'done' || s === 'completed' || s === 'complete') return 'done';
+  if (s === 'review' || s === 'in_review') return 'review';
+  if (s === 'blocked') return 'blocked';
+  return 'open';
+}
+
+function renderTaskBoard(container, tasks) {
+  var columns = { open: [], in_progress: [], review: [], done: [] };
+  tasks.forEach(function(t) {
+    var status = normalizeTaskStatus(t.status);
+    if (status === 'blocked') { columns.open.push(t); return; }
+    if (columns[status]) columns[status].push(t);
+    else columns.open.push(t);
+  });
+
+  var board = el('div', { className: 'task-board' });
+
+  var columnDefs = [
+    { key: 'open', label: 'Open' },
+    { key: 'in_progress', label: 'In Progress' },
+    { key: 'review', label: 'Review' },
+    { key: 'done', label: 'Done' }
+  ];
+
+  columnDefs.forEach(function(col) {
+    var colDiv = el('div', { className: 'task-column' });
+    var header = el('div', { className: 'task-column-header' });
+    var headerLabel = el('span', null, col.label);
+    var headerCount = el('span', { className: 'task-column-count' }, String(columns[col.key].length));
+    header.appendChild(headerLabel);
+    header.appendChild(headerCount);
+    colDiv.appendChild(header);
+
+    columns[col.key].forEach(function(task) {
+      var card = el('div', { className: 'task-card', onClick: function() { openTaskDetail(task); } });
+
+      var title = el('div', { className: 'task-card-title' }, task.title || task.name || 'Untitled');
+      card.appendChild(title);
+
+      var meta = el('div', { className: 'task-card-meta' });
+      var status = normalizeTaskStatus(task.status);
+      if (status === 'blocked') {
+        var pill = el('span', { className: 'task-status-pill task-status-blocked' }, 'BLOCKED');
+        meta.appendChild(pill);
+      }
+      if (task.owner || task.assignee) {
+        var owner = el('span', { className: 'task-card-owner' });
+        var ownerAgent = AGENTS.find(function(a) { return a.slug === (task.owner || task.assignee); });
+        if (ownerAgent) {
+          owner.appendChild(el('span', null, ownerAgent.emoji));
+        }
+        owner.appendChild(el('span', null, task.owner || task.assignee));
+        meta.appendChild(owner);
+      }
+      card.appendChild(meta);
+      colDiv.appendChild(card);
+    });
+
+    board.appendChild(colDiv);
+  });
+
+  container.appendChild(board);
+}
+
+function openTaskDetail(task) {
+  var overlay = el('div', { className: 'task-detail-overlay' });
+  var card = el('div', { className: 'task-detail-card' });
+
+  var titleRow = el('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' } });
+  var title = el('h3', { className: 'task-detail-title' }, task.title || task.name || 'Untitled');
+  var closeBtn = el('button', { className: 'app-view-close', onClick: function() { overlay.remove(); } });
+  closeBtn.appendChild(svgIcon(['M18 6 6 18', 'M6 6 12 12']));
+  titleRow.appendChild(title);
+  titleRow.appendChild(closeBtn);
+  card.appendChild(titleRow);
+
+  var status = normalizeTaskStatus(task.status);
+  var statusClass = 'task-status-' + status;
+
+  var rows = [
+    ['Status', status.replace(/_/g, ' '), statusClass],
+    ['Owner', task.owner || task.assignee || 'Unassigned', null],
+    ['Channel', task.channel || '-', null]
+  ];
+  rows.forEach(function(r) {
+    var row = el('div', { className: 'task-detail-row' });
+    row.appendChild(el('span', { className: 'task-detail-label' }, r[0]));
+    if (r[2]) {
+      var pill = el('span', { className: 'task-status-pill ' + r[2] }, r[1].toUpperCase());
+      row.appendChild(pill);
+    } else {
+      row.appendChild(el('span', { className: 'task-detail-value' }, r[1]));
+    }
+    card.appendChild(row);
+  });
+
+  if (task.description) {
+    var desc = el('div', { className: 'task-detail-desc' }, task.description);
+    card.appendChild(desc);
+  }
+
+  overlay.appendChild(card);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+function renderRequestList(container, data) {
+  var list = el('div', { className: 'request-list' });
+
+  // Combine all requests
+  var allRequests = [];
+  if (data.pending) allRequests.push(data.pending);
+  if (data.requests) allRequests = allRequests.concat(data.requests);
+  if (data.all) allRequests = allRequests.concat(data.all);
+
+  // Dedupe by id
+  var seen = {};
+  allRequests = allRequests.filter(function(r) {
+    if (!r || !r.id || seen[r.id]) return false;
+    seen[r.id] = true;
+    return true;
+  });
+
+  if (allRequests.length === 0) {
+    list.appendChild(el('div', { className: 'request-empty' }, 'No requests right now. Your agents are working independently.'));
+    container.appendChild(list);
+    return;
+  }
+
+  // Pending first, then answered
+  var pending = allRequests.filter(function(r) { return r.status === 'open' || r.status === 'pending' || !r.status; });
+  var answered = allRequests.filter(function(r) { return r.status && r.status !== 'open' && r.status !== 'pending'; });
+
+  if (pending.length > 0) {
+    list.appendChild(el('div', { className: 'request-list-header' }, 'Pending (' + pending.length + ')'));
+    pending.forEach(function(req) { list.appendChild(buildRequestItem(req, true)); });
+  }
+
+  if (answered.length > 0) {
+    list.appendChild(el('div', { className: 'request-list-header', style: { marginTop: '12px' } }, 'Answered (' + answered.length + ')'));
+    answered.forEach(function(req) { list.appendChild(buildRequestItem(req, false)); });
+  }
+
+  container.appendChild(list);
+}
+
+function buildRequestItem(req, isPending) {
+  var item = el('div', { className: 'request-item' });
+
+  var header = el('div', { className: 'request-item-header' });
+  var fromAgent = AGENTS.find(function(a) { return a.slug === req.from; });
+  var fromName = el('span', { className: 'request-item-from' }, fromAgent ? fromAgent.name : (req.from || 'Unknown'));
+  header.appendChild(fromName);
+
+  // Kind pill
+  var kind = req.kind || req.type || 'input';
+  var kindLower = kind.toLowerCase();
+  var kindClass = 'request-kind-input';
+  if (kindLower === 'approval') kindClass = 'request-kind-approval';
+  else if (kindLower === 'confirm') kindClass = 'request-kind-confirm';
+  else if (kindLower === 'secret') kindClass = 'request-kind-secret';
+  var pill = el('span', { className: 'request-kind-pill ' + kindClass }, kind.toUpperCase());
+  header.appendChild(pill);
+
+  if (req.blocking || req.required) {
+    var urgentPill = el('span', { className: 'request-kind-pill request-kind-secret', style: { marginLeft: '4px' } }, 'BLOCKING');
+    header.appendChild(urgentPill);
+  }
+
+  item.appendChild(header);
+
+  var question = el('div', { className: 'request-item-question' }, req.question || req.title || '');
+  item.appendChild(question);
+
+  // Timing
+  if (req.due || req.created_at || req.follow_up) {
+    var timing = el('div', { className: 'request-item-timing' });
+    var parts = [];
+    if (req.created_at) {
+      var d = new Date(req.created_at);
+      parts.push('Asked ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+    }
+    if (req.due) parts.push('Due ' + req.due);
+    if (req.follow_up) parts.push('Follow-up: ' + req.follow_up);
+    timing.textContent = parts.join(' \u2022 ');
+    item.appendChild(timing);
+  }
+
+  // Actions for pending requests
+  if (isPending) {
+    var actions = el('div', { className: 'request-item-actions' });
+    var answerBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: function() { openInterviewModal(req); } }, 'Answer');
+    actions.appendChild(answerBtn);
+
+    var options = req.options || [];
+    options.forEach(function(opt) {
+      var btn = el('button', { className: 'btn btn-ghost btn-sm', onClick: function() {
+        if (opt.requires_text) {
+          openInterviewModal(req);
+        } else {
+          WuphfAPI.answerRequest(req.id, opt.id)
+            .then(function() { openRequestList(); fetchRequests(); });
+        }
+      } }, opt.label || opt.text || opt.id);
+      actions.appendChild(btn);
+    });
+    item.appendChild(actions);
+  } else {
+    var statusLine = el('div', { style: { fontSize: '12px', color: 'var(--green)', fontWeight: '500' } }, 'Answered');
+    item.appendChild(statusLine);
+  }
+
+  return item;
+}
+
+// ─── Interview Answer Flow (3-phase modal) ───
+function openInterviewModal(request) {
+  var overlay = el('div', { className: 'interview-overlay' });
+  var card = el('div', { className: 'interview-card' });
+
+  var fromAgent = AGENTS.find(function(a) { return a.slug === request.from; });
+  var title = el('h3', { className: 'interview-title' }, (fromAgent ? fromAgent.name : request.from) + ' needs your input');
+  var question = el('p', { className: 'interview-question' }, request.question || request.title || '');
+  card.appendChild(title);
+  card.appendChild(question);
+
+  var options = request.options || [];
+  var selectedOption = null;
+  var customText = '';
+
+  // Phase 1: Choose option
+  renderPhase1();
+
+  function renderPhase1() {
+    clearPhaseContent();
+    var phase = el('div', { className: 'interview-phase' }, 'Step 1 of 3 \u2014 Choose an option');
+    card.appendChild(phase);
+
+    if (options.length === 0) {
+      // No options, go straight to text input
+      renderPhase2(null);
+      return;
+    }
+
+    var optionsDiv = el('div', { className: 'interview-options' });
+    options.forEach(function(opt) {
+      var optBtn = el('button', { className: 'interview-option' + (selectedOption && selectedOption.id === opt.id ? ' selected' : '') });
+      var radio = el('div', { className: 'interview-option-radio' });
+      radio.appendChild(el('div', { className: 'interview-option-radio-inner' }));
+      var label = el('span', { className: 'interview-option-label' }, opt.label || opt.text || opt.id);
+      optBtn.appendChild(radio);
+      optBtn.appendChild(label);
+      optBtn.addEventListener('click', function() {
+        selectedOption = opt;
+        optionsDiv.querySelectorAll('.interview-option').forEach(function(o) { o.classList.remove('selected'); });
+        optBtn.classList.add('selected');
+        nextBtn.disabled = false;
+      });
+      optionsDiv.appendChild(optBtn);
+    });
+    card.appendChild(optionsDiv);
+
+    var actions = el('div', { className: 'interview-actions' });
+    var cancelBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: function() { overlay.remove(); } }, 'Cancel');
+    var nextBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: function() {
+      if (selectedOption && selectedOption.requires_text) {
+        renderPhase2(selectedOption);
+      } else {
+        renderPhase3();
+      }
+    } }, 'Next');
+    nextBtn.disabled = !selectedOption;
+    actions.appendChild(cancelBtn);
+    actions.appendChild(nextBtn);
+    card.appendChild(actions);
+  }
+
+  function renderPhase2(opt) {
+    clearPhaseContent();
+    var phase = el('div', { className: 'interview-phase' }, 'Step 2 of 3 \u2014 Add details');
+    card.appendChild(phase);
+
+    if (opt) {
+      var chosen = el('div', { style: { fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' } }, 'Selected: ' + (opt.label || opt.text || opt.id));
+      card.appendChild(chosen);
+    }
+
+    var textarea = document.createElement('textarea');
+    textarea.className = 'interview-text';
+    textarea.placeholder = 'Add context, notes, or a custom response...';
+    textarea.value = customText;
+    textarea.addEventListener('input', function() { customText = textarea.value; });
+    card.appendChild(textarea);
+
+    var actions = el('div', { className: 'interview-actions' });
+    var backBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: function() {
+      if (options.length > 0) renderPhase1();
+      else { overlay.remove(); }
+    } }, 'Back');
+    var nextBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: renderPhase3 }, 'Review');
+    actions.appendChild(backBtn);
+    actions.appendChild(nextBtn);
+    card.appendChild(actions);
+
+    textarea.focus();
+  }
+
+  function renderPhase3() {
+    clearPhaseContent();
+    var phase = el('div', { className: 'interview-phase' }, 'Step 3 of 3 \u2014 Confirm');
+    card.appendChild(phase);
+
+    if (selectedOption) {
+      var reviewChoice = el('div', { className: 'interview-review' });
+      reviewChoice.appendChild(el('div', { className: 'interview-review-label' }, 'Your choice'));
+      reviewChoice.appendChild(el('div', { className: 'interview-review-value' }, selectedOption.label || selectedOption.text || selectedOption.id));
+      card.appendChild(reviewChoice);
+    }
+
+    if (customText.trim()) {
+      var reviewText = el('div', { className: 'interview-review' });
+      reviewText.appendChild(el('div', { className: 'interview-review-label' }, 'Your note'));
+      reviewText.appendChild(el('div', { className: 'interview-review-value' }, customText));
+      card.appendChild(reviewText);
+    }
+
+    var actions = el('div', { className: 'interview-actions' });
+    var backBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: function() {
+      if (selectedOption && selectedOption.requires_text) renderPhase2(selectedOption);
+      else if (options.length > 0) renderPhase1();
+      else renderPhase2(null);
+    } }, 'Back');
+    var submitBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: function() {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+      var body = { id: request.id };
+      if (selectedOption) body.choice_id = selectedOption.id;
+      if (customText.trim()) body.custom_text = customText.trim();
+      WuphfAPI.post('/requests/answer', body)
+        .then(function() {
+          overlay.remove();
+          fetchRequests();
+          if (currentApp === 'requests') renderAppContent('requests');
+        })
+        .catch(function() {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit';
+        });
+    } }, 'Submit');
+    actions.appendChild(backBtn);
+    actions.appendChild(submitBtn);
+    card.appendChild(actions);
+  }
+
+  function clearPhaseContent() {
+    // Keep title and question, remove everything after
+    while (card.children.length > 2) {
+      card.removeChild(card.lastChild);
+    }
+  }
+
+  overlay.appendChild(card);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+// (sidebar apps managed by switchApp/renderSidebarApps above)
 
 initApp();
 </script>
