@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -119,6 +120,107 @@ func ResolveNoNex() bool {
 		return false
 	}
 	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+}
+
+// ResolveLLMProvider resolves the active LLM provider for this run.
+// Resolution: flag/env override > config file > default claude-code.
+// Only supported interactive providers are returned.
+func ResolveLLMProvider(flagValue string) string {
+	if v := normalizeLLMProvider(flagValue); v != "" {
+		return v
+	}
+	if v := normalizeLLMProvider(os.Getenv("WUPHF_LLM_PROVIDER")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	if v := normalizeLLMProvider(cfg.LLMProvider); v != "" {
+		return v
+	}
+	return "claude-code"
+}
+
+func normalizeLLMProvider(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "claude-code":
+		return "claude-code"
+	case "codex":
+		return "codex"
+	default:
+		return ""
+	}
+}
+
+var codexModelLinePattern = regexp.MustCompile(`(?m)^\s*model\s*=\s*("([^"\\]|\\.)*"|'[^']*')`)
+
+// ResolveCodexModel returns the effective Codex model for the current working
+// directory, following the documented Codex config layering:
+// WUPHF_CODEX_MODEL/CODEX_MODEL env > nearest .codex/config.toml > ~/.codex/config.toml.
+func ResolveCodexModel(cwd string) string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_CODEX_MODEL")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("CODEX_MODEL")); v != "" {
+		return v
+	}
+	for _, path := range codexConfigSearchPaths(cwd) {
+		if model := codexModelFromFile(path); model != "" {
+			return model
+		}
+	}
+	return ""
+}
+
+func codexConfigSearchPaths(cwd string) []string {
+	seen := map[string]struct{}{}
+	paths := make([]string, 0, 8)
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+
+	if absCwd, err := filepath.Abs(strings.TrimSpace(cwd)); err == nil && absCwd != "" {
+		for dir := absCwd; ; dir = filepath.Dir(dir) {
+			add(filepath.Join(dir, ".codex", "config.toml"))
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+		}
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		add(filepath.Join(home, ".codex", "config.toml"))
+	}
+	return paths
+}
+
+func codexModelFromFile(path string) string {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	match := codexModelLinePattern.FindSubmatch(raw)
+	if len(match) < 2 {
+		return ""
+	}
+	value := strings.TrimSpace(string(match[1]))
+	if len(value) >= 2 {
+		if strings.HasPrefix(value, `"`) && strings.HasSuffix(value, `"`) {
+			if unquoted, err := strconv.Unquote(value); err == nil {
+				return strings.TrimSpace(unquoted)
+			}
+		}
+		if strings.HasPrefix(value, `'`) && strings.HasSuffix(value, `'`) {
+			return strings.TrimSpace(value[1 : len(value)-1])
+		}
+	}
+	return strings.TrimSpace(value)
 }
 
 // ResolveAPIKey resolves the API key via: flag > WUPHF_API_KEY env > NEX_API_KEY env > config file.

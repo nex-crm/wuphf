@@ -119,8 +119,7 @@ func BuildCapabilityRegistry(runtime RuntimeCapabilities) CapabilityRegistry {
 	if len(runtime.Registry.Entries) > 0 {
 		return runtime.Registry
 	}
-	cfg, _ := config.Load()
-	return buildCapabilityRegistry(strings.TrimSpace(cfg.LLMProvider), runtimeCapabilityStatus(runtime, "tmux"), runtimeCapabilityStatus(runtime, "claude"), runtimeCapabilityStatus(runtime, "codex"), CapabilityProbeOptions{})
+	return buildCapabilityRegistry(config.ResolveLLMProvider(""), runtimeCapabilityStatus(runtime, "tmux"), runtimeCapabilityStatus(runtime, "claude"), runtimeCapabilityStatus(runtime, "codex"), CapabilityProbeOptions{})
 }
 
 func buildCapabilityRegistry(providerName string, tmuxStatus, claudeStatus, codexStatus CapabilityStatus, opts CapabilityProbeOptions) CapabilityRegistry {

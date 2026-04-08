@@ -96,6 +96,18 @@ func TestProviderOptionsIncludeCodex(t *testing.T) {
 	t.Fatal("expected codex provider option")
 }
 
+func TestProviderOptionsOnlyExposeClaudeAndCodex(t *testing.T) {
+	options := ProviderOptions()
+	values := make([]string, 0, len(options))
+	for _, opt := range options {
+		values = append(values, opt.Value)
+	}
+	joined := strings.Join(values, ",")
+	if strings.Contains(joined, "gemini") || strings.Contains(joined, "nex-ask") {
+		t.Fatalf("expected provider options to hide gemini and nex-ask, got %q", joined)
+	}
+}
+
 func containsAll(s string, needles ...string) bool {
 	for _, needle := range needles {
 		if !strings.Contains(s, needle) {
