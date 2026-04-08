@@ -6,7 +6,7 @@ This is the implementation-ready plan for Phase 2 of the CC-agent-inspired WUPHF
 
 It corresponds to the `Medium UX Wins` portion of:
 
-- [cc-agent-implementation-roadmap.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-implementation-roadmap.md)
+- [cc-agent-implementation-roadmap.md](./cc-agent-implementation-roadmap.md)
 
 This doc answers:
 
@@ -21,13 +21,13 @@ Phase 2 is mostly about making existing office/direct capabilities feel much mor
 
 ### Channel UX and transcript surfaces
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
-- [channel_thread.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_thread.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
-- [channel_layout.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_layout.go)
-- [channel_sidebar.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_sidebar.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
+- [channel_thread.go](../cmd/wuphf/channel_thread.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
+- [channel_layout.go](../cmd/wuphf/channel_layout.go)
+- [channel_sidebar.go](../cmd/wuphf/channel_sidebar.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 What lives there today:
 
@@ -39,10 +39,10 @@ What lives there today:
 
 ### Picker, overlay, and focused interaction surfaces
 
-- [picker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/picker.go)
-- [picker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/picker_test.go)
-- [autocomplete.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete.go)
-- [autocomplete_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete_test.go)
+- [picker.go](../internal/tui/picker.go)
+- [picker_test.go](../internal/tui/picker_test.go)
+- [autocomplete.go](../internal/tui/autocomplete.go)
+- [autocomplete_test.go](../internal/tui/autocomplete_test.go)
 
 What lives there today:
 
@@ -52,9 +52,9 @@ What lives there today:
 
 ### Human requests, interviews, approvals, and office state
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [ledger.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/ledger.go)
-- [broker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker_test.go)
+- [broker.go](../internal/team/broker.go)
+- [ledger.go](../internal/team/ledger.go)
+- [broker_test.go](../internal/team/broker_test.go)
 
 What lives there today:
 
@@ -65,9 +65,9 @@ What lives there today:
 
 ### Existing UAT coverage
 
-- [office-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/office-channel-e2e.sh)
-- [one-on-one-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/one-on-one-channel-e2e.sh)
-- [human-judgment-uat.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/human-judgment-uat.sh)
+- [office-channel-e2e.sh](../tests/uat/office-channel-e2e.sh)
+- [one-on-one-channel-e2e.sh](../tests/uat/one-on-one-channel-e2e.sh)
+- [human-judgment-uat.sh](../tests/uat/human-judgment-uat.sh)
 
 What they already prove:
 
@@ -116,13 +116,13 @@ Turn blocking interviews into explicit mini-flows instead of relying on raw tran
 
 ### Likely Files
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
+- [broker.go](../internal/team/broker.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
 - likely new helper:
-  - `[channel_interview.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_interview.go)` or similar
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
-- [broker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker_test.go)
+  - `[channel_interview.go](../cmd/wuphf/channel_interview.go)` or similar
+- [channel_test.go](../cmd/wuphf/channel_test.go)
+- [broker_test.go](../internal/team/broker_test.go)
 
 ### Termwright Scenarios
 
@@ -157,12 +157,12 @@ Let human approvals include steering at the decision point instead of only yes/n
 
 ### Likely Files
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
-- [broker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker_test.go)
+- [broker.go](../internal/team/broker.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
+- [broker_test.go](../internal/team/broker_test.go)
 
 ### Termwright Scenarios
 
@@ -197,12 +197,12 @@ Introduce one canonical switcher for office, direct sessions, and agent/task tra
 
 ### Likely Files
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_sidebar.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_sidebar.go)
-- [channel_layout.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_layout.go)
-- [picker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/picker.go)
-- [picker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/picker_test.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_sidebar.go](../cmd/wuphf/channel_sidebar.go)
+- [channel_layout.go](../cmd/wuphf/channel_layout.go)
+- [picker.go](../internal/tui/picker.go)
+- [picker_test.go](../internal/tui/picker_test.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 ### Termwright Scenarios
 
@@ -234,12 +234,12 @@ Make “new since you looked” a first-class concept in channels and direct ses
 
 ### Likely Files
 
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
-- [channel_layout.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_layout.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
-- [office-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/office-channel-e2e.sh)
-- [one-on-one-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/one-on-one-channel-e2e.sh)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
+- [channel_layout.go](../cmd/wuphf/channel_layout.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
+- [office-channel-e2e.sh](../tests/uat/office-channel-e2e.sh)
+- [one-on-one-channel-e2e.sh](../tests/uat/one-on-one-channel-e2e.sh)
 
 ### Termwright Scenarios
 
@@ -269,12 +269,12 @@ Turn transcript rewind/restore/summarize into explicit operator tools.
 
 ### Likely Files
 
-- [channel_thread.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_thread.go)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
+- [channel_thread.go](../cmd/wuphf/channel_thread.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
 - likely new helper:
-  - `[channel_recovery.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_recovery.go)` or similar
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+  - `[channel_recovery.go](../cmd/wuphf/channel_recovery.go)` or similar
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 ### Termwright Scenarios
 
@@ -304,11 +304,11 @@ Add concise “while you were away” summaries for office and direct sessions.
 
 ### Likely Files
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [ledger.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/ledger.go)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+- [broker.go](../internal/team/broker.go)
+- [ledger.go](../internal/team/ledger.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 ### Termwright Scenarios
 
@@ -338,11 +338,11 @@ Surface setup and readiness blockers in the main flow instead of only via `/doct
 
 ### Likely Files
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
+- [broker.go](../internal/team/broker.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 ### Termwright Scenarios
 
@@ -371,12 +371,12 @@ Improve authoring with insertion/search overlays instead of making everything ra
 
 ### Likely Files
 
-- [picker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/picker.go)
-- [channel_composer.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_composer.go)
-- [autocomplete.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete.go)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [picker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/picker_test.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+- [picker.go](../internal/tui/picker.go)
+- [channel_composer.go](../cmd/wuphf/channel_composer.go)
+- [autocomplete.go](../internal/tui/autocomplete.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [picker_test.go](../internal/tui/picker_test.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 ### Termwright Scenarios
 

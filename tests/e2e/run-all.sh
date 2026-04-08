@@ -4,10 +4,15 @@
 
 set -e
 
-TERMWRIGHT="/Users/najmuzzaman/.cargo/bin/termwright"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+TERMWRIGHT="${TERMWRIGHT:-$(command -v termwright || true)}"
+if [ -z "$TERMWRIGHT" ]; then
+  echo "termwright not found in PATH; set TERMWRIGHT=/abs/path/to/termwright" >&2
+  exit 1
+fi
 SOCKET="/tmp/wuphf-go-e2e.sock"
-NEX="$(cd "$(dirname "$0")/../.." && pwd)/wuphf"
-ARTIFACTS="$(cd "$(dirname "$0")/../.." && pwd)/termwright-artifacts/e2e-$(date +%Y%m%d-%H%M%S)"
+NEX="${WUPHF_BIN:-$REPO_ROOT/wuphf}"
+ARTIFACTS="${ARTIFACTS:-$REPO_ROOT/termwright-artifacts/e2e-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$ARTIFACTS"
 
 PASS=0

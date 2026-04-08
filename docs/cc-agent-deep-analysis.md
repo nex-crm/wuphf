@@ -23,7 +23,7 @@ This is intentionally broader than an "agent runtime" review. It covers:
 
 Execution roadmap:
 
-- [cc-agent-implementation-roadmap.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-implementation-roadmap.md)
+- [cc-agent-implementation-roadmap.md](./cc-agent-implementation-roadmap.md)
 
 ## Files Inspected
 

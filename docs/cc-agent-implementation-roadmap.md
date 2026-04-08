@@ -25,11 +25,11 @@ while preserving WUPHF's office-first product identity.
 
 Related docs:
 
-- [cc-agent-deep-analysis.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-deep-analysis.md)
-- [cc-agent-phase1-execution-plan.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-phase1-execution-plan.md)
-- [cc-agent-phase2-execution-plan.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-phase2-execution-plan.md)
-- [cc-agent-phase3-execution-plan.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-phase3-execution-plan.md)
-- [TODOS.md](/Users/najmuzzaman/Documents/nex/WUPHF/TODOS.md)
+- [cc-agent-deep-analysis.md](./cc-agent-deep-analysis.md)
+- [cc-agent-phase1-execution-plan.md](./cc-agent-phase1-execution-plan.md)
+- [cc-agent-phase2-execution-plan.md](./cc-agent-phase2-execution-plan.md)
+- [cc-agent-phase3-execution-plan.md](./cc-agent-phase3-execution-plan.md)
+- [TODOS.md](../TODOS.md)
 
 ## Guiding Principles
 
