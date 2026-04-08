@@ -3651,7 +3651,7 @@ func (m channelModel) answerRequest(req channelInterview) (tea.Model, tea.Cmd) {
 	m.pending = &req
 	m.snoozedInterview = ""
 	m.selectedOption = m.recommendedOptionIndex()
-	m.notice = "Answering request " + req.ID + ". Type your answer and press Enter."
+	m.notice = answerRequestNotice(req)
 	if req.ReplyTo != "" {
 		m.threadPanelOpen = true
 		m.threadPanelID = req.ReplyTo
@@ -3995,11 +3995,14 @@ func renderInterviewCard(interview channelInterview, selected int, phaseTitle st
 		if i == selected {
 			prefix = lipgloss.NewStyle().Foreground(lipgloss.Color("#60A5FA")).Bold(true).Render("→ ")
 		}
-		label := option.Label
+		labelBits := []string{titleStyle.Render(interviewOptionDisplayLabel(&option))}
 		if option.ID == interview.RecommendedID {
-			label += " (Recommended)"
+			labelBits = append(labelBits, subtlePill("recommended", "#DBEAFE", "#1D4ED8"))
 		}
-		lines = append(lines, prefix+titleStyle.Render(label))
+		if badge := interviewOptionDraftBadge(&option); badge != "" {
+			labelBits = append(labelBits, subtlePill(badge, "#FDE68A", "#78350F"))
+		}
+		lines = append(lines, prefix+strings.Join(labelBits, " "))
 		if strings.TrimSpace(option.Description) != "" {
 			lines = append(lines, "    "+muted.Width(cardWidth-8).Render(option.Description))
 		}

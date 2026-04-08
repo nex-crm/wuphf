@@ -215,8 +215,8 @@ func buildRecoveryActionLines(contentWidth int, tasks []channelTask, requests []
 			body = strings.TrimSpace(req.Question)
 		}
 		extra := []string{"Asked by @" + fallbackString(req.From, "unknown")}
-		if strings.TrimSpace(req.RecommendedID) != "" {
-			extra = append(extra, "Recommended: "+req.RecommendedID)
+		if recommended := req.recommendedOptionLabel(); recommended != "" {
+			extra = append(extra, "Recommended: "+recommended)
 		}
 		extra = append(extra, "Open request")
 		lines = append(lines, prefixedCardLines(renderedCardLines(renderRecoveryActionCard(contentWidth, header, body, "#B45309", extra), "", req.ID, strings.TrimSpace(req.ReplyTo), ""), "  ")...)

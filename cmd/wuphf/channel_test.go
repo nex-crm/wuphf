@@ -2479,6 +2479,28 @@ func TestPendingRequestTypedAnswerOpensReviewConfirmation(t *testing.T) {
 	}
 }
 
+func TestAnswerRequestUsesApprovalSteeringNotice(t *testing.T) {
+	m := newChannelModel(false)
+	req := channelInterview{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Question: "Ship it?",
+		Options: []channelInterviewOption{
+			{ID: "approve", Label: "Approve"},
+			{ID: "reject_with_steer", Label: "Reject with steer", RequiresText: true},
+		},
+		RecommendedID: "approve",
+	}
+
+	next, _ := m.answerRequest(req)
+	got := next.(channelModel)
+
+	if !strings.Contains(got.notice, "Pick a decision or type steering") {
+		t.Fatalf("expected approval-specific notice, got %q", got.notice)
+	}
+}
+
 func TestChannelResetDoneImmediatelyRehydratesDirectMode(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
@@ -2566,6 +2588,27 @@ func TestRenderInterviewCardShowsCustomAnswerAsFinalOption(t *testing.T) {
 	}
 }
 
+func TestRenderInterviewCardShowsApprovalBadges(t *testing.T) {
+	card := renderInterviewCard(channelInterview{
+		Kind:     "approval",
+		From:     "ceo",
+		Question: "Ship the launch copy?",
+		Options: []channelInterviewOption{
+			{ID: "approve_with_note", Label: "Approve with note", RequiresText: true},
+			{ID: "reject", Label: "Reject"},
+		},
+		RecommendedID: "approve_with_note",
+	}, 0, "Step 1 of 3 · choose", 72)
+
+	plain := stripANSI(card)
+	if !strings.Contains(plain, "recommended") {
+		t.Fatalf("expected recommended badge in approval card, got %q", plain)
+	}
+	if !strings.Contains(plain, "add guidance") {
+		t.Fatalf("expected guidance badge for text-required choice, got %q", plain)
+	}
+}
+
 func TestInterviewPhaseTracksChooseDraftAndReview(t *testing.T) {
 	m := newChannelModel(false)
 	m.pending = &channelInterview{
@@ -2596,6 +2639,31 @@ func TestInterviewPhaseTracksChooseDraftAndReview(t *testing.T) {
 	}
 	if hint := m.composerHint(m.composerTargetLabel(), "", m.pending); !strings.Contains(hint, "Enter submit") || !strings.Contains(hint, "Esc revise") {
 		t.Fatalf("expected review hint while reviewing answer, got %q", hint)
+	}
+}
+
+func TestConfirmationForApprovalShowsOutcomeAndGuardrails(t *testing.T) {
+	req := channelInterview{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Question: "Ship it?",
+	}
+	option := &channelInterviewOption{ID: "approve_with_note", Label: "Approve with note", RequiresText: true}
+
+	confirm := confirmationForInterviewAnswer(req, option, "Need legal sign-off first.")
+
+	if confirm.Title != "Review Approval Decision" {
+		t.Fatalf("expected approval review title, got %q", confirm.Title)
+	}
+	if !strings.Contains(confirm.Detail, "Decision: Approve with note") {
+		t.Fatalf("expected decision label in detail, got %q", confirm.Detail)
+	}
+	if !strings.Contains(confirm.Detail, "Outcome: The team will proceed, but your note becomes explicit guardrails.") {
+		t.Fatalf("expected approval outcome in detail, got %q", confirm.Detail)
+	}
+	if !strings.Contains(confirm.Detail, "Guardrails: Need legal sign-off first.") {
+		t.Fatalf("expected guardrails label in detail, got %q", confirm.Detail)
 	}
 }
 
