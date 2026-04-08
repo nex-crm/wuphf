@@ -83,13 +83,13 @@ func (m channelModel) currentArtifactSummary() string {
 	requestCount := snapshot.Count(team.RuntimeArtifactRequest, team.RuntimeArtifactHumanAction, team.RuntimeArtifactExternalAction)
 	parts := make([]string, 0, 3)
 	if logCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d task run%s", logCount, pluralSuffix(logCount)))
+		parts = append(parts, fmt.Sprintf("%d %s", logCount, pluralizeWord(logCount, "task run", "task runs")))
 	}
 	if workflowCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d workflow run%s", workflowCount, pluralSuffix(workflowCount)))
+		parts = append(parts, fmt.Sprintf("%d %s", workflowCount, pluralizeWord(workflowCount, "workflow run", "workflow runs")))
 	}
 	if requestCount > 0 {
-		parts = append(parts, fmt.Sprintf("%d action trace%s", requestCount, pluralSuffix(requestCount)))
+		parts = append(parts, fmt.Sprintf("%d %s", requestCount, pluralizeWord(requestCount, "action trace", "action traces")))
 	}
 	return strings.Join(parts, " · ")
 }

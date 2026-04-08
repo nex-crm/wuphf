@@ -138,7 +138,7 @@ func fallbackChannelDescription(ch channelInfo) string {
 		return ch.Description
 	}
 	if len(ch.Members) > 0 {
-		return fmt.Sprintf("%d member%s", len(ch.Members), pluralSuffix(len(ch.Members)))
+		return fmt.Sprintf("%d %s", len(ch.Members), pluralizeWord(len(ch.Members), "member", "members"))
 	}
 	return "Shared office channel"
 }
