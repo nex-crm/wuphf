@@ -400,29 +400,9 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-card-routing { display: flex; align-items: center; gap: 8px; padding: 6px 0 6px 48px; }
 .message-card-routing-icon { font-size: 14px; flex-shrink: 0; }
 .message-card-routing-text { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
-/* ─── Quick jump modal (#29) ─── */
-.quick-jump-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); backdrop-filter: blur(4px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 20vh; }
-.quick-jump-overlay.open { display: flex; }
-.quick-jump { width: 400px; max-width: 90vw; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 16px 48px rgba(59,47,47,0.18); overflow: hidden; animation: fadeIn 0.15s ease-out; }
-.quick-jump-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
-.quick-jump-header kbd { font-family: var(--font-mono); font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; color: var(--text-tertiary); }
-.quick-jump-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 15px; color: var(--text); outline: none; }
-.quick-jump-input::placeholder { color: var(--text-tertiary); }
-.quick-jump-list { max-height: 280px; overflow-y: auto; padding: 4px 0; }
-.quick-jump-item { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 13px; transition: background 0.08s; }
-.quick-jump-item:hover, .quick-jump-item.selected { background: var(--accent-bg); }
-.quick-jump-item-hash { font-weight: 700; color: var(--text-tertiary); width: 20px; text-align: center; }
-.quick-jump-item-name { font-weight: 500; color: var(--text); }
-.quick-jump-item-shortcut { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
 /* ─── Thread expand/collapse toggle (#19) ─── */
 .thread-toggle-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-family: var(--font-sans); color: var(--text-tertiary); background: none; border: 1px solid var(--border); border-radius: var(--radius-full); padding: 2px 10px; cursor: pointer; transition: all 0.15s; margin-left: 8px; }
 .thread-toggle-btn:hover { border-color: var(--border-dark); color: var(--text-secondary); }
-/* ─── Pause confirmation ─── */
-.pause-confirm { display: flex; align-items: center; gap: 8px; padding: 8px 20px; background: var(--yellow-bg); border-top: 1px solid var(--border); font-size: 13px; color: var(--yellow); animation: fadeIn 0.15s ease-out; }
-.pause-confirm-text { flex: 1; font-weight: 500; }
-.pause-confirm-btn { padding: 4px 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; border: 1px solid var(--yellow); cursor: pointer; font-family: var(--font-sans); transition: all 0.15s; }
-.pause-confirm-yes { background: var(--yellow); color: white; }
-.pause-confirm-no { background: transparent; color: var(--yellow); }
 /* ─── Thread reply-to indicator (#20) ─── */
 .thread-reply-to { font-size: 11px; color: var(--text-tertiary); font-style: italic; margin-bottom: 2px; }
 
@@ -1062,16 +1042,6 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
     </div>
   </div>
 
-  <!-- Quick Jump Modal (#29) -->
-  <div class="quick-jump-overlay" id="quick-jump-overlay">
-    <div class="quick-jump">
-      <div class="quick-jump-header">
-        <kbd>Ctrl+G</kbd>
-        <input class="quick-jump-input" id="quick-jump-input" placeholder="Jump to channel..." autocomplete="off" />
-      </div>
-      <div class="quick-jump-list" id="quick-jump-list"></div>
-    </div>
-  </div>
 </div>
 
 <script>
@@ -3060,17 +3030,9 @@ var acItems = [];
 var acMode = null; // 'slash' | 'mention' | null
 
 var SLASH_COMMANDS = [
-  { name: '/reply', desc: 'Reply in thread', icon: '💬' },
-  { name: '/requests', desc: 'View open requests', icon: '📋' },
-  { name: '/tasks', desc: 'View task board', icon: '✅' },
-  { name: '/reset', desc: 'Reset the office', icon: '🔄' },
   { name: '/clear', desc: 'Clear messages', icon: '🧹' },
   { name: '/help', desc: 'Show all commands', icon: '❓' },
-  { name: '/config', desc: 'View/set config', icon: '⚙️' },
-  { name: '/quit', desc: 'Exit WUPHF', icon: '👋' },
-  { name: '/connect', desc: 'Connect integration', icon: '🔗' },
-  { name: '/1o1', desc: 'Start 1:1 session', icon: '🤝' },
-  { name: '/recover', desc: 'Show workspace recovery info', icon: '🔍' },
+  { name: '/reset', desc: 'Reset the office', icon: '🔄' },
   { name: '/search', desc: 'Search messages', icon: '🔎' },
 ];
 
@@ -3240,7 +3202,7 @@ function handleSlashCommand(input) {
       showSystem('Messages cleared');
       break;
     case '/help':
-      showSystem('Commands: /clear /help /requests /tasks /reset /reply <msg-id> /1o1 <agent>');
+      showSystem('Commands: /clear /help /requests /tasks /reset /reply /1o1 <agent> /search /recover');
       break;
     case '/requests':
       switchApp('requests');
@@ -4970,7 +4932,7 @@ function renderA2UIBlock(blockText) {
 initApp();
 
 // ═══════════════════════════════════════════════════════════════
-//   WAVE 3 POLISH — Quick Jump, Thread Toggle, Pause, PgUp/PgDn
+//   WAVE 3 POLISH — Thread Toggle, Message Cards, Status Pills
 // ═══════════════════════════════════════════════════════════════
 var threadsDefaultExpand = localStorage.getItem('wuphf-threads-expand') !== 'false';
 (function initThreadToggle() {
@@ -4984,63 +4946,6 @@ var threadsDefaultExpand = localStorage.getItem('wuphf-threads-expand') !== 'fal
     updateLabel();
   });
 })();
-var quickJumpOverlay = document.getElementById('quick-jump-overlay');
-var quickJumpInput = document.getElementById('quick-jump-input');
-var quickJumpList = document.getElementById('quick-jump-list');
-var quickJumpSelectedIdx = -1;
-function openQuickJump() {
-  if (!document.getElementById('office').classList.contains('active')) return;
-  quickJumpOverlay.classList.add('open'); quickJumpInput.value = ''; quickJumpSelectedIdx = -1;
-  renderQuickJumpList(''); setTimeout(function() { quickJumpInput.focus(); }, 50);
-}
-function closeQuickJump() { quickJumpOverlay.classList.remove('open'); quickJumpSelectedIdx = -1; }
-function renderQuickJumpList(query) {
-  var q = (query || '').toLowerCase(); quickJumpList.textContent = '';
-  CHANNELS.filter(function(ch) { return !q || ch.name.toLowerCase().indexOf(q) !== -1; }).forEach(function(ch, idx) {
-    var item = el('div', { className: 'quick-jump-item' + (idx === quickJumpSelectedIdx ? ' selected' : ''), onClick: function() { closeQuickJump(); switchChannel(ch.name); renderSidebarChannels(); } });
-    item.appendChild(el('span', { className: 'quick-jump-item-hash' }, '#'));
-    item.appendChild(el('span', { className: 'quick-jump-item-name' }, ch.name));
-    var ci = CHANNELS.indexOf(ch); if (ci >= 0 && ci < 9) item.appendChild(el('span', { className: 'quick-jump-item-shortcut' }, String(ci + 1)));
-    quickJumpList.appendChild(item);
-  });
-}
-quickJumpInput.addEventListener('input', function() { quickJumpSelectedIdx = -1; renderQuickJumpList(quickJumpInput.value.trim()); });
-quickJumpInput.addEventListener('keydown', function(e) {
-  var items = quickJumpList.querySelectorAll('.quick-jump-item');
-  if (e.key === 'ArrowDown') { e.preventDefault(); quickJumpSelectedIdx = Math.min(quickJumpSelectedIdx + 1, items.length - 1); renderQuickJumpList(quickJumpInput.value.trim()); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); quickJumpSelectedIdx = Math.max(quickJumpSelectedIdx - 1, 0); renderQuickJumpList(quickJumpInput.value.trim()); }
-  else if (e.key === 'Enter') { e.preventDefault(); var sel = quickJumpSelectedIdx >= 0 ? quickJumpSelectedIdx : 0; var filtered = CHANNELS.filter(function(ch) { var q = (quickJumpInput.value || '').trim().toLowerCase(); return !q || ch.name.toLowerCase().indexOf(q) !== -1; }); if (filtered[sel]) { closeQuickJump(); switchChannel(filtered[sel].name); renderSidebarChannels(); } }
-  else if (e.key === 'Escape') { e.preventDefault(); closeQuickJump(); }
-});
-quickJumpOverlay.addEventListener('click', function(e) { if (e.target === quickJumpOverlay) closeQuickJump(); });
-var pauseConfirmVisible = false;
-function showPauseConfirm() {
-  if (pauseConfirmVisible) return; pauseConfirmVisible = true;
-  var composer = document.querySelector('.composer');
-  var bar = el('div', { className: 'pause-confirm', id: 'pause-confirm-bar' });
-  bar.appendChild(el('span', { className: 'pause-confirm-text' }, 'Pause all agents?'));
-  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-yes', onClick: function() {
-    hidePauseConfirm();
-    if (brokerConnected) WuphfAPI.post('/messages', { from: 'system', channel: currentChannel, content: '[PAUSE] All agents paused by human' }).catch(function() {});
-    var container = document.getElementById('messages'); var sysDiv = el('div', { className: 'message-system animate-fade' }); var inner = el('div', { className: 'message-system-inner' });
-    inner.appendChild(el('span', { className: 'message-system-line' })); inner.appendChild(el('span', { className: 'message-system-text' }, 'All agents paused')); inner.appendChild(el('span', { className: 'message-system-line' }));
-    sysDiv.appendChild(inner); container.appendChild(sysDiv); container.scrollTop = container.scrollHeight;
-  } }, 'Yes, pause'));
-  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-no', onClick: hidePauseConfirm }, 'Cancel'));
-  composer.parentNode.insertBefore(bar, composer);
-}
-function hidePauseConfirm() { pauseConfirmVisible = false; var bar = document.getElementById('pause-confirm-bar'); if (bar) bar.remove(); }
-document.addEventListener('keydown', function(e) {
-  var officeActive = document.getElementById('office').classList.contains('active'); if (!officeActive) return;
-  var inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
-  if ((e.ctrlKey || e.metaKey) && e.key === 'g') { e.preventDefault(); quickJumpOverlay.classList.contains('open') ? closeQuickJump() : openQuickJump(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9' && !e.shiftKey && !e.altKey) { var ci = parseInt(e.key) - 1; if (ci < CHANNELS.length) { e.preventDefault(); switchChannel(CHANNELS[ci].name); renderSidebarChannels(); } return; }
-  if (e.key === 'Escape' && inInput && e.target.id === 'composer-input') {
-    var po = document.getElementById('thread-panel').classList.contains('open') || document.getElementById('agent-panel').classList.contains('open') || cmdPaletteOverlay.classList.contains('open') || quickJumpOverlay.classList.contains('open');
-    if (!po && !e.target.value.trim()) { e.preventDefault(); showPauseConfirm(); return; }
-  }
-  if (!inInput && (e.key === 'PageUp' || e.key === 'PageDown')) { var al = document.getElementById('sidebar-agents'); if (al && al.scrollHeight > al.clientHeight) { e.preventDefault(); al.scrollBy({ top: e.key === 'PageUp' ? -(al.clientHeight * 0.8) : (al.clientHeight * 0.8), behavior: 'smooth' }); } }
-});
 // ═══════════════════════════════════════════════════════════════
 //   PIXEL ART AVATARS (#25)
 // ═══════════════════════════════════════════════════════════════
