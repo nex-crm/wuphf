@@ -62,7 +62,7 @@ func TestBuildRecoveryLinesShowsSummaryAndHighlights(t *testing.T) {
 		{ID: "task-1", Title: "Ship launch checklist", Owner: "pm", Status: "in_progress", ExecutionMode: "local_worktree", WorktreePath: "/tmp/wuphf-task-1"},
 	}
 	m.requests = []channelInterview{
-		{ID: "req-1", Title: "Review launch scope", Question: "Review the launch scope", From: "ceo", Blocking: true, Status: "pending"},
+		{ID: "req-1", Kind: "approval", Title: "Review launch scope", Question: "Review the launch scope", From: "ceo", Blocking: true, Status: "pending"},
 	}
 	m.messages = []brokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Need final scope review before launch.", Timestamp: "2026-04-06T10:00:00Z"},
@@ -70,7 +70,7 @@ func TestBuildRecoveryLinesShowsSummaryAndHighlights(t *testing.T) {
 	}
 
 	workspace := m.currentWorkspaceUIState()
-	lines := buildRecoveryLines(workspace, 88, m.tasks, m.requests, m.messages)
+	lines := buildRecoveryLines(workspace, 88, m.tasks, m.requests, m.messages, m.currentArtifactSnapshot(24))
 	plain := stripANSI(joinRenderedLines(lines))
 
 	if !strings.Contains(plain, "What changed while you were gone") {
@@ -87,6 +87,12 @@ func TestBuildRecoveryLinesShowsSummaryAndHighlights(t *testing.T) {
 	}
 	if !strings.Contains(plain, "Waiting on you") {
 		t.Fatalf("expected normalized readiness card, got %q", plain)
+	}
+	if !strings.Contains(plain, "Review next") {
+		t.Fatalf("expected review-next artifact section, got %q", plain)
+	}
+	if !strings.Contains(plain, "Resume next") {
+		t.Fatalf("expected resume-next artifact section, got %q", plain)
 	}
 }
 
