@@ -124,8 +124,8 @@ func deriveWorkspaceReadiness(state workspaceUIState, doctor *channelDoctorRepor
 		return workspaceReadinessState{
 			Level:    workspaceReadinessPreview,
 			Headline: "Offline preview",
-			Detail:   "The workspace is showing manifest-backed context, not the live tmux office runtime.",
-			NextStep: "Launch WUPHF to attach the live office, or run /doctor to inspect tmux and setup readiness.",
+			Detail:   "The workspace is showing manifest-backed context, not the live office runtime.",
+			NextStep: "Launch WUPHF to attach the live office, or run /doctor to inspect runtime readiness.",
 		}
 	}
 	if state.NoNex {

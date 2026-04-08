@@ -2395,28 +2395,97 @@ func (l *Launcher) spawnOverflowAgents() {
 	}
 }
 
-// spawnBackgroundAgents starts all agents as background OS processes (no tmux).
-// Used by LaunchWeb for web mode.
+// spawnBackgroundAgents starts all agents as headless background processes (no tmux).
+// Used by LaunchWeb for web mode. Agents run with --print and communicate only via MCP broker.
 func (l *Launcher) spawnBackgroundAgents() {
 	for _, member := range l.visibleOfficeMembers() {
-		cmdStr := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
 		go l.runBackgroundAgent(member.Slug, cmdStr)
 	}
 	for _, member := range l.overflowOfficeMembers() {
-		cmdStr := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
 		go l.runBackgroundAgent(member.Slug, cmdStr)
 	}
 }
 
-// runBackgroundAgent runs a single agent as an OS process. On exit it waits 5s and restarts.
+// headlessClaudeCommand builds a non-interactive claude command for web mode.
+// Uses --print with an initial prompt that tells the agent to start working via MCP.
+func (l *Launcher) headlessClaudeCommand(slug, systemPrompt string) string {
+	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
+	mcpConfig := strings.ReplaceAll(l.mcpConfig, "'", "'\\''")
+
+	permFlags := l.resolvePermissionFlags(slug)
+
+	brokerToken := ""
+	if l.broker != nil {
+		brokerToken = l.broker.Token()
+	}
+
+	oneSecretEnv := ""
+	if secret := strings.TrimSpace(config.ResolveOneSecret()); secret != "" {
+		oneSecretEnv = "ONE_SECRET=" + shellQuote(secret) + " "
+	}
+	oneIdentityEnv := ""
+	if identity := strings.TrimSpace(config.ResolveOneIdentity()); identity != "" {
+		oneIdentityEnv = "ONE_IDENTITY=" + shellQuote(identity) + " "
+		if identityType := strings.TrimSpace(config.ResolveOneIdentityType()); identityType != "" {
+			oneIdentityEnv += "ONE_IDENTITY_TYPE=" + shellQuote(identityType) + " "
+		}
+	}
+
+	model := "claude-sonnet-4-6"
+	if slug == l.officeLeadSlug() {
+		model = "claude-opus-4-6"
+	}
+
+	// --print makes claude run non-interactively: process the prompt and exit.
+	// The agent communicates via MCP tools (team_poll, team_post) to the broker.
+	initialPrompt := fmt.Sprintf("You are now active in the WUPHF office. Use your MCP tools (team_poll, team_post) to read messages and participate. Start by polling the channel for recent messages and respond to anything relevant. When done, poll again.")
+
+	return fmt.Sprintf(
+		"%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 claude --model %s --print %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -p '%s'",
+		oneSecretEnv,
+		oneIdentityEnv,
+		slug,
+		brokerToken,
+		config.ResolveNoNex(),
+		model,
+		permFlags,
+		escaped,
+		mcpConfig,
+		strings.ReplaceAll(initialPrompt, "'", "'\\''"),
+	)
+}
+
+// runBackgroundAgent runs a single agent as a headless OS process.
+// On exit it waits 5s and restarts. Stdout/stderr go to a log file, not the terminal.
 func (l *Launcher) runBackgroundAgent(slug, cmdStr string) {
+	logDir := filepath.Join(os.TempDir(), "wuphf-agents")
+	os.MkdirAll(logDir, 0o700)
+	logPath := filepath.Join(logDir, slug+".log")
+
 	for {
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[%s] failed to open log %s: %v\n", slug, logPath, err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
 		cmd := exec.Command("bash", "-c", cmdStr)
 		cmd.Dir = l.cwd
 		cmd.Env = append(os.Environ(), fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()))
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		_ = cmd.Run()
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		cmd.Stdin = nil // no terminal input
+
+		fmt.Fprintf(os.Stderr, "[%s] agent starting (log: %s)\n", slug, logPath)
+		runErr := cmd.Run()
+		logFile.Close()
+
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr, "[%s] agent exited: %v, restarting in 5s\n", slug, runErr)
+		}
 		time.Sleep(5 * time.Second)
 	}
 }

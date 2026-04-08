@@ -91,6 +91,7 @@ func cmdInit(ctx *SlashContext, args string) error {
 func cmdProvider(ctx *SlashContext, args string) error {
 	options := []PickerOption{
 		{Label: "Gemini", Value: "gemini", Description: "Google Gemini via API key"},
+		{Label: "Codex CLI", Value: "codex", Description: "Codex via codex CLI"},
 		{Label: "Claude Code", Value: "claude-code", Description: "Claude via claude-code CLI"},
 	}
 	if !config.ResolveNoNex() {

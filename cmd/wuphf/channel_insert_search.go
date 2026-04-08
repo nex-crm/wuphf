@@ -64,45 +64,17 @@ func (m channelModel) buildInsertPickerOptions() []tui.PickerOption {
 
 func (m channelModel) buildSearchPickerOptions() []tui.PickerOption {
 	options := []tui.PickerOption{}
+	seen := map[string]struct{}{}
 
-	if !m.isOneOnOne() {
-		for _, ch := range m.channels {
-			if strings.TrimSpace(ch.Slug) == "" {
-				continue
-			}
-			options = append(options, tui.PickerOption{
-				Label:       "#" + ch.Slug,
-				Value:       "channel:" + ch.Slug,
-				Description: fallbackChannelDescription(ch),
-			})
-		}
-	}
-
-	for _, member := range mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()) {
-		if member.Slug == "you" || strings.TrimSpace(member.Slug) == "" {
+	for _, opt := range m.buildWorkspaceSwitcherOptions() {
+		if strings.TrimSpace(opt.Value) == "" {
 			continue
 		}
-		options = append(options, tui.PickerOption{
-			Label:       "1:1 with " + member.Name,
-			Value:       "dm:" + member.Slug,
-			Description: "Switch to direct session",
-		})
-	}
-
-	for _, task := range m.tasks {
-		options = append(options, tui.PickerOption{
-			Label:       "Task " + task.ID + " · " + truncateText(task.Title, 52),
-			Value:       "task:" + task.ID,
-			Description: strings.TrimSpace(task.Status + " · @" + fallbackString(task.Owner, "unowned")),
-		})
-	}
-
-	for _, req := range m.requests {
-		options = append(options, tui.PickerOption{
-			Label:       "Request " + req.ID + " · " + truncateText(req.TitleOrQuestion(), 52),
-			Value:       "request:" + req.ID,
-			Description: strings.TrimSpace(req.Kind + " · @" + req.From),
-		})
+		if _, ok := seen[opt.Value]; ok {
+			continue
+		}
+		seen[opt.Value] = struct{}{}
+		options = append(options, opt)
 	}
 
 	for _, msg := range m.recentRootMessages(20) {
@@ -110,9 +82,14 @@ func (m channelModel) buildSearchPickerOptions() []tui.PickerOption {
 		if hasThreadReplies(m.messages, msg.ID) || strings.TrimSpace(msg.ReplyTo) != "" {
 			valuePrefix = "thread:"
 		}
+		value := valuePrefix + threadRootMessageID(m.messages, msg.ID)
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
 		options = append(options, tui.PickerOption{
 			Label:       "Message " + msg.ID + " · @" + msg.From,
-			Value:       valuePrefix + threadRootMessageID(m.messages, msg.ID),
+			Value:       value,
 			Description: truncateText(msg.Content, 64),
 		})
 	}
@@ -167,6 +144,8 @@ func (m *channelModel) insertIntoActiveComposer(text string) {
 
 func (m *channelModel) applySearchSelection(value, label string) tea.Cmd {
 	switch {
+	case value == "mode:office" || strings.HasPrefix(value, "app:"):
+		return m.applyWorkspaceSwitcherSelection(value)
 	case strings.HasPrefix(value, "channel:"):
 		channel := normalizeWorkspaceChannel(strings.TrimPrefix(value, "channel:"))
 		if channel == "" {
