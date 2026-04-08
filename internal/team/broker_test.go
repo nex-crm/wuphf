@@ -93,6 +93,42 @@ func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
 	}
 }
 
+func TestBrokerFocusModePersistsAndHealthReportsIt(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.SetFocusMode(true); err != nil {
+		t.Fatalf("SetFocusMode failed: %v", err)
+	}
+
+	reloaded := NewBroker()
+	if !reloaded.FocusModeEnabled() {
+		t.Fatal("expected focus mode to persist across broker reload")
+	}
+	if err := reloaded.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer reloaded.Stop()
+
+	resp, err := http.Get("http://" + reloaded.Addr() + "/health")
+	if err != nil {
+		t.Fatalf("health request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	var health struct {
+		FocusMode bool `json:"focus_mode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
+		t.Fatalf("decode health: %v", err)
+	}
+	if !health.FocusMode {
+		t.Fatal("expected /health to report focus_mode=true")
+	}
+}
+
 func TestBrokerMessageKindAndTitleRoundTrip(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -465,6 +501,7 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	var health struct {
 		SessionMode   string `json:"session_mode"`
 		OneOnOneAgent string `json:"one_on_one_agent"`
+		FocusMode     bool   `json:"focus_mode"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		resp.Body.Close()
@@ -476,6 +513,9 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	}
 	if health.OneOnOneAgent != DefaultOneOnOneAgent {
 		t.Fatalf("expected health to report default 1o1 agent %q, got %q", DefaultOneOnOneAgent, health.OneOnOneAgent)
+	}
+	if health.FocusMode {
+		t.Fatal("expected health to report focus mode disabled by default")
 	}
 
 	// Messages without auth should be rejected
