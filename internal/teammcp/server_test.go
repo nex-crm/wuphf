@@ -564,7 +564,7 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 		"Current focus: Approve release from @ceo.",
 		"working_directory /tmp/wuphf-task-77",
 		"Runtime capabilities:",
-		"nex [info]: Disabled for this session with --no-nex.",
+		"Nex memory [info]: Disabled for this session with --no-nex.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in %q", want, text)
@@ -583,6 +583,12 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	}
 	if len(snapshot.Requests) == 0 || snapshot.Requests[0].Title != "Approve release" {
 		t.Fatalf("unexpected runtime requests: %+v", snapshot.Requests)
+	}
+	if _, ok := snapshot.Registry.Entry(team.CapabilityKeyConnections); !ok {
+		t.Fatalf("expected connections readiness in runtime registry, got %+v", snapshot.Registry.Entries)
+	}
+	if _, ok := snapshot.Registry.Entry(team.CapabilityKeyOfficeActions); !ok {
+		t.Fatalf("expected office actions readiness in runtime registry, got %+v", snapshot.Registry.Entries)
 	}
 }
 

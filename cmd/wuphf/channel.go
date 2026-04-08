@@ -445,6 +445,8 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)", Category: "setup"},
 	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode", Category: "session"},
 	{Name: "messages", Description: "Show the main office feed", Category: "navigate"},
+	{Name: "inbox", Description: "Show the selected agent inbox lane in 1:1 mode", Category: "navigate"},
+	{Name: "outbox", Description: "Show the selected agent outbox lane in 1:1 mode", Category: "navigate"},
 	{Name: "recover", Description: "Open the session recovery summary", Category: "navigate"},
 	{Name: "resume", Description: "Alias for /recover", Category: "navigate"},
 	{Name: "rewind", Description: "Insert a summarize-from-here recovery prompt", Category: "navigate"},
@@ -533,6 +535,8 @@ type officeApp string
 
 const (
 	officeAppMessages  officeApp = "messages"
+	officeAppInbox     officeApp = "inbox"
+	officeAppOutbox    officeApp = "outbox"
 	officeAppRecovery  officeApp = "recovery"
 	officeAppTasks     officeApp = "tasks"
 	officeAppRequests  officeApp = "requests"
@@ -2419,7 +2423,7 @@ func (m channelModel) View() string {
 }
 
 func (m channelModel) currentHeaderTitle() string {
-	if m.isOneOnOne() && m.activeApp != officeAppRecovery {
+	if m.isOneOnOne() && m.activeApp != officeAppRecovery && m.activeApp != officeAppInbox && m.activeApp != officeAppOutbox {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
 	switch m.activeApp {
@@ -2428,6 +2432,16 @@ func (m channelModel) currentHeaderTitle() string {
 			return "1:1 with " + m.oneOnOneAgentName() + " · Recovery"
 		}
 		return "# " + m.activeChannel + " · Recovery"
+	case officeAppInbox:
+		if m.isOneOnOne() {
+			return "1:1 with " + m.oneOnOneAgentName() + " · Inbox"
+		}
+		return "# " + m.activeChannel + " · Inbox"
+	case officeAppOutbox:
+		if m.isOneOnOne() {
+			return "1:1 with " + m.oneOnOneAgentName() + " · Outbox"
+		}
+		return "# " + m.activeChannel + " · Outbox"
 	case officeAppArtifacts:
 		return "# " + m.activeChannel + " · Artifacts"
 	case officeAppTasks:
@@ -2448,26 +2462,47 @@ func (m channelModel) currentHeaderTitle() string {
 func (m channelModel) currentHeaderMeta() string {
 	workspace := m.currentWorkspaceUIState()
 	if m.activeApp == officeAppRecovery {
-		snapshot := m.currentRuntimeSnapshot()
-		blocking := 0
-		for _, req := range snapshot.Requests {
-			status := strings.TrimSpace(strings.ToLower(req.Status))
-			if status != "" && status != "pending" && status != "open" {
-				continue
-			}
-			if req.Blocking || req.Required {
-				blocking++
-			}
-		}
+		snapshot := workspace.Runtime
 		if m.isOneOnOne() {
-			return fmt.Sprintf("  Re-entry summary for %s · %d running tasks · %d open requests · %d new since you looked", m.oneOnOneAgentName(), countRunningRuntimeTasks(snapshot.Tasks), len(snapshot.Requests), m.unreadCount)
+			return fmt.Sprintf("  Re-entry summary for %s · %d running tasks · %d open requests · %d new since you looked", m.oneOnOneAgentName(), workspace.RunningTasks, workspace.OpenRequests, workspace.UnreadCount)
 		}
-		return fmt.Sprintf("  Re-entry summary for #%s · %d blocking requests · %d running tasks · %d new since you looked", m.activeChannel, blocking, countRunningRuntimeTasks(snapshot.Tasks), m.unreadCount)
+		parts := []string{
+			fmt.Sprintf("Re-entry summary for #%s", fallbackString(snapshot.Channel, m.activeChannel)),
+			fmt.Sprintf("%d blocking requests", workspace.BlockingCount),
+			fmt.Sprintf("%d running tasks", workspace.RunningTasks),
+			fmt.Sprintf("%d new since you looked", workspace.UnreadCount),
+		}
+		if workspace.Readiness.Level != workspaceReadinessReady && strings.TrimSpace(workspace.Readiness.Headline) != "" {
+			parts = append(parts, strings.ToLower(workspace.Readiness.Headline))
+		}
+		return "  " + strings.Join(parts, " · ")
+	}
+	if m.isOneOnOne() && (m.activeApp == officeAppInbox || m.activeApp == officeAppOutbox) {
+		scopeLabel := "inbox"
+		if m.activeApp == officeAppOutbox {
+			scopeLabel = "outbox"
+		}
+		scopeCount := len(filterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), scopeLabel))
+		parts := []string{
+			fmt.Sprintf("%s lane for %s", strings.Title(scopeLabel), m.oneOnOneAgentName()),
+			fmt.Sprintf("%d visible messages", scopeCount),
+		}
+		if workspace.RunningTasks > 0 {
+			parts = append(parts, fmt.Sprintf("%d running tasks", workspace.RunningTasks))
+		}
+		if strings.TrimSpace(workspace.Focus) != "" {
+			parts = append(parts, "focus: "+workspace.Focus)
+		}
+		return "  " + strings.Join(parts, " · ")
 	}
 	if m.isOneOnOne() {
 		return workspace.headerMeta()
 	}
 	switch m.activeApp {
+	case officeAppInbox:
+		return fmt.Sprintf("  Inbox lane · %d visible messages · %d open requests", len(m.messages), len(m.requests))
+	case officeAppOutbox:
+		return fmt.Sprintf("  Outbox lane · %d visible messages · %d recent actions", len(m.messages), len(m.actions))
 	case officeAppTasks:
 		open, inProgress, review, blocked, overdue := 0, 0, 0, 0, 0
 		for _, task := range m.tasks {
@@ -2565,12 +2600,16 @@ func (m channelModel) currentHeaderMeta() string {
 }
 
 func (m channelModel) currentAppLabel() string {
-	if m.isOneOnOne() && m.activeApp != officeAppRecovery {
+	if m.isOneOnOne() && m.activeApp != officeAppRecovery && m.activeApp != officeAppInbox && m.activeApp != officeAppOutbox {
 		return "messages"
 	}
 	switch m.activeApp {
 	case officeAppRecovery:
 		return "recovery"
+	case officeAppInbox:
+		return "inbox"
+	case officeAppOutbox:
+		return "outbox"
 	case officeAppTasks:
 		return "tasks"
 	case officeAppRequests:
@@ -2738,6 +2777,13 @@ func (m channelModel) mainPanelMouseAction(x, y, mainW, contentH int) (mouseActi
 			case officeAppMessages:
 				if visibleRows[row].ThreadID != "" {
 					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
+				}
+			case officeAppInbox, officeAppOutbox:
+				if visibleRows[row].ThreadID != "" {
+					return mouseAction{Kind: "thread", Value: visibleRows[row].ThreadID}, true
+				}
+				if visibleRows[row].RequestID != "" {
+					return mouseAction{Kind: "request", Value: visibleRows[row].RequestID}, true
 				}
 			case officeAppTasks:
 				if visibleRows[row].TaskID != "" {
@@ -3282,6 +3328,12 @@ func (m *channelModel) selectSidebarItem(item sidebarItem) tea.Cmd {
 		switch m.activeApp {
 		case officeAppMessages:
 			m.notice = "Viewing #" + m.activeChannel + "."
+			return pollBroker("", m.activeChannel)
+		case officeAppInbox:
+			m.notice = "Viewing the selected agent inbox."
+			return pollBroker("", m.activeChannel)
+		case officeAppOutbox:
+			m.notice = "Viewing the selected agent outbox."
 			return pollBroker("", m.activeChannel)
 		case officeAppRecovery:
 			m.notice = "Viewing the recovery summary."
@@ -4393,6 +4445,26 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		} else {
 			m.notice = "Viewing #general."
 		}
+		return m, nil
+	case trimmed == "/inbox":
+		clearCurrent()
+		if !m.isOneOnOne() {
+			m.notice = "/inbox only applies in direct 1:1 mode."
+			return m, nil
+		}
+		m.activeApp = officeAppInbox
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing the selected agent inbox."
+		return m, nil
+	case trimmed == "/outbox":
+		clearCurrent()
+		if !m.isOneOnOne() {
+			m.notice = "/outbox only applies in direct 1:1 mode."
+			return m, nil
+		}
+		m.activeApp = officeAppOutbox
+		m.syncSidebarCursorToActive()
+		m.notice = "Viewing the selected agent outbox."
 		return m, nil
 	case trimmed == "/recover" || trimmed == "/resume":
 		clearCurrent()
@@ -6304,7 +6376,7 @@ func resolveInitialOfficeApp(name string) officeApp {
 		return officeAppPolicies
 	}
 	switch officeApp(normalized) {
-	case officeAppMessages, officeAppRecovery, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar, officeAppArtifacts:
+	case officeAppMessages, officeAppInbox, officeAppOutbox, officeAppRecovery, officeAppTasks, officeAppRequests, officeAppPolicies, officeAppCalendar, officeAppArtifacts:
 		return officeApp(normalized)
 	default:
 		return officeAppMessages

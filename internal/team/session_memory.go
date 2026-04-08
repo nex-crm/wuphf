@@ -12,6 +12,10 @@ type SessionRecovery struct {
 }
 
 func BuildSessionRecovery(sessionMode, directAgent string, tasks []RuntimeTask, requests []RuntimeRequest, recent []RuntimeMessage) SessionRecovery {
+	return buildSessionRecovery(sessionMode, directAgent, tasks, requests, recent)
+}
+
+func buildSessionRecovery(sessionMode, directAgent string, tasks []RuntimeTask, requests []RuntimeRequest, recent []RuntimeMessage) SessionRecovery {
 	recovery := SessionRecovery{}
 
 	if req, ok := firstPendingBlockingRuntimeRequest(requests); ok {
@@ -51,6 +55,11 @@ func BuildSessionRecovery(sessionMode, directAgent string, tasks []RuntimeTask, 
 	}
 
 	return recovery
+}
+
+func runtimeRequestIsOpen(req RuntimeRequest) bool {
+	status := strings.ToLower(strings.TrimSpace(req.Status))
+	return status == "" || status == "pending" || status == "open" || status == "draft"
 }
 
 func firstPendingBlockingRuntimeRequest(requests []RuntimeRequest) (RuntimeRequest, bool) {

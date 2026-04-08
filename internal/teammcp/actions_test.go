@@ -258,3 +258,20 @@ func TestHandleTeamActionWorkflowScheduleRunNowExecutesImmediately(t *testing.T)
 		t.Fatalf("expected scheduled and executed actions, got %+v", b.Actions())
 	}
 }
+
+func TestSelectedActionProviderIncludesCapabilityGuidance(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_NO_NEX", "1")
+
+	prev := externalActionProvider
+	externalActionProvider = nil
+	defer func() { externalActionProvider = prev }()
+
+	_, err := selectedActionProvider(action.CapabilityActionExecute)
+	if err == nil {
+		t.Fatal("expected provider selection to fail when Nex is disabled")
+	}
+	if !strings.Contains(err.Error(), "Restart without --no-nex") {
+		t.Fatalf("expected readiness next step in %q", err)
+	}
+}

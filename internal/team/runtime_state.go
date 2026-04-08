@@ -49,7 +49,10 @@ type RuntimeSnapshot struct {
 	Tasks        []RuntimeTask
 	Requests     []RuntimeRequest
 	Recent       []RuntimeMessage
+	Artifacts    []RuntimeArtifact
 	Capabilities RuntimeCapabilities
+	Registry     CapabilityRegistry
+	Memory       SessionMemorySnapshot
 	Recovery     SessionRecovery
 }
 
@@ -60,7 +63,9 @@ type RuntimeSnapshotInput struct {
 	Tasks        []RuntimeTask
 	Requests     []RuntimeRequest
 	Recent       []RuntimeMessage
+	Artifacts    []RuntimeArtifact
 	Capabilities RuntimeCapabilities
+	Registry     CapabilityRegistry
 	Now          time.Time
 }
 
@@ -82,9 +87,15 @@ func BuildRuntimeSnapshot(input RuntimeSnapshotInput) RuntimeSnapshot {
 		Tasks:        append([]RuntimeTask(nil), input.Tasks...),
 		Requests:     append([]RuntimeRequest(nil), input.Requests...),
 		Recent:       append([]RuntimeMessage(nil), input.Recent...),
+		Artifacts:    append([]RuntimeArtifact(nil), input.Artifacts...),
 		Capabilities: input.Capabilities,
+		Registry:     input.Registry,
 	}
-	snapshot.Recovery = BuildSessionRecovery(sessionMode, directAgent, snapshot.Tasks, snapshot.Requests, snapshot.Recent)
+	if len(snapshot.Registry.Entries) == 0 {
+		snapshot.Registry = BuildCapabilityRegistry(snapshot.Capabilities)
+	}
+	snapshot.Memory = BuildSessionMemorySnapshot(sessionMode, directAgent, snapshot.Tasks, snapshot.Requests, snapshot.Recent)
+	snapshot.Recovery = snapshot.Memory.ToRecovery()
 	return snapshot
 }
 
@@ -107,6 +118,9 @@ func (s RuntimeSnapshot) FormatText() string {
 		fmt.Sprintf("- Isolated worktrees: %d", s.isolatedTaskCount()),
 		fmt.Sprintf("- Pending human requests: %d", s.pendingRequestCount()),
 	)
+	if len(s.Artifacts) > 0 {
+		lines = append(lines, fmt.Sprintf("- Retained execution artifacts: %d", len(s.Artifacts)))
+	}
 
 	if focus := strings.TrimSpace(s.Recovery.Focus); focus != "" {
 		lines = append(lines, fmt.Sprintf("- Current focus: %s", focus))
@@ -126,6 +140,20 @@ func (s RuntimeSnapshot) FormatText() string {
 		}
 	}
 
+	if len(s.Artifacts) > 0 {
+		lines = append(lines, "", "Execution artifacts:")
+		for _, artifact := range firstRuntimeArtifacts(s.Artifacts, 4) {
+			line := fmt.Sprintf("- %s [%s]", artifact.EffectiveTitle(), artifact.Kind)
+			if state := strings.TrimSpace(artifact.State); state != "" {
+				line += " " + strings.ReplaceAll(state, "_", " ")
+			}
+			if summary := strings.TrimSpace(artifact.Summary); summary != "" {
+				line += ": " + summary
+			}
+			lines = append(lines, line)
+		}
+	}
+
 	if tmuxLines := s.Capabilities.Tmux.FormatLines(); len(tmuxLines) > 0 {
 		lines = append(lines, "", "Tmux runtime:")
 		lines = append(lines, tmuxLines...)
@@ -135,6 +163,17 @@ func (s RuntimeSnapshot) FormatText() string {
 		lines = append(lines, "", "Runtime capabilities:")
 		for _, item := range s.Capabilities.Items {
 			line := fmt.Sprintf("- %s [%s]: %s", item.Name, item.Level, item.Detail)
+			if next := strings.TrimSpace(item.NextStep); next != "" {
+				line += " Next: " + next
+			}
+			lines = append(lines, line)
+		}
+	}
+
+	if len(s.Registry.Entries) > 0 {
+		lines = append(lines, "", "Capability registry:")
+		for _, item := range s.Registry.Entries {
+			line := fmt.Sprintf("- %s (%s) [%s]: %s", item.Label, item.Category, item.Level, item.Detail)
 			if next := strings.TrimSpace(item.NextStep); next != "" {
 				line += " Next: " + next
 			}
@@ -190,4 +229,11 @@ func runtimeTaskUsesIsolation(task RuntimeTask) bool {
 	return strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") ||
 		strings.TrimSpace(task.WorktreePath) != "" ||
 		strings.TrimSpace(task.WorktreeBranch) != ""
+}
+
+func firstRuntimeArtifacts(artifacts []RuntimeArtifact, limit int) []RuntimeArtifact {
+	if limit <= 0 || len(artifacts) <= limit {
+		return append([]RuntimeArtifact(nil), artifacts...)
+	}
+	return append([]RuntimeArtifact(nil), artifacts[:limit]...)
 }

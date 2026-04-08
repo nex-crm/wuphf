@@ -17,6 +17,8 @@ const (
 	mainLinesCacheLimit = 48
 	sidebarCacheLimit   = 24
 	markdownCacheLimit  = 256
+	threadedCacheLimit  = 96
+	viewportBlockLimit  = 2048
 )
 
 type channelRenderCacheStore struct {
@@ -26,6 +28,8 @@ type channelRenderCacheStore struct {
 	sidebars  map[uint64]string
 	markdown  map[uint64]string
 	renderers map[int]*glamour.TermRenderer
+	threaded  map[uint64][]threadedMessage
+	blocks    map[uint64][]renderedLine
 }
 
 var channelRenderCache = channelRenderCacheStore{
@@ -33,6 +37,8 @@ var channelRenderCache = channelRenderCacheStore{
 	sidebars:  make(map[uint64]string),
 	markdown:  make(map[uint64]string),
 	renderers: make(map[int]*glamour.TermRenderer),
+	threaded:  make(map[uint64][]threadedMessage),
+	blocks:    make(map[uint64][]renderedLine),
 }
 
 func cachedSidebarRender(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int) string {
@@ -53,13 +59,22 @@ func (m channelModel) cachedMainLines(contentWidth int) []renderedLine {
 
 	var lines []renderedLine
 	if m.isOneOnOne() {
-		if m.activeApp == officeAppRecovery {
+		switch m.activeApp {
+		case officeAppRecovery:
 			lines = m.buildRecoveryLines(contentWidth)
-		} else {
+		case officeAppInbox:
+			lines = buildInboxLines(filterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), "inbox"), m.requests, contentWidth)
+		case officeAppOutbox:
+			lines = buildOutboxLines(filterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), "outbox"), m.actions, contentWidth)
+		default:
 			lines = m.buildDirectFeedLines(contentWidth)
 		}
 	} else {
 		switch m.activeApp {
+		case officeAppInbox:
+			lines = buildInboxLines(m.messages, m.requests, contentWidth)
+		case officeAppOutbox:
+			lines = buildOutboxLines(m.messages, m.actions, contentWidth)
 		case officeAppRecovery:
 			lines = m.buildRecoveryLines(contentWidth)
 		case officeAppTasks:
@@ -95,7 +110,8 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 	h.add(m.oneOnOneAgent)
 	h.addInt64(renderTimeBucket(m.activeApp, m.isOneOnOne()))
 
-	if m.isOneOnOne() || m.activeApp == officeAppMessages || m.activeApp == officeAppRecovery {
+	if m.isOneOnOne() || m.activeApp == officeAppMessages || m.activeApp == officeAppInbox || m.activeApp == officeAppOutbox || m.activeApp == officeAppRecovery {
+		workspace := m.currentWorkspaceUIState()
 		h.addMessages(m.messages)
 		h.addExpandedThreads(m.expandedThreads)
 		h.add(m.unreadAnchorID)
@@ -109,10 +125,21 @@ func (m channelModel) hashMainLinesState(contentWidth int) uint64 {
 			h.add(m.oneOnOneAgentName())
 		}
 		h.addBool(m.brokerConnected)
+		h.add(string(workspace.Readiness.Level), workspace.Readiness.Headline, workspace.Readiness.Detail, workspace.Readiness.NextStep)
+		h.add(workspace.Focus, workspace.NextStep)
+		if workspace.NeedsYou != nil {
+			h.add(workspace.NeedsYou.ID, workspace.NeedsYou.TitleOrQuestion(), workspace.NeedsYou.Status)
+		}
 		return h.sum()
 	}
 
 	switch m.activeApp {
+	case officeAppInbox:
+		h.addMessages(m.messages)
+		h.addRequests(m.requests)
+	case officeAppOutbox:
+		h.addMessages(m.messages)
+		h.addActions(m.actions)
 	case officeAppTasks:
 		h.addTasks(m.tasks)
 	case officeAppRequests:
@@ -168,6 +195,7 @@ func hashSidebarState(channels []channelInfo, members []channelMember, tasks []c
 	h.addInt(workspace.UnreadCount)
 	h.addBool(workspace.NoNex)
 	h.addBool(workspace.APIConfigured)
+	h.add(string(workspace.Readiness.Level), workspace.Readiness.Headline, workspace.Readiness.Detail, workspace.Readiness.NextStep)
 	if workspace.NeedsYou != nil {
 		h.add(workspace.NeedsYou.ID, workspace.NeedsYou.TitleOrQuestion())
 	}
@@ -187,6 +215,15 @@ func cloneRenderedLines(lines []renderedLine) []renderedLine {
 	}
 	out := make([]renderedLine, len(lines))
 	copy(out, lines)
+	return out
+}
+
+func cloneThreadedMessages(items []threadedMessage) []threadedMessage {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]threadedMessage, len(items))
+	copy(out, items)
 	return out
 }
 
@@ -239,6 +276,44 @@ func (c *channelRenderCacheStore) putMarkdown(key uint64, rendered string) {
 		c.markdown = make(map[uint64]string)
 	}
 	c.markdown[key] = rendered
+}
+
+func (c *channelRenderCacheStore) getThreaded(key uint64) ([]threadedMessage, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	items, ok := c.threaded[key]
+	if !ok {
+		return nil, false
+	}
+	return cloneThreadedMessages(items), true
+}
+
+func (c *channelRenderCacheStore) putThreaded(key uint64, items []threadedMessage) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.threaded) >= threadedCacheLimit {
+		c.threaded = make(map[uint64][]threadedMessage)
+	}
+	c.threaded[key] = cloneThreadedMessages(items)
+}
+
+func (c *channelRenderCacheStore) getViewportBlock(key uint64) ([]renderedLine, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	lines, ok := c.blocks[key]
+	if !ok {
+		return nil, false
+	}
+	return cloneRenderedLines(lines), true
+}
+
+func (c *channelRenderCacheStore) putViewportBlock(key uint64, lines []renderedLine) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.blocks) >= viewportBlockLimit {
+		c.blocks = make(map[uint64][]renderedLine)
+	}
+	c.blocks[key] = cloneRenderedLines(lines)
 }
 
 func (c *channelRenderCacheStore) renderer(width int) (*glamour.TermRenderer, error) {

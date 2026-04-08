@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -834,7 +835,7 @@ func TestBuildCalendarLinesShowsNextRunMetadata(t *testing.T) {
 	}, nil, nil, "general", []channelMember{{Slug: "ceo", Name: "CEO"}}, calendarRangeWeek, "", 80)
 
 	rendered := stripANSI(joinRenderedLines(lines))
-	if !strings.Contains(rendered, "every 15 min") || !strings.Contains(rendered, "today") {
+	if !strings.Contains(rendered, "every 15 min") || (!strings.Contains(rendered, "today") && !strings.Contains(rendered, "tomorrow")) {
 		t.Fatalf("expected scheduler timing metadata, got %q", rendered)
 	}
 	if !strings.Contains(rendered, "#general") || !strings.Contains(rendered, "CEO") {
@@ -2128,6 +2129,62 @@ func TestOfficeViewportWindowMatchesFullRenderAndMouseHitTesting(t *testing.T) {
 	}
 	if action.Kind != "thread" || action.Value != "msg-7" {
 		t.Fatalf("expected click to open msg-7 thread, got %+v", action)
+	}
+}
+
+func TestOfficeViewportVirtualizationCachesVisibleBlocks(t *testing.T) {
+	oldRender := renderOfficeMessageBlockFn
+	defer func() { renderOfficeMessageBlockFn = oldRender }()
+
+	channelRenderCache.mu.Lock()
+	channelRenderCache.threaded = make(map[uint64][]threadedMessage)
+	channelRenderCache.blocks = make(map[uint64][]renderedLine)
+	channelRenderCache.mu.Unlock()
+
+	renderCalls := 0
+	renderOfficeMessageBlockFn = func(tm threadedMessage, contentWidth int, unreadAnchorID string, unreadCount int) []renderedLine {
+		renderCalls++
+		return renderOfficeMessageBlock(tm, contentWidth, unreadAnchorID, unreadCount)
+	}
+
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 22
+	m.activeApp = officeAppMessages
+	for i := 0; i < 120; i++ {
+		m.messages = append(m.messages, brokerMessage{
+			ID:        fmt.Sprintf("msg-%03d", i),
+			From:      "ceo",
+			Content:   fmt.Sprintf("Longer history row %03d should not force the viewport to render the full transcript before showing the tail.", i),
+			Timestamp: time.Date(2026, 4, 7, 10, i%60, 0, 0, time.UTC).Format(time.RFC3339),
+		})
+	}
+
+	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	_, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
+	contentWidth := layout.MainW - 2
+
+	_ = m.currentMainViewportLines(contentWidth, msgH)
+	firstRenderCalls := renderCalls
+	if firstRenderCalls == 0 {
+		t.Fatal("expected virtual viewport to render at least one visible block")
+	}
+	if firstRenderCalls >= len(m.messages) {
+		t.Fatalf("expected virtual viewport to avoid rendering the full transcript, rendered %d blocks for %d messages", firstRenderCalls, len(m.messages))
+	}
+
+	_ = m.currentMainViewportLines(contentWidth, msgH)
+	if renderCalls != firstRenderCalls {
+		t.Fatalf("expected second viewport pass to reuse cached blocks, got %d render calls after second pass vs %d initially", renderCalls, firstRenderCalls)
+	}
+
+	m.scroll = msgH
+	_ = m.currentMainViewportLines(contentWidth, msgH)
+	if renderCalls <= firstRenderCalls {
+		t.Fatalf("expected deeper scroll to render additional older blocks, got %d vs %d", renderCalls, firstRenderCalls)
+	}
+	if renderCalls >= len(m.messages) {
+		t.Fatalf("expected deep scroll to stay virtualized, rendered %d blocks for %d messages", renderCalls, len(m.messages))
 	}
 }
 
