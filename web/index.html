@@ -285,6 +285,15 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .msg-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 .msg-link:hover { color: var(--accent-warm); }
 
+/* ─── Reply-to badge ─── */
+.composer-reply-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; font-size: 12px; color: var(--accent); background: var(--accent-bg); border-radius: var(--radius-md) var(--radius-md) 0 0; border: 1px solid var(--border); border-bottom: none; }
+.composer-reply-badge-text { font-weight: 500; }
+.composer-reply-badge-close { width: 18px; height: 18px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-tertiary); margin-left: auto; }
+.composer-reply-badge-close:hover { background: var(--border); color: var(--text); }
+
+/* ─── Composer context hint ─── */
+.composer-context-hint { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); font-style: italic; }
+
 .message-system { text-align: center; padding: 8px 0; }
 .message-system-inner { display: flex; align-items: center; gap: 12px; padding: 0 20px; }
 .message-system-line { height: 1px; flex: 1; background: var(--border); }
@@ -2149,9 +2158,15 @@ function appendMessageToContainer(msg, container, opts) {
     threadLink.addEventListener('click', function() { openThread(msg.id); });
     content.appendChild(threadLink);
 
-    // Action buttons (reply in thread)
+    // Action buttons (reply inline + reply in thread)
     var actions = document.createElement('div');
     actions.className = 'message-actions';
+    var quickReplyBtn = document.createElement('button');
+    quickReplyBtn.className = 'message-action-btn';
+    quickReplyBtn.title = 'Reply';
+    quickReplyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
+    quickReplyBtn.addEventListener('click', (function(mid) { return function() { setReplyMode(mid); }; })(msg.id));
+    actions.appendChild(quickReplyBtn);
     var replyBtn = document.createElement('button');
     replyBtn.className = 'message-action-btn';
     replyBtn.title = 'Reply in thread';
@@ -2340,6 +2355,42 @@ function renderRequestBanner(pending) {
 // ─── Composer ───
 var composerInput = document.getElementById('composer-input');
 var composerSend = document.getElementById('composer-send');
+
+// ─── Reply-to mode state ───
+var replyToMsgId = null;
+var replyToAgent = null;
+
+function setReplyMode(msgId) {
+  var msg = allMessages[msgId];
+  if (!msg) return;
+  replyToMsgId = msgId;
+  var agent = AGENTS.find(function(a) { return a.slug === msg.from; });
+  replyToAgent = agent ? agent.name : msg.from;
+  renderReplyBadge();
+  composerInput.focus();
+}
+
+function clearReplyMode() {
+  replyToMsgId = null;
+  replyToAgent = null;
+  var badge = document.getElementById('composer-reply-badge');
+  if (badge) badge.remove();
+  renderComposerHint();
+}
+
+function renderReplyBadge() {
+  var existing = document.getElementById('composer-reply-badge');
+  if (existing) existing.remove();
+  if (!replyToMsgId) return;
+  var badge = el('div', { className: 'composer-reply-badge', id: 'composer-reply-badge' });
+  badge.appendChild(svgIcon(['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'], 12));
+  badge.appendChild(el('span', { className: 'composer-reply-badge-text' }, 'Replying to @' + replyToAgent));
+  var closeBtn = el('button', { className: 'composer-reply-badge-close', onClick: clearReplyMode });
+  closeBtn.textContent = '\u00D7';
+  badge.appendChild(closeBtn);
+  var composerEl = document.querySelector('.composer');
+  composerEl.insertBefore(badge, composerEl.firstChild);
+}
 
 // ─── Autocomplete state ───
 var acPanel = document.getElementById('autocomplete');
@@ -2536,8 +2587,21 @@ function handleSlashCommand(input) {
       switchApp('tasks');
       break;
     case '/reply':
-      if (args) openThread(args.trim());
-      else showSystem('Usage: /reply <message-id>');
+      if (args) {
+        var replyTarget = args.trim();
+        if (allMessages[replyTarget]) { setReplyMode(replyTarget); }
+        else openThread(replyTarget);
+      } else {
+        // Default: reply to the last non-human message
+        var msgKeys = Object.keys(allMessages);
+        for (var ri = msgKeys.length - 1; ri >= 0; ri--) {
+          var rm = allMessages[msgKeys[ri]];
+          if (rm.from !== 'you' && rm.from !== 'human' && !rm.reply_to) {
+            setReplyMode(rm.id);
+            break;
+          }
+        }
+      }
       break;
     case '/reset':
       showConfirmDialog({
@@ -2607,12 +2671,15 @@ function sendMessage() {
 
   if (brokerConnected) {
     // POST to broker with tagged agents — tagged agents get notified
-    WuphfAPI.post('/messages', {
+    var msgBody = {
       from: 'you',
       channel: currentChannel,
       content: raw,
       tagged: tagged
-    })
+    };
+    if (replyToMsgId) msgBody.reply_to = replyToMsgId;
+    clearReplyMode();
+    WuphfAPI.post('/messages', msgBody)
       .catch(function(err) {
         // Show error as system message
         var container = document.getElementById('messages');
@@ -3091,6 +3158,20 @@ document.addEventListener('keydown', function(e) {
       closeCommandPalette();
     } else {
       openCommandPalette();
+    }
+    return;
+  }
+
+  // Ctrl+R / Cmd+R: reply to last message
+  if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+    e.preventDefault();
+    var msgKeys = Object.keys(allMessages);
+    for (var ri = msgKeys.length - 1; ri >= 0; ri--) {
+      var rm = allMessages[msgKeys[ri]];
+      if (rm.from !== 'you' && rm.from !== 'human' && !rm.reply_to) {
+        setReplyMode(rm.id);
+        break;
+      }
     }
     return;
   }
