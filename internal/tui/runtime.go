@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -44,6 +45,10 @@ func (rt *Runtime) BootstrapFromConfig() {
 	agentSvc := agent.NewAgentService(
 		agent.WithStreamFnResolver(streamResolver),
 		agent.WithClient(apiClient),
+		agent.WithFocusModeChecker(func() bool {
+			value := strings.TrimSpace(os.Getenv("WUPHF_FOCUS_MODE"))
+			return strings.EqualFold(value, "1") || strings.EqualFold(value, "true")
+		}),
 	)
 	msgRouter := orchestration.NewMessageRouter()
 

@@ -1,0 +1,451 @@
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Theme: Slack (Modern 2024+)
+   Dark aubergine sidebar, white main area, system font stack,
+   inline timestamps, rounded avatars, green send button.
+   Pixel-accurate clone of modern Slack.
+   ═══════════════════════════════════════════════════════════════ */
+
+html[data-theme="slack"] {
+  --bg:             #FFFFFF;
+  --bg-warm:        #F8F8F8;
+  --bg-card:        #FFFFFF;
+  --text:           #1D1C1D;
+  --text-secondary: #616061;
+  --text-tertiary:  #868686;
+  --accent:         #1264A3;
+  --accent-warm:    #0B4C8C;
+  --accent-bg:      #E8F5FE;
+  --border:         #E8E8E8;
+  --border-light:   #F0F0F0;
+  --border-dark:    #DDDDDD;
+  --green:          #007A5A;
+  --green-bg:       #E3F9E5;
+  --red:            #E01E5A;
+  --red-bg:         #FDE8EE;
+  --yellow:         #ECB22E;
+  --yellow-bg:      #FEF9E7;
+  --font-sans:  -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-serif: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-logo:  -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono:  'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* Modern Slack sidebar — dark aubergine, not the old purple */
+  --slack-sidebar:             #19171D;
+  --slack-sidebar-hover:       rgba(255,255,255,0.04);
+  --slack-sidebar-active:      #1164A3;
+  --slack-sidebar-text:        rgba(255,255,255,0.7);
+  --slack-sidebar-text-active: #FFFFFF;
+  --slack-presence:            #2BAC76;
+}
+
+html[data-theme="slack"] body {
+  background: #FFFFFF;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+/* ═══ SIDEBAR: Modern dark aubergine ═══ */
+html[data-theme="slack"] .sidebar {
+  background: var(--slack-sidebar);
+  border-right: none;
+  width: 260px !important;
+}
+
+/* Workspace header area — subtle depth */
+html[data-theme="slack"] .sidebar-header {
+  background: rgba(255,255,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  padding: 12px 16px !important;
+}
+html[data-theme="slack"] .sidebar-logo {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 18px !important;
+  font-weight: 900 !important;
+  color: #FFFFFF !important;
+  font-style: normal !important;
+  letter-spacing: -0.02em !important;
+}
+html[data-theme="slack"] .sidebar-header .sidebar-btn {
+  color: var(--slack-sidebar-text) !important;
+}
+html[data-theme="slack"] .sidebar-header .sidebar-btn:hover {
+  background: var(--slack-sidebar-hover) !important;
+  color: #FFFFFF !important;
+}
+
+/* Section titles */
+html[data-theme="slack"] .sidebar-section {
+  padding: 12px 12px 4px !important;
+  border-top: none !important;
+}
+html[data-theme="slack"] .sidebar-section-title {
+  color: var(--slack-sidebar-text) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+/* Sidebar items — channel list */
+html[data-theme="slack"] .sidebar-item,
+html[data-theme="slack"] .sidebar-agent {
+  color: var(--slack-sidebar-text) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 15px !important;
+  padding: 4px 12px !important;
+  border-radius: 6px !important;
+  margin-left: 0 !important;
+}
+html[data-theme="slack"] .sidebar-item:hover,
+html[data-theme="slack"] .sidebar-agent:hover {
+  background: var(--slack-sidebar-hover) !important;
+  color: var(--slack-sidebar-text-active) !important;
+}
+html[data-theme="slack"] .sidebar-item.active {
+  background: var(--slack-sidebar-active) !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+}
+
+/* Channel prefix icon */
+html[data-theme="slack"] .sidebar-item-icon {
+  font-size: 16px !important;
+  font-weight: 400 !important;
+  color: var(--slack-sidebar-text) !important;
+}
+
+/* Presence dot — green */
+html[data-theme="slack"] .status-dot.active {
+  background: var(--slack-presence) !important;
+  border: 2px solid var(--slack-sidebar);
+  width: 9px !important;
+  height: 9px !important;
+  animation: none !important;
+}
+
+/* Sidebar bottom */
+html[data-theme="slack"] .sidebar-bottom {
+  background: var(--slack-sidebar);
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding: 8px 12px !important;
+}
+html[data-theme="slack"] .sidebar-btn {
+  color: var(--slack-sidebar-text) !important;
+}
+
+/* Theme switcher in sidebar */
+html[data-theme="slack"] #theme-switcher {
+  background: rgba(255,255,255,0.08) !important;
+  border: 1px solid rgba(255,255,255,0.12) !important;
+  color: var(--slack-sidebar-text) !important;
+  border-radius: 6px !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 13px !important;
+}
+
+/* ═══ MAIN: Clean white ═══ */
+html[data-theme="slack"] .main {
+  background: #FFFFFF;
+}
+
+/* Channel header — 49px, bottom border, bold name */
+html[data-theme="slack"] .channel-header {
+  background: #FFFFFF !important;
+  border-bottom: 1px solid var(--border) !important;
+  backdrop-filter: none !important;
+  padding: 10px 20px !important;
+  min-height: 49px;
+}
+html[data-theme="slack"] .channel-title {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-weight: 900 !important;
+  font-size: 18px !important;
+  color: var(--text) !important;
+}
+html[data-theme="slack"] .channel-desc {
+  font-size: 13px !important;
+  color: var(--text-tertiary) !important;
+}
+
+/* ─── Messages ─── */
+html[data-theme="slack"] .messages {
+  background: #FFFFFF;
+  padding: 8px 20px !important;
+}
+html[data-theme="slack"] .message {
+  padding: 8px 20px !important;
+  gap: 12px !important;
+  border-radius: 8px;
+  margin: 0 -20px;
+}
+html[data-theme="slack"] .message:hover {
+  background: #F8F8F8;
+}
+
+/* Avatar — 36px, rounded-rect (not circle) */
+html[data-theme="slack"] .message-avatar {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 8px !important;
+  font-size: 18px !important;
+  background: #F0E6F0 !important;
+}
+
+/* Author — 15px, black, heavy weight */
+html[data-theme="slack"] .message-author {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-weight: 900 !important;
+  font-size: 15px !important;
+  color: var(--text) !important;
+}
+
+/* Message text — 15px, Slack line-height */
+html[data-theme="slack"] .message-text {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 15px !important;
+  line-height: 1.46667 !important;
+  color: var(--text) !important;
+}
+html[data-theme="slack"] .message-text strong {
+  color: var(--text) !important;
+  font-weight: 700 !important;
+}
+
+/* Inline code — pink on light bg, like Slack */
+html[data-theme="slack"] .message-text code {
+  background: #F7F7F7 !important;
+  border: 1px solid #E8E8E8;
+  border-radius: 3px;
+  padding: 2px 4px;
+  font-size: 12px !important;
+  color: #E01E5A !important;
+}
+
+/* Timestamps — ALWAYS VISIBLE inline, modern Slack shows them */
+html[data-theme="slack"] .message-time {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 12px !important;
+  color: #616061 !important;
+  opacity: 1 !important;
+}
+
+/* Badges */
+html[data-theme="slack"] .badge {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  border-radius: var(--radius-full) !important;
+  padding: 1px 8px !important;
+}
+html[data-theme="slack"] .badge-accent { background: #E8F5FE !important; color: #1264A3 !important; }
+html[data-theme="slack"] .badge-green  { background: #E3F9E5 !important; color: #007A5A !important; }
+html[data-theme="slack"] .badge-yellow { background: #FEF9E7 !important; color: #B7850E !important; }
+
+/* System messages */
+html[data-theme="slack"] .message-system-text {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  color: var(--text-tertiary) !important;
+  font-size: 13px !important;
+}
+
+/* ─── Message action bar — appears top-right on hover ─── */
+html[data-theme="slack"] .message-actions {
+  border-radius: 8px !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+  padding: 4px !important;
+  background: #FFFFFF !important;
+}
+html[data-theme="slack"] .message-action-btn {
+  border-radius: 4px !important;
+}
+
+/* ─── Thread link ─── */
+html[data-theme="slack"] .message-thread-link {
+  color: #1264A3 !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+html[data-theme="slack"] .message-thread-link:hover {
+  background: #E8F5FE !important;
+}
+
+/* Typing indicator */
+html[data-theme="slack"] .typing-indicator {
+  color: var(--text-tertiary) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+}
+
+/* ─── Composer ─── */
+html[data-theme="slack"] .composer {
+  background: #FFFFFF !important;
+  border-top: none !important;
+  padding: 0 20px 24px !important;
+}
+
+/* Compose box — rounded 8px, focus ring */
+html[data-theme="slack"] .composer-inner {
+  background: #FFFFFF !important;
+  border: 1px solid #868686 !important;
+  border-radius: 8px !important;
+  padding: 12px 16px !important;
+  min-height: 44px;
+}
+html[data-theme="slack"] .composer-inner:focus-within {
+  border-color: #1264A3 !important;
+  box-shadow: 0 0 0 1px #1264A3 !important;
+}
+html[data-theme="slack"] .composer-input {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-size: 15px !important;
+}
+
+/* Send button — green */
+html[data-theme="slack"] .composer-send {
+  background: #007A5A !important;
+  border-radius: 4px !important;
+  width: 32px !important;
+  height: 28px !important;
+}
+html[data-theme="slack"] .composer-send:hover {
+  background: #005A3E !important;
+}
+html[data-theme="slack"] .composer-send:disabled {
+  background: #DDDDDD !important;
+  opacity: 1 !important;
+}
+
+/* ═══ THREAD PANEL — 400px, white, thin left border ═══ */
+html[data-theme="slack"] .thread-panel {
+  background: #FFFFFF !important;
+  border-left: 1px solid var(--border) !important;
+  width: 400px !important;
+}
+html[data-theme="slack"] .thread-panel-header {
+  padding: 12px 20px !important;
+  border-bottom: 1px solid var(--border) !important;
+}
+html[data-theme="slack"] .thread-panel-title {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-weight: 900 !important;
+  font-size: 18px !important;
+}
+html[data-theme="slack"] .thread-panel-divider {
+  color: var(--text-tertiary) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-weight: 700 !important;
+}
+html[data-theme="slack"] .thread-panel-parent {
+  background: #FFFFFF !important;
+}
+
+/* ═══ AGENT PANEL ═══ */
+html[data-theme="slack"] .agent-panel {
+  background: #FFFFFF !important;
+  border-left: 1px solid var(--border) !important;
+}
+html[data-theme="slack"] .agent-panel-header {
+  background: #FFFFFF !important;
+  border-bottom: 1px solid var(--border) !important;
+  padding: 12px 20px !important;
+}
+html[data-theme="slack"] .agent-panel-header span {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-weight: 900 !important;
+  color: var(--text) !important;
+}
+html[data-theme="slack"] .agent-panel-avatar {
+  border-radius: 8px !important;
+  background: #F0E6F0 !important;
+}
+html[data-theme="slack"] .agent-panel-name {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-weight: 900 !important;
+}
+html[data-theme="slack"] .agent-panel-section-title {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-weight: 700 !important;
+}
+html[data-theme="slack"] .agent-panel-skill {
+  border-radius: var(--radius-full) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+}
+
+/* ═══ BUTTONS ═══ */
+html[data-theme="slack"] .btn {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+}
+html[data-theme="slack"] .btn-primary {
+  background: #007A5A !important;
+  border-radius: 4px !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
+}
+html[data-theme="slack"] .btn-primary:hover { background: #005A3E !important; }
+html[data-theme="slack"] .btn-ghost {
+  border: 1px solid #BBBBBB !important;
+  border-radius: 4px !important;
+  background: #FFFFFF !important;
+  color: var(--text) !important;
+  font-weight: 700 !important;
+}
+
+/* ═══ ONBOARDING ═══ */
+html[data-theme="slack"] .onboarding { background: #F4EDE4 !important; }
+html[data-theme="slack"] .dot-grid { background-image: none !important; }
+html[data-theme="slack"] .progress-dot.active { background: #19171D !important; }
+html[data-theme="slack"] .dict-word {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+}
+html[data-theme="slack"] .welcome-tagline {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+}
+html[data-theme="slack"] .tagline-gradient {
+  background: none !important;
+  -webkit-text-fill-color: #19171D !important;
+}
+html[data-theme="slack"] .step-title {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-style: normal !important;
+  font-weight: 900 !important;
+}
+html[data-theme="slack"] .emoji-backdrop { display: none !important; }
+html[data-theme="slack"] .card {
+  border-radius: 8px !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+}
+html[data-theme="slack"] .input {
+  border-radius: 4px !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+}
+html[data-theme="slack"] .label {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-weight: 700 !important;
+}
+
+/* Launch */
+html[data-theme="slack"] .launch-screen { background: #19171D !important; }
+html[data-theme="slack"] .launch-spinner {
+  border-color: rgba(255,255,255,0.2) !important;
+  border-top-color: #FFFFFF !important;
+}
+html[data-theme="slack"] .launch-text {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
+  font-style: normal !important;
+  color: #FFFFFF !important;
+  font-weight: 900 !important;
+}
+html[data-theme="slack"] .launch-sub { color: var(--slack-sidebar-text) !important; }
+
+/* Disconnect banner */
+html[data-theme="slack"] #disconnect-banner { border-radius: 8px !important; }

@@ -255,6 +255,7 @@ type brokerState struct {
 	Channels          []teamChannel                `json:"channels,omitempty"`
 	SessionMode       string                       `json:"session_mode,omitempty"`
 	OneOnOneAgent     string                       `json:"one_on_one_agent,omitempty"`
+	FocusMode         bool                         `json:"focus_mode,omitempty"`
 	Tasks             []teamTask                   `json:"tasks,omitempty"`
 	Requests          []humanInterview             `json:"requests,omitempty"`
 	Actions           []officeActionLog            `json:"actions,omitempty"`
@@ -296,6 +297,7 @@ type Broker struct {
 	channels           []teamChannel
 	sessionMode        string
 	oneOnOneAgent      string
+	focusMode          bool
 	tasks              []teamTask
 	requests           []humanInterview
 	actions            []officeActionLog
@@ -316,8 +318,9 @@ type Broker struct {
 	externalDelivered  map[string]struct{} // message IDs already queued for external delivery
 	mu                 sync.Mutex
 	server             *http.Server
-	token              string // shared secret for authenticating requests
-	addr               string // actual listen address (useful when port=0)
+	token              string   // shared secret for authenticating requests
+	addr               string   // actual listen address (useful when port=0)
+	webUIOrigins       []string // allowed CORS origins for web UI (set by ServeWebUI)
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -423,6 +426,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
+	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
 	mux.HandleFunc("/reactions", b.requireAuth(b.handleReactions))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
@@ -452,6 +456,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
+	mux.HandleFunc("/web-token", b.handleWebToken)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -462,7 +467,7 @@ func (b *Broker) StartOnPort(port int) error {
 
 	b.server = &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      b.corsMiddleware(mux),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
@@ -482,6 +487,58 @@ func (b *Broker) Stop() {
 	if b.server != nil {
 		b.server.Close()
 	}
+}
+
+// corsMiddleware adds CORS headers only for the web UI origin.
+// If no web UI origins are configured, no CORS headers are set.
+func (b *Broker) corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" && len(b.webUIOrigins) > 0 {
+			for _, allowed := range b.webUIOrigins {
+				if origin == allowed {
+					w.Header().Set("Access-Control-Allow-Origin", allowed)
+					w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+					break
+				}
+			}
+		}
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handleWebToken returns the broker token to localhost clients without requiring auth.
+// This lets the web UI fetch the token to authenticate subsequent API calls.
+func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if host != "127.0.0.1" && host != "::1" {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": b.token})
+}
+
+// ServeWebUI starts a static file server for the web UI on the given port.
+func (b *Broker) ServeWebUI(port int) {
+	b.webUIOrigins = []string{
+		fmt.Sprintf("http://localhost:%d", port),
+		fmt.Sprintf("http://127.0.0.1:%d", port),
+	}
+
+	exePath, _ := os.Executable()
+	webDir := filepath.Join(filepath.Dir(exePath), "web")
+	if _, err := os.Stat(webDir); os.IsNotExist(err) {
+		webDir = "web"
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/", http.FileServer(http.Dir(webDir)))
+	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux)
 }
 
 // Messages returns all channel messages (for the Go TUI channel view).
@@ -844,6 +901,7 @@ func (b *Broker) loadState() error {
 	b.channels = state.Channels
 	b.sessionMode = state.SessionMode
 	b.oneOnOneAgent = state.OneOnOneAgent
+	b.focusMode = state.FocusMode
 	b.tasks = state.Tasks
 	b.requests = state.Requests
 	b.actions = state.Actions
@@ -873,7 +931,7 @@ func (b *Broker) loadState() error {
 
 func (b *Broker) saveLocked() error {
 	path := brokerStatePath()
-	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
+	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent && !b.focusMode {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -888,6 +946,7 @@ func (b *Broker) saveLocked() error {
 		Channels:          b.channels,
 		SessionMode:       b.sessionMode,
 		OneOnOneAgent:     b.oneOnOneAgent,
+		FocusMode:         b.focusMode,
 		Tasks:             b.tasks,
 		Requests:          b.requests,
 		Actions:           b.actions,
@@ -1198,6 +1257,12 @@ func (b *Broker) SessionModeState() (string, string) {
 	return b.sessionMode, b.oneOnOneAgent
 }
 
+func (b *Broker) FocusModeEnabled() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.focusMode
+}
+
 func (b *Broker) SetSessionMode(mode, agent string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -1206,6 +1271,13 @@ func (b *Broker) SetSessionMode(mode, agent string) error {
 	if b.findMemberLocked(b.oneOnOneAgent) == nil {
 		b.oneOnOneAgent = DefaultOneOnOneAgent
 	}
+	return b.saveLocked()
+}
+
+func (b *Broker) SetFocusMode(enabled bool) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.focusMode = enabled
 	return b.saveLocked()
 }
 
@@ -1980,6 +2052,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	mode := b.sessionMode
 	agent := b.oneOnOneAgent
+	focusMode := b.focusMode
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -1987,6 +2060,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":           "ok",
 		"session_mode":     mode,
 		"one_on_one_agent": agent,
+		"focus_mode":       focusMode,
 	})
 }
 
@@ -2017,6 +2091,34 @@ func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"session_mode":     mode,
 			"one_on_one_agent": agent,
+		})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleFocusMode(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"focus_mode": b.FocusModeEnabled(),
+		})
+	case http.MethodPost:
+		var body struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := b.SetFocusMode(body.Enabled); err != nil {
+			http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"focus_mode": body.Enabled,
 		})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

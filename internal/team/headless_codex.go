@@ -49,6 +49,9 @@ func (l *Launcher) launchHeadlessCodex() error {
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
+	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
+		return fmt.Errorf("set focus mode: %w", err)
+	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
@@ -250,6 +253,9 @@ func (l *Launcher) buildHeadlessCodexEnv(slug string) []string {
 		"WUPHF_BROKER_TOKEN="+l.broker.Token(),
 		"WUPHF_HEADLESS_PROVIDER=codex",
 	)
+	if l.isFocusModeEnabled() {
+		env = append(env, "WUPHF_FOCUS_MODE=1")
+	}
 	if config.ResolveNoNex() {
 		env = append(env, "WUPHF_NO_NEX=1")
 	}
@@ -285,6 +291,9 @@ func (l *Launcher) buildCodexOfficeConfigOverrides(slug string) ([]string, error
 	wuphfEnvVars := []string{
 		"WUPHF_AGENT_SLUG",
 		"WUPHF_BROKER_TOKEN",
+	}
+	if l.isFocusModeEnabled() {
+		wuphfEnvVars = append(wuphfEnvVars, "WUPHF_FOCUS_MODE")
 	}
 	if config.ResolveNoNex() {
 		wuphfEnvVars = append(wuphfEnvVars, "WUPHF_NO_NEX")

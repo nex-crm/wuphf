@@ -57,6 +57,20 @@ func TestSearchCommandOpensWorkspaceSearchPicker(t *testing.T) {
 	}
 }
 
+func TestSearchPickerIncludesOfficeApps(t *testing.T) {
+	m := newChannelModel(false)
+
+	options := m.buildSearchPickerOptions()
+	values := make([]string, 0, len(options))
+	for _, opt := range options {
+		values = append(values, opt.Value)
+	}
+	joined := strings.Join(values, "\n")
+	if !strings.Contains(joined, "app:messages") || !strings.Contains(joined, "app:artifacts") {
+		t.Fatalf("expected office app targets in search picker, got %q", joined)
+	}
+}
+
 func TestSearchSelectionOpensThread(t *testing.T) {
 	m := newChannelModel(false)
 	m.messages = []brokerMessage{
@@ -70,6 +84,21 @@ func TestSearchSelectionOpensThread(t *testing.T) {
 	}
 	if !m.threadPanelOpen || m.threadPanelID != "msg-1" || m.replyToID != "msg-1" {
 		t.Fatalf("expected thread focus on msg-1, got threadOpen=%v threadID=%q replyTo=%q", m.threadPanelOpen, m.threadPanelID, m.replyToID)
+	}
+}
+
+func TestSearchSelectionSupportsOfficeAppTargets(t *testing.T) {
+	m := newChannelModel(false)
+
+	cmd := m.applySearchSelection("app:artifacts", "Artifacts")
+	if cmd == nil {
+		t.Fatal("expected app selection to trigger a refresh command")
+	}
+	if m.activeApp != officeAppArtifacts {
+		t.Fatalf("expected artifacts app to be active, got %q", m.activeApp)
+	}
+	if !strings.Contains(m.notice, "Viewing Artifacts") {
+		t.Fatalf("expected app selection notice, got %q", m.notice)
 	}
 }
 

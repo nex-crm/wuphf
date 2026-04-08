@@ -98,6 +98,7 @@ type Launcher struct {
 	unsafe      bool
 	sessionMode string
 	oneOnOne    string
+	focusMode   bool
 	provider    string
 
 	headlessMu      sync.Mutex
@@ -106,10 +107,14 @@ type Launcher struct {
 	headlessWorkers map[string]bool
 	headlessActive  map[string]*headlessCodexActiveTurn
 	headlessQueues  map[string][]headlessCodexTurn
+	webMode         bool
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
 func (l *Launcher) SetUnsafe(v bool) { l.unsafe = v }
+
+// SetFocusMode enables CEO-routed focus mode for a run.
+func (l *Launcher) SetFocusMode(v bool) { l.focusMode = v }
 
 func (l *Launcher) SetOneOnOne(slug string) {
 	l.sessionMode = SessionModeOneOnOne
@@ -136,6 +141,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		return nil, err
 	}
 	sessionMode, oneOnOne := loadRunningSessionMode()
+	focusMode := loadRunningFocusMode()
 
 	return &Launcher{
 		packSlug:        packSlug,
@@ -144,6 +150,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		cwd:             cwd,
 		sessionMode:     sessionMode,
 		oneOnOne:        oneOnOne,
+		focusMode:       focusMode,
 		provider:        config.ResolveLLMProvider(""),
 		headlessWorkers: make(map[string]bool),
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
@@ -189,6 +196,9 @@ func (l *Launcher) Launch() error {
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
+	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
+		return fmt.Errorf("set focus mode: %w", err)
+	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
@@ -206,6 +216,9 @@ func (l *Launcher) Launch() error {
 	// Pass broker token via env so channel view + agents can authenticate
 	channelEnv := []string{
 		fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()),
+	}
+	if l.focusMode {
+		channelEnv = append(channelEnv, "WUPHF_FOCUS_MODE=1")
 	}
 	if l.isOneOnOne() {
 		channelEnv = append(channelEnv,
@@ -675,6 +688,13 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		guidance = fmt.Sprintf(" If you own this task, use working_directory=%q for local file and bash tools.", path)
 	}
+	if l.isFocusModeEnabled() {
+		if strings.TrimSpace(task.Owner) == l.officeLeadSlug() {
+			guidance += " Focus mode is enabled. You are the routing hub: decide whether to delegate further or present the result to the human."
+		} else {
+			guidance += " Focus mode is enabled. Work directly, do not fan out to peers, and report completion or blockers back to @ceo."
+		}
+	}
 	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Before you speak, call team_poll and team_tasks, confirm whether you own this work, and stay in your lane.%s", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance)
 }
 
@@ -688,6 +708,9 @@ func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, conte
 	)
 	if l.usesCodexRuntime() {
 		l.enqueueHeadlessCodexTurn(slug, notification)
+		return
+	}
+	if l.webMode {
 		return
 	}
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
@@ -770,6 +793,37 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 			return false
 		}
 		return inferAgentDomain(slug) == domain
+	}
+
+	if l.isFocusModeEnabled() {
+		switch {
+		case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
+			addImmediate(lead)
+			for _, slug := range slugs {
+				if slug == lead || slug == msg.From {
+					continue
+				}
+				if containsSlug(msg.Tagged, slug) && allowTarget(slug) {
+					addImmediate(slug)
+				}
+			}
+		case msg.From == lead:
+			for _, slug := range slugs {
+				if slug == lead || slug == msg.From {
+					continue
+				}
+				if containsSlug(msg.Tagged, slug) && allowTarget(slug) {
+					addImmediate(slug)
+					continue
+				}
+				if owner != "" && slug == owner && allowTarget(slug) {
+					addImmediate(slug)
+				}
+			}
+		default:
+			addImmediate(lead)
+		}
+		return immediate, nil
 	}
 
 	switch {
@@ -2099,10 +2153,19 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 			)
 		}
 	}
-
+	if l.isFocusModeEnabled() && !l.isOneOnOne() {
+		if slug == l.officeLeadSlug() {
+			notification += "\nFocus mode is enabled. You are the routing hub: specialists should report back to you, and you should delegate intentionally."
+		} else {
+			notification += "\nFocus mode is enabled. Do not chatter with peers or wake other agents. Work the request directly and report completion or blockers back to @ceo."
+		}
+	}
 	if l.usesCodexRuntime() {
 		l.enqueueHeadlessCodexTurn(slug, notification)
 		return
+	}
+	if l.webMode {
+		return // non-codex web mode: agents poll the broker directly
 	}
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
@@ -2201,12 +2264,24 @@ func (l *Launcher) listTeamPanes() ([]int, error) {
 	).CombinedOutput()
 	if err != nil {
 		// If the session isn't up, there's nothing to clear.
-		if strings.Contains(string(out), "no server") || strings.Contains(string(out), "can't find") {
+		if isMissingTmuxSession(string(out)) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("list panes: %w", err)
 	}
 	return parseAgentPaneIndices(string(out)), nil
+}
+
+func isMissingTmuxSession(output string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(output))
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, "no server") ||
+		strings.Contains(normalized, "can't find") ||
+		strings.Contains(normalized, "failed to connect to server") ||
+		strings.Contains(normalized, "error connecting to") ||
+		strings.Contains(normalized, "no such file or directory")
 }
 
 func parseAgentPaneIndices(output string) []int {
@@ -2447,6 +2522,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("Tag agents with @slug in your message (e.g., '@fe can you handle this?').\n")
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
+		if l.isFocusModeEnabled() {
+			sb.WriteString("== FOCUS MODE ==\n")
+			sb.WriteString("Focus mode is enabled. You are the routing hub between specialists.\n")
+			sb.WriteString("- Default to taking human requests yourself first.\n")
+			sb.WriteString("- Delegate to a specialist only when you intentionally want that handoff.\n")
+			sb.WriteString("- Specialists should report completion, blockers, and handoff notes back to you, not to each other.\n")
+			sb.WriteString("- Keep the office out of cross-agent chatter.\n\n")
+		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
 		if config.ResolveNoNex() {
@@ -2513,6 +2596,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("Use the Nex context graph for durable memory:\n")
 			sb.WriteString("- query_context: Check prior decisions, customer context, company history, or facts before making assumptions\n")
 			sb.WriteString("- add_context: Store durable conclusions or findings once the team actually lands them\n\n")
+		}
+		if l.isFocusModeEnabled() {
+			sb.WriteString("== FOCUS MODE ==\n")
+			sb.WriteString("Focus mode is enabled.\n")
+			sb.WriteString("- You take work directly from the human only when they explicitly tag you, or from @ceo when delegated.\n")
+			sb.WriteString("- Do not debate with other specialists in the channel.\n")
+			sb.WriteString("- Do the work, then report completion, blockers, or handoff notes back to @ceo.\n")
+			sb.WriteString("- If another specialist should get involved, tell @ceo instead of routing it yourself.\n\n")
 		}
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
@@ -2772,6 +2863,35 @@ func loadRunningSessionMode() (string, string) {
 	return NormalizeSessionMode(result.SessionMode), NormalizeOneOnOneAgent(result.OneOnOneAgent)
 }
 
+func loadRunningFocusMode() bool {
+	client := &http.Client{Timeout: time.Second}
+	resp, err := client.Get(brokerBaseURL() + "/health")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	var result struct {
+		FocusMode bool `json:"focus_mode"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false
+	}
+	return result.FocusMode
+}
+
+func (l *Launcher) isFocusModeEnabled() bool {
+	if l != nil && l.broker != nil {
+		return l.broker.FocusModeEnabled()
+	}
+	if l == nil {
+		return false
+	}
+	return l.focusMode
+}
+
 func brokerBaseURL() string {
 	if base := strings.TrimSpace(os.Getenv("WUPHF_BROKER_BASE_URL")); base != "" {
 		return strings.TrimRight(base, "/")
@@ -2859,4 +2979,130 @@ func (l *Launcher) getAgentName(slug string) string {
 		return member.Name
 	}
 	return slug
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Web View Mode
+// ═══════════════════════════════════════════════════════════════
+
+// PreflightWeb checks only for claude (no tmux requirement for web mode).
+func (l *Launcher) PreflightWeb() error {
+	if l.usesCodexRuntime() {
+		if _, err := exec.LookPath("codex"); err != nil {
+			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
+		}
+		return nil
+	}
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("claude not found in PATH. Install Claude Code CLI first")
+	}
+	return nil
+}
+
+// LaunchWeb starts the broker, web UI server, and background agents without tmux.
+func (l *Launcher) LaunchWeb(webPort int) error {
+	mcpConfig, err := l.ensureMCPConfig()
+	if err != nil {
+		return fmt.Errorf("prepare mcp config: %w", err)
+	}
+	l.mcpConfig = mcpConfig
+	l.webMode = true
+
+	killStaleBroker()
+
+	l.broker = NewBroker()
+	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
+		return fmt.Errorf("set session mode: %w", err)
+	}
+	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
+		return fmt.Errorf("set focus mode: %w", err)
+	}
+	if err := l.broker.Start(); err != nil {
+		return fmt.Errorf("start broker: %w", err)
+	}
+
+	l.broker.ServeWebUI(webPort)
+
+	if l.usesCodexRuntime() {
+		// Set up headless codex context. Don't call launchHeadlessCodex() because
+		// it starts its own broker and notification loops — LaunchWeb handles those.
+		l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
+	} else {
+		l.spawnBackgroundAgents()
+	}
+
+	go l.notifyAgentsLoop()
+	go l.notifyTaskActionsLoop()
+	go l.pollNexNotificationsLoop()
+	go l.watchdogSchedulerLoop()
+
+	fmt.Printf("\n  Web UI:  http://localhost:%d\n", webPort)
+	fmt.Printf("  Broker:  http://localhost:%d\n", BrokerPort)
+	fmt.Printf("  Press Ctrl+C to stop.\n\n")
+
+	select {}
+}
+
+// spawnBackgroundAgents starts all agents as headless background processes (no tmux).
+func (l *Launcher) spawnBackgroundAgents() {
+	for _, member := range l.visibleOfficeMembers() {
+		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		go l.runBackgroundAgent(member.Slug, cmdStr)
+	}
+	for _, member := range l.overflowOfficeMembers() {
+		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		go l.runBackgroundAgent(member.Slug, cmdStr)
+	}
+}
+
+// headlessClaudeCommand builds a non-interactive claude command for web mode.
+func (l *Launcher) headlessClaudeCommand(slug, systemPrompt string) string {
+	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
+	mcpConfig := strings.ReplaceAll(l.mcpConfig, "'", "'\\''")
+	permFlags := l.resolvePermissionFlags(slug)
+	brokerToken := ""
+	if l.broker != nil {
+		brokerToken = l.broker.Token()
+	}
+	model := "claude-sonnet-4-6"
+	if slug == l.officeLeadSlug() {
+		model = "claude-opus-4-6"
+	}
+	initialPrompt := "You are now active in the WUPHF office. Use your MCP tools (team_poll, team_post) to read messages and participate. Start by polling the channel for recent messages and respond to anything relevant. When done, poll again."
+	return fmt.Sprintf(
+		"WUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 claude --model %s --print %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -p '%s'",
+		slug, brokerToken, config.ResolveNoNex(), model, permFlags, escaped, mcpConfig,
+		strings.ReplaceAll(initialPrompt, "'", "'\\''"),
+	)
+}
+
+// runBackgroundAgent runs a single agent as a headless OS process.
+func (l *Launcher) runBackgroundAgent(slug, cmdStr string) {
+	logDir := filepath.Join(os.TempDir(), "wuphf-agents")
+	os.MkdirAll(logDir, 0o700)
+	logPath := filepath.Join(logDir, slug+".log")
+
+	for {
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[%s] failed to open log %s: %v\n", slug, logPath, err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		cmd := exec.Command("bash", "-c", cmdStr)
+		cmd.Dir = l.cwd
+		cmd.Env = append(os.Environ(), fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()))
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		cmd.Stdin = nil
+
+		fmt.Fprintf(os.Stderr, "[%s] agent starting (log: %s)\n", slug, logPath)
+		runErr := cmd.Run()
+		logFile.Close()
+
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr, "[%s] agent exited: %v, restarting in 5s\n", slug, runErr)
+		}
+		time.Sleep(5 * time.Second)
+	}
 }

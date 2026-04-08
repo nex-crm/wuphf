@@ -27,6 +27,26 @@ func TestParseAgentPaneIndicesSkipsChannelPane(t *testing.T) {
 	}
 }
 
+func TestIsMissingTmuxSessionRecognizesCommonErrors(t *testing.T) {
+	cases := []string{
+		"no server running on /tmp/tmux-1000/wuphf",
+		"can't find session: wuphf-team",
+		"failed to connect to server",
+		"error connecting to /tmp/tmux-1001/wuphf (No such file or directory)",
+	}
+	for _, tc := range cases {
+		if !isMissingTmuxSession(tc) {
+			t.Fatalf("expected missing-session detection for %q", tc)
+		}
+	}
+}
+
+func TestIsMissingTmuxSessionIgnoresUnexpectedErrors(t *testing.T) {
+	if isMissingTmuxSession("unknown option: -bogus") {
+		t.Fatal("expected non-session tmux errors to remain actionable")
+	}
+}
+
 func TestResetBrokerStateUsesAuthToken(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -192,6 +212,64 @@ func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
 	}
 }
 
+func TestNotificationTargetsForHumanMessageInFocusModeOnlyWakeCEOAndTaggedSpecialist(t *testing.T) {
+	l := &Launcher{
+		sessionName: "focus-office",
+		focusMode:   true,
+		broker: &Broker{
+			members: []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Channel: "general",
+		Content: "Need a product breakdown. @pm please take first pass.",
+		Tagged:  []string{"pm"},
+	})
+
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets in focus mode, got %v", delayed)
+	}
+	if len(immediate) != 2 {
+		t.Fatalf("expected CEO and tagged specialist, got %v", immediate)
+	}
+	if immediate[0].Slug != "ceo" || immediate[1].Slug != "pm" {
+		t.Fatalf("expected CEO then PM, got %v", immediate)
+	}
+}
+
+func TestNotificationTargetsForAgentMessageInFocusModeOnlyWakeCEO(t *testing.T) {
+	l := &Launcher{
+		sessionName: "focus-office",
+		focusMode:   true,
+		broker: &Broker{
+			members: []officeMember{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "pm", Name: "Product Manager"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "fe",
+		Channel: "general",
+		Content: "Implementation is done. Ready for review.",
+	})
+
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets in focus mode, got %v", delayed)
+	}
+	if len(immediate) != 1 || immediate[0].Slug != "ceo" {
+		t.Fatalf("expected only CEO to be notified, got %v", immediate)
+	}
+}
+
 func TestLoadRunningSessionModePrefersLiveBrokerState(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
@@ -213,6 +291,72 @@ func TestLoadRunningSessionModePrefersLiveBrokerState(t *testing.T) {
 	}
 	if agent != "pm" {
 		t.Fatalf("expected live 1o1 agent pm, got %q", agent)
+	}
+}
+
+func TestLoadRunningFocusModeUsesLiveHealth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"focus_mode": true,
+		})
+	}))
+	defer server.Close()
+
+	t.Setenv("WUPHF_BROKER_BASE_URL", server.URL)
+
+	if !loadRunningFocusMode() {
+		t.Fatal("expected focus mode to load from live broker health")
+	}
+}
+
+func TestTaskNotificationContentIncludesFocusModeGuidance(t *testing.T) {
+	b := NewBroker()
+	if err := b.SetFocusMode(true); err != nil {
+		t.Fatalf("SetFocusMode: %v", err)
+	}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO"}}
+	l := &Launcher{
+		focusMode: true,
+		broker:    b,
+	}
+
+	content := l.taskNotificationContent(officeActionLog{Kind: "task_updated"}, teamTask{
+		ID:      "task-1",
+		Title:   "Ship focus mode",
+		Owner:   "pm",
+		Status:  "in_progress",
+		Channel: "general",
+	})
+
+	if !strings.Contains(content, "Focus mode is enabled.") {
+		t.Fatalf("expected focus mode guidance in task notification, got %q", content)
+	}
+	if !strings.Contains(content, "report completion or blockers back to @ceo") {
+		t.Fatalf("expected CEO routing guidance, got %q", content)
+	}
+}
+
+func TestBuildPromptIncludesFocusModeRules(t *testing.T) {
+	l := &Launcher{
+		focusMode: true,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Name:     "Founding Team",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO", Personality: "Lead", Expertise: []string{"delegation"}},
+				{Slug: "pm", Name: "Product Manager", Personality: "Ship", Expertise: []string{"product"}},
+			},
+		},
+	}
+
+	ceoPrompt := l.buildPrompt("ceo")
+	if !strings.Contains(ceoPrompt, "== FOCUS MODE ==") || !strings.Contains(ceoPrompt, "routing hub") {
+		t.Fatalf("expected CEO prompt to include focus mode routing rules, got %q", ceoPrompt)
+	}
+
+	pmPrompt := l.buildPrompt("pm")
+	if !strings.Contains(pmPrompt, "Do not debate with other specialists") || !strings.Contains(pmPrompt, "report completion, blockers, or handoff notes back to @ceo") {
+		t.Fatalf("expected specialist prompt to include focus mode delegation rules, got %q", pmPrompt)
 	}
 }
 
