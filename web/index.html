@@ -348,6 +348,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .unread-divider-line { height: 1px; flex: 1; background: var(--red); }
 .unread-divider-text { font-size: 12px; font-weight: 600; color: var(--red); white-space: nowrap; }
 
+/* ─── Status messages ─── */
+.message-status { padding: 4px 0 4px 48px; }
+.message-status-text { font-size: 13px; font-style: italic; color: var(--text-tertiary); }
+
 .agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
 .agent-panel.open { display: flex; }
 .agent-panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
@@ -731,10 +735,18 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           </button>
         </div>
       </div>
+      <div class="dm-banner" id="dm-banner">
+        <span class="dm-banner-text" id="dm-banner-text">1:1 session with CEO</span>
+        <button class="dm-back-btn" onclick="exitDMMode()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+          Back to office
+        </button>
+      </div>
       <div class="messages" id="messages"></div>
       <div class="app-panel" id="app-tasks"></div>
       <div class="app-panel" id="app-requests"></div>
       <div class="app-panel" id="app-calendar"></div>
+      <div class="recovery-panel" id="recovery-panel"></div>
       <div class="typing-indicator" id="typing-indicator" style="display:none;padding:0 20px 8px;">
         <div class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
         <span id="typing-who">CEO is thinking&hellip;</span>
@@ -783,6 +795,23 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       </div>
       <div class="agent-panel-body" id="agent-panel-body"></div>
     </aside>
+  </div>
+
+  <!-- Command Palette Overlay -->
+  <div class="cmd-palette-overlay" id="cmd-palette-overlay">
+    <div class="cmd-palette" id="cmd-palette">
+      <div class="cmd-palette-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input class="cmd-palette-input" id="cmd-palette-input" placeholder="Search channels, agents, commands..." autocomplete="off" />
+        <span class="cmd-palette-kbd">esc</span>
+      </div>
+      <div class="cmd-palette-results" id="cmd-palette-results"></div>
+      <div class="cmd-palette-footer">
+        <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span>
+        <span><kbd>&crarr;</kbd> select</span>
+        <span><kbd>esc</kbd> close</span>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1611,6 +1640,20 @@ function appendBrokerMessage(msg) {
 
 function appendMessageToContainer(msg, container, opts) {
   opts = opts || {};
+
+  // Status messages render compact and italic, no avatar
+  if (msg.kind === 'status') {
+    var statusDiv = document.createElement('div');
+    statusDiv.className = 'message-status animate-fade';
+    statusDiv.dataset.msgId = msg.id;
+    var statusText = document.createElement('span');
+    statusText.className = 'message-status-text';
+    statusText.textContent = msg.content || '';
+    statusDiv.appendChild(statusText);
+    container.appendChild(statusDiv);
+    return statusDiv;
+  }
+
   var msgDiv = document.createElement('div');
   msgDiv.className = 'message animate-fade' + (opts.grouped ? ' message-grouped' : '');
   msgDiv.dataset.msgId = msg.id;
