@@ -35,6 +35,7 @@ const (
 const (
 	CapabilityKeyTmux          = "tmux"
 	CapabilityKeyClaude        = "claude"
+	CapabilityKeyCodex         = "codex"
 	CapabilityKeyOfficeRuntime = "office_runtime"
 	CapabilityKeyDirectRuntime = "direct_runtime"
 	CapabilityKeyNex           = "nex"
@@ -118,15 +119,17 @@ func BuildCapabilityRegistry(runtime RuntimeCapabilities) CapabilityRegistry {
 	if len(runtime.Registry.Entries) > 0 {
 		return runtime.Registry
 	}
-	return buildCapabilityRegistry(runtimeCapabilityStatus(runtime, "tmux"), runtimeCapabilityStatus(runtime, "claude"), CapabilityProbeOptions{})
+	cfg, _ := config.Load()
+	return buildCapabilityRegistry(strings.TrimSpace(cfg.LLMProvider), runtimeCapabilityStatus(runtime, "tmux"), runtimeCapabilityStatus(runtime, "claude"), runtimeCapabilityStatus(runtime, "codex"), CapabilityProbeOptions{})
 }
 
-func buildCapabilityRegistry(tmuxStatus, claudeStatus CapabilityStatus, opts CapabilityProbeOptions) CapabilityRegistry {
+func buildCapabilityRegistry(providerName string, tmuxStatus, claudeStatus, codexStatus CapabilityStatus, opts CapabilityProbeOptions) CapabilityRegistry {
 	entries := []CapabilityDescriptor{
-		buildOfficeRuntimeDescriptor(tmuxStatus, claudeStatus),
-		buildDirectRuntimeDescriptor(claudeStatus),
+		buildOfficeRuntimeDescriptor(providerName, tmuxStatus, claudeStatus, codexStatus),
+		buildDirectRuntimeDescriptor(providerName, claudeStatus, codexStatus),
 		descriptorFromStatus(CapabilityKeyTmux, "tmux", CapabilityCategoryRuntime, tmuxStatus),
 		descriptorFromStatus(CapabilityKeyClaude, "claude", CapabilityCategoryRuntime, claudeStatus),
+		descriptorFromStatus(CapabilityKeyCodex, "codex", CapabilityCategoryRuntime, codexStatus),
 		buildNexDescriptor(),
 		buildActionCapabilityDescriptor(CapabilityKeyActions, "Action execution", CapabilityCategoryAction, action.CapabilityActionExecute),
 		buildActionCapabilityDescriptor(CapabilityKeyWorkflows, "Workflow execution", CapabilityCategoryWorkflow, action.CapabilityWorkflowExecute),
@@ -154,7 +157,23 @@ func RegistryKeyForActionCapability(cap action.Capability) string {
 	}
 }
 
-func buildOfficeRuntimeDescriptor(tmuxStatus, claudeStatus CapabilityStatus) CapabilityDescriptor {
+func buildOfficeRuntimeDescriptor(providerName string, tmuxStatus, claudeStatus, codexStatus CapabilityStatus) CapabilityDescriptor {
+	if strings.EqualFold(strings.TrimSpace(providerName), "codex") {
+		level := codexStatus.Level
+		lifecycle := CapabilityLifecycleReady
+		if level != CapabilityReady {
+			lifecycle = CapabilityLifecycleNeedsSetup
+		}
+		return CapabilityDescriptor{
+			Key:       CapabilityKeyOfficeRuntime,
+			Label:     "Office runtime",
+			Category:  CapabilityCategoryOffice,
+			Level:     level,
+			Lifecycle: lifecycle,
+			Detail:    codexStatus.Detail,
+			NextStep:  codexStatus.NextStep,
+		}
+	}
 	level := CapabilityReady
 	lifecycle := CapabilityLifecycleReady
 	nextStep := ""
@@ -174,8 +193,12 @@ func buildOfficeRuntimeDescriptor(tmuxStatus, claudeStatus CapabilityStatus) Cap
 	}
 }
 
-func buildDirectRuntimeDescriptor(claudeStatus CapabilityStatus) CapabilityDescriptor {
-	level := claudeStatus.Level
+func buildDirectRuntimeDescriptor(providerName string, claudeStatus, codexStatus CapabilityStatus) CapabilityDescriptor {
+	status := claudeStatus
+	if strings.EqualFold(strings.TrimSpace(providerName), "codex") {
+		status = codexStatus
+	}
+	level := status.Level
 	lifecycle := CapabilityLifecycleReady
 	if level != CapabilityReady {
 		lifecycle = CapabilityLifecycleNeedsSetup
@@ -186,8 +209,8 @@ func buildDirectRuntimeDescriptor(claudeStatus CapabilityStatus) CapabilityDescr
 		Category:  CapabilityCategoryDirect,
 		Level:     level,
 		Lifecycle: lifecycle,
-		Detail:    claudeStatus.Detail,
-		NextStep:  claudeStatus.NextStep,
+		Detail:    status.Detail,
+		NextStep:  status.NextStep,
 	}
 }
 
@@ -361,6 +384,13 @@ func runtimeCapabilityStatus(runtime RuntimeCapabilities, name string) Capabilit
 		status := runtime.Tmux.status()
 		if strings.TrimSpace(status.Name) == "" {
 			status.Name = "tmux"
+		}
+		return status
+	}
+	if name == "codex" && strings.TrimSpace(runtime.Codex.Name) != "" {
+		status := runtime.Codex
+		if strings.TrimSpace(status.Name) == "" {
+			status.Name = "codex"
 		}
 		return status
 	}

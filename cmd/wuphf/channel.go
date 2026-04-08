@@ -6193,6 +6193,13 @@ func applyTeamSetup() tea.Cmd {
 		if err != nil {
 			return channelInitDoneMsg{err: err}
 		}
+		cfg, _ := config.Load()
+		if current := strings.TrimSpace(os.Getenv("WUPHF_HEADLESS_PROVIDER")); current != "" {
+			return channelInitDoneMsg{notice: notice + " Setup saved. Restart WUPHF to reload the " + current + " office runtime with the new configuration."}
+		}
+		if strings.TrimSpace(cfg.LLMProvider) == "codex" {
+			return channelInitDoneMsg{notice: notice + " Codex was saved as the LLM provider. Restart WUPHF to launch the headless Codex office runtime."}
+		}
 		l, err := team.NewLauncher("")
 		if err != nil {
 			return channelInitDoneMsg{err: err}
@@ -6413,8 +6420,12 @@ func reportChannelCrash(details string) {
 	fmt.Fprintln(os.Stderr, "Log:", channelCrashLogPath())
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "The rest of the team is still running.")
-	fmt.Fprintln(os.Stderr, "Use `tmux -L wuphf attach -t wuphf-team` to inspect panes,")
-	fmt.Fprintln(os.Stderr, "then restart WUPHF when ready.")
+	if strings.TrimSpace(os.Getenv("WUPHF_HEADLESS_PROVIDER")) != "" {
+		fmt.Fprintln(os.Stderr, "Restart WUPHF when ready to reconnect to the headless office runtime.")
+	} else {
+		fmt.Fprintln(os.Stderr, "Use `tmux -L wuphf attach -t wuphf-team` to inspect panes,")
+		fmt.Fprintln(os.Stderr, "then restart WUPHF when ready.")
+	}
 	select {}
 }
 

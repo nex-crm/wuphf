@@ -11,6 +11,14 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
+var initFlowLookPathFn = exec.LookPath
+
+type initReadinessCheck struct {
+	Label  string
+	Status string
+	Detail string
+}
+
 // InitPhase represents a step in the onboarding flow.
 type InitPhase string
 
@@ -50,21 +58,20 @@ func (f InitFlowModel) IsActive() bool {
 	return f.phase != InitIdle && f.phase != InitDone
 }
 
-// Start begins the init flow. API key → pack choice → done.
-// Provider is always claude-code.
+// Start begins the init flow. API key → provider choice → pack choice → done.
 func (f InitFlowModel) Start() (InitFlowModel, tea.Cmd) {
 	cfg, _ := config.Load()
-	if cfg.APIKey != "" {
-		f.apiKey = cfg.APIKey
+	f.apiKey = strings.TrimSpace(config.ResolveAPIKey(""))
+	f.provider = strings.TrimSpace(cfg.LLMProvider)
+	if f.provider == "" {
+		f.provider = "claude-code"
 	}
-	f.provider = "claude-code"
 	if f.apiKey == "" {
 		f.phase = InitAPIKey
 		return f, f.emitPhase(InitAPIKey)
 	}
-	// Already have API key — skip to pack choice
-	f.phase = InitPackChoice
-	return f, f.emitPhase(InitPackChoice)
+	f.phase = InitProviderChoice
+	return f, f.emitPhase(InitProviderChoice)
 }
 
 // Update advances the flow based on incoming messages.
@@ -117,9 +124,11 @@ func (f InitFlowModel) updateAPIKeyInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd
 		f.apiKey = key
 		f.keyError = ""
 		f.keyInput = nil
-		f.provider = "claude-code"
-		f.phase = InitPackChoice
-		return f, f.emitPhase(InitPackChoice)
+		if strings.TrimSpace(f.provider) == "" {
+			f.provider = "claude-code"
+		}
+		f.phase = InitProviderChoice
+		return f, f.emitPhase(InitProviderChoice)
 	case "backspace":
 		if len(f.keyInput) > 0 {
 			f.keyInput = f.keyInput[:len(f.keyInput)-1]
@@ -177,11 +186,16 @@ func (f InitFlowModel) emitPhase(phase InitPhase) tea.Cmd {
 // ProviderOptions returns the picker options for LLM provider selection.
 func ProviderOptions() []PickerOption {
 	claudeDesc := "Claude via claude CLI (recommended)"
-	if _, err := exec.LookPath("claude"); err != nil {
+	if _, err := initFlowLookPathFn("claude"); err != nil {
 		claudeDesc = "Claude via claude CLI (not found in PATH!)"
+	}
+	codexDesc := "Codex via codex CLI"
+	if _, err := initFlowLookPathFn("codex"); err != nil {
+		codexDesc = "Codex via codex CLI (not found in PATH!)"
 	}
 	options := []PickerOption{
 		{Label: "Claude Code (default)", Value: "claude-code", Description: claudeDesc},
+		{Label: "Codex CLI", Value: "codex", Description: codexDesc},
 		{Label: "Gemini", Value: "gemini", Description: "Google Gemini via API key"},
 	}
 	if !config.ResolveNoNex() {
@@ -215,8 +229,12 @@ func (f InitFlowModel) View() string {
 
 	view := labelStyle.Render(heading) + "\n" + muteStyle.Render(instructions)
 
+	if readiness := f.renderReadinessSummary(); readiness != "" {
+		view += "\n\n" + readiness
+	}
+
 	if f.requiresTextInput() {
-		view += "\n" + f.renderAPIKeyInput()
+		view += "\n\n" + f.renderAPIKeyInput()
 	}
 
 	return view
@@ -237,6 +255,160 @@ func (f InitFlowModel) renderAPIKeyInput() string {
 	}
 
 	return display
+}
+
+func (f InitFlowModel) renderReadinessSummary() string {
+	checks := f.readinessChecks()
+	if len(checks) == 0 {
+		return ""
+	}
+
+	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(NexBlue))
+	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(MutedColor))
+
+	lines := []string{
+		titleStyle.Render("Setup Readiness"),
+		mutedStyle.Render("Use /doctor for the full capability report."),
+	}
+	for _, check := range checks {
+		lines = append(lines, f.renderReadinessCheck(check))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (f InitFlowModel) renderReadinessCheck(check initReadinessCheck) string {
+	statusStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#E5E7EB")).
+		Background(lipgloss.Color(readinessStatusColor(check.Status))).
+		Padding(0, 1)
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(ValueColor))
+	detailStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(MutedColor))
+
+	return statusStyle.Render(strings.ToUpper(check.Status)) + " " +
+		labelStyle.Render(check.Label) + " " +
+		detailStyle.Render(check.Detail)
+}
+
+func readinessStatusColor(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ready":
+		return "#166534"
+	case "next":
+		return "#1D4ED8"
+	default:
+		return "#991B1B"
+	}
+}
+
+func (f InitFlowModel) readinessChecks() []initReadinessCheck {
+	effectiveAPIKey := strings.TrimSpace(f.apiKey)
+	if effectiveAPIKey == "" {
+		effectiveAPIKey = strings.TrimSpace(config.ResolveAPIKey(""))
+	}
+	provider := strings.TrimSpace(f.provider)
+	if provider == "" {
+		provider = "claude-code"
+	}
+
+	checks := []initReadinessCheck{
+		{
+			Label:  "Nex identity",
+			Status: readinessStatusForBool(effectiveAPIKey != ""),
+			Detail: apiKeyReadinessDetail(effectiveAPIKey != ""),
+		},
+		{
+			Label:  "tmux office runtime",
+			Status: readinessStatusForBool(binaryAvailable("tmux")),
+			Detail: binaryReadinessDetail("tmux", "WUPHF can open the office panes.", "Install tmux before launching the office."),
+		},
+		{
+			Label:  "LLM runtime",
+			Status: providerRuntimeStatus(provider),
+			Detail: providerRuntimeDetail(provider),
+		},
+		{
+			Label:  "Agent pack",
+			Status: packReadinessStatus(f.pack),
+			Detail: packReadinessDetail(f.pack),
+		},
+		{
+			Label:  "Integrations",
+			Status: "ready",
+			Detail: config.OneSetupSummary(),
+		},
+	}
+
+	return checks
+}
+
+func readinessStatusForBool(ok bool) string {
+	if ok {
+		return "ready"
+	}
+	return "missing"
+}
+
+func apiKeyReadinessDetail(ok bool) string {
+	if ok {
+		return "WUPHF/Nex API key is configured."
+	}
+	return "Paste your WUPHF/Nex API key to enable memory and managed integrations."
+}
+
+func packReadinessStatus(pack string) string {
+	if strings.TrimSpace(pack) == "" {
+		return "next"
+	}
+	return "ready"
+}
+
+func packReadinessDetail(pack string) string {
+	if p := agent.GetPack(strings.TrimSpace(pack)); p != nil {
+		return "Selected " + p.Name + "."
+	}
+	if strings.TrimSpace(pack) != "" {
+		return "Selected " + pack + "."
+	}
+	return "Choose which team should open after setup."
+}
+
+func providerRuntimeStatus(provider string) string {
+	switch strings.TrimSpace(provider) {
+	case "", "claude-code":
+		return readinessStatusForBool(binaryAvailable("claude"))
+	case "codex":
+		return readinessStatusForBool(binaryAvailable("codex"))
+	default:
+		return "ready"
+	}
+}
+
+func providerRuntimeDetail(provider string) string {
+	switch strings.TrimSpace(provider) {
+	case "", "claude-code":
+		return binaryReadinessDetail("claude", "Claude CLI is ready for teammate sessions.", "Install claude or pick another provider.")
+	case "codex":
+		return binaryReadinessDetail("codex", "Codex CLI is ready for teammate sessions.", "Install codex or pick another provider.")
+	case "gemini":
+		return "Gemini uses an API key. No local CLI is required."
+	case "nex-ask":
+		return "Managed through Nex. WUPHF will route requests through your Nex identity."
+	default:
+		return provider + " is selected."
+	}
+}
+
+func binaryReadinessDetail(name, readyDetail, missingDetail string) string {
+	if binaryAvailable(name) {
+		return readyDetail
+	}
+	return missingDetail
+}
+
+func binaryAvailable(name string) bool {
+	_, err := initFlowLookPathFn(name)
+	return err == nil
 }
 
 func (f InitFlowModel) phaseText() (heading, instructions string) {

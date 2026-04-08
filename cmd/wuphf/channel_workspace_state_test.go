@@ -36,7 +36,7 @@ func TestBuildOfficeIntroLinesShowsOfflinePreviewGuidance(t *testing.T) {
 	if !strings.Contains(plain, "Offline preview") {
 		t.Fatalf("expected offline preview messaging, got %q", plain)
 	}
-	if !strings.Contains(plain, "Launch WUPHF to attach the live office, or run /doctor to inspect tmux and setup readiness.") {
+	if !strings.Contains(plain, "Launch WUPHF to attach the live office, or run /doctor to inspect runtime readiness.") {
 		t.Fatalf("expected doctor guidance, got %q", plain)
 	}
 }
