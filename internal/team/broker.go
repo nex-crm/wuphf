@@ -491,14 +491,24 @@ func (b *Broker) Stop() {
 func (b *Broker) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" && len(b.webUIOrigins) > 0 {
+		if len(b.webUIOrigins) > 0 {
+			matched := false
 			for _, allowed := range b.webUIOrigins {
 				if origin == allowed {
 					w.Header().Set("Access-Control-Allow-Origin", allowed)
-					w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+					matched = true
 					break
 				}
+			}
+			// Allow null/empty origin for localhost requests (headless browsers,
+			// file:// loads, same-machine tools). Still safe because /web-token
+			// restricts to 127.0.0.1 RemoteAddr.
+			if !matched && (origin == "null" || origin == "") {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
+			if w.Header().Get("Access-Control-Allow-Origin") != "" {
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			}
 		}
 		if r.Method == "OPTIONS" {
