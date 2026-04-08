@@ -96,6 +96,7 @@ type Launcher struct {
 	broker      *Broker
 	mcpConfig   string
 	unsafe      bool
+	webMode     bool
 	sessionMode string
 	oneOnOne    string
 	provider    string
@@ -117,8 +118,8 @@ func (l *Launcher) SetOneOnOne(slug string) {
 
 // NewLauncher creates a launcher for the given pack.
 func NewLauncher(packSlug string) (*Launcher, error) {
+	cfg, _ := config.Load()
 	if packSlug == "" {
-		cfg, _ := config.Load()
 		packSlug = cfg.Pack
 		if packSlug == "" {
 			packSlug = "founding-team"
@@ -137,13 +138,13 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	sessionMode, oneOnOne := loadRunningSessionMode()
 
 	return &Launcher{
-		packSlug:    packSlug,
-		pack:        pack,
-		sessionName: SessionName,
-		cwd:         cwd,
-		sessionMode: sessionMode,
-		oneOnOne:    oneOnOne,
-		provider:    firstNonEmpty(strings.TrimSpace(cfg.LLMProvider), "claude-code"),
+		packSlug:        packSlug,
+		pack:            pack,
+		sessionName:     SessionName,
+		cwd:             cwd,
+		sessionMode:     sessionMode,
+		oneOnOne:        oneOnOne,
+		provider:        firstNonEmpty(strings.TrimSpace(cfg.LLMProvider), "claude-code"),
 		headlessRunning: make(map[string]bool),
 		headlessPending: make(map[string]string),
 	}, nil
@@ -313,6 +314,8 @@ func (l *Launcher) Launch() error {
 // LaunchWeb starts the broker, web UI server, and background agents without tmux.
 // This is the entry point for --web mode.
 func (l *Launcher) LaunchWeb(webPort int) error {
+	l.webMode = true
+
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)
@@ -723,6 +726,14 @@ func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, conte
 		"[Task #%s %s from @%s]: %s — You own this task. Reply with the concrete next step and update via team_task with my_slug \"%s\".",
 		channel, taskID, from, truncate(content, 150), slug,
 	)
+	if l.usesCodexRuntime() {
+		l.enqueueHeadlessCodexTurn(slug, notification)
+		return
+	}
+	// In web mode, agents poll the broker via team_poll — no tmux panes to push to.
+	if l.webMode {
+		return
+	}
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
 		"-l",
@@ -2120,6 +2131,14 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 			)
 		}
 	}
+	if l.usesCodexRuntime() {
+		l.enqueueHeadlessCodexTurn(slug, notification)
+		return
+	}
+	// In web mode, agents poll the broker via team_poll — no tmux panes to push to.
+	if l.webMode {
+		return
+	}
 
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
@@ -2882,6 +2901,11 @@ func (l *Launcher) AgentCount() int {
 		return 1
 	}
 	return len(l.officeMembersSnapshot())
+}
+
+// OneOnOneAgent returns the active direct-session agent slug, if any.
+func (l *Launcher) OneOnOneAgent() string {
+	return l.oneOnOneAgent()
 }
 
 // filterEnv returns env with the given key removed.
