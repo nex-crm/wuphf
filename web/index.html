@@ -979,6 +979,16 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </button>
       </div>
       <div class="messages" id="messages"></div>
+      <div class="dm-lanes" id="dm-lanes" style="display:none;">
+        <div class="dm-lane">
+          <div class="dm-lane-header">Inbox (from agent)</div>
+          <div id="dm-inbox" style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;"></div>
+        </div>
+        <div class="dm-lane">
+          <div class="dm-lane-header">Outbox (from you)</div>
+          <div id="dm-outbox" style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;"></div>
+        </div>
+      </div>
       <div class="app-panel" id="app-tasks"></div>
       <div class="app-panel" id="app-requests"></div>
       <div class="app-panel" id="app-policies"></div>
@@ -2380,6 +2390,21 @@ function appendBrokerMessage(msg) {
   }
 
   var container = document.getElementById('messages');
+
+  // In DM mode, route messages to inbox/outbox lanes
+  if (dmModeActive && dmAgent) {
+    var isFromAgent = msg.from === dmAgent.slug;
+    var isFromHuman = msg.from === 'you' || msg.from === 'human';
+    if (isFromAgent) {
+      appendMessageToContainer(msg, document.getElementById('dm-inbox'));
+      var inbox = document.getElementById('dm-inbox');
+      inbox.scrollTop = inbox.scrollHeight;
+    } else if (isFromHuman) {
+      appendMessageToContainer(msg, document.getElementById('dm-outbox'));
+      var outbox = document.getElementById('dm-outbox');
+      outbox.scrollTop = outbox.scrollHeight;
+    }
+  }
 
   // Insert date separator if day changed
   if (msg.timestamp) {
@@ -3945,8 +3970,11 @@ function enterDMMode(agentSlug) {
   // Update composer placeholder
   document.getElementById('composer-input').placeholder = 'Message ' + agent.name + ' directly...';
 
-  // Clear messages and fetch DM channel
-  document.getElementById('messages').textContent = '';
+  // Show DM lanes, hide regular messages
+  document.getElementById('messages').style.display = 'none';
+  document.getElementById('dm-lanes').style.display = 'grid';
+  document.getElementById('dm-inbox').textContent = '';
+  document.getElementById('dm-outbox').textContent = '';
   lastMessageId = null;
 
   // Try to switch mode via broker
@@ -3964,6 +3992,10 @@ function exitDMMode() {
   if (!dmModeActive) return;
   dmModeActive = false;
   dmAgent = null;
+
+  // Hide DM lanes, show regular messages
+  document.getElementById('dm-lanes').style.display = 'none';
+  document.getElementById('messages').style.display = '';
 
   // Hide DM banner
   document.getElementById('dm-banner').classList.remove('open');
