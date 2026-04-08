@@ -575,6 +575,42 @@ func TestOneOnOneCommandOpensModePicker(t *testing.T) {
 	}
 }
 
+func TestFocusCommandOpensPicker(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, cmd := m.runCommand("/focus", "")
+	if cmd != nil {
+		t.Fatalf("expected no immediate command from /focus picker open, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if !got.picker.IsActive() || got.pickerMode != channelPickerFocusMode {
+		t.Fatalf("expected focus mode picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "Enable focus mode") {
+		t.Fatalf("expected focus picker options, got %q", view)
+	}
+}
+
+func TestFocusPickerSelectionStartsToggleRequest(t *testing.T) {
+	m := newChannelModel(false)
+	m.picker = tui.NewPicker("Focus Mode", m.buildFocusModePickerOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerFocusMode
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "focus:enable"})
+	if cmd == nil {
+		t.Fatal("expected focus toggle command")
+	}
+	got := next.(channelModel)
+	if !got.posting {
+		t.Fatal("expected posting state while focus mode is being toggled")
+	}
+	if got.notice != "Enabling focus mode..." {
+		t.Fatalf("unexpected notice: %q", got.notice)
+	}
+}
+
 func TestOneOnOnePickerEnableOpensAgentPicker(t *testing.T) {
 	m := newChannelModel(false)
 	m.picker = tui.NewPicker("Direct Session", m.buildOneOnOneModePickerOptions())

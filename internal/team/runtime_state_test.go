@@ -50,6 +50,7 @@ func TestDetectRuntimeCapabilities(t *testing.T) {
 	}
 	actionProvidersFn = func() []action.Provider { return nil }
 
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("TMUX", "/tmp/tmux-1000/default,123,0")
 	t.Setenv("WUPHF_NO_NEX", "1")
 
@@ -121,6 +122,7 @@ func TestDetectRuntimeCapabilitiesWhenTmuxServerIsMissing(t *testing.T) {
 	}
 	actionProvidersFn = func() []action.Provider { return nil }
 
+	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_NO_NEX", "1")
 
 	got := DetectRuntimeCapabilities()

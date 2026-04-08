@@ -39,6 +39,7 @@ type AgentService struct {
 	credTracker      *CredibilityTracker
 	client           *api.Client
 	streamFnResolver StreamFnResolver
+	focusModeChecker func() bool
 	listeners        []func()
 	tickTimers       map[string]chan struct{} // per-agent stop channels
 	mu               sync.Mutex
@@ -81,6 +82,12 @@ func WithCredibilityTracker(ct *CredibilityTracker) AgentServiceOption {
 // This is the integration point for provider selection (nex-ask, claude-code, gemini).
 func WithStreamFnResolver(r StreamFnResolver) AgentServiceOption {
 	return func(s *AgentService) { s.streamFnResolver = r }
+}
+
+// WithFocusModeChecker sets the callback used by agent loops to determine whether
+// cross-agent gossip should be suppressed for the current runtime.
+func WithFocusModeChecker(checker func() bool) AgentServiceOption {
+	return func(s *AgentService) { s.focusModeChecker = checker }
 }
 
 // defaultStreamFnResolver returns a StreamFn that emits a configuration error.
@@ -157,6 +164,7 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 	streamFn := s.streamFnResolver(cfg.Slug)
 
 	loop := NewAgentLoop(cfg, s.toolRegistry, s.sessionStore, s.queues, streamFn, s.gossipLayer, s.credTracker)
+	loop.SetFocusModeChecker(s.focusModeChecker)
 
 	ma := &ManagedAgent{
 		Config: cfg,
