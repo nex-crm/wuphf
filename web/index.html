@@ -1,0 +1,2147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>WUPHF — Your AI Office</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="themes/slack.css" />
+<link rel="stylesheet" href="themes/windows-98.css" />
+<style>
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Web — Design System
+   ═══════════════════════════════════════════════════════════════ */
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:             #FAF6F1;
+  --bg-warm:        #F3EDE4;
+  --bg-card:        #FFFFFF;
+  --text:           #3B2F2F;
+  --text-secondary: #6B5B4F;
+  --text-tertiary:  #A89888;
+  --accent:         #8B5E3C;
+  --accent-warm:    #7A4F30;
+  --accent-bg:      #F5E6D3;
+  --border:         #E8DDD0;
+  --border-light:   #F0E8DD;
+  --border-dark:    #D4C4B0;
+  --green:          #16a34a;
+  --green-bg:       #dcfce7;
+  --red:            #dc2626;
+  --red-bg:         #fef2f2;
+  --yellow:         #ca8a04;
+  --yellow-bg:      #fefce8;
+  --blue:           #2563eb;
+  --blue-bg:        #eff6ff;
+  --discord:        #5865F2;
+  --discord-bg:     #ECEAFD;
+  --discord-border: #D8D4F7;
+  --font-sans:  'Inter', system-ui, -apple-system, sans-serif;
+  --font-serif: 'Source Serif 4', Georgia, serif;
+  --font-logo:  'Instrument Serif', Georgia, serif;
+  --font-mono:  'JetBrains Mono', ui-monospace, monospace;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+}
+
+html { font-family: var(--font-sans); -webkit-font-smoothing: antialiased; }
+body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+.dot-grid {
+  background-image: radial-gradient(circle, var(--border-dark) 0.5px, transparent 0.5px);
+  background-size: 32px 32px;
+}
+
+@keyframes cloud-sway {
+  0% { transform: translate3d(11%, 0, 0); }
+  50% { transform: translate3d(-9%, 0, 0); }
+  100% { transform: translate3d(11%, 0, 0); }
+}
+@keyframes cloud-sway-reverse {
+  0% { transform: translate3d(-10%, 0, 0); }
+  50% { transform: translate3d(8%, 0, 0); }
+  100% { transform: translate3d(-10%, 0, 0); }
+}
+.cloud-row { animation: cloud-sway var(--dur, 38s) ease-in-out infinite; will-change: transform; }
+.cloud-row-reverse { animation-name: cloud-sway-reverse; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes typing-bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
+.animate-fade { animation: fadeIn 0.3s ease-out; }
+
+/* ─── Buttons ─── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 8px; font-family: var(--font-sans); font-weight: 500;
+  border: none; cursor: pointer; transition: all 0.2s; text-decoration: none;
+}
+.btn:hover { transform: translateY(-1px); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
+.btn-primary { background: var(--accent); color: white; padding: 10px 24px; border-radius: var(--radius-full); font-size: 14px; box-shadow: 0 1px 3px rgba(139,94,60,0.15); }
+.btn-primary:hover { background: var(--accent-warm); }
+.btn-secondary { background: transparent; color: var(--text-secondary); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
+.btn-ghost { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--border); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
+.btn-lg { padding: 16px 40px; font-size: 16px; }
+.btn-sm { padding: 6px 12px; font-size: 12px; }
+
+/* ─── Cards ─── */
+.card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 1px 3px rgba(59,47,47,0.04), 0 8px 30px rgba(59,47,47,0.04); }
+
+/* ─── Inputs ─── */
+.input { background: var(--bg-card); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-md); height: 44px; font-size: 15px; padding: 0 14px; outline: none; width: 100%; font-family: var(--font-sans); transition: border-color 0.2s; }
+.input:focus { border-color: var(--accent); }
+.input::placeholder { color: var(--text-tertiary); }
+
+.label { display: block; font-size: 14px; font-weight: 500; color: var(--text); margin-bottom: 6px; }
+
+/* ─── Badges ─── */
+.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-full); font-size: 11px; font-weight: 500; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
+.badge-green { background: var(--green-bg); color: var(--green); }
+.badge-accent { background: var(--accent-bg); color: var(--accent); }
+.badge-yellow { background: var(--yellow-bg); color: var(--yellow); }
+
+/* ─── Status Dot ─── */
+.status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.status-dot.active { background: var(--green); }
+.status-dot.pulse { animation: pulse-dot 2s ease-in-out infinite; }
+
+/* ─── Typography ─── */
+.font-logo { font-family: var(--font-logo); font-style: italic; }
+.font-serif { font-family: var(--font-serif); }
+.font-mono { font-family: var(--font-mono); }
+
+/* ═══════════════════════════════════════════
+   ONBOARDING
+   ═══════════════════════════════════════════ */
+#app { min-height: 100vh; }
+.onboarding { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
+.onboarding-inner { width: 100%; max-width: 720px; }
+
+.progress-dots { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 40px; }
+.progress-dot { height: 8px; border-radius: var(--radius-full); transition: all 0.3s ease; }
+.progress-dot.active { width: 40px; background: var(--accent); }
+.progress-dot.inactive { width: 24px; background: var(--border-light); }
+
+.step { display: none; }
+.step.active { display: block; }
+.step-title { font-family: var(--font-logo); font-style: italic; font-size: 28px; letter-spacing: -0.01em; text-align: center; margin-bottom: 8px; }
+.step-subtitle { font-size: 14px; color: var(--text-secondary); text-align: center; line-height: 1.6; margin-bottom: 32px; }
+.step-nav { display: flex; align-items: center; justify-content: space-between; padding-top: 16px; }
+
+/* Welcome */
+.welcome-layout { display: flex; flex-direction: column; align-items: center; gap: 32px; }
+@media (min-width: 1024px) { .welcome-layout { flex-direction: row; align-items: center; gap: 40px; } }
+.dict-card { padding: 32px 40px; flex: 1; }
+.dict-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+.dict-word { font-family: var(--font-logo); font-style: italic; font-size: 42px; letter-spacing: -0.01em; }
+.dict-phonetic { font-family: var(--font-mono); font-size: 12px; color: var(--text-tertiary); }
+.dict-pos { font-family: var(--font-mono); font-size: 12px; font-style: italic; color: var(--text-tertiary); margin-bottom: 24px; }
+.dict-definitions { list-style: none; }
+.dict-def { display: flex; gap: 12px; margin-bottom: 20px; }
+.dict-num { font-family: var(--font-logo); font-style: italic; font-size: 18px; color: var(--accent); flex-shrink: 0; margin-top: -2px; }
+.dict-text { font-family: var(--font-serif); font-size: 15px; line-height: 1.6; color: var(--text-secondary); }
+.dict-context-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 2px 6px; border-radius: 4px; margin-right: 6px; }
+.dict-example { font-family: var(--font-mono); font-size: 12px; font-style: italic; color: var(--text-tertiary); margin-top: 6px; }
+.welcome-cta { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 0; flex-shrink: 0; }
+@media (min-width: 1024px) { .welcome-cta { align-items: flex-start; max-width: 300px; } }
+.welcome-tagline { font-family: var(--font-logo); font-style: italic; font-size: 34px; letter-spacing: -0.01em; line-height: 1.1; text-align: center; }
+@media (min-width: 1024px) { .welcome-tagline { text-align: left; font-size: 44px; } }
+.tagline-gradient { background: linear-gradient(135deg, #3B2F2F 0%, #8B5E3C 50%, #A0714D 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+.form-card { padding: 24px; }
+.form-group { margin-bottom: 20px; }
+.form-group:last-child { margin-bottom: 0; }
+
+/* Team grid */
+.team-grid { display: grid; gap: 8px; grid-template-columns: repeat(2, 1fr); }
+@media (max-width: 640px) { .team-grid { grid-template-columns: 1fr; } }
+.team-card { display: flex; align-items: center; gap: 12px; padding: 16px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; transition: all 0.2s; text-align: left; width: 100%; font-family: var(--font-sans); }
+.team-card:hover { border-color: var(--border-dark); }
+.team-card.selected { border-color: var(--accent); background: var(--accent-bg); }
+.team-check { width: 20px; height: 20px; border-radius: 4px; border: 1.5px solid var(--border-dark); display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.2s; }
+.team-card.selected .team-check { background: var(--accent); border-color: var(--accent); }
+.team-check svg { display: none; }
+.team-card.selected .team-check svg { display: block; }
+.team-emoji { font-size: 20px; }
+.team-info { flex: 1; min-width: 0; }
+.team-name { font-size: 13px; font-weight: 500; }
+.team-role { font-size: 11px; color: var(--text-secondary); }
+
+/* Size selector */
+.size-options { display: flex; gap: 8px; }
+.size-btn { flex: 1; padding: 10px 12px; border-radius: var(--radius-md); font-size: 14px; font-weight: 500; border: 1px solid var(--border); background: var(--bg-card); color: var(--text-secondary); cursor: pointer; transition: all 0.2s; font-family: var(--font-sans); }
+.size-btn:hover { border-color: var(--border-dark); }
+.size-btn.selected { border-color: var(--accent); background: var(--accent-bg); color: var(--accent); }
+
+/* Prerequisites */
+.prereq-list { display: flex; flex-direction: column; gap: 12px; }
+.prereq-item { display: flex; align-items: center; gap: 12px; padding: 16px 20px; border-radius: var(--radius-lg); background: var(--bg-card); border: 1px solid var(--border); }
+.prereq-item.ready { border-color: var(--green); }
+.prereq-icon { width: 40px; height: 40px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; background: var(--accent-bg); color: var(--accent); }
+.prereq-info { flex: 1; }
+.prereq-name { font-size: 14px; font-weight: 600; }
+.prereq-status { font-size: 12px; }
+.prereq-status.ok { color: var(--green); }
+
+/* Community CTA */
+.community-cta { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; border-radius: var(--radius-full); transition: all 0.2s; text-decoration: none; color: inherit; }
+.community-cta:hover { transform: translateY(-2px); }
+.community-cta-left { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.community-cta-icon { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--bg-card); box-shadow: 0 1px 3px rgba(59,47,47,0.08); }
+.community-cta-text { display: flex; flex-direction: column; gap: 2px; }
+.community-cta-title { font-size: 16px; font-weight: 600; }
+.community-cta-sub { font-size: 14px; color: var(--text-secondary); }
+.community-cta-badge { padding: 4px 12px; border-radius: var(--radius-full); font-size: 14px; font-weight: 600; flex-shrink: 0; }
+
+/* Floating emojis */
+.emoji-backdrop { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.emoji-float { position: absolute; user-select: none; line-height: 1; font-size: 200px; filter: drop-shadow(0 18px 26px rgba(214,194,160,0.22)); }
+@media (min-width: 640px) { .emoji-float { font-size: 300px; } }
+
+/* ═══════════════════════════════════════════
+   MAIN OFFICE
+   ═══════════════════════════════════════════ */
+.office { display: none; height: 100vh; }
+.office.active { display: flex; }
+
+.sidebar { width: 260px; flex-shrink: 0; background: var(--bg-card); border-right: 1px solid var(--border); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 12px; border-bottom: 1px solid var(--border); }
+.sidebar-logo { font-family: var(--font-logo); font-style: italic; font-size: 22px; letter-spacing: -0.01em; }
+.sidebar-btn { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); transition: all 0.15s; }
+.sidebar-btn:hover { background: var(--bg); color: var(--text); }
+
+.sidebar-section { padding: 8px 12px 4px; }
+.sidebar-section-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 4px; }
+
+.sidebar-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 6px; font-size: 12px; border: none; background: transparent; cursor: pointer; transition: all 0.15s; color: var(--text-secondary); font-family: var(--font-sans); text-align: left; }
+.sidebar-item:hover { background: rgba(0,0,0,0.04); color: var(--text); }
+.sidebar-item.active { background: rgba(0,0,0,0.06); color: var(--text); font-weight: 500; }
+.sidebar-item-icon { width: 14px; height: 14px; flex-shrink: 0; }
+.sidebar-item-emoji { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
+
+.sidebar-agents { padding: 0 12px 4px; }
+.sidebar-agent { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; margin-left: 12px; border-radius: 6px; font-size: 11px; border: none; background: transparent; cursor: pointer; transition: all 0.15s; color: var(--text-secondary); font-family: var(--font-sans); text-align: left; }
+.sidebar-agent:hover { background: rgba(0,0,0,0.04); color: var(--text); }
+.sidebar-agent.active { background: rgba(0,0,0,0.06); color: var(--text); font-weight: 500; }
+.sidebar-agent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sidebar-channels { padding: 4px 12px; flex: 1; overflow-y: auto; }
+.sidebar-bottom { padding: 8px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 4px; }
+
+.main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+.channel-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.8); backdrop-filter: blur(8px); }
+.channel-title { font-size: 14px; font-weight: 600; }
+.channel-desc { font-size: 12px; color: var(--text-secondary); margin-left: 12px; }
+.channel-actions { display: flex; gap: 4px; }
+
+.messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.message { display: flex; gap: 12px; animation: fadeIn 0.3s ease-out; }
+.message-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--accent-bg); }
+.message-content { flex: 1; min-width: 0; }
+.message-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.message-author { font-size: 13px; font-weight: 600; }
+.message-time { font-size: 11px; color: var(--text-tertiary); }
+.message-text { font-size: 14px; line-height: 1.6; color: var(--text-secondary); }
+.message-text strong { color: var(--text); font-weight: 600; }
+.message-text code { background: var(--bg-warm); border-radius: 4px; padding: 1px 5px; font-family: var(--font-mono); font-size: 12px; }
+
+.message-system { text-align: center; padding: 8px 0; }
+.message-system-inner { display: flex; align-items: center; gap: 12px; padding: 0 20px; }
+.message-system-line { height: 1px; flex: 1; background: var(--border); }
+.message-system-text { font-size: 12px; color: var(--text-tertiary); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.typing-indicator { display: flex; align-items: center; gap: 8px; padding: 0 20px; font-size: 12px; color: var(--text-tertiary); }
+.typing-dots { display: flex; gap: 3px; }
+.typing-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-tertiary); animation: typing-bounce 1.4s ease-in-out infinite; }
+.typing-dot:nth-child(2) { animation-delay: 0.16s; }
+.typing-dot:nth-child(3) { animation-delay: 0.32s; }
+
+.composer { padding: 12px 20px 16px; border-top: 1px solid var(--border); background: var(--bg-card); }
+.composer-inner { display: flex; align-items: flex-end; gap: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; transition: border-color 0.2s; }
+.composer-inner:focus-within { border-color: var(--accent); }
+.composer-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 14px; color: var(--text); outline: none; resize: none; min-height: 20px; max-height: 120px; line-height: 1.5; }
+.composer-input::placeholder { color: var(--text-tertiary); }
+.composer-send { width: 32px; height: 32px; border: none; background: var(--accent); color: white; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+.composer-send:hover { background: var(--accent-warm); }
+.composer-send:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ─── Autocomplete dropdown ─── */
+.autocomplete { position: absolute; bottom: 100%; left: 0; right: 0; max-height: 240px; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 -4px 16px rgba(0,0,0,0.12); margin-bottom: 4px; display: none; z-index: 20; }
+.autocomplete.open { display: block; }
+.autocomplete-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; transition: background 0.1s; }
+.autocomplete-item:hover, .autocomplete-item.selected { background: var(--accent-bg); }
+.autocomplete-item-icon { width: 20px; text-align: center; flex-shrink: 0; font-size: 14px; }
+.autocomplete-item-label { font-weight: 600; color: var(--text); }
+.autocomplete-item-desc { font-size: 12px; color: var(--text-tertiary); margin-left: auto; }
+
+/* ─── Thread Panel ─── */
+.thread-panel { width: 380px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; height: 100vh; overflow: hidden; }
+.thread-panel.open { display: flex; }
+.thread-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.thread-panel-title { font-size: 15px; font-weight: 700; }
+.thread-panel-close { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); }
+.thread-panel-close:hover { background: var(--bg); }
+.thread-panel-parent { padding: 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.thread-panel-divider { padding: 8px 16px; font-size: 12px; color: var(--text-tertiary); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+.thread-panel-divider::before, .thread-panel-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.thread-panel-messages { flex: 1; overflow-y: auto; padding: 12px 16px; display: flex; flex-direction: column; gap: 12px; }
+.thread-panel-composer { padding: 8px 12px 12px; border-top: 1px solid var(--border); }
+
+/* ─── Message thread indicators ─── */
+.message-actions { display: none; position: absolute; top: -4px; right: 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 2px; gap: 2px; z-index: 5; }
+.message:hover .message-actions { display: flex; }
+.message { position: relative; }
+.message-action-btn { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-tertiary); transition: all 0.1s; }
+.message-action-btn:hover { background: var(--bg); color: var(--text); }
+.message-thread-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: transparent; font-family: var(--font-sans); transition: background 0.15s; }
+.message-thread-link:hover { background: var(--accent-bg); }
+.message-thread-link svg { flex-shrink: 0; }
+
+.agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
+.agent-panel.open { display: flex; }
+.agent-panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.agent-panel-close { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); }
+.agent-panel-close:hover { background: var(--bg); }
+.agent-panel-body { padding: 20px; }
+.agent-panel-avatar { width: 56px; height: 56px; border-radius: 14px; display: flex; align-items: center; justify-content: center; font-size: 28px; background: var(--accent-bg); margin-bottom: 12px; }
+.agent-panel-name { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+.agent-panel-role { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; }
+.agent-panel-section { margin-bottom: 20px; }
+.agent-panel-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 8px; }
+.agent-panel-stat { display: flex; align-items: center; justify-content: space-between; padding: 6px 0; font-size: 13px; }
+.agent-panel-stat-label { color: var(--text-secondary); }
+.agent-panel-stat-value { font-weight: 500; }
+.agent-panel-skill { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: var(--radius-full); background: var(--bg); border: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); margin: 0 4px 4px 0; }
+
+.launch-screen { display: none; position: fixed; inset: 0; background: var(--bg); z-index: 100; align-items: center; justify-content: center; flex-direction: column; gap: 24px; }
+.launch-screen.active { display: flex; }
+.launch-spinner { width: 40px; height: 40px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.launch-text { font-family: var(--font-logo); font-style: italic; font-size: 24px; color: var(--text); }
+.launch-sub { font-size: 14px; color: var(--text-secondary); }
+
+@media (max-width: 768px) {
+  .sidebar { width: 240px; }
+  .agent-panel { width: 280px; }
+  .dict-card { padding: 24px; }
+  .dict-word { font-size: 34px; }
+  .welcome-tagline { font-size: 28px; }
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- ONBOARDING -->
+  <div class="onboarding dot-grid" id="onboarding">
+    <div class="onboarding-inner">
+      <div class="progress-dots" id="progress-dots"></div>
+
+      <!-- Step 0: Welcome -->
+      <div class="step active animate-fade" data-step="0">
+        <div class="welcome-layout">
+          <div class="card dict-card">
+            <div class="dict-header">
+              <h1 class="dict-word">wuphf</h1>
+              <span class="dict-phonetic">/w&#x28C;f/</span>
+            </div>
+            <p class="dict-pos">noun</p>
+            <ol class="dict-definitions">
+              <li class="dict-def">
+                <span class="dict-num font-logo">1.</span>
+                <div>
+                  <p class="dict-text">The sound a dog makes when it's not quite barking but definitely wants your attention.</p>
+                  <p class="dict-example">"did you hear that wuphf? he wants outside again"</p>
+                </div>
+              </li>
+              <li class="dict-def">
+                <span class="dict-num font-logo">2.</span>
+                <div>
+                  <p class="dict-text">
+                    <span class="dict-context-label" style="color:var(--text-tertiary);background:#F5F0EB;">pop culture</span>
+                    A service that simultaneously sends your message to every communication platform at once.
+                  </p>
+                  <p class="dict-example">"I WUPHF'd everyone about the launch &mdash; email, text, fax, tweet, all at once"</p>
+                </div>
+              </li>
+              <li class="dict-def">
+                <span class="dict-num font-logo">3.</span>
+                <div>
+                  <p class="dict-text" style="color:var(--text);">
+                    <span class="dict-context-label" style="color:var(--accent);background:var(--accent-bg);">software</span>
+                    A terminal office where a team of AI coworkers sits in one place, arguing about what to build.
+                  </p>
+                  <p class="dict-example">"I opened wuphf and my CEO agent was already fighting with the PM about priorities"</p>
+                </div>
+              </li>
+            </ol>
+          </div>
+          <div class="welcome-cta">
+            <h2 class="welcome-tagline">
+              <span>Your office.</span><br />
+              <span class="tagline-gradient">Your AI team.</span>
+            </h2>
+            <button class="btn btn-primary btn-lg" style="width:100%;" onclick="goToStep(1)">
+              Get started
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 1: Company info -->
+      <div class="step" data-step="1">
+        <h1 class="step-title">Tell me about your company</h1>
+        <div class="card form-card" style="max-width:540px;margin:0 auto;">
+          <div class="form-group">
+            <label class="label">What's your company or project name?</label>
+            <input class="input" id="q-company" placeholder="Stealth Mode Labs" />
+          </div>
+          <div class="form-group">
+            <label class="label">What do you do?</label>
+            <input class="input" id="q-description" placeholder="We build AI-powered analytics for e-commerce" />
+          </div>
+          <div class="form-group">
+            <label class="label">What are your top 3 goals right now?</label>
+            <input class="input" id="q-goals" placeholder="Ship MVP, get first 10 customers, close seed round" />
+          </div>
+        </div>
+        <div class="step-nav" style="max-width:540px;margin:0 auto;">
+          <button class="btn btn-secondary" onclick="goToStep(0)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+            Back
+          </button>
+          <button class="btn btn-primary" onclick="goToStep(2)">
+            Next
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: Preferences -->
+      <div class="step" data-step="2">
+        <h1 class="step-title">Almost there</h1>
+        <div class="card form-card" style="max-width:540px;margin:0 auto;">
+          <div class="form-group">
+            <label class="label">How big is your team?</label>
+            <div class="size-options" id="size-options"></div>
+          </div>
+          <div class="form-group">
+            <label class="label">What's your most immediate priority?</label>
+            <input class="input" id="q-priority" placeholder="Get the landing page live and start collecting leads" />
+          </div>
+        </div>
+        <div class="step-nav" style="max-width:540px;margin:0 auto;">
+          <button class="btn btn-secondary" onclick="goToStep(1)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+            Back
+          </button>
+          <button class="btn btn-primary" onclick="buildTeam()">
+            Next
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 3: Team -->
+      <div class="step" data-step="3">
+        <h1 class="step-title">Your starter team</h1>
+        <p class="step-subtitle">Based on your goals, here's who I recommend. Toggle who you want in the office &mdash; you can always add or remove teammates later.</p>
+        <div class="team-grid" id="team-grid"></div>
+        <div class="step-nav">
+          <button class="btn btn-secondary" onclick="goToStep(2)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+            Back
+          </button>
+          <button class="btn btn-primary" onclick="goToStep(4)">
+            Next
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 4: Prerequisites -->
+      <div class="step" data-step="4">
+        <h1 class="step-title">Prerequisites</h1>
+        <p class="step-subtitle">WUPHF runs locally. Let's make sure you have what you need.</p>
+        <div class="card" style="padding:24px;max-width:540px;margin:0 auto;">
+          <div class="prereq-list" id="prereq-list"></div>
+          <div style="margin-top:16px;">
+            <button class="btn btn-ghost btn-sm" onclick="recheckPrereqs()">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+              Re-check
+            </button>
+          </div>
+        </div>
+        <div class="step-nav" style="max-width:540px;margin:0 auto;">
+          <button class="btn btn-secondary" onclick="goToStep(3)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+            Back
+          </button>
+          <button class="btn btn-primary" onclick="goToStep(5)">
+            Next
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 5: GitHub -->
+      <div class="step" data-step="5">
+        <div class="emoji-backdrop">
+          <div class="cloud-row emoji-float" style="top:-5%;left:-8%;opacity:0.4;--dur:34s;animation-delay:-8s;">&#x2728;</div>
+          <div class="cloud-row cloud-row-reverse emoji-float" style="top:5%;left:55%;opacity:0.35;--dur:42s;animation-delay:-17s;">&#x2728;</div>
+          <div class="cloud-row cloud-row-reverse emoji-float" style="top:40%;left:-5%;opacity:0.3;--dur:38s;animation-delay:-12s;">&#x2728;</div>
+          <div class="cloud-row emoji-float" style="top:50%;left:60%;opacity:0.35;--dur:46s;animation-delay:-22s;">&#x2728;</div>
+          <div class="cloud-row emoji-float" style="top:75%;left:20%;opacity:0.3;--dur:40s;animation-delay:-5s;">&#x2728;</div>
+        </div>
+        <div style="position:relative;z-index:1;">
+          <div class="card" style="padding:24px;max-width:600px;margin:0 auto;">
+            <h2 class="font-logo" style="font-size:22px;margin-bottom:8px;">Help the WUPHF community grow</h2>
+            <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;margin-bottom:8px;">A GitHub star helps more people discover WUPHF and build their own AI offices.</p>
+            <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">If WUPHF feels like something you'd use, give it a star.</p>
+            <div style="margin-top:24px;">
+              <a href="https://github.com/nex-crm/wuphf" target="_blank" rel="noopener noreferrer"
+                class="community-cta" style="background:var(--accent-bg);border:1px solid var(--border);">
+                <span class="community-cta-left">
+                  <span class="community-cta-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--accent)" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  </span>
+                  <span class="community-cta-text">
+                    <span class="community-cta-title">Star WUPHF on GitHub</span>
+                    <span class="community-cta-sub">Help more people find the community</span>
+                  </span>
+                </span>
+              </a>
+            </div>
+          </div>
+          <div class="step-nav" style="max-width:600px;margin:16px auto 0;">
+            <button class="btn btn-secondary" onclick="goToStep(4)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+              Back
+            </button>
+            <button class="btn btn-primary" onclick="goToStep(6)">
+              Next
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 6: Discord + Launch -->
+      <div class="step" data-step="6">
+        <div class="emoji-backdrop">
+          <div class="cloud-row emoji-float" style="top:-5%;left:-8%;opacity:0.4;--dur:34s;animation-delay:-8s;">&#x1F4AC;</div>
+          <div class="cloud-row cloud-row-reverse emoji-float" style="top:5%;left:55%;opacity:0.35;--dur:42s;animation-delay:-17s;">&#x1F4AC;</div>
+          <div class="cloud-row cloud-row-reverse emoji-float" style="top:40%;left:-5%;opacity:0.3;--dur:38s;animation-delay:-12s;">&#x1F4AC;</div>
+          <div class="cloud-row emoji-float" style="top:50%;left:60%;opacity:0.35;--dur:46s;animation-delay:-22s;">&#x1F4AC;</div>
+        </div>
+        <div style="position:relative;z-index:1;">
+          <div class="card" style="padding:24px;max-width:600px;margin:0 auto;">
+            <h2 class="font-logo" style="font-size:22px;margin-bottom:8px;">Where the good chaos happens</h2>
+            <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;margin-bottom:8px;">This is where agent configs get debated, bugs get caught before they ship, and somebody always finds the edge case first.</p>
+            <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">If you prefer &ldquo;come chat&rdquo; over &ldquo;please submit a ticket,&rdquo; this is your room.</p>
+            <div style="margin-top:24px;">
+              <a href="https://discord.gg/nex-community" target="_blank" rel="noopener noreferrer"
+                class="community-cta" style="background:var(--discord-bg);border:1px solid var(--discord-border);">
+                <span class="community-cta-left">
+                  <span class="community-cta-icon">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--discord)"><path d="M20.32 4.37a16.4 16.4 0 0 0-4.1-1.28.06.06 0 0 0-.07.03c-.18.32-.38.73-.52 1.06a15.16 15.16 0 0 0-4.56 0c-.15-.34-.35-.74-.53-1.06a.06.06 0 0 0-.07-.03c-1.43.24-2.8.68-4.1 1.28a.05.05 0 0 0-.02.02C3.77 8.17 3.12 11.87 3.44 15.53a.06.06 0 0 0 .02.04 16.52 16.52 0 0 0 5.03 2.54.06.06 0 0 0 .07-.02c.39-.54.74-1.12 1.04-1.73a.06.06 0 0 0-.03-.08 10.73 10.73 0 0 1-1.6-.77.06.06 0 0 1-.01-.1l.32-.24a.06.06 0 0 1 .06-.01c3.35 1.53 6.98 1.53 10.29 0a.06.06 0 0 1 .06 0c.1.08.21.16.32.24a.06.06 0 0 1-.01.1c-.51.3-1.05.56-1.6.77a.06.06 0 0 0-.03.08c.3.61.65 1.19 1.04 1.73a.06.06 0 0 0 .07.02 16.42 16.42 0 0 0 5.03-2.54.06.06 0 0 0 .02-.04c.38-4.23-.64-7.9-2.89-11.14a.04.04 0 0 0-.02-.02ZM9.68 13.3c-.98 0-1.78-.9-1.78-2s.79-2 1.78-2c.99 0 1.79.9 1.78 2 0 1.1-.8 2-1.78 2Zm4.64 0c-.98 0-1.78-.9-1.78-2s.79-2 1.78-2c.99 0 1.79.9 1.78 2 0 1.1-.79 2-1.78 2Z"/></svg>
+                  </span>
+                  <span class="community-cta-text">
+                    <span class="community-cta-title">Join the Discord</span>
+                    <span class="community-cta-sub">Chat with the people building WUPHF</span>
+                  </span>
+                </span>
+                <span class="community-cta-badge" style="background:var(--discord-border);color:var(--discord);">Join</span>
+              </a>
+            </div>
+          </div>
+          <div class="step-nav" style="max-width:600px;margin:16px auto 0;">
+            <button class="btn btn-secondary" onclick="goToStep(5)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+              Back
+            </button>
+            <button class="btn btn-primary" onclick="launchOffice()">
+              Open the office
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- LAUNCH ANIMATION -->
+  <div class="launch-screen" id="launch-screen">
+    <div class="launch-spinner"></div>
+    <p class="launch-text" id="launch-title">Opening the office&hellip;</p>
+    <p class="launch-sub" id="launch-status">Assembling your team</p>
+  </div>
+
+  <!-- MAIN OFFICE -->
+  <div class="office" id="office">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <span class="sidebar-logo">wuphf</span>
+        <button class="sidebar-btn" title="Collapse sidebar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+        </button>
+      </div>
+      <div class="sidebar-section">
+        <p class="sidebar-section-title">Team</p>
+        <button class="sidebar-item active">
+          <svg class="sidebar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          <span>Agents</span>
+          <svg style="margin-left:auto;width:12px;height:12px;transform:rotate(90deg);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+        </button>
+      </div>
+      <div class="sidebar-agents" id="sidebar-agents"></div>
+      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
+        <p class="sidebar-section-title">Channels</p>
+      </div>
+      <div class="sidebar-channels" id="sidebar-channels"></div>
+      <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
+        <select id="theme-switcher" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
+          <option value="">Editorial</option>
+          <option value="slack">Slack</option>
+          <option value="windows-98">Windows 98</option>
+        </select>
+      </div>
+    </aside>
+
+    <div class="main">
+      <div class="channel-header">
+        <div style="display:flex;align-items:center;">
+          <span class="channel-title" id="channel-title"># general</span>
+          <span class="channel-desc" id="channel-desc">The shared office channel</span>
+        </div>
+        <div class="channel-actions">
+          <button class="sidebar-btn" title="Search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </button>
+          <button class="sidebar-btn" title="Requests">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="messages" id="messages"></div>
+      <div class="typing-indicator" id="typing-indicator" style="display:none;padding:0 20px 8px;">
+        <div class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
+        <span id="typing-who">CEO is thinking&hellip;</span>
+      </div>
+      <div class="composer" style="position:relative;">
+        <div class="autocomplete" id="autocomplete"></div>
+        <div class="composer-inner">
+          <textarea class="composer-input" id="composer-input" placeholder="Message #general &mdash; type / for commands, @ to mention" rows="1"></textarea>
+          <button class="composer-send" id="composer-send" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/></svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Thread Panel -->
+    <aside class="thread-panel" id="thread-panel">
+      <div class="thread-panel-header">
+        <span class="thread-panel-title">Thread</span>
+        <button class="thread-panel-close" onclick="closeThreadPanel()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="thread-panel-parent" id="thread-parent"></div>
+      <div class="thread-panel-divider">
+        <span class="thread-panel-reply-count" id="thread-reply-count"></span>
+      </div>
+      <div class="thread-panel-messages" id="thread-messages"></div>
+      <div class="thread-panel-composer">
+        <div class="composer-inner">
+          <textarea class="composer-input" id="thread-composer-input" placeholder="Reply in thread..." rows="1"></textarea>
+          <button class="composer-send" id="thread-composer-send" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/></svg>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Agent Panel -->
+    <aside class="agent-panel" id="agent-panel">
+      <div class="agent-panel-header">
+        <span style="font-size:14px;font-weight:600;">Agent Detail</span>
+        <button class="agent-panel-close" onclick="closeAgentPanel()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div class="agent-panel-body" id="agent-panel-body"></div>
+    </aside>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Web — Application Logic
+   ═══════════════════════════════════════════════════════════════ */
+
+// ─── HTML escaping for user input (XSS prevention) ───
+function escapeHtml(str) {
+  var div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ─── Safe text formatting (only for trusted content) ───
+function formatTrusted(text) {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/`(.*?)`/g, '<code>$1</code>')
+    .replace(/@(\w+)/g, '<strong style="color:var(--accent);">@$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+
+// ─── DOM builder helpers ───
+function el(tag, attrs, children) {
+  var node = document.createElement(tag);
+  if (attrs) Object.keys(attrs).forEach(function(k) {
+    if (k === 'className') node.className = attrs[k];
+    else if (k === 'style' && typeof attrs[k] === 'object') Object.assign(node.style, attrs[k]);
+    else if (k.startsWith('on')) node.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+    else node.setAttribute(k, attrs[k]);
+  });
+  if (children) {
+    if (typeof children === 'string') node.textContent = children;
+    else if (Array.isArray(children)) children.forEach(function(c) { if (c) node.appendChild(c); });
+    else node.appendChild(children);
+  }
+  return node;
+}
+
+function htmlNode(html) {
+  var t = document.createElement('template');
+  t.innerHTML = html.trim();
+  return t.content.firstChild;
+}
+
+// ─── Broker API client ───
+var WuphfAPI = (function() {
+  var BROKER = 'http://localhost:7890';
+  var token = null;
+
+  function init() {
+    return fetch(BROKER + '/web-token')
+      .then(function(r) { return r.json(); })
+      .then(function(data) { token = data.token; });
+  }
+
+  function authHeaders() {
+    var h = { 'Content-Type': 'application/json' };
+    if (token) h['Authorization'] = 'Bearer ' + token;
+    return h;
+  }
+
+  function get(path, params) {
+    var url = BROKER + path;
+    if (params) {
+      var qs = Object.keys(params)
+        .filter(function(k) { return params[k] != null; })
+        .map(function(k) { return encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); })
+        .join('&');
+      if (qs) url += '?' + qs;
+    }
+    return fetch(url, { headers: authHeaders() }).then(function(r) {
+      if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+      return r.json();
+    });
+  }
+
+  function post(path, body) {
+    return fetch(BROKER + path, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(body)
+    }).then(function(r) {
+      if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+      return r.json();
+    });
+  }
+
+  function getMessages(channel, sinceId, limit) {
+    return get('/messages', {
+      channel: channel || 'general',
+      viewer_slug: 'human',
+      since_id: sinceId || null,
+      limit: limit || 50
+    });
+  }
+
+  function postMessage(content, channel, replyTo) {
+    var body = {
+      from: 'you',
+      channel: channel || 'general',
+      content: content
+    };
+    if (replyTo) body.reply_to = replyTo;
+    return post('/messages', body);
+  }
+
+  function getThreadMessages(channel, threadId) {
+    return get('/messages', {
+      channel: channel || 'general',
+      thread_id: threadId,
+      viewer_slug: 'human',
+      limit: 50
+    });
+  }
+
+  function getMembers() {
+    return get('/office-members');
+  }
+
+  function getChannels() {
+    return get('/channels');
+  }
+
+  function getRequests(channel) {
+    return get('/requests', {
+      channel: channel || 'general',
+      viewer_slug: 'human'
+    });
+  }
+
+  function answerRequest(id, choiceId) {
+    return post('/requests/answer', { id: id, choice_id: choiceId });
+  }
+
+  function getHealth() {
+    return get('/health');
+  }
+
+  return {
+    init: init,
+    get: get,
+    post: post,
+    getMessages: getMessages,
+    postMessage: postMessage,
+    getMembers: getMembers,
+    getChannels: getChannels,
+    getRequests: getRequests,
+    answerRequest: answerRequest,
+    getHealth: getHealth,
+    getThreadMessages: getThreadMessages
+  };
+})();
+
+// ─── State ───
+var TOTAL_STEPS = 7;
+var currentStep = 0;
+var selectedSize = '';
+var brokerConnected = false;
+var currentChannel = 'general';
+var lastMessageId = null;
+var pollTimer = null;
+var requestPollTimer = null;
+var consecutiveFailures = 0;
+var DISCONNECT_THRESHOLD = 3;
+
+var AGENTS = [
+  { slug: 'ceo',      emoji: '\uD83D\uDC54', name: 'CEO',               role: 'Strategy, delegation, goal tracking',           checked: true,  type: 'lead' },
+  { slug: 'pm',       emoji: '\uD83D\uDCCB', name: 'Product Manager',   role: 'Roadmap, prioritization, user stories',         checked: true,  type: 'lead' },
+  { slug: 'frontend', emoji: '\uD83C\uDFA8', name: 'Frontend Engineer', role: 'UI/UX implementation, components, styling',     checked: true,  type: 'specialist' },
+  { slug: 'backend',  emoji: '\u2699\uFE0F', name: 'Backend Engineer',  role: 'APIs, databases, infrastructure',               checked: true,  type: 'specialist' },
+  { slug: 'ai-eng',   emoji: '\uD83E\uDDE0', name: 'AI Engineer',       role: 'Models, prompts, agent architecture',           checked: false, type: 'specialist' },
+  { slug: 'designer', emoji: '\u270F\uFE0F', name: 'Designer',          role: 'Visual design, branding, prototypes',           checked: false, type: 'specialist' },
+  { slug: 'cmo',      emoji: '\uD83D\uDCE3', name: 'CMO',               role: 'Growth, content, positioning, campaigns',       checked: false, type: 'lead' },
+  { slug: 'cro',      emoji: '\uD83D\uDCB0', name: 'CRO',               role: 'Revenue, sales strategy, pipeline',             checked: false, type: 'specialist' },
+];
+
+var PREREQS = [
+  { name: 'tmux', status: 'Installed', ready: true, icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><line x1="8" y1="12" x2="16" y2="12"/></svg>' },
+  { name: 'Claude CLI', status: 'Installed and authenticated', ready: true, icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5z"/></svg>' },
+  { name: 'Go', status: 'v1.25.0', ready: true, icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>' },
+];
+
+var OFFICE_MESSAGES = [
+  { type: 'system', text: 'The WUPHF Office is now open' },
+  { agent: 'ceo', emoji: '\uD83D\uDC54', name: 'CEO', badge: 'lead', time: '9:01 AM',
+    text: 'Good morning team. I\'ve reviewed our goals and here\'s my take on priorities this week:\n\n**1. Ship the onboarding flow** \u2014 first impressions matter more than features right now.\n**2. Landing page copy** \u2014 we need to articulate the value prop in one sentence.\n**3. Set up analytics** \u2014 we can\'t improve what we don\'t measure.\n\nLet\'s hear from PM on sequencing.' },
+  { agent: 'pm', emoji: '\uD83D\uDCCB', name: 'Product Manager', badge: 'lead', time: '9:03 AM',
+    text: 'Agree on priorities. I\'d reorder slightly \u2014 **landing page first**, then onboarding. Reasoning: we need something to send people to before the product flow matters.\n\nI\'ll draft user stories for both today. @Frontend can you scope the landing page by EOD?' },
+  { agent: 'frontend', emoji: '\uD83C\uDFA8', name: 'Frontend Engineer', badge: 'specialist', time: '9:05 AM',
+    text: 'On it. I can have a first pass by this afternoon. Quick question \u2014 are we going with the warm/editorial aesthetic or something more techy? The current brand direction feels warm and editorial, like a startup notebook.' },
+  { agent: 'designer', emoji: '\u270F\uFE0F', name: 'Designer', badge: 'specialist', time: '9:07 AM',
+    text: 'I\'d lean editorial \u2014 warm tones, serif display fonts, generous whitespace. We\'re selling a *team*, not a tool. The interface should feel like walking into an office, not opening a dashboard.' },
+  { agent: 'backend', emoji: '\u2699\uFE0F', name: 'Backend Engineer', badge: 'specialist', time: '9:09 AM',
+    text: 'While frontend works on the landing page, I\'ll set up the API layer for the onboarding flow. Need to persist company config + team selection.\n\nAlso \u2014 should I wire up the WebSocket channel for real-time messages, or is that overkill for v1?' },
+  { agent: 'ceo', emoji: '\uD83D\uDC54', name: 'CEO', badge: 'lead', time: '9:11 AM',
+    text: 'Skip WebSockets for now. Polling is fine for v1 \u2014 **ship speed over architecture perfection**. We can refactor when we have users who care about latency.\n\nDesigner\'s right on the aesthetic. Let\'s commit to warm/editorial. @CMO what do you think about messaging?' },
+  { agent: 'cmo', emoji: '\uD83D\uDCE3', name: 'CMO', badge: 'lead', time: '9:14 AM',
+    text: 'The positioning is clear: **"Your AI team, visible and working."**\n\nEvery other multi-agent tool hides the agents behind an API. We show them sitting in a room, arguing. That\'s the hook.\n\nI\'ll draft three headline variants by noon and we\'ll pick one.' },
+];
+
+var AGENT_SKILLS = {
+  ceo: ['Strategic planning', 'Delegation', 'Goal tracking', 'Decision making', 'OKR management'],
+  pm: ['User stories', 'Sprint planning', 'Prioritization', 'Roadmap', 'Stakeholder comms'],
+  frontend: ['React', 'TypeScript', 'CSS', 'Accessibility', 'Performance'],
+  backend: ['Go', 'APIs', 'Databases', 'Infrastructure', 'Security'],
+  'ai-eng': ['Prompt engineering', 'Model evaluation', 'RAG', 'Fine-tuning', 'Agent design'],
+  designer: ['UI design', 'Branding', 'Prototyping', 'Design systems', 'User research'],
+  cmo: ['Content strategy', 'SEO', 'Social media', 'Brand positioning', 'Analytics'],
+  cro: ['Sales strategy', 'Pipeline management', 'Revenue ops', 'Forecasting', 'Partnerships'],
+};
+
+var AGENT_RESPONSES = [
+  'Good point. Let me think about how that fits into our current sprint priorities.',
+  'I\'ll take a look at this and report back with a concrete recommendation.',
+  'Interesting \u2014 that aligns with what I was seeing in the data. Let me pull together some numbers.',
+  'Noted. I\'ll factor this into the next iteration of the plan and share an update.',
+  'On it. I\'ll have something for you to review within the hour.',
+];
+
+var CHANNELS = [
+  { name: 'general', desc: 'The shared office channel' },
+  { name: 'engineering', desc: 'Technical discussions and code reviews' },
+  { name: 'marketing', desc: 'Campaigns, content, and positioning' },
+];
+
+// ─── Progress ───
+function renderProgress() {
+  var container = document.getElementById('progress-dots');
+  container.textContent = '';
+  for (var i = 0; i < TOTAL_STEPS; i++) {
+    var dot = document.createElement('div');
+    dot.className = 'progress-dot ' + (i <= currentStep ? 'active' : 'inactive');
+    container.appendChild(dot);
+  }
+}
+
+// ─── Step navigation ───
+function goToStep(n) {
+  currentStep = n;
+  document.querySelectorAll('.step').forEach(function(s) {
+    s.classList.remove('active');
+    s.style.display = 'none';
+  });
+  var step = document.querySelector('[data-step="' + n + '"]');
+  if (step) {
+    step.style.display = 'block';
+    step.classList.remove('animate-fade');
+    void step.offsetWidth;
+    step.classList.add('animate-fade', 'active');
+  }
+  renderProgress();
+}
+
+// ─── Size options ───
+function renderSizeOptions() {
+  var container = document.getElementById('size-options');
+  ['Just me', '2\u20135', '5\u201320', '20+'].forEach(function(size) {
+    var btn = document.createElement('button');
+    btn.className = 'size-btn';
+    btn.textContent = size;
+    btn.addEventListener('click', function() {
+      selectedSize = size;
+      container.querySelectorAll('.size-btn').forEach(function(b) { b.classList.remove('selected'); });
+      btn.classList.add('selected');
+    });
+    container.appendChild(btn);
+  });
+}
+
+// ─── Prerequisites ───
+function renderPrereqs() {
+  var container = document.getElementById('prereq-list');
+  container.textContent = '';
+  PREREQS.forEach(function(p) {
+    var item = document.createElement('div');
+    item.className = 'prereq-item' + (p.ready ? ' ready' : '');
+
+    var icon = document.createElement('div');
+    icon.className = 'prereq-icon';
+    icon.innerHTML = p.icon;
+
+    var info = document.createElement('div');
+    info.className = 'prereq-info';
+    var nameEl = document.createElement('p');
+    nameEl.className = 'prereq-name';
+    nameEl.textContent = p.name;
+    var statusEl = document.createElement('p');
+    statusEl.className = 'prereq-status' + (p.ready ? ' ok' : '');
+    statusEl.textContent = p.status;
+    info.appendChild(nameEl);
+    info.appendChild(statusEl);
+
+    item.appendChild(icon);
+    item.appendChild(info);
+
+    if (p.ready) {
+      var check = htmlNode('<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg>');
+      item.appendChild(check);
+    }
+    container.appendChild(item);
+  });
+}
+
+function recheckPrereqs() { renderPrereqs(); }
+
+// ─── Build team ───
+function buildTeam() {
+  var desc = (
+    (document.getElementById('q-description') ? document.getElementById('q-description').value : '') + ' ' +
+    (document.getElementById('q-goals') ? document.getElementById('q-goals').value : '') + ' ' +
+    (document.getElementById('q-priority') ? document.getElementById('q-priority').value : '')
+  ).toLowerCase();
+
+  AGENTS.forEach(function(a) {
+    if (a.slug === 'ceo' || a.slug === 'pm') { a.checked = true; return; }
+    if (a.slug === 'ai-eng' && /ai|model|agent|llm|prompt|ml/.test(desc)) a.checked = true;
+    if (a.slug === 'designer' && /design|brand|ui|ux|visual|landing/.test(desc)) a.checked = true;
+    if (a.slug === 'cmo' && /market|growth|content|blog|social|brand|launch/.test(desc)) a.checked = true;
+    if (a.slug === 'cro' && /sales|revenue|pipeline|customer|deal|close/.test(desc)) a.checked = true;
+    if (a.slug === 'frontend' && /frontend|ui|web|app|landing|page|site/.test(desc)) a.checked = true;
+    if (a.slug === 'backend' && /api|backend|data|server|infra|database/.test(desc)) a.checked = true;
+  });
+
+  var checkedCount = AGENTS.filter(function(a) { return a.checked; }).length;
+  if (checkedCount < 4) {
+    ['frontend', 'backend'].forEach(function(slug) {
+      var a = AGENTS.find(function(x) { return x.slug === slug; });
+      if (a && !a.checked) a.checked = true;
+    });
+  }
+
+  renderTeamGrid();
+  goToStep(3);
+}
+
+function renderTeamGrid() {
+  var grid = document.getElementById('team-grid');
+  grid.textContent = '';
+  AGENTS.forEach(function(a) {
+    var card = document.createElement('button');
+    card.className = 'team-card' + (a.checked ? ' selected' : '');
+    card.addEventListener('click', function() {
+      a.checked = !a.checked;
+      renderTeamGrid();
+    });
+
+    var check = document.createElement('div');
+    check.className = 'team-check';
+    check.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+    var emoji = document.createElement('span');
+    emoji.className = 'team-emoji';
+    emoji.textContent = a.emoji;
+
+    var info = document.createElement('div');
+    info.className = 'team-info';
+    var nameEl = document.createElement('p');
+    nameEl.className = 'team-name';
+    nameEl.textContent = a.name;
+    var roleEl = document.createElement('p');
+    roleEl.className = 'team-role';
+    roleEl.textContent = a.role;
+    info.appendChild(nameEl);
+    info.appendChild(roleEl);
+
+    card.appendChild(check);
+    card.appendChild(emoji);
+    card.appendChild(info);
+    grid.appendChild(card);
+  });
+}
+
+// ─── Launch ───
+function launchOffice() {
+  document.getElementById('onboarding').style.display = 'none';
+  var launch = document.getElementById('launch-screen');
+  launch.classList.add('active');
+
+  var statuses = ['Assembling your team', 'Setting up channels', 'CEO is reviewing the strategy doc', 'PM is writing user stories', 'Opening the office doors'];
+  var i = 0;
+  var interval = setInterval(function() {
+    i++;
+    if (i < statuses.length) {
+      document.getElementById('launch-status').textContent = statuses[i];
+    }
+  }, 600);
+
+  setTimeout(function() {
+    clearInterval(interval);
+    launch.classList.remove('active');
+    showOffice();
+  }, 3000);
+}
+
+// ─── Show office ───
+function showOffice() {
+  document.getElementById('office').classList.add('active');
+  if (brokerConnected) {
+    Promise.all([WuphfAPI.getMembers(), WuphfAPI.getChannels()])
+      .then(function(results) {
+        var membersData = results[0];
+        var channelsData = results[1];
+        if (membersData.members) {
+          AGENTS = membersData.members.map(function(m) {
+            return {
+              slug: m.slug,
+              emoji: m.emoji || m.slug.charAt(0).toUpperCase(),
+              name: m.name || m.slug,
+              role: m.role || '',
+              checked: true,
+              type: m.type || 'specialist',
+              expertise: m.expertise || [],
+              personality: m.personality || ''
+            };
+          });
+        }
+        if (channelsData.channels) {
+          CHANNELS = channelsData.channels.map(function(ch) {
+            return { name: ch.name || ch.slug, desc: ch.description || '' };
+          });
+        }
+        renderSidebarAgents();
+        renderSidebarChannels();
+        startMessagePolling();
+        startRequestPolling();
+      })
+      .catch(function() {
+        renderSidebarAgents();
+        renderSidebarChannels();
+        animateMessages();
+      });
+  } else {
+    renderSidebarAgents();
+    renderSidebarChannels();
+    animateMessages();
+  }
+}
+
+function renderSidebarAgents() {
+  var container = document.getElementById('sidebar-agents');
+  container.textContent = '';
+  AGENTS.filter(function(a) { return a.checked; }).forEach(function(a) {
+    var btn = document.createElement('button');
+    btn.className = 'sidebar-agent';
+    btn.title = a.name;
+    btn.addEventListener('click', function() { openAgentPanel(a.slug); });
+
+    var emoji = document.createElement('span');
+    emoji.className = 'sidebar-item-emoji';
+    emoji.textContent = a.emoji;
+    var name = document.createElement('span');
+    name.className = 'sidebar-agent-name';
+    name.textContent = a.name;
+    var dot = document.createElement('span');
+    dot.className = 'status-dot active pulse';
+
+    btn.appendChild(emoji);
+    btn.appendChild(name);
+    btn.appendChild(dot);
+    container.appendChild(btn);
+  });
+}
+
+function renderSidebarChannels() {
+  var container = document.getElementById('sidebar-channels');
+  container.textContent = '';
+  CHANNELS.forEach(function(ch, idx) {
+    var isActive = ch.name === currentChannel || (idx === 0 && !currentChannel);
+    var btn = document.createElement('button');
+    btn.className = 'sidebar-item' + (isActive ? ' active' : '');
+    btn.addEventListener('click', function() {
+      switchChannel(ch.name);
+      container.querySelectorAll('.sidebar-item').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+    });
+
+    var hash = document.createElement('span');
+    hash.className = 'sidebar-item-icon';
+    hash.style.fontWeight = 'bold';
+    hash.style.fontSize = '14px';
+    hash.textContent = '#';
+    var name = document.createElement('span');
+    name.textContent = ch.name;
+
+    btn.appendChild(hash);
+    btn.appendChild(name);
+    container.appendChild(btn);
+  });
+}
+
+function switchChannel(name) {
+  currentChannel = name;
+  lastMessageId = null;
+  document.getElementById('messages').textContent = '';
+  var ch = CHANNELS.find(function(c) { return c.name === name; });
+  document.getElementById('channel-title').textContent = '# ' + name;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+  document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
+  if (brokerConnected) {
+    fetchMessages();
+    fetchRequests();
+  }
+}
+
+// ─── Animate messages ───
+function animateMessages() {
+  var container = document.getElementById('messages');
+  var selected = AGENTS.filter(function(a) { return a.checked; });
+  var slugs = selected.map(function(a) { return a.slug; });
+  var msgs = OFFICE_MESSAGES.filter(function(m) {
+    return m.type === 'system' || slugs.indexOf(m.agent) !== -1;
+  });
+
+  var i = 0;
+  function showNext() {
+    if (i >= msgs.length) {
+      document.getElementById('typing-indicator').style.display = 'none';
+      return;
+    }
+    var msg = msgs[i];
+    i++;
+
+    if (i < msgs.length && msgs[i].agent) {
+      document.getElementById('typing-indicator').style.display = 'flex';
+      document.getElementById('typing-who').textContent = msgs[i].name + ' is thinking\u2026';
+    } else {
+      document.getElementById('typing-indicator').style.display = 'none';
+    }
+
+    if (msg.type === 'system') {
+      var sysDiv = document.createElement('div');
+      sysDiv.className = 'message-system animate-fade';
+      var inner = document.createElement('div');
+      inner.className = 'message-system-inner';
+      var line1 = document.createElement('span');
+      line1.className = 'message-system-line';
+      var textSpan = document.createElement('span');
+      textSpan.className = 'message-system-text';
+      textSpan.textContent = msg.text;
+      var line2 = document.createElement('span');
+      line2.className = 'message-system-line';
+      inner.appendChild(line1);
+      inner.appendChild(textSpan);
+      inner.appendChild(line2);
+      sysDiv.appendChild(inner);
+      container.appendChild(sysDiv);
+    } else {
+      var msgDiv = document.createElement('div');
+      msgDiv.className = 'message animate-fade';
+
+      var avatar = document.createElement('div');
+      avatar.className = 'message-avatar';
+      avatar.textContent = msg.emoji;
+
+      var content = document.createElement('div');
+      content.className = 'message-content';
+
+      var header = document.createElement('div');
+      header.className = 'message-header';
+      var author = document.createElement('span');
+      author.className = 'message-author';
+      author.textContent = msg.name;
+      var badgeEl = document.createElement('span');
+      badgeEl.className = 'badge ' + (msg.badge === 'lead' ? 'badge-accent' : 'badge-green');
+      badgeEl.textContent = msg.badge;
+      var timeEl = document.createElement('span');
+      timeEl.className = 'message-time';
+      timeEl.textContent = msg.time;
+      header.appendChild(author);
+      header.appendChild(badgeEl);
+      header.appendChild(timeEl);
+
+      var textDiv = document.createElement('div');
+      textDiv.className = 'message-text';
+      // Message text is trusted (from OFFICE_MESSAGES constant), safe to format
+      textDiv.innerHTML = formatTrusted(msg.text);
+
+      content.appendChild(header);
+      content.appendChild(textDiv);
+      msgDiv.appendChild(avatar);
+      msgDiv.appendChild(content);
+      container.appendChild(msgDiv);
+    }
+
+    container.scrollTop = container.scrollHeight;
+    setTimeout(showNext, 1200 + Math.random() * 800);
+  }
+
+  setTimeout(showNext, 500);
+}
+
+// ─── Broker connection health ───
+function onBrokerSuccess() {
+  if (consecutiveFailures >= DISCONNECT_THRESHOLD) {
+    hideDisconnectBanner();
+  }
+  consecutiveFailures = 0;
+}
+
+function onBrokerFailure() {
+  consecutiveFailures++;
+  if (consecutiveFailures >= DISCONNECT_THRESHOLD) {
+    showDisconnectBanner();
+  }
+}
+
+function showDisconnectBanner() {
+  if (document.getElementById('disconnect-banner')) return;
+  var banner = document.createElement('div');
+  banner.id = 'disconnect-banner';
+  banner.style.cssText = 'padding:10px 20px;background:var(--red-bg);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;';
+
+  var text = document.createElement('span');
+  text.style.cssText = 'font-size:13px;color:var(--red);font-weight:500;';
+  text.textContent = 'Disconnected from office \u2014 broker is not responding';
+
+  var btn = document.createElement('button');
+  btn.className = 'btn btn-ghost btn-sm';
+  btn.textContent = 'Retry now';
+  btn.addEventListener('click', function() {
+    consecutiveFailures = 0;
+    hideDisconnectBanner();
+    fetchMessages();
+  });
+
+  banner.appendChild(text);
+  banner.appendChild(btn);
+  var channelHeader = document.querySelector('.channel-header');
+  channelHeader.parentNode.insertBefore(banner, channelHeader.nextSibling);
+}
+
+function hideDisconnectBanner() {
+  var banner = document.getElementById('disconnect-banner');
+  if (banner) banner.remove();
+}
+
+// ─── Thread state ───
+var threadReplyCounts = {}; // msgId -> count of replies
+var allMessages = {}; // msgId -> msg object
+var activeThreadId = null;
+var threadPollTimer = null;
+
+// ─── Live message polling ───
+function startMessagePolling() {
+  fetchMessages();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(fetchMessages, 2000);
+}
+
+function fetchMessages() {
+  WuphfAPI.getMessages(currentChannel, lastMessageId)
+    .then(function(data) {
+      onBrokerSuccess();
+      var msgs = data.messages || [];
+      msgs.forEach(function(msg) {
+        appendBrokerMessage(msg);
+        lastMessageId = msg.id;
+      });
+    })
+    .catch(function() { onBrokerFailure(); });
+}
+
+function appendBrokerMessage(msg) {
+  // Track all messages for thread lookups
+  allMessages[msg.id] = msg;
+
+  // If this is a reply, update parent's reply count but don't show in main feed
+  if (msg.reply_to) {
+    threadReplyCounts[msg.reply_to] = (threadReplyCounts[msg.reply_to] || 0) + 1;
+    updateThreadLink(msg.reply_to);
+    // If thread panel is open for this thread, append there too
+    if (activeThreadId === msg.reply_to) {
+      appendMessageToContainer(msg, document.getElementById('thread-messages'));
+      var tmsg = document.getElementById('thread-messages');
+      tmsg.scrollTop = tmsg.scrollHeight;
+    }
+    return;
+  }
+
+  var container = document.getElementById('messages');
+  var msgDiv = appendMessageToContainer(msg, container);
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendMessageToContainer(msg, container) {
+  var msgDiv = document.createElement('div');
+  msgDiv.className = 'message animate-fade';
+  msgDiv.dataset.msgId = msg.id;
+
+  var agent = AGENTS.find(function(a) { return a.slug === msg.from; });
+  var isHuman = msg.from === 'you' || msg.from === 'human';
+
+  var avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  if (isHuman) {
+    avatar.style.background = 'var(--accent)';
+    avatar.style.color = 'white';
+    avatar.style.fontSize = '14px';
+    avatar.style.fontWeight = '600';
+    avatar.textContent = 'You';
+  } else {
+    avatar.textContent = agent ? agent.emoji : msg.from.charAt(0).toUpperCase();
+  }
+
+  var content = document.createElement('div');
+  content.className = 'message-content';
+
+  var header = document.createElement('div');
+  header.className = 'message-header';
+  var author = document.createElement('span');
+  author.className = 'message-author';
+  author.textContent = isHuman ? 'You' : (agent ? agent.name : msg.from);
+  header.appendChild(author);
+
+  if (isHuman) {
+    var badgeEl = document.createElement('span');
+    badgeEl.className = 'badge badge-yellow';
+    badgeEl.textContent = 'human';
+    header.appendChild(badgeEl);
+  } else if (agent) {
+    var badgeEl = document.createElement('span');
+    badgeEl.className = 'badge ' + (agent.type === 'lead' ? 'badge-accent' : 'badge-green');
+    badgeEl.textContent = agent.type;
+    header.appendChild(badgeEl);
+  }
+
+  var timeEl = document.createElement('span');
+  timeEl.className = 'message-time';
+  if (msg.timestamp) {
+    var d = new Date(msg.timestamp);
+    timeEl.textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  header.appendChild(timeEl);
+
+  var textDiv = document.createElement('div');
+  textDiv.className = 'message-text';
+  if (isHuman) {
+    textDiv.textContent = msg.content || '';
+  } else {
+    textDiv.innerHTML = formatTrusted(msg.content || '');
+  }
+
+  content.appendChild(header);
+  content.appendChild(textDiv);
+
+  // Thread link (shows "N replies" if this message has replies)
+  if (container.id === 'messages') {
+    var threadLink = document.createElement('button');
+    threadLink.className = 'message-thread-link';
+    threadLink.id = 'thread-link-' + msg.id;
+    threadLink.style.display = 'none';
+    threadLink.addEventListener('click', function() { openThread(msg.id); });
+    content.appendChild(threadLink);
+
+    // Action buttons (reply in thread)
+    var actions = document.createElement('div');
+    actions.className = 'message-actions';
+    var replyBtn = document.createElement('button');
+    replyBtn.className = 'message-action-btn';
+    replyBtn.title = 'Reply in thread';
+    replyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    replyBtn.addEventListener('click', function() { openThread(msg.id); });
+    actions.appendChild(replyBtn);
+    msgDiv.appendChild(actions);
+
+    // Show thread link if replies exist
+    if (threadReplyCounts[msg.id]) {
+      updateThreadLink(msg.id);
+    }
+  }
+
+  msgDiv.appendChild(avatar);
+  msgDiv.appendChild(content);
+  container.appendChild(msgDiv);
+  return msgDiv;
+}
+
+function updateThreadLink(parentId) {
+  var link = document.getElementById('thread-link-' + parentId);
+  if (!link) return;
+  var count = threadReplyCounts[parentId] || 0;
+  if (count > 0) {
+    link.style.display = 'inline-flex';
+    link.textContent = '';
+    var icon = document.createElement('span');
+    icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+    link.appendChild(icon);
+    var text = document.createElement('span');
+    text.textContent = count + (count === 1 ? ' reply' : ' replies');
+    link.appendChild(text);
+  }
+}
+
+// ─── Thread panel ───
+function openThread(msgId) {
+  activeThreadId = msgId;
+  closeAgentPanel();
+  var panel = document.getElementById('thread-panel');
+  var parentContainer = document.getElementById('thread-parent');
+  var messagesContainer = document.getElementById('thread-messages');
+  var replyCount = document.getElementById('thread-reply-count');
+
+  parentContainer.textContent = '';
+  messagesContainer.textContent = '';
+
+  // Render parent message
+  var parentMsg = allMessages[msgId];
+  if (parentMsg) {
+    appendMessageToContainer(parentMsg, parentContainer);
+  }
+
+  panel.classList.add('open');
+
+  // Fetch thread replies from broker
+  WuphfAPI.getThreadMessages(currentChannel, msgId)
+    .then(function(data) {
+      var msgs = data.messages || [];
+      var replies = msgs.filter(function(m) { return m.id !== msgId; });
+      replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
+      replies.forEach(function(m) {
+        allMessages[m.id] = m;
+        appendMessageToContainer(m, messagesContainer);
+      });
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    });
+
+  // Start thread polling
+  if (threadPollTimer) clearInterval(threadPollTimer);
+  threadPollTimer = setInterval(function() {
+    WuphfAPI.getThreadMessages(currentChannel, msgId)
+      .then(function(data) {
+        var msgs = data.messages || [];
+        var replies = msgs.filter(function(m) { return m.id !== msgId; });
+        replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
+        // Only append new messages
+        var existing = messagesContainer.querySelectorAll('[data-msg-id]');
+        var existingIds = {};
+        existing.forEach(function(el) { existingIds[el.dataset.msgId] = true; });
+        replies.forEach(function(m) {
+          if (!existingIds[m.id]) {
+            allMessages[m.id] = m;
+            appendMessageToContainer(m, messagesContainer);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+          }
+        });
+      });
+  }, 2000);
+
+  // Focus thread composer
+  document.getElementById('thread-composer-input').focus();
+}
+
+function closeThreadPanel() {
+  activeThreadId = null;
+  document.getElementById('thread-panel').classList.remove('open');
+  if (threadPollTimer) { clearInterval(threadPollTimer); threadPollTimer = null; }
+}
+
+// ─── Request polling ───
+function startRequestPolling() {
+  fetchRequests();
+  if (requestPollTimer) clearInterval(requestPollTimer);
+  requestPollTimer = setInterval(fetchRequests, 2000);
+}
+
+function fetchRequests() {
+  WuphfAPI.getRequests(currentChannel)
+    .then(function(data) {
+      renderRequestBanner(data.pending);
+    })
+    .catch(function() {});  // failures tracked by fetchMessages
+}
+
+function renderRequestBanner(pending) {
+  var existing = document.getElementById('request-banner');
+  if (existing) existing.remove();
+  if (!pending) return;
+
+  var banner = document.createElement('div');
+  banner.id = 'request-banner';
+  banner.style.cssText = 'padding:12px 20px;background:var(--yellow-bg);border-bottom:1px solid var(--border);';
+
+  var fromAgent = AGENTS.find(function(a) { return a.slug === pending.from; });
+  var label = document.createElement('div');
+  label.style.cssText = 'font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text);';
+  label.textContent = (fromAgent ? fromAgent.name : pending.from) + ' needs your input';
+
+  var question = document.createElement('div');
+  question.style.cssText = 'font-size:13px;color:var(--text-secondary);margin-bottom:10px;';
+  question.textContent = pending.question || pending.title || '';
+
+  banner.appendChild(label);
+  banner.appendChild(question);
+
+  var options = pending.options || [];
+  var btnWrap = document.createElement('div');
+  btnWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+  options.forEach(function(opt) {
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.textContent = opt.label || opt.text || opt.id;
+    btn.addEventListener('click', function() {
+      WuphfAPI.answerRequest(pending.id, opt.id)
+        .then(function() {
+          var b = document.getElementById('request-banner');
+          if (b) b.remove();
+        })
+        .catch(function() {});
+    });
+    btnWrap.appendChild(btn);
+  });
+  banner.appendChild(btnWrap);
+
+  var channelHeader = document.querySelector('.channel-header');
+  channelHeader.parentNode.insertBefore(banner, channelHeader.nextSibling);
+}
+
+// ─── Composer ───
+var composerInput = document.getElementById('composer-input');
+var composerSend = document.getElementById('composer-send');
+
+// ─── Autocomplete state ───
+var acPanel = document.getElementById('autocomplete');
+var acSelectedIdx = -1;
+var acItems = [];
+var acMode = null; // 'slash' | 'mention' | null
+
+var SLASH_COMMANDS = [
+  { name: '/reply', desc: 'Reply in thread', icon: '💬' },
+  { name: '/requests', desc: 'View open requests', icon: '📋' },
+  { name: '/tasks', desc: 'View task board', icon: '✅' },
+  { name: '/reset', desc: 'Reset the office', icon: '🔄' },
+  { name: '/clear', desc: 'Clear messages', icon: '🧹' },
+  { name: '/help', desc: 'Show all commands', icon: '❓' },
+  { name: '/config', desc: 'View/set config', icon: '⚙️' },
+  { name: '/quit', desc: 'Exit WUPHF', icon: '👋' },
+  { name: '/connect', desc: 'Connect integration', icon: '🔗' },
+  { name: '/1o1', desc: 'Start 1:1 session', icon: '🤝' },
+];
+
+function updateAutocomplete() {
+  var val = composerInput.value;
+  var shouldShow = false;
+
+  // Slash commands: trigger when input starts with /
+  if (val.match(/^\/\S*$/) && val.length >= 1) {
+    acMode = 'slash';
+    var query = val.slice(1).toLowerCase();
+    acItems = SLASH_COMMANDS.filter(function(cmd) {
+      return cmd.name.slice(1).toLowerCase().indexOf(query) === 0;
+    });
+    shouldShow = acItems.length > 0;
+  }
+  // @mentions: trigger when last word starts with @
+  else if (val.match(/(^|\s)@\S*$/)) {
+    acMode = 'mention';
+    var match = val.match(/(^|\s)@(\S*)$/);
+    var query = match ? match[2].toLowerCase() : '';
+    acItems = AGENTS.filter(function(a) {
+      return a.slug.toLowerCase().indexOf(query) === 0 ||
+             a.name.toLowerCase().indexOf(query) === 0;
+    }).map(function(a) {
+      return { name: '@' + a.slug, desc: a.name + ' — ' + a.role, icon: a.emoji };
+    });
+    shouldShow = acItems.length > 0;
+  } else {
+    acMode = null;
+    acItems = [];
+  }
+
+  if (shouldShow) {
+    renderAutocomplete();
+    acPanel.classList.add('open');
+  } else {
+    acPanel.classList.remove('open');
+    acSelectedIdx = -1;
+  }
+}
+
+function renderAutocomplete() {
+  acPanel.textContent = '';
+  acItems.forEach(function(item, i) {
+    var row = document.createElement('div');
+    row.className = 'autocomplete-item' + (i === acSelectedIdx ? ' selected' : '');
+    var icon = document.createElement('span');
+    icon.className = 'autocomplete-item-icon';
+    icon.textContent = item.icon || '';
+    var label = document.createElement('span');
+    label.className = 'autocomplete-item-label';
+    label.textContent = item.name;
+    var desc = document.createElement('span');
+    desc.className = 'autocomplete-item-desc';
+    desc.textContent = item.desc || '';
+    row.appendChild(icon);
+    row.appendChild(label);
+    row.appendChild(desc);
+    row.addEventListener('click', function() { selectAutocomplete(i); });
+    acPanel.appendChild(row);
+  });
+}
+
+function selectAutocomplete(idx) {
+  if (idx < 0 || idx >= acItems.length) return;
+  var item = acItems[idx];
+  if (acMode === 'slash') {
+    composerInput.value = item.name + ' ';
+  } else if (acMode === 'mention') {
+    // Replace the @partial with the full @slug
+    composerInput.value = composerInput.value.replace(/(^|\s)@\S*$/, '$1' + item.name + ' ');
+  }
+  acPanel.classList.remove('open');
+  acSelectedIdx = -1;
+  acMode = null;
+  composerInput.focus();
+  composerSend.disabled = !composerInput.value.trim();
+}
+
+composerInput.addEventListener('input', function() {
+  composerSend.disabled = !composerInput.value.trim();
+  composerInput.style.height = 'auto';
+  composerInput.style.height = Math.min(composerInput.scrollHeight, 120) + 'px';
+  updateAutocomplete();
+});
+
+composerInput.addEventListener('keydown', function(e) {
+  // Autocomplete navigation
+  if (acPanel.classList.contains('open')) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      acSelectedIdx = Math.min(acSelectedIdx + 1, acItems.length - 1);
+      renderAutocomplete();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      acSelectedIdx = Math.max(acSelectedIdx - 1, 0);
+      renderAutocomplete();
+      return;
+    }
+    if (e.key === 'Tab' || (e.key === 'Enter' && acSelectedIdx >= 0)) {
+      e.preventDefault();
+      selectAutocomplete(acSelectedIdx >= 0 ? acSelectedIdx : 0);
+      return;
+    }
+    if (e.key === 'Escape') {
+      acPanel.classList.remove('open');
+      acSelectedIdx = -1;
+      return;
+    }
+  }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+composerSend.addEventListener('click', sendMessage);
+
+// Thread composer
+var threadInput = document.getElementById('thread-composer-input');
+var threadSend = document.getElementById('thread-composer-send');
+if (threadInput) {
+  threadInput.addEventListener('input', function() {
+    threadSend.disabled = !threadInput.value.trim();
+    threadInput.style.height = 'auto';
+    threadInput.style.height = Math.min(threadInput.scrollHeight, 120) + 'px';
+  });
+  threadInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendThreadReply(); }
+  });
+  threadSend.addEventListener('click', sendThreadReply);
+}
+
+function sendThreadReply() {
+  if (!activeThreadId || !threadInput) return;
+  var raw = threadInput.value.trim();
+  if (!raw) return;
+  threadInput.value = '';
+  threadInput.style.height = 'auto';
+  threadSend.disabled = true;
+  WuphfAPI.postMessage(raw, currentChannel, activeThreadId)
+    .catch(function(e) { console.error('Thread reply failed:', e); });
+}
+
+function handleSlashCommand(input) {
+  var parts = input.split(/\s+/);
+  var cmd = parts[0].toLowerCase();
+  var args = parts.slice(1).join(' ');
+  var container = document.getElementById('messages');
+
+  function showSystem(text) {
+    var sysDiv = document.createElement('div');
+    sysDiv.className = 'message-system animate-fade';
+    var inner = document.createElement('div');
+    inner.className = 'message-system-inner';
+    var l1 = document.createElement('span'); l1.className = 'message-system-line';
+    var t = document.createElement('span'); t.className = 'message-system-text'; t.textContent = text;
+    var l2 = document.createElement('span'); l2.className = 'message-system-line';
+    inner.appendChild(l1); inner.appendChild(t); inner.appendChild(l2);
+    sysDiv.appendChild(inner); container.appendChild(sysDiv);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  switch (cmd) {
+    case '/clear':
+      container.textContent = '';
+      showSystem('Messages cleared');
+      break;
+    case '/help':
+      showSystem('Commands: /clear /help /requests /tasks /reset /reply <msg-id> /1o1 <agent>');
+      break;
+    case '/requests':
+      fetchRequests();
+      showSystem('Refreshing requests...');
+      break;
+    case '/reply':
+      if (args) openThread(args.trim());
+      else showSystem('Usage: /reply <message-id>');
+      break;
+    case '/reset':
+      WuphfAPI.post('/reset', {}).then(function() {
+        container.textContent = '';
+        lastMessageId = '';
+        allMessages = {};
+        threadReplyCounts = {};
+        showSystem('Office reset');
+      });
+      break;
+    default:
+      // Send unknown commands to broker as a message (agents may handle them)
+      WuphfAPI.postMessage(input, currentChannel);
+      break;
+  }
+}
+
+function sendMessage() {
+  var raw = composerInput.value.trim();
+  if (!raw) return;
+
+  // Close autocomplete
+  acPanel.classList.remove('open');
+  acSelectedIdx = -1;
+
+  // Handle slash commands locally
+  if (raw.charAt(0) === '/') {
+    composerInput.value = '';
+    composerInput.style.height = 'auto';
+    composerSend.disabled = true;
+    handleSlashCommand(raw);
+    return;
+  }
+
+  // Extract @mentions for tagged array
+  var tagged = [];
+  var mentionRe = /@(\S+)/g;
+  var mentionMatch;
+  while ((mentionMatch = mentionRe.exec(raw)) !== null) {
+    var mentionSlug = mentionMatch[1].toLowerCase();
+    var mentionAgent = AGENTS.find(function(a) { return a.slug === mentionSlug; });
+    if (mentionAgent) tagged.push(mentionAgent.slug);
+  }
+
+  composerInput.value = '';
+  composerInput.style.height = 'auto';
+  composerSend.disabled = true;
+
+  if (brokerConnected) {
+    // POST to broker with tagged agents — tagged agents get notified
+    WuphfAPI.post('/messages', {
+      from: 'you',
+      channel: currentChannel,
+      content: raw,
+      tagged: tagged
+    })
+      .catch(function(err) {
+        // Show error as system message
+        var container = document.getElementById('messages');
+        var sysDiv = document.createElement('div');
+        sysDiv.className = 'message-system animate-fade';
+        var inner = document.createElement('div');
+        inner.className = 'message-system-inner';
+        var line1 = document.createElement('span');
+        line1.className = 'message-system-line';
+        var textSpan = document.createElement('span');
+        textSpan.className = 'message-system-text';
+        textSpan.style.color = 'var(--red)';
+        textSpan.textContent = err.message.indexOf('409') !== -1
+          ? 'A request is pending — answer it before sending messages'
+          : 'Failed to send message';
+        var line2 = document.createElement('span');
+        line2.className = 'message-system-line';
+        inner.appendChild(line1);
+        inner.appendChild(textSpan);
+        inner.appendChild(line2);
+        sysDiv.appendChild(inner);
+        container.appendChild(sysDiv);
+        container.scrollTop = container.scrollHeight;
+      });
+    return;
+  }
+
+  // Demo mode: render locally with simulated response
+  var text = escapeHtml(raw);
+  var container = document.getElementById('messages');
+
+  var msgDiv = document.createElement('div');
+  msgDiv.className = 'message animate-fade';
+
+  var avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  avatar.style.background = 'var(--accent)';
+  avatar.style.color = 'white';
+  avatar.style.fontSize = '14px';
+  avatar.style.fontWeight = '600';
+  avatar.textContent = 'You';
+
+  var content = document.createElement('div');
+  content.className = 'message-content';
+
+  var header = document.createElement('div');
+  header.className = 'message-header';
+  var author = document.createElement('span');
+  author.className = 'message-author';
+  author.textContent = 'You';
+  var badgeEl = document.createElement('span');
+  badgeEl.className = 'badge badge-yellow';
+  badgeEl.textContent = 'human';
+  var timeEl = document.createElement('span');
+  timeEl.className = 'message-time';
+  timeEl.textContent = 'now';
+  header.appendChild(author);
+  header.appendChild(badgeEl);
+  header.appendChild(timeEl);
+
+  var textDiv = document.createElement('div');
+  textDiv.className = 'message-text';
+  textDiv.innerHTML = text.replace(/\n/g, '<br>');
+
+  content.appendChild(header);
+  content.appendChild(textDiv);
+  msgDiv.appendChild(avatar);
+  msgDiv.appendChild(content);
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+
+  // Simulate agent response
+  var selected = AGENTS.filter(function(a) { return a.checked; });
+  var responder = selected[Math.floor(Math.random() * selected.length)];
+  document.getElementById('typing-indicator').style.display = 'flex';
+  document.getElementById('typing-who').textContent = responder.name + ' is thinking\u2026';
+
+  setTimeout(function() {
+    document.getElementById('typing-indicator').style.display = 'none';
+    var response = AGENT_RESPONSES[Math.floor(Math.random() * AGENT_RESPONSES.length)];
+
+    var rDiv = document.createElement('div');
+    rDiv.className = 'message animate-fade';
+
+    var rAvatar = document.createElement('div');
+    rAvatar.className = 'message-avatar';
+    rAvatar.textContent = responder.emoji;
+
+    var rContent = document.createElement('div');
+    rContent.className = 'message-content';
+
+    var rHeader = document.createElement('div');
+    rHeader.className = 'message-header';
+    var rAuthor = document.createElement('span');
+    rAuthor.className = 'message-author';
+    rAuthor.textContent = responder.name;
+    var rBadge = document.createElement('span');
+    rBadge.className = 'badge ' + (responder.type === 'lead' ? 'badge-accent' : 'badge-green');
+    rBadge.textContent = responder.type;
+    var rTime = document.createElement('span');
+    rTime.className = 'message-time';
+    rTime.textContent = 'now';
+    rHeader.appendChild(rAuthor);
+    rHeader.appendChild(rBadge);
+    rHeader.appendChild(rTime);
+
+    var rText = document.createElement('div');
+    rText.className = 'message-text';
+    rText.textContent = response;
+
+    rContent.appendChild(rHeader);
+    rContent.appendChild(rText);
+    rDiv.appendChild(rAvatar);
+    rDiv.appendChild(rContent);
+    container.appendChild(rDiv);
+
+    container.scrollTop = container.scrollHeight;
+  }, 1500 + Math.random() * 1000);
+}
+
+// ─── Agent panel ───
+function openAgentPanel(slug) {
+  var agent = AGENTS.find(function(a) { return a.slug === slug; });
+  if (!agent) return;
+
+  var panel = document.getElementById('agent-panel');
+  var body = document.getElementById('agent-panel-body');
+  body.textContent = '';
+
+  var avatar = document.createElement('div');
+  avatar.className = 'agent-panel-avatar';
+  avatar.textContent = agent.emoji;
+
+  var nameEl = document.createElement('h3');
+  nameEl.className = 'agent-panel-name';
+  nameEl.textContent = agent.name;
+
+  var roleEl = document.createElement('p');
+  roleEl.className = 'agent-panel-role';
+  roleEl.textContent = agent.role;
+
+  // Status section
+  var statusSection = document.createElement('div');
+  statusSection.className = 'agent-panel-section';
+  var statusTitle = document.createElement('p');
+  statusTitle.className = 'agent-panel-section-title';
+  statusTitle.textContent = 'Status';
+  statusSection.appendChild(statusTitle);
+
+  var stats = [
+    ['State', 'Active', 'badge badge-green'],
+    ['Type', agent.type.charAt(0).toUpperCase() + agent.type.slice(1), null],
+  ];
+  stats.forEach(function(s) {
+    var row = document.createElement('div');
+    row.className = 'agent-panel-stat';
+    var label = document.createElement('span');
+    label.className = 'agent-panel-stat-label';
+    label.textContent = s[0];
+    row.appendChild(label);
+    if (s[2]) {
+      var badge = document.createElement('span');
+      badge.className = s[2];
+      badge.textContent = s[1];
+      row.appendChild(badge);
+    } else {
+      var val = document.createElement('span');
+      val.className = 'agent-panel-stat-value';
+      val.textContent = s[1];
+      row.appendChild(val);
+    }
+    statusSection.appendChild(row);
+  });
+
+  // Personality section (from broker data)
+  var personalitySection = null;
+  if (agent.personality) {
+    personalitySection = document.createElement('div');
+    personalitySection.className = 'agent-panel-section';
+    var personalityTitle = document.createElement('p');
+    personalityTitle.className = 'agent-panel-section-title';
+    personalityTitle.textContent = 'Personality';
+    personalitySection.appendChild(personalityTitle);
+    var personalityText = document.createElement('p');
+    personalityText.style.cssText = 'font-size:13px;color:var(--text-secondary);line-height:1.5;';
+    personalityText.textContent = agent.personality;
+    personalitySection.appendChild(personalityText);
+  }
+
+  // Skills section
+  var skillsSection = document.createElement('div');
+  skillsSection.className = 'agent-panel-section';
+  var skillsTitle = document.createElement('p');
+  skillsTitle.className = 'agent-panel-section-title';
+  skillsTitle.textContent = 'Skills';
+  skillsSection.appendChild(skillsTitle);
+  var skillsWrap = document.createElement('div');
+  skillsWrap.style.display = 'flex';
+  skillsWrap.style.flexWrap = 'wrap';
+  var skillsList = (agent.expertise && agent.expertise.length > 0)
+    ? agent.expertise
+    : (AGENT_SKILLS[slug] || ['General']);
+  skillsList.forEach(function(s) {
+    var skill = document.createElement('span');
+    skill.className = 'agent-panel-skill';
+    skill.textContent = s;
+    skillsWrap.appendChild(skill);
+  });
+  skillsSection.appendChild(skillsWrap);
+
+  // Actions section
+  var actionsSection = document.createElement('div');
+  actionsSection.className = 'agent-panel-section';
+  var actionsTitle = document.createElement('p');
+  actionsTitle.className = 'agent-panel-section-title';
+  actionsTitle.textContent = 'Actions';
+  actionsSection.appendChild(actionsTitle);
+  ['Start 1:1 conversation', 'Configure agent'].forEach(function(label) {
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.style.width = '100%';
+    btn.style.marginBottom = '8px';
+    btn.textContent = label;
+    actionsSection.appendChild(btn);
+  });
+
+  body.appendChild(avatar);
+  body.appendChild(nameEl);
+  body.appendChild(roleEl);
+  if (personalitySection) body.appendChild(personalitySection);
+  body.appendChild(statusSection);
+  body.appendChild(skillsSection);
+  body.appendChild(actionsSection);
+
+  panel.classList.add('open');
+}
+
+function closeAgentPanel() {
+  document.getElementById('agent-panel').classList.remove('open');
+}
+
+// ─── Init ───
+function initApp() {
+  WuphfAPI.init()
+    .then(function() { return WuphfAPI.getHealth(); })
+    .then(function(data) {
+      if (data.status === 'ok') {
+        brokerConnected = true;
+        document.getElementById('onboarding').style.display = 'none';
+        showOffice();
+      } else {
+        renderProgress();
+        renderSizeOptions();
+        renderPrereqs();
+      }
+    })
+    .catch(function() {
+      // Broker not running — fall back to demo/onboarding
+      renderProgress();
+      renderSizeOptions();
+      renderPrereqs();
+    });
+}
+
+// ─── Theme Switcher ───
+var themeSwitcher = document.getElementById('theme-switcher');
+if (themeSwitcher) {
+  // Restore saved theme
+  var savedTheme = localStorage.getItem('wuphf-theme') || '';
+  if (savedTheme) {
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    themeSwitcher.value = savedTheme;
+  }
+  themeSwitcher.addEventListener('change', function() {
+    var theme = themeSwitcher.value;
+    if (theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    localStorage.setItem('wuphf-theme', theme);
+  });
+}
+
+initApp();
+</script>
+
+</body>
+</html>

@@ -47,6 +47,7 @@ type AgentLoop struct {
 	collectedInsights []string
 	taskLogRoot       string
 	lastCompactionAt  int
+	focusModeChecker  func() bool
 	mu                sync.Mutex
 }
 
@@ -144,6 +145,13 @@ func (l *AgentLoop) AddInsight(insight string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.collectedInsights = append(l.collectedInsights, insight)
+}
+
+// SetFocusModeChecker injects a callback that reports whether focus mode is active.
+func (l *AgentLoop) SetFocusModeChecker(checker func() bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.focusModeChecker = checker
 }
 
 // Tick advances the state machine by one step. Called by the service's tick loop.
@@ -248,7 +256,7 @@ func (l *AgentLoop) buildContext() error {
 	}
 
 	// Inject gossip insights if gossip layer is available.
-	if l.gossipLayer != nil {
+	if l.gossipLayer != nil && !l.focusModeEnabled() {
 		l.injectGossipInsights()
 	}
 
@@ -293,6 +301,13 @@ func (l *AgentLoop) injectGossipInsights() {
 		}
 		// "reject" is silently dropped.
 	}
+}
+
+func (l *AgentLoop) focusModeEnabled() bool {
+	if l.focusModeChecker == nil {
+		return false
+	}
+	return l.focusModeChecker()
 }
 
 // streamLLM streams output from the LLM and processes chunks.
@@ -498,7 +513,7 @@ func (l *AgentLoop) handleDone() error {
 	}
 
 	// Publish collected insights via gossip.
-	if l.gossipLayer != nil && len(l.collectedInsights) > 0 {
+	if l.gossipLayer != nil && len(l.collectedInsights) > 0 && !l.focusModeEnabled() {
 		for _, insight := range l.collectedInsights {
 			l.gossipLayer.Publish(slug, insight, "")
 		}

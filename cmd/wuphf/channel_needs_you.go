@@ -33,8 +33,8 @@ func buildNeedsYouLinesForRequest(req *channelInterview, contentWidth int) []ren
 	if req.Blocking || req.Required {
 		extra = append(extra, "The team is paused until you answer.")
 	}
-	if strings.TrimSpace(req.RecommendedID) != "" {
-		extra = append(extra, "Recommended: "+req.RecommendedID)
+	if recommended := req.recommendedOptionLabel(); recommended != "" {
+		extra = append(extra, "Recommended: "+recommended)
 	}
 	if due := strings.TrimSpace(req.DueAt); due != "" {
 		extra = append(extra, "Due "+prettyRelativeTime(due))

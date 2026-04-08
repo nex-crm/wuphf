@@ -87,6 +87,97 @@ func (s runtimeArtifactSnapshot) Filter(kinds ...team.RuntimeArtifactKind) []tea
 	return out
 }
 
+func (s runtimeArtifactSnapshot) ReviewCandidates(limit int) []team.RuntimeArtifact {
+	return prioritizeArtifacts(s.Items, limit, artifactReviewRank)
+}
+
+func (s runtimeArtifactSnapshot) ResumeCandidates(limit int) []team.RuntimeArtifact {
+	return prioritizeArtifacts(s.Items, limit, artifactResumeRank)
+}
+
+type artifactRankFn func(team.RuntimeArtifact) (int, bool)
+
+func prioritizeArtifacts(items []team.RuntimeArtifact, limit int, rankFn artifactRankFn) []team.RuntimeArtifact {
+	type rankedArtifact struct {
+		artifact team.RuntimeArtifact
+		rank     int
+		updated  time.Time
+	}
+	ranked := make([]rankedArtifact, 0, len(items))
+	for _, artifact := range items {
+		rank, ok := rankFn(artifact)
+		if !ok {
+			continue
+		}
+		ranked = append(ranked, rankedArtifact{
+			artifact: artifact,
+			rank:     rank,
+			updated:  parseArtifactTimestamp(artifact.UpdatedAt, artifact.StartedAt),
+		})
+	}
+	sort.SliceStable(ranked, func(i, j int) bool {
+		if ranked[i].rank != ranked[j].rank {
+			return ranked[i].rank < ranked[j].rank
+		}
+		left, right := ranked[i].updated, ranked[j].updated
+		switch {
+		case !left.IsZero() && !right.IsZero():
+			return left.After(right)
+		case !left.IsZero():
+			return true
+		case !right.IsZero():
+			return false
+		default:
+			return ranked[i].artifact.ID > ranked[j].artifact.ID
+		}
+	})
+	if limit > 0 && len(ranked) > limit {
+		ranked = ranked[:limit]
+	}
+	out := make([]team.RuntimeArtifact, 0, len(ranked))
+	for _, item := range ranked {
+		out = append(out, item.artifact)
+	}
+	return out
+}
+
+func artifactReviewRank(artifact team.RuntimeArtifact) (int, bool) {
+	if !artifact.Reviewable() {
+		return 0, false
+	}
+	switch artifact.Kind {
+	case team.RuntimeArtifactRequest:
+		if artifact.Blocking {
+			return 0, true
+		}
+		return 1, true
+	case team.RuntimeArtifactTask:
+		if artifact.NormalizedState() == "review" {
+			return 2, true
+		}
+		return 3, true
+	default:
+		return 0, false
+	}
+}
+
+func artifactResumeRank(artifact team.RuntimeArtifact) (int, bool) {
+	if !artifact.Resumable() {
+		return 0, false
+	}
+	state := artifact.NormalizedState()
+	switch {
+	case state == "blocked" && strings.TrimSpace(artifact.Worktree) != "":
+		return 0, true
+	case strings.TrimSpace(artifact.Worktree) != "":
+		return 1, true
+	case strings.TrimSpace(artifact.RelatedID) != "":
+		return 2, true
+	default:
+		return 3, true
+	}
+}
+
 func recentArtifactTasks(tasks []channelTask, limit int) []channelTask {
 	filtered := make([]channelTask, 0, len(tasks))
 	for _, task := range tasks {
@@ -139,6 +230,7 @@ func buildTaskRuntimeArtifact(task channelTask, logArtifact taskLogArtifact, has
 		UpdatedAt:     updatedAt,
 		Path:          path,
 		Worktree:      strings.TrimSpace(task.WorktreePath),
+		Branch:        strings.TrimSpace(task.WorktreeBranch),
 		PartialOutput: partialOutput,
 		ResumeHint:    buildTaskArtifactResumeHint(task, state),
 		ReviewHint:    reviewHint,
@@ -291,14 +383,19 @@ func buildTaskArtifactReviewHint(task channelTask, logArtifact taskLogArtifact, 
 }
 
 func buildTaskArtifactResumeHint(task channelTask, state string) string {
+	branch := strings.TrimSpace(task.WorktreeBranch)
 	if worktree := strings.TrimSpace(task.WorktreePath); worktree != "" {
+		target := worktree
+		if branch != "" {
+			target += " on " + branch
+		}
 		switch state {
 		case "completed":
-			return "Review the retained output or reopen the task thread before reusing the worktree."
+			return "Review the retained output or reopen the task thread before reusing " + target + "."
 		case "blocked":
-			return "Resolve the blocker, then continue in " + worktree + " or reopen the task thread."
+			return "Resolve the blocker, then continue in " + target + " or reopen the task thread."
 		default:
-			return "Resume in " + worktree + " or reopen the task thread."
+			return "Resume in " + target + " or reopen the task thread."
 		}
 	}
 	if thread := strings.TrimSpace(task.ThreadID); thread != "" {
@@ -355,8 +452,8 @@ func normalizeWorkflowArtifactState(status string) string {
 
 func requestArtifactProgress(req channelInterview) string {
 	parts := make([]string, 0, 3)
-	if choice := strings.TrimSpace(req.RecommendedID); choice != "" {
-		parts = append(parts, "Recommended: "+choice)
+	if recommended := req.recommendedOptionLabel(); recommended != "" {
+		parts = append(parts, "Recommended: "+recommended)
 	}
 	if due := strings.TrimSpace(req.DueAt); due != "" {
 		parts = append(parts, "Due "+prettyRelativeTime(due))
@@ -368,7 +465,7 @@ func requestArtifactProgress(req channelInterview) string {
 }
 
 func requestArtifactReviewHint(req channelInterview) string {
-	if recommended := strings.TrimSpace(req.RecommendedID); recommended != "" {
+	if recommended := req.recommendedOptionLabel(); recommended != "" {
 		return "Review recommendation " + recommended + " before answering."
 	}
 	if due := strings.TrimSpace(req.DueAt); due != "" {

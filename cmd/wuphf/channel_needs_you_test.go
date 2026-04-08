@@ -23,6 +23,9 @@ func TestBuildNeedsYouLinesPrefersBlockingRequests(t *testing.T) {
 	if !strings.Contains(plain, "The team is paused until you answer.") {
 		t.Fatalf("expected blocking request guidance, got %q", plain)
 	}
+	if !strings.Contains(plain, "Recommended: Approve") {
+		t.Fatalf("expected human-readable recommendation label, got %q", plain)
+	}
 }
 
 func TestCurrentMainViewportLinesPrependsNeedsYouStrip(t *testing.T) {
