@@ -769,6 +769,11 @@ var WuphfAPI = (function() {
 var TOTAL_STEPS = 7;
 var currentStep = 0;
 var selectedSize = '';
+var brokerConnected = false;
+var currentChannel = 'general';
+var lastMessageId = null;
+var pollTimer = null;
+var requestPollTimer = null;
 
 var AGENTS = [
   { slug: 'ceo',      emoji: '\uD83D\uDC54', name: 'CEO',               role: 'Strategy, delegation, goal tracking',           checked: true,  type: 'lead' },
@@ -1002,9 +1007,45 @@ function launchOffice() {
 // ─── Show office ───
 function showOffice() {
   document.getElementById('office').classList.add('active');
-  renderSidebarAgents();
-  renderSidebarChannels();
-  animateMessages();
+  if (brokerConnected) {
+    Promise.all([WuphfAPI.getMembers(), WuphfAPI.getChannels()])
+      .then(function(results) {
+        var membersData = results[0];
+        var channelsData = results[1];
+        if (membersData.members) {
+          AGENTS = membersData.members.map(function(m) {
+            return {
+              slug: m.slug,
+              emoji: m.emoji || m.slug.charAt(0).toUpperCase(),
+              name: m.name || m.slug,
+              role: m.role || '',
+              checked: true,
+              type: m.type || 'specialist',
+              expertise: m.expertise || [],
+              personality: m.personality || ''
+            };
+          });
+        }
+        if (channelsData.channels) {
+          CHANNELS = channelsData.channels.map(function(ch) {
+            return { name: ch.name || ch.slug, desc: ch.description || '' };
+          });
+        }
+        renderSidebarAgents();
+        renderSidebarChannels();
+        startMessagePolling();
+        startRequestPolling();
+      })
+      .catch(function() {
+        renderSidebarAgents();
+        renderSidebarChannels();
+        animateMessages();
+      });
+  } else {
+    renderSidebarAgents();
+    renderSidebarChannels();
+    animateMessages();
+  }
 }
 
 function renderSidebarAgents() {
@@ -1036,13 +1077,13 @@ function renderSidebarChannels() {
   var container = document.getElementById('sidebar-channels');
   container.textContent = '';
   CHANNELS.forEach(function(ch, idx) {
+    var isActive = ch.name === currentChannel || (idx === 0 && !currentChannel);
     var btn = document.createElement('button');
-    btn.className = 'sidebar-item' + (idx === 0 ? ' active' : '');
+    btn.className = 'sidebar-item' + (isActive ? ' active' : '');
     btn.addEventListener('click', function() {
+      switchChannel(ch.name);
       container.querySelectorAll('.sidebar-item').forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
-      document.getElementById('channel-title').textContent = '# ' + ch.name;
-      document.getElementById('channel-desc').textContent = ch.desc;
     });
 
     var hash = document.createElement('span');
@@ -1057,6 +1098,20 @@ function renderSidebarChannels() {
     btn.appendChild(name);
     container.appendChild(btn);
   });
+}
+
+function switchChannel(name) {
+  currentChannel = name;
+  lastMessageId = null;
+  document.getElementById('messages').textContent = '';
+  var ch = CHANNELS.find(function(c) { return c.name === name; });
+  document.getElementById('channel-title').textContent = '# ' + name;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+  document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
+  if (brokerConnected) {
+    fetchMessages();
+    fetchRequests();
+  }
 }
 
 // ─── Animate messages ───
@@ -1146,6 +1201,152 @@ function animateMessages() {
   setTimeout(showNext, 500);
 }
 
+// ─── Live message polling ───
+function startMessagePolling() {
+  fetchMessages();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(fetchMessages, 2000);
+}
+
+function fetchMessages() {
+  WuphfAPI.getMessages(currentChannel, lastMessageId)
+    .then(function(data) {
+      var msgs = data.messages || [];
+      msgs.forEach(function(msg) {
+        appendBrokerMessage(msg);
+        lastMessageId = msg.id;
+      });
+    })
+    .catch(function() {});
+}
+
+function appendBrokerMessage(msg) {
+  var container = document.getElementById('messages');
+  var msgDiv = document.createElement('div');
+  msgDiv.className = 'message animate-fade';
+
+  var agent = AGENTS.find(function(a) { return a.slug === msg.from; });
+  var isHuman = msg.from === 'you' || msg.from === 'human';
+
+  var avatar = document.createElement('div');
+  avatar.className = 'message-avatar';
+  if (isHuman) {
+    avatar.style.background = 'var(--accent)';
+    avatar.style.color = 'white';
+    avatar.style.fontSize = '14px';
+    avatar.style.fontWeight = '600';
+    avatar.textContent = 'You';
+  } else {
+    avatar.textContent = agent ? agent.emoji : msg.from.charAt(0).toUpperCase();
+  }
+
+  var content = document.createElement('div');
+  content.className = 'message-content';
+
+  var header = document.createElement('div');
+  header.className = 'message-header';
+  var author = document.createElement('span');
+  author.className = 'message-author';
+  author.textContent = isHuman ? 'You' : (agent ? agent.name : msg.from);
+  header.appendChild(author);
+
+  if (isHuman) {
+    var badgeEl = document.createElement('span');
+    badgeEl.className = 'badge badge-yellow';
+    badgeEl.textContent = 'human';
+    header.appendChild(badgeEl);
+  } else if (agent) {
+    var badgeEl = document.createElement('span');
+    badgeEl.className = 'badge ' + (agent.type === 'lead' ? 'badge-accent' : 'badge-green');
+    badgeEl.textContent = agent.type;
+    header.appendChild(badgeEl);
+  }
+
+  var timeEl = document.createElement('span');
+  timeEl.className = 'message-time';
+  if (msg.timestamp) {
+    var d = new Date(msg.timestamp);
+    timeEl.textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+  header.appendChild(timeEl);
+
+  var textDiv = document.createElement('div');
+  textDiv.className = 'message-text';
+  if (isHuman) {
+    // User input: use textContent for safety
+    textDiv.textContent = msg.content || '';
+  } else {
+    // Agent messages from broker are trusted content
+    textDiv.innerHTML = formatTrusted(msg.content || '');
+  }
+
+  content.appendChild(header);
+  content.appendChild(textDiv);
+  msgDiv.appendChild(avatar);
+  msgDiv.appendChild(content);
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+}
+
+// ─── Request polling ───
+function startRequestPolling() {
+  fetchRequests();
+  if (requestPollTimer) clearInterval(requestPollTimer);
+  requestPollTimer = setInterval(fetchRequests, 2000);
+}
+
+function fetchRequests() {
+  WuphfAPI.getRequests(currentChannel)
+    .then(function(data) {
+      renderRequestBanner(data.pending);
+    })
+    .catch(function() {});
+}
+
+function renderRequestBanner(pending) {
+  var existing = document.getElementById('request-banner');
+  if (existing) existing.remove();
+  if (!pending) return;
+
+  var banner = document.createElement('div');
+  banner.id = 'request-banner';
+  banner.style.cssText = 'padding:12px 20px;background:var(--yellow-bg);border-bottom:1px solid var(--border);';
+
+  var fromAgent = AGENTS.find(function(a) { return a.slug === pending.from; });
+  var label = document.createElement('div');
+  label.style.cssText = 'font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text);';
+  label.textContent = (fromAgent ? fromAgent.name : pending.from) + ' needs your input';
+
+  var question = document.createElement('div');
+  question.style.cssText = 'font-size:13px;color:var(--text-secondary);margin-bottom:10px;';
+  question.textContent = pending.question || pending.title || '';
+
+  banner.appendChild(label);
+  banner.appendChild(question);
+
+  var options = pending.options || [];
+  var btnWrap = document.createElement('div');
+  btnWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+  options.forEach(function(opt) {
+    var btn = document.createElement('button');
+    btn.className = 'btn btn-ghost btn-sm';
+    btn.textContent = opt.label || opt.text || opt.id;
+    btn.addEventListener('click', function() {
+      WuphfAPI.answerRequest(pending.id, opt.id)
+        .then(function() {
+          var b = document.getElementById('request-banner');
+          if (b) b.remove();
+        })
+        .catch(function() {});
+    });
+    btnWrap.appendChild(btn);
+  });
+  banner.appendChild(btnWrap);
+
+  var channelHeader = document.querySelector('.channel-header');
+  channelHeader.parentNode.insertBefore(banner, channelHeader.nextSibling);
+}
+
 // ─── Composer ───
 var composerInput = document.getElementById('composer-input');
 var composerSend = document.getElementById('composer-send');
@@ -1165,8 +1366,43 @@ composerSend.addEventListener('click', sendMessage);
 function sendMessage() {
   var raw = composerInput.value.trim();
   if (!raw) return;
-  var text = escapeHtml(raw);
 
+  composerInput.value = '';
+  composerInput.style.height = 'auto';
+  composerSend.disabled = true;
+
+  if (brokerConnected) {
+    // POST to broker — message will appear via next poll cycle
+    WuphfAPI.postMessage(raw, currentChannel)
+      .catch(function(err) {
+        // Show error as system message
+        var container = document.getElementById('messages');
+        var sysDiv = document.createElement('div');
+        sysDiv.className = 'message-system animate-fade';
+        var inner = document.createElement('div');
+        inner.className = 'message-system-inner';
+        var line1 = document.createElement('span');
+        line1.className = 'message-system-line';
+        var textSpan = document.createElement('span');
+        textSpan.className = 'message-system-text';
+        textSpan.style.color = 'var(--red)';
+        textSpan.textContent = err.message.indexOf('409') !== -1
+          ? 'A request is pending — answer it before sending messages'
+          : 'Failed to send message';
+        var line2 = document.createElement('span');
+        line2.className = 'message-system-line';
+        inner.appendChild(line1);
+        inner.appendChild(textSpan);
+        inner.appendChild(line2);
+        sysDiv.appendChild(inner);
+        container.appendChild(sysDiv);
+        container.scrollTop = container.scrollHeight;
+      });
+    return;
+  }
+
+  // Demo mode: render locally with simulated response
+  var text = escapeHtml(raw);
   var container = document.getElementById('messages');
 
   var msgDiv = document.createElement('div');
@@ -1200,7 +1436,6 @@ function sendMessage() {
 
   var textDiv = document.createElement('div');
   textDiv.className = 'message-text';
-  // User input is escaped, then safe to set
   textDiv.innerHTML = text.replace(/\n/g, '<br>');
 
   content.appendChild(header);
@@ -1208,10 +1443,6 @@ function sendMessage() {
   msgDiv.appendChild(avatar);
   msgDiv.appendChild(content);
   container.appendChild(msgDiv);
-
-  composerInput.value = '';
-  composerInput.style.height = 'auto';
-  composerSend.disabled = true;
   container.scrollTop = container.scrollHeight;
 
   // Simulate agent response
@@ -1319,6 +1550,21 @@ function openAgentPanel(slug) {
     statusSection.appendChild(row);
   });
 
+  // Personality section (from broker data)
+  var personalitySection = null;
+  if (agent.personality) {
+    personalitySection = document.createElement('div');
+    personalitySection.className = 'agent-panel-section';
+    var personalityTitle = document.createElement('p');
+    personalityTitle.className = 'agent-panel-section-title';
+    personalityTitle.textContent = 'Personality';
+    personalitySection.appendChild(personalityTitle);
+    var personalityText = document.createElement('p');
+    personalityText.style.cssText = 'font-size:13px;color:var(--text-secondary);line-height:1.5;';
+    personalityText.textContent = agent.personality;
+    personalitySection.appendChild(personalityText);
+  }
+
   // Skills section
   var skillsSection = document.createElement('div');
   skillsSection.className = 'agent-panel-section';
@@ -1329,7 +1575,10 @@ function openAgentPanel(slug) {
   var skillsWrap = document.createElement('div');
   skillsWrap.style.display = 'flex';
   skillsWrap.style.flexWrap = 'wrap';
-  (AGENT_SKILLS[slug] || ['General']).forEach(function(s) {
+  var skillsList = (agent.expertise && agent.expertise.length > 0)
+    ? agent.expertise
+    : (AGENT_SKILLS[slug] || ['General']);
+  skillsList.forEach(function(s) {
     var skill = document.createElement('span');
     skill.className = 'agent-panel-skill';
     skill.textContent = s;
@@ -1356,6 +1605,7 @@ function openAgentPanel(slug) {
   body.appendChild(avatar);
   body.appendChild(nameEl);
   body.appendChild(roleEl);
+  if (personalitySection) body.appendChild(personalitySection);
   body.appendChild(statusSection);
   body.appendChild(skillsSection);
   body.appendChild(actionsSection);
@@ -1368,9 +1618,29 @@ function closeAgentPanel() {
 }
 
 // ─── Init ───
-renderProgress();
-renderSizeOptions();
-renderPrereqs();
+function initApp() {
+  WuphfAPI.init()
+    .then(function() { return WuphfAPI.getHealth(); })
+    .then(function(data) {
+      if (data.status === 'ok') {
+        brokerConnected = true;
+        document.getElementById('onboarding').style.display = 'none';
+        showOffice();
+      } else {
+        renderProgress();
+        renderSizeOptions();
+        renderPrereqs();
+      }
+    })
+    .catch(function() {
+      // Broker not running — fall back to demo/onboarding
+      renderProgress();
+      renderSizeOptions();
+      renderPrereqs();
+    });
+}
+
+initApp();
 </script>
 
 </body>
