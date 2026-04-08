@@ -1633,9 +1633,7 @@ function renderTeamGrid() {
 // ─── Launch ───
 function launchOffice() {
   document.getElementById('onboarding').style.display = 'none';
-  showSplashScreen(function() {
-    showOffice();
-  });
+  showOffice();
 }
 
 function showSplashScreen(onDone) {
@@ -3657,20 +3655,31 @@ closeCommandPalette = function() {
 
 // ─── Init ───
 function initApp() {
+  console.log('[wuphf] initApp starting...');
   WuphfAPI.init()
-    .then(function() { return WuphfAPI.getHealth(); })
+    .then(function() {
+      console.log('[wuphf] init done, fetching health...');
+      return WuphfAPI.getHealth();
+    })
     .then(function(data) {
+      console.log('[wuphf] health response:', JSON.stringify(data));
       if (data.status === 'ok') {
         brokerConnected = true;
         document.getElementById('onboarding').style.display = 'none';
-        showSplashScreen(function() { showOffice(); });
+        console.log('[wuphf] broker connected, showing office directly');
+        showOffice();
       } else {
+        console.log('[wuphf] health not ok, showing onboarding');
         renderProgress();
         renderSizeOptions();
         renderPrereqs();
       }
     })
-    .catch(function() {
+    .catch(function(err) {
+      var errMsg = err && err.message ? err.message : String(err);
+      console.error('[wuphf] initApp FAILED: ' + errMsg);
+      // Show error on page for debugging
+      document.title = 'WUPHF ERROR: ' + errMsg;
       // Broker not running — fall back to demo/onboarding
       renderProgress();
       renderSizeOptions();
