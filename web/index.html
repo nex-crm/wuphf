@@ -2878,6 +2878,7 @@ function fetchMemberActivity() {
     renderSidebarAgents();
     renderWorkspaceSummary();
     updateTypingIndicator();
+    renderComposerHint();
   });
 }
 
@@ -3022,6 +3023,34 @@ function renderReplyBadge() {
   badge.appendChild(closeBtn);
   var composerEl = document.querySelector('.composer');
   composerEl.insertBefore(badge, composerEl.firstChild);
+}
+
+// ─── Composer context hints (#38) ───
+function renderComposerHint() {
+  var existing = document.getElementById('composer-context-hint');
+  if (existing) existing.remove();
+  if (replyToMsgId) return; // reply badge takes priority
+
+  var hints = [];
+
+  // Count active agents
+  var activeCount = 0;
+  cachedMembers.forEach(function(m) {
+    if (m.slug !== 'human' && m.slug !== 'you') {
+      var ac = classifyActivity(m);
+      if (ac.state !== 'lurking') activeCount++;
+    }
+  });
+  if (activeCount > 0) hints.push(activeCount + ' agent' + (activeCount !== 1 ? 's' : '') + ' active');
+
+  // Count open tasks
+  var openTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; }).length;
+  if (openTasks > 0) hints.push(openTasks + ' open task' + (openTasks !== 1 ? 's' : ''));
+
+  if (hints.length === 0) return;
+  var hintEl = el('div', { className: 'composer-context-hint', id: 'composer-context-hint' }, hints.join(' \u2022 '));
+  var composerEl = document.querySelector('.composer');
+  composerEl.insertBefore(hintEl, composerEl.firstChild);
 }
 
 // ─── Autocomplete state ───
