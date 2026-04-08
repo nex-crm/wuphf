@@ -2905,8 +2905,9 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	l.broker.ServeWebUI(webPort)
 
 	if l.usesCodexRuntime() {
+		// Set up headless codex context. Don't call launchHeadlessCodex() because
+		// it starts its own broker and notification loops — LaunchWeb handles those.
 		l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
-		l.launchHeadlessCodex()
 	} else {
 		l.spawnBackgroundAgents()
 	}
