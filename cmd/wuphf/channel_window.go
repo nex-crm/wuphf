@@ -248,7 +248,7 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 		if len(coloredNames) > 0 {
 			participantStr = "  " + strings.Join(coloredNames, ", ")
 		}
-		label := fmt.Sprintf("  ↩ %d repl%s%s", tm.HiddenReplies, pluralSuffix(tm.HiddenReplies), participantStr)
+		label := fmt.Sprintf("  ↩ %d %s%s", tm.HiddenReplies, pluralizeWord(tm.HiddenReplies, "reply", "replies"), participantStr)
 		lines = append(lines, renderedLine{Text: label, ThreadID: msg.ID})
 	}
 

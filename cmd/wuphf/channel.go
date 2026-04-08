@@ -3708,11 +3708,14 @@ func containsSlug(items []string, want string) bool {
 	return false
 }
 
-func pluralSuffix(n int) string {
-	if n == 1 {
-		return "y"
+func pluralizeWord(count int, singular, plural string) string {
+	if count == 1 {
+		return singular
 	}
-	return "ies"
+	if strings.TrimSpace(plural) != "" {
+		return plural
+	}
+	return singular + "s"
 }
 
 func maxInt(a, b int) int {

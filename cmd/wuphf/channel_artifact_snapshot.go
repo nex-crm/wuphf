@@ -153,7 +153,7 @@ func buildOrphanTaskLogRuntimeArtifact(artifact taskLogArtifact) team.RuntimeArt
 	}
 	reviewHint := ""
 	if artifact.EntryCount > 0 {
-		reviewHint = fmt.Sprintf("Retained %d log entr%s.", artifact.EntryCount, pluralSuffix(artifact.EntryCount))
+		reviewHint = fmt.Sprintf("Retained %d log %s.", artifact.EntryCount, pluralizeWord(artifact.EntryCount, "entry", "entries"))
 	}
 	return team.RuntimeArtifact{
 		ID:            strings.TrimSpace(artifact.TaskID),
@@ -285,7 +285,7 @@ func buildTaskArtifactReviewHint(task channelTask, logArtifact taskLogArtifact, 
 		parts = append(parts, "Review is the current pipeline state.")
 	}
 	if hasLog && logArtifact.EntryCount > 0 {
-		parts = append(parts, fmt.Sprintf("Retained %d log entr%s.", logArtifact.EntryCount, pluralSuffix(logArtifact.EntryCount)))
+		parts = append(parts, fmt.Sprintf("Retained %d log %s.", logArtifact.EntryCount, pluralizeWord(logArtifact.EntryCount, "entry", "entries")))
 	}
 	return strings.Join(parts, " · ")
 }
