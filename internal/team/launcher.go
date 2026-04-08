@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/action"
@@ -399,6 +400,7 @@ func (l *Launcher) notifyTaskActionsLoop() {
 	}
 }
 
+var agentLastNotifiedMu sync.Mutex
 var agentLastNotified = make(map[string]time.Time)
 
 const (
@@ -418,6 +420,7 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	}
 	now := time.Now()
 	filtered := make([]notificationTarget, 0, len(immediate))
+	agentLastNotifiedMu.Lock()
 	for _, t := range immediate {
 		if last, ok := agentLastNotified[t.Slug]; ok && now.Sub(last) < cooldown {
 			continue
@@ -425,6 +428,7 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 		agentLastNotified[t.Slug] = now
 		filtered = append(filtered, t)
 	}
+	agentLastNotifiedMu.Unlock()
 	immediate = filtered
 
 	// Broadcast stage update only for untagged messages in team mode
