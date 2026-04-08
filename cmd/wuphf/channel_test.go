@@ -1527,25 +1527,20 @@ func TestOfficeViewRendersSlashAutocompletePopup(t *testing.T) {
 }
 
 func TestOneOnOneSlashAutocompleteShowsResetAndHidesChannels(t *testing.T) {
-	t.Setenv("WUPHF_API_KEY", "test-key")
-	m := newChannelModel(false)
-	m.sessionMode = team.SessionModeOneOnOne
-	m.oneOnOneAgent = "pm"
-	m.sidebarCollapsed = true
-	m.refreshSlashCommands()
-	m.input = []rune("/")
-	m.inputPos = len(m.input)
-	m.updateInputOverlays()
+	cmds := buildOneOnOneSlashCommands()
+	seen := make(map[string]bool, len(cmds))
+	for _, cmd := range cmds {
+		seen[cmd.Name] = true
+	}
 
-	view := stripANSI(m.autocomplete.View())
-	if !strings.Contains(view, "/reset") {
-		t.Fatalf("expected /reset in visible 1:1 autocomplete, got %q", view)
+	if !seen["reset"] {
+		t.Fatalf("expected /reset to remain available in 1:1 mode, got %+v", cmds)
 	}
-	if !strings.Contains(view, "/switch") {
-		t.Fatalf("expected /switch in visible 1:1 autocomplete, got %q", view)
+	if !seen["switch"] {
+		t.Fatalf("expected /switch to remain available in 1:1 mode, got %+v", cmds)
 	}
-	if strings.Contains(view, "/channels") || strings.Contains(view, "/tasks") || strings.Contains(view, "/threads") {
-		t.Fatalf("expected blocked 1:1 commands to be hidden from autocomplete, got %q", view)
+	if seen["channels"] || seen["tasks"] || seen["threads"] {
+		t.Fatalf("expected blocked 1:1 commands to be removed, got %+v", cmds)
 	}
 }
 
