@@ -295,6 +295,18 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 /* ─── Composer context hint ─── */
 .composer-context-hint { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); font-style: italic; }
 
+/* ─── Nested thread replies ─── */
+.thread-reply-depth { border-left: 2px solid var(--border); }
+.thread-reply-parent-label { font-size: 10px; color: var(--text-tertiary); margin-bottom: 2px; font-style: italic; }
+
+/* ─── Inline thread expand ─── */
+.inline-thread-container { margin-left: 48px; padding: 4px 0 4px 12px; border-left: 2px solid var(--border-light); }
+.inline-thread-container .message { margin-bottom: 8px; }
+.inline-thread-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: transparent; font-family: var(--font-sans); padding: 2px 6px; border-radius: 4px; margin-top: 4px; }
+.inline-thread-toggle:hover { background: var(--accent-bg); }
+.inline-thread-toggle svg { transition: transform 0.2s; }
+.inline-thread-toggle.expanded svg { transform: rotate(90deg); }
+
 .message-system { text-align: center; padding: 8px 0; }
 .message-system-inner { display: flex; align-items: center; gap: 12px; padding: 0 20px; }
 .message-system-line { height: 1px; flex: 1; background: var(--border); }
@@ -580,6 +592,79 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .app-view-title { font-size: 16px; font-weight: 600; }
 .app-view-close { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); transition: all 0.15s; }
 .app-view-close:hover { background: var(--bg); color: var(--text); }
+
+/* ─── Policies Tabs ─── */
+.policy-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.policy-tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-secondary); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; font-family: var(--font-sans); }
+.policy-tab:hover { color: var(--text); }
+.policy-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.policy-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; display: flex; align-items: flex-start; gap: 12px; transition: all 0.15s; }
+.policy-item:hover { border-color: var(--border-dark); }
+.policy-item-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; background: var(--bg); }
+.policy-item-body { flex: 1; min-width: 0; }
+.policy-item-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.policy-item-summary { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.policy-item-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--text-tertiary); }
+.policy-status-pill { display: inline-flex; padding: 1px 6px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; }
+.policy-status-active { background: var(--green-bg); color: var(--green); }
+.policy-status-pending { background: var(--yellow-bg); color: var(--yellow); }
+.policy-status-fired { background: var(--red-bg); color: var(--red); }
+.policy-status-resolved { background: var(--bg); color: var(--text-tertiary); }
+
+/* ─── Skills View ─── */
+.skill-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; transition: all 0.15s; }
+.skill-card:hover { border-color: var(--border-dark); box-shadow: 0 2px 8px rgba(59,47,47,0.06); }
+.skill-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.skill-card-name { font-size: 14px; font-weight: 600; }
+.skill-card-trigger { font-family: var(--font-mono); font-size: 11px; color: var(--accent); background: var(--accent-bg); padding: 2px 6px; border-radius: 4px; }
+.skill-card-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px; }
+.skill-card-meta { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-tertiary); }
+.skill-card-stat { display: flex; align-items: center; gap: 4px; }
+
+/* ─── Splash Screen ─── */
+.splash-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 150; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px; }
+.splash-logo { font-family: var(--font-logo); font-style: italic; font-size: 72px; letter-spacing: -0.02em; opacity: 0; animation: splashFadeIn 0.6s ease-out 0.2s forwards; }
+.splash-team-count { font-size: 16px; color: var(--text-secondary); opacity: 0; animation: splashFadeIn 0.4s ease-out 0.6s forwards; }
+.splash-bar-track { width: 200px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; opacity: 0; animation: splashFadeIn 0.3s ease-out 0.8s forwards; }
+.splash-bar-fill { height: 100%; width: 0; background: var(--accent); border-radius: 2px; animation: splashBarFill 1.5s ease-in-out 1s forwards; }
+@keyframes splashFadeIn { to { opacity: 1; } }
+@keyframes splashBarFill { to { width: 100%; } }
+@keyframes splashFadeOut { to { opacity: 0; } }
+
+/* ─── Mood Indicator ─── */
+.mood-indicator { display: inline-flex; margin-left: 6px; font-size: 12px; opacity: 0.7; }
+
+/* ─── Agent Character Face ─── */
+.msg-agent-char { display: inline-flex; margin-right: 4px; font-size: 14px; }
+
+/* ─── A2UI Blocks ─── */
+.a2ui-block { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; margin-top: 8px; font-size: 13px; }
+.a2ui-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.a2ui-table th { text-align: left; font-weight: 600; padding: 6px 8px; border-bottom: 2px solid var(--border); color: var(--text); }
+.a2ui-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-light); color: var(--text-secondary); }
+.a2ui-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+.a2ui-kv-key { font-weight: 600; color: var(--text); font-size: 12px; }
+.a2ui-kv-val { color: var(--text-secondary); font-size: 12px; }
+.a2ui-progress { display: flex; align-items: center; gap: 8px; }
+.a2ui-progress-bar { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.a2ui-progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
+.a2ui-progress-label { font-size: 12px; font-weight: 600; color: var(--text); min-width: 36px; text-align: right; }
+.a2ui-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500; }
+.a2ui-status-ok { background: var(--green-bg); color: var(--green); }
+.a2ui-status-warn { background: var(--yellow-bg); color: var(--yellow); }
+.a2ui-status-error { background: var(--red-bg); color: var(--red); }
+.a2ui-status-info { background: var(--blue-bg); color: var(--blue); }
+
+/* ─── Pixel Art Avatar ─── */
+.pixel-avatar { image-rendering: pixelated; border-radius: 4px; }
+.pixel-avatar-sidebar { width: 24px; height: 24px; }
+.pixel-avatar-panel { width: 56px; height: 56px; }
+
+/* ─── Inbox/Outbox DM Lanes ─── */
+.dm-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; overflow: hidden; padding: 16px 20px; }
+.dm-lane { display: flex; flex-direction: column; overflow-y: auto; gap: 12px; }
+.dm-lane-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 6px; }
+.dm-lane-empty { text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px; }
 </style>
 </head>
 <body>
