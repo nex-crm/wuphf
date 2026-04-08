@@ -401,8 +401,6 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-card-routing-icon { font-size: 14px; flex-shrink: 0; }
 .message-card-routing-text { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
 /* ─── Thread expand/collapse toggle (#19) ─── */
-.thread-toggle-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-family: var(--font-sans); color: var(--text-tertiary); background: none; border: 1px solid var(--border); border-radius: var(--radius-full); padding: 2px 10px; cursor: pointer; transition: all 0.15s; margin-left: 8px; }
-.thread-toggle-btn:hover { border-color: var(--border-dark); color: var(--text-secondary); }
 /* ─── Thread reply-to indicator (#20) ─── */
 .thread-reply-to { font-size: 11px; color: var(--text-tertiary); font-style: italic; margin-bottom: 2px; }
 
@@ -942,7 +940,6 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <span class="channel-desc" id="channel-desc">The shared office channel</span>
         </div>
         <div class="channel-actions">
-          <button class="thread-toggle-btn" id="thread-toggle-btn" title="Toggle thread expand/collapse default">Collapse threads</button>
           <button class="sidebar-btn" title="Search">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
@@ -4965,18 +4962,7 @@ initApp();
 // ═══════════════════════════════════════════════════════════════
 //   WAVE 3 POLISH — Thread Toggle, Message Cards, Status Pills
 // ═══════════════════════════════════════════════════════════════
-var threadsDefaultExpand = localStorage.getItem('wuphf-threads-expand') !== 'false';
-(function initThreadToggle() {
-  var btn = document.getElementById('thread-toggle-btn');
-  if (!btn) return;
-  function updateLabel() { btn.textContent = threadsDefaultExpand ? 'Collapse threads' : 'Expand threads'; }
-  updateLabel();
-  btn.addEventListener('click', function() {
-    threadsDefaultExpand = !threadsDefaultExpand;
-    localStorage.setItem('wuphf-threads-expand', threadsDefaultExpand ? 'true' : 'false');
-    updateLabel();
-  });
-})();
+var threadsDefaultExpand = true;
 // ═══════════════════════════════════════════════════════════════
 //   PIXEL ART AVATARS (#25)
 // ═══════════════════════════════════════════════════════════════
