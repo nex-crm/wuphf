@@ -774,6 +774,8 @@ var currentChannel = 'general';
 var lastMessageId = null;
 var pollTimer = null;
 var requestPollTimer = null;
+var consecutiveFailures = 0;
+var DISCONNECT_THRESHOLD = 3;
 
 var AGENTS = [
   { slug: 'ceo',      emoji: '\uD83D\uDC54', name: 'CEO',               role: 'Strategy, delegation, goal tracking',           checked: true,  type: 'lead' },
@@ -1201,6 +1203,51 @@ function animateMessages() {
   setTimeout(showNext, 500);
 }
 
+// ─── Broker connection health ───
+function onBrokerSuccess() {
+  if (consecutiveFailures >= DISCONNECT_THRESHOLD) {
+    hideDisconnectBanner();
+  }
+  consecutiveFailures = 0;
+}
+
+function onBrokerFailure() {
+  consecutiveFailures++;
+  if (consecutiveFailures >= DISCONNECT_THRESHOLD) {
+    showDisconnectBanner();
+  }
+}
+
+function showDisconnectBanner() {
+  if (document.getElementById('disconnect-banner')) return;
+  var banner = document.createElement('div');
+  banner.id = 'disconnect-banner';
+  banner.style.cssText = 'padding:10px 20px;background:var(--red-bg);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;';
+
+  var text = document.createElement('span');
+  text.style.cssText = 'font-size:13px;color:var(--red);font-weight:500;';
+  text.textContent = 'Disconnected from office \u2014 broker is not responding';
+
+  var btn = document.createElement('button');
+  btn.className = 'btn btn-ghost btn-sm';
+  btn.textContent = 'Retry now';
+  btn.addEventListener('click', function() {
+    consecutiveFailures = 0;
+    hideDisconnectBanner();
+    fetchMessages();
+  });
+
+  banner.appendChild(text);
+  banner.appendChild(btn);
+  var channelHeader = document.querySelector('.channel-header');
+  channelHeader.parentNode.insertBefore(banner, channelHeader.nextSibling);
+}
+
+function hideDisconnectBanner() {
+  var banner = document.getElementById('disconnect-banner');
+  if (banner) banner.remove();
+}
+
 // ─── Live message polling ───
 function startMessagePolling() {
   fetchMessages();
@@ -1211,13 +1258,14 @@ function startMessagePolling() {
 function fetchMessages() {
   WuphfAPI.getMessages(currentChannel, lastMessageId)
     .then(function(data) {
+      onBrokerSuccess();
       var msgs = data.messages || [];
       msgs.forEach(function(msg) {
         appendBrokerMessage(msg);
         lastMessageId = msg.id;
       });
     })
-    .catch(function() {});
+    .catch(function() { onBrokerFailure(); });
 }
 
 function appendBrokerMessage(msg) {
@@ -1300,7 +1348,7 @@ function fetchRequests() {
     .then(function(data) {
       renderRequestBanner(data.pending);
     })
-    .catch(function() {});
+    .catch(function() {});  // failures tracked by fetchMessages
 }
 
 function renderRequestBanner(pending) {
