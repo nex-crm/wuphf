@@ -60,12 +60,8 @@ func (f InitFlowModel) IsActive() bool {
 
 // Start begins the init flow. API key → provider choice → pack choice → done.
 func (f InitFlowModel) Start() (InitFlowModel, tea.Cmd) {
-	cfg, _ := config.Load()
 	f.apiKey = strings.TrimSpace(config.ResolveAPIKey(""))
-	f.provider = strings.TrimSpace(cfg.LLMProvider)
-	if f.provider == "" {
-		f.provider = "claude-code"
-	}
+	f.provider = config.ResolveLLMProvider("")
 	if f.apiKey == "" {
 		f.phase = InitAPIKey
 		return f, f.emitPhase(InitAPIKey)
@@ -196,10 +192,6 @@ func ProviderOptions() []PickerOption {
 	options := []PickerOption{
 		{Label: "Claude Code (default)", Value: "claude-code", Description: claudeDesc},
 		{Label: "Codex CLI", Value: "codex", Description: codexDesc},
-		{Label: "Gemini", Value: "gemini", Description: "Google Gemini via API key"},
-	}
-	if !config.ResolveNoNex() {
-		options = append(options, PickerOption{Label: "Nex Ask", Value: "nex-ask", Description: "Nex hosted AI (uses WUPHF_API_KEY)"})
 	}
 	return options
 }

@@ -90,12 +90,8 @@ func cmdInit(ctx *SlashContext, args string) error {
 
 func cmdProvider(ctx *SlashContext, args string) error {
 	options := []PickerOption{
-		{Label: "Gemini", Value: "gemini", Description: "Google Gemini via API key"},
 		{Label: "Codex CLI", Value: "codex", Description: "Codex via codex CLI"},
 		{Label: "Claude Code", Value: "claude-code", Description: "Claude via claude-code CLI"},
-	}
-	if !config.ResolveNoNex() {
-		options = append(options, PickerOption{Label: "Nex Ask", Value: "nex-ask", Description: "Nex hosted AI"})
 	}
 	if ctx.ShowPicker != nil {
 		ctx.ShowPicker("Switch LLM Provider", options)

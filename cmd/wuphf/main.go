@@ -23,6 +23,7 @@ func main() {
 	apiKeyFlag := flag.String("api-key", "", "API key for authentication")
 	showVersion := flag.Bool("version", false, "Print version and exit")
 	packFlag := flag.String("pack", "", "Agent pack (founding-team, coding-team, lead-gen-agency)")
+	providerFlag := flag.String("provider", "", "LLM provider override for this run (claude-code, codex)")
 	oneOnOne := flag.Bool("1o1", false, "Launch a direct 1:1 session with a single agent (default ceo)")
 	channelView := flag.Bool("channel-view", false, "Run as channel view (internal)")
 	channelApp := flag.String("channel-app", "", "Start channel view on a specific app (internal)")
@@ -45,6 +46,15 @@ func main() {
 
 	if *noNex {
 		_ = os.Setenv("WUPHF_NO_NEX", "1")
+	}
+	if provider := strings.TrimSpace(*providerFlag); provider != "" {
+		switch provider {
+		case "claude-code", "codex":
+			_ = os.Setenv("WUPHF_LLM_PROVIDER", provider)
+		default:
+			fmt.Fprintf(os.Stderr, "error: unsupported provider %q (expected claude-code or codex)\n", provider)
+			os.Exit(1)
+		}
 	}
 
 	if *showVersion {

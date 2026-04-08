@@ -10,6 +10,8 @@ import (
 )
 
 func TestDetectRuntimeCapabilities(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_LLM_PROVIDER", "claude-code")
 	oldLookPath := lookPathFn
 	oldCommandOutput := commandCombinedOutputFn
 	oldActionProviderForCapability := actionProviderForCapabilityFn
@@ -79,6 +81,8 @@ func TestDetectRuntimeCapabilities(t *testing.T) {
 }
 
 func TestDetectRuntimeCapabilitiesWhenTmuxServerIsMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_LLM_PROVIDER", "claude-code")
 	oldLookPath := lookPathFn
 	oldCommandOutput := commandCombinedOutputFn
 	oldActionProviderForCapability := actionProviderForCapabilityFn

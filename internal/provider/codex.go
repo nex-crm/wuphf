@@ -1,12 +1,16 @@
 package provider
 
 import (
+	"bufio"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
 
 	"github.com/nex-crm/wuphf/internal/agent"
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 var (
@@ -64,56 +68,56 @@ func RunCodexOneShot(systemPrompt, prompt, cwd string) (string, error) {
 }
 
 func runCodexOnce(systemPrompt, prompt, cwd string) (string, error) {
-	outputFile, err := os.CreateTemp("", "wuphf-codex-*.txt")
-	if err != nil {
-		return "", fmt.Errorf("create codex output file: %w", err)
-	}
-	outputPath := outputFile.Name()
-	outputFile.Close()
-	defer os.Remove(outputPath)
-
-	args := buildCodexArgs(cwd, outputPath)
+	args := buildCodexArgs(cwd, config.ResolveCodexModel(cwd))
 	cmd := codexCommand("codex", args...)
 	cmd.Dir = cwd
 	cmd.Env = filteredEnv(nil)
 	cmd.Stdin = strings.NewReader(buildCodexPrompt(systemPrompt, prompt))
 
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("attach codex stdout: %w", err)
+	}
+
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 
-	if err := cmd.Run(); err != nil {
-		if content, readErr := os.ReadFile(outputPath); readErr == nil {
-			if text := strings.TrimSpace(string(content)); text != "" {
-				return text, nil
-			}
-		}
-		if stderrText := strings.TrimSpace(stderr.String()); stderrText != "" {
-			return "", fmt.Errorf("%w: %s", err, stderrText)
-		}
+	if err := cmd.Start(); err != nil {
 		return "", err
 	}
 
-	content, err := os.ReadFile(outputPath)
-	if err != nil {
-		return "", fmt.Errorf("read codex output: %w", err)
+	result, parseErr := readCodexJSONStream(stdout)
+	if err := cmd.Wait(); err != nil {
+		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
+		if detail != "" {
+			return "", fmt.Errorf("%w: %s", err, detail)
+		}
+		return "", err
 	}
-	text := strings.TrimSpace(string(content))
+	if parseErr != nil {
+		return "", parseErr
+	}
+	text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine))
 	if text == "" {
 		return "", fmt.Errorf("codex returned no final text")
 	}
 	return text, nil
 }
 
-func buildCodexArgs(cwd string, outputPath string) []string {
-	return []string{
-		"exec",
+func buildCodexArgs(cwd string, model string) []string {
+	args := []string{"exec"}
+	if strings.TrimSpace(model) != "" {
+		args = append(args, "--model", strings.TrimSpace(model))
+	}
+	args = append(args,
 		"-C", cwd,
 		"--skip-git-repo-check",
 		"--ephemeral",
 		"--color", "never",
-		"--output-last-message", outputPath,
+		"--json",
 		"-",
-	}
+	)
+	return args
 }
 
 func buildCodexPrompt(systemPrompt, prompt string) string {
@@ -133,4 +137,94 @@ func describeCodexFailure(err error) string {
 		return "Codex CLI requires login. Run `codex login` or use /provider to choose a different provider."
 	}
 	return fmt.Sprintf("codex exited with error: %v", err)
+}
+
+type codexJSONResult struct {
+	FinalMessage  string
+	LastPlainLine string
+	LastError     string
+}
+
+type codexJSONEvent struct {
+	Type    string `json:"type"`
+	Message string `json:"message,omitempty"`
+	Error   *struct {
+		Message string `json:"message,omitempty"`
+	} `json:"error,omitempty"`
+	Item *struct {
+		Type    string `json:"type,omitempty"`
+		Text    string `json:"text,omitempty"`
+		Content []struct {
+			Type string `json:"type,omitempty"`
+			Text string `json:"text,omitempty"`
+		} `json:"content,omitempty"`
+	} `json:"item,omitempty"`
+}
+
+func readCodexJSONStream(r io.Reader) (codexJSONResult, error) {
+	var result codexJSONResult
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var event codexJSONEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			result.LastPlainLine = line
+			continue
+		}
+		if text := strings.TrimSpace(extractCodexAgentMessage(event)); text != "" {
+			result.FinalMessage = text
+		}
+		if detail := strings.TrimSpace(extractCodexError(event)); detail != "" {
+			result.LastError = detail
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return result, fmt.Errorf("read codex json stream: %w", err)
+	}
+	return result, nil
+}
+
+func extractCodexAgentMessage(event codexJSONEvent) string {
+	if event.Type != "item.completed" || event.Item == nil || event.Item.Type != "agent_message" {
+		return ""
+	}
+	if text := strings.TrimSpace(event.Item.Text); text != "" {
+		return text
+	}
+	parts := make([]string, 0, len(event.Item.Content))
+	for _, item := range event.Item.Content {
+		if item.Type == "output_text" || item.Type == "text" {
+			if text := strings.TrimSpace(item.Text); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func extractCodexError(event codexJSONEvent) string {
+	switch event.Type {
+	case "error", "turn.failed":
+		if event.Error != nil && strings.TrimSpace(event.Error.Message) != "" {
+			return event.Error.Message
+		}
+		if strings.TrimSpace(event.Message) != "" {
+			return event.Message
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

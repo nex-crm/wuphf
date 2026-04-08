@@ -103,8 +103,9 @@ type Launcher struct {
 	headlessMu      sync.Mutex
 	headlessCtx     context.Context
 	headlessCancel  context.CancelFunc
-	headlessRunning map[string]bool
-	headlessPending map[string]string
+	headlessWorkers map[string]bool
+	headlessActive  map[string]*headlessCodexActiveTurn
+	headlessQueues  map[string][]headlessCodexTurn
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
@@ -143,9 +144,10 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		cwd:             cwd,
 		sessionMode:     sessionMode,
 		oneOnOne:        oneOnOne,
-		provider:        firstNonEmpty(strings.TrimSpace(cfg.LLMProvider), "claude-code"),
-		headlessRunning: make(map[string]bool),
-		headlessPending: make(map[string]string),
+		provider:        config.ResolveLLMProvider(""),
+		headlessWorkers: make(map[string]bool),
+		headlessActive:  make(map[string]*headlessCodexActiveTurn),
+		headlessQueues:  make(map[string][]headlessCodexTurn),
 	}, nil
 }
 
@@ -1953,6 +1955,13 @@ func (l *Launcher) ResetSession() error {
 
 func (l *Launcher) ReconfigureSession() error {
 	if l.usesCodexRuntime() {
+		if err := provider.ResetClaudeSessions(); err != nil {
+			return fmt.Errorf("reset Claude sessions: %w", err)
+		}
+		if err := l.clearAgentPanes(); err != nil {
+			return err
+		}
+		l.clearOverflowAgentWindows()
 		return nil
 	}
 	return l.reconfigureVisibleAgents()

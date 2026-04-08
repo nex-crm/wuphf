@@ -440,6 +440,7 @@ func newBrokerRequest(method, url string, body io.Reader) (*http.Request, error)
 
 var channelSlashCommands = []tui.SlashCommand{
 	{Name: "init", Description: "Run setup", Category: "setup"},
+	{Name: "provider", Description: "Switch LLM provider", Category: "setup"},
 	{Name: "doctor", Description: "Check readiness, integrations, and runtime health", Category: "setup"},
 	{Name: "integrate", Description: "Connect an integration", Category: "setup"},
 	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)", Category: "setup"},
@@ -509,6 +510,7 @@ const (
 	channelPickerNone           channelPickerMode = ""
 	channelPickerInitProvider   channelPickerMode = "init_provider"
 	channelPickerInitPack       channelPickerMode = "init_pack"
+	channelPickerProvider       channelPickerMode = "provider"
 	channelPickerIntegrations   channelPickerMode = "integrations"
 	channelPickerRequests       channelPickerMode = "requests"
 	channelPickerTasks          channelPickerMode = "tasks"
@@ -2072,6 +2074,11 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				delete(m.expandedThreads, msgID)
 			}
 			return m, nil
+		case channelPickerProvider:
+			m.picker.SetActive(false)
+			m.pickerMode = channelPickerNone
+			m.posting = true
+			return m, applyProviderSelection(msg.Value)
 		default:
 			m.picker.SetActive(false)
 			var cmd tea.Cmd
@@ -4880,6 +4887,13 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		var cmd tea.Cmd
 		m.initFlow, cmd = m.initFlow.Start()
 		return m, cmd
+	case trimmed == "/provider":
+		clearCurrent()
+		m.picker = tui.NewPicker("Switch LLM Provider", tui.ProviderOptions())
+		m.picker.SetActive(true)
+		m.pickerMode = channelPickerProvider
+		m.notice = "Choose an LLM provider."
+		return m, nil
 	case trimmed == "/cancel":
 		clearCurrent()
 		if m.replyToID != "" {
@@ -6197,7 +6211,7 @@ func applyTeamSetup() tea.Cmd {
 		if current := strings.TrimSpace(os.Getenv("WUPHF_HEADLESS_PROVIDER")); current != "" {
 			return channelInitDoneMsg{notice: notice + " Setup saved. Restart WUPHF to reload the " + current + " office runtime with the new configuration."}
 		}
-		if strings.TrimSpace(cfg.LLMProvider) == "codex" {
+		if config.ResolveLLMProvider("") == "codex" || strings.TrimSpace(cfg.LLMProvider) == "codex" {
 			return channelInitDoneMsg{notice: notice + " Codex was saved as the LLM provider. Restart WUPHF to launch the headless Codex office runtime."}
 		}
 		l, err := team.NewLauncher("")
@@ -6208,6 +6222,48 @@ func applyTeamSetup() tea.Cmd {
 			return channelInitDoneMsg{err: err}
 		}
 		return channelInitDoneMsg{notice: notice + " Setup applied. Team reloaded with the new configuration."}
+	}
+}
+
+func applyProviderSelection(providerName string) tea.Cmd {
+	return func() tea.Msg {
+		providerName = strings.TrimSpace(providerName)
+		if providerName == "" {
+			return channelInitDoneMsg{err: errors.New("choose a provider")}
+		}
+
+		cfg, _ := config.Load()
+		currentProvider := config.ResolveLLMProvider("")
+		cfg.LLMProvider = providerName
+		if err := config.Save(cfg); err != nil {
+			return channelInitDoneMsg{err: err}
+		}
+
+		if current := strings.TrimSpace(os.Getenv("WUPHF_HEADLESS_PROVIDER")); current != "" {
+			return channelInitDoneMsg{notice: "Provider switched to " + providerName + ". Restart WUPHF to reload the office runtime with the new configuration."}
+		}
+		if providerName == "codex" {
+			l, err := team.NewLauncher("")
+			if err != nil {
+				return channelInitDoneMsg{err: err}
+			}
+			if err := l.ReconfigureSession(); err != nil {
+				return channelInitDoneMsg{err: err}
+			}
+			return channelInitDoneMsg{notice: "Provider switched to codex. Claude teammate panes were stopped. Restart WUPHF to launch the headless Codex office runtime."}
+		}
+		if currentProvider == "codex" {
+			return channelInitDoneMsg{notice: "Provider switched to " + providerName + ". Restart WUPHF to reload the office runtime with the new configuration."}
+		}
+
+		l, err := team.NewLauncher("")
+		if err != nil {
+			return channelInitDoneMsg{err: err}
+		}
+		if err := l.ReconfigureSession(); err != nil {
+			return channelInitDoneMsg{err: err}
+		}
+		return channelInitDoneMsg{notice: "Provider switched to " + providerName + ". Team reloaded with the new configuration."}
 	}
 }
 

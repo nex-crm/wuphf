@@ -62,8 +62,7 @@ func NewModel(panesMode bool) Model {
 	rt := NewRuntime(events)
 
 	hasAPIKey := config.ResolveAPIKey("") != ""
-	cfg, _ := config.Load()
-	providerName := strings.TrimSpace(cfg.LLMProvider)
+	providerName := config.ResolveLLMProvider("")
 
 	m := Model{
 		runtime:     rt,
