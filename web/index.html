@@ -1339,6 +1339,13 @@ var WuphfAPI = (function() {
     return post('/messages/react', { message_id: msgId, emoji: emoji, channel: channel || 'general' });
   }
 
+  function getSignals() { return get('/signals'); }
+  function getDecisions() { return get('/decisions'); }
+  function getWatchdogs() { return get('/watchdogs'); }
+  function getActions() { return get('/actions'); }
+  function getScheduler() { return get('/scheduler'); }
+  function getSkills() { return get('/skills'); }
+
   return {
     init: init,
     get: get,
@@ -1352,7 +1359,13 @@ var WuphfAPI = (function() {
     getHealth: getHealth,
     getThreadMessages: getThreadMessages,
     getTasks: getTasks,
-    toggleReaction: toggleReaction
+    toggleReaction: toggleReaction,
+    getSignals: getSignals,
+    getDecisions: getDecisions,
+    getWatchdogs: getWatchdogs,
+    getActions: getActions,
+    getScheduler: getScheduler,
+    getSkills: getSkills
   };
 })();
 
@@ -2216,6 +2229,21 @@ function appendMessageToContainer(msg, container, opts) {
   msgDiv.className = 'message animate-fade' + (opts.grouped ? ' message-grouped' : '');
   msgDiv.dataset.msgId = msg.id;
 
+  // Depth-based indentation for nested thread replies (#17)
+  if (opts.depth && opts.depth > 0) {
+    msgDiv.classList.add('thread-reply-depth');
+    msgDiv.style.marginLeft = (opts.depth * 20) + 'px';
+  }
+
+  // Parent label for nested replies
+  if (opts.parentName) {
+    var parentLabel = document.createElement('div');
+    parentLabel.className = 'thread-reply-parent-label';
+    parentLabel.textContent = 'reply to @' + opts.parentName;
+    if (opts.depth && opts.depth > 0) parentLabel.style.marginLeft = (opts.depth * 20) + 'px';
+    container.appendChild(parentLabel);
+  }
+
   var agent = AGENTS.find(function(a) { return a.slug === msg.from; });
   var isHuman = msg.from === 'you' || msg.from === 'human';
 
@@ -2349,6 +2377,27 @@ function updateThreadLink(parentId) {
 }
 
 // ─── Thread panel ───
+// ─── Thread nesting helpers (#17) ───
+function calcReplyDepth(msg, threadRoot, maxDepth) {
+  maxDepth = maxDepth || 4;
+  if (!msg.reply_to || msg.reply_to === threadRoot) return 0;
+  var depth = 0;
+  var cur = msg;
+  while (cur.reply_to && cur.reply_to !== threadRoot && depth < maxDepth) {
+    depth++;
+    cur = allMessages[cur.reply_to] || {};
+  }
+  return depth;
+}
+
+function getReplyParentName(msg) {
+  if (!msg.reply_to) return null;
+  var parent = allMessages[msg.reply_to];
+  if (!parent) return null;
+  var agent = AGENTS.find(function(a) { return a.slug === parent.from; });
+  return agent ? agent.name : parent.from;
+}
+
 function openThread(msgId) {
   activeThreadId = msgId;
   closeAgentPanel();
@@ -2374,9 +2423,12 @@ function openThread(msgId) {
       var msgs = data.messages || [];
       var replies = msgs.filter(function(m) { return m.id !== msgId; });
       replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
+      // Store all for depth calc
+      replies.forEach(function(m) { allMessages[m.id] = m; });
       replies.forEach(function(m) {
-        allMessages[m.id] = m;
-        appendMessageToContainer(m, messagesContainer);
+        var depth = calcReplyDepth(m, msgId);
+        var parentName = depth > 0 ? getReplyParentName(m) : null;
+        appendMessageToContainer(m, messagesContainer, { depth: depth, parentName: parentName });
       });
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     });
@@ -2389,14 +2441,15 @@ function openThread(msgId) {
         var msgs = data.messages || [];
         var replies = msgs.filter(function(m) { return m.id !== msgId; });
         replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
-        // Only append new messages
         var existing = messagesContainer.querySelectorAll('[data-msg-id]');
         var existingIds = {};
         existing.forEach(function(el) { existingIds[el.dataset.msgId] = true; });
         replies.forEach(function(m) {
           if (!existingIds[m.id]) {
             allMessages[m.id] = m;
-            appendMessageToContainer(m, messagesContainer);
+            var depth = calcReplyDepth(m, msgId);
+            var parentName = depth > 0 ? getReplyParentName(m) : null;
+            appendMessageToContainer(m, messagesContainer, { depth: depth, parentName: parentName });
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
           }
         });
