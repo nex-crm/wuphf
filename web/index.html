@@ -272,6 +272,19 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-text strong { color: var(--text); font-weight: 600; }
 .message-text code { background: var(--bg-warm); border-radius: 4px; padding: 1px 5px; font-family: var(--font-mono); font-size: 12px; }
 
+/* ─── Markdown rendering ─── */
+.msg-h1 { font-size: 18px; font-weight: 700; color: var(--text); margin: 8px 0 4px; }
+.msg-h2 { font-size: 16px; font-weight: 600; color: var(--text); margin: 6px 0 3px; }
+.msg-h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 4px 0 2px; }
+.msg-blockquote { border-left: 3px solid var(--border-dark); padding: 2px 0 2px 12px; margin: 4px 0; color: var(--text-secondary); font-style: italic; }
+.msg-ul, .msg-ol { margin: 4px 0; padding-left: 24px; }
+.msg-ul li, .msg-ol li { margin: 2px 0; line-height: 1.6; }
+.msg-codeblock { background: var(--bg-warm); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin: 6px 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; white-space: pre; }
+.msg-codeblock code { background: none; border: none; padding: 0; font-size: inherit; }
+.msg-hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+.msg-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.msg-link:hover { color: var(--accent-warm); }
+
 .message-system { text-align: center; padding: 8px 0; }
 .message-system-inner { display: flex; align-items: center; gap: 12px; padding: 0 20px; }
 .message-system-line { height: 1px; flex: 1; background: var(--border); }
@@ -915,11 +928,107 @@ function escapeHtml(str) {
 
 // ─── Safe text formatting (only for trusted content) ───
 function formatTrusted(text) {
+  // Split out fenced code blocks first (``` ... ```)
+  var parts = text.split(/(```[\s\S]*?```)/g);
+  var out = [];
+  for (var pi = 0; pi < parts.length; pi++) {
+    var part = parts[pi];
+    if (part.indexOf('```') === 0 && part.lastIndexOf('```') > 2) {
+      // Fenced code block — strip the backtick fences, extract optional lang
+      var inner = part.slice(3, part.length - 3);
+      var nlIdx = inner.indexOf('\n');
+      var lang = '';
+      if (nlIdx !== -1) {
+        var firstLine = inner.substring(0, nlIdx).trim();
+        if (firstLine && /^[a-zA-Z0-9_+-]+$/.test(firstLine)) {
+          lang = firstLine;
+          inner = inner.substring(nlIdx + 1);
+        }
+      }
+      out.push('<pre class="msg-codeblock"' + (lang ? ' data-lang="' + lang + '"' : '') + '><code>' + escapeHtml(inner) + '</code></pre>');
+    } else {
+      out.push(formatTrustedInline(part));
+    }
+  }
+  return out.join('');
+}
+
+function formatTrustedInline(text) {
+  // Process line-by-line for block-level elements
+  var lines = text.split('\n');
+  var result = [];
+  var inList = false;    // 'ul' | 'ol' | false
+  var listType = '';
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // Horizontal rule: --- or *** or ___ (3+, alone on line)
+    if (/^(\s*[-*_]\s*){3,}$/.test(line)) {
+      if (inList) { result.push('</' + listType + '>'); inList = false; }
+      result.push('<hr class="msg-hr">');
+      continue;
+    }
+
+    // Headers: # ## ###
+    var headerMatch = line.match(/^(#{1,3})\s+(.+)$/);
+    if (headerMatch) {
+      if (inList) { result.push('</' + listType + '>'); inList = false; }
+      var level = headerMatch[1].length;
+      result.push('<h' + (level + 2) + ' class="msg-h' + level + '">' + inlineFormat(headerMatch[2]) + '</h' + (level + 2) + '>');
+      continue;
+    }
+
+    // Blockquote: > text
+    var bqMatch = line.match(/^>\s?(.*)$/);
+    if (bqMatch) {
+      if (inList) { result.push('</' + listType + '>'); inList = false; }
+      result.push('<blockquote class="msg-blockquote">' + inlineFormat(bqMatch[1]) + '</blockquote>');
+      continue;
+    }
+
+    // Unordered list: - item or * item
+    var ulMatch = line.match(/^[\s]*[-*]\s+(.+)$/);
+    if (ulMatch) {
+      if (inList && listType !== 'ul') { result.push('</' + listType + '>'); inList = false; }
+      if (!inList) { result.push('<ul class="msg-ul">'); inList = true; listType = 'ul'; }
+      result.push('<li>' + inlineFormat(ulMatch[1]) + '</li>');
+      continue;
+    }
+
+    // Ordered list: 1. item
+    var olMatch = line.match(/^[\s]*\d+\.\s+(.+)$/);
+    if (olMatch) {
+      if (inList && listType !== 'ol') { result.push('</' + listType + '>'); inList = false; }
+      if (!inList) { result.push('<ol class="msg-ol">'); inList = true; listType = 'ol'; }
+      result.push('<li>' + inlineFormat(olMatch[1]) + '</li>');
+      continue;
+    }
+
+    // Regular line — close any open list
+    if (inList && line.trim() === '') { result.push('</' + listType + '>'); inList = false; }
+
+    // Non-empty regular line
+    if (line.trim() !== '') {
+      result.push(inlineFormat(line) + '<br>');
+    } else if (!inList) {
+      result.push('<br>');
+    }
+  }
+  if (inList) result.push('</' + listType + '>');
+
+  // Trim trailing <br>
+  var joined = result.join('');
+  if (joined.slice(-4) === '<br>') joined = joined.slice(0, -4);
+  return joined;
+}
+
+function inlineFormat(text) {
   return text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.*?)`/g, '<code>$1</code>')
     .replace(/@(\w+)/g, '<span class="mention">@$1</span>')
-    .replace(/\n/g, '<br>');
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="msg-link">$1</a>');
 }
 
 // ─── Date separator helpers ───
