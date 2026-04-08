@@ -8,11 +8,11 @@ landed the remaining major CC-agent-inspired roadmap slices.
 
 Reference planning docs:
 
-- [cc-agent-deep-analysis.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-deep-analysis.md)
-- [cc-agent-implementation-roadmap.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-implementation-roadmap.md)
-- [cc-agent-phase1-execution-plan.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-phase1-execution-plan.md)
-- [cc-agent-phase2-execution-plan.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-phase2-execution-plan.md)
-- [cc-agent-phase3-execution-plan.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-phase3-execution-plan.md)
+- [cc-agent-deep-analysis.md](./cc-agent-deep-analysis.md)
+- [cc-agent-implementation-roadmap.md](./cc-agent-implementation-roadmap.md)
+- [cc-agent-phase1-execution-plan.md](./cc-agent-phase1-execution-plan.md)
+- [cc-agent-phase2-execution-plan.md](./cc-agent-phase2-execution-plan.md)
+- [cc-agent-phase3-execution-plan.md](./cc-agent-phase3-execution-plan.md)
 
 ## Current Read
 
@@ -36,27 +36,27 @@ gap.
 
 | Phase | Planned branch | Status | Evidence |
 | --- | --- | --- | --- |
-| 1 | `feat/context-aware-keybindings` | Implemented | [interaction.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/interaction.go), [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go), [channel_context.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_context.go) |
-| 1 | `feat/contextual-footer-hints` | Implemented | [channel_composer.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_composer.go), [channel_context.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_context.go) |
-| 1 | `feat/draft-safe-history` | Implemented | [channel_history.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_history.go) |
-| 1 | `feat/interaction-primitives` | Implemented | [channel_confirm.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_confirm.go), [interaction.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/interaction.go) |
-| 1 | `feat/runtime-change-confirmations` | Implemented | [channel_confirm.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_confirm.go), [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go) |
-| 1 | `feat/safety-dialogs` | Implemented | [channel_confirm.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_confirm.go) |
-| 2 | `feat/structured-human-interviews` | Implemented | [channel_interview.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_interview.go), [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go) |
-| 2 | `feat/approval-steering` | Implemented | [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go), [server.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/server.go) |
-| 2 | `feat/agent-office-switcher` | Implemented | [channel_switcher.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_switcher.go) |
-| 2 | `feat/unread-navigation-semantics` | Implemented | [channel_unread.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_unread.go), [channel_window.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_window.go) |
-| 2 | `feat/transcript-recovery` | Implemented | [channel_recovery.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_recovery.go) |
-| 2 | `feat/away-summaries` | Implemented | [channel_recovery.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_recovery.go), [channel_unread.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_unread.go) |
-| 2 | `feat/in-channel-readiness` | Implemented | [channel_doctor.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_doctor.go), [channel_workspace_state.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_workspace_state.go) |
-| 2 | `feat/insert-search-surfaces` | Implemented | [channel_insert_search.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_insert_search.go) |
-| 3 | `feat/runtime-state-model` | Implemented | [runtime_state.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/runtime_state.go), [channel_workspace_state.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_workspace_state.go) |
-| 3 | `feat/per-agent-transcript-inbox` | Implemented | [channel_mailboxes.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_mailboxes.go), [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go), [server.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/server.go) |
-| 3 | `feat/execution-artifacts` | Implemented | [runtime_artifacts.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/runtime_artifacts.go), [channel_artifacts.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_artifacts.go) |
-| 3 | `feat/session-memory` | Implemented | [session_memory.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/session_memory.go), [session_memory_snapshot.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/session_memory_snapshot.go) |
-| 3 | `feat/history-virtualization` | Implemented | [channel_viewport_virtual.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_viewport_virtual.go), [channel_window.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_window.go) |
-| 3 | `feat/tmux-capability-layer` | Implemented | [capabilities.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/capabilities.go), [channel_doctor.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_doctor.go) |
-| 3 | `feat/capability-registry` | Implemented | [capability_registry.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/capability_registry.go) |
+| 1 | `feat/context-aware-keybindings` | Implemented | [interaction.go](../internal/tui/interaction.go), [channel.go](../cmd/wuphf/channel.go), [channel_context.go](../cmd/wuphf/channel_context.go) |
+| 1 | `feat/contextual-footer-hints` | Implemented | [channel_composer.go](../cmd/wuphf/channel_composer.go), [channel_context.go](../cmd/wuphf/channel_context.go) |
+| 1 | `feat/draft-safe-history` | Implemented | [channel_history.go](../cmd/wuphf/channel_history.go) |
+| 1 | `feat/interaction-primitives` | Implemented | [channel_confirm.go](../cmd/wuphf/channel_confirm.go), [interaction.go](../internal/tui/interaction.go) |
+| 1 | `feat/runtime-change-confirmations` | Implemented | [channel_confirm.go](../cmd/wuphf/channel_confirm.go), [channel.go](../cmd/wuphf/channel.go) |
+| 1 | `feat/safety-dialogs` | Implemented | [channel_confirm.go](../cmd/wuphf/channel_confirm.go) |
+| 2 | `feat/structured-human-interviews` | Implemented | [channel_interview.go](../cmd/wuphf/channel_interview.go), [broker.go](../internal/team/broker.go) |
+| 2 | `feat/approval-steering` | Implemented | [broker.go](../internal/team/broker.go), [server.go](../internal/teammcp/server.go) |
+| 2 | `feat/agent-office-switcher` | Implemented | [channel_switcher.go](../cmd/wuphf/channel_switcher.go) |
+| 2 | `feat/unread-navigation-semantics` | Implemented | [channel_unread.go](../cmd/wuphf/channel_unread.go), [channel_window.go](../cmd/wuphf/channel_window.go) |
+| 2 | `feat/transcript-recovery` | Implemented | [channel_recovery.go](../cmd/wuphf/channel_recovery.go) |
+| 2 | `feat/away-summaries` | Implemented | [channel_recovery.go](../cmd/wuphf/channel_recovery.go), [channel_unread.go](../cmd/wuphf/channel_unread.go) |
+| 2 | `feat/in-channel-readiness` | Implemented | [channel_doctor.go](../cmd/wuphf/channel_doctor.go), [channel_workspace_state.go](../cmd/wuphf/channel_workspace_state.go) |
+| 2 | `feat/insert-search-surfaces` | Implemented | [channel_insert_search.go](../cmd/wuphf/channel_insert_search.go) |
+| 3 | `feat/runtime-state-model` | Implemented | [runtime_state.go](../internal/team/runtime_state.go), [channel_workspace_state.go](../cmd/wuphf/channel_workspace_state.go) |
+| 3 | `feat/per-agent-transcript-inbox` | Implemented | [channel_mailboxes.go](../cmd/wuphf/channel_mailboxes.go), [broker.go](../internal/team/broker.go), [server.go](../internal/teammcp/server.go) |
+| 3 | `feat/execution-artifacts` | Implemented | [runtime_artifacts.go](../internal/team/runtime_artifacts.go), [channel_artifacts.go](../cmd/wuphf/channel_artifacts.go) |
+| 3 | `feat/session-memory` | Implemented | [session_memory.go](../internal/team/session_memory.go), [session_memory_snapshot.go](../internal/team/session_memory_snapshot.go) |
+| 3 | `feat/history-virtualization` | Implemented | [channel_viewport_virtual.go](../cmd/wuphf/channel_viewport_virtual.go), [channel_window.go](../cmd/wuphf/channel_window.go) |
+| 3 | `feat/tmux-capability-layer` | Implemented | [capabilities.go](../internal/team/capabilities.go), [channel_doctor.go](../cmd/wuphf/channel_doctor.go) |
+| 3 | `feat/capability-registry` | Implemented | [capability_registry.go](../internal/team/capability_registry.go) |
 
 ## What Remains
 

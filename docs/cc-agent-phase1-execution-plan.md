@@ -6,7 +6,7 @@ This is the implementation-ready plan for Phase 1 of the CC-agent-inspired WUPHF
 
 It is narrower than the full roadmap in:
 
-- [cc-agent-implementation-roadmap.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-implementation-roadmap.md)
+- [cc-agent-implementation-roadmap.md](./cc-agent-implementation-roadmap.md)
 
 This doc answers:
 
@@ -21,9 +21,9 @@ Phase 1 mostly touches these existing codepaths:
 
 ### Channel and composer runtime
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_composer.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_composer.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_composer.go](../cmd/wuphf/channel_composer.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 What lives there today:
 
@@ -42,8 +42,8 @@ Important constraint:
 
 ### Autocomplete
 
-- [autocomplete.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete.go)
-- [autocomplete_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete_test.go)
+- [autocomplete.go](../internal/tui/autocomplete.go)
+- [autocomplete_test.go](../internal/tui/autocomplete_test.go)
 
 What lives there today:
 
@@ -54,8 +54,8 @@ What lives there today:
 
 ### Existing UAT coverage
 
-- [office-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/office-channel-e2e.sh)
-- [one-on-one-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/one-on-one-channel-e2e.sh)
+- [office-channel-e2e.sh](../tests/uat/office-channel-e2e.sh)
+- [one-on-one-channel-e2e.sh](../tests/uat/one-on-one-channel-e2e.sh)
 
 What they already prove:
 
@@ -106,13 +106,13 @@ Introduce an explicit interaction-context model for keyboard handling so overlay
 
 ### Likely Files
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_composer.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_composer.go)
-- [autocomplete.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_composer.go](../cmd/wuphf/channel_composer.go)
+- [autocomplete.go](../internal/tui/autocomplete.go)
 - likely new helper:
-  - `[internal/tui/keymap.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/keymap.go)` or similar
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
-- [autocomplete_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete_test.go)
+  - `[internal/tui/keymap.go](../internal/tui/keymap.go)` or similar
+- [channel_test.go](../cmd/wuphf/channel_test.go)
+- [autocomplete_test.go](../internal/tui/autocomplete_test.go)
 
 ### Suggested Implementation Shape
 
@@ -157,13 +157,13 @@ Make composer help and slash guidance more truthful, more contextual, and less s
 
 ### Likely Files
 
-- [channel_composer.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_composer.go)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [autocomplete.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
-- [autocomplete_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/autocomplete_test.go)
-- [office-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/office-channel-e2e.sh)
-- [one-on-one-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/one-on-one-channel-e2e.sh)
+- [channel_composer.go](../cmd/wuphf/channel_composer.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [autocomplete.go](../internal/tui/autocomplete.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
+- [autocomplete_test.go](../internal/tui/autocomplete_test.go)
+- [office-channel-e2e.sh](../tests/uat/office-channel-e2e.sh)
+- [one-on-one-channel-e2e.sh](../tests/uat/one-on-one-channel-e2e.sh)
 
 ### Suggested Implementation Shape
 
@@ -206,14 +206,14 @@ Protect unfinished operator input during history and recall.
 
 ### Likely Files
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
+- [channel.go](../cmd/wuphf/channel.go)
 - new helper likely:
-  - `[channel_history.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_history.go)` or similar
-- [channel_composer.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_composer.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+  - `[channel_history.go](../cmd/wuphf/channel_history.go)` or similar
+- [channel_composer.go](../cmd/wuphf/channel_composer.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 - new UAT additions in:
-  - [office-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/office-channel-e2e.sh)
-  - [one-on-one-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/one-on-one-channel-e2e.sh)
+  - [office-channel-e2e.sh](../tests/uat/office-channel-e2e.sh)
+  - [one-on-one-channel-e2e.sh](../tests/uat/one-on-one-channel-e2e.sh)
 
 ### Suggested Implementation Shape
 
@@ -261,10 +261,10 @@ Create small reusable primitives for confirmation, continue, and pending states 
 ### Likely Files
 
 - new helpers likely in:
-  - [internal/tui](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui)
-  - or small focused files under [cmd/wuphf](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+  - [internal/tui](../internal/tui)
+  - or small focused files under [cmd/wuphf](../cmd/wuphf)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 ### Suggested Implementation Shape
 
@@ -306,11 +306,11 @@ Highest-value candidates in current WUPHF:
 
 ### Likely Files
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
+- [channel.go](../cmd/wuphf/channel.go)
 - new small dialog/helper file likely:
-  - `[channel_confirm.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_confirm.go)` or similar
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
-- [one-on-one-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/one-on-one-channel-e2e.sh)
+  - `[channel_confirm.go](../cmd/wuphf/channel_confirm.go)` or similar
+- [channel_test.go](../cmd/wuphf/channel_test.go)
+- [one-on-one-channel-e2e.sh](../tests/uat/one-on-one-channel-e2e.sh)
 
 ### Suggested Implementation Shape
 
@@ -352,13 +352,13 @@ First candidates in current WUPHF:
 
 ### Likely Files
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
+- [channel.go](../cmd/wuphf/channel.go)
 - likely new helper:
-  - `[channel_dialogs.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_dialogs.go)` or similar
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+  - `[channel_dialogs.go](../cmd/wuphf/channel_dialogs.go)` or similar
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 - relevant UATs:
-  - [office-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/office-channel-e2e.sh)
-  - [one-on-one-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/one-on-one-channel-e2e.sh)
+  - [office-channel-e2e.sh](../tests/uat/office-channel-e2e.sh)
+  - [one-on-one-channel-e2e.sh](../tests/uat/one-on-one-channel-e2e.sh)
 
 ### Suggested Implementation Shape
 

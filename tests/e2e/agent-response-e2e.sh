@@ -2,9 +2,14 @@
 # E2E test: verify agents actually respond to messages
 # Tests message delivery → agent processing → response appears in channel
 
-TERMWRIGHT="/Users/najmuzzaman/.cargo/bin/termwright"
-WUPHF="/Users/najmuzzaman/Documents/nex/wuphf/wuphf"
-ARTIFACTS="/Users/najmuzzaman/Documents/nex/wuphf/termwright-artifacts/agent-response-$(date +%Y%m%d-%H%M%S)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+TERMWRIGHT="${TERMWRIGHT:-$(command -v termwright || true)}"
+if [ -z "$TERMWRIGHT" ]; then
+  echo "termwright not found in PATH; set TERMWRIGHT=/abs/path/to/termwright" >&2
+  exit 1
+fi
+WUPHF="${WUPHF_BIN:-$REPO_ROOT/wuphf}"
+ARTIFACTS="${ARTIFACTS:-$REPO_ROOT/termwright-artifacts/agent-response-$(date +%Y%m%d-%H%M%S)}"
 mkdir -p "$ARTIFACTS"
 
 SOCKET="/tmp/wuphf-agent-resp-$$.sock"

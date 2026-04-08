@@ -6,7 +6,7 @@ This is the implementation-ready plan for Phase 3 of the CC-agent-inspired WUPHF
 
 It corresponds to the `Deep Architectural Polish` portion of:
 
-- [cc-agent-implementation-roadmap.md](/Users/najmuzzaman/Documents/nex/WUPHF/docs/cc-agent-implementation-roadmap.md)
+- [cc-agent-implementation-roadmap.md](./cc-agent-implementation-roadmap.md)
 
 This doc answers:
 
@@ -21,13 +21,13 @@ Phase 3 is where the durable substrate work happens.
 
 ### Runtime, office, and retained state
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [ledger.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/ledger.go)
-- [launcher.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/launcher.go)
-- [scheduler_runtime.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/scheduler_runtime.go)
-- [session_mode.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/session_mode.go)
-- [broker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker_test.go)
-- [launcher_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/launcher_test.go)
+- [broker.go](../internal/team/broker.go)
+- [ledger.go](../internal/team/ledger.go)
+- [launcher.go](../internal/team/launcher.go)
+- [scheduler_runtime.go](../internal/team/scheduler_runtime.go)
+- [session_mode.go](../internal/team/session_mode.go)
+- [broker_test.go](../internal/team/broker_test.go)
+- [launcher_test.go](../internal/team/launcher_test.go)
 
 What lives there today:
 
@@ -39,11 +39,11 @@ What lives there today:
 
 ### Channel rendering and state consumption
 
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
-- [channel_layout.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_layout.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
+- [channel_layout.go](../cmd/wuphf/channel_layout.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 What lives there today:
 
@@ -54,12 +54,12 @@ What lives there today:
 
 ### Action/workflow/provider substrate
 
-- [types.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/action/types.go)
-- [registry.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/action/registry.go)
-- [composio.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/action/composio.go)
-- [composio_workflows.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/action/composio_workflows.go)
-- [workflow_store.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/action/workflow_store.go)
-- [actions.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/actions.go)
+- [types.go](../internal/action/types.go)
+- [registry.go](../internal/action/registry.go)
+- [composio.go](../internal/action/composio.go)
+- [composio_workflows.go](../internal/action/composio_workflows.go)
+- [workflow_store.go](../internal/action/workflow_store.go)
+- [actions.go](../internal/teammcp/actions.go)
 
 What lives there today:
 
@@ -70,10 +70,10 @@ What lives there today:
 
 ### Existing UAT coverage
 
-- [office-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/office-channel-e2e.sh)
-- [one-on-one-channel-e2e.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/one-on-one-channel-e2e.sh)
-- [autonomy-acceptance.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/autonomy-acceptance.sh)
-- [comprehensive-uat.sh](/Users/najmuzzaman/Documents/nex/WUPHF/tests/uat/comprehensive-uat.sh)
+- [office-channel-e2e.sh](../tests/uat/office-channel-e2e.sh)
+- [one-on-one-channel-e2e.sh](../tests/uat/one-on-one-channel-e2e.sh)
+- [autonomy-acceptance.sh](../tests/uat/autonomy-acceptance.sh)
+- [comprehensive-uat.sh](../tests/uat/comprehensive-uat.sh)
 
 ## Recommended Phase 3 Branch Order
 
@@ -116,14 +116,14 @@ Create one normalized UI-facing runtime state model for agents, jobs, readiness,
 
 ### Likely Files
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [launcher.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/launcher.go)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
+- [broker.go](../internal/team/broker.go)
+- [launcher.go](../internal/team/launcher.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
 - likely new helper/module:
-  - `[internal/tui/runtime_state.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/runtime_state.go)` or similar
-- [broker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker_test.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+  - `[internal/tui/runtime_state.go](../internal/tui/runtime_state.go)` or similar
+- [broker_test.go](../internal/team/broker_test.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 ### Termwright Scenarios
 
@@ -150,13 +150,13 @@ Give each agent/task its own transcript scope and first-class inbox/outbox model
 
 ### Likely Files
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [launcher.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/launcher.go)
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
-- [channel_thread.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_thread.go)
-- [channel_sidebar.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_sidebar.go)
-- [broker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker_test.go)
-- [launcher_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/launcher_test.go)
+- [broker.go](../internal/team/broker.go)
+- [launcher.go](../internal/team/launcher.go)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
+- [channel_thread.go](../cmd/wuphf/channel_thread.go)
+- [channel_sidebar.go](../cmd/wuphf/channel_sidebar.go)
+- [broker_test.go](../internal/team/broker_test.go)
+- [launcher_test.go](../internal/team/launcher_test.go)
 
 ### Termwright Scenarios
 
@@ -192,13 +192,13 @@ Turn tasks, workflows, approvals, and external actions into retained execution a
 
 ### Likely Files
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [ledger.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/ledger.go)
-- [scheduler_runtime.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/scheduler_runtime.go)
-- [actions.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/actions.go)
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
-- [broker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker_test.go)
-- [actions_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/actions_test.go)
+- [broker.go](../internal/team/broker.go)
+- [ledger.go](../internal/team/ledger.go)
+- [scheduler_runtime.go](../internal/team/scheduler_runtime.go)
+- [actions.go](../internal/teammcp/actions.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
+- [broker_test.go](../internal/team/broker_test.go)
+- [actions_test.go](../internal/teammcp/actions_test.go)
 
 ### Termwright Scenarios
 
@@ -228,12 +228,12 @@ Add session-operational memory and transcript compaction distinct from Nex organ
 
 ### Likely Files
 
-- [broker.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker.go)
-- [ledger.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/ledger.go)
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
+- [broker.go](../internal/team/broker.go)
+- [ledger.go](../internal/team/ledger.go)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
 - likely new package/module:
-  - `[internal/team/session_memory.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/session_memory.go)` or similar
-- [broker_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/broker_test.go)
+  - `[internal/team/session_memory.go](../internal/team/session_memory.go)` or similar
+- [broker_test.go](../internal/team/broker_test.go)
 
 ### Termwright Scenarios
 
@@ -260,11 +260,11 @@ Scale long transcript rendering beyond cache-only optimization.
 
 ### Likely Files
 
-- [channel_render.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_render.go)
-- [channel_layout.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_layout.go)
-- [channel_messages.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_messages.go)
-- [channel.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel.go)
-- [channel_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/cmd/wuphf/channel_test.go)
+- [channel_render.go](../cmd/wuphf/channel_render.go)
+- [channel_layout.go](../cmd/wuphf/channel_layout.go)
+- [channel_messages.go](../cmd/wuphf/channel_messages.go)
+- [channel.go](../cmd/wuphf/channel.go)
+- [channel_test.go](../cmd/wuphf/channel_test.go)
 
 ### Termwright Scenarios
 
@@ -296,13 +296,13 @@ Centralize tmux/screen-specific clipboard, notification, status, and redraw beha
 
 ### Likely Files
 
-- [launcher.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/launcher.go)
-- [tmux_manager.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/tmux_manager.go)
-- [statusbar.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/statusbar.go)
+- [launcher.go](../internal/team/launcher.go)
+- [tmux_manager.go](../internal/tui/tmux_manager.go)
+- [statusbar.go](../internal/tui/statusbar.go)
 - likely new helper/module:
-  - `[internal/tui/termcaps.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/termcaps.go)` or similar
-- [tmux_manager_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/tui/tmux_manager_test.go)
-- [launcher_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/team/launcher_test.go)
+  - `[internal/tui/termcaps.go](../internal/tui/termcaps.go)` or similar
+- [tmux_manager_test.go](../internal/tui/tmux_manager_test.go)
+- [launcher_test.go](../internal/team/launcher_test.go)
 
 ### Termwright Scenarios
 
@@ -337,14 +337,14 @@ Centralize capability assembly for tools, actions, workflows, skills, and future
 
 ### Likely Files
 
-- [server.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/server.go)
-- [actions.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/actions.go)
-- [registry.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/action/registry.go)
-- [types.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/action/types.go)
+- [server.go](../internal/teammcp/server.go)
+- [actions.go](../internal/teammcp/actions.go)
+- [registry.go](../internal/action/registry.go)
+- [types.go](../internal/action/types.go)
 - likely new helper/module:
-  - `[internal/capabilities](/Users/najmuzzaman/Documents/nex/WUPHF/internal/capabilities)` or similar
-- [server_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/server_test.go)
-- [actions_test.go](/Users/najmuzzaman/Documents/nex/WUPHF/internal/teammcp/actions_test.go)
+  - `[internal/capabilities](../internal/capabilities)` or similar
+- [server_test.go](../internal/teammcp/server_test.go)
+- [actions_test.go](../internal/teammcp/actions_test.go)
 
 ### Termwright Scenarios
 

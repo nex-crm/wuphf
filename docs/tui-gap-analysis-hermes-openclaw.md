@@ -2,9 +2,7 @@
 
 ## Context
 
-This analysis is grounded in the actual WUPHF repo at:
-
-- `/Users/najmuzzaman/Documents/nex/WUPHF`
+This analysis is grounded in the actual WUPHF repo root.
 
 It replaces an earlier incorrect pass that was done in the wrong neighboring repo.
 
