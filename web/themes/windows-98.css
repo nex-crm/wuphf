@@ -1,0 +1,346 @@
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Theme: Windows 98
+   Silver/teal window chrome, 3D beveled borders, system font,
+   Start menu sidebar, taskbar, sunken inputs. Classic.
+   ═══════════════════════════════════════════════════════════════ */
+
+html[data-theme="windows-98"] {
+  --bg:             #008080;
+  --bg-warm:        #C0C0C0;
+  --bg-card:        #C0C0C0;
+  --text:           #000000;
+  --text-secondary: #222222;
+  --text-tertiary:  #555555;
+  --accent:         #000080;
+  --accent-warm:    #000060;
+  --accent-bg:      #C0C0C0;
+  --border:         #808080;
+  --border-light:   #DFDFDF;
+  --border-dark:    #404040;
+  --green:          #008000;
+  --green-bg:       #C0C0C0;
+  --red:            #FF0000;
+  --yellow:         #808000;
+  --yellow-bg:      #FFFFE0;
+  --font-sans:  'Tahoma', 'MS Sans Serif', 'Arial', sans-serif;
+  --font-serif: 'Tahoma', 'MS Sans Serif', sans-serif;
+  --font-logo:  'Tahoma', 'MS Sans Serif', sans-serif;
+  --font-mono:  'Fixedsys', 'Courier New', monospace;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-full: 0px;
+}
+
+/* Desktop */
+html[data-theme="windows-98"] body {
+  background: #008080;
+  font-family: Tahoma, 'MS Sans Serif', Arial, sans-serif;
+  font-size: 11px;
+}
+
+/* Window frame for the entire office */
+html[data-theme="windows-98"] .office {
+  border: 2px solid;
+  border-color: #DFDFDF #404040 #404040 #DFDFDF;
+  margin: 4px;
+  height: calc(100vh - 8px) !important;
+}
+
+/* Sidebar as Explorer/Start panel */
+html[data-theme="windows-98"] .sidebar {
+  background: #C0C0C0;
+  border-right: 2px solid;
+  border-right-color: #808080;
+  width: 220px !important;
+}
+html[data-theme="windows-98"] .sidebar-header {
+  background: linear-gradient(90deg, #000080 0%, #1084D0 100%);
+  border-bottom: 2px solid;
+  border-bottom-color: #808080;
+  padding: 4px 8px !important;
+}
+html[data-theme="windows-98"] .sidebar-logo {
+  font-family: Tahoma, sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  color: #FFFFFF !important;
+  font-style: normal !important;
+  text-shadow: 1px 1px 0 #000080;
+}
+html[data-theme="windows-98"] .sidebar-section-title {
+  color: #000000 !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  border-bottom: 1px solid #808080;
+  padding-bottom: 2px !important;
+}
+html[data-theme="windows-98"] .sidebar-item,
+html[data-theme="windows-98"] .sidebar-agent {
+  color: #000000 !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  padding: 2px 4px !important;
+}
+html[data-theme="windows-98"] .sidebar-item:hover,
+html[data-theme="windows-98"] .sidebar-agent:hover {
+  background: #000080 !important;
+  color: #FFFFFF !important;
+}
+html[data-theme="windows-98"] .sidebar-item.active {
+  background: #000080 !important;
+  color: #FFFFFF !important;
+}
+
+/* Status dot as old-school indicator */
+html[data-theme="windows-98"] .status-dot.active {
+  background: #00FF00 !important;
+  border: 1px solid #008000;
+  box-shadow: none !important;
+  animation: none !important;
+}
+
+html[data-theme="windows-98"] .sidebar-bottom {
+  background: #C0C0C0;
+  border-top: 2px solid;
+  border-top-color: #DFDFDF #404040 #404040 #DFDFDF;
+}
+html[data-theme="windows-98"] .sidebar-btn {
+  color: #000000 !important;
+  border: 2px solid;
+  border-color: #DFDFDF #404040 #404040 #DFDFDF;
+  background: #C0C0C0 !important;
+}
+html[data-theme="windows-98"] .sidebar-btn:hover {
+  border-color: #404040 #DFDFDF #DFDFDF #404040;
+}
+
+/* Main area */
+html[data-theme="windows-98"] .main {
+  background: #FFFFFF;
+}
+html[data-theme="windows-98"] .channel-header {
+  background: #C0C0C0 !important;
+  border-bottom: 2px solid !important;
+  border-bottom-color: #808080 !important;
+  backdrop-filter: none !important;
+  padding: 4px 8px !important;
+}
+html[data-theme="windows-98"] .channel-title {
+  font-family: Tahoma, sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+}
+html[data-theme="windows-98"] .channel-desc {
+  font-size: 11px !important;
+}
+
+/* Messages */
+html[data-theme="windows-98"] .messages {
+  background: #FFFFFF;
+  border: 2px solid;
+  border-color: #808080 #DFDFDF #DFDFDF #808080;
+  margin: 4px;
+  padding: 4px 8px !important;
+}
+html[data-theme="windows-98"] .message {
+  padding: 3px 0 !important;
+  gap: 6px !important;
+  border-bottom: 1px solid #E0E0E0;
+}
+html[data-theme="windows-98"] .message-avatar {
+  width: 24px !important;
+  height: 24px !important;
+  border-radius: 0 !important;
+  font-size: 12px !important;
+  background: #C0C0C0 !important;
+  border: 1px solid #808080 !important;
+}
+html[data-theme="windows-98"] .message-author {
+  font-family: Tahoma, sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 11px !important;
+  color: #000080 !important;
+}
+html[data-theme="windows-98"] .message-text {
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  line-height: 1.4 !important;
+  color: #000000 !important;
+}
+html[data-theme="windows-98"] .message-text strong { color: #000080 !important; }
+html[data-theme="windows-98"] .message-text code {
+  font-family: 'Fixedsys', 'Courier New', monospace !important;
+  background: #C0C0C0 !important;
+  border: 1px solid #808080;
+}
+html[data-theme="windows-98"] .message-time {
+  font-family: Tahoma, sans-serif !important;
+  font-size: 10px !important;
+  color: #808080 !important;
+}
+
+/* System messages */
+html[data-theme="windows-98"] .message-system-text {
+  font-family: Tahoma, sans-serif !important;
+  color: #808080 !important;
+  font-size: 10px !important;
+}
+
+/* Composer as sunken text field */
+html[data-theme="windows-98"] .composer {
+  background: #C0C0C0 !important;
+  border-top: 2px solid;
+  border-top-color: #808080 !important;
+  padding: 4px 8px !important;
+}
+html[data-theme="windows-98"] .composer-inner {
+  background: #FFFFFF !important;
+  border: 2px solid !important;
+  border-color: #808080 #DFDFDF #DFDFDF #808080 !important;
+  border-radius: 0 !important;
+  padding: 4px 6px !important;
+}
+html[data-theme="windows-98"] .composer-input {
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+}
+html[data-theme="windows-98"] .composer-send {
+  background: #C0C0C0 !important;
+  border: 2px solid !important;
+  border-color: #DFDFDF #404040 #404040 #DFDFDF !important;
+  border-radius: 0 !important;
+  color: #000000 !important;
+}
+html[data-theme="windows-98"] .composer-send:hover {
+  border-color: #404040 #DFDFDF #DFDFDF #404040 !important;
+}
+
+/* Agent panel as Properties dialog */
+html[data-theme="windows-98"] .agent-panel {
+  background: #C0C0C0 !important;
+  border-left: 2px solid !important;
+  border-left-color: #808080 !important;
+}
+html[data-theme="windows-98"] .agent-panel-header {
+  background: linear-gradient(90deg, #000080 0%, #1084D0 100%) !important;
+  border-bottom: 2px solid #808080 !important;
+}
+html[data-theme="windows-98"] .agent-panel-header span {
+  color: #FFFFFF !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+html[data-theme="windows-98"] .agent-panel-close {
+  background: #C0C0C0 !important;
+  border: 2px solid !important;
+  border-color: #DFDFDF #404040 #404040 #DFDFDF !important;
+  color: #000000 !important;
+  width: 20px !important;
+  height: 20px !important;
+}
+html[data-theme="windows-98"] .agent-panel-avatar {
+  border-radius: 0 !important;
+  border: 2px solid;
+  border-color: #808080 #DFDFDF #DFDFDF #808080;
+  background: #FFFFFF !important;
+}
+html[data-theme="windows-98"] .agent-panel-name {
+  font-family: Tahoma, sans-serif !important;
+  font-size: 13px !important;
+}
+html[data-theme="windows-98"] .agent-panel-section-title {
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+}
+html[data-theme="windows-98"] .agent-panel-skill {
+  border-radius: 0 !important;
+  border: 1px solid #808080 !important;
+  background: #FFFFFF !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+}
+
+/* Badges */
+html[data-theme="windows-98"] .badge {
+  font-family: Tahoma, sans-serif !important;
+  border-radius: 0 !important;
+  font-size: 10px !important;
+}
+html[data-theme="windows-98"] .badge-accent {
+  background: #C0C0C0 !important;
+  color: #000080 !important;
+  border: 1px solid #808080;
+}
+html[data-theme="windows-98"] .badge-green {
+  background: #C0C0C0 !important;
+  color: #008000 !important;
+  border: 1px solid #808080;
+}
+html[data-theme="windows-98"] .badge-yellow {
+  background: #C0C0C0 !important;
+  color: #808000 !important;
+  border: 1px solid #808080;
+}
+
+/* Buttons */
+html[data-theme="windows-98"] .btn-primary {
+  background: #C0C0C0 !important;
+  border: 2px solid !important;
+  border-color: #DFDFDF #404040 #404040 #DFDFDF !important;
+  border-radius: 0 !important;
+  color: #000000 !important;
+  box-shadow: none !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+}
+html[data-theme="windows-98"] .btn-primary:hover {
+  border-color: #404040 #DFDFDF #DFDFDF #404040 !important;
+  background: #D0D0D0 !important;
+}
+html[data-theme="windows-98"] .btn-ghost {
+  border: 2px solid !important;
+  border-color: #DFDFDF #404040 #404040 #DFDFDF !important;
+  border-radius: 0 !important;
+  background: #C0C0C0 !important;
+  color: #000000 !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+}
+html[data-theme="windows-98"] .card {
+  border-radius: 0 !important;
+  border: 2px solid !important;
+  border-color: #808080 #DFDFDF #DFDFDF #808080 !important;
+  box-shadow: none !important;
+  background: #C0C0C0 !important;
+}
+html[data-theme="windows-98"] .input {
+  border: 2px solid !important;
+  border-color: #808080 #DFDFDF #DFDFDF #808080 !important;
+  border-radius: 0 !important;
+  font-family: Tahoma, sans-serif !important;
+  font-size: 11px !important;
+}
+
+/* Onboarding overrides */
+html[data-theme="windows-98"] .onboarding {
+  background: #008080 !important;
+  background-image: none !important;
+}
+html[data-theme="windows-98"] .dict-word {
+  font-family: Tahoma, sans-serif !important;
+  font-style: normal !important;
+  font-weight: 700 !important;
+}
+html[data-theme="windows-98"] .welcome-tagline {
+  font-family: Tahoma, sans-serif !important;
+  font-style: normal !important;
+}
+html[data-theme="windows-98"] .step-title {
+  font-family: Tahoma, sans-serif !important;
+  font-style: normal !important;
+  font-size: 16px !important;
+}

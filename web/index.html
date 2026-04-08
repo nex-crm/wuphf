@@ -7,6 +7,10 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="themes/post-it-board.css" />
+<link rel="stylesheet" href="themes/interoffice-memo.css" />
+<link rel="stylesheet" href="themes/aol-messenger.css" />
+<link rel="stylesheet" href="themes/windows-98.css" />
 <style>
 /* ═══════════════════════════════════════════════════════════════
    WUPHF Web — Design System
@@ -575,10 +579,14 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <p class="sidebar-section-title">Channels</p>
       </div>
       <div class="sidebar-channels" id="sidebar-channels"></div>
-      <div class="sidebar-bottom">
-        <button class="sidebar-btn" title="Settings" style="flex:1;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v6m0 6v6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M1 12h6m6 0h6M4.22 19.78l4.24-4.24m7.08-7.08l4.24-4.24"/></svg>
-        </button>
+      <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
+        <select id="theme-switcher" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
+          <option value="">Default (Editorial)</option>
+          <option value="post-it-board">Post-It Board</option>
+          <option value="interoffice-memo">Interoffice Memo</option>
+          <option value="aol-messenger">AOL Messenger</option>
+          <option value="windows-98">Windows 98</option>
+        </select>
       </div>
     </aside>
 
@@ -1684,6 +1692,26 @@ function initApp() {
       renderSizeOptions();
       renderPrereqs();
     });
+}
+
+// ─── Theme Switcher ───
+var themeSwitcher = document.getElementById('theme-switcher');
+if (themeSwitcher) {
+  // Restore saved theme
+  var savedTheme = localStorage.getItem('wuphf-theme') || '';
+  if (savedTheme) {
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    themeSwitcher.value = savedTheme;
+  }
+  themeSwitcher.addEventListener('change', function() {
+    var theme = themeSwitcher.value;
+    if (theme) {
+      document.documentElement.setAttribute('data-theme', theme);
+    } else {
+      document.documentElement.removeAttribute('data-theme');
+    }
+    localStorage.setItem('wuphf-theme', theme);
+  });
 }
 
 initApp();

@@ -1,0 +1,264 @@
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Theme: AOL Instant Messenger
+   AIM buddy list, yellow chat bubbles, door open/close energy,
+   bright blue/yellow/white. Peak 2003 internet.
+   ═══════════════════════════════════════════════════════════════ */
+
+@import url('https://fonts.googleapis.com/css2?family=Trebuchet+MS:wght@400;700&display=swap');
+
+html[data-theme="aol-messenger"] {
+  --bg:             #FFFFFF;
+  --bg-warm:        #F0F4F8;
+  --bg-card:        #FFFFFF;
+  --text:           #000000;
+  --text-secondary: #333333;
+  --text-tertiary:  #666666;
+  --accent:         #0066CC;
+  --accent-warm:    #004499;
+  --accent-bg:      #E3F0FF;
+  --border:         #A0B0C0;
+  --border-light:   #C8D4E0;
+  --border-dark:    #6080A0;
+  --green:          #008000;
+  --green-bg:       #E0FFE0;
+  --red:            #FF0000;
+  --yellow:         #CC6600;
+  --yellow-bg:      #FFFDE0;
+  --font-sans:  Trebuchet MS, Tahoma, Verdana, sans-serif;
+  --font-serif: Trebuchet MS, Tahoma, sans-serif;
+  --font-logo:  Trebuchet MS, Tahoma, sans-serif;
+  --font-mono:  'Courier New', monospace;
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
+  --radius-full: 0px;
+}
+
+/* AIM window frame */
+html[data-theme="aol-messenger"] body {
+  background: #5080B0;
+  font-family: Trebuchet MS, Tahoma, Verdana, sans-serif;
+}
+
+/* Buddy List sidebar */
+html[data-theme="aol-messenger"] .sidebar {
+  background: linear-gradient(180deg, #3070A0 0%, #205080 100%);
+  border-right: 2px solid #103060;
+  width: 220px !important;
+}
+html[data-theme="aol-messenger"] .sidebar-header {
+  background: linear-gradient(180deg, #FFD700 0%, #FFA500 100%);
+  border-bottom: 2px solid #CC8800;
+  padding: 8px 12px !important;
+}
+html[data-theme="aol-messenger"] .sidebar-logo {
+  font-family: Trebuchet MS, sans-serif !important;
+  font-size: 16px !important;
+  font-weight: 700 !important;
+  color: #000000 !important;
+  font-style: normal !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+}
+html[data-theme="aol-messenger"] .sidebar-section-title {
+  color: #FFD700 !important;
+  font-family: Trebuchet MS, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+}
+html[data-theme="aol-messenger"] .sidebar-item,
+html[data-theme="aol-messenger"] .sidebar-agent {
+  color: #FFFFFF !important;
+  font-family: Trebuchet MS, sans-serif !important;
+  font-size: 13px !important;
+}
+html[data-theme="aol-messenger"] .sidebar-item:hover,
+html[data-theme="aol-messenger"] .sidebar-agent:hover {
+  background: rgba(255,255,255,0.15) !important;
+}
+html[data-theme="aol-messenger"] .sidebar-item.active {
+  background: rgba(255,215,0,0.2) !important;
+  color: #FFD700 !important;
+  font-weight: 700 !important;
+}
+
+/* Status dots as AIM away indicators */
+html[data-theme="aol-messenger"] .status-dot.active {
+  background: #00CC00 !important;
+  box-shadow: 0 0 4px #00CC00;
+}
+
+html[data-theme="aol-messenger"] .sidebar-bottom {
+  background: linear-gradient(180deg, #205080 0%, #103060 100%);
+  border-top: 2px solid #103060;
+}
+html[data-theme="aol-messenger"] .sidebar-btn { color: #FFD700 !important; }
+
+/* Chat window */
+html[data-theme="aol-messenger"] .main {
+  background: #FFFFFF;
+}
+html[data-theme="aol-messenger"] .channel-header {
+  background: linear-gradient(180deg, #E8E8E8 0%, #D0D0D0 100%) !important;
+  border-bottom: 2px outset #CCCCCC !important;
+  backdrop-filter: none !important;
+}
+html[data-theme="aol-messenger"] .channel-title {
+  font-family: Trebuchet MS, sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 13px !important;
+  color: #000000 !important;
+}
+html[data-theme="aol-messenger"] .channel-desc {
+  font-size: 11px !important;
+  color: #666666 !important;
+}
+
+/* Chat messages */
+html[data-theme="aol-messenger"] .messages {
+  background: #FFFFFF;
+  padding: 8px 12px !important;
+}
+html[data-theme="aol-messenger"] .message {
+  padding: 4px 0 !important;
+  gap: 8px !important;
+}
+html[data-theme="aol-messenger"] .message-avatar {
+  width: 28px !important;
+  height: 28px !important;
+  border-radius: 0 !important;
+  font-size: 14px !important;
+  background: #E3F0FF !important;
+  border: 1px solid #A0B0C0 !important;
+}
+html[data-theme="aol-messenger"] .message-author {
+  font-family: Trebuchet MS, sans-serif !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  color: #0066CC !important;
+}
+html[data-theme="aol-messenger"] .message-text {
+  font-family: Trebuchet MS, sans-serif !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  color: #000000 !important;
+}
+html[data-theme="aol-messenger"] .message-time {
+  font-family: Trebuchet MS, sans-serif !important;
+  font-size: 10px !important;
+  color: #999999 !important;
+}
+
+/* Human messages in yellow */
+html[data-theme="aol-messenger"] .message-avatar[style*="var(--accent)"] {
+  background: #FFD700 !important;
+  color: #000000 !important;
+  border: 1px solid #CC8800 !important;
+}
+
+/* System messages */
+html[data-theme="aol-messenger"] .message-system-text {
+  color: #CC0000 !important;
+  font-family: Trebuchet MS, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+}
+html[data-theme="aol-messenger"] .message-system-line {
+  background: #CCCCCC !important;
+}
+
+/* Typing indicator */
+html[data-theme="aol-messenger"] .typing-indicator {
+  color: #666666 !important;
+  font-family: Trebuchet MS, sans-serif !important;
+  font-size: 11px !important;
+  font-style: italic;
+}
+
+/* Composer as AIM text input */
+html[data-theme="aol-messenger"] .composer {
+  background: #E8E8E8 !important;
+  border-top: 2px inset #CCCCCC !important;
+  padding: 8px !important;
+}
+html[data-theme="aol-messenger"] .composer-inner {
+  background: #FFFFFF !important;
+  border: 2px inset #B0B0B0 !important;
+  border-radius: 0 !important;
+}
+html[data-theme="aol-messenger"] .composer-input {
+  font-family: Trebuchet MS, sans-serif !important;
+  font-size: 13px !important;
+}
+html[data-theme="aol-messenger"] .composer-send {
+  background: linear-gradient(180deg, #FFD700 0%, #FFA500 100%) !important;
+  border: 2px outset #CC8800 !important;
+  border-radius: 0 !important;
+  color: #000000 !important;
+  font-weight: 700;
+}
+html[data-theme="aol-messenger"] .composer-send:hover {
+  background: linear-gradient(180deg, #FFE44D 0%, #FFB733 100%) !important;
+}
+
+/* Agent panel as Buddy Info window */
+html[data-theme="aol-messenger"] .agent-panel {
+  background: #F0F0F0 !important;
+  border-left: 2px inset #CCCCCC !important;
+}
+html[data-theme="aol-messenger"] .agent-panel-header {
+  background: linear-gradient(180deg, #E8E8E8 0%, #D0D0D0 100%) !important;
+  border-bottom: 2px outset #CCCCCC !important;
+}
+html[data-theme="aol-messenger"] .agent-panel-avatar {
+  border-radius: 0 !important;
+  border: 2px solid #A0B0C0 !important;
+  background: #E3F0FF !important;
+}
+html[data-theme="aol-messenger"] .agent-panel-name {
+  font-family: Trebuchet MS, sans-serif !important;
+  color: #0066CC !important;
+}
+html[data-theme="aol-messenger"] .agent-panel-skill {
+  border-radius: 0 !important;
+  border: 1px solid #A0B0C0 !important;
+  background: #E3F0FF !important;
+}
+
+/* Badges */
+html[data-theme="aol-messenger"] .badge {
+  font-family: Trebuchet MS, sans-serif !important;
+  border-radius: 0 !important;
+  font-size: 10px !important;
+  font-weight: 700 !important;
+}
+html[data-theme="aol-messenger"] .badge-accent {
+  background: #E3F0FF !important;
+  color: #0066CC !important;
+}
+html[data-theme="aol-messenger"] .badge-green {
+  background: #E0FFE0 !important;
+  color: #008000 !important;
+}
+
+/* Buttons */
+html[data-theme="aol-messenger"] .btn-primary {
+  background: linear-gradient(180deg, #FFD700 0%, #FFA500 100%) !important;
+  border: 2px outset #CC8800 !important;
+  border-radius: 0 !important;
+  color: #000000 !important;
+  box-shadow: none !important;
+}
+html[data-theme="aol-messenger"] .btn-ghost {
+  border: 2px outset #CCCCCC !important;
+  border-radius: 0 !important;
+  background: #E8E8E8 !important;
+  color: #000000 !important;
+}
+html[data-theme="aol-messenger"] .card {
+  border-radius: 0 !important;
+  border: 2px inset #CCCCCC !important;
+  box-shadow: none !important;
+}
