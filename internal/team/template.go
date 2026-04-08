@@ -51,7 +51,7 @@ Constraints:
 - permission_mode should usually be "plan" unless the role clearly needs autonomous editing/coding.
 `
 	userPrompt := "Design a new office teammate from this request:\n\n" + request
-	raw, err := provider.RunClaudeOneShot(systemPrompt, userPrompt, l.cwd)
+	raw, err := provider.RunConfiguredOneShot(systemPrompt, userPrompt, l.cwd)
 	if err != nil {
 		return generatedMemberTemplate{}, err
 	}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -15,6 +16,19 @@ func TestInitFlowStartsWithAPIKeyStepWhenMissing(t *testing.T) {
 	}
 }
 
+func TestInitFlowUsesResolvedAPIKeyFromEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_API_KEY", "env-key")
+
+	flow, _ := NewInitFlow().Start()
+	if flow.Phase() != InitProviderChoice {
+		t.Fatalf("expected provider choice phase, got %q", flow.Phase())
+	}
+	if flow.apiKey != "env-key" {
+		t.Fatalf("expected resolved env API key, got %q", flow.apiKey)
+	}
+}
+
 func TestInitFlowSkipsToPackWhenAPIKeyExists(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if err := config.Save(config.Config{APIKey: "wuphf-key"}); err != nil {
@@ -22,11 +36,39 @@ func TestInitFlowSkipsToPackWhenAPIKeyExists(t *testing.T) {
 	}
 
 	flow, _ := NewInitFlow().Start()
-	if flow.Phase() != InitPackChoice {
-		t.Fatalf("expected pack choice phase, got %q", flow.Phase())
+	if flow.Phase() != InitProviderChoice {
+		t.Fatalf("expected provider choice phase, got %q", flow.Phase())
 	}
 	if flow.provider != "claude-code" {
 		t.Fatalf("expected provider to default to claude-code, got %q", flow.provider)
+	}
+}
+
+func TestInitFlowViewShowsReadinessSummary(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	prevLookPath := initFlowLookPathFn
+	initFlowLookPathFn = func(name string) (string, error) {
+		switch name {
+		case "tmux", "claude":
+			return "/usr/bin/" + name, nil
+		default:
+			return "", fmt.Errorf("%s not found", name)
+		}
+	}
+	t.Cleanup(func() {
+		initFlowLookPathFn = prevLookPath
+	})
+
+	flow := NewInitFlow()
+	flow.phase = InitAPIKey
+	flow.provider = "claude-code"
+
+	view := flow.View()
+	if !containsAll(view, "Setup Readiness", "Nex identity", "tmux office runtime", "LLM runtime", "Agent pack") {
+		t.Fatalf("expected readiness summary in init view, got %q", view)
+	}
+	if !strings.Contains(view, "Paste your WUPHF/Nex API key") {
+		t.Fatalf("expected API key guidance in readiness summary, got %q", view)
 	}
 }
 
@@ -42,6 +84,16 @@ func TestInitFlowMentionsManagedIntegrations(t *testing.T) {
 	if instructions == "" || !containsAll(instructions, "One", "automatically") {
 		t.Fatalf("expected managed integration copy, got %q", instructions)
 	}
+}
+
+func TestProviderOptionsIncludeCodex(t *testing.T) {
+	options := ProviderOptions()
+	for _, opt := range options {
+		if opt.Value == "codex" {
+			return
+		}
+	}
+	t.Fatal("expected codex provider option")
 }
 
 func containsAll(s string, needles ...string) bool {

@@ -450,7 +450,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "recover", Description: "Open the session recovery summary", Category: "navigate"},
 	{Name: "resume", Description: "Alias for /recover", Category: "navigate"},
 	{Name: "rewind", Description: "Insert a summarize-from-here recovery prompt", Category: "navigate"},
-	{Name: "search", Description: "Search channels, tasks, requests, and threads", Category: "navigate"},
+	{Name: "search", Description: "Search office apps, channels, active work, and threads", Category: "navigate"},
 	{Name: "insert", Description: "Insert a channel, task, request, or message reference", Category: "navigate"},
 	{Name: "switcher", Description: "Open the unified office/direct switcher", Category: "navigate"},
 	{Name: "tasks", Description: "Show active work in this channel", Category: "navigate"},
@@ -4513,7 +4513,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		m.picker = tui.NewPicker("Search Workspace", options)
 		m.picker.SetActive(true)
 		m.pickerMode = channelPickerSearch
-		m.notice = "Choose where to jump next."
+		m.notice = "Search the office, active work, and threads."
 		return m, nil
 	case trimmed == "/tasks":
 		clearCurrent()
@@ -6193,6 +6193,13 @@ func applyTeamSetup() tea.Cmd {
 		if err != nil {
 			return channelInitDoneMsg{err: err}
 		}
+		cfg, _ := config.Load()
+		if current := strings.TrimSpace(os.Getenv("WUPHF_HEADLESS_PROVIDER")); current != "" {
+			return channelInitDoneMsg{notice: notice + " Setup saved. Restart WUPHF to reload the " + current + " office runtime with the new configuration."}
+		}
+		if strings.TrimSpace(cfg.LLMProvider) == "codex" {
+			return channelInitDoneMsg{notice: notice + " Codex was saved as the LLM provider. Restart WUPHF to launch the headless Codex office runtime."}
+		}
 		l, err := team.NewLauncher("")
 		if err != nil {
 			return channelInitDoneMsg{err: err}
@@ -6413,8 +6420,12 @@ func reportChannelCrash(details string) {
 	fmt.Fprintln(os.Stderr, "Log:", channelCrashLogPath())
 	fmt.Fprintln(os.Stderr, "")
 	fmt.Fprintln(os.Stderr, "The rest of the team is still running.")
-	fmt.Fprintln(os.Stderr, "Use `tmux -L wuphf attach -t wuphf-team` to inspect panes,")
-	fmt.Fprintln(os.Stderr, "then restart WUPHF when ready.")
+	if strings.TrimSpace(os.Getenv("WUPHF_HEADLESS_PROVIDER")) != "" {
+		fmt.Fprintln(os.Stderr, "Restart WUPHF when ready to reconnect to the headless office runtime.")
+	} else {
+		fmt.Fprintln(os.Stderr, "Use `tmux -L wuphf attach -t wuphf-team` to inspect panes,")
+		fmt.Fprintln(os.Stderr, "then restart WUPHF when ready.")
+	}
 	select {}
 }
 

@@ -8,12 +8,10 @@ import (
 	"os"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/nex-crm/wuphf/internal/commands"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/teammcp"
-	"github.com/nex-crm/wuphf/internal/tui"
 )
 
 const version = "0.1.0"
@@ -120,12 +118,6 @@ func main() {
 }
 
 func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
-	cfg, _ := config.Load()
-	if strings.TrimSpace(cfg.LLMProvider) == "codex" {
-		runHeadlessCodexRuntime(oneOnOne)
-		return
-	}
-
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -156,6 +148,19 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
 	if err := l.Launch(); err != nil {
 		fmt.Fprintf(os.Stderr, "error launching team: %v\n", err)
 		os.Exit(1)
+	}
+	if !l.UsesTmuxRuntime() {
+		if token := strings.TrimSpace(l.BrokerToken()); token != "" {
+			_ = os.Setenv("WUPHF_BROKER_TOKEN", token)
+		}
+		_ = os.Setenv("WUPHF_HEADLESS_PROVIDER", "codex")
+		if oneOnOne {
+			_ = os.Setenv("WUPHF_ONE_ON_ONE", "1")
+			_ = os.Setenv("WUPHF_ONE_ON_ONE_AGENT", l.OneOnOneAgent())
+		}
+		defer l.Kill()
+		runChannelView(false, resolveInitialOfficeApp(""), false)
+		return
 	}
 
 	fmt.Println("Team launched. Attaching...")
@@ -197,18 +202,6 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int) {
 	fmt.Printf("Launching %s web view (%d agents)...\n", l.PackName(), l.AgentCount())
 	if err := l.LaunchWeb(webPort); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		os.Exit(1)
-	}
-}
-
-func runHeadlessCodexRuntime(oneOnOne bool) {
-	if oneOnOne {
-		fmt.Fprintln(os.Stderr, "error: direct 1:1 mode is not supported in the headless Codex runtime yet")
-		os.Exit(1)
-	}
-	program := tea.NewProgram(tui.NewModel(false), tea.WithAltScreen())
-	if _, err := program.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "error launching Codex runtime: %v\n", err)
 		os.Exit(1)
 	}
 }
