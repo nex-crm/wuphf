@@ -2493,6 +2493,17 @@ function appendMessageToContainer(msg, container, opts) {
 
   var header = document.createElement('div');
   header.className = 'message-header';
+  // Agent character face (#14)
+  if (!isHuman && agent) {
+    var charEmoji = AGENT_CHARACTERS[agent.slug] || AGENT_CHARACTERS[msg.from];
+    if (charEmoji) {
+      var charFace = document.createElement('span');
+      charFace.className = 'msg-agent-char';
+      charFace.textContent = charEmoji;
+      charFace.title = agent.slug;
+      header.appendChild(charFace);
+    }
+  }
   var author = document.createElement('span');
   author.className = 'message-author';
   author.textContent = isHuman ? 'You' : (agent ? agent.name : msg.from);
@@ -2517,6 +2528,18 @@ function appendMessageToContainer(msg, container, opts) {
     timeEl.textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
   header.appendChild(timeEl);
+
+  // Mood inference (#10)
+  if (!isHuman && msg.content) {
+    var mood = inferMood(msg.content);
+    if (mood) {
+      var moodEl = document.createElement('span');
+      moodEl.className = 'mood-indicator';
+      moodEl.textContent = mood.emoji;
+      moodEl.title = mood.label;
+      header.appendChild(moodEl);
+    }
+  }
 
   var textDiv = document.createElement('div');
   textDiv.className = 'message-text';
@@ -3167,6 +3190,9 @@ function handleSlashCommand(input) {
 function sendMessage() {
   var raw = composerInput.value.trim();
   if (!raw) return;
+
+  // Push to history before clearing
+  pushComposerHistory(raw);
 
   // Close autocomplete
   acPanel.classList.remove('open');
@@ -4640,6 +4666,38 @@ function openInterviewModal(request) {
 
 // (sidebar apps managed by switchApp/renderSidebarApps above)
 
+// ═══════════════════════════════════════════════════════════════
+//   AGENT CHARACTER FACES (#14) & MOOD INFERENCE (#10)
+// ═══════════════════════════════════════════════════════════════
+var AGENT_CHARACTERS = {
+  ceo: '\uD83D\uDC54',       // necktie
+  pm: '\uD83D\uDCCB',        // clipboard
+  frontend: '\uD83C\uDFA8',  // palette
+  fe: '\uD83C\uDFA8',
+  backend: '\u2699\uFE0F',   // gear
+  be: '\u2699\uFE0F',
+  'ai-eng': '\uD83E\uDDE0', // brain
+  ai: '\uD83E\uDDE0',
+  designer: '\u270F\uFE0F',  // pencil
+  cmo: '\uD83D\uDCE3',       // megaphone
+  cro: '\uD83D\uDCB0'        // money bag
+};
+
+function inferMood(text) {
+  if (!text) return null;
+  var t = text.toLowerCase();
+  // Excitement signals
+  if (/!!|\bgreat\b|\bshipped\b|\bawesome\b|\bwoo\b|\bnice\b|\bperfect\b|\blove\b|\bcelebrat/.test(t)) return { emoji: '\u2728', label: 'excited' };
+  // Frustration signals
+  if (/\bblocked\b|\bfailed\b|\bbroken\b|\bbug\b|\berror\b|\bcrash|\bfrustrat|\bugh\b/.test(t)) return { emoji: '\uD83D\uDE15', label: 'frustrated' };
+  // Thinking signals
+  if (/\bhmm\b|\bthinking\b|\bconsider|\bwonder|\bmaybe\b|\bperhaps\b|\bnot sure\b/.test(t)) return { emoji: '\uD83E\uDD14', label: 'thinking' };
+  // Shipping signals
+  if (/\bdeploy|\bpush|\bmerge|\brelease|\bship\b|\blaunched\b/.test(t)) return { emoji: '\uD83D\uDE80', label: 'shipping' };
+  return null;
+}
+
+initApp();
 
 // ═══════════════════════════════════════════════════════════════
 //   WAVE 3 POLISH — Quick Jump, Thread Toggle, Pause, PgUp/PgDn
