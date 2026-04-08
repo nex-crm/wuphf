@@ -36,15 +36,16 @@ type AgentConfig struct {
 
 // AgentState holds the runtime state of a running agent.
 type AgentState struct {
-	Phase         AgentPhase `json:"phase"`
+	Phase         AgentPhase  `json:"phase"`
 	Config        AgentConfig `json:"config"`
-	SessionID     string     `json:"sessionId,omitempty"`
-	CurrentTask   string     `json:"currentTask,omitempty"`
-	TokensUsed    int        `json:"tokensUsed"`
-	CostUsd       float64    `json:"costUsd"`
-	LastHeartbeat int64      `json:"lastHeartbeat,omitempty"`
-	NextHeartbeat int64      `json:"nextHeartbeat,omitempty"`
-	Error         string     `json:"error,omitempty"`
+	SessionID     string      `json:"sessionId,omitempty"`
+	CurrentTask   string      `json:"currentTask,omitempty"`
+	TaskID        string      `json:"taskId,omitempty"`
+	TokensUsed    int         `json:"tokensUsed"`
+	CostUsd       float64     `json:"costUsd"`
+	LastHeartbeat int64       `json:"lastHeartbeat,omitempty"`
+	NextHeartbeat int64       `json:"nextHeartbeat,omitempty"`
+	Error         string      `json:"error,omitempty"`
 }
 
 // AgentTool is a named tool an agent can invoke.
@@ -67,12 +68,12 @@ type ToolCall struct {
 
 // SessionEntry is one entry in an agent's session history.
 type SessionEntry struct {
-	ID       string         `json:"id"`
-	ParentID string         `json:"parentId,omitempty"`
-	Type     string         `json:"type"` // "user" | "assistant" | "tool_call" | "tool_result" | "system"
-	Content  string         `json:"content"`
-	Timestamp int64         `json:"timestamp"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	ID        string         `json:"id"`
+	ParentID  string         `json:"parentId,omitempty"`
+	Type      string         `json:"type"` // "user" | "assistant" | "tool_call" | "tool_result" | "system"
+	Content   string         `json:"content"`
+	Timestamp int64          `json:"timestamp"`
+	Metadata  map[string]any `json:"metadata,omitempty"`
 }
 
 // Message is a single LLM conversation turn.
@@ -88,8 +89,8 @@ type StreamChunk struct {
 	Content    string         `json:"content,omitempty"`
 	ToolName   string         `json:"toolName,omitempty"`
 	ToolParams map[string]any `json:"toolParams,omitempty"`
-	ToolUseID  string         `json:"toolUseId,omitempty"`  // for tool_use / tool_result correlation
-	ToolInput  string         `json:"toolInput,omitempty"`  // serialized tool input for display
+	ToolUseID  string         `json:"toolUseId,omitempty"` // for tool_use / tool_result correlation
+	ToolInput  string         `json:"toolInput,omitempty"` // serialized tool input for display
 }
 
 // StreamFn is a function that streams LLM output as a channel of chunks.

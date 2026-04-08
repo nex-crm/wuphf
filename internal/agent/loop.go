@@ -2,7 +2,10 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +45,8 @@ type AgentLoop struct {
 	cancelFunc        context.CancelFunc
 	taskHadError      bool
 	collectedInsights []string
+	taskLogRoot       string
+	lastCompactionAt  int
 	mu                sync.Mutex
 }
 
@@ -68,6 +73,7 @@ func NewAgentLoop(
 		gossipLayer:        gossipLayer,
 		credibilityTracker: credibilityTracker,
 		eventHandlers:      make(map[EventName][]EventHandler),
+		taskLogRoot:        defaultTaskLogRoot(),
 	}
 }
 
@@ -233,6 +239,8 @@ func (l *AgentLoop) buildContext() error {
 	// Drain follow-up message and append as user entry.
 	if msg, ok := l.queues.DrainFollowUp(slug); ok {
 		l.state.CurrentTask = msg
+		l.state.TaskID = nextTaskID(slug)
+		l.lastCompactionAt = 0
 		l.sessions.Append(l.state.SessionID, SessionEntry{
 			Type:    "user",
 			Content: msg,
@@ -300,6 +308,7 @@ func (l *AgentLoop) streamLLM() error {
 		l.emit(EventError, l.state.Error)
 		return err
 	}
+	entries = l.prepareEntriesForStreaming(entries)
 
 	messages := entriesToMessages(entries)
 
@@ -444,6 +453,7 @@ func (l *AgentLoop) executeTool() error {
 
 	if err != nil {
 		tc.Error = err.Error()
+		l.emit(EventToolResult, err.Error())
 		l.sessions.Append(l.state.SessionID, SessionEntry{
 			Type:    "tool_result",
 			Content: err.Error(),
@@ -455,6 +465,7 @@ func (l *AgentLoop) executeTool() error {
 		l.taskHadError = true
 	} else {
 		tc.Result = result
+		l.emit(EventToolResult, result)
 		l.sessions.Append(l.state.SessionID, SessionEntry{
 			Type:    "tool_result",
 			Content: result,
@@ -470,6 +481,7 @@ func (l *AgentLoop) executeTool() error {
 			}
 		}
 	}
+	l.logToolExecution(*tc)
 
 	l.pendingToolCall = nil
 	return nil
@@ -499,6 +511,7 @@ func (l *AgentLoop) handleDone() error {
 	}
 
 	l.state.CurrentTask = ""
+	l.state.TaskID = ""
 	l.setPhase(PhaseDone)
 	l.emit(EventDone)
 	return nil
@@ -566,4 +579,98 @@ func entriesToMessages(entries []SessionEntry) []Message {
 		}
 	}
 	return msgs
+}
+
+func (l *AgentLoop) prepareEntriesForStreaming(entries []SessionEntry) []SessionEntry {
+	if !shouldCompactEntries(entries) {
+		l.lastCompactionAt = 0
+		return entries
+	}
+	if l.lastCompactionAt == len(entries) {
+		return entries
+	}
+
+	prefix, archived, recent := splitEntriesForCompaction(entries)
+	summary := buildOfficeInsightSummary(archived)
+	if len(archived) == 0 || strings.TrimSpace(summary) == "" {
+		return entries
+	}
+
+	summaryEntry := SessionEntry{
+		Type:    "system",
+		Content: summary,
+		Metadata: map[string]any{
+			"officeInsight":   true,
+			"archivedEntries": len(archived),
+			"taskId":          l.state.TaskID,
+		},
+	}
+	if stored, err := l.sessions.Append(l.state.SessionID, summaryEntry); err == nil {
+		summaryEntry = stored
+	}
+
+	l.lastCompactionAt = len(entries)
+	l.emit(EventThinking, "Context nearing capacity; archived older context into an Office Insight.")
+	l.rememberOfficeInsight(summary)
+
+	compacted := make([]SessionEntry, 0, len(prefix)+1+len(recent))
+	compacted = append(compacted, prefix...)
+	compacted = append(compacted, summaryEntry)
+	compacted = append(compacted, recent...)
+	return compacted
+}
+
+func (l *AgentLoop) rememberOfficeInsight(summary string) {
+	tool, ok := l.tools.Get("nex_remember")
+	if !ok {
+		return
+	}
+
+	content := strings.TrimSpace(summary)
+	if content == "" {
+		return
+	}
+
+	go func() {
+		_, _ = tool.Execute(map[string]any{
+			"content": content,
+			"tags":    []string{"office-insight", "compaction"},
+		}, context.Background(), func(string) {})
+	}()
+}
+
+func (l *AgentLoop) logToolExecution(call ToolCall) {
+	taskID := strings.TrimSpace(l.state.TaskID)
+	if taskID == "" {
+		taskID = "adhoc"
+	}
+
+	dir := filepath.Join(l.taskLogRoot, taskID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+
+	path := filepath.Join(dir, "output.log")
+	record := map[string]any{
+		"task_id":      taskID,
+		"agent_slug":   l.state.Config.Slug,
+		"tool_name":    call.ToolName,
+		"params":       call.Params,
+		"result":       call.Result,
+		"error":        call.Error,
+		"started_at":   call.StartedAt,
+		"completed_at": call.CompletedAt,
+	}
+	line, err := json.Marshal(record)
+	if err != nil {
+		return
+	}
+
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	_, _ = f.Write(append(line, '\n'))
 }

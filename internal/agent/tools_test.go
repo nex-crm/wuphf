@@ -1,6 +1,11 @@
 package agent_test
 
 import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -152,5 +157,169 @@ func TestToolRegistry_Validate_RequiredOnly(t *testing.T) {
 	})
 	if !ok {
 		t.Errorf("expected validation to pass with only required params, got: %v", errs)
+	}
+}
+
+func builtinTool(t *testing.T, name string) agent.AgentTool {
+	t.Helper()
+	for _, tool := range agent.CreateBuiltinTools(nil) {
+		if tool.Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("builtin tool %q not found", name)
+	return agent.AgentTool{}
+}
+
+func decodeToolResult(t *testing.T, raw string) map[string]any {
+	t.Helper()
+	var result map[string]any
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		t.Fatalf("decode tool result: %v", err)
+	}
+	return result
+}
+
+func TestBuiltinToolsIncludeLocalToolset(t *testing.T) {
+	tools := agent.CreateBuiltinTools(nil)
+	names := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		names[tool.Name] = true
+	}
+	for _, name := range []string{"read_file", "grep_search", "glob", "write_file", "bash", "send_message"} {
+		if !names[name] {
+			t.Fatalf("expected builtin tool %q", name)
+		}
+	}
+}
+
+func TestReadFileTool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("hello\nworld\n"), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	tool := builtinTool(t, "read_file")
+	raw, err := tool.Execute(map[string]any{
+		"path":              "notes.txt",
+		"working_directory": dir,
+	}, context.Background(), func(string) {})
+	if err != nil {
+		t.Fatalf("read_file: %v", err)
+	}
+	result := decodeToolResult(t, raw)
+	if got := result["combined"]; got != "hello\nworld\n" {
+		t.Fatalf("expected file content, got %#v", got)
+	}
+}
+
+func TestWriteFileAndGlobTools(t *testing.T) {
+	dir := t.TempDir()
+	writeTool := builtinTool(t, "write_file")
+	if _, err := writeTool.Execute(map[string]any{
+		"path":              "nested/report.txt",
+		"content":           "alpha\nbeta",
+		"working_directory": dir,
+	}, context.Background(), func(string) {}); err != nil {
+		t.Fatalf("write_file: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "nested", "report.txt"))
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if string(data) != "alpha\nbeta" {
+		t.Fatalf("unexpected file content %q", string(data))
+	}
+
+	globTool := builtinTool(t, "glob")
+	raw, err := globTool.Execute(map[string]any{
+		"pattern":           "nested/*.txt",
+		"working_directory": dir,
+	}, context.Background(), func(string) {})
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+	result := decodeToolResult(t, raw)
+	files, ok := result["files"].([]any)
+	if !ok || len(files) != 1 || files[0] != "nested/report.txt" {
+		t.Fatalf("unexpected glob files %#v", result["files"])
+	}
+}
+
+func TestGrepSearchTool(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "a.txt"), []byte("BubbleTea\nother\n"), 0o644); err != nil {
+		t.Fatalf("write a.txt: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.txt"), []byte("none here\n"), 0o644); err != nil {
+		t.Fatalf("write b.txt: %v", err)
+	}
+
+	tool := builtinTool(t, "grep_search")
+	raw, err := tool.Execute(map[string]any{
+		"pattern":           "BubbleTea",
+		"working_directory": dir,
+	}, context.Background(), func(string) {})
+	if err != nil {
+		t.Fatalf("grep_search: %v", err)
+	}
+	result := decodeToolResult(t, raw)
+	if got := int(result["match_count"].(float64)); got != 1 {
+		t.Fatalf("expected 1 match, got %d", got)
+	}
+	matches, ok := result["matches"].([]any)
+	if !ok || len(matches) != 1 || !strings.Contains(matches[0].(string), "a.txt:1:BubbleTea") {
+		t.Fatalf("unexpected matches %#v", result["matches"])
+	}
+}
+
+func TestBashToolCapturesStdoutAndStderr(t *testing.T) {
+	dir := t.TempDir()
+	tool := builtinTool(t, "bash")
+	raw, err := tool.Execute(map[string]any{
+		"command":           "printf 'out'; printf 'err' >&2",
+		"working_directory": dir,
+	}, context.Background(), func(string) {})
+	if err != nil {
+		t.Fatalf("bash: %v", err)
+	}
+	result := decodeToolResult(t, raw)
+	if result["stdout"] != "out" {
+		t.Fatalf("expected stdout 'out', got %#v", result["stdout"])
+	}
+	if result["stderr"] != "err" {
+		t.Fatalf("expected stderr 'err', got %#v", result["stderr"])
+	}
+	if got := int(result["exit_code"].(float64)); got != 0 {
+		t.Fatalf("expected exit code 0, got %d", got)
+	}
+}
+
+func TestSendMessageToolWritesOutbox(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tool := builtinTool(t, "send_message")
+	raw, err := tool.Execute(map[string]any{
+		"recipient": "be",
+		"message":   "API is ready",
+		"channel":   "launch",
+	}, context.Background(), func(string) {})
+	if err != nil {
+		t.Fatalf("send_message: %v", err)
+	}
+	result := decodeToolResult(t, raw)
+	if result["recipient"] != "be" {
+		t.Fatalf("expected recipient be, got %#v", result["recipient"])
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".wuphf", "office", "messages", "outbox.jsonl"))
+	if err != nil {
+		t.Fatalf("read outbox: %v", err)
+	}
+	if !strings.Contains(string(data), "\"recipient\":\"be\"") {
+		t.Fatalf("expected outbox entry, got %q", string(data))
 	}
 }

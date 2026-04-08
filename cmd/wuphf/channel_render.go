@@ -6,21 +6,20 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 )
 
 type renderedLine struct {
-	Text      string
-	ThreadID  string
-	TaskID    string
-	RequestID string
-	AgentSlug string
+	Text        string
+	ThreadID    string
+	TaskID      string
+	RequestID   string
+	AgentSlug   string
+	PromptValue string
 }
 
-func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, threadsDefaultExpand bool) []renderedLine {
+func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, threadsDefaultExpand bool, unreadAnchorID string, unreadCount int) []renderedLine {
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
-	statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#CBD5E1")).Italic(true)
 
 	var lines []renderedLine
 	if len(messages) == 0 {
@@ -36,217 +35,68 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 	}
 
 	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Today")})
-
-	// Always expand threads — collapsed is confusing, expanded is readable
-	for _, msg := range messages {
-		if msg.ReplyTo == "" && hasThreadReplies(messages, msg.ID) {
-			expanded[msg.ID] = true
-		}
-	}
-
-	for _, tm := range flattenThreadMessages(messages, expanded) {
-		msg := tm.Message
-		ts := msg.Timestamp
-		if len(ts) > 19 {
-			ts = ts[11:19]
-		}
-
-		color := agentColorMap[msg.From]
-		if color == "" {
-			color = "#9CA3AF"
-		}
-		nameStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(color)).
-			Bold(true)
-		ruleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-
-		appendWrappedLine := func(text string) {
-			wrapped := appendWrapped(nil, contentWidth, text)
-			for _, line := range wrapped {
-				lines = append(lines, renderedLine{Text: line})
-			}
-		}
-
-		if strings.HasPrefix(msg.Kind, "human_") {
-			lines = append(lines, renderedLine{Text: ""})
-			headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				headerPrefix += "↳ "
-			}
-			meta := fmt.Sprintf("for you · %s · %s", humanMessageLabel(msg.Kind), msg.ID)
-			if tm.Depth > 0 {
-				meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
-			}
-			appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s",
-				headerPrefix,
-				agentAvatar(msg.From),
-				nameStyle.Render(displayName(msg.From)),
-				mutedStyle.Render(ts),
-				lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render(meta),
-			))
-
-			prefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				prefix += lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("┆") + " "
-			} else {
-				prefix += lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")).Render("│") + " "
-			}
-			titleLine := msg.Title
-			if titleLine == "" {
-				titleLine = defaultHumanMessageTitle(msg.Kind, msg.From)
-			}
-			appendWrappedLine(prefix + subtlePill("for you", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Render(titleLine))
-			textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-			for _, paragraph := range strings.Split(textPart, "\n") {
-				paragraph = highlightMentions(paragraph, agentColorMap)
-				appendWrappedLine(prefix + paragraph)
-			}
-			if a2uiRendered != "" {
-				for _, lineText := range strings.Split(a2uiRendered, "\n") {
-					lines = append(lines, renderedLine{Text: prefix + lineText})
-				}
-			}
-			continue
-		}
-
-		if msg.Kind == "automation" || msg.From == "nex" {
-			lines = append(lines, renderedLine{Text: ""})
-			headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				headerPrefix += "↳ "
-			}
-			source := msg.Source
-			if source == "" {
-				source = "context graph"
-			} else {
-				source = strings.ReplaceAll(source, "_", " ")
-			}
-			meta := fmt.Sprintf("%s · automated · %s", source, msg.ID)
-			if tm.Depth > 0 {
-				meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
-			}
-			appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s", headerPrefix, agentAvatar(msg.From), nameStyle.Render(displayName(msg.From)), mutedStyle.Render(ts), mutedStyle.Render(meta)))
-
-			prefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				prefix += ruleStyle.Render("┆") + " "
-			} else {
-				prefix += ruleStyle.Render("│") + " "
-			}
-			if msg.Title != "" {
-				appendWrappedLine(prefix + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(msg.Title))
-			}
-			textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-			for _, paragraph := range strings.Split(textPart, "\n") {
-				appendWrappedLine(prefix + paragraph)
-			}
-			if a2uiRendered != "" {
-				for _, lineText := range strings.Split(a2uiRendered, "\n") {
-					lines = append(lines, renderedLine{Text: prefix + lineText})
-				}
-			}
-			continue
-		}
-
-		if strings.HasPrefix(msg.Content, "[STATUS]") {
-			status := strings.TrimPrefix(msg.Content, "[STATUS] ")
-			statusPrefix := "  " + strings.Repeat("  ", tm.Depth)
-			if tm.Depth > 0 {
-				statusPrefix += "↳ "
-			}
-			appendWrappedLine(fmt.Sprintf("%s%s  %s %s", statusPrefix, mutedStyle.Render(ts), nameStyle.Render("@"+msg.From), statusStyle.Render("is "+status)))
-			continue
-		}
-
-		// System/routing messages — render as subtle inline updates
-		if msg.From == "system" && (msg.Kind == "routing" || msg.Kind == "stage") {
-			sysStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#7C7C85")).Italic(true)
-			appendWrappedLine("  " + sysStyle.Render("  → "+msg.Content))
-			continue
-		}
-
-		mood := inferMood(msg.Content)
-		meta := roleLabel(msg.From) + " · " + msg.ID
-		if mood != "" {
-			meta += " · " + mood
-		}
-		if tm.Depth > 0 {
-			meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
-		}
-		metaStyle := mutedStyle
-		if mood != "" {
-			metaStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(color))
-		}
-		lines = append(lines, renderedLine{Text: ""})
-		headerPrefix := "  " + strings.Repeat("  ", tm.Depth)
-		if tm.Depth > 0 {
-			headerPrefix += "↳ "
-		}
-		appendWrappedLine(fmt.Sprintf("%s%s %s  %s  %s", headerPrefix, agentAvatar(msg.From), nameStyle.Render(displayName(msg.From)), mutedStyle.Render(ts), metaStyle.Render(meta)))
-
-		prefix := "  " + strings.Repeat("  ", tm.Depth)
-		if tm.Depth > 0 {
-			prefix += ruleStyle.Render("┆") + " "
-		} else {
-			prefix += ruleStyle.Render("│") + " "
-		}
-
-		textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-		rendered := renderMarkdown(textPart, contentWidth-len(prefix)-2)
-		for _, paragraph := range strings.Split(rendered, "\n") {
-			paragraph = highlightMentions(paragraph, agentColorMap)
-			appendWrappedLine(prefix + paragraph)
-		}
-		if a2uiRendered != "" {
-			for _, lineText := range strings.Split(a2uiRendered, "\n") {
-				lines = append(lines, renderedLine{Text: prefix + lineText})
-			}
-		}
-		if tm.Collapsed && tm.HiddenReplies > 0 {
-			var coloredNames []string
-			for _, p := range tm.ThreadParticipants {
-				pColor := agentColorMap[strings.TrimPrefix(strings.ToLower(p), "@")]
-				if pColor == "" {
-					for slug, name := range map[string]string{
-						"ceo": "CEO", "pm": "Product Manager", "fe": "Frontend Engineer", "be": "Backend Engineer",
-						"ai": "AI Engineer", "designer": "Designer", "cmo": "CMO", "cro": "CRO",
-					} {
-						if p == name {
-							pColor = agentColorMap[slug]
-							break
-						}
-					}
-				}
-				if pColor == "" {
-					pColor = "#ABABAD"
-				}
-				coloredNames = append(coloredNames, lipgloss.NewStyle().Foreground(lipgloss.Color(pColor)).Bold(true).Render(p))
-			}
-			participantStr := ""
-			if len(coloredNames) > 0 {
-				participantStr = "  " + strings.Join(coloredNames, ", ")
-			}
-			label := fmt.Sprintf("  ↩ %d repl%s%s", tm.HiddenReplies, pluralSuffix(tm.HiddenReplies), participantStr)
-			lines = append(lines, renderedLine{Text: label, ThreadID: msg.ID})
-		}
+	for _, tm := range officeThreadedMessages(messages, expanded, threadsDefaultExpand) {
+		lines = append(lines, renderOfficeMessageBlock(tm, contentWidth, unreadAnchorID, unreadCount)...)
 	}
 
 	return lines
 }
 
-func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, agentName string) []renderedLine {
+func renderReactions(reactions []brokerReaction) string {
+	if len(reactions) == 0 {
+		return ""
+	}
+	// Group by emoji: 👍 @ceo @pm
+	groups := make(map[string][]string)
+	order := make([]string, 0)
+	for _, r := range reactions {
+		if _, exists := groups[r.Emoji]; !exists {
+			order = append(order, r.Emoji)
+		}
+		groups[r.Emoji] = append(groups[r.Emoji], r.From)
+	}
+	pillStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#2C2D31")).
+		Foreground(lipgloss.Color("#D1D2D3")).
+		Padding(0, 1)
+	var parts []string
+	for _, emoji := range order {
+		agents := groups[emoji]
+		label := emoji + " " + fmt.Sprintf("%d", len(agents))
+		parts = append(parts, pillStyle.Render(label))
+	}
+	return strings.Join(parts, " ")
+}
+
+func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, agentName string, unreadAnchorID string, unreadCount int) []renderedLine {
 	if len(messages) == 0 {
 		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 		return []renderedLine{
 			{Text: ""},
-			{Text: mutedStyle.Render("  Direct 1:1 with " + agentName + ".")},
+			{Text: mutedStyle.Render("  Direct session reset. Agent pane reloaded in place.")},
 			{Text: mutedStyle.Render("  There is no office, no channel, and no teammate roster in this mode.")},
 			{Text: ""},
 			{Text: mutedStyle.Render("  Suggested: Help me think through the v1 launch plan.")},
 			{Text: mutedStyle.Render("  This conversation is just you and " + agentName + ".")},
 		}
 	}
-	return buildOfficeMessageLines(messages, expanded, contentWidth, true)
+	return buildOfficeMessageLines(messages, expanded, contentWidth, true, unreadAnchorID, unreadCount)
+}
+
+func renderUnreadDivider(contentWidth int, unreadCount int) string {
+	label := " New since you looked "
+	if unreadCount > 0 {
+		label = fmt.Sprintf(" %d new since you looked ", unreadCount)
+	}
+	lineLen := contentWidth - len(label) - 2
+	if lineLen < 4 {
+		lineLen = 4
+	}
+	left := strings.Repeat("─", lineLen/2)
+	right := strings.Repeat("─", lineLen-lineLen/2)
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#93C5FD")).
+		Render("  " + left + label + right)
 }
 
 func humanMessageLabel(kind string) string {
@@ -339,18 +189,18 @@ func buildRequestLines(requests []channelInterview, contentWidth int) []rendered
 	return lines
 }
 
-func buildPolicyLines(decisions []channelDecision, contentWidth int) []renderedLine {
+func buildPolicyLines(signals []channelSignal, decisions []channelDecision, alerts []channelWatchdog, actions []channelAction, contentWidth int) []renderedLine {
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 	var lines []renderedLine
-	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Policies")})
+	lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, "Insights")})
 
-	if len(decisions) == 0 {
+	if len(signals) == 0 && len(decisions) == 0 && len(alerts) == 0 && len(actions) == 0 {
 		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: muted.Render("  No team policies defined yet.")})
-		lines = append(lines, renderedLine{Text: muted.Render("  Policies are rules the team follows: coding standards, review gates,")})
-		lines = append(lines, renderedLine{Text: muted.Render("  deployment procedures, communication protocols.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  No office insights yet.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  Signals, decisions, watchdogs, and external actions will appear here")})
+		lines = append(lines, renderedLine{Text: muted.Render("  as the office starts tracking higher-signal work.")})
 		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: muted.Render("  The CEO can create policies from observed team patterns.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  Use /policies to refresh this ledger at any time.")})
 		return lines
 	}
 
@@ -361,7 +211,42 @@ func buildPolicyLines(decisions []channelDecision, contentWidth int) []renderedL
 		}
 	}
 
-	for _, decision := range decisions {
+	appendSection := func(title string) {
+		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, renderedLine{Text: renderDateSeparator(contentWidth, title)})
+	}
+
+	for _, signal := range reverseSignals(signals, 8) {
+		if len(lines) == 1 {
+			appendSection("Signals")
+		}
+		metaParts := []string{}
+		if kind := displaySignalKind(signal); kind != "" {
+			metaParts = append(metaParts, kind)
+		}
+		if signal.Owner != "" {
+			metaParts = append(metaParts, "@"+signal.Owner)
+		}
+		if signal.Channel != "" {
+			metaParts = append(metaParts, "#"+signal.Channel)
+		}
+		if signal.Urgency != "" {
+			metaParts = append(metaParts, "urgency "+signal.Urgency)
+		}
+		if signal.Confidence != "" {
+			metaParts = append(metaParts, "confidence "+signal.Confidence)
+		}
+		appendWrappedLine("  " + accentPill("signal", "#7C3AED") + " " + lipgloss.NewStyle().Bold(true).Render(fallbackString(signal.Title, "Office signal")))
+		if len(metaParts) > 0 {
+			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
+		}
+		appendWrappedLine("  " + signal.Content)
+	}
+
+	if len(decisions) > 0 {
+		appendSection("Decisions")
+	}
+	for _, decision := range reverseDecisions(decisions, 8) {
 		metaParts := []string{}
 		if decision.Owner != "" {
 			metaParts = append(metaParts, "by @"+decision.Owner)
@@ -370,7 +255,7 @@ func buildPolicyLines(decisions []channelDecision, contentWidth int) []renderedL
 			metaParts = append(metaParts, "#"+decision.Channel)
 		}
 		lines = append(lines, renderedLine{Text: ""})
-		appendWrappedLine("  " + accentPill("policy", "#1264A3") + " " + lipgloss.NewStyle().Bold(true).Render(decision.Summary))
+		appendWrappedLine("  " + accentPill("policy", "#1264A3") + " " + lipgloss.NewStyle().Bold(true).Render("Decisions · "+displayDecisionSummary(decision.Summary)))
 		if len(metaParts) > 0 {
 			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
 		}
@@ -378,7 +263,74 @@ func buildPolicyLines(decisions []channelDecision, contentWidth int) []renderedL
 			appendWrappedLine("  " + muted.Render("Why: "+decision.Reason))
 		}
 	}
+
+	watchdogs := activeWatchdogs(alerts)
+	if len(watchdogs) > 0 {
+		appendSection("Watchdogs")
+	}
+	for _, alert := range reverseWatchdogs(watchdogs, 8) {
+		metaParts := []string{}
+		if alert.Owner != "" {
+			metaParts = append(metaParts, "@"+alert.Owner)
+		}
+		if alert.Channel != "" {
+			metaParts = append(metaParts, "#"+alert.Channel)
+		}
+		if alert.Kind != "" {
+			metaParts = append(metaParts, alert.Kind)
+		}
+		if alert.Status != "" {
+			metaParts = append(metaParts, alert.Status)
+		}
+		appendWrappedLine("  " + accentPill("watchdog", "#DC2626") + " " + lipgloss.NewStyle().Bold(true).Render(fallbackString(alert.Summary, "Watchdog alert")))
+		if len(metaParts) > 0 {
+			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
+		}
+	}
+
+	external := recentExternalActions(actions, 6)
+	if len(external) > 0 {
+		appendSection("External Actions")
+	}
+	for _, action := range external {
+		metaParts := []string{}
+		if action.Actor != "" {
+			metaParts = append(metaParts, "@"+action.Actor)
+		}
+		if action.Channel != "" {
+			metaParts = append(metaParts, "#"+action.Channel)
+		}
+		if action.Kind != "" {
+			metaParts = append(metaParts, action.Kind)
+		}
+		if action.Source != "" {
+			metaParts = append(metaParts, action.Source)
+		}
+		appendWrappedLine("  " + accentPill("action", "#0F766E") + " " + lipgloss.NewStyle().Bold(true).Render(fallbackString(action.Summary, "External action")))
+		if len(metaParts) > 0 {
+			appendWrappedLine("  " + muted.Render(strings.Join(metaParts, " · ")))
+		}
+	}
 	return lines
+}
+
+func displaySignalKind(signal channelSignal) string {
+	kind := strings.TrimSpace(signal.Kind)
+	if kind == "" {
+		return ""
+	}
+	if strings.EqualFold(kind, "directive") {
+		return "Human directive"
+	}
+	return kind
+}
+
+func displayDecisionSummary(summary string) string {
+	summary = strings.TrimSpace(summary)
+	if strings.HasPrefix(summary, "Human directed the office:") {
+		return strings.Replace(summary, "Human directed the office:", "Human directive:", 1)
+	}
+	return summary
 }
 
 func buildTaskLines(tasks []channelTask, contentWidth int) []renderedLine {
@@ -516,7 +468,7 @@ func buildSkillLines(skills []channelSkill, contentWidth int) []renderedLine {
 			lines = append(lines, renderedLine{Text: "  " + muted.Render(fmt.Sprintf("workflow: %s via %s", skill.WorkflowKey, fallbackString(skill.WorkflowProvider, "one")))})
 		}
 		if skill.WorkflowSchedule != "" {
-			lines = append(lines, renderedLine{Text: "  " + muted.Render("schedule: " + skill.WorkflowSchedule)})
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("schedule: "+skill.WorkflowSchedule)})
 		}
 		if skill.RelayID != "" || skill.RelayPlatform != "" || len(skill.RelayEventTypes) > 0 {
 			relayParts := []string{}
@@ -529,7 +481,7 @@ func buildSkillLines(skills []channelSkill, contentWidth int) []renderedLine {
 			if skill.RelayID != "" {
 				relayParts = append(relayParts, skill.RelayID)
 			}
-			lines = append(lines, renderedLine{Text: "  " + muted.Render("relay: " + strings.Join(relayParts, " · "))})
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("relay: "+strings.Join(relayParts, " · "))})
 		}
 		if skill.LastExecutionAt != "" || skill.LastExecutionStatus != "" {
 			runParts := []string{}
@@ -539,7 +491,7 @@ func buildSkillLines(skills []channelSkill, contentWidth int) []renderedLine {
 			if skill.LastExecutionAt != "" {
 				runParts = append(runParts, prettyRelativeTime(skill.LastExecutionAt))
 			}
-			lines = append(lines, renderedLine{Text: "  " + muted.Render("last run: " + strings.Join(runParts, " · "))})
+			lines = append(lines, renderedLine{Text: "  " + muted.Render("last run: "+strings.Join(runParts, " · "))})
 		}
 	}
 	return lines
@@ -576,6 +528,59 @@ func buildCalendarLines(actions []channelAction, jobs []channelSchedulerJob, tas
 			}
 			lines = append(lines, renderedLine{Text: ""})
 			lines = append(lines, renderCalendarEventCard(event, contentWidth)...)
+		}
+	}
+	recentActionCap := len(actions)
+	if recentActionCap > 4 {
+		recentActionCap = 4
+	}
+	recentActions := make([]channelAction, 0, recentActionCap)
+	var pinnedBridge *channelAction
+	for i := len(actions) - 1; i >= 0; i-- {
+		action := actions[i]
+		channel := normalizeSidebarSlug(action.Channel)
+		if strings.TrimSpace(action.Kind) != "bridge_channel" && channel != "" && channel != normalizeSidebarSlug(activeChannel) {
+			continue
+		}
+		if strings.TrimSpace(action.Kind) == "bridge_channel" && pinnedBridge == nil {
+			actionCopy := action
+			pinnedBridge = &actionCopy
+		}
+		if len(recentActions) < recentActionCap {
+			recentActions = append(recentActions, action)
+		}
+	}
+	if pinnedBridge != nil {
+		hasBridge := false
+		for _, action := range recentActions {
+			if strings.TrimSpace(action.Kind) == "bridge_channel" {
+				hasBridge = true
+				break
+			}
+		}
+		if !hasBridge {
+			recentActions = append([]channelAction{*pinnedBridge}, recentActions...)
+			if recentActionCap > 0 && len(recentActions) > recentActionCap {
+				recentActions = recentActions[:recentActionCap]
+			}
+		}
+	}
+	if len(recentActions) > 0 {
+		lines = append(lines, renderedLine{Text: ""})
+		lines = append(lines, renderedLine{Text: "  " + lipgloss.NewStyle().Bold(true).Render("Recent actions")})
+		for _, action := range recentActions {
+			metaParts := []string{}
+			if action.Actor != "" {
+				metaParts = append(metaParts, "@"+action.Actor)
+			}
+			if action.Kind != "" {
+				metaParts = append(metaParts, action.Kind)
+			}
+			if action.CreatedAt != "" {
+				metaParts = append(metaParts, prettyRelativeTime(action.CreatedAt))
+			}
+			lines = append(lines, renderedLine{Text: ""})
+			lines = append(lines, renderCalendarActionCard(action, strings.Join(metaParts, " · "), contentWidth)...)
 		}
 	}
 	return lines
@@ -692,14 +697,19 @@ func renderCalendarActionCard(action channelAction, meta string, contentWidth in
 }
 
 func renderedCardLines(card, taskID, requestID, threadID, agentSlug string) []renderedLine {
+	return renderedCardLinesWithPrompt(card, taskID, requestID, threadID, agentSlug, "")
+}
+
+func renderedCardLinesWithPrompt(card, taskID, requestID, threadID, agentSlug, promptValue string) []renderedLine {
 	var lines []renderedLine
 	for _, line := range strings.Split(card, "\n") {
 		lines = append(lines, renderedLine{
-			Text:      line,
-			TaskID:    taskID,
-			RequestID: requestID,
-			ThreadID:  threadID,
-			AgentSlug: agentSlug,
+			Text:        line,
+			TaskID:      taskID,
+			RequestID:   requestID,
+			ThreadID:    threadID,
+			AgentSlug:   agentSlug,
+			PromptValue: promptValue,
 		})
 	}
 	return lines
@@ -1325,7 +1335,8 @@ func reverseWatchdogs(alerts []channelWatchdog, limit int) []channelWatchdog {
 func recentExternalActions(actions []channelAction, limit int) []channelAction {
 	var filtered []channelAction
 	for _, action := range actions {
-		if !strings.HasPrefix(strings.TrimSpace(action.Kind), "external_") {
+		kind := strings.TrimSpace(action.Kind)
+		if !strings.HasPrefix(kind, "external_") && kind != "bridge_channel" {
 			continue
 		}
 		filtered = append(filtered, action)
@@ -1354,10 +1365,11 @@ func renderMarkdown(text string, width int) string {
 	if !strings.ContainsAny(text, "*_`#|-[]>") {
 		return text
 	}
-	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width),
-	)
+	key := markdownCacheKey(width, text)
+	if cached, ok := channelRenderCache.getMarkdown(key); ok {
+		return cached
+	}
+	r, err := channelRenderCache.renderer(width)
 	if err != nil {
 		return text
 	}
@@ -1369,5 +1381,6 @@ func renderMarkdown(text string, width int) string {
 	result := strings.TrimRight(rendered, "\n ")
 	// Remove glamour's auto-linked mailto: URLs that duplicate email addresses
 	result = strings.ReplaceAll(result, "mailto:", "")
+	channelRenderCache.putMarkdown(key, result)
 	return result
 }

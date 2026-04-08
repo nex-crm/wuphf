@@ -155,6 +155,122 @@ func TestBrokerMessageKindAndTitleRoundTrip(t *testing.T) {
 	}
 }
 
+func TestBrokerMessagesCanScopeToThread(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	root, err := b.PostMessage("ceo", "general", "Root topic", nil, "")
+	if err != nil {
+		t.Fatalf("post root: %v", err)
+	}
+	reply, err := b.PostMessage("fe", "general", "Reply in thread", nil, root.ID)
+	if err != nil {
+		t.Fatalf("post reply: %v", err)
+	}
+	if _, err := b.PostMessage("pm", "general", "Separate topic", nil, ""); err != nil {
+		t.Fatalf("post unrelated: %v", err)
+	}
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	req, _ := http.NewRequest(http.MethodGet, base+"/messages?channel=general&thread_id="+root.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("thread messages request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 listing thread messages, got %d: %s", resp.StatusCode, raw)
+	}
+
+	var result struct {
+		Messages []channelMessage `json:"messages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode thread messages: %v", err)
+	}
+	if len(result.Messages) != 2 {
+		t.Fatalf("expected root and reply only, got %+v", result.Messages)
+	}
+	if result.Messages[0].ID != root.ID || result.Messages[1].ID != reply.ID {
+		t.Fatalf("unexpected thread messages: %+v", result.Messages)
+	}
+}
+
+func TestBrokerMessagesCanScopeToAgentInbox(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	if _, err := b.PostMessage("you", "general", "Global direction", nil, ""); err != nil {
+		t.Fatalf("post human message: %v", err)
+	}
+	if _, err := b.PostMessage("pm", "general", "Unrelated PM update", nil, ""); err != nil {
+		t.Fatalf("post unrelated message: %v", err)
+	}
+	tagged, err := b.PostMessage("ceo", "general", "Frontend, take this next.", []string{"fe"}, "")
+	if err != nil {
+		t.Fatalf("post tagged message: %v", err)
+	}
+	own, err := b.PostMessage("fe", "general", "I am on it.", nil, "")
+	if err != nil {
+		t.Fatalf("post own message: %v", err)
+	}
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	req, _ := http.NewRequest(http.MethodGet, base+"/messages?channel=general&my_slug=fe&viewer_slug=fe&scope=agent", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("agent-scoped messages request failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 listing agent-scoped messages, got %d: %s", resp.StatusCode, raw)
+	}
+
+	var result struct {
+		Messages    []channelMessage `json:"messages"`
+		TaggedCount int              `json:"tagged_count"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode agent-scoped messages: %v", err)
+	}
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected human, tagged, and own messages only, got %+v", result.Messages)
+	}
+	if result.TaggedCount != 1 {
+		t.Fatalf("expected one tagged message, got %d", result.TaggedCount)
+	}
+	seen := map[string]bool{}
+	for _, msg := range result.Messages {
+		seen[msg.ID] = true
+		if strings.Contains(msg.Content, "Unrelated PM update") {
+			t.Fatalf("did not expect unrelated message in agent scope: %+v", result.Messages)
+		}
+	}
+	if !seen[tagged.ID] || !seen[own.ID] {
+		t.Fatalf("expected tagged and own messages in scoped view, got %+v", result.Messages)
+	}
+}
+
 func TestNewBrokerSeedsDefaultOfficeRosterOnFreshState(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -178,6 +294,74 @@ func TestNewBrokerSeedsDefaultOfficeRosterOnFreshState(t *testing.T) {
 	}
 	if len(general.Members) < len(members) {
 		t.Fatalf("expected general channel to include office roster, got %v for %d members", general.Members, len(members))
+	}
+}
+
+func TestHandleMessagesSupportsInboxAndOutboxScopes(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	root, err := b.PostMessage("ceo", "general", "Frontend, take the signup thread.", nil, "")
+	if err != nil {
+		t.Fatalf("post root message: %v", err)
+	}
+	ownReply, err := b.PostMessage("fe", "general", "I can own the signup thread.", nil, root.ID)
+	if err != nil {
+		t.Fatalf("post own reply: %v", err)
+	}
+	threadReply, err := b.PostMessage("pm", "general", "Please include the pricing copy in that thread.", nil, ownReply.ID)
+	if err != nil {
+		t.Fatalf("post thread reply: %v", err)
+	}
+	ownTopLevel, err := b.PostMessage("fe", "general", "Shipped the initial branch.", nil, "")
+	if err != nil {
+		t.Fatalf("post own top-level message: %v", err)
+	}
+	if _, err := b.PostMessage("pm", "general", "Unrelated roadmap chatter.", nil, ""); err != nil {
+		t.Fatalf("post unrelated message: %v", err)
+	}
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	fetch := func(scope string) []channelMessage {
+		req, _ := http.NewRequest(http.MethodGet, base+"/messages?channel=general&viewer_slug=fe&scope="+scope, nil)
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("get %s messages: %v", scope, err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200 for %s scope, got %d: %s", scope, resp.StatusCode, raw)
+		}
+		var result struct {
+			Messages []channelMessage `json:"messages"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode %s messages: %v", scope, err)
+		}
+		return result.Messages
+	}
+
+	inbox := fetch("inbox")
+	if len(inbox) != 2 {
+		t.Fatalf("expected CEO root plus PM thread reply in inbox, got %+v", inbox)
+	}
+	if inbox[0].ID != root.ID || inbox[1].ID != threadReply.ID {
+		t.Fatalf("unexpected inbox ordering/content: %+v", inbox)
+	}
+
+	outbox := fetch("outbox")
+	if len(outbox) != 2 {
+		t.Fatalf("expected only authored messages in outbox, got %+v", outbox)
+	}
+	if outbox[0].ID != ownReply.ID || outbox[1].ID != ownTopLevel.ID {
+		t.Fatalf("unexpected outbox ordering/content: %+v", outbox)
 	}
 }
 
@@ -924,6 +1108,17 @@ func TestBrokerTaskCreateReusesExistingOpenTask(t *testing.T) {
 }
 
 func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
+	oldPrepare := prepareTaskWorktree
+	oldCleanup := cleanupTaskWorktree
+	prepareTaskWorktree = func(taskID string) (string, string, error) {
+		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
+	}
+	cleanupTaskWorktree = func(path, branch string) error { return nil }
+	defer func() {
+		prepareTaskWorktree = oldPrepare
+		cleanupTaskWorktree = oldCleanup
+	}()
+
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
@@ -970,6 +1165,9 @@ func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 	if task.PipelineStage != "implement" || task.ExecutionMode != "local_worktree" || task.SourceDecisionID != decision.ID {
 		t.Fatalf("expected structured task metadata, got %+v", task)
 	}
+	if task.WorktreePath == "" || task.WorktreeBranch == "" {
+		t.Fatalf("expected planned task worktree metadata, got %+v", task)
+	}
 
 	base := fmt.Sprintf("http://%s", b.Addr())
 	body, _ := json.Marshal(map[string]any{
@@ -1001,6 +1199,75 @@ func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 	}
 	if len(b.Decisions()) != 1 || len(b.Signals()) != 1 || len(b.Watchdogs()) != 1 {
 		t.Fatalf("expected ledger state, got signals=%d decisions=%d watchdogs=%d", len(b.Signals()), len(b.Decisions()), len(b.Watchdogs()))
+	}
+}
+
+func TestBrokerReleaseTaskCleansWorktree(t *testing.T) {
+	oldPrepare := prepareTaskWorktree
+	oldCleanup := cleanupTaskWorktree
+	var cleanedPath, cleanedBranch string
+	prepareTaskWorktree = func(taskID string) (string, string, error) {
+		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
+	}
+	cleanupTaskWorktree = func(path, branch string) error {
+		cleanedPath = path
+		cleanedBranch = branch
+		return nil
+	}
+	defer func() {
+		prepareTaskWorktree = oldPrepare
+		cleanupTaskWorktree = oldCleanup
+	}()
+
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:   "general",
+		Title:     "Build signup conversion fix",
+		Owner:     "fe",
+		CreatedBy: "ceo",
+		TaskType:  "feature",
+	})
+	if err != nil || reused {
+		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
+	}
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	body, _ := json.Marshal(map[string]any{
+		"action":     "release",
+		"channel":    "general",
+		"id":         task.ID,
+		"created_by": "ceo",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("release task: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Task teamTask `json:"task"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode released task: %v", err)
+	}
+	if cleanedPath == "" || cleanedBranch == "" {
+		t.Fatalf("expected cleanup to run, got path=%q branch=%q", cleanedPath, cleanedBranch)
+	}
+	if result.Task.WorktreePath != "" || result.Task.WorktreeBranch != "" {
+		t.Fatalf("expected released task worktree metadata to clear, got %+v", result.Task)
 	}
 }
 
@@ -1212,6 +1479,76 @@ func TestBrokerDecisionRequestsDefaultToBlocking(t *testing.T) {
 	if !created.Request.Blocking || !created.Request.Required {
 		t.Fatalf("expected approval to default to blocking+required, got %+v", created.Request)
 	}
+	if got := created.Request.RecommendedID; got != "approve" {
+		t.Fatalf("expected approval recommended_id to default to approve, got %q", got)
+	}
+	if len(created.Request.Options) != 5 {
+		t.Fatalf("expected enriched approval options, got %+v", created.Request.Options)
+	}
+	var approveWithNote *interviewOption
+	for i := range created.Request.Options {
+		if created.Request.Options[i].ID == "approve_with_note" {
+			approveWithNote = &created.Request.Options[i]
+			break
+		}
+	}
+	if approveWithNote == nil || !approveWithNote.RequiresText || strings.TrimSpace(approveWithNote.TextHint) == "" {
+		t.Fatalf("expected approve_with_note to require text, got %+v", approveWithNote)
+	}
+}
+
+func TestBrokerRequestAnswerRequiresCustomTextWhenOptionNeedsIt(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	body, _ := json.Marshal(map[string]any{
+		"kind":     "approval",
+		"from":     "ceo",
+		"channel":  "general",
+		"title":    "Approval needed",
+		"question": "Should we proceed?",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request create failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var created struct {
+		Request humanInterview `json:"request"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+
+	answerBody, _ := json.Marshal(map[string]any{
+		"id":        created.Request.ID,
+		"choice_id": "approve_with_note",
+	})
+	req, _ = http.NewRequest(http.MethodPost, base+"/requests/answer", bytes.NewReader(answerBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request answer failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 400 for missing custom text, got %d: %s", resp.StatusCode, raw)
+	}
 }
 
 func TestQueueEndpointShowsDueJobs(t *testing.T) {
@@ -1255,6 +1592,68 @@ func TestQueueEndpointShowsDueJobs(t *testing.T) {
 	}
 	if len(queue.Due) != 1 {
 		t.Fatalf("expected due scheduler job to surface, got %+v", queue.Due)
+	}
+}
+
+func TestBrokerGetMessagesAgentScopeKeepsHumanAndCEOContext(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	postMessage := func(payload map[string]any) {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, base+"/messages", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("post message: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200 posting message, got %d: %s", resp.StatusCode, raw)
+		}
+	}
+
+	postMessage(map[string]any{"channel": "general", "from": "you", "content": "Frontend, should we ship this?", "tagged": []string{"fe"}})
+	postMessage(map[string]any{"channel": "general", "from": "pm", "content": "Unrelated roadmap chatter."})
+	postMessage(map[string]any{"channel": "general", "from": "ceo", "content": "Keep scope tight and focus on signup."})
+	postMessage(map[string]any{"channel": "general", "from": "fe", "content": "I can take the signup work."})
+
+	req, _ := http.NewRequest(http.MethodGet, base+"/messages?channel=general&viewer_slug=fe&scope=agent", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get messages: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var result struct {
+		Messages []channelMessage `json:"messages"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode messages: %v", err)
+	}
+	if len(result.Messages) != 3 {
+		t.Fatalf("expected scoped transcript to keep 3 messages, got %+v", result.Messages)
+	}
+	if got := result.Messages[1].From; got != "ceo" {
+		t.Fatalf("expected CEO context to remain visible, got %+v", result.Messages)
+	}
+	for _, msg := range result.Messages {
+		if msg.From == "pm" {
+			t.Fatalf("did not expect unrelated PM chatter in scoped transcript: %+v", result.Messages)
+		}
 	}
 }
 

@@ -18,8 +18,8 @@ func TestBuildTeamLeadPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "@be") {
 		t.Error("expected prompt to contain @be")
 	}
-	if !strings.Contains(prompt, "delegate") || !strings.Contains(prompt, "MUST delegate") {
-		t.Error("expected delegation instructions in prompt")
+	if !strings.Contains(prompt, "They can see everything you say") {
+		t.Error("expected broadcast instructions in prompt")
 	}
 	if !strings.Contains(prompt, "Never invent external teammates") {
 		t.Error("expected prompt to forbid invented teammates")
@@ -41,6 +41,9 @@ func TestBuildSpecialistPrompt(t *testing.T) {
 	if !strings.Contains(prompt, "frontend") {
 		t.Error("expected expertise in prompt")
 	}
+	if !strings.Contains(prompt, "you are needed") {
+		t.Error("expected directive 'you are needed' language in prompt")
+	}
 }
 
 func TestBuildTeamLeadPromptMentionsAllAgents(t *testing.T) {
@@ -54,6 +57,31 @@ func TestBuildTeamLeadPromptMentionsAllAgents(t *testing.T) {
 	for _, a := range team {
 		if !strings.Contains(prompt, "@"+a.Slug) {
 			t.Errorf("expected prompt to mention @%s", a.Slug)
+		}
+	}
+}
+
+func TestBuildOfficeCompactionPrompt(t *testing.T) {
+	prompt := BuildOfficeCompactionPrompt("PM decided to ship the launch page on Friday.")
+	if !strings.Contains(prompt, "Office Insight") {
+		t.Fatal("expected Office Insight instructions in compaction prompt")
+	}
+	if !strings.Contains(prompt, "mission summary") {
+		t.Fatal("expected mission-summary guidance in compaction prompt")
+	}
+	if !strings.Contains(prompt, "key decisions, current blockers, and open follow-ups") {
+		t.Fatal("expected compaction sections in prompt")
+	}
+	if !strings.Contains(prompt, "PM decided to ship the launch page on Friday.") {
+		t.Fatal("expected archived thread content in prompt")
+	}
+}
+
+func TestBuildCompactionPrompt(t *testing.T) {
+	prompt := BuildCompactionPrompt()
+	for _, want := range []string{"mission", "key decisions", "current blockers", "Office Insight"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("expected compaction prompt to mention %q", want)
 		}
 	}
 }

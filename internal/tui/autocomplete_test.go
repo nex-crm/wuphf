@@ -1,16 +1,17 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 var testCommands = []SlashCommand{
-	{Name: "help", Description: "Show help"},
-	{Name: "history", Description: "Show history"},
-	{Name: "agents", Description: "List agents"},
-	{Name: "clear", Description: "Clear screen"},
+	{Name: "help", Description: "Show help", Category: "general"},
+	{Name: "history", Description: "Show history", Category: "general"},
+	{Name: "agents", Description: "List agents", Category: "team"},
+	{Name: "clear", Description: "Clear screen", Category: "general"},
 }
 
 func TestAutocompleteFilter(t *testing.T) {
@@ -96,5 +97,18 @@ func TestAutocompleteMaxMatches(t *testing.T) {
 
 	if len(ac.matches) > maxAutocompleteMatches {
 		t.Fatalf("expected at most %d matches, got %d", maxAutocompleteMatches, len(ac.matches))
+	}
+}
+
+func TestAutocompleteViewShowsCategoryLabels(t *testing.T) {
+	ac := NewAutocomplete(testCommands)
+	ac.UpdateQuery("/")
+
+	view := ac.View()
+	if view == "" {
+		t.Fatal("expected autocomplete view to render")
+	}
+	if !strings.Contains(view, "general") || !strings.Contains(view, "team") {
+		t.Fatalf("expected category labels in autocomplete view, got %q", view)
 	}
 }

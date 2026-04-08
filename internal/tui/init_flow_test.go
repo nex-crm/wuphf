@@ -15,7 +15,7 @@ func TestInitFlowStartsWithAPIKeyStepWhenMissing(t *testing.T) {
 	}
 }
 
-func TestInitFlowSkipsToProviderWhenAPIKeyExists(t *testing.T) {
+func TestInitFlowSkipsToPackWhenAPIKeyExists(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	if err := config.Save(config.Config{APIKey: "wuphf-key"}); err != nil {
 		t.Fatalf("save config: %v", err)
@@ -24,6 +24,9 @@ func TestInitFlowSkipsToProviderWhenAPIKeyExists(t *testing.T) {
 	flow, _ := NewInitFlow().Start()
 	if flow.Phase() != InitPackChoice {
 		t.Fatalf("expected pack choice phase, got %q", flow.Phase())
+	}
+	if flow.provider != "claude-code" {
+		t.Fatalf("expected provider to default to claude-code, got %q", flow.provider)
 	}
 }
 

@@ -27,6 +27,10 @@ func joinRenderedLines(lines []renderedLine) string {
 	return strings.Join(parts, "\n")
 }
 
+func altRuneKey(r rune) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}, Alt: true}
+}
+
 func TestNewBrokerRequestUsesEnvTokenAtRequestTime(t *testing.T) {
 	oldEnv := os.Getenv("WUPHF_BROKER_TOKEN")
 	oldPath := brokerTokenPath
@@ -242,7 +246,7 @@ func TestRenderThreadPanelShowsNestedReplies(t *testing.T) {
 		{ID: "msg-3", From: "be", Content: "Nested reply", ReplyTo: "msg-2", Timestamp: "2026-03-24T10:02:00Z"},
 	}
 
-	view := stripANSI(renderThreadPanel(messages, "msg-1", 44, 18, nil, 0, 0, "", true))
+	view := stripANSI(renderThreadPanel(messages, "msg-1", 44, 18, nil, 0, 0, "", true, false))
 	if !strings.Contains(view, "Reply one") || !strings.Contains(view, "Reply two") {
 		t.Fatalf("expected thread panel to count nested replies, got %q", view)
 	}
@@ -280,6 +284,56 @@ func TestChannelViewUsesOneOnOneChrome(t *testing.T) {
 	}
 }
 
+func TestOneOnOneViewShowsExecutionTimeline(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "ceo"
+	m.sidebarCollapsed = true
+	m.refreshSlashCommands()
+	m.actions = []channelAction{
+		{ID: "action-1", Kind: "external_action_planned", Source: "composio", Actor: "ceo", Summary: "Dry-run Gmail send ready.", RelatedID: "GMAIL_SEND_EMAIL", CreatedAt: "2026-04-02T10:00:00Z"},
+		{ID: "action-2", Kind: "external_action_executed", Source: "composio", Actor: "ceo", Summary: "Sent the test email.", RelatedID: "GMAIL_SEND_EMAIL", CreatedAt: "2026-04-02T10:01:00Z"},
+	}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Execution timeline") || !strings.Contains(view, "Sent the test email.") {
+		t.Fatalf("expected 1:1 execution timeline, got %q", view)
+	}
+	if !strings.Contains(view, "completed") || !strings.Contains(view, "planned") {
+		t.Fatalf("expected action state pills in 1:1 timeline, got %q", view)
+	}
+}
+
+func TestOneOnOneStatusBarShowsRuntimeSummary(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "ceo"
+	m.sidebarCollapsed = true
+	m.refreshSlashCommands()
+	m.brokerConnected = true
+	m.members = []channelMember{{
+		Slug:         "ceo",
+		Name:         "CEO",
+		LiveActivity: "go test ./cmd/wuphf",
+	}}
+	m.tasks = []channelTask{{
+		ID:      "task-1",
+		Channel: "general",
+		Title:   "launch review",
+		Owner:   "ceo",
+		Status:  "in_progress",
+	}}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "Ctrl+J newline") || !strings.Contains(view, "Running tests") {
+		t.Fatalf("expected richer 1:1 status text, got %q", view)
+	}
+}
+
 func TestOneOnOneModeBlocksOfficeCommands(t *testing.T) {
 	m := newChannelModel(false)
 	m.sessionMode = team.SessionModeOneOnOne
@@ -290,6 +344,159 @@ func TestOneOnOneModeBlocksOfficeCommands(t *testing.T) {
 	got := next.(channelModel)
 	if !strings.Contains(got.notice, "1:1 mode disables office") {
 		t.Fatalf("expected office commands to be blocked in 1o1 mode, got %q", got.notice)
+	}
+}
+
+func TestSwitchCommandOpensChannelPicker(t *testing.T) {
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+	}
+
+	next, cmd := m.runCommand("/switch", "")
+	if cmd != nil {
+		t.Fatalf("expected no immediate command from /switch, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if !got.picker.IsActive() || got.pickerMode != channelPickerChannels {
+		t.Fatalf("expected channel picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	if got.notice != "Choose a channel to switch to." {
+		t.Fatalf("expected switch notice, got %q", got.notice)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "Switch Channel") || !strings.Contains(view, "#launch") {
+		t.Fatalf("expected switch picker contents, got %q", view)
+	}
+}
+
+func TestSwitchCommandIncludesWorkspaceDestinations(t *testing.T) {
+	m := newChannelModel(false)
+
+	options := m.buildSwitchChannelPickerOptions()
+	values := make(map[string]bool, len(options))
+	for _, option := range options {
+		values[option.Value] = true
+	}
+
+	for _, want := range []string{"app:messages", "app:tasks", "app:requests", "app:policies", "app:calendar", "session:1o1:ceo"} {
+		if !values[want] {
+			t.Fatalf("expected switcher option %q, got %+v", want, options)
+		}
+	}
+}
+
+func TestSwitchAliasSelectsChannel(t *testing.T) {
+	m := newChannelModel(false)
+	m.activeChannel = "general"
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+	}
+	m.picker = tui.NewPicker("Switch Channel", m.buildChannelPickerOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerChannels
+	m.messages = []brokerMessage{{ID: "msg-1", Content: "hello"}}
+	m.members = []channelMember{{Slug: "ceo"}}
+	m.replyToID = "msg-1"
+	m.threadPanelOpen = true
+	m.threadPanelID = "thread-1"
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "switch:launch", Label: "#launch"})
+	if cmd == nil {
+		t.Fatal("expected channel switch polling command")
+	}
+	got := next.(channelModel)
+	if got.activeChannel != "launch" {
+		t.Fatalf("expected active channel launch, got %q", got.activeChannel)
+	}
+	if got.lastID != "" || len(got.messages) != 0 || len(got.members) != 0 {
+		t.Fatalf("expected channel state to reset on switch, got lastID=%q messages=%d members=%d", got.lastID, len(got.messages), len(got.members))
+	}
+	if got.replyToID != "" || got.threadPanelOpen || got.threadPanelID != "" {
+		t.Fatalf("expected thread context to clear on switch, got replyToID=%q threadOpen=%v threadID=%q", got.replyToID, got.threadPanelOpen, got.threadPanelID)
+	}
+	if got.notice != "Switched to #launch" {
+		t.Fatalf("expected switch notice, got %q", got.notice)
+	}
+	if got.picker.IsActive() || got.pickerMode != channelPickerNone {
+		t.Fatalf("expected picker to close after switch, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+}
+
+func TestBuildSwitchChannelPickerOptionsOnlyIncludesSwitchTargets(t *testing.T) {
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+	}
+
+	options := m.buildSwitchChannelPickerOptions()
+	if len(options) < 2 {
+		t.Fatalf("expected channel switch targets, got %+v", options)
+	}
+	seenChannels := 0
+	for _, option := range options {
+		if strings.HasPrefix(option.Value, "switch:") {
+			seenChannels++
+		}
+	}
+	if seenChannels != 2 {
+		t.Fatalf("expected two channel switch targets, got %+v", options)
+	}
+}
+
+func TestTypingSwitchShortcutOpensChannelPicker(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+	}
+	m.input = []rune("/switch")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	got := next.(channelModel)
+
+	if !got.picker.IsActive() || got.pickerMode != channelPickerChannels {
+		t.Fatalf("expected typed /switch shortcut to open picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	if got.inputPos != 0 || len(got.input) != 0 {
+		t.Fatalf("expected composer to clear once picker opens, got input=%q pos=%d", string(got.input), got.inputPos)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "#launch") {
+		t.Fatalf("expected switch picker contents, got %q", view)
+	}
+	if strings.Contains(view, "Remove #launch") {
+		t.Fatalf("expected switch shortcut picker to hide remove actions, got %q", view)
+	}
+}
+
+func TestPickerTypingDoesNotAppendToComposer(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Release work", Members: []string{"ceo", "fe"}},
+		{Slug: "ops", Name: "ops", Members: []string{"ceo"}},
+	}
+	m.input = []rune("/switch")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeySpace})
+	got := next.(channelModel)
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'u'}})
+	got = next.(channelModel)
+
+	if string(got.input) != "" || got.inputPos != 0 {
+		t.Fatalf("expected picker input to leave composer untouched, got input=%q pos=%d", string(got.input), got.inputPos)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "#launch") || strings.Contains(view, "#general") {
+		t.Fatalf("expected picker query to filter channels, got %q", view)
 	}
 }
 
@@ -343,6 +550,46 @@ func TestOneOnOnePickerDisableInOfficeIsNoop(t *testing.T) {
 	got := next.(channelModel)
 	if got.notice != "Already running the full office team." {
 		t.Fatalf("expected office noop notice, got %q", got.notice)
+	}
+}
+
+func TestOneOnOnePickerDisableInDirectModeRequiresConfirmation(t *testing.T) {
+	m := newChannelModel(false)
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "be"
+	m.picker = tui.NewPicker("Direct Session", m.buildOneOnOneModePickerOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerOneOnOneMode
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "disable"})
+	if cmd != nil {
+		t.Fatalf("expected no immediate command when requesting office mode, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if got.confirm == nil {
+		t.Fatal("expected confirmation card to open")
+	}
+	if got.confirm.Action != confirmActionSwitchMode {
+		t.Fatalf("expected switch-mode confirmation, got %q", got.confirm.Action)
+	}
+}
+
+func TestOneOnOneAgentSelectionRequiresConfirmation(t *testing.T) {
+	m := newChannelModel(false)
+	m.picker = tui.NewPicker("Choose Direct Agent", m.buildOneOnOneAgentPickerOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerOneOnOneAgent
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "ceo"})
+	if cmd != nil {
+		t.Fatalf("expected no immediate command when picking direct agent, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if got.confirm == nil {
+		t.Fatal("expected confirmation card to open")
+	}
+	if got.confirm.Action != confirmActionSwitchMode || got.confirm.Agent != "ceo" {
+		t.Fatalf("unexpected confirmation: %+v", got.confirm)
 	}
 }
 
@@ -428,7 +675,6 @@ func TestChannelCreateDoneSwitchesToNewChannel(t *testing.T) {
 }
 
 func TestResolveInitialOfficeAppFallsBackToMessages(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	if got := resolveInitialOfficeApp("insights"); got != officeAppPolicies {
 		t.Fatalf("expected policies app, got %q", got)
 	}
@@ -437,6 +683,71 @@ func TestResolveInitialOfficeAppFallsBackToMessages(t *testing.T) {
 	}
 	if got := resolveInitialOfficeApp("not-real"); got != officeAppMessages {
 		t.Fatalf("expected invalid app to fall back to messages, got %q", got)
+	}
+}
+
+func TestDisplaySignalKindUsesHumanDirectiveLabel(t *testing.T) {
+	got := displaySignalKind(channelSignal{Kind: "directive", Source: "human"})
+	if got != "Human directive" {
+		t.Fatalf("expected human directive label, got %q", got)
+	}
+	if got := displaySignalKind(channelSignal{Kind: "risk", Source: "nex_insights"}); got != "risk" {
+		t.Fatalf("expected raw signal kind for non-human signal, got %q", got)
+	}
+}
+
+func TestRecentExternalActionsIncludesBridgeChannel(t *testing.T) {
+	actions := []channelAction{
+		{ID: "action-1", Kind: "note_internal"},
+		{ID: "action-2", Kind: "bridge_channel"},
+		{ID: "action-3", Kind: "external_webhook"},
+	}
+	got := recentExternalActions(actions, 10)
+	if len(got) != 2 {
+		t.Fatalf("expected bridge and external actions, got %d", len(got))
+	}
+	if got[0].Kind != "external_webhook" || got[1].Kind != "bridge_channel" {
+		t.Fatalf("expected reverse chronological bridge/external actions, got %#v", got)
+	}
+}
+
+func TestDisplayDecisionSummaryUsesHumanDirectiveLabel(t *testing.T) {
+	got := displayDecisionSummary("Human directed the office:\n- tighten scope")
+	if !strings.Contains(got, "Human directive:") {
+		t.Fatalf("expected human directive heading, got %q", got)
+	}
+	if got := displayDecisionSummary("Open a frontend follow-up."); got != "Open a frontend follow-up." {
+		t.Fatalf("expected non-human decision summary to remain unchanged, got %q", got)
+	}
+}
+
+func TestCalendarRecentActionsIncludeBridgeChannel(t *testing.T) {
+	lines := buildCalendarLines([]channelAction{
+		{ID: "action-1", Kind: "human_directive", Channel: "general", Summary: "Human directed the office:", Actor: "you"},
+		{ID: "action-2", Kind: "bridge_channel", Channel: "launch", Summary: "Use the sharper product narrative.", Actor: "ceo"},
+		{ID: "action-3", Kind: "task_created", Channel: "general", Summary: "Tighten v1 scope", Actor: "ceo"},
+	}, nil, nil, nil, "general", nil, calendarRangeWeek, "", 90)
+	view := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(view, "bridge_channel") {
+		t.Fatalf("expected calendar recent actions to include bridge_channel, got %q", view)
+	}
+	if !strings.Contains(view, "task_created") {
+		t.Fatalf("expected calendar recent actions to include task_created, got %q", view)
+	}
+}
+
+func TestCalendarRecentActionsPinsBridgeWhenCapWouldDropIt(t *testing.T) {
+	lines := buildCalendarLines([]channelAction{
+		{ID: "action-1", Kind: "bridge_channel", Channel: "launch", Summary: "Use the sharper product narrative.", Actor: "ceo"},
+		{ID: "action-2", Kind: "human_directive", Channel: "general", Summary: "Human directed the office.", Actor: "you"},
+		{ID: "action-3", Kind: "request_answered", Channel: "general", Summary: "Approved the launch direction.", Actor: "you"},
+		{ID: "action-4", Kind: "task_created", Channel: "general", Summary: "Tighten v1 scope", Actor: "ceo"},
+		{ID: "action-5", Kind: "signal_recorded", Channel: "general", Summary: "Recorded a human directive signal.", Actor: "ceo"},
+	}, nil, nil, nil, "general", nil, calendarRangeWeek, "", 90)
+
+	view := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(view, "bridge_channel") {
+		t.Fatalf("expected bridge_channel to stay pinned in recent actions, got %q", view)
 	}
 }
 
@@ -600,13 +911,13 @@ func TestCtrlOQuickJumpSelectsApp(t *testing.T) {
 		t.Fatal("expected app quick nav to activate")
 	}
 
-	model, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	model, cmd := got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'6'}})
 	got = model.(channelModel)
 	if cmd == nil {
 		t.Fatal("expected selecting a numbered app to trigger a command")
 	}
 	if got.activeApp != officeAppCalendar {
-		t.Fatalf("expected quick jump 5 to open calendar, got %s", got.activeApp)
+		t.Fatalf("expected quick jump 6 to open calendar, got %s", got.activeApp)
 	}
 	if got.quickJumpTarget != quickJumpNone {
 		t.Fatal("expected app quick nav mode to exit after selection")
@@ -632,6 +943,24 @@ func TestBuildChannelPickerOptionsUsesChannelDescriptions(t *testing.T) {
 	}
 }
 
+func TestBuildSwitchChannelPickerOptionsExcludeRemoveActions(t *testing.T) {
+	m := newChannelModel(false)
+	m.channels = []channelInfo{
+		{Slug: "general", Name: "general", Description: "Company-wide coordination", Members: []string{"ceo", "pm"}},
+		{Slug: "launch", Name: "launch", Description: "Launch planning", Members: []string{"ceo", "fe"}},
+	}
+
+	options := m.buildSwitchChannelPickerOptions()
+	if len(options) < 2 {
+		t.Fatalf("expected switcher options, got %d options", len(options))
+	}
+	for _, option := range options {
+		if strings.HasPrefix(option.Value, "remove:") {
+			t.Fatalf("expected remove actions to stay hidden, got %+v", option)
+		}
+	}
+}
+
 func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 	sidebar := stripANSI(renderSidebar(
 		[]channelInfo{{Slug: "general", Name: "general"}},
@@ -649,7 +978,7 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 		0,
 		false,
 		quickJumpNone,
-		true,
+		workspaceUIState{BrokerConnected: true, Channel: "general", PeerCount: 1},
 		36,
 		40,
 	))
@@ -661,6 +990,61 @@ func TestRenderSidebarShowsOfficeCharacterBubble(t *testing.T) {
 	}
 	if !strings.Contains(sidebar, "Ctrl+G channels") {
 		t.Fatalf("expected quick nav hint in sidebar, got %q", sidebar)
+	}
+}
+
+func TestRenderSidebarReflectsWorkspaceState(t *testing.T) {
+	sidebar := stripANSI(renderSidebar(
+		[]channelInfo{{Slug: "launch", Name: "launch"}},
+		nil,
+		nil,
+		"launch",
+		officeAppMessages,
+		0,
+		0,
+		false,
+		quickJumpNone,
+		workspaceUIState{
+			BrokerConnected: true,
+			Channel:         "launch",
+			PeerCount:       4,
+			BlockingCount:   1,
+			NeedsYou: &channelInterview{
+				ID:       "req-1",
+				Title:    "Approve launch copy",
+				Question: "Approve launch copy?",
+			},
+		},
+		72,
+		36,
+	))
+	if !strings.Contains(sidebar, "Message lane · #launch · 1 waiting") {
+		t.Fatalf("expected workspace summary in sidebar, got %q", sidebar)
+	}
+	if !strings.Contains(sidebar, "Need you: Approve launch copy") || !strings.Contains(sidebar, "/request answer req-1") {
+		t.Fatalf("expected action hint for blocking request, got %q", sidebar)
+	}
+}
+
+func TestRenderSidebarShowsRecoveryRequestsAndArtifactsApps(t *testing.T) {
+	sidebar := stripANSI(renderSidebar(
+		[]channelInfo{{Slug: "general", Name: "general"}},
+		nil,
+		nil,
+		"general",
+		officeAppMessages,
+		0,
+		0,
+		false,
+		quickJumpNone,
+		workspaceUIState{BrokerConnected: true, Channel: "general"},
+		48,
+		40,
+	))
+	for _, label := range []string{"Recovery", "Requests", "Artifacts"} {
+		if !strings.Contains(sidebar, label) {
+			t.Fatalf("expected sidebar to show %s app, got %q", label, sidebar)
+		}
 	}
 }
 
@@ -683,7 +1067,7 @@ func TestRenderSidebarUsesCompactRosterWhenSpaceIsTight(t *testing.T) {
 		0,
 		false,
 		quickJumpNone,
-		false,
+		workspaceUIState{BrokerConnected: false, Channel: "general"},
 		36,
 		22,
 	))
@@ -720,7 +1104,7 @@ func TestRenderSidebarFallsBackToOfficeRosterWhenPeopleListIsEmpty(t *testing.T)
 		0,
 		false,
 		quickJumpNone,
-		false,
+		workspaceUIState{BrokerConnected: false, Channel: "general"},
 		42,
 		20,
 	))
@@ -733,7 +1117,6 @@ func TestRenderSidebarFallsBackToOfficeRosterWhenPeopleListIsEmpty(t *testing.T)
 }
 
 func TestRenderSidebarShowsTaskDrivenWorkingState(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	sidebar := stripANSI(renderSidebar(
 		[]channelInfo{{Slug: "general", Name: "general"}},
 		[]channelMember{{
@@ -754,15 +1137,55 @@ func TestRenderSidebarShowsTaskDrivenWorkingState(t *testing.T) {
 		0,
 		false,
 		quickJumpNone,
-		true,
+		workspaceUIState{BrokerConnected: true, Channel: "general", PeerCount: 1},
 		40,
 		44,
 	))
 	if !strings.Contains(sidebar, "working") {
 		t.Fatalf("expected task-driven working activity, got %q", sidebar)
 	}
-	if !strings.Contains(sidebar, "On landing page polish.") {
-		t.Fatalf("expected task-driven bubble, got %q", sidebar)
+	if !strings.Contains(sidebar, "Working on landing page polish") {
+		t.Fatalf("expected task detail line, got %q", sidebar)
+	}
+}
+
+func TestChannelViewShowsRuntimeStripForOfficeMessages(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.activeApp = officeAppMessages
+	m.members = []channelMember{{
+		Slug:         "fe",
+		Name:         "Frontend Engineer",
+		LiveActivity: "go test ./cmd/wuphf",
+	}}
+	m.tasks = []channelTask{{
+		ID:      "task-1",
+		Channel: "general",
+		Title:   "landing page polish",
+		Owner:   "fe",
+		Status:  "in_progress",
+	}}
+	m.requests = []channelInterview{{
+		ID:       "req-1",
+		From:     "ceo",
+		Question: "Ship now?",
+		Blocking: true,
+	}}
+	m.actions = []channelAction{{
+		ID:        "action-1",
+		Kind:      "external_action_executed",
+		Actor:     "fe",
+		Summary:   "Sent customer follow-up",
+		CreatedAt: "2026-04-02T10:01:00Z",
+	}}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "1 active") || !strings.Contains(view, "1 need you") {
+		t.Fatalf("expected runtime strip summary, got %q", view)
+	}
+	if !strings.Contains(view, "Frontend Engineer · Working on landing page polish") {
+		t.Fatalf("expected runtime strip detail, got %q", view)
 	}
 }
 
@@ -784,7 +1207,7 @@ func TestChannelViewRendersNexAutomationMessage(t *testing.T) {
 	}
 
 	view := stripANSI(m.View())
-	if !strings.Contains(view, "Nex") || !strings.Contains(view, "automated") || !strings.Contains(view, "Context alert") {
+	if !strings.Contains(view, "automation") || !strings.Contains(view, "Context alert") || !strings.Contains(view, "Important: Acme mentioned budget pressure") {
 		t.Fatalf("expected Nex automation rendering, got %q", view)
 	}
 }
@@ -891,6 +1314,145 @@ func TestSlashAutocompleteShowsAllCommandsOnSlash(t *testing.T) {
 	if !strings.Contains(view, "/init") || !strings.Contains(view, "/tasks") {
 		t.Fatalf("expected command list in autocomplete, got %q", view)
 	}
+	if !strings.Contains(view, "setup") || !strings.Contains(view, "navigate") {
+		t.Fatalf("expected command categories in autocomplete, got %q", view)
+	}
+}
+
+func TestRefreshSlashCommandsPreservesAutocompleteQuery(t *testing.T) {
+	m := newChannelModel(false)
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
+	m.skills = []channelSkill{{Name: "daily-digest", Description: "Run the digest", Status: "active"}}
+
+	m.refreshSlashCommands()
+
+	if !m.autocomplete.IsVisible() {
+		t.Fatal("expected slash autocomplete to remain visible")
+	}
+	view := stripANSI(m.autocomplete.View())
+	if !strings.Contains(view, "/integrate") || !strings.Contains(view, "/daily-digest") {
+		t.Fatalf("expected refreshed command list, got %q", view)
+	}
+}
+
+func TestCtrlJInsertsNewlineInComposer(t *testing.T) {
+	m := newChannelModel(false)
+	m.input = []rune("hello")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	got := next.(channelModel)
+
+	if string(got.input) != "hello\n" {
+		t.Fatalf("expected newline in composer, got %q", string(got.input))
+	}
+}
+
+func TestCtrlJInsertsNewlineInThreadComposer(t *testing.T) {
+	m := newChannelModel(false)
+	m.threadPanelOpen = true
+	m.threadPanelID = "msg-1"
+	m.focus = focusThread
+	m.threadInput = []rune("hello")
+	m.threadInputPos = len(m.threadInput)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	got := next.(channelModel)
+
+	if string(got.threadInput) != "hello\n" {
+		t.Fatalf("expected newline in thread composer, got %q", string(got.threadInput))
+	}
+}
+
+func TestDoctorCommandStartsReadinessCheck(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, cmd := m.runCommand("/doctor", "")
+	if cmd == nil {
+		t.Fatal("expected /doctor to emit a follow-up command")
+	}
+	got := next.(channelModel)
+	if got.notice != "Checking readiness..." {
+		t.Fatalf("expected doctor notice, got %q", got.notice)
+	}
+}
+
+func TestChannelDoctorDoneShowsDoctorCard(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+
+	next, _ := m.Update(channelDoctorDoneMsg{report: channelDoctorReport{
+		GeneratedAt: time.Now(),
+		Checks: []doctorCheck{{
+			Label:    "Nex API key",
+			Severity: doctorWarn,
+			Detail:   "Missing WUPHF/Nex API key.",
+			NextStep: "Run /init and paste your WUPHF API key.",
+		}},
+	}})
+	got := next.(channelModel)
+
+	if got.doctor == nil {
+		t.Fatal("expected doctor report to be visible")
+	}
+	view := stripANSI(got.View())
+	if !strings.Contains(view, "Doctor") || !strings.Contains(view, "Nex API key") {
+		t.Fatalf("expected doctor card in view, got %q", view)
+	}
+}
+
+func TestOfficeSlashAutocompleteIncludesAgentsInVisibleMatches(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
+
+	view := stripANSI(m.autocomplete.View())
+	if !strings.Contains(view, "/agents") {
+		t.Fatalf("expected /agents in visible office autocomplete, got %q", view)
+	}
+}
+
+func TestOfficeViewRendersSlashAutocompletePopup(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 40
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "/integrate") || !strings.Contains(view, "/agents") {
+		t.Fatalf("expected office view to render slash popup, got %q", view)
+	}
+}
+
+func TestOneOnOneSlashAutocompleteShowsResetAndHidesChannels(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "pm"
+	m.sidebarCollapsed = true
+	m.refreshSlashCommands()
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
+
+	view := stripANSI(m.autocomplete.View())
+	if !strings.Contains(view, "/reset") {
+		t.Fatalf("expected /reset in visible 1:1 autocomplete, got %q", view)
+	}
+	if !strings.Contains(view, "/switch") {
+		t.Fatalf("expected /switch in visible 1:1 autocomplete, got %q", view)
+	}
+	if strings.Contains(view, "/channels") || strings.Contains(view, "/tasks") || strings.Contains(view, "/threads") {
+		t.Fatalf("expected blocked 1:1 commands to be hidden from autocomplete, got %q", view)
+	}
 }
 
 func TestSlashAutocompleteEnterSubmitsSelectedCommand(t *testing.T) {
@@ -982,6 +1544,134 @@ func TestMentionAutocompleteFiltersAgents(t *testing.T) {
 	}
 	if strings.Contains(view, "@cmo") {
 		t.Fatalf("expected non-matching mention to be filtered out, got %q", view)
+	}
+}
+
+func TestComposerSupportsVimStyleWordMotions(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.input = []rune("ship landing page")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(altRuneKey('b'))
+	got := next.(channelModel)
+	if got.inputPos != len([]rune("ship landing ")) {
+		t.Fatalf("expected alt+b to jump to previous word, got %d", got.inputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('b'))
+	got = next.(channelModel)
+	if got.inputPos != len([]rune("ship ")) {
+		t.Fatalf("expected second alt+b to jump to prior word, got %d", got.inputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('w'))
+	got = next.(channelModel)
+	if got.inputPos != len([]rune("ship landing ")) {
+		t.Fatalf("expected alt+w to jump forward a word, got %d", got.inputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('0'))
+	got = next.(channelModel)
+	if got.inputPos != 0 {
+		t.Fatalf("expected alt+0 to jump to start, got %d", got.inputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('$'))
+	got = next.(channelModel)
+	if got.inputPos != len(got.input) {
+		t.Fatalf("expected alt+$ to jump to end, got %d", got.inputPos)
+	}
+}
+
+func TestThreadComposerSupportsVimStyleWordMotions(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.threadPanelOpen = true
+	m.threadPanelID = "msg-1"
+	m.focus = focusThread
+	m.threadInput = []rune("thread reply draft")
+	m.threadInputPos = len(m.threadInput)
+
+	next, _ := m.Update(altRuneKey('b'))
+	got := next.(channelModel)
+	if got.threadInputPos != len([]rune("thread reply ")) {
+		t.Fatalf("expected thread alt+b to jump to previous word, got %d", got.threadInputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('0'))
+	got = next.(channelModel)
+	if got.threadInputPos != 0 {
+		t.Fatalf("expected thread alt+0 to jump to start, got %d", got.threadInputPos)
+	}
+
+	next, _ = got.Update(altRuneKey('$'))
+	got = next.(channelModel)
+	if got.threadInputPos != len(got.threadInput) {
+		t.Fatalf("expected thread alt+$ to jump to end, got %d", got.threadInputPos)
+	}
+}
+
+func TestMainComposerRecallRestoresDraft(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.input = []rune("first shipped prompt")
+	m.inputPos = len(m.input)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if len(got.inputHistory.entries) != 1 {
+		t.Fatalf("expected one history entry, got %d", len(got.inputHistory.entries))
+	}
+
+	got.input = []rune("draft in progress")
+	got.inputPos = len([]rune("draft "))
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	got = next.(channelModel)
+	if string(got.input) != "first shipped prompt" {
+		t.Fatalf("expected recalled input, got %q", string(got.input))
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	got = next.(channelModel)
+	if string(got.input) != "draft in progress" {
+		t.Fatalf("expected original draft restored, got %q", string(got.input))
+	}
+	if got.inputPos != len([]rune("draft ")) {
+		t.Fatalf("expected draft cursor restored, got %d", got.inputPos)
+	}
+}
+
+func TestThreadComposerRecallRestoresDraft(t *testing.T) {
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.threadPanelOpen = true
+	m.threadPanelID = "msg-1"
+	m.focus = focusThread
+	m.threadInput = []rune("thread shipped reply")
+	m.threadInputPos = len(m.threadInput)
+
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+	if len(got.threadInputHistory.entries) != 1 {
+		t.Fatalf("expected one thread history entry, got %d", len(got.threadInputHistory.entries))
+	}
+
+	got.threadInput = []rune("thread draft")
+	got.threadInputPos = len([]rune("thread "))
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	got = next.(channelModel)
+	if string(got.threadInput) != "thread shipped reply" {
+		t.Fatalf("expected recalled thread input, got %q", string(got.threadInput))
+	}
+
+	next, _ = got.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	got = next.(channelModel)
+	if string(got.threadInput) != "thread draft" {
+		t.Fatalf("expected thread draft restored, got %q", string(got.threadInput))
+	}
+	if got.threadInputPos != len([]rune("thread ")) {
+		t.Fatalf("expected thread draft cursor restored, got %d", got.threadInputPos)
 	}
 }
 
@@ -1368,6 +2058,169 @@ func TestMouseClickJumpLatestClearsUnread(t *testing.T) {
 	}
 }
 
+func TestOfficeViewportWindowMatchesFullRenderAndMouseHitTesting(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 32
+	m.activeApp = officeAppMessages
+	m.members = []channelMember{{Slug: "fe", Name: "Frontend Engineer", LastMessage: "Landing the next slice"}}
+	m.tasks = []channelTask{{
+		ID:            "task-1",
+		Title:         "Ship onboarding",
+		Status:        "in_progress",
+		Owner:         "fe",
+		ExecutionMode: "local_worktree",
+		WorktreePath:  "/tmp/worktree",
+		CreatedBy:     "ceo",
+		CreatedAt:     time.Now().Add(-2 * time.Hour).Format(time.RFC3339),
+		UpdatedAt:     time.Now().Format(time.RFC3339),
+	}}
+	m.actions = []channelAction{{
+		Kind:      "external_build",
+		Actor:     "fe",
+		Summary:   "Build the office UI",
+		CreatedAt: time.Now().Add(-90 * time.Minute).Format(time.RFC3339),
+	}}
+	m.messages = []brokerMessage{
+		{ID: "msg-1", From: "ceo", Content: "A very long root message that should wrap across multiple rows to make sure the viewport helper actually has to window the history instead of rendering everything at once.", Timestamp: "2026-03-24T10:00:00Z"},
+		{ID: "msg-2", From: "fe", Content: "Reply one with enough content to wrap and keep the total line count above the viewport height.", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:01:00Z"},
+		{ID: "msg-3", From: "be", Content: "Second root message with more wrapped text so the suffix collector has to stop before the entire history is materialized.", Timestamp: "2026-03-24T10:02:00Z"},
+		{ID: "msg-4", From: "pm", Content: "Reply two that stays in the same thread and should remain visible in the tail window.", ReplyTo: "msg-3", Timestamp: "2026-03-24T10:03:00Z"},
+		{ID: "msg-5", From: "cmo", Content: "Another root message that keeps the history long enough for the windowing path to matter.", Timestamp: "2026-03-24T10:04:00Z"},
+		{ID: "msg-6", From: "designer", Content: "More filler content to push the viewport down and exercise the suffix collector.", Timestamp: "2026-03-24T10:05:00Z"},
+		{ID: "msg-7", From: "ceo", Content: "Should we keep the thread collapsed so the summary row is clickable?", Timestamp: "2026-03-24T10:06:00Z"},
+		{ID: "msg-8", From: "fe", Content: "Yes, the collapse summary is what we want to click.", ReplyTo: "msg-7", Timestamp: "2026-03-24T10:07:00Z"},
+	}
+	m.expandedThreads["msg-7"] = false
+
+	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
+	contentWidth := layout.MainW - 2
+	if contentWidth < 32 {
+		contentWidth = 32
+	}
+
+	full := append(buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount), buildLiveWorkLines(m.members, m.tasks, m.actions, contentWidth, "")...)
+	expected, expectedScroll, _, _ := sliceRenderedLines(full, msgH, m.scroll)
+	window := m.currentMainViewportLines(contentWidth, msgH)
+	got, gotScroll, _, _ := sliceRenderedLines(window, msgH, m.scroll)
+	if gotScroll != expectedScroll {
+		t.Fatalf("expected scroll %d from windowed render, got %d", expectedScroll, gotScroll)
+	}
+	if joinRenderedLines(got) != joinRenderedLines(expected) {
+		t.Fatalf("expected windowed render to match full render\nfull:\n%s\nwindow:\n%s", joinRenderedLines(expected), joinRenderedLines(got))
+	}
+
+	mainX := layout.SidebarW + 3
+	targetRow := -1
+	for i, row := range got {
+		if row.ThreadID == "msg-7" {
+			targetRow = i
+			break
+		}
+	}
+	if targetRow < 0 {
+		t.Fatal("expected collapsed thread summary row in viewport")
+	}
+	action, ok := m.mainPanelMouseAction(mainX, headerH+targetRow, layout.MainW, layout.ContentH)
+	if !ok {
+		t.Fatal("expected viewport row to be clickable")
+	}
+	if action.Kind != "thread" || action.Value != "msg-7" {
+		t.Fatalf("expected click to open msg-7 thread, got %+v", action)
+	}
+}
+
+func TestRecoveryMouseClickInsertsPromptAndReturnsToMessages(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 32
+	m.activeApp = officeAppRecovery
+	m.tasks = []channelTask{{
+		ID:        "task-1",
+		Title:     "Ship onboarding",
+		Status:    "in_progress",
+		Owner:     "fe",
+		UpdatedAt: time.Now().Format(time.RFC3339),
+	}}
+	m.messages = []brokerMessage{
+		{ID: "msg-1", From: "ceo", Content: "Need launch review.", Timestamp: time.Now().Add(-3 * time.Minute).Format(time.RFC3339)},
+		{ID: "msg-2", From: "pm", Content: "Reply in thread", ReplyTo: "msg-1", Timestamp: time.Now().Add(-2 * time.Minute).Format(time.RFC3339)},
+	}
+
+	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
+	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
+	contentWidth := layout.MainW - 2
+	if contentWidth < 32 {
+		contentWidth = 32
+	}
+	rows, _, _, _ := sliceRenderedLines(m.currentMainLines(contentWidth), msgH, m.scroll)
+	targetRow := -1
+	for i, row := range rows {
+		if strings.TrimSpace(row.PromptValue) != "" {
+			targetRow = i
+			break
+		}
+	}
+	if targetRow < 0 {
+		t.Fatal("expected recovery render to expose a prompt action")
+	}
+
+	mainX := layout.SidebarW + 3
+	action, ok := m.mainPanelMouseAction(mainX, headerH+targetRow, layout.MainW, layout.ContentH)
+	if !ok {
+		t.Fatal("expected recovery row to be clickable")
+	}
+	if action.Kind != "prompt" {
+		t.Fatalf("expected recovery click to draft a prompt, got %+v", action)
+	}
+
+	next, _ := m.Update(tea.MouseMsg{Type: tea.MouseLeft, Button: tea.MouseButtonLeft, X: mainX, Y: headerH + targetRow})
+	got := next.(channelModel)
+	if got.activeApp != officeAppMessages {
+		t.Fatalf("expected recovery click to return to messages, got %q", got.activeApp)
+	}
+	if !strings.Contains(string(got.input), "Restore context for task task-1") && !strings.Contains(string(got.input), "Summarize everything since") {
+		t.Fatalf("expected drafted recovery prompt in composer, got %q", string(got.input))
+	}
+}
+
+func TestBuildLiveWorkLinesShowsWaitStateWhenQuiet(t *testing.T) {
+	lines := buildLiveWorkLines(nil, nil, nil, 96, "")
+	plain := stripANSI(joinRenderedLines(lines))
+	if !strings.Contains(plain, "Wait state") {
+		t.Fatalf("expected wait-state section, got %q", plain)
+	}
+	if !strings.Contains(plain, "Nothing is moving right now") {
+		t.Fatalf("expected quiet-state guidance, got %q", plain)
+	}
+}
+
+func TestBuildLiveWorkLinesShowsBlockedWork(t *testing.T) {
+	lines := buildLiveWorkLines(nil, []channelTask{{
+		ID:       "task-1",
+		Title:    "Ship onboarding",
+		Status:   "blocked",
+		Owner:    "fe",
+		ThreadID: "msg-1",
+		Details:  "Waiting on an API schema decision.",
+	}}, nil, 96, "")
+	plain := stripANSI(joinRenderedLines(lines))
+	hasTask := false
+	for _, line := range lines {
+		if line.TaskID == "task-1" {
+			hasTask = true
+			break
+		}
+	}
+	if !strings.Contains(plain, "Blocked work") || !strings.Contains(plain, "Ship onboarding") {
+		t.Fatalf("expected blocked-work guidance, got %q", plain)
+	}
+	if !hasTask {
+		t.Fatalf("expected blocked-work lines to stay clickable, got %+v", lines)
+	}
+}
+
 func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
 	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	m := newChannelModel(true)
@@ -1381,7 +2234,7 @@ func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
 	layout := computeLayout(m.width, m.height, m.threadPanelOpen, m.sidebarCollapsed)
 	headerH, msgH, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 	contentWidth := layout.MainW - 2
-	lines := buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand)
+	lines := buildOfficeMessageLines(m.messages, m.expandedThreads, contentWidth, m.threadsDefaultExpand, m.unreadAnchorID, m.unreadCount)
 	visible, _, _, _ := sliceRenderedLines(lines, msgH, m.scroll)
 	row := -1
 	for i, line := range visible {
@@ -1415,6 +2268,125 @@ func TestChannelErrorsSurfaceInNotice(t *testing.T) {
 	got = next.(channelModel)
 	if !strings.Contains(got.notice, "Send failed") {
 		t.Fatalf("expected post error notice, got %q", got.notice)
+	}
+}
+
+func TestResetCommandOpensConfirmation(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, cmd := m.runCommand("/reset", "")
+	if cmd != nil {
+		t.Fatalf("expected no immediate command from /reset, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if got.confirm == nil {
+		t.Fatal("expected reset confirmation")
+	}
+	if got.confirm.Action != confirmActionResetTeam {
+		t.Fatalf("expected reset-team confirmation, got %q", got.confirm.Action)
+	}
+}
+
+func TestPendingRequestEnterOpensReviewConfirmation(t *testing.T) {
+	m := newChannelModel(false)
+	m.pending = &channelInterview{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Question: "Ship it?",
+		Options: []channelInterviewOption{
+			{ID: "approve", Label: "Approve"},
+		},
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("expected no immediate post while opening review confirmation, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if got.confirm == nil {
+		t.Fatal("expected review confirmation")
+	}
+	if got.confirm.Action != confirmActionSubmitRequest {
+		t.Fatalf("expected submit-request confirmation, got %q", got.confirm.Action)
+	}
+	if got.confirm.ChoiceID != "approve" {
+		t.Fatalf("expected approve choice in confirmation, got %+v", got.confirm)
+	}
+}
+
+func TestPendingRequestRequiresTextBeforeReview(t *testing.T) {
+	m := newChannelModel(false)
+	m.pending = &channelInterview{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Question: "Ship it?",
+		Options: []channelInterviewOption{
+			{ID: "approve_with_note", Label: "Approve with note", RequiresText: true, TextHint: "Type constraints first."},
+		},
+	}
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("expected no immediate post for text-required option, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if got.confirm != nil {
+		t.Fatalf("did not expect review confirmation before required text, got %+v", got.confirm)
+	}
+	if got.notice != "Type constraints first." {
+		t.Fatalf("expected text hint notice, got %q", got.notice)
+	}
+}
+
+func TestPendingRequestTypedAnswerOpensReviewConfirmation(t *testing.T) {
+	m := newChannelModel(false)
+	m.pending = &channelInterview{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Question: "Ship it?",
+	}
+	m.selectedOption = 0
+	m.input = []rune("Need legal review first.")
+	m.inputPos = len(m.input)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatalf("expected no immediate post while reviewing typed answer, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if got.confirm == nil || got.confirm.Action != confirmActionSubmitRequest {
+		t.Fatalf("expected submit-request confirmation, got %+v", got.confirm)
+	}
+	if got.confirm.CustomText != "Need legal review first." {
+		t.Fatalf("expected typed note to be preserved, got %+v", got.confirm)
+	}
+}
+
+func TestChannelResetDoneImmediatelyRehydratesDirectMode(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+
+	next, _ := m.Update(channelResetDoneMsg{
+		notice:        "Direct 1:1 with Backend Engineer is ready.",
+		sessionMode:   team.SessionModeOneOnOne,
+		oneOnOneAgent: "be",
+	})
+	got := next.(channelModel)
+
+	if !got.isOneOnOne() {
+		t.Fatal("expected model to enter 1:1 mode immediately")
+	}
+
+	view := stripANSI(got.View())
+	if !strings.Contains(view, "Direct session reset. Agent pane reloaded in place.") {
+		t.Fatalf("expected direct-session empty state, got %q", view)
+	}
+	if strings.Contains(view, "Welcome to The WUPHF Office.") {
+		t.Fatalf("expected office welcome to disappear in direct mode, got %q", view)
 	}
 }
 
@@ -1466,7 +2438,7 @@ func TestRenderInterviewCardShowsCustomAnswerAsFinalOption(t *testing.T) {
 			{ID: "quality", Label: "Higher polish", Description: "Bias toward experience quality."},
 		},
 		RecommendedID: "speed",
-	}, 2, 60)
+	}, 2, "Step 1 of 3 · choose", 60)
 
 	plain := stripANSI(card)
 	if !strings.Contains(plain, "Something else") {
@@ -1474,6 +2446,42 @@ func TestRenderInterviewCardShowsCustomAnswerAsFinalOption(t *testing.T) {
 	}
 	if strings.LastIndex(plain, "Something else") <= strings.LastIndex(plain, "Higher polish") {
 		t.Fatalf("expected Something else to appear after predefined options, got %q", plain)
+	}
+	if !strings.Contains(plain, "Step 1 of 3 · choose") {
+		t.Fatalf("expected explicit request phase in card, got %q", plain)
+	}
+}
+
+func TestInterviewPhaseTracksChooseDraftAndReview(t *testing.T) {
+	m := newChannelModel(false)
+	m.pending = &channelInterview{
+		ID:       "request-1",
+		Kind:     "approval",
+		From:     "ceo",
+		Question: "Ship it?",
+		Options: []channelInterviewOption{
+			{ID: "approve_with_note", Label: "Approve with note", RequiresText: true},
+		},
+	}
+
+	if got := m.currentInterviewPhase(); got != interviewPhaseDraft {
+		t.Fatalf("expected text-required option to enter draft phase, got %q", got)
+	}
+	m.pending.Options[0] = channelInterviewOption{ID: "approve", Label: "Approve"}
+	if got := m.currentInterviewPhase(); got != interviewPhaseChoose {
+		t.Fatalf("expected choose phase without typed text, got %q", got)
+	}
+	m.input = []rune("Need legal review first.")
+	m.inputPos = len(m.input)
+	if got := m.currentInterviewPhase(); got != interviewPhaseDraft {
+		t.Fatalf("expected typed input to enter draft phase, got %q", got)
+	}
+	m.confirm = confirmationForInterviewAnswer(*m.pending, nil, "Need legal review first.")
+	if got := m.currentInterviewPhase(); got != interviewPhaseReview {
+		t.Fatalf("expected review phase once confirmation is open, got %q", got)
+	}
+	if hint := m.composerHint(m.composerTargetLabel(), "", m.pending); !strings.Contains(hint, "Enter submit") || !strings.Contains(hint, "Esc revise") {
+		t.Fatalf("expected review hint while reviewing answer, got %q", hint)
 	}
 }
 
@@ -2124,5 +3132,7 @@ func TestMain(m *testing.M) {
 	// Use a temp home dir so tests don't read the real ~/.wuphf/config.json
 	tmp, _ := os.MkdirTemp("", "wuphf-test-*")
 	os.Setenv("HOME", tmp)
+	os.Setenv("WUPHF_API_KEY", "test-key")
+	os.Unsetenv("WUPHF_NO_NEX")
 	os.Exit(m.Run())
 }

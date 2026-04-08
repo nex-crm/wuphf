@@ -227,6 +227,35 @@ func TestRouterGeneralChannel(t *testing.T) {
 	}
 }
 
+func TestInjectOfficeInsight(t *testing.T) {
+	dir := tempDir(t)
+	cm, err := NewChannelManagerAt(filepath.Join(dir, "channels.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ms := NewMessageStoreAt(dir)
+	r := NewRouter(cm, ms)
+
+	ch, err := cm.Create("general", ChannelPublic, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	msg, err := r.InjectOfficeInsight(ch.ID, "Archived decisions and blockers.")
+	if err != nil {
+		t.Fatalf("InjectOfficeInsight: %v", err)
+	}
+	if msg.SenderSlug != "office-insight" {
+		t.Fatalf("expected office-insight sender, got %q", msg.SenderSlug)
+	}
+	if msg.SenderName != "Office Insight" {
+		t.Fatalf("expected Office Insight sender name, got %q", msg.SenderName)
+	}
+	if msg.Type != MsgSystem {
+		t.Fatalf("expected system message type, got %q", msg.Type)
+	}
+}
+
 func TestParseMentions(t *testing.T) {
 	tests := []struct {
 		input string
