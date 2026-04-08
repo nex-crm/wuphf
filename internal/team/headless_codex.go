@@ -1,12 +1,15 @@
 package team
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -14,13 +17,33 @@ import (
 )
 
 var (
-	headlessCodexLookPath        = exec.LookPath
-	headlessCodexCommandContext  = exec.CommandContext
-	headlessCodexExecutablePath  = os.Executable
+	headlessCodexLookPath       = exec.LookPath
+	headlessCodexCommandContext = exec.CommandContext
+	headlessCodexExecutablePath = os.Executable
+	headlessCodexRunTurn        = func(l *Launcher, ctx context.Context, slug, notification string) error {
+		return l.runHeadlessCodexTurn(ctx, slug, notification)
+	}
 )
+
+var (
+	headlessCodexTurnTimeout      = 2 * time.Minute
+	headlessCodexStaleCancelAfter = 45 * time.Second
+)
+
+type headlessCodexTurn struct {
+	Prompt     string
+	EnqueuedAt time.Time
+}
+
+type headlessCodexActiveTurn struct {
+	Turn      headlessCodexTurn
+	StartedAt time.Time
+	Cancel    context.CancelFunc
+}
 
 func (l *Launcher) launchHeadlessCodex() error {
 	killStaleBroker()
+	exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	l.broker = NewBroker()
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
@@ -49,70 +72,115 @@ func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string) {
 		return
 	}
 
+	var cancel context.CancelFunc
+	var staleAge time.Duration
+	startWorker := false
+
 	l.headlessMu.Lock()
-	if l.headlessRunning[slug] {
-		l.headlessPending[slug] = prompt
-		l.headlessMu.Unlock()
-		return
+	l.headlessQueues[slug] = append(l.headlessQueues[slug], headlessCodexTurn{
+		Prompt:     prompt,
+		EnqueuedAt: time.Now(),
+	})
+	if !l.headlessWorkers[slug] {
+		l.headlessWorkers[slug] = true
+		startWorker = true
 	}
-	l.headlessRunning[slug] = true
+	if active := l.headlessActive[slug]; active != nil && active.Cancel != nil {
+		age := time.Since(active.StartedAt)
+		if age >= headlessCodexStaleCancelAfter {
+			cancel = active.Cancel
+			staleAge = age
+		}
+	}
 	l.headlessMu.Unlock()
 
-	go l.runHeadlessCodexQueue(slug, prompt)
+	if cancel != nil {
+		appendHeadlessCodexLog(slug, fmt.Sprintf("stale-turn: cancelling active turn after %s to process queued work", staleAge.Round(time.Second)))
+		cancel()
+	}
+	if startWorker {
+		go l.runHeadlessCodexQueue(slug)
+	}
 }
 
-func (l *Launcher) runHeadlessCodexQueue(slug string, prompt string) {
-	current := prompt
+func (l *Launcher) runHeadlessCodexQueue(slug string) {
 	for {
-		if ctx := l.headlessCtx; ctx != nil {
-			select {
-			case <-ctx.Done():
-				l.finishHeadlessTurn(slug)
-				return
-			default:
-			}
+		turn, turnCtx, ok := l.beginHeadlessCodexTurn(slug)
+		if !ok {
+			l.finishHeadlessWorker(slug)
+			return
 		}
 
-		if err := l.runHeadlessCodexTurn(slug, current); err != nil {
+		err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt)
+		ctxErr := turnCtx.Err()
+		switch {
+		case err == nil:
+		case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
+			appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", headlessCodexTurnTimeout))
+		case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
+			appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
+		default:
 			appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
 		}
-
-		l.headlessMu.Lock()
-		next, ok := l.headlessPending[slug]
-		if ok {
-			delete(l.headlessPending, slug)
-			l.headlessMu.Unlock()
-			current = next
-			continue
-		}
-		delete(l.headlessRunning, slug)
-		l.headlessMu.Unlock()
-		return
+		l.finishHeadlessTurn(slug)
 	}
 }
 
 func (l *Launcher) finishHeadlessTurn(slug string) {
 	l.headlessMu.Lock()
-	delete(l.headlessRunning, slug)
-	delete(l.headlessPending, slug)
+	if active := l.headlessActive[slug]; active != nil && active.Cancel != nil {
+		active.Cancel()
+	}
+	delete(l.headlessActive, slug)
 	l.headlessMu.Unlock()
 }
 
-func (l *Launcher) runHeadlessCodexTurn(slug string, notification string) error {
+func (l *Launcher) finishHeadlessWorker(slug string) {
+	l.headlessMu.Lock()
+	delete(l.headlessWorkers, slug)
+	if len(l.headlessQueues[slug]) == 0 {
+		delete(l.headlessQueues, slug)
+	}
+	l.headlessMu.Unlock()
+}
+
+func (l *Launcher) beginHeadlessCodexTurn(slug string) (headlessCodexTurn, context.Context, bool) {
+	l.headlessMu.Lock()
+	defer l.headlessMu.Unlock()
+
+	queue := l.headlessQueues[slug]
+	if len(queue) == 0 {
+		delete(l.headlessQueues, slug)
+		return headlessCodexTurn{}, nil, false
+	}
+
+	turn := queue[0]
+	if len(queue) == 1 {
+		delete(l.headlessQueues, slug)
+	} else {
+		l.headlessQueues[slug] = queue[1:]
+	}
+
+	baseCtx := l.headlessCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
+	}
+	turnCtx, cancel := context.WithTimeout(baseCtx, headlessCodexTurnTimeout)
+	l.headlessActive[slug] = &headlessCodexActiveTurn{
+		Turn:      turn,
+		StartedAt: time.Now(),
+		Cancel:    cancel,
+	}
+	return turn, turnCtx, true
+}
+
+func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notification string) error {
 	if _, err := headlessCodexLookPath("codex"); err != nil {
 		return fmt.Errorf("codex not found: %w", err)
 	}
 	if l == nil || l.broker == nil {
 		return fmt.Errorf("broker is not running")
 	}
-
-	outputFile, err := os.CreateTemp("", "wuphf-office-codex-*.txt")
-	if err != nil {
-		return fmt.Errorf("create codex output file: %w", err)
-	}
-	outputPath := outputFile.Name()
-	outputFile.Close()
-	defer os.Remove(outputPath)
 
 	overrides, err := l.buildCodexOfficeConfigOverrides(slug)
 	if err != nil {
@@ -131,35 +199,46 @@ func (l *Launcher) runHeadlessCodexTurn(slug string, notification string) error 
 		"--skip-git-repo-check",
 		"--ephemeral",
 		"--color", "never",
+		"--json",
 	)
+	if model := strings.TrimSpace(config.ResolveCodexModel(l.cwd)); model != "" {
+		args = append(args, "--model", model)
+	}
 	for _, override := range overrides {
 		args = append(args, "-c", override)
 	}
-	args = append(args, "--output-last-message", outputPath, "-")
+	args = append(args, "-")
 
-	ctx := l.headlessCtx
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	cmd := headlessCodexCommandContext(ctx, "codex", args...)
 	cmd.Dir = l.cwd
 	cmd.Env = l.buildHeadlessCodexEnv(slug)
 	cmd.Stdin = strings.NewReader(buildHeadlessCodexPrompt(l.buildPrompt(slug), notification))
 
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("attach codex stdout: %w", err)
+	}
+
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		if stderrText := strings.TrimSpace(stderr.String()); stderrText != "" {
-			appendHeadlessCodexLog(slug, "stderr: "+stderrText)
-			return fmt.Errorf("%w: %s", err, stderrText)
-		}
+	if err := cmd.Start(); err != nil {
 		return err
 	}
 
-	if raw, err := os.ReadFile(outputPath); err == nil {
-		if text := strings.TrimSpace(string(raw)); text != "" {
-			appendHeadlessCodexLog(slug, "result: "+text)
+	result, parseErr := readHeadlessCodexJSONStream(stdout)
+	if err := cmd.Wait(); err != nil {
+		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
+		if detail != "" {
+			appendHeadlessCodexLog(slug, "stderr: "+detail)
+			return fmt.Errorf("%w: %s", err, detail)
 		}
+		return err
+	}
+	if parseErr != nil {
+		return parseErr
+	}
+	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
+		appendHeadlessCodexLog(slug, "result: "+text)
 	}
 	return nil
 }
@@ -189,6 +268,12 @@ func (l *Launcher) buildHeadlessCodexEnv(slug string) []string {
 			env = append(env, "ONE_IDENTITY_TYPE="+identityType)
 		}
 	}
+	if apiKey := strings.TrimSpace(config.ResolveAPIKey("")); apiKey != "" {
+		env = append(env,
+			"WUPHF_API_KEY="+apiKey,
+			"NEX_API_KEY="+apiKey,
+		)
+	}
 	return env
 }
 
@@ -197,43 +282,43 @@ func (l *Launcher) buildCodexOfficeConfigOverrides(slug string) ([]string, error
 	if err != nil {
 		return nil, err
 	}
-	wuphfEnv := map[string]string{
-		"WUPHF_AGENT_SLUG":  slug,
-		"WUPHF_BROKER_TOKEN": l.broker.Token(),
+	wuphfEnvVars := []string{
+		"WUPHF_AGENT_SLUG",
+		"WUPHF_BROKER_TOKEN",
 	}
 	if config.ResolveNoNex() {
-		wuphfEnv["WUPHF_NO_NEX"] = "1"
+		wuphfEnvVars = append(wuphfEnvVars, "WUPHF_NO_NEX")
 	}
 	if l.isOneOnOne() {
-		wuphfEnv["WUPHF_ONE_ON_ONE"] = "1"
-		wuphfEnv["WUPHF_ONE_ON_ONE_AGENT"] = l.oneOnOneAgent()
+		wuphfEnvVars = append(wuphfEnvVars,
+			"WUPHF_ONE_ON_ONE",
+			"WUPHF_ONE_ON_ONE_AGENT",
+		)
 	}
 	if secret := strings.TrimSpace(config.ResolveOneSecret()); secret != "" {
-		wuphfEnv["ONE_SECRET"] = secret
+		wuphfEnvVars = append(wuphfEnvVars, "ONE_SECRET")
 	}
 	if identity := strings.TrimSpace(config.ResolveOneIdentity()); identity != "" {
-		wuphfEnv["ONE_IDENTITY"] = identity
+		wuphfEnvVars = append(wuphfEnvVars, "ONE_IDENTITY")
 		if identityType := strings.TrimSpace(config.ResolveOneIdentityType()); identityType != "" {
-			wuphfEnv["ONE_IDENTITY_TYPE"] = identityType
+			wuphfEnvVars = append(wuphfEnvVars, "ONE_IDENTITY_TYPE")
 		}
 	}
 
 	overrides := []string{
 		fmt.Sprintf(`mcp_servers.wuphf-office.command=%s`, tomlQuote(wuphfBinary)),
 		`mcp_servers.wuphf-office.args=["mcp-team"]`,
-		fmt.Sprintf(`mcp_servers.wuphf-office.env=%s`, tomlInlineTable(wuphfEnv)),
+		fmt.Sprintf(`mcp_servers.wuphf-office.env_vars=%s`, tomlStringArray(wuphfEnvVars)),
 	}
 
 	if !config.ResolveNoNex() {
 		if nexMCP, err := headlessCodexLookPath("nex-mcp"); err == nil {
 			overrides = append(overrides, fmt.Sprintf(`mcp_servers.nex.command=%s`, tomlQuote(nexMCP)))
-			nexEnv := map[string]string{}
 			if apiKey := strings.TrimSpace(config.ResolveAPIKey("")); apiKey != "" {
-				nexEnv["WUPHF_API_KEY"] = apiKey
-				nexEnv["NEX_API_KEY"] = apiKey
-			}
-			if len(nexEnv) > 0 {
-				overrides = append(overrides, fmt.Sprintf(`mcp_servers.nex.env=%s`, tomlInlineTable(nexEnv)))
+				overrides = append(overrides, fmt.Sprintf(`mcp_servers.nex.env_vars=%s`, tomlStringArray([]string{
+					"WUPHF_API_KEY",
+					"NEX_API_KEY",
+				})))
 			}
 		}
 	}
@@ -274,18 +359,100 @@ func tomlQuote(value string) string {
 	return fmt.Sprintf("%q", value)
 }
 
-func tomlInlineTable(values map[string]string) string {
+func tomlStringArray(values []string) string {
 	if len(values) == 0 {
-		return "{}"
+		return "[]"
 	}
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		parts = append(parts, tomlQuote(value))
 	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		parts = append(parts, fmt.Sprintf("%s=%s", key, tomlQuote(values[key])))
+	if len(parts) == 0 {
+		return "[]"
 	}
-	return "{"+strings.Join(parts, ", ")+"}"
+	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+type headlessCodexJSONResult struct {
+	FinalMessage  string
+	LastPlainLine string
+	LastError     string
+}
+
+type headlessCodexJSONEvent struct {
+	Type    string `json:"type"`
+	Message string `json:"message,omitempty"`
+	Error   *struct {
+		Message string `json:"message,omitempty"`
+	} `json:"error,omitempty"`
+	Item *struct {
+		Type    string `json:"type,omitempty"`
+		Text    string `json:"text,omitempty"`
+		Content []struct {
+			Type string `json:"type,omitempty"`
+			Text string `json:"text,omitempty"`
+		} `json:"content,omitempty"`
+	} `json:"item,omitempty"`
+}
+
+func readHeadlessCodexJSONStream(r io.Reader) (headlessCodexJSONResult, error) {
+	var result headlessCodexJSONResult
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var event headlessCodexJSONEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			result.LastPlainLine = line
+			continue
+		}
+		if text := strings.TrimSpace(extractHeadlessCodexAgentMessage(event)); text != "" {
+			result.FinalMessage = text
+		}
+		if detail := strings.TrimSpace(extractHeadlessCodexError(event)); detail != "" {
+			result.LastError = detail
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return result, fmt.Errorf("read codex json stream: %w", err)
+	}
+	return result, nil
+}
+
+func extractHeadlessCodexAgentMessage(event headlessCodexJSONEvent) string {
+	if event.Type != "item.completed" || event.Item == nil || event.Item.Type != "agent_message" {
+		return ""
+	}
+	if text := strings.TrimSpace(event.Item.Text); text != "" {
+		return text
+	}
+	parts := make([]string, 0, len(event.Item.Content))
+	for _, item := range event.Item.Content {
+		if item.Type == "output_text" || item.Type == "text" {
+			if text := strings.TrimSpace(item.Text); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(parts, "\n"))
+}
+
+func extractHeadlessCodexError(event headlessCodexJSONEvent) string {
+	switch event.Type {
+	case "error", "turn.failed":
+		if event.Error != nil && strings.TrimSpace(event.Error.Message) != "" {
+			return event.Error.Message
+		}
+		if strings.TrimSpace(event.Message) != "" {
+			return event.Message
+		}
+	}
+	return ""
 }

@@ -17,7 +17,7 @@ type codexHelperRecord struct {
 }
 
 func TestBuildCodexArgsIncludesOutputFile(t *testing.T) {
-	args := buildCodexArgs("/tmp/work", "/tmp/out.txt")
+	args := buildCodexArgs("/tmp/work", "gpt-5.4")
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "exec") {
 		t.Fatalf("expected exec command, got %q", joined)
@@ -25,11 +25,14 @@ func TestBuildCodexArgsIncludesOutputFile(t *testing.T) {
 	if !strings.Contains(joined, "-C /tmp/work") {
 		t.Fatalf("expected working directory, got %q", joined)
 	}
-	if !strings.Contains(joined, "--output-last-message /tmp/out.txt") {
-		t.Fatalf("expected output file flag, got %q", joined)
+	if !strings.Contains(joined, "--json") {
+		t.Fatalf("expected json flag, got %q", joined)
 	}
 	if !strings.Contains(joined, "--ephemeral") {
 		t.Fatalf("expected ephemeral execution, got %q", joined)
+	}
+	if !strings.Contains(joined, "--model gpt-5.4") {
+		t.Fatalf("expected explicit model flag, got %q", joined)
 	}
 }
 
@@ -106,6 +109,7 @@ func stubCodexRuntime(t *testing.T, recordFile string, scenario string, cwd stri
 	t.Setenv("GO_WANT_CODEX_HELPER_PROCESS", "1")
 	t.Setenv("CODEX_TEST_RECORD_FILE", recordFile)
 	t.Setenv("CODEX_TEST_SCENARIO", scenario)
+	t.Setenv("HOME", t.TempDir())
 
 	codexLookPath = func(file string) (string, error) {
 		return "/usr/bin/codex", nil
@@ -153,25 +157,16 @@ func TestCodexHelperProcess(t *testing.T) {
 	}
 	file.Close()
 
-	outputPath := ""
-	for i := 0; i < len(codexArgs)-1; i++ {
-		if codexArgs[i] == "--output-last-message" {
-			outputPath = codexArgs[i+1]
-			break
-		}
-	}
-	if outputPath == "" {
-		t.Fatalf("missing --output-last-message arg: %#v", codexArgs)
+	if !containsArg(codexArgs, "--json") {
+		t.Fatalf("missing --json arg: %#v", codexArgs)
 	}
 
 	switch os.Getenv("CODEX_TEST_SCENARIO") {
 	case "success":
-		if err := os.WriteFile(outputPath, []byte("codex final answer"), 0o644); err != nil {
-			t.Fatalf("write codex output: %v", err)
-		}
+		_, _ = os.Stdout.WriteString("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"codex final answer\"}}\n")
 		os.Exit(0)
 	case "login-required":
-		_ = os.WriteFile(outputPath, []byte(""), 0o644)
+		_, _ = os.Stdout.WriteString("{\"type\":\"turn.failed\",\"error\":{\"message\":\"authentication required\"}}\n")
 		_, _ = os.Stderr.WriteString("authentication required\n")
 		os.Exit(1)
 	default:

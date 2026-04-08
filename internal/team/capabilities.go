@@ -64,8 +64,7 @@ func DetectRuntimeCapabilitiesWithOptions(opts CapabilityProbeOptions) RuntimeCa
 	tmuxStatus, tmux := probeTmuxCapability()
 	claudeStatus := probeBinaryCapability("claude", "Install claude so WUPHF can start teammate runtime sessions.")
 	codexStatus := probeBinaryCapability("codex", "Install Codex CLI and run `codex login` so WUPHF can start the headless Codex office runtime.")
-	cfg, _ := config.Load()
-	registry := buildCapabilityRegistry(strings.TrimSpace(cfg.LLMProvider), tmuxStatus, claudeStatus, codexStatus, opts)
+	registry := buildCapabilityRegistry(config.ResolveLLMProvider(""), tmuxStatus, claudeStatus, codexStatus, opts)
 	summaryKeys := []string{
 		CapabilityKeyOfficeRuntime,
 		CapabilityKeyDirectRuntime,

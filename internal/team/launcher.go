@@ -96,7 +96,6 @@ type Launcher struct {
 	broker      *Broker
 	mcpConfig   string
 	unsafe      bool
-	webMode     bool
 	sessionMode string
 	oneOnOne    string
 	provider    string
@@ -104,8 +103,10 @@ type Launcher struct {
 	headlessMu      sync.Mutex
 	headlessCtx     context.Context
 	headlessCancel  context.CancelFunc
-	headlessRunning map[string]bool
-	headlessPending map[string]string
+	headlessWorkers map[string]bool
+	headlessActive  map[string]*headlessCodexActiveTurn
+	headlessQueues  map[string][]headlessCodexTurn
+	webMode bool
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
@@ -144,9 +145,10 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		cwd:             cwd,
 		sessionMode:     sessionMode,
 		oneOnOne:        oneOnOne,
-		provider:        firstNonEmpty(strings.TrimSpace(cfg.LLMProvider), "claude-code"),
-		headlessRunning: make(map[string]bool),
-		headlessPending: make(map[string]string),
+		provider:        config.ResolveLLMProvider(""),
+		headlessWorkers: make(map[string]bool),
+		headlessActive:  make(map[string]*headlessCodexActiveTurn),
+		headlessQueues:  make(map[string][]headlessCodexTurn),
 	}, nil
 }
 
@@ -161,14 +163,6 @@ func (l *Launcher) Preflight() error {
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return fmt.Errorf("tmux not found. Install: brew install tmux")
 	}
-	if _, err := exec.LookPath("claude"); err != nil {
-		return fmt.Errorf("claude not found. Install: npm install -g @anthropic-ai/claude-code")
-	}
-	return nil
-}
-
-// PreflightWeb checks that tools required for web mode are available (no tmux needed).
-func (l *Launcher) PreflightWeb() error {
 	if _, err := exec.LookPath("claude"); err != nil {
 		return fmt.Errorf("claude not found. Install: npm install -g @anthropic-ai/claude-code")
 	}
@@ -309,39 +303,6 @@ func (l *Launcher) Launch() error {
 	}
 
 	return nil
-}
-
-// LaunchWeb starts the broker, web UI server, and background agents without tmux.
-// This is the entry point for --web mode.
-func (l *Launcher) LaunchWeb(webPort int) error {
-	l.webMode = true
-
-	mcpConfig, err := l.ensureMCPConfig()
-	if err != nil {
-		return fmt.Errorf("prepare mcp config: %w", err)
-	}
-	l.mcpConfig = mcpConfig
-
-	killStaleBroker()
-
-	l.broker = NewBroker()
-	if err := l.broker.Start(); err != nil {
-		return fmt.Errorf("start broker: %w", err)
-	}
-
-	l.broker.ServeWebUI(webPort)
-	l.spawnBackgroundAgents()
-
-	go l.notifyAgentsLoop()
-	go l.notifyTaskActionsLoop()
-	go l.pollNexNotificationsLoop()
-	go l.watchdogSchedulerLoop()
-
-	fmt.Printf("\n  Web UI:  http://localhost:%d\n", webPort)
-	fmt.Printf("  Broker:  http://localhost:%d\n", BrokerPort)
-	fmt.Printf("  Press Ctrl+C to stop.\n\n")
-
-	select {}
 }
 
 // notifyAgentsLoop polls the broker for new messages and pushes them
@@ -719,6 +680,9 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 }
 
 func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, content string) {
+	if l.webMode {
+		return
+	}
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
@@ -728,10 +692,6 @@ func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, conte
 	)
 	if l.usesCodexRuntime() {
 		l.enqueueHeadlessCodexTurn(slug, notification)
-		return
-	}
-	// In web mode, agents poll the broker via team_poll — no tmux panes to push to.
-	if l.webMode {
 		return
 	}
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
@@ -1882,6 +1842,26 @@ func (l *Launcher) oneOnOneAgent() string {
 	return NormalizeOneOnOneAgent(l.oneOnOne)
 }
 
+func (l *Launcher) usesCodexRuntime() bool {
+	return strings.EqualFold(strings.TrimSpace(l.provider), "codex")
+}
+
+func (l *Launcher) UsesTmuxRuntime() bool {
+	return !l.usesCodexRuntime()
+}
+
+func (l *Launcher) BrokerToken() string {
+	if l == nil || l.broker == nil {
+		return ""
+	}
+	return l.broker.Token()
+}
+
+// OneOnOneAgent returns the active direct-session agent slug, if any.
+func (l *Launcher) OneOnOneAgent() string {
+	return l.oneOnOneAgent()
+}
+
 // killStaleBroker kills any process holding port 7890 from a previous run.
 func killStaleBroker() {
 	out, err := exec.Command("lsof", "-i", fmt.Sprintf(":%d", BrokerPort), "-t").Output()
@@ -1979,24 +1959,16 @@ func (l *Launcher) ResetSession() error {
 
 func (l *Launcher) ReconfigureSession() error {
 	if l.usesCodexRuntime() {
+		if err := provider.ResetClaudeSessions(); err != nil {
+			return fmt.Errorf("reset Claude sessions: %w", err)
+		}
+		if err := l.clearAgentPanes(); err != nil {
+			return err
+		}
+		l.clearOverflowAgentWindows()
 		return nil
 	}
 	return l.reconfigureVisibleAgents()
-}
-
-func (l *Launcher) usesCodexRuntime() bool {
-	return strings.EqualFold(strings.TrimSpace(l.provider), "codex")
-}
-
-func (l *Launcher) UsesTmuxRuntime() bool {
-	return !l.usesCodexRuntime()
-}
-
-func (l *Launcher) BrokerToken() string {
-	if l == nil || l.broker == nil {
-		return ""
-	}
-	return l.broker.Token()
 }
 
 func (l *Launcher) reconfigureVisibleAgents() error {
@@ -2108,6 +2080,9 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID string, limit 
 }
 
 func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, content string) {
+	if l.webMode {
+		return // web mode agents poll the broker directly
+	}
 	if strings.TrimSpace(channel) == "" {
 		channel = "general"
 	}
@@ -2131,15 +2106,11 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 			)
 		}
 	}
+
 	if l.usesCodexRuntime() {
 		l.enqueueHeadlessCodexTurn(slug, notification)
 		return
 	}
-	// In web mode, agents poll the broker via team_poll — no tmux panes to push to.
-	if l.webMode {
-		return
-	}
-
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
 		"-l",
@@ -2392,101 +2363,6 @@ func (l *Launcher) spawnOverflowAgents() {
 			"-c", l.cwd,
 			agentCmd,
 		).Run()
-	}
-}
-
-// spawnBackgroundAgents starts all agents as headless background processes (no tmux).
-// Used by LaunchWeb for web mode. Agents run with --print and communicate only via MCP broker.
-func (l *Launcher) spawnBackgroundAgents() {
-	for _, member := range l.visibleOfficeMembers() {
-		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
-		go l.runBackgroundAgent(member.Slug, cmdStr)
-	}
-	for _, member := range l.overflowOfficeMembers() {
-		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
-		go l.runBackgroundAgent(member.Slug, cmdStr)
-	}
-}
-
-// headlessClaudeCommand builds a non-interactive claude command for web mode.
-// Uses --print with an initial prompt that tells the agent to start working via MCP.
-func (l *Launcher) headlessClaudeCommand(slug, systemPrompt string) string {
-	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
-	mcpConfig := strings.ReplaceAll(l.mcpConfig, "'", "'\\''")
-
-	permFlags := l.resolvePermissionFlags(slug)
-
-	brokerToken := ""
-	if l.broker != nil {
-		brokerToken = l.broker.Token()
-	}
-
-	oneSecretEnv := ""
-	if secret := strings.TrimSpace(config.ResolveOneSecret()); secret != "" {
-		oneSecretEnv = "ONE_SECRET=" + shellQuote(secret) + " "
-	}
-	oneIdentityEnv := ""
-	if identity := strings.TrimSpace(config.ResolveOneIdentity()); identity != "" {
-		oneIdentityEnv = "ONE_IDENTITY=" + shellQuote(identity) + " "
-		if identityType := strings.TrimSpace(config.ResolveOneIdentityType()); identityType != "" {
-			oneIdentityEnv += "ONE_IDENTITY_TYPE=" + shellQuote(identityType) + " "
-		}
-	}
-
-	model := "claude-sonnet-4-6"
-	if slug == l.officeLeadSlug() {
-		model = "claude-opus-4-6"
-	}
-
-	// --print makes claude run non-interactively: process the prompt and exit.
-	// The agent communicates via MCP tools (team_poll, team_post) to the broker.
-	initialPrompt := fmt.Sprintf("You are now active in the WUPHF office. Use your MCP tools (team_poll, team_post) to read messages and participate. Start by polling the channel for recent messages and respond to anything relevant. When done, poll again.")
-
-	return fmt.Sprintf(
-		"%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 claude --model %s --print %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -p '%s'",
-		oneSecretEnv,
-		oneIdentityEnv,
-		slug,
-		brokerToken,
-		config.ResolveNoNex(),
-		model,
-		permFlags,
-		escaped,
-		mcpConfig,
-		strings.ReplaceAll(initialPrompt, "'", "'\\''"),
-	)
-}
-
-// runBackgroundAgent runs a single agent as a headless OS process.
-// On exit it waits 5s and restarts. Stdout/stderr go to a log file, not the terminal.
-func (l *Launcher) runBackgroundAgent(slug, cmdStr string) {
-	logDir := filepath.Join(os.TempDir(), "wuphf-agents")
-	os.MkdirAll(logDir, 0o700)
-	logPath := filepath.Join(logDir, slug+".log")
-
-	for {
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[%s] failed to open log %s: %v\n", slug, logPath, err)
-			time.Sleep(5 * time.Second)
-			continue
-		}
-
-		cmd := exec.Command("bash", "-c", cmdStr)
-		cmd.Dir = l.cwd
-		cmd.Env = append(os.Environ(), fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()))
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
-		cmd.Stdin = nil // no terminal input
-
-		fmt.Fprintf(os.Stderr, "[%s] agent starting (log: %s)\n", slug, logPath)
-		runErr := cmd.Run()
-		logFile.Close()
-
-		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "[%s] agent exited: %v, restarting in 5s\n", slug, runErr)
-		}
-		time.Sleep(5 * time.Second)
 	}
 }
 
@@ -2972,11 +2848,6 @@ func (l *Launcher) AgentCount() int {
 	return len(l.officeMembersSnapshot())
 }
 
-// OneOnOneAgent returns the active direct-session agent slug, if any.
-func (l *Launcher) OneOnOneAgent() string {
-	return l.oneOnOneAgent()
-}
-
 // filterEnv returns env with the given key removed.
 func filterEnv(env []string, key string) []string {
 	prefix := key + "="
@@ -2995,4 +2866,123 @@ func (l *Launcher) getAgentName(slug string) string {
 		return member.Name
 	}
 	return slug
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Web View Mode
+// ═══════════════════════════════════════════════════════════════
+
+// PreflightWeb checks only for claude (no tmux requirement for web mode).
+func (l *Launcher) PreflightWeb() error {
+	if l.usesCodexRuntime() {
+		if _, err := exec.LookPath("codex"); err != nil {
+			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
+		}
+		return nil
+	}
+	if _, err := exec.LookPath("claude"); err != nil {
+		return fmt.Errorf("claude not found in PATH. Install Claude Code CLI first")
+	}
+	return nil
+}
+
+// LaunchWeb starts the broker, web UI server, and background agents without tmux.
+func (l *Launcher) LaunchWeb(webPort int) error {
+	mcpConfig, err := l.ensureMCPConfig()
+	if err != nil {
+		return fmt.Errorf("prepare mcp config: %w", err)
+	}
+	l.mcpConfig = mcpConfig
+	l.webMode = true
+
+	killStaleBroker()
+
+	l.broker = NewBroker()
+	if err := l.broker.Start(); err != nil {
+		return fmt.Errorf("start broker: %w", err)
+	}
+
+	l.broker.ServeWebUI(webPort)
+
+	if l.usesCodexRuntime() {
+		l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
+		l.launchHeadlessCodex()
+	} else {
+		l.spawnBackgroundAgents()
+	}
+
+	go l.notifyAgentsLoop()
+	go l.notifyTaskActionsLoop()
+	go l.pollNexNotificationsLoop()
+	go l.watchdogSchedulerLoop()
+
+	fmt.Printf("\n  Web UI:  http://localhost:%d\n", webPort)
+	fmt.Printf("  Broker:  http://localhost:%d\n", BrokerPort)
+	fmt.Printf("  Press Ctrl+C to stop.\n\n")
+
+	select {}
+}
+
+// spawnBackgroundAgents starts all agents as headless background processes (no tmux).
+func (l *Launcher) spawnBackgroundAgents() {
+	for _, member := range l.visibleOfficeMembers() {
+		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		go l.runBackgroundAgent(member.Slug, cmdStr)
+	}
+	for _, member := range l.overflowOfficeMembers() {
+		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		go l.runBackgroundAgent(member.Slug, cmdStr)
+	}
+}
+
+// headlessClaudeCommand builds a non-interactive claude command for web mode.
+func (l *Launcher) headlessClaudeCommand(slug, systemPrompt string) string {
+	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
+	mcpConfig := strings.ReplaceAll(l.mcpConfig, "'", "'\\''")
+	permFlags := l.resolvePermissionFlags(slug)
+	brokerToken := ""
+	if l.broker != nil {
+		brokerToken = l.broker.Token()
+	}
+	model := "claude-sonnet-4-6"
+	if slug == l.officeLeadSlug() {
+		model = "claude-opus-4-6"
+	}
+	initialPrompt := "You are now active in the WUPHF office. Use your MCP tools (team_poll, team_post) to read messages and participate. Start by polling the channel for recent messages and respond to anything relevant. When done, poll again."
+	return fmt.Sprintf(
+		"WUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 claude --model %s --print %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -p '%s'",
+		slug, brokerToken, config.ResolveNoNex(), model, permFlags, escaped, mcpConfig,
+		strings.ReplaceAll(initialPrompt, "'", "'\\''"),
+	)
+}
+
+// runBackgroundAgent runs a single agent as a headless OS process.
+func (l *Launcher) runBackgroundAgent(slug, cmdStr string) {
+	logDir := filepath.Join(os.TempDir(), "wuphf-agents")
+	os.MkdirAll(logDir, 0o700)
+	logPath := filepath.Join(logDir, slug+".log")
+
+	for {
+		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[%s] failed to open log %s: %v\n", slug, logPath, err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		cmd := exec.Command("bash", "-c", cmdStr)
+		cmd.Dir = l.cwd
+		cmd.Env = append(os.Environ(), fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()))
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+		cmd.Stdin = nil
+
+		fmt.Fprintf(os.Stderr, "[%s] agent starting (log: %s)\n", slug, logPath)
+		runErr := cmd.Run()
+		logFile.Close()
+
+		if runErr != nil {
+			fmt.Fprintf(os.Stderr, "[%s] agent exited: %v, restarting in 5s\n", slug, runErr)
+		}
+		time.Sleep(5 * time.Second)
+	}
 }
