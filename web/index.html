@@ -1224,6 +1224,35 @@ function createDateSeparator(ts) {
   return sep;
 }
 
+// ─── Relative time formatting (#49) ───
+function formatRelativeTime(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return ts; // fallback if not parseable
+  var now = new Date();
+  var diff = d - now;
+  var absDiff = Math.abs(diff);
+  var minutes = Math.floor(absDiff / 60000);
+  var hours = Math.floor(absDiff / 3600000);
+  var days = Math.floor(absDiff / 86400000);
+
+  if (diff > 0) {
+    // future
+    if (minutes < 1) return 'now';
+    if (minutes < 60) return 'in ' + minutes + 'min';
+    if (hours < 24) return 'in ' + hours + 'h';
+    if (days === 1) return 'tomorrow';
+    return 'in ' + days + ' days';
+  } else {
+    // past
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return minutes + 'min ago';
+    if (hours < 24) return hours + 'h ago';
+    if (days === 1) return 'yesterday';
+    return days + ' days ago';
+  }
+}
+
 // ─── DOM builder helpers ───
 function el(tag, attrs, children) {
   var node = document.createElement(tag);
