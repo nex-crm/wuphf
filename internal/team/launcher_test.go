@@ -27,6 +27,26 @@ func TestParseAgentPaneIndicesSkipsChannelPane(t *testing.T) {
 	}
 }
 
+func TestIsMissingTmuxSessionRecognizesCommonErrors(t *testing.T) {
+	cases := []string{
+		"no server running on /tmp/tmux-1000/wuphf",
+		"can't find session: wuphf-team",
+		"failed to connect to server",
+		"error connecting to /tmp/tmux-1001/wuphf (No such file or directory)",
+	}
+	for _, tc := range cases {
+		if !isMissingTmuxSession(tc) {
+			t.Fatalf("expected missing-session detection for %q", tc)
+		}
+	}
+}
+
+func TestIsMissingTmuxSessionIgnoresUnexpectedErrors(t *testing.T) {
+	if isMissingTmuxSession("unknown option: -bogus") {
+		t.Fatal("expected non-session tmux errors to remain actionable")
+	}
+}
+
 func TestResetBrokerStateUsesAuthToken(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
