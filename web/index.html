@@ -113,6 +113,24 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.active { background: var(--green); }
 .status-dot.pulse { animation: pulse-dot 2s ease-in-out infinite; }
+.status-dot.shipping { background: var(--blue); }
+.status-dot.plotting { background: var(--yellow); }
+.status-dot.lurking { background: #9ca3af; }
+
+/* ─── Agent task text ─── */
+.sidebar-agent-task { font-size: 10px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.sidebar-agent-wrap { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+
+/* ─── Sidebar summary / hint ─── */
+.sidebar-summary { padding: 4px 16px 2px; font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); }
+.sidebar-hint { padding: 0 16px 6px; font-size: 10px; color: var(--text-secondary); font-style: italic; }
+
+/* ─── App content panel ─── */
+.app-panel { flex: 1; overflow-y: auto; padding: 20px; display: none; flex-direction: column; gap: 12px; }
+.app-panel.active { display: flex; }
+.app-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; }
+.app-card-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.app-card-meta { font-size: 11px; color: var(--text-tertiary); }
 
 /* ─── Typography ─── */
 .font-logo { font-family: var(--font-logo); font-style: italic; }
@@ -310,6 +328,11 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-grouped { margin-top: -12px; }
 .message-grouped .message-avatar { visibility: hidden; }
 .message-grouped .message-header { display: none; }
+
+/* ─── Date separators ─── */
+.date-separator { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.date-separator-line { height: 1px; flex: 1; background: var(--border); }
+.date-separator-text { font-size: 12px; font-weight: 600; color: var(--text-tertiary); white-space: nowrap; }
 
 .agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
 .agent-panel.open { display: flex; }
@@ -601,6 +624,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
         </button>
       </div>
+      <div class="sidebar-summary" id="sidebar-summary"></div>
+      <div class="sidebar-hint" id="sidebar-hint"></div>
       <div class="sidebar-section">
         <p class="sidebar-section-title">Team</p>
         <button class="sidebar-item active">
@@ -614,6 +639,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <p class="sidebar-section-title">Channels</p>
       </div>
       <div class="sidebar-channels" id="sidebar-channels"></div>
+      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
+        <p class="sidebar-section-title">Apps</p>
+      </div>
+      <div class="sidebar-channels" id="sidebar-apps"></div>
       <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
         <select id="theme-switcher" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
           <option value="">Editorial</option>
@@ -639,6 +668,9 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </div>
       </div>
       <div class="messages" id="messages"></div>
+      <div class="app-panel" id="app-tasks"></div>
+      <div class="app-panel" id="app-requests"></div>
+      <div class="app-panel" id="app-calendar"></div>
       <div class="typing-indicator" id="typing-indicator" style="display:none;padding:0 20px 8px;">
         <div class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
         <span id="typing-who">CEO is thinking&hellip;</span>
@@ -709,6 +741,39 @@ function formatTrusted(text) {
     .replace(/`(.*?)`/g, '<code>$1</code>')
     .replace(/@(\w+)/g, '<strong style="color:var(--accent);">@$1</strong>')
     .replace(/\n/g, '<br>');
+}
+
+// ─── Date separator helpers ───
+function dateDayKey(ts) {
+  var d = new Date(ts);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function formatDateLabel(ts) {
+  var d = new Date(ts);
+  var now = new Date();
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var diff = today - msgDay;
+  if (diff === 0) return 'Today';
+  if (diff === 86400000) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function createDateSeparator(ts) {
+  var sep = document.createElement('div');
+  sep.className = 'date-separator';
+  var line1 = document.createElement('div');
+  line1.className = 'date-separator-line';
+  var text = document.createElement('span');
+  text.className = 'date-separator-text';
+  text.textContent = formatDateLabel(ts);
+  var line2 = document.createElement('div');
+  line2.className = 'date-separator-line';
+  sep.appendChild(line1);
+  sep.appendChild(text);
+  sep.appendChild(line2);
+  return sep;
 }
 
 // ─── DOM builder helpers ───
@@ -828,6 +893,10 @@ var WuphfAPI = (function() {
     return get('/health');
   }
 
+  function getTasks() {
+    return get('/tasks');
+  }
+
   return {
     init: init,
     get: get,
@@ -839,7 +908,8 @@ var WuphfAPI = (function() {
     getRequests: getRequests,
     answerRequest: answerRequest,
     getHealth: getHealth,
-    getThreadMessages: getThreadMessages
+    getThreadMessages: getThreadMessages,
+    getTasks: getTasks
   };
 })();
 
@@ -854,6 +924,16 @@ var pollTimer = null;
 var requestPollTimer = null;
 var consecutiveFailures = 0;
 var DISCONNECT_THRESHOLD = 3;
+var currentApp = null; // null = messages view, 'tasks' | 'requests' | 'calendar'
+var memberActivityPollTimer = null;
+var cachedMembers = []; // latest /office-members data for activity classification
+var cachedTasks = []; // latest /tasks data
+
+var SIDEBAR_APPS = [
+  { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
+  { id: 'requests', icon: '\uD83D\uDCCB', name: 'Requests' },
+  { id: 'calendar', icon: '\uD83D\uDCC5', name: 'Calendar' },
+];
 
 var AGENTS = [
   { slug: 'ceo',      emoji: '\uD83D\uDC54', name: 'CEO',               role: 'Strategy, delegation, goal tracking',           checked: true,  type: 'lead' },
@@ -1329,6 +1409,7 @@ function hideDisconnectBanner() {
 // ─── Message grouping state ───
 var lastRenderedFrom = null;
 var lastRenderedTime = null;
+var lastRenderedDate = null; // 'YYYY-MM-DD' string for date separator tracking
 
 // ─── Thread state ───
 var threadReplyCounts = {}; // msgId -> count of replies
@@ -1374,6 +1455,21 @@ function appendBrokerMessage(msg) {
   }
 
   var container = document.getElementById('messages');
+
+  // Insert date separator if day changed
+  if (msg.timestamp) {
+    var msgDayKey = dateDayKey(msg.timestamp);
+    if (lastRenderedDate && msgDayKey !== lastRenderedDate) {
+      container.appendChild(createDateSeparator(msg.timestamp));
+      // Reset grouping on day change
+      lastRenderedFrom = null;
+      lastRenderedTime = null;
+    }
+    if (!lastRenderedDate) {
+      container.appendChild(createDateSeparator(msg.timestamp));
+    }
+    lastRenderedDate = msgDayKey;
+  }
 
   // Detect grouping: same sender within 5 minutes
   var isGrouped = false;
