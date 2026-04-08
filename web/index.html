@@ -1248,23 +1248,43 @@ function htmlNode(html) {
 
 // ─── Broker API client ───
 var WuphfAPI = (function() {
-  var BROKER = 'http://localhost:7890';
+  // Use same-origin proxy (/api/*) — no CORS needed.
+  // Falls back to direct broker URL if proxy unavailable (e.g. file:// mode).
+  var API_BASE = '/api';
+  var BROKER_DIRECT = 'http://localhost:7890';
+  var useProxy = true;
   var token = null;
 
   function init() {
-    return fetch(BROKER + '/web-token')
+    // Try same-origin proxy first
+    return fetch('/api-token')
       .then(function(r) { return r.json(); })
-      .then(function(data) { token = data.token; });
+      .then(function(data) {
+        token = data.token;
+        useProxy = true;
+      })
+      .catch(function() {
+        // Fallback: direct broker (needs CORS)
+        useProxy = false;
+        return fetch(BROKER_DIRECT + '/web-token')
+          .then(function(r) { return r.json(); })
+          .then(function(data) { token = data.token; });
+      });
+  }
+
+  function baseURL() {
+    return useProxy ? API_BASE : BROKER_DIRECT;
   }
 
   function authHeaders() {
     var h = { 'Content-Type': 'application/json' };
-    if (token) h['Authorization'] = 'Bearer ' + token;
+    // When using proxy, broker injects auth server-side. When direct, add token.
+    if (!useProxy && token) h['Authorization'] = 'Bearer ' + token;
     return h;
   }
 
   function get(path, params) {
-    var url = BROKER + path;
+    var url = baseURL() + path;
     if (params) {
       var qs = Object.keys(params)
         .filter(function(k) { return params[k] != null; })
@@ -1279,7 +1299,7 @@ var WuphfAPI = (function() {
   }
 
   function post(path, body) {
-    return fetch(BROKER + path, {
+    return fetch(baseURL() + path, {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify(body)

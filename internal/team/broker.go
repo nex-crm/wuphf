@@ -544,6 +544,49 @@ func (b *Broker) ServeWebUI(port int) {
 		webDir = "web"
 	}
 	mux := http.NewServeMux()
+	// Reverse proxy: /api/* → broker on :7890. Same origin, no CORS.
+	brokerURL := fmt.Sprintf("http://127.0.0.1:%d", BrokerPort)
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		// Strip /api prefix and forward to broker
+		targetPath := strings.TrimPrefix(r.URL.Path, "/api")
+		if targetPath == "" {
+			targetPath = "/"
+		}
+		target := brokerURL + targetPath
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+
+		proxyReq, err := http.NewRequest(r.Method, target, r.Body)
+		if err != nil {
+			http.Error(w, "proxy error", http.StatusBadGateway)
+			return
+		}
+		// Forward auth header
+		proxyReq.Header.Set("Authorization", "Bearer "+b.token)
+		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+
+		resp, err := http.DefaultClient.Do(proxyReq)
+		if err != nil {
+			http.Error(w, "broker unreachable", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Copy response headers and body
+		for k, v := range resp.Header {
+			for _, vv := range v {
+				w.Header().Add(k, vv)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	})
+	// Token endpoint — no auth needed, same origin
+	mux.HandleFunc("/api-token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"token": b.token})
+	})
 	mux.Handle("/", http.FileServer(http.Dir(webDir)))
 	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux)
 }
