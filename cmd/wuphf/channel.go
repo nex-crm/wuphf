@@ -422,7 +422,13 @@ type channelMemberDraft struct {
 
 var mentionPattern = regexp.MustCompile(`@([A-Za-z0-9_-]+)`)
 
-var brokerTokenPath = "/tmp/wuphf-broker-token"
+var brokerTokenPath = func() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "/tmp/wuphf-broker-token"
+	}
+	return filepath.Join(home, ".wuphf", "broker-token")
+}()
 var officeDirectory = map[string]officeMemberInfo{}
 
 func currentBrokerAuthToken() string {
@@ -1680,15 +1686,8 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.notice = "Workflow detected! Type /run to launch it."
 					continue
 				}
-				// Fallback: detect bare JSON with workflow shape {"id":..., "steps":...}
-				content := strings.TrimSpace(newMsg.Content)
-				if strings.HasPrefix(content, "{") && strings.Contains(content, `"steps"`) && strings.Contains(content, `"id"`) {
-					// Try to parse as a workflow spec.
-					if _, err := workflow.ParseSpec(content); err == nil {
-						m.lastDetectedWorkflow = content
-						m.notice = "Workflow detected! Type /run to launch it."
-					}
-				}
+				// NOTE: bare JSON workflow detection removed — only fenced ```workflow blocks
+				// and explicit /workflow commands are accepted to prevent injection attacks.
 			}
 		}
 
@@ -1790,7 +1789,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.actionRegistry = action.NewRegistryFromEnv()
 		}
 		brokerToken := ""
-		if raw, err := os.ReadFile("/tmp/wuphf-broker-token"); err == nil {
+		if raw, err := os.ReadFile(brokerTokenPath); err == nil {
 			brokerToken = strings.TrimSpace(string(raw))
 		}
 		rt.SetProviders(
