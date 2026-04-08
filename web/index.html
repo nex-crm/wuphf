@@ -4550,16 +4550,17 @@ function buildRequestItem(req, isPending) {
   var question = el('div', { className: 'request-item-question' }, req.question || req.title || '');
   item.appendChild(question);
 
-  // Timing
-  if (req.due || req.created_at || req.follow_up) {
+  // Timing (#49)
+  if (req.due_at || req.due || req.created_at || req.follow_up_at || req.follow_up || req.reminder_at) {
     var timing = el('div', { className: 'request-item-timing' });
     var parts = [];
     if (req.created_at) {
       var d = new Date(req.created_at);
       parts.push('Asked ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
     }
-    if (req.due) parts.push('Due ' + req.due);
-    if (req.follow_up) parts.push('Follow-up: ' + req.follow_up);
+    if (req.due_at || req.due) parts.push('Due ' + formatRelativeTime(req.due_at || req.due));
+    if (req.follow_up_at || req.follow_up) parts.push('Follow up ' + formatRelativeTime(req.follow_up_at || req.follow_up));
+    if (req.reminder_at) parts.push('Reminder ' + formatRelativeTime(req.reminder_at));
     timing.textContent = parts.join(' \u2022 ');
     item.appendChild(timing);
   }
