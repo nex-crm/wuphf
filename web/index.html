@@ -1526,76 +1526,50 @@ function renderAppContent(appId) {
   else if (appId === 'calendar') renderCalendarApp(panel);
 }
 function renderTasksApp(panel) {
-  var header = document.createElement('h3');
-  header.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:4px;';
-  header.textContent = 'Task Board';
-  panel.appendChild(header);
-  if (!brokerConnected || cachedTasks.length === 0) {
-    var empty = document.createElement('p');
-    empty.style.cssText = 'font-size:13px;color:var(--text-tertiary);';
-    empty.textContent = brokerConnected ? 'No tasks yet.' : 'Connect to broker to see tasks.';
-    panel.appendChild(empty);
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see tasks.'));
     return;
   }
-  cachedTasks.forEach(function(t) {
-    var card = document.createElement('div');
-    card.className = 'app-card';
-    var title = document.createElement('div');
-    title.className = 'app-card-title';
-    title.textContent = t.title || t.name || 'Task #' + (t.id || '?');
-    var meta = document.createElement('div');
-    meta.className = 'app-card-meta';
-    var parts = [];
-    if (t.status) parts.push(t.status);
-    if (t.owner) parts.push('owner: ' + t.owner);
-    meta.textContent = parts.join(' • ');
-    card.appendChild(title);
-    card.appendChild(meta);
-    panel.appendChild(card);
-  });
+  panel.style.overflow = 'hidden';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading tasks...');
+  panel.appendChild(loading);
+  WuphfAPI.getTasks()
+    .then(function(data) {
+      panel.textContent = '';
+      var tasks = data.tasks || [];
+      if (tasks.length === 0 && cachedTasks.length > 0) tasks = cachedTasks;
+      if (tasks.length === 0) {
+        panel.appendChild(el('div', { className: 'request-empty' }, 'No tasks yet.'));
+        return;
+      }
+      renderTaskBoard(panel, tasks);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      if (cachedTasks.length > 0) {
+        renderTaskBoard(panel, cachedTasks);
+      } else {
+        panel.appendChild(el('div', { className: 'request-empty' }, 'Could not load tasks.'));
+      }
+    });
 }
 function renderRequestsApp(panel) {
-  var header = document.createElement('h3');
-  header.style.cssText = 'font-size:16px;font-weight:600;margin-bottom:4px;';
-  header.textContent = 'Requests';
-  panel.appendChild(header);
   if (!brokerConnected) {
-    var empty = document.createElement('p');
-    empty.style.cssText = 'font-size:13px;color:var(--text-tertiary);';
-    empty.textContent = 'Connect to broker to see requests.';
-    panel.appendChild(empty);
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see requests.'));
     return;
   }
-  WuphfAPI.getRequests(currentChannel).then(function(data) {
-    var requests = data.requests || [];
-    if (requests.length === 0 && !data.pending) {
-      var empty = document.createElement('p');
-      empty.style.cssText = 'font-size:13px;color:var(--text-tertiary);';
-      empty.textContent = 'No open requests.';
-      panel.appendChild(empty);
-      return;
-    }
-    if (data.pending) requests = [data.pending].concat(requests);
-    requests.forEach(function(r) {
-      var card = document.createElement('div');
-      card.className = 'app-card';
-      var title = document.createElement('div');
-      title.className = 'app-card-title';
-      title.textContent = r.question || r.title || 'Request';
-      var meta = document.createElement('div');
-      meta.className = 'app-card-meta';
-      var fromAgent = AGENTS.find(function(a) { return a.slug === r.from; });
-      meta.textContent = 'from: ' + (fromAgent ? fromAgent.name : (r.from || 'unknown'));
-      card.appendChild(title);
-      card.appendChild(meta);
-      panel.appendChild(card);
+  panel.style.overflow = 'auto';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading requests...');
+  panel.appendChild(loading);
+  WuphfAPI.getRequests(currentChannel)
+    .then(function(data) {
+      panel.textContent = '';
+      renderRequestList(panel, data);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      panel.appendChild(el('div', { className: 'request-empty' }, 'Failed to load requests.'));
     });
-  }).catch(function() {
-    var err = document.createElement('p');
-    err.style.cssText = 'font-size:13px;color:var(--text-tertiary);';
-    err.textContent = 'Failed to load requests.';
-    panel.appendChild(err);
-  });
 }
 function renderCalendarApp(panel) {
   var header = document.createElement('h3');
@@ -2457,12 +2431,19 @@ function handleSlashCommand(input) {
       else showSystem('Usage: /reply <message-id>');
       break;
     case '/reset':
-      WuphfAPI.post('/reset', {}).then(function() {
-        container.textContent = '';
-        lastMessageId = '';
-        allMessages = {};
-        threadReplyCounts = {};
-        showSystem('Office reset');
+      showConfirmDialog({
+        title: 'Reset Office',
+        message: 'This will clear all messages and reset the office state. Are you sure?',
+        confirmLabel: 'Reset',
+        onConfirm: function() {
+          WuphfAPI.post('/reset', {}).then(function() {
+            container.textContent = '';
+            lastMessageId = '';
+            allMessages = {};
+            threadReplyCounts = {};
+            showSystem('Office reset');
+          });
+        }
       });
       break;
     case '/recover':
@@ -3701,7 +3682,7 @@ function buildRequestItem(req, isPending) {
           openInterviewModal(req);
         } else {
           WuphfAPI.answerRequest(req.id, opt.id)
-            .then(function() { openRequestList(); fetchRequests(); });
+            .then(function() { if (currentApp === 'requests') renderAppContent('requests'); fetchRequests(); });
         }
       } }, opt.label || opt.text || opt.id);
       actions.appendChild(btn);
