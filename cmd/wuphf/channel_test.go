@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
 )
@@ -445,6 +446,62 @@ func TestBuildSwitchChannelPickerOptionsOnlyIncludesSwitchTargets(t *testing.T) 
 	}
 	if seenChannels != 2 {
 		t.Fatalf("expected two channel switch targets, got %+v", options)
+	}
+}
+
+func TestProviderCommandOpensProviderPicker(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, cmd := m.runCommand("/provider", "")
+	if cmd != nil {
+		t.Fatalf("expected no async command when opening provider picker, got %v", cmd)
+	}
+	got := next.(channelModel)
+	if !got.picker.IsActive() || got.pickerMode != channelPickerProvider {
+		t.Fatalf("expected provider picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "Codex CLI") || !strings.Contains(view, "Claude Code") {
+		t.Fatalf("expected provider options in picker, got %q", view)
+	}
+}
+
+func TestProviderSelectionSavesCodexAndRequestsRestart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	if err := config.Save(config.Config{LLMProvider: "claude-code", Pack: "founding-team"}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	m := newChannelModel(false)
+	m.picker = tui.NewPicker("Switch LLM Provider", tui.ProviderOptions())
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerProvider
+
+	next, cmd := m.Update(tui.PickerSelectMsg{Value: "codex", Label: "Codex CLI"})
+	if cmd == nil {
+		t.Fatal("expected provider selection to emit follow-up command")
+	}
+	got := next.(channelModel)
+	if !got.posting {
+		t.Fatal("expected provider selection to enter posting state")
+	}
+
+	msg := cmd()
+	followUp, _ := got.Update(msg)
+	done := followUp.(channelModel)
+	if done.posting {
+		t.Fatal("expected provider selection to clear posting state after completion")
+	}
+	if !strings.Contains(done.notice, "Claude teammate panes were stopped.") || !strings.Contains(done.notice, "Restart WUPHF to launch the headless Codex office runtime.") {
+		t.Fatalf("expected codex restart notice, got %q", done.notice)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.LLMProvider != "codex" {
+		t.Fatalf("expected codex provider saved, got %q", cfg.LLMProvider)
 	}
 }
 

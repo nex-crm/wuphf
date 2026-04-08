@@ -171,6 +171,71 @@ func TestResolveActionProviderUsesConfig(t *testing.T) {
 	})
 }
 
+func TestResolveLLMProviderDefaultsToClaude(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		if got := ResolveLLMProvider(""); got != "claude-code" {
+			t.Fatalf("expected claude-code default, got %q", got)
+		}
+	})
+}
+
+func TestResolveLLMProviderUsesEnvOverride(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_LLM_PROVIDER", "codex")
+		if got := ResolveLLMProvider(""); got != "codex" {
+			t.Fatalf("expected codex env override, got %q", got)
+		}
+	})
+}
+
+func TestResolveLLMProviderNormalizesUnsupportedConfig(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{LLMProvider: "gemini"})
+		if got := ResolveLLMProvider(""); got != "claude-code" {
+			t.Fatalf("expected unsupported provider to normalize to claude-code, got %q", got)
+		}
+	})
+}
+
+func TestResolveCodexModelUsesEnvOverride(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_CODEX_MODEL", "gpt-5.4")
+		if got := ResolveCodexModel(""); got != "gpt-5.4" {
+			t.Fatalf("expected env codex model, got %q", got)
+		}
+	})
+}
+
+func TestResolveCodexModelPrefersNearestProjectConfig(t *testing.T) {
+	withTempConfig(t, func(dir string) {
+		homeConfigDir := filepath.Join(dir, ".codex")
+		if err := os.MkdirAll(homeConfigDir, 0o755); err != nil {
+			t.Fatalf("mkdir home codex dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(homeConfigDir, "config.toml"), []byte("model = \"gpt-5.4\"\n"), 0o644); err != nil {
+			t.Fatalf("write home config: %v", err)
+		}
+
+		projectRoot := filepath.Join(dir, "repo")
+		projectConfigDir := filepath.Join(projectRoot, ".codex")
+		if err := os.MkdirAll(projectConfigDir, 0o755); err != nil {
+			t.Fatalf("mkdir project codex dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(projectConfigDir, "config.toml"), []byte("model = \"gpt-5.4-mini\"\n"), 0o644); err != nil {
+			t.Fatalf("write project config: %v", err)
+		}
+
+		nested := filepath.Join(projectRoot, "nested", "deeper")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("mkdir nested dir: %v", err)
+		}
+
+		if got := ResolveCodexModel(nested); got != "gpt-5.4-mini" {
+			t.Fatalf("expected nearest project codex model, got %q", got)
+		}
+	})
+}
+
 func TestResolveFormatFlag(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		if got := ResolveFormat("json"); got != "json" {

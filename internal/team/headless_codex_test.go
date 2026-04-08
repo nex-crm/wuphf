@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -76,14 +77,11 @@ func TestBuildCodexOfficeConfigOverridesIncludesOfficeMCPEnv(t *testing.T) {
 	if !strings.Contains(joined, `mcp_servers.wuphf-office.args=["mcp-team"]`) {
 		t.Fatalf("expected WUPHF MCP args override, got %q", joined)
 	}
-	if !strings.Contains(joined, `WUPHF_AGENT_SLUG="pm"`) {
-		t.Fatalf("expected agent slug in MCP env, got %q", joined)
+	if !strings.Contains(joined, `mcp_servers.wuphf-office.env_vars=["WUPHF_AGENT_SLUG", "WUPHF_BROKER_TOKEN", "WUPHF_NO_NEX", "WUPHF_ONE_ON_ONE", "WUPHF_ONE_ON_ONE_AGENT"]`) {
+		t.Fatalf("expected office env var forwarding, got %q", joined)
 	}
-	if !strings.Contains(joined, `WUPHF_BROKER_TOKEN="`) {
-		t.Fatalf("expected broker token in MCP env, got %q", joined)
-	}
-	if !strings.Contains(joined, `WUPHF_ONE_ON_ONE="1"`) || !strings.Contains(joined, `WUPHF_ONE_ON_ONE_AGENT="pm"`) {
-		t.Fatalf("expected 1:1 env in MCP override, got %q", joined)
+	if strings.Contains(joined, broker.Token()) {
+		t.Fatalf("expected broker token value to stay out of args, got %q", joined)
 	}
 	if strings.Contains(joined, `mcp_servers.nex.command=`) {
 		t.Fatalf("expected Nex MCP to stay disabled with WUPHF_NO_NEX, got %q", joined)
@@ -99,6 +97,8 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 		switch file {
 		case "codex":
 			return "/usr/bin/codex", nil
+		case "nex-mcp":
+			return "/usr/bin/nex-mcp", nil
 		default:
 			return "", exec.ErrNotFound
 		}
@@ -118,7 +118,10 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
 	t.Setenv("HEADLESS_CODEX_RECORD_FILE", recordFile)
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("WUPHF_NO_NEX", "1")
+	t.Setenv("WUPHF_API_KEY", "nex-secret-key")
+	t.Setenv("WUPHF_ONE_SECRET", "one-secret-value")
+	t.Setenv("WUPHF_ONE_IDENTITY", "founder@example.com")
+	t.Setenv("WUPHF_ONE_IDENTITY_TYPE", "user")
 
 	l := &Launcher{
 		pack:        agent.GetPack("founding-team"),
@@ -127,7 +130,7 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 		headlessCtx: context.Background(),
 	}
 
-	if err := l.runHeadlessCodexTurn("ceo", "You have new work in #launch."); err != nil {
+	if err := l.runHeadlessCodexTurn(context.Background(), "ceo", "You have new work in #launch."); err != nil {
 		t.Fatalf("runHeadlessCodexTurn: %v", err)
 	}
 
@@ -139,6 +142,15 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	if !strings.Contains(joinedArgs, `mcp_servers.wuphf-office.command="/tmp/wuphf"`) {
 		t.Fatalf("expected office MCP override, got %#v", record.Args)
 	}
+	if !strings.Contains(joinedArgs, `mcp_servers.wuphf-office.env_vars=["WUPHF_AGENT_SLUG", "WUPHF_BROKER_TOKEN", "ONE_SECRET", "ONE_IDENTITY", "ONE_IDENTITY_TYPE"]`) {
+		t.Fatalf("expected office env var forwarding, got %#v", record.Args)
+	}
+	if !strings.Contains(joinedArgs, `mcp_servers.nex.command="/usr/bin/nex-mcp"`) {
+		t.Fatalf("expected nex MCP override, got %#v", record.Args)
+	}
+	if !strings.Contains(joinedArgs, `mcp_servers.nex.env_vars=["WUPHF_API_KEY", "NEX_API_KEY"]`) {
+		t.Fatalf("expected nex env var forwarding, got %#v", record.Args)
+	}
 	if !containsEnv(record.Env, "WUPHF_AGENT_SLUG=ceo") {
 		t.Fatalf("expected agent env, got %#v", record.Env)
 	}
@@ -148,8 +160,82 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	if !containsEnvPrefix(record.Env, "WUPHF_BROKER_TOKEN=") {
 		t.Fatalf("expected broker token env, got %#v", record.Env)
 	}
+	if !containsEnv(record.Env, "WUPHF_API_KEY=nex-secret-key") || !containsEnv(record.Env, "NEX_API_KEY=nex-secret-key") {
+		t.Fatalf("expected nex API env, got %#v", record.Env)
+	}
+	if !containsEnv(record.Env, "ONE_SECRET=one-secret-value") {
+		t.Fatalf("expected one secret env, got %#v", record.Env)
+	}
+	if strings.Contains(joinedArgs, l.broker.Token()) || strings.Contains(joinedArgs, "nex-secret-key") || strings.Contains(joinedArgs, "one-secret-value") {
+		t.Fatalf("expected secret values to stay out of args, got %#v", record.Args)
+	}
 	if !strings.Contains(record.Stdin, "<system>") || !strings.Contains(record.Stdin, "You have new work in #launch.") {
 		t.Fatalf("expected notification prompt in stdin, got %q", record.Stdin)
+	}
+}
+
+func TestEnqueueHeadlessCodexTurnProcessesFIFO(t *testing.T) {
+	oldRunTurn := headlessCodexRunTurn
+	processed := make(chan string, 4)
+	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, _ string, notification string) error {
+		processed <- notification
+		return nil
+	}
+	defer func() { headlessCodexRunTurn = oldRunTurn }()
+
+	l := newHeadlessLauncherForTest()
+
+	l.enqueueHeadlessCodexTurn("ceo", "first")
+	l.enqueueHeadlessCodexTurn("ceo", "second")
+
+	first := waitForString(t, processed)
+	second := waitForString(t, processed)
+	if first != "first" || second != "second" {
+		t.Fatalf("expected FIFO order, got %q then %q", first, second)
+	}
+}
+
+func TestEnqueueHeadlessCodexTurnCancelsStaleTurn(t *testing.T) {
+	oldRunTurn := headlessCodexRunTurn
+	oldTimeout := headlessCodexTurnTimeout
+	oldStale := headlessCodexStaleCancelAfter
+	headlessCodexTurnTimeout = 5 * time.Second
+	headlessCodexStaleCancelAfter = 20 * time.Millisecond
+	defer func() {
+		headlessCodexRunTurn = oldRunTurn
+		headlessCodexTurnTimeout = oldTimeout
+		headlessCodexStaleCancelAfter = oldStale
+	}()
+
+	started := make(chan struct{}, 1)
+	cancelled := make(chan struct{}, 1)
+	processed := make(chan string, 4)
+	headlessCodexRunTurn = func(_ *Launcher, ctx context.Context, _ string, notification string) error {
+		if notification == "first" {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-ctx.Done()
+			select {
+			case cancelled <- struct{}{}:
+			default:
+			}
+			return ctx.Err()
+		}
+		processed <- notification
+		return nil
+	}
+
+	l := newHeadlessLauncherForTest()
+	l.enqueueHeadlessCodexTurn("ceo", "first")
+	waitForSignal(t, started)
+	time.Sleep(35 * time.Millisecond)
+	l.enqueueHeadlessCodexTurn("ceo", "second")
+
+	waitForSignal(t, cancelled)
+	if got := waitForString(t, processed); got != "second" {
+		t.Fatalf("expected queued turn to run after cancellation, got %q", got)
 	}
 }
 
@@ -183,19 +269,10 @@ func TestHeadlessCodexHelperProcess(t *testing.T) {
 		t.Fatalf("write helper record: %v", err)
 	}
 
-	outputPath := ""
-	for i := 0; i < len(codexArgs)-1; i++ {
-		if codexArgs[i] == "--output-last-message" {
-			outputPath = codexArgs[i+1]
-			break
-		}
+	if !containsArg(codexArgs, "--json") {
+		t.Fatalf("missing --json arg: %#v", codexArgs)
 	}
-	if outputPath == "" {
-		t.Fatalf("missing --output-last-message arg: %#v", codexArgs)
-	}
-	if err := os.WriteFile(outputPath, []byte("codex office reply"), 0o644); err != nil {
-		t.Fatalf("write codex output: %v", err)
-	}
+	_, _ = os.Stdout.WriteString("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"codex office reply\"}}\n")
 	os.Exit(0)
 }
 
@@ -228,4 +305,42 @@ func containsEnvPrefix(values []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func containsArg(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func newHeadlessLauncherForTest() *Launcher {
+	return &Launcher{
+		headlessCtx:     context.Background(),
+		headlessWorkers: make(map[string]bool),
+		headlessActive:  make(map[string]*headlessCodexActiveTurn),
+		headlessQueues:  make(map[string][]headlessCodexTurn),
+	}
+}
+
+func waitForSignal(t *testing.T, ch <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for signal")
+	}
+}
+
+func waitForString(t *testing.T, ch <-chan string) string {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for string")
+		return ""
+	}
 }
