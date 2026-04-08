@@ -98,6 +98,13 @@ type Launcher struct {
 	unsafe      bool
 	sessionMode string
 	oneOnOne    string
+	provider    string
+
+	headlessMu      sync.Mutex
+	headlessCtx     context.Context
+	headlessCancel  context.CancelFunc
+	headlessRunning map[string]bool
+	headlessPending map[string]string
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
@@ -110,8 +117,8 @@ func (l *Launcher) SetOneOnOne(slug string) {
 
 // NewLauncher creates a launcher for the given pack.
 func NewLauncher(packSlug string) (*Launcher, error) {
+	cfg, _ := config.Load()
 	if packSlug == "" {
-		cfg, _ := config.Load()
 		packSlug = cfg.Pack
 		if packSlug == "" {
 			packSlug = "founding-team"
@@ -130,17 +137,26 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	sessionMode, oneOnOne := loadRunningSessionMode()
 
 	return &Launcher{
-		packSlug:    packSlug,
-		pack:        pack,
-		sessionName: SessionName,
-		cwd:         cwd,
-		sessionMode: sessionMode,
-		oneOnOne:    oneOnOne,
+		packSlug:        packSlug,
+		pack:            pack,
+		sessionName:     SessionName,
+		cwd:             cwd,
+		sessionMode:     sessionMode,
+		oneOnOne:        oneOnOne,
+		provider:        firstNonEmpty(strings.TrimSpace(cfg.LLMProvider), "claude-code"),
+		headlessRunning: make(map[string]bool),
+		headlessPending: make(map[string]string),
 	}, nil
 }
 
 // Preflight checks that required tools are available.
 func (l *Launcher) Preflight() error {
+	if l.usesCodexRuntime() {
+		if _, err := exec.LookPath("codex"); err != nil {
+			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
+		}
+		return nil
+	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		return fmt.Errorf("tmux not found. Install: brew install tmux")
 	}
@@ -154,6 +170,9 @@ func (l *Launcher) Preflight() error {
 //   - Window 0 "team": Channel on left, agent panes on the right
 //   - No extra windows: all team activity is visible in one place
 func (l *Launcher) Launch() error {
+	if l.usesCodexRuntime() {
+		return l.launchHeadlessCodex()
+	}
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)
@@ -665,6 +684,10 @@ func (l *Launcher) sendTaskUpdate(paneTarget, slug, channel, taskID, from, conte
 		"[Task #%s %s from @%s]: %s — You own this task. Reply with the concrete next step and update via team_task with my_slug \"%s\".",
 		channel, taskID, from, truncate(content, 150), slug,
 	)
+	if l.usesCodexRuntime() {
+		l.enqueueHeadlessCodexTurn(slug, notification)
+		return
+	}
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
 		"-l",
@@ -1813,6 +1836,26 @@ func (l *Launcher) oneOnOneAgent() string {
 	return NormalizeOneOnOneAgent(l.oneOnOne)
 }
 
+func (l *Launcher) usesCodexRuntime() bool {
+	return strings.EqualFold(strings.TrimSpace(l.provider), "codex")
+}
+
+func (l *Launcher) UsesTmuxRuntime() bool {
+	return !l.usesCodexRuntime()
+}
+
+func (l *Launcher) BrokerToken() string {
+	if l == nil || l.broker == nil {
+		return ""
+	}
+	return l.broker.Token()
+}
+
+// OneOnOneAgent returns the active direct-session agent slug, if any.
+func (l *Launcher) OneOnOneAgent() string {
+	return l.oneOnOneAgent()
+}
+
 // killStaleBroker kills any process holding port 7890 from a previous run.
 func killStaleBroker() {
 	out, err := exec.Command("lsof", "-i", fmt.Sprintf(":%d", BrokerPort), "-t").Output()
@@ -1863,8 +1906,14 @@ func (l *Launcher) Attach() error {
 
 // Kill destroys the tmux session, all agent processes, and the broker.
 func (l *Launcher) Kill() error {
+	if l.headlessCancel != nil {
+		l.headlessCancel()
+	}
 	if l.broker != nil {
 		l.broker.Stop()
+	}
+	if l.usesCodexRuntime() {
+		return nil
 	}
 	err := exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 	if err != nil {
@@ -1879,6 +1928,16 @@ func (l *Launcher) Kill() error {
 }
 
 func (l *Launcher) ResetSession() error {
+	if l.usesCodexRuntime() {
+		if l != nil && l.broker != nil {
+			l.broker.Reset()
+			return nil
+		}
+		if err := ResetBrokerState(); err != nil {
+			return fmt.Errorf("reset broker state: %w", err)
+		}
+		return nil
+	}
 	if err := provider.ResetClaudeSessions(); err != nil {
 		return fmt.Errorf("reset Claude sessions: %w", err)
 	}
@@ -1893,6 +1952,9 @@ func (l *Launcher) ResetSession() error {
 }
 
 func (l *Launcher) ReconfigureSession() error {
+	if l.usesCodexRuntime() {
+		return nil
+	}
 	return l.reconfigureVisibleAgents()
 }
 
@@ -2029,6 +2091,10 @@ func (l *Launcher) sendChannelUpdate(paneTarget, slug, channel, msgID, from, con
 		}
 	}
 
+	if l.usesCodexRuntime() {
+		l.enqueueHeadlessCodexTurn(slug, notification)
+		return
+	}
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget,
 		"-l",

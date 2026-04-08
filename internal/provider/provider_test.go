@@ -20,6 +20,13 @@ func TestClaudeStreamFnBuilds(t *testing.T) {
 	}
 }
 
+func TestCodexStreamFnBuilds(t *testing.T) {
+	fn := provider.CreateCodexCLIStreamFn("test-agent")
+	if fn == nil {
+		t.Fatal("expected non-nil StreamFn")
+	}
+}
+
 func TestNexAskStreamFn_NoAPIKey(t *testing.T) {
 	c := api.NewClient("") // no key
 	fn := provider.CreateNexAskStreamFn(c)

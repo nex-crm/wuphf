@@ -16,6 +16,8 @@ func DefaultStreamFnResolver(client *api.Client) agent.StreamFnResolver {
 			cfg.LLMProvider = "claude-code"
 		}
 		switch cfg.LLMProvider {
+		case "codex":
+			return CreateCodexCLIStreamFn(agentSlug)
 		case "gemini":
 			return CreateGeminiStreamFn(cfg.GeminiAPIKey)
 		case "nex-ask":

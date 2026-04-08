@@ -730,6 +730,13 @@ func (m StreamModel) handleSlashCommand(input string) (StreamModel, tea.Cmd) {
 		}
 		return m, nil
 	case "reset":
+		cfg, _ := config.Load()
+		if strings.TrimSpace(cfg.LLMProvider) == "codex" {
+			m.runtime.Reconfigure()
+			m.resetDelegationState()
+			m.appendSystemMessage("Codex runs ephemerally in WUPHF. The runtime was reconfigured and the next Codex task will start fresh.")
+			return m, nil
+		}
 		if err := provider.ResetClaudeSessions(); err != nil {
 			m.appendSystemMessage("Failed to reset Claude session persistence: " + err.Error())
 			return m, nil

@@ -62,6 +62,8 @@ func NewModel(panesMode bool) Model {
 	rt := NewRuntime(events)
 
 	hasAPIKey := config.ResolveAPIKey("") != ""
+	cfg, _ := config.Load()
+	providerName := strings.TrimSpace(cfg.LLMProvider)
 
 	m := Model{
 		runtime:     rt,
@@ -71,7 +73,7 @@ func NewModel(panesMode bool) Model {
 		hasAPIKey:   hasAPIKey,
 	}
 
-	if panesMode && HasClaude() {
+	if shouldUseEmbeddedPanes(providerName, panesMode, HasClaude()) {
 		// Embedded terminal mode (--panes flag): each agent gets its own PTY.
 		pm := NewPaneManager()
 		bus := NewGossipBus(rt.TeamLeadSlug)
@@ -91,7 +93,7 @@ func NewModel(panesMode bool) Model {
 		m.paneManager = pm
 		m.gossipBus = bus
 		m.roster = roster
-	} else if HasTmux() && HasClaude() {
+	} else if shouldUseTmuxChannelMode(providerName, HasTmux(), HasClaude()) {
 		// Channel mode (default): agents run in tmux, output feeds into stream view.
 		stream := NewStreamModel(rt, events)
 		stream.channelMode = true
@@ -108,6 +110,14 @@ func NewModel(panesMode bool) Model {
 	}
 
 	return m
+}
+
+func shouldUseEmbeddedPanes(providerName string, panesMode bool, hasClaude bool) bool {
+	return strings.TrimSpace(providerName) != "codex" && panesMode && hasClaude
+}
+
+func shouldUseTmuxChannelMode(providerName string, hasTmux bool, hasClaude bool) bool {
+	return strings.TrimSpace(providerName) != "codex" && hasTmux && hasClaude
 }
 
 // Init starts the appropriate mode.

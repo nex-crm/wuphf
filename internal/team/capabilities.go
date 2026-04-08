@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 type CapabilityLevel string
@@ -44,6 +46,7 @@ type TmuxCapability struct {
 
 type RuntimeCapabilities struct {
 	Tmux     TmuxCapability
+	Codex    CapabilityStatus
 	Items    []CapabilityStatus
 	Registry CapabilityRegistry
 }
@@ -60,7 +63,9 @@ func DetectRuntimeCapabilities() RuntimeCapabilities {
 func DetectRuntimeCapabilitiesWithOptions(opts CapabilityProbeOptions) RuntimeCapabilities {
 	tmuxStatus, tmux := probeTmuxCapability()
 	claudeStatus := probeBinaryCapability("claude", "Install claude so WUPHF can start teammate runtime sessions.")
-	registry := buildCapabilityRegistry(tmuxStatus, claudeStatus, opts)
+	codexStatus := probeBinaryCapability("codex", "Install Codex CLI and run `codex login` so WUPHF can start the headless Codex office runtime.")
+	cfg, _ := config.Load()
+	registry := buildCapabilityRegistry(strings.TrimSpace(cfg.LLMProvider), tmuxStatus, claudeStatus, codexStatus, opts)
 	summaryKeys := []string{
 		CapabilityKeyOfficeRuntime,
 		CapabilityKeyDirectRuntime,
@@ -75,6 +80,7 @@ func DetectRuntimeCapabilitiesWithOptions(opts CapabilityProbeOptions) RuntimeCa
 	}
 	return RuntimeCapabilities{
 		Tmux:     tmux,
+		Codex:    codexStatus,
 		Items:    registry.SummaryStatuses(summaryKeys...),
 		Registry: registry,
 	}

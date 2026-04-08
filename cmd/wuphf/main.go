@@ -141,6 +141,19 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
 		fmt.Fprintf(os.Stderr, "error launching team: %v\n", err)
 		os.Exit(1)
 	}
+	if !l.UsesTmuxRuntime() {
+		if token := strings.TrimSpace(l.BrokerToken()); token != "" {
+			_ = os.Setenv("WUPHF_BROKER_TOKEN", token)
+		}
+		_ = os.Setenv("WUPHF_HEADLESS_PROVIDER", "codex")
+		if oneOnOne {
+			_ = os.Setenv("WUPHF_ONE_ON_ONE", "1")
+			_ = os.Setenv("WUPHF_ONE_ON_ONE_AGENT", l.OneOnOneAgent())
+		}
+		defer l.Kill()
+		runChannelView(false, resolveInitialOfficeApp(""), false)
+		return
+	}
 
 	fmt.Println("Team launched. Attaching...")
 	fmt.Println()
