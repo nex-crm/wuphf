@@ -2327,12 +2327,24 @@ func (l *Launcher) listTeamPanes() ([]int, error) {
 	).CombinedOutput()
 	if err != nil {
 		// If the session isn't up, there's nothing to clear.
-		if strings.Contains(string(out), "no server") || strings.Contains(string(out), "can't find") {
+		if isMissingTmuxSession(string(out)) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("list panes: %w", err)
 	}
 	return parseAgentPaneIndices(string(out)), nil
+}
+
+func isMissingTmuxSession(output string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(output))
+	if normalized == "" {
+		return false
+	}
+	return strings.Contains(normalized, "no server") ||
+		strings.Contains(normalized, "can't find") ||
+		strings.Contains(normalized, "failed to connect to server") ||
+		strings.Contains(normalized, "error connecting to") ||
+		strings.Contains(normalized, "no such file or directory")
 }
 
 func parseAgentPaneIndices(output string) []int {
