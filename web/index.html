@@ -2029,9 +2029,6 @@ function normalizeMemberActivityHints(members) {
     var statusText = trimStatusPrefix(copy.lastMessage);
     if (statusText) {
       copy.activity = statusText;
-      if (!copy.liveActivity || copy.liveActivity === 'active') {
-        copy.liveActivity = statusText;
-      }
       if (!copy.status) copy.status = 'active';
     }
     return copy;
@@ -2057,7 +2054,6 @@ function applyStatusActivity(msg) {
   var base = idx >= 0 ? Object.assign({}, cachedMembers[idx]) : { slug: slug };
   base.status = 'active';
   base.activity = status;
-  base.liveActivity = status;
   base.last_time = msg.timestamp || new Date().toISOString();
   if (idx >= 0) cachedMembers[idx] = base;
   else cachedMembers.push(base);
@@ -2135,6 +2131,21 @@ function renderSidebarAgents() {
     btn.appendChild(dot);
     container.appendChild(btn);
   });
+  // New Agent button (#73)
+  var newAgentBtn = document.createElement('button');
+  newAgentBtn.className = 'sidebar-agent';
+  newAgentBtn.style.cssText = 'opacity:0.6;font-size:12px;';
+  newAgentBtn.title = 'Create a new agent';
+  var plusIcon = document.createElement('span');
+  plusIcon.style.cssText = 'width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;background:var(--border-light);color:var(--text-tertiary);font-size:16px;font-weight:600;';
+  plusIcon.textContent = '+';
+  var plusLabel = document.createElement('span');
+  plusLabel.className = 'sidebar-agent-name';
+  plusLabel.textContent = 'New Agent';
+  newAgentBtn.appendChild(plusIcon);
+  newAgentBtn.appendChild(plusLabel);
+  newAgentBtn.addEventListener('click', function() { openAgentWizard(null); });
+  container.appendChild(newAgentBtn);
   // Set up double-click handlers for DM mode
   setupAgentDMHandlers();
 }
@@ -2157,8 +2168,10 @@ function renderSidebarApps() {
   });
 }
 function switchApp(appId) {
-  // Close recovery view if switching away
+  // Close recovery/threads/agents views if switching away
   if (recoveryViewOpen && appId !== 'recover') closeRecoveryView();
+  if (threadsViewOpen) closeThreadsView();
+  if (agentsViewOpen) closeAgentsView();
 
   // Handle recovery app specially
   if (appId === 'recover') {
@@ -2222,7 +2235,7 @@ function renderTasksApp(panel) {
   panel.style.overflow = 'hidden';
   var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading tasks...');
   panel.appendChild(loading);
-  WuphfAPI.getTasks()
+  WuphfAPI.getTasks(currentChannel)
     .then(function(data) {
       panel.textContent = '';
       var tasks = data.tasks || [];
@@ -2769,6 +2782,9 @@ function renderSidebarChannels() {
 }
 
 function switchChannel(name) {
+  // Close overlay views when switching channels
+  if (typeof threadsViewOpen !== 'undefined' && threadsViewOpen) closeThreadsView();
+  if (typeof agentsViewOpen !== 'undefined' && agentsViewOpen) closeAgentsView();
   // Exit app mode when switching channels
   if (currentApp) {
     currentApp = null;
@@ -2810,6 +2826,7 @@ function switchChannel(name) {
   if (brokerConnected) {
     fetchMessages();
     fetchRequests();
+    fetchMemberActivity();
   }
 }
 
@@ -2992,6 +3009,10 @@ function fetchMessages() {
 }
 
 function appendBrokerMessage(msg) {
+  if (applyStatusActivity(msg)) {
+    return;
+  }
+
   // Track all messages for thread lookups
   allMessages[msg.id] = msg;
 
@@ -3086,13 +3107,13 @@ function appendMessageToContainer(msg, container, opts) {
   opts = opts || {};
 
   // Status messages render compact and italic, no avatar
-  if (msg.kind === 'status') {
+  if (msg.kind === 'status' || trimStatusPrefix(msg.content)) {
     var statusDiv = document.createElement('div');
     statusDiv.className = 'message-status animate-fade';
     statusDiv.dataset.msgId = msg.id;
     var statusText = document.createElement('span');
     statusText.className = 'message-status-text';
-    statusText.textContent = msg.content || '';
+    statusText.textContent = trimStatusPrefix(msg.content) || msg.content || '';
     statusDiv.appendChild(statusText);
     container.appendChild(statusDiv);
     return statusDiv;
@@ -3511,20 +3532,14 @@ function startMemberActivityPolling() {
 }
 function fetchMemberActivity() {
   Promise.all([
-    WuphfAPI.getMembers().catch(function() { return { members: [] }; }),
-    WuphfAPI.getTasks().catch(function() { return { tasks: [] }; })
+    WuphfAPI.getMembers(currentChannel).catch(function() { return { members: [] }; }),
+    WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; })
   ]).then(function(results) {
-    cachedMembers = (results[0].members || []);
+    cachedMembers = normalizeMemberActivityHints(results[0].members || []);
     cachedTasks = (results[1].tasks || results[1] || []);
     if (Array.isArray(cachedTasks) === false) cachedTasks = [];
-    renderSidebarAgents();
-    renderWorkspaceSummary();
-    renderRuntimeStrip();
-    renderLiveWork();
+    refreshLiveActivityUI();
     renderExecutionTimeline();
-    updateStatusBar();
-    updateTypingIndicator();
-    renderComposerHint();
   });
 }
 
@@ -3994,7 +4009,7 @@ function handleSlashCommand(input) {
       showSystem('Messages cleared');
       break;
     case '/help':
-      showSystem('Commands: /clear /help /requests /tasks /reset /reply /1o1 <agent> /search /recover /threads /agents /insert /rewind /reset-dm /connect /skill /artifacts /pause');
+      showSystem('Commands: /clear /help /requests /tasks /reset /reply /1o1 <agent> /search /recover /threads /agents /insert /rewind /reset-dm /connect /skill /artifacts /pause /doctor /provider /newagent');
       break;
     case '/requests':
       switchApp('requests');
@@ -4209,6 +4224,15 @@ function handleSlashCommand(input) {
         WuphfAPI.post('/signals', { kind: 'resume', summary: 'Human resumed agents' }).catch(function() {});
       }
       renderRuntimeStrip();
+      break;
+    case '/doctor':
+      openDoctorPanel();
+      break;
+    case '/provider':
+      openProviderSwitcher();
+      break;
+    case '/newagent':
+      openAgentWizard(null);
       break;
     default:
       // Send unknown commands to broker as a message (agents may handle them)
@@ -4473,6 +4497,38 @@ function openAgentPanel(slug) {
   });
   skillsSection.appendChild(skillsWrap);
 
+  // Enable/Disable toggle (#76)
+  var toggleSection = document.createElement('div');
+  toggleSection.className = 'agent-panel-section';
+  var toggleRow = document.createElement('div');
+  toggleRow.className = 'agent-panel-stat';
+  var toggleLabel = document.createElement('span');
+  toggleLabel.className = 'agent-panel-stat-label';
+  toggleLabel.textContent = 'Enabled';
+  var toggle = document.createElement('label');
+  toggle.className = 'agent-toggle';
+  var toggleInput = document.createElement('input');
+  toggleInput.type = 'checkbox';
+  toggleInput.checked = agent.checked;
+  var toggleSlider = document.createElement('span');
+  toggleSlider.className = 'agent-toggle-slider';
+  toggleInput.addEventListener('change', function() {
+    var enabled = toggleInput.checked;
+    agent.checked = enabled;
+    var action = enabled ? 'enable' : 'disable';
+    WuphfAPI.post('/channel-members', { channel: currentChannel, action: action, slug: agent.slug })
+      .then(function() {
+        showNotice(agent.name + ' ' + (enabled ? 'enabled' : 'disabled'), 'success');
+        renderSidebarAgents();
+      })
+      .catch(function(e) { showNotice('Toggle failed: ' + (e.message || e), 'error'); toggleInput.checked = !enabled; agent.checked = !enabled; });
+  });
+  toggle.appendChild(toggleInput);
+  toggle.appendChild(toggleSlider);
+  toggleRow.appendChild(toggleLabel);
+  toggleRow.appendChild(toggle);
+  toggleSection.appendChild(toggleRow);
+
   // Actions section
   var actionsSection = document.createElement('div');
   actionsSection.className = 'agent-panel-section';
@@ -4480,20 +4536,29 @@ function openAgentPanel(slug) {
   actionsTitle.className = 'agent-panel-section-title';
   actionsTitle.textContent = 'Actions';
   actionsSection.appendChild(actionsTitle);
-  ['Start 1:1 conversation', 'Configure agent'].forEach(function(label) {
-    var btn = document.createElement('button');
-    btn.className = 'btn btn-ghost btn-sm';
-    btn.style.width = '100%';
-    btn.style.marginBottom = '8px';
-    btn.textContent = label;
-    actionsSection.appendChild(btn);
-  });
+
+  var dmBtn = document.createElement('button');
+  dmBtn.className = 'btn btn-ghost btn-sm';
+  dmBtn.style.width = '100%';
+  dmBtn.style.marginBottom = '8px';
+  dmBtn.textContent = 'Start 1:1 conversation';
+  dmBtn.addEventListener('click', function() { closeAgentPanel(); enterDMMode(agent.slug); });
+  actionsSection.appendChild(dmBtn);
+
+  var editBtn = document.createElement('button');
+  editBtn.className = 'btn btn-ghost btn-sm';
+  editBtn.style.width = '100%';
+  editBtn.style.marginBottom = '8px';
+  editBtn.textContent = 'Edit agent';
+  editBtn.addEventListener('click', function() { closeAgentPanel(); openAgentWizard(agent); });
+  actionsSection.appendChild(editBtn);
 
   body.appendChild(avatar);
   body.appendChild(nameEl);
   body.appendChild(roleEl);
   if (personalitySection) body.appendChild(personalitySection);
   body.appendChild(statusSection);
+  body.appendChild(toggleSection);
   body.appendChild(skillsSection);
   body.appendChild(actionsSection);
 
@@ -4504,6 +4569,272 @@ function closeAgentPanel() {
   document.getElementById('agent-panel').classList.remove('open');
 }
 
+// ─── Agent Create/Edit Wizard (#73-75) ───
+function openAgentWizard(existingAgent) {
+  var isEdit = !!existingAgent;
+  var overlay = document.createElement('div');
+  overlay.className = 'agent-wizard-overlay';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var card = document.createElement('div');
+  card.className = 'agent-wizard-card';
+
+  var title = document.createElement('h3');
+  title.textContent = isEdit ? 'Edit Agent' : 'New Agent';
+  card.appendChild(title);
+
+  var fields = [
+    { key: 'slug', label: 'Slug', type: 'input', placeholder: 'e.g. devops', disabled: isEdit },
+    { key: 'name', label: 'Name', type: 'input', placeholder: 'e.g. DevOps Engineer' },
+    { key: 'role', label: 'Role', type: 'input', placeholder: 'e.g. CI/CD, infrastructure, monitoring' },
+    { key: 'expertise', label: 'Expertise (comma-separated)', type: 'input', placeholder: 'e.g. Docker, Kubernetes, Terraform' },
+    { key: 'personality', label: 'Personality', type: 'textarea', placeholder: 'Describe how this agent should behave...' }
+  ];
+  var inputs = {};
+
+  fields.forEach(function(f) {
+    var fieldDiv = document.createElement('div');
+    fieldDiv.className = 'agent-wizard-field';
+    var label = document.createElement('label');
+    label.textContent = f.label;
+    fieldDiv.appendChild(label);
+    var inp;
+    if (f.type === 'textarea') {
+      inp = document.createElement('textarea');
+    } else {
+      inp = document.createElement('input');
+      inp.type = 'text';
+    }
+    inp.placeholder = f.placeholder || '';
+    if (f.disabled) inp.disabled = true;
+    if (isEdit) {
+      if (f.key === 'expertise') {
+        inp.value = (existingAgent.expertise || []).join(', ');
+      } else {
+        inp.value = existingAgent[f.key] || '';
+      }
+    }
+    inputs[f.key] = inp;
+    fieldDiv.appendChild(inp);
+    card.appendChild(fieldDiv);
+  });
+
+  var actions = document.createElement('div');
+  actions.className = 'agent-wizard-actions';
+  var cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-secondary';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', function() { overlay.remove(); });
+
+  var submitBtn = document.createElement('button');
+  submitBtn.className = 'btn btn-primary';
+  submitBtn.textContent = isEdit ? 'Save Changes' : 'Create Agent';
+  submitBtn.addEventListener('click', function() {
+    var slug = (inputs.slug.value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    var name = (inputs.name.value || '').trim();
+    var role = (inputs.role.value || '').trim();
+    var expertiseRaw = (inputs.expertise.value || '').trim();
+    var expertise = expertiseRaw ? expertiseRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+    var personality = (inputs.personality.value || '').trim();
+
+    if (!slug || !name) {
+      showNotice('Slug and name are required', 'error');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = isEdit ? 'Saving...' : 'Creating...';
+
+    var body = {
+      action: isEdit ? 'update' : 'create',
+      slug: slug,
+      name: name,
+      role: role,
+      expertise: expertise,
+      personality: personality
+    };
+
+    WuphfAPI.post('/office-members', body)
+      .then(function() {
+        overlay.remove();
+        showNotice(isEdit ? 'Agent updated' : 'Agent created', 'success');
+        if (isEdit) {
+          var ag = AGENTS.find(function(a) { return a.slug === slug; });
+          if (ag) { ag.name = name; ag.role = role; ag.expertise = expertise; ag.personality = personality; }
+        } else {
+          AGENTS.push({ slug: slug, name: name, role: role, expertise: expertise, personality: personality, emoji: '', checked: true, type: 'specialist' });
+        }
+        renderSidebarAgents();
+      })
+      .catch(function(e) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = isEdit ? 'Save Changes' : 'Create Agent';
+        showNotice('Failed: ' + (e.message || e), 'error');
+      });
+  });
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(submitBtn);
+  card.appendChild(actions);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  inputs[isEdit ? 'name' : 'slug'].focus();
+}
+
+// ─── Doctor Panel (#82, #97) ───
+function openDoctorPanel() {
+  var overlay = document.createElement('div');
+  overlay.className = 'doctor-overlay';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var panel = document.createElement('div');
+  panel.className = 'doctor-panel';
+
+  var title = document.createElement('h3');
+  title.textContent = 'System Diagnostics';
+  panel.appendChild(title);
+
+  var grid = document.createElement('div');
+  grid.className = 'doctor-grid';
+
+  function makeCard(label, value, cls) {
+    var card = document.createElement('div');
+    card.className = 'doctor-card';
+    var labelEl = document.createElement('div');
+    labelEl.className = 'doctor-card-label';
+    labelEl.textContent = label;
+    var valEl = document.createElement('div');
+    valEl.className = 'doctor-card-value' + (cls ? ' ' + cls : '');
+    valEl.textContent = value;
+    card.appendChild(labelEl);
+    card.appendChild(valEl);
+    return card;
+  }
+
+  grid.appendChild(makeCard('Broker', brokerConnected ? 'Connected' : 'Disconnected', brokerConnected ? 'ok' : 'error'));
+  grid.appendChild(makeCard('Agents', AGENTS.filter(function(a) { return a.checked; }).length + ' active', ''));
+
+  Promise.all([
+    WuphfAPI.getRequests().catch(function() { return { requests: [] }; }),
+    WuphfAPI.getTasks().catch(function() { return { tasks: [] }; }),
+    WuphfAPI.getHealth().catch(function() { return {}; })
+  ]).then(function(results) {
+    var requests = results[0].requests || [];
+    var tasks = results[1].tasks || [];
+    var health = results[2];
+
+    var pendingReqs = requests.filter(function(r) { return r.status === 'pending' || r.status === 'open'; }).length;
+    var blockedTasks = tasks.filter(function(t) { return t.status === 'blocked'; }).length;
+    var totalTasks = tasks.length;
+
+    grid.textContent = '';
+    grid.appendChild(makeCard('Broker', brokerConnected ? 'Connected' : 'Disconnected', brokerConnected ? 'ok' : 'error'));
+    grid.appendChild(makeCard('Session Mode', health.session_mode || 'normal', ''));
+    grid.appendChild(makeCard('Agents', AGENTS.filter(function(a) { return a.checked; }).length + ' / ' + AGENTS.length, ''));
+    grid.appendChild(makeCard('Total Tasks', String(totalTasks), ''));
+    grid.appendChild(makeCard('Pending Requests', String(pendingReqs), pendingReqs > 0 ? 'warn' : 'ok'));
+    grid.appendChild(makeCard('Blocked Tasks', String(blockedTasks), blockedTasks > 0 ? 'warn' : 'ok'));
+  });
+
+  panel.appendChild(grid);
+
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-secondary';
+  closeBtn.style.marginTop = '16px';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', function() { overlay.remove(); });
+  panel.appendChild(closeBtn);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
+// ─── Provider Switcher (#86) ───
+function openProviderSwitcher() {
+  var overlay = document.createElement('div');
+  overlay.className = 'provider-overlay';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var panel = document.createElement('div');
+  panel.className = 'provider-panel';
+
+  var title = document.createElement('h3');
+  title.textContent = 'Runtime Provider';
+  panel.appendChild(title);
+
+  var loadingEl = document.createElement('p');
+  loadingEl.style.cssText = 'color:var(--text-secondary);font-size:13px;';
+  loadingEl.textContent = 'Loading current provider...';
+  panel.appendChild(loadingEl);
+
+  var providers = [
+    { id: 'claude', name: 'Claude', desc: 'Anthropic Claude via Claude Code CLI' },
+    { id: 'codex', name: 'Codex', desc: 'OpenAI Codex CLI agent' }
+  ];
+
+  WuphfAPI.getHealth()
+    .then(function(data) {
+      loadingEl.remove();
+      var currentProvider = (data.provider || data.runtime || 'claude').toLowerCase();
+      var optionsDiv = document.createElement('div');
+
+      providers.forEach(function(p) {
+        var isActive = currentProvider === p.id;
+        var option = document.createElement('div');
+        option.className = 'provider-option' + (isActive ? ' active' : '');
+        option.addEventListener('click', function() {
+          if (isActive) return;
+          showConfirmDialog({
+            title: 'Switch Provider',
+            message: 'Switch runtime provider to ' + p.name + '? Active agents will be restarted.',
+            confirmLabel: 'Switch',
+            onConfirm: function() {
+              WuphfAPI.post('/office-members', { action: 'update', slug: 'ceo', permission_mode: p.id })
+                .then(function() {
+                  showNotice('Provider switched to ' + p.name, 'success');
+                  overlay.remove();
+                })
+                .catch(function(e) { showNotice('Switch failed: ' + (e.message || e), 'error'); });
+            }
+          });
+        });
+
+        var nameEl = document.createElement('div');
+        nameEl.className = 'provider-option-name';
+        nameEl.textContent = p.name;
+        var descEl = document.createElement('div');
+        descEl.className = 'provider-option-desc';
+        descEl.textContent = p.desc;
+        var textWrap = document.createElement('div');
+        textWrap.appendChild(nameEl);
+        textWrap.appendChild(descEl);
+        option.appendChild(textWrap);
+
+        if (isActive) {
+          var check = document.createElement('span');
+          check.className = 'provider-option-check';
+          check.textContent = '\u2713';
+          option.appendChild(check);
+        }
+        optionsDiv.appendChild(option);
+      });
+
+      panel.appendChild(optionsDiv);
+    })
+    .catch(function() {
+      loadingEl.textContent = 'Could not load provider info';
+    });
+
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-secondary';
+  closeBtn.style.marginTop = '16px';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', function() { overlay.remove(); });
+  panel.appendChild(closeBtn);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
 
 // ─── Search mode (#63 part) ───
 var searchMode = false;
@@ -5079,12 +5410,12 @@ function openRecoveryView() {
   if (brokerConnected) {
     Promise.all([
       WuphfAPI.get('/state').catch(function() { return {}; }),
-      WuphfAPI.get('/tasks').catch(function() { return { tasks: [] }; }),
-      WuphfAPI.getMembers().catch(function() { return { members: [] }; })
+      WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; }),
+      WuphfAPI.getMembers(currentChannel).catch(function() { return { members: [] }; })
     ]).then(function(results) {
       var state = results[0];
       var tasksData = results[1];
-      var membersData = results[2];
+      var membersData = { members: normalizeMemberActivityHints(results[2].members || []) };
       renderRecoveryData(panel, state, tasksData, membersData);
     });
   } else {
@@ -6279,6 +6610,534 @@ function renderPixelAvatar(slug, size) {
   ctx.putImageData(imgData, 0, 0);
   return canvas;
 }
+
+// ═══════════════════════════════════════════════════════════════
+//   SEARCH PICKER (#64) — Enhanced /search with grouped results
+// ═══════════════════════════════════════════════════════════════
+function openSearchPicker() {
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = '';
+  cmdPaletteInput.placeholder = 'Search messages, tasks, agents...';
+  cmdSelectedIdx = -1;
+  searchMode = false;
+  cmdPaletteInput._searchPickerMode = true;
+  renderSearchPickerResults('');
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function searchPickerInputHandler() {
+  if (!cmdPaletteInput._searchPickerMode) return;
+  cmdSelectedIdx = -1;
+  renderSearchPickerResults(cmdPaletteInput.value.trim());
+}
+
+cmdPaletteInput.addEventListener('input', searchPickerInputHandler);
+
+function renderSearchPickerResults(query) {
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+  var q = (query || '').toLowerCase().trim();
+
+  if (!q || q.length < 2) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'Type at least 2 characters to search...'));
+    return;
+  }
+
+  var groups = [];
+
+  // Messages
+  var msgItems = [];
+  var msgKeys = Object.keys(allMessages);
+  for (var i = msgKeys.length - 1; i >= 0 && msgItems.length < 8; i--) {
+    var m = allMessages[msgKeys[i]];
+    if (m.content && m.content.toLowerCase().indexOf(q) !== -1) {
+      var fromAgent = AGENTS.find(function(a) { return a.slug === m.from; });
+      var hasThread = threadReplyCounts[m.id] && threadReplyCounts[m.id] > 0;
+      msgItems.push({
+        icon: fromAgent ? fromAgent.emoji : '💬',
+        label: (fromAgent ? fromAgent.name : m.from) + ': ' + (m.content.length > 50 ? m.content.substring(0, 50) + '...' : m.content),
+        desc: hasThread ? threadReplyCounts[m.id] + ' replies' : 'message',
+        action: (function(mid, hasT, rt) { return function() {
+          closeCommandPalette();
+          if (hasT) { openThread(mid); }
+          else if (rt) { openThread(rt); }
+          else {
+            var t = document.querySelector('[data-msg-id="' + mid + '"]');
+            if (t) { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); t.style.background = 'var(--yellow-bg)'; setTimeout(function() { t.style.background = ''; }, 2000); }
+          }
+        }; })(m.id, hasThread, m.reply_to)
+      });
+    }
+  }
+  if (msgItems.length) groups.push({ title: 'Messages', items: msgItems });
+
+  // Tasks
+  var taskItems = [];
+  for (var ti = 0; ti < cachedTasks.length && taskItems.length < 5; ti++) {
+    var task = cachedTasks[ti];
+    var taskTitle = task.title || task.id || '';
+    if (taskTitle.toLowerCase().indexOf(q) !== -1 || (task.desc && task.desc.toLowerCase().indexOf(q) !== -1)) {
+      taskItems.push({
+        icon: '📋',
+        label: 'Task #' + (task.id || ti) + ': ' + taskTitle,
+        desc: task.status || '',
+        action: (function() { return function() { closeCommandPalette(); switchApp('tasks'); }; })()
+      });
+    }
+  }
+  if (taskItems.length) groups.push({ title: 'Tasks', items: taskItems });
+
+  // Requests
+  var reqItems = [];
+  for (var ri = 0; ri < cachedRequests.length && reqItems.length < 5; ri++) {
+    var req = cachedRequests[ri];
+    var reqLabel = req.title || req.prompt || req.id || '';
+    if (reqLabel.toLowerCase().indexOf(q) !== -1) {
+      reqItems.push({
+        icon: '🔔',
+        label: reqLabel.length > 60 ? reqLabel.substring(0, 60) + '...' : reqLabel,
+        desc: req.status || 'request',
+        action: (function() { return function() { closeCommandPalette(); switchApp('requests'); }; })()
+      });
+    }
+  }
+  if (reqItems.length) groups.push({ title: 'Requests', items: reqItems });
+
+  // Agents
+  var agentItems = [];
+  AGENTS.forEach(function(a) {
+    if (a.name.toLowerCase().indexOf(q) !== -1 || a.role.toLowerCase().indexOf(q) !== -1 || a.slug.toLowerCase().indexOf(q) !== -1) {
+      agentItems.push({
+        icon: a.emoji,
+        label: a.name,
+        desc: a.role,
+        action: (function(slug) { return function() { closeCommandPalette(); openAgentPanel(slug); }; })(a.slug)
+      });
+    }
+  });
+  if (agentItems.length) groups.push({ title: 'Agents', items: agentItems });
+
+  if (groups.length === 0) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'No results for "' + query + '"'));
+    return;
+  }
+
+  groups.forEach(function(group) {
+    var groupDiv = el('div', { className: 'cmd-palette-group' });
+    groupDiv.appendChild(el('div', { className: 'cmd-palette-group-title' }, group.title));
+    group.items.forEach(function(item) {
+      var idx = cmdFlatItems.length;
+      cmdFlatItems.push(item);
+      var row = el('div', { className: 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : ''), onClick: function() { selectCommandPaletteItem(idx); } });
+      row.appendChild(el('div', { className: 'cmd-palette-item-icon' }, item.icon));
+      var text = el('div', { className: 'cmd-palette-item-text' });
+      text.appendChild(el('div', { className: 'cmd-palette-item-label' }, item.label));
+      if (item.desc) text.appendChild(el('div', { className: 'cmd-palette-item-desc' }, item.desc));
+      row.appendChild(text);
+      groupDiv.appendChild(row);
+    });
+    cmdPaletteResults.appendChild(groupDiv);
+  });
+}
+
+// Override /search to use enhanced search picker
+var _origOpenSearchMode = openSearchMode;
+openSearchMode = function(query) {
+  openSearchPicker();
+  if (query) {
+    cmdPaletteInput.value = query;
+    renderSearchPickerResults(query);
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//   THREADS VIEW (#113) — /threads command
+// ═══════════════════════════════════════════════════════════════
+var threadsViewOpen = false;
+
+function openThreadsView() {
+  var panel = document.getElementById('threads-view');
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+
+  messagesEl.style.display = 'none';
+  typingEl.style.display = 'none';
+  panel.classList.add('open');
+  threadsViewOpen = true;
+
+  document.getElementById('channel-title').textContent = 'Threads';
+  document.getElementById('channel-desc').textContent = 'All active threads';
+
+  panel.textContent = '';
+
+  // Collect all threads
+  var threads = [];
+  var msgKeys = Object.keys(allMessages);
+  for (var i = 0; i < msgKeys.length; i++) {
+    var mid = msgKeys[i];
+    if (threadReplyCounts[mid] && threadReplyCounts[mid] > 0) {
+      threads.push({ id: mid, msg: allMessages[mid], replyCount: threadReplyCounts[mid] });
+    }
+  }
+
+  if (threads.length === 0) {
+    panel.appendChild(el('div', { className: 'cmd-palette-empty', style: { padding: '40px 20px' } }, 'No threads yet. Start a conversation to see threads here.'));
+    var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start' }, onClick: closeThreadsView }, 'Back to messages');
+    panel.appendChild(closeBtn);
+    return;
+  }
+
+  var header = el('div', { className: 'threads-view-header' }, threads.length + ' active thread' + (threads.length !== 1 ? 's' : ''));
+  panel.appendChild(header);
+
+  // Sort by reply count descending
+  threads.sort(function(a, b) { return b.replyCount - a.replyCount; });
+
+  threads.forEach(function(thread) {
+    var msg = thread.msg;
+    if (!msg) return;
+    var fromAgent = AGENTS.find(function(a) { return a.slug === msg.from; });
+    var preview = (msg.content || '').length > 80 ? msg.content.substring(0, 80) + '...' : (msg.content || '(no content)');
+    var timeStr = msg.ts ? new Date(msg.ts).toLocaleString() : '';
+
+    var item = el('div', { className: 'thread-list-item', onClick: (function(mid) { return function() { closeThreadsView(); openThread(mid); }; })(thread.id) });
+
+    var avatarDiv = el('div', { className: 'thread-list-item-avatar' });
+    if (fromAgent) {
+      avatarDiv.appendChild(renderPixelAvatar(fromAgent.slug, 32));
+    } else {
+      avatarDiv.textContent = '💬';
+    }
+
+    var body = el('div', { className: 'thread-list-item-body' });
+    body.appendChild(el('div', { className: 'thread-list-item-preview' }, preview));
+
+    var meta = el('div', { className: 'thread-list-item-meta' });
+    meta.appendChild(el('span', { className: 'thread-list-item-replies' }, thread.replyCount + ' repl' + (thread.replyCount === 1 ? 'y' : 'ies')));
+    if (fromAgent) meta.appendChild(el('span', null, fromAgent.name));
+    if (timeStr) meta.appendChild(el('span', null, timeStr));
+    body.appendChild(meta);
+
+    item.appendChild(avatarDiv);
+    item.appendChild(body);
+    panel.appendChild(item);
+  });
+
+  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: closeThreadsView }, 'Back to messages');
+  panel.appendChild(closeBtn);
+}
+
+function closeThreadsView() {
+  var panel = document.getElementById('threads-view');
+  var messagesEl = document.getElementById('messages');
+  panel.classList.remove('open');
+  messagesEl.style.display = '';
+  threadsViewOpen = false;
+
+  var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
+  document.getElementById('channel-title').textContent = '# ' + currentChannel;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   AGENTS VIEW (#111) — /agents command
+// ═══════════════════════════════════════════════════════════════
+var agentsViewOpen = false;
+
+function openAgentsView() {
+  var panel = document.getElementById('agents-grid-view');
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+
+  messagesEl.style.display = 'none';
+  typingEl.style.display = 'none';
+  panel.classList.add('open');
+  agentsViewOpen = true;
+
+  document.getElementById('channel-title').textContent = 'Agents';
+  document.getElementById('channel-desc').textContent = 'All team members';
+
+  panel.textContent = '';
+
+  var header = el('div', { className: 'threads-view-header' }, AGENTS.length + ' agent' + (AGENTS.length !== 1 ? 's' : ''));
+  panel.appendChild(header);
+
+  var grid = el('div', { className: 'agents-grid' });
+
+  AGENTS.forEach(function(agent) {
+    var member = cachedMembers.find(function(m) { return m.slug === agent.slug; });
+    var ac = classifyActivity(member);
+    var task = findAgentTask(agent.slug);
+
+    var card = el('div', { className: 'agent-grid-card', onClick: (function(slug) { return function() { closeAgentsView(); openAgentPanel(slug); }; })(agent.slug) });
+
+    var avatarWrap = el('div', { style: { width: '48px', height: '48px' } });
+    avatarWrap.appendChild(renderPixelAvatar(agent.slug, 48));
+    card.appendChild(avatarWrap);
+
+    card.appendChild(el('div', { className: 'agent-grid-card-name' }, agent.name));
+    card.appendChild(el('div', { className: 'agent-grid-card-role' }, agent.role));
+
+    var statusRow = el('div', { className: 'agent-grid-card-status' });
+    statusRow.appendChild(el('span', { className: 'agent-grid-card-dot ' + ac.dotClass }));
+    statusRow.appendChild(document.createTextNode(ac.label));
+    if (!agent.checked) {
+      statusRow.appendChild(document.createTextNode(' (inactive)'));
+    }
+    card.appendChild(statusRow);
+
+    if (task) {
+      card.appendChild(el('div', { className: 'agent-grid-card-task' }, task.title || task.id));
+    }
+
+    grid.appendChild(card);
+  });
+
+  panel.appendChild(grid);
+
+  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: closeAgentsView }, 'Back to messages');
+  panel.appendChild(closeBtn);
+}
+
+function closeAgentsView() {
+  var panel = document.getElementById('agents-grid-view');
+  var messagesEl = document.getElementById('messages');
+  panel.classList.remove('open');
+  messagesEl.style.display = '';
+  agentsViewOpen = false;
+
+  var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
+  document.getElementById('channel-title').textContent = '# ' + currentChannel;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   INSERT PICKER (#65, #108) — /insert command
+// ═══════════════════════════════════════════════════════════════
+function openInsertPicker() {
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = '';
+  cmdPaletteInput.placeholder = 'Insert reference: agent, task, or message...';
+  cmdSelectedIdx = -1;
+  searchMode = false;
+  cmdPaletteInput._insertPickerMode = true;
+  renderInsertPickerResults('');
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function renderInsertPickerResults(query) {
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+  var q = (query || '').toLowerCase().trim();
+  var groups = [];
+
+  // Agents
+  var agentItems = [];
+  AGENTS.forEach(function(a) {
+    if (!q || a.name.toLowerCase().indexOf(q) !== -1 || a.slug.toLowerCase().indexOf(q) !== -1) {
+      agentItems.push({
+        icon: a.emoji,
+        label: '@' + a.slug,
+        desc: a.name + ' — ' + a.role,
+        action: (function(slug) { return function() { closeCommandPalette(); insertIntoComposer('@' + slug + ' '); }; })(a.slug)
+      });
+    }
+  });
+  if (agentItems.length) groups.push({ title: 'Agents', items: agentItems });
+
+  // Tasks
+  var taskItems = [];
+  for (var ti = 0; ti < cachedTasks.length && taskItems.length < 8; ti++) {
+    var task = cachedTasks[ti];
+    var taskLabel = task.title || task.id || '';
+    if (!q || taskLabel.toLowerCase().indexOf(q) !== -1) {
+      taskItems.push({
+        icon: '📋',
+        label: 'Task #' + (task.id || ti),
+        desc: taskLabel,
+        action: (function(tid) { return function() { closeCommandPalette(); insertIntoComposer('Task #' + tid + ' '); }; })(task.id || ti)
+      });
+    }
+  }
+  if (taskItems.length) groups.push({ title: 'Tasks', items: taskItems });
+
+  // Recent messages
+  var msgItems = [];
+  var msgKeys = Object.keys(allMessages);
+  for (var mi = msgKeys.length - 1; mi >= 0 && msgItems.length < 5; mi--) {
+    var m = allMessages[msgKeys[mi]];
+    if (!m.content) continue;
+    if (!q || m.content.toLowerCase().indexOf(q) !== -1) {
+      var fromAgent = AGENTS.find(function(a) { return a.slug === m.from; });
+      msgItems.push({
+        icon: fromAgent ? fromAgent.emoji : '💬',
+        label: (fromAgent ? fromAgent.name : m.from) + ': ' + (m.content.length > 40 ? m.content.substring(0, 40) + '...' : m.content),
+        desc: 'message',
+        action: (function(mid) { return function() { closeCommandPalette(); insertIntoComposer(mid + ' '); }; })(m.id)
+      });
+    }
+  }
+  if (msgItems.length) groups.push({ title: 'Recent Messages', items: msgItems });
+
+  if (groups.length === 0) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, q ? 'No results for "' + query + '"' : 'Nothing to insert'));
+    return;
+  }
+
+  groups.forEach(function(group) {
+    var groupDiv = el('div', { className: 'cmd-palette-group' });
+    groupDiv.appendChild(el('div', { className: 'cmd-palette-group-title' }, group.title));
+    group.items.forEach(function(item) {
+      var idx = cmdFlatItems.length;
+      cmdFlatItems.push(item);
+      var row = el('div', { className: 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : ''), onClick: function() { selectCommandPaletteItem(idx); } });
+      row.appendChild(el('div', { className: 'cmd-palette-item-icon' }, item.icon));
+      var text = el('div', { className: 'cmd-palette-item-text' });
+      text.appendChild(el('div', { className: 'cmd-palette-item-label' }, item.label));
+      if (item.desc) text.appendChild(el('div', { className: 'cmd-palette-item-desc' }, item.desc));
+      row.appendChild(text);
+      groupDiv.appendChild(row);
+    });
+    cmdPaletteResults.appendChild(groupDiv);
+  });
+}
+
+function insertIntoComposer(text) {
+  var ci = document.getElementById('composer-input');
+  if (!ci) return;
+  var start = ci.selectionStart || ci.value.length;
+  ci.value = ci.value.substring(0, start) + text + ci.value.substring(ci.selectionEnd || start);
+  ci.focus();
+  ci.selectionStart = ci.selectionEnd = start + text.length;
+  var sendBtn = document.getElementById('composer-send');
+  if (sendBtn) sendBtn.disabled = !ci.value.trim();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   REWIND PICKER (#66, #119) — /rewind command
+// ═══════════════════════════════════════════════════════════════
+function openRewindPicker() {
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = '';
+  cmdPaletteInput.placeholder = 'Select a checkpoint to rewind to...';
+  cmdSelectedIdx = -1;
+  searchMode = false;
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+
+  cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'Loading checkpoints...'));
+
+  WuphfAPI.get('/state').then(function(state) {
+    renderRewindResults(state);
+  }).catch(function() {
+    renderRewindResults({});
+  });
+
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function renderRewindResults(state) {
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+
+  var recovery = state.recovery || {};
+  var checkpoints = [];
+
+  // Build checkpoint list from available state
+  if (recovery.checkpoints && recovery.checkpoints.length > 0) {
+    recovery.checkpoints.forEach(function(cp) {
+      checkpoints.push({
+        label: cp.label || cp.id || 'Checkpoint',
+        desc: cp.ts ? new Date(cp.ts).toLocaleString() : '',
+        id: cp.id || ''
+      });
+    });
+  }
+
+  // Add current session as a "checkpoint"
+  checkpoints.unshift({
+    label: 'Current session — ' + Object.keys(allMessages).length + ' messages',
+    desc: 'Now',
+    id: 'current'
+  });
+
+  // Add task-state snapshot
+  if (cachedTasks.length > 0) {
+    var doneTasks = cachedTasks.filter(function(t) { return t.status === 'done' || t.status === 'completed'; });
+    var activeTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; });
+    checkpoints.push({
+      label: 'Task snapshot — ' + doneTasks.length + ' done, ' + activeTasks.length + ' active',
+      desc: 'Task state',
+      id: 'tasks'
+    });
+  }
+
+  // Add recovery focus if present
+  if (recovery.focus) {
+    checkpoints.push({
+      label: 'Last focus: ' + recovery.focus,
+      desc: recovery.away_since ? 'Away since ' + recovery.away_since : 'Recovery data',
+      id: 'focus'
+    });
+  }
+
+  if (checkpoints.length <= 1) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'No checkpoints available. Session data will appear as agents work.'));
+    return;
+  }
+
+  var groupDiv = el('div', { className: 'cmd-palette-group' });
+  groupDiv.appendChild(el('div', { className: 'cmd-palette-group-title' }, 'Checkpoints'));
+
+  checkpoints.forEach(function(cp) {
+    var idx = cmdFlatItems.length;
+    cmdFlatItems.push({
+      icon: cp.id === 'current' ? '📍' : '⏪',
+      label: cp.label,
+      desc: cp.desc,
+      action: (function(checkpoint) { return function() {
+        closeCommandPalette();
+        var prompt = '/recover';
+        if (checkpoint.id && checkpoint.id !== 'current') {
+          prompt = 'Rewind to: ' + checkpoint.label;
+        }
+        var ci = document.getElementById('composer-input');
+        if (ci) {
+          ci.value = prompt;
+          ci.focus();
+          var sendBtn = document.getElementById('composer-send');
+          if (sendBtn) sendBtn.disabled = false;
+        }
+      }; })(cp)
+    });
+
+    var row = el('div', { className: 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : ''), onClick: function() { selectCommandPaletteItem(idx); } });
+    row.appendChild(el('div', { className: 'cmd-palette-item-icon' }, cp.id === 'current' ? '📍' : '⏪'));
+    var text = el('div', { className: 'cmd-palette-item-text' });
+    text.appendChild(el('div', { className: 'cmd-palette-item-label' }, cp.label));
+    if (cp.desc) text.appendChild(el('div', { className: 'cmd-palette-item-desc' }, cp.desc));
+    row.appendChild(text);
+    groupDiv.appendChild(row);
+  });
+
+  cmdPaletteResults.appendChild(groupDiv);
+}
+
+// ─── Patch closeCommandPalette to clean up picker modes ───
+var _prevCloseCP = closeCommandPalette;
+closeCommandPalette = function() {
+  cmdPaletteInput._searchPickerMode = false;
+  cmdPaletteInput._insertPickerMode = false;
+  _prevCloseCP();
+};
+
+// ─── Patch input handler to route to active picker ───
+cmdPaletteInput.addEventListener('input', function() {
+  if (cmdPaletteInput._insertPickerMode) {
+    cmdSelectedIdx = -1;
+    renderInsertPickerResults(cmdPaletteInput.value.trim());
+  }
+});
 </script>
 
 </body>
