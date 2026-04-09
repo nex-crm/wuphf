@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>WUPHF — Your AI Office</title>
+<title>WUPHF — Your AI team, visible and working</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
@@ -144,6 +144,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 #app { min-height: 100vh; }
 .onboarding { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
 .onboarding-inner { width: 100%; max-width: 720px; }
+.onboarding[data-step="0"] { align-items: flex-start; }
+.onboarding[data-step="0"] .onboarding-inner { max-width: 960px; }
+.onboarding[data-step="0"] .progress-dots { display: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .progress-dots { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 40px; }
 .progress-dot { height: 8px; border-radius: var(--radius-full); transition: all 0.3s ease; }
@@ -172,9 +176,41 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .dict-example { font-family: var(--font-mono); font-size: 12px; font-style: italic; color: var(--text-tertiary); margin-top: 6px; }
 .welcome-cta { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 0; flex-shrink: 0; }
 @media (min-width: 1024px) { .welcome-cta { align-items: flex-start; max-width: 300px; } }
+.welcome-label { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-tertiary); }
 .welcome-tagline { font-family: var(--font-logo); font-style: italic; font-size: 34px; letter-spacing: -0.01em; line-height: 1.1; text-align: center; }
 @media (min-width: 1024px) { .welcome-tagline { text-align: left; font-size: 44px; } }
 .tagline-gradient { background: linear-gradient(135deg, #3B2F2F 0%, #8B5E3C 50%, #A0714D 100%); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+.welcome-copy { max-width: 30ch; font-size: 15px; line-height: 1.65; color: var(--text-secondary); text-align: center; }
+@media (min-width: 1024px) { .welcome-copy { text-align: left; } }
+
+/* Frozen six-block landing shell */
+.landing-shell { width: 100%; max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+.landing-intro { display: flex; flex-direction: column; gap: 0; }
+.landing-hero { padding: 44px 48px 36px; border-radius: var(--radius-xl) var(--radius-xl) 0 0; display: flex; flex-direction: column; gap: 18px; }
+.landing-headline { font-family: var(--font-logo); font-style: italic; font-size: clamp(2rem, 5vw, 4rem); line-height: 0.98; letter-spacing: -0.03em; max-width: 12ch; }
+.landing-subhead { max-width: 56ch; font-size: 17px; line-height: 1.65; color: var(--text-secondary); }
+.landing-cta-btn { width: 100%; max-width: 460px; justify-content: center; text-align: center; white-space: normal; line-height: 1.35; }
+.landing-proof { background: var(--bg-warm); border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius-xl) var(--radius-xl); padding: 16px 48px 18px; font-size: 15px; line-height: 1.65; font-weight: 600; color: var(--text); }
+.landing-middle { display: flex; flex-direction: column; gap: 10px; }
+.landing-block { padding: 22px 28px; }
+.landing-block p { font-size: 16px; line-height: 1.7; color: var(--text-secondary); }
+.landing-pain p { color: var(--text); }
+.landing-objection { display: flex; flex-direction: column; gap: 10px; }
+.landing-objection-lead { font-family: var(--font-mono); font-size: 12px; line-height: 1.7; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-tertiary); }
+.landing-objection-detail { color: var(--text); }
+.landing-final-cta { padding: 24px 28px; display: flex; justify-content: center; }
+
+@media (max-width: 768px) {
+  .landing-shell { gap: 10px; }
+  .landing-hero { padding: 28px 24px 24px; gap: 16px; }
+  .landing-subhead { font-size: 16px; max-width: none; }
+  .landing-proof { padding: 14px 24px 16px; font-size: 14px; }
+  .landing-middle { gap: 8px; }
+  .landing-block { padding: 18px 20px; }
+  .landing-block p { font-size: 15px; line-height: 1.65; }
+  .landing-final-cta { padding: 18px 20px; }
+  .landing-cta-btn { max-width: none; }
+}
 
 .form-card { padding: 24px; }
 .form-group { margin-bottom: 20px; }
@@ -277,7 +313,27 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .msg-h1 { font-size: 18px; font-weight: 700; color: var(--text); margin: 8px 0 4px; }
 .msg-h2 { font-size: 16px; font-weight: 600; color: var(--text); margin: 6px 0 3px; }
 .msg-h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 4px 0 2px; }
-.msg-blockquote { border-left: 3px solid var(--border-dark); padding: 2px 0 2px 12px; margin: 4px 0; color: var(--text-secondary); font-style: italic; }
+/* Quote block — visually distinct card for quoted messages */
+.msg-blockquote {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-warm);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 8px 12px;
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-style: normal;
+  position: relative;
+}
+.msg-blockquote strong {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+}
+/* Visual separator between quote and reply */
+.msg-blockquote + br { display: none; }
+.msg-blockquote + br + * { margin-top: 6px; }
 .msg-ul, .msg-ol { margin: 4px 0; padding-left: 24px; }
 .msg-ul li, .msg-ol li { margin: 2px 0; line-height: 1.6; }
 .msg-codeblock { background: var(--bg-warm); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin: 6px 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; white-space: pre; }
@@ -292,6 +348,26 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .composer-reply-badge-close { width: 18px; height: 18px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-tertiary); margin-left: auto; }
 .composer-reply-badge-close:hover { background: var(--border); color: var(--text); }
 
+/* Quote preview card above thread composer */
+.composer-quote-preview {
+  margin: 0 12px;
+  padding: 8px 12px;
+  background: var(--bg-warm);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.composer-quote-preview-body { flex: 1; min-width: 0; }
+.composer-quote-preview-author { font-weight: 700; color: var(--accent); font-size: 11px; margin-bottom: 2px; }
+.composer-quote-preview-text { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.composer-quote-preview-close { width: 18px; height: 18px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-tertiary); flex-shrink: 0; }
+.composer-quote-preview-close:hover { background: var(--border); color: var(--text); }
+
 /* ─── Composer context hint ─── */
 .composer-context-hint { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); font-style: italic; }
 
@@ -300,12 +376,15 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .thread-reply-parent-label { font-size: 10px; color: var(--text-tertiary); margin-bottom: 2px; font-style: italic; }
 
 /* ─── Inline thread expand ─── */
-.inline-thread-container { margin-left: 48px; padding: 4px 0 4px 12px; border-left: 2px solid var(--border-light); }
+.inline-thread-container { margin-left: 48px; padding: 4px 0 4px 12px; border-left: 2px solid var(--border-light); display: flex; flex-direction: column; gap: 8px; }
+.inline-thread-container[hidden] { display: none; }
 .inline-thread-container .message { margin-bottom: 8px; }
-.inline-thread-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: transparent; font-family: var(--font-sans); padding: 2px 6px; border-radius: 4px; margin-top: 4px; }
+.inline-thread-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: 1px solid var(--border); background: var(--bg); font-family: var(--font-sans); padding: 4px 8px; border-radius: 999px; margin-top: 0; transition: background 0.15s, border-color 0.15s, color 0.15s; }
 .inline-thread-toggle:hover { background: var(--accent-bg); }
+.inline-thread-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .inline-thread-toggle svg { transition: transform 0.2s; }
 .inline-thread-toggle.expanded svg { transform: rotate(90deg); }
+.thread-surface-state { font-size: 12px; color: var(--text-tertiary); padding: 4px 0; }
 
 .message-system { text-align: center; padding: 8px 0; }
 .message-system-inner { display: flex; align-items: center; gap: 12px; padding: 0 20px; }
@@ -346,6 +425,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .thread-panel-title { font-size: 15px; font-weight: 700; }
 .thread-panel-close { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); }
 .thread-panel-close:hover { background: var(--bg); }
+.thread-panel-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .thread-panel-parent { padding: 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .thread-panel-divider { padding: 8px 16px; font-size: 12px; color: var(--text-tertiary); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
 .thread-panel-divider::before, .thread-panel-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
@@ -353,13 +433,17 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .thread-panel-composer { padding: 8px 12px 12px; border-top: 1px solid var(--border); }
 
 /* ─── Message thread indicators ─── */
-.message-actions { display: none; position: absolute; top: -4px; right: 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 2px; gap: 2px; z-index: 5; }
-.message:hover .message-actions { display: flex; }
+.message-actions { position: absolute; top: -4px; right: 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 2px; gap: 2px; z-index: 5; display: flex; opacity: 0; pointer-events: none; transition: opacity 0.12s ease-out; }
+.message:hover .message-actions, .message:focus-within .message-actions { opacity: 1; pointer-events: auto; }
 .message { position: relative; }
 .message-action-btn { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-tertiary); transition: all 0.1s; }
 .message-action-btn:hover { background: var(--bg); color: var(--text); }
-.message-thread-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: transparent; font-family: var(--font-sans); transition: background 0.15s; }
+.message-action-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.message-thread-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.message-thread-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 0; padding: 4px 8px; border-radius: 999px; font-size: 12px; color: var(--accent); cursor: pointer; border: 1px solid var(--border); background: var(--bg); font-family: var(--font-sans); transition: background 0.15s, border-color 0.15s, color 0.15s; }
 .message-thread-link:hover { background: var(--accent-bg); }
+.message-thread-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.message-thread-link[data-active="true"], .inline-thread-toggle[data-active="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 .message-thread-link svg { flex-shrink: 0; }
 
 /* ─── Message grouping ─── */
@@ -400,29 +484,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-card-routing { display: flex; align-items: center; gap: 8px; padding: 6px 0 6px 48px; }
 .message-card-routing-icon { font-size: 14px; flex-shrink: 0; }
 .message-card-routing-text { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
-/* ─── Quick jump modal (#29) ─── */
-.quick-jump-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); backdrop-filter: blur(4px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 20vh; }
-.quick-jump-overlay.open { display: flex; }
-.quick-jump { width: 400px; max-width: 90vw; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 16px 48px rgba(59,47,47,0.18); overflow: hidden; animation: fadeIn 0.15s ease-out; }
-.quick-jump-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
-.quick-jump-header kbd { font-family: var(--font-mono); font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; color: var(--text-tertiary); }
-.quick-jump-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 15px; color: var(--text); outline: none; }
-.quick-jump-input::placeholder { color: var(--text-tertiary); }
-.quick-jump-list { max-height: 280px; overflow-y: auto; padding: 4px 0; }
-.quick-jump-item { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 13px; transition: background 0.08s; }
-.quick-jump-item:hover, .quick-jump-item.selected { background: var(--accent-bg); }
-.quick-jump-item-hash { font-weight: 700; color: var(--text-tertiary); width: 20px; text-align: center; }
-.quick-jump-item-name { font-weight: 500; color: var(--text); }
-.quick-jump-item-shortcut { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
 /* ─── Thread expand/collapse toggle (#19) ─── */
-.thread-toggle-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-family: var(--font-sans); color: var(--text-tertiary); background: none; border: 1px solid var(--border); border-radius: var(--radius-full); padding: 2px 10px; cursor: pointer; transition: all 0.15s; margin-left: 8px; }
-.thread-toggle-btn:hover { border-color: var(--border-dark); color: var(--text-secondary); }
-/* ─── Pause confirmation ─── */
-.pause-confirm { display: flex; align-items: center; gap: 8px; padding: 8px 20px; background: var(--yellow-bg); border-top: 1px solid var(--border); font-size: 13px; color: var(--yellow); animation: fadeIn 0.15s ease-out; }
-.pause-confirm-text { flex: 1; font-weight: 500; }
-.pause-confirm-btn { padding: 4px 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; border: 1px solid var(--yellow); cursor: pointer; font-family: var(--font-sans); transition: all 0.15s; }
-.pause-confirm-yes { background: var(--yellow); color: white; }
-.pause-confirm-no { background: transparent; color: var(--yellow); }
 /* ─── Thread reply-to indicator (#20) ─── */
 .thread-reply-to { font-size: 11px; color: var(--text-tertiary); font-style: italic; margin-bottom: 2px; }
 
@@ -480,6 +542,34 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .cmd-palette-footer { display: flex; align-items: center; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); }
 .cmd-palette-footer kbd { font-family: var(--font-mono); font-size: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px; }
 
+/* ─── Threads View ─── */
+.threads-view { flex: 1; overflow-y: auto; padding: 20px; display: none; flex-direction: column; gap: 8px; }
+.threads-view.open { display: flex; }
+.threads-view-header { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 4px; }
+.thread-list-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s; }
+.thread-list-item:hover { border-color: var(--accent); background: var(--accent-bg); }
+.thread-list-item-avatar { flex-shrink: 0; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.thread-list-item-body { flex: 1; min-width: 0; }
+.thread-list-item-preview { font-size: 13px; color: var(--text); line-height: 1.4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.thread-list-item-meta { display: flex; align-items: center; gap: 10px; margin-top: 4px; font-size: 11px; color: var(--text-tertiary); }
+.thread-list-item-replies { font-weight: 600; color: var(--accent); }
+
+/* ─── Agents Grid View ─── */
+.agents-grid-view { flex: 1; overflow-y: auto; padding: 20px; display: none; flex-direction: column; gap: 16px; }
+.agents-grid-view.open { display: flex; }
+.agents-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.agent-grid-card { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 16px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s; text-align: center; }
+.agent-grid-card:hover { border-color: var(--accent); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(59,47,47,0.08); }
+.agent-grid-card-name { font-size: 14px; font-weight: 600; color: var(--text); }
+.agent-grid-card-role { font-size: 12px; color: var(--text-secondary); line-height: 1.4; }
+.agent-grid-card-status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-tertiary); }
+.agent-grid-card-dot { width: 6px; height: 6px; border-radius: 50%; }
+.agent-grid-card-dot.active { background: var(--green); }
+.agent-grid-card-dot.shipping { background: var(--blue); }
+.agent-grid-card-dot.plotting { background: var(--yellow); }
+.agent-grid-card-dot.lurking { background: var(--text-tertiary); }
+.agent-grid-card-task { font-size: 11px; color: var(--accent); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+
 /* ─── 1:1 DM Mode ─── */
 .dm-banner { display: none; align-items: center; gap: 10px; padding: 8px 20px; background: var(--blue-bg); border-bottom: 1px solid var(--border); font-size: 13px; color: var(--blue); }
 .dm-banner.open { display: flex; }
@@ -523,6 +613,44 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .needs-you-btn { padding: 6px 14px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; border: 1px solid var(--red); background: white; color: var(--red); cursor: pointer; transition: all 0.15s; font-family: var(--font-sans); }
 .needs-you-btn:hover { background: var(--red); color: white; }
 
+/* ─── Status Bar (#91) ─── */
+.status-bar { display: flex; align-items: center; gap: 12px; padding: 4px 20px; border-top: 1px solid var(--border); background: var(--bg); font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
+.status-bar-item { white-space: nowrap; }
+.status-bar-spacer { flex: 1; }
+.status-bar-conn { display: inline-flex; align-items: center; gap: 4px; }
+.status-bar-conn::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.status-bar-conn.disconnected::before { background: var(--red); }
+
+/* ─── Runtime Strip (#81) ─── */
+.runtime-strip { display: flex; align-items: center; gap: 8px; padding: 6px 20px; border-bottom: 1px solid var(--border); background: var(--bg); font-size: 11px; font-family: var(--font-mono); }
+.runtime-strip:empty { display: none; }
+.runtime-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-full); font-weight: 600; font-size: 10px; }
+.runtime-pill-active { background: var(--green-bg); color: var(--green); }
+.runtime-pill-blocked { background: var(--yellow-bg); color: var(--yellow); }
+.runtime-pill-needyou { background: var(--red-bg); color: var(--red); }
+.runtime-pill-idle { background: var(--bg); color: var(--text-tertiary); border: 1px solid var(--border); }
+
+/* ─── Live Work Cards (#77) ─── */
+.live-work-section { border-bottom: 1px solid var(--border); padding: 8px 20px; background: var(--bg); }
+.live-work-section:empty { display: none; }
+.live-work-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 6px; }
+.live-work-cards { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.live-work-card { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+.live-work-card-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s ease-in-out infinite; }
+.live-work-card-dot.blocked { background: var(--yellow); }
+.live-work-card-agent { font-weight: 600; color: var(--text); }
+.live-work-card-task { color: var(--text-secondary); max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+
+/* ─── Notice / Toast ─── */
+.notice-container { position: fixed; top: 16px; right: 16px; z-index: 300; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.notice { pointer-events: auto; padding: 10px 16px; border-radius: var(--radius-md); font-size: 13px; font-weight: 500; font-family: var(--font-sans); box-shadow: 0 4px 16px rgba(59,47,47,0.12); animation: noticeIn 0.25s ease-out; display: flex; align-items: center; gap: 8px; max-width: 360px; }
+.notice.removing { animation: noticeOut 0.2s ease-in forwards; }
+.notice-success { background: var(--green-bg); color: #166534; border: 1px solid var(--green); }
+.notice-error { background: var(--red-bg); color: #991b1b; border: 1px solid var(--red); }
+.notice-info { background: var(--blue-bg); color: #1e40af; border: 1px solid var(--blue); }
+@keyframes noticeIn { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes noticeOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(40px); } }
+
 /* ─── Task Board ─── */
 .task-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 20px; height: 100%; overflow-y: auto; align-content: start; }
 .task-column { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
@@ -555,10 +683,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .request-item-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
 .request-item-from { font-size: 13px; font-weight: 600; }
 .request-kind-pill { display: inline-flex; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
-.request-kind-approval { background: var(--yellow-bg); color: var(--yellow); }
-.request-kind-confirm { background: var(--blue-bg); color: var(--blue); }
+.request-kind-approval { background: var(--blue-bg); color: var(--blue); }
+.request-kind-confirm { background: var(--green-bg); color: var(--green); }
 .request-kind-secret { background: var(--red-bg); color: var(--red); }
-.request-kind-input { background: var(--accent-bg); color: var(--accent); }
+.request-kind-input { background: var(--yellow-bg); color: var(--yellow); }
 .request-item-question { font-size: 14px; color: var(--text); margin-bottom: 8px; line-height: 1.5; }
 .request-item-timing { font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; }
 .request-item-actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -665,65 +793,164 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .dm-lane { display: flex; flex-direction: column; overflow-y: auto; gap: 12px; }
 .dm-lane-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 6px; }
 .dm-lane-empty { text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px; }
+
+/* ─── Execution Timeline (#78) ─── */
+.exec-timeline { margin-top: 12px; }
+.exec-timeline-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 6px; }
+.exec-timeline-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-light); }
+.exec-timeline-item:last-child { border-bottom: none; }
+.exec-timeline-time { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); min-width: 52px; flex-shrink: 0; }
+.exec-timeline-agent { font-size: 14px; flex-shrink: 0; }
+.exec-timeline-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ─── Wait State (#79) ─── */
+@keyframes wait-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+.wait-state { text-align: center; padding: 16px 12px; color: var(--text-tertiary); font-size: 12px; animation: wait-pulse 3s ease-in-out infinite; }
+.wait-state-icon { font-size: 18px; margin-bottom: 4px; }
+.wait-state-label { font-weight: 500; }
+
+/* ─── Thought Bubbles (#26) ─── */
+.thought-bubble { position: relative; display: inline-block; max-width: 140px; padding: 2px 8px; margin-top: 2px; background: rgba(0,0,0,0.05); border-radius: 8px 8px 8px 2px; font-size: 10px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
+.thought-bubble::before { content: ''; position: absolute; left: 2px; bottom: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid rgba(0,0,0,0.05); }
+
+/* ─── Agent Wizard (#73-75) ─── */
+.agent-wizard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.agent-wizard-card { background: var(--bg-card); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(0,0,0,0.15); width: 480px; max-width: 92vw; max-height: 85vh; overflow-y: auto; padding: 28px; }
+.agent-wizard-card h3 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+.agent-wizard-field { margin-bottom: 16px; }
+.agent-wizard-field label { display: block; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 6px; }
+.agent-wizard-field input, .agent-wizard-field textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: var(--font-sans); font-size: 14px; color: var(--text); background: var(--bg); transition: border-color 0.2s; }
+.agent-wizard-field input:focus, .agent-wizard-field textarea:focus { outline: none; border-color: var(--accent); }
+.agent-wizard-field textarea { min-height: 72px; resize: vertical; }
+.agent-wizard-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+
+/* ─── Agent Toggle (#76) ─── */
+.agent-toggle { position: relative; display: inline-block; width: 40px; height: 22px; flex-shrink: 0; }
+.agent-toggle input { opacity: 0; width: 0; height: 0; }
+.agent-toggle-slider { position: absolute; cursor: pointer; inset: 0; background: var(--border-dark); border-radius: 11px; transition: background 0.2s; }
+.agent-toggle-slider::before { content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: white; transition: transform 0.2s; }
+.agent-toggle input:checked + .agent-toggle-slider { background: var(--green); }
+.agent-toggle input:checked + .agent-toggle-slider::before { transform: translateX(18px); }
+
+/* ─── Doctor Panel (#82, #97) ─── */
+.doctor-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.doctor-panel { background: var(--bg-card); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(0,0,0,0.15); width: 560px; max-width: 92vw; max-height: 85vh; overflow-y: auto; padding: 28px; }
+.doctor-panel h3 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+.doctor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.doctor-card { padding: 16px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg); }
+.doctor-card-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 6px; }
+.doctor-card-value { font-size: 18px; font-weight: 600; color: var(--text); }
+.doctor-card-value.ok { color: var(--green); }
+.doctor-card-value.warn { color: var(--yellow); }
+.doctor-card-value.error { color: var(--red); }
+
+/* ─── Sidebar Agent Activity (#24) ─── */
+.sidebar-agent-activity { font-size: 10px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+
+/* ─── Provider Switcher (#86) ─── */
+.provider-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.provider-panel { background: var(--bg-card); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(0,0,0,0.15); width: 400px; max-width: 92vw; padding: 28px; }
+.provider-panel h3 { font-size: 18px; font-weight: 600; margin-bottom: 20px; }
+.provider-option { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s; margin-bottom: 8px; }
+.provider-option:hover { border-color: var(--accent); background: var(--accent-bg); }
+.provider-option.active { border-color: var(--accent); background: var(--accent-bg); }
+.provider-option-name { font-weight: 600; font-size: 14px; }
+.provider-option-desc { font-size: 12px; color: var(--text-secondary); }
+.provider-option-check { margin-left: auto; font-size: 16px; color: var(--accent); }
+
+/* ─── Task card worktree info (#53) ─── */
+.task-card-worktree { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ─── Artifacts view (#58, #104) ─── */
+.artifact-timeline { display: flex; flex-direction: column; gap: 0; padding: 20px; }
+.artifact-item { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border-light); position: relative; }
+.artifact-item:last-child { border-bottom: none; }
+.artifact-item::before { content: ''; position: absolute; left: 5px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+.artifact-item:first-child::before { top: 18px; }
+.artifact-item:last-child::before { bottom: calc(100% - 18px); }
+.artifact-dot { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--border); background: var(--bg-card); flex-shrink: 0; z-index: 1; margin-top: 2px; }
+.artifact-dot-commit { border-color: var(--green); background: var(--green-bg); }
+.artifact-dot-deploy { border-color: var(--blue); background: var(--blue-bg); }
+.artifact-dot-tool { border-color: var(--yellow); background: var(--yellow-bg); }
+.artifact-dot-approval { border-color: var(--accent); background: var(--accent-bg); }
+.artifact-body { flex: 1; min-width: 0; }
+.artifact-header { display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.artifact-type { font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 6px; border-radius: var(--radius-full); }
+.artifact-type-commit { background: var(--green-bg); color: var(--green); }
+.artifact-type-deploy { background: var(--blue-bg); color: var(--blue); }
+.artifact-type-tool { background: var(--yellow-bg); color: var(--yellow); }
+.artifact-type-approval { background: var(--accent-bg); color: var(--accent); }
+.artifact-agent { font-size: 11px; color: var(--text-tertiary); }
+.artifact-summary { font-size: 13px; color: var(--text); line-height: 1.4; }
+.artifact-time { font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); margin-top: 2px; }
+
+/* ─── Paused state (#42) ─── */
+.runtime-strip.paused { border-bottom-color: var(--red); box-shadow: inset 0 -2px 0 var(--red); }
+.runtime-paused-pill { background: var(--red-bg); color: var(--red); font-weight: 600; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; animation: pulse-dot 1.5s ease-in-out infinite; }
+
+/* ─── Connect panel (#84, #85, #118) ─── */
+.connect-panel { padding: 20px; }
+.connect-item { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: 8px; background: var(--bg-card); }
+.connect-icon { font-size: 20px; flex-shrink: 0; }
+.connect-body { flex: 1; min-width: 0; }
+.connect-name { font-size: 14px; font-weight: 500; }
+.connect-status { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+.connect-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-full); }
+.connect-badge-ok { background: var(--green-bg); color: var(--green); }
+.connect-badge-off { background: var(--bg); color: var(--text-tertiary); }
 </style>
 </head>
 <body>
 
 <div id="app">
   <!-- ONBOARDING -->
-  <div class="onboarding dot-grid" id="onboarding">
+  <div class="onboarding dot-grid" id="onboarding" data-step="0">
     <div class="onboarding-inner">
       <div class="progress-dots" id="progress-dots"></div>
 
       <!-- Step 0: Welcome -->
       <div class="step active animate-fade" data-step="0">
-        <div class="welcome-layout">
-          <div class="card dict-card">
-            <div class="dict-header">
-              <h1 class="dict-word">wuphf</h1>
-              <span class="dict-phonetic">/w&#x28C;f/</span>
-            </div>
-            <p class="dict-pos">noun</p>
-            <ol class="dict-definitions">
-              <li class="dict-def">
-                <span class="dict-num font-logo">1.</span>
-                <div>
-                  <p class="dict-text">The sound a dog makes when it's not quite barking but definitely wants your attention.</p>
-                  <p class="dict-example">"did you hear that wuphf? he wants outside again"</p>
-                </div>
-              </li>
-              <li class="dict-def">
-                <span class="dict-num font-logo">2.</span>
-                <div>
-                  <p class="dict-text">
-                    <span class="dict-context-label" style="color:var(--text-tertiary);background:#F5F0EB;">pop culture</span>
-                    A service that simultaneously sends your message to every communication platform at once.
-                  </p>
-                  <p class="dict-example">"I WUPHF'd everyone about the launch &mdash; email, text, fax, tweet, all at once"</p>
-                </div>
-              </li>
-              <li class="dict-def">
-                <span class="dict-num font-logo">3.</span>
-                <div>
-                  <p class="dict-text" style="color:var(--text);">
-                    <span class="dict-context-label" style="color:var(--accent);background:var(--accent-bg);">software</span>
-                    A terminal office where a team of AI coworkers sits in one place, arguing about what to build.
-                  </p>
-                  <p class="dict-example">"I opened wuphf and my CEO agent was already fighting with the PM about priorities"</p>
-                </div>
-              </li>
-            </ol>
+        <div class="landing-shell">
+          <div class="landing-intro">
+            <section class="card landing-hero" aria-labelledby="landing-headline">
+              <h1 class="landing-headline" id="landing-headline">Your AI team, visible and working.</h1>
+              <p class="landing-subhead">Technical founder, CTO, or engineering lead running multiple AI agents on real code and operational work. The team is moving from one agent to several on a live repo and coordination is starting to slip.</p>
+              <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
+                Run one live task in WUPHF on a real repo and judge it from the office, not a demo.
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+              </button>
+            </section>
+            <section class="landing-proof" aria-labelledby="landing-proof-heading">
+              <h2 class="sr-only" id="landing-proof-heading">Proof</h2>
+              <p>WUPHF already runs specialist agents in one shared office with visible panes, threads, task claims, and blocking requests, so the human can see who owns what and intervene in real time.</p>
+            </section>
           </div>
-          <div class="welcome-cta">
-            <h2 class="welcome-tagline">
-              <span>Your office.</span><br />
-              <span class="tagline-gradient">Your AI team.</span>
-            </h2>
-            <button class="btn btn-primary btn-lg" style="width:100%;" onclick="goToStep(1)">
-              Get started
+
+          <div class="landing-middle">
+            <section class="card landing-block landing-pain" aria-labelledby="landing-pain-heading">
+              <h2 class="sr-only" id="landing-pain-heading">Coordination pain</h2>
+              <p>Once work spans several agent sessions, ownership, decisions, and blockers become hard to see, so humans waste time reconstructing what happened instead of steering it live.</p>
+            </section>
+
+            <section class="card landing-block" aria-labelledby="landing-how-heading">
+              <h2 class="sr-only" id="landing-how-heading">How WUPHF works</h2>
+              <p>WUPHF runs specialist agents in one shared office with visible panes, threads, task claims, and blocking requests.</p>
+            </section>
+
+            <section class="card landing-block landing-objection" aria-labelledby="landing-objection-heading">
+              <h2 class="sr-only" id="landing-objection-heading">Budget owner and trigger</h2>
+              <p class="landing-objection-lead">Technical founder or CTO who owns developer-productivity and internal AI-tooling spend.</p>
+              <p class="landing-objection-detail">The team is moving from one agent to several on a live repo and coordination is starting to slip.</p>
+            </section>
+          </div>
+
+          <section class="card landing-final-cta" aria-labelledby="landing-final-heading">
+            <h2 class="sr-only" id="landing-final-heading">Final call to action</h2>
+            <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
+              Run one live task in WUPHF on a real repo and judge it from the office, not a demo.
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
             </button>
-          </div>
+          </section>
         </div>
       </div>
 
@@ -962,7 +1189,6 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <span class="channel-desc" id="channel-desc">The shared office channel</span>
         </div>
         <div class="channel-actions">
-          <button class="thread-toggle-btn" id="thread-toggle-btn" title="Toggle thread expand/collapse default">Collapse threads</button>
           <button class="sidebar-btn" title="Search">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
@@ -971,6 +1197,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           </button>
         </div>
       </div>
+      <div class="runtime-strip" id="runtime-strip"></div>
+      <div class="live-work-section" id="live-work-section"></div>
       <div class="dm-banner" id="dm-banner">
         <span class="dm-banner-text" id="dm-banner-text">1:1 session with CEO</span>
         <button class="dm-back-btn" onclick="exitDMMode()">
@@ -979,12 +1207,25 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </button>
       </div>
       <div class="messages" id="messages"></div>
+      <div class="dm-lanes" id="dm-lanes" style="display:none;">
+        <div class="dm-lane">
+          <div class="dm-lane-header">Inbox (from agent)</div>
+          <div id="dm-inbox" style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;"></div>
+        </div>
+        <div class="dm-lane">
+          <div class="dm-lane-header">Outbox (from you)</div>
+          <div id="dm-outbox" style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;"></div>
+        </div>
+      </div>
       <div class="app-panel" id="app-tasks"></div>
       <div class="app-panel" id="app-requests"></div>
       <div class="app-panel" id="app-policies"></div>
       <div class="app-panel" id="app-calendar"></div>
       <div class="app-panel" id="app-skills"></div>
+      <div class="app-panel" id="app-artifacts"></div>
       <div class="recovery-panel" id="recovery-panel"></div>
+      <div class="threads-view" id="threads-view"></div>
+      <div class="agents-grid-view" id="agents-grid-view"></div>
       <div class="typing-indicator" id="typing-indicator" style="display:none;padding:0 20px 8px;">
         <div class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
         <span id="typing-who">CEO is thinking&hellip;</span>
@@ -998,25 +1239,33 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           </button>
         </div>
       </div>
+      <div class="status-bar" id="status-bar">
+        <span class="status-bar-item" id="status-bar-channel"># general</span>
+        <span class="status-bar-item" id="status-bar-mode">office</span>
+        <span class="status-bar-spacer"></span>
+        <span class="status-bar-item" id="status-bar-provider" style="font-weight:600;"></span>
+        <span class="status-bar-item" id="status-bar-agents">0 agents</span>
+        <span class="status-bar-item status-bar-conn" id="status-bar-conn">connected</span>
+      </div>
     </div>
 
     <!-- Thread Panel -->
-    <aside class="thread-panel" id="thread-panel">
+    <aside class="thread-panel" id="thread-panel" aria-hidden="true" aria-labelledby="thread-panel-title">
       <div class="thread-panel-header">
-        <span class="thread-panel-title">Thread</span>
-        <button class="thread-panel-close" onclick="closeThreadPanel()">
+        <span class="thread-panel-title" id="thread-panel-title">Thread</span>
+        <button class="thread-panel-close" type="button" aria-label="Close thread" onclick="closeThreadPanel()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
-      <div class="thread-panel-parent" id="thread-parent"></div>
+      <div class="thread-panel-parent" id="thread-parent" aria-label="Thread parent message"></div>
       <div class="thread-panel-divider">
         <span class="thread-panel-reply-count" id="thread-reply-count"></span>
       </div>
-      <div class="thread-panel-messages" id="thread-messages"></div>
+      <div class="thread-panel-messages" id="thread-messages" role="region" aria-label="Thread replies"></div>
       <div class="thread-panel-composer">
         <div class="composer-inner">
           <textarea class="composer-input" id="thread-composer-input" placeholder="Reply in thread..." rows="1"></textarea>
-          <button class="composer-send" id="thread-composer-send" disabled>
+          <button class="composer-send" id="thread-composer-send" type="button" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/></svg>
           </button>
         </div>
@@ -1052,16 +1301,6 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
     </div>
   </div>
 
-  <!-- Quick Jump Modal (#29) -->
-  <div class="quick-jump-overlay" id="quick-jump-overlay">
-    <div class="quick-jump">
-      <div class="quick-jump-header">
-        <kbd>Ctrl+G</kbd>
-        <input class="quick-jump-input" id="quick-jump-input" placeholder="Jump to channel..." autocomplete="off" />
-      </div>
-      <div class="quick-jump-list" id="quick-jump-list"></div>
-    </div>
-  </div>
 </div>
 
 <script>
@@ -1214,6 +1453,35 @@ function createDateSeparator(ts) {
   return sep;
 }
 
+// ─── Relative time formatting (#49) ───
+function formatRelativeTime(ts) {
+  if (!ts) return '';
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return ts; // fallback if not parseable
+  var now = new Date();
+  var diff = d - now;
+  var absDiff = Math.abs(diff);
+  var minutes = Math.floor(absDiff / 60000);
+  var hours = Math.floor(absDiff / 3600000);
+  var days = Math.floor(absDiff / 86400000);
+
+  if (diff > 0) {
+    // future
+    if (minutes < 1) return 'now';
+    if (minutes < 60) return 'in ' + minutes + 'min';
+    if (hours < 24) return 'in ' + hours + 'h';
+    if (days === 1) return 'tomorrow';
+    return 'in ' + days + ' days';
+  } else {
+    // past
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return minutes + 'min ago';
+    if (hours < 24) return hours + 'h ago';
+    if (days === 1) return 'yesterday';
+    return days + ' days ago';
+  }
+}
+
 // ─── DOM builder helpers ───
 function el(tag, attrs, children) {
   var node = document.createElement(tag);
@@ -1239,23 +1507,43 @@ function htmlNode(html) {
 
 // ─── Broker API client ───
 var WuphfAPI = (function() {
-  var BROKER = 'http://localhost:7890';
+  // Use same-origin proxy (/api/*) — no CORS needed.
+  // Falls back to direct broker URL if proxy unavailable (e.g. file:// mode).
+  var API_BASE = '/api';
+  var BROKER_DIRECT = 'http://localhost:7890';
+  var useProxy = true;
   var token = null;
 
   function init() {
-    return fetch(BROKER + '/web-token')
+    // Try same-origin proxy first
+    return fetch('/api-token')
       .then(function(r) { return r.json(); })
-      .then(function(data) { token = data.token; });
+      .then(function(data) {
+        token = data.token;
+        useProxy = true;
+      })
+      .catch(function() {
+        // Fallback: direct broker (needs CORS)
+        useProxy = false;
+        return fetch(BROKER_DIRECT + '/web-token')
+          .then(function(r) { return r.json(); })
+          .then(function(data) { token = data.token; });
+      });
+  }
+
+  function baseURL() {
+    return useProxy ? API_BASE : BROKER_DIRECT;
   }
 
   function authHeaders() {
     var h = { 'Content-Type': 'application/json' };
-    if (token) h['Authorization'] = 'Bearer ' + token;
+    // When using proxy, broker injects auth server-side. When direct, add token.
+    if (!useProxy && token) h['Authorization'] = 'Bearer ' + token;
     return h;
   }
 
   function get(path, params) {
-    var url = BROKER + path;
+    var url = baseURL() + path;
     if (params) {
       var qs = Object.keys(params)
         .filter(function(k) { return params[k] != null; })
@@ -1270,7 +1558,7 @@ var WuphfAPI = (function() {
   }
 
   function post(path, body) {
-    return fetch(BROKER + path, {
+    return fetch(baseURL() + path, {
       method: 'POST',
       headers: authHeaders(),
       body: JSON.stringify(body)
@@ -1319,10 +1607,6 @@ var WuphfAPI = (function() {
     });
   }
 
-  function getLiveMembers(channel) {
-    return getMembers(channel);
-  }
-
   function getChannels() {
     return get('/channels');
   }
@@ -1360,25 +1644,6 @@ var WuphfAPI = (function() {
   function getScheduler() { return get('/scheduler'); }
   function getSkills() { return get('/skills'); }
 
-  function subscribeEvents(onEvent, onError) {
-    if (!token) throw new Error('broker token unavailable');
-    var es = new EventSource(BROKER + '/events?token=' + encodeURIComponent(token));
-    ['ready', 'message', 'action', 'activity'].forEach(function(name) {
-      es.addEventListener(name, function(evt) {
-        try {
-          var payload = evt.data ? JSON.parse(evt.data) : {};
-          onEvent(name, payload);
-        } catch (err) {
-          if (onError) onError(err);
-        }
-      });
-    });
-    es.onerror = function(err) {
-      if (onError) onError(err);
-    };
-    return es;
-  }
-
   return {
     init: init,
     get: get,
@@ -1386,7 +1651,7 @@ var WuphfAPI = (function() {
     getMessages: getMessages,
     postMessage: postMessage,
     getOfficeMembers: getOfficeMembers,
-    getLiveMembers: getLiveMembers,
+    getMembers: getMembers,
     getChannels: getChannels,
     getRequests: getRequests,
     answerRequest: answerRequest,
@@ -1399,8 +1664,7 @@ var WuphfAPI = (function() {
     getWatchdogs: getWatchdogs,
     getActions: getActions,
     getScheduler: getScheduler,
-    getSkills: getSkills,
-    subscribeEvents: subscribeEvents
+    getSkills: getSkills
   };
 })();
 
@@ -1411,14 +1675,15 @@ var selectedSize = '';
 var brokerConnected = false;
 var currentChannel = 'general';
 var lastMessageId = null;
+var pollTimer = null;
+var requestPollTimer = null;
 var consecutiveFailures = 0;
 var DISCONNECT_THRESHOLD = 3;
 var currentApp = null; // null = messages view, 'tasks' | 'requests' | 'calendar'
+var memberActivityPollTimer = null;
 var cachedMembers = []; // latest /office-members data for activity classification
 var cachedTasks = []; // latest /tasks data
-var brokerEventSource = null;
-var brokerReconnectTimer = null;
-var refreshTasksTimer = null;
+var cachedRequests = []; // latest /requests data for runtime strip
 
 var SIDEBAR_APPS = [
   { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
@@ -1426,6 +1691,7 @@ var SIDEBAR_APPS = [
   { id: 'policies', icon: '\uD83D\uDEE1', name: 'Policies' },
   { id: 'calendar', icon: '\uD83D\uDCC5', name: 'Calendar' },
   { id: 'skills',   icon: '\u26A1', name: 'Skills' },
+  { id: 'artifacts', icon: '\uD83D\uDCE6', name: 'Artifacts' },
   { id: 'recover',  icon: '\uD83D\uDD0D', name: 'Recovery' },
 ];
 
@@ -1461,7 +1727,7 @@ var OFFICE_MESSAGES = [
   { agent: 'ceo', emoji: '\uD83D\uDC54', name: 'CEO', badge: 'lead', time: '9:11 AM',
     text: 'Skip WebSockets for now. Polling is fine for v1 \u2014 **ship speed over architecture perfection**. We can refactor when we have users who care about latency.\n\nDesigner\'s right on the aesthetic. Let\'s commit to warm/editorial. @CMO what do you think about messaging?' },
   { agent: 'cmo', emoji: '\uD83D\uDCE3', name: 'CMO', badge: 'lead', time: '9:14 AM',
-    text: 'The positioning is clear: **"Your AI team, visible and working."**\n\nEvery other multi-agent tool hides the agents behind an API. We show them sitting in a room, arguing. That\'s the hook.\n\nI\'ll draft three headline variants by noon and we\'ll pick one.' },
+    text: 'The positioning is locked: **"Your AI team, visible and working."**\n\nEvery other multi-agent tool hides the agents behind an API. We show them sitting in a room, arguing, claiming tasks, and reporting progress. That\'s the hook.' },
 ];
 
 var AGENT_SKILLS = {
@@ -1503,11 +1769,13 @@ function renderProgress() {
 // ─── Step navigation ───
 function goToStep(n) {
   currentStep = n;
+  var onboarding = document.getElementById('onboarding');
+  if (onboarding) onboarding.setAttribute('data-step', String(n));
   document.querySelectorAll('.step').forEach(function(s) {
     s.classList.remove('active');
     s.style.display = 'none';
   });
-  var step = document.querySelector('[data-step="' + n + '"]');
+  var step = document.querySelector('.step[data-step="' + n + '"]');
   if (step) {
     step.style.display = 'block';
     step.classList.remove('animate-fade');
@@ -1639,9 +1907,7 @@ function renderTeamGrid() {
 // ─── Launch ───
 function launchOffice() {
   document.getElementById('onboarding').style.display = 'none';
-  showSplashScreen(function() {
-    showOffice();
-  });
+  showSplashScreen(function() { showOffice(); });
 }
 
 function showSplashScreen(onDone) {
@@ -1712,11 +1978,9 @@ function showOffice() {
         renderSidebarAgents();
         renderSidebarChannels();
         renderSidebarApps();
-        renderWorkspaceSummary();
-        fetchMessages();
-        fetchRequests();
-        fetchMemberActivity();
-        startBrokerEvents();
+        startMessagePolling();
+        startRequestPolling();
+        startMemberActivityPolling();
       })
       .catch(function() {
         renderSidebarAgents();
@@ -1732,80 +1996,92 @@ function showOffice() {
   }
 }
 
+// --- Activity classification (#23) ---
 function trimStatusPrefix(text) {
-  var value = String(text || '').trim();
-  if (value.indexOf('[STATUS]') !== 0) return '';
-  return value.replace(/^\[STATUS\]\s*/, '');
-}
-
-function parseMemberActivityTime(member) {
-  if (!member) return null;
-  var raw = member.lastTime || member.last_time || '';
-  if (!raw) return null;
-  var parsed = new Date(raw);
-  if (!isNaN(parsed.getTime())) return parsed;
-  var timeOnly = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(raw));
-  if (!timeOnly) return null;
-  var fallback = new Date();
-  fallback.setHours(parseInt(timeOnly[1], 10), parseInt(timeOnly[2], 10), parseInt(timeOnly[3] || '0', 10), 0);
-  return fallback;
+  var content = (text || '').trim();
+  if (!content) return '';
+  if (content.indexOf('[STATUS]') === 0) {
+    return content.replace(/^\[STATUS\]\s*/, '');
+  }
+  return '';
 }
 
 function memberActivityText(member) {
   if (!member) return '';
-  return member.detail || member.liveActivity || member.activityText || member.activity || trimStatusPrefix(member.lastMessage || '') || '';
+  return trimStatusPrefix(member.lastMessage) ||
+    member.activity ||
+    member.liveActivity ||
+    member.live_activity ||
+    '';
+}
+
+function parseMemberActivityTime(member) {
+  if (!member) return null;
+  var stamp = member.last_time || member.lastTime || '';
+  if (!stamp) return null;
+  if (/^\d{2}:\d{2}:\d{2}$/.test(stamp)) {
+    var parts = stamp.split(':');
+    var parsed = new Date();
+    parsed.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2], 10), 0);
+    if (parsed.getTime() - Date.now() > 60 * 1000) {
+      parsed.setDate(parsed.getDate() - 1);
+    }
+    return parsed;
+  }
+  var result = new Date(stamp);
+  return isNaN(result.getTime()) ? null : result;
 }
 
 function normalizeMemberActivityHints(members) {
   return (members || []).map(function(member) {
-    var next = Object.assign({}, member);
-    var statusText = trimStatusPrefix(next.lastMessage || '');
+    var copy = Object.assign({}, member);
+    var statusText = trimStatusPrefix(copy.lastMessage);
     if (statusText) {
-      next.activityText = statusText;
-      if (!next.activity || next.activity === 'idle') next.activity = statusText;
-      if (!next.status || next.status === 'idle') next.status = 'active';
+      copy.activity = statusText;
+      if (!copy.status) copy.status = 'active';
     }
-    return next;
+    return copy;
   });
 }
 
-// --- Activity classification (#23) ---
+function refreshLiveActivityUI() {
+  renderSidebarAgents();
+  renderWorkspaceSummary();
+  renderRuntimeStrip();
+  renderLiveWork();
+  updateStatusBar();
+  updateTypingIndicator();
+  renderComposerHint();
+}
+
+function applyStatusActivity(msg) {
+  var status = trimStatusPrefix(msg.content);
+  if (!status) return false;
+  var slug = msg.from;
+  if (!slug || slug === 'human' || slug === 'you') return true;
+  var idx = cachedMembers.findIndex(function(member) { return member.slug === slug; });
+  var base = idx >= 0 ? Object.assign({}, cachedMembers[idx]) : { slug: slug };
+  base.status = 'active';
+  base.activity = status;
+  base.last_time = msg.timestamp || new Date().toISOString();
+  if (idx >= 0) cachedMembers[idx] = base;
+  else cachedMembers.push(base);
+  refreshLiveActivityUI();
+  return true;
+}
+
 function classifyActivity(member) {
   if (!member) return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
   var activity = memberActivityText(member).toLowerCase();
   var status = (member.status || '').toLowerCase();
-  if (!status && activity) status = 'active';
   var lastTime = parseMemberActivityTime(member);
   var elapsed = lastTime ? (Date.now() - lastTime.getTime()) / 1000 : Infinity;
-  if (status === 'error') return { state: 'plotting', label: 'needs attention', dotClass: 'plotting' };
   if (status === 'active' && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity)) return { state: 'shipping', label: 'shipping', dotClass: 'shipping' };
-  if (status === 'active' && /think|plan|queue|review|sync/.test(activity)) return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
-  if (status === 'active') return { state: 'talking', label: 'talking', dotClass: 'active pulse' };
-  if (elapsed < 10 && activity && activity !== 'idle') return { state: 'talking', label: 'talking', dotClass: 'active pulse' };
+  if (status === 'active' && /think|plan|queue|review|sync|debug|trace|investigat/.test(activity)) return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
+  if (status === 'active' || (elapsed < 10 && activity)) return { state: 'talking', label: 'talking', dotClass: 'active pulse' };
   if (elapsed < 30 && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity)) return { state: 'shipping', label: 'shipping', dotClass: 'shipping' };
-  if (elapsed < 30 && activity && activity !== 'idle') return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
+  if (elapsed < 30 && activity) return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
   return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
-}
-function formatLatencyHint(member) {
-  if (!member) return '';
-  var parts = [];
-  if (member.firstTextMs > 0) parts.push('ttft ' + member.firstTextMs + 'ms');
-  else if (member.firstEventMs > 0) parts.push('first ' + member.firstEventMs + 'ms');
-  if (member.totalMs > 0) parts.push('done ' + member.totalMs + 'ms');
-  return parts.join(' · ');
-}
-function memberSecondaryText(member, task) {
-  if (task) return 'working on: Task #' + (task.id || task.number || '?');
-  var statusText = trimStatusPrefix(member && member.lastMessage || '');
-  if (member && member.status === 'active') {
-    if (member.detail) return member.detail;
-    if (member.liveActivity) return member.liveActivity;
-    if (statusText) return statusText;
-  }
-  var latency = formatLatencyHint(member);
-  if (latency) return latency;
-  if (member && member.lastMessage) return trimStatusPrefix(member.lastMessage) || member.lastMessage;
-  return '';
 }
 function findAgentTask(slug) {
   for (var i = 0; i < cachedTasks.length; i++) {
@@ -1833,12 +2109,29 @@ function renderSidebarAgents() {
     nameEl.className = 'sidebar-agent-name';
     nameEl.textContent = a.name;
     wrap.appendChild(nameEl);
-    var subtext = memberSecondaryText(member, task);
-    if (subtext) {
+    if (task) {
       var taskText = document.createElement('span');
       taskText.className = 'sidebar-agent-task';
-      taskText.textContent = subtext;
+      taskText.textContent = 'working on: Task #' + (task.id || task.number || '?');
       wrap.appendChild(taskText);
+    }
+    // Thought bubble (#26) — show activity snippet for non-lurking agents
+    if (member && member.activity && ac.state !== 'lurking') {
+      var bubble = document.createElement('span');
+      bubble.className = 'thought-bubble';
+      var activityText = member.activity;
+      bubble.textContent = activityText.length > 30 ? activityText.substring(0, 30) + '\u2026' : activityText;
+      bubble.title = activityText;
+      wrap.appendChild(bubble);
+    }
+    // Live activity text (#24)
+    var liveAct = member && (member.liveActivity || member.live_activity);
+    if (liveAct && liveAct !== 'active') {
+      var actEl = document.createElement('span');
+      actEl.className = 'sidebar-agent-activity';
+      actEl.textContent = liveAct.length > 40 ? liveAct.substring(0, 40) + '\u2026' : liveAct;
+      actEl.title = liveAct;
+      wrap.appendChild(actEl);
     }
     var dot = document.createElement('span');
     dot.className = 'status-dot ' + ac.dotClass;
@@ -1847,6 +2140,21 @@ function renderSidebarAgents() {
     btn.appendChild(dot);
     container.appendChild(btn);
   });
+  // New Agent button (#73)
+  var newAgentBtn = document.createElement('button');
+  newAgentBtn.className = 'sidebar-agent';
+  newAgentBtn.style.cssText = 'opacity:0.6;font-size:12px;';
+  newAgentBtn.title = 'Create a new agent';
+  var plusIcon = document.createElement('span');
+  plusIcon.style.cssText = 'width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;background:var(--border-light);color:var(--text-tertiary);font-size:16px;font-weight:600;';
+  plusIcon.textContent = '+';
+  var plusLabel = document.createElement('span');
+  plusLabel.className = 'sidebar-agent-name';
+  plusLabel.textContent = 'New Agent';
+  newAgentBtn.appendChild(plusIcon);
+  newAgentBtn.appendChild(plusLabel);
+  newAgentBtn.addEventListener('click', function() { openAgentWizard(null); });
+  container.appendChild(newAgentBtn);
   // Set up double-click handlers for DM mode
   setupAgentDMHandlers();
 }
@@ -1869,8 +2177,10 @@ function renderSidebarApps() {
   });
 }
 function switchApp(appId) {
-  // Close recovery view if switching away
+  // Close recovery/threads/agents views if switching away
   if (recoveryViewOpen && appId !== 'recover') closeRecoveryView();
+  if (threadsViewOpen) closeThreadsView();
+  if (agentsViewOpen) closeAgentsView();
 
   // Handle recovery app specially
   if (appId === 'recover') {
@@ -1888,7 +2198,7 @@ function switchApp(appId) {
   var messagesEl = document.getElementById('messages');
   var typingEl = document.getElementById('typing-indicator');
   var composerEl = document.querySelector('.composer');
-  ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills'].forEach(function(pid) {
+  ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills', 'app-artifacts'].forEach(function(pid) {
     var p = document.getElementById(pid);
     if (p) { p.classList.remove('active'); p.style.display = 'none'; }
   });
@@ -1924,6 +2234,7 @@ function renderAppContent(appId) {
   else if (appId === 'policies') renderPoliciesApp(panel);
   else if (appId === 'calendar') renderCalendarApp(panel);
   else if (appId === 'skills') renderSkillsApp(panel);
+  else if (appId === 'artifacts') renderArtifactsApp(panel);
 }
 function renderTasksApp(panel) {
   if (!brokerConnected) {
@@ -2198,6 +2509,70 @@ function renderSkillsList(panel, skills) {
     panel.appendChild(card);
   });
 }
+// --- Artifacts view (#58, #104) ---
+function renderArtifactsApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see artifacts.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading artifacts...');
+  panel.appendChild(loading);
+  WuphfAPI.getActions()
+    .then(function(data) {
+      panel.textContent = '';
+      var actions = data.actions || data || [];
+      if (!Array.isArray(actions)) actions = [];
+      if (actions.length === 0) {
+        panel.appendChild(el('div', { className: 'request-empty' }, 'No artifacts yet.'));
+        return;
+      }
+      var header = el('div', { style: { padding: '0 20px 12px', borderBottom: '1px solid var(--border)' } });
+      header.appendChild(el('h3', { style: { fontSize: '16px', fontWeight: '600' } }, 'Artifacts'));
+      header.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' } }, actions.length + ' actions recorded'));
+      panel.appendChild(header);
+      var timeline = el('div', { className: 'artifact-timeline' });
+      actions.sort(function(a, b) {
+        var ta = a.timestamp || a.created_at || '';
+        var tb = b.timestamp || b.created_at || '';
+        return tb.localeCompare(ta);
+      });
+      actions.forEach(function(action) {
+        var kind = (action.kind || action.type || 'tool').toLowerCase();
+        var dotClass = 'artifact-dot';
+        var typeClass = 'artifact-type';
+        if (kind.indexOf('commit') >= 0 || kind.indexOf('push') >= 0) { dotClass += ' artifact-dot-commit'; typeClass += ' artifact-type-commit'; }
+        else if (kind.indexOf('deploy') >= 0) { dotClass += ' artifact-dot-deploy'; typeClass += ' artifact-type-deploy'; }
+        else if (kind.indexOf('approv') >= 0) { dotClass += ' artifact-dot-approval'; typeClass += ' artifact-type-approval'; }
+        else { dotClass += ' artifact-dot-tool'; typeClass += ' artifact-type-tool'; }
+
+        var item = el('div', { className: 'artifact-item' });
+        item.appendChild(el('div', { className: dotClass }));
+        var body = el('div', { className: 'artifact-body' });
+        var hdr = el('div', { className: 'artifact-header' });
+        hdr.appendChild(el('span', { className: typeClass }, kind));
+        if (action.owner || action.agent) {
+          hdr.appendChild(el('span', { className: 'artifact-agent' }, action.owner || action.agent));
+        }
+        body.appendChild(hdr);
+        if (action.summary || action.name || action.title || action.description) {
+          body.appendChild(el('div', { className: 'artifact-summary' }, action.summary || action.name || action.title || action.description));
+        }
+        var ts = action.timestamp || action.created_at || action.updated_at;
+        if (ts) {
+          body.appendChild(el('div', { className: 'artifact-time' }, new Date(ts).toLocaleString()));
+        }
+        item.appendChild(body);
+        timeline.appendChild(item);
+      });
+      panel.appendChild(timeline);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      panel.appendChild(el('div', { className: 'request-empty' }, 'Could not load artifacts.'));
+    });
+}
+
 // --- Workspace summary (#30) and hint (#31) ---
 function renderWorkspaceSummary() {
   var summaryEl = document.getElementById('sidebar-summary');
@@ -2207,21 +2582,185 @@ function renderWorkspaceSummary() {
   cachedMembers.forEach(function(m) { if (classifyActivity(m).state !== 'lurking') activeAgents++; });
   var openTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; }).length;
   summaryEl.textContent = activeAgents + ' agent' + (activeAgents !== 1 ? 's' : '') + ' active, ' + openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' open';
-  var latencyMember = cachedMembers
-    .filter(function(m) { return m && formatLatencyHint(m); })
-    .sort(function(a, b) {
-      var bTime = parseMemberActivityTime(b);
-      var aTime = parseMemberActivityTime(a);
-      return (bTime ? bTime.getTime() : 0) - (aTime ? aTime.getTime() : 0);
-    })[0];
-  var latencyHint = latencyMember ? formatLatencyHint(latencyMember) : '';
-  if (latencyHint) {
-    hintEl.textContent = latencyHint;
-  } else if (openTasks > 0) {
-    hintEl.textContent = openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' in progress';
-  } else {
-    hintEl.textContent = 'Type / for commands';
+  hintEl.textContent = openTasks > 0 ? (openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' in progress') : 'Type / for commands';
+}
+
+// --- Runtime strip (#81) ---
+function renderRuntimeStrip() {
+  var strip = document.getElementById('runtime-strip');
+  if (!strip) return;
+  strip.textContent = '';
+
+  var active = 0, blocked = 0, needYou = 0, idle = 0;
+  cachedMembers.forEach(function(m) {
+    if (m.slug === 'human' || m.slug === 'you') return;
+    var ac = classifyActivity(m);
+    if (ac.state === 'talking' || ac.state === 'shipping' || ac.state === 'plotting') active++;
+    else idle++;
+  });
+  cachedTasks.forEach(function(t) {
+    if (t.status === 'blocked') blocked++;
+  });
+  // Check for pending requests that need human
+  if (typeof cachedRequests !== 'undefined' && cachedRequests) {
+    cachedRequests.forEach(function(r) {
+      if (r.status === 'open' && (r.blocking || r.required)) needYou++;
+    });
   }
+
+  function pill(cls, label, count) {
+    var p = document.createElement('span');
+    p.className = 'runtime-pill runtime-pill-' + cls;
+    p.textContent = count + ' ' + label;
+    return p;
+  }
+
+  if (active > 0) strip.appendChild(pill('active', 'active', active));
+  if (blocked > 0) strip.appendChild(pill('blocked', 'blocked', blocked));
+  if (needYou > 0) strip.appendChild(pill('needyou', 'need you', needYou));
+  if (active === 0 && blocked === 0 && needYou === 0) strip.appendChild(pill('idle', 'all quiet', idle));
+  if (isPaused) {
+    var pausePill = document.createElement('span');
+    pausePill.className = 'runtime-paused-pill';
+    pausePill.textContent = 'PAUSED';
+    strip.insertBefore(pausePill, strip.firstChild);
+    strip.classList.add('paused');
+  }
+}
+
+// --- Live work cards (#77) ---
+function renderLiveWork() {
+  var section = document.getElementById('live-work-section');
+  if (!section) return;
+  section.textContent = '';
+
+  var liveAgents = [];
+  cachedMembers.forEach(function(m) {
+    if (m.slug === 'human' || m.slug === 'you') return;
+    var ac = classifyActivity(m);
+    if (ac.state === 'lurking') return;
+    var task = findAgentTask(m.slug);
+    liveAgents.push({ slug: m.slug, name: m.name, state: ac.state, activity: m.activity || ac.label, task: task });
+  });
+
+  // Blocked tasks (#80)
+  var blockedTasks = cachedTasks.filter(function(t) { return t.status === 'blocked'; });
+
+  // Wait state (#79) — show calm message when nothing is moving
+  if (liveAgents.length === 0 && blockedTasks.length === 0) {
+    var waitState = document.createElement('div');
+    waitState.className = 'wait-state';
+    var waitIcon = document.createElement('div');
+    waitIcon.className = 'wait-state-icon';
+    waitIcon.textContent = '\u2022 \u2022 \u2022';
+    var waitLabel = document.createElement('div');
+    waitLabel.className = 'wait-state-label';
+    waitLabel.textContent = 'Nothing is moving';
+    waitState.appendChild(waitIcon);
+    waitState.appendChild(waitLabel);
+    section.appendChild(waitState);
+    return;
+  }
+
+  if (liveAgents.length > 0) {
+    var title = document.createElement('div');
+    title.className = 'live-work-title';
+    title.textContent = 'Live work now';
+    section.appendChild(title);
+
+    var cards = document.createElement('div');
+    cards.className = 'live-work-cards';
+    liveAgents.forEach(function(a) {
+      var card = document.createElement('div');
+      card.className = 'live-work-card';
+      var dot = document.createElement('span');
+      dot.className = 'live-work-card-dot';
+      var agentName = document.createElement('span');
+      agentName.className = 'live-work-card-agent';
+      var agent = AGENTS.find(function(ag) { return ag.slug === a.slug; });
+      agentName.textContent = agent ? agent.name : a.name || a.slug;
+      var taskText = document.createElement('span');
+      taskText.className = 'live-work-card-task';
+      taskText.textContent = a.task ? a.task.title || a.task.name || a.activity : a.activity;
+      card.appendChild(dot);
+      card.appendChild(agentName);
+      card.appendChild(taskText);
+      cards.appendChild(card);
+    });
+    section.appendChild(cards);
+  }
+
+  if (blockedTasks.length > 0) {
+    var blockedTitle = document.createElement('div');
+    blockedTitle.className = 'live-work-title';
+    blockedTitle.style.color = 'var(--yellow)';
+    blockedTitle.textContent = '\u26A0 ' + blockedTasks.length + ' blocked';
+    section.appendChild(blockedTitle);
+
+    var blockedCards = document.createElement('div');
+    blockedCards.className = 'live-work-cards';
+    blockedTasks.forEach(function(t) {
+      var card = document.createElement('div');
+      card.className = 'live-work-card';
+      card.style.borderColor = 'var(--yellow)';
+      var dot = document.createElement('span');
+      dot.className = 'live-work-card-dot blocked';
+      var owner = document.createElement('span');
+      owner.className = 'live-work-card-agent';
+      var agent = AGENTS.find(function(ag) { return ag.slug === t.owner; });
+      owner.textContent = agent ? agent.name : t.owner || 'unassigned';
+      var taskText = document.createElement('span');
+      taskText.className = 'live-work-card-task';
+      taskText.textContent = t.title || t.name || 'Task #' + (t.id || t.number || '?');
+      card.appendChild(dot);
+      card.appendChild(owner);
+      card.appendChild(taskText);
+      blockedCards.appendChild(card);
+    });
+    section.appendChild(blockedCards);
+  }
+}
+
+// ─── Execution Timeline (#78) ───
+function renderExecutionTimeline() {
+  var section = document.getElementById('live-work-section');
+  if (!section) return;
+  var existing = section.querySelector('.exec-timeline');
+  if (existing) existing.remove();
+
+  WuphfAPI.getActions().catch(function() { return { actions: [] }; }).then(function(resp) {
+    var actions = resp.actions || resp || [];
+    if (!Array.isArray(actions) || actions.length === 0) return;
+    var recent = actions.slice(-8).reverse();
+    var timeline = document.createElement('div');
+    timeline.className = 'exec-timeline';
+    var title = document.createElement('div');
+    title.className = 'exec-timeline-title';
+    title.textContent = 'Recent actions';
+    timeline.appendChild(title);
+    recent.forEach(function(action) {
+      var item = document.createElement('div');
+      item.className = 'exec-timeline-item';
+      var timeEl = document.createElement('span');
+      timeEl.className = 'exec-timeline-time';
+      if (action.timestamp || action.created_at || action.time) {
+        var d = new Date(action.timestamp || action.created_at || action.time);
+        timeEl.textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      }
+      item.appendChild(timeEl);
+      var agentEmoji = document.createElement('span');
+      agentEmoji.className = 'exec-timeline-agent';
+      var agent = AGENTS.find(function(a) { return a.slug === (action.agent || action.from || action.owner); });
+      agentEmoji.textContent = agent ? agent.emoji : '\u2699';
+      item.appendChild(agentEmoji);
+      var summary = document.createElement('span');
+      summary.className = 'exec-timeline-summary';
+      summary.textContent = action.summary || action.description || action.action || action.type || '';
+      item.appendChild(summary);
+      timeline.appendChild(item);
+    });
+    section.appendChild(timeline);
+  });
 }
 
 function renderSidebarChannels() {
@@ -2252,6 +2791,9 @@ function renderSidebarChannels() {
 }
 
 function switchChannel(name) {
+  // Close overlay views when switching channels
+  if (typeof threadsViewOpen !== 'undefined' && threadsViewOpen) closeThreadsView();
+  if (typeof agentsViewOpen !== 'undefined' && agentsViewOpen) closeAgentsView();
   // Exit app mode when switching channels
   if (currentApp) {
     currentApp = null;
@@ -2438,6 +2980,126 @@ var lastRenderedDate = null; // 'YYYY-MM-DD' string for date separator tracking
 var threadReplyCounts = {}; // msgId -> count of replies
 var allMessages = {}; // msgId -> msg object
 var activeThreadId = null;
+var threadPollTimer = null;
+var threadPanelReturnFocusEl = null;
+
+function threadInlineContainerId(parentId) {
+  return 'inline-thread-' + parentId;
+}
+
+function threadControlsId(parentId) {
+  return 'thread-controls-' + parentId;
+}
+
+function isThreadPanelOpen() {
+  return document.getElementById('thread-panel').classList.contains('open');
+}
+
+function threadRepliesLabel(count) {
+  return count + (count === 1 ? ' reply' : ' replies');
+}
+
+function createThreadState(text) {
+  return el('div', { className: 'thread-surface-state', 'data-thread-state': 'true' }, text);
+}
+
+function removeThreadState(container) {
+  var state = container.querySelector('[data-thread-state]');
+  if (state) state.remove();
+}
+
+function setThreadReplyCount(parentId, count) {
+  if (count > 0) threadReplyCounts[parentId] = count;
+  else delete threadReplyCounts[parentId];
+  updateThreadLink(parentId);
+  if (activeThreadId === parentId) {
+    var replyCount = document.getElementById('thread-reply-count');
+    if (replyCount) replyCount.textContent = threadRepliesLabel(count);
+  }
+}
+
+function ensureInlineThreadContainer(parentId) {
+  var containerId = threadInlineContainerId(parentId);
+  var existing = document.getElementById(containerId);
+  if (existing) return existing;
+
+  var parentEl = document.querySelector('[data-msg-id="' + parentId + '"]');
+  if (!parentEl || !parentEl.parentNode) return null;
+
+  var inlineContainer = el('div', {
+    className: 'inline-thread-container',
+    id: containerId,
+    role: 'region',
+    'aria-label': 'Inline thread replies'
+  });
+  inlineContainer.hidden = true;
+  parentEl.parentNode.insertBefore(inlineContainer, parentEl.nextSibling);
+  return inlineContainer;
+}
+
+function threadReplyRenderOptions(msg, threadRootId) {
+  var depth = calcReplyDepth(msg, threadRootId);
+  return {
+    depth: depth,
+    parentName: getReplyParentName(msg),
+    showReplyContext: depth > 0
+  };
+}
+
+function appendReplyToThreadSurface(container, msg, threadRootId) {
+  if (!container || container.querySelector('[data-msg-id="' + msg.id + '"]')) return;
+  removeThreadState(container);
+  appendMessageToContainer(msg, container, threadReplyRenderOptions(msg, threadRootId));
+}
+
+function renderThreadReplies(container, replies, threadRootId, emptyText) {
+  container.textContent = '';
+  if (!replies.length) {
+    container.appendChild(createThreadState(emptyText || 'No replies yet'));
+    return;
+  }
+  replies.forEach(function(reply) {
+    allMessages[reply.id] = reply;
+    appendMessageToContainer(reply, container, threadReplyRenderOptions(reply, threadRootId));
+  });
+}
+
+function loadThreadReplies(threadRootId) {
+  return WuphfAPI.getThreadMessages(currentChannel, threadRootId)
+    .then(function(data) {
+      var msgs = data.messages || [];
+      var replies = msgs.filter(function(msg) { return msg.id !== threadRootId; });
+      replies.forEach(function(msg) { allMessages[msg.id] = msg; });
+      setThreadReplyCount(threadRootId, replies.length);
+      return replies;
+    });
+}
+
+function renderInlineThread(parentId) {
+  var inlineContainer = ensureInlineThreadContainer(parentId);
+  if (!inlineContainer) return Promise.resolve();
+
+  inlineContainer.hidden = false;
+  inlineContainer.textContent = '';
+  inlineContainer.appendChild(createThreadState('Loading replies...'));
+
+  return loadThreadReplies(parentId)
+    .then(function(replies) {
+      renderThreadReplies(inlineContainer, replies, parentId, 'No replies yet');
+    })
+    .catch(function() {
+      inlineContainer.textContent = '';
+      inlineContainer.appendChild(createThreadState('Could not load replies'));
+    });
+}
+
+function restoreThreadPanelFocus() {
+  var focusTarget = threadPanelReturnFocusEl;
+  threadPanelReturnFocusEl = null;
+  if (focusTarget && focusTarget.isConnected && typeof focusTarget.focus === 'function') {
+    focusTarget.focus();
+  }
+}
 
 // ─── Unread tracking state ───
 var lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + currentChannel) || null;
@@ -2445,9 +3107,11 @@ var unreadDividerInserted = false;
 var lastSeenPassed = false;
 var newMessageCount = 0;
 
-// ─── Live message bootstrap + broker SSE ───
+// ─── Live message polling ───
 function startMessagePolling() {
   fetchMessages();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(fetchMessages, 2000);
 }
 
 function fetchMessages() {
@@ -2472,110 +3136,10 @@ function fetchMessages() {
     .catch(function() { onBrokerFailure(); });
 }
 
-function startBrokerEvents() {
-  if (!brokerConnected) return;
-  if (brokerReconnectTimer) {
-    clearTimeout(brokerReconnectTimer);
-    brokerReconnectTimer = null;
-  }
-  if (brokerEventSource) brokerEventSource.close();
-  try {
-    brokerEventSource = WuphfAPI.subscribeEvents(handleBrokerEvent, function() {
-      if (brokerEventSource) {
-        brokerEventSource.close();
-        brokerEventSource = null;
-      }
-      if (brokerReconnectTimer) return;
-      brokerReconnectTimer = setTimeout(function() {
-        brokerReconnectTimer = null;
-        fetchMessages();
-        fetchRequests();
-        fetchMemberActivity();
-        startBrokerEvents();
-      }, 1500);
-    });
-  } catch (err) {
-    console.error('Failed to subscribe to broker events:', err);
-  }
-}
-
-function handleBrokerEvent(type, payload) {
-  if (type === 'ready') {
-    onBrokerSuccess();
-    return;
-  }
-  if (type === 'message' && payload.message) {
-    onBrokerSuccess();
-    appendBrokerMessage(payload.message);
-    lastMessageId = payload.message.id || lastMessageId;
-    if (lastMessageId && document.hasFocus() && payload.message.channel === currentChannel) {
-      localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
-    }
-    return;
-  }
-  if (type === 'activity' && payload.activity) {
-    upsertCachedMember(payload.activity);
-    renderSidebarAgents();
-    renderWorkspaceSummary();
-    updateTypingIndicator();
-    return;
-  }
-  if (type === 'action' && payload.action) {
-    scheduleSidebarRefresh();
-  }
-}
-
-function upsertCachedMember(update) {
-  if (!update || !update.slug) return;
-  var idx = cachedMembers.findIndex(function(m) { return m.slug === update.slug; });
-  var base = idx >= 0 ? cachedMembers[idx] : { slug: update.slug };
-  base.status = update.status || base.status || 'idle';
-  base.activity = update.activity || base.activity || 'idle';
-  base.detail = update.detail || base.detail || '';
-  base.liveActivity = update.detail || update.liveActivity || base.liveActivity || '';
-  base.lastTime = update.lastTime || update.last_time || base.lastTime || '';
-  if (update.totalMs != null) base.totalMs = update.totalMs;
-  if (update.firstEventMs != null) base.firstEventMs = update.firstEventMs;
-  if (update.firstTextMs != null) base.firstTextMs = update.firstTextMs;
-  if (update.firstToolMs != null) base.firstToolMs = update.firstToolMs;
-  if (idx >= 0) cachedMembers[idx] = base;
-  else cachedMembers.push(base);
-}
-
-function applyStatusActivity(msg) {
-  var statusText = trimStatusPrefix(msg && msg.content);
-  if (!statusText) return false;
-  if (!msg || !msg.from || msg.from === 'human' || msg.from === 'you') return true;
-  if (msg.channel !== currentChannel) return true;
-
-  var idx = cachedMembers.findIndex(function(member) { return member.slug === msg.from; });
-  var base = idx >= 0 ? Object.assign({}, cachedMembers[idx]) : { slug: msg.from };
-  base.lastMessage = msg.content || base.lastMessage || '';
-  base.lastTime = msg.timestamp || msg.ts || base.lastTime || new Date().toISOString();
-  base.activityText = statusText;
-  if (!base.activity || base.activity === 'idle') base.activity = statusText;
-  if (!base.status || base.status === 'idle') base.status = 'active';
-  if (idx >= 0) cachedMembers[idx] = base;
-  else cachedMembers.push(base);
-
-  renderSidebarAgents();
-  renderWorkspaceSummary();
-  updateTypingIndicator();
-  return true;
-}
-
-function scheduleSidebarRefresh() {
-  if (refreshTasksTimer) return;
-  refreshTasksTimer = setTimeout(function() {
-    refreshTasksTimer = null;
-    fetchRequests();
-    fetchMemberActivity();
-    if (currentApp === 'tasks' || currentApp === 'requests') renderAppContent(currentApp);
-  }, 120);
-}
-
 function appendBrokerMessage(msg) {
-  if (applyStatusActivity(msg)) return;
+  if (applyStatusActivity(msg)) {
+    return;
+  }
 
   // Track all messages for thread lookups
   allMessages[msg.id] = msg;
@@ -2585,20 +3149,40 @@ function appendBrokerMessage(msg) {
     incrementUnreadCount(msg.channel);
   }
 
-  // If this is a reply, update parent's reply count but don't show in main feed
+  // If this is a reply, update parent's reply count but don't show in main feed.
+  // Thread panel has its own poll (threadPollTimer) that handles rendering + dedup.
   if (msg.reply_to) {
-    threadReplyCounts[msg.reply_to] = (threadReplyCounts[msg.reply_to] || 0) + 1;
-    updateThreadLink(msg.reply_to);
-    // If thread panel is open for this thread, append there too
+    setThreadReplyCount(msg.reply_to, (threadReplyCounts[msg.reply_to] || 0) + 1);
+
+    if (inlineExpandedThreads[msg.reply_to]) {
+      var inlineContainer = ensureInlineThreadContainer(msg.reply_to);
+      if (inlineContainer && !inlineContainer.hidden) {
+        appendReplyToThreadSurface(inlineContainer, msg, msg.reply_to);
+      }
+    }
+
     if (activeThreadId === msg.reply_to) {
-      appendMessageToContainer(msg, document.getElementById('thread-messages'));
-      var tmsg = document.getElementById('thread-messages');
-      tmsg.scrollTop = tmsg.scrollHeight;
+      appendReplyToThreadSurface(document.getElementById('thread-messages'), msg, msg.reply_to);
     }
     return;
   }
 
   var container = document.getElementById('messages');
+
+  // In DM mode, route messages to inbox/outbox lanes
+  if (dmModeActive && dmAgent) {
+    var isFromAgent = msg.from === dmAgent.slug;
+    var isFromHuman = msg.from === 'you' || msg.from === 'human';
+    if (isFromAgent) {
+      appendMessageToContainer(msg, document.getElementById('dm-inbox'));
+      var inbox = document.getElementById('dm-inbox');
+      inbox.scrollTop = inbox.scrollHeight;
+    } else if (isFromHuman) {
+      appendMessageToContainer(msg, document.getElementById('dm-outbox'));
+      var outbox = document.getElementById('dm-outbox');
+      outbox.scrollTop = outbox.scrollHeight;
+    }
+  }
 
   // Insert date separator if day changed
   if (msg.timestamp) {
@@ -2661,14 +3245,13 @@ function appendMessageToContainer(msg, container, opts) {
   opts = opts || {};
 
   // Status messages render compact and italic, no avatar
-  var strippedStatus = trimStatusPrefix(msg.content || '');
-  if (msg.kind === 'status' || strippedStatus) {
+  if (msg.kind === 'status' || trimStatusPrefix(msg.content)) {
     var statusDiv = document.createElement('div');
     statusDiv.className = 'message-status animate-fade';
     statusDiv.dataset.msgId = msg.id;
     var statusText = document.createElement('span');
     statusText.className = 'message-status-text';
-    statusText.textContent = strippedStatus || msg.content || '';
+    statusText.textContent = trimStatusPrefix(msg.content) || msg.content || '';
     statusDiv.appendChild(statusText);
     container.appendChild(statusDiv);
     return statusDiv;
@@ -2695,7 +3278,7 @@ function appendMessageToContainer(msg, container, opts) {
   }
 
   // Parent label for nested replies
-  if (opts.parentName) {
+  if (false && opts.parentName) {
     var parentLabel = document.createElement('div');
     parentLabel.className = 'thread-reply-parent-label';
     parentLabel.textContent = 'reply to @' + opts.parentName;
@@ -2781,6 +3364,10 @@ function appendMessageToContainer(msg, container, opts) {
 
   content.appendChild(header);
 
+  if (opts.showReplyContext && opts.parentName) {
+    content.appendChild(el('div', { className: 'thread-reply-to' }, 'Replying to ' + opts.parentName));
+  }
+
   // Human message cards (#7)
   if (msg.kind === 'human_decision' || msg.kind === 'human_action') {
     var hCard = el('div', { className: 'message-card-human' + (msg.kind === 'human_action' ? ' action' : '') });
@@ -2803,16 +3390,21 @@ function appendMessageToContainer(msg, container, opts) {
     content.appendChild(textDiv);
   }
 
-  // Thread reply-to indicator (#20)
-  if (msg.reply_to && container.id === 'thread-messages') {
-    var parentMsg = allMessages[msg.reply_to];
-    if (parentMsg) {
-      var replyToAgent = AGENTS.find(function(a) { return a.slug === parentMsg.from; });
-      var replyToLabel = el('div', { className: 'thread-reply-to' }, 'replied to @' + (replyToAgent ? replyToAgent.name : parentMsg.from));
-      // Insert before the header
-      content.insertBefore(replyToLabel, header);
-    }
+  // A2UI structured blocks (#13) — from msg.blocks or msg.kind === 'a2ui'
+  if (msg.blocks && Array.isArray(msg.blocks)) {
+    msg.blocks.forEach(function(block) {
+      var rendered = renderA2UIBlocks(block, content);
+      if (rendered) content.appendChild(rendered);
+    });
+  } else if (msg.kind === 'a2ui' && msg.content) {
+    var parsed = parseA2UIBlocks(msg.content);
+    parsed.blocks.forEach(function(blockText) {
+      var rendered = renderA2UIBlock(blockText);
+      if (rendered) content.appendChild(rendered);
+    });
   }
+
+  // Threads are flat conversations — no per-message reply indicators
 
   // Reactions display
   if (msg.reactions && msg.reactions.length > 0) {
@@ -2836,98 +3428,145 @@ function appendMessageToContainer(msg, container, opts) {
     content.appendChild(reactionsDiv);
   }
 
-  // Thread link (shows "N replies" if this message has replies)
+  // Quote button — only for messages inside threads (main feed uses threads instead)
+  var quoteActions = document.createElement('div');
+  quoteActions.className = 'message-actions';
+  var quoteBtn = document.createElement('button');
+  quoteBtn.className = 'message-action-btn';
+  quoteBtn.type = 'button';
+  quoteBtn.title = 'Quote reply';
+  quoteBtn.setAttribute('aria-label', 'Quote reply');
+  quoteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z"/></svg>';
+  quoteBtn.addEventListener('click', (function(m) {
+    return function() {
+      var authorName = isHuman ? 'You' : (agent ? agent.name : m.from);
+      var preview = (m.content || '').replace(/\n/g, ' ').substring(0, 150);
+      var quoteMarkdown = '> **' + authorName + '**: ' + preview.split(' ').slice(0, 20).join(' ');
+
+      // Show visual preview above thread composer
+      var threadComposerArea = document.querySelector('.thread-panel-composer');
+      if (!threadComposerArea) return;
+
+      // Remove existing preview
+      var existingPreview = document.getElementById('quote-preview');
+      if (existingPreview) existingPreview.remove();
+
+      // Build preview card
+      var previewCard = document.createElement('div');
+      previewCard.className = 'composer-quote-preview';
+      previewCard.id = 'quote-preview';
+
+      var body = document.createElement('div');
+      body.className = 'composer-quote-preview-body';
+      var authorEl = document.createElement('div');
+      authorEl.className = 'composer-quote-preview-author';
+      authorEl.textContent = authorName;
+      var textEl = document.createElement('div');
+      textEl.className = 'composer-quote-preview-text';
+      textEl.textContent = preview;
+      body.appendChild(authorEl);
+      body.appendChild(textEl);
+
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'composer-quote-preview-close';
+      closeBtn.textContent = '\u00D7';
+      closeBtn.addEventListener('click', function() {
+        previewCard.remove();
+        window._quoteMarkdown = null;
+      });
+
+      previewCard.appendChild(body);
+      previewCard.appendChild(closeBtn);
+      threadComposerArea.insertBefore(previewCard, threadComposerArea.firstChild);
+
+      // Store quote for sendThreadReply to prepend
+      window._quoteMarkdown = quoteMarkdown;
+
+      // Focus thread composer
+      var threadInputEl = document.getElementById('thread-composer-input');
+      if (threadInputEl) threadInputEl.focus();
+    };
+  })(msg));
+  quoteActions.appendChild(quoteBtn);
+
+  // Main-feed thread controls are always keyboard reachable.
   if (container.id === 'messages') {
-    var threadLink = document.createElement('button');
-    threadLink.className = 'message-thread-link';
-    threadLink.id = 'thread-link-' + msg.id;
-    threadLink.style.display = 'none';
-    threadLink.addEventListener('click', function() { openThread(msg.id); });
-    content.appendChild(threadLink);
+    var threadControls = document.createElement('div');
+    threadControls.className = 'message-thread-controls';
+    threadControls.id = threadControlsId(msg.id);
+    threadControls.setAttribute('role', 'group');
+    threadControls.setAttribute('aria-label', 'Thread actions for ' + author.textContent);
+    content.appendChild(threadControls);
+  }
 
-    // Action buttons (reply inline + reply in thread)
-    var actions = document.createElement('div');
-    actions.className = 'message-actions';
-    var quickReplyBtn = document.createElement('button');
-    quickReplyBtn.className = 'message-action-btn';
-    quickReplyBtn.title = 'Reply';
-    quickReplyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
-    quickReplyBtn.addEventListener('click', (function(mid) { return function() { setReplyMode(mid); }; })(msg.id));
-    actions.appendChild(quickReplyBtn);
-    var replyBtn = document.createElement('button');
-    replyBtn.className = 'message-action-btn';
-    replyBtn.title = 'Reply in thread';
-    replyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-    replyBtn.addEventListener('click', function() { openThread(msg.id); });
-    actions.appendChild(replyBtn);
-    msgDiv.appendChild(actions);
-
-    // Show thread link if replies exist
-    if (threadReplyCounts[msg.id]) {
-      updateThreadLink(msg.id);
-    }
+  // For thread panel messages: add quote button
+  if (container.id !== 'messages' && container.id !== 'thread-parent') {
+    msgDiv.appendChild(quoteActions);
   }
 
   msgDiv.appendChild(avatar);
   msgDiv.appendChild(content);
   container.appendChild(msgDiv);
+
+  if (container.id === 'messages') {
+    updateThreadLink(msg.id);
+  }
+
   return msgDiv;
 }
 
 var inlineExpandedThreads = {};
 
 function updateThreadLink(parentId) {
-  var link = document.getElementById('thread-link-' + parentId);
-  if (!link) return;
+  var controls = document.getElementById(threadControlsId(parentId));
+  if (!controls) return;
   var count = threadReplyCounts[parentId] || 0;
+  var inlineExpanded = !!inlineExpandedThreads[parentId];
+  var panelOpen = activeThreadId === parentId && isThreadPanelOpen();
+
+  controls.textContent = '';
+
   if (count > 0) {
-    link.style.display = 'inline-flex';
-    link.textContent = '';
-    var toggle = document.createElement('button');
-    toggle.className = 'inline-thread-toggle' + (inlineExpandedThreads[parentId] ? ' expanded' : '');
-    toggle.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
-    toggle.addEventListener('click', function(e) { e.stopPropagation(); toggleInlineThread(parentId); });
-    link.appendChild(toggle);
-    var icon = document.createElement('span');
-    icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-    link.appendChild(icon);
-    var text = document.createElement('span');
-    text.textContent = count + (count === 1 ? ' reply' : ' replies');
-    link.appendChild(text);
+    var inlineBtn = document.createElement('button');
+    inlineBtn.className = 'inline-thread-toggle' + (inlineExpanded ? ' expanded' : '');
+    inlineBtn.type = 'button';
+    inlineBtn.setAttribute('data-active', inlineExpanded ? 'true' : 'false');
+    inlineBtn.setAttribute('aria-controls', threadInlineContainerId(parentId));
+    inlineBtn.setAttribute('aria-expanded', inlineExpanded ? 'true' : 'false');
+    inlineBtn.setAttribute('aria-label', (inlineExpanded ? 'Hide ' : 'Show ') + threadRepliesLabel(count) + ' inline');
+    inlineBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg><span>' + threadRepliesLabel(count) + '</span>';
+    inlineBtn.addEventListener('click', function() { toggleInlineThread(parentId); });
+    controls.appendChild(inlineBtn);
   }
+
+  var panelBtn = document.createElement('button');
+  panelBtn.className = 'message-thread-link';
+  panelBtn.type = 'button';
+  panelBtn.setAttribute('data-active', panelOpen ? 'true' : 'false');
+  panelBtn.setAttribute('aria-controls', 'thread-panel');
+  panelBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
+  panelBtn.setAttribute('aria-label', panelOpen ? 'Thread panel open' : (count > 0 ? 'Open thread panel' : 'Reply in thread'));
+  panelBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>' + (count > 0 ? (panelOpen ? 'Thread open' : 'Open thread') : 'Reply in thread') + '</span>';
+  panelBtn.addEventListener('click', function() {
+    openThread(parentId, { triggerEl: panelBtn });
+  });
+  controls.appendChild(panelBtn);
 }
 
 function toggleInlineThread(parentId) {
-  var containerId = 'inline-thread-' + parentId;
-  var existing = document.getElementById(containerId);
-  if (existing) {
-    existing.remove();
+  var inlineContainer = ensureInlineThreadContainer(parentId);
+  if (!inlineContainer) return;
+
+  if (inlineExpandedThreads[parentId]) {
     inlineExpandedThreads[parentId] = false;
+    inlineContainer.hidden = true;
     updateThreadLink(parentId);
     return;
   }
+
   inlineExpandedThreads[parentId] = true;
   updateThreadLink(parentId);
-  var parentEl = document.querySelector('[data-msg-id="' + parentId + '"]');
-  if (!parentEl) return;
-  var inlineContainer = el('div', { className: 'inline-thread-container', id: containerId });
-  inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'Loading replies...'));
-  parentEl.parentNode.insertBefore(inlineContainer, parentEl.nextSibling);
-  WuphfAPI.getThreadMessages(currentChannel, parentId)
-    .then(function(data) {
-      inlineContainer.textContent = '';
-      var msgs = data.messages || [];
-      var replies = msgs.filter(function(m) { return m.id !== parentId; });
-      if (replies.length === 0) {
-        inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'No replies yet'));
-        return;
-      }
-      replies.forEach(function(m) { allMessages[m.id] = m; appendMessageToContainer(m, inlineContainer); });
-    })
-    .catch(function() {
-      inlineContainer.textContent = '';
-      inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'Could not load replies'));
-    });
+  renderInlineThread(parentId);
 }
 
 // ─── Thread panel ───
@@ -2952,7 +3591,13 @@ function getReplyParentName(msg) {
   return agent ? agent.name : parent.from;
 }
 
-function openThread(msgId) {
+function openThread(msgId, opts) {
+  opts = opts || {};
+  var previousThreadId = activeThreadId;
+  var opener = opts.triggerEl || (document.activeElement && document.activeElement !== document.body ? document.activeElement : null);
+  if (opener && typeof opener.focus === 'function') {
+    threadPanelReturnFocusEl = opener;
+  }
   activeThreadId = msgId;
   closeAgentPanel();
   var panel = document.getElementById('thread-panel');
@@ -2970,30 +3615,68 @@ function openThread(msgId) {
   }
 
   panel.classList.add('open');
+  panel.setAttribute('aria-hidden', 'false');
+  if (previousThreadId && previousThreadId !== msgId) {
+    updateThreadLink(previousThreadId);
+  }
+  updateThreadLink(msgId);
 
-  // Fetch thread replies from broker
-  WuphfAPI.getThreadMessages(currentChannel, msgId)
-    .then(function(data) {
-      var msgs = data.messages || [];
-      var replies = msgs.filter(function(m) { return m.id !== msgId; });
-      replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
-      // Store all for depth calc
-      replies.forEach(function(m) { allMessages[m.id] = m; });
-      replies.forEach(function(m) {
-        var depth = calcReplyDepth(m, msgId);
-        var parentName = depth > 0 ? getReplyParentName(m) : null;
-        appendMessageToContainer(m, messagesContainer, { depth: depth, parentName: parentName });
+  // Single function to fetch and render thread replies with dedup
+  function fetchAndRenderThreadReplies() {
+    loadThreadReplies(msgId)
+      .then(function(replies) {
+        replyCount.textContent = threadRepliesLabel(replies.length);
+
+        if (!messagesContainer.querySelector('[data-msg-id]') && !messagesContainer.querySelector('[data-thread-state]')) {
+          renderThreadReplies(messagesContainer, replies, msgId, 'No replies yet');
+        } else if (!replies.length) {
+          renderThreadReplies(messagesContainer, replies, msgId, 'No replies yet');
+        } else {
+          replies.forEach(function(reply) {
+            appendReplyToThreadSurface(messagesContainer, reply, msgId);
+          });
+        }
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
       });
-      messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    });
+  }
+
+  // Initial fetch + poll every 2s (same dedup logic)
+  fetchAndRenderThreadReplies();
+  if (threadPollTimer) clearInterval(threadPollTimer);
+  threadPollTimer = setInterval(fetchAndRenderThreadReplies, 2000);
 
   // Focus thread composer
-  document.getElementById('thread-composer-input').focus();
+  if (opts.focusComposer !== false) {
+    document.getElementById('thread-composer-input').focus();
+  }
 }
 
-function closeThreadPanel() {
+function closeThreadPanel(opts) {
+  opts = opts || {};
+  var closingThreadId = activeThreadId;
   activeThreadId = null;
-  document.getElementById('thread-panel').classList.remove('open');
+  var panel = document.getElementById('thread-panel');
+  panel.classList.remove('open');
+  panel.setAttribute('aria-hidden', 'true');
+  if (closingThreadId) updateThreadLink(closingThreadId);
+  if (threadPollTimer) { clearInterval(threadPollTimer); threadPollTimer = null; }
+  if (opts.restoreFocus !== false) {
+    restoreThreadPanelFocus();
+  }
+}
+
+// ─── Request polling ───
+function startRequestPolling() {
+  fetchRequests();
+  if (requestPollTimer) clearInterval(requestPollTimer);
+  requestPollTimer = setInterval(fetchRequests, 2000);
+}
+
+// --- Member activity + task polling (#23, #27, #30, #31) ---
+function startMemberActivityPolling() {
+  fetchMemberActivity();
+  if (memberActivityPollTimer) clearInterval(memberActivityPollTimer);
+  memberActivityPollTimer = setInterval(fetchMemberActivity, 3000);
 }
 function fetchMemberActivity() {
   Promise.all([
@@ -3003,9 +3686,8 @@ function fetchMemberActivity() {
     cachedMembers = normalizeMemberActivityHints(results[0].members || []);
     cachedTasks = (results[1].tasks || results[1] || []);
     if (Array.isArray(cachedTasks) === false) cachedTasks = [];
-    renderSidebarAgents();
-    renderWorkspaceSummary();
-    updateTypingIndicator();
+    refreshLiveActivityUI();
+    renderExecutionTimeline();
   });
 }
 
@@ -3048,6 +3730,7 @@ function fetchRequests() {
       if (data.pending) allReqs.push(data.pending);
       if (data.requests) allReqs = allReqs.concat(data.requests);
       if (data.all) allReqs = allReqs.concat(data.all);
+      cachedRequests = allReqs;
       renderNeedsYouBanner(allReqs);
     })
     .catch(function() {});  // failures tracked by fetchMessages
@@ -3152,6 +3835,64 @@ function renderReplyBadge() {
   composerEl.insertBefore(badge, composerEl.firstChild);
 }
 
+// ─── Composer context hints (#38) ───
+// --- Status bar (#91) ---
+var _cachedProvider = '';
+function updateStatusBar() {
+  var chEl = document.getElementById('status-bar-channel');
+  var modeEl = document.getElementById('status-bar-mode');
+  var agentsEl = document.getElementById('status-bar-agents');
+  var connEl = document.getElementById('status-bar-conn');
+  var provEl = document.getElementById('status-bar-provider');
+  if (!chEl) return;
+  chEl.textContent = currentApp ? currentApp : '# ' + currentChannel;
+  modeEl.textContent = dmModeActive ? '1:1' : 'office';
+  var agentCount = cachedMembers.filter(function(m) { return m.slug !== 'human' && m.slug !== 'you'; }).length;
+  agentsEl.textContent = agentCount + ' agent' + (agentCount !== 1 ? 's' : '');
+  if (connEl) {
+    connEl.textContent = brokerConnected ? 'connected' : 'disconnected';
+    connEl.className = 'status-bar-item status-bar-conn' + (brokerConnected ? '' : ' disconnected');
+  }
+  // Fetch provider from /health (no auth required)
+  if (provEl && brokerConnected && !_cachedProvider) {
+    fetch('/api/health').then(function(r) { return r.json(); }).then(function(data) {
+      var p = data.provider || 'unknown';
+      _cachedProvider = p;
+      provEl.textContent = '\u2699 ' + p;
+      provEl.title = 'Runtime provider: ' + p;
+    }).catch(function() {});
+  } else if (provEl && _cachedProvider) {
+    provEl.textContent = '\u2699 ' + _cachedProvider;
+  }
+}
+
+function renderComposerHint() {
+  var existing = document.getElementById('composer-context-hint');
+  if (existing) existing.remove();
+  if (replyToMsgId) return; // reply badge takes priority
+
+  var hints = [];
+
+  // Count active agents
+  var activeCount = 0;
+  cachedMembers.forEach(function(m) {
+    if (m.slug !== 'human' && m.slug !== 'you') {
+      var ac = classifyActivity(m);
+      if (ac.state !== 'lurking') activeCount++;
+    }
+  });
+  if (activeCount > 0) hints.push(activeCount + ' agent' + (activeCount !== 1 ? 's' : '') + ' active');
+
+  // Count open tasks
+  var openTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; }).length;
+  if (openTasks > 0) hints.push(openTasks + ' open task' + (openTasks !== 1 ? 's' : ''));
+
+  if (hints.length === 0) return;
+  var hintEl = el('div', { className: 'composer-context-hint', id: 'composer-context-hint' }, hints.join(' \u2022 '));
+  var composerEl = document.querySelector('.composer');
+  composerEl.insertBefore(hintEl, composerEl.firstChild);
+}
+
 // ─── Autocomplete state ───
 var acPanel = document.getElementById('autocomplete');
 var acSelectedIdx = -1;
@@ -3159,18 +3900,24 @@ var acItems = [];
 var acMode = null; // 'slash' | 'mention' | null
 
 var SLASH_COMMANDS = [
-  { name: '/reply', desc: 'Reply in thread', icon: '💬' },
-  { name: '/requests', desc: 'View open requests', icon: '📋' },
-  { name: '/tasks', desc: 'View task board', icon: '✅' },
-  { name: '/reset', desc: 'Reset the office', icon: '🔄' },
   { name: '/clear', desc: 'Clear messages', icon: '🧹' },
   { name: '/help', desc: 'Show all commands', icon: '❓' },
-  { name: '/config', desc: 'View/set config', icon: '⚙️' },
-  { name: '/quit', desc: 'Exit WUPHF', icon: '👋' },
-  { name: '/connect', desc: 'Connect integration', icon: '🔗' },
-  { name: '/1o1', desc: 'Start 1:1 session', icon: '🤝' },
-  { name: '/recover', desc: 'Show workspace recovery info', icon: '🔍' },
+  { name: '/reset', desc: 'Reset the office', icon: '🔄' },
   { name: '/search', desc: 'Search messages', icon: '🔎' },
+  { name: '/tasks', desc: 'Open task board', icon: '📋' },
+  { name: '/requests', desc: 'Open requests', icon: '🔔' },
+  { name: '/recover', desc: 'Recovery view', icon: '🔁' },
+  { name: '/1o1', desc: '1:1 with agent', icon: '💬' },
+  { name: '/task', desc: 'Task actions (claim/release/complete/block)', icon: '✅' },
+  { name: '/cancel', desc: 'Cancel a task', icon: '❌' },
+  { name: '/policies', desc: 'View policies', icon: '📜' },
+  { name: '/calendar', desc: 'View schedule', icon: '📅' },
+  { name: '/skills', desc: 'View skills', icon: '⚡' },
+  { name: '/reply', desc: 'Reply to a message', icon: '↩️' },
+  { name: '/threads', desc: 'View all threads', icon: '🧵' },
+  { name: '/agents', desc: 'View all agents', icon: '👥' },
+  { name: '/insert', desc: 'Insert a reference', icon: '📎' },
+  { name: '/rewind', desc: 'Rewind to checkpoint', icon: '⏪' },
 ];
 
 function updateAutocomplete() {
@@ -3234,18 +3981,59 @@ function renderAutocomplete() {
   });
 }
 
-function selectAutocomplete(idx) {
+// Generic versions that work with any input element
+var acActiveInput = composerInput;
+
+function updateAutocompleteFor(inputEl) {
+  acActiveInput = inputEl;
+  var val = inputEl.value;
+  var shouldShow = false;
+
+  if (val.match(/^\/\S*$/) && val.length >= 1) {
+    acMode = 'slash';
+    var query = val.slice(1).toLowerCase();
+    acItems = SLASH_COMMANDS.filter(function(cmd) {
+      return cmd.name.slice(1).toLowerCase().indexOf(query) === 0;
+    });
+    shouldShow = acItems.length > 0;
+  } else if (val.match(/(^|\s)@\S*$/)) {
+    acMode = 'mention';
+    var match = val.match(/(^|\s)@(\S*)$/);
+    var q = match ? match[2].toLowerCase() : '';
+    acItems = AGENTS.filter(function(a) {
+      return a.slug.toLowerCase().indexOf(q) === 0 || a.name.toLowerCase().indexOf(q) === 0;
+    }).map(function(a) {
+      return { name: '@' + a.slug, desc: a.name + ' \u2014 ' + a.role, icon: a.emoji };
+    });
+    shouldShow = acItems.length > 0;
+  } else {
+    acMode = null;
+    acItems = [];
+  }
+
+  if (shouldShow) { renderAutocomplete(); acPanel.classList.add('open'); }
+  else { acPanel.classList.remove('open'); acSelectedIdx = -1; }
+}
+
+function selectAutocompleteFor(idx, inputEl) {
   if (idx < 0 || idx >= acItems.length) return;
+  var target = inputEl || acActiveInput || composerInput;
   var item = acItems[idx];
   if (acMode === 'slash') {
-    composerInput.value = item.name + ' ';
+    target.value = item.name + ' ';
   } else if (acMode === 'mention') {
-    // Replace the @partial with the full @slug
-    composerInput.value = composerInput.value.replace(/(^|\s)@\S*$/, '$1' + item.name + ' ');
+    target.value = target.value.replace(/(^|\s)@\S*$/, '$1' + item.name + ' ');
   }
   acPanel.classList.remove('open');
   acSelectedIdx = -1;
   acMode = null;
+  target.focus();
+}
+
+function selectAutocomplete(idx) {
+  selectAutocompleteFor(idx, acActiveInput || composerInput);
+  // Also update send button state
+  composerSend.disabled = !composerInput.value.trim();
   composerInput.focus();
   composerSend.disabled = !composerInput.value.trim();
 }
@@ -3296,8 +4084,22 @@ if (threadInput) {
     threadSend.disabled = !threadInput.value.trim();
     threadInput.style.height = 'auto';
     threadInput.style.height = Math.min(threadInput.scrollHeight, 120) + 'px';
+    // Autocomplete in thread composer (same as main)
+    updateAutocompleteFor(threadInput);
   });
   threadInput.addEventListener('keydown', function(e) {
+    // Autocomplete navigation
+    if (acPanel.classList.contains('open')) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); acSelectedIdx = Math.min(acSelectedIdx + 1, acItems.length - 1); renderAutocomplete(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); acSelectedIdx = Math.max(acSelectedIdx - 1, 0); renderAutocomplete(); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && acSelectedIdx >= 0)) { e.preventDefault(); selectAutocompleteFor(acSelectedIdx >= 0 ? acSelectedIdx : 0, threadInput); return; }
+      if (e.key === 'Escape') { acPanel.classList.remove('open'); acSelectedIdx = -1; return; }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeThreadPanel();
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendThreadReply(); }
   });
   threadSend.addEventListener('click', sendThreadReply);
@@ -3307,11 +4109,45 @@ function sendThreadReply() {
   if (!activeThreadId || !threadInput) return;
   var raw = threadInput.value.trim();
   if (!raw) return;
+
+  // Prepend quote if one is active
+  if (window._quoteMarkdown) {
+    raw = window._quoteMarkdown + '\n\n' + raw;
+    window._quoteMarkdown = null;
+    var quotePreview = document.getElementById('quote-preview');
+    if (quotePreview) quotePreview.remove();
+  }
+
+  // Handle slash commands in thread too
+  if (raw.charAt(0) === '/') {
+    threadInput.value = '';
+    threadInput.style.height = 'auto';
+    threadSend.disabled = true;
+    handleSlashCommand(raw);
+    return;
+  }
+
+  // Extract @mentions for tagged array
+  var tagged = [];
+  var mentionRe = /@(\S+)/g;
+  var mentionMatch;
+  while ((mentionMatch = mentionRe.exec(raw)) !== null) {
+    var mentionSlug = mentionMatch[1].toLowerCase();
+    var mentionAgent = AGENTS.find(function(a) { return a.slug === mentionSlug; });
+    if (mentionAgent) tagged.push(mentionAgent.slug);
+  }
+
   threadInput.value = '';
   threadInput.style.height = 'auto';
   threadSend.disabled = true;
-  WuphfAPI.postMessage(raw, currentChannel, activeThreadId)
-    .catch(function(e) { console.error('Thread reply failed:', e); });
+
+  WuphfAPI.post('/messages', {
+    from: 'you',
+    channel: currentChannel,
+    content: raw,
+    tagged: tagged,
+    reply_to: activeThreadId
+  }).catch(function(e) { console.error('Thread reply failed:', e); showNotice('Thread reply failed', 'error'); });
 }
 
 function handleSlashCommand(input) {
@@ -3339,7 +4175,7 @@ function handleSlashCommand(input) {
       showSystem('Messages cleared');
       break;
     case '/help':
-      showSystem('Commands: /clear /help /requests /tasks /reset /reply <msg-id> /1o1 <agent>');
+      showSystem('Commands: /clear /help /requests /tasks /reset /reply /1o1 <agent> /search /recover /threads /agents /insert /rewind /reset-dm /connect /skill /artifacts /pause /doctor /provider /newagent');
       break;
     case '/requests':
       switchApp('requests');
@@ -3403,6 +4239,166 @@ function handleSlashCommand(input) {
       } else {
         showSystem('Usage: /1o1 <agent-slug>');
       }
+      break;
+    case '/task':
+      var taskParts = args.split(/\s+/);
+      var taskAction = (taskParts[0] || '').toLowerCase();
+      var taskId = taskParts[1] || '';
+      var taskExtra = taskParts.slice(2).join(' ');
+      if (!taskAction || !taskId) {
+        showSystem('Usage: /task <claim|release|complete|block|approve> <task-id> [details]');
+        break;
+      }
+      var validActions = ['claim', 'release', 'complete', 'block', 'approve', 'review'];
+      if (validActions.indexOf(taskAction) === -1) {
+        showSystem('Unknown task action: ' + taskAction + '. Use: ' + validActions.join(', '));
+        break;
+      }
+      var taskBody = { action: taskAction, id: taskId, channel: currentChannel };
+      if (taskAction === 'claim') taskBody.owner = 'human';
+      if (taskExtra) taskBody.details = taskExtra;
+      WuphfAPI.post('/tasks', taskBody)
+        .then(function(data) {
+          showSystem('Task ' + taskId + ' → ' + taskAction);
+          showNotice('Task ' + taskAction + ': ' + taskId, 'success');
+          if (currentApp === 'tasks') renderAppContent('tasks');
+        })
+        .catch(function(e) {
+          showSystem('Task action failed: ' + (e.message || e));
+          showNotice('Task action failed', 'error');
+        });
+      break;
+    case '/cancel':
+      if (args) {
+        WuphfAPI.post('/tasks', { action: 'release', id: args.trim(), channel: currentChannel })
+          .then(function() { showSystem('Task ' + args.trim() + ' cancelled'); showNotice('Task cancelled', 'success'); })
+          .catch(function() { showSystem('Cancel failed'); });
+      } else {
+        showSystem('Usage: /cancel <task-id>');
+      }
+      break;
+    case '/threads':
+      openThreadsView();
+      break;
+    case '/agents':
+      openAgentsView();
+      break;
+    case '/insert':
+      openInsertPicker();
+      break;
+    case '/rewind':
+      openRewindPicker();
+      break;
+    case '/reset-dm':
+      // Reset DM session (#70)
+      if (!dmModeActive) {
+        showSystem('Not in a 1:1 session. Use /1o1 <agent> first.');
+      } else {
+        var resetAgent = dmAgent;
+        showConfirmDialog({
+          title: 'Reset 1:1 Session',
+          message: 'Clear transcript and reset session with ' + resetAgent.name + '?',
+          confirmLabel: 'Reset',
+          onConfirm: function() {
+            WuphfAPI.post('/reset-dm', { agent: resetAgent.slug })
+              .then(function() {
+                document.getElementById('dm-inbox').textContent = '';
+                document.getElementById('dm-outbox').textContent = '';
+                showNotice('1:1 session reset', 'success');
+                showSystem('DM session with ' + resetAgent.name + ' cleared');
+              })
+              .catch(function(e) { showNotice('Reset failed: ' + (e.message || e), 'error'); });
+          }
+        });
+      }
+      break;
+    case '/connect':
+      // Integration connect panel (#84, #85, #118)
+      showSystem('Loading integrations...');
+      var integrations = [
+        { name: 'Telegram', icon: '\u2708', key: 'telegram' },
+        { name: 'Slack', icon: '\uD83D\uDCAC', key: 'slack' },
+        { name: 'Discord', icon: '\uD83C\uDFAE', key: 'discord' }
+      ];
+      WuphfAPI.get('/bridges').then(function(data) {
+        var bridges = data.bridges || data || [];
+        var overlay = el('div', { className: 'task-detail-overlay' });
+        var card = el('div', { className: 'task-detail-card' });
+        var titleRow = el('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' } });
+        titleRow.appendChild(el('h3', { style: { fontSize: '18px', fontWeight: '600' } }, 'Integrations'));
+        var closeBtn = el('button', { className: 'app-view-close', onClick: function() { overlay.remove(); } });
+        closeBtn.textContent = '\u2715';
+        titleRow.appendChild(closeBtn);
+        card.appendChild(titleRow);
+        var panelDiv = el('div', { className: 'connect-panel' });
+        integrations.forEach(function(integ) {
+          var bridge = bridges.find(function(b) { return b.kind === integ.key || b.type === integ.key || (b.name || '').toLowerCase().indexOf(integ.key) >= 0; });
+          var connected = !!bridge;
+          var item = el('div', { className: 'connect-item' });
+          item.appendChild(el('div', { className: 'connect-icon' }, integ.icon));
+          var body = el('div', { className: 'connect-body' });
+          body.appendChild(el('div', { className: 'connect-name' }, integ.name));
+          body.appendChild(el('div', { className: 'connect-status' }, connected ? 'Connected' : 'Not connected'));
+          item.appendChild(body);
+          item.appendChild(el('span', { className: 'connect-badge ' + (connected ? 'connect-badge-ok' : 'connect-badge-off') }, connected ? 'ACTIVE' : 'SETUP'));
+          panelDiv.appendChild(item);
+        });
+        card.appendChild(panelDiv);
+        overlay.appendChild(card);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+        document.body.appendChild(overlay);
+      }).catch(function() {
+        showSystem('Could not load integrations');
+      });
+      break;
+    case '/skill':
+      // Enhanced skill commands (#117)
+      var skillParts = args.split(/\s+/);
+      var skillAction = (skillParts[0] || '').toLowerCase();
+      var skillName = skillParts.slice(1).join(' ');
+      if (skillAction === 'list' || !skillAction) {
+        switchApp('skills');
+      } else if (skillAction === 'invoke' && skillName) {
+        showSystem('Invoking skill: ' + skillName + '...');
+        WuphfAPI.post('/skills/' + encodeURIComponent(skillName) + '/invoke', { name: skillName })
+          .then(function(data) {
+            showSystem('Skill "' + skillName + '" invoked successfully');
+            showNotice('Skill invoked: ' + skillName, 'success');
+          })
+          .catch(function(e) {
+            showSystem('Skill invoke failed: ' + (e.message || e));
+            showNotice('Skill invoke failed', 'error');
+          });
+      } else {
+        showSystem('Usage: /skill list | /skill invoke <name>');
+      }
+      break;
+    case '/artifacts':
+      switchApp('artifacts');
+      break;
+    case '/pause':
+      // Manual pause toggle (#42)
+      isPaused = !isPaused;
+      var strip = document.getElementById('runtime-strip');
+      if (isPaused) {
+        strip.classList.add('paused');
+        showNotice('All agents paused', 'error');
+        WuphfAPI.post('/signals', { kind: 'pause', summary: 'Human paused all agents' }).catch(function() {});
+      } else {
+        strip.classList.remove('paused');
+        showNotice('Agents resumed', 'success');
+        WuphfAPI.post('/signals', { kind: 'resume', summary: 'Human resumed agents' }).catch(function() {});
+      }
+      renderRuntimeStrip();
+      break;
+    case '/doctor':
+      openDoctorPanel();
+      break;
+    case '/provider':
+      openProviderSwitcher();
+      break;
+    case '/newagent':
+      openAgentWizard(null);
       break;
     default:
       // Send unknown commands to broker as a message (agents may handle them)
@@ -3580,9 +4576,6 @@ function sendMessage() {
 function openAgentPanel(slug) {
   var agent = AGENTS.find(function(a) { return a.slug === slug; });
   if (!agent) return;
-  var liveMember = cachedMembers.find(function(m) { return m.slug === slug; }) || null;
-  var liveState = classifyActivity(liveMember);
-  var latencyHint = formatLatencyHint(liveMember);
 
   var panel = document.getElementById('agent-panel');
   var body = document.getElementById('agent-panel-body');
@@ -3610,9 +4603,8 @@ function openAgentPanel(slug) {
   statusSection.appendChild(statusTitle);
 
   var stats = [
-    ['State', liveState.label, liveState.state !== 'lurking' ? 'badge badge-green' : 'badge badge-accent'],
+    ['State', 'Active', 'badge badge-green'],
     ['Type', agent.type.charAt(0).toUpperCase() + agent.type.slice(1), null],
-    ['Latency', latencyHint || 'n/a', null],
   ];
   stats.forEach(function(s) {
     var row = document.createElement('div');
@@ -3671,6 +4663,38 @@ function openAgentPanel(slug) {
   });
   skillsSection.appendChild(skillsWrap);
 
+  // Enable/Disable toggle (#76)
+  var toggleSection = document.createElement('div');
+  toggleSection.className = 'agent-panel-section';
+  var toggleRow = document.createElement('div');
+  toggleRow.className = 'agent-panel-stat';
+  var toggleLabel = document.createElement('span');
+  toggleLabel.className = 'agent-panel-stat-label';
+  toggleLabel.textContent = 'Enabled';
+  var toggle = document.createElement('label');
+  toggle.className = 'agent-toggle';
+  var toggleInput = document.createElement('input');
+  toggleInput.type = 'checkbox';
+  toggleInput.checked = agent.checked;
+  var toggleSlider = document.createElement('span');
+  toggleSlider.className = 'agent-toggle-slider';
+  toggleInput.addEventListener('change', function() {
+    var enabled = toggleInput.checked;
+    agent.checked = enabled;
+    var action = enabled ? 'enable' : 'disable';
+    WuphfAPI.post('/channel-members', { channel: currentChannel, action: action, slug: agent.slug })
+      .then(function() {
+        showNotice(agent.name + ' ' + (enabled ? 'enabled' : 'disabled'), 'success');
+        renderSidebarAgents();
+      })
+      .catch(function(e) { showNotice('Toggle failed: ' + (e.message || e), 'error'); toggleInput.checked = !enabled; agent.checked = !enabled; });
+  });
+  toggle.appendChild(toggleInput);
+  toggle.appendChild(toggleSlider);
+  toggleRow.appendChild(toggleLabel);
+  toggleRow.appendChild(toggle);
+  toggleSection.appendChild(toggleRow);
+
   // Actions section
   var actionsSection = document.createElement('div');
   actionsSection.className = 'agent-panel-section';
@@ -3678,20 +4702,29 @@ function openAgentPanel(slug) {
   actionsTitle.className = 'agent-panel-section-title';
   actionsTitle.textContent = 'Actions';
   actionsSection.appendChild(actionsTitle);
-  ['Start 1:1 conversation', 'Configure agent'].forEach(function(label) {
-    var btn = document.createElement('button');
-    btn.className = 'btn btn-ghost btn-sm';
-    btn.style.width = '100%';
-    btn.style.marginBottom = '8px';
-    btn.textContent = label;
-    actionsSection.appendChild(btn);
-  });
+
+  var dmBtn = document.createElement('button');
+  dmBtn.className = 'btn btn-ghost btn-sm';
+  dmBtn.style.width = '100%';
+  dmBtn.style.marginBottom = '8px';
+  dmBtn.textContent = 'Start 1:1 conversation';
+  dmBtn.addEventListener('click', function() { closeAgentPanel(); enterDMMode(agent.slug); });
+  actionsSection.appendChild(dmBtn);
+
+  var editBtn = document.createElement('button');
+  editBtn.className = 'btn btn-ghost btn-sm';
+  editBtn.style.width = '100%';
+  editBtn.style.marginBottom = '8px';
+  editBtn.textContent = 'Edit agent';
+  editBtn.addEventListener('click', function() { closeAgentPanel(); openAgentWizard(agent); });
+  actionsSection.appendChild(editBtn);
 
   body.appendChild(avatar);
   body.appendChild(nameEl);
   body.appendChild(roleEl);
   if (personalitySection) body.appendChild(personalitySection);
   body.appendChild(statusSection);
+  body.appendChild(toggleSection);
   body.appendChild(skillsSection);
   body.appendChild(actionsSection);
 
@@ -3702,6 +4735,272 @@ function closeAgentPanel() {
   document.getElementById('agent-panel').classList.remove('open');
 }
 
+// ─── Agent Create/Edit Wizard (#73-75) ───
+function openAgentWizard(existingAgent) {
+  var isEdit = !!existingAgent;
+  var overlay = document.createElement('div');
+  overlay.className = 'agent-wizard-overlay';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var card = document.createElement('div');
+  card.className = 'agent-wizard-card';
+
+  var title = document.createElement('h3');
+  title.textContent = isEdit ? 'Edit Agent' : 'New Agent';
+  card.appendChild(title);
+
+  var fields = [
+    { key: 'slug', label: 'Slug', type: 'input', placeholder: 'e.g. devops', disabled: isEdit },
+    { key: 'name', label: 'Name', type: 'input', placeholder: 'e.g. DevOps Engineer' },
+    { key: 'role', label: 'Role', type: 'input', placeholder: 'e.g. CI/CD, infrastructure, monitoring' },
+    { key: 'expertise', label: 'Expertise (comma-separated)', type: 'input', placeholder: 'e.g. Docker, Kubernetes, Terraform' },
+    { key: 'personality', label: 'Personality', type: 'textarea', placeholder: 'Describe how this agent should behave...' }
+  ];
+  var inputs = {};
+
+  fields.forEach(function(f) {
+    var fieldDiv = document.createElement('div');
+    fieldDiv.className = 'agent-wizard-field';
+    var label = document.createElement('label');
+    label.textContent = f.label;
+    fieldDiv.appendChild(label);
+    var inp;
+    if (f.type === 'textarea') {
+      inp = document.createElement('textarea');
+    } else {
+      inp = document.createElement('input');
+      inp.type = 'text';
+    }
+    inp.placeholder = f.placeholder || '';
+    if (f.disabled) inp.disabled = true;
+    if (isEdit) {
+      if (f.key === 'expertise') {
+        inp.value = (existingAgent.expertise || []).join(', ');
+      } else {
+        inp.value = existingAgent[f.key] || '';
+      }
+    }
+    inputs[f.key] = inp;
+    fieldDiv.appendChild(inp);
+    card.appendChild(fieldDiv);
+  });
+
+  var actions = document.createElement('div');
+  actions.className = 'agent-wizard-actions';
+  var cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-secondary';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', function() { overlay.remove(); });
+
+  var submitBtn = document.createElement('button');
+  submitBtn.className = 'btn btn-primary';
+  submitBtn.textContent = isEdit ? 'Save Changes' : 'Create Agent';
+  submitBtn.addEventListener('click', function() {
+    var slug = (inputs.slug.value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    var name = (inputs.name.value || '').trim();
+    var role = (inputs.role.value || '').trim();
+    var expertiseRaw = (inputs.expertise.value || '').trim();
+    var expertise = expertiseRaw ? expertiseRaw.split(',').map(function(s) { return s.trim(); }).filter(Boolean) : [];
+    var personality = (inputs.personality.value || '').trim();
+
+    if (!slug || !name) {
+      showNotice('Slug and name are required', 'error');
+      return;
+    }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = isEdit ? 'Saving...' : 'Creating...';
+
+    var body = {
+      action: isEdit ? 'update' : 'create',
+      slug: slug,
+      name: name,
+      role: role,
+      expertise: expertise,
+      personality: personality
+    };
+
+    WuphfAPI.post('/office-members', body)
+      .then(function() {
+        overlay.remove();
+        showNotice(isEdit ? 'Agent updated' : 'Agent created', 'success');
+        if (isEdit) {
+          var ag = AGENTS.find(function(a) { return a.slug === slug; });
+          if (ag) { ag.name = name; ag.role = role; ag.expertise = expertise; ag.personality = personality; }
+        } else {
+          AGENTS.push({ slug: slug, name: name, role: role, expertise: expertise, personality: personality, emoji: '', checked: true, type: 'specialist' });
+        }
+        renderSidebarAgents();
+      })
+      .catch(function(e) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = isEdit ? 'Save Changes' : 'Create Agent';
+        showNotice('Failed: ' + (e.message || e), 'error');
+      });
+  });
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(submitBtn);
+  card.appendChild(actions);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+  inputs[isEdit ? 'name' : 'slug'].focus();
+}
+
+// ─── Doctor Panel (#82, #97) ───
+function openDoctorPanel() {
+  var overlay = document.createElement('div');
+  overlay.className = 'doctor-overlay';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var panel = document.createElement('div');
+  panel.className = 'doctor-panel';
+
+  var title = document.createElement('h3');
+  title.textContent = 'System Diagnostics';
+  panel.appendChild(title);
+
+  var grid = document.createElement('div');
+  grid.className = 'doctor-grid';
+
+  function makeCard(label, value, cls) {
+    var card = document.createElement('div');
+    card.className = 'doctor-card';
+    var labelEl = document.createElement('div');
+    labelEl.className = 'doctor-card-label';
+    labelEl.textContent = label;
+    var valEl = document.createElement('div');
+    valEl.className = 'doctor-card-value' + (cls ? ' ' + cls : '');
+    valEl.textContent = value;
+    card.appendChild(labelEl);
+    card.appendChild(valEl);
+    return card;
+  }
+
+  grid.appendChild(makeCard('Broker', brokerConnected ? 'Connected' : 'Disconnected', brokerConnected ? 'ok' : 'error'));
+  grid.appendChild(makeCard('Agents', AGENTS.filter(function(a) { return a.checked; }).length + ' active', ''));
+
+  Promise.all([
+    WuphfAPI.getRequests().catch(function() { return { requests: [] }; }),
+    WuphfAPI.getTasks().catch(function() { return { tasks: [] }; }),
+    WuphfAPI.getHealth().catch(function() { return {}; })
+  ]).then(function(results) {
+    var requests = results[0].requests || [];
+    var tasks = results[1].tasks || [];
+    var health = results[2];
+
+    var pendingReqs = requests.filter(function(r) { return r.status === 'pending' || r.status === 'open'; }).length;
+    var blockedTasks = tasks.filter(function(t) { return t.status === 'blocked'; }).length;
+    var totalTasks = tasks.length;
+
+    grid.textContent = '';
+    grid.appendChild(makeCard('Broker', brokerConnected ? 'Connected' : 'Disconnected', brokerConnected ? 'ok' : 'error'));
+    grid.appendChild(makeCard('Session Mode', health.session_mode || 'normal', ''));
+    grid.appendChild(makeCard('Agents', AGENTS.filter(function(a) { return a.checked; }).length + ' / ' + AGENTS.length, ''));
+    grid.appendChild(makeCard('Total Tasks', String(totalTasks), ''));
+    grid.appendChild(makeCard('Pending Requests', String(pendingReqs), pendingReqs > 0 ? 'warn' : 'ok'));
+    grid.appendChild(makeCard('Blocked Tasks', String(blockedTasks), blockedTasks > 0 ? 'warn' : 'ok'));
+  });
+
+  panel.appendChild(grid);
+
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-secondary';
+  closeBtn.style.marginTop = '16px';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', function() { overlay.remove(); });
+  panel.appendChild(closeBtn);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
+
+// ─── Provider Switcher (#86) ───
+function openProviderSwitcher() {
+  var overlay = document.createElement('div');
+  overlay.className = 'provider-overlay';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var panel = document.createElement('div');
+  panel.className = 'provider-panel';
+
+  var title = document.createElement('h3');
+  title.textContent = 'Runtime Provider';
+  panel.appendChild(title);
+
+  var loadingEl = document.createElement('p');
+  loadingEl.style.cssText = 'color:var(--text-secondary);font-size:13px;';
+  loadingEl.textContent = 'Loading current provider...';
+  panel.appendChild(loadingEl);
+
+  var providers = [
+    { id: 'claude', name: 'Claude', desc: 'Anthropic Claude via Claude Code CLI' },
+    { id: 'codex', name: 'Codex', desc: 'OpenAI Codex CLI agent' }
+  ];
+
+  WuphfAPI.getHealth()
+    .then(function(data) {
+      loadingEl.remove();
+      var currentProvider = (data.provider || data.runtime || 'claude').toLowerCase();
+      var optionsDiv = document.createElement('div');
+
+      providers.forEach(function(p) {
+        var isActive = currentProvider === p.id;
+        var option = document.createElement('div');
+        option.className = 'provider-option' + (isActive ? ' active' : '');
+        option.addEventListener('click', function() {
+          if (isActive) return;
+          showConfirmDialog({
+            title: 'Switch Provider',
+            message: 'Switch runtime provider to ' + p.name + '? Active agents will be restarted.',
+            confirmLabel: 'Switch',
+            onConfirm: function() {
+              WuphfAPI.post('/office-members', { action: 'update', slug: 'ceo', permission_mode: p.id })
+                .then(function() {
+                  showNotice('Provider switched to ' + p.name, 'success');
+                  overlay.remove();
+                })
+                .catch(function(e) { showNotice('Switch failed: ' + (e.message || e), 'error'); });
+            }
+          });
+        });
+
+        var nameEl = document.createElement('div');
+        nameEl.className = 'provider-option-name';
+        nameEl.textContent = p.name;
+        var descEl = document.createElement('div');
+        descEl.className = 'provider-option-desc';
+        descEl.textContent = p.desc;
+        var textWrap = document.createElement('div');
+        textWrap.appendChild(nameEl);
+        textWrap.appendChild(descEl);
+        option.appendChild(textWrap);
+
+        if (isActive) {
+          var check = document.createElement('span');
+          check.className = 'provider-option-check';
+          check.textContent = '\u2713';
+          option.appendChild(check);
+        }
+        optionsDiv.appendChild(option);
+      });
+
+      panel.appendChild(optionsDiv);
+    })
+    .catch(function() {
+      loadingEl.textContent = 'Could not load provider info';
+    });
+
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-secondary';
+  closeBtn.style.marginTop = '16px';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', function() { overlay.remove(); });
+  panel.appendChild(closeBtn);
+
+  overlay.appendChild(panel);
+  document.body.appendChild(overlay);
+}
 
 // ─── Search mode (#63 part) ───
 var searchMode = false;
@@ -3763,11 +5062,13 @@ function renderSearchResults(query) {
   cmdPaletteResults.appendChild(groupDiv);
 }
 
-cmdPaletteInput.addEventListener('input', function() {
-  cmdSelectedIdx = -1;
-  if (searchMode) renderSearchResults(cmdPaletteInput.value.trim());
-  else renderCommandPaletteResults(cmdPaletteInput.value.trim());
-});
+if (cmdPaletteInput) {
+  cmdPaletteInput.addEventListener('input', function() {
+    cmdSelectedIdx = -1;
+    if (searchMode) renderSearchResults(cmdPaletteInput.value.trim());
+    else renderCommandPaletteResults(cmdPaletteInput.value.trim());
+  });
+}
 
 var _origCloseCP = closeCommandPalette;
 closeCommandPalette = function() {
@@ -3778,20 +5079,31 @@ closeCommandPalette = function() {
 
 // ─── Init ───
 function initApp() {
+  console.log('[wuphf] initApp starting...');
   WuphfAPI.init()
-    .then(function() { return WuphfAPI.getHealth(); })
+    .then(function() {
+      console.log('[wuphf] init done, fetching health...');
+      return WuphfAPI.getHealth();
+    })
     .then(function(data) {
+      console.log('[wuphf] health response:', JSON.stringify(data));
       if (data.status === 'ok') {
         brokerConnected = true;
         document.getElementById('onboarding').style.display = 'none';
+        console.log('[wuphf] broker connected, showing splash + office');
         showSplashScreen(function() { showOffice(); });
       } else {
+        console.log('[wuphf] health not ok, showing onboarding');
         renderProgress();
         renderSizeOptions();
         renderPrereqs();
       }
     })
-    .catch(function() {
+    .catch(function(err) {
+      var errMsg = err && err.message ? err.message : String(err);
+      console.error('[wuphf] initApp FAILED: ' + errMsg);
+      // Show error on page for debugging
+      document.title = 'WUPHF ERROR: ' + errMsg;
       // Broker not running — fall back to demo/onboarding
       renderProgress();
       renderSizeOptions();
@@ -3816,6 +5128,7 @@ if (themeSwitcher) {
       document.documentElement.removeAttribute('data-theme');
     }
     localStorage.setItem('wuphf-theme', theme);
+    showNotice('Theme changed to ' + (theme || 'Editorial'), 'success');
   });
 }
 
@@ -4031,6 +5344,25 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 
+
+  // Ctrl+G / Cmd+G: open command palette filtered to channels (#29)
+  if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+    e.preventDefault();
+    openCommandPalette();
+    setTimeout(function() { cmdPaletteInput.value = '#'; renderCommandPaletteResults('#'); }, 60);
+    return;
+  }
+
+  // Ctrl+1-9 / Cmd+1-9: quick jump to channel by index (#29)
+  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
+    e.preventDefault();
+    var qjIdx = parseInt(e.key) - 1;
+    if (qjIdx < CHANNELS.length) {
+      switchChannel(CHANNELS[qjIdx].name);
+      renderSidebarChannels();
+    }
+    return;
+  }
   // Ctrl+/ or Cmd+/: focus composer
   if ((e.ctrlKey || e.metaKey) && e.key === '/') {
     e.preventDefault();
@@ -4051,7 +5383,7 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 
-  // Escape: close panels (command palette handled by its own handler)
+  // Escape: close panels or toggle pause (#42)
   if (e.key === 'Escape' && !inInput) {
     if (cmdPaletteOverlay.classList.contains('open')) {
       closeCommandPalette();
@@ -4061,6 +5393,24 @@ document.addEventListener('keydown', function(e) {
       closeAgentPanel();
     } else if (document.getElementById('recovery-panel').classList.contains('open')) {
       closeRecoveryView();
+    } else if (document.getElementById('threads-view').classList.contains('open')) {
+      closeThreadsView();
+    } else if (document.getElementById('agents-grid-view').classList.contains('open')) {
+      closeAgentsView();
+    } else {
+      // No panels open: toggle pause all agents (#42)
+      isPaused = !isPaused;
+      var strip = document.getElementById('runtime-strip');
+      if (isPaused) {
+        strip.classList.add('paused');
+        showNotice('All agents paused', 'error');
+        WuphfAPI.post('/signals', { kind: 'pause', summary: 'Human paused all agents via Esc' }).catch(function() {});
+      } else {
+        strip.classList.remove('paused');
+        showNotice('Agents resumed', 'success');
+        WuphfAPI.post('/signals', { kind: 'resume', summary: 'Human resumed agents via Esc' }).catch(function() {});
+      }
+      renderRuntimeStrip();
     }
     return;
   }
@@ -4108,6 +5458,7 @@ document.addEventListener('keydown', function(e) {
 // ═══════════════════════════════════════════════════════════════
 //   1:1 DIRECT SESSION MODE (#65)
 // ═══════════════════════════════════════════════════════════════
+var isPaused = false;
 var dmModeActive = false;
 var dmAgent = null;
 var dmPreviousChannel = null;
@@ -4131,16 +5482,18 @@ function enterDMMode(agentSlug) {
   // Update composer placeholder
   document.getElementById('composer-input').placeholder = 'Message ' + agent.name + ' directly...';
 
-  // Clear messages and fetch DM channel
-  document.getElementById('messages').textContent = '';
+  // Show DM lanes, hide regular messages
+  document.getElementById('messages').style.display = 'none';
+  document.getElementById('dm-lanes').style.display = 'grid';
+  document.getElementById('dm-inbox').textContent = '';
+  document.getElementById('dm-outbox').textContent = '';
   lastMessageId = null;
 
   // Try to switch mode via broker
   if (brokerConnected) {
     WuphfAPI.post('/session-mode', { mode: '1:1', agent: agentSlug })
-      .then(function() { fetchMessages(); })
+      .then(function() { fetchMessages(); showNotice('Switched to 1:1 with ' + agentSlug, 'info'); })
       .catch(function() {
-        // Fallback: just filter messages
         fetchMessages();
       });
   }
@@ -4150,6 +5503,10 @@ function exitDMMode() {
   if (!dmModeActive) return;
   dmModeActive = false;
   dmAgent = null;
+
+  // Hide DM lanes, show regular messages
+  document.getElementById('dm-lanes').style.display = 'none';
+  document.getElementById('messages').style.display = '';
 
   // Hide DM banner
   document.getElementById('dm-banner').classList.remove('open');
@@ -4224,8 +5581,7 @@ function openRecoveryView() {
     ]).then(function(results) {
       var state = results[0];
       var tasksData = results[1];
-      var membersData = results[2];
-      membersData.members = normalizeMemberActivityHints(membersData.members || []);
+      var membersData = { members: normalizeMemberActivityHints(results[2].members || []) };
       renderRecoveryData(panel, state, tasksData, membersData);
     });
   } else {
@@ -4453,6 +5809,26 @@ function svgIcon(paths, size) {
   return svg;
 }
 
+// ─── Notice / Toast System (#90) ───
+var _noticeContainer = null;
+function showNotice(text, type) {
+  type = type || 'info';
+  if (!_noticeContainer) {
+    _noticeContainer = document.createElement('div');
+    _noticeContainer.className = 'notice-container';
+    document.body.appendChild(_noticeContainer);
+  }
+  var icon = type === 'success' ? '\u2713' : type === 'error' ? '\u2717' : '\u2139';
+  var notice = document.createElement('div');
+  notice.className = 'notice notice-' + type;
+  notice.textContent = icon + '  ' + text;
+  _noticeContainer.appendChild(notice);
+  setTimeout(function() {
+    notice.classList.add('removing');
+    setTimeout(function() { notice.remove(); }, 200);
+  }, 3000);
+}
+
 // ─── Confirmation Dialog (reusable) ───
 function showConfirmDialog(opts) {
   var overlay = el('div', { className: 'confirm-overlay' });
@@ -4568,17 +5944,38 @@ function renderTaskBoard(container, tasks) {
     colDiv.appendChild(header);
 
     columns[col.key].forEach(function(task) {
-      var card = el('div', { className: 'task-card', onClick: function() { openTaskDetail(task); } });
+      var card = el('div', { className: 'task-card', onClick: function() {
+        // Task click-to-focus (#54): open thread or find related message
+        if (task.thread_id) {
+          openThread(task.thread_id);
+        } else {
+          var msgKeys = Object.keys(allMessages);
+          var found = false;
+          for (var ti = msgKeys.length - 1; ti >= 0; ti--) {
+            var tm = allMessages[msgKeys[ti]];
+            if (tm.content && task.title && tm.content.indexOf(task.title) >= 0) {
+              var msgEl = document.querySelector('[data-msg-id="' + tm.id + '"]');
+              if (msgEl) { msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); msgEl.style.outline = '2px solid var(--accent)'; setTimeout(function() { msgEl.style.outline = ''; }, 2000); }
+              found = true;
+              break;
+            }
+          }
+          if (!found) openTaskDetail(task);
+        }
+      } });
 
       var title = el('div', { className: 'task-card-title' }, task.title || task.name || 'Untitled');
       card.appendChild(title);
 
+      // Worktree info (#53)
+      if (task.worktree_branch || task.worktree_path) {
+        var branchText = task.worktree_branch || task.worktree_path.split('/').pop();
+        card.appendChild(el('div', { className: 'task-card-worktree' }, '\u2387 ' + branchText));
+      }
+
       var meta = el('div', { className: 'task-card-meta' });
       var status = normalizeTaskStatus(task.status);
-      if (status === 'blocked') {
-        var pill = el('span', { className: 'task-status-pill task-status-blocked' }, 'BLOCKED');
-        meta.appendChild(pill);
-      }
+      meta.appendChild(el('span', { className: 'task-status-pill task-status-' + status }, status.replace(/_/g, ' ').toUpperCase()));
       if (task.owner || task.assignee) {
         var owner = el('span', { className: 'task-card-owner' });
         var ownerAgent = AGENTS.find(function(a) { return a.slug === (task.owner || task.assignee); });
@@ -4708,16 +6105,17 @@ function buildRequestItem(req, isPending) {
   var question = el('div', { className: 'request-item-question' }, req.question || req.title || '');
   item.appendChild(question);
 
-  // Timing
-  if (req.due || req.created_at || req.follow_up) {
+  // Timing (#49)
+  if (req.due_at || req.due || req.created_at || req.follow_up_at || req.follow_up || req.reminder_at) {
     var timing = el('div', { className: 'request-item-timing' });
     var parts = [];
     if (req.created_at) {
       var d = new Date(req.created_at);
       parts.push('Asked ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
     }
-    if (req.due) parts.push('Due ' + req.due);
-    if (req.follow_up) parts.push('Follow-up: ' + req.follow_up);
+    if (req.due_at || req.due) parts.push('Due ' + formatRelativeTime(req.due_at || req.due));
+    if (req.follow_up_at || req.follow_up) parts.push('Follow up ' + formatRelativeTime(req.follow_up_at || req.follow_up));
+    if (req.reminder_at) parts.push('Reminder ' + formatRelativeTime(req.reminder_at));
     timing.textContent = parts.join(' \u2022 ');
     item.appendChild(timing);
   }
@@ -4936,6 +6334,95 @@ function inferMood(text) {
 // ═══════════════════════════════════════════════════════════════
 //   A2UI BLOCK RENDERING (#13)
 // ═══════════════════════════════════════════════════════════════
+function renderA2UIBlocks(block, parentContainer) {
+  if (!block) return null;
+  var container = document.createElement('div');
+  container.className = 'a2ui-block';
+
+  // Table: array of objects
+  if (Array.isArray(block.rows || block.data || block)) {
+    var rows = block.rows || block.data || block;
+    if (rows.length > 0 && typeof rows[0] === 'object') {
+      var table = document.createElement('table');
+      table.className = 'a2ui-table';
+      var keys = Object.keys(rows[0]);
+      var thead = document.createElement('tr');
+      keys.forEach(function(k) {
+        var th = document.createElement('th');
+        th.textContent = k;
+        thead.appendChild(th);
+      });
+      table.appendChild(thead);
+      rows.forEach(function(row) {
+        var tr = document.createElement('tr');
+        keys.forEach(function(k) {
+          var td = document.createElement('td');
+          td.textContent = row[k] != null ? String(row[k]) : '';
+          tr.appendChild(td);
+        });
+        table.appendChild(tr);
+      });
+      container.appendChild(table);
+      return container;
+    }
+  }
+
+  // Progress bar
+  if (block.type === 'progress' || block.progress != null) {
+    var pct = typeof block.progress === 'number' ? block.progress : parseInt(block.value || block.percent || 0);
+    var progressDiv = document.createElement('div');
+    progressDiv.className = 'a2ui-progress';
+    if (block.label) {
+      var labelEl = document.createElement('span');
+      labelEl.style.cssText = 'font-size:12px;color:var(--text-secondary);min-width:60px;';
+      labelEl.textContent = block.label;
+      progressDiv.appendChild(labelEl);
+    }
+    var bar = document.createElement('div');
+    bar.className = 'a2ui-progress-bar';
+    var fill = document.createElement('div');
+    fill.className = 'a2ui-progress-fill';
+    fill.style.width = Math.min(pct, 100) + '%';
+    bar.appendChild(fill);
+    progressDiv.appendChild(bar);
+    var pctLabel = document.createElement('span');
+    pctLabel.className = 'a2ui-progress-label';
+    pctLabel.textContent = pct + '%';
+    progressDiv.appendChild(pctLabel);
+    container.appendChild(progressDiv);
+    return container;
+  }
+
+  // Key-value pairs
+  if (block.type === 'kv' || block.pairs || block.fields) {
+    var pairs = block.pairs || block.fields || block;
+    var kvDiv = document.createElement('div');
+    kvDiv.className = 'a2ui-kv';
+    var entries = Array.isArray(pairs) ? pairs : Object.entries(pairs).filter(function(e) { return e[0] !== 'type'; });
+    entries.forEach(function(entry) {
+      var key = Array.isArray(entry) ? entry[0] : (entry.key || entry.label);
+      var val = Array.isArray(entry) ? entry[1] : (entry.value || entry.val);
+      var keyEl = document.createElement('span');
+      keyEl.className = 'a2ui-kv-key';
+      keyEl.textContent = key;
+      var valEl = document.createElement('span');
+      valEl.className = 'a2ui-kv-val';
+      valEl.textContent = val != null ? String(val) : '';
+      kvDiv.appendChild(keyEl);
+      kvDiv.appendChild(valEl);
+    });
+    container.appendChild(kvDiv);
+    return container;
+  }
+
+  // Fallback: render as text if block has a text/content field
+  if (block.text || block.content) {
+    return renderA2UIBlock(block.text || block.content);
+  }
+
+  return null;
+}
+
 function parseA2UIBlocks(text) {
   // Detect ```a2ui ... ``` or [A2UI] ... [/A2UI] markers
   var blocks = [];
@@ -5069,77 +6556,9 @@ function renderA2UIBlock(blockText) {
 initApp();
 
 // ═══════════════════════════════════════════════════════════════
-//   WAVE 3 POLISH — Quick Jump, Thread Toggle, Pause, PgUp/PgDn
+//   WAVE 3 POLISH — Thread Toggle, Message Cards, Status Pills
 // ═══════════════════════════════════════════════════════════════
-var threadsDefaultExpand = localStorage.getItem('wuphf-threads-expand') !== 'false';
-(function initThreadToggle() {
-  var btn = document.getElementById('thread-toggle-btn');
-  if (!btn) return;
-  function updateLabel() { btn.textContent = threadsDefaultExpand ? 'Collapse threads' : 'Expand threads'; }
-  updateLabel();
-  btn.addEventListener('click', function() {
-    threadsDefaultExpand = !threadsDefaultExpand;
-    localStorage.setItem('wuphf-threads-expand', threadsDefaultExpand ? 'true' : 'false');
-    updateLabel();
-  });
-})();
-var quickJumpOverlay = document.getElementById('quick-jump-overlay');
-var quickJumpInput = document.getElementById('quick-jump-input');
-var quickJumpList = document.getElementById('quick-jump-list');
-var quickJumpSelectedIdx = -1;
-function openQuickJump() {
-  if (!document.getElementById('office').classList.contains('active')) return;
-  quickJumpOverlay.classList.add('open'); quickJumpInput.value = ''; quickJumpSelectedIdx = -1;
-  renderQuickJumpList(''); setTimeout(function() { quickJumpInput.focus(); }, 50);
-}
-function closeQuickJump() { quickJumpOverlay.classList.remove('open'); quickJumpSelectedIdx = -1; }
-function renderQuickJumpList(query) {
-  var q = (query || '').toLowerCase(); quickJumpList.textContent = '';
-  CHANNELS.filter(function(ch) { return !q || ch.name.toLowerCase().indexOf(q) !== -1; }).forEach(function(ch, idx) {
-    var item = el('div', { className: 'quick-jump-item' + (idx === quickJumpSelectedIdx ? ' selected' : ''), onClick: function() { closeQuickJump(); switchChannel(ch.name); renderSidebarChannels(); } });
-    item.appendChild(el('span', { className: 'quick-jump-item-hash' }, '#'));
-    item.appendChild(el('span', { className: 'quick-jump-item-name' }, ch.name));
-    var ci = CHANNELS.indexOf(ch); if (ci >= 0 && ci < 9) item.appendChild(el('span', { className: 'quick-jump-item-shortcut' }, String(ci + 1)));
-    quickJumpList.appendChild(item);
-  });
-}
-quickJumpInput.addEventListener('input', function() { quickJumpSelectedIdx = -1; renderQuickJumpList(quickJumpInput.value.trim()); });
-quickJumpInput.addEventListener('keydown', function(e) {
-  var items = quickJumpList.querySelectorAll('.quick-jump-item');
-  if (e.key === 'ArrowDown') { e.preventDefault(); quickJumpSelectedIdx = Math.min(quickJumpSelectedIdx + 1, items.length - 1); renderQuickJumpList(quickJumpInput.value.trim()); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); quickJumpSelectedIdx = Math.max(quickJumpSelectedIdx - 1, 0); renderQuickJumpList(quickJumpInput.value.trim()); }
-  else if (e.key === 'Enter') { e.preventDefault(); var sel = quickJumpSelectedIdx >= 0 ? quickJumpSelectedIdx : 0; var filtered = CHANNELS.filter(function(ch) { var q = (quickJumpInput.value || '').trim().toLowerCase(); return !q || ch.name.toLowerCase().indexOf(q) !== -1; }); if (filtered[sel]) { closeQuickJump(); switchChannel(filtered[sel].name); renderSidebarChannels(); } }
-  else if (e.key === 'Escape') { e.preventDefault(); closeQuickJump(); }
-});
-quickJumpOverlay.addEventListener('click', function(e) { if (e.target === quickJumpOverlay) closeQuickJump(); });
-var pauseConfirmVisible = false;
-function showPauseConfirm() {
-  if (pauseConfirmVisible) return; pauseConfirmVisible = true;
-  var composer = document.querySelector('.composer');
-  var bar = el('div', { className: 'pause-confirm', id: 'pause-confirm-bar' });
-  bar.appendChild(el('span', { className: 'pause-confirm-text' }, 'Pause all agents?'));
-  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-yes', onClick: function() {
-    hidePauseConfirm();
-    if (brokerConnected) WuphfAPI.post('/messages', { from: 'system', channel: currentChannel, content: '[PAUSE] All agents paused by human' }).catch(function() {});
-    var container = document.getElementById('messages'); var sysDiv = el('div', { className: 'message-system animate-fade' }); var inner = el('div', { className: 'message-system-inner' });
-    inner.appendChild(el('span', { className: 'message-system-line' })); inner.appendChild(el('span', { className: 'message-system-text' }, 'All agents paused')); inner.appendChild(el('span', { className: 'message-system-line' }));
-    sysDiv.appendChild(inner); container.appendChild(sysDiv); container.scrollTop = container.scrollHeight;
-  } }, 'Yes, pause'));
-  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-no', onClick: hidePauseConfirm }, 'Cancel'));
-  composer.parentNode.insertBefore(bar, composer);
-}
-function hidePauseConfirm() { pauseConfirmVisible = false; var bar = document.getElementById('pause-confirm-bar'); if (bar) bar.remove(); }
-document.addEventListener('keydown', function(e) {
-  var officeActive = document.getElementById('office').classList.contains('active'); if (!officeActive) return;
-  var inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
-  if ((e.ctrlKey || e.metaKey) && e.key === 'g') { e.preventDefault(); quickJumpOverlay.classList.contains('open') ? closeQuickJump() : openQuickJump(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9' && !e.shiftKey && !e.altKey) { var ci = parseInt(e.key) - 1; if (ci < CHANNELS.length) { e.preventDefault(); switchChannel(CHANNELS[ci].name); renderSidebarChannels(); } return; }
-  if (e.key === 'Escape' && inInput && e.target.id === 'composer-input') {
-    var po = document.getElementById('thread-panel').classList.contains('open') || document.getElementById('agent-panel').classList.contains('open') || cmdPaletteOverlay.classList.contains('open') || quickJumpOverlay.classList.contains('open');
-    if (!po && !e.target.value.trim()) { e.preventDefault(); showPauseConfirm(); return; }
-  }
-  if (!inInput && (e.key === 'PageUp' || e.key === 'PageDown')) { var al = document.getElementById('sidebar-agents'); if (al && al.scrollHeight > al.clientHeight) { e.preventDefault(); al.scrollBy({ top: e.key === 'PageUp' ? -(al.clientHeight * 0.8) : (al.clientHeight * 0.8), behavior: 'smooth' }); } }
-});
+var threadsDefaultExpand = true;
 // ═══════════════════════════════════════════════════════════════
 //   PIXEL ART AVATARS (#25)
 // ═══════════════════════════════════════════════════════════════
@@ -5306,6 +6725,13 @@ function getAgentColor(slug) {
 }
 
 function renderPixelAvatar(slug, size) {
+  // Guard: sprite data may not be loaded yet, or may not exist for this slug
+  if (typeof SPRITE_DATA === 'undefined' || typeof SPRITE_SLUG_MAP === 'undefined') {
+    var fallback = document.createElement('div');
+    fallback.style.cssText = 'width:' + size + 'px;height:' + size + 'px;display:flex;align-items:center;justify-content:center;font-size:' + Math.round(size * 0.6) + 'px;';
+    fallback.textContent = slug.charAt(0).toUpperCase();
+    return fallback;
+  }
   var key = SPRITE_SLUG_MAP[slug] || slug;
   var sprite = SPRITE_DATA[key] || SPRITE_GENERIC;
   var accentHex = getAgentColor(slug);
@@ -5340,20 +6766,543 @@ function renderPixelAvatar(slug, size) {
       var px = sprite[r][c];
       var idx = (r * cols + c) * 4;
       if (px === 0) {
-  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-no', onClick: hidePauseConfirm }, 'Cancel'));
-  composer.parentNode.insertBefore(bar, composer);
-}
-function hidePauseConfirm() { pauseConfirmVisible = false; var bar = document.getElementById('pause-confirm-bar'); if (bar) bar.remove(); }
-document.addEventListener('keydown', function(e) {
-  var officeActive = document.getElementById('office').classList.contains('active'); if (!officeActive) return;
-  var inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
-  if ((e.ctrlKey || e.metaKey) && e.key === 'g') { e.preventDefault(); quickJumpOverlay.classList.contains('open') ? closeQuickJump() : openQuickJump(); return; }
-  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9' && !e.shiftKey && !e.altKey) { var ci = parseInt(e.key) - 1; if (ci < CHANNELS.length) { e.preventDefault(); switchChannel(CHANNELS[ci].name); renderSidebarChannels(); } return; }
-  if (e.key === 'Escape' && inInput && e.target.id === 'composer-input') {
-    var po = document.getElementById('thread-panel').classList.contains('open') || document.getElementById('agent-panel').classList.contains('open') || cmdPaletteOverlay.classList.contains('open') || quickJumpOverlay.classList.contains('open');
-    if (!po && !e.target.value.trim()) { e.preventDefault(); showPauseConfirm(); return; }
+        imgData.data[idx] = 0; imgData.data[idx+1] = 0; imgData.data[idx+2] = 0; imgData.data[idx+3] = 0;
+      } else {
+        var rgb = palette[px] || [128, 128, 128];
+        imgData.data[idx] = rgb[0]; imgData.data[idx+1] = rgb[1]; imgData.data[idx+2] = rgb[2]; imgData.data[idx+3] = 255;
+      }
+    }
   }
-  if (!inInput && (e.key === 'PageUp' || e.key === 'PageDown')) { var al = document.getElementById('sidebar-agents'); if (al && al.scrollHeight > al.clientHeight) { e.preventDefault(); al.scrollBy({ top: e.key === 'PageUp' ? -(al.clientHeight * 0.8) : (al.clientHeight * 0.8), behavior: 'smooth' }); } }
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   SEARCH PICKER (#64) — Enhanced /search with grouped results
+// ═══════════════════════════════════════════════════════════════
+function openSearchPicker() {
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = '';
+  cmdPaletteInput.placeholder = 'Search messages, tasks, agents...';
+  cmdSelectedIdx = -1;
+  searchMode = false;
+  cmdPaletteInput._searchPickerMode = true;
+  renderSearchPickerResults('');
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function searchPickerInputHandler() {
+  if (!cmdPaletteInput._searchPickerMode) return;
+  cmdSelectedIdx = -1;
+  renderSearchPickerResults(cmdPaletteInput.value.trim());
+}
+
+cmdPaletteInput.addEventListener('input', searchPickerInputHandler);
+
+function renderSearchPickerResults(query) {
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+  var q = (query || '').toLowerCase().trim();
+
+  if (!q || q.length < 2) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'Type at least 2 characters to search...'));
+    return;
+  }
+
+  var groups = [];
+
+  // Messages
+  var msgItems = [];
+  var msgKeys = Object.keys(allMessages);
+  for (var i = msgKeys.length - 1; i >= 0 && msgItems.length < 8; i--) {
+    var m = allMessages[msgKeys[i]];
+    if (m.content && m.content.toLowerCase().indexOf(q) !== -1) {
+      var fromAgent = AGENTS.find(function(a) { return a.slug === m.from; });
+      var hasThread = threadReplyCounts[m.id] && threadReplyCounts[m.id] > 0;
+      msgItems.push({
+        icon: fromAgent ? fromAgent.emoji : '💬',
+        label: (fromAgent ? fromAgent.name : m.from) + ': ' + (m.content.length > 50 ? m.content.substring(0, 50) + '...' : m.content),
+        desc: hasThread ? threadReplyCounts[m.id] + ' replies' : 'message',
+        action: (function(mid, hasT, rt) { return function() {
+          closeCommandPalette();
+          if (hasT) { openThread(mid); }
+          else if (rt) { openThread(rt); }
+          else {
+            var t = document.querySelector('[data-msg-id="' + mid + '"]');
+            if (t) { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); t.style.background = 'var(--yellow-bg)'; setTimeout(function() { t.style.background = ''; }, 2000); }
+          }
+        }; })(m.id, hasThread, m.reply_to)
+      });
+    }
+  }
+  if (msgItems.length) groups.push({ title: 'Messages', items: msgItems });
+
+  // Tasks
+  var taskItems = [];
+  for (var ti = 0; ti < cachedTasks.length && taskItems.length < 5; ti++) {
+    var task = cachedTasks[ti];
+    var taskTitle = task.title || task.id || '';
+    if (taskTitle.toLowerCase().indexOf(q) !== -1 || (task.desc && task.desc.toLowerCase().indexOf(q) !== -1)) {
+      taskItems.push({
+        icon: '📋',
+        label: 'Task #' + (task.id || ti) + ': ' + taskTitle,
+        desc: task.status || '',
+        action: (function() { return function() { closeCommandPalette(); switchApp('tasks'); }; })()
+      });
+    }
+  }
+  if (taskItems.length) groups.push({ title: 'Tasks', items: taskItems });
+
+  // Requests
+  var reqItems = [];
+  for (var ri = 0; ri < cachedRequests.length && reqItems.length < 5; ri++) {
+    var req = cachedRequests[ri];
+    var reqLabel = req.title || req.prompt || req.id || '';
+    if (reqLabel.toLowerCase().indexOf(q) !== -1) {
+      reqItems.push({
+        icon: '🔔',
+        label: reqLabel.length > 60 ? reqLabel.substring(0, 60) + '...' : reqLabel,
+        desc: req.status || 'request',
+        action: (function() { return function() { closeCommandPalette(); switchApp('requests'); }; })()
+      });
+    }
+  }
+  if (reqItems.length) groups.push({ title: 'Requests', items: reqItems });
+
+  // Agents
+  var agentItems = [];
+  AGENTS.forEach(function(a) {
+    if (a.name.toLowerCase().indexOf(q) !== -1 || a.role.toLowerCase().indexOf(q) !== -1 || a.slug.toLowerCase().indexOf(q) !== -1) {
+      agentItems.push({
+        icon: a.emoji,
+        label: a.name,
+        desc: a.role,
+        action: (function(slug) { return function() { closeCommandPalette(); openAgentPanel(slug); }; })(a.slug)
+      });
+    }
+  });
+  if (agentItems.length) groups.push({ title: 'Agents', items: agentItems });
+
+  if (groups.length === 0) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'No results for "' + query + '"'));
+    return;
+  }
+
+  groups.forEach(function(group) {
+    var groupDiv = el('div', { className: 'cmd-palette-group' });
+    groupDiv.appendChild(el('div', { className: 'cmd-palette-group-title' }, group.title));
+    group.items.forEach(function(item) {
+      var idx = cmdFlatItems.length;
+      cmdFlatItems.push(item);
+      var row = el('div', { className: 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : ''), onClick: function() { selectCommandPaletteItem(idx); } });
+      row.appendChild(el('div', { className: 'cmd-palette-item-icon' }, item.icon));
+      var text = el('div', { className: 'cmd-palette-item-text' });
+      text.appendChild(el('div', { className: 'cmd-palette-item-label' }, item.label));
+      if (item.desc) text.appendChild(el('div', { className: 'cmd-palette-item-desc' }, item.desc));
+      row.appendChild(text);
+      groupDiv.appendChild(row);
+    });
+    cmdPaletteResults.appendChild(groupDiv);
+  });
+}
+
+// Override /search to use enhanced search picker
+var _origOpenSearchMode = openSearchMode;
+openSearchMode = function(query) {
+  openSearchPicker();
+  if (query) {
+    cmdPaletteInput.value = query;
+    renderSearchPickerResults(query);
+  }
+};
+
+// ═══════════════════════════════════════════════════════════════
+//   THREADS VIEW (#113) — /threads command
+// ═══════════════════════════════════════════════════════════════
+var threadsViewOpen = false;
+
+function openThreadsView() {
+  var panel = document.getElementById('threads-view');
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+
+  messagesEl.style.display = 'none';
+  typingEl.style.display = 'none';
+  panel.classList.add('open');
+  threadsViewOpen = true;
+
+  document.getElementById('channel-title').textContent = 'Threads';
+  document.getElementById('channel-desc').textContent = 'All active threads';
+
+  panel.textContent = '';
+
+  // Collect all threads
+  var threads = [];
+  var msgKeys = Object.keys(allMessages);
+  for (var i = 0; i < msgKeys.length; i++) {
+    var mid = msgKeys[i];
+    if (threadReplyCounts[mid] && threadReplyCounts[mid] > 0) {
+      threads.push({ id: mid, msg: allMessages[mid], replyCount: threadReplyCounts[mid] });
+    }
+  }
+
+  if (threads.length === 0) {
+    panel.appendChild(el('div', { className: 'cmd-palette-empty', style: { padding: '40px 20px' } }, 'No threads yet. Start a conversation to see threads here.'));
+    var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start' }, onClick: closeThreadsView }, 'Back to messages');
+    panel.appendChild(closeBtn);
+    return;
+  }
+
+  var header = el('div', { className: 'threads-view-header' }, threads.length + ' active thread' + (threads.length !== 1 ? 's' : ''));
+  panel.appendChild(header);
+
+  // Sort by reply count descending
+  threads.sort(function(a, b) { return b.replyCount - a.replyCount; });
+
+  threads.forEach(function(thread) {
+    var msg = thread.msg;
+    if (!msg) return;
+    var fromAgent = AGENTS.find(function(a) { return a.slug === msg.from; });
+    var preview = (msg.content || '').length > 80 ? msg.content.substring(0, 80) + '...' : (msg.content || '(no content)');
+    var timeStr = msg.ts ? new Date(msg.ts).toLocaleString() : '';
+
+    var item = el('div', { className: 'thread-list-item', onClick: (function(mid) { return function() { closeThreadsView(); openThread(mid); }; })(thread.id) });
+
+    var avatarDiv = el('div', { className: 'thread-list-item-avatar' });
+    if (fromAgent) {
+      avatarDiv.appendChild(renderPixelAvatar(fromAgent.slug, 32));
+    } else {
+      avatarDiv.textContent = '💬';
+    }
+
+    var body = el('div', { className: 'thread-list-item-body' });
+    body.appendChild(el('div', { className: 'thread-list-item-preview' }, preview));
+
+    var meta = el('div', { className: 'thread-list-item-meta' });
+    meta.appendChild(el('span', { className: 'thread-list-item-replies' }, thread.replyCount + ' repl' + (thread.replyCount === 1 ? 'y' : 'ies')));
+    if (fromAgent) meta.appendChild(el('span', null, fromAgent.name));
+    if (timeStr) meta.appendChild(el('span', null, timeStr));
+    body.appendChild(meta);
+
+    item.appendChild(avatarDiv);
+    item.appendChild(body);
+    panel.appendChild(item);
+  });
+
+  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: closeThreadsView }, 'Back to messages');
+  panel.appendChild(closeBtn);
+}
+
+function closeThreadsView() {
+  var panel = document.getElementById('threads-view');
+  var messagesEl = document.getElementById('messages');
+  panel.classList.remove('open');
+  messagesEl.style.display = '';
+  threadsViewOpen = false;
+
+  var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
+  document.getElementById('channel-title').textContent = '# ' + currentChannel;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   AGENTS VIEW (#111) — /agents command
+// ═══════════════════════════════════════════════════════════════
+var agentsViewOpen = false;
+
+function openAgentsView() {
+  var panel = document.getElementById('agents-grid-view');
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+
+  messagesEl.style.display = 'none';
+  typingEl.style.display = 'none';
+  panel.classList.add('open');
+  agentsViewOpen = true;
+
+  document.getElementById('channel-title').textContent = 'Agents';
+  document.getElementById('channel-desc').textContent = 'All team members';
+
+  panel.textContent = '';
+
+  var header = el('div', { className: 'threads-view-header' }, AGENTS.length + ' agent' + (AGENTS.length !== 1 ? 's' : ''));
+  panel.appendChild(header);
+
+  var grid = el('div', { className: 'agents-grid' });
+
+  AGENTS.forEach(function(agent) {
+    var member = cachedMembers.find(function(m) { return m.slug === agent.slug; });
+    var ac = classifyActivity(member);
+    var task = findAgentTask(agent.slug);
+
+    var card = el('div', { className: 'agent-grid-card', onClick: (function(slug) { return function() { closeAgentsView(); openAgentPanel(slug); }; })(agent.slug) });
+
+    var avatarWrap = el('div', { style: { width: '48px', height: '48px' } });
+    avatarWrap.appendChild(renderPixelAvatar(agent.slug, 48));
+    card.appendChild(avatarWrap);
+
+    card.appendChild(el('div', { className: 'agent-grid-card-name' }, agent.name));
+    card.appendChild(el('div', { className: 'agent-grid-card-role' }, agent.role));
+
+    var statusRow = el('div', { className: 'agent-grid-card-status' });
+    statusRow.appendChild(el('span', { className: 'agent-grid-card-dot ' + ac.dotClass }));
+    statusRow.appendChild(document.createTextNode(ac.label));
+    if (!agent.checked) {
+      statusRow.appendChild(document.createTextNode(' (inactive)'));
+    }
+    card.appendChild(statusRow);
+
+    if (task) {
+      card.appendChild(el('div', { className: 'agent-grid-card-task' }, task.title || task.id));
+    }
+
+    grid.appendChild(card);
+  });
+
+  panel.appendChild(grid);
+
+  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: closeAgentsView }, 'Back to messages');
+  panel.appendChild(closeBtn);
+}
+
+function closeAgentsView() {
+  var panel = document.getElementById('agents-grid-view');
+  var messagesEl = document.getElementById('messages');
+  panel.classList.remove('open');
+  messagesEl.style.display = '';
+  agentsViewOpen = false;
+
+  var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
+  document.getElementById('channel-title').textContent = '# ' + currentChannel;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   INSERT PICKER (#65, #108) — /insert command
+// ═══════════════════════════════════════════════════════════════
+function openInsertPicker() {
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = '';
+  cmdPaletteInput.placeholder = 'Insert reference: agent, task, or message...';
+  cmdSelectedIdx = -1;
+  searchMode = false;
+  cmdPaletteInput._insertPickerMode = true;
+  renderInsertPickerResults('');
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function renderInsertPickerResults(query) {
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+  var q = (query || '').toLowerCase().trim();
+  var groups = [];
+
+  // Agents
+  var agentItems = [];
+  AGENTS.forEach(function(a) {
+    if (!q || a.name.toLowerCase().indexOf(q) !== -1 || a.slug.toLowerCase().indexOf(q) !== -1) {
+      agentItems.push({
+        icon: a.emoji,
+        label: '@' + a.slug,
+        desc: a.name + ' — ' + a.role,
+        action: (function(slug) { return function() { closeCommandPalette(); insertIntoComposer('@' + slug + ' '); }; })(a.slug)
+      });
+    }
+  });
+  if (agentItems.length) groups.push({ title: 'Agents', items: agentItems });
+
+  // Tasks
+  var taskItems = [];
+  for (var ti = 0; ti < cachedTasks.length && taskItems.length < 8; ti++) {
+    var task = cachedTasks[ti];
+    var taskLabel = task.title || task.id || '';
+    if (!q || taskLabel.toLowerCase().indexOf(q) !== -1) {
+      taskItems.push({
+        icon: '📋',
+        label: 'Task #' + (task.id || ti),
+        desc: taskLabel,
+        action: (function(tid) { return function() { closeCommandPalette(); insertIntoComposer('Task #' + tid + ' '); }; })(task.id || ti)
+      });
+    }
+  }
+  if (taskItems.length) groups.push({ title: 'Tasks', items: taskItems });
+
+  // Recent messages
+  var msgItems = [];
+  var msgKeys = Object.keys(allMessages);
+  for (var mi = msgKeys.length - 1; mi >= 0 && msgItems.length < 5; mi--) {
+    var m = allMessages[msgKeys[mi]];
+    if (!m.content) continue;
+    if (!q || m.content.toLowerCase().indexOf(q) !== -1) {
+      var fromAgent = AGENTS.find(function(a) { return a.slug === m.from; });
+      msgItems.push({
+        icon: fromAgent ? fromAgent.emoji : '💬',
+        label: (fromAgent ? fromAgent.name : m.from) + ': ' + (m.content.length > 40 ? m.content.substring(0, 40) + '...' : m.content),
+        desc: 'message',
+        action: (function(mid) { return function() { closeCommandPalette(); insertIntoComposer(mid + ' '); }; })(m.id)
+      });
+    }
+  }
+  if (msgItems.length) groups.push({ title: 'Recent Messages', items: msgItems });
+
+  if (groups.length === 0) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, q ? 'No results for "' + query + '"' : 'Nothing to insert'));
+    return;
+  }
+
+  groups.forEach(function(group) {
+    var groupDiv = el('div', { className: 'cmd-palette-group' });
+    groupDiv.appendChild(el('div', { className: 'cmd-palette-group-title' }, group.title));
+    group.items.forEach(function(item) {
+      var idx = cmdFlatItems.length;
+      cmdFlatItems.push(item);
+      var row = el('div', { className: 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : ''), onClick: function() { selectCommandPaletteItem(idx); } });
+      row.appendChild(el('div', { className: 'cmd-palette-item-icon' }, item.icon));
+      var text = el('div', { className: 'cmd-palette-item-text' });
+      text.appendChild(el('div', { className: 'cmd-palette-item-label' }, item.label));
+      if (item.desc) text.appendChild(el('div', { className: 'cmd-palette-item-desc' }, item.desc));
+      row.appendChild(text);
+      groupDiv.appendChild(row);
+    });
+    cmdPaletteResults.appendChild(groupDiv);
+  });
+}
+
+function insertIntoComposer(text) {
+  var ci = document.getElementById('composer-input');
+  if (!ci) return;
+  var start = ci.selectionStart || ci.value.length;
+  ci.value = ci.value.substring(0, start) + text + ci.value.substring(ci.selectionEnd || start);
+  ci.focus();
+  ci.selectionStart = ci.selectionEnd = start + text.length;
+  var sendBtn = document.getElementById('composer-send');
+  if (sendBtn) sendBtn.disabled = !ci.value.trim();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   REWIND PICKER (#66, #119) — /rewind command
+// ═══════════════════════════════════════════════════════════════
+function openRewindPicker() {
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = '';
+  cmdPaletteInput.placeholder = 'Select a checkpoint to rewind to...';
+  cmdSelectedIdx = -1;
+  searchMode = false;
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+
+  cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'Loading checkpoints...'));
+
+  WuphfAPI.get('/state').then(function(state) {
+    renderRewindResults(state);
+  }).catch(function() {
+    renderRewindResults({});
+  });
+
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function renderRewindResults(state) {
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+
+  var recovery = state.recovery || {};
+  var checkpoints = [];
+
+  // Build checkpoint list from available state
+  if (recovery.checkpoints && recovery.checkpoints.length > 0) {
+    recovery.checkpoints.forEach(function(cp) {
+      checkpoints.push({
+        label: cp.label || cp.id || 'Checkpoint',
+        desc: cp.ts ? new Date(cp.ts).toLocaleString() : '',
+        id: cp.id || ''
+      });
+    });
+  }
+
+  // Add current session as a "checkpoint"
+  checkpoints.unshift({
+    label: 'Current session — ' + Object.keys(allMessages).length + ' messages',
+    desc: 'Now',
+    id: 'current'
+  });
+
+  // Add task-state snapshot
+  if (cachedTasks.length > 0) {
+    var doneTasks = cachedTasks.filter(function(t) { return t.status === 'done' || t.status === 'completed'; });
+    var activeTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; });
+    checkpoints.push({
+      label: 'Task snapshot — ' + doneTasks.length + ' done, ' + activeTasks.length + ' active',
+      desc: 'Task state',
+      id: 'tasks'
+    });
+  }
+
+  // Add recovery focus if present
+  if (recovery.focus) {
+    checkpoints.push({
+      label: 'Last focus: ' + recovery.focus,
+      desc: recovery.away_since ? 'Away since ' + recovery.away_since : 'Recovery data',
+      id: 'focus'
+    });
+  }
+
+  if (checkpoints.length <= 1) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'No checkpoints available. Session data will appear as agents work.'));
+    return;
+  }
+
+  var groupDiv = el('div', { className: 'cmd-palette-group' });
+  groupDiv.appendChild(el('div', { className: 'cmd-palette-group-title' }, 'Checkpoints'));
+
+  checkpoints.forEach(function(cp) {
+    var idx = cmdFlatItems.length;
+    cmdFlatItems.push({
+      icon: cp.id === 'current' ? '📍' : '⏪',
+      label: cp.label,
+      desc: cp.desc,
+      action: (function(checkpoint) { return function() {
+        closeCommandPalette();
+        var prompt = '/recover';
+        if (checkpoint.id && checkpoint.id !== 'current') {
+          prompt = 'Rewind to: ' + checkpoint.label;
+        }
+        var ci = document.getElementById('composer-input');
+        if (ci) {
+          ci.value = prompt;
+          ci.focus();
+          var sendBtn = document.getElementById('composer-send');
+          if (sendBtn) sendBtn.disabled = false;
+        }
+      }; })(cp)
+    });
+
+    var row = el('div', { className: 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : ''), onClick: function() { selectCommandPaletteItem(idx); } });
+    row.appendChild(el('div', { className: 'cmd-palette-item-icon' }, cp.id === 'current' ? '📍' : '⏪'));
+    var text = el('div', { className: 'cmd-palette-item-text' });
+    text.appendChild(el('div', { className: 'cmd-palette-item-label' }, cp.label));
+    if (cp.desc) text.appendChild(el('div', { className: 'cmd-palette-item-desc' }, cp.desc));
+    row.appendChild(text);
+    groupDiv.appendChild(row);
+  });
+
+  cmdPaletteResults.appendChild(groupDiv);
+}
+
+// ─── Patch closeCommandPalette to clean up picker modes ───
+var _prevCloseCP = closeCommandPalette;
+closeCommandPalette = function() {
+  cmdPaletteInput._searchPickerMode = false;
+  cmdPaletteInput._insertPickerMode = false;
+  _prevCloseCP();
+};
+
+// ─── Patch input handler to route to active picker ───
+cmdPaletteInput.addEventListener('input', function() {
+  if (cmdPaletteInput._insertPickerMode) {
+    cmdSelectedIdx = -1;
+    renderInsertPickerResults(cmdPaletteInput.value.trim());
+  }
 });
 </script>
 
