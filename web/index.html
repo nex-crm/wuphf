@@ -376,12 +376,15 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .thread-reply-parent-label { font-size: 10px; color: var(--text-tertiary); margin-bottom: 2px; font-style: italic; }
 
 /* ─── Inline thread expand ─── */
-.inline-thread-container { margin-left: 48px; padding: 4px 0 4px 12px; border-left: 2px solid var(--border-light); }
+.inline-thread-container { margin-left: 48px; padding: 4px 0 4px 12px; border-left: 2px solid var(--border-light); display: flex; flex-direction: column; gap: 8px; }
+.inline-thread-container[hidden] { display: none; }
 .inline-thread-container .message { margin-bottom: 8px; }
-.inline-thread-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: transparent; font-family: var(--font-sans); padding: 2px 6px; border-radius: 4px; margin-top: 4px; }
+.inline-thread-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: 1px solid var(--border); background: var(--bg); font-family: var(--font-sans); padding: 4px 8px; border-radius: 999px; margin-top: 0; transition: background 0.15s, border-color 0.15s, color 0.15s; }
 .inline-thread-toggle:hover { background: var(--accent-bg); }
+.inline-thread-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .inline-thread-toggle svg { transition: transform 0.2s; }
 .inline-thread-toggle.expanded svg { transform: rotate(90deg); }
+.thread-surface-state { font-size: 12px; color: var(--text-tertiary); padding: 4px 0; }
 
 .message-system { text-align: center; padding: 8px 0; }
 .message-system-inner { display: flex; align-items: center; gap: 12px; padding: 0 20px; }
@@ -422,6 +425,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .thread-panel-title { font-size: 15px; font-weight: 700; }
 .thread-panel-close { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); }
 .thread-panel-close:hover { background: var(--bg); }
+.thread-panel-close:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .thread-panel-parent { padding: 16px; border-bottom: 1px solid var(--border); background: var(--bg); }
 .thread-panel-divider { padding: 8px 16px; font-size: 12px; color: var(--text-tertiary); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
 .thread-panel-divider::before, .thread-panel-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
@@ -429,13 +433,17 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .thread-panel-composer { padding: 8px 12px 12px; border-top: 1px solid var(--border); }
 
 /* ─── Message thread indicators ─── */
-.message-actions { display: none; position: absolute; top: -4px; right: 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 2px; gap: 2px; z-index: 5; }
-.message:hover .message-actions { display: flex; }
+.message-actions { position: absolute; top: -4px; right: 8px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); padding: 2px; gap: 2px; z-index: 5; display: flex; opacity: 0; pointer-events: none; transition: opacity 0.12s ease-out; }
+.message:hover .message-actions, .message:focus-within .message-actions { opacity: 1; pointer-events: auto; }
 .message { position: relative; }
 .message-action-btn { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 4px; color: var(--text-tertiary); transition: all 0.1s; }
 .message-action-btn:hover { background: var(--bg); color: var(--text); }
-.message-thread-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 4px 8px; border-radius: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: transparent; font-family: var(--font-sans); transition: background 0.15s; }
+.message-action-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.message-thread-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.message-thread-link { display: inline-flex; align-items: center; gap: 6px; margin-top: 0; padding: 4px 8px; border-radius: 999px; font-size: 12px; color: var(--accent); cursor: pointer; border: 1px solid var(--border); background: var(--bg); font-family: var(--font-sans); transition: background 0.15s, border-color 0.15s, color 0.15s; }
 .message-thread-link:hover { background: var(--accent-bg); }
+.message-thread-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.message-thread-link[data-active="true"], .inline-thread-toggle[data-active="true"] { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
 .message-thread-link svg { flex-shrink: 0; }
 
 /* ─── Message grouping ─── */
@@ -1235,28 +1243,29 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <span class="status-bar-item" id="status-bar-channel"># general</span>
         <span class="status-bar-item" id="status-bar-mode">office</span>
         <span class="status-bar-spacer"></span>
+        <span class="status-bar-item" id="status-bar-provider" style="font-weight:600;"></span>
         <span class="status-bar-item" id="status-bar-agents">0 agents</span>
         <span class="status-bar-item status-bar-conn" id="status-bar-conn">connected</span>
       </div>
     </div>
 
     <!-- Thread Panel -->
-    <aside class="thread-panel" id="thread-panel">
+    <aside class="thread-panel" id="thread-panel" aria-hidden="true" aria-labelledby="thread-panel-title">
       <div class="thread-panel-header">
-        <span class="thread-panel-title">Thread</span>
-        <button class="thread-panel-close" onclick="closeThreadPanel()">
+        <span class="thread-panel-title" id="thread-panel-title">Thread</span>
+        <button class="thread-panel-close" type="button" aria-label="Close thread" onclick="closeThreadPanel()">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
-      <div class="thread-panel-parent" id="thread-parent"></div>
+      <div class="thread-panel-parent" id="thread-parent" aria-label="Thread parent message"></div>
       <div class="thread-panel-divider">
         <span class="thread-panel-reply-count" id="thread-reply-count"></span>
       </div>
-      <div class="thread-panel-messages" id="thread-messages"></div>
+      <div class="thread-panel-messages" id="thread-messages" role="region" aria-label="Thread replies"></div>
       <div class="thread-panel-composer">
         <div class="composer-inner">
           <textarea class="composer-input" id="thread-composer-input" placeholder="Reply in thread..." rows="1"></textarea>
-          <button class="composer-send" id="thread-composer-send" disabled>
+          <button class="composer-send" id="thread-composer-send" type="button" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/></svg>
           </button>
         </div>
@@ -1766,7 +1775,7 @@ function goToStep(n) {
     s.classList.remove('active');
     s.style.display = 'none';
   });
-  var step = document.querySelector('[data-step="' + n + '"]');
+  var step = document.querySelector('.step[data-step="' + n + '"]');
   if (step) {
     step.style.display = 'block';
     step.classList.remove('animate-fade');
@@ -2972,6 +2981,125 @@ var threadReplyCounts = {}; // msgId -> count of replies
 var allMessages = {}; // msgId -> msg object
 var activeThreadId = null;
 var threadPollTimer = null;
+var threadPanelReturnFocusEl = null;
+
+function threadInlineContainerId(parentId) {
+  return 'inline-thread-' + parentId;
+}
+
+function threadControlsId(parentId) {
+  return 'thread-controls-' + parentId;
+}
+
+function isThreadPanelOpen() {
+  return document.getElementById('thread-panel').classList.contains('open');
+}
+
+function threadRepliesLabel(count) {
+  return count + (count === 1 ? ' reply' : ' replies');
+}
+
+function createThreadState(text) {
+  return el('div', { className: 'thread-surface-state', 'data-thread-state': 'true' }, text);
+}
+
+function removeThreadState(container) {
+  var state = container.querySelector('[data-thread-state]');
+  if (state) state.remove();
+}
+
+function setThreadReplyCount(parentId, count) {
+  if (count > 0) threadReplyCounts[parentId] = count;
+  else delete threadReplyCounts[parentId];
+  updateThreadLink(parentId);
+  if (activeThreadId === parentId) {
+    var replyCount = document.getElementById('thread-reply-count');
+    if (replyCount) replyCount.textContent = threadRepliesLabel(count);
+  }
+}
+
+function ensureInlineThreadContainer(parentId) {
+  var containerId = threadInlineContainerId(parentId);
+  var existing = document.getElementById(containerId);
+  if (existing) return existing;
+
+  var parentEl = document.querySelector('[data-msg-id="' + parentId + '"]');
+  if (!parentEl || !parentEl.parentNode) return null;
+
+  var inlineContainer = el('div', {
+    className: 'inline-thread-container',
+    id: containerId,
+    role: 'region',
+    'aria-label': 'Inline thread replies'
+  });
+  inlineContainer.hidden = true;
+  parentEl.parentNode.insertBefore(inlineContainer, parentEl.nextSibling);
+  return inlineContainer;
+}
+
+function threadReplyRenderOptions(msg, threadRootId) {
+  var depth = calcReplyDepth(msg, threadRootId);
+  return {
+    depth: depth,
+    parentName: getReplyParentName(msg),
+    showReplyContext: depth > 0
+  };
+}
+
+function appendReplyToThreadSurface(container, msg, threadRootId) {
+  if (!container || container.querySelector('[data-msg-id="' + msg.id + '"]')) return;
+  removeThreadState(container);
+  appendMessageToContainer(msg, container, threadReplyRenderOptions(msg, threadRootId));
+}
+
+function renderThreadReplies(container, replies, threadRootId, emptyText) {
+  container.textContent = '';
+  if (!replies.length) {
+    container.appendChild(createThreadState(emptyText || 'No replies yet'));
+    return;
+  }
+  replies.forEach(function(reply) {
+    allMessages[reply.id] = reply;
+    appendMessageToContainer(reply, container, threadReplyRenderOptions(reply, threadRootId));
+  });
+}
+
+function loadThreadReplies(threadRootId) {
+  return WuphfAPI.getThreadMessages(currentChannel, threadRootId)
+    .then(function(data) {
+      var msgs = data.messages || [];
+      var replies = msgs.filter(function(msg) { return msg.id !== threadRootId; });
+      replies.forEach(function(msg) { allMessages[msg.id] = msg; });
+      setThreadReplyCount(threadRootId, replies.length);
+      return replies;
+    });
+}
+
+function renderInlineThread(parentId) {
+  var inlineContainer = ensureInlineThreadContainer(parentId);
+  if (!inlineContainer) return Promise.resolve();
+
+  inlineContainer.hidden = false;
+  inlineContainer.textContent = '';
+  inlineContainer.appendChild(createThreadState('Loading replies...'));
+
+  return loadThreadReplies(parentId)
+    .then(function(replies) {
+      renderThreadReplies(inlineContainer, replies, parentId, 'No replies yet');
+    })
+    .catch(function() {
+      inlineContainer.textContent = '';
+      inlineContainer.appendChild(createThreadState('Could not load replies'));
+    });
+}
+
+function restoreThreadPanelFocus() {
+  var focusTarget = threadPanelReturnFocusEl;
+  threadPanelReturnFocusEl = null;
+  if (focusTarget && focusTarget.isConnected && typeof focusTarget.focus === 'function') {
+    focusTarget.focus();
+  }
+}
 
 // ─── Unread tracking state ───
 var lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + currentChannel) || null;
@@ -3024,8 +3152,18 @@ function appendBrokerMessage(msg) {
   // If this is a reply, update parent's reply count but don't show in main feed.
   // Thread panel has its own poll (threadPollTimer) that handles rendering + dedup.
   if (msg.reply_to) {
-    threadReplyCounts[msg.reply_to] = (threadReplyCounts[msg.reply_to] || 0) + 1;
-    updateThreadLink(msg.reply_to);
+    setThreadReplyCount(msg.reply_to, (threadReplyCounts[msg.reply_to] || 0) + 1);
+
+    if (inlineExpandedThreads[msg.reply_to]) {
+      var inlineContainer = ensureInlineThreadContainer(msg.reply_to);
+      if (inlineContainer && !inlineContainer.hidden) {
+        appendReplyToThreadSurface(inlineContainer, msg, msg.reply_to);
+      }
+    }
+
+    if (activeThreadId === msg.reply_to) {
+      appendReplyToThreadSurface(document.getElementById('thread-messages'), msg, msg.reply_to);
+    }
     return;
   }
 
@@ -3226,6 +3364,10 @@ function appendMessageToContainer(msg, container, opts) {
 
   content.appendChild(header);
 
+  if (opts.showReplyContext && opts.parentName) {
+    content.appendChild(el('div', { className: 'thread-reply-to' }, 'Replying to ' + opts.parentName));
+  }
+
   // Human message cards (#7)
   if (msg.kind === 'human_decision' || msg.kind === 'human_action') {
     var hCard = el('div', { className: 'message-card-human' + (msg.kind === 'human_action' ? ' action' : '') });
@@ -3291,7 +3433,9 @@ function appendMessageToContainer(msg, container, opts) {
   quoteActions.className = 'message-actions';
   var quoteBtn = document.createElement('button');
   quoteBtn.className = 'message-action-btn';
+  quoteBtn.type = 'button';
   quoteBtn.title = 'Quote reply';
+  quoteBtn.setAttribute('aria-label', 'Quote reply');
   quoteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z"/></svg>';
   quoteBtn.addEventListener('click', (function(m) {
     return function() {
@@ -3345,30 +3489,14 @@ function appendMessageToContainer(msg, container, opts) {
   })(msg));
   quoteActions.appendChild(quoteBtn);
 
-  // Thread link (shows "N replies" if this message has replies)
+  // Main-feed thread controls are always keyboard reachable.
   if (container.id === 'messages') {
-    var threadLink = document.createElement('button');
-    threadLink.className = 'message-thread-link';
-    threadLink.id = 'thread-link-' + msg.id;
-    threadLink.style.display = 'none';
-    threadLink.addEventListener('click', function() { openThread(msg.id); });
-    content.appendChild(threadLink);
-
-    // Action buttons (reply in thread only — no quote in main feed)
-    var actions = document.createElement('div');
-    actions.className = 'message-actions';
-    var replyBtn = document.createElement('button');
-    replyBtn.className = 'message-action-btn';
-    replyBtn.title = 'Reply in thread';
-    replyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-    replyBtn.addEventListener('click', function() { openThread(msg.id); });
-    actions.appendChild(replyBtn);
-    msgDiv.appendChild(actions);
-
-    // Show thread link if replies exist
-    if (threadReplyCounts[msg.id]) {
-      updateThreadLink(msg.id);
-    }
+    var threadControls = document.createElement('div');
+    threadControls.className = 'message-thread-controls';
+    threadControls.id = threadControlsId(msg.id);
+    threadControls.setAttribute('role', 'group');
+    threadControls.setAttribute('aria-label', 'Thread actions for ' + author.textContent);
+    content.appendChild(threadControls);
   }
 
   // For thread panel messages: add quote button
@@ -3379,63 +3507,66 @@ function appendMessageToContainer(msg, container, opts) {
   msgDiv.appendChild(avatar);
   msgDiv.appendChild(content);
   container.appendChild(msgDiv);
+
+  if (container.id === 'messages') {
+    updateThreadLink(msg.id);
+  }
+
   return msgDiv;
 }
 
 var inlineExpandedThreads = {};
 
 function updateThreadLink(parentId) {
-  var link = document.getElementById('thread-link-' + parentId);
-  if (!link) return;
+  var controls = document.getElementById(threadControlsId(parentId));
+  if (!controls) return;
   var count = threadReplyCounts[parentId] || 0;
+  var inlineExpanded = !!inlineExpandedThreads[parentId];
+  var panelOpen = activeThreadId === parentId && isThreadPanelOpen();
+
+  controls.textContent = '';
+
   if (count > 0) {
-    link.style.display = 'inline-flex';
-    link.textContent = '';
-    var toggle = document.createElement('button');
-    toggle.className = 'inline-thread-toggle' + (inlineExpandedThreads[parentId] ? ' expanded' : '');
-    toggle.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
-    toggle.addEventListener('click', function(e) { e.stopPropagation(); toggleInlineThread(parentId); });
-    link.appendChild(toggle);
-    var icon = document.createElement('span');
-    icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
-    link.appendChild(icon);
-    var text = document.createElement('span');
-    text.textContent = count + (count === 1 ? ' reply' : ' replies');
-    link.appendChild(text);
+    var inlineBtn = document.createElement('button');
+    inlineBtn.className = 'inline-thread-toggle' + (inlineExpanded ? ' expanded' : '');
+    inlineBtn.type = 'button';
+    inlineBtn.setAttribute('data-active', inlineExpanded ? 'true' : 'false');
+    inlineBtn.setAttribute('aria-controls', threadInlineContainerId(parentId));
+    inlineBtn.setAttribute('aria-expanded', inlineExpanded ? 'true' : 'false');
+    inlineBtn.setAttribute('aria-label', (inlineExpanded ? 'Hide ' : 'Show ') + threadRepliesLabel(count) + ' inline');
+    inlineBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg><span>' + threadRepliesLabel(count) + '</span>';
+    inlineBtn.addEventListener('click', function() { toggleInlineThread(parentId); });
+    controls.appendChild(inlineBtn);
   }
+
+  var panelBtn = document.createElement('button');
+  panelBtn.className = 'message-thread-link';
+  panelBtn.type = 'button';
+  panelBtn.setAttribute('data-active', panelOpen ? 'true' : 'false');
+  panelBtn.setAttribute('aria-controls', 'thread-panel');
+  panelBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
+  panelBtn.setAttribute('aria-label', panelOpen ? 'Thread panel open' : (count > 0 ? 'Open thread panel' : 'Reply in thread'));
+  panelBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>' + (count > 0 ? (panelOpen ? 'Thread open' : 'Open thread') : 'Reply in thread') + '</span>';
+  panelBtn.addEventListener('click', function() {
+    openThread(parentId, { triggerEl: panelBtn });
+  });
+  controls.appendChild(panelBtn);
 }
 
 function toggleInlineThread(parentId) {
-  var containerId = 'inline-thread-' + parentId;
-  var existing = document.getElementById(containerId);
-  if (existing) {
-    existing.remove();
+  var inlineContainer = ensureInlineThreadContainer(parentId);
+  if (!inlineContainer) return;
+
+  if (inlineExpandedThreads[parentId]) {
     inlineExpandedThreads[parentId] = false;
+    inlineContainer.hidden = true;
     updateThreadLink(parentId);
     return;
   }
+
   inlineExpandedThreads[parentId] = true;
   updateThreadLink(parentId);
-  var parentEl = document.querySelector('[data-msg-id="' + parentId + '"]');
-  if (!parentEl) return;
-  var inlineContainer = el('div', { className: 'inline-thread-container', id: containerId });
-  inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'Loading replies...'));
-  parentEl.parentNode.insertBefore(inlineContainer, parentEl.nextSibling);
-  WuphfAPI.getThreadMessages(currentChannel, parentId)
-    .then(function(data) {
-      inlineContainer.textContent = '';
-      var msgs = data.messages || [];
-      var replies = msgs.filter(function(m) { return m.id !== parentId; });
-      if (replies.length === 0) {
-        inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'No replies yet'));
-        return;
-      }
-      replies.forEach(function(m) { allMessages[m.id] = m; appendMessageToContainer(m, inlineContainer); });
-    })
-    .catch(function() {
-      inlineContainer.textContent = '';
-      inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'Could not load replies'));
-    });
+  renderInlineThread(parentId);
 }
 
 // ─── Thread panel ───
@@ -3460,7 +3591,13 @@ function getReplyParentName(msg) {
   return agent ? agent.name : parent.from;
 }
 
-function openThread(msgId) {
+function openThread(msgId, opts) {
+  opts = opts || {};
+  var previousThreadId = activeThreadId;
+  var opener = opts.triggerEl || (document.activeElement && document.activeElement !== document.body ? document.activeElement : null);
+  if (opener && typeof opener.focus === 'function') {
+    threadPanelReturnFocusEl = opener;
+  }
   activeThreadId = msgId;
   closeAgentPanel();
   var panel = document.getElementById('thread-panel');
@@ -3478,26 +3615,27 @@ function openThread(msgId) {
   }
 
   panel.classList.add('open');
+  panel.setAttribute('aria-hidden', 'false');
+  if (previousThreadId && previousThreadId !== msgId) {
+    updateThreadLink(previousThreadId);
+  }
+  updateThreadLink(msgId);
 
   // Single function to fetch and render thread replies with dedup
   function fetchAndRenderThreadReplies() {
-    WuphfAPI.getThreadMessages(currentChannel, msgId)
-      .then(function(data) {
-        var msgs = data.messages || [];
-        var replies = msgs.filter(function(m) { return m.id !== msgId; });
-        replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
+    loadThreadReplies(msgId)
+      .then(function(replies) {
+        replyCount.textContent = threadRepliesLabel(replies.length);
 
-        // Dedup: only append messages not already in the DOM
-        var existing = messagesContainer.querySelectorAll('[data-msg-id]');
-        var existingIds = {};
-        existing.forEach(function(el) { existingIds[el.dataset.msgId] = true; });
-
-        replies.forEach(function(m) {
-          allMessages[m.id] = m;
-          if (!existingIds[m.id]) {
-            appendMessageToContainer(m, messagesContainer);
-          }
-        });
+        if (!messagesContainer.querySelector('[data-msg-id]') && !messagesContainer.querySelector('[data-thread-state]')) {
+          renderThreadReplies(messagesContainer, replies, msgId, 'No replies yet');
+        } else if (!replies.length) {
+          renderThreadReplies(messagesContainer, replies, msgId, 'No replies yet');
+        } else {
+          replies.forEach(function(reply) {
+            appendReplyToThreadSurface(messagesContainer, reply, msgId);
+          });
+        }
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
       });
   }
@@ -3508,13 +3646,23 @@ function openThread(msgId) {
   threadPollTimer = setInterval(fetchAndRenderThreadReplies, 2000);
 
   // Focus thread composer
-  document.getElementById('thread-composer-input').focus();
+  if (opts.focusComposer !== false) {
+    document.getElementById('thread-composer-input').focus();
+  }
 }
 
-function closeThreadPanel() {
+function closeThreadPanel(opts) {
+  opts = opts || {};
+  var closingThreadId = activeThreadId;
   activeThreadId = null;
-  document.getElementById('thread-panel').classList.remove('open');
+  var panel = document.getElementById('thread-panel');
+  panel.classList.remove('open');
+  panel.setAttribute('aria-hidden', 'true');
+  if (closingThreadId) updateThreadLink(closingThreadId);
   if (threadPollTimer) { clearInterval(threadPollTimer); threadPollTimer = null; }
+  if (opts.restoreFocus !== false) {
+    restoreThreadPanelFocus();
+  }
 }
 
 // ─── Request polling ───
@@ -3689,11 +3837,13 @@ function renderReplyBadge() {
 
 // ─── Composer context hints (#38) ───
 // --- Status bar (#91) ---
+var _cachedProvider = '';
 function updateStatusBar() {
   var chEl = document.getElementById('status-bar-channel');
   var modeEl = document.getElementById('status-bar-mode');
   var agentsEl = document.getElementById('status-bar-agents');
   var connEl = document.getElementById('status-bar-conn');
+  var provEl = document.getElementById('status-bar-provider');
   if (!chEl) return;
   chEl.textContent = currentApp ? currentApp : '# ' + currentChannel;
   modeEl.textContent = dmModeActive ? '1:1' : 'office';
@@ -3702,6 +3852,17 @@ function updateStatusBar() {
   if (connEl) {
     connEl.textContent = brokerConnected ? 'connected' : 'disconnected';
     connEl.className = 'status-bar-item status-bar-conn' + (brokerConnected ? '' : ' disconnected');
+  }
+  // Fetch provider from /health (no auth required)
+  if (provEl && brokerConnected && !_cachedProvider) {
+    fetch('/api/health').then(function(r) { return r.json(); }).then(function(data) {
+      var p = data.provider || 'unknown';
+      _cachedProvider = p;
+      provEl.textContent = '\u2699 ' + p;
+      provEl.title = 'Runtime provider: ' + p;
+    }).catch(function() {});
+  } else if (provEl && _cachedProvider) {
+    provEl.textContent = '\u2699 ' + _cachedProvider;
   }
 }
 
@@ -3933,6 +4094,11 @@ if (threadInput) {
       if (e.key === 'ArrowUp') { e.preventDefault(); acSelectedIdx = Math.max(acSelectedIdx - 1, 0); renderAutocomplete(); return; }
       if (e.key === 'Tab' || (e.key === 'Enter' && acSelectedIdx >= 0)) { e.preventDefault(); selectAutocompleteFor(acSelectedIdx >= 0 ? acSelectedIdx : 0, threadInput); return; }
       if (e.key === 'Escape') { acPanel.classList.remove('open'); acSelectedIdx = -1; return; }
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeThreadPanel();
+      return;
     }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendThreadReply(); }
   });

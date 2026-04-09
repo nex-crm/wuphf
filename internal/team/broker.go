@@ -336,6 +336,7 @@ type Broker struct {
 	token               string   // shared secret for authenticating requests
 	addr                string   // actual listen address (useful when port=0)
 	webUIOrigins        []string // allowed CORS origins for web UI (set by ServeWebUI)
+	runtimeProvider     string   // "codex" or "claude" — set by launcher
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -2332,6 +2333,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":           "ok",
 		"session_mode":     mode,
 		"one_on_one_agent": agent,
+		"provider":         b.runtimeProvider,
 	})
 }
 
