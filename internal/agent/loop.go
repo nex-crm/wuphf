@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,7 +48,6 @@ type AgentLoop struct {
 	collectedInsights []string
 	taskLogRoot       string
 	lastCompactionAt  int
-	focusModeChecker  func() bool
 	mu                sync.Mutex
 }
 
@@ -106,6 +106,37 @@ func (l *AgentLoop) GetState() AgentState {
 	return l.state
 }
 
+// CanProcess reports whether the loop is started and not paused.
+func (l *AgentLoop) CanProcess() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.running && !l.paused
+}
+
+// IsBusy reports whether the loop is actively processing a turn.
+func (l *AgentLoop) IsBusy() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	switch l.state.Phase {
+	case PhaseBuildContext, PhaseStreamLLM, PhaseExecuteTool:
+		return l.running && !l.paused
+	default:
+		return false
+	}
+}
+
+// Interrupt cancels in-flight provider or tool work so newer queued work can start.
+func (l *AgentLoop) Interrupt() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.cancelFunc == nil {
+		return false
+	}
+	l.cancelFunc()
+	l.cancelFunc = nil
+	return true
+}
+
 // Start marks the loop as running and sets phase to idle.
 func (l *AgentLoop) Start() {
 	l.mu.Lock()
@@ -145,13 +176,6 @@ func (l *AgentLoop) AddInsight(insight string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.collectedInsights = append(l.collectedInsights, insight)
-}
-
-// SetFocusModeChecker injects a callback that reports whether focus mode is active.
-func (l *AgentLoop) SetFocusModeChecker(checker func() bool) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.focusModeChecker = checker
 }
 
 // Tick advances the state machine by one step. Called by the service's tick loop.
@@ -256,7 +280,7 @@ func (l *AgentLoop) buildContext() error {
 	}
 
 	// Inject gossip insights if gossip layer is available.
-	if l.gossipLayer != nil && !l.focusModeEnabled() {
+	if l.gossipLayer != nil {
 		l.injectGossipInsights()
 	}
 
@@ -301,13 +325,6 @@ func (l *AgentLoop) injectGossipInsights() {
 		}
 		// "reject" is silently dropped.
 	}
-}
-
-func (l *AgentLoop) focusModeEnabled() bool {
-	if l.focusModeChecker == nil {
-		return false
-	}
-	return l.focusModeChecker()
 }
 
 // streamLLM streams output from the LLM and processes chunks.
@@ -359,6 +376,11 @@ func (l *AgentLoop) streamLLM() error {
 	for chunk := range ch {
 		select {
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				l.pendingToolCall = nil
+				l.setPhase(PhaseIdle)
+				return nil
+			}
 			return ctx.Err()
 		default:
 		}
@@ -390,6 +412,11 @@ func (l *AgentLoop) streamLLM() error {
 	}
 
 done:
+	if errors.Is(ctx.Err(), context.Canceled) {
+		l.pendingToolCall = nil
+		l.setPhase(PhaseIdle)
+		return nil
+	}
 	// Append assistant text to session.
 	if fullText.Len() > 0 {
 		l.sessions.Append(l.state.SessionID, SessionEntry{
@@ -466,6 +493,12 @@ func (l *AgentLoop) executeTool() error {
 	result, err := tool.Execute(tc.Params, ctx, func(s string) {})
 	tc.CompletedAt = time.Now().UnixMilli()
 
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		l.pendingToolCall = nil
+		l.setPhase(PhaseIdle)
+		return nil
+	}
+
 	if err != nil {
 		tc.Error = err.Error()
 		l.emit(EventToolResult, err.Error())
@@ -513,7 +546,7 @@ func (l *AgentLoop) handleDone() error {
 	}
 
 	// Publish collected insights via gossip.
-	if l.gossipLayer != nil && len(l.collectedInsights) > 0 && !l.focusModeEnabled() {
+	if l.gossipLayer != nil && len(l.collectedInsights) > 0 {
 		for _, insight := range l.collectedInsights {
 			l.gossipLayer.Publish(slug, insight, "")
 		}

@@ -181,8 +181,8 @@ func buildRequestLines(requests []channelInterview, contentWidth int) []rendered
 		if timing := renderTimingSummary(req.DueAt, req.FollowUpAt, req.ReminderAt, req.RecheckAt); timing != "" {
 			lines = append(lines, renderedLine{Text: "  " + muted.Render(timing), RequestID: req.ID})
 		}
-		if recommended := req.recommendedOptionLabel(); recommended != "" {
-			lines = append(lines, renderedLine{Text: "  " + highlight.Render("Recommended: "+recommended), RequestID: req.ID})
+		if req.RecommendedID != "" {
+			lines = append(lines, renderedLine{Text: "  " + highlight.Render("Recommended: "+req.RecommendedID), RequestID: req.ID})
 		}
 		lines = append(lines, renderedLine{Text: "  " + muted.Render("Click to focus, answer, or snooze. Esc hides it locally; the team still waits."), RequestID: req.ID})
 	}

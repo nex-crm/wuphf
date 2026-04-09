@@ -53,7 +53,6 @@ func TestBuildCodexOfficeConfigOverridesIncludesOfficeMCPEnv(t *testing.T) {
 		headlessCodexLookPath = oldLookPath
 	}()
 
-	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_NO_NEX", "1")
 
 	broker := NewBroker()

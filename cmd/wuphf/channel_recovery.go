@@ -22,7 +22,7 @@ func (m channelModel) currentRuntimeSnapshot() team.RuntimeSnapshot {
 }
 
 func (m channelModel) buildRecoveryLines(contentWidth int) []renderedLine {
-	return buildRecoveryLines(m.currentWorkspaceUIState(), contentWidth, m.tasks, m.requests, m.messages, m.currentArtifactSnapshot(24))
+	return buildRecoveryLines(m.currentWorkspaceUIState(), contentWidth, m.tasks, m.requests, m.messages)
 }
 
 func runtimeTasksFromChannel(tasks []channelTask) []team.RuntimeTask {
@@ -126,7 +126,7 @@ func renderAwayStrip(width, unreadCount int, summary string) string {
 		Render(label)
 }
 
-func buildRecoveryLines(workspace workspaceUIState, contentWidth int, tasks []channelTask, requests []channelInterview, messages []brokerMessage, artifacts runtimeArtifactSnapshot) []renderedLine {
+func buildRecoveryLines(workspace workspaceUIState, contentWidth int, tasks []channelTask, requests []channelInterview, messages []brokerMessage) []renderedLine {
 	snapshot := workspace.Runtime
 	muted := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 	lines := []renderedLine{{Text: renderDateSeparator(contentWidth, "Recovery")}}
@@ -196,24 +196,10 @@ func buildRecoveryLines(workspace workspaceUIState, contentWidth int, tasks []ch
 	if actionLines := buildRecoveryActionLines(contentWidth, tasks, requests, messages); len(actionLines) > 0 {
 		lines = append(lines, actionLines...)
 	}
-	if artifactLines := buildRecoveryArtifactLines(contentWidth, artifacts); len(artifactLines) > 0 {
-		lines = append(lines, artifactLines...)
-	}
 	if surgeryLines := buildRecoverySurgeryLines(contentWidth, tasks, requests, messages); len(surgeryLines) > 0 {
 		lines = append(lines, surgeryLines...)
 	}
 
-	return lines
-}
-
-func buildRecoveryArtifactLines(contentWidth int, artifacts runtimeArtifactSnapshot) []renderedLine {
-	lines := []renderedLine{}
-	if review := artifacts.ReviewCandidates(2); len(review) > 0 {
-		lines = append(lines, renderArtifactFocusSection(contentWidth, "Review next", "#B45309", review, true)...)
-	}
-	if resume := artifacts.ResumeCandidates(2); len(resume) > 0 {
-		lines = append(lines, renderArtifactFocusSection(contentWidth, "Resume next", "#2563EB", resume, false)...)
-	}
 	return lines
 }
 
@@ -229,8 +215,8 @@ func buildRecoveryActionLines(contentWidth int, tasks []channelTask, requests []
 			body = strings.TrimSpace(req.Question)
 		}
 		extra := []string{"Asked by @" + fallbackString(req.From, "unknown")}
-		if recommended := req.recommendedOptionLabel(); recommended != "" {
-			extra = append(extra, "Recommended: "+recommended)
+		if strings.TrimSpace(req.RecommendedID) != "" {
+			extra = append(extra, "Recommended: "+req.RecommendedID)
 		}
 		extra = append(extra, "Open request")
 		lines = append(lines, prefixedCardLines(renderedCardLines(renderRecoveryActionCard(contentWidth, header, body, "#B45309", extra), "", req.ID, strings.TrimSpace(req.ReplyTo), ""), "  ")...)

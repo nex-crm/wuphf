@@ -146,7 +146,6 @@ type channelHealthMsg struct {
 	Connected     bool
 	SessionMode   string
 	OneOnOneAgent string
-	FocusMode     bool
 }
 
 type brokerReaction struct {
@@ -358,10 +357,6 @@ type channelResetDoneMsg struct {
 	sessionMode   string
 	oneOnOneAgent string
 }
-type channelFocusModeDoneMsg struct {
-	err     error
-	enabled bool
-}
 type channelResetDMDoneMsg struct {
 	err     error
 	removed int
@@ -450,7 +445,6 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "integrate", Description: "Connect an integration", Category: "setup"},
 	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)", Category: "setup"},
 	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode", Category: "session"},
-	{Name: "focus", Description: "Enable or disable CEO-routed focus mode", Category: "session"},
 	{Name: "messages", Description: "Show the main office feed", Category: "navigate"},
 	{Name: "inbox", Description: "Show the selected agent inbox lane in 1:1 mode", Category: "navigate"},
 	{Name: "outbox", Description: "Show the selected agent outbox lane in 1:1 mode", Category: "navigate"},
@@ -533,7 +527,6 @@ const (
 	channelPickerCalendarAgent  channelPickerMode = "calendar_agent"
 	channelPickerOneOnOneMode   channelPickerMode = "one_on_one_mode"
 	channelPickerOneOnOneAgent  channelPickerMode = "one_on_one_agent"
-	channelPickerFocusMode      channelPickerMode = "focus_mode"
 	channelPickerTelegramGroup  channelPickerMode = "telegram_group"
 	channelPickerConnect        channelPickerMode = "connect"
 	channelPickerTelegramToken  channelPickerMode = "telegram_token"
@@ -657,7 +650,6 @@ type channelModel struct {
 	brokerConnected     bool
 	sessionMode         string
 	oneOnOneAgent       string
-	focusMode           bool
 	lastCtrlCAt         time.Time
 	quickJumpTarget     quickJumpTarget
 	calendarRange       calendarRange
@@ -686,7 +678,6 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		}
 		initialApp = officeAppMessages
 	}
-	focusMode := strings.EqualFold(strings.TrimSpace(os.Getenv("WUPHF_FOCUS_MODE")), "1") || strings.EqualFold(strings.TrimSpace(os.Getenv("WUPHF_FOCUS_MODE")), "true")
 	officeDirectory = make(map[string]officeMemberInfo, len(officeMembers))
 	for _, member := range officeMembers {
 		officeDirectory[member.Slug] = member
@@ -705,7 +696,6 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		channels:             channels,
 		sessionMode:          sessionMode,
 		oneOnOneAgent:        oneOnOneAgent,
-		focusMode:            focusMode,
 		threadInputHistory:   newComposerHistory(),
 	}
 	if m.isOneOnOne() {
@@ -1452,20 +1442,6 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = "Reset failed: " + msg.err.Error()
 		}
 
-	case channelFocusModeDoneMsg:
-		m.posting = false
-		if msg.err != nil {
-			m.notice = "Focus mode update failed: " + msg.err.Error()
-			return m, nil
-		}
-		m.focusMode = msg.enabled
-		if msg.enabled {
-			m.notice = "Focus mode enabled. Specialists now route through CEO."
-		} else {
-			m.notice = "Focus mode disabled. Normal office chatter is back."
-		}
-		return m, m.pollCurrentState()
-
 	case channelResetDMDoneMsg:
 		m.posting = false
 		m.confirm = nil
@@ -1688,11 +1664,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Connected {
 			nextMode := team.NormalizeSessionMode(msg.SessionMode)
 			nextAgent := team.NormalizeOneOnOneAgent(msg.OneOnOneAgent)
-			focusChanged := msg.FocusMode != m.focusMode
 			modeChanged := nextMode != m.sessionMode || nextAgent != m.oneOnOneAgent
 			m.sessionMode = nextMode
 			m.oneOnOneAgent = nextAgent
-			m.focusMode = msg.FocusMode
 			if m.isOneOnOne() {
 				m.activeApp = officeAppMessages
 				m.sidebarCollapsed = true
@@ -1713,13 +1687,6 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.notice = "Direct session reset. Agent pane reloaded in place."
 				}
 				return m, m.pollCurrentState()
-			}
-			if focusChanged && strings.TrimSpace(m.notice) == "" {
-				if m.focusMode {
-					m.notice = "Focus mode enabled. Specialists now route through CEO."
-				} else {
-					m.notice = "Focus mode disabled. Normal office chatter is back."
-				}
 			}
 		}
 
@@ -1923,22 +1890,6 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirm = confirmationForSessionSwitch(team.SessionModeOneOnOne, agent)
 			m.notice = "Confirm the direct session switch."
 			return m, nil
-		case channelPickerFocusMode:
-			m.picker.SetActive(false)
-			m.pickerMode = channelPickerNone
-			switch strings.TrimSpace(msg.Value) {
-			case "focus:enable":
-				m.posting = true
-				m.notice = "Enabling focus mode..."
-				return m, setFocusMode(true)
-			case "focus:disable":
-				m.posting = true
-				m.notice = "Disabling focus mode..."
-				return m, setFocusMode(false)
-			default:
-				m.notice = "Left focus mode unchanged."
-				return m, nil
-			}
 		case channelPickerConnect:
 			m.picker.SetActive(false)
 			m.pickerMode = channelPickerNone
@@ -3622,21 +3573,14 @@ func (m channelModel) buildTaskPickerOptions() []tui.PickerOption {
 }
 
 func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.PickerOption {
-	claimLabel := "Claim task"
-	claimDescription := "Take ownership as you"
-	if strings.TrimSpace(task.WorktreePath) != "" || strings.EqualFold(strings.TrimSpace(task.ExecutionMode), "local_worktree") {
-		claimLabel = "Resume task"
-		claimDescription = "Take ownership and continue the retained worktree-backed run"
-	}
-
 	options := []tui.PickerOption{
-		{Label: claimLabel, Value: "claim:" + task.ID, Description: claimDescription},
+		{Label: "Claim task", Value: "claim:" + task.ID, Description: "Take ownership as you"},
 		{Label: "Release task", Value: "release:" + task.ID, Description: "Clear the current owner"},
 	}
 	if task.ReviewState == "ready_for_review" || task.Status == "review" {
-		options = append(options, tui.PickerOption{Label: "Review and approve", Value: "approve:" + task.ID, Description: "Mark this review-ready task done"})
+		options = append(options, tui.PickerOption{Label: "Approve task", Value: "approve:" + task.ID, Description: "Mark this review-ready task done"})
 	} else if task.ReviewState == "pending_review" || task.ExecutionMode == "local_worktree" {
-		options = append(options, tui.PickerOption{Label: "Hand off for review", Value: "complete:" + task.ID, Description: "Move this retained task into review"})
+		options = append(options, tui.PickerOption{Label: "Ready for review", Value: "complete:" + task.ID, Description: "Move this task into review"})
 	} else {
 		options = append(options, tui.PickerOption{Label: "Complete task", Value: "complete:" + task.ID, Description: "Mark this task done"})
 	}
@@ -3644,11 +3588,7 @@ func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.Picke
 		options = append(options, tui.PickerOption{Label: "Block task", Value: "block:" + task.ID, Description: "Mark this work blocked"})
 	}
 	if task.ThreadID != "" {
-		description := "Jump to the thread for this task"
-		if strings.TrimSpace(task.WorktreePath) != "" {
-			description = "Jump to the handoff thread before resuming"
-		}
-		options = append(options, tui.PickerOption{Label: "Open thread", Value: "open:" + task.ID, Description: description})
+		options = append(options, tui.PickerOption{Label: "Open thread", Value: "open:" + task.ID, Description: "Jump to the thread for this task"})
 	}
 	return options
 }
@@ -3711,7 +3651,7 @@ func (m channelModel) answerRequest(req channelInterview) (tea.Model, tea.Cmd) {
 	m.pending = &req
 	m.snoozedInterview = ""
 	m.selectedOption = m.recommendedOptionIndex()
-	m.notice = answerRequestNotice(req)
+	m.notice = "Answering request " + req.ID + ". Type your answer and press Enter."
 	if req.ReplyTo != "" {
 		m.threadPanelOpen = true
 		m.threadPanelID = req.ReplyTo
@@ -4055,14 +3995,11 @@ func renderInterviewCard(interview channelInterview, selected int, phaseTitle st
 		if i == selected {
 			prefix = lipgloss.NewStyle().Foreground(lipgloss.Color("#60A5FA")).Bold(true).Render("→ ")
 		}
-		labelBits := []string{titleStyle.Render(interviewOptionDisplayLabel(&option))}
+		label := option.Label
 		if option.ID == interview.RecommendedID {
-			labelBits = append(labelBits, subtlePill("recommended", "#DBEAFE", "#1D4ED8"))
+			label += " (Recommended)"
 		}
-		if badge := interviewOptionDraftBadge(&option); badge != "" {
-			labelBits = append(labelBits, subtlePill(badge, "#FDE68A", "#78350F"))
-		}
-		lines = append(lines, prefix+strings.Join(labelBits, " "))
+		lines = append(lines, prefix+titleStyle.Render(label))
 		if strings.TrimSpace(option.Description) != "" {
 			lines = append(lines, "    "+muted.Width(cardWidth-8).Render(option.Description))
 		}
@@ -4509,32 +4446,6 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		}
 		m.posting = true
 		return m, switchSessionMode(team.SessionModeOneOnOne, agent)
-	case trimmed == "/focus":
-		clearCurrent()
-		m.picker = tui.NewPicker("Focus Mode", m.buildFocusModePickerOptions())
-		m.picker.SetActive(true)
-		m.pickerMode = channelPickerFocusMode
-		return m, nil
-	case trimmed == "/focus on" || trimmed == "/focus enable":
-		clearCurrent()
-		if m.focusMode {
-			m.notice = "Focus mode is already enabled."
-			return m, nil
-		}
-		m.posting = true
-		return m, setFocusMode(true)
-	case trimmed == "/focus off" || trimmed == "/focus disable":
-		clearCurrent()
-		if !m.focusMode {
-			m.notice = "Focus mode is already disabled."
-			return m, nil
-		}
-		m.posting = true
-		return m, setFocusMode(false)
-	case trimmed == "/focus toggle":
-		clearCurrent()
-		m.posting = true
-		return m, setFocusMode(!m.focusMode)
 	case trimmed == "/messages" || trimmed == "/general":
 		clearCurrent()
 		m.activeApp = officeAppMessages
@@ -5395,35 +5306,6 @@ func (m channelModel) buildOneOnOneModePickerOptions() []tui.PickerOption {
 	}
 }
 
-func (m channelModel) buildFocusModePickerOptions() []tui.PickerOption {
-	if m.focusMode {
-		return []tui.PickerOption{
-			{
-				Label:       "Disable focus mode",
-				Value:       "focus:disable",
-				Description: "Restore normal office chatter and specialist cross-talk",
-			},
-			{
-				Label:       "Keep focus mode on",
-				Value:       "focus:keep",
-				Description: "CEO remains the routing hub",
-			},
-		}
-	}
-	return []tui.PickerOption{
-		{
-			Label:       "Enable focus mode",
-			Value:       "focus:enable",
-			Description: "Route specialist work through CEO and suppress cross-agent gossip",
-		},
-		{
-			Label:       "Keep normal office mode",
-			Value:       "focus:keep",
-			Description: "Leave normal office chatter enabled",
-		},
-	}
-}
-
 func (m channelModel) buildOneOnOneAgentPickerOptions() []tui.PickerOption {
 	options := make([]tui.PickerOption, 0, len(m.officeMembers))
 	for _, member := range m.officeMembers {
@@ -5483,7 +5365,6 @@ func pollHealth() tea.Cmd {
 			Status        string `json:"status"`
 			SessionMode   string `json:"session_mode"`
 			OneOnOneAgent string `json:"one_on_one_agent"`
-			FocusMode     bool   `json:"focus_mode"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 			return channelHealthMsg{Connected: true}
@@ -5492,7 +5373,6 @@ func pollHealth() tea.Cmd {
 			Connected:     true,
 			SessionMode:   result.SessionMode,
 			OneOnOneAgent: result.OneOnOneAgent,
-			FocusMode:     result.FocusMode,
 		}
 	}
 }
@@ -6318,41 +6198,6 @@ func switchSessionMode(mode, agent string) tea.Cmd {
 				oneOnOneAgent: result.OneOnOneAgent,
 			}
 		}
-	}
-}
-
-func setFocusMode(enabled bool) tea.Cmd {
-	return func() tea.Msg {
-		body, _ := json.Marshal(map[string]any{
-			"enabled": enabled,
-		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/focus-mode", bytes.NewReader(body))
-		if err != nil {
-			return channelFocusModeDoneMsg{err: err}
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return channelFocusModeDoneMsg{err: err}
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			raw, _ := io.ReadAll(resp.Body)
-			return channelFocusModeDoneMsg{err: fmt.Errorf("%s", strings.TrimSpace(string(raw)))}
-		}
-		var result struct {
-			FocusMode bool `json:"focus_mode"`
-		}
-		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-			result.FocusMode = enabled
-		}
-		l, err := team.NewLauncher("")
-		if err != nil {
-			return channelFocusModeDoneMsg{err: err}
-		}
-		if err := l.ReconfigureSession(); err != nil {
-			return channelFocusModeDoneMsg{err: err}
-		}
-		return channelFocusModeDoneMsg{enabled: result.FocusMode}
 	}
 }
 

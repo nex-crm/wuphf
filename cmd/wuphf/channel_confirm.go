@@ -93,19 +93,16 @@ func confirmationForSessionSwitch(mode, agent string) *channelConfirm {
 }
 
 func confirmationForInterviewAnswer(interview channelInterview, option *channelInterviewOption, customText string) *channelConfirm {
-	title := interviewReviewTitle(interview)
+	title := "Review Human Answer"
 	detailLines := []string{
 		fmt.Sprintf("Question: %s", strings.TrimSpace(interview.Question)),
 	}
-	if label := interviewOptionDisplayLabel(option); label != "" {
-		detailLines = append(detailLines, fmt.Sprintf("Decision: %s", label))
-	}
-	if outcome := interviewOptionOutcome(interview, option); outcome != "" {
-		detailLines = append(detailLines, fmt.Sprintf("Outcome: %s", outcome))
+	if option != nil && strings.TrimSpace(option.Label) != "" {
+		detailLines = append(detailLines, fmt.Sprintf("Choice: %s", strings.TrimSpace(option.Label)))
 	}
 	customText = strings.TrimSpace(customText)
 	if customText != "" {
-		detailLines = append(detailLines, fmt.Sprintf("%s: %s", interviewCustomTextLabel(option), customText))
+		detailLines = append(detailLines, fmt.Sprintf("Note: %s", customText))
 	}
 	if len(detailLines) == 1 && option == nil {
 		detailLines = append(detailLines, "Type an answer before submitting.")

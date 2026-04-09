@@ -27,7 +27,6 @@ type RuntimeArtifact struct {
 	UpdatedAt     string
 	Path          string
 	Worktree      string
-	Branch        string
 	PartialOutput string
 	ResumeHint    string
 	ReviewHint    string
@@ -65,31 +64,4 @@ func (a RuntimeArtifact) EffectiveProgress() string {
 		return progress
 	}
 	return strings.ReplaceAll(strings.TrimSpace(a.State), "_", " ")
-}
-
-func (a RuntimeArtifact) NormalizedState() string {
-	return strings.ToLower(strings.TrimSpace(a.State))
-}
-
-func (a RuntimeArtifact) Reviewable() bool {
-	switch a.Kind {
-	case RuntimeArtifactTask:
-		return a.NormalizedState() == "review" || strings.TrimSpace(a.ReviewHint) != ""
-	case RuntimeArtifactRequest:
-		state := a.NormalizedState()
-		return state == "pending" || state == "review"
-	default:
-		return false
-	}
-}
-
-func (a RuntimeArtifact) Resumable() bool {
-	if a.Kind != RuntimeArtifactTask {
-		return false
-	}
-	switch a.NormalizedState() {
-	case "completed", "canceled", "cancelled":
-		return false
-	}
-	return strings.TrimSpace(a.Worktree) != "" || strings.TrimSpace(a.RelatedID) != ""
 }

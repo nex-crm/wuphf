@@ -79,6 +79,27 @@ func TestCreateCodexCLIStreamFnShowsLoginError(t *testing.T) {
 	}
 }
 
+func TestCreateCodexCLIStreamFnStreamsToolLifecycleAndTextDeltas(t *testing.T) {
+	recordFile := t.TempDir() + "/codex-structured-record.jsonl"
+	cwd := t.TempDir()
+
+	restore := stubCodexRuntime(t, recordFile, "structured-stream", cwd)
+	defer restore()
+
+	fn := CreateCodexCLIStreamFn("fe")
+	chunks := collectStreamChunks(fn([]agent.Message{{Role: "user", Content: "Ship the UI update."}}, nil))
+
+	if !containsChunk(chunks, "tool_use", "apply_patch") {
+		t.Fatalf("expected tool_use chunk, got %#v", chunks)
+	}
+	if !containsChunk(chunks, "tool_result", "completed") {
+		t.Fatalf("expected tool_result chunk, got %#v", chunks)
+	}
+	if joinedChunkText(chunks) != "Shipped the update." {
+		t.Fatalf("expected streamed text deltas to reconstruct final text, got %#v", chunks)
+	}
+}
+
 func readCodexHelperRecords(t *testing.T, path string) []codexHelperRecord {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -165,6 +186,13 @@ func TestCodexHelperProcess(t *testing.T) {
 	case "success":
 		_, _ = os.Stdout.WriteString("{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"codex final answer\"}}\n")
 		os.Exit(0)
+	case "structured-stream":
+		_, _ = os.Stdout.WriteString("{\"type\":\"response.output_item.added\",\"item\":{\"id\":\"tool-1\",\"type\":\"function_call\",\"name\":\"apply_patch\",\"arguments\":\"{\\\"path\\\":\\\"app.go\\\"}\"}}\n")
+		_, _ = os.Stdout.WriteString("{\"type\":\"response.output_item.done\",\"item\":{\"id\":\"tool-1\",\"type\":\"function_call\",\"name\":\"apply_patch\",\"arguments\":\"{\\\"path\\\":\\\"app.go\\\"}\"}}\n")
+		_, _ = os.Stdout.WriteString("{\"type\":\"response.output_text.delta\",\"delta\":\"Shipped \"}\n")
+		_, _ = os.Stdout.WriteString("{\"type\":\"response.output_text.delta\",\"delta\":\"the update.\"}\n")
+		_, _ = os.Stdout.WriteString("{\"type\":\"response.output_item.done\",\"item\":{\"type\":\"message\",\"content\":[{\"type\":\"output_text\",\"text\":\"Shipped the update.\"}]}}\n")
+		os.Exit(0)
 	case "login-required":
 		_, _ = os.Stdout.WriteString("{\"type\":\"turn.failed\",\"error\":{\"message\":\"authentication required\"}}\n")
 		_, _ = os.Stderr.WriteString("authentication required\n")
@@ -172,4 +200,16 @@ func TestCodexHelperProcess(t *testing.T) {
 	default:
 		t.Fatalf("unknown helper scenario: %s", os.Getenv("CODEX_TEST_SCENARIO"))
 	}
+}
+
+func containsChunk(chunks []agent.StreamChunk, chunkType string, needle string) bool {
+	for _, chunk := range chunks {
+		if chunk.Type != chunkType {
+			continue
+		}
+		if strings.Contains(chunk.Content, needle) || strings.Contains(chunk.ToolName, needle) || strings.Contains(chunk.ToolInput, needle) {
+			return true
+		}
+	}
+	return false
 }

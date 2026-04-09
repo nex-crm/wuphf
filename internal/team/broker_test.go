@@ -1,6 +1,7 @@
 package team
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -93,39 +94,138 @@ func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
 	}
 }
 
-func TestBrokerFocusModePersistsAndHealthReportsIt(t *testing.T) {
+func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
-	if err := b.SetFocusMode(true); err != nil {
-		t.Fatalf("SetFocusMode failed: %v", err)
+	msgs, unsubscribe := b.SubscribeMessages(4)
+	defer unsubscribe()
+
+	want, err := b.PostMessage("ceo", "general", "Push this immediately", nil, "")
+	if err != nil {
+		t.Fatalf("PostMessage: %v", err)
 	}
 
-	reloaded := NewBroker()
-	if !reloaded.FocusModeEnabled() {
-		t.Fatal("expected focus mode to persist across broker reload")
+	select {
+	case got := <-msgs:
+		if got.ID != want.ID || got.Content != want.Content {
+			t.Fatalf("unexpected subscribed message: %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscribed message")
 	}
-	if err := reloaded.StartOnPort(0); err != nil {
+}
+
+func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	actions, unsubscribe := b.SubscribeActions(4)
+	defer unsubscribe()
+
+	if _, _, err := b.EnsureTask("general", "Landing page", "Build the hero", "fe", "ceo", ""); err != nil {
+		t.Fatalf("EnsureTask: %v", err)
+	}
+
+	select {
+	case got := <-actions:
+		if got.Kind != "task_created" {
+			t.Fatalf("expected task_created action, got %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscribed action")
+	}
+}
+
+func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	updates, unsubscribe := b.SubscribeActivity(4)
+	defer unsubscribe()
+
+	b.UpdateAgentActivity(agentActivitySnapshot{
+		Slug:     "ceo",
+		Status:   "active",
+		Activity: "tool_use",
+		Detail:   "running rg",
+		LastTime: time.Now().UTC().Format(time.RFC3339),
+	})
+
+	select {
+	case got := <-updates:
+		if got.Slug != "ceo" || got.Activity != "tool_use" || got.Detail != "running rg" {
+			t.Fatalf("unexpected activity update: %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscribed activity")
+	}
+}
+
+func TestBrokerEventsEndpointStreamsMessages(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
-	defer reloaded.Stop()
+	defer b.Stop()
 
-	resp, err := http.Get("http://" + reloaded.Addr() + "/health")
+	base := fmt.Sprintf("http://%s", b.Addr())
+	req, _ := http.NewRequest(http.MethodGet, base+"/events?token="+b.Token(), nil)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("health request failed: %v", err)
+		t.Fatalf("open event stream: %v", err)
 	}
 	defer resp.Body.Close()
-	var health struct {
-		FocusMode bool `json:"focus_mode"`
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 opening event stream, got %d: %s", resp.StatusCode, raw)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
-		t.Fatalf("decode health: %v", err)
+
+	lines := make(chan string, 16)
+	go func() {
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+
+	if _, err := b.PostMessage("ceo", "general", "Stream this", nil, ""); err != nil {
+		t.Fatalf("PostMessage: %v", err)
 	}
-	if !health.FocusMode {
-		t.Fatal("expected /health to report focus_mode=true")
+
+	deadline := time.After(2 * time.Second)
+	var sawEvent bool
+	var sawPayload bool
+	for !(sawEvent && sawPayload) {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatal("event stream closed before receiving message")
+			}
+			if strings.Contains(line, "event: message") {
+				sawEvent = true
+			}
+			if strings.Contains(line, `"content":"Stream this"`) {
+				sawPayload = true
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for message event (event=%v payload=%v)", sawEvent, sawPayload)
+		}
 	}
 }
 
@@ -501,7 +601,6 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	var health struct {
 		SessionMode   string `json:"session_mode"`
 		OneOnOneAgent string `json:"one_on_one_agent"`
-		FocusMode     bool   `json:"focus_mode"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		resp.Body.Close()
@@ -513,9 +612,6 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	}
 	if health.OneOnOneAgent != DefaultOneOnOneAgent {
 		t.Fatalf("expected health to report default 1o1 agent %q, got %q", DefaultOneOnOneAgent, health.OneOnOneAgent)
-	}
-	if health.FocusMode {
-		t.Fatal("expected health to report focus mode disabled by default")
 	}
 
 	// Messages without auth should be rejected

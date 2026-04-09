@@ -55,12 +55,6 @@ func TestBuildWorkspaceSwitcherOptionsIncludesActiveWorkAndThreads(t *testing.T)
 	if !strings.Contains(descriptions["app:messages"], "3 new since you looked") {
 		t.Fatalf("expected office feed description to use away summary, got %q", descriptions["app:messages"])
 	}
-	if !strings.Contains(descriptions["app:recovery"], "Review: Approve launch copy") {
-		t.Fatalf("expected recovery description to promote review target, got %q", descriptions["app:recovery"])
-	}
-	if !strings.Contains(descriptions["app:artifacts"], "Review Approve launch copy") {
-		t.Fatalf("expected artifacts description to summarize review/resume work, got %q", descriptions["app:artifacts"])
-	}
 }
 
 func TestApplyWorkspaceSwitcherSelectionSupportsTaskAndRequestTargets(t *testing.T) {
@@ -149,12 +143,6 @@ func TestBuildRecoveryLinesIncludesActionCards(t *testing.T) {
 	}
 	if !strings.Contains(plain, "Return to recent threads") {
 		t.Fatalf("expected recent threads section, got %q", plain)
-	}
-	if !strings.Contains(plain, "Review next") {
-		t.Fatalf("expected review-retained section, got %q", plain)
-	}
-	if !strings.Contains(plain, "Resume next") {
-		t.Fatalf("expected resume-retained section, got %q", plain)
 	}
 	if !hasTask || !hasRequest || !hasThread {
 		t.Fatalf("expected clickable recovery lines, got task=%v request=%v thread=%v", hasTask, hasRequest, hasThread)

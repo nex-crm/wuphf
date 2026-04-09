@@ -31,7 +31,6 @@ type workspaceUIState struct {
 	CurrentApp      officeApp
 	BrokerConnected bool
 	Direct          bool
-	FocusMode       bool
 	Channel         string
 	AgentName       string
 	AgentSlug       string
@@ -58,7 +57,6 @@ func (m channelModel) currentWorkspaceUIState() workspaceUIState {
 		CurrentApp:      m.activeApp,
 		BrokerConnected: m.brokerConnected,
 		Direct:          m.isOneOnOne(),
-		FocusMode:       m.focusMode,
 		Channel:         m.activeChannel,
 		AgentName:       m.oneOnOneAgentName(),
 		AgentSlug:       m.oneOnOneAgentSlug(),
@@ -249,9 +247,6 @@ func (s workspaceUIState) headerMeta() string {
 		fmt.Sprintf("%d running", s.RunningTasks),
 		fmt.Sprintf("%d open requests", s.OpenRequests),
 	}
-	if s.FocusMode {
-		parts = append(parts, "focus mode")
-	}
 	if strings.TrimSpace(s.Readiness.Headline) != "" && s.Readiness.Level != workspaceReadinessReady {
 		parts = append(parts, strings.ToLower(s.Readiness.Headline))
 	}
@@ -292,9 +287,6 @@ func (s workspaceUIState) defaultStatusLine(scrollHint string) string {
 	}
 	if strings.TrimSpace(s.AwaySummary) != "" && s.UnreadCount > 0 {
 		return fmt.Sprintf(" While away │ %s │ %s │ /recover", truncateText(s.AwaySummary, 72), scrollHint)
-	}
-	if s.FocusMode && !s.Direct {
-		return fmt.Sprintf(" Focus mode live │ CEO routes work; specialists report back │ %s │ /focus", scrollHint)
 	}
 	if s.PrimaryTask != nil {
 		return fmt.Sprintf(" Focus │ %s │ %s │ /switcher │ /doctor", truncateText(s.PrimaryTask.Title, 72), scrollHint)
