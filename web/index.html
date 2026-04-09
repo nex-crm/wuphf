@@ -1312,11 +1312,15 @@ var WuphfAPI = (function() {
     return get('/office-members');
   }
 
-  function getLiveMembers(channel) {
+  function getMembers(channel) {
     return get('/members', {
       channel: channel || 'general',
       viewer_slug: 'human'
     });
+  }
+
+  function getLiveMembers(channel) {
+    return getMembers(channel);
   }
 
   function getChannels() {
@@ -1680,7 +1684,7 @@ function showSplashScreen(onDone) {
 function showOffice() {
   document.getElementById('office').classList.add('active');
   if (brokerConnected) {
-    Promise.all([WuphfAPI.getOfficeMembers(), WuphfAPI.getChannels(), WuphfAPI.getLiveMembers(currentChannel)])
+    Promise.all([WuphfAPI.getOfficeMembers(), WuphfAPI.getChannels(), WuphfAPI.getMembers(currentChannel)])
       .then(function(results) {
         var membersData = results[0];
         var channelsData = results[1];
@@ -1699,7 +1703,7 @@ function showOffice() {
             };
           });
         }
-        cachedMembers = liveMembersData.members || [];
+        cachedMembers = normalizeMemberActivityHints(liveMembersData.members || []);
         if (channelsData.channels) {
           CHANNELS = channelsData.channels.map(function(ch) {
             return { name: ch.name || ch.slug, desc: ch.description || '' };
@@ -1728,13 +1732,50 @@ function showOffice() {
   }
 }
 
+function trimStatusPrefix(text) {
+  var value = String(text || '').trim();
+  if (value.indexOf('[STATUS]') !== 0) return '';
+  return value.replace(/^\[STATUS\]\s*/, '');
+}
+
+function parseMemberActivityTime(member) {
+  if (!member) return null;
+  var raw = member.lastTime || member.last_time || '';
+  if (!raw) return null;
+  var parsed = new Date(raw);
+  if (!isNaN(parsed.getTime())) return parsed;
+  var timeOnly = /^(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(String(raw));
+  if (!timeOnly) return null;
+  var fallback = new Date();
+  fallback.setHours(parseInt(timeOnly[1], 10), parseInt(timeOnly[2], 10), parseInt(timeOnly[3] || '0', 10), 0);
+  return fallback;
+}
+
+function memberActivityText(member) {
+  if (!member) return '';
+  return member.detail || member.liveActivity || member.activityText || member.activity || trimStatusPrefix(member.lastMessage || '') || '';
+}
+
+function normalizeMemberActivityHints(members) {
+  return (members || []).map(function(member) {
+    var next = Object.assign({}, member);
+    var statusText = trimStatusPrefix(next.lastMessage || '');
+    if (statusText) {
+      next.activityText = statusText;
+      if (!next.activity || next.activity === 'idle') next.activity = statusText;
+      if (!next.status || next.status === 'idle') next.status = 'active';
+    }
+    return next;
+  });
+}
+
 // --- Activity classification (#23) ---
 function classifyActivity(member) {
   if (!member) return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
-  var activity = (member.activity || member.liveActivity || '').toLowerCase();
+  var activity = memberActivityText(member).toLowerCase();
   var status = (member.status || '').toLowerCase();
-  var lastStamp = member.lastTime || member.last_time || null;
-  var lastTime = lastStamp ? new Date(lastStamp) : null;
+  if (!status && activity) status = 'active';
+  var lastTime = parseMemberActivityTime(member);
   var elapsed = lastTime ? (Date.now() - lastTime.getTime()) / 1000 : Infinity;
   if (status === 'error') return { state: 'plotting', label: 'needs attention', dotClass: 'plotting' };
   if (status === 'active' && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity)) return { state: 'shipping', label: 'shipping', dotClass: 'shipping' };
@@ -1755,10 +1796,15 @@ function formatLatencyHint(member) {
 }
 function memberSecondaryText(member, task) {
   if (task) return 'working on: Task #' + (task.id || task.number || '?');
-  if (member && member.status === 'active' && member.liveActivity) return member.liveActivity;
+  var statusText = trimStatusPrefix(member && member.lastMessage || '');
+  if (member && member.status === 'active') {
+    if (member.detail) return member.detail;
+    if (member.liveActivity) return member.liveActivity;
+    if (statusText) return statusText;
+  }
   var latency = formatLatencyHint(member);
   if (latency) return latency;
-  if (member && member.lastMessage) return member.lastMessage;
+  if (member && member.lastMessage) return trimStatusPrefix(member.lastMessage) || member.lastMessage;
   return '';
 }
 function findAgentTask(slug) {
@@ -2164,7 +2210,9 @@ function renderWorkspaceSummary() {
   var latencyMember = cachedMembers
     .filter(function(m) { return m && formatLatencyHint(m); })
     .sort(function(a, b) {
-      return new Date(b.lastTime || 0).getTime() - new Date(a.lastTime || 0).getTime();
+      var bTime = parseMemberActivityTime(b);
+      var aTime = parseMemberActivityTime(a);
+      return (bTime ? bTime.getTime() : 0) - (aTime ? aTime.getTime() : 0);
     })[0];
   var latencyHint = latencyMember ? formatLatencyHint(latencyMember) : '';
   if (latencyHint) {
@@ -2494,6 +2542,28 @@ function upsertCachedMember(update) {
   else cachedMembers.push(base);
 }
 
+function applyStatusActivity(msg) {
+  var statusText = trimStatusPrefix(msg && msg.content);
+  if (!statusText) return false;
+  if (!msg || !msg.from || msg.from === 'human' || msg.from === 'you') return true;
+  if (msg.channel !== currentChannel) return true;
+
+  var idx = cachedMembers.findIndex(function(member) { return member.slug === msg.from; });
+  var base = idx >= 0 ? Object.assign({}, cachedMembers[idx]) : { slug: msg.from };
+  base.lastMessage = msg.content || base.lastMessage || '';
+  base.lastTime = msg.timestamp || msg.ts || base.lastTime || new Date().toISOString();
+  base.activityText = statusText;
+  if (!base.activity || base.activity === 'idle') base.activity = statusText;
+  if (!base.status || base.status === 'idle') base.status = 'active';
+  if (idx >= 0) cachedMembers[idx] = base;
+  else cachedMembers.push(base);
+
+  renderSidebarAgents();
+  renderWorkspaceSummary();
+  updateTypingIndicator();
+  return true;
+}
+
 function scheduleSidebarRefresh() {
   if (refreshTasksTimer) return;
   refreshTasksTimer = setTimeout(function() {
@@ -2505,6 +2575,8 @@ function scheduleSidebarRefresh() {
 }
 
 function appendBrokerMessage(msg) {
+  if (applyStatusActivity(msg)) return;
+
   // Track all messages for thread lookups
   allMessages[msg.id] = msg;
 
@@ -2589,13 +2661,14 @@ function appendMessageToContainer(msg, container, opts) {
   opts = opts || {};
 
   // Status messages render compact and italic, no avatar
-  if (msg.kind === 'status') {
+  var strippedStatus = trimStatusPrefix(msg.content || '');
+  if (msg.kind === 'status' || strippedStatus) {
     var statusDiv = document.createElement('div');
     statusDiv.className = 'message-status animate-fade';
     statusDiv.dataset.msgId = msg.id;
     var statusText = document.createElement('span');
     statusText.className = 'message-status-text';
-    statusText.textContent = msg.content || '';
+    statusText.textContent = strippedStatus || msg.content || '';
     statusDiv.appendChild(statusText);
     container.appendChild(statusDiv);
     return statusDiv;
@@ -2924,10 +2997,10 @@ function closeThreadPanel() {
 }
 function fetchMemberActivity() {
   Promise.all([
-    WuphfAPI.getLiveMembers(currentChannel).catch(function() { return { members: [] }; }),
+    WuphfAPI.getMembers(currentChannel).catch(function() { return { members: [] }; }),
     WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; })
   ]).then(function(results) {
-    cachedMembers = (results[0].members || []);
+    cachedMembers = normalizeMemberActivityHints(results[0].members || []);
     cachedTasks = (results[1].tasks || results[1] || []);
     if (Array.isArray(cachedTasks) === false) cachedTasks = [];
     renderSidebarAgents();
@@ -4147,11 +4220,12 @@ function openRecoveryView() {
     Promise.all([
       WuphfAPI.get('/state').catch(function() { return {}; }),
       WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; }),
-      WuphfAPI.getLiveMembers(currentChannel).catch(function() { return { members: [] }; })
+      WuphfAPI.getMembers(currentChannel).catch(function() { return { members: [] }; })
     ]).then(function(results) {
       var state = results[0];
       var tasksData = results[1];
       var membersData = results[2];
+      membersData.members = normalizeMemberActivityHints(membersData.members || []);
       renderRecoveryData(panel, state, tasksData, membersData);
     });
   } else {
