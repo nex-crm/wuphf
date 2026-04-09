@@ -7,7 +7,7 @@ import (
 )
 
 func (b *Broker) appendActionWithRefsLocked(kind, source, channel, actor, summary, relatedID string, signalIDs []string, decisionID string) {
-	b.actions = append(b.actions, officeActionLog{
+	record := officeActionLog{
 		ID:         fmt.Sprintf("action-%d", len(b.actions)+1),
 		Kind:       strings.TrimSpace(kind),
 		Source:     strings.TrimSpace(source),
@@ -18,10 +18,12 @@ func (b *Broker) appendActionWithRefsLocked(kind, source, channel, actor, summar
 		SignalIDs:  append([]string(nil), signalIDs...),
 		DecisionID: strings.TrimSpace(decisionID),
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
-	})
+	}
+	b.actions = append(b.actions, record)
 	if len(b.actions) > 150 {
 		b.actions = append([]officeActionLog(nil), b.actions[len(b.actions)-150:]...)
 	}
+	b.publishActionLocked(record)
 }
 
 func officeSignalDedupeKey(signal officeSignal) string {

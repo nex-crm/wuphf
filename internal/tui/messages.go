@@ -35,6 +35,16 @@ type AgentToolResultMsg struct {
 	Content   string
 }
 
+type ChannelMessageMsg struct {
+	Message StreamMessage
+}
+
+type ChannelActivityMsg struct {
+	Slug     string
+	Name     string
+	Activity string
+}
+
 // API messages
 
 type APIResultMsg struct {

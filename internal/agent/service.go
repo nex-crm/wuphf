@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"sync"
-	"time"
 
 	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -40,7 +39,7 @@ type AgentService struct {
 	client           *api.Client
 	streamFnResolver StreamFnResolver
 	listeners        []func()
-	tickTimers       map[string]chan struct{} // per-agent stop channels
+	tickTimers       map[string]chan struct{} // per-agent worker stop channels
 	mu               sync.Mutex
 }
 
@@ -243,29 +242,39 @@ func (s *AgentService) Stop(slug string) error {
 // Steer pushes a steering message to the agent's queue.
 func (s *AgentService) Steer(slug, message string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, err := s.requireAgent(slug); err != nil {
+	ma, err := s.requireAgent(slug)
+	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
 	s.queues.Steer(slug, message)
+	s.mu.Unlock()
+	if ma.Loop.IsBusy() {
+		ma.Loop.Interrupt()
+	}
+	s.EnsureRunning(slug)
 	return nil
 }
 
 // FollowUp pushes a follow-up message to the agent's queue.
 func (s *AgentService) FollowUp(slug, message string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, err := s.requireAgent(slug); err != nil {
+	ma, err := s.requireAgent(slug)
+	if err != nil {
+		s.mu.Unlock()
 		return err
 	}
 	s.queues.FollowUp(slug, message)
+	s.mu.Unlock()
+	if ma.Loop.IsBusy() {
+		ma.Loop.Interrupt()
+	}
+	s.EnsureRunning(slug)
 	return nil
 }
 
-// EnsureRunning starts an idempotent goroutine that ticks the agent loop at 1s intervals.
-// The goroutine checks queues.HasMessages before ticking and stops when the loop is no longer running.
+// EnsureRunning starts an idempotent worker that drives the agent loop immediately.
+// The worker exits as soon as the agent is idle and has no queued messages.
 func (s *AgentService) EnsureRunning(slug string) {
 	s.mu.Lock()
 	if _, ok := s.tickTimers[slug]; ok {
@@ -278,66 +287,71 @@ func (s *AgentService) EnsureRunning(slug string) {
 		s.mu.Unlock()
 		return
 	}
+	if !ma.Loop.CanProcess() {
+		s.mu.Unlock()
+		return
+	}
 
 	stopCh := make(chan struct{})
 	s.tickTimers[slug] = stopCh
 	s.mu.Unlock()
 
-	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
+	go s.runAgentWorker(slug, ma, stopCh)
+}
 
-		for {
-			select {
-			case <-stopCh:
-				return
-			case <-ticker.C:
-				s.mu.Lock()
-				current, ok := s.agents[slug]
-				if !ok || current != ma {
-					delete(s.tickTimers, slug)
-					s.mu.Unlock()
-					return
-				}
-				state := ma.Loop.GetState()
-				hasMessages := s.queues.HasMessages(slug)
-				shouldStop := !hasMessages && (state.Phase == PhaseIdle || state.Phase == PhaseDone || state.Phase == PhaseError)
-				shouldTick := !shouldStop
-				s.mu.Unlock()
-
-				if shouldStop {
-					s.mu.Lock()
-					delete(s.tickTimers, slug)
-					s.mu.Unlock()
-					return
-				}
-				if !shouldTick {
-					continue
-				}
-
-				_ = ma.Loop.Tick()
-				nextState := ma.Loop.GetState()
-
-				s.mu.Lock()
-				current, ok = s.agents[slug]
-				if !ok || current != ma {
-					delete(s.tickTimers, slug)
-					s.mu.Unlock()
-					return
-				}
-				ma.State = nextState
-				running := (nextState.Phase != PhaseDone && nextState.Phase != PhaseIdle) || s.queues.HasMessages(slug)
-				s.mu.Unlock()
-
-				if !running {
-					s.mu.Lock()
-					delete(s.tickTimers, slug)
-					s.mu.Unlock()
-					return
-				}
-			}
+func (s *AgentService) runAgentWorker(slug string, ma *ManagedAgent, stopCh <-chan struct{}) {
+	for {
+		select {
+		case <-stopCh:
+			return
+		default:
 		}
-	}()
+
+		s.mu.Lock()
+		current, ok := s.agents[slug]
+		if !ok || current != ma {
+			delete(s.tickTimers, slug)
+			s.mu.Unlock()
+			return
+		}
+		state := ma.Loop.GetState()
+		hasMessages := s.queues.HasMessages(slug)
+		shouldStop := !hasMessages && (state.Phase == PhaseIdle || state.Phase == PhaseDone || state.Phase == PhaseError)
+		s.mu.Unlock()
+
+		if shouldStop {
+			s.mu.Lock()
+			if current, ok := s.agents[slug]; ok && current == ma {
+				delete(s.tickTimers, slug)
+			}
+			s.mu.Unlock()
+			return
+		}
+
+		_ = ma.Loop.Tick()
+		nextState := ma.Loop.GetState()
+
+		s.mu.Lock()
+		current, ok = s.agents[slug]
+		if !ok || current != ma {
+			delete(s.tickTimers, slug)
+			s.mu.Unlock()
+			return
+		}
+		ma.State = nextState
+		running := ma.Loop.CanProcess() &&
+			((nextState.Phase != PhaseDone && nextState.Phase != PhaseIdle) || s.queues.HasMessages(slug))
+		s.mu.Unlock()
+
+		if !running {
+			s.mu.Lock()
+			if current, ok := s.agents[slug]; ok && current == ma {
+				delete(s.tickTimers, slug)
+			}
+			s.mu.Unlock()
+			return
+		}
+	}
 }
 
 // Get returns the managed agent for the given slug.

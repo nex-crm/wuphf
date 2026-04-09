@@ -1,6 +1,7 @@
 package team
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -90,6 +91,141 @@ func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
 	}
 	if len(reloaded.Messages()) != 0 {
 		t.Fatalf("expected reset to clear direct messages, got %d", len(reloaded.Messages()))
+	}
+}
+
+func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	msgs, unsubscribe := b.SubscribeMessages(4)
+	defer unsubscribe()
+
+	want, err := b.PostMessage("ceo", "general", "Push this immediately", nil, "")
+	if err != nil {
+		t.Fatalf("PostMessage: %v", err)
+	}
+
+	select {
+	case got := <-msgs:
+		if got.ID != want.ID || got.Content != want.Content {
+			t.Fatalf("unexpected subscribed message: %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscribed message")
+	}
+}
+
+func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	actions, unsubscribe := b.SubscribeActions(4)
+	defer unsubscribe()
+
+	if _, _, err := b.EnsureTask("general", "Landing page", "Build the hero", "fe", "ceo", ""); err != nil {
+		t.Fatalf("EnsureTask: %v", err)
+	}
+
+	select {
+	case got := <-actions:
+		if got.Kind != "task_created" {
+			t.Fatalf("expected task_created action, got %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscribed action")
+	}
+}
+
+func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	updates, unsubscribe := b.SubscribeActivity(4)
+	defer unsubscribe()
+
+	b.UpdateAgentActivity(agentActivitySnapshot{
+		Slug:     "ceo",
+		Status:   "active",
+		Activity: "tool_use",
+		Detail:   "running rg",
+		LastTime: time.Now().UTC().Format(time.RFC3339),
+	})
+
+	select {
+	case got := <-updates:
+		if got.Slug != "ceo" || got.Activity != "tool_use" || got.Detail != "running rg" {
+			t.Fatalf("unexpected activity update: %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for subscribed activity")
+	}
+}
+
+func TestBrokerEventsEndpointStreamsMessages(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	req, _ := http.NewRequest(http.MethodGet, base+"/events?token="+b.Token(), nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open event stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200 opening event stream, got %d: %s", resp.StatusCode, raw)
+	}
+
+	lines := make(chan string, 16)
+	go func() {
+		scanner := bufio.NewScanner(resp.Body)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+
+	if _, err := b.PostMessage("ceo", "general", "Stream this", nil, ""); err != nil {
+		t.Fatalf("PostMessage: %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	var sawEvent bool
+	var sawPayload bool
+	for !(sawEvent && sawPayload) {
+		select {
+		case line, ok := <-lines:
+			if !ok {
+				t.Fatal("event stream closed before receiving message")
+			}
+			if strings.Contains(line, "event: message") {
+				sawEvent = true
+			}
+			if strings.Contains(line, `"content":"Stream this"`) {
+				sawPayload = true
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for message event (event=%v payload=%v)", sawEvent, sawPayload)
+		}
 	}
 }
 

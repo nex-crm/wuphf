@@ -162,6 +162,18 @@ type officeActionLog struct {
 	CreatedAt  string   `json:"created_at"`
 }
 
+type agentActivitySnapshot struct {
+	Slug         string `json:"slug"`
+	Status       string `json:"status,omitempty"`
+	Activity     string `json:"activity,omitempty"`
+	Detail       string `json:"detail,omitempty"`
+	LastTime     string `json:"lastTime,omitempty"`
+	TotalMs      int64  `json:"totalMs,omitempty"`
+	FirstEventMs int64  `json:"firstEventMs,omitempty"`
+	FirstTextMs  int64  `json:"firstTextMs,omitempty"`
+	FirstToolMs  int64  `json:"firstToolMs,omitempty"`
+}
+
 type officeSignalRecord struct {
 	ID            string `json:"id"`
 	Source        string `json:"source"`
@@ -291,34 +303,39 @@ type teamUsageState struct {
 // Broker is a lightweight HTTP message broker for the team channel.
 // All agent MCP instances connect to this shared broker.
 type Broker struct {
-	messages           []channelMessage
-	members            []officeMember
-	channels           []teamChannel
-	sessionMode        string
-	oneOnOneAgent      string
-	tasks              []teamTask
-	requests           []humanInterview
-	actions            []officeActionLog
-	signals            []officeSignalRecord
-	decisions          []officeDecisionRecord
-	watchdogs          []watchdogAlert
-	scheduler          []schedulerJob
-	skills             []teamSkill
-	sharedMemory       map[string]map[string]string // namespace → key → value
-	lastTaggedAt       map[string]time.Time         // when each agent was last @mentioned
-	lastPaneSnapshot   map[string]string            // last captured pane content per agent (for change detection)
-	seenTelegramGroups map[int64]string             // chat_id -> title, populated by transport
-	counter            int
-	notificationSince  string
-	insightsSince      string
-	pendingInterview   *humanInterview
-	usage              teamUsageState
-	externalDelivered  map[string]struct{} // message IDs already queued for external delivery
-	mu                 sync.Mutex
-	server             *http.Server
-	token              string // shared secret for authenticating requests
-	addr               string // actual listen address (useful when port=0)
-	webUIOrigins       []string // allowed CORS origins for web UI (set by ServeWebUI)
+	messages            []channelMessage
+	members             []officeMember
+	channels            []teamChannel
+	sessionMode         string
+	oneOnOneAgent       string
+	tasks               []teamTask
+	requests            []humanInterview
+	actions             []officeActionLog
+	signals             []officeSignalRecord
+	decisions           []officeDecisionRecord
+	watchdogs           []watchdogAlert
+	scheduler           []schedulerJob
+	skills              []teamSkill
+	sharedMemory        map[string]map[string]string // namespace → key → value
+	lastTaggedAt        map[string]time.Time         // when each agent was last @mentioned
+	lastPaneSnapshot    map[string]string            // last captured pane content per agent (for change detection)
+	seenTelegramGroups  map[int64]string             // chat_id -> title, populated by transport
+	counter             int
+	notificationSince   string
+	insightsSince       string
+	pendingInterview    *humanInterview
+	usage               teamUsageState
+	externalDelivered   map[string]struct{} // message IDs already queued for external delivery
+	messageSubscribers  map[int]chan channelMessage
+	actionSubscribers   map[int]chan officeActionLog
+	activity            map[string]agentActivitySnapshot
+	activitySubscribers map[int]chan agentActivitySnapshot
+	nextSubscriberID    int
+	mu                  sync.Mutex
+	server              *http.Server
+	token               string   // shared secret for authenticating requests
+	addr                string   // actual listen address (useful when port=0)
+	webUIOrigins        []string // allowed CORS origins for web UI (set by ServeWebUI)
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -380,7 +397,11 @@ func generateToken() string {
 // NewBroker creates a new channel broker with a random auth token.
 func NewBroker() *Broker {
 	b := &Broker{
-		token: generateToken(),
+		token:               generateToken(),
+		messageSubscribers:  make(map[int]chan channelMessage),
+		actionSubscribers:   make(map[int]chan officeActionLog),
+		activity:            make(map[string]agentActivitySnapshot),
+		activitySubscribers: make(map[int]chan agentActivitySnapshot),
 	}
 	_ = b.loadState()
 	b.mu.Lock()
@@ -389,6 +410,146 @@ func NewBroker() *Broker {
 	b.normalizeLoadedStateLocked()
 	b.mu.Unlock()
 	return b
+}
+
+func (b *Broker) appendMessageLocked(msg channelMessage) {
+	b.messages = append(b.messages, msg)
+	b.publishMessageLocked(msg)
+}
+
+func (b *Broker) publishMessageLocked(msg channelMessage) {
+	for _, ch := range b.messageSubscribers {
+		select {
+		case ch <- msg:
+		default:
+		}
+	}
+}
+
+func (b *Broker) publishActionLocked(action officeActionLog) {
+	for _, ch := range b.actionSubscribers {
+		select {
+		case ch <- action:
+		default:
+		}
+	}
+}
+
+func (b *Broker) publishActivityLocked(activity agentActivitySnapshot) {
+	for _, ch := range b.activitySubscribers {
+		select {
+		case ch <- activity:
+		default:
+		}
+	}
+}
+
+func (b *Broker) SubscribeMessages(buffer int) (<-chan channelMessage, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan channelMessage, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.messageSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.messageSubscribers[id]; ok {
+			delete(b.messageSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+func (b *Broker) SubscribeActions(buffer int) (<-chan officeActionLog, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan officeActionLog, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.actionSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.actionSubscribers[id]; ok {
+			delete(b.actionSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+func (b *Broker) SubscribeActivity(buffer int) (<-chan agentActivitySnapshot, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan agentActivitySnapshot, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.activitySubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.activitySubscribers[id]; ok {
+			delete(b.activitySubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
+	slug := normalizeChannelSlug(update.Slug)
+	if slug == "" {
+		return
+	}
+	if update.LastTime == "" {
+		update.LastTime = time.Now().UTC().Format(time.RFC3339)
+	}
+	update.Slug = slug
+
+	b.mu.Lock()
+	current := b.activity[slug]
+	current.Slug = slug
+	if update.Status != "" {
+		current.Status = update.Status
+	}
+	if update.Activity != "" {
+		current.Activity = update.Activity
+	}
+	if update.Detail != "" {
+		current.Detail = update.Detail
+	}
+	if update.LastTime != "" {
+		current.LastTime = update.LastTime
+	}
+	if update.TotalMs > 0 {
+		current.TotalMs = update.TotalMs
+	}
+	if update.FirstEventMs >= 0 {
+		current.FirstEventMs = update.FirstEventMs
+	}
+	if update.FirstTextMs >= 0 {
+		current.FirstTextMs = update.FirstTextMs
+	}
+	if update.FirstToolMs >= 0 {
+		current.FirstToolMs = update.FirstToolMs
+	}
+	b.activity[slug] = current
+	b.publishActivityLocked(current)
+	b.mu.Unlock()
 }
 
 // Token returns the shared secret that agents must include in requests.
@@ -453,6 +614,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
+	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/web-token", b.handleWebToken)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
@@ -529,6 +691,81 @@ func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": b.token})
+}
+
+func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token == "" {
+		auth := strings.TrimSpace(r.Header.Get("Authorization"))
+		if strings.HasPrefix(auth, "Bearer ") {
+			token = strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))
+		}
+	}
+	if token != b.token {
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	messages, unsubscribeMessages := b.SubscribeMessages(256)
+	defer unsubscribeMessages()
+	actions, unsubscribeActions := b.SubscribeActions(256)
+	defer unsubscribeActions()
+	activity, unsubscribeActivity := b.SubscribeActivity(256)
+	defer unsubscribeActivity()
+
+	writeEvent := func(name string, payload any) error {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", name, data); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+
+	if err := writeEvent("ready", map[string]string{"status": "ok"}); err != nil {
+		return
+	}
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case msg, ok := <-messages:
+			if !ok || writeEvent("message", map[string]any{"message": msg}) != nil {
+				return
+			}
+		case action, ok := <-actions:
+			if !ok || writeEvent("action", map[string]any{"action": action}) != nil {
+				return
+			}
+		case snapshot, ok := <-activity:
+			if !ok || writeEvent("activity", map[string]any{"activity": snapshot}) != nil {
+				return
+			}
+		case <-heartbeat.C:
+			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
 }
 
 // ServeWebUI starts a static file server for the web UI on the given port.
@@ -741,7 +978,7 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 		Content:     strings.TrimSpace(content),
 		Timestamp:   time.Now().UTC().Format(time.RFC3339),
 	}
-	b.messages = append(b.messages, msg)
+	b.appendMessageLocked(msg)
 	// Mark as already delivered so it doesn't bounce back to the same surface
 	if b.externalDelivered == nil {
 		b.externalDelivered = make(map[string]struct{})
@@ -916,6 +1153,7 @@ func (b *Broker) Reset() {
 	b.watchdogs = nil
 	b.scheduler = nil
 	b.pendingInterview = nil
+	b.activity = make(map[string]agentActivitySnapshot)
 	b.counter = 0
 	b.notificationSince = ""
 	b.insightsSince = ""
@@ -3183,7 +3421,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		ReplyTo:   replyTo,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	b.messages = append(b.messages, msg)
+	b.appendMessageLocked(msg)
 	total := len(b.messages)
 
 	// Track which agents were tagged — they should show "typing" immediately
@@ -3310,7 +3548,7 @@ func (b *Broker) PostSystemMessage(channel, content, kind string) {
 		Content:   content,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	b.messages = append(b.messages, msg)
+	b.appendMessageLocked(msg)
 }
 
 func (b *Broker) PostMessage(from, channel, content string, tagged []string, replyTo string) (channelMessage, error) {
@@ -3341,7 +3579,7 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		ReplyTo:   strings.TrimSpace(replyTo),
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
-	b.messages = append(b.messages, msg)
+	b.appendMessageLocked(msg)
 	// Clear typing indicator — agent has replied
 	if b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
@@ -3394,7 +3632,7 @@ func (b *Broker) PostAutomationMessage(from, channel, title, content, eventID, s
 		msg.From = "nex"
 	}
 
-	b.messages = append(b.messages, msg)
+	b.appendMessageLocked(msg)
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, false, err
 	}
@@ -3798,13 +4036,9 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		if len(content) > 80 {
 			content = content[:80]
 		}
-		ts := msg.Timestamp
-		if len(ts) > 19 {
-			ts = ts[11:19]
-		}
 		info := members[msg.From]
 		info.lastMessage = content
-		info.lastTime = ts
+		info.lastTime = msg.Timestamp
 		if info.name == "" {
 			if office := b.findMemberLocked(msg.From); office != nil {
 				info.name = office.Name
@@ -3815,7 +4049,14 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	isOneOnOne := b.sessionMode == SessionModeOneOnOne
 	oneOnOneSlug := b.oneOnOneAgent
-	taggedAt := b.lastTaggedAt
+	taggedAt := make(map[string]time.Time, len(b.lastTaggedAt))
+	for slug, ts := range b.lastTaggedAt {
+		taggedAt[slug] = ts
+	}
+	activity := make(map[string]agentActivitySnapshot, len(b.activity))
+	for slug, snapshot := range b.activity {
+		activity[slug] = snapshot
+	}
 	b.mu.Unlock()
 
 	type memberEntry struct {
@@ -3826,6 +4067,13 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 		LastMessage  string `json:"lastMessage"`
 		LastTime     string `json:"lastTime"`
 		LiveActivity string `json:"liveActivity,omitempty"`
+		Status       string `json:"status,omitempty"`
+		Activity     string `json:"activity,omitempty"`
+		Detail       string `json:"detail,omitempty"`
+		TotalMs      int64  `json:"totalMs,omitempty"`
+		FirstEventMs int64  `json:"firstEventMs,omitempty"`
+		FirstTextMs  int64  `json:"firstTextMs,omitempty"`
+		FirstToolMs  int64  `json:"firstToolMs,omitempty"`
 	}
 
 	// Capture pane activity via diff detection.
@@ -3847,14 +4095,47 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 			LastMessage: info.lastMessage,
 			LastTime:    info.lastTime,
 		}
-		if activity, ok := paneActivity[slug]; ok {
-			entry.LiveActivity = activity
+		if snapshot, ok := activity[slug]; ok {
+			entry.Status = snapshot.Status
+			entry.Activity = snapshot.Activity
+			entry.Detail = snapshot.Detail
+			entry.TotalMs = snapshot.TotalMs
+			entry.FirstEventMs = snapshot.FirstEventMs
+			entry.FirstTextMs = snapshot.FirstTextMs
+			entry.FirstToolMs = snapshot.FirstToolMs
+			if snapshot.LastTime != "" {
+				entry.LastTime = snapshot.LastTime
+			}
+			if snapshot.Detail != "" {
+				entry.LiveActivity = snapshot.Detail
+			}
+		}
+		if live, ok := paneActivity[slug]; ok {
+			entry.Status = "active"
+			if entry.Activity == "" {
+				entry.Activity = "text"
+			}
+			entry.LiveActivity = live
+			entry.Detail = live
+			if entry.LastTime == "" {
+				entry.LastTime = time.Now().UTC().Format(time.RFC3339)
+			}
 		}
 		// Also mark as active if tagged recently and hasn't replied yet
 		if entry.LiveActivity == "" && taggedAt != nil {
 			if t, ok := taggedAt[slug]; ok && time.Since(t) < 60*time.Second {
+				entry.Status = "active"
+				if entry.Activity == "" {
+					entry.Activity = "queued"
+				}
 				entry.LiveActivity = "active"
 			}
+		}
+		if entry.Status == "" {
+			entry.Status = "idle"
+		}
+		if entry.Activity == "" {
+			entry.Activity = "idle"
 		}
 		list = append(list, entry)
 	}
@@ -4829,7 +5110,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
 		}
 		msg.Content = formatRequestAnswerMessage(b.requests[i], *answer)
-		b.messages = append(b.messages, msg)
+		b.appendMessageLocked(msg)
 		b.appendActionLocked("request_answered", "office", b.requests[i].Channel, "you", truncateSummary(msg.Content, 140), b.requests[i].ID)
 		if err := b.saveLocked(); err != nil {
 			b.mu.Unlock()
@@ -5145,7 +5426,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	}
 	b.skills = append(b.skills, sk)
 
-	b.messages = append(b.messages, channelMessage{
+	b.appendMessageLocked(channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      sk.CreatedBy,
 		Channel:   channel,
@@ -5264,7 +5545,7 @@ func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.counter++
-	b.messages = append(b.messages, channelMessage{
+	b.appendMessageLocked(channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      sk.CreatedBy,
 		Channel:   channel,
@@ -5317,7 +5598,7 @@ func (b *Broker) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.counter++
-	b.messages = append(b.messages, channelMessage{
+	b.appendMessageLocked(channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      sk.CreatedBy,
 		Channel:   channel,
@@ -5388,7 +5669,7 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.counter++
-	b.messages = append(b.messages, channelMessage{
+	b.appendMessageLocked(channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      invoker,
 		Channel:   channel,
@@ -5497,7 +5778,7 @@ func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
 
 	// Announce the proposal
 	b.counter++
-	b.messages = append(b.messages, channelMessage{
+	b.appendMessageLocked(channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      "system",
 		Channel:   channel,

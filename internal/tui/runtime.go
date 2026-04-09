@@ -155,6 +155,11 @@ func (rt *Runtime) BootstrapTmuxChannel() (*TmuxManager, *GossipBus, *ChannelAda
 		if err := tm.SpawnAgent(agentCfg.Slug, "claude", args, []string{"CWD=" + cwd}); err != nil {
 			continue // non-fatal
 		}
+		reader, err := tm.AttachObserverPipe(agentCfg.Slug)
+		if err != nil {
+			continue
+		}
+		NewOutputObserver(agentCfg.Slug, bus, reader).Start()
 	}
 
 	return tm, bus, adapter, nil

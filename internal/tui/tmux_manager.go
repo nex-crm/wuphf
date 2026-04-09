@@ -2,19 +2,29 @@ package tui
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // TmuxManager manages a tmux session with one window per agent.
 type TmuxManager struct {
 	sessionName string
+	pipeDir     string
+	pipePaths   map[string]string
+	pipeFiles   map[string]*os.File
 }
 
 // NewTmuxManager creates a TmuxManager for the given session name.
 func NewTmuxManager(sessionName string) *TmuxManager {
-	return &TmuxManager{sessionName: sessionName}
+	return &TmuxManager{
+		sessionName: sessionName,
+		pipePaths:   make(map[string]string),
+		pipeFiles:   make(map[string]*os.File),
+	}
 }
 
 // HasTmux returns true if tmux is in PATH.
@@ -62,6 +72,32 @@ func (t *TmuxManager) SpawnAgent(slug string, command string, args []string, env
 	return nil
 }
 
+// AttachObserverPipe streams fresh pane output through a FIFO so observers can
+// read it directly without polling capture-pane snapshots.
+func (t *TmuxManager) AttachObserverPipe(slug string) (io.ReadCloser, error) {
+	if err := t.ensurePipeDir(); err != nil {
+		return nil, err
+	}
+	path := filepath.Join(t.pipeDir, slug+".fifo")
+	_ = os.Remove(path)
+	if err := syscall.Mkfifo(path, 0o600); err != nil {
+		return nil, fmt.Errorf("mkfifo %s: %w", path, err)
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open fifo %s: %w", path, err)
+	}
+	cmd := exec.Command("tmux", "pipe-pane", "-o", "-t", t.sessionName+":"+slug, "cat > "+tmuxShellQuote(path))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		file.Close()
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("tmux pipe-pane %s: %s: %w", slug, strings.TrimSpace(string(out)), err)
+	}
+	t.pipePaths[slug] = path
+	t.pipeFiles[slug] = file
+	return file, nil
+}
+
 // CapturePaneContent captures the visible text from an agent's tmux pane.
 func (t *TmuxManager) CapturePaneContent(slug string) (string, error) {
 	target := t.sessionName + ":" + slug
@@ -75,6 +111,7 @@ func (t *TmuxManager) CapturePaneContent(slug string) (string, error) {
 
 // KillSession kills the entire tmux session and all agent windows.
 func (t *TmuxManager) KillSession() error {
+	t.closeObserverPipes()
 	if !t.sessionExists() {
 		return nil
 	}
@@ -117,3 +154,35 @@ func (t *TmuxManager) sessionExists() bool {
 	return cmd.Run() == nil
 }
 
+func (t *TmuxManager) ensurePipeDir() error {
+	if t.pipeDir != "" {
+		return nil
+	}
+	dir, err := os.MkdirTemp("", t.sessionName+"-pipes-")
+	if err != nil {
+		return err
+	}
+	t.pipeDir = dir
+	return nil
+}
+
+func (t *TmuxManager) closeObserverPipes() {
+	for slug, file := range t.pipeFiles {
+		if file != nil {
+			_ = file.Close()
+		}
+		delete(t.pipeFiles, slug)
+	}
+	for slug, path := range t.pipePaths {
+		_ = os.Remove(path)
+		delete(t.pipePaths, slug)
+	}
+	if t.pipeDir != "" {
+		_ = os.RemoveAll(t.pipeDir)
+		t.pipeDir = ""
+	}
+}
+
+func tmuxShellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}

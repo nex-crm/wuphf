@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -103,6 +104,37 @@ func (l *AgentLoop) GetState() AgentState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.state
+}
+
+// CanProcess reports whether the loop is started and not paused.
+func (l *AgentLoop) CanProcess() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.running && !l.paused
+}
+
+// IsBusy reports whether the loop is actively processing a turn.
+func (l *AgentLoop) IsBusy() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	switch l.state.Phase {
+	case PhaseBuildContext, PhaseStreamLLM, PhaseExecuteTool:
+		return l.running && !l.paused
+	default:
+		return false
+	}
+}
+
+// Interrupt cancels in-flight provider or tool work so newer queued work can start.
+func (l *AgentLoop) Interrupt() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.cancelFunc == nil {
+		return false
+	}
+	l.cancelFunc()
+	l.cancelFunc = nil
+	return true
 }
 
 // Start marks the loop as running and sets phase to idle.
@@ -344,6 +376,11 @@ func (l *AgentLoop) streamLLM() error {
 	for chunk := range ch {
 		select {
 		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.Canceled) {
+				l.pendingToolCall = nil
+				l.setPhase(PhaseIdle)
+				return nil
+			}
 			return ctx.Err()
 		default:
 		}
@@ -375,6 +412,11 @@ func (l *AgentLoop) streamLLM() error {
 	}
 
 done:
+	if errors.Is(ctx.Err(), context.Canceled) {
+		l.pendingToolCall = nil
+		l.setPhase(PhaseIdle)
+		return nil
+	}
 	// Append assistant text to session.
 	if fullText.Len() > 0 {
 		l.sessions.Append(l.state.SessionID, SessionEntry{
@@ -450,6 +492,12 @@ func (l *AgentLoop) executeTool() error {
 
 	result, err := tool.Execute(tc.Params, ctx, func(s string) {})
 	tc.CompletedAt = time.Now().UnixMilli()
+
+	if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+		l.pendingToolCall = nil
+		l.setPhase(PhaseIdle)
+		return nil
+	}
 
 	if err != nil {
 		tc.Error = err.Error()

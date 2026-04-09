@@ -1,8 +1,10 @@
 package tui
 
 import (
+	"bufio"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestHasTmux(t *testing.T) {
@@ -132,4 +134,43 @@ func TestTmuxSpawnAndCapture(t *testing.T) {
 		t.Fatalf("CapturePaneContent: %v", err)
 	}
 	t.Logf("captured content:\n%s", content)
+}
+
+func TestTmuxAttachObserverPipe(t *testing.T) {
+	skipIfNoTmux(t)
+
+	tm := NewTmuxManager("nex-test-pipe")
+	_ = tm.KillSession()
+	defer tm.KillSession()
+
+	if err := tm.CreateSession(); err != nil {
+		t.Fatalf("CreateSession: %v", err)
+	}
+
+	if err := tm.SpawnAgent("test-agent", "bash", []string{"-c", "'sleep 0.2; echo HELLO_PIPE; sleep 2'"}, nil); err != nil {
+		t.Fatalf("SpawnAgent: %v", err)
+	}
+
+	reader, err := tm.AttachObserverPipe("test-agent")
+	if err != nil {
+		t.Fatalf("AttachObserverPipe: %v", err)
+	}
+	defer reader.Close()
+
+	lines := make(chan string, 4)
+	go func() {
+		scanner := bufio.NewScanner(reader)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+	}()
+
+	select {
+	case line := <-lines:
+		if line != "HELLO_PIPE" {
+			t.Fatalf("expected HELLO_PIPE, got %q", line)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("timed out waiting for pane pipe output")
+	}
 }

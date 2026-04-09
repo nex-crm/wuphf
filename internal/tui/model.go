@@ -11,9 +11,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
-// channelTickMsg triggers periodic tmux capture and adapter polling.
-type channelTickMsg struct{}
-
 // ViewName identifies a top-level view.
 type ViewName string
 
@@ -43,6 +40,7 @@ type Model struct {
 	tmuxManager    *TmuxManager
 	channelBus     *GossipBus
 	channelAdapter *ChannelAdapter
+	channelStop    func()
 
 	currentView ViewName
 	width       int
@@ -143,9 +141,9 @@ func (m Model) Init() tea.Cmd {
 			m.tmuxManager = tm
 			m.channelBus = bus
 			m.channelAdapter = adapter
-
-			// Start capture polling goroutine.
-			go m.tmuxCaptureLoop(tm, bus, adapter)
+			events, unsubscribe := bus.SubscribeEvents(256)
+			m.channelStop = unsubscribe
+			go m.channelBusLoop(bus, adapter, events)
 		}
 	}
 
@@ -156,16 +154,10 @@ func (m Model) Init() tea.Cmd {
 		}
 	}
 
-	var channelCmd tea.Cmd
-	if m.channelMode {
-		channelCmd = channelTick()
-	}
-
 	return tea.Batch(
 		m.stream.Init(),
 		waitForAgentEvent(m.runtime.Events),
 		welcomeCmd,
-		channelCmd,
 	)
 }
 
@@ -231,33 +223,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-	case channelTickMsg:
-		if m.channelMode && m.channelAdapter != nil {
-			// Drain adapter messages into stream view.
-			drained := 0
-			for drained < 20 {
-				select {
-				case smsg := <-m.channelAdapter.Messages():
-					m.stream.messages = append(m.stream.messages, smsg)
-					m.stream.scrollOffset = 0 // auto-scroll to bottom
-					drained++
-				default:
-					goto doneDrain
-				}
-			}
-		doneDrain:
-
-			// Update agent status line from gossip activity.
-			if m.channelBus != nil {
-				for _, a := range m.runtime.AgentService.List() {
-					activity := m.channelBus.GetActivity(a.Config.Slug)
-					m.stream.updateAgentStatus(a.Config.Slug, a.Config.Name, activity)
-				}
-			}
-
-			return m, channelTick()
-		}
-
 	case embeddedTickMsg:
 		if m.embedded {
 			// Flush any pending gossip batches.
@@ -284,6 +249,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ViewSwitchMsg:
 		m.currentView = msg.Target
 		return m, nil
+
+	case ChannelMessageMsg:
+		if m.channelMode {
+			m.stream.messages = append(m.stream.messages, msg.Message)
+			m.stream.scrollOffset = 0
+			return m, waitForAgentEvent(m.runtime.Events)
+		}
+
+	case ChannelActivityMsg:
+		if m.channelMode {
+			m.stream.updateAgentStatus(msg.Slug, msg.Name, msg.Activity)
+			return m, waitForAgentEvent(m.runtime.Events)
+		}
 
 	case AgentTextMsg, AgentDoneMsg, AgentErrorMsg, PhaseChangeMsg,
 		AgentThinkingMsg, AgentToolUseMsg, AgentToolResultMsg:
@@ -386,71 +364,61 @@ func (m *Model) shutdownPanes() {
 
 // shutdownTmux kills the tmux session on exit.
 func (m *Model) shutdownTmux() {
+	if m.channelStop != nil {
+		m.channelStop()
+		m.channelStop = nil
+	}
 	if m.tmuxManager == nil {
 		return
 	}
 	_ = m.tmuxManager.KillSession()
 }
 
-// tmuxCaptureLoop polls tmux panes every 500ms, parses NDJSON output,
-// and feeds events through GossipBus → ChannelAdapter.
-func (m *Model) tmuxCaptureLoop(tm *TmuxManager, bus *GossipBus, adapter *ChannelAdapter) {
-	// Track last captured content per agent to only process new lines.
-	lastContent := make(map[string]string)
-	// Track how many events we've already forwarded to the adapter.
-	lastEventIdx := 0
+// channelBusLoop listens to raw gossip events from pane pipes and forwards them
+// directly into the Bubble Tea runtime while periodically flushing delayed
+// inter-agent injections inside the bus.
+func (m *Model) channelBusLoop(bus *GossipBus, adapter *ChannelAdapter, events <-chan GossipEvent) {
+	flushTicker := time.NewTicker(500 * time.Millisecond)
+	defer flushTicker.Stop()
 
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		windows, err := tm.ListWindows()
-		if err != nil {
-			continue
-		}
-		for _, slug := range windows {
-			content, err := tm.CapturePaneContent(slug)
-			if err != nil || content == lastContent[slug] {
-				continue
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				return
 			}
-
-			// Find new lines by comparing with last capture.
-			prev := lastContent[slug]
-			lastContent[slug] = content
-
-			newPart := content
-			if len(prev) > 0 && strings.HasPrefix(content, prev) {
-				newPart = content[len(prev):]
+			adapter.HandleEvent(event)
+			m.forwardChannelMessages(adapter)
+			name := event.FromSlug
+			if ma, ok := m.runtime.AgentService.Get(event.FromSlug); ok {
+				name = ma.Config.Name
 			}
-
-			// Parse new lines as NDJSON and emit to bus.
-			for _, line := range strings.Split(newPart, "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" || line[0] != '{' {
-					continue
-				}
-				obs := NewOutputObserver(slug, bus, strings.NewReader(line+"\n"))
-				obs.run()
+			select {
+			case m.runtime.Events <- ChannelActivityMsg{
+				Slug:     event.FromSlug,
+				Name:     name,
+				Activity: bus.GetActivity(event.FromSlug),
+			}:
+			default:
 			}
+		case <-flushTicker.C:
+			bus.FlushPending()
 		}
-
-		// Flush pending gossip events.
-		bus.FlushPending()
-
-		// Feed only NEW gossip events to the channel adapter.
-		allEvents := bus.EventLog()
-		for i := lastEventIdx; i < len(allEvents); i++ {
-			adapter.HandleEvent(allEvents[i])
-		}
-		lastEventIdx = len(allEvents)
 	}
 }
 
-// channelTick returns a command that fires a channelTickMsg after 500ms.
-func channelTick() tea.Cmd {
-	return tea.Tick(500*time.Millisecond, func(time.Time) tea.Msg {
-		return channelTickMsg{}
-	})
+func (m *Model) forwardChannelMessages(adapter *ChannelAdapter) {
+	for {
+		select {
+		case smsg := <-adapter.Messages():
+			select {
+			case m.runtime.Events <- ChannelMessageMsg{Message: smsg}:
+			default:
+			}
+		default:
+			return
+		}
+	}
 }
 
 // embeddedTick returns a command that fires an embeddedTickMsg after 100ms.

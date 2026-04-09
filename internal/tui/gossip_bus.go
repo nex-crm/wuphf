@@ -36,6 +36,8 @@ const (
 type GossipBus struct {
 	panes    map[string]GossipTarget
 	eventLog []GossipEvent
+	subs     map[int]chan GossipEvent
+	nextSub  int
 
 	// Turn-taking state
 	leaderSlug  string
@@ -61,6 +63,7 @@ func NewGossipBus(leaderSlug string) *GossipBus {
 		cooldowns:     make(map[string]time.Time),
 		lastInjection: make(map[string]time.Time),
 		pendingBatch:  make(map[string][]GossipEvent),
+		subs:          make(map[int]chan GossipEvent),
 		now:           time.Now,
 	}
 }
@@ -70,6 +73,29 @@ func (b *GossipBus) RegisterTarget(target GossipTarget) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.panes[target.Slug()] = target
+}
+
+// SubscribeEvents receives raw emitted events as they happen.
+func (b *GossipBus) SubscribeEvents(buffer int) (<-chan GossipEvent, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan GossipEvent, buffer)
+
+	b.mu.Lock()
+	id := b.nextSub
+	b.nextSub++
+	b.subs[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.subs[id]; ok {
+			delete(b.subs, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
 }
 
 // BroadcastUserMessage sends text to all targets and gives the leader the floor.
@@ -107,6 +133,12 @@ func (b *GossipBus) Emit(event GossipEvent) {
 		event.Timestamp = b.now()
 	}
 	b.eventLog = append(b.eventLog, event)
+	for _, ch := range b.subs {
+		select {
+		case ch <- event:
+		default:
+		}
+	}
 
 	now := b.now()
 
