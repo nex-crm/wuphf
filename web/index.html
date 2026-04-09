@@ -277,7 +277,27 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .msg-h1 { font-size: 18px; font-weight: 700; color: var(--text); margin: 8px 0 4px; }
 .msg-h2 { font-size: 16px; font-weight: 600; color: var(--text); margin: 6px 0 3px; }
 .msg-h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 4px 0 2px; }
-.msg-blockquote { border-left: 3px solid var(--border-dark); padding: 2px 0 2px 12px; margin: 4px 0; color: var(--text-secondary); font-style: italic; }
+/* Quote block — visually distinct card for quoted messages */
+.msg-blockquote {
+  border-left: 3px solid var(--accent);
+  background: var(--bg-warm);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  padding: 8px 12px;
+  margin: 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  font-style: normal;
+  position: relative;
+}
+.msg-blockquote strong {
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 12px;
+}
+/* Visual separator between quote and reply */
+.msg-blockquote + br { display: none; }
+.msg-blockquote + br + * { margin-top: 6px; }
 .msg-ul, .msg-ol { margin: 4px 0; padding-left: 24px; }
 .msg-ul li, .msg-ol li { margin: 2px 0; line-height: 1.6; }
 .msg-codeblock { background: var(--bg-warm); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin: 6px 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; white-space: pre; }
@@ -291,6 +311,26 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .composer-reply-badge-text { font-weight: 500; }
 .composer-reply-badge-close { width: 18px; height: 18px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-tertiary); margin-left: auto; }
 .composer-reply-badge-close:hover { background: var(--border); color: var(--text); }
+
+/* Quote preview card above thread composer */
+.composer-quote-preview {
+  margin: 0 12px;
+  padding: 8px 12px;
+  background: var(--bg-warm);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.composer-quote-preview-body { flex: 1; min-width: 0; }
+.composer-quote-preview-author { font-weight: 700; color: var(--accent); font-size: 11px; margin-bottom: 2px; }
+.composer-quote-preview-text { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.composer-quote-preview-close { width: 18px; height: 18px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-tertiary); flex-shrink: 0; }
+.composer-quote-preview-close:hover { background: var(--border); color: var(--text); }
 
 /* ─── Composer context hint ─── */
 .composer-context-hint { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); font-style: italic; }
@@ -2651,18 +2691,51 @@ function appendMessageToContainer(msg, container, opts) {
   quoteBtn.addEventListener('click', (function(m) {
     return function() {
       var authorName = isHuman ? 'You' : (agent ? agent.name : m.from);
-      var preview = (m.content || '').split('\n')[0].substring(0, 120);
-      var quoteText = '> **' + authorName + '**: ' + preview + '\n\n';
-      // Insert into the appropriate composer
-      var targetInput = activeThreadId ? document.getElementById('thread-composer-input') : composerInput;
-      if (targetInput) {
-        targetInput.value = quoteText + targetInput.value;
-        targetInput.focus();
-        targetInput.setSelectionRange(targetInput.value.length, targetInput.value.length);
-        // Enable send button
-        var sendBtn = activeThreadId ? document.getElementById('thread-composer-send') : composerSend;
-        if (sendBtn) sendBtn.disabled = false;
-      }
+      var preview = (m.content || '').replace(/\n/g, ' ').substring(0, 150);
+      var quoteMarkdown = '> **' + authorName + '**: ' + preview.split(' ').slice(0, 20).join(' ');
+
+      // Show visual preview above thread composer
+      var threadComposerArea = document.querySelector('.thread-panel-composer');
+      if (!threadComposerArea) return;
+
+      // Remove existing preview
+      var existingPreview = document.getElementById('quote-preview');
+      if (existingPreview) existingPreview.remove();
+
+      // Build preview card
+      var previewCard = document.createElement('div');
+      previewCard.className = 'composer-quote-preview';
+      previewCard.id = 'quote-preview';
+
+      var body = document.createElement('div');
+      body.className = 'composer-quote-preview-body';
+      var authorEl = document.createElement('div');
+      authorEl.className = 'composer-quote-preview-author';
+      authorEl.textContent = authorName;
+      var textEl = document.createElement('div');
+      textEl.className = 'composer-quote-preview-text';
+      textEl.textContent = preview;
+      body.appendChild(authorEl);
+      body.appendChild(textEl);
+
+      var closeBtn = document.createElement('button');
+      closeBtn.className = 'composer-quote-preview-close';
+      closeBtn.textContent = '\u00D7';
+      closeBtn.addEventListener('click', function() {
+        previewCard.remove();
+        window._quoteMarkdown = null;
+      });
+
+      previewCard.appendChild(body);
+      previewCard.appendChild(closeBtn);
+      threadComposerArea.insertBefore(previewCard, threadComposerArea.firstChild);
+
+      // Store quote for sendThreadReply to prepend
+      window._quoteMarkdown = quoteMarkdown;
+
+      // Focus thread composer
+      var threadInputEl = document.getElementById('thread-composer-input');
+      if (threadInputEl) threadInputEl.focus();
     };
   })(msg));
   quoteActions.appendChild(quoteBtn);
@@ -3235,6 +3308,14 @@ function sendThreadReply() {
   if (!activeThreadId || !threadInput) return;
   var raw = threadInput.value.trim();
   if (!raw) return;
+
+  // Prepend quote if one is active
+  if (window._quoteMarkdown) {
+    raw = window._quoteMarkdown + '\n\n' + raw;
+    window._quoteMarkdown = null;
+    var quotePreview = document.getElementById('quote-preview');
+    if (quotePreview) quotePreview.remove();
+  }
 
   // Handle slash commands in thread too
   if (raw.charAt(0) === '/') {
