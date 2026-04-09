@@ -68,9 +68,6 @@ func (m channelModel) buildArtifactLines(contentWidth int) []renderedLine {
 		)
 	}
 
-	if priority := buildArtifactPriorityLines(contentWidth, snapshot); len(priority) > 0 {
-		lines = append(lines, priority...)
-	}
 	lines = append(lines, renderArtifactSection(contentWidth, "Task execution", snapshot.Filter(team.RuntimeArtifactTask, team.RuntimeArtifactTaskLog))...)
 	lines = append(lines, renderArtifactSection(contentWidth, "Workflow runs", snapshot.Filter(team.RuntimeArtifactWorkflowRun))...)
 	lines = append(lines, renderArtifactSection(contentWidth, "Requests and approvals", snapshot.Filter(team.RuntimeArtifactRequest))...)
@@ -97,102 +94,8 @@ func (m channelModel) currentArtifactSummary() string {
 	return strings.Join(parts, " · ")
 }
 
-func (m channelModel) currentArtifactFocusSummary() string {
-	snapshot := m.currentArtifactSnapshot(24)
-	if review := snapshot.ReviewCandidates(1); len(review) > 0 {
-		if resume := snapshot.ResumeCandidates(1); len(resume) > 0 {
-			return truncateText("Review "+review[0].EffectiveTitle()+" · Resume "+resume[0].EffectiveTitle(), 96)
-		}
-		return truncateText("Review "+review[0].EffectiveTitle(), 96)
-	}
-	if resume := snapshot.ResumeCandidates(1); len(resume) > 0 {
-		return truncateText("Resume "+resume[0].EffectiveTitle(), 96)
-	}
-	return ""
-}
-
 func (m channelModel) currentRuntimeArtifacts(limit int) []team.RuntimeArtifact {
 	return m.currentArtifactSnapshot(limit).Items
-}
-
-func buildArtifactPriorityLines(contentWidth int, snapshot runtimeArtifactSnapshot) []renderedLine {
-	lines := []renderedLine{}
-	if review := snapshot.ReviewCandidates(2); len(review) > 0 {
-		lines = append(lines, renderArtifactFocusSection(contentWidth, "Review next", "#B45309", review, true)...)
-	}
-	if resume := snapshot.ResumeCandidates(2); len(resume) > 0 {
-		lines = append(lines, renderArtifactFocusSection(contentWidth, "Resume next", "#2563EB", resume, false)...)
-	}
-	return lines
-}
-
-func renderArtifactFocusSection(contentWidth int, title, accent string, artifacts []team.RuntimeArtifact, review bool) []renderedLine {
-	if len(artifacts) == 0 {
-		return nil
-	}
-	lines := []renderedLine{{Text: ""}, {Text: renderDateSeparator(contentWidth, title)}}
-	for _, artifact := range artifacts {
-		body := artifactReviewSummary(artifact)
-		if !review {
-			body = artifactResumeSummary(artifact)
-		}
-		extra := []string{}
-		if progress := strings.TrimSpace(artifact.EffectiveProgress()); progress != "" && !strings.EqualFold(progress, body) {
-			extra = append(extra, "Progress: "+progress)
-		}
-		if review && strings.TrimSpace(artifact.ReviewHint) != "" {
-			extra = append(extra, "Review: "+artifact.ReviewHint)
-		}
-		if !review && strings.TrimSpace(artifact.ResumeHint) != "" {
-			extra = append(extra, "Resume: "+artifact.ResumeHint)
-		}
-		if taskID, requestID, threadID := artifactNavigationTargets(artifact); taskID != "" || requestID != "" || threadID != "" {
-			extra = append(extra, artifactInteractionCTA(artifact, review))
-			card := renderRecoveryActionCard(contentWidth, subtlePill(strings.ToLower(title), "#F8FAFC", accent)+" "+lipgloss.NewStyle().Bold(true).Render(artifact.EffectiveTitle()), body, accent, extra)
-			lines = append(lines, prefixedCardLines(renderedCardLines(card, taskID, requestID, threadID, ""), "  ")...)
-			continue
-		}
-		header := subtlePill(strings.ToLower(title), "#F8FAFC", accent) + " " + lipgloss.NewStyle().Bold(true).Render(artifact.EffectiveTitle())
-		for _, line := range renderRuntimeEventCard(contentWidth, header, body, accent, extra) {
-			lines = append(lines, renderedLine{Text: "  " + line})
-		}
-	}
-	return lines
-}
-
-func artifactReviewSummary(artifact team.RuntimeArtifact) string {
-	switch artifact.Kind {
-	case team.RuntimeArtifactRequest:
-		return "Human decision waiting: " + artifact.EffectiveSummary()
-	default:
-		return fallbackString(strings.TrimSpace(artifact.EffectiveSummary()), "Review this retained work before moving it forward.")
-	}
-}
-
-func artifactResumeSummary(artifact team.RuntimeArtifact) string {
-	switch {
-	case strings.TrimSpace(artifact.Worktree) != "":
-		summary := "Resume from worktree " + artifact.Worktree
-		if branch := strings.TrimSpace(artifact.Branch); branch != "" {
-			summary += " on " + branch
-		}
-		return summary
-	case strings.TrimSpace(artifact.RelatedID) != "":
-		return "Resume from thread " + artifact.RelatedID
-	default:
-		return fallbackString(strings.TrimSpace(artifact.ResumeHint), "Resume this retained work.")
-	}
-}
-
-func artifactNavigationTargets(artifact team.RuntimeArtifact) (taskID, requestID, threadID string) {
-	switch artifact.Kind {
-	case team.RuntimeArtifactTask:
-		taskID = strings.TrimSpace(artifact.ID)
-	case team.RuntimeArtifactRequest:
-		requestID = strings.TrimSpace(artifact.ID)
-	}
-	threadID = strings.TrimSpace(artifact.RelatedID)
-	return taskID, requestID, threadID
 }
 
 func renderArtifactSection(contentWidth int, title string, artifacts []team.RuntimeArtifact) []renderedLine {
@@ -253,9 +156,6 @@ func artifactExtraLines(artifact team.RuntimeArtifact) []string {
 	if strings.TrimSpace(artifact.Worktree) != "" {
 		extra = append(extra, "Worktree: "+artifact.Worktree)
 	}
-	if strings.TrimSpace(artifact.Branch) != "" {
-		extra = append(extra, "Branch: "+artifact.Branch)
-	}
 	if strings.TrimSpace(artifact.Path) != "" {
 		extra = append(extra, "Path: "+artifact.Path)
 	}
@@ -266,32 +166,12 @@ func artifactExtraLines(artifact team.RuntimeArtifact) []string {
 		extra = append(extra, "Blocking")
 	}
 	if strings.TrimSpace(artifact.ReviewHint) != "" {
-		extra = append(extra, "Review: "+artifact.ReviewHint)
+		extra = append(extra, artifact.ReviewHint)
 	}
 	if strings.TrimSpace(artifact.ResumeHint) != "" {
-		extra = append(extra, "Resume: "+artifact.ResumeHint)
-	}
-	if cta := artifactInteractionCTA(artifact, artifact.Reviewable()); cta != "" {
-		extra = append(extra, cta)
+		extra = append(extra, artifact.ResumeHint)
 	}
 	return extra
-}
-
-func artifactInteractionCTA(artifact team.RuntimeArtifact, review bool) string {
-	switch artifact.Kind {
-	case team.RuntimeArtifactTask:
-		if review {
-			return "Click to open task actions and review context."
-		}
-		return "Click to open task actions and resume context."
-	case team.RuntimeArtifactRequest:
-		if review {
-			return "Click to reopen the decision and answer it."
-		}
-		return "Click to reopen the request context."
-	default:
-		return ""
-	}
 }
 
 func artifactLifecyclePill(state, runningColor, pendingColor, failedColor, completedColor string) string {

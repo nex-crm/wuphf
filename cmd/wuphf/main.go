@@ -29,7 +29,6 @@ func main() {
 	channelApp := flag.String("channel-app", "", "Start channel view on a specific app (internal)")
 	threadsCollapsed := flag.Bool("threads-collapsed", false, "Start with threads collapsed (default: expanded)")
 	unsafeMode := flag.Bool("unsafe", false, "Bypass all agent permission checks (use for local dev only)")
-	focusMode := flag.Bool("focus", false, "Route work through CEO and suppress cross-agent gossip for this run")
 	webMode := flag.Bool("web", false, "Launch web UI instead of tmux TUI")
 	webPort := flag.Int("web-port", 7891, "Port for the web UI (default 7891)")
 	noNex := flag.Bool("no-nex", false, "Disable Nex completely for this run")
@@ -120,15 +119,15 @@ func main() {
 
 	// Web mode: browser-based UI instead of tmux
 	if *webMode {
-		runWeb(args, *packFlag, *unsafeMode, *focusMode, *webPort)
+		runWeb(args, *packFlag, *unsafeMode, *webPort)
 		return
 	}
 
 	// Default: launch team or direct 1:1
-	runTeam(args, *packFlag, *unsafeMode, *focusMode, *oneOnOne)
+	runTeam(args, *packFlag, *unsafeMode, *oneOnOne)
 }
 
-func runTeam(args []string, packSlug string, unsafe bool, focus bool, oneOnOne bool) {
+func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -147,9 +146,6 @@ func runTeam(args []string, packSlug string, unsafe bool, focus bool, oneOnOne b
 		l.SetUnsafe(true)
 		fmt.Fprintf(os.Stderr, "\n\u26a0\ufe0f  UNSAFE MODE: All agents have unrestricted permissions.\n")
 		fmt.Fprintf(os.Stderr, "   This bypasses all tool approval prompts. Use for local dev only.\n\n")
-	}
-	if focus {
-		l.SetFocusMode(true)
 	}
 
 	if err := l.Preflight(); err != nil {
@@ -200,7 +196,7 @@ func runTeam(args []string, packSlug string, unsafe bool, focus bool, oneOnOne b
 	}
 }
 
-func runWeb(args []string, packSlug string, unsafe bool, focus bool, webPort int) {
+func runWeb(args []string, packSlug string, unsafe bool, webPort int) {
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -208,9 +204,6 @@ func runWeb(args []string, packSlug string, unsafe bool, focus bool, webPort int
 	}
 	if unsafe {
 		l.SetUnsafe(true)
-	}
-	if focus {
-		l.SetFocusMode(true)
 	}
 	if err := l.PreflightWeb(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)

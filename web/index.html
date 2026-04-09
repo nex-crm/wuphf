@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="themes/slack.css" />
+<link rel="stylesheet" href="themes/slack-dark.css" />
 <link rel="stylesheet" href="themes/windows-98.css" />
 <style>
 /* ═══════════════════════════════════════════════════════════════
@@ -113,6 +114,24 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.active { background: var(--green); }
 .status-dot.pulse { animation: pulse-dot 2s ease-in-out infinite; }
+.status-dot.shipping { background: var(--blue); }
+.status-dot.plotting { background: var(--yellow); }
+.status-dot.lurking { background: #9ca3af; }
+
+/* ─── Agent task text ─── */
+.sidebar-agent-task { font-size: 10px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
+.sidebar-agent-wrap { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+
+/* ─── Sidebar summary / hint ─── */
+.sidebar-summary { padding: 4px 16px 2px; font-size: 10px; color: var(--text-tertiary); font-family: var(--font-mono); }
+.sidebar-hint { padding: 0 16px 6px; font-size: 10px; color: var(--text-secondary); font-style: italic; }
+
+/* ─── App content panel ─── */
+.app-panel { flex: 1; overflow-y: auto; padding: 20px; display: none; flex-direction: column; gap: 12px; }
+.app-panel.active { display: flex; }
+.app-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; }
+.app-card-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.app-card-meta { font-size: 11px; color: var(--text-tertiary); }
 
 /* ─── Typography ─── */
 .font-logo { font-family: var(--font-logo); font-style: italic; }
@@ -228,7 +247,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .sidebar-item-icon { width: 14px; height: 14px; flex-shrink: 0; }
 .sidebar-item-emoji { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
 
-.sidebar-agents { padding: 0 12px 4px; }
+.sidebar-agents { padding: 0 12px 4px; max-height: 40vh; overflow-y: auto; }
 .sidebar-agent { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; margin-left: 12px; border-radius: 6px; font-size: 11px; border: none; background: transparent; cursor: pointer; transition: all 0.15s; color: var(--text-secondary); font-family: var(--font-sans); text-align: left; }
 .sidebar-agent:hover { background: rgba(0,0,0,0.04); color: var(--text); }
 .sidebar-agent.active { background: rgba(0,0,0,0.06); color: var(--text); font-weight: 500; }
@@ -254,10 +273,47 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-text strong { color: var(--text); font-weight: 600; }
 .message-text code { background: var(--bg-warm); border-radius: 4px; padding: 1px 5px; font-family: var(--font-mono); font-size: 12px; }
 
+/* ─── Markdown rendering ─── */
+.msg-h1 { font-size: 18px; font-weight: 700; color: var(--text); margin: 8px 0 4px; }
+.msg-h2 { font-size: 16px; font-weight: 600; color: var(--text); margin: 6px 0 3px; }
+.msg-h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 4px 0 2px; }
+.msg-blockquote { border-left: 3px solid var(--border-dark); padding: 2px 0 2px 12px; margin: 4px 0; color: var(--text-secondary); font-style: italic; }
+.msg-ul, .msg-ol { margin: 4px 0; padding-left: 24px; }
+.msg-ul li, .msg-ol li { margin: 2px 0; line-height: 1.6; }
+.msg-codeblock { background: var(--bg-warm); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin: 6px 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; white-space: pre; }
+.msg-codeblock code { background: none; border: none; padding: 0; font-size: inherit; }
+.msg-hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+.msg-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.msg-link:hover { color: var(--accent-warm); }
+
+/* ─── Reply-to badge ─── */
+.composer-reply-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; font-size: 12px; color: var(--accent); background: var(--accent-bg); border-radius: var(--radius-md) var(--radius-md) 0 0; border: 1px solid var(--border); border-bottom: none; }
+.composer-reply-badge-text { font-weight: 500; }
+.composer-reply-badge-close { width: 18px; height: 18px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 50%; color: var(--text-tertiary); margin-left: auto; }
+.composer-reply-badge-close:hover { background: var(--border); color: var(--text); }
+
+/* ─── Composer context hint ─── */
+.composer-context-hint { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); font-style: italic; }
+
+/* ─── Nested thread replies ─── */
+.thread-reply-depth { border-left: 2px solid var(--border); }
+.thread-reply-parent-label { font-size: 10px; color: var(--text-tertiary); margin-bottom: 2px; font-style: italic; }
+
+/* ─── Inline thread expand ─── */
+.inline-thread-container { margin-left: 48px; padding: 4px 0 4px 12px; border-left: 2px solid var(--border-light); }
+.inline-thread-container .message { margin-bottom: 8px; }
+.inline-thread-toggle { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); cursor: pointer; border: none; background: transparent; font-family: var(--font-sans); padding: 2px 6px; border-radius: 4px; margin-top: 4px; }
+.inline-thread-toggle:hover { background: var(--accent-bg); }
+.inline-thread-toggle svg { transition: transform 0.2s; }
+.inline-thread-toggle.expanded svg { transform: rotate(90deg); }
+
 .message-system { text-align: center; padding: 8px 0; }
 .message-system-inner { display: flex; align-items: center; gap: 12px; padding: 0 20px; }
 .message-system-line { height: 1px; flex: 1; background: var(--border); }
 .message-system-text { font-size: 12px; color: var(--text-tertiary); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* ─── @mention highlighting ─── */
+.mention { background: #FDF1E2; color: #D4700E; padding: 1px 4px; border-radius: 3px; font-weight: 600; }
 
 .typing-indicator { display: flex; align-items: center; gap: 8px; padding: 0 20px; font-size: 12px; color: var(--text-tertiary); }
 .typing-dots { display: flex; gap: 3px; }
@@ -306,6 +362,70 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-thread-link:hover { background: var(--accent-bg); }
 .message-thread-link svg { flex-shrink: 0; }
 
+/* ─── Message grouping ─── */
+.message-grouped { margin-top: -12px; }
+.message-grouped .message-avatar { visibility: hidden; }
+.message-grouped .message-header { display: none; }
+
+/* ─── Date separators ─── */
+.date-separator { display: flex; align-items: center; gap: 12px; padding: 8px 0; }
+.date-separator-line { height: 1px; flex: 1; background: var(--border); }
+.date-separator-text { font-size: 12px; font-weight: 600; color: var(--text-tertiary); white-space: nowrap; }
+
+/* ─── Reactions ─── */
+.message-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.reaction-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-full); border: 1px solid var(--border); background: var(--bg); font-size: 12px; cursor: pointer; transition: all 0.15s; font-family: var(--font-sans); }
+.reaction-pill:hover { border-color: var(--accent); background: var(--accent-bg); }
+.reaction-pill-count { font-weight: 600; color: var(--text-secondary); }
+
+/* ─── Unread divider ─── */
+.unread-divider { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+.unread-divider-line { height: 1px; flex: 1; background: var(--red); }
+.unread-divider-text { font-size: 12px; font-weight: 600; color: var(--red); white-space: nowrap; }
+
+/* ─── Status messages ─── */
+.message-status { padding: 4px 0 4px 48px; }
+.message-status-text { font-size: 13px; font-style: italic; color: var(--text-tertiary); }
+
+/* ─── Human message cards (#7) ─── */
+.message-card-human { border-left: 3px solid var(--blue); background: var(--blue-bg); border-radius: var(--radius-md); padding: 12px 14px; margin-top: 4px; }
+.message-card-human.action { border-left-color: var(--green); background: var(--green-bg); }
+.message-card-human-icon { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 4px; }
+.message-card-human.action .message-card-human-icon { color: var(--green); }
+.message-card-human:not(.action) .message-card-human-icon { color: var(--blue); }
+/* ─── Automation message cards (#8) ─── */
+.message-card-auto { border: 1px solid var(--border); background: var(--bg); border-radius: var(--radius-md); padding: 10px 14px; margin-top: 4px; opacity: 0.85; }
+.message-card-auto-icon { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-tertiary); margin-bottom: 4px; }
+/* ─── Routing/stage cards (#9) ─── */
+.message-card-routing { display: flex; align-items: center; gap: 8px; padding: 6px 0 6px 48px; }
+.message-card-routing-icon { font-size: 14px; flex-shrink: 0; }
+.message-card-routing-text { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
+/* ─── Quick jump modal (#29) ─── */
+.quick-jump-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); backdrop-filter: blur(4px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 20vh; }
+.quick-jump-overlay.open { display: flex; }
+.quick-jump { width: 400px; max-width: 90vw; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 16px 48px rgba(59,47,47,0.18); overflow: hidden; animation: fadeIn 0.15s ease-out; }
+.quick-jump-header { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+.quick-jump-header kbd { font-family: var(--font-mono); font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; color: var(--text-tertiary); }
+.quick-jump-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 15px; color: var(--text); outline: none; }
+.quick-jump-input::placeholder { color: var(--text-tertiary); }
+.quick-jump-list { max-height: 280px; overflow-y: auto; padding: 4px 0; }
+.quick-jump-item { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 13px; transition: background 0.08s; }
+.quick-jump-item:hover, .quick-jump-item.selected { background: var(--accent-bg); }
+.quick-jump-item-hash { font-weight: 700; color: var(--text-tertiary); width: 20px; text-align: center; }
+.quick-jump-item-name { font-weight: 500; color: var(--text); }
+.quick-jump-item-shortcut { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+/* ─── Thread expand/collapse toggle (#19) ─── */
+.thread-toggle-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-family: var(--font-sans); color: var(--text-tertiary); background: none; border: 1px solid var(--border); border-radius: var(--radius-full); padding: 2px 10px; cursor: pointer; transition: all 0.15s; margin-left: 8px; }
+.thread-toggle-btn:hover { border-color: var(--border-dark); color: var(--text-secondary); }
+/* ─── Pause confirmation ─── */
+.pause-confirm { display: flex; align-items: center; gap: 8px; padding: 8px 20px; background: var(--yellow-bg); border-top: 1px solid var(--border); font-size: 13px; color: var(--yellow); animation: fadeIn 0.15s ease-out; }
+.pause-confirm-text { flex: 1; font-weight: 500; }
+.pause-confirm-btn { padding: 4px 12px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; border: 1px solid var(--yellow); cursor: pointer; font-family: var(--font-sans); transition: all 0.15s; }
+.pause-confirm-yes { background: var(--yellow); color: white; }
+.pause-confirm-no { background: transparent; color: var(--yellow); }
+/* ─── Thread reply-to indicator (#20) ─── */
+.thread-reply-to { font-size: 11px; color: var(--text-tertiary); font-style: italic; margin-bottom: 2px; }
+
 .agent-panel { width: 320px; flex-shrink: 0; background: var(--bg-card); border-left: 1px solid var(--border); display: none; flex-direction: column; overflow-y: auto; }
 .agent-panel.open { display: flex; }
 .agent-panel-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
@@ -335,6 +455,216 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   .dict-word { font-size: 34px; }
   .welcome-tagline { font-size: 28px; }
 }
+
+/* ─── Command Palette ─── */
+.cmd-palette-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); backdrop-filter: blur(4px); z-index: 200; display: none; align-items: flex-start; justify-content: center; padding-top: 20vh; }
+.cmd-palette-overlay.open { display: flex; }
+.cmd-palette { width: 560px; max-width: 90vw; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 16px 48px rgba(59,47,47,0.18); overflow: hidden; animation: fadeIn 0.15s ease-out; }
+.cmd-palette-input-wrap { display: flex; align-items: center; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.cmd-palette-input-wrap svg { flex-shrink: 0; color: var(--text-tertiary); }
+.cmd-palette-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 15px; color: var(--text); outline: none; }
+.cmd-palette-input::placeholder { color: var(--text-tertiary); }
+.cmd-palette-kbd { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; }
+.cmd-palette-results { max-height: 320px; overflow-y: auto; padding: 4px 0; }
+.cmd-palette-group { padding: 4px 0; }
+.cmd-palette-group-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding: 6px 16px 4px; }
+.cmd-palette-item { display: flex; align-items: center; gap: 10px; padding: 8px 16px; cursor: pointer; font-size: 13px; transition: background 0.08s; }
+.cmd-palette-item:hover, .cmd-palette-item.selected { background: var(--accent-bg); }
+.cmd-palette-item-icon { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: var(--bg); font-size: 14px; flex-shrink: 0; }
+.cmd-palette-item-text { flex: 1; min-width: 0; }
+.cmd-palette-item-label { font-weight: 500; color: var(--text); }
+.cmd-palette-item-desc { font-size: 11px; color: var(--text-tertiary); }
+.cmd-palette-item-shortcut { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); }
+.cmd-palette-empty { padding: 24px 16px; text-align: center; font-size: 13px; color: var(--text-tertiary); }
+.cmd-palette-item-highlight { background: var(--yellow-bg); color: var(--yellow); padding: 0 1px; border-radius: 2px; }
+.cmd-palette-footer { display: flex; align-items: center; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); }
+.cmd-palette-footer kbd { font-family: var(--font-mono); font-size: 10px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; padding: 1px 4px; }
+
+/* ─── 1:1 DM Mode ─── */
+.dm-banner { display: none; align-items: center; gap: 10px; padding: 8px 20px; background: var(--blue-bg); border-bottom: 1px solid var(--border); font-size: 13px; color: var(--blue); }
+.dm-banner.open { display: flex; }
+.dm-banner-text { flex: 1; font-weight: 500; }
+.dm-back-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px; font-family: var(--font-sans); }
+.dm-back-btn:hover { background: rgba(0,0,0,0.06); color: var(--text); }
+
+/* ─── Recovery View ─── */
+.recovery-panel { display: none; flex-direction: column; gap: 16px; padding: 20px; overflow-y: auto; flex: 1; animation: fadeIn 0.3s ease-out; }
+.recovery-panel.open { display: flex; }
+.recovery-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px; }
+.recovery-card-title { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 8px; display: flex; align-items: center; gap: 6px; }
+.recovery-card-body { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.recovery-stat { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+.recovery-stat-label { color: var(--text-secondary); }
+.recovery-stat-value { font-weight: 500; color: var(--text); }
+.recovery-task { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--border-light); }
+.recovery-task:last-child { border-bottom: none; }
+.recovery-task-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.recovery-task-dot.active { background: var(--green); }
+.recovery-task-dot.blocked { background: var(--red); }
+.recovery-task-dot.pending { background: var(--yellow); }
+.recovery-task-dot.done { background: var(--text-tertiary); }
+
+/* ─── Notification Badge ─── */
+.sidebar-badge { min-width: 18px; height: 18px; border-radius: var(--radius-full); background: var(--red); color: white; font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center; padding: 0 5px; margin-left: auto; flex-shrink: 0; }
+
+/* ─── Confirmation Modal ─── */
+.confirm-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); z-index: 50; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.confirm-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(59,47,47,0.15); padding: 24px; width: 100%; max-width: 420px; animation: fadeIn 0.2s ease-out; }
+.confirm-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+.confirm-message { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ─── Needs You Banner ─── */
+.needs-you-banner { padding: 12px 20px; background: var(--red-bg); border-bottom: 2px solid var(--red); display: flex; flex-direction: column; gap: 8px; animation: fadeIn 0.3s ease-out; }
+.needs-you-label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--red); display: flex; align-items: center; gap: 6px; }
+.needs-you-question { font-size: 14px; font-weight: 500; color: var(--text); }
+.needs-you-from { font-size: 12px; color: var(--text-secondary); }
+.needs-you-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.needs-you-btn { padding: 6px 14px; border-radius: var(--radius-full); font-size: 12px; font-weight: 600; border: 1px solid var(--red); background: white; color: var(--red); cursor: pointer; transition: all 0.15s; font-family: var(--font-sans); }
+.needs-you-btn:hover { background: var(--red); color: white; }
+
+/* ─── Task Board ─── */
+.task-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; padding: 20px; height: 100%; overflow-y: auto; align-content: start; }
+.task-column { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
+.task-column-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding: 0 4px 8px; border-bottom: 2px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.task-column-count { font-family: var(--font-mono); font-size: 10px; background: var(--bg); padding: 1px 6px; border-radius: var(--radius-full); }
+.task-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; cursor: pointer; transition: all 0.15s; }
+.task-card:hover { border-color: var(--border-dark); box-shadow: 0 2px 8px rgba(59,47,47,0.06); }
+.task-card-title { font-size: 13px; font-weight: 500; margin-bottom: 6px; line-height: 1.4; }
+.task-card-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-tertiary); }
+.task-card-owner { display: flex; align-items: center; gap: 4px; }
+.task-status-pill { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
+.task-status-open { background: var(--bg); color: var(--text-tertiary); }
+.task-status-in_progress, .task-status-moving { background: var(--blue-bg); color: var(--blue); }
+.task-status-review { background: var(--yellow-bg); color: var(--yellow); }
+.task-status-done, .task-status-completed { background: var(--green-bg); color: var(--green); }
+.task-status-blocked { background: var(--red-bg); color: var(--red); }
+.task-detail-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); z-index: 50; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.task-detail-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(59,47,47,0.15); padding: 24px; width: 100%; max-width: 540px; max-height: 80vh; overflow-y: auto; animation: fadeIn 0.2s ease-out; }
+.task-detail-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
+.task-detail-row { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 0; }
+.task-detail-label { color: var(--text-tertiary); min-width: 80px; }
+.task-detail-value { color: var(--text); font-weight: 500; }
+.task-detail-desc { font-size: 14px; color: var(--text-secondary); line-height: 1.6; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* ─── Request List ─── */
+.request-list { padding: 20px; display: flex; flex-direction: column; gap: 8px; overflow-y: auto; height: 100%; }
+.request-list-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.request-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px; transition: all 0.15s; }
+.request-item:hover { border-color: var(--border-dark); }
+.request-item-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.request-item-from { font-size: 13px; font-weight: 600; }
+.request-kind-pill { display: inline-flex; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.03em; }
+.request-kind-approval { background: var(--yellow-bg); color: var(--yellow); }
+.request-kind-confirm { background: var(--blue-bg); color: var(--blue); }
+.request-kind-secret { background: var(--red-bg); color: var(--red); }
+.request-kind-input { background: var(--accent-bg); color: var(--accent); }
+.request-item-question { font-size: 14px; color: var(--text); margin-bottom: 8px; line-height: 1.5; }
+.request-item-timing { font-size: 11px; color: var(--text-tertiary); margin-bottom: 8px; }
+.request-item-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.request-empty { text-align: center; padding: 40px 20px; color: var(--text-tertiary); font-size: 14px; }
+
+/* ─── Interview Modal ─── */
+.interview-overlay { position: fixed; inset: 0; background: rgba(59,47,47,0.4); z-index: 50; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
+.interview-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 8px 40px rgba(59,47,47,0.15); padding: 24px; width: 100%; max-width: 520px; max-height: 85vh; overflow-y: auto; animation: fadeIn 0.2s ease-out; }
+.interview-title { font-size: 16px; font-weight: 600; margin-bottom: 4px; }
+.interview-question { font-size: 14px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; }
+.interview-phase { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 12px; }
+.interview-options { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.interview-option { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius-md); border: 1px solid var(--border); background: var(--bg-card); cursor: pointer; transition: all 0.15s; text-align: left; font-family: var(--font-sans); font-size: 14px; color: var(--text); width: 100%; }
+.interview-option:hover { border-color: var(--border-dark); background: var(--bg); }
+.interview-option.selected { border-color: var(--accent); background: var(--accent-bg); }
+.interview-option-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-dark); flex-shrink: 0; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.interview-option.selected .interview-option-radio { border-color: var(--accent); background: var(--accent); }
+.interview-option-radio-inner { width: 8px; height: 8px; border-radius: 50%; background: white; display: none; }
+.interview-option.selected .interview-option-radio-inner { display: block; }
+.interview-option-label { flex: 1; }
+.interview-text { width: 100%; min-height: 80px; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; font-family: var(--font-sans); font-size: 14px; color: var(--text); resize: vertical; outline: none; transition: border-color 0.2s; margin-bottom: 16px; background: var(--bg-card); }
+.interview-text:focus { border-color: var(--accent); }
+.interview-text::placeholder { color: var(--text-tertiary); }
+.interview-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.interview-review { background: var(--bg); border-radius: var(--radius-md); padding: 14px; margin-bottom: 16px; }
+.interview-review-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 6px; }
+.interview-review-value { font-size: 14px; color: var(--text); line-height: 1.5; }
+
+/* ─── App View (replaces messages) ─── */
+.app-view-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.app-view-title { font-size: 16px; font-weight: 600; }
+.app-view-close { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); transition: all 0.15s; }
+.app-view-close:hover { background: var(--bg); color: var(--text); }
+
+/* ─── Policies Tabs ─── */
+.policy-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.policy-tab { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--text-secondary); border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; font-family: var(--font-sans); }
+.policy-tab:hover { color: var(--text); }
+.policy-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.policy-item { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; display: flex; align-items: flex-start; gap: 12px; transition: all 0.15s; }
+.policy-item:hover { border-color: var(--border-dark); }
+.policy-item-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; background: var(--bg); }
+.policy-item-body { flex: 1; min-width: 0; }
+.policy-item-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.policy-item-summary { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.policy-item-meta { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 11px; color: var(--text-tertiary); }
+.policy-status-pill { display: inline-flex; padding: 1px 6px; border-radius: var(--radius-full); font-size: 10px; font-weight: 600; font-family: var(--font-mono); text-transform: uppercase; }
+.policy-status-active { background: var(--green-bg); color: var(--green); }
+.policy-status-pending { background: var(--yellow-bg); color: var(--yellow); }
+.policy-status-fired { background: var(--red-bg); color: var(--red); }
+.policy-status-resolved { background: var(--bg); color: var(--text-tertiary); }
+
+/* ─── Skills View ─── */
+.skill-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 14px 16px; transition: all 0.15s; }
+.skill-card:hover { border-color: var(--border-dark); box-shadow: 0 2px 8px rgba(59,47,47,0.06); }
+.skill-card-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+.skill-card-name { font-size: 14px; font-weight: 600; }
+.skill-card-trigger { font-family: var(--font-mono); font-size: 11px; color: var(--accent); background: var(--accent-bg); padding: 2px 6px; border-radius: 4px; }
+.skill-card-desc { font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 8px; }
+.skill-card-meta { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-tertiary); }
+.skill-card-stat { display: flex; align-items: center; gap: 4px; }
+
+/* ─── Splash Screen ─── */
+.splash-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 150; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px; }
+.splash-logo { font-family: var(--font-logo); font-style: italic; font-size: 72px; letter-spacing: -0.02em; opacity: 0; animation: splashFadeIn 0.6s ease-out 0.2s forwards; }
+.splash-team-count { font-size: 16px; color: var(--text-secondary); opacity: 0; animation: splashFadeIn 0.4s ease-out 0.6s forwards; }
+.splash-bar-track { width: 200px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; opacity: 0; animation: splashFadeIn 0.3s ease-out 0.8s forwards; }
+.splash-bar-fill { height: 100%; width: 0; background: var(--accent); border-radius: 2px; animation: splashBarFill 1.5s ease-in-out 1s forwards; }
+@keyframes splashFadeIn { to { opacity: 1; } }
+@keyframes splashBarFill { to { width: 100%; } }
+@keyframes splashFadeOut { to { opacity: 0; } }
+
+/* ─── Mood Indicator ─── */
+.mood-indicator { display: inline-flex; margin-left: 6px; font-size: 12px; opacity: 0.7; }
+
+/* ─── Agent Character Face ─── */
+.msg-agent-char { display: inline-flex; margin-right: 4px; font-size: 14px; }
+
+/* ─── A2UI Blocks ─── */
+.a2ui-block { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px; margin-top: 8px; font-size: 13px; }
+.a2ui-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.a2ui-table th { text-align: left; font-weight: 600; padding: 6px 8px; border-bottom: 2px solid var(--border); color: var(--text); }
+.a2ui-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-light); color: var(--text-secondary); }
+.a2ui-kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+.a2ui-kv-key { font-weight: 600; color: var(--text); font-size: 12px; }
+.a2ui-kv-val { color: var(--text-secondary); font-size: 12px; }
+.a2ui-progress { display: flex; align-items: center; gap: 8px; }
+.a2ui-progress-bar { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.a2ui-progress-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.3s; }
+.a2ui-progress-label { font-size: 12px; font-weight: 600; color: var(--text); min-width: 36px; text-align: right; }
+.a2ui-status { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: var(--radius-full); font-size: 12px; font-weight: 500; }
+.a2ui-status-ok { background: var(--green-bg); color: var(--green); }
+.a2ui-status-warn { background: var(--yellow-bg); color: var(--yellow); }
+.a2ui-status-error { background: var(--red-bg); color: var(--red); }
+.a2ui-status-info { background: var(--blue-bg); color: var(--blue); }
+
+/* ─── Pixel Art Avatar ─── */
+.pixel-avatar { image-rendering: pixelated; border-radius: 4px; }
+.pixel-avatar-sidebar { width: 24px; height: 24px; }
+.pixel-avatar-panel { width: 56px; height: 56px; }
+
+/* ─── Inbox/Outbox DM Lanes ─── */
+.dm-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; overflow: hidden; padding: 16px 20px; }
+.dm-lane { display: flex; flex-direction: column; overflow-y: auto; gap: 12px; }
+.dm-lane-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 6px; }
+.dm-lane-empty { text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px; }
 </style>
 </head>
 <body>
@@ -596,6 +926,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
         </button>
       </div>
+      <div class="sidebar-summary" id="sidebar-summary"></div>
+      <div class="sidebar-hint" id="sidebar-hint"></div>
       <div class="sidebar-section">
         <p class="sidebar-section-title">Team</p>
         <button class="sidebar-item active">
@@ -609,10 +941,15 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <p class="sidebar-section-title">Channels</p>
       </div>
       <div class="sidebar-channels" id="sidebar-channels"></div>
+      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
+        <p class="sidebar-section-title">Apps</p>
+      </div>
+      <div class="sidebar-channels" id="sidebar-apps"></div>
       <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
         <select id="theme-switcher" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
           <option value="">Editorial</option>
           <option value="slack">Slack</option>
+          <option value="slack-dark">Slack (Dark)</option>
           <option value="windows-98">Windows 98</option>
         </select>
       </div>
@@ -625,6 +962,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <span class="channel-desc" id="channel-desc">The shared office channel</span>
         </div>
         <div class="channel-actions">
+          <button class="thread-toggle-btn" id="thread-toggle-btn" title="Toggle thread expand/collapse default">Collapse threads</button>
           <button class="sidebar-btn" title="Search">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           </button>
@@ -633,7 +971,20 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           </button>
         </div>
       </div>
+      <div class="dm-banner" id="dm-banner">
+        <span class="dm-banner-text" id="dm-banner-text">1:1 session with CEO</span>
+        <button class="dm-back-btn" onclick="exitDMMode()">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+          Back to office
+        </button>
+      </div>
       <div class="messages" id="messages"></div>
+      <div class="app-panel" id="app-tasks"></div>
+      <div class="app-panel" id="app-requests"></div>
+      <div class="app-panel" id="app-policies"></div>
+      <div class="app-panel" id="app-calendar"></div>
+      <div class="app-panel" id="app-skills"></div>
+      <div class="recovery-panel" id="recovery-panel"></div>
       <div class="typing-indicator" id="typing-indicator" style="display:none;padding:0 20px 8px;">
         <div class="typing-dots"><span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span></div>
         <span id="typing-who">CEO is thinking&hellip;</span>
@@ -683,6 +1034,34 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <div class="agent-panel-body" id="agent-panel-body"></div>
     </aside>
   </div>
+
+  <!-- Command Palette Overlay -->
+  <div class="cmd-palette-overlay" id="cmd-palette-overlay">
+    <div class="cmd-palette" id="cmd-palette">
+      <div class="cmd-palette-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input class="cmd-palette-input" id="cmd-palette-input" placeholder="Search channels, agents, commands..." autocomplete="off" />
+        <span class="cmd-palette-kbd">esc</span>
+      </div>
+      <div class="cmd-palette-results" id="cmd-palette-results"></div>
+      <div class="cmd-palette-footer">
+        <span><kbd>&uarr;</kbd><kbd>&darr;</kbd> navigate</span>
+        <span><kbd>&crarr;</kbd> select</span>
+        <span><kbd>esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Quick Jump Modal (#29) -->
+  <div class="quick-jump-overlay" id="quick-jump-overlay">
+    <div class="quick-jump">
+      <div class="quick-jump-header">
+        <kbd>Ctrl+G</kbd>
+        <input class="quick-jump-input" id="quick-jump-input" placeholder="Jump to channel..." autocomplete="off" />
+      </div>
+      <div class="quick-jump-list" id="quick-jump-list"></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -699,11 +1078,140 @@ function escapeHtml(str) {
 
 // ─── Safe text formatting (only for trusted content) ───
 function formatTrusted(text) {
+  // Split out fenced code blocks first (``` ... ```)
+  var parts = text.split(/(```[\s\S]*?```)/g);
+  var out = [];
+  for (var pi = 0; pi < parts.length; pi++) {
+    var part = parts[pi];
+    if (part.indexOf('```') === 0 && part.lastIndexOf('```') > 2) {
+      // Fenced code block — strip the backtick fences, extract optional lang
+      var inner = part.slice(3, part.length - 3);
+      var nlIdx = inner.indexOf('\n');
+      var lang = '';
+      if (nlIdx !== -1) {
+        var firstLine = inner.substring(0, nlIdx).trim();
+        if (firstLine && /^[a-zA-Z0-9_+-]+$/.test(firstLine)) {
+          lang = firstLine;
+          inner = inner.substring(nlIdx + 1);
+        }
+      }
+      out.push('<pre class="msg-codeblock"' + (lang ? ' data-lang="' + lang + '"' : '') + '><code>' + escapeHtml(inner) + '</code></pre>');
+    } else {
+      out.push(formatTrustedInline(part));
+    }
+  }
+  return out.join('');
+}
+
+function formatTrustedInline(text) {
+  // Process line-by-line for block-level elements
+  var lines = text.split('\n');
+  var result = [];
+  var inList = false;    // 'ul' | 'ol' | false
+  var listType = '';
+
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+
+    // Horizontal rule: --- or *** or ___ (3+, alone on line)
+    if (/^(\s*[-*_]\s*){3,}$/.test(line)) {
+      if (inList) { result.push('</' + listType + '>'); inList = false; }
+      result.push('<hr class="msg-hr">');
+      continue;
+    }
+
+    // Headers: # ## ###
+    var headerMatch = line.match(/^(#{1,3})\s+(.+)$/);
+    if (headerMatch) {
+      if (inList) { result.push('</' + listType + '>'); inList = false; }
+      var level = headerMatch[1].length;
+      result.push('<h' + (level + 2) + ' class="msg-h' + level + '">' + inlineFormat(headerMatch[2]) + '</h' + (level + 2) + '>');
+      continue;
+    }
+
+    // Blockquote: > text
+    var bqMatch = line.match(/^>\s?(.*)$/);
+    if (bqMatch) {
+      if (inList) { result.push('</' + listType + '>'); inList = false; }
+      result.push('<blockquote class="msg-blockquote">' + inlineFormat(bqMatch[1]) + '</blockquote>');
+      continue;
+    }
+
+    // Unordered list: - item or * item
+    var ulMatch = line.match(/^[\s]*[-*]\s+(.+)$/);
+    if (ulMatch) {
+      if (inList && listType !== 'ul') { result.push('</' + listType + '>'); inList = false; }
+      if (!inList) { result.push('<ul class="msg-ul">'); inList = true; listType = 'ul'; }
+      result.push('<li>' + inlineFormat(ulMatch[1]) + '</li>');
+      continue;
+    }
+
+    // Ordered list: 1. item
+    var olMatch = line.match(/^[\s]*\d+\.\s+(.+)$/);
+    if (olMatch) {
+      if (inList && listType !== 'ol') { result.push('</' + listType + '>'); inList = false; }
+      if (!inList) { result.push('<ol class="msg-ol">'); inList = true; listType = 'ol'; }
+      result.push('<li>' + inlineFormat(olMatch[1]) + '</li>');
+      continue;
+    }
+
+    // Regular line — close any open list
+    if (inList && line.trim() === '') { result.push('</' + listType + '>'); inList = false; }
+
+    // Non-empty regular line
+    if (line.trim() !== '') {
+      result.push(inlineFormat(line) + '<br>');
+    } else if (!inList) {
+      result.push('<br>');
+    }
+  }
+  if (inList) result.push('</' + listType + '>');
+
+  // Trim trailing <br>
+  var joined = result.join('');
+  if (joined.slice(-4) === '<br>') joined = joined.slice(0, -4);
+  return joined;
+}
+
+function inlineFormat(text) {
   return text
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/`(.*?)`/g, '<code>$1</code>')
-    .replace(/@(\w+)/g, '<strong style="color:var(--accent);">@$1</strong>')
-    .replace(/\n/g, '<br>');
+    .replace(/@(\w+)/g, '<span class="mention">@$1</span>')
+    .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="msg-link">$1</a>');
+}
+
+// ─── Date separator helpers ───
+function dateDayKey(ts) {
+  var d = new Date(ts);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function formatDateLabel(ts) {
+  var d = new Date(ts);
+  var now = new Date();
+  var today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var msgDay = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var diff = today - msgDay;
+  if (diff === 0) return 'Today';
+  if (diff === 86400000) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function createDateSeparator(ts) {
+  var sep = document.createElement('div');
+  sep.className = 'date-separator';
+  var line1 = document.createElement('div');
+  line1.className = 'date-separator-line';
+  var text = document.createElement('span');
+  text.className = 'date-separator-text';
+  text.textContent = formatDateLabel(ts);
+  var line2 = document.createElement('div');
+  line2.className = 'date-separator-line';
+  sep.appendChild(line1);
+  sep.appendChild(text);
+  sep.appendChild(line2);
+  return sep;
 }
 
 // ─── DOM builder helpers ───
@@ -800,8 +1308,15 @@ var WuphfAPI = (function() {
     });
   }
 
-  function getMembers() {
+  function getOfficeMembers() {
     return get('/office-members');
+  }
+
+  function getLiveMembers(channel) {
+    return get('/members', {
+      channel: channel || 'general',
+      viewer_slug: 'human'
+    });
   }
 
   function getChannels() {
@@ -823,18 +1338,65 @@ var WuphfAPI = (function() {
     return get('/health');
   }
 
+  function getTasks(channel) {
+    return get('/tasks', {
+      channel: channel || 'general',
+      viewer_slug: 'human'
+    });
+  }
+
+  function toggleReaction(msgId, emoji, channel) {
+    return post('/messages/react', { message_id: msgId, emoji: emoji, channel: channel || 'general' });
+  }
+
+  function getSignals() { return get('/signals'); }
+  function getDecisions() { return get('/decisions'); }
+  function getWatchdogs() { return get('/watchdogs'); }
+  function getActions() { return get('/actions'); }
+  function getScheduler() { return get('/scheduler'); }
+  function getSkills() { return get('/skills'); }
+
+  function subscribeEvents(onEvent, onError) {
+    if (!token) throw new Error('broker token unavailable');
+    var es = new EventSource(BROKER + '/events?token=' + encodeURIComponent(token));
+    ['ready', 'message', 'action', 'activity'].forEach(function(name) {
+      es.addEventListener(name, function(evt) {
+        try {
+          var payload = evt.data ? JSON.parse(evt.data) : {};
+          onEvent(name, payload);
+        } catch (err) {
+          if (onError) onError(err);
+        }
+      });
+    });
+    es.onerror = function(err) {
+      if (onError) onError(err);
+    };
+    return es;
+  }
+
   return {
     init: init,
     get: get,
     post: post,
     getMessages: getMessages,
     postMessage: postMessage,
-    getMembers: getMembers,
+    getOfficeMembers: getOfficeMembers,
+    getLiveMembers: getLiveMembers,
     getChannels: getChannels,
     getRequests: getRequests,
     answerRequest: answerRequest,
     getHealth: getHealth,
-    getThreadMessages: getThreadMessages
+    getThreadMessages: getThreadMessages,
+    getTasks: getTasks,
+    toggleReaction: toggleReaction,
+    getSignals: getSignals,
+    getDecisions: getDecisions,
+    getWatchdogs: getWatchdogs,
+    getActions: getActions,
+    getScheduler: getScheduler,
+    getSkills: getSkills,
+    subscribeEvents: subscribeEvents
   };
 })();
 
@@ -845,10 +1407,23 @@ var selectedSize = '';
 var brokerConnected = false;
 var currentChannel = 'general';
 var lastMessageId = null;
-var pollTimer = null;
-var requestPollTimer = null;
 var consecutiveFailures = 0;
 var DISCONNECT_THRESHOLD = 3;
+var currentApp = null; // null = messages view, 'tasks' | 'requests' | 'calendar'
+var cachedMembers = []; // latest /office-members data for activity classification
+var cachedTasks = []; // latest /tasks data
+var brokerEventSource = null;
+var brokerReconnectTimer = null;
+var refreshTasksTimer = null;
+
+var SIDEBAR_APPS = [
+  { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
+  { id: 'requests', icon: '\uD83D\uDCCB', name: 'Requests' },
+  { id: 'policies', icon: '\uD83D\uDEE1', name: 'Policies' },
+  { id: 'calendar', icon: '\uD83D\uDCC5', name: 'Calendar' },
+  { id: 'skills',   icon: '\u26A1', name: 'Skills' },
+  { id: 'recover',  icon: '\uD83D\uDD0D', name: 'Recovery' },
+];
 
 var AGENTS = [
   { slug: 'ceo',      emoji: '\uD83D\uDC54', name: 'CEO',               role: 'Strategy, delegation, goal tracking',           checked: true,  type: 'lead' },
@@ -1060,33 +1635,56 @@ function renderTeamGrid() {
 // ─── Launch ───
 function launchOffice() {
   document.getElementById('onboarding').style.display = 'none';
-  var launch = document.getElementById('launch-screen');
-  launch.classList.add('active');
-
-  var statuses = ['Assembling your team', 'Setting up channels', 'CEO is reviewing the strategy doc', 'PM is writing user stories', 'Opening the office doors'];
-  var i = 0;
-  var interval = setInterval(function() {
-    i++;
-    if (i < statuses.length) {
-      document.getElementById('launch-status').textContent = statuses[i];
-    }
-  }, 600);
-
-  setTimeout(function() {
-    clearInterval(interval);
-    launch.classList.remove('active');
+  showSplashScreen(function() {
     showOffice();
-  }, 3000);
+  });
+}
+
+function showSplashScreen(onDone) {
+  var teamCount = AGENTS.filter(function(a) { return a.checked; }).length;
+
+  var splash = document.createElement('div');
+  splash.className = 'splash-overlay';
+  splash.id = 'splash-screen';
+
+  var logo = document.createElement('div');
+  logo.className = 'splash-logo';
+  logo.textContent = 'wuphf';
+
+  var count = document.createElement('div');
+  count.className = 'splash-team-count';
+  count.textContent = teamCount + ' agent' + (teamCount !== 1 ? 's' : '') + ' ready';
+
+  var barTrack = document.createElement('div');
+  barTrack.className = 'splash-bar-track';
+  var barFill = document.createElement('div');
+  barFill.className = 'splash-bar-fill';
+  barTrack.appendChild(barFill);
+
+  splash.appendChild(logo);
+  splash.appendChild(count);
+  splash.appendChild(barTrack);
+  document.body.appendChild(splash);
+
+  // Fade out and remove after animation completes
+  setTimeout(function() {
+    splash.style.animation = 'splashFadeOut 0.4s ease-in forwards';
+    setTimeout(function() {
+      splash.remove();
+      if (onDone) onDone();
+    }, 400);
+  }, 2600);
 }
 
 // ─── Show office ───
 function showOffice() {
   document.getElementById('office').classList.add('active');
   if (brokerConnected) {
-    Promise.all([WuphfAPI.getMembers(), WuphfAPI.getChannels()])
+    Promise.all([WuphfAPI.getOfficeMembers(), WuphfAPI.getChannels(), WuphfAPI.getLiveMembers(currentChannel)])
       .then(function(results) {
         var membersData = results[0];
         var channelsData = results[1];
+        var liveMembersData = results[2];
         if (membersData.members) {
           AGENTS = membersData.members.map(function(m) {
             return {
@@ -1101,6 +1699,7 @@ function showOffice() {
             };
           });
         }
+        cachedMembers = liveMembersData.members || [];
         if (channelsData.channels) {
           CHANNELS = channelsData.channels.map(function(ch) {
             return { name: ch.name || ch.slug, desc: ch.description || '' };
@@ -1108,44 +1707,473 @@ function showOffice() {
         }
         renderSidebarAgents();
         renderSidebarChannels();
-        startMessagePolling();
-        startRequestPolling();
+        renderSidebarApps();
+        renderWorkspaceSummary();
+        fetchMessages();
+        fetchRequests();
+        fetchMemberActivity();
+        startBrokerEvents();
       })
       .catch(function() {
         renderSidebarAgents();
         renderSidebarChannels();
+        renderSidebarApps();
         animateMessages();
       });
   } else {
     renderSidebarAgents();
     renderSidebarChannels();
+    renderSidebarApps();
     animateMessages();
   }
 }
 
+// --- Activity classification (#23) ---
+function classifyActivity(member) {
+  if (!member) return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
+  var activity = (member.activity || member.liveActivity || '').toLowerCase();
+  var status = (member.status || '').toLowerCase();
+  var lastStamp = member.lastTime || member.last_time || null;
+  var lastTime = lastStamp ? new Date(lastStamp) : null;
+  var elapsed = lastTime ? (Date.now() - lastTime.getTime()) / 1000 : Infinity;
+  if (status === 'error') return { state: 'plotting', label: 'needs attention', dotClass: 'plotting' };
+  if (status === 'active' && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity)) return { state: 'shipping', label: 'shipping', dotClass: 'shipping' };
+  if (status === 'active' && /think|plan|queue|review|sync/.test(activity)) return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
+  if (status === 'active') return { state: 'talking', label: 'talking', dotClass: 'active pulse' };
+  if (elapsed < 10 && activity && activity !== 'idle') return { state: 'talking', label: 'talking', dotClass: 'active pulse' };
+  if (elapsed < 30 && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity)) return { state: 'shipping', label: 'shipping', dotClass: 'shipping' };
+  if (elapsed < 30 && activity && activity !== 'idle') return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
+  return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
+}
+function formatLatencyHint(member) {
+  if (!member) return '';
+  var parts = [];
+  if (member.firstTextMs > 0) parts.push('ttft ' + member.firstTextMs + 'ms');
+  else if (member.firstEventMs > 0) parts.push('first ' + member.firstEventMs + 'ms');
+  if (member.totalMs > 0) parts.push('done ' + member.totalMs + 'ms');
+  return parts.join(' · ');
+}
+function memberSecondaryText(member, task) {
+  if (task) return 'working on: Task #' + (task.id || task.number || '?');
+  if (member && member.status === 'active' && member.liveActivity) return member.liveActivity;
+  var latency = formatLatencyHint(member);
+  if (latency) return latency;
+  if (member && member.lastMessage) return member.lastMessage;
+  return '';
+}
+function findAgentTask(slug) {
+  for (var i = 0; i < cachedTasks.length; i++) {
+    var t = cachedTasks[i];
+    if (t.owner === slug && t.status !== 'done' && t.status !== 'completed') return t;
+  }
+  return null;
+}
 function renderSidebarAgents() {
   var container = document.getElementById('sidebar-agents');
   container.textContent = '';
   AGENTS.filter(function(a) { return a.checked; }).forEach(function(a) {
+    var member = cachedMembers.find(function(m) { return m.slug === a.slug; });
+    var ac = classifyActivity(member);
+    var task = findAgentTask(a.slug);
     var btn = document.createElement('button');
     btn.className = 'sidebar-agent';
-    btn.title = a.name;
+    btn.title = a.name + ' — ' + ac.label;
     btn.addEventListener('click', function() { openAgentPanel(a.slug); });
-
-    var emoji = document.createElement('span');
-    emoji.className = 'sidebar-item-emoji';
-    emoji.textContent = a.emoji;
-    var name = document.createElement('span');
-    name.className = 'sidebar-agent-name';
-    name.textContent = a.name;
+    var avatarEl = renderPixelAvatar(a.slug, 24);
+    avatarEl.classList.add('pixel-avatar-sidebar');
+    var wrap = document.createElement('div');
+    wrap.className = 'sidebar-agent-wrap';
+    var nameEl = document.createElement('span');
+    nameEl.className = 'sidebar-agent-name';
+    nameEl.textContent = a.name;
+    wrap.appendChild(nameEl);
+    var subtext = memberSecondaryText(member, task);
+    if (subtext) {
+      var taskText = document.createElement('span');
+      taskText.className = 'sidebar-agent-task';
+      taskText.textContent = subtext;
+      wrap.appendChild(taskText);
+    }
     var dot = document.createElement('span');
-    dot.className = 'status-dot active pulse';
-
-    btn.appendChild(emoji);
-    btn.appendChild(name);
+    dot.className = 'status-dot ' + ac.dotClass;
+    btn.appendChild(avatarEl);
+    btn.appendChild(wrap);
     btn.appendChild(dot);
     container.appendChild(btn);
   });
+  // Set up double-click handlers for DM mode
+  setupAgentDMHandlers();
+}
+// --- Apps sidebar (#28) ---
+function renderSidebarApps() {
+  var container = document.getElementById('sidebar-apps');
+  container.textContent = '';
+  SIDEBAR_APPS.forEach(function(app) {
+    var btn = document.createElement('button');
+    btn.className = 'sidebar-item' + (currentApp === app.id ? ' active' : '');
+    btn.addEventListener('click', function() { switchApp(app.id); });
+    var icon = document.createElement('span');
+    icon.className = 'sidebar-item-emoji';
+    icon.textContent = app.icon;
+    var lbl = document.createElement('span');
+    lbl.textContent = app.name;
+    btn.appendChild(icon);
+    btn.appendChild(lbl);
+    container.appendChild(btn);
+  });
+}
+function switchApp(appId) {
+  // Close recovery view if switching away
+  if (recoveryViewOpen && appId !== 'recover') closeRecoveryView();
+
+  // Handle recovery app specially
+  if (appId === 'recover') {
+    currentApp = (currentApp === 'recover') ? null : 'recover';
+    if (currentApp === 'recover') {
+      openRecoveryView();
+    } else {
+      closeRecoveryView();
+    }
+    renderSidebarApps();
+    return;
+  }
+
+  currentApp = (currentApp === appId) ? null : appId;
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+  var composerEl = document.querySelector('.composer');
+  ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills'].forEach(function(pid) {
+    var p = document.getElementById(pid);
+    if (p) { p.classList.remove('active'); p.style.display = 'none'; }
+  });
+  if (currentApp) {
+    messagesEl.style.display = 'none';
+    typingEl.style.display = 'none';
+    composerEl.style.display = 'none';
+    var activePanel = document.getElementById('app-' + currentApp);
+    if (activePanel) { activePanel.style.display = 'flex'; activePanel.classList.add('active'); }
+    document.getElementById('channel-title').textContent = currentApp.charAt(0).toUpperCase() + currentApp.slice(1);
+    document.getElementById('channel-desc').textContent = '';
+    renderAppContent(currentApp);
+  } else {
+    messagesEl.style.display = '';
+    composerEl.style.display = '';
+    var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
+    document.getElementById('channel-title').textContent = '# ' + currentChannel;
+    document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+  }
+  renderSidebarApps();
+  if (currentApp) {
+    document.querySelectorAll('#sidebar-channels .sidebar-item').forEach(function(b) { b.classList.remove('active'); });
+  } else {
+    renderSidebarChannels();
+  }
+}
+function renderAppContent(appId) {
+  var panel = document.getElementById('app-' + appId);
+  if (!panel) return;
+  panel.textContent = '';
+  if (appId === 'tasks') renderTasksApp(panel);
+  else if (appId === 'requests') renderRequestsApp(panel);
+  else if (appId === 'policies') renderPoliciesApp(panel);
+  else if (appId === 'calendar') renderCalendarApp(panel);
+  else if (appId === 'skills') renderSkillsApp(panel);
+}
+function renderTasksApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see tasks.'));
+    return;
+  }
+  panel.style.overflow = 'hidden';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading tasks...');
+  panel.appendChild(loading);
+  WuphfAPI.getTasks(currentChannel)
+    .then(function(data) {
+      panel.textContent = '';
+      var tasks = data.tasks || [];
+      if (tasks.length === 0 && cachedTasks.length > 0) tasks = cachedTasks;
+      if (tasks.length === 0) {
+        panel.appendChild(el('div', { className: 'request-empty' }, 'No tasks yet.'));
+        return;
+      }
+      renderTaskBoard(panel, tasks);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      if (cachedTasks.length > 0) {
+        renderTaskBoard(panel, cachedTasks);
+      } else {
+        panel.appendChild(el('div', { className: 'request-empty' }, 'Could not load tasks.'));
+      }
+    });
+}
+function renderRequestsApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see requests.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading requests...');
+  panel.appendChild(loading);
+  WuphfAPI.getRequests(currentChannel)
+    .then(function(data) {
+      panel.textContent = '';
+      renderRequestList(panel, data);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      panel.appendChild(el('div', { className: 'request-empty' }, 'Failed to load requests.'));
+    });
+}
+function renderCalendarApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see scheduled jobs.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading schedule...');
+  panel.appendChild(loading);
+  WuphfAPI.getScheduler()
+    .then(function(data) {
+      panel.textContent = '';
+      var jobs = data.jobs || data.schedules || data || [];
+      if (!Array.isArray(jobs)) jobs = [];
+      renderCalendarTimeline(panel, jobs);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      renderCalendarTimeline(panel, []);
+    });
+}
+function renderCalendarTimeline(panel, jobs) {
+  var today = new Date();
+  var dateStr = today.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  var header = el('div', { style: { padding: '0 0 12px', borderBottom: '1px solid var(--border)', marginBottom: '12px' } }, [
+    el('h3', { style: { fontSize: '16px', fontWeight: '600', marginBottom: '4px' } }, 'Schedule'),
+    el('p', { style: { fontSize: '13px', color: 'var(--text-secondary)' } }, dateStr)
+  ]);
+  panel.appendChild(header);
+
+  if (jobs.length === 0) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'No scheduled jobs.'));
+    return;
+  }
+
+  // Group by next_run date
+  var groups = {};
+  jobs.forEach(function(job) {
+    var key = 'Upcoming';
+    if (job.next_run) {
+      var d = new Date(job.next_run);
+      key = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+    }
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(job);
+  });
+
+  Object.keys(groups).forEach(function(groupKey) {
+    var groupLabel = el('div', { style: { fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-tertiary)', padding: '8px 0 6px' } }, groupKey);
+    panel.appendChild(groupLabel);
+    groups[groupKey].forEach(function(job) {
+      var card = el('div', { className: 'app-card', style: { marginBottom: '8px' } });
+      var titleRow = el('div', { style: { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' } });
+      titleRow.appendChild(el('span', { style: { fontSize: '14px' } }, '\u23F0'));
+      titleRow.appendChild(el('span', { className: 'app-card-title', style: { marginBottom: '0' } }, job.label || job.name || 'Job'));
+      if (job.status) {
+        var statusClass = job.status === 'active' ? 'policy-status-active' : 'policy-status-pending';
+        titleRow.appendChild(el('span', { className: 'policy-status-pill ' + statusClass }, job.status.toUpperCase()));
+      }
+      card.appendChild(titleRow);
+      var metaParts = [];
+      if (job.schedule) metaParts.push(job.schedule);
+      if (job.target) metaParts.push('Target: ' + job.target);
+      if (job.last_run) metaParts.push('Last: ' + new Date(job.last_run).toLocaleString());
+      if (job.next_run) metaParts.push('Next: ' + new Date(job.next_run).toLocaleString());
+      if (metaParts.length) {
+        card.appendChild(el('div', { className: 'app-card-meta' }, metaParts.join(' \u2022 ')));
+      }
+      panel.appendChild(card);
+    });
+  });
+}
+
+// ─── Policies View (#56) ───
+function renderPoliciesApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see policies.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var policyTabs = ['signals', 'decisions', 'watchdogs', 'actions'];
+  var activeTab = 'signals';
+  var cachedPolicyData = {};
+
+  var tabsDiv = el('div', { className: 'policy-tabs' });
+  var contentDiv = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } });
+
+  policyTabs.forEach(function(tab) {
+    var tabBtn = el('button', {
+      className: 'policy-tab' + (tab === activeTab ? ' active' : ''),
+      onClick: function() {
+        activeTab = tab;
+        tabsDiv.querySelectorAll('.policy-tab').forEach(function(t) { t.classList.remove('active'); });
+        tabBtn.classList.add('active');
+        renderPolicyTab(contentDiv, tab, cachedPolicyData);
+      }
+    }, tab.charAt(0).toUpperCase() + tab.slice(1));
+    tabsDiv.appendChild(tabBtn);
+  });
+
+  panel.appendChild(tabsDiv);
+  panel.appendChild(contentDiv);
+
+  // Fetch all data
+  contentDiv.textContent = '';
+  contentDiv.appendChild(el('div', { style: { padding: '20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading...'));
+
+  Promise.all([
+    WuphfAPI.getSignals().catch(function() { return { signals: [] }; }),
+    WuphfAPI.getDecisions().catch(function() { return { decisions: [] }; }),
+    WuphfAPI.getWatchdogs().catch(function() { return { watchdogs: [] }; }),
+    WuphfAPI.getActions().catch(function() { return { actions: [] }; })
+  ]).then(function(results) {
+    cachedPolicyData.signals = results[0].signals || results[0] || [];
+    cachedPolicyData.decisions = results[1].decisions || results[1] || [];
+    cachedPolicyData.watchdogs = results[2].watchdogs || results[2] || [];
+    cachedPolicyData.actions = results[3].actions || results[3] || [];
+    if (!Array.isArray(cachedPolicyData.signals)) cachedPolicyData.signals = [];
+    if (!Array.isArray(cachedPolicyData.decisions)) cachedPolicyData.decisions = [];
+    if (!Array.isArray(cachedPolicyData.watchdogs)) cachedPolicyData.watchdogs = [];
+    if (!Array.isArray(cachedPolicyData.actions)) cachedPolicyData.actions = [];
+    renderPolicyTab(contentDiv, activeTab, cachedPolicyData);
+  });
+}
+
+function renderPolicyTab(container, tab, data) {
+  container.textContent = '';
+  var items = data[tab] || [];
+  var icons = { signals: '\uD83D\uDCE1', decisions: '\u2696', watchdogs: '\uD83D\uDC15', actions: '\u26A1' };
+
+  if (items.length === 0) {
+    container.appendChild(el('div', { className: 'request-empty' }, 'No ' + tab + ' found.'));
+    return;
+  }
+
+  items.forEach(function(item) {
+    var row = el('div', { className: 'policy-item' });
+    var icon = el('div', { className: 'policy-item-icon' }, icons[tab] || '\uD83D\uDCCC');
+    var body = el('div', { className: 'policy-item-body' });
+    body.appendChild(el('div', { className: 'policy-item-title' }, item.name || item.title || item.kind || 'Unknown'));
+    if (item.summary || item.description) {
+      body.appendChild(el('div', { className: 'policy-item-summary' }, item.summary || item.description));
+    }
+    var meta = el('div', { className: 'policy-item-meta' });
+    if (item.kind) meta.appendChild(el('span', null, item.kind));
+    if (item.owner) meta.appendChild(el('span', null, 'by ' + item.owner));
+    if (item.timestamp || item.created_at || item.updated_at) {
+      var ts = item.timestamp || item.created_at || item.updated_at;
+      meta.appendChild(el('span', null, new Date(ts).toLocaleString()));
+    }
+    if (item.status) {
+      var sClass = 'policy-status-pending';
+      var sl = item.status.toLowerCase();
+      if (sl === 'active' || sl === 'enabled') sClass = 'policy-status-active';
+      else if (sl === 'fired' || sl === 'triggered') sClass = 'policy-status-fired';
+      else if (sl === 'resolved' || sl === 'done') sClass = 'policy-status-resolved';
+      meta.appendChild(el('span', { className: 'policy-status-pill ' + sClass }, item.status.toUpperCase()));
+    }
+    body.appendChild(meta);
+    row.appendChild(icon);
+    row.appendChild(body);
+    container.appendChild(row);
+  });
+}
+
+// ─── Skills View (#59) ───
+function renderSkillsApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see skills.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading skills...');
+  panel.appendChild(loading);
+  WuphfAPI.getSkills()
+    .then(function(data) {
+      panel.textContent = '';
+      var skills = data.skills || data || [];
+      if (!Array.isArray(skills)) skills = [];
+      renderSkillsList(panel, skills);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      renderSkillsList(panel, []);
+    });
+}
+
+function renderSkillsList(panel, skills) {
+  var header = el('div', { style: { padding: '0 0 12px', borderBottom: '1px solid var(--border)', marginBottom: '12px' } }, [
+    el('h3', { style: { fontSize: '16px', fontWeight: '600' } }, 'Skills')
+  ]);
+  panel.appendChild(header);
+
+  if (skills.length === 0) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'No skills registered yet.'));
+    return;
+  }
+
+  skills.forEach(function(skill) {
+    var card = el('div', { className: 'skill-card', style: { marginBottom: '8px' } });
+    var cardHeader = el('div', { className: 'skill-card-header' });
+    cardHeader.appendChild(el('span', { style: { fontSize: '16px' } }, '\u26A1'));
+    cardHeader.appendChild(el('span', { className: 'skill-card-name' }, skill.name || 'Untitled'));
+    if (skill.trigger) {
+      cardHeader.appendChild(el('span', { className: 'skill-card-trigger' }, skill.trigger));
+    }
+    card.appendChild(cardHeader);
+
+    if (skill.description) {
+      card.appendChild(el('div', { className: 'skill-card-desc' }, skill.description));
+    }
+
+    var meta = el('div', { className: 'skill-card-meta' });
+    if (skill.usage_count != null) {
+      meta.appendChild(el('span', { className: 'skill-card-stat' }, '\uD83D\uDD04 ' + skill.usage_count + ' uses'));
+    }
+    if (skill.last_status) {
+      var statusClass = skill.last_status === 'success' ? 'policy-status-active' : (skill.last_status === 'failed' ? 'policy-status-fired' : 'policy-status-pending');
+      meta.appendChild(el('span', { className: 'policy-status-pill ' + statusClass }, skill.last_status.toUpperCase()));
+    }
+    if (skill.last_run || skill.last_execution) {
+      var ts = skill.last_run || skill.last_execution;
+      meta.appendChild(el('span', null, new Date(ts).toLocaleString()));
+    }
+    card.appendChild(meta);
+    panel.appendChild(card);
+  });
+}
+// --- Workspace summary (#30) and hint (#31) ---
+function renderWorkspaceSummary() {
+  var summaryEl = document.getElementById('sidebar-summary');
+  var hintEl = document.getElementById('sidebar-hint');
+  if (!summaryEl || !hintEl) return;
+  var activeAgents = 0;
+  cachedMembers.forEach(function(m) { if (classifyActivity(m).state !== 'lurking') activeAgents++; });
+  var openTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; }).length;
+  summaryEl.textContent = activeAgents + ' agent' + (activeAgents !== 1 ? 's' : '') + ' active, ' + openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' open';
+  var latencyMember = cachedMembers
+    .filter(function(m) { return m && formatLatencyHint(m); })
+    .sort(function(a, b) {
+      return new Date(b.lastTime || 0).getTime() - new Date(a.lastTime || 0).getTime();
+    })[0];
+  var latencyHint = latencyMember ? formatLatencyHint(latencyMember) : '';
+  if (latencyHint) {
+    hintEl.textContent = latencyHint;
+  } else if (openTasks > 0) {
+    hintEl.textContent = openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' in progress';
+  } else {
+    hintEl.textContent = 'Type / for commands';
+  }
 }
 
 function renderSidebarChannels() {
@@ -1176,16 +2204,48 @@ function renderSidebarChannels() {
 }
 
 function switchChannel(name) {
+  // Exit app mode when switching channels
+  if (currentApp) {
+    currentApp = null;
+    var messagesEl = document.getElementById('messages');
+    var composerEl = document.querySelector('.composer');
+    ['app-tasks', 'app-requests', 'app-calendar'].forEach(function(pid) {
+      var p = document.getElementById(pid);
+      if (p) { p.classList.remove('active'); p.style.display = 'none'; }
+    });
+    if (messagesEl) messagesEl.style.display = '';
+    if (composerEl) composerEl.style.display = '';
+    renderSidebarApps();
+  }
+  // Save last-seen for previous channel before switching
+  if (lastMessageId) {
+    localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
+  }
   currentChannel = name;
   lastMessageId = null;
+  // Reset unread/grouping/date state for new channel
+  lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + name) || null;
+  unreadDividerInserted = false;
+  lastSeenPassed = false;
+  newMessageCount = 0;
+  lastRenderedFrom = null;
+  lastRenderedTime = null;
+  lastRenderedDate = null;
   document.getElementById('messages').textContent = '';
   var ch = CHANNELS.find(function(c) { return c.name === name; });
   document.getElementById('channel-title').textContent = '# ' + name;
   document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
   document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
+  // Close recovery view if open
+  if (recoveryViewOpen) closeRecoveryView();
+
+  // Mark channel as seen and update badges
+  markChannelSeen(name);
+
   if (brokerConnected) {
     fetchMessages();
     fetchRequests();
+    fetchMemberActivity();
   }
 }
 
@@ -1321,17 +2381,25 @@ function hideDisconnectBanner() {
   if (banner) banner.remove();
 }
 
+// ─── Message grouping state ───
+var lastRenderedFrom = null;
+var lastRenderedTime = null;
+var lastRenderedDate = null; // 'YYYY-MM-DD' string for date separator tracking
+
 // ─── Thread state ───
 var threadReplyCounts = {}; // msgId -> count of replies
 var allMessages = {}; // msgId -> msg object
 var activeThreadId = null;
-var threadPollTimer = null;
 
-// ─── Live message polling ───
+// ─── Unread tracking state ───
+var lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + currentChannel) || null;
+var unreadDividerInserted = false;
+var lastSeenPassed = false;
+var newMessageCount = 0;
+
+// ─── Live message bootstrap + broker SSE ───
 function startMessagePolling() {
   fetchMessages();
-  if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(fetchMessages, 2000);
 }
 
 function fetchMessages() {
@@ -1343,13 +2411,107 @@ function fetchMessages() {
         appendBrokerMessage(msg);
         lastMessageId = msg.id;
       });
+      // Update unread divider count text
+      if (newMessageCount > 0) {
+        var uTextEl = document.getElementById('unread-divider-text');
+        if (uTextEl) uTextEl.textContent = newMessageCount + ' new message' + (newMessageCount === 1 ? '' : 's');
+      }
+      // Persist last-seen message for next session
+      if (lastMessageId && document.hasFocus()) {
+        localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
+      }
     })
     .catch(function() { onBrokerFailure(); });
+}
+
+function startBrokerEvents() {
+  if (!brokerConnected) return;
+  if (brokerReconnectTimer) {
+    clearTimeout(brokerReconnectTimer);
+    brokerReconnectTimer = null;
+  }
+  if (brokerEventSource) brokerEventSource.close();
+  try {
+    brokerEventSource = WuphfAPI.subscribeEvents(handleBrokerEvent, function() {
+      if (brokerEventSource) {
+        brokerEventSource.close();
+        brokerEventSource = null;
+      }
+      if (brokerReconnectTimer) return;
+      brokerReconnectTimer = setTimeout(function() {
+        brokerReconnectTimer = null;
+        fetchMessages();
+        fetchRequests();
+        fetchMemberActivity();
+        startBrokerEvents();
+      }, 1500);
+    });
+  } catch (err) {
+    console.error('Failed to subscribe to broker events:', err);
+  }
+}
+
+function handleBrokerEvent(type, payload) {
+  if (type === 'ready') {
+    onBrokerSuccess();
+    return;
+  }
+  if (type === 'message' && payload.message) {
+    onBrokerSuccess();
+    appendBrokerMessage(payload.message);
+    lastMessageId = payload.message.id || lastMessageId;
+    if (lastMessageId && document.hasFocus() && payload.message.channel === currentChannel) {
+      localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
+    }
+    return;
+  }
+  if (type === 'activity' && payload.activity) {
+    upsertCachedMember(payload.activity);
+    renderSidebarAgents();
+    renderWorkspaceSummary();
+    updateTypingIndicator();
+    return;
+  }
+  if (type === 'action' && payload.action) {
+    scheduleSidebarRefresh();
+  }
+}
+
+function upsertCachedMember(update) {
+  if (!update || !update.slug) return;
+  var idx = cachedMembers.findIndex(function(m) { return m.slug === update.slug; });
+  var base = idx >= 0 ? cachedMembers[idx] : { slug: update.slug };
+  base.status = update.status || base.status || 'idle';
+  base.activity = update.activity || base.activity || 'idle';
+  base.detail = update.detail || base.detail || '';
+  base.liveActivity = update.detail || update.liveActivity || base.liveActivity || '';
+  base.lastTime = update.lastTime || update.last_time || base.lastTime || '';
+  if (update.totalMs != null) base.totalMs = update.totalMs;
+  if (update.firstEventMs != null) base.firstEventMs = update.firstEventMs;
+  if (update.firstTextMs != null) base.firstTextMs = update.firstTextMs;
+  if (update.firstToolMs != null) base.firstToolMs = update.firstToolMs;
+  if (idx >= 0) cachedMembers[idx] = base;
+  else cachedMembers.push(base);
+}
+
+function scheduleSidebarRefresh() {
+  if (refreshTasksTimer) return;
+  refreshTasksTimer = setTimeout(function() {
+    refreshTasksTimer = null;
+    fetchRequests();
+    fetchMemberActivity();
+    if (currentApp === 'tasks' || currentApp === 'requests') renderAppContent(currentApp);
+  }, 120);
 }
 
 function appendBrokerMessage(msg) {
   // Track all messages for thread lookups
   allMessages[msg.id] = msg;
+
+  // Track unread counts for non-active channels
+  if (msg.channel && msg.channel !== currentChannel) {
+    incrementUnreadCount(msg.channel);
+  }
 
   // If this is a reply, update parent's reply count but don't show in main feed
   if (msg.reply_to) {
@@ -1365,14 +2527,108 @@ function appendBrokerMessage(msg) {
   }
 
   var container = document.getElementById('messages');
-  var msgDiv = appendMessageToContainer(msg, container);
+
+  // Insert date separator if day changed
+  if (msg.timestamp) {
+    var msgDayKey = dateDayKey(msg.timestamp);
+    if (lastRenderedDate && msgDayKey !== lastRenderedDate) {
+      container.appendChild(createDateSeparator(msg.timestamp));
+      // Reset grouping on day change
+      lastRenderedFrom = null;
+      lastRenderedTime = null;
+    }
+    if (!lastRenderedDate) {
+      container.appendChild(createDateSeparator(msg.timestamp));
+    }
+    lastRenderedDate = msgDayKey;
+  }
+
+  // Unread divider: insert once after we've passed the last-seen message
+  if (lastSeenMessageId && !unreadDividerInserted) {
+    // We haven't seen this message yet and we've already rendered the last-seen one
+    if (lastSeenPassed) {
+      newMessageCount++;
+      if (newMessageCount === 1) {
+        var unreadDiv = document.createElement('div');
+        unreadDiv.className = 'unread-divider';
+        unreadDiv.id = 'unread-divider';
+        var uLine1 = document.createElement('div');
+        uLine1.className = 'unread-divider-line';
+        var uText = document.createElement('span');
+        uText.className = 'unread-divider-text';
+        uText.id = 'unread-divider-text';
+        uText.textContent = 'New';
+        var uLine2 = document.createElement('div');
+        uLine2.className = 'unread-divider-line';
+        unreadDiv.appendChild(uLine1);
+        unreadDiv.appendChild(uText);
+        unreadDiv.appendChild(uLine2);
+        container.appendChild(unreadDiv);
+        unreadDividerInserted = true;
+      }
+    }
+    if (msg.id === lastSeenMessageId) {
+      lastSeenPassed = true;
+    }
+  }
+
+  // Detect grouping: same sender within 5 minutes
+  var isGrouped = false;
+  if (lastRenderedFrom === msg.from && msg.timestamp && lastRenderedTime) {
+    var delta = new Date(msg.timestamp) - new Date(lastRenderedTime);
+    if (delta >= 0 && delta < 5 * 60 * 1000) isGrouped = true;
+  }
+  lastRenderedFrom = msg.from;
+  lastRenderedTime = msg.timestamp || lastRenderedTime;
+
+  var msgDiv = appendMessageToContainer(msg, container, { grouped: isGrouped });
   container.scrollTop = container.scrollHeight;
 }
 
-function appendMessageToContainer(msg, container) {
+function appendMessageToContainer(msg, container, opts) {
+  opts = opts || {};
+
+  // Status messages render compact and italic, no avatar
+  if (msg.kind === 'status') {
+    var statusDiv = document.createElement('div');
+    statusDiv.className = 'message-status animate-fade';
+    statusDiv.dataset.msgId = msg.id;
+    var statusText = document.createElement('span');
+    statusText.className = 'message-status-text';
+    statusText.textContent = msg.content || '';
+    statusDiv.appendChild(statusText);
+    container.appendChild(statusDiv);
+    return statusDiv;
+  }
+
+  // Routing/stage cards (#9) — compact system-style
+  if (msg.kind === 'routing' || msg.kind === 'stage') {
+    var routeDiv = el('div', { className: 'message-card-routing animate-fade' });
+    routeDiv.dataset.msgId = msg.id;
+    routeDiv.appendChild(el('span', { className: 'message-card-routing-icon' }, msg.kind === 'routing' ? '\u2192' : '\u25CF'));
+    routeDiv.appendChild(el('span', { className: 'message-card-routing-text' }, msg.content || ''));
+    container.appendChild(routeDiv);
+    return routeDiv;
+  }
+
   var msgDiv = document.createElement('div');
-  msgDiv.className = 'message animate-fade';
+  msgDiv.className = 'message animate-fade' + (opts.grouped ? ' message-grouped' : '');
   msgDiv.dataset.msgId = msg.id;
+
+  // Depth-based indentation for nested thread replies (#17)
+  if (opts.depth && opts.depth > 0) {
+    msgDiv.classList.add('thread-reply-depth');
+    msgDiv.style.marginLeft = (opts.depth * 20) + 'px';
+  }
+
+  // Parent label for nested replies
+  if (opts.parentName) {
+    var parentLabel = document.createElement('div');
+    parentLabel.className = 'thread-reply-parent-label';
+    parentLabel.textContent = 'reply to @' + opts.parentName;
+    if (opts.depth && opts.depth > 0) parentLabel.style.marginLeft = (opts.depth * 20) + 'px';
+    container.appendChild(parentLabel);
+  }
 
   var agent = AGENTS.find(function(a) { return a.slug === msg.from; });
   var isHuman = msg.from === 'you' || msg.from === 'human';
@@ -1394,6 +2650,17 @@ function appendMessageToContainer(msg, container) {
 
   var header = document.createElement('div');
   header.className = 'message-header';
+  // Agent character face (#14)
+  if (!isHuman && agent) {
+    var charEmoji = AGENT_CHARACTERS[agent.slug] || AGENT_CHARACTERS[msg.from];
+    if (charEmoji) {
+      var charFace = document.createElement('span');
+      charFace.className = 'msg-agent-char';
+      charFace.textContent = charEmoji;
+      charFace.title = agent.slug;
+      header.appendChild(charFace);
+    }
+  }
   var author = document.createElement('span');
   author.className = 'message-author';
   author.textContent = isHuman ? 'You' : (agent ? agent.name : msg.from);
@@ -1419,6 +2686,18 @@ function appendMessageToContainer(msg, container) {
   }
   header.appendChild(timeEl);
 
+  // Mood inference (#10)
+  if (!isHuman && msg.content) {
+    var mood = inferMood(msg.content);
+    if (mood) {
+      var moodEl = document.createElement('span');
+      moodEl.className = 'mood-indicator';
+      moodEl.textContent = mood.emoji;
+      moodEl.title = mood.label;
+      header.appendChild(moodEl);
+    }
+  }
+
   var textDiv = document.createElement('div');
   textDiv.className = 'message-text';
   if (isHuman) {
@@ -1428,7 +2707,61 @@ function appendMessageToContainer(msg, container) {
   }
 
   content.appendChild(header);
-  content.appendChild(textDiv);
+
+  // Human message cards (#7)
+  if (msg.kind === 'human_decision' || msg.kind === 'human_action') {
+    var hCard = el('div', { className: 'message-card-human' + (msg.kind === 'human_action' ? ' action' : '') });
+    var hIcon = el('div', { className: 'message-card-human-icon' });
+    hIcon.textContent = (msg.kind === 'human_action' ? '\u2713 ACTION' : '\u2691 DECISION');
+    hCard.appendChild(hIcon);
+    hCard.appendChild(textDiv);
+    content.appendChild(hCard);
+  }
+  // Automation message cards (#8)
+  else if (msg.kind === 'automation' || msg.source === 'nex') {
+    var aCard = el('div', { className: 'message-card-auto' });
+    var aIcon = el('div', { className: 'message-card-auto-icon' });
+    aIcon.textContent = '\u2699 AUTOMATION';
+    aCard.appendChild(aIcon);
+    aCard.appendChild(textDiv);
+    content.appendChild(aCard);
+  }
+  else {
+    content.appendChild(textDiv);
+  }
+
+  // Thread reply-to indicator (#20)
+  if (msg.reply_to && container.id === 'thread-messages') {
+    var parentMsg = allMessages[msg.reply_to];
+    if (parentMsg) {
+      var replyToAgent = AGENTS.find(function(a) { return a.slug === parentMsg.from; });
+      var replyToLabel = el('div', { className: 'thread-reply-to' }, 'replied to @' + (replyToAgent ? replyToAgent.name : parentMsg.from));
+      // Insert before the header
+      content.insertBefore(replyToLabel, header);
+    }
+  }
+
+  // Reactions display
+  if (msg.reactions && msg.reactions.length > 0) {
+    var reactionsDiv = document.createElement('div');
+    reactionsDiv.className = 'message-reactions';
+    msg.reactions.forEach(function(r) {
+      var pill = document.createElement('button');
+      pill.className = 'reaction-pill';
+      var emojiSpan = document.createElement('span');
+      emojiSpan.textContent = r.emoji;
+      var countSpan = document.createElement('span');
+      countSpan.className = 'reaction-pill-count';
+      countSpan.textContent = r.count || 1;
+      pill.appendChild(emojiSpan);
+      pill.appendChild(countSpan);
+      pill.addEventListener('click', function() {
+        WuphfAPI.toggleReaction(msg.id, r.emoji, currentChannel);
+      });
+      reactionsDiv.appendChild(pill);
+    });
+    content.appendChild(reactionsDiv);
+  }
 
   // Thread link (shows "N replies" if this message has replies)
   if (container.id === 'messages') {
@@ -1439,9 +2772,15 @@ function appendMessageToContainer(msg, container) {
     threadLink.addEventListener('click', function() { openThread(msg.id); });
     content.appendChild(threadLink);
 
-    // Action buttons (reply in thread)
+    // Action buttons (reply inline + reply in thread)
     var actions = document.createElement('div');
     actions.className = 'message-actions';
+    var quickReplyBtn = document.createElement('button');
+    quickReplyBtn.className = 'message-action-btn';
+    quickReplyBtn.title = 'Reply';
+    quickReplyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
+    quickReplyBtn.addEventListener('click', (function(mid) { return function() { setReplyMode(mid); }; })(msg.id));
+    actions.appendChild(quickReplyBtn);
     var replyBtn = document.createElement('button');
     replyBtn.className = 'message-action-btn';
     replyBtn.title = 'Reply in thread';
@@ -1462,6 +2801,8 @@ function appendMessageToContainer(msg, container) {
   return msgDiv;
 }
 
+var inlineExpandedThreads = {};
+
 function updateThreadLink(parentId) {
   var link = document.getElementById('thread-link-' + parentId);
   if (!link) return;
@@ -1469,6 +2810,11 @@ function updateThreadLink(parentId) {
   if (count > 0) {
     link.style.display = 'inline-flex';
     link.textContent = '';
+    var toggle = document.createElement('button');
+    toggle.className = 'inline-thread-toggle' + (inlineExpandedThreads[parentId] ? ' expanded' : '');
+    toggle.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>';
+    toggle.addEventListener('click', function(e) { e.stopPropagation(); toggleInlineThread(parentId); });
+    link.appendChild(toggle);
     var icon = document.createElement('span');
     icon.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
     link.appendChild(icon);
@@ -1478,7 +2824,61 @@ function updateThreadLink(parentId) {
   }
 }
 
+function toggleInlineThread(parentId) {
+  var containerId = 'inline-thread-' + parentId;
+  var existing = document.getElementById(containerId);
+  if (existing) {
+    existing.remove();
+    inlineExpandedThreads[parentId] = false;
+    updateThreadLink(parentId);
+    return;
+  }
+  inlineExpandedThreads[parentId] = true;
+  updateThreadLink(parentId);
+  var parentEl = document.querySelector('[data-msg-id="' + parentId + '"]');
+  if (!parentEl) return;
+  var inlineContainer = el('div', { className: 'inline-thread-container', id: containerId });
+  inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'Loading replies...'));
+  parentEl.parentNode.insertBefore(inlineContainer, parentEl.nextSibling);
+  WuphfAPI.getThreadMessages(currentChannel, parentId)
+    .then(function(data) {
+      inlineContainer.textContent = '';
+      var msgs = data.messages || [];
+      var replies = msgs.filter(function(m) { return m.id !== parentId; });
+      if (replies.length === 0) {
+        inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'No replies yet'));
+        return;
+      }
+      replies.forEach(function(m) { allMessages[m.id] = m; appendMessageToContainer(m, inlineContainer); });
+    })
+    .catch(function() {
+      inlineContainer.textContent = '';
+      inlineContainer.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', padding: '4px 0' } }, 'Could not load replies'));
+    });
+}
+
 // ─── Thread panel ───
+// ─── Thread nesting helpers (#17) ───
+function calcReplyDepth(msg, threadRoot, maxDepth) {
+  maxDepth = maxDepth || 4;
+  if (!msg.reply_to || msg.reply_to === threadRoot) return 0;
+  var depth = 0;
+  var cur = msg;
+  while (cur.reply_to && cur.reply_to !== threadRoot && depth < maxDepth) {
+    depth++;
+    cur = allMessages[cur.reply_to] || {};
+  }
+  return depth;
+}
+
+function getReplyParentName(msg) {
+  if (!msg.reply_to) return null;
+  var parent = allMessages[msg.reply_to];
+  if (!parent) return null;
+  var agent = AGENTS.find(function(a) { return a.slug === parent.from; });
+  return agent ? agent.name : parent.from;
+}
+
 function openThread(msgId) {
   activeThreadId = msgId;
   closeAgentPanel();
@@ -1504,34 +2904,15 @@ function openThread(msgId) {
       var msgs = data.messages || [];
       var replies = msgs.filter(function(m) { return m.id !== msgId; });
       replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
+      // Store all for depth calc
+      replies.forEach(function(m) { allMessages[m.id] = m; });
       replies.forEach(function(m) {
-        allMessages[m.id] = m;
-        appendMessageToContainer(m, messagesContainer);
+        var depth = calcReplyDepth(m, msgId);
+        var parentName = depth > 0 ? getReplyParentName(m) : null;
+        appendMessageToContainer(m, messagesContainer, { depth: depth, parentName: parentName });
       });
       messagesContainer.scrollTop = messagesContainer.scrollHeight;
     });
-
-  // Start thread polling
-  if (threadPollTimer) clearInterval(threadPollTimer);
-  threadPollTimer = setInterval(function() {
-    WuphfAPI.getThreadMessages(currentChannel, msgId)
-      .then(function(data) {
-        var msgs = data.messages || [];
-        var replies = msgs.filter(function(m) { return m.id !== msgId; });
-        replyCount.textContent = replies.length + (replies.length === 1 ? ' reply' : ' replies');
-        // Only append new messages
-        var existing = messagesContainer.querySelectorAll('[data-msg-id]');
-        var existingIds = {};
-        existing.forEach(function(el) { existingIds[el.dataset.msgId] = true; });
-        replies.forEach(function(m) {
-          if (!existingIds[m.id]) {
-            allMessages[m.id] = m;
-            appendMessageToContainer(m, messagesContainer);
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-          }
-        });
-      });
-  }, 2000);
 
   // Focus thread composer
   document.getElementById('thread-composer-input').focus();
@@ -1540,20 +2921,61 @@ function openThread(msgId) {
 function closeThreadPanel() {
   activeThreadId = null;
   document.getElementById('thread-panel').classList.remove('open');
-  if (threadPollTimer) { clearInterval(threadPollTimer); threadPollTimer = null; }
+}
+function fetchMemberActivity() {
+  Promise.all([
+    WuphfAPI.getLiveMembers(currentChannel).catch(function() { return { members: [] }; }),
+    WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; })
+  ]).then(function(results) {
+    cachedMembers = (results[0].members || []);
+    cachedTasks = (results[1].tasks || results[1] || []);
+    if (Array.isArray(cachedTasks) === false) cachedTasks = [];
+    renderSidebarAgents();
+    renderWorkspaceSummary();
+    updateTypingIndicator();
+  });
 }
 
-// ─── Request polling ───
-function startRequestPolling() {
-  fetchRequests();
-  if (requestPollTimer) clearInterval(requestPollTimer);
-  requestPollTimer = setInterval(fetchRequests, 2000);
+// ─── Typing indicator (#36) ───
+function updateTypingIndicator() {
+  var typingEl = document.getElementById('typing-indicator');
+  var typingWho = document.getElementById('typing-who');
+  if (!typingEl || !typingWho) return;
+  // Don't show typing when in app view
+  if (currentApp) { typingEl.style.display = 'none'; return; }
+  var typingAgents = [];
+  cachedMembers.forEach(function(m) {
+    if (m.slug === 'human' || m.slug === 'you') return;
+    var ac = classifyActivity(m);
+    if (ac.state === 'talking' || ac.state === 'shipping' || ac.state === 'plotting') {
+      var agent = AGENTS.find(function(a) { return a.slug === m.slug; });
+      if (agent) typingAgents.push(agent.name);
+    }
+  });
+  if (typingAgents.length > 0) {
+    typingEl.style.display = 'flex';
+    if (typingAgents.length === 1) {
+      typingWho.textContent = typingAgents[0] + ' is typing\u2026';
+    } else if (typingAgents.length === 2) {
+      typingWho.textContent = typingAgents[0] + ' and ' + typingAgents[1] + ' are typing\u2026';
+    } else {
+      typingWho.textContent = typingAgents.length + ' agents are typing\u2026';
+    }
+  } else {
+    typingEl.style.display = 'none';
+  }
 }
 
 function fetchRequests() {
   WuphfAPI.getRequests(currentChannel)
     .then(function(data) {
       renderRequestBanner(data.pending);
+      // Render "needs you" banner for blocking requests
+      var allReqs = [];
+      if (data.pending) allReqs.push(data.pending);
+      if (data.requests) allReqs = allReqs.concat(data.requests);
+      if (data.all) allReqs = allReqs.concat(data.all);
+      renderNeedsYouBanner(allReqs);
     })
     .catch(function() {});  // failures tracked by fetchMessages
 }
@@ -1606,6 +3028,57 @@ function renderRequestBanner(pending) {
 var composerInput = document.getElementById('composer-input');
 var composerSend = document.getElementById('composer-send');
 
+// ─── Reply-to mode state ───
+var replyToMsgId = null;
+var replyToAgent = null;
+
+// ─── Composer input history (#40) ───
+var composerHistory = [];
+var composerHistoryIdx = -1;
+var composerHistoryMax = 20;
+var composerHistoryDraft = ''; // stash current input when navigating
+
+function pushComposerHistory(text) {
+  if (!text) return;
+  // Dedupe: don't add if same as last
+  if (composerHistory.length > 0 && composerHistory[composerHistory.length - 1] === text) return;
+  composerHistory.push(text);
+  if (composerHistory.length > composerHistoryMax) composerHistory.shift();
+  composerHistoryIdx = -1;
+}
+
+function setReplyMode(msgId) {
+  var msg = allMessages[msgId];
+  if (!msg) return;
+  replyToMsgId = msgId;
+  var agent = AGENTS.find(function(a) { return a.slug === msg.from; });
+  replyToAgent = agent ? agent.name : msg.from;
+  renderReplyBadge();
+  composerInput.focus();
+}
+
+function clearReplyMode() {
+  replyToMsgId = null;
+  replyToAgent = null;
+  var badge = document.getElementById('composer-reply-badge');
+  if (badge) badge.remove();
+  renderComposerHint();
+}
+
+function renderReplyBadge() {
+  var existing = document.getElementById('composer-reply-badge');
+  if (existing) existing.remove();
+  if (!replyToMsgId) return;
+  var badge = el('div', { className: 'composer-reply-badge', id: 'composer-reply-badge' });
+  badge.appendChild(svgIcon(['M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'], 12));
+  badge.appendChild(el('span', { className: 'composer-reply-badge-text' }, 'Replying to @' + replyToAgent));
+  var closeBtn = el('button', { className: 'composer-reply-badge-close', onClick: clearReplyMode });
+  closeBtn.textContent = '\u00D7';
+  badge.appendChild(closeBtn);
+  var composerEl = document.querySelector('.composer');
+  composerEl.insertBefore(badge, composerEl.firstChild);
+}
+
 // ─── Autocomplete state ───
 var acPanel = document.getElementById('autocomplete');
 var acSelectedIdx = -1;
@@ -1623,6 +3096,8 @@ var SLASH_COMMANDS = [
   { name: '/quit', desc: 'Exit WUPHF', icon: '👋' },
   { name: '/connect', desc: 'Connect integration', icon: '🔗' },
   { name: '/1o1', desc: 'Start 1:1 session', icon: '🤝' },
+  { name: '/recover', desc: 'Show workspace recovery info', icon: '🔍' },
+  { name: '/search', desc: 'Search messages', icon: '🔎' },
 ];
 
 function updateAutocomplete() {
@@ -1794,21 +3269,67 @@ function handleSlashCommand(input) {
       showSystem('Commands: /clear /help /requests /tasks /reset /reply <msg-id> /1o1 <agent>');
       break;
     case '/requests':
-      fetchRequests();
-      showSystem('Refreshing requests...');
+      switchApp('requests');
+      break;
+    case '/policies':
+      switchApp('policies');
+      break;
+    case '/skills':
+      switchApp('skills');
+      break;
+    case '/calendar':
+      switchApp('calendar');
+      break;
+    case '/tasks':
+      switchApp('tasks');
       break;
     case '/reply':
-      if (args) openThread(args.trim());
-      else showSystem('Usage: /reply <message-id>');
+      if (args) {
+        var replyTarget = args.trim();
+        if (allMessages[replyTarget]) { setReplyMode(replyTarget); }
+        else openThread(replyTarget);
+      } else {
+        // Default: reply to the last non-human message
+        var msgKeys = Object.keys(allMessages);
+        for (var ri = msgKeys.length - 1; ri >= 0; ri--) {
+          var rm = allMessages[msgKeys[ri]];
+          if (rm.from !== 'you' && rm.from !== 'human' && !rm.reply_to) {
+            setReplyMode(rm.id);
+            break;
+          }
+        }
+      }
       break;
     case '/reset':
-      WuphfAPI.post('/reset', {}).then(function() {
-        container.textContent = '';
-        lastMessageId = '';
-        allMessages = {};
-        threadReplyCounts = {};
-        showSystem('Office reset');
+      showConfirmDialog({
+        title: 'Reset Office',
+        message: 'This will clear all messages and reset the office state. Are you sure?',
+        confirmLabel: 'Reset',
+        onConfirm: function() {
+          WuphfAPI.post('/reset', {}).then(function() {
+            container.textContent = '';
+            lastMessageId = '';
+            allMessages = {};
+            threadReplyCounts = {};
+            showSystem('Office reset');
+          });
+        }
       });
+      break;
+    case '/recover':
+      openRecoveryView();
+      break;
+    case '/search':
+      openSearchMode(args || '');
+      break;
+    case '/1o1':
+      if (args) {
+        var targetAgent = AGENTS.find(function(a) { return a.slug === args.trim().toLowerCase() || a.name.toLowerCase() === args.trim().toLowerCase(); });
+        if (targetAgent) enterDMMode(targetAgent.slug);
+        else showSystem('Agent not found: ' + args.trim());
+      } else {
+        showSystem('Usage: /1o1 <agent-slug>');
+      }
       break;
     default:
       // Send unknown commands to broker as a message (agents may handle them)
@@ -1820,6 +3341,9 @@ function handleSlashCommand(input) {
 function sendMessage() {
   var raw = composerInput.value.trim();
   if (!raw) return;
+
+  // Push to history before clearing
+  pushComposerHistory(raw);
 
   // Close autocomplete
   acPanel.classList.remove('open');
@@ -1850,12 +3374,15 @@ function sendMessage() {
 
   if (brokerConnected) {
     // POST to broker with tagged agents — tagged agents get notified
-    WuphfAPI.post('/messages', {
+    var msgBody = {
       from: 'you',
       channel: currentChannel,
       content: raw,
       tagged: tagged
-    })
+    };
+    if (replyToMsgId) msgBody.reply_to = replyToMsgId;
+    clearReplyMode();
+    WuphfAPI.post('/messages', msgBody)
       .catch(function(err) {
         // Show error as system message
         var container = document.getElementById('messages');
@@ -1980,6 +3507,9 @@ function sendMessage() {
 function openAgentPanel(slug) {
   var agent = AGENTS.find(function(a) { return a.slug === slug; });
   if (!agent) return;
+  var liveMember = cachedMembers.find(function(m) { return m.slug === slug; }) || null;
+  var liveState = classifyActivity(liveMember);
+  var latencyHint = formatLatencyHint(liveMember);
 
   var panel = document.getElementById('agent-panel');
   var body = document.getElementById('agent-panel-body');
@@ -1987,7 +3517,8 @@ function openAgentPanel(slug) {
 
   var avatar = document.createElement('div');
   avatar.className = 'agent-panel-avatar';
-  avatar.textContent = agent.emoji;
+  avatar.style.background = 'transparent';
+  avatar.appendChild(renderPixelAvatar(agent.slug, 56));
 
   var nameEl = document.createElement('h3');
   nameEl.className = 'agent-panel-name';
@@ -2006,8 +3537,9 @@ function openAgentPanel(slug) {
   statusSection.appendChild(statusTitle);
 
   var stats = [
-    ['State', 'Active', 'badge badge-green'],
+    ['State', liveState.label, liveState.state !== 'lurking' ? 'badge badge-green' : 'badge badge-accent'],
     ['Type', agent.type.charAt(0).toUpperCase() + agent.type.slice(1), null],
+    ['Latency', latencyHint || 'n/a', null],
   ];
   stats.forEach(function(s) {
     var row = document.createElement('div');
@@ -2097,6 +3629,80 @@ function closeAgentPanel() {
   document.getElementById('agent-panel').classList.remove('open');
 }
 
+
+// ─── Search mode (#63 part) ───
+var searchMode = false;
+var searchCache = [];
+
+function openSearchMode(query) {
+  searchMode = true;
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = query || '';
+  cmdPaletteInput.placeholder = 'Search messages...';
+  cmdSelectedIdx = -1;
+  if (brokerConnected) {
+    WuphfAPI.getMessages(currentChannel, null, 100)
+      .then(function(data) { searchCache = data.messages || []; renderSearchResults(query || ''); })
+      .catch(function() { searchCache = []; renderSearchResults(query || ''); });
+  } else { searchCache = []; renderSearchResults(query || ''); }
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function renderSearchResults(query) {
+  if (!searchMode) return;
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+  var q = (query || '').toLowerCase().trim();
+  if (!q || q.length < 2) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'Type at least 2 characters to search...'));
+    return;
+  }
+  var combined = {};
+  Object.keys(allMessages).forEach(function(k) { combined[k] = allMessages[k]; });
+  searchCache.forEach(function(m) { if (m.id) combined[m.id] = m; });
+  var results = [];
+  var keys = Object.keys(combined);
+  for (var si = keys.length - 1; si >= 0 && results.length < 20; si--) {
+    var sm = combined[keys[si]];
+    if (sm.content && sm.content.toLowerCase().indexOf(q) !== -1) results.push(sm);
+  }
+  if (results.length === 0) {
+    cmdPaletteResults.appendChild(el('div', { className: 'cmd-palette-empty' }, 'No messages matching "' + query + '"'));
+    return;
+  }
+  var groupDiv = el('div', { className: 'cmd-palette-group' });
+  groupDiv.appendChild(el('div', { className: 'cmd-palette-group-title' }, results.length + ' result' + (results.length !== 1 ? 's' : '')));
+  results.forEach(function(m) {
+    var idx = cmdFlatItems.length;
+    var fromAgent = AGENTS.find(function(a) { return a.slug === m.from; });
+    var snippet = m.content.length > 80 ? m.content.substring(0, 80) + '...' : m.content;
+    cmdFlatItems.push({ icon: fromAgent ? fromAgent.emoji : '?', label: fromAgent ? fromAgent.name : m.from, desc: snippet,
+      action: (function(mid, rt) { return function() { closeCommandPalette(); var t = document.querySelector('[data-msg-id="' + mid + '"]'); if (t) { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); t.style.background = 'var(--yellow-bg)'; setTimeout(function() { t.style.background = ''; }, 2000); } else if (rt) { openThread(rt); } }; })(m.id, m.reply_to)
+    });
+    var row = el('div', { className: 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : ''), onClick: function() { selectCommandPaletteItem(idx); } });
+    row.appendChild(el('div', { className: 'cmd-palette-item-icon' }, cmdFlatItems[idx].icon));
+    var text = el('div', { className: 'cmd-palette-item-text' });
+    text.appendChild(el('div', { className: 'cmd-palette-item-label' }, cmdFlatItems[idx].label));
+    text.appendChild(el('div', { className: 'cmd-palette-item-desc' }, snippet));
+    row.appendChild(text);
+    groupDiv.appendChild(row);
+  });
+  cmdPaletteResults.appendChild(groupDiv);
+}
+
+cmdPaletteInput.addEventListener('input', function() {
+  cmdSelectedIdx = -1;
+  if (searchMode) renderSearchResults(cmdPaletteInput.value.trim());
+  else renderCommandPaletteResults(cmdPaletteInput.value.trim());
+});
+
+var _origCloseCP = closeCommandPalette;
+closeCommandPalette = function() {
+  searchMode = false;
+  cmdPaletteInput.placeholder = 'Search channels, agents, commands...';
+  _origCloseCP();
+};
+
 // ─── Init ───
 function initApp() {
   WuphfAPI.init()
@@ -2105,7 +3711,7 @@ function initApp() {
       if (data.status === 'ok') {
         brokerConnected = true;
         document.getElementById('onboarding').style.display = 'none';
-        showOffice();
+        showSplashScreen(function() { showOffice(); });
       } else {
         renderProgress();
         renderSizeOptions();
@@ -2140,7 +3746,1541 @@ if (themeSwitcher) {
   });
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+//   COMMAND PALETTE (#63)
+// ═══════════════════════════════════════════════════════════════
+var cmdPaletteOverlay = document.getElementById('cmd-palette-overlay');
+var cmdPaletteInput = document.getElementById('cmd-palette-input');
+var cmdPaletteResults = document.getElementById('cmd-palette-results');
+var cmdSelectedIdx = -1;
+var cmdFlatItems = [];
+
+function openCommandPalette() {
+  if (!document.getElementById('office').classList.contains('active')) return;
+  cmdPaletteOverlay.classList.add('open');
+  cmdPaletteInput.value = '';
+  cmdSelectedIdx = -1;
+  renderCommandPaletteResults('');
+  setTimeout(function() { cmdPaletteInput.focus(); }, 50);
+}
+
+function closeCommandPalette() {
+  cmdPaletteOverlay.classList.remove('open');
+  cmdPaletteInput.value = '';
+  cmdSelectedIdx = -1;
+}
+
+function buildCommandPaletteItems(query) {
+  var q = (query || '').toLowerCase();
+  var groups = [];
+
+  // Channels
+  var channelItems = CHANNELS.filter(function(ch) {
+    return !q || ch.name.toLowerCase().indexOf(q) !== -1 || (ch.desc && ch.desc.toLowerCase().indexOf(q) !== -1);
+  }).map(function(ch) {
+    return { icon: '#', label: ch.name, desc: ch.desc, action: function() { switchChannel(ch.name); renderSidebarChannels(); } };
+  });
+  if (channelItems.length) groups.push({ title: 'Channels', items: channelItems });
+
+  // Agents
+  var agentItems = AGENTS.filter(function(a) {
+    return a.checked && (!q || a.name.toLowerCase().indexOf(q) !== -1 || a.slug.toLowerCase().indexOf(q) !== -1 || a.role.toLowerCase().indexOf(q) !== -1);
+  }).map(function(a) {
+    return { icon: a.emoji, label: a.name, desc: a.role, action: function() { openAgentPanel(a.slug); } };
+  });
+  if (agentItems.length) groups.push({ title: 'Agents', items: agentItems });
+
+  // Commands
+  var cmdItems = SLASH_COMMANDS.filter(function(cmd) {
+    return !q || cmd.name.toLowerCase().indexOf(q) !== -1 || cmd.desc.toLowerCase().indexOf(q) !== -1;
+  }).map(function(cmd) {
+    return { icon: cmd.icon, label: cmd.name, desc: cmd.desc, action: function() { handleSlashCommand(cmd.name); } };
+  });
+  // Add palette-specific commands
+  var extraCmds = [
+    { icon: '🔍', label: '/recover', desc: 'Show workspace recovery info', action: function() { openRecoveryView(); } },
+  ];
+  extraCmds.forEach(function(c) {
+    if (!q || c.label.toLowerCase().indexOf(q) !== -1 || c.desc.toLowerCase().indexOf(q) !== -1) {
+      cmdItems.push(c);
+    }
+  });
+  if (cmdItems.length) groups.push({ title: 'Commands', items: cmdItems });
+
+  // Recent messages (search through allMessages)
+  if (q && q.length >= 2) {
+    var msgItems = [];
+    var msgKeys = Object.keys(allMessages);
+    for (var i = msgKeys.length - 1; i >= 0 && msgItems.length < 5; i--) {
+      var m = allMessages[msgKeys[i]];
+      if (m.content && m.content.toLowerCase().indexOf(q) !== -1) {
+        var fromAgent = AGENTS.find(function(a) { return a.slug === m.from; });
+        msgItems.push({
+          icon: fromAgent ? fromAgent.emoji : '💬',
+          label: (fromAgent ? fromAgent.name : m.from) + ': ' + (m.content.length > 60 ? m.content.substring(0, 60) + '...' : m.content),
+          desc: 'message',
+          action: (function(mid) { return function() { if (m.reply_to) openThread(m.reply_to); }; })(m.id)
+        });
+      }
+    }
+    if (msgItems.length) groups.push({ title: 'Messages', items: msgItems });
+  }
+
+  return groups;
+}
+
+function renderCommandPaletteResults(query) {
+  var groups = buildCommandPaletteItems(query);
+  cmdPaletteResults.textContent = '';
+  cmdFlatItems = [];
+
+  if (groups.length === 0) {
+    var empty = document.createElement('div');
+    empty.className = 'cmd-palette-empty';
+    empty.textContent = query ? 'No results for "' + query + '"' : 'Start typing to search...';
+    cmdPaletteResults.appendChild(empty);
+    return;
+  }
+
+  groups.forEach(function(group) {
+    var groupDiv = document.createElement('div');
+    groupDiv.className = 'cmd-palette-group';
+    var title = document.createElement('div');
+    title.className = 'cmd-palette-group-title';
+    title.textContent = group.title;
+    groupDiv.appendChild(title);
+
+    group.items.forEach(function(item) {
+      var idx = cmdFlatItems.length;
+      cmdFlatItems.push(item);
+
+      var row = document.createElement('div');
+      row.className = 'cmd-palette-item' + (idx === cmdSelectedIdx ? ' selected' : '');
+      row.addEventListener('click', function() { selectCommandPaletteItem(idx); });
+
+      var icon = document.createElement('div');
+      icon.className = 'cmd-palette-item-icon';
+      icon.textContent = item.icon;
+
+      var text = document.createElement('div');
+      text.className = 'cmd-palette-item-text';
+      var label = document.createElement('div');
+      label.className = 'cmd-palette-item-label';
+      label.textContent = item.label;
+      text.appendChild(label);
+      if (item.desc) {
+        var desc = document.createElement('div');
+        desc.className = 'cmd-palette-item-desc';
+        desc.textContent = item.desc;
+        text.appendChild(desc);
+      }
+
+      row.appendChild(icon);
+      row.appendChild(text);
+      groupDiv.appendChild(row);
+    });
+
+    cmdPaletteResults.appendChild(groupDiv);
+  });
+}
+
+function selectCommandPaletteItem(idx) {
+  if (idx < 0 || idx >= cmdFlatItems.length) return;
+  var item = cmdFlatItems[idx];
+  closeCommandPalette();
+  if (item.action) item.action();
+}
+
+cmdPaletteInput.addEventListener('input', function() {
+  cmdSelectedIdx = -1;
+  renderCommandPaletteResults(cmdPaletteInput.value.trim());
+});
+
+cmdPaletteInput.addEventListener('keydown', function(e) {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    cmdSelectedIdx = Math.min(cmdSelectedIdx + 1, cmdFlatItems.length - 1);
+    renderCommandPaletteResults(cmdPaletteInput.value.trim());
+    // Scroll selected into view
+    var sel = cmdPaletteResults.querySelector('.cmd-palette-item.selected');
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    cmdSelectedIdx = Math.max(cmdSelectedIdx - 1, 0);
+    renderCommandPaletteResults(cmdPaletteInput.value.trim());
+    var sel = cmdPaletteResults.querySelector('.cmd-palette-item.selected');
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    selectCommandPaletteItem(cmdSelectedIdx >= 0 ? cmdSelectedIdx : 0);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    closeCommandPalette();
+  }
+});
+
+cmdPaletteOverlay.addEventListener('click', function(e) {
+  if (e.target === cmdPaletteOverlay) closeCommandPalette();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//   KEYBOARD SHORTCUTS (#64)
+// ═══════════════════════════════════════════════════════════════
+document.addEventListener('keydown', function(e) {
+  // Don't handle shortcuts when typing in inputs (except specific ones)
+  var inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
+  var officeActive = document.getElementById('office').classList.contains('active');
+  if (!officeActive) return;
+
+  // Ctrl+K / Cmd+K: open command palette (works even in inputs)
+  if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+    e.preventDefault();
+    if (cmdPaletteOverlay.classList.contains('open')) {
+      closeCommandPalette();
+    } else {
+      openCommandPalette();
+    }
+    return;
+  }
+
+  // Ctrl+R / Cmd+R: reply to last message
+  if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+    e.preventDefault();
+    var msgKeys = Object.keys(allMessages);
+    for (var ri = msgKeys.length - 1; ri >= 0; ri--) {
+      var rm = allMessages[msgKeys[ri]];
+      if (rm.from !== 'you' && rm.from !== 'human' && !rm.reply_to) {
+        setReplyMode(rm.id);
+        break;
+      }
+    }
+    return;
+  }
+
+  // Ctrl+/ or Cmd+/: focus composer
+  if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+    e.preventDefault();
+    var ci = document.getElementById('composer-input');
+    if (ci) ci.focus();
+    return;
+  }
+
+  // Ctrl+Shift+T / Cmd+Shift+T: toggle thread panel
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'T') {
+    e.preventDefault();
+    var tp = document.getElementById('thread-panel');
+    if (tp.classList.contains('open')) {
+      closeThreadPanel();
+    } else if (activeThreadId) {
+      openThread(activeThreadId);
+    }
+    return;
+  }
+
+  // Escape: close panels (command palette handled by its own handler)
+  if (e.key === 'Escape' && !inInput) {
+    if (cmdPaletteOverlay.classList.contains('open')) {
+      closeCommandPalette();
+    } else if (document.getElementById('thread-panel').classList.contains('open')) {
+      closeThreadPanel();
+    } else if (document.getElementById('agent-panel').classList.contains('open')) {
+      closeAgentPanel();
+    } else if (document.getElementById('recovery-panel').classList.contains('open')) {
+      closeRecoveryView();
+    }
+    return;
+  }
+
+  // Skip remaining shortcuts if in an input field
+  if (inInput) {
+    // Up/Down arrow in composer: navigate input history (#40)
+    if (e.target.id === 'composer-input' && composerHistory.length > 0) {
+      if (e.key === 'ArrowUp' && (!e.target.value.trim() || composerHistoryIdx >= 0)) {
+        e.preventDefault();
+        if (composerHistoryIdx < 0) composerHistoryDraft = e.target.value;
+        composerHistoryIdx = Math.min(composerHistoryIdx + 1, composerHistory.length - 1);
+        e.target.value = composerHistory[composerHistory.length - 1 - composerHistoryIdx];
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+        composerSend.disabled = !e.target.value.trim();
+      } else if (e.key === 'ArrowDown' && composerHistoryIdx >= 0) {
+        e.preventDefault();
+        composerHistoryIdx--;
+        if (composerHistoryIdx < 0) {
+          e.target.value = composerHistoryDraft;
+        } else {
+          e.target.value = composerHistory[composerHistory.length - 1 - composerHistoryIdx];
+        }
+        e.target.style.height = 'auto';
+        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+        composerSend.disabled = !e.target.value.trim();
+      }
+    }
+    return;
+  }
+
+  // Number keys 1-9: switch to channel by position
+  if (e.key >= '1' && e.key <= '9' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+    var chIdx = parseInt(e.key) - 1;
+    if (chIdx < CHANNELS.length) {
+      e.preventDefault();
+      switchChannel(CHANNELS[chIdx].name);
+      renderSidebarChannels();
+    }
+    return;
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+//   1:1 DIRECT SESSION MODE (#65)
+// ═══════════════════════════════════════════════════════════════
+var dmModeActive = false;
+var dmAgent = null;
+var dmPreviousChannel = null;
+
+function enterDMMode(agentSlug) {
+  var agent = AGENTS.find(function(a) { return a.slug === agentSlug; });
+  if (!agent) return;
+
+  dmModeActive = true;
+  dmAgent = agent;
+  dmPreviousChannel = currentChannel;
+
+  // Update header
+  document.getElementById('channel-title').textContent = '@ ' + agent.name;
+  document.getElementById('channel-desc').textContent = '1:1 direct session';
+
+  // Show DM banner
+  document.getElementById('dm-banner-text').textContent = '1:1 session with ' + agent.name;
+  document.getElementById('dm-banner').classList.add('open');
+
+  // Update composer placeholder
+  document.getElementById('composer-input').placeholder = 'Message ' + agent.name + ' directly...';
+
+  // Clear messages and fetch DM channel
+  document.getElementById('messages').textContent = '';
+  lastMessageId = null;
+
+  // Try to switch mode via broker
+  if (brokerConnected) {
+    WuphfAPI.post('/session-mode', { mode: '1:1', agent: agentSlug })
+      .then(function() { fetchMessages(); })
+      .catch(function() {
+        // Fallback: just filter messages
+        fetchMessages();
+      });
+  }
+}
+
+function exitDMMode() {
+  if (!dmModeActive) return;
+  dmModeActive = false;
+  dmAgent = null;
+
+  // Hide DM banner
+  document.getElementById('dm-banner').classList.remove('open');
+
+  // Restore previous channel
+  if (dmPreviousChannel) {
+    switchChannel(dmPreviousChannel);
+  }
+
+  // Try to switch mode via broker
+  if (brokerConnected) {
+    WuphfAPI.post('/session-mode', { mode: 'office' }).catch(function() {});
+  }
+}
+
+// Double-click on sidebar agent to start DM
+function setupAgentDMHandlers() {
+  var agentButtons = document.querySelectorAll('#sidebar-agents .sidebar-agent');
+  agentButtons.forEach(function(btn) {
+    btn.addEventListener('dblclick', function(e) {
+      e.preventDefault();
+      var slug = btn.title;
+      // Find agent by name (title is set to agent.name)
+      var agent = AGENTS.find(function(a) { return a.name === slug; });
+      if (agent) enterDMMode(agent.slug);
+    });
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   RECOVERY VIEW (#55)
+// ═══════════════════════════════════════════════════════════════
+var recoveryViewOpen = false;
+
+function openRecoveryView() {
+  var panel = document.getElementById('recovery-panel');
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+
+  // Hide messages, show recovery
+  messagesEl.style.display = 'none';
+  typingEl.style.display = 'none';
+  panel.classList.add('open');
+  recoveryViewOpen = true;
+
+  // Update header
+  document.getElementById('channel-title').textContent = 'Recovery';
+  document.getElementById('channel-desc').textContent = 'Workspace state and recovery info';
+
+  panel.textContent = '';
+
+  // Header card
+  var headerCard = document.createElement('div');
+  headerCard.className = 'recovery-card';
+  var headerTitle = document.createElement('div');
+  headerTitle.className = 'recovery-card-title';
+  headerTitle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/></svg> Session Overview';
+  headerCard.appendChild(headerTitle);
+
+  var headerBody = document.createElement('div');
+  headerBody.className = 'recovery-card-body';
+  headerBody.textContent = 'Loading recovery data...';
+  headerCard.appendChild(headerBody);
+  panel.appendChild(headerCard);
+
+  // Fetch from broker
+  if (brokerConnected) {
+    Promise.all([
+      WuphfAPI.get('/state').catch(function() { return {}; }),
+      WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; }),
+      WuphfAPI.getLiveMembers(currentChannel).catch(function() { return { members: [] }; })
+    ]).then(function(results) {
+      var state = results[0];
+      var tasksData = results[1];
+      var membersData = results[2];
+      renderRecoveryData(panel, state, tasksData, membersData);
+    });
+  } else {
+    renderRecoveryData(panel, {}, { tasks: [] }, { members: [] });
+  }
+}
+
+function renderRecoveryData(panel, state, tasksData, membersData) {
+  panel.textContent = '';
+
+  // Session card
+  var sessionCard = document.createElement('div');
+  sessionCard.className = 'recovery-card';
+  var sessionTitle = document.createElement('div');
+  sessionTitle.className = 'recovery-card-title';
+  sessionTitle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10H12V2z"/></svg> Session State';
+  sessionCard.appendChild(sessionTitle);
+
+  var sessionBody = document.createElement('div');
+  sessionBody.className = 'recovery-card-body';
+
+  var recovery = state.recovery || {};
+  var stats = [
+    ['Current Channel', currentChannel],
+    ['Session Mode', dmModeActive ? '1:1 with ' + (dmAgent ? dmAgent.name : '?') : 'Office'],
+    ['Connected', brokerConnected ? 'Yes' : 'No (demo mode)'],
+    ['Messages Loaded', Object.keys(allMessages).length.toString()],
+    ['Active Threads', Object.keys(threadReplyCounts).length.toString()],
+  ];
+  if (recovery.focus) stats.push(['Focus', recovery.focus]);
+  if (recovery.away_since) stats.push(['Away Since', recovery.away_since]);
+
+  stats.forEach(function(s) {
+    var row = document.createElement('div');
+    row.className = 'recovery-stat';
+    var label = document.createElement('span');
+    label.className = 'recovery-stat-label';
+    label.textContent = s[0];
+    var val = document.createElement('span');
+    val.className = 'recovery-stat-value';
+    val.textContent = s[1];
+    row.appendChild(label);
+    row.appendChild(val);
+    sessionBody.appendChild(row);
+  });
+  sessionCard.appendChild(sessionBody);
+  panel.appendChild(sessionCard);
+
+  // Agent states card
+  var members = membersData.members || AGENTS.filter(function(a) { return a.checked; });
+  if (members.length > 0) {
+    var agentCard = document.createElement('div');
+    agentCard.className = 'recovery-card';
+    var agentTitle = document.createElement('div');
+    agentTitle.className = 'recovery-card-title';
+    agentTitle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg> Agent States';
+    agentCard.appendChild(agentTitle);
+
+    var agentBody = document.createElement('div');
+    agentBody.className = 'recovery-card-body';
+    members.forEach(function(m) {
+      var row = document.createElement('div');
+      row.className = 'recovery-stat';
+      var label = document.createElement('span');
+      label.className = 'recovery-stat-label';
+      label.textContent = m.name || m.slug;
+      var val = document.createElement('span');
+      val.className = 'recovery-stat-value';
+      val.textContent = m.state || m.status || 'active';
+      row.appendChild(label);
+      row.appendChild(val);
+      agentBody.appendChild(row);
+    });
+    agentCard.appendChild(agentBody);
+    panel.appendChild(agentCard);
+  }
+
+  // Tasks card
+  var tasks = tasksData.tasks || [];
+  if (tasks.length > 0) {
+    var taskCard = document.createElement('div');
+    taskCard.className = 'recovery-card';
+    var taskTitle = document.createElement('div');
+    taskTitle.className = 'recovery-card-title';
+    taskTitle.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><path d="m9 11 3 3L22 4"/></svg> Pending Work';
+    taskCard.appendChild(taskTitle);
+
+    var taskBody = document.createElement('div');
+    taskBody.className = 'recovery-card-body';
+    tasks.forEach(function(t) {
+      var row = document.createElement('div');
+      row.className = 'recovery-task';
+      var dot = document.createElement('span');
+      dot.className = 'recovery-task-dot';
+      if (t.status === 'active' || t.status === 'in_progress') dot.className += ' active';
+      else if (t.status === 'blocked') dot.className += ' blocked';
+      else if (t.status === 'done' || t.status === 'completed') dot.className += ' done';
+      else dot.className += ' pending';
+      var text = document.createElement('span');
+      text.textContent = (t.title || t.subject || t.id) + (t.owner ? ' (' + t.owner + ')' : '');
+      row.appendChild(dot);
+      row.appendChild(text);
+      taskBody.appendChild(row);
+    });
+    taskCard.appendChild(taskBody);
+    panel.appendChild(taskCard);
+  }
+
+  // Next steps card from recovery
+  if (state.recovery && state.recovery.next_steps) {
+    var nextCard = document.createElement('div');
+    nextCard.className = 'recovery-card';
+    var nextTitle = document.createElement('div');
+    nextTitle.className = 'recovery-card-title';
+    nextTitle.textContent = 'Suggested Next Steps';
+    nextCard.appendChild(nextTitle);
+    var nextBody = document.createElement('div');
+    nextBody.className = 'recovery-card-body';
+    nextBody.textContent = state.recovery.next_steps;
+    nextCard.appendChild(nextBody);
+    panel.appendChild(nextCard);
+  }
+
+  // Close button
+  var closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-ghost';
+  closeBtn.textContent = 'Back to messages';
+  closeBtn.style.alignSelf = 'flex-start';
+  closeBtn.addEventListener('click', closeRecoveryView);
+  panel.appendChild(closeBtn);
+}
+
+function closeRecoveryView() {
+  var panel = document.getElementById('recovery-panel');
+  var messagesEl = document.getElementById('messages');
+  panel.classList.remove('open');
+  messagesEl.style.display = '';
+  recoveryViewOpen = false;
+
+  // Restore header
+  var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
+  document.getElementById('channel-title').textContent = '# ' + currentChannel;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   NOTIFICATION BADGES (#66)
+// ═══════════════════════════════════════════════════════════════
+var channelLastSeen = {};
+var channelUnreadCounts = {};
+
+function loadLastSeenState() {
+  try {
+    var saved = localStorage.getItem('wuphf-channel-last-seen');
+    if (saved) channelLastSeen = JSON.parse(saved);
+  } catch(e) {}
+}
+
+function saveLastSeenState() {
+  try {
+    localStorage.setItem('wuphf-channel-last-seen', JSON.stringify(channelLastSeen));
+  } catch(e) {}
+}
+
+function markChannelSeen(channelName) {
+  // Set last seen to the most recent message ID we know about
+  channelLastSeen[channelName] = lastMessageId || channelLastSeen[channelName] || '';
+  channelUnreadCounts[channelName] = 0;
+  saveLastSeenState();
+  updateChannelBadges();
+}
+
+function incrementUnreadCount(channelName) {
+  if (channelName === currentChannel) return; // Don't count for active channel
+  channelUnreadCounts[channelName] = (channelUnreadCounts[channelName] || 0) + 1;
+  updateChannelBadges();
+}
+
+function updateChannelBadges() {
+  var channelContainer = document.getElementById('sidebar-channels');
+  if (!channelContainer) return;
+  var items = channelContainer.querySelectorAll('.sidebar-item');
+  items.forEach(function(item, idx) {
+    if (idx >= CHANNELS.length) return;
+    var chName = CHANNELS[idx].name;
+    var count = channelUnreadCounts[chName] || 0;
+
+    // Remove existing badge
+    var existingBadge = item.querySelector('.sidebar-badge');
+    if (existingBadge) existingBadge.remove();
+
+    // Add badge if unread count > 0
+    if (count > 0) {
+      var badge = document.createElement('span');
+      badge.className = 'sidebar-badge';
+      badge.textContent = count > 99 ? '99+' : count.toString();
+      item.appendChild(badge);
+    }
+  });
+}
+
+// Hook into message polling to track unreads
+var _originalAppendBrokerMessage = typeof appendBrokerMessage === 'function' ? appendBrokerMessage : null;
+
+loadLastSeenState();
+
+// ─── SVG icon helper (static trusted icons only) ───
+function svgIcon(paths, size) {
+  var s = size || 16;
+  var ns = 'http://www.w3.org/2000/svg';
+  var svg = document.createElementNS(ns, 'svg');
+  svg.setAttribute('width', String(s));
+  svg.setAttribute('height', String(s));
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  paths.forEach(function(d) {
+    var p = document.createElementNS(ns, 'path');
+    p.setAttribute('d', d);
+    svg.appendChild(p);
+  });
+  return svg;
+}
+
+// ─── Confirmation Dialog (reusable) ───
+function showConfirmDialog(opts) {
+  var overlay = el('div', { className: 'confirm-overlay' });
+  var card = el('div', { className: 'confirm-card' });
+
+  var title = el('h3', { className: 'confirm-title' }, opts.title || 'Confirm');
+  var message = el('p', { className: 'confirm-message' }, opts.message || '');
+  card.appendChild(title);
+  card.appendChild(message);
+
+  var actions = el('div', { className: 'confirm-actions' });
+  var cancelBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: function() { overlay.remove(); if (opts.onCancel) opts.onCancel(); } }, opts.cancelLabel || 'Cancel');
+  var confirmBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: function() { overlay.remove(); if (opts.onConfirm) opts.onConfirm(); } }, opts.confirmLabel || 'Confirm');
+  actions.appendChild(cancelBtn);
+  actions.appendChild(confirmBtn);
+  card.appendChild(actions);
+
+  overlay.appendChild(card);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) { overlay.remove(); if (opts.onCancel) opts.onCancel(); } });
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
+// ─── Needs You Banner ───
+function renderNeedsYouBanner(requests) {
+  var existing = document.getElementById('needs-you-banner');
+  if (existing) existing.remove();
+
+  // Find blocking/required request
+  var blocking = null;
+  if (Array.isArray(requests)) {
+    blocking = requests.find(function(r) { return (r.blocking || r.required) && r.status === 'open'; });
+  } else if (requests && (requests.blocking || requests.required)) {
+    blocking = requests;
+  }
+  if (!blocking) return;
+
+  var banner = el('div', { className: 'needs-you-banner', id: 'needs-you-banner' });
+
+  var label = el('div', { className: 'needs-you-label' });
+  // Warning triangle icon
+  label.appendChild(svgIcon(['M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z', 'M12 9v4', 'M12 17h.01'], 14));
+  label.appendChild(document.createTextNode(' NEEDS YOU'));
+  banner.appendChild(label);
+
+  var fromAgent = AGENTS.find(function(a) { return a.slug === blocking.from; });
+  var fromText = el('div', { className: 'needs-you-from' }, (fromAgent ? fromAgent.name : blocking.from) + ' is waiting for your response');
+  banner.appendChild(fromText);
+
+  var question = el('div', { className: 'needs-you-question' }, blocking.question || blocking.title || '');
+  banner.appendChild(question);
+
+  var options = blocking.options || [];
+  if (options.length > 0) {
+    var actionsDiv = el('div', { className: 'needs-you-actions' });
+    options.forEach(function(opt) {
+      var btn = el('button', { className: 'needs-you-btn', onClick: function() {
+        if (opt.requires_text || options.length > 1) {
+          openInterviewModal(blocking);
+        } else {
+          WuphfAPI.answerRequest(blocking.id, opt.id)
+            .then(function() { var b = document.getElementById('needs-you-banner'); if (b) b.remove(); fetchRequests(); });
+        }
+      } }, opt.label || opt.text || opt.id);
+      actionsDiv.appendChild(btn);
+    });
+    // Add "Answer" button that opens interview flow
+    var answerBtn = el('button', { className: 'needs-you-btn', style: { background: 'var(--red)', color: 'white' }, onClick: function() { openInterviewModal(blocking); } }, 'Answer');
+    actionsDiv.appendChild(answerBtn);
+    banner.appendChild(actionsDiv);
+  }
+
+  var mainEl = document.querySelector('.main');
+  var channelHeader = mainEl.querySelector('.channel-header');
+  channelHeader.parentNode.insertBefore(banner, channelHeader.nextSibling);
+}
+
+function normalizeTaskStatus(status) {
+  if (!status) return 'open';
+  var s = status.toLowerCase().replace(/[\s-]/g, '_');
+  if (s === 'moving' || s === 'in_progress' || s === 'active') return 'in_progress';
+  if (s === 'done' || s === 'completed' || s === 'complete') return 'done';
+  if (s === 'review' || s === 'in_review') return 'review';
+  if (s === 'blocked') return 'blocked';
+  return 'open';
+}
+
+function renderTaskBoard(container, tasks) {
+  var columns = { open: [], in_progress: [], review: [], done: [] };
+  tasks.forEach(function(t) {
+    var status = normalizeTaskStatus(t.status);
+    if (status === 'blocked') { columns.open.push(t); return; }
+    if (columns[status]) columns[status].push(t);
+    else columns.open.push(t);
+  });
+
+  var board = el('div', { className: 'task-board' });
+
+  var columnDefs = [
+    { key: 'open', label: 'Open' },
+    { key: 'in_progress', label: 'In Progress' },
+    { key: 'review', label: 'Review' },
+    { key: 'done', label: 'Done' }
+  ];
+
+  columnDefs.forEach(function(col) {
+    var colDiv = el('div', { className: 'task-column' });
+    var header = el('div', { className: 'task-column-header' });
+    var headerLabel = el('span', null, col.label);
+    var headerCount = el('span', { className: 'task-column-count' }, String(columns[col.key].length));
+    header.appendChild(headerLabel);
+    header.appendChild(headerCount);
+    colDiv.appendChild(header);
+
+    columns[col.key].forEach(function(task) {
+      var card = el('div', { className: 'task-card', onClick: function() { openTaskDetail(task); } });
+
+      var title = el('div', { className: 'task-card-title' }, task.title || task.name || 'Untitled');
+      card.appendChild(title);
+
+      var meta = el('div', { className: 'task-card-meta' });
+      var status = normalizeTaskStatus(task.status);
+      if (status === 'blocked') {
+        var pill = el('span', { className: 'task-status-pill task-status-blocked' }, 'BLOCKED');
+        meta.appendChild(pill);
+      }
+      if (task.owner || task.assignee) {
+        var owner = el('span', { className: 'task-card-owner' });
+        var ownerAgent = AGENTS.find(function(a) { return a.slug === (task.owner || task.assignee); });
+        if (ownerAgent) {
+          owner.appendChild(el('span', null, ownerAgent.emoji));
+        }
+        owner.appendChild(el('span', null, task.owner || task.assignee));
+        meta.appendChild(owner);
+      }
+      card.appendChild(meta);
+      colDiv.appendChild(card);
+    });
+
+    board.appendChild(colDiv);
+  });
+
+  container.appendChild(board);
+}
+
+function openTaskDetail(task) {
+  var overlay = el('div', { className: 'task-detail-overlay' });
+  var card = el('div', { className: 'task-detail-card' });
+
+  var titleRow = el('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' } });
+  var title = el('h3', { className: 'task-detail-title' }, task.title || task.name || 'Untitled');
+  var closeBtn = el('button', { className: 'app-view-close', onClick: function() { overlay.remove(); } });
+  closeBtn.appendChild(svgIcon(['M18 6 6 18', 'M6 6 12 12']));
+  titleRow.appendChild(title);
+  titleRow.appendChild(closeBtn);
+  card.appendChild(titleRow);
+
+  var status = normalizeTaskStatus(task.status);
+  var statusClass = 'task-status-' + status;
+
+  var rows = [
+    ['Status', status.replace(/_/g, ' '), statusClass],
+    ['Owner', task.owner || task.assignee || 'Unassigned', null],
+    ['Channel', task.channel || '-', null]
+  ];
+  rows.forEach(function(r) {
+    var row = el('div', { className: 'task-detail-row' });
+    row.appendChild(el('span', { className: 'task-detail-label' }, r[0]));
+    if (r[2]) {
+      var pill = el('span', { className: 'task-status-pill ' + r[2] }, r[1].toUpperCase());
+      row.appendChild(pill);
+    } else {
+      row.appendChild(el('span', { className: 'task-detail-value' }, r[1]));
+    }
+    card.appendChild(row);
+  });
+
+  if (task.description) {
+    var desc = el('div', { className: 'task-detail-desc' }, task.description);
+    card.appendChild(desc);
+  }
+
+  overlay.appendChild(card);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+function renderRequestList(container, data) {
+  var list = el('div', { className: 'request-list' });
+
+  // Combine all requests
+  var allRequests = [];
+  if (data.pending) allRequests.push(data.pending);
+  if (data.requests) allRequests = allRequests.concat(data.requests);
+  if (data.all) allRequests = allRequests.concat(data.all);
+
+  // Dedupe by id
+  var seen = {};
+  allRequests = allRequests.filter(function(r) {
+    if (!r || !r.id || seen[r.id]) return false;
+    seen[r.id] = true;
+    return true;
+  });
+
+  if (allRequests.length === 0) {
+    list.appendChild(el('div', { className: 'request-empty' }, 'No requests right now. Your agents are working independently.'));
+    container.appendChild(list);
+    return;
+  }
+
+  // Pending first, then answered
+  var pending = allRequests.filter(function(r) { return r.status === 'open' || r.status === 'pending' || !r.status; });
+  var answered = allRequests.filter(function(r) { return r.status && r.status !== 'open' && r.status !== 'pending'; });
+
+  if (pending.length > 0) {
+    list.appendChild(el('div', { className: 'request-list-header' }, 'Pending (' + pending.length + ')'));
+    pending.forEach(function(req) { list.appendChild(buildRequestItem(req, true)); });
+  }
+
+  if (answered.length > 0) {
+    list.appendChild(el('div', { className: 'request-list-header', style: { marginTop: '12px' } }, 'Answered (' + answered.length + ')'));
+    answered.forEach(function(req) { list.appendChild(buildRequestItem(req, false)); });
+  }
+
+  container.appendChild(list);
+}
+
+function buildRequestItem(req, isPending) {
+  var item = el('div', { className: 'request-item' });
+
+  var header = el('div', { className: 'request-item-header' });
+  var fromAgent = AGENTS.find(function(a) { return a.slug === req.from; });
+  var fromName = el('span', { className: 'request-item-from' }, fromAgent ? fromAgent.name : (req.from || 'Unknown'));
+  header.appendChild(fromName);
+
+  // Kind pill
+  var kind = req.kind || req.type || 'input';
+  var kindLower = kind.toLowerCase();
+  var kindClass = 'request-kind-input';
+  if (kindLower === 'approval') kindClass = 'request-kind-approval';
+  else if (kindLower === 'confirm') kindClass = 'request-kind-confirm';
+  else if (kindLower === 'secret') kindClass = 'request-kind-secret';
+  var pill = el('span', { className: 'request-kind-pill ' + kindClass }, kind.toUpperCase());
+  header.appendChild(pill);
+
+  if (req.blocking || req.required) {
+    var urgentPill = el('span', { className: 'request-kind-pill request-kind-secret', style: { marginLeft: '4px' } }, 'BLOCKING');
+    header.appendChild(urgentPill);
+  }
+
+  item.appendChild(header);
+
+  var question = el('div', { className: 'request-item-question' }, req.question || req.title || '');
+  item.appendChild(question);
+
+  // Timing
+  if (req.due || req.created_at || req.follow_up) {
+    var timing = el('div', { className: 'request-item-timing' });
+    var parts = [];
+    if (req.created_at) {
+      var d = new Date(req.created_at);
+      parts.push('Asked ' + d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }));
+    }
+    if (req.due) parts.push('Due ' + req.due);
+    if (req.follow_up) parts.push('Follow-up: ' + req.follow_up);
+    timing.textContent = parts.join(' \u2022 ');
+    item.appendChild(timing);
+  }
+
+  // Actions for pending requests
+  if (isPending) {
+    var actions = el('div', { className: 'request-item-actions' });
+    var answerBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: function() { openInterviewModal(req); } }, 'Answer');
+    actions.appendChild(answerBtn);
+
+    var options = req.options || [];
+    options.forEach(function(opt) {
+      var btn = el('button', { className: 'btn btn-ghost btn-sm', onClick: function() {
+        if (opt.requires_text) {
+          openInterviewModal(req);
+        } else {
+          WuphfAPI.answerRequest(req.id, opt.id)
+            .then(function() { if (currentApp === 'requests') renderAppContent('requests'); fetchRequests(); });
+        }
+      } }, opt.label || opt.text || opt.id);
+      actions.appendChild(btn);
+    });
+    item.appendChild(actions);
+  } else {
+    var statusLine = el('div', { style: { fontSize: '12px', color: 'var(--green)', fontWeight: '500' } }, 'Answered');
+    item.appendChild(statusLine);
+  }
+
+  return item;
+}
+
+// ─── Interview Answer Flow (3-phase modal) ───
+function openInterviewModal(request) {
+  var overlay = el('div', { className: 'interview-overlay' });
+  var card = el('div', { className: 'interview-card' });
+
+  var fromAgent = AGENTS.find(function(a) { return a.slug === request.from; });
+  var title = el('h3', { className: 'interview-title' }, (fromAgent ? fromAgent.name : request.from) + ' needs your input');
+  var question = el('p', { className: 'interview-question' }, request.question || request.title || '');
+  card.appendChild(title);
+  card.appendChild(question);
+
+  var options = request.options || [];
+  var selectedOption = null;
+  var customText = '';
+
+  // Phase 1: Choose option
+  renderPhase1();
+
+  function renderPhase1() {
+    clearPhaseContent();
+    var phase = el('div', { className: 'interview-phase' }, 'Step 1 of 3 \u2014 Choose an option');
+    card.appendChild(phase);
+
+    if (options.length === 0) {
+      // No options, go straight to text input
+      renderPhase2(null);
+      return;
+    }
+
+    var optionsDiv = el('div', { className: 'interview-options' });
+    options.forEach(function(opt) {
+      var optBtn = el('button', { className: 'interview-option' + (selectedOption && selectedOption.id === opt.id ? ' selected' : '') });
+      var radio = el('div', { className: 'interview-option-radio' });
+      radio.appendChild(el('div', { className: 'interview-option-radio-inner' }));
+      var label = el('span', { className: 'interview-option-label' }, opt.label || opt.text || opt.id);
+      optBtn.appendChild(radio);
+      optBtn.appendChild(label);
+      optBtn.addEventListener('click', function() {
+        selectedOption = opt;
+        optionsDiv.querySelectorAll('.interview-option').forEach(function(o) { o.classList.remove('selected'); });
+        optBtn.classList.add('selected');
+        nextBtn.disabled = false;
+      });
+      optionsDiv.appendChild(optBtn);
+    });
+    card.appendChild(optionsDiv);
+
+    var actions = el('div', { className: 'interview-actions' });
+    var cancelBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: function() { overlay.remove(); } }, 'Cancel');
+    var nextBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: function() {
+      if (selectedOption && selectedOption.requires_text) {
+        renderPhase2(selectedOption);
+      } else {
+        renderPhase3();
+      }
+    } }, 'Next');
+    nextBtn.disabled = !selectedOption;
+    actions.appendChild(cancelBtn);
+    actions.appendChild(nextBtn);
+    card.appendChild(actions);
+  }
+
+  function renderPhase2(opt) {
+    clearPhaseContent();
+    var phase = el('div', { className: 'interview-phase' }, 'Step 2 of 3 \u2014 Add details');
+    card.appendChild(phase);
+
+    if (opt) {
+      var chosen = el('div', { style: { fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '12px' } }, 'Selected: ' + (opt.label || opt.text || opt.id));
+      card.appendChild(chosen);
+    }
+
+    var textarea = document.createElement('textarea');
+    textarea.className = 'interview-text';
+    textarea.placeholder = 'Add context, notes, or a custom response...';
+    textarea.value = customText;
+    textarea.addEventListener('input', function() { customText = textarea.value; });
+    card.appendChild(textarea);
+
+    var actions = el('div', { className: 'interview-actions' });
+    var backBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: function() {
+      if (options.length > 0) renderPhase1();
+      else { overlay.remove(); }
+    } }, 'Back');
+    var nextBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: renderPhase3 }, 'Review');
+    actions.appendChild(backBtn);
+    actions.appendChild(nextBtn);
+    card.appendChild(actions);
+
+    textarea.focus();
+  }
+
+  function renderPhase3() {
+    clearPhaseContent();
+    var phase = el('div', { className: 'interview-phase' }, 'Step 3 of 3 \u2014 Confirm');
+    card.appendChild(phase);
+
+    if (selectedOption) {
+      var reviewChoice = el('div', { className: 'interview-review' });
+      reviewChoice.appendChild(el('div', { className: 'interview-review-label' }, 'Your choice'));
+      reviewChoice.appendChild(el('div', { className: 'interview-review-value' }, selectedOption.label || selectedOption.text || selectedOption.id));
+      card.appendChild(reviewChoice);
+    }
+
+    if (customText.trim()) {
+      var reviewText = el('div', { className: 'interview-review' });
+      reviewText.appendChild(el('div', { className: 'interview-review-label' }, 'Your note'));
+      reviewText.appendChild(el('div', { className: 'interview-review-value' }, customText));
+      card.appendChild(reviewText);
+    }
+
+    var actions = el('div', { className: 'interview-actions' });
+    var backBtn = el('button', { className: 'btn btn-secondary btn-sm', onClick: function() {
+      if (selectedOption && selectedOption.requires_text) renderPhase2(selectedOption);
+      else if (options.length > 0) renderPhase1();
+      else renderPhase2(null);
+    } }, 'Back');
+    var submitBtn = el('button', { className: 'btn btn-primary btn-sm', onClick: function() {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting...';
+      var body = { id: request.id };
+      if (selectedOption) body.choice_id = selectedOption.id;
+      if (customText.trim()) body.custom_text = customText.trim();
+      WuphfAPI.post('/requests/answer', body)
+        .then(function() {
+          overlay.remove();
+          fetchRequests();
+          if (currentApp === 'requests') renderAppContent('requests');
+        })
+        .catch(function() {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit';
+        });
+    } }, 'Submit');
+    actions.appendChild(backBtn);
+    actions.appendChild(submitBtn);
+    card.appendChild(actions);
+  }
+
+  function clearPhaseContent() {
+    // Keep title and question, remove everything after
+    while (card.children.length > 2) {
+      card.removeChild(card.lastChild);
+    }
+  }
+
+  overlay.appendChild(card);
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+// (sidebar apps managed by switchApp/renderSidebarApps above)
+
+// ═══════════════════════════════════════════════════════════════
+//   AGENT CHARACTER FACES (#14) & MOOD INFERENCE (#10)
+// ═══════════════════════════════════════════════════════════════
+var AGENT_CHARACTERS = {
+  ceo: '\uD83D\uDC54',       // necktie
+  pm: '\uD83D\uDCCB',        // clipboard
+  frontend: '\uD83C\uDFA8',  // palette
+  fe: '\uD83C\uDFA8',
+  backend: '\u2699\uFE0F',   // gear
+  be: '\u2699\uFE0F',
+  'ai-eng': '\uD83E\uDDE0', // brain
+  ai: '\uD83E\uDDE0',
+  designer: '\u270F\uFE0F',  // pencil
+  cmo: '\uD83D\uDCE3',       // megaphone
+  cro: '\uD83D\uDCB0'        // money bag
+};
+
+function inferMood(text) {
+  if (!text) return null;
+  var t = text.toLowerCase();
+  // Excitement signals
+  if (/!!|\bgreat\b|\bshipped\b|\bawesome\b|\bwoo\b|\bnice\b|\bperfect\b|\blove\b|\bcelebrat/.test(t)) return { emoji: '\u2728', label: 'excited' };
+  // Frustration signals
+  if (/\bblocked\b|\bfailed\b|\bbroken\b|\bbug\b|\berror\b|\bcrash|\bfrustrat|\bugh\b/.test(t)) return { emoji: '\uD83D\uDE15', label: 'frustrated' };
+  // Thinking signals
+  if (/\bhmm\b|\bthinking\b|\bconsider|\bwonder|\bmaybe\b|\bperhaps\b|\bnot sure\b/.test(t)) return { emoji: '\uD83E\uDD14', label: 'thinking' };
+  // Shipping signals
+  if (/\bdeploy|\bpush|\bmerge|\brelease|\bship\b|\blaunched\b/.test(t)) return { emoji: '\uD83D\uDE80', label: 'shipping' };
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   A2UI BLOCK RENDERING (#13)
+// ═══════════════════════════════════════════════════════════════
+function parseA2UIBlocks(text) {
+  // Detect ```a2ui ... ``` or [A2UI] ... [/A2UI] markers
+  var blocks = [];
+  var remaining = text;
+
+  // Pattern 1: ```a2ui\n...\n```
+  remaining = remaining.replace(/```a2ui\n([\s\S]*?)```/g, function(match, inner) {
+    blocks.push(inner.trim());
+    return '<!--A2UI_PLACEHOLDER_' + (blocks.length - 1) + '-->';
+  });
+
+  // Pattern 2: [A2UI]...[/A2UI]
+  remaining = remaining.replace(/\[A2UI\]([\s\S]*?)\[\/A2UI\]/gi, function(match, inner) {
+    blocks.push(inner.trim());
+    return '<!--A2UI_PLACEHOLDER_' + (blocks.length - 1) + '-->';
+  });
+
+  return { text: remaining, blocks: blocks };
+}
+
+function renderA2UIBlock(blockText) {
+  var container = document.createElement('div');
+  container.className = 'a2ui-block';
+
+  var lines = blockText.split('\n').filter(function(l) { return l.trim(); });
+  if (lines.length === 0) return null;
+
+  // Detect block type
+  var firstLine = lines[0].trim().toLowerCase();
+
+  // Table: lines with | separators
+  if (firstLine.indexOf('|') !== -1 && lines.length >= 2) {
+    var table = document.createElement('table');
+    table.className = 'a2ui-table';
+    lines.forEach(function(line, i) {
+      if (line.trim().match(/^[\|\-\s:]+$/)) return; // skip separator rows
+      var cells = line.split('|').map(function(c) { return c.trim(); }).filter(function(c) { return c; });
+      var tr = document.createElement('tr');
+      cells.forEach(function(cell) {
+        var td = document.createElement(i === 0 ? 'th' : 'td');
+        td.textContent = cell;
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    container.appendChild(table);
+    return container;
+  }
+
+  // Progress bar: "progress: N%" or "progress N/M"
+  var progressMatch = blockText.match(/progress[:\s]+(\d+)%/i);
+  if (!progressMatch) progressMatch = blockText.match(/progress[:\s]+(\d+)\s*\/\s*(\d+)/i);
+  if (progressMatch) {
+    var pct = progressMatch[2]
+      ? Math.round((parseInt(progressMatch[1]) / parseInt(progressMatch[2])) * 100)
+      : parseInt(progressMatch[1]);
+    var label = blockText.split('\n')[0].replace(/progress[:\s].*$/i, '').trim();
+
+    var progressDiv = document.createElement('div');
+    progressDiv.className = 'a2ui-progress';
+    if (label) {
+      var labelEl = document.createElement('span');
+      labelEl.style.cssText = 'font-size:12px;color:var(--text-secondary);min-width:60px;';
+      labelEl.textContent = label;
+      progressDiv.appendChild(labelEl);
+    }
+    var bar = document.createElement('div');
+    bar.className = 'a2ui-progress-bar';
+    var fill = document.createElement('div');
+    fill.className = 'a2ui-progress-fill';
+    fill.style.width = Math.min(pct, 100) + '%';
+    bar.appendChild(fill);
+    progressDiv.appendChild(bar);
+    var pctLabel = document.createElement('span');
+    pctLabel.className = 'a2ui-progress-label';
+    pctLabel.textContent = pct + '%';
+    progressDiv.appendChild(pctLabel);
+    container.appendChild(progressDiv);
+    return container;
+  }
+
+  // Status indicator: "status: ok/warn/error/info"
+  var statusMatch = blockText.match(/status[:\s]+(ok|success|warn|warning|error|fail|failed|info)/i);
+  if (statusMatch) {
+    var statusVal = statusMatch[1].toLowerCase();
+    var statusClass = 'a2ui-status-info';
+    if (statusVal === 'ok' || statusVal === 'success') statusClass = 'a2ui-status-ok';
+    else if (statusVal === 'warn' || statusVal === 'warning') statusClass = 'a2ui-status-warn';
+    else if (statusVal === 'error' || statusVal === 'fail' || statusVal === 'failed') statusClass = 'a2ui-status-error';
+    var statusLabel = blockText.replace(/status[:\s]+\S+/i, '').trim() || statusVal;
+    var statusDiv = document.createElement('div');
+    statusDiv.className = 'a2ui-status ' + statusClass;
+    var dot = document.createElement('span');
+    dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0;';
+    statusDiv.appendChild(dot);
+    statusDiv.appendChild(document.createTextNode(statusLabel.charAt(0).toUpperCase() + statusLabel.slice(1)));
+    container.appendChild(statusDiv);
+    return container;
+  }
+
+  // Key-value list: lines with "key: value" pattern
+  var kvLines = lines.filter(function(l) { return l.indexOf(':') !== -1; });
+  if (kvLines.length >= 2 && kvLines.length === lines.length) {
+    var kvDiv = document.createElement('div');
+    kvDiv.className = 'a2ui-kv';
+    kvLines.forEach(function(line) {
+      var colonIdx = line.indexOf(':');
+      var key = line.substring(0, colonIdx).trim();
+      var val = line.substring(colonIdx + 1).trim();
+      var keyEl = document.createElement('span');
+      keyEl.className = 'a2ui-kv-key';
+      keyEl.textContent = key;
+      var valEl = document.createElement('span');
+      valEl.className = 'a2ui-kv-val';
+      valEl.textContent = val;
+      kvDiv.appendChild(keyEl);
+      kvDiv.appendChild(valEl);
+    });
+    container.appendChild(kvDiv);
+    return container;
+  }
+
+  // Fallback: render as preformatted text
+  var pre = document.createElement('pre');
+  pre.style.cssText = 'font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;margin:0;';
+  pre.textContent = blockText;
+  container.appendChild(pre);
+  return container;
+}
+
 initApp();
+
+// ═══════════════════════════════════════════════════════════════
+//   WAVE 3 POLISH — Quick Jump, Thread Toggle, Pause, PgUp/PgDn
+// ═══════════════════════════════════════════════════════════════
+var threadsDefaultExpand = localStorage.getItem('wuphf-threads-expand') !== 'false';
+(function initThreadToggle() {
+  var btn = document.getElementById('thread-toggle-btn');
+  if (!btn) return;
+  function updateLabel() { btn.textContent = threadsDefaultExpand ? 'Collapse threads' : 'Expand threads'; }
+  updateLabel();
+  btn.addEventListener('click', function() {
+    threadsDefaultExpand = !threadsDefaultExpand;
+    localStorage.setItem('wuphf-threads-expand', threadsDefaultExpand ? 'true' : 'false');
+    updateLabel();
+  });
+})();
+var quickJumpOverlay = document.getElementById('quick-jump-overlay');
+var quickJumpInput = document.getElementById('quick-jump-input');
+var quickJumpList = document.getElementById('quick-jump-list');
+var quickJumpSelectedIdx = -1;
+function openQuickJump() {
+  if (!document.getElementById('office').classList.contains('active')) return;
+  quickJumpOverlay.classList.add('open'); quickJumpInput.value = ''; quickJumpSelectedIdx = -1;
+  renderQuickJumpList(''); setTimeout(function() { quickJumpInput.focus(); }, 50);
+}
+function closeQuickJump() { quickJumpOverlay.classList.remove('open'); quickJumpSelectedIdx = -1; }
+function renderQuickJumpList(query) {
+  var q = (query || '').toLowerCase(); quickJumpList.textContent = '';
+  CHANNELS.filter(function(ch) { return !q || ch.name.toLowerCase().indexOf(q) !== -1; }).forEach(function(ch, idx) {
+    var item = el('div', { className: 'quick-jump-item' + (idx === quickJumpSelectedIdx ? ' selected' : ''), onClick: function() { closeQuickJump(); switchChannel(ch.name); renderSidebarChannels(); } });
+    item.appendChild(el('span', { className: 'quick-jump-item-hash' }, '#'));
+    item.appendChild(el('span', { className: 'quick-jump-item-name' }, ch.name));
+    var ci = CHANNELS.indexOf(ch); if (ci >= 0 && ci < 9) item.appendChild(el('span', { className: 'quick-jump-item-shortcut' }, String(ci + 1)));
+    quickJumpList.appendChild(item);
+  });
+}
+quickJumpInput.addEventListener('input', function() { quickJumpSelectedIdx = -1; renderQuickJumpList(quickJumpInput.value.trim()); });
+quickJumpInput.addEventListener('keydown', function(e) {
+  var items = quickJumpList.querySelectorAll('.quick-jump-item');
+  if (e.key === 'ArrowDown') { e.preventDefault(); quickJumpSelectedIdx = Math.min(quickJumpSelectedIdx + 1, items.length - 1); renderQuickJumpList(quickJumpInput.value.trim()); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); quickJumpSelectedIdx = Math.max(quickJumpSelectedIdx - 1, 0); renderQuickJumpList(quickJumpInput.value.trim()); }
+  else if (e.key === 'Enter') { e.preventDefault(); var sel = quickJumpSelectedIdx >= 0 ? quickJumpSelectedIdx : 0; var filtered = CHANNELS.filter(function(ch) { var q = (quickJumpInput.value || '').trim().toLowerCase(); return !q || ch.name.toLowerCase().indexOf(q) !== -1; }); if (filtered[sel]) { closeQuickJump(); switchChannel(filtered[sel].name); renderSidebarChannels(); } }
+  else if (e.key === 'Escape') { e.preventDefault(); closeQuickJump(); }
+});
+quickJumpOverlay.addEventListener('click', function(e) { if (e.target === quickJumpOverlay) closeQuickJump(); });
+var pauseConfirmVisible = false;
+function showPauseConfirm() {
+  if (pauseConfirmVisible) return; pauseConfirmVisible = true;
+  var composer = document.querySelector('.composer');
+  var bar = el('div', { className: 'pause-confirm', id: 'pause-confirm-bar' });
+  bar.appendChild(el('span', { className: 'pause-confirm-text' }, 'Pause all agents?'));
+  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-yes', onClick: function() {
+    hidePauseConfirm();
+    if (brokerConnected) WuphfAPI.post('/messages', { from: 'system', channel: currentChannel, content: '[PAUSE] All agents paused by human' }).catch(function() {});
+    var container = document.getElementById('messages'); var sysDiv = el('div', { className: 'message-system animate-fade' }); var inner = el('div', { className: 'message-system-inner' });
+    inner.appendChild(el('span', { className: 'message-system-line' })); inner.appendChild(el('span', { className: 'message-system-text' }, 'All agents paused')); inner.appendChild(el('span', { className: 'message-system-line' }));
+    sysDiv.appendChild(inner); container.appendChild(sysDiv); container.scrollTop = container.scrollHeight;
+  } }, 'Yes, pause'));
+  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-no', onClick: hidePauseConfirm }, 'Cancel'));
+  composer.parentNode.insertBefore(bar, composer);
+}
+function hidePauseConfirm() { pauseConfirmVisible = false; var bar = document.getElementById('pause-confirm-bar'); if (bar) bar.remove(); }
+document.addEventListener('keydown', function(e) {
+  var officeActive = document.getElementById('office').classList.contains('active'); if (!officeActive) return;
+  var inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
+  if ((e.ctrlKey || e.metaKey) && e.key === 'g') { e.preventDefault(); quickJumpOverlay.classList.contains('open') ? closeQuickJump() : openQuickJump(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9' && !e.shiftKey && !e.altKey) { var ci = parseInt(e.key) - 1; if (ci < CHANNELS.length) { e.preventDefault(); switchChannel(CHANNELS[ci].name); renderSidebarChannels(); } return; }
+  if (e.key === 'Escape' && inInput && e.target.id === 'composer-input') {
+    var po = document.getElementById('thread-panel').classList.contains('open') || document.getElementById('agent-panel').classList.contains('open') || cmdPaletteOverlay.classList.contains('open') || quickJumpOverlay.classList.contains('open');
+    if (!po && !e.target.value.trim()) { e.preventDefault(); showPauseConfirm(); return; }
+  }
+  if (!inInput && (e.key === 'PageUp' || e.key === 'PageDown')) { var al = document.getElementById('sidebar-agents'); if (al && al.scrollHeight > al.clientHeight) { e.preventDefault(); al.scrollBy({ top: e.key === 'PageUp' ? -(al.clientHeight * 0.8) : (al.clientHeight * 0.8), behavior: 'smooth' }); } }
+});
+// ═══════════════════════════════════════════════════════════════
+//   PIXEL ART AVATARS (#25)
+// ═══════════════════════════════════════════════════════════════
+var SPRITE_DATA = {
+  ceo: [
+    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,1,1,1,2,2,1,1,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,0,1,2,1,1,2,1,0,0,0,0],
+    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+    [0,0,2,2,3,3,3,3,3,3,2,5,1,0],
+    [0,0,1,2,1,3,3,3,3,1,2,5,1,0],
+    [0,0,0,1,0,1,1,1,1,0,1,5,0,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+  ],
+  pm: [
+    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
+    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+    [0,0,2,3,3,3,3,3,3,3,5,5,1,0],
+    [0,0,1,2,1,3,3,3,3,1,5,5,1,0],
+    [0,0,0,1,0,0,1,1,0,0,5,5,0,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+  ],
+  fe: [
+    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+    [0,0,1,4,2,2,2,2,2,2,4,1,0,0],
+    [0,0,1,4,2,1,2,2,1,2,4,1,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
+    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+    [0,2,2,5,5,5,5,5,5,5,5,2,2,0],
+    [0,0,1,5,6,6,6,6,6,6,5,1,0,0],
+    [0,0,0,5,5,5,5,5,5,5,5,0,0,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+  ],
+  be: [
+    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
+    [0,0,0,1,2,2,1,1,2,2,1,0,0,0],
+    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
+    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+    [0,0,1,2,3,3,3,3,3,3,2,1,0,0],
+    [0,0,1,3,2,3,3,3,3,2,3,1,0,0],
+    [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+  ],
+  ai: [
+    [0,0,0,0,0,0,5,5,0,0,0,0,0,0],
+    [0,0,0,0,0,0,1,1,0,0,0,0,0,0],
+    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,1,5,1,2,2,1,5,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
+    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+    [0,0,2,2,3,3,3,3,3,3,2,2,0,0],
+    [0,0,1,2,1,3,3,3,3,1,2,1,0,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+  ],
+  designer: [
+    [0,0,0,5,5,5,5,1,0,0,0,0,0,0],
+    [0,0,0,1,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,0,1,2,3,3,2,1,0,0,0,0],
+    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+    [0,1,2,3,3,3,3,3,3,3,3,2,5,0],
+    [0,0,2,2,3,3,3,3,3,3,2,2,5,0],
+    [0,0,1,2,1,3,3,3,3,1,2,1,5,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+  ],
+  cmo: [
+    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,0,1,2,3,3,2,1,0,0,0,0],
+    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+    [5,1,2,3,3,3,3,3,3,3,3,2,1,0],
+    [5,5,2,2,3,3,3,3,3,3,2,2,0,0],
+    [5,0,1,2,1,3,3,3,3,1,2,1,0,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+  ],
+  cro: [
+    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
+    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
+    [0,0,1,3,6,3,3,3,3,6,3,1,0,0],
+    [0,1,2,3,6,3,3,3,3,6,3,2,1,0],
+    [0,0,2,2,3,3,3,3,3,3,2,2,0,0],
+    [0,0,1,2,1,3,3,3,3,1,2,1,0,0],
+    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+    [0,0,0,1,0,0,1,1,0,5,5,5,0,0],
+    [0,0,0,0,1,0,0,0,0,5,1,5,0,0],
+    [0,0,0,1,1,0,0,0,0,5,5,5,0,0]
+  ]
+};
+
+var SPRITE_GENERIC = [
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+  [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+  [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+  [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
+  [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+  [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
+  [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+  [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+  [0,0,2,2,3,3,3,3,3,3,2,2,0,0],
+  [0,0,1,2,1,3,3,3,3,1,2,1,0,0],
+  [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+  [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+  [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+];
+
+// Map agent slug aliases to sprite keys
+var SPRITE_SLUG_MAP = {
+  'frontend': 'fe', 'backend': 'be', 'ai-eng': 'ai', 'ai_eng': 'ai'
+};
+
+function getAgentColor(slug) {
+  var colorMap = {
+    ceo: '#E8A838', pm: '#58A6FF', fe: '#A371F7', frontend: '#A371F7',
+    be: '#3FB950', backend: '#3FB950', ai: '#D2A8FF', 'ai-eng': '#D2A8FF',
+    designer: '#F778BA', cmo: '#FFA657', cro: '#79C0FF'
+  };
+  return colorMap[slug] || '#58A6FF';
+}
+
+function renderPixelAvatar(slug, size) {
+  var key = SPRITE_SLUG_MAP[slug] || slug;
+  var sprite = SPRITE_DATA[key] || SPRITE_GENERIC;
+  var accentHex = getAgentColor(slug);
+
+  // Parse accent color
+  var ar = parseInt(accentHex.slice(1,3), 16);
+  var ag = parseInt(accentHex.slice(3,5), 16);
+  var ab = parseInt(accentHex.slice(5,7), 16);
+
+  var palette = {
+    1: [36, 32, 30],       // outline
+    2: [235, 215, 190],    // skin
+    3: [ar, ag, ab],       // accent
+    4: [Math.max(0,ar-60), Math.max(0,ag-60), Math.max(0,ab-60)], // hair
+    5: [180, 170, 155],    // prop
+    6: [255, 255, 255]     // highlight
+  };
+
+  var rows = sprite.length;
+  var cols = sprite[0].length;
+  var canvas = document.createElement('canvas');
+  canvas.width = cols;
+  canvas.height = rows;
+  canvas.className = 'pixel-avatar';
+  canvas.style.width = size + 'px';
+  canvas.style.height = (size * rows / cols) + 'px';
+
+  var ctx = canvas.getContext('2d');
+  var imgData = ctx.createImageData(cols, rows);
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var px = sprite[r][c];
+      var idx = (r * cols + c) * 4;
+      if (px === 0) {
+  bar.appendChild(el('button', { className: 'pause-confirm-btn pause-confirm-no', onClick: hidePauseConfirm }, 'Cancel'));
+  composer.parentNode.insertBefore(bar, composer);
+}
+function hidePauseConfirm() { pauseConfirmVisible = false; var bar = document.getElementById('pause-confirm-bar'); if (bar) bar.remove(); }
+document.addEventListener('keydown', function(e) {
+  var officeActive = document.getElementById('office').classList.contains('active'); if (!officeActive) return;
+  var inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT';
+  if ((e.ctrlKey || e.metaKey) && e.key === 'g') { e.preventDefault(); quickJumpOverlay.classList.contains('open') ? closeQuickJump() : openQuickJump(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9' && !e.shiftKey && !e.altKey) { var ci = parseInt(e.key) - 1; if (ci < CHANNELS.length) { e.preventDefault(); switchChannel(CHANNELS[ci].name); renderSidebarChannels(); } return; }
+  if (e.key === 'Escape' && inInput && e.target.id === 'composer-input') {
+    var po = document.getElementById('thread-panel').classList.contains('open') || document.getElementById('agent-panel').classList.contains('open') || cmdPaletteOverlay.classList.contains('open') || quickJumpOverlay.classList.contains('open');
+    if (!po && !e.target.value.trim()) { e.preventDefault(); showPauseConfirm(); return; }
+  }
+  if (!inInput && (e.key === 'PageUp' || e.key === 'PageDown')) { var al = document.getElementById('sidebar-agents'); if (al && al.scrollHeight > al.clientHeight) { e.preventDefault(); al.scrollBy({ top: e.key === 'PageUp' ? -(al.clientHeight * 0.8) : (al.clientHeight * 0.8), behavior: 'smooth' }); } }
+});
 </script>
 
 </body>

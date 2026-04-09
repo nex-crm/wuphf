@@ -676,7 +676,6 @@ func (m StreamModel) handleSubmit() (StreamModel, tea.Cmd) {
 		}
 	}
 	_ = m.runtime.AgentService.FollowUp(primarySlug, input)
-	m.runtime.AgentService.EnsureRunning(primarySlug)
 
 	// Collaborators are populated for informational purposes only.
 	// The team-lead will narrate and the delegator will extract delegations
@@ -1252,7 +1251,6 @@ func (m *StreamModel) startDelegations(delegations []orchestration.Delegation) {
 		steerMsg := orchestration.FormatSteerMessage(d)
 		_ = m.runtime.AgentService.Steer(d.AgentSlug, steerMsg)
 		_ = m.runtime.AgentService.FollowUp(d.AgentSlug, d.Task)
-		m.runtime.AgentService.EnsureRunning(d.AgentSlug)
 		if !m.wiredAgents[d.AgentSlug] {
 			m.wireAgent(d.AgentSlug)
 		}

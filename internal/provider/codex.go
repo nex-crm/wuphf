@@ -1,13 +1,12 @@
 package provider
 
 import (
-	"bufio"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -43,12 +42,62 @@ func CreateCodexCLIStreamFn(agentSlug string) agent.StreamFn {
 				prompt = "Proceed with the task."
 			}
 
-			text, err := runCodexOnce(systemPrompt, prompt, cwd)
+			startedAt := time.Now()
+			var firstEventAt time.Time
+			var firstTextAt time.Time
+			var firstToolAt time.Time
+			text, err := runCodexOnce(systemPrompt, prompt, cwd, func(event CodexStreamEvent) {
+				if firstEventAt.IsZero() {
+					firstEventAt = time.Now()
+				}
+				switch event.Type {
+				case "text":
+					if strings.TrimSpace(event.Text) == "" {
+						return
+					}
+					if firstTextAt.IsZero() {
+						firstTextAt = time.Now()
+					}
+					ch <- agent.StreamChunk{Type: "text", Content: event.Text}
+				case "tool_use":
+					if firstToolAt.IsZero() {
+						firstToolAt = time.Now()
+					}
+					ch <- agent.StreamChunk{
+						Type:      "tool_use",
+						ToolName:  event.ToolName,
+						ToolUseID: event.ToolUseID,
+						ToolInput: event.ToolInput,
+					}
+				case "tool_result":
+					ch <- agent.StreamChunk{
+						Type:      "tool_result",
+						ToolUseID: event.ToolUseID,
+						Content:   event.Text,
+					}
+				}
+			})
 			if err != nil {
+				appendCodexLatencyLog(agentSlug, fmt.Sprintf("status=error total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d detail=%q",
+					time.Since(startedAt).Milliseconds(),
+					durationMillis(startedAt, firstEventAt),
+					durationMillis(startedAt, firstTextAt),
+					durationMillis(startedAt, firstToolAt),
+					err.Error(),
+				))
 				ch <- agent.StreamChunk{Type: "error", Content: describeCodexFailure(err)}
 				return
 			}
-			streamTextChunks(ch, text)
+			appendCodexLatencyLog(agentSlug, fmt.Sprintf("status=ok total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d final_chars=%d",
+				time.Since(startedAt).Milliseconds(),
+				durationMillis(startedAt, firstEventAt),
+				durationMillis(startedAt, firstTextAt),
+				durationMillis(startedAt, firstToolAt),
+				len(text),
+			))
+			if firstTextAt.IsZero() && strings.TrimSpace(text) != "" {
+				streamTextChunks(ch, text)
+			}
 		}()
 		return ch
 	}
@@ -64,10 +113,10 @@ func RunCodexOneShot(systemPrompt, prompt, cwd string) (string, error) {
 			return "", err
 		}
 	}
-	return runCodexOnce(systemPrompt, prompt, cwd)
+	return runCodexOnce(systemPrompt, prompt, cwd, nil)
 }
 
-func runCodexOnce(systemPrompt, prompt, cwd string) (string, error) {
+func runCodexOnce(systemPrompt, prompt, cwd string, onEvent func(CodexStreamEvent)) (string, error) {
 	args := buildCodexArgs(cwd, config.ResolveCodexModel(cwd))
 	cmd := codexCommand("codex", args...)
 	cmd.Dir = cwd
@@ -86,7 +135,7 @@ func runCodexOnce(systemPrompt, prompt, cwd string) (string, error) {
 		return "", err
 	}
 
-	result, parseErr := readCodexJSONStream(stdout)
+	result, parseErr := ReadCodexJSONStream(stdout, onEvent)
 	if err := cmd.Wait(); err != nil {
 		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
 		if detail != "" {
@@ -139,85 +188,29 @@ func describeCodexFailure(err error) string {
 	return fmt.Sprintf("codex exited with error: %v", err)
 }
 
-type codexJSONResult struct {
-	FinalMessage  string
-	LastPlainLine string
-	LastError     string
+func appendCodexLatencyLog(agentSlug string, line string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	logDir := filepath.Join(home, ".wuphf", "logs")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return
+	}
+	path := filepath.Join(logDir, "codex-latency.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(agentSlug), strings.TrimSpace(line))
 }
 
-type codexJSONEvent struct {
-	Type    string `json:"type"`
-	Message string `json:"message,omitempty"`
-	Error   *struct {
-		Message string `json:"message,omitempty"`
-	} `json:"error,omitempty"`
-	Item *struct {
-		Type    string `json:"type,omitempty"`
-		Text    string `json:"text,omitempty"`
-		Content []struct {
-			Type string `json:"type,omitempty"`
-			Text string `json:"text,omitempty"`
-		} `json:"content,omitempty"`
-	} `json:"item,omitempty"`
-}
-
-func readCodexJSONStream(r io.Reader) (codexJSONResult, error) {
-	var result codexJSONResult
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		var event codexJSONEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			result.LastPlainLine = line
-			continue
-		}
-		if text := strings.TrimSpace(extractCodexAgentMessage(event)); text != "" {
-			result.FinalMessage = text
-		}
-		if detail := strings.TrimSpace(extractCodexError(event)); detail != "" {
-			result.LastError = detail
-		}
+func durationMillis(start, mark time.Time) int64 {
+	if start.IsZero() || mark.IsZero() {
+		return -1
 	}
-	if err := scanner.Err(); err != nil {
-		return result, fmt.Errorf("read codex json stream: %w", err)
-	}
-	return result, nil
-}
-
-func extractCodexAgentMessage(event codexJSONEvent) string {
-	if event.Type != "item.completed" || event.Item == nil || event.Item.Type != "agent_message" {
-		return ""
-	}
-	if text := strings.TrimSpace(event.Item.Text); text != "" {
-		return text
-	}
-	parts := make([]string, 0, len(event.Item.Content))
-	for _, item := range event.Item.Content {
-		if item.Type == "output_text" || item.Type == "text" {
-			if text := strings.TrimSpace(item.Text); text != "" {
-				parts = append(parts, text)
-			}
-		}
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n"))
-}
-
-func extractCodexError(event codexJSONEvent) string {
-	switch event.Type {
-	case "error", "turn.failed":
-		if event.Error != nil && strings.TrimSpace(event.Error.Message) != "" {
-			return event.Error.Message
-		}
-		if strings.TrimSpace(event.Message) != "" {
-			return event.Message
-		}
-	}
-	return ""
+	return mark.Sub(start).Milliseconds()
 }
 
 func firstNonEmpty(values ...string) string {

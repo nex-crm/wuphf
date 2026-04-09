@@ -575,42 +575,6 @@ func TestOneOnOneCommandOpensModePicker(t *testing.T) {
 	}
 }
 
-func TestFocusCommandOpensPicker(t *testing.T) {
-	m := newChannelModel(false)
-
-	next, cmd := m.runCommand("/focus", "")
-	if cmd != nil {
-		t.Fatalf("expected no immediate command from /focus picker open, got %v", cmd)
-	}
-	got := next.(channelModel)
-	if !got.picker.IsActive() || got.pickerMode != channelPickerFocusMode {
-		t.Fatalf("expected focus mode picker, got active=%v mode=%q", got.picker.IsActive(), got.pickerMode)
-	}
-	view := stripANSI(got.picker.View())
-	if !strings.Contains(view, "Enable focus mode") {
-		t.Fatalf("expected focus picker options, got %q", view)
-	}
-}
-
-func TestFocusPickerSelectionStartsToggleRequest(t *testing.T) {
-	m := newChannelModel(false)
-	m.picker = tui.NewPicker("Focus Mode", m.buildFocusModePickerOptions())
-	m.picker.SetActive(true)
-	m.pickerMode = channelPickerFocusMode
-
-	next, cmd := m.Update(tui.PickerSelectMsg{Value: "focus:enable"})
-	if cmd == nil {
-		t.Fatal("expected focus toggle command")
-	}
-	got := next.(channelModel)
-	if !got.posting {
-		t.Fatal("expected posting state while focus mode is being toggled")
-	}
-	if got.notice != "Enabling focus mode..." {
-		t.Fatalf("unexpected notice: %q", got.notice)
-	}
-}
-
 func TestOneOnOnePickerEnableOpensAgentPicker(t *testing.T) {
 	m := newChannelModel(false)
 	m.picker = tui.NewPicker("Direct Session", m.buildOneOnOneModePickerOptions())
@@ -684,34 +648,6 @@ func TestOneOnOneAgentSelectionRequiresConfirmation(t *testing.T) {
 	}
 	if got.confirm.Action != confirmActionSwitchMode || got.confirm.Agent != "ceo" {
 		t.Fatalf("unexpected confirmation: %+v", got.confirm)
-	}
-}
-
-func TestTaskActionPickerUsesReviewResumeLanguageForWorktreeTasks(t *testing.T) {
-	m := newChannelModel(false)
-	options := m.buildTaskActionPickerOptions(channelTask{
-		ID:            "task-1",
-		Title:         "Ship review-resume UX",
-		Status:        "in_progress",
-		ExecutionMode: "local_worktree",
-		WorktreePath:  "/tmp/wuphf-task-1",
-		ThreadID:      "msg-1",
-	})
-
-	joined := make([]string, 0, len(options))
-	for _, option := range options {
-		joined = append(joined, option.Label+" :: "+option.Description)
-	}
-	text := strings.Join(joined, "\n")
-
-	if !strings.Contains(text, "Resume task :: Take ownership and continue the retained worktree-backed run") {
-		t.Fatalf("expected resume-first copy for worktree task, got %q", text)
-	}
-	if !strings.Contains(text, "Hand off for review") {
-		t.Fatalf("expected review handoff copy for worktree task, got %q", text)
-	}
-	if !strings.Contains(text, "Open thread :: Jump to the handoff thread before resuming") {
-		t.Fatalf("expected open-thread handoff copy, got %q", text)
 	}
 }
 
@@ -1555,20 +1491,25 @@ func TestOfficeViewRendersSlashAutocompletePopup(t *testing.T) {
 }
 
 func TestOneOnOneSlashAutocompleteShowsResetAndHidesChannels(t *testing.T) {
-	cmds := buildOneOnOneSlashCommands()
-	seen := make(map[string]bool, len(cmds))
-	for _, cmd := range cmds {
-		seen[cmd.Name] = true
-	}
+	t.Setenv("WUPHF_API_KEY", "test-key")
+	m := newChannelModel(false)
+	m.sessionMode = team.SessionModeOneOnOne
+	m.oneOnOneAgent = "pm"
+	m.sidebarCollapsed = true
+	m.refreshSlashCommands()
+	m.input = []rune("/")
+	m.inputPos = len(m.input)
+	m.updateInputOverlays()
 
-	if !seen["reset"] {
-		t.Fatalf("expected /reset to remain available in 1:1 mode, got %+v", cmds)
+	view := stripANSI(m.autocomplete.View())
+	if !strings.Contains(view, "/reset") {
+		t.Fatalf("expected /reset in visible 1:1 autocomplete, got %q", view)
 	}
-	if !seen["switch"] {
-		t.Fatalf("expected /switch to remain available in 1:1 mode, got %+v", cmds)
+	if !strings.Contains(view, "/switch") {
+		t.Fatalf("expected /switch in visible 1:1 autocomplete, got %q", view)
 	}
-	if seen["channels"] || seen["tasks"] || seen["threads"] {
-		t.Fatalf("expected blocked 1:1 commands to be removed, got %+v", cmds)
+	if strings.Contains(view, "/channels") || strings.Contains(view, "/tasks") || strings.Contains(view, "/threads") {
+		t.Fatalf("expected blocked 1:1 commands to be hidden from autocomplete, got %q", view)
 	}
 }
 
@@ -2538,28 +2479,6 @@ func TestPendingRequestTypedAnswerOpensReviewConfirmation(t *testing.T) {
 	}
 }
 
-func TestAnswerRequestUsesApprovalSteeringNotice(t *testing.T) {
-	m := newChannelModel(false)
-	req := channelInterview{
-		ID:       "request-1",
-		Kind:     "approval",
-		From:     "ceo",
-		Question: "Ship it?",
-		Options: []channelInterviewOption{
-			{ID: "approve", Label: "Approve"},
-			{ID: "reject_with_steer", Label: "Reject with steer", RequiresText: true},
-		},
-		RecommendedID: "approve",
-	}
-
-	next, _ := m.answerRequest(req)
-	got := next.(channelModel)
-
-	if !strings.Contains(got.notice, "Pick a decision or type steering") {
-		t.Fatalf("expected approval-specific notice, got %q", got.notice)
-	}
-}
-
 func TestChannelResetDoneImmediatelyRehydratesDirectMode(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120
@@ -2647,27 +2566,6 @@ func TestRenderInterviewCardShowsCustomAnswerAsFinalOption(t *testing.T) {
 	}
 }
 
-func TestRenderInterviewCardShowsApprovalBadges(t *testing.T) {
-	card := renderInterviewCard(channelInterview{
-		Kind:     "approval",
-		From:     "ceo",
-		Question: "Ship the launch copy?",
-		Options: []channelInterviewOption{
-			{ID: "approve_with_note", Label: "Approve with note", RequiresText: true},
-			{ID: "reject", Label: "Reject"},
-		},
-		RecommendedID: "approve_with_note",
-	}, 0, "Step 1 of 3 · choose", 72)
-
-	plain := stripANSI(card)
-	if !strings.Contains(plain, "recommended") {
-		t.Fatalf("expected recommended badge in approval card, got %q", plain)
-	}
-	if !strings.Contains(plain, "add guidance") {
-		t.Fatalf("expected guidance badge for text-required choice, got %q", plain)
-	}
-}
-
 func TestInterviewPhaseTracksChooseDraftAndReview(t *testing.T) {
 	m := newChannelModel(false)
 	m.pending = &channelInterview{
@@ -2698,31 +2596,6 @@ func TestInterviewPhaseTracksChooseDraftAndReview(t *testing.T) {
 	}
 	if hint := m.composerHint(m.composerTargetLabel(), "", m.pending); !strings.Contains(hint, "Enter submit") || !strings.Contains(hint, "Esc revise") {
 		t.Fatalf("expected review hint while reviewing answer, got %q", hint)
-	}
-}
-
-func TestConfirmationForApprovalShowsOutcomeAndGuardrails(t *testing.T) {
-	req := channelInterview{
-		ID:       "request-1",
-		Kind:     "approval",
-		From:     "ceo",
-		Question: "Ship it?",
-	}
-	option := &channelInterviewOption{ID: "approve_with_note", Label: "Approve with note", RequiresText: true}
-
-	confirm := confirmationForInterviewAnswer(req, option, "Need legal sign-off first.")
-
-	if confirm.Title != "Review Approval Decision" {
-		t.Fatalf("expected approval review title, got %q", confirm.Title)
-	}
-	if !strings.Contains(confirm.Detail, "Decision: Approve with note") {
-		t.Fatalf("expected decision label in detail, got %q", confirm.Detail)
-	}
-	if !strings.Contains(confirm.Detail, "Outcome: The team will proceed, but your note becomes explicit guardrails.") {
-		t.Fatalf("expected approval outcome in detail, got %q", confirm.Detail)
-	}
-	if !strings.Contains(confirm.Detail, "Guardrails: Need legal sign-off first.") {
-		t.Fatalf("expected guardrails label in detail, got %q", confirm.Detail)
 	}
 }
 

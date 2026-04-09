@@ -98,17 +98,3 @@ func TestCurrentWorkspaceUIStatePromotesDoctorWarningsIntoReadiness(t *testing.T
 		t.Fatalf("expected doctor next step to flow into readiness, got %+v", state.Readiness)
 	}
 }
-
-func TestFocusModeStatusLineReflectsState(t *testing.T) {
-	m := newChannelModel(false)
-	m.brokerConnected = true
-	m.focusMode = true
-
-	status := m.currentWorkspaceUIState().defaultStatusLine("PgUp/PgDn scroll")
-	if !strings.Contains(status, "Focus mode live") {
-		t.Fatalf("expected focus mode status line, got %q", status)
-	}
-	if !strings.Contains(status, "/focus") {
-		t.Fatalf("expected focus command hint, got %q", status)
-	}
-}

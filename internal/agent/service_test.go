@@ -282,7 +282,7 @@ func TestEnsureRunningTickLoop(t *testing.T) {
 	// Wait for the stream to be called (the tick loop should trigger it).
 	select {
 	case <-streamCalled:
-		// Success — the tick loop is running and progressing the agent.
+		// Success — the worker loop is running and progressing the agent.
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for tick loop to call streamFn")
 	}
@@ -294,6 +294,52 @@ func TestEnsureRunningTickLoop(t *testing.T) {
 
 	// Calling EnsureRunning again after stop should be safe (no-op since agent is stopped).
 	svc.EnsureRunning("tick-test")
+}
+
+func TestFollowUpStartsRunningAgentImmediately(t *testing.T) {
+	dir := t.TempDir()
+	sessions := NewSessionStoreAt(dir)
+	queues := NewMessageQueues()
+	tools := NewToolRegistry()
+
+	streamCalled := make(chan struct{}, 1)
+	mockStream := func(msgs []Message, tls []AgentTool) <-chan StreamChunk {
+		ch := make(chan StreamChunk, 1)
+		go func() {
+			defer close(ch)
+			select {
+			case streamCalled <- struct{}{}:
+			default:
+			}
+			ch <- StreamChunk{Type: "text", Content: "queued response"}
+		}()
+		return ch
+	}
+
+	svc := NewAgentService(
+		WithToolRegistry(tools),
+		WithSessionStore(sessions),
+		WithQueues(queues),
+	)
+
+	ma, err := svc.Create(AgentConfig{Slug: "auto-start", Name: "Auto Start"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	ma.Loop.streamFn = mockStream
+	if err := svc.Start("auto-start"); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	if err := svc.FollowUp("auto-start", "respond now"); err != nil {
+		t.Fatalf("FollowUp: %v", err)
+	}
+
+	select {
+	case <-streamCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for follow-up to start agent work")
+	}
 }
 
 func TestEnsureRunningDoesNotHoldServiceMutexDuringTick(t *testing.T) {

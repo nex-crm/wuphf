@@ -63,6 +63,29 @@ func newTestStreamModelWithQueues() (StreamModel, *agent.MessageQueues) {
 	return m, queues
 }
 
+func waitForQueuedOrStarted(t *testing.T, m StreamModel, queues *agent.MessageQueues, slug string) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if queues.HasMessages(slug) {
+			return
+		}
+		if ma, ok := m.runtime.AgentService.Get(slug); ok {
+			if ma.Loop.GetState().Phase != agent.PhaseIdle {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	phase := agent.PhaseIdle
+	if ma, ok := m.runtime.AgentService.Get(slug); ok {
+		phase = ma.Loop.GetState().Phase
+	}
+	t.Fatalf("expected %s to have queued work or start processing; phase=%s", slug, phase)
+}
+
 // --- Slash command tests ---
 
 func TestSlashHelp(t *testing.T) {
@@ -343,7 +366,7 @@ func TestSubmitRoutesToAgent(t *testing.T) {
 	}
 }
 
-func TestSubmitQueuesFollowUpForPrimaryAgent(t *testing.T) {
+func TestSubmitStartsPrimaryAgentWorkImmediately(t *testing.T) {
 	m, queues := newTestStreamModelWithQueues()
 
 	_, _ = m.runtime.AgentService.CreateFromTemplate("team-lead", "team-lead")
@@ -357,9 +380,7 @@ func TestSubmitQueuesFollowUpForPrimaryAgent(t *testing.T) {
 
 	_, _ = m.handleSubmit()
 
-	if !queues.HasFollowUp("team-lead") {
-		t.Fatal("expected primary agent follow-up to be queued")
-	}
+	waitForQueuedOrStarted(t, m, queues, "team-lead")
 	if queues.HasSteer("team-lead") {
 		t.Fatal("did not expect primary agent steer to be queued for user submit")
 	}
@@ -386,15 +407,9 @@ func TestSubmitImmediatelyKicksOffCollaboratorsForBroadDirective(t *testing.T) {
 
 	_, _ = m.handleSubmit()
 
-	if !queues.HasFollowUp("ceo") {
-		t.Fatal("expected ceo follow-up to be queued")
-	}
-	if !queues.HasFollowUp("fe") {
-		t.Fatal("expected fe follow-up to be queued from collaborator kickoff")
-	}
-	if !queues.HasFollowUp("be") {
-		t.Fatal("expected be follow-up to be queued from collaborator kickoff")
-	}
+	waitForQueuedOrStarted(t, m, queues, "ceo")
+	waitForQueuedOrStarted(t, m, queues, "fe")
+	waitForQueuedOrStarted(t, m, queues, "be")
 }
 
 func TestEmptySubmitDoesNothing(t *testing.T) {
@@ -635,12 +650,7 @@ func TestStartDelegationsQueuesSteerAndFollowUp(t *testing.T) {
 		Task:      "@fe tighten the hero spacing.",
 	}})
 
-	if !queues.HasSteer("fe") {
-		t.Fatal("expected delegation steer to be queued")
-	}
-	if !queues.HasFollowUp("fe") {
-		t.Fatal("expected delegation follow-up task to be queued")
-	}
+	waitForQueuedOrStarted(t, m, queues, "fe")
 }
 
 func TestTeamLeadDoneFallsBackToRoutingHints(t *testing.T) {
@@ -658,9 +668,7 @@ func TestTeamLeadDoneFallsBackToRoutingHints(t *testing.T) {
 
 	m2, _ := m.Update(AgentDoneMsg{AgentSlug: "team-lead"})
 
-	if !queues.HasFollowUp("fe") {
-		t.Fatal("expected fallback delegation follow-up to be queued for fe")
-	}
+	waitForQueuedOrStarted(t, m2, queues, "fe")
 	if m2.pendingLeadTask != "" || len(m2.pendingLeadHints) != 0 {
 		t.Fatal("expected pending lead hints to be cleared after fallback delegation")
 	}

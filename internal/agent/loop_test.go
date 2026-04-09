@@ -2,16 +2,11 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/nex-crm/wuphf/internal/api"
 )
 
 // mockStreamFn returns a StreamFn that yields a single text chunk.
@@ -609,41 +604,5 @@ func TestOffRemovesHandler(t *testing.T) {
 
 	if callCount != 0 {
 		t.Errorf("handler should not have been called after Off, was called %d times", callCount)
-	}
-}
-
-func TestFocusModeSkipsGossipQueryAndPublish(t *testing.T) {
-	var searchCount, rememberCount int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/search":
-			searchCount++
-			_ = json.NewEncoder(w).Encode(map[string]any{"results": []map[string]any{}})
-		case "/remember":
-			rememberCount++
-			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
-
-	loop, _ := newTestLoop(t, mockStreamFn("done"))
-	client := api.NewClient("test-key")
-	client.BaseURL = srv.URL
-	loop.gossipLayer = NewGossipLayer(client)
-	loop.SetFocusModeChecker(func() bool { return true })
-	loop.AddInsight("share this")
-	loop.queues.FollowUp("test-agent", "do task")
-	loop.Start()
-
-	for i := 0; i < 4; i++ {
-		if err := loop.Tick(); err != nil {
-			t.Fatalf("tick %d: %v", i+1, err)
-		}
-	}
-
-	if searchCount != 0 || rememberCount != 0 {
-		t.Fatalf("expected focus mode to suppress gossip, got search=%d remember=%d", searchCount, rememberCount)
 	}
 }

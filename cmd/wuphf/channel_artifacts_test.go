@@ -64,7 +64,7 @@ func TestBuildArtifactLinesShowsTaskLogsWorkflowRunsAndApprovals(t *testing.T) {
 	writeWorkflowRun(t, home, "one", "launch-sync", `{"provider":"one","workflow_key":"launch-sync","run_id":"run-2","status":"success","started_at":"2026-04-07T10:02:00Z","finished_at":"2026-04-07T10:03:00Z"}`)
 
 	m := newChannelModel(false)
-	m.tasks = []channelTask{{ID: "task-1", Title: "Ship launch notes", WorktreePath: "/tmp/wuphf-task-1", WorktreeBranch: "codex/task-1"}}
+	m.tasks = []channelTask{{ID: "task-1", Title: "Ship launch notes", WorktreePath: "/tmp/wuphf-task-1"}}
 	m.requests = []channelInterview{{
 		ID:            "req-1",
 		Kind:          "approval",
@@ -92,12 +92,6 @@ func TestBuildArtifactLinesShowsTaskLogsWorkflowRunsAndApprovals(t *testing.T) {
 	if !strings.Contains(plain, "Task execution") {
 		t.Fatalf("expected task execution section, got %q", plain)
 	}
-	if !strings.Contains(plain, "Review next") {
-		t.Fatalf("expected review-next section, got %q", plain)
-	}
-	if !strings.Contains(plain, "Resume next") {
-		t.Fatalf("expected resume-next section, got %q", plain)
-	}
 	if !strings.Contains(plain, "Workflow runs") {
 		t.Fatalf("expected workflow runs section, got %q", plain)
 	}
@@ -119,14 +113,8 @@ func TestBuildArtifactLinesShowsTaskLogsWorkflowRunsAndApprovals(t *testing.T) {
 	if !strings.Contains(plain, "Output: ok") {
 		t.Fatalf("expected retained output summary, got %q", plain)
 	}
-	if !strings.Contains(plain, "Resume in /tmp/wuphf-task-1 on codex/task-1") {
+	if !strings.Contains(plain, "Resume in /tmp/wuphf-task-1") {
 		t.Fatalf("expected resume hint, got %q", plain)
-	}
-	if !strings.Contains(plain, "Branch: codex/task-1") {
-		t.Fatalf("expected worktree branch metadata, got %q", plain)
-	}
-	if !strings.Contains(plain, "Click to open task actions and resume context.") {
-		t.Fatalf("expected explicit review/resume CTA, got %q", plain)
 	}
 }
 

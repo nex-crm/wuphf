@@ -1,12 +1,9 @@
 package team
 
 import (
-	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 var (
@@ -21,13 +19,16 @@ var (
 	headlessCodexCommandContext = exec.CommandContext
 	headlessCodexExecutablePath = os.Executable
 	headlessCodexRunTurn        = func(l *Launcher, ctx context.Context, slug, notification string) error {
+		if l != nil && !l.usesCodexRuntime() {
+			return l.runHeadlessClaudeTurn(ctx, slug, notification)
+		}
 		return l.runHeadlessCodexTurn(ctx, slug, notification)
 	}
 )
 
 var (
 	headlessCodexTurnTimeout      = 2 * time.Minute
-	headlessCodexStaleCancelAfter = 45 * time.Second
+	headlessCodexStaleCancelAfter = 8 * time.Second
 )
 
 type headlessCodexTurn struct {
@@ -48,9 +49,6 @@ func (l *Launcher) launchHeadlessCodex() error {
 	l.broker = NewBroker()
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
-	}
-	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
-		return fmt.Errorf("set focus mode: %w", err)
 	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
@@ -99,6 +97,7 @@ func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string) {
 
 	if cancel != nil {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("stale-turn: cancelling active turn after %s to process queued work", staleAge.Round(time.Second)))
+		l.updateHeadlessProgress(slug, "active", "queued", "preempting stale work for newer request", headlessProgressMetrics{})
 		cancel()
 	}
 	if startWorker {
@@ -110,9 +109,12 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 	for {
 		turn, turnCtx, ok := l.beginHeadlessCodexTurn(slug)
 		if !ok {
+			l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
 			l.finishHeadlessWorker(slug)
 			return
 		}
+		appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
+		l.updateHeadlessProgress(slug, "active", "queued", "queued work packet received", headlessProgressMetrics{})
 
 		err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt)
 		ctxErr := turnCtx.Err()
@@ -120,10 +122,13 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 		case err == nil:
 		case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
 			appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", headlessCodexTurnTimeout))
+			l.updateHeadlessProgress(slug, "error", "error", fmt.Sprintf("turn timed out after %s", headlessCodexTurnTimeout), headlessProgressMetrics{})
 		case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
 			appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
+			l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
 		default:
 			appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
+			l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
 		}
 		l.finishHeadlessTurn(slug)
 	}
@@ -228,18 +233,92 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		return err
 	}
 
-	result, parseErr := readHeadlessCodexJSONStream(stdout)
+	startedAt := time.Now()
+	metrics := headlessProgressMetrics{
+		TotalMs:      -1,
+		FirstEventMs: -1,
+		FirstTextMs:  -1,
+		FirstToolMs:  -1,
+	}
+	l.updateHeadlessProgress(slug, "active", "thinking", "reviewing work packet", metrics)
+	var firstEventAt time.Time
+	var firstTextAt time.Time
+	var firstToolAt time.Time
+	textStarted := false
+	result, parseErr := provider.ReadCodexJSONStream(stdout, func(event provider.CodexStreamEvent) {
+		if firstEventAt.IsZero() {
+			firstEventAt = time.Now()
+			metrics.FirstEventMs = durationMillis(startedAt, firstEventAt)
+		}
+		switch event.Type {
+		case "text":
+			if firstTextAt.IsZero() && strings.TrimSpace(event.Text) != "" {
+				firstTextAt = time.Now()
+				metrics.FirstTextMs = durationMillis(startedAt, firstTextAt)
+			}
+			if !textStarted && strings.TrimSpace(event.Text) != "" {
+				textStarted = true
+				l.updateHeadlessProgress(slug, "active", "text", "drafting response", metrics)
+			}
+		case "tool_use":
+			if firstToolAt.IsZero() {
+				firstToolAt = time.Now()
+				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
+			}
+			appendHeadlessCodexLog(slug, fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120)))
+			l.updateHeadlessProgress(slug, "active", "tool_use", fmt.Sprintf("running %s", strings.TrimSpace(event.ToolName)), metrics)
+		case "tool_result":
+			appendHeadlessCodexLog(slug, "tool_result: "+truncate(event.Text, 140))
+			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
+		case "error":
+			appendHeadlessCodexLog(slug, "stream_error: "+event.Detail)
+			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
+		}
+	})
 	if err := cmd.Wait(); err != nil {
 		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
+		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		if detail != "" {
+			appendHeadlessCodexLatency(slug, fmt.Sprintf("status=error total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d detail=%q",
+				time.Since(startedAt).Milliseconds(),
+				durationMillis(startedAt, firstEventAt),
+				durationMillis(startedAt, firstTextAt),
+				durationMillis(startedAt, firstToolAt),
+				detail,
+			))
 			appendHeadlessCodexLog(slug, "stderr: "+detail)
+			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
 			return fmt.Errorf("%w: %s", err, detail)
 		}
+		appendHeadlessCodexLatency(slug, fmt.Sprintf("status=error total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d detail=%q",
+			time.Since(startedAt).Milliseconds(),
+			durationMillis(startedAt, firstEventAt),
+			durationMillis(startedAt, firstTextAt),
+			durationMillis(startedAt, firstToolAt),
+			err.Error(),
+		))
 		return err
 	}
 	if parseErr != nil {
+		metrics.TotalMs = time.Since(startedAt).Milliseconds()
+		l.updateHeadlessProgress(slug, "error", "error", truncate(parseErr.Error(), 180), metrics)
 		return parseErr
 	}
+	metrics.TotalMs = time.Since(startedAt).Milliseconds()
+	appendHeadlessCodexLatency(slug, fmt.Sprintf("status=ok total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d final_chars=%d",
+		time.Since(startedAt).Milliseconds(),
+		durationMillis(startedAt, firstEventAt),
+		durationMillis(startedAt, firstTextAt),
+		durationMillis(startedAt, firstToolAt),
+		len(strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine))),
+	))
+	summary := strings.TrimSpace(formatHeadlessLatencySummary(metrics))
+	if summary == "" {
+		summary = "reply ready"
+	} else {
+		summary = "reply ready · " + summary
+	}
+	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
 		appendHeadlessCodexLog(slug, "result: "+text)
 	}
@@ -253,9 +332,6 @@ func (l *Launcher) buildHeadlessCodexEnv(slug string) []string {
 		"WUPHF_BROKER_TOKEN="+l.broker.Token(),
 		"WUPHF_HEADLESS_PROVIDER=codex",
 	)
-	if l.isFocusModeEnabled() {
-		env = append(env, "WUPHF_FOCUS_MODE=1")
-	}
 	if config.ResolveNoNex() {
 		env = append(env, "WUPHF_NO_NEX=1")
 	}
@@ -291,9 +367,6 @@ func (l *Launcher) buildCodexOfficeConfigOverrides(slug string) ([]string, error
 	wuphfEnvVars := []string{
 		"WUPHF_AGENT_SLUG",
 		"WUPHF_BROKER_TOKEN",
-	}
-	if l.isFocusModeEnabled() {
-		wuphfEnvVars = append(wuphfEnvVars, "WUPHF_FOCUS_MODE")
 	}
 	if config.ResolveNoNex() {
 		wuphfEnvVars = append(wuphfEnvVars, "WUPHF_NO_NEX")
@@ -364,6 +437,31 @@ func appendHeadlessCodexLog(slug string, line string) {
 	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(line))
 }
 
+func appendHeadlessCodexLatency(slug string, line string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	logDir := filepath.Join(home, ".wuphf", "logs")
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return
+	}
+	path := filepath.Join(logDir, "headless-codex-latency.log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
+}
+
+func durationMillis(start, mark time.Time) int64 {
+	if start.IsZero() || mark.IsZero() {
+		return -1
+	}
+	return mark.Sub(start).Milliseconds()
+}
+
 func tomlQuote(value string) string {
 	return fmt.Sprintf("%q", value)
 }
@@ -383,85 +481,4 @@ func tomlStringArray(values []string) string {
 		return "[]"
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
-}
-
-type headlessCodexJSONResult struct {
-	FinalMessage  string
-	LastPlainLine string
-	LastError     string
-}
-
-type headlessCodexJSONEvent struct {
-	Type    string `json:"type"`
-	Message string `json:"message,omitempty"`
-	Error   *struct {
-		Message string `json:"message,omitempty"`
-	} `json:"error,omitempty"`
-	Item *struct {
-		Type    string `json:"type,omitempty"`
-		Text    string `json:"text,omitempty"`
-		Content []struct {
-			Type string `json:"type,omitempty"`
-			Text string `json:"text,omitempty"`
-		} `json:"content,omitempty"`
-	} `json:"item,omitempty"`
-}
-
-func readHeadlessCodexJSONStream(r io.Reader) (headlessCodexJSONResult, error) {
-	var result headlessCodexJSONResult
-	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-
-		var event headlessCodexJSONEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			result.LastPlainLine = line
-			continue
-		}
-		if text := strings.TrimSpace(extractHeadlessCodexAgentMessage(event)); text != "" {
-			result.FinalMessage = text
-		}
-		if detail := strings.TrimSpace(extractHeadlessCodexError(event)); detail != "" {
-			result.LastError = detail
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return result, fmt.Errorf("read codex json stream: %w", err)
-	}
-	return result, nil
-}
-
-func extractHeadlessCodexAgentMessage(event headlessCodexJSONEvent) string {
-	if event.Type != "item.completed" || event.Item == nil || event.Item.Type != "agent_message" {
-		return ""
-	}
-	if text := strings.TrimSpace(event.Item.Text); text != "" {
-		return text
-	}
-	parts := make([]string, 0, len(event.Item.Content))
-	for _, item := range event.Item.Content {
-		if item.Type == "output_text" || item.Type == "text" {
-			if text := strings.TrimSpace(item.Text); text != "" {
-				parts = append(parts, text)
-			}
-		}
-	}
-	return strings.TrimSpace(strings.Join(parts, "\n"))
-}
-
-func extractHeadlessCodexError(event headlessCodexJSONEvent) string {
-	switch event.Type {
-	case "error", "turn.failed":
-		if event.Error != nil && strings.TrimSpace(event.Error.Message) != "" {
-			return event.Error.Message
-		}
-		if strings.TrimSpace(event.Message) != "" {
-			return event.Message
-		}
-	}
-	return ""
 }
