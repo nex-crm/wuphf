@@ -1587,8 +1587,15 @@ var WuphfAPI = (function() {
     });
   }
 
-  function getMembers() {
+  function getOfficeMembers() {
     return get('/office-members');
+  }
+
+  function getMembers(channel) {
+    return get('/members', {
+      channel: channel || 'general',
+      viewer_slug: 'human'
+    });
   }
 
   function getChannels() {
@@ -1610,8 +1617,11 @@ var WuphfAPI = (function() {
     return get('/health');
   }
 
-  function getTasks() {
-    return get('/tasks');
+  function getTasks(channel) {
+    return get('/tasks', {
+      channel: channel || 'general',
+      viewer_slug: 'human'
+    });
   }
 
   function toggleReaction(msgId, emoji, channel) {
@@ -1631,6 +1641,7 @@ var WuphfAPI = (function() {
     post: post,
     getMessages: getMessages,
     postMessage: postMessage,
+    getOfficeMembers: getOfficeMembers,
     getMembers: getMembers,
     getChannels: getChannels,
     getRequests: getRequests,
@@ -1930,10 +1941,11 @@ function showSplashScreen(onDone) {
 function showOffice() {
   document.getElementById('office').classList.add('active');
   if (brokerConnected) {
-    Promise.all([WuphfAPI.getMembers(), WuphfAPI.getChannels()])
+    Promise.all([WuphfAPI.getOfficeMembers(), WuphfAPI.getChannels(), WuphfAPI.getMembers(currentChannel)])
       .then(function(results) {
         var membersData = results[0];
         var channelsData = results[1];
+        var liveMembersData = results[2];
         if (membersData.members) {
           AGENTS = membersData.members.map(function(m) {
             return {
@@ -1948,6 +1960,7 @@ function showOffice() {
             };
           });
         }
+        cachedMembers = normalizeMemberActivityHints(liveMembersData.members || []);
         if (channelsData.channels) {
           CHANNELS = channelsData.channels.map(function(ch) {
             return { name: ch.name || ch.slug, desc: ch.description || '' };
@@ -1975,15 +1988,94 @@ function showOffice() {
 }
 
 // --- Activity classification (#23) ---
+function trimStatusPrefix(text) {
+  var content = (text || '').trim();
+  if (!content) return '';
+  if (content.indexOf('[STATUS]') === 0) {
+    return content.replace(/^\[STATUS\]\s*/, '');
+  }
+  return '';
+}
+
+function memberActivityText(member) {
+  if (!member) return '';
+  return trimStatusPrefix(member.lastMessage) ||
+    member.activity ||
+    member.liveActivity ||
+    member.live_activity ||
+    '';
+}
+
+function parseMemberActivityTime(member) {
+  if (!member) return null;
+  var stamp = member.last_time || member.lastTime || '';
+  if (!stamp) return null;
+  if (/^\d{2}:\d{2}:\d{2}$/.test(stamp)) {
+    var parts = stamp.split(':');
+    var parsed = new Date();
+    parsed.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), parseInt(parts[2], 10), 0);
+    if (parsed.getTime() - Date.now() > 60 * 1000) {
+      parsed.setDate(parsed.getDate() - 1);
+    }
+    return parsed;
+  }
+  var result = new Date(stamp);
+  return isNaN(result.getTime()) ? null : result;
+}
+
+function normalizeMemberActivityHints(members) {
+  return (members || []).map(function(member) {
+    var copy = Object.assign({}, member);
+    var statusText = trimStatusPrefix(copy.lastMessage);
+    if (statusText) {
+      copy.activity = statusText;
+      if (!copy.liveActivity || copy.liveActivity === 'active') {
+        copy.liveActivity = statusText;
+      }
+      if (!copy.status) copy.status = 'active';
+    }
+    return copy;
+  });
+}
+
+function refreshLiveActivityUI() {
+  renderSidebarAgents();
+  renderWorkspaceSummary();
+  renderRuntimeStrip();
+  renderLiveWork();
+  updateStatusBar();
+  updateTypingIndicator();
+  renderComposerHint();
+}
+
+function applyStatusActivity(msg) {
+  var status = trimStatusPrefix(msg.content);
+  if (!status) return false;
+  var slug = msg.from;
+  if (!slug || slug === 'human' || slug === 'you') return true;
+  var idx = cachedMembers.findIndex(function(member) { return member.slug === slug; });
+  var base = idx >= 0 ? Object.assign({}, cachedMembers[idx]) : { slug: slug };
+  base.status = 'active';
+  base.activity = status;
+  base.liveActivity = status;
+  base.last_time = msg.timestamp || new Date().toISOString();
+  if (idx >= 0) cachedMembers[idx] = base;
+  else cachedMembers.push(base);
+  refreshLiveActivityUI();
+  return true;
+}
+
 function classifyActivity(member) {
-  if (!member || !member.status) return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
-  var activity = (member.activity || '').toLowerCase();
+  if (!member) return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
+  var activity = memberActivityText(member).toLowerCase();
   var status = (member.status || '').toLowerCase();
-  var lastTime = member.last_time ? new Date(member.last_time) : null;
+  var lastTime = parseMemberActivityTime(member);
   var elapsed = lastTime ? (Date.now() - lastTime.getTime()) / 1000 : Infinity;
-  if (status === 'active' || elapsed < 10) return { state: 'talking', label: 'talking', dotClass: 'active pulse' };
+  if (status === 'active' && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity)) return { state: 'shipping', label: 'shipping', dotClass: 'shipping' };
+  if (status === 'active' && /think|plan|queue|review|sync|debug|trace|investigat/.test(activity)) return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
+  if (status === 'active' || (elapsed < 10 && activity)) return { state: 'talking', label: 'talking', dotClass: 'active pulse' };
   if (elapsed < 30 && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity)) return { state: 'shipping', label: 'shipping', dotClass: 'shipping' };
-  if (elapsed < 30) return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
+  if (elapsed < 30 && activity) return { state: 'plotting', label: 'plotting', dotClass: 'plotting' };
   return { state: 'lurking', label: 'lurking', dotClass: 'lurking' };
 }
 function findAgentTask(slug) {
@@ -2026,6 +2118,15 @@ function renderSidebarAgents() {
       bubble.textContent = activityText.length > 30 ? activityText.substring(0, 30) + '\u2026' : activityText;
       bubble.title = activityText;
       wrap.appendChild(bubble);
+    }
+    // Live activity text (#24)
+    var liveAct = member && (member.liveActivity || member.live_activity);
+    if (liveAct && liveAct !== 'active') {
+      var actEl = document.createElement('span');
+      actEl.className = 'sidebar-agent-activity';
+      actEl.textContent = liveAct.length > 40 ? liveAct.substring(0, 40) + '\u2026' : liveAct;
+      actEl.title = liveAct;
+      wrap.appendChild(actEl);
     }
     var dot = document.createElement('span');
     dot.className = 'status-dot ' + ac.dotClass;
@@ -2075,7 +2176,7 @@ function switchApp(appId) {
   var messagesEl = document.getElementById('messages');
   var typingEl = document.getElementById('typing-indicator');
   var composerEl = document.querySelector('.composer');
-  ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills'].forEach(function(pid) {
+  ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills', 'app-artifacts'].forEach(function(pid) {
     var p = document.getElementById(pid);
     if (p) { p.classList.remove('active'); p.style.display = 'none'; }
   });
@@ -2111,6 +2212,7 @@ function renderAppContent(appId) {
   else if (appId === 'policies') renderPoliciesApp(panel);
   else if (appId === 'calendar') renderCalendarApp(panel);
   else if (appId === 'skills') renderSkillsApp(panel);
+  else if (appId === 'artifacts') renderArtifactsApp(panel);
 }
 function renderTasksApp(panel) {
   if (!brokerConnected) {
@@ -2385,6 +2487,70 @@ function renderSkillsList(panel, skills) {
     panel.appendChild(card);
   });
 }
+// --- Artifacts view (#58, #104) ---
+function renderArtifactsApp(panel) {
+  if (!brokerConnected) {
+    panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see artifacts.'));
+    return;
+  }
+  panel.style.overflow = 'auto';
+  var loading = el('div', { style: { padding: '40px 20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading artifacts...');
+  panel.appendChild(loading);
+  WuphfAPI.getActions()
+    .then(function(data) {
+      panel.textContent = '';
+      var actions = data.actions || data || [];
+      if (!Array.isArray(actions)) actions = [];
+      if (actions.length === 0) {
+        panel.appendChild(el('div', { className: 'request-empty' }, 'No artifacts yet.'));
+        return;
+      }
+      var header = el('div', { style: { padding: '0 20px 12px', borderBottom: '1px solid var(--border)' } });
+      header.appendChild(el('h3', { style: { fontSize: '16px', fontWeight: '600' } }, 'Artifacts'));
+      header.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' } }, actions.length + ' actions recorded'));
+      panel.appendChild(header);
+      var timeline = el('div', { className: 'artifact-timeline' });
+      actions.sort(function(a, b) {
+        var ta = a.timestamp || a.created_at || '';
+        var tb = b.timestamp || b.created_at || '';
+        return tb.localeCompare(ta);
+      });
+      actions.forEach(function(action) {
+        var kind = (action.kind || action.type || 'tool').toLowerCase();
+        var dotClass = 'artifact-dot';
+        var typeClass = 'artifact-type';
+        if (kind.indexOf('commit') >= 0 || kind.indexOf('push') >= 0) { dotClass += ' artifact-dot-commit'; typeClass += ' artifact-type-commit'; }
+        else if (kind.indexOf('deploy') >= 0) { dotClass += ' artifact-dot-deploy'; typeClass += ' artifact-type-deploy'; }
+        else if (kind.indexOf('approv') >= 0) { dotClass += ' artifact-dot-approval'; typeClass += ' artifact-type-approval'; }
+        else { dotClass += ' artifact-dot-tool'; typeClass += ' artifact-type-tool'; }
+
+        var item = el('div', { className: 'artifact-item' });
+        item.appendChild(el('div', { className: dotClass }));
+        var body = el('div', { className: 'artifact-body' });
+        var hdr = el('div', { className: 'artifact-header' });
+        hdr.appendChild(el('span', { className: typeClass }, kind));
+        if (action.owner || action.agent) {
+          hdr.appendChild(el('span', { className: 'artifact-agent' }, action.owner || action.agent));
+        }
+        body.appendChild(hdr);
+        if (action.summary || action.name || action.title || action.description) {
+          body.appendChild(el('div', { className: 'artifact-summary' }, action.summary || action.name || action.title || action.description));
+        }
+        var ts = action.timestamp || action.created_at || action.updated_at;
+        if (ts) {
+          body.appendChild(el('div', { className: 'artifact-time' }, new Date(ts).toLocaleString()));
+        }
+        item.appendChild(body);
+        timeline.appendChild(item);
+      });
+      panel.appendChild(timeline);
+    })
+    .catch(function() {
+      panel.textContent = '';
+      panel.appendChild(el('div', { className: 'request-empty' }, 'Could not load artifacts.'));
+    });
+}
+
 // --- Workspace summary (#30) and hint (#31) ---
 function renderWorkspaceSummary() {
   var summaryEl = document.getElementById('sidebar-summary');
@@ -2431,6 +2597,13 @@ function renderRuntimeStrip() {
   if (blocked > 0) strip.appendChild(pill('blocked', 'blocked', blocked));
   if (needYou > 0) strip.appendChild(pill('needyou', 'need you', needYou));
   if (active === 0 && blocked === 0 && needYou === 0) strip.appendChild(pill('idle', 'all quiet', idle));
+  if (isPaused) {
+    var pausePill = document.createElement('span');
+    pausePill.className = 'runtime-paused-pill';
+    pausePill.textContent = 'PAUSED';
+    strip.insertBefore(pausePill, strip.firstChild);
+    strip.classList.add('paused');
+  }
 }
 
 // --- Live work cards (#77) ---
@@ -3821,7 +3994,7 @@ function handleSlashCommand(input) {
       showSystem('Messages cleared');
       break;
     case '/help':
-      showSystem('Commands: /clear /help /requests /tasks /reset /reply /1o1 <agent> /search /recover');
+      showSystem('Commands: /clear /help /requests /tasks /reset /reply /1o1 <agent> /search /recover /threads /agents /insert /rewind /reset-dm /connect /skill /artifacts /pause');
       break;
     case '/requests':
       switchApp('requests');
@@ -3934,6 +4107,108 @@ function handleSlashCommand(input) {
       break;
     case '/rewind':
       openRewindPicker();
+      break;
+    case '/reset-dm':
+      // Reset DM session (#70)
+      if (!dmModeActive) {
+        showSystem('Not in a 1:1 session. Use /1o1 <agent> first.');
+      } else {
+        var resetAgent = dmAgent;
+        showConfirmDialog({
+          title: 'Reset 1:1 Session',
+          message: 'Clear transcript and reset session with ' + resetAgent.name + '?',
+          confirmLabel: 'Reset',
+          onConfirm: function() {
+            WuphfAPI.post('/reset-dm', { agent: resetAgent.slug })
+              .then(function() {
+                document.getElementById('dm-inbox').textContent = '';
+                document.getElementById('dm-outbox').textContent = '';
+                showNotice('1:1 session reset', 'success');
+                showSystem('DM session with ' + resetAgent.name + ' cleared');
+              })
+              .catch(function(e) { showNotice('Reset failed: ' + (e.message || e), 'error'); });
+          }
+        });
+      }
+      break;
+    case '/connect':
+      // Integration connect panel (#84, #85, #118)
+      showSystem('Loading integrations...');
+      var integrations = [
+        { name: 'Telegram', icon: '\u2708', key: 'telegram' },
+        { name: 'Slack', icon: '\uD83D\uDCAC', key: 'slack' },
+        { name: 'Discord', icon: '\uD83C\uDFAE', key: 'discord' }
+      ];
+      WuphfAPI.get('/bridges').then(function(data) {
+        var bridges = data.bridges || data || [];
+        var overlay = el('div', { className: 'task-detail-overlay' });
+        var card = el('div', { className: 'task-detail-card' });
+        var titleRow = el('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' } });
+        titleRow.appendChild(el('h3', { style: { fontSize: '18px', fontWeight: '600' } }, 'Integrations'));
+        var closeBtn = el('button', { className: 'app-view-close', onClick: function() { overlay.remove(); } });
+        closeBtn.textContent = '\u2715';
+        titleRow.appendChild(closeBtn);
+        card.appendChild(titleRow);
+        var panelDiv = el('div', { className: 'connect-panel' });
+        integrations.forEach(function(integ) {
+          var bridge = bridges.find(function(b) { return b.kind === integ.key || b.type === integ.key || (b.name || '').toLowerCase().indexOf(integ.key) >= 0; });
+          var connected = !!bridge;
+          var item = el('div', { className: 'connect-item' });
+          item.appendChild(el('div', { className: 'connect-icon' }, integ.icon));
+          var body = el('div', { className: 'connect-body' });
+          body.appendChild(el('div', { className: 'connect-name' }, integ.name));
+          body.appendChild(el('div', { className: 'connect-status' }, connected ? 'Connected' : 'Not connected'));
+          item.appendChild(body);
+          item.appendChild(el('span', { className: 'connect-badge ' + (connected ? 'connect-badge-ok' : 'connect-badge-off') }, connected ? 'ACTIVE' : 'SETUP'));
+          panelDiv.appendChild(item);
+        });
+        card.appendChild(panelDiv);
+        overlay.appendChild(card);
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+        document.body.appendChild(overlay);
+      }).catch(function() {
+        showSystem('Could not load integrations');
+      });
+      break;
+    case '/skill':
+      // Enhanced skill commands (#117)
+      var skillParts = args.split(/\s+/);
+      var skillAction = (skillParts[0] || '').toLowerCase();
+      var skillName = skillParts.slice(1).join(' ');
+      if (skillAction === 'list' || !skillAction) {
+        switchApp('skills');
+      } else if (skillAction === 'invoke' && skillName) {
+        showSystem('Invoking skill: ' + skillName + '...');
+        WuphfAPI.post('/skills/' + encodeURIComponent(skillName) + '/invoke', { name: skillName })
+          .then(function(data) {
+            showSystem('Skill "' + skillName + '" invoked successfully');
+            showNotice('Skill invoked: ' + skillName, 'success');
+          })
+          .catch(function(e) {
+            showSystem('Skill invoke failed: ' + (e.message || e));
+            showNotice('Skill invoke failed', 'error');
+          });
+      } else {
+        showSystem('Usage: /skill list | /skill invoke <name>');
+      }
+      break;
+    case '/artifacts':
+      switchApp('artifacts');
+      break;
+    case '/pause':
+      // Manual pause toggle (#42)
+      isPaused = !isPaused;
+      var strip = document.getElementById('runtime-strip');
+      if (isPaused) {
+        strip.classList.add('paused');
+        showNotice('All agents paused', 'error');
+        WuphfAPI.post('/signals', { kind: 'pause', summary: 'Human paused all agents' }).catch(function() {});
+      } else {
+        strip.classList.remove('paused');
+        showNotice('Agents resumed', 'success');
+        WuphfAPI.post('/signals', { kind: 'resume', summary: 'Human resumed agents' }).catch(function() {});
+      }
+      renderRuntimeStrip();
       break;
     default:
       // Send unknown commands to broker as a message (agents may handle them)
@@ -4572,6 +4847,25 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 
+
+  // Ctrl+G / Cmd+G: open command palette filtered to channels (#29)
+  if ((e.ctrlKey || e.metaKey) && e.key === 'g') {
+    e.preventDefault();
+    openCommandPalette();
+    setTimeout(function() { cmdPaletteInput.value = '#'; renderCommandPaletteResults('#'); }, 60);
+    return;
+  }
+
+  // Ctrl+1-9 / Cmd+1-9: quick jump to channel by index (#29)
+  if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '9') {
+    e.preventDefault();
+    var qjIdx = parseInt(e.key) - 1;
+    if (qjIdx < CHANNELS.length) {
+      switchChannel(CHANNELS[qjIdx].name);
+      renderSidebarChannels();
+    }
+    return;
+  }
   // Ctrl+/ or Cmd+/: focus composer
   if ((e.ctrlKey || e.metaKey) && e.key === '/') {
     e.preventDefault();
@@ -4592,7 +4886,7 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 
-  // Escape: close panels (command palette handled by its own handler)
+  // Escape: close panels or toggle pause (#42)
   if (e.key === 'Escape' && !inInput) {
     if (cmdPaletteOverlay.classList.contains('open')) {
       closeCommandPalette();
@@ -4602,6 +4896,24 @@ document.addEventListener('keydown', function(e) {
       closeAgentPanel();
     } else if (document.getElementById('recovery-panel').classList.contains('open')) {
       closeRecoveryView();
+    } else if (document.getElementById('threads-view').classList.contains('open')) {
+      closeThreadsView();
+    } else if (document.getElementById('agents-grid-view').classList.contains('open')) {
+      closeAgentsView();
+    } else {
+      // No panels open: toggle pause all agents (#42)
+      isPaused = !isPaused;
+      var strip = document.getElementById('runtime-strip');
+      if (isPaused) {
+        strip.classList.add('paused');
+        showNotice('All agents paused', 'error');
+        WuphfAPI.post('/signals', { kind: 'pause', summary: 'Human paused all agents via Esc' }).catch(function() {});
+      } else {
+        strip.classList.remove('paused');
+        showNotice('Agents resumed', 'success');
+        WuphfAPI.post('/signals', { kind: 'resume', summary: 'Human resumed agents via Esc' }).catch(function() {});
+      }
+      renderRuntimeStrip();
     }
     return;
   }
@@ -4649,6 +4961,7 @@ document.addEventListener('keydown', function(e) {
 // ═══════════════════════════════════════════════════════════════
 //   1:1 DIRECT SESSION MODE (#65)
 // ═══════════════════════════════════════════════════════════════
+var isPaused = false;
 var dmModeActive = false;
 var dmAgent = null;
 var dmPreviousChannel = null;
@@ -5134,10 +5447,34 @@ function renderTaskBoard(container, tasks) {
     colDiv.appendChild(header);
 
     columns[col.key].forEach(function(task) {
-      var card = el('div', { className: 'task-card', onClick: function() { openTaskDetail(task); } });
+      var card = el('div', { className: 'task-card', onClick: function() {
+        // Task click-to-focus (#54): open thread or find related message
+        if (task.thread_id) {
+          openThread(task.thread_id);
+        } else {
+          var msgKeys = Object.keys(allMessages);
+          var found = false;
+          for (var ti = msgKeys.length - 1; ti >= 0; ti--) {
+            var tm = allMessages[msgKeys[ti]];
+            if (tm.content && task.title && tm.content.indexOf(task.title) >= 0) {
+              var msgEl = document.querySelector('[data-msg-id="' + tm.id + '"]');
+              if (msgEl) { msgEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); msgEl.style.outline = '2px solid var(--accent)'; setTimeout(function() { msgEl.style.outline = ''; }, 2000); }
+              found = true;
+              break;
+            }
+          }
+          if (!found) openTaskDetail(task);
+        }
+      } });
 
       var title = el('div', { className: 'task-card-title' }, task.title || task.name || 'Untitled');
       card.appendChild(title);
+
+      // Worktree info (#53)
+      if (task.worktree_branch || task.worktree_path) {
+        var branchText = task.worktree_branch || task.worktree_path.split('/').pop();
+        card.appendChild(el('div', { className: 'task-card-worktree' }, '\u2387 ' + branchText));
+      }
 
       var meta = el('div', { className: 'task-card-meta' });
       var status = normalizeTaskStatus(task.status);
