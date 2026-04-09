@@ -2641,7 +2641,7 @@ function appendMessageToContainer(msg, container, opts) {
     content.appendChild(reactionsDiv);
   }
 
-  // Quote button — available on all messages (main feed + thread panel)
+  // Quote button — only for messages inside threads (main feed uses threads instead)
   var quoteActions = document.createElement('div');
   quoteActions.className = 'message-actions';
   var quoteBtn = document.createElement('button');
@@ -2676,11 +2676,9 @@ function appendMessageToContainer(msg, container, opts) {
     threadLink.addEventListener('click', function() { openThread(msg.id); });
     content.appendChild(threadLink);
 
-    // Action buttons (quote + reply in thread)
+    // Action buttons (reply in thread only — no quote in main feed)
     var actions = document.createElement('div');
     actions.className = 'message-actions';
-    quoteActions.className = ''; // merge into this actions bar
-    actions.appendChild(quoteBtn);
     var replyBtn = document.createElement('button');
     replyBtn.className = 'message-action-btn';
     replyBtn.title = 'Reply in thread';
