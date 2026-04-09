@@ -2641,6 +2641,32 @@ function appendMessageToContainer(msg, container, opts) {
     content.appendChild(reactionsDiv);
   }
 
+  // Quote button — available on all messages (main feed + thread panel)
+  var quoteActions = document.createElement('div');
+  quoteActions.className = 'message-actions';
+  var quoteBtn = document.createElement('button');
+  quoteBtn.className = 'message-action-btn';
+  quoteBtn.title = 'Quote reply';
+  quoteBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z"/></svg>';
+  quoteBtn.addEventListener('click', (function(m) {
+    return function() {
+      var authorName = isHuman ? 'You' : (agent ? agent.name : m.from);
+      var preview = (m.content || '').split('\n')[0].substring(0, 120);
+      var quoteText = '> **' + authorName + '**: ' + preview + '\n\n';
+      // Insert into the appropriate composer
+      var targetInput = activeThreadId ? document.getElementById('thread-composer-input') : composerInput;
+      if (targetInput) {
+        targetInput.value = quoteText + targetInput.value;
+        targetInput.focus();
+        targetInput.setSelectionRange(targetInput.value.length, targetInput.value.length);
+        // Enable send button
+        var sendBtn = activeThreadId ? document.getElementById('thread-composer-send') : composerSend;
+        if (sendBtn) sendBtn.disabled = false;
+      }
+    };
+  })(msg));
+  quoteActions.appendChild(quoteBtn);
+
   // Thread link (shows "N replies" if this message has replies)
   if (container.id === 'messages') {
     var threadLink = document.createElement('button');
@@ -2650,15 +2676,11 @@ function appendMessageToContainer(msg, container, opts) {
     threadLink.addEventListener('click', function() { openThread(msg.id); });
     content.appendChild(threadLink);
 
-    // Action buttons (reply inline + reply in thread)
+    // Action buttons (quote + reply in thread)
     var actions = document.createElement('div');
     actions.className = 'message-actions';
-    var quickReplyBtn = document.createElement('button');
-    quickReplyBtn.className = 'message-action-btn';
-    quickReplyBtn.title = 'Reply';
-    quickReplyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>';
-    quickReplyBtn.addEventListener('click', (function(mid) { return function() { setReplyMode(mid); }; })(msg.id));
-    actions.appendChild(quickReplyBtn);
+    quoteActions.className = ''; // merge into this actions bar
+    actions.appendChild(quoteBtn);
     var replyBtn = document.createElement('button');
     replyBtn.className = 'message-action-btn';
     replyBtn.title = 'Reply in thread';
@@ -2671,6 +2693,11 @@ function appendMessageToContainer(msg, container, opts) {
     if (threadReplyCounts[msg.id]) {
       updateThreadLink(msg.id);
     }
+  }
+
+  // For thread panel messages: add quote button
+  if (container.id !== 'messages' && container.id !== 'thread-parent') {
+    msgDiv.appendChild(quoteActions);
   }
 
   msgDiv.appendChild(avatar);
