@@ -336,6 +336,7 @@ type Broker struct {
 	token               string   // shared secret for authenticating requests
 	addr                string   // actual listen address (useful when port=0)
 	webUIOrigins        []string // allowed CORS origins for web UI (set by ServeWebUI)
+	runtimeProvider     string   // "codex" or "claude" — set by launcher
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -653,14 +654,24 @@ func (b *Broker) Stop() {
 func (b *Broker) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if origin != "" && len(b.webUIOrigins) > 0 {
+		if len(b.webUIOrigins) > 0 {
+			matched := false
 			for _, allowed := range b.webUIOrigins {
 				if origin == allowed {
 					w.Header().Set("Access-Control-Allow-Origin", allowed)
-					w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+					matched = true
 					break
 				}
+			}
+			// Allow null/empty origin for localhost requests (headless browsers,
+			// file:// loads, same-machine tools). Still safe because /web-token
+			// restricts to 127.0.0.1 RemoteAddr.
+			if !matched && (origin == "null" || origin == "") {
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+			}
+			if w.Header().Get("Access-Control-Allow-Origin") != "" {
+				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			}
 		}
 		if r.Method == "OPTIONS" {
@@ -771,6 +782,49 @@ func (b *Broker) ServeWebUI(port int) {
 		webDir = "web"
 	}
 	mux := http.NewServeMux()
+	// Reverse proxy: /api/* → broker on :7890. Same origin, no CORS.
+	brokerURL := fmt.Sprintf("http://127.0.0.1:%d", BrokerPort)
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		// Strip /api prefix and forward to broker
+		targetPath := strings.TrimPrefix(r.URL.Path, "/api")
+		if targetPath == "" {
+			targetPath = "/"
+		}
+		target := brokerURL + targetPath
+		if r.URL.RawQuery != "" {
+			target += "?" + r.URL.RawQuery
+		}
+
+		proxyReq, err := http.NewRequest(r.Method, target, r.Body)
+		if err != nil {
+			http.Error(w, "proxy error", http.StatusBadGateway)
+			return
+		}
+		// Forward auth header
+		proxyReq.Header.Set("Authorization", "Bearer "+b.token)
+		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
+
+		resp, err := http.DefaultClient.Do(proxyReq)
+		if err != nil {
+			http.Error(w, "broker unreachable", http.StatusBadGateway)
+			return
+		}
+		defer resp.Body.Close()
+
+		// Copy response headers and body
+		for k, v := range resp.Header {
+			for _, vv := range v {
+				w.Header().Add(k, vv)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		io.Copy(w, resp.Body)
+	})
+	// Token endpoint — no auth needed, same origin
+	mux.HandleFunc("/api-token", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"token": b.token})
+	})
 	mux.Handle("/", http.FileServer(http.Dir(webDir)))
 	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux)
 }
@@ -2279,6 +2333,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":           "ok",
 		"session_mode":     mode,
 		"one_on_one_agent": agent,
+		"provider":         b.runtimeProvider,
 	})
 }
 
@@ -3335,6 +3390,28 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
+	tagged := uniqueSlugs(body.Tagged)
+
+	// Thread auto-tagging: ALL thread participants get notified about
+	// every new message in the thread. If CEO, PM, and you are in a
+	// thread, any new reply notifies the other two. This applies to
+	// both human and agent messages.
+	replyTo := strings.TrimSpace(body.ReplyTo)
+	if replyTo != "" {
+		threadRoot := replyTo
+		threadParticipants := []string{}
+		for _, existing := range b.messages {
+			inThread := existing.ID == threadRoot || existing.ReplyTo == threadRoot
+			if inThread && existing.From != body.From {
+				// Include agents (skip "you"/"human" — they see via the web UI poll)
+				if existing.From != "you" && existing.From != "human" {
+					threadParticipants = append(threadParticipants, existing.From)
+				}
+			}
+		}
+		tagged = uniqueSlugs(append(tagged, threadParticipants...))
+	}
+
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      body.From,
@@ -3342,8 +3419,8 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		Kind:      strings.TrimSpace(body.Kind),
 		Title:     strings.TrimSpace(body.Title),
 		Content:   body.Content,
-		Tagged:    uniqueSlugs(body.Tagged),
-		ReplyTo:   strings.TrimSpace(body.ReplyTo),
+		Tagged:    tagged,
+		ReplyTo:   replyTo,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	}
 	b.appendMessageLocked(msg)
