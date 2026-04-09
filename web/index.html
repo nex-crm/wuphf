@@ -2509,7 +2509,7 @@ function appendMessageToContainer(msg, container, opts) {
   }
 
   // Parent label for nested replies
-  if (opts.parentName) {
+  if (false && opts.parentName) {
     var parentLabel = document.createElement('div');
     parentLabel.className = 'thread-reply-parent-label';
     parentLabel.textContent = 'reply to @' + opts.parentName;
@@ -2617,16 +2617,7 @@ function appendMessageToContainer(msg, container, opts) {
     content.appendChild(textDiv);
   }
 
-  // Thread reply-to indicator (#20)
-  if (msg.reply_to && container.id === 'thread-messages') {
-    var parentMsg = allMessages[msg.reply_to];
-    if (parentMsg) {
-      var replyToAgent = AGENTS.find(function(a) { return a.slug === parentMsg.from; });
-      var replyToLabel = el('div', { className: 'thread-reply-to' }, 'replied to @' + (replyToAgent ? replyToAgent.name : parentMsg.from));
-      // Insert before the header
-      content.insertBefore(replyToLabel, header);
-    }
-  }
+  // Threads are flat conversations — no per-message reply indicators
 
   // Reactions display
   if (msg.reactions && msg.reactions.length > 0) {
@@ -2801,9 +2792,7 @@ function openThread(msgId) {
         replies.forEach(function(m) {
           allMessages[m.id] = m;
           if (!existingIds[m.id]) {
-            var depth = calcReplyDepth(m, msgId);
-            var parentName = depth > 0 ? getReplyParentName(m) : null;
-            appendMessageToContainer(m, messagesContainer, { depth: depth, parentName: parentName });
+            appendMessageToContainer(m, messagesContainer);
           }
         });
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -3098,18 +3087,59 @@ function renderAutocomplete() {
   });
 }
 
-function selectAutocomplete(idx) {
+// Generic versions that work with any input element
+var acActiveInput = composerInput;
+
+function updateAutocompleteFor(inputEl) {
+  acActiveInput = inputEl;
+  var val = inputEl.value;
+  var shouldShow = false;
+
+  if (val.match(/^\/\S*$/) && val.length >= 1) {
+    acMode = 'slash';
+    var query = val.slice(1).toLowerCase();
+    acItems = SLASH_COMMANDS.filter(function(cmd) {
+      return cmd.name.slice(1).toLowerCase().indexOf(query) === 0;
+    });
+    shouldShow = acItems.length > 0;
+  } else if (val.match(/(^|\s)@\S*$/)) {
+    acMode = 'mention';
+    var match = val.match(/(^|\s)@(\S*)$/);
+    var q = match ? match[2].toLowerCase() : '';
+    acItems = AGENTS.filter(function(a) {
+      return a.slug.toLowerCase().indexOf(q) === 0 || a.name.toLowerCase().indexOf(q) === 0;
+    }).map(function(a) {
+      return { name: '@' + a.slug, desc: a.name + ' \u2014 ' + a.role, icon: a.emoji };
+    });
+    shouldShow = acItems.length > 0;
+  } else {
+    acMode = null;
+    acItems = [];
+  }
+
+  if (shouldShow) { renderAutocomplete(); acPanel.classList.add('open'); }
+  else { acPanel.classList.remove('open'); acSelectedIdx = -1; }
+}
+
+function selectAutocompleteFor(idx, inputEl) {
   if (idx < 0 || idx >= acItems.length) return;
+  var target = inputEl || acActiveInput || composerInput;
   var item = acItems[idx];
   if (acMode === 'slash') {
-    composerInput.value = item.name + ' ';
+    target.value = item.name + ' ';
   } else if (acMode === 'mention') {
-    // Replace the @partial with the full @slug
-    composerInput.value = composerInput.value.replace(/(^|\s)@\S*$/, '$1' + item.name + ' ');
+    target.value = target.value.replace(/(^|\s)@\S*$/, '$1' + item.name + ' ');
   }
   acPanel.classList.remove('open');
   acSelectedIdx = -1;
   acMode = null;
+  target.focus();
+}
+
+function selectAutocomplete(idx) {
+  selectAutocompleteFor(idx, acActiveInput || composerInput);
+  // Also update send button state
+  composerSend.disabled = !composerInput.value.trim();
   composerInput.focus();
   composerSend.disabled = !composerInput.value.trim();
 }
@@ -3160,8 +3190,17 @@ if (threadInput) {
     threadSend.disabled = !threadInput.value.trim();
     threadInput.style.height = 'auto';
     threadInput.style.height = Math.min(threadInput.scrollHeight, 120) + 'px';
+    // Autocomplete in thread composer (same as main)
+    updateAutocompleteFor(threadInput);
   });
   threadInput.addEventListener('keydown', function(e) {
+    // Autocomplete navigation
+    if (acPanel.classList.contains('open')) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); acSelectedIdx = Math.min(acSelectedIdx + 1, acItems.length - 1); renderAutocomplete(); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); acSelectedIdx = Math.max(acSelectedIdx - 1, 0); renderAutocomplete(); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && acSelectedIdx >= 0)) { e.preventDefault(); selectAutocompleteFor(acSelectedIdx >= 0 ? acSelectedIdx : 0, threadInput); return; }
+      if (e.key === 'Escape') { acPanel.classList.remove('open'); acSelectedIdx = -1; return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendThreadReply(); }
   });
   threadSend.addEventListener('click', sendThreadReply);
@@ -3171,11 +3210,37 @@ function sendThreadReply() {
   if (!activeThreadId || !threadInput) return;
   var raw = threadInput.value.trim();
   if (!raw) return;
+
+  // Handle slash commands in thread too
+  if (raw.charAt(0) === '/') {
+    threadInput.value = '';
+    threadInput.style.height = 'auto';
+    threadSend.disabled = true;
+    handleSlashCommand(raw);
+    return;
+  }
+
+  // Extract @mentions for tagged array
+  var tagged = [];
+  var mentionRe = /@(\S+)/g;
+  var mentionMatch;
+  while ((mentionMatch = mentionRe.exec(raw)) !== null) {
+    var mentionSlug = mentionMatch[1].toLowerCase();
+    var mentionAgent = AGENTS.find(function(a) { return a.slug === mentionSlug; });
+    if (mentionAgent) tagged.push(mentionAgent.slug);
+  }
+
   threadInput.value = '';
   threadInput.style.height = 'auto';
   threadSend.disabled = true;
-  WuphfAPI.postMessage(raw, currentChannel, activeThreadId)
-    .catch(function(e) { console.error('Thread reply failed:', e); });
+
+  WuphfAPI.post('/messages', {
+    from: 'you',
+    channel: currentChannel,
+    content: raw,
+    tagged: tagged,
+    reply_to: activeThreadId
+  }).catch(function(e) { console.error('Thread reply failed:', e); });
 }
 
 function handleSlashCommand(input) {
