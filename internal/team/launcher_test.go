@@ -799,49 +799,25 @@ func TestTaskNotificationTargetsDoNotRewakeCEOForOwnCreatedTask(t *testing.T) {
 	}
 }
 
-func TestPersistHumanDirectiveRecordsLedger(t *testing.T) {
+func TestRecordPolicyDeduplicates(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
-	l := &Launcher{broker: b}
-	msg := channelMessage{
-		ID:      "msg-1",
-		From:    "you",
-		Channel: "general",
-		Content: "CEO, give me the office state and ask PM for a v1 scope.",
-		Tagged:  []string{"ceo", "pm"},
+	_, err := b.RecordPolicy("human_directed", "Always ask before deploying to production")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-
-	l.persistHumanDirective(msg)
-
-	if got := len(b.Signals()); got != 1 {
-		t.Fatalf("expected 1 signal, got %d", got)
+	// Second call with same rule should deduplicate.
+	_, err = b.RecordPolicy("human_directed", "Always ask before deploying to production")
+	if err != nil {
+		t.Fatalf("unexpected error on dedup: %v", err)
 	}
-	if got := len(b.Decisions()); got != 1 {
-		t.Fatalf("expected 1 decision, got %d", got)
-	}
-	if got := len(b.Actions()); got != 1 {
-		t.Fatalf("expected 1 action, got %d", got)
-	}
-	if sig := b.Signals()[0]; sig.Source != "human_directive" || sig.SourceRef != "msg-1" {
-		t.Fatalf("unexpected human directive signal: %+v", sig)
-	}
-	if decision := b.Decisions()[0]; decision.Kind == "" || decision.Owner != "ceo" {
-		t.Fatalf("unexpected human directive decision: %+v", decision)
-	}
-	if action := b.Actions()[0]; action.Kind != "human_directive" || action.DecisionID == "" || len(action.SignalIDs) == 0 {
-		t.Fatalf("unexpected human directive action: %+v", action)
-	}
-
-	l.persistHumanDirective(msg)
-	if got := len(b.Signals()); got != 1 {
-		t.Fatalf("expected deduped signal count to stay 1, got %d", got)
-	}
-	if got := len(b.Decisions()); got != 1 {
-		t.Fatalf("expected deduped decision count to stay 1, got %d", got)
+	policies := b.ListPolicies()
+	if len(policies) != 1 {
+		t.Fatalf("expected 1 policy after dedup, got %d", len(policies))
 	}
 }
 
@@ -869,52 +845,37 @@ func TestRecordWatchdogLedgerCreatesSignalAndDecision(t *testing.T) {
 	}
 }
 
-func TestPersistOfficeSignalsCreatesOwnedTaskAndLedger(t *testing.T) {
+func TestRecordPolicyPersistsAndLoads(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
-	l := &Launcher{broker: b}
+	_, err := b.RecordPolicy("human_directed", "Work autonomously without asking for approval")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = b.RecordPolicy("auto_detected", "User prefers brief responses")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-	l.persistOfficeSignals("general", []officeSignal{{
-		ID:         "nex-1",
-		Source:     "nex_insights",
-		Kind:       "activity",
-		Title:      "Nex insight",
-		Content:    "Paul Williams is speaking at a product event and we should follow up on the opportunity.",
-		Channel:    "general",
-		Owner:      "ai",
-		Confidence: "very_high",
-		Urgency:    "normal",
-	}})
-
-	if got := len(b.Signals()); got != 1 {
-		t.Fatalf("expected 1 signal, got %d", got)
+	// Reload and verify persistence.
+	b2 := NewBroker()
+	if err := b2.loadState(); err != nil {
+		t.Fatalf("load failed: %v", err)
 	}
-	if got := len(b.Decisions()); got != 1 {
-		t.Fatalf("expected 1 decision, got %d", got)
+	policies := b2.ListPolicies()
+	if len(policies) != 2 {
+		t.Fatalf("expected 2 policies after reload, got %d", len(policies))
 	}
-	if got := len(b.Messages()); got != 1 {
-		t.Fatalf("expected 1 automation message, got %d", got)
+	sources := map[string]bool{}
+	for _, p := range policies {
+		sources[p.Source] = true
 	}
-	tasks := b.ChannelTasks("general")
-	if len(tasks) != 1 {
-		t.Fatalf("expected 1 planned task, got %d", len(tasks))
-	}
-	if tasks[0].Owner != "ai" || tasks[0].SourceSignalID == "" || tasks[0].SourceDecisionID == "" {
-		t.Fatalf("unexpected planned task: %+v", tasks[0])
-	}
-	hasTaskCreated := false
-	for _, a := range b.Actions() {
-		if a.Kind == "task_created" {
-			hasTaskCreated = true
-			break
-		}
-	}
-	if !hasTaskCreated {
-		t.Fatalf("expected task_created action among %+v", b.Actions())
+	if !sources["human_directed"] || !sources["auto_detected"] {
+		t.Fatalf("expected both sources, got %v", sources)
 	}
 }
 
