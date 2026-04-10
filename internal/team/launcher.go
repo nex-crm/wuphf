@@ -321,52 +321,10 @@ func (l *Launcher) notifyAgentsLoop() {
 		if msg.From == "system" {
 			continue
 		}
-		l.persistHumanDirective(msg)
 		l.deliverMessageNotification(msg)
 	}
 }
 
-func (l *Launcher) persistHumanDirective(msg channelMessage) {
-	if l.broker == nil {
-		return
-	}
-	signal, ok := buildHumanDirectiveSignal(msg)
-	if !ok {
-		return
-	}
-	records, err := l.broker.RecordSignals([]officeSignal{signal})
-	if err != nil || len(records) == 0 {
-		return
-	}
-	signalIDs := make([]string, 0, len(records))
-	for _, record := range records {
-		signalIDs = append(signalIDs, record.ID)
-	}
-	plan := planHumanDirective(msg)
-	decision, err := l.broker.RecordDecision(
-		plan.DecisionKind,
-		signal.Channel,
-		plan.Summary,
-		plan.DecisionReason,
-		"ceo",
-		signalIDs,
-		false,
-		false,
-	)
-	if err != nil {
-		return
-	}
-	_ = l.broker.RecordAction(
-		"human_directive",
-		"human",
-		signal.Channel,
-		msg.From,
-		truncate(plan.Summary, 140),
-		msg.ID,
-		signalIDs,
-		decision.ID,
-	)
-}
 
 func (l *Launcher) notifyTaskActionsLoop() {
 	if l.broker == nil {
@@ -1415,13 +1373,7 @@ func (l *Launcher) fetchAndPostNexInsights(client *api.Client) {
 	if err != nil {
 		return
 	}
-	insights := parseInsightsResponse(raw)
-	signals := buildInsightSignals(insights)
-	if len(signals) == 0 {
-		_ = l.broker.SetInsightsCursor(now.Format(time.RFC3339Nano))
-		return
-	}
-	l.persistOfficeSignals("general", signals)
+	_ = parseInsightsResponse(raw) // parse and discard — CEO sees Nex context via MCP, not signal machinery
 	_ = l.broker.SetInsightsCursor(now.Format(time.RFC3339Nano))
 }
 
@@ -1538,86 +1490,16 @@ func (l *Launcher) fetchAndIngestNexNotifications(client *api.Client) {
 	}
 
 	latest := l.broker.NotificationCursor()
-	signals := buildNotificationSignals(result.Items)
-	for i := range signals {
-		item := result.Items[i]
+	for _, item := range result.Items {
 		if item.SentAt != "" && (latest == "" || item.SentAt > latest) {
 			latest = item.SentAt
 		}
 	}
-	l.persistOfficeSignals("general", signals)
-
 	if latest != "" {
 		_ = l.broker.SetNotificationCursor(latest)
 	}
 }
 
-func (l *Launcher) persistOfficeSignals(channel string, signals []officeSignal) {
-	if l.broker == nil || len(signals) == 0 {
-		return
-	}
-	records, err := l.broker.RecordSignals(signals)
-	if err != nil || len(records) == 0 {
-		return
-	}
-	plan := planOfficeActions(signals)
-	signalIDs := make([]string, 0, len(records))
-	for _, record := range records {
-		signalIDs = append(signalIDs, record.ID)
-	}
-	requiresHuman := false
-	blocking := false
-	for _, req := range plan.Requests {
-		requiresHuman = true
-		if req.Blocking {
-			blocking = true
-		}
-	}
-	owner := "ceo"
-	if len(plan.Tagged) == 1 {
-		owner = plan.Tagged[0]
-	}
-	decision, err := l.broker.RecordDecision(plan.DecisionKind, channel, plan.Summary, plan.DecisionReason, owner, signalIDs, requiresHuman, blocking)
-	if err != nil {
-		return
-	}
-	msg, _, err := l.broker.PostAutomationMessage(
-		"wuphf",
-		channel,
-		"Office decision",
-		plan.Summary,
-		decision.ID,
-		"policy_engine",
-		"Office policy",
-		plan.Tagged,
-		"",
-	)
-	if err != nil {
-		return
-	}
-	_ = l.broker.RecordAction("decision_posted", "policy_engine", channel, "ceo", truncate(plan.Summary, 140), msg.ID, signalIDs, decision.ID)
-	firstSignalID := ""
-	if len(signalIDs) > 0 {
-		firstSignalID = signalIDs[0]
-	}
-	for _, task := range plan.Tasks {
-		_, _, _ = l.broker.EnsurePlannedTask(plannedTaskInput{
-			Channel:          channel,
-			Title:            task.Title,
-			Details:          task.Details,
-			Owner:            task.Owner,
-			CreatedBy:        "ceo",
-			ThreadID:         msg.ID,
-			SourceSignalID:   firstSignalID,
-			SourceDecisionID: decision.ID,
-		})
-	}
-	for _, req := range plan.Requests {
-		if _, err := l.broker.CreateRequest(req); err != nil {
-			continue
-		}
-	}
-}
 
 func formatNexFeedItem(item nexFeedItem) (string, string) {
 	title := humanizeNotificationType(item.Type)

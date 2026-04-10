@@ -1641,6 +1641,15 @@ var WuphfAPI = (function() {
   function getDecisions() { return get('/decisions'); }
   function getWatchdogs() { return get('/watchdogs'); }
   function getActions() { return get('/actions'); }
+  function getPolicies() { return get('/policies'); }
+  function createPolicy(source, rule) { return post('/policies', { source: source, rule: rule }); }
+  function deletePolicy(id) {
+    return fetch(baseURL() + '/policies', {
+      method: 'DELETE',
+      headers: authHeaders(),
+      body: JSON.stringify({ id: id })
+    }).then(function(r) { return r.json(); });
+  }
   function getScheduler() { return get('/scheduler'); }
   function getSkills() { return get('/skills'); }
 
@@ -1663,6 +1672,9 @@ var WuphfAPI = (function() {
     getDecisions: getDecisions,
     getWatchdogs: getWatchdogs,
     getActions: getActions,
+    getPolicies: getPolicies,
+    createPolicy: createPolicy,
+    deletePolicy: deletePolicy,
     getScheduler: getScheduler,
     getSkills: getSkills
   };
@@ -2361,89 +2373,107 @@ function renderPoliciesApp(panel) {
     return;
   }
   panel.style.overflow = 'auto';
-  var policyTabs = ['signals', 'decisions', 'watchdogs', 'actions'];
-  var activeTab = 'signals';
-  var cachedPolicyData = {};
 
-  var tabsDiv = el('div', { className: 'policy-tabs' });
-  var contentDiv = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } });
+  // Header with add button
+  var header = el('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px 8px' } });
+  header.appendChild(el('div', { style: { fontSize: '13px', color: 'var(--text-secondary)' } }, 'Office operating rules. Set explicitly or auto-detected from working patterns.'));
+  var addBtn = el('button', { className: 'btn-secondary', style: { fontSize: '12px', padding: '4px 12px' } }, '+ Add rule');
+  header.appendChild(addBtn);
+  panel.appendChild(header);
 
-  policyTabs.forEach(function(tab) {
-    var tabBtn = el('button', {
-      className: 'policy-tab' + (tab === activeTab ? ' active' : ''),
-      onClick: function() {
-        activeTab = tab;
-        tabsDiv.querySelectorAll('.policy-tab').forEach(function(t) { t.classList.remove('active'); });
-        tabBtn.classList.add('active');
-        renderPolicyTab(contentDiv, tab, cachedPolicyData);
+  // Inline add form (hidden by default)
+  var addForm = el('div', { style: { display: 'none', padding: '8px 20px 12px', borderBottom: '1px solid var(--border)' } });
+  var addInput = el('input', { type: 'text', placeholder: 'e.g. "Always ask before deploying to production"', style: { width: '100%', padding: '8px 10px', fontSize: '13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', background: 'var(--bg-card)', color: 'var(--text)', boxSizing: 'border-box', marginBottom: '8px' } });
+  var formBtns = el('div', { style: { display: 'flex', gap: '8px' } });
+  var saveBtn = el('button', { className: 'btn-primary', style: { fontSize: '12px', padding: '4px 12px' } }, 'Save');
+  var cancelBtn = el('button', { className: 'btn-secondary', style: { fontSize: '12px', padding: '4px 12px' } }, 'Cancel');
+  formBtns.appendChild(saveBtn);
+  formBtns.appendChild(cancelBtn);
+  addForm.appendChild(addInput);
+  addForm.appendChild(formBtns);
+  panel.appendChild(addForm);
+
+  addBtn.addEventListener('click', function() {
+    addForm.style.display = addForm.style.display === 'none' ? 'block' : 'none';
+    if (addForm.style.display === 'block') addInput.focus();
+  });
+  cancelBtn.addEventListener('click', function() {
+    addForm.style.display = 'none';
+    addInput.value = '';
+  });
+
+  var listDiv = el('div', { style: { padding: '8px 0' } });
+  panel.appendChild(listDiv);
+
+  function reloadPolicies() {
+    listDiv.textContent = '';
+    listDiv.appendChild(el('div', { style: { padding: '20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading...'));
+    WuphfAPI.getPolicies().then(function(data) {
+      listDiv.textContent = '';
+      var policies = (data.policies || []).filter(function(p) { return p.active; });
+      if (policies.length === 0) {
+        listDiv.appendChild(el('div', { className: 'request-empty' }, 'No policies set. Add one above.'));
+        return;
       }
-    }, tab.charAt(0).toUpperCase() + tab.slice(1));
-    tabsDiv.appendChild(tabBtn);
-  });
-
-  panel.appendChild(tabsDiv);
-  panel.appendChild(contentDiv);
-
-  // Fetch all data
-  contentDiv.textContent = '';
-  contentDiv.appendChild(el('div', { style: { padding: '20px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' } }, 'Loading...'));
-
-  Promise.all([
-    WuphfAPI.getSignals().catch(function() { return { signals: [] }; }),
-    WuphfAPI.getDecisions().catch(function() { return { decisions: [] }; }),
-    WuphfAPI.getWatchdogs().catch(function() { return { watchdogs: [] }; }),
-    WuphfAPI.getActions().catch(function() { return { actions: [] }; })
-  ]).then(function(results) {
-    cachedPolicyData.signals = results[0].signals || results[0] || [];
-    cachedPolicyData.decisions = results[1].decisions || results[1] || [];
-    cachedPolicyData.watchdogs = results[2].watchdogs || results[2] || [];
-    cachedPolicyData.actions = results[3].actions || results[3] || [];
-    if (!Array.isArray(cachedPolicyData.signals)) cachedPolicyData.signals = [];
-    if (!Array.isArray(cachedPolicyData.decisions)) cachedPolicyData.decisions = [];
-    if (!Array.isArray(cachedPolicyData.watchdogs)) cachedPolicyData.watchdogs = [];
-    if (!Array.isArray(cachedPolicyData.actions)) cachedPolicyData.actions = [];
-    renderPolicyTab(contentDiv, activeTab, cachedPolicyData);
-  });
-}
-
-function renderPolicyTab(container, tab, data) {
-  container.textContent = '';
-  var items = data[tab] || [];
-  var icons = { signals: '\uD83D\uDCE1', decisions: '\u2696', watchdogs: '\uD83D\uDC15', actions: '\u26A1' };
-
-  if (items.length === 0) {
-    container.appendChild(el('div', { className: 'request-empty' }, 'No ' + tab + ' found.'));
-    return;
+      // Group by source
+      var sections = [
+        { key: 'human_directed', label: 'Human-directed', icon: '\uD83D\uDC64' },
+        { key: 'auto_detected', label: 'Auto-detected', icon: '\uD83E\uDD16' }
+      ];
+      sections.forEach(function(section) {
+        var sectionPolicies = policies.filter(function(p) { return p.source === section.key; });
+        if (sectionPolicies.length === 0) return;
+        var sectionHeader = el('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 20px', fontSize: '11px', fontWeight: '600', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.08em' } });
+        sectionHeader.appendChild(el('span', null, section.icon));
+        sectionHeader.appendChild(el('span', null, section.label));
+        listDiv.appendChild(sectionHeader);
+        sectionPolicies.forEach(function(policy) {
+          var row = el('div', { className: 'policy-item', style: { margin: '0 12px 6px', cursor: 'default' } });
+          var icon = el('div', { className: 'policy-item-icon' }, '\uD83D\uDCCB');
+          var body = el('div', { className: 'policy-item-body' });
+          body.appendChild(el('div', { className: 'policy-item-title', style: { fontWeight: '500' } }, policy.rule));
+          var meta = el('div', { className: 'policy-item-meta' });
+          if (policy.created_at) {
+            meta.appendChild(el('span', null, new Date(policy.created_at).toLocaleDateString()));
+          }
+          var statusPill = el('span', { className: 'policy-status-pill policy-status-active' }, 'ACTIVE');
+          meta.appendChild(statusPill);
+          body.appendChild(meta);
+          // Deactivate button
+          var deactivateBtn = el('button', {
+            style: { background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', fontSize: '16px', padding: '0 4px', lineHeight: '1', flexShrink: '0', alignSelf: 'center' },
+            title: 'Deactivate'
+          }, '\u00D7');
+          deactivateBtn.addEventListener('click', function() {
+            WuphfAPI.deletePolicy(policy.id).then(function() { reloadPolicies(); }).catch(function() {});
+          });
+          row.appendChild(icon);
+          row.appendChild(body);
+          row.appendChild(deactivateBtn);
+          listDiv.appendChild(row);
+        });
+      });
+    }).catch(function() {
+      listDiv.textContent = '';
+      listDiv.appendChild(el('div', { className: 'request-empty' }, 'Failed to load policies.'));
+    });
   }
 
-  items.forEach(function(item) {
-    var row = el('div', { className: 'policy-item' });
-    var icon = el('div', { className: 'policy-item-icon' }, icons[tab] || '\uD83D\uDCCC');
-    var body = el('div', { className: 'policy-item-body' });
-    body.appendChild(el('div', { className: 'policy-item-title' }, item.name || item.title || item.kind || 'Unknown'));
-    if (item.summary || item.description) {
-      body.appendChild(el('div', { className: 'policy-item-summary' }, item.summary || item.description));
-    }
-    var meta = el('div', { className: 'policy-item-meta' });
-    if (item.kind) meta.appendChild(el('span', null, item.kind));
-    if (item.owner) meta.appendChild(el('span', null, 'by ' + item.owner));
-    if (item.timestamp || item.created_at || item.updated_at) {
-      var ts = item.timestamp || item.created_at || item.updated_at;
-      meta.appendChild(el('span', null, new Date(ts).toLocaleString()));
-    }
-    if (item.status) {
-      var sClass = 'policy-status-pending';
-      var sl = item.status.toLowerCase();
-      if (sl === 'active' || sl === 'enabled') sClass = 'policy-status-active';
-      else if (sl === 'fired' || sl === 'triggered') sClass = 'policy-status-fired';
-      else if (sl === 'resolved' || sl === 'done') sClass = 'policy-status-resolved';
-      meta.appendChild(el('span', { className: 'policy-status-pill ' + sClass }, item.status.toUpperCase()));
-    }
-    body.appendChild(meta);
-    row.appendChild(icon);
-    row.appendChild(body);
-    container.appendChild(row);
+  saveBtn.addEventListener('click', function() {
+    var rule = addInput.value.trim();
+    if (!rule) return;
+    WuphfAPI.createPolicy('human_directed', rule).then(function() {
+      addInput.value = '';
+      addForm.style.display = 'none';
+      reloadPolicies();
+    }).catch(function() {});
   });
+  addInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') saveBtn.click();
+    if (e.key === 'Escape') cancelBtn.click();
+  });
+
+  reloadPolicies();
 }
 
 // ─── Skills View (#59) ───

@@ -281,6 +281,7 @@ type brokerState struct {
 	InsightsSince     string                       `json:"insights_since,omitempty"`
 	PendingInterview  *humanInterview              `json:"pending_interview,omitempty"`
 	Usage             teamUsageState               `json:"usage,omitempty"`
+	Policies          []officePolicy               `json:"policies,omitempty"`
 }
 
 type usageTotals struct {
@@ -336,7 +337,8 @@ type Broker struct {
 	token               string   // shared secret for authenticating requests
 	addr                string   // actual listen address (useful when port=0)
 	webUIOrigins        []string // allowed CORS origins for web UI (set by ServeWebUI)
-	runtimeProvider     string   // "codex" or "claude" — set by launcher
+	runtimeProvider     string         // "codex" or "claude" — set by launcher
+	policies            []officePolicy // active office operating rules
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -604,6 +606,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/reset", b.requireAuth(b.handleReset))
 	mux.HandleFunc("/reset-dm", b.requireAuth(b.handleResetDM))
 	mux.HandleFunc("/usage", b.requireAuth(b.handleUsage))
+	mux.HandleFunc("/policies", b.requireAuth(b.handlePolicies))
 	mux.HandleFunc("/signals", b.requireAuth(b.handleSignals))
 	mux.HandleFunc("/decisions", b.requireAuth(b.handleDecisions))
 	mux.HandleFunc("/watchdogs", b.requireAuth(b.handleWatchdogs))
@@ -1152,6 +1155,7 @@ func (b *Broker) Reset() {
 	b.signals = nil
 	b.decisions = nil
 	b.watchdogs = nil
+	b.policies = nil
 	b.scheduler = nil
 	b.pendingInterview = nil
 	b.activity = make(map[string]agentActivitySnapshot)
@@ -1196,6 +1200,7 @@ func (b *Broker) loadState() error {
 	b.signals = state.Signals
 	b.decisions = state.Decisions
 	b.watchdogs = state.Watchdogs
+	b.policies = state.Policies
 	b.scheduler = state.Scheduler
 	b.skills = state.Skills
 	b.sharedMemory = state.SharedMemory
@@ -1219,7 +1224,7 @@ func (b *Broker) loadState() error {
 
 func (b *Broker) saveLocked() error {
 	path := brokerStatePath()
-	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
+	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.policies) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
@@ -1240,6 +1245,7 @@ func (b *Broker) saveLocked() error {
 		Signals:           b.signals,
 		Decisions:         b.decisions,
 		Watchdogs:         b.watchdogs,
+		Policies:          b.policies,
 		Scheduler:         b.scheduler,
 		Skills:            b.skills,
 		SharedMemory:      b.sharedMemory,
@@ -2481,6 +2487,108 @@ func (b *Broker) handleUsage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(usage)
+}
+
+// RecordPolicy adds a new active policy. Deduplicates by exact rule text.
+func (b *Broker) RecordPolicy(source, rule string) (officePolicy, error) {
+	rule = strings.TrimSpace(rule)
+	if rule == "" {
+		return officePolicy{}, fmt.Errorf("rule cannot be empty")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// Dedupe: don't add the same rule twice.
+	for i, p := range b.policies {
+		if strings.EqualFold(p.Rule, rule) {
+			b.policies[i].Active = true
+			_ = b.saveLocked()
+			return b.policies[i], nil
+		}
+	}
+	p := newOfficePolicy(source, rule)
+	b.policies = append(b.policies, p)
+	_ = b.saveLocked()
+	return p, nil
+}
+
+// ListPolicies returns all active policies.
+func (b *Broker) ListPolicies() []officePolicy {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]officePolicy, 0, len(b.policies))
+	for _, p := range b.policies {
+		if p.Active {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		b.mu.Lock()
+		out := make([]officePolicy, 0, len(b.policies))
+		for _, p := range b.policies {
+			if p.Active {
+				out = append(out, p)
+			}
+		}
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"policies": out})
+
+	case http.MethodPost:
+		var body struct {
+			Source string `json:"source"`
+			Rule   string `json:"rule"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if strings.TrimSpace(body.Rule) == "" {
+			http.Error(w, "rule is required", http.StatusBadRequest)
+			return
+		}
+		p, err := b.RecordPolicy(body.Source, body.Rule)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(p)
+
+	case http.MethodDelete:
+		id := strings.TrimPrefix(r.URL.Path, "/policies/")
+		id = strings.TrimSpace(id)
+		if id == "" || id == "/policies" {
+			// Parse from body
+			var body struct {
+				ID string `json:"id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			id = strings.TrimSpace(body.ID)
+		}
+		if id == "" {
+			http.Error(w, "id required", http.StatusBadRequest)
+			return
+		}
+		b.mu.Lock()
+		for i, p := range b.policies {
+			if p.ID == id {
+				b.policies[i].Active = false
+				_ = b.saveLocked()
+				break
+			}
+		}
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (b *Broker) handleSignals(w http.ResponseWriter, r *http.Request) {
