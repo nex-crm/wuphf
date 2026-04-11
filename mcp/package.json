@@ -1,0 +1,13 @@
+{
+  "name": "@nex-crm/mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "build": "tsc --outDir dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "zod": "^3.25.76"
+  }
+}
