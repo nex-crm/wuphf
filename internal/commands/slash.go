@@ -25,6 +25,11 @@ func RegisterAllCommands(r *Registry) {
 
 	// Agents
 	r.Register(SlashCommand{Name: "agent", Description: "Agent commands (list/details)", Execute: cmdAgent})
+	r.Register(SlashCommand{
+		Name:        "managed-agent",
+		Description: "Managed agent HITL: approve|respond|deny|stop|events <run_id>",
+		Execute:     cmdManagedAgent,
+	})
 
 	// Config
 	r.Register(SlashCommand{Name: "config", Description: "Config commands (show/set/path)", Execute: cmdConfig})

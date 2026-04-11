@@ -72,6 +72,7 @@ func dispatchInternal(input string, apiKey string, format string, timeout int, a
 		AgentService: agentSvc,
 		APIClient:    client,
 		Config:       &cfg,
+		Format:       format,
 		AddMessage: func(role, content string) {
 			output.WriteString(content)
 			output.WriteString("\n")

@@ -30,6 +30,7 @@ type SlashContext struct {
 	AgentService *agent.AgentService
 	APIClient    *api.Client
 	Config       *config.Config
+	Format       string // "text" or "json"
 	AddMessage   func(role, content string)
 	SetLoading   func(bool)
 	ShowPicker   func(title string, options []PickerOption)
