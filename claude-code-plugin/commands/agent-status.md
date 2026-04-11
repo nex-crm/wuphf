@@ -6,8 +6,10 @@ Handle agent status streaming based on $ARGUMENTS (expected: `<run_id>`):
 **Stream events from the run:**
 Run the following bash command:
 ```
-nex agent events <run_id>
+nex agent events <run_id> --json
 ```
+
+(The `events` subcommand streams JSON lines regardless of `--json`; the flag applies to the final summary line.)
 
 This streams SSE events as JSON lines. Display each event as it arrives. Watch for:
 - `session.status_idle` — run completed normally; display "Run <run_id> completed."
