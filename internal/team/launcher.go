@@ -1182,6 +1182,15 @@ func (l *Launcher) processDueTaskJob(job schedulerJob) {
 		_ = l.broker.UpdateSchedulerJobState(job.Slug, time.Time{}, "done")
 		return
 	}
+	// Blocked tasks are legitimately waiting on dependencies — skip the watchdog
+	// reminder entirely. The owner cannot act until their blockers resolve, so a
+	// "still waiting" nudge is both misleading and a wasted token spend. The
+	// task_unblocked mechanism will wake them when deps clear.
+	if task.Blocked {
+		nextRun := time.Now().UTC().Add(time.Duration(config.ResolveTaskReminderInterval()) * time.Minute)
+		_ = l.broker.UpdateSchedulerJobState(job.Slug, nextRun, "scheduled")
+		return
+	}
 	alertKind := "task_stalled"
 	summary := fmt.Sprintf("Task %s in #%s is still waiting for movement.", task.Title, normalizeChannelSlug(task.Channel))
 	if strings.TrimSpace(task.Owner) == "" {
