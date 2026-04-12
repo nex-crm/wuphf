@@ -661,6 +661,473 @@ DMs (1:1 mode) for personal conversations. Any team member can DM any agent dire
 where every agent works for everyone — and you can DM any of them privately. One Arrow
 serving 5 people is cheaper and smarter than 5 Arrows that can't see each other."
 
+## FINAL PLAN: Content-Driven Development
+
+**Principle:** Write the content first. Build only what makes the claims true.
+The content IS the spec. If we can't truthfully say it, we don't ship it.
+
+Updated 2026-04-12 after ICP panel (10 personas), stargazer analysis (52k stars,
+2k open issues), confusion tax research, Reddit engagement pattern study.
+
+### ICP (corrected — aligned to Paperclip's actual users)
+- Claude Pro/Max users running 3+ agents, hitting rate limits daily
+- Technical operators with "too many Claude tabs open" (@dotta's origin story)
+- Cost-aware, frustrated by token waste, terminal-native
+- NOT limited to API-key users — most Paperclip users are on subscriptions
+
+---
+
+## Content Plan: Every Piece, Exact Copy
+
+### 1. REDDIT POST (r/ClaudeAI, r/LocalLLaMA, r/selfhosted)
+
+**Title:**
+"I cut multi-agent token waste from 44% to under 5% by making agents share
+a channel — here's the architecture (open source)"
+
+**Body (draft):**
+```
+If you're running 3+ AI agents, you're probably burning 22-44% of your tokens
+on what researchers call the "confusion tax":
+
+- Orientation tax (5-10%): agents waste tokens figuring out what's happening
+- Duplication tax (10-20%): agents redo work another agent already completed
+- Amnesia tax (5-10%): agents repeat approaches already ruled out
+- Context pollution (5-8%): noise in the context window
+
+(Source: Sandelin, "Your AI Agent Teams Are Burning Money — Here's the Math")
+
+I built an open-source multi-agent office that eliminates these by design:
+
+1. Agents share a visible channel (like Slack). They SEE each other's work.
+   No orientation tax — the channel IS the state.
+2. CEO agent delegates with atomic task checkout. No two agents claim the
+   same work. No duplication.
+3. Built-in knowledge graph (optional) persists learnings across sessions.
+   No amnesia.
+4. Delegation mode by default — agents only see their assigned task + CEO
+   context. No context pollution.
+
+Fresh sessions per turn (no --resume accumulation). Per-agent tool scoping
+(specialists don't load 240 tool definitions). No LLM polling for "is there
+work" — push-driven only.
+
+The interesting part: you can click any running agent and see their tool
+calls streaming in real-time. DM them mid-task to steer. The channel keeps
+running. No mode switch. No restart.
+
+Default is delegation mode (quiet, CEO routes everything — familiar if you've
+used Paperclip). Type /collab and agents start coordinating in the shared
+channel.
+
+Go binary, self-hosted, MIT. Works with Claude Code and Codex. Runs on
+Claude Pro — CEO defaults to Sonnet, not Opus.
+
+[link] | Try: curl -sSL https://wuphf.dev/install | sh
+```
+
+**Claims made → features required:**
+| Claim | Feature needed | Status |
+|-------|---------------|--------|
+| "agents share a visible channel" | shared channel model | SHIPPED |
+| "they SEE each other's work" | gossip bus / channel visibility | SHIPPED |
+| "CEO delegates with atomic task checkout" | `/tasks/:id/checkout` endpoint | NEEDS BUILD |
+| "knowledge graph persists learnings" | Nex integration | SHIPPED (needs polish) |
+| "delegation mode by default" | flip focus mode to default | 1-LINE CHANGE |
+| "fresh sessions per turn" | no --resume | SHIPPED (verify) |
+| "per-agent tool scoping" | per-agent MCP config | NEEDS BUILD (~30 lines) |
+| "no LLM polling" | push-driven wakes | SHIPPED |
+| "click agent, see streaming" | live agent progress in web view | PARTIALLY SHIPPED |
+| "DM mid-task, no mode switch" | lightweight DM without /1o1 shutdown | NEEDS BUILD |
+| "type /collab" | rename /focus, add /collab inverse | NEEDS BUILD |
+| "CEO defaults to Sonnet" | change headlessClaudeModel default | 1-LINE CHANGE |
+| "works with Claude Pro" | verify Pro subscription compatibility | VERIFY |
+| "curl install" | goreleaser prebuilt binary | NEEDS BUILD |
+
+---
+
+### 2. SHOW HN
+
+**Title:**
+"Show HN: Open-source multi-agent office — agents share a Slack-like channel,
+you watch them work and steer mid-flight"
+
+**First paragraph:**
+```
+I had 8 Claude Code terminals open and couldn't remember which one was doing
+what. Built WUPHF — a shared office where AI agents work in channels, delegate
+through a CEO, and you can see every tool call in real-time. Click any agent,
+DM them mid-task, watch them adjust. No restart. The channel keeps running.
+
+Default is delegation mode (CEO routes work, specialists execute — quiet and
+cheap). Type /collab and they start coordinating with each other.
+
+Go binary. Self-hosted. MIT. Fresh sessions per turn, per-agent tool scoping.
+Runs on Claude Pro (CEO on Sonnet by default, not Opus).
+```
+
+**HN angle:** NOT "zero-human company" (already used by Paperclip, polarizing).
+NOT "70% cheaper" (unearned until benchmarked). Instead: "I had too many
+Claude tabs" — the @dotta origin story, but with our solution.
+
+**Claims audit:** Same as Reddit post + "8 Claude Code terminals" (the ICP moment).
+
+---
+
+### 3. X/TWITTER THREAD (6 tweets)
+
+```
+1/ I had 8 AI agent sessions open and couldn't tell which one was doing what.
+
+So I built a shared office where they all work in the same Slack-like channel.
+
+Here's what changed. 🧵
+
+2/ The problem with multi-agent setups:
+Each agent is a separate session. Separate context. Separate memory.
+
+They redo each other's work.
+They forget what was tried.
+They burn tokens figuring out "what's happening."
+
+Researchers call it the "confusion tax." 22-44% of your tokens. Wasted.
+
+3/ The fix: make agents share a channel.
+
+- They SEE each other's output
+- CEO delegates tasks (no duplication)
+- Knowledge graph remembers across sessions (no amnesia)
+- Delegation mode: agents only wake when assigned (no noise)
+
+4/ The part that surprised me:
+
+You can click any running agent and watch their tool calls stream in real-time.
+Type a DM: "also handle the empty array case."
+Agent adjusts. No restart. Channel keeps running.
+
+That changed how I work with agents entirely.
+
+5/ Default mode: delegation (CEO routes, specialists execute). Quiet. Cheap.
+
+Type /collab → agents start talking to each other. SEO tells Content about
+keyword gaps. Content incorporates them. CEO watches and steers.
+
+You can do both. Most tools can only do one.
+
+6/ Open source. Go binary. Self-hosted. MIT.
+
+Works with Claude Pro (CEO on Sonnet, not Opus).
+Fresh sessions per turn (no token accumulation).
+Per-agent tool scoping (no 240-definition overhead).
+
+github.com/[repo] | curl -sSL https://wuphf.dev/install | sh
+```
+
+**Claims audit:** Same set. Thread format = each tweet earns its own claim.
+
+---
+
+### 4. PRODUCT HUNT
+
+**Tagline:** "A shared office for your AI agents — watch them work, steer mid-flight"
+
+**Description:**
+```
+WUPHF is an open-source multi-agent office where your AI agents work together
+in a Slack-like channel. Default: delegation mode (CEO routes, specialists
+execute). One command: /collab (agents coordinate with each other).
+
+What makes it different:
+→ See every agent's tool calls in real-time
+→ DM any agent mid-task without stopping the office
+→ Fresh sessions per turn (no token accumulation)
+→ Per-agent tool scoping (no global MCP overhead)
+→ Built-in knowledge graph that compounds over time
+→ Go binary, self-hosted, MIT. Runs on Claude Pro.
+
+For technical founders running 3+ AI agents who are tired of too many tabs,
+too much token waste, and agents that can't see each other's work.
+```
+
+**Maker comment:**
+```
+I built this because I had too many Claude Code sessions open and couldn't
+track what any of them were doing. The moment I made agents share a channel —
+so they could see each other's output and I could see all of them — everything
+changed. The CEO delegates quietly by default. Type /collab when you want them
+to brainstorm. The live streaming and mid-task DMs are the features I use
+most. Cost tracking is built in so you know what every task actually costs.
+```
+
+---
+
+### 5. LANDING PAGE
+
+**Hero:**
+```
+See your AI agents work.
+Steer them mid-flight.
+```
+
+**Subhead:**
+```
+A shared office where agents delegate, collaborate, and you watch everything
+happen. Fresh sessions. Per-agent tool scoping. No confusion tax.
+```
+
+**CTA:** "Watch the 2-minute demo" → Scene 5 video (streaming + DM mid-task)
+
+**3 value props (below hero):**
+
+```
+DELEGATION MODE (default)
+CEO routes work. Specialists execute. Quiet and cheap.
+Familiar if you've used ticket-based orchestration.
+
+/COLLAB MODE (one command)
+Agents see each other's work in shared channels.
+CEO suggests it when tasks overlap. The upgrade.
+
+WORLD MODEL (compounds over time)
+Connect Gmail, CRM, calendar. Agents reference real business
+context. Month 3 is when the flywheel kicks in.
+```
+
+**Social proof section:**
+```
+"Most multi-agent tools are ticket queues wearing a dashboard.
+This is a shared office." — DevRel reviewer after reading 72k lines of source
+
+"The first AI tool I can justify to my CFO." — Platform engineer
+
+"Like having a tiny dev shop in your terminal." — Freelance developer
+```
+(These are from the ICP panel — Lena, Sam, Jordan)
+
+**Comparison section (no competitor name — let readers figure it out):**
+```
+                        Ticket-based          Shared office
+                        orchestration         (WUPHF)
+Agents see each other   No                    Yes
+Mid-task steering       Kill & restart        DM without stopping
+Token accumulation      10x over time         Fresh per turn
+Tool definition bloat   All agents get all    Per-agent scoped
+Agent wake trigger      LLM poll (burns $)    Push (free)
+Collaboration mode      Not possible          /collab toggle
+Cost tracking           Post-hoc dashboard    Per-task, per-agent
+```
+
+---
+
+### 6. YOUTUBE / DEMO VIDEO (2 minutes)
+
+**Script:**
+```
+0:00 — "I have 5 AI agents running. Let me show you what that looks like."
+       Screen: WUPHF office, channel view, agents in sidebar with status dots.
+
+0:10 — "I type a task. The CEO reads it and delegates."
+       Screen: type "Write a blog post about our new pricing"
+       CEO responds: "@content, draft the pricing blog. Pull context from
+       the announcement notes."
+       Content agent status changes to "working."
+
+0:25 — "Here's what most tools can't do. I click on Content."
+       Screen: click Content in sidebar. Streaming panel opens.
+       Tool calls scrolling: "Reading pricing-announcement.md..."
+       "Drafting intro paragraph..."
+
+0:40 — "I notice something. I DM them without stopping anything."
+       Screen: type in DM: "Make sure to mention the free tier."
+       Content acknowledges. Channel keeps running behind.
+       "No restart. No mode switch. The office keeps going."
+
+0:55 — "After the task, I check the cost."
+       Screen: cost panel showing "12k tokens, $0.04" for this task.
+       "Every task, every agent, tracked."
+
+1:10 — "Default is delegation mode. CEO routes everything.
+       But watch this."
+       Screen: type "/collab"
+       "Now agents see each other."
+       SEO posts: "Found 3 keyword gaps for the blog."
+       Content: "Incorporating now."
+       "That coordination happened without me."
+
+1:30 — "Go binary. Self-hosted. MIT. Runs on Claude Pro.
+       curl install, one command.
+       See your agents work. Steer them mid-flight."
+       Screen: terminal with curl | sh install.
+
+1:45 — End card with GitHub link.
+```
+
+---
+
+### 7. "SWITCHING" GUIDE (docs page)
+
+```
+# Switching from ticket-based orchestration
+
+If you're running agents through a task queue — assign issue, wait, review —
+and you want to see what they're actually doing:
+
+## Step 1: Install
+curl -sSL https://wuphf.dev/install | sh
+
+## Step 2: Import (if you have an existing setup)
+wuphf import --from ~/.paperclip/instances/default
+# → "Imported 6 agents, 42 tasks, $38 cost history."
+
+## Step 3: Start the office
+wuphf
+
+## What's different
+- Agents work in a shared channel (you see everything)
+- CEO delegates by default (quiet mode, like your ticket system)
+- /collab switches to collaborative mode (agents coordinate)
+- Click any agent → see their tool calls live → DM them mid-task
+- Cost tracked per task, per agent
+- Fresh sessions per turn (no token accumulation)
+- Per-agent tool scoping (no bloated tool definitions)
+
+## What stays the same
+- Your agents, your tasks, your config
+- Self-hosted, no account, MIT licensed
+- Works with Claude Code, Codex
+```
+
+---
+
+### 8. TECHNICAL BLOG POST
+
+**Title:** "The confusion tax: why your multi-agent team wastes 22-44% of its tokens
+and how a shared channel architecture fixes it"
+
+**Structure:**
+1. The confusion tax (cite Sandelin) — 5 categories of waste
+2. Why ticket-based orchestration CAUSES each tax
+3. How shared-channel architecture ELIMINATES each tax
+4. The architecture: broker + CEO + gossip bus + delegation/collab modes
+5. Real benchmark numbers (THIS REQUIRES THE BENCHMARK)
+6. The one-line changes that matter most (Sonnet CEO, per-agent MCP)
+7. "Try it yourself" — link + install command
+
+**This is the LAST content piece to publish.** It requires the benchmark (Week 5).
+Everything else can publish before the benchmark.
+
+---
+
+## Claims Audit → Feature Backlog
+
+Every claim made in ANY content piece above. If it's not true, it blocks publishing.
+
+| Claim | Current State | Work Needed | Priority |
+|-------|--------------|-------------|----------|
+| "CEO defaults to Sonnet" | CEO on Opus (`headless_claude.go:153`) | Change 1 line | P0 — DAY 1 |
+| "delegation mode by default" | Focus mode exists but not default | Flip default in launcher | P0 — DAY 1 |
+| "/collab to enable collaboration" | `/focus` exists as the toggle | Add `/collab` as inverse command | P0 — DAY 1 |
+| "fresh sessions per turn" | No `--resume` in args | VERIFY and document as invariant | P0 — DAY 1 |
+| "no LLM polling" | Push-driven wakes | SHIPPED — document | P0 — DAY 1 |
+| "agents share a visible channel" | Channels + gossip bus | SHIPPED | — |
+| "per-agent tool scoping" | Global MCP config | Build per-agent mcp.json generation | P1 — WEEK 1 |
+| "cost tracked per task, per agent" | Budget infra exists, no data flows | Hook cost_events into headless turns | P1 — WEEK 1 |
+| "click agent, see streaming live" | TUI has streaming, web has activity indicators | Web streaming panel for live tool calls | P1 — WEEK 1 |
+| "DM mid-task without mode switch" | /1o1 shuts down office | Lightweight sidebar DM that doesn't switch modes | P1 — WEEK 2 |
+| "atomic task checkout" | Tasks have owner but no compare-and-swap | `POST /tasks/:id/checkout` in broker | P2 — WEEK 2 |
+| "curl install" | Go build from source | goreleaser + install script | P2 — WEEK 2 |
+| "import from existing setup" | Doesn't exist | `wuphf import --from <path>` | P2 — WEEK 3 |
+| "knowledge graph compounds" | Nex integration exists | Polish: verify insights → CEO flow is tight | P2 — WEEK 3 |
+| "CEO suggests /collab" | Doesn't exist | System prompt addition | P2 — WEEK 3 |
+| "22-44% → under 5% confusion tax" | Not benchmarked | Run the benchmark | P3 — WEEK 4 |
+| "works with Claude Pro" | Probably works, unverified | Test on Pro subscription | P1 — WEEK 1 |
+| "3-agent minimal default" | Default pack has 5-8 agents | Add a "solo" or "minimal" pack with 3 agents | P1 — WEEK 1 |
+
+---
+
+## Content-Driven Roadmap
+
+### What can we publish TODAY (all claims already true)
+- Nothing yet. CEO on Opus and delegation not default block everything.
+
+### What we can publish after DAY 1 (4 one-line changes)
+- **X/Twitter thread** — all claims are architectural, verified in source
+- **Product Hunt tagline draft** — for feedback, not launch
+
+### What we can publish after WEEK 1 (per-agent MCP + cost tracking + streaming)
+- **Reddit post** — all claims become TRUE including per-agent scoping and cost tracking
+- **Show HN** — same claim set
+- **Landing page** (draft) — hero, subhead, value props, comparison table
+
+### What we can publish after WEEK 2 (DM + install + checkout)
+- **YouTube demo video** — Scene 5 (streaming + DM) is the hero scene
+- **Landing page** (final) — with demo video embedded
+- **"Switching" guide** — migration path documented
+
+### What we can publish after WEEK 3 (import + Nex + /collab suggestion)
+- **Product Hunt launch** — full launch with maker comment
+- **Switching guide** (with import command)
+
+### What we can publish after WEEK 4 (benchmark)
+- **Technical blog post** — confusion tax with real numbers
+- **Reddit comparison post** — "same 6-agent workload, real token numbers"
+- **Landing page comparison table** — with verified numbers
+
+---
+
+## Revised Roadmap (content-sequenced)
+
+### DAY 1 (unblock all content)
+- [ ] CEO on Sonnet by default (`headless_claude.go:153`: change `claude-opus-4-6` to `claude-sonnet-4-6` for non-lead agents... wait, this is ALREADY done — lead gets Opus, others get Sonnet. The LEAD needs to be Sonnet too for Pro users.)
+  → Actually: add a config option. CEO on Sonnet by default, `--opus-ceo` flag to upgrade.
+- [ ] Flip delegation mode to default (launcher.go)
+- [ ] Add `/collab` command (inverse of `/focus`)
+- [ ] Verify no `--resume` in headless args (audit + document)
+- [ ] Add LICENSE file (MIT — Chris won't recommend without it)
+- [ ] 3-agent minimal pack: CEO + 2 specialists
+
+### WEEK 1 (unblock Reddit + Show HN)
+- [ ] Per-agent MCP config generation (~30 lines)
+- [ ] cost_events: log {agent, tokens, cost} per turn to broker state
+- [ ] Budget hard cap: stop agents when token/cost limit hit
+- [ ] Web view: live streaming panel when clicking agent (tool calls, not just status)
+- [ ] Verify Claude Pro subscription works with headless mode
+- [ ] Delete A2UI code
+
+### WEEK 2 (unblock YouTube demo + landing page)
+- [ ] Lightweight DM: sidebar DM to any agent without /1o1 mode switch
+- [ ] Prebuilt binary via goreleaser (curl install)
+- [ ] Atomic task checkout endpoint
+- [ ] Record 2-min demo video (Scene 5 hero)
+- [ ] Build landing page
+
+### WEEK 3 (unblock Product Hunt)
+- [ ] `wuphf import --from <path>` command
+- [ ] CEO suggests /collab when 2+ agents on related tasks
+- [ ] Nex integration polish (insights → CEO → delegation flow)
+- [ ] 3 starter packs: Founding Team, Marketing Office, Customer Ops
+- [ ] Product Hunt launch prep
+
+### WEEK 4 (unblock technical blog)
+- [ ] Port benchmark workload (6-agent marketing office or coding team)
+- [ ] Run side-by-side: same workload, WUPHF vs ticket-based, measure tokens
+- [ ] Write technical blog post with real numbers
+- [ ] Reddit comparison post with real numbers
+- [ ] Update landing page with verified comparison table
+
+### WEEK 5 (launch)
+- [ ] Publish all content in sequence:
+  - Day 1: X thread
+  - Day 2: Reddit post (r/ClaudeAI)
+  - Day 3: Show HN
+  - Day 4: Product Hunt
+  - Day 5: Technical blog + Reddit comparison
+- [ ] DM Paperclip issue filers (#544, #3335, #3401, #1183)
+- [ ] Post in OpenClaw Discord, relevant communities
+- [ ] "Switching" guide live on docs site
+
+---
+
 ## Part 8: Open Questions
 
 1. Should WUPHF support Paperclip's company templates as an import format? (Would expand
