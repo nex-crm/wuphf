@@ -1331,6 +1331,16 @@ func (b *Broker) ChannelTasks(channel string) []teamTask {
 	return out
 }
 
+// AllTasks returns a copy of all tasks across all channels. Use this when the
+// caller needs to search across channels rather than in a single known channel.
+func (b *Broker) AllTasks() []teamTask {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]teamTask, len(b.tasks))
+	copy(out, b.tasks)
+	return out
+}
+
 // UnackedTasks returns in_progress tasks with an owner that have not been acked
 // and were created more than the given duration ago.
 func (b *Broker) UnackedTasks(timeout time.Duration) []teamTask {

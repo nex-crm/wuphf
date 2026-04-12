@@ -2129,11 +2129,15 @@ func (l *Launcher) buildTaskNotificationContext(channel, slug string, limit int)
 	if l.broker == nil || limit <= 0 {
 		return ""
 	}
-	if strings.TrimSpace(channel) == "" {
-		channel = "general"
-	}
 
-	tasks := l.broker.ChannelTasks(channel)
+	var tasks []teamTask
+	if strings.TrimSpace(channel) == "" {
+		// No specific channel: scan all tasks across all channels so non-general
+		// channel tasks are not silently omitted from the CEO's task context.
+		tasks = l.broker.AllTasks()
+	} else {
+		tasks = l.broker.ChannelTasks(channel)
+	}
 	if len(tasks) == 0 {
 		return ""
 	}
