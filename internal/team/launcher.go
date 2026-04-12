@@ -10,9 +10,11 @@
 package team
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -2986,12 +2988,26 @@ func (l *Launcher) runBackgroundAgent(slug, cmdStr string) {
 		cmd := exec.Command("bash", "-c", cmdStr)
 		cmd.Dir = l.cwd
 		cmd.Env = append(os.Environ(), fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()))
-		cmd.Stdout = logFile
-		cmd.Stderr = logFile
 		cmd.Stdin = nil
+
+		// Fan-out stdout+stderr to the log file AND the broker's per-agent
+		// stream buffer so the web UI can tail it in real time via SSE.
+		pr, pw := io.Pipe()
+		cmd.Stdout = io.MultiWriter(logFile, pw)
+		cmd.Stderr = io.MultiWriter(logFile, pw)
+
+		stream := l.broker.AgentStream(slug)
+		go func() {
+			scanner := bufio.NewScanner(pr)
+			scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+			for scanner.Scan() {
+				stream.Push(scanner.Text())
+			}
+		}()
 
 		fmt.Fprintf(os.Stderr, "[%s] agent starting (log: %s)\n", slug, logPath)
 		runErr := cmd.Run()
+		pw.Close() // signals scanner goroutine to exit
 		logFile.Close()
 
 		if runErr != nil {
