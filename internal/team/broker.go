@@ -932,7 +932,12 @@ func (b *Broker) ServeWebUI(port int) {
 		proxyReq.Header.Set("Authorization", "Bearer "+b.token)
 		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
 
-		resp, err := http.DefaultClient.Do(proxyReq)
+		// Use a client with no timeout for SSE streams.
+		client := http.DefaultClient
+		if r.Header.Get("Accept") == "text/event-stream" {
+			client = &http.Client{Timeout: 0}
+		}
+		resp, err := client.Do(proxyReq)
 		if err != nil {
 			http.Error(w, "broker unreachable", http.StatusBadGateway)
 			return
@@ -946,6 +951,25 @@ func (b *Broker) ServeWebUI(port int) {
 			}
 		}
 		w.WriteHeader(resp.StatusCode)
+
+		// For SSE streams, flush each chunk as it arrives.
+		if resp.Header.Get("Content-Type") == "text/event-stream" {
+			flusher, canFlush := w.(http.Flusher)
+			buf := make([]byte, 4096)
+			for {
+				n, readErr := resp.Body.Read(buf)
+				if n > 0 {
+					w.Write(buf[:n]) //nolint:errcheck
+					if canFlush {
+						flusher.Flush()
+					}
+				}
+				if readErr != nil {
+					break
+				}
+			}
+			return
+		}
 		io.Copy(w, resp.Body)
 	})
 	// Token endpoint — no auth needed, same origin
