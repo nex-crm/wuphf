@@ -521,9 +521,13 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 	// Assigned owners should start immediately when new work lands, especially
 	// for CEO-created or automation-created tasks. This is the bridge between
 	// "policy created work" and "the specialist actually begins moving."
-	if (action.Kind == "task_created" || action.Kind == "watchdog_alert") && owner != actor {
+	//
+	// Exception: do not wake the owner when the task is blocked (unresolved
+	// dependencies). They have no work to do until the blocker clears. They
+	// will be notified via a task_unblocked action when deps resolve.
+	if (action.Kind == "task_created" || action.Kind == "watchdog_alert" || action.Kind == "task_unblocked") && owner != actor && !task.Blocked {
 		addImmediate(owner)
-	} else if owner != actor {
+	} else if owner != actor && action.Kind != "task_created" {
 		addDelayed(owner)
 	}
 
@@ -584,6 +588,8 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 		verb = "Task created"
 	case "task_updated":
 		verb = "Task updated"
+	case "task_unblocked":
+		verb = "Task unblocked — dependencies resolved, ready to start"
 	case "watchdog_alert":
 		verb = "Watchdog reminder"
 	}
@@ -2086,7 +2092,14 @@ func (l *Launcher) buildTaskNotificationContext(channel, slug string, limit int)
 		if status == "" {
 			status = "open"
 		}
-		line := fmt.Sprintf("- #%s %s (%s, %s)", task.ID, truncate(task.Title, 72), owner, status)
+		meta := owner + ", " + status
+		if task.Blocked {
+			meta += ", blocked"
+		}
+		if len(task.DependsOn) > 0 {
+			meta += ", depends: " + strings.Join(task.DependsOn, " ")
+		}
+		line := fmt.Sprintf("- #%s %s (%s)", task.ID, truncate(task.Title, 72), meta)
 		if details := strings.TrimSpace(task.Details); details != "" {
 			line += ": " + truncate(details, 96)
 		}

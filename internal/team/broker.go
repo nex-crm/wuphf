@@ -5321,7 +5321,9 @@ func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 	return false
 }
 
-// unblockDependentsLocked checks all blocked tasks and unblocks those whose dependencies are now resolved.
+// unblockDependentsLocked checks all blocked tasks and unblocks those whose
+// dependencies are now resolved. For each newly unblocked task, it appends a
+// "task_unblocked" action so the launcher can deliver a notification to the owner.
 func (b *Broker) unblockDependentsLocked(completedTaskID string) {
 	for i := range b.tasks {
 		if !b.tasks[i].Blocked {
@@ -5339,6 +5341,14 @@ func (b *Broker) unblockDependentsLocked(completedTaskID string) {
 		}
 		if !b.hasUnresolvedDepsLocked(&b.tasks[i]) {
 			b.tasks[i].Blocked = false
+			b.appendActionLocked(
+				"task_unblocked",
+				"office",
+				normalizeChannelSlug(b.tasks[i].Channel),
+				"system",
+				truncateSummary(b.tasks[i].Title+" unblocked by "+completedTaskID, 140),
+				b.tasks[i].ID,
+			)
 		}
 	}
 }

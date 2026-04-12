@@ -1467,3 +1467,140 @@ func TestRelevantTaskForTargetCrossChannel(t *testing.T) {
 		t.Error("marketing should not find an engineering-owned task")
 	}
 }
+
+func TestBlockedTaskNotificationAndUnblockFlow(t *testing.T) {
+	// Verifies the full research→marketing dependency chain:
+	// 1. CEO creates marketing task with depends_on: [research-task] while research is in_progress
+	// 2. Marketing should NOT be woken immediately (task is blocked)
+	// 3. When research completes, a task_unblocked action fires
+	// 4. Marketing IS woken immediately via the task_unblocked notification
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	// Create research task (in_progress).
+	researchTask, _, err := b.EnsureTask("general", "Research rate limiting", "", "research", "ceo", "")
+	if err != nil {
+		t.Fatalf("create research task: %v", err)
+	}
+
+	// Create marketing task depending on the research task → should be Blocked.
+	// We need to use the HTTP endpoint to pass DependsOn correctly.
+	// EnsureTask doesn't support DependsOn, so we manipulate directly.
+	marketingTask, _, err := b.EnsureTask("general", "Write blog copy", "Based on research results", "marketing", "ceo", "")
+	if err != nil {
+		t.Fatalf("create marketing task: %v", err)
+	}
+
+	// Manually set DependsOn and Blocked to simulate a properly created dependent task.
+	b.mu.Lock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == marketingTask.ID {
+			b.tasks[i].DependsOn = []string{researchTask.ID}
+			b.tasks[i].Blocked = true
+		}
+	}
+	b.mu.Unlock()
+
+	// Set broker members so agentPaneTargets can build notification targets.
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "research", Name: "Researcher"},
+		{Slug: "marketing", Name: "Marketer"},
+	}
+	// Also populate the general channel's Members so EnabledMembers returns our agents.
+	if ch := b.findChannelLocked("general"); ch != nil {
+		ch.Members = []string{"ceo", "research", "marketing"}
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "research", Name: "Researcher"},
+				{Slug: "marketing", Name: "Marketer"},
+			},
+		},
+	}
+
+	// Simulate research completing: task_created action for the marketing task.
+	// With task.Blocked=true, taskNotificationTargets should NOT add marketing to immediate.
+	blockedTask := teamTask{
+		ID:        marketingTask.ID,
+		Channel:   "general",
+		Title:     "Write blog copy",
+		Owner:     "marketing",
+		Status:    "in_progress",
+		DependsOn: []string{researchTask.ID},
+		Blocked:   true,
+	}
+	createdAction := officeActionLog{Kind: "task_created", Actor: "ceo", Channel: "general", RelatedID: marketingTask.ID}
+	immediate, _ := l.taskNotificationTargets(createdAction, blockedTask)
+	for _, t2 := range immediate {
+		if t2.Slug == "marketing" {
+			t.Error("marketing should NOT be woken when their task is blocked")
+		}
+	}
+
+	// Now simulate research completing: unblockDependentsLocked should fire task_unblocked action.
+	// We check this by looking at the action log after marking research task done.
+	initialActionCount := len(b.Actions())
+	b.mu.Lock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == researchTask.ID {
+			b.tasks[i].Status = "done"
+		}
+	}
+	b.unblockDependentsLocked(researchTask.ID)
+	b.mu.Unlock()
+
+	// Verify a task_unblocked action was recorded.
+	actions := b.Actions()
+	if len(actions) <= initialActionCount {
+		t.Fatal("expected task_unblocked action after completing research task")
+	}
+	var unblockedAction officeActionLog
+	for _, a := range actions[initialActionCount:] {
+		if a.Kind == "task_unblocked" {
+			unblockedAction = a
+			break
+		}
+	}
+	if unblockedAction.Kind == "" {
+		t.Fatal("expected task_unblocked action kind in log")
+	}
+	if unblockedAction.RelatedID != marketingTask.ID {
+		t.Errorf("expected task_unblocked for marketing task %s, got %s", marketingTask.ID, unblockedAction.RelatedID)
+	}
+
+	// Verify that task_unblocked wakes marketing immediately.
+	unblockedTaskState := teamTask{
+		ID:      marketingTask.ID,
+		Channel: "general",
+		Title:   "Write blog copy",
+		Owner:   "marketing",
+		Status:  "in_progress",
+		Blocked: false, // now unblocked
+	}
+	immediate2, _ := l.taskNotificationTargets(unblockedAction, unblockedTaskState)
+	hasMarketing := false
+	for _, t2 := range immediate2 {
+		if t2.Slug == "marketing" {
+			hasMarketing = true
+		}
+	}
+	if !hasMarketing {
+		t.Error("marketing should be woken immediately when their task is unblocked")
+	}
+}
