@@ -2520,6 +2520,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("- add_context: Store explicit decisions, meeting-style summaries, and durable facts after the team lands them\n\n")
 		}
 		sb.WriteString("Tag agents with @slug in your message (e.g., '@fe can you handle this?').\n")
+		sb.WriteString("CRITICAL: text @-mentions alone do NOT wake agents. You MUST include the agent slug in the `tagged` parameter of team_broadcast for them to receive and act on your message.\n")
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
 		if l.isFocusModeEnabled() {
 			sb.WriteString("== DELEGATION MODE ==\n")
