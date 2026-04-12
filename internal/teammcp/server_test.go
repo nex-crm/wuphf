@@ -74,6 +74,38 @@ func TestSuppressBroadcastReasonBlocksAfterUntargetedCEOReply(t *testing.T) {
 	}
 }
 
+// TestSuppressBroadcastReasonAllowsMarketingCompetitorPricing verifies that a
+// marketing agent can broadcast about "competitor pricing" without being suppressed.
+// Before the fix, "pricing" was a sales-only keyword so "competitor pricing findings"
+// classified as "sales" domain and a marketing agent got blocked ("outside your domain").
+func TestSuppressBroadcastReasonAllowsMarketingCompetitorPricing(t *testing.T) {
+	reason := suppressBroadcastReason(
+		"marketing",
+		"Here are our competitor pricing findings — Acme charges $50/seat, Bravo charges $45.",
+		"",
+		nil,
+		nil,
+	)
+	if reason != "" {
+		t.Errorf("marketing should not be suppressed for competitor pricing content, got %q", reason)
+	}
+}
+
+// TestSuppressBroadcastReasonBlocksFEOnPureBackend ensures the suppression still
+// fires for genuine hard domain mismatches (FE agent talking about DB schemas).
+func TestSuppressBroadcastReasonBlocksFEOnPureBackend(t *testing.T) {
+	reason := suppressBroadcastReason(
+		"fe",
+		"The database migration adds a new index on the users table for faster auth queries.",
+		"",
+		nil,
+		nil,
+	)
+	if reason == "" {
+		t.Error("FE agent should be suppressed for pure backend/database content")
+	}
+}
+
 func TestIsOneOnOneModeFromEnv(t *testing.T) {
 	t.Setenv("WUPHF_ONE_ON_ONE", "1")
 	if !isOneOnOneMode() {

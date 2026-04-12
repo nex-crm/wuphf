@@ -54,9 +54,10 @@ func inferTextDomain(text string) string {
 	case hasAnyToken(tokens, "design", "visual", "typography", "layout") || containsAny(text, "brand system"):
 		return "design"
 	case hasAnyToken(tokens, "positioning", "campaign", "launch", "brand", "marketing", "copy", "persona", "messaging", "growth",
-		"content", "blog", "post", "article", "seo", "audience", "email", "newsletter", "social"):
+		"content", "blog", "post", "article", "seo", "audience", "email", "newsletter", "social",
+		"competitive", "competitor", "gtm", "awareness", "conversion", "funnel"):
 		return "marketing"
-	case hasAnyToken(tokens, "sales", "pipeline", "pricing", "revenue", "deal", "budget", "buyer"):
+	case hasAnyToken(tokens, "sales", "pipeline", "pricing", "revenue", "deal", "budget", "buyer", "quota", "forecast"):
 		return "sales"
 	case hasAnyToken(tokens, "product", "roadmap", "scope", "planning", "priority"):
 		return "product"
