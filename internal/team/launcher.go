@@ -776,6 +776,14 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 	// Collaborative mode: all agents can see domain-relevant messages
 	switch {
 	case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
+		// @all: notify every agent immediately.
+		if containsSlug(msg.Tagged, "all") {
+			addImmediate(lead)
+			for slug := range targetMap {
+				addImmediate(slug)
+			}
+			break
+		}
 		addImmediate(lead)
 		if owner != "" && owner != lead && allowTarget(owner) {
 			addImmediate(owner)

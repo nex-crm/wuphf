@@ -195,6 +195,12 @@ type TeamBroadcastArgs struct {
 	NewTopic  bool     `json:"new_topic,omitempty" jsonschema:"Set true only when this genuinely needs to start a new top-level thread"`
 }
 
+type TeamReactArgs struct {
+	MessageID string `json:"message_id" jsonschema:"The message ID to react to"`
+	Emoji     string `json:"emoji" jsonschema:"Emoji reaction (e.g. 👍, 💯, 🔥, 👀, ✅)"`
+	MySlug    string `json:"my_slug,omitempty" jsonschema:"Agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
 type TeamPollArgs struct {
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug so tagged_count can be computed. Defaults to WUPHF_AGENT_SLUG."`
@@ -393,6 +399,11 @@ func Run(ctx context.Context) error {
 		"team_broadcast",
 		"Post a message into the team channel for all teammates to see.",
 	), handleTeamBroadcast)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_react",
+		"React to a message with an emoji instead of posting a full reply. Use when you agree and have nothing new to add.",
+	), handleTeamReact)
 
 	mcp.AddTool(server, readOnlyTool(
 		"team_poll",
@@ -608,6 +619,31 @@ func detectUntaggedMentions(content string, tagged []string) []string {
 		out = append(out, "@"+raw)
 	}
 	return out
+}
+
+func handleTeamReact(ctx context.Context, _ *mcp.CallToolRequest, args TeamReactArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	if args.MessageID == "" || args.Emoji == "" {
+		return toolError(fmt.Errorf("message_id and emoji are required")), nil, nil
+	}
+	var result struct {
+		OK        bool `json:"ok"`
+		Duplicate bool `json:"duplicate"`
+	}
+	if err := brokerPostJSON(ctx, "/reactions", map[string]any{
+		"message_id": args.MessageID,
+		"emoji":      args.Emoji,
+		"from":       slug,
+	}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	if result.Duplicate {
+		return textResult(fmt.Sprintf("Already reacted %s to %s.", args.Emoji, args.MessageID)), nil, nil
+	}
+	return textResult(fmt.Sprintf("Reacted %s to %s as @%s.", args.Emoji, args.MessageID, slug)), nil, nil
 }
 
 func fetchBroadcastContext(ctx context.Context, channel, mySlug string) ([]brokerMessage, []brokerTaskSummary, error) {
