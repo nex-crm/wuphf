@@ -269,14 +269,15 @@ type TeamRuntimeStateArgs struct {
 }
 
 type TeamTaskArgs struct {
-	Action   string `json:"action" jsonschema:"One of: create, claim, assign, complete, block, release"`
-	Channel  string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
-	ID       string `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
-	Title    string `json:"title,omitempty" jsonschema:"Task title when creating a task"`
-	Details  string `json:"details,omitempty" jsonschema:"Optional detail or update"`
-	Owner    string `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
-	ThreadID string `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
-	MySlug   string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+	Action    string   `json:"action" jsonschema:"One of: create, claim, assign, complete, block, release"`
+	Channel   string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
+	ID        string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
+	Title     string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`
+	Details   string   `json:"details,omitempty" jsonschema:"Optional detail or update"`
+	Owner     string   `json:"owner,omitempty" jsonschema:"Owner slug for claim or assign"`
+	ThreadID  string   `json:"thread_id,omitempty" jsonschema:"Related thread or message id"`
+	DependsOn []string `json:"depends_on,omitempty" jsonschema:"Task IDs this task must wait for before starting (create action only)"`
+	MySlug    string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamChannelsArgs struct{}
@@ -955,6 +956,9 @@ func handleTeamTask(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAr
 		"details":    strings.TrimSpace(args.Details),
 		"thread_id":  strings.TrimSpace(args.ThreadID),
 		"created_by": mySlug,
+	}
+	if action == "create" && len(args.DependsOn) > 0 {
+		payload["depends_on"] = args.DependsOn
 	}
 	switch action {
 	case "claim":
