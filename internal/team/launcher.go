@@ -30,6 +30,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/calendar"
+	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/tui"
@@ -130,6 +131,7 @@ func (l *Launcher) SetOneOnOne(slug string) {
 // NewLauncher creates a launcher for the given pack.
 func NewLauncher(packSlug string) (*Launcher, error) {
 	cfg, _ := config.Load()
+	explicitPack := packSlug != "" // true when user passed --pack explicitly
 	if packSlug == "" {
 		packSlug = cfg.Pack
 		if packSlug == "" {
@@ -140,6 +142,16 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	pack := agent.GetPack(packSlug)
 	if pack == nil {
 		return nil, fmt.Errorf("unknown pack: %s", packSlug)
+	}
+
+	// --pack is authoritative: when explicitly provided, reset company.json to
+	// match the pack so the broker doesn't silently load stale members.
+	if explicitPack {
+		if err := resetManifestToPack(pack); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: save pack config: %v\n", err)
+		}
+		// Drop stale broker state so the new pack starts clean.
+		_ = os.Remove(brokerStatePath())
 	}
 
 	cwd, err := os.Getwd()
@@ -2890,6 +2902,31 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 		return members
 	}
 	return defaultOfficeMembers()
+}
+
+// resetManifestToPack overwrites company.json with the members defined in the
+// given pack. Called when the user passes --pack explicitly so the flag is
+// authoritative over any previously saved company configuration.
+func resetManifestToPack(pack *agent.PackDefinition) error {
+	members := make([]company.MemberSpec, 0, len(pack.Agents))
+	for _, cfg := range pack.Agents {
+		members = append(members, company.MemberSpec{
+			Slug:           cfg.Slug,
+			Name:           cfg.Name,
+			Role:           cfg.Name,
+			Expertise:      append([]string(nil), cfg.Expertise...),
+			Personality:    cfg.Personality,
+			PermissionMode: cfg.PermissionMode,
+			AllowedTools:   append([]string(nil), cfg.AllowedTools...),
+			System:         cfg.Slug == pack.LeadSlug || cfg.Slug == "ceo",
+		})
+	}
+	manifest := company.Manifest{
+		Name:    pack.Name,
+		Lead:    pack.LeadSlug,
+		Members: members,
+	}
+	return company.SaveManifest(manifest)
 }
 
 func loadRunningSessionMode() (string, string) {
