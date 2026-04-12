@@ -2251,7 +2251,7 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 	if task, ok := l.relevantTaskForTarget(msg, slug); ok {
 		lines = append(lines, fmt.Sprintf("- Active task: #%s %s (%s)", task.ID, truncate(task.Title, 96), strings.TrimSpace(task.Status)))
 		if details := strings.TrimSpace(task.Details); details != "" {
-			lines = append(lines, fmt.Sprintf("- Task details: %s", truncate(details, 144)))
+			lines = append(lines, fmt.Sprintf("- Task details: %s", truncate(details, 512)))
 		}
 		if path := strings.TrimSpace(task.WorktreePath); path != "" {
 			lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
@@ -2342,7 +2342,7 @@ func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog,
 		fmt.Sprintf("- Owner: @%s", slug),
 	}
 	if details := strings.TrimSpace(task.Details); details != "" {
-		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, 160)))
+		lines = append(lines, fmt.Sprintf("- Details: %s", truncate(details, 512)))
 	}
 	if task.ThreadID != "" {
 		lines = append(lines, fmt.Sprintf("- Thread: #%s reply_to %s", channel, task.ThreadID))
