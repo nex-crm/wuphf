@@ -473,6 +473,8 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "expand", Description: "Expand a collapsed thread", Category: "conversation"},
 	{Name: "collapse", Description: "Collapse a thread", Category: "conversation"},
 	{Name: "cancel", Description: "Exit reply/setup/doctor mode", Category: "conversation"},
+	{Name: "collab", Description: "Switch to collaborative mode (all agents see all messages)", Category: "session"},
+	{Name: "focus", Description: "Switch to delegation mode (CEO routes, specialists execute)", Category: "session"},
 	{Name: "reset", Description: "Reset channel and agents", Category: "session"},
 	{Name: "reset-dm", Description: "Clear direct messages with an agent", Category: "session"},
 	{Name: "quit", Description: "Exit WUPHF", Category: "session"},
@@ -491,6 +493,8 @@ var oneOnOneBlacklist = map[string]bool{
 	"threads":      true,
 	"expand":       true,
 	"collapse":     true,
+	"collab":       true,
+	"focus":        true,
 }
 
 func buildOneOnOneSlashCommands() []tui.SlashCommand {
@@ -4619,6 +4623,14 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			m.notice = "Usage: /task <claim|release|complete|review|approve|block> <task-id>"
 			return m, nil
 		}
+	case trimmed == "/collab":
+		clearCurrent()
+		m.notice = "Switched to collaborative mode. All agents see all messages."
+		return m, switchFocusMode(false)
+	case trimmed == "/focus":
+		clearCurrent()
+		m.notice = "Switched to delegation mode. CEO routes, specialists execute."
+		return m, switchFocusMode(true)
 	case trimmed == "/reset":
 		clearCurrent()
 		m.confirm = m.confirmationForReset()
@@ -6265,6 +6277,24 @@ func switchSessionMode(mode, agent string) tea.Cmd {
 	}
 }
 
+func switchFocusMode(enabled bool) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"focus_mode": enabled,
+		})
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/focus-mode", bytes.NewReader(body))
+		if err != nil {
+			return nil
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil
+		}
+		resp.Body.Close()
+		return nil
+	}
+}
+
 func applyTeamSetup() tea.Cmd {
 	return func() tea.Msg {
 		notice, err := setup.InstallLatestCLI()
@@ -6380,124 +6410,6 @@ func killTeamSession() {
 	exec.Command("tmux", "-L", "wuphf", "kill-session", "-t", "wuphf-team").Run()
 	// Stop the broker
 	http.Get("http://127.0.0.1:7890/health") // just to check; broker stops with the process
-}
-
-// renderA2UIBlocks extracts A2UI JSON blocks from message content,
-// renders them via the GenerativeModel, and returns remaining text + rendered output.
-// A2UI blocks are detected by ```a2ui ... ``` fences or inline {"type":"card",...} objects.
-func renderA2UIBlocks(content string, width int) (textPart string, rendered string) {
-	// Look for ```a2ui ... ``` fenced blocks
-	fenceRe := regexp.MustCompile("(?s)```a2ui\\s*\n(.*?)```")
-	matches := fenceRe.FindAllStringSubmatchIndex(content, -1)
-
-	if len(matches) == 0 {
-		// Also try to detect a bare A2UI JSON object embedded in the message.
-		if idx := strings.Index(content, `{"type":"`); idx >= 0 {
-			jsonStart, endIdx := extractJSONObject(content, idx)
-			if jsonStart == "" {
-				return content, ""
-			}
-			var comp tui.A2UIComponent
-			if err := json.Unmarshal([]byte(jsonStart), &comp); err == nil && isA2UIType(comp.Type) {
-				gm := tui.NewGenerativeModel()
-				gm.SetWidth(width)
-				gm.SetSchema(comp)
-				if err := gm.Validate(); err != nil {
-					return content, ""
-				}
-				parts := []string{strings.TrimSpace(content[:idx]), strings.TrimSpace(content[endIdx:])}
-				textPart = strings.TrimSpace(strings.Join(parts, "\n"))
-				rendered = gm.View()
-				return
-			}
-		}
-		return content, ""
-	}
-
-	// Process fenced blocks
-	var textParts []string
-	lastEnd := 0
-	var renderedParts []string
-
-	for _, match := range matches {
-		// Text before the fence
-		if match[0] > lastEnd {
-			textParts = append(textParts, content[lastEnd:match[0]])
-		}
-
-		// Extract JSON inside fence
-		jsonStr := content[match[2]:match[3]]
-		var comp tui.A2UIComponent
-		if err := json.Unmarshal([]byte(jsonStr), &comp); err == nil && isA2UIType(comp.Type) {
-			gm := tui.NewGenerativeModel()
-			gm.SetWidth(width)
-			gm.SetSchema(comp)
-			if err := gm.Validate(); err != nil {
-				textParts = append(textParts, "```a2ui\n"+jsonStr+"\n```")
-			} else {
-				renderedParts = append(renderedParts, gm.View())
-			}
-		} else {
-			// Invalid A2UI JSON — show as code block
-			textParts = append(textParts, "```a2ui\n"+jsonStr+"\n```")
-		}
-
-		lastEnd = match[1]
-	}
-
-	// Text after last fence
-	if lastEnd < len(content) {
-		textParts = append(textParts, content[lastEnd:])
-	}
-
-	textPart = strings.TrimSpace(strings.Join(textParts, "\n"))
-	rendered = strings.Join(renderedParts, "\n")
-	return
-}
-
-func extractJSONObject(content string, start int) (string, int) {
-	if start < 0 || start >= len(content) || content[start] != '{' {
-		return "", 0
-	}
-	depth := 0
-	inString := false
-	escaped := false
-	for i := start; i < len(content); i++ {
-		ch := content[i]
-		if escaped {
-			escaped = false
-			continue
-		}
-		if inString {
-			if ch == '\\' {
-				escaped = true
-			} else if ch == '"' {
-				inString = false
-			}
-			continue
-		}
-		switch ch {
-		case '"':
-			inString = true
-		case '{':
-			depth++
-		case '}':
-			depth--
-			if depth == 0 {
-				return content[start : i+1], i + 1
-			}
-		}
-	}
-	return "", 0
-}
-
-// isA2UIType checks if a type string is a valid A2UI component type.
-func isA2UIType(t string) bool {
-	switch t {
-	case "row", "column", "card", "text", "textfield", "list", "table", "progress", "spacer":
-		return true
-	}
-	return false
 }
 
 func resolveInitialOfficeApp(name string) officeApp {

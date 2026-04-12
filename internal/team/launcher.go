@@ -98,6 +98,8 @@ type Launcher struct {
 	broker      *Broker
 	mcpConfig   string
 	unsafe      bool
+	opusCEO     bool
+	focusMode   bool
 	sessionMode string
 	oneOnOne    string
 	provider    string
@@ -113,6 +115,12 @@ type Launcher struct {
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
 func (l *Launcher) SetUnsafe(v bool) { l.unsafe = v }
+
+// SetOpusCEO upgrades the CEO agent from Sonnet to Opus.
+func (l *Launcher) SetOpusCEO(v bool) { l.opusCEO = v }
+
+// SetFocusMode enables CEO-routed delegation mode.
+func (l *Launcher) SetFocusMode(v bool) { l.focusMode = v }
 
 func (l *Launcher) SetOneOnOne(slug string) {
 	l.sessionMode = SessionModeOneOnOne
@@ -192,6 +200,9 @@ func (l *Launcher) Launch() error {
 	l.broker.runtimeProvider = l.provider
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
+	}
+	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
+		return fmt.Errorf("set focus mode: %w", err)
 	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
@@ -294,6 +305,9 @@ func (l *Launcher) Launch() error {
 	exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 	).Run()
+
+	// Headless context for per-turn Claude invocations in TUI mode.
+	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
 
 	// Start the notification loop that pushes new messages to agent panes
 	go l.watchChannelPaneLoop(channelCmd)
@@ -617,15 +631,7 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		l.enqueueHeadlessCodexTurn(target.Slug, notification)
 		return
 	}
-	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", target.PaneTarget,
-		"-l",
-		notification,
-	).Run()
-	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", target.PaneTarget,
-		"Enter",
-	).Run()
+	l.sendNotificationToPane(target.PaneTarget, notification)
 }
 
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
@@ -698,6 +704,31 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		return inferAgentDomain(slug) == domain
 	}
 
+	// Focus mode (delegation): CEO routes all work. Specialists only wake
+	// when explicitly tagged by CEO or human. No cross-agent chatter.
+	if l.isFocusModeEnabled() {
+		switch {
+		case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
+			addImmediate(lead)
+			for _, slug := range msg.Tagged {
+				if slug != lead && allowTarget(slug) {
+					addImmediate(slug)
+				}
+			}
+		case msg.From == lead:
+			for _, slug := range msg.Tagged {
+				if slug != lead && allowTarget(slug) {
+					addImmediate(slug)
+				}
+			}
+		default:
+			// Specialist message: only wake CEO
+			addImmediate(lead)
+		}
+		return immediate, delayed
+	}
+
+	// Collaborative mode: all agents can see domain-relevant messages
 	switch {
 	case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
 		addImmediate(lead)
@@ -1849,8 +1880,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 			continue
 		}
 		slug := visibleMembers[slugIdx].Slug
-		prompt := l.buildPrompt(slug)
-		cmd := l.claudeCommand(slug, prompt)
+		cmd := l.claudeCommand(slug, l.buildPrompt(slug))
 
 		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
 		// respawn-pane -k kills the current process and starts a new one
@@ -2115,14 +2145,23 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		l.enqueueHeadlessCodexTurn(target.Slug, notification)
 		return
 	}
+	l.sendNotificationToPane(target.PaneTarget, notification)
+}
+
+// sendNotificationToPane delivers a notification to a persistent interactive
+// Claude session in a tmux pane. It sends /clear first so each turn starts
+// with a fresh context window — the work packet carries all required context,
+// so accumulated history is not needed and only causes drift over time.
+// --append-system-prompt is a CLI flag and survives /clear intact.
+func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", target.PaneTarget,
-		"-l",
-		notification,
+		"-t", paneTarget, "/clear", "Enter",
 	).Run()
 	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
-		"-t", target.PaneTarget,
-		"Enter",
+		"-t", paneTarget, "-l", notification,
+	).Run()
+	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+		"-t", paneTarget, "Enter",
 	).Run()
 }
 
@@ -2470,6 +2509,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("Tag agents with @slug in your message (e.g., '@fe can you handle this?').\n")
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
+		if l.isFocusModeEnabled() {
+			sb.WriteString("== DELEGATION MODE ==\n")
+			sb.WriteString("Delegation mode is enabled. You are the routing hub between specialists.\n")
+			sb.WriteString("- Default to taking human requests yourself first.\n")
+			sb.WriteString("- Delegate to a specialist only when you intentionally want that handoff.\n")
+			sb.WriteString("- Specialists should report completion, blockers, and handoff notes back to you, not to each other.\n")
+			sb.WriteString("- Keep the office out of cross-agent chatter.\n\n")
+		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
 		if config.ResolveNoNex() {
@@ -2492,7 +2539,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("10. Create channels (team_channel) or agents (team_member) when the human asks or scope genuinely warrants it\n")
 		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n")
 		sb.WriteString("12. If a task shows a worktree path, that path is the working_directory for local file and bash tools on that task\n\n")
-		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data. A2UI JSON in ```a2ui fences for rich components.\n")
+		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data.\n")
 		if config.ResolveNoNex() {
 			sb.WriteString("Do not claim you stored anything outside the office.\n")
 		} else {
@@ -2537,6 +2584,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("- query_context: Check prior decisions, customer context, company history, or facts before making assumptions\n")
 			sb.WriteString("- add_context: Store durable conclusions or findings once the team actually lands them\n\n")
 		}
+		if l.isFocusModeEnabled() {
+			sb.WriteString("== DELEGATION MODE ==\n")
+			sb.WriteString("Delegation mode is enabled.\n")
+			sb.WriteString("- You take work directly from the human only when they explicitly tag you, or from @ceo when delegated.\n")
+			sb.WriteString("- Do not debate with other specialists in the channel.\n")
+			sb.WriteString("- Do the work, then report completion, blockers, or handoff notes back to @ceo.\n")
+			sb.WriteString("- If another specialist should get involved, tell @ceo instead of routing it yourself.\n\n")
+		}
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
@@ -2576,7 +2631,11 @@ func (l *Launcher) buildPrompt(slug string) string {
 // Sets WUPHF_AGENT_SLUG so the MCP knows which agent this session serves.
 func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
-	mcpConfig := strings.ReplaceAll(l.mcpConfig, "'", "'\\''")
+	agentMCP := l.mcpConfig
+	if path, err := l.ensureAgentMCPConfig(slug); err == nil {
+		agentMCP = path
+	}
+	mcpConfig := strings.ReplaceAll(agentMCP, "'", "'\\''")
 	name := strings.ReplaceAll(l.getAgentName(slug), "'", "'\\''")
 
 	permFlags := l.resolvePermissionFlags(slug)
@@ -2602,11 +2661,7 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		}
 	}
 
-	// Use Sonnet for specialists, Opus for CEO — faster + cheaper
-	model := "claude-sonnet-4-6"
-	if slug == l.officeLeadSlug() {
-		model = "claude-opus-4-6"
-	}
+	model := l.headlessClaudeModel(slug)
 
 	return fmt.Sprintf(
 		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
@@ -2633,12 +2688,32 @@ func (l *Launcher) resolvePermissionFlags(slug string) string {
 	return "--permission-mode bypassPermissions --dangerously-skip-permissions"
 }
 
-func (l *Launcher) ensureMCPConfig() (string, error) {
+// codingAgentSlugs lists agents that run code and get workspace isolation.
+// These agents only receive the wuphf-office MCP server (no CRM context).
+var codingAgentSlugs = map[string]bool{
+	"fe":        true,
+	"be":        true,
+	"ai":        true,
+	"qa":        true,
+	"tech-lead": true,
+}
+
+// agentMCPServers returns the MCP server keys that a given agent should receive.
+func agentMCPServers(slug string) []string {
+	if codingAgentSlugs[slug] {
+		return []string{"wuphf-office"}
+	}
+	return []string{"wuphf-office", "nex"}
+}
+
+// buildMCPServerMap constructs the full set of MCP server entries.
+// This is the shared helper used by both ensureMCPConfig and ensureAgentMCPConfig.
+func (l *Launcher) buildMCPServerMap() (map[string]any, error) {
 	apiKey := config.ResolveAPIKey("")
 	servers := map[string]any{}
 	wuphfBinary, err := os.Executable()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	servers["wuphf-office"] = map[string]any{
@@ -2680,6 +2755,15 @@ func (l *Launcher) ensureMCPConfig() (string, error) {
 		}
 	}
 
+	return servers, nil
+}
+
+func (l *Launcher) ensureMCPConfig() (string, error) {
+	servers, err := l.buildMCPServerMap()
+	if err != nil {
+		return "", err
+	}
+
 	cfg := map[string]any{
 		"mcpServers": servers,
 	}
@@ -2693,6 +2777,51 @@ func (l *Launcher) ensureMCPConfig() (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+// ensureAgentMCPConfig writes a per-agent MCP config containing only the servers
+// that agent needs. Returns the config file path.
+func (l *Launcher) ensureAgentMCPConfig(slug string) (string, error) {
+	allServers, err := l.buildMCPServerMap()
+	if err != nil {
+		return "", err
+	}
+
+	allowed := agentMCPServers(slug)
+	filtered := make(map[string]any, len(allowed))
+	for _, key := range allowed {
+		if srv, ok := allServers[key]; ok {
+			filtered[key] = srv
+		}
+	}
+
+	cfg := map[string]any{
+		"mcpServers": filtered,
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return "", err
+	}
+
+	path := filepath.Join(os.TempDir(), "wuphf-mcp-"+slug+".json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// agentActiveTask returns the first in_progress task owned by the given agent slug.
+func (l *Launcher) agentActiveTask(slug string) *teamTask {
+	if l.broker == nil {
+		return nil
+	}
+	tasks := l.broker.ChannelTasks("general")
+	for i := range tasks {
+		if tasks[i].Owner == slug && tasks[i].Status == "in_progress" {
+			return &tasks[i]
+		}
+	}
+	return nil
 }
 
 func teamVoiceForSlug(slug string) string {
@@ -2793,6 +2922,16 @@ func loadRunningSessionMode() (string, string) {
 		return SessionModeOffice, DefaultOneOnOneAgent
 	}
 	return NormalizeSessionMode(result.SessionMode), NormalizeOneOnOneAgent(result.OneOnOneAgent)
+}
+
+func (l *Launcher) isFocusModeEnabled() bool {
+	if l != nil && l.broker != nil {
+		return l.broker.FocusModeEnabled()
+	}
+	if l == nil {
+		return false
+	}
+	return l.focusMode
 }
 
 func brokerBaseURL() string {
@@ -2915,6 +3054,12 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 
 	l.broker = NewBroker()
 	l.broker.runtimeProvider = l.provider
+	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
+		return fmt.Errorf("set session mode: %w", err)
+	}
+	if err := l.broker.SetFocusMode(l.focusMode); err != nil {
+		return fmt.Errorf("set focus mode: %w", err)
+	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
 	}
@@ -2954,16 +3099,17 @@ func (l *Launcher) spawnBackgroundAgents() {
 // headlessClaudeCommand builds a non-interactive claude command for web mode.
 func (l *Launcher) headlessClaudeCommand(slug, systemPrompt string) string {
 	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
-	mcpConfig := strings.ReplaceAll(l.mcpConfig, "'", "'\\''")
+	agentMCPPath, err := l.ensureAgentMCPConfig(slug)
+	if err != nil {
+		agentMCPPath = l.mcpConfig
+	}
+	mcpConfig := strings.ReplaceAll(agentMCPPath, "'", "'\\''")
 	permFlags := l.resolvePermissionFlags(slug)
 	brokerToken := ""
 	if l.broker != nil {
 		brokerToken = l.broker.Token()
 	}
-	model := "claude-sonnet-4-6"
-	if slug == l.officeLeadSlug() {
-		model = "claude-opus-4-6"
-	}
+	model := l.headlessClaudeModel(slug)
 	initialPrompt := "You are now active in the WUPHF office. Use your MCP tools (team_poll, team_post) to read messages and participate. Start by polling the channel for recent messages and respond to anything relevant. When done, poll again."
 	return fmt.Sprintf(
 		"WUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 claude --model %s --print %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -p '%s'",

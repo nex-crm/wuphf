@@ -130,17 +130,9 @@ func renderMessageGroups(
 			// Message content — first message at indent 2, continuations same
 			prefix := "  "
 
-			// Render A2UI blocks if present
-			textPart, a2uiRendered := renderA2UIBlocks(msg.Content, width-4)
-
-			for _, paragraph := range strings.Split(textPart, "\n") {
+			for _, paragraph := range strings.Split(msg.Content, "\n") {
 				paragraph = highlightMentions(paragraph, agentColors)
 				lines = appendWrapped(lines, width, prefix+paragraph)
-			}
-			if a2uiRendered != "" {
-				for _, renderedLine := range strings.Split(a2uiRendered, "\n") {
-					lines = append(lines, prefix+renderedLine)
-				}
 			}
 
 			// Thread indicator: only on the first message of the group

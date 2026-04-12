@@ -18,10 +18,20 @@ type ClaudeStreamEvent struct {
 	Detail    string
 }
 
+// ClaudeUsage captures token counts and cost from a Claude CLI result event.
+type ClaudeUsage struct {
+	InputTokens         int     `json:"input_tokens"`
+	OutputTokens        int     `json:"output_tokens"`
+	CacheReadTokens     int     `json:"cache_read_tokens"`
+	CacheCreationTokens int     `json:"cache_creation_tokens"`
+	CostUSD             float64 `json:"cost_usd"`
+}
+
 // ClaudeStreamResult captures the final outcome of a streamed Claude turn.
 type ClaudeStreamResult struct {
 	FinalMessage string
 	LastError    string
+	Usage        ClaudeUsage
 }
 
 // ReadClaudeJSONStream consumes Claude CLI stream-json output and normalizes it
@@ -115,6 +125,23 @@ func ReadClaudeJSONStream(r io.Reader, onEvent func(ClaudeStreamEvent)) (ClaudeS
 		case "result":
 			if textOut := strings.TrimSpace(msg.Result); textOut != "" {
 				result.FinalMessage = textOut
+			}
+			// Parse usage fields from the raw result line.
+			var usageRaw struct {
+				InputTokens              int     `json:"input_tokens"`
+				OutputTokens             int     `json:"output_tokens"`
+				CacheCreationInputTokens int     `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int     `json:"cache_read_input_tokens"`
+				CostUSD                  float64 `json:"cost_usd"`
+			}
+			if err := json.Unmarshal([]byte(line), &usageRaw); err == nil {
+				result.Usage = ClaudeUsage{
+					InputTokens:         usageRaw.InputTokens,
+					OutputTokens:        usageRaw.OutputTokens,
+					CacheReadTokens:     usageRaw.CacheReadInputTokens,
+					CacheCreationTokens: usageRaw.CacheCreationInputTokens,
+					CostUSD:             usageRaw.CostUSD,
+				}
 			}
 			if errors := parseClaudeErrors(msg.Errors); len(errors) > 0 {
 				result.LastError = strings.Join(errors, "; ")
