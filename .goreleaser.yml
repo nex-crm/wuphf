@@ -1,0 +1,31 @@
+version: 2
+
+builds:
+  - id: wuphf
+    main: ./cmd/wuphf
+    binary: wuphf
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+
+archives:
+  - format: tar.gz
+    name_template: "wuphf_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: nex-crm
+    name: wuphf

@@ -22,23 +22,27 @@ func main() {
 	format := flag.String("format", "text", "Output format (text, json)")
 	apiKeyFlag := flag.String("api-key", "", "API key for authentication")
 	showVersion := flag.Bool("version", false, "Print version and exit")
-	packFlag := flag.String("pack", "", "Agent pack (founding-team, coding-team, lead-gen-agency)")
+	packFlag := flag.String("pack", "", "Agent pack (starter, founding-team, coding-team, lead-gen-agency)")
 	providerFlag := flag.String("provider", "", "LLM provider override for this run (claude-code, codex)")
 	oneOnOne := flag.Bool("1o1", false, "Launch a direct 1:1 session with a single agent (default ceo)")
 	channelView := flag.Bool("channel-view", false, "Run as channel view (internal)")
 	channelApp := flag.String("channel-app", "", "Start channel view on a specific app (internal)")
 	threadsCollapsed := flag.Bool("threads-collapsed", false, "Start with threads collapsed (default: expanded)")
 	unsafeMode := flag.Bool("unsafe", false, "Bypass all agent permission checks (use for local dev only)")
-	webMode := flag.Bool("web", false, "Launch web UI instead of tmux TUI")
+	tuiMode := flag.Bool("tui", false, "Launch with tmux TUI instead of the web UI")
 	webPort := flag.Int("web-port", 7891, "Port for the web UI (default 7891)")
 	noNex := flag.Bool("no-nex", false, "Disable Nex completely for this run")
+	opusCEO := flag.Bool("opus-ceo", false, "Upgrade CEO agent from Sonnet to Opus")
+	collabMode := flag.Bool("collab", false, "Start in collaborative mode (all agents see all messages)")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "WUPHF v%s\n\n", version)
 		fmt.Fprintf(os.Stderr, "Usage:\n")
-		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
+		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s shred        Stop the running team\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s import --from paperclip  Import from running Paperclip (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		flag.PrintDefaults()
@@ -95,6 +99,9 @@ func main() {
 		case "init":
 			dispatch("/init", *apiKeyFlag, *format)
 			return
+		case "import":
+			runImport(args[1:])
+			return
 		}
 	}
 
@@ -117,17 +124,17 @@ func main() {
 		return
 	}
 
-	// Web mode: browser-based UI instead of tmux
-	if *webMode {
-		runWeb(args, *packFlag, *unsafeMode, *webPort)
+	// TUI mode: tmux-based interface
+	if *tuiMode {
+		runTeam(args, *packFlag, *unsafeMode, *oneOnOne, *opusCEO, *collabMode)
 		return
 	}
 
-	// Default: launch team or direct 1:1
-	runTeam(args, *packFlag, *unsafeMode, *oneOnOne)
+	// Default: web UI
+	runWeb(args, *packFlag, *unsafeMode, *webPort, *opusCEO, *collabMode)
 }
 
-func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
+func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO bool, collabMode bool) {
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -141,6 +148,13 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
 		}
 		l.SetOneOnOne(agentSlug)
 	}
+
+	if opusCEO {
+		l.SetOpusCEO(true)
+	}
+
+	// Default: delegation mode (focus). --collab disables it.
+	l.SetFocusMode(!collabMode)
 
 	if unsafe {
 		l.SetUnsafe(true)
@@ -196,7 +210,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool) {
 	}
 }
 
-func runWeb(args []string, packSlug string, unsafe bool, webPort int) {
+func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bool, collabMode bool) {
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -205,6 +219,10 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int) {
 	if unsafe {
 		l.SetUnsafe(true)
 	}
+	if opusCEO {
+		l.SetOpusCEO(true)
+	}
+	l.SetFocusMode(!collabMode)
 	if err := l.PreflightWeb(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

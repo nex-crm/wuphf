@@ -3,8 +3,8 @@ package agent
 import "testing"
 
 func TestPacksRegistered(t *testing.T) {
-	if len(Packs) != 3 {
-		t.Fatalf("expected 3 packs, got %d", len(Packs))
+	if len(Packs) != 4 {
+		t.Fatalf("expected 4 packs, got %d", len(Packs))
 	}
 	founding := GetPack("founding-team")
 	if founding == nil {

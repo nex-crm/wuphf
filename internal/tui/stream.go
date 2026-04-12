@@ -839,49 +839,6 @@ func (m StreamModel) handleSlashCommand(input string) (StreamModel, tea.Cmd) {
 	case "agents":
 		m.appendSystemMessage(m.renderAgentsSnapshot())
 		return m, nil
-	case "generative":
-		g := NewGenerativeModel()
-		g.width = m.width - 10
-		g.SetData(map[string]any{
-			"title":    "Agent Dashboard",
-			"status":   "active",
-			"progress": 0.72,
-			"tasks":    []any{"Scan codebase", "Generate report", "Deploy changes"},
-			"metrics": []any{
-				[]any{"Metric", "Value"},
-				[]any{"Latency", "42ms"},
-				[]any{"Throughput", "1.2k/s"},
-				[]any{"Errors", "0"},
-			},
-		})
-		g.SetSchema(A2UIComponent{
-			Type: "column",
-			Children: []A2UIComponent{
-				{Type: "card", Props: map[string]any{"title": "Overview"}, Children: []A2UIComponent{
-					{Type: "row", Children: []A2UIComponent{
-						{Type: "text", DataRef: "/title", Props: map[string]any{"bold": true}},
-						{Type: "text", DataRef: "/status", Props: map[string]any{"color": Success}},
-					}},
-					{Type: "spacer"},
-					{Type: "text", Props: map[string]any{"content": "Progress:", "dimmed": true}},
-					{Type: "progress", DataRef: "/progress"},
-				}},
-				{Type: "spacer"},
-				{Type: "card", Props: map[string]any{"title": "Tasks"}, Children: []A2UIComponent{
-					{Type: "list", DataRef: "/tasks"},
-				}},
-				{Type: "spacer"},
-				{Type: "card", Props: map[string]any{"title": "Metrics"}, Children: []A2UIComponent{
-					{Type: "table", DataRef: "/metrics"},
-				}},
-			},
-		})
-		m.messages = append(m.messages, StreamMessage{
-			Role:      "system",
-			Content:   "Generative UI demo:\n\n" + g.View(),
-			Timestamp: time.Now(),
-		})
-		return m, nil
 	case "chat":
 		return m, func() tea.Msg { return ViewSwitchMsg{Target: ViewChat} }
 	case "quit", "q":

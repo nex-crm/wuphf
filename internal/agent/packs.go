@@ -12,6 +12,17 @@ type PackDefinition struct {
 // Packs is the registry of all available agent packs.
 var Packs = []PackDefinition{
 	{
+		Slug:        "starter",
+		Name:        "Starter Team",
+		Description: "CEO, engineer, and GTM — the three roles that actually ship and sell",
+		LeadSlug:    "ceo",
+		Agents: []AgentConfig{
+			{Slug: "ceo", Name: "CEO", Expertise: []string{"strategy", "decision-making", "prioritization", "delegation", "orchestration"}, Personality: "Strategic leader who breaks down directives into clear specialist assignments", PermissionMode: "plan"},
+			{Slug: "eng", Name: "Founding Engineer", Expertise: []string{"full-stack", "backend", "frontend", "APIs", "databases", "architecture", "DevOps"}, Personality: "Scrappy full-stack engineer who ships fast and keeps the system simple until it needs to be complex", PermissionMode: "auto", AllowedTools: []string{"Edit", "Write", "Bash(go*,git*,npm*,make*)"}},
+			{Slug: "gtm", Name: "GTM Lead", Expertise: []string{"go-to-market", "sales", "outreach", "positioning", "content", "pipeline", "ICP", "growth"}, Personality: "Revenue-focused generalist who handles the full GTM motion from messaging to closed deals", PermissionMode: "plan"},
+		},
+	},
+	{
 		Slug:        "founding-team",
 		Name:        "Founding Team",
 		Description: "Full autonomous company — CEO delegates to specialists",

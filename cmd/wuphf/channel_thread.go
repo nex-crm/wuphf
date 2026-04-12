@@ -231,16 +231,10 @@ func renderThreadReply(reply threadedMessage, width int) []string {
 		bodyPrefix += lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render("│") + " "
 	}
 
-	textPart, a2uiRendered := renderA2UIBlocks(msg.Content, width-4)
-	for _, paragraph := range strings.Split(textPart, "\n") {
+	for _, paragraph := range strings.Split(msg.Content, "\n") {
 		paragraph = highlightMentions(paragraph, agentColorMap)
 		for _, wrappedLine := range strings.Split(ansi.Wrap(paragraph, width-4, ""), "\n") {
 			lines = append(lines, bodyPrefix+wrappedLine)
-		}
-	}
-	if a2uiRendered != "" {
-		for _, renderedLine := range strings.Split(a2uiRendered, "\n") {
-			lines = append(lines, bodyPrefix+renderedLine)
 		}
 	}
 	lines = append(lines, "")
@@ -276,20 +270,13 @@ func renderThreadMessage(msg brokerMessage, width int, isParent bool) []string {
 		agentAvatar(msg.From), nameRendered, strings.Repeat(" ", gap), tsRendered))
 
 	// Render content
-	textPart, a2uiRendered := renderA2UIBlocks(msg.Content, width-4)
-	for _, paragraph := range strings.Split(textPart, "\n") {
+	for _, paragraph := range strings.Split(msg.Content, "\n") {
 		paragraph = highlightMentions(paragraph, agentColorMap)
 		wrapped := ansi.Wrap(paragraph, width-4, "")
 		for _, wl := range strings.Split(wrapped, "\n") {
 			lines = append(lines, "  "+wl)
 		}
 	}
-	if a2uiRendered != "" {
-		for _, renderedLine := range strings.Split(a2uiRendered, "\n") {
-			lines = append(lines, "  "+renderedLine)
-		}
-	}
-
 	return lines
 }
 

@@ -26,6 +26,12 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		return fmt.Errorf("broker is not running")
 	}
 
+	// Per-agent MCP scoping: give each agent only the MCP servers it needs.
+	agentMCP := l.mcpConfig
+	if path, err := l.ensureAgentMCPConfig(slug); err == nil {
+		agentMCP = path
+	}
+
 	args := []string{
 		"--model", l.headlessClaudeModel(slug),
 		"--print", "-",
@@ -35,14 +41,33 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		"--disable-slash-commands",
 		"--setting-sources", "user",
 		"--append-system-prompt", l.buildPrompt(slug),
-		"--mcp-config", l.mcpConfig,
+		"--mcp-config", agentMCP,
 		"--strict-mcp-config",
 	}
 	args = append(args, strings.Fields(l.resolvePermissionFlags(slug))...)
 
+	// Workspace isolation: coding agents get their own git worktree.
+	worktreeDir := ""
+	if codingAgentSlugs[slug] && l.broker != nil {
+		task := l.agentActiveTask(slug)
+		if task != nil && strings.TrimSpace(task.ID) != "" {
+			if wPath, _, err := prepareTaskWorktree(task.ID); err == nil {
+				worktreeDir = wPath
+			}
+		}
+	}
+
 	cmd := headlessClaudeCommandContext(ctx, "claude", args...)
-	cmd.Dir = l.cwd
-	cmd.Env = l.buildHeadlessClaudeEnv(slug)
+	if worktreeDir != "" {
+		cmd.Dir = worktreeDir
+	} else {
+		cmd.Dir = l.cwd
+	}
+	env := l.buildHeadlessClaudeEnv(slug)
+	if worktreeDir != "" {
+		env = append(env, "WUPHF_WORKTREE_PATH="+worktreeDir)
+	}
+	cmd.Env = env
 	cmd.Stdin = strings.NewReader(notification)
 
 	stdout, err := cmd.StdoutPipe()
@@ -143,6 +168,9 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		summary = "reply ready · " + summary
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
+	if l.broker != nil {
+		l.broker.RecordAgentUsage(slug, l.headlessClaudeModel(slug), result.Usage)
+	}
 	if text := strings.TrimSpace(result.FinalMessage); text != "" {
 		appendHeadlessClaudeLog(slug, "result: "+text)
 	}
@@ -150,7 +178,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 }
 
 func (l *Launcher) headlessClaudeModel(slug string) string {
-	if slug == l.officeLeadSlug() {
+	if l.opusCEO && slug == l.officeLeadSlug() {
 		return "claude-opus-4-6"
 	}
 	return "claude-sonnet-4-6"
