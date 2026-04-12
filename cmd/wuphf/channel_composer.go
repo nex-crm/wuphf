@@ -23,8 +23,11 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 	// ── Typing indicator ──────────────────────────────────────────────
 
 	// ── Composer label ────────────────────────────────────────────────
+	isDM := strings.HasPrefix(channelName, "DM→")
 	label := fmt.Sprintf("Message #%s", channelName)
 	if strings.HasPrefix(channelName, "1:1 ") {
+		label = channelName
+	} else if isDM {
 		label = channelName
 	}
 	if pending != nil {
@@ -35,6 +38,9 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 	labelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(slackActive)).
 		Bold(true)
+	if isDM && pending == nil && replyToID == "" {
+		labelStyle = labelStyle.Foreground(lipgloss.Color("#8B5CF6"))
+	}
 	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 	if strings.TrimSpace(hint) == "" {
 		hint = "/ commands · @ mention · Ctrl+J newline · Enter send · Esc pause all"
@@ -42,6 +48,8 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 			hint = "↑/↓ pick option · Enter submit · type to answer freeform · Esc pause all"
 		} else if strings.HasPrefix(channelName, "1:1 ") {
 			hint = "/ commands · @ mention · Ctrl+J newline · Enter send direct · Esc pause all"
+		} else if isDM {
+			hint = "/ commands · Ctrl+J newline · Enter send direct · Ctrl+D close DM · Esc pause all"
 		}
 	}
 	parts = append(parts, "  "+labelStyle.Render(label)+"  "+hintStyle.Render(hint))
@@ -58,6 +66,9 @@ func renderComposer(width int, input []rune, inputPos int, channelName string,
 		placeholder := "Type a message... (/ commands, @ mention)"
 		if strings.HasPrefix(channelName, "1:1 ") {
 			placeholder = "Talk directly to your agent here... (Ctrl+J for a new line)"
+		} else if isDM {
+			agentName := strings.TrimPrefix(channelName, "DM→")
+			placeholder = fmt.Sprintf("Message %s directly... (office stays active)", agentName)
 		}
 		if pending != nil {
 			placeholder = "Type your answer here, or Enter to accept the highlighted option"

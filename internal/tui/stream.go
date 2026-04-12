@@ -94,6 +94,12 @@ type StreamModel struct {
 	channelMode bool
 	agentStatus []AgentStatusEntry
 
+	// Roster navigation + inline DM.
+	rosterFocus   bool   // roster panel has keyboard focus
+	rosterCursor  int    // selected agent index in roster (-1 = none)
+	dmTargetSlug  string // when set, messages are sent directly to this agent
+	dmTargetName  string // display name for the DM target
+
 	initFlow InitFlowModel
 }
 
@@ -195,6 +201,7 @@ func (m StreamModel) Update(msg tea.Msg) (StreamModel, tea.Cmd) {
 
 	case AgentTextMsg:
 		m.streaming[msg.AgentSlug] = m.streaming[msg.AgentSlug] + msg.Text
+		m.roster.SetAgentText(msg.AgentSlug, m.streaming[msg.AgentSlug])
 		m.noteAgentActivity(msg.AgentSlug, time.Now())
 
 	case AgentThinkingMsg:
@@ -273,6 +280,7 @@ func (m StreamModel) Update(msg tea.Msg) (StreamModel, tea.Cmd) {
 				})
 			}
 			delete(m.streaming, msg.AgentSlug)
+			m.roster.SetAgentText(msg.AgentSlug, "")
 
 			// If the team-lead just finished, parse for delegations to specialists
 			if msg.AgentSlug == m.runtime.TeamLeadSlug && m.runtime.Delegator != nil {
@@ -490,6 +498,11 @@ func (m StreamModel) updateInsertMode(msg tea.KeyMsg) (StreamModel, tea.Cmd) {
 	case "esc":
 		m.mode = "normal"
 		m.statusBar.Mode = "NORMAL"
+		if m.dmTargetSlug != "" {
+			m.appendSystemMessage(fmt.Sprintf("DM with %s closed.", m.dmTargetName))
+			m.dmTargetSlug = ""
+			m.dmTargetName = ""
+		}
 		return m, nil
 	case "backspace":
 		if m.inputPos > 0 {
@@ -580,7 +593,63 @@ func sanitizeInputRunes(in []rune) []rune {
 
 // updateNormalMode handles key events when in normal mode.
 func (m StreamModel) updateNormalMode(msg tea.KeyMsg) (StreamModel, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+
+	// Roster navigation when roster has focus.
+	if m.rosterFocus {
+		switch key {
+		case "j", "down":
+			n := m.roster.AgentCount()
+			if n > 0 {
+				next := m.rosterCursor + 1
+				if next >= n {
+					next = 0
+				}
+				m.rosterCursor = next
+				m.roster.SetCursor(next)
+			}
+		case "k", "up":
+			n := m.roster.AgentCount()
+			if n > 0 {
+				prev := m.rosterCursor - 1
+				if prev < 0 {
+					prev = n - 1
+				}
+				m.rosterCursor = prev
+				m.roster.SetCursor(prev)
+			}
+		case "d", "enter":
+			// Begin DM with the currently selected agent.
+			slug := m.roster.CursorAgent()
+			if slug != "" {
+				m.dmTargetSlug = slug
+				if ma, ok := m.runtime.AgentService.Get(slug); ok {
+					m.dmTargetName = ma.Config.Name
+				} else {
+					m.dmTargetName = slug
+				}
+				m.rosterFocus = false
+				m.roster.SetFocused(false)
+				m.mode = "insert"
+				m.statusBar.Mode = "DM"
+				m.appendSystemMessage(fmt.Sprintf("DM open with %s — press Esc to close.", m.dmTargetName))
+			}
+		case "esc", "tab":
+			m.rosterFocus = false
+			m.roster.SetFocused(false)
+		}
+		return m, nil
+	}
+
+	switch key {
+	case "tab":
+		// Focus the roster sidebar.
+		if !m.channelMode && m.roster.AgentCount() > 0 {
+			m.rosterFocus = true
+			m.rosterCursor = 0
+			m.roster.SetFocused(true)
+			m.roster.SetCursor(0)
+		}
 	case "i":
 		m.mode = "insert"
 		m.statusBar.Mode = "INSERT"
@@ -614,12 +683,35 @@ func (m StreamModel) handleSubmit() (StreamModel, tea.Cmd) {
 		return m.handleSlashCommand(input)
 	}
 
-	// Add as user message
+	// Add as user message (show DM label when targeting a specific agent).
+	displayContent := input
+	if m.dmTargetSlug != "" {
+		displayContent = fmt.Sprintf("[DM→%s] %s", m.dmTargetName, input)
+	}
 	m.messages = append(m.messages, StreamMessage{
 		Role:      "user",
-		Content:   input,
+		Content:   displayContent,
 		Timestamp: time.Now(),
 	})
+
+	// If a DM target is active, bypass the router and go directly to that agent.
+	if m.dmTargetSlug != "" {
+		targetSlug := m.dmTargetSlug
+		if _, ok := m.runtime.AgentService.Get(targetSlug); !ok {
+			if _, err := m.runtime.AgentService.CreateFromTemplate(targetSlug, targetSlug); err == nil {
+				_ = m.runtime.AgentService.Start(targetSlug)
+			}
+		}
+		m.wireAgent(targetSlug)
+		m.appendSystemMessage(fmt.Sprintf("Message sent directly to %s.", m.dmTargetName))
+		_ = m.runtime.AgentService.FollowUp(targetSlug, input)
+		m.runtime.MessageRouter.RecordAgentActivity(targetSlug)
+		m.loading = true
+		m.spinner.SetActive(true)
+		m.updateSpinnerLabel()
+		m.updateRoster()
+		return m, tea.Batch(m.ensureSpinnerTick())
+	}
 
 	// Route via message router
 	available := m.availableAgents()
@@ -1064,9 +1156,22 @@ func (m StreamModel) agentPrefix(slug, name string) string {
 func (m StreamModel) renderInput(width int) string {
 	var inputStr string
 
+	// DM prefix rendered before the user's input.
+	var dmPrefix string
+	if m.dmTargetSlug != "" {
+		dmPrefix = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(NexPurple)).
+			Bold(true).
+			Render(fmt.Sprintf("[DM→%s] ", m.dmTargetName))
+	}
+
 	if len(m.inputValue) == 0 {
 		if m.mode == "insert" {
-			inputStr = SystemStyle.Render(fmt.Sprintf("Message %s or use @agent... (/help, /thinking, /quit)", m.agentDisplayName(m.runtime.TeamLeadSlug)))
+			placeholder := fmt.Sprintf("Message %s or use @agent... (/help, /thinking, /quit)", m.agentDisplayName(m.runtime.TeamLeadSlug))
+			if m.dmTargetSlug != "" {
+				placeholder = fmt.Sprintf("Message %s directly...", m.dmTargetName)
+			}
+			inputStr = dmPrefix + SystemStyle.Render(placeholder)
 		}
 	} else if m.mode == "insert" {
 		// Render with cursor
@@ -1080,9 +1185,9 @@ func (m StreamModel) renderInput(width int) string {
 			cursor = cursorStyle.Render(" ")
 			after = ""
 		}
-		inputStr = before + cursor + after
+		inputStr = dmPrefix + before + cursor + after
 	} else {
-		inputStr = string(m.inputValue)
+		inputStr = dmPrefix + string(m.inputValue)
 	}
 
 	iw := width - 4
