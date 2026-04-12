@@ -327,6 +327,89 @@ func newHeadlessLauncherForTest() *Launcher {
 	}
 }
 
+func TestFinishHeadlessTurnWakesLeadWhenAllSpecialistsDone(t *testing.T) {
+	woken := make(chan string, 4)
+	oldWakeLead := headlessWakeLeadFn
+	headlessWakeLeadFn = func(_ *Launcher, specialistSlug string) {
+		woken <- specialistSlug
+	}
+	defer func() { headlessWakeLeadFn = oldWakeLead }()
+
+	l := newHeadlessLauncherForTest()
+
+	// Simulate "fe" finishing with no other specialists active.
+	l.finishHeadlessTurn("fe")
+
+	got := waitForString(t, woken)
+	if got != "fe" {
+		t.Fatalf("expected lead woken after fe finished, got %q", got)
+	}
+}
+
+func TestFinishHeadlessTurnDoesNotWakeLeadWhenOtherSpecialistsActive(t *testing.T) {
+	woken := make(chan string, 4)
+	oldWakeLead := headlessWakeLeadFn
+	headlessWakeLeadFn = func(_ *Launcher, specialistSlug string) {
+		woken <- specialistSlug
+	}
+	defer func() { headlessWakeLeadFn = oldWakeLead }()
+
+	l := newHeadlessLauncherForTest()
+	// "be" is still active while "fe" finishes.
+	l.headlessActive["be"] = &headlessCodexActiveTurn{}
+
+	l.finishHeadlessTurn("fe")
+
+	select {
+	case got := <-woken:
+		t.Fatalf("expected NO lead wake when other specialist still active, but got %q", got)
+	case <-time.After(100 * time.Millisecond):
+		// correct: lead not woken
+	}
+}
+
+func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadFinishes(t *testing.T) {
+	woken := make(chan string, 4)
+	oldWakeLead := headlessWakeLeadFn
+	headlessWakeLeadFn = func(_ *Launcher, specialistSlug string) {
+		woken <- specialistSlug
+	}
+	defer func() { headlessWakeLeadFn = oldWakeLead }()
+
+	l := newHeadlessLauncherForTest()
+	// CEO finishes — should not self-wake.
+	l.finishHeadlessTurn("ceo")
+
+	select {
+	case got := <-woken:
+		t.Fatalf("expected NO lead wake when lead itself finishes, got %q", got)
+	case <-time.After(100 * time.Millisecond):
+		// correct: lead not self-woken
+	}
+}
+
+func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadAlreadyQueued(t *testing.T) {
+	woken := make(chan string, 4)
+	oldWakeLead := headlessWakeLeadFn
+	headlessWakeLeadFn = func(_ *Launcher, specialistSlug string) {
+		woken <- specialistSlug
+	}
+	defer func() { headlessWakeLeadFn = oldWakeLead }()
+
+	l := newHeadlessLauncherForTest()
+	// CEO already has a pending turn.
+	l.headlessQueues["ceo"] = []headlessCodexTurn{{Prompt: "pending work"}}
+
+	l.finishHeadlessTurn("fe")
+
+	select {
+	case got := <-woken:
+		t.Fatalf("expected NO lead wake when lead already has queued work, got %q", got)
+	case <-time.After(100 * time.Millisecond):
+		// correct: lead not woken again
+	}
+}
+
 func waitForSignal(t *testing.T, ch <-chan struct{}) {
 	t.Helper()
 	select {
