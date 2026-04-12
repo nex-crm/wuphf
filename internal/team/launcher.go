@@ -2233,6 +2233,15 @@ func (l *Launcher) relevantTaskForTarget(msg channelMessage, slug string) (teamT
 func (l *Launcher) responseInstructionForTarget(msg channelMessage, slug string) string {
 	lead := l.officeLeadSlug()
 	if slug == lead {
+		// When the CEO is woken by a specialist (msg.From is not human/you/system),
+		// the context is different: the specialist just finished work and the CEO
+		// should review and deliver or coordinate, not re-initiate. When woken by
+		// the human, the CEO should reply quickly and route.
+		from := strings.TrimSpace(msg.From)
+		isFromHuman := from == "" || from == "you" || from == "human" || from == "nex"
+		if !isFromHuman {
+			return fmt.Sprintf("You are @%s. A specialist just finished. If the human already has what they need (the specialist used human_message), stay quiet. If additional coordination or synthesis is genuinely needed, act — otherwise do nothing.", slug)
+		}
 		return fmt.Sprintf("You are @%s. Give the first top-level reply quickly, then pull in specialists only when needed.", slug)
 	}
 	if containsSlug(msg.Tagged, slug) {
@@ -2276,7 +2285,10 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 		lines = append(lines, ctx)
 	}
 	if slug == l.officeLeadSlug() {
-		if taskCtx := l.buildTaskNotificationContext(channel, slug, 3); taskCtx != "" {
+		// Always use AllTasks (pass "") so the CEO sees tasks across all channels,
+		// not just the channel of the message that woke them. Without this, a CEO
+		// woken from the "engineering" channel would miss "general"-channel tasks.
+		if taskCtx := l.buildTaskNotificationContext("", slug, 3); taskCtx != "" {
 			lines = append(lines, taskCtx)
 		}
 		// For the lead (CEO), explicitly list which specialist agents have already
