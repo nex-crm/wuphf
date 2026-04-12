@@ -111,6 +111,9 @@ type Launcher struct {
 	headlessActive  map[string]*headlessCodexActiveTurn
 	headlessQueues  map[string][]headlessCodexTurn
 	webMode         bool
+
+	notifyMu            sync.Mutex
+	notifyLastDelivered map[string]time.Time
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
@@ -167,9 +170,10 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		sessionMode:     sessionMode,
 		oneOnOne:        oneOnOne,
 		provider:        config.ResolveLLMProvider(""),
-		headlessWorkers: make(map[string]bool),
-		headlessActive:  make(map[string]*headlessCodexActiveTurn),
-		headlessQueues:  make(map[string][]headlessCodexTurn),
+		headlessWorkers:     make(map[string]bool),
+		headlessActive:      make(map[string]*headlessCodexActiveTurn),
+		headlessQueues:      make(map[string][]headlessCodexTurn),
+		notifyLastDelivered: make(map[string]time.Time),
 	}, nil
 }
 
@@ -375,9 +379,6 @@ func (l *Launcher) notifyTaskActionsLoop() {
 	}
 }
 
-var agentLastNotifiedMu sync.Mutex
-var agentLastNotified = make(map[string]time.Time)
-
 const (
 	agentNotifyCooldown      = 1 * time.Second
 	agentNotifyCooldownAgent = 2 * time.Second
@@ -395,15 +396,18 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	}
 	now := time.Now()
 	filtered := make([]notificationTarget, 0, len(immediate))
-	agentLastNotifiedMu.Lock()
+	l.notifyMu.Lock()
+	if l.notifyLastDelivered == nil {
+		l.notifyLastDelivered = make(map[string]time.Time)
+	}
 	for _, t := range immediate {
-		if last, ok := agentLastNotified[t.Slug]; ok && now.Sub(last) < cooldown {
+		if last, ok := l.notifyLastDelivered[t.Slug]; ok && now.Sub(last) < cooldown {
 			continue
 		}
-		agentLastNotified[t.Slug] = now
+		l.notifyLastDelivered[t.Slug] = now
 		filtered = append(filtered, t)
 	}
-	agentLastNotifiedMu.Unlock()
+	l.notifyMu.Unlock()
 	immediate = filtered
 
 	// Broadcast stage update only for untagged messages in team mode
