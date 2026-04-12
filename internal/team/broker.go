@@ -26,6 +26,52 @@ const brokerTokenFile = "/tmp/wuphf-broker-token"
 
 var brokerStatePath = defaultBrokerStatePath
 
+// agentStreamBuffer holds recent stdout/stderr lines from a headless agent
+// process and fans them out to SSE subscribers in real time.
+type agentStreamBuffer struct {
+	mu     sync.Mutex
+	lines  []string
+	subs   map[int]chan string
+	nextID int
+}
+
+func (s *agentStreamBuffer) Push(line string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lines = append(s.lines, line)
+	if len(s.lines) > 2000 {
+		s.lines = s.lines[len(s.lines)-2000:]
+	}
+	for _, ch := range s.subs {
+		select {
+		case ch <- line:
+		default:
+		}
+	}
+}
+
+func (s *agentStreamBuffer) subscribe() (<-chan string, func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := s.nextID
+	s.nextID++
+	ch := make(chan string, 128)
+	s.subs[id] = ch
+	return ch, func() {
+		s.mu.Lock()
+		delete(s.subs, id)
+		s.mu.Unlock()
+	}
+}
+
+func (s *agentStreamBuffer) recent() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]string, len(s.lines))
+	copy(out, s.lines)
+	return out
+}
+
 type messageReaction struct {
 	Emoji string `json:"emoji"`
 	From  string `json:"from"`
@@ -332,6 +378,7 @@ type Broker struct {
 	activity            map[string]agentActivitySnapshot
 	activitySubscribers map[int]chan agentActivitySnapshot
 	nextSubscriberID    int
+	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
 	server              *http.Server
 	token               string   // shared secret for authenticating requests
@@ -397,6 +444,22 @@ func generateToken() string {
 	return hex.EncodeToString(b)
 }
 
+// AgentStream returns (or lazily creates) the stream buffer for a given agent slug.
+// It is safe to call concurrently.
+func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.agentStreams == nil {
+		b.agentStreams = make(map[string]*agentStreamBuffer)
+	}
+	s, ok := b.agentStreams[slug]
+	if !ok {
+		s = &agentStreamBuffer{subs: make(map[int]chan string)}
+		b.agentStreams[slug] = s
+	}
+	return s
+}
+
 // NewBroker creates a new channel broker with a random auth token.
 func NewBroker() *Broker {
 	b := &Broker{
@@ -405,6 +468,7 @@ func NewBroker() *Broker {
 		actionSubscribers:   make(map[int]chan officeActionLog),
 		activity:            make(map[string]agentActivitySnapshot),
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
+		agentStreams:        make(map[string]*agentStreamBuffer),
 	}
 	_ = b.loadState()
 	b.mu.Lock()
@@ -619,6 +683,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
+	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
 	mux.HandleFunc("/web-token", b.handleWebToken)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
@@ -763,6 +828,62 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok || writeEvent("activity", map[string]any{"activity": snapshot}) != nil {
 				return
 			}
+		case <-heartbeat.C:
+			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+// handleAgentStream serves a per-agent stdout SSE stream.
+// Recent lines are replayed as initial history, then new lines are pushed live.
+// Path: /agent-stream/{slug}
+func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
+	slug := strings.TrimPrefix(r.URL.Path, "/agent-stream/")
+	if slug == "" {
+		http.Error(w, "missing agent slug", http.StatusBadRequest)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	stream := b.AgentStream(slug)
+
+	// Replay recent history so the client sees context immediately.
+	for _, line := range stream.recent() {
+		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+			return
+		}
+	}
+	flusher.Flush()
+
+	lines, unsubscribe := stream.subscribe()
+	defer unsubscribe()
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case line, ok := <-lines:
+			if !ok {
+				return
+			}
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+				return
+			}
+			flusher.Flush()
 		case <-heartbeat.C:
 			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
 				return

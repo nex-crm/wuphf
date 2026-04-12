@@ -659,10 +659,6 @@ type channelModel struct {
 	telegramGroups []team.TelegramGroup
 	telegramToken  string
 
-	// Inline DM — office stays active, no session mode switch.
-	dmTargetSlug string
-	dmTargetName string
-
 	// lastAgentContent tracks the latest streaming text per agent for sidebar display.
 	lastAgentContent map[string]string
 }
@@ -969,12 +965,13 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "ctrl+d":
-			// Close inline DM (Ctrl+D toggles the DM target).
-			if m.dmTargetSlug != "" {
-				prevName := m.dmTargetName
-				m.dmTargetSlug = ""
-				m.dmTargetName = ""
-				m.notice = fmt.Sprintf("DM with %s closed — back to office.", prevName)
+			// Return to #general from a DM channel.
+			if strings.HasPrefix(m.activeChannel, "dm-") {
+				m.activeChannel = "general"
+				m.lastID = ""
+				m.messages = nil
+				m.notice = "Back to #general"
+				return m, pollBroker("", m.activeChannel)
 			}
 			return m, nil
 		}
@@ -1212,12 +1209,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputPos = 0
 				m.notice = ""
 				m.posting = true
-				// When inline DM is active, target the message directly at that agent.
-				postText := text
-				if m.dmTargetSlug != "" && !strings.HasPrefix(text, "@"+m.dmTargetSlug) {
-					postText = "@" + m.dmTargetSlug + " " + text
-				}
-				return m, postToChannel(postText, m.replyToID, m.activeChannel)
+				return m, postToChannel(text, m.replyToID, m.activeChannel)
 			}
 			if m.pending != nil {
 				if opt := m.selectedInterviewOption(); opt != nil {
@@ -2972,8 +2964,9 @@ func (m channelModel) composerTargetLabel() string {
 	if m.isOneOnOne() {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
-	if m.dmTargetSlug != "" {
-		return "DM→" + m.dmTargetName
+	if strings.HasPrefix(m.activeChannel, "dm-") {
+		slug := strings.TrimPrefix(m.activeChannel, "dm-")
+		return "DM→" + slug
 	}
 	return m.activeChannel
 }
@@ -3244,8 +3237,8 @@ func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, m.selectSidebarItem(items[m.sidebarCursor])
 	case "d":
-		// Open inline DM with the agent visible at current roster scroll position.
-		// Office stays active — no session mode switch.
+		// Switch the main channel view to the per-agent DM channel.
+		// The office continues running; this is just a channel switch.
 		roster := mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo())
 		if len(roster) > 0 {
 			idx := m.sidebarRosterOffset
@@ -3256,13 +3249,15 @@ func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				idx = len(roster) - 1
 			}
 			target := roster[idx]
-			m.dmTargetSlug = target.Slug
-			m.dmTargetName = target.Name
-			if m.dmTargetName == "" {
-				m.dmTargetName = target.Slug
+			name := target.Name
+			if name == "" {
+				name = target.Slug
 			}
+			m.activeChannel = "dm-" + target.Slug
 			m.focus = focusMain
-			m.notice = fmt.Sprintf("DM open with %s — Ctrl+D to close, office stays active", m.dmTargetName)
+			m.lastID = ""
+			m.messages = nil
+			m.notice = fmt.Sprintf("DM with %s — Ctrl+D to return to #general", name)
 		}
 	}
 	return m, nil
