@@ -1197,10 +1197,6 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       </div>
       <div class="sidebar-channels" id="sidebar-channels"></div>
       <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
-        <p class="sidebar-section-title">Direct messages</p>
-      </div>
-      <div class="sidebar-channels" id="sidebar-dms"></div>
-      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
         <p class="sidebar-section-title">Apps</p>
       </div>
       <div class="sidebar-channels" id="sidebar-apps"></div>
@@ -2161,65 +2157,32 @@ function renderSidebarAgents() {
     var member = cachedMembers.find(function(m) { return m.slug === a.slug; });
     var ac = classifyActivity(member);
     var task = findAgentTask(a.slug);
+    var isDMActive = currentChannel === 'dm-' + a.slug;
     var btn = document.createElement('button');
-    btn.className = 'sidebar-agent';
+    btn.className = 'sidebar-agent' + (isDMActive ? ' active' : '');
     btn.setAttribute('data-slug', a.slug);
     btn.title = a.name + ' — ' + ac.label;
-    btn.addEventListener('click', function() { openAgentPanel(a.slug); });
     var avatarEl = renderPixelAvatar(a.slug, 24);
     avatarEl.classList.add('pixel-avatar-sidebar');
+    avatarEl.title = 'View ' + a.name + ' profile';
+    avatarEl.addEventListener('click', function(e) {
+      e.stopPropagation();
+      openAgentPanel(a.slug);
+    });
     var wrap = document.createElement('div');
     wrap.className = 'sidebar-agent-wrap';
     var nameEl = document.createElement('span');
     nameEl.className = 'sidebar-agent-name';
     nameEl.textContent = a.name;
     wrap.appendChild(nameEl);
-    if (task) {
-      var taskText = document.createElement('span');
-      taskText.className = 'sidebar-agent-task';
-      taskText.textContent = 'working on: Task #' + (task.id || task.number || '?');
-      wrap.appendChild(taskText);
-    }
-    // Thought bubble (#26) — show activity snippet for non-lurking agents
-    if (member && member.activity && ac.state !== 'lurking') {
-      var bubble = document.createElement('span');
-      bubble.className = 'thought-bubble';
-      var activityText = member.activity;
-      bubble.textContent = activityText.length > 30 ? activityText.substring(0, 30) + '\u2026' : activityText;
-      bubble.title = activityText;
-      wrap.appendChild(bubble);
-    }
-    // Live activity text (#24)
-    var liveAct = member && (member.liveActivity || member.live_activity);
-    if (liveAct && liveAct !== 'active') {
-      var actEl = document.createElement('span');
-      actEl.className = 'sidebar-agent-activity';
-      actEl.textContent = liveAct.length > 40 ? liveAct.substring(0, 40) + '\u2026' : liveAct;
-      actEl.title = liveAct;
-      wrap.appendChild(actEl);
-    }
-    // Inline streaming text — last text snippet from this agent's messages
-    var streamSnippet = agentLatestText && agentLatestText[a.slug];
-    if (streamSnippet) {
-      var streamEl = document.createElement('span');
-      streamEl.className = 'sidebar-agent-stream';
-      streamEl.textContent = streamSnippet;
-      wrap.appendChild(streamEl);
-    }
-    var dot = document.createElement('span');
-    dot.className = 'status-dot ' + ac.dotClass;
-    // DM button — opens inline panel without switching mode
-    var dmBtn = document.createElement('button');
-    dmBtn.className = 'sidebar-agent-dm-btn';
-    dmBtn.textContent = 'DM';
-    dmBtn.title = 'Open direct channel with ' + a.name;
-    dmBtn.addEventListener('click', function(e) {
-      e.stopPropagation(); // don't open agent panel
+    wrap.addEventListener('click', function(e) {
+      e.stopPropagation();
       switchChannel('dm-' + a.slug);
     });
+    var dot = document.createElement('span');
+    dot.className = 'status-dot ' + ac.dotClass;
     btn.appendChild(avatarEl);
     btn.appendChild(wrap);
-    btn.appendChild(dmBtn);
     btn.appendChild(dot);
     container.appendChild(btn);
   });
@@ -2874,6 +2837,7 @@ function switchChannel(name) {
   // DM channel enter/leave hooks (Slack-style)
   var prevChannel = currentChannel;
   currentChannel = name;
+  renderSidebarChannels();
   if (name.indexOf('dm-') === 0) {
     onDMChannelEnter(name.slice(3));
   } else if (prevChannel && prevChannel.indexOf('dm-') === 0) {
@@ -4785,8 +4749,8 @@ function openAgentPanel(slug) {
   dmBtn.className = 'btn btn-ghost btn-sm';
   dmBtn.style.width = '100%';
   dmBtn.style.marginBottom = '8px';
-  dmBtn.textContent = 'Start 1:1 conversation';
-  dmBtn.addEventListener('click', function() { closeAgentPanel(); enterDMMode(agent.slug); });
+  dmBtn.textContent = 'Open DM';
+  dmBtn.addEventListener('click', function() { closeAgentPanel(); switchChannel('dm-' + agent.slug); });
   actionsSection.appendChild(dmBtn);
 
   var editBtn = document.createElement('button');
@@ -4797,44 +4761,6 @@ function openAgentPanel(slug) {
   editBtn.addEventListener('click', function() { closeAgentPanel(); openAgentWizard(agent); });
   actionsSection.appendChild(editBtn);
 
-  // Live stream section (Item 7)
-  var streamSection = document.createElement('div');
-  streamSection.className = 'agent-stream-section';
-  var streamTitle = document.createElement('p');
-  streamTitle.className = 'agent-stream-section-title';
-  var streamDot = document.createElement('span');
-  streamDot.className = 'agent-stream-dot';
-  streamTitle.appendChild(streamDot);
-  var streamLabel = document.createTextNode(' Live Activity');
-  streamTitle.appendChild(streamLabel);
-  streamSection.appendChild(streamTitle);
-  // Start streaming for this agent
-  startAgentStream(agent.slug, streamSection);
-
-  // Lightweight DM section (Item 8)
-  var dmSection = document.createElement('div');
-  dmSection.className = 'agent-dm-section';
-  var dmLabel = document.createElement('p');
-  dmLabel.className = 'agent-panel-section-title';
-  dmLabel.textContent = 'Quick Message';
-  dmSection.appendChild(dmLabel);
-  var dmRow = document.createElement('div');
-  dmRow.className = 'agent-dm-row';
-  var dmInput = document.createElement('input');
-  dmInput.type = 'text';
-  dmInput.className = 'agent-dm-input';
-  dmInput.placeholder = 'Message ' + agent.name + '...';
-  var dmSendBtn = document.createElement('button');
-  dmSendBtn.className = 'agent-dm-send';
-  dmSendBtn.textContent = 'Send';
-  dmSendBtn.addEventListener('click', function() { sendLightweightDM(agent.slug, dmInput); });
-  dmInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') { e.preventDefault(); sendLightweightDM(agent.slug, dmInput); }
-  });
-  dmRow.appendChild(dmInput);
-  dmRow.appendChild(dmSendBtn);
-  dmSection.appendChild(dmRow);
-
   body.appendChild(avatar);
   body.appendChild(nameEl);
   body.appendChild(roleEl);
@@ -4843,8 +4769,6 @@ function openAgentPanel(slug) {
   body.appendChild(toggleSection);
   body.appendChild(skillsSection);
   body.appendChild(actionsSection);
-  body.appendChild(streamSection);
-  body.appendChild(dmSection);
 
   panel.classList.add('open');
 }
@@ -5678,7 +5602,7 @@ function onDMChannelEnter(slug) {
   var strip = document.getElementById('dm-stream-strip');
   if (strip) strip.style.display = '';
   connectAgentStream(slug);
-  renderSidebarDMs();
+  renderSidebarAgents();
 }
 
 function onDMChannelLeave() {
@@ -5686,10 +5610,10 @@ function onDMChannelLeave() {
   if (dmStreamES) { dmStreamES.close(); dmStreamES = null; }
   var strip = document.getElementById('dm-stream-strip');
   if (strip) strip.style.display = 'none';
-  renderSidebarDMs();
+  renderSidebarAgents();
 }
 
-// Render "Direct messages" section in the sidebar listing all agents.
+// DM section removed — agent rows show active state directly.
 function renderSidebarDMs() {
   var container = document.getElementById('sidebar-dms');
   if (!container) return;
