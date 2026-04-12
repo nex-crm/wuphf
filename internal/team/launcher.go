@@ -2380,7 +2380,7 @@ func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog,
 	if ctx := l.buildNotificationContext(channel, "", threadRoot, 3); ctx != "" {
 		lines = append(lines, ctx)
 	}
-	lines = append(lines, fmt.Sprintf("%s Reply with the concrete next step and update via team_task with my_slug \"%s\".", truncate(content, 1000), slug))
+	lines = append(lines, fmt.Sprintf("%s Use team_task with my_slug \"%s\" to update status as you go.", truncate(content, 1000), slug))
 	return strings.Join(lines, "\n")
 }
 
