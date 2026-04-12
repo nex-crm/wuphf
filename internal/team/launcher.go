@@ -2675,6 +2675,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("- query_context: Check prior decisions, customer context, company history, or facts before making assumptions\n")
 			sb.WriteString("- add_context: Store durable conclusions or findings once the team actually lands them\n\n")
 		}
+		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
 		if l.isFocusModeEnabled() {
 			sb.WriteString("== DELEGATION MODE ==\n")
 			sb.WriteString("Delegation mode is enabled.\n")
@@ -2683,7 +2684,6 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("- Do the work, then report completion, blockers, or handoff notes back to @ceo.\n")
 			sb.WriteString("- If another specialist should get involved, tell @ceo instead of routing it yourself.\n\n")
 		}
-		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
 		sb.WriteString("1. Start with the pushed notification context and respond directly when it is enough; use team_poll only if you need genuinely fresher or broader context\n")
