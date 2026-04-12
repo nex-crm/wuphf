@@ -1951,7 +1951,7 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID string, limit 
 
 	var b strings.Builder
 	for _, msg := range filtered {
-		b.WriteString(fmt.Sprintf("@%s: %s\n", msg.From, truncate(msg.Content, 120)))
+		b.WriteString(fmt.Sprintf("@%s: %s\n", msg.From, truncate(msg.Content, 600)))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
@@ -2130,7 +2130,7 @@ func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog,
 	if ctx := l.buildNotificationContext(channel, task.ThreadID, 3); ctx != "" {
 		lines = append(lines, "[Recent thread]\n"+ctx)
 	}
-	lines = append(lines, fmt.Sprintf("%s Reply with the concrete next step and update via team_task with my_slug \"%s\".", truncate(content, 180), slug))
+	lines = append(lines, fmt.Sprintf("%s Reply with the concrete next step and update via team_task with my_slug \"%s\".", truncate(content, 1000), slug))
 	return strings.Join(lines, "\n")
 }
 
@@ -2143,13 +2143,13 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 	if l.isOneOnOne() {
 		notification = fmt.Sprintf(
 			"[New from @%s]: %s\n%s Reply using team_broadcast with my_slug \"%s\" and channel \"%s\" reply_to_id \"%s\".",
-			msg.From, truncate(msg.Content, 150), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
+			msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	} else {
 		packet := l.buildMessageWorkPacket(msg, target.Slug)
 		notification = fmt.Sprintf(
 			"%s\n---\n[New from @%s]: %s\n%s Only call team_poll or team_tasks if the pushed packet is not enough. Reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\".",
-			packet, msg.From, truncate(msg.Content, 150), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
+			packet, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	}
 
