@@ -183,33 +183,412 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .welcome-copy { max-width: 30ch; font-size: 15px; line-height: 1.65; color: var(--text-secondary); text-align: center; }
 @media (min-width: 1024px) { .welcome-copy { text-align: left; } }
 
-/* Frozen six-block landing shell */
-.landing-shell { width: 100%; max-width: 920px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
-.landing-intro { display: flex; flex-direction: column; gap: 0; }
-.landing-hero { padding: 44px 48px 36px; border-radius: var(--radius-xl) var(--radius-xl) 0 0; display: flex; flex-direction: column; gap: 18px; }
-.landing-headline { font-family: var(--font-logo); font-style: italic; font-size: clamp(2rem, 5vw, 4rem); line-height: 0.98; letter-spacing: -0.03em; max-width: 12ch; }
-.landing-subhead { max-width: 56ch; font-size: 17px; line-height: 1.65; color: var(--text-secondary); }
-.landing-cta-btn { width: 100%; max-width: 460px; justify-content: center; text-align: center; white-space: normal; line-height: 1.35; }
-.landing-proof { background: var(--bg-warm); border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--radius-xl) var(--radius-xl); padding: 16px 48px 18px; font-size: 15px; line-height: 1.65; font-weight: 600; color: var(--text); }
-.landing-middle { display: flex; flex-direction: column; gap: 10px; }
-.landing-block { padding: 22px 28px; }
-.landing-block p { font-size: 16px; line-height: 1.7; color: var(--text-secondary); }
-.landing-pain p { color: var(--text); }
-.landing-objection { display: flex; flex-direction: column; gap: 10px; }
-.landing-objection-lead { font-family: var(--font-mono); font-size: 12px; line-height: 1.7; letter-spacing: 0.02em; text-transform: uppercase; color: var(--text-secondary); }
-.landing-objection-detail { color: var(--text); }
-.landing-final-cta { padding: 24px 28px; display: flex; justify-content: center; }
+/* Landing page shell */
+.landing-shell { width: 100%; max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.landing-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 2px 0;
+}
+.landing-brand {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-size: 28px;
+  letter-spacing: -0.02em;
+}
+.landing-topbar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.landing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.landing-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 48px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 28px;
+  background:
+    radial-gradient(circle at top right, rgba(139,94,60,0.14), transparent 34%),
+    linear-gradient(180deg, rgba(255,255,255,0.92), rgba(243,237,228,0.9));
+}
+.landing-hero::after {
+  content: '';
+  position: absolute;
+  inset: auto 24px 24px auto;
+  width: 180px;
+  height: 180px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(139,94,60,0.12), transparent 68%);
+  pointer-events: none;
+}
+.landing-hero-copy,
+.landing-preview { position: relative; z-index: 1; }
+.landing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+.landing-headline {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-size: clamp(3rem, 7vw, 5.5rem);
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  max-width: 9ch;
+}
+.landing-subhead {
+  margin-top: 18px;
+  max-width: 58ch;
+  font-size: 17px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+.landing-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  margin-top: 28px;
+}
+.landing-cta-btn { width: auto; min-width: 260px; justify-content: center; text-align: center; white-space: normal; line-height: 1.35; }
+.landing-secondary-note {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.landing-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.landing-preview-card {
+  background: rgba(255,255,255,0.84);
+  border: 1px solid rgba(212,196,176,0.9);
+  border-radius: 18px;
+  box-shadow: 0 20px 60px rgba(59,47,47,0.08);
+  overflow: hidden;
+}
+.landing-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: rgba(245,230,211,0.7);
+  border-bottom: 1px solid var(--border);
+}
+.landing-preview-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.landing-preview-subtitle {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 2px;
+}
+.landing-preview-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-full);
+  background: white;
+  border: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+.landing-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+}
+.landing-thread {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  background: rgba(250,246,241,0.9);
+  border: 1px solid var(--border-light);
+  border-radius: 14px;
+}
+.landing-thread-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-bg);
+  font-size: 16px;
+}
+.landing-thread-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.landing-thread-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.landing-thread-status {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.landing-thread-copy {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+.landing-thread-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.landing-action {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+.landing-action-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+.landing-action-copy {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.landing-proof-grid,
+.landing-props-grid,
+.landing-flow-grid,
+.landing-control-grid {
+  display: grid;
+  gap: 14px;
+}
+.landing-proof-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.landing-proof-card,
+.landing-prop-card,
+.landing-flow-step,
+.landing-control-card {
+  padding: 20px;
+}
+.landing-proof-label,
+.landing-prop-label,
+.landing-step-label,
+.landing-control-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+.landing-proof-value,
+.landing-prop-title,
+.landing-section-title,
+.landing-final-title {
+  margin-top: 10px;
+  font-size: 22px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.landing-proof-copy,
+.landing-prop-copy,
+.landing-step-copy,
+.landing-control-copy,
+.landing-section-copy,
+.landing-final-copy {
+  margin-top: 8px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+.landing-prop-proof {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.landing-section.card,
+.landing-final-cta {
+  padding: 28px;
+}
+.landing-section-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.landing-kicker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-tertiary);
+}
+.landing-problem-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+.landing-problem-card {
+  padding: 22px;
+  border-radius: var(--radius-lg);
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+}
+.landing-problem-lead {
+  margin-top: 0;
+  color: var(--text);
+}
+.landing-solution-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(245,230,211,0.72));
+}
+.landing-solution-title {
+  font-size: 18px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+.landing-solution-points {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.landing-solution-points li {
+  display: flex;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.landing-problem-points {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.landing-problem-points li {
+  display: flex;
+  gap: 10px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+.landing-problem-points strong { color: var(--text); }
+.landing-point-index {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.landing-props-grid,
+.landing-flow-grid,
+.landing-control-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.landing-prop-card,
+.landing-flow-step { background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,246,241,0.98)); }
+.landing-step-number {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+.landing-step-label { margin-top: 14px; }
+.landing-control-card { background: var(--bg); border: 1px solid var(--border-light); border-radius: var(--radius-lg); }
+.landing-final-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  background: linear-gradient(135deg, rgba(245,230,211,0.95), rgba(255,255,255,0.95));
+}
+.landing-final-copy-wrap {
+  max-width: 52ch;
+}
+
+@media (max-width: 960px) {
+  .landing-hero,
+  .landing-problem-grid,
+  .landing-proof-grid,
+  .landing-props-grid,
+  .landing-flow-grid,
+  .landing-control-grid {
+    grid-template-columns: 1fr;
+  }
+  .landing-final-cta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
 
 @media (max-width: 768px) {
-  .landing-shell { gap: 10px; }
-  .landing-hero { padding: 28px 24px 24px; gap: 16px; }
+  .landing-shell { gap: 12px; }
+  .landing-topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .landing-hero,
+  .landing-section.card,
+  .landing-final-cta { padding: 24px; }
+  .landing-headline { max-width: none; }
   .landing-subhead { font-size: 16px; max-width: none; }
-  .landing-proof { padding: 14px 24px 16px; font-size: 14px; }
-  .landing-middle { gap: 8px; }
-  .landing-block { padding: 18px 20px; }
-  .landing-block p { font-size: 15px; line-height: 1.65; }
-  .landing-final-cta { padding: 18px 20px; }
-  .landing-cta-btn { max-width: none; }
+  .landing-cta-row { margin-top: 22px; }
+  .landing-cta-btn { width: 100%; }
+  .landing-thread-actions { grid-template-columns: 1fr; }
 }
 
 .form-card { padding: 24px; }
@@ -939,43 +1318,201 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <!-- Step 0: Welcome -->
       <div class="step active animate-fade" data-step="0">
         <div class="landing-shell">
-          <div class="landing-intro">
-            <section class="card landing-hero" aria-labelledby="landing-headline">
+          <header class="landing-topbar" aria-label="WUPHF overview">
+            <div class="landing-brand">WUPHF</div>
+            <div class="landing-topbar-meta">
+              <span class="badge badge-accent">Private alpha</span>
+              <span class="landing-dot" aria-hidden="true"></span>
+              <span>Visible multi-agent execution for live work</span>
+            </div>
+          </header>
+
+          <section class="card landing-hero" aria-labelledby="landing-headline">
+            <div class="landing-hero-copy">
+              <div class="landing-eyebrow">
+                <span class="status-dot active pulse"></span>
+                Shared office for agents, humans, and real tasks
+              </div>
               <h1 class="landing-headline" id="landing-headline">Your AI team, visible and working.</h1>
-              <p class="landing-subhead">Technical founder, CTO, or engineering lead running multiple AI agents on real code and operational work. The team is moving from one agent to several on a live repo and coordination is starting to slip.</p>
-              <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
-                Run one live task in WUPHF on a real repo and judge it from the office, not a demo.
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-              </button>
-            </section>
-            <section class="landing-proof" aria-labelledby="landing-proof-heading">
-              <h2 class="sr-only" id="landing-proof-heading">Proof</h2>
-              <p>WUPHF already runs specialist agents in one shared office with visible panes, threads, task claims, and blocking requests, so the human can see who owns what and intervene in real time.</p>
-            </section>
-          </div>
+              <p class="landing-subhead">WUPHF gives operators one room where AI specialists can claim real work, show progress in public, and pull in a human only when judgment is required.</p>
+              <div class="landing-cta-row">
+                <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
+                  Open a live office on a real task
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+                </button>
+                <p class="landing-secondary-note">Start with one repo or GTM motion and judge the system by shipped work, not polished agent theater.</p>
+              </div>
+            </div>
 
-          <div class="landing-middle">
-            <section class="card landing-block landing-pain" aria-labelledby="landing-pain-heading">
-              <h2 class="sr-only" id="landing-pain-heading">Coordination pain</h2>
-              <p>Once work spans several agent sessions, ownership, decisions, and blockers become hard to see, so humans waste time reconstructing what happened instead of steering it live.</p>
-            </section>
+            <aside class="landing-preview" aria-label="Office preview">
+              <div class="landing-preview-card">
+                <div class="landing-preview-header">
+                  <div>
+                    <div class="landing-preview-title">#general</div>
+                    <div class="landing-preview-subtitle">3 agents active, 1 decision pending</div>
+                  </div>
+                  <div class="landing-preview-pill">
+                    <span class="status-dot active pulse"></span>
+                    Live office
+                  </div>
+                </div>
+                <div class="landing-preview-body">
+                  <article class="landing-thread">
+                    <div class="landing-thread-avatar">🤖</div>
+                    <div>
+                      <div class="landing-thread-meta">
+                        <span class="landing-thread-name">@eng</span>
+                        <span class="landing-thread-status">task claimed</span>
+                      </div>
+                      <p class="landing-thread-copy">Landing page scaffold is in progress. Hero and proof sections are ready. Waiting on final value-prop copy.</p>
+                    </div>
+                  </article>
+                  <div class="landing-thread-actions">
+                    <div class="landing-action">
+                      <div class="landing-action-label">Task board</div>
+                      <div class="landing-action-copy">Ownership and active work stay visible.</div>
+                    </div>
+                    <div class="landing-action">
+                      <div class="landing-action-label">Threading</div>
+                      <div class="landing-action-copy">Decisions stay attached to the work they changed.</div>
+                    </div>
+                    <div class="landing-action">
+                      <div class="landing-action-label">Escalation</div>
+                      <div class="landing-action-copy">Humans get pulled in only when judgment is required.</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+          </section>
 
-            <section class="card landing-block" aria-labelledby="landing-how-heading">
-              <h2 class="sr-only" id="landing-how-heading">How WUPHF works</h2>
-              <p>WUPHF runs specialist agents in one shared office with visible panes, threads, task claims, and blocking requests.</p>
-            </section>
+          <section class="landing-proof-grid" aria-label="What the foundation needs to communicate">
+            <article class="card landing-proof-card">
+              <div class="landing-proof-label">Visibility</div>
+              <h2 class="landing-proof-value">See who owns the next move</h2>
+              <p class="landing-proof-copy">Tasks, threads, and blockers stay in one room, so work does not disappear into hidden agent sessions.</p>
+            </article>
+            <article class="card landing-proof-card">
+              <div class="landing-proof-label">Judgment</div>
+              <h2 class="landing-proof-value">Humans step in at the right moment</h2>
+              <p class="landing-proof-copy">Approvals, blockers, and interviews are explicit, so operators review decisions instead of babysitting every step.</p>
+            </article>
+            <article class="card landing-proof-card">
+              <div class="landing-proof-label">Output</div>
+              <h2 class="landing-proof-value">Judge it on real work</h2>
+              <p class="landing-proof-copy">Point WUPHF at a live repo, pipeline, or workflow and evaluate it from shipped output, not prompt tricks.</p>
+            </article>
+          </section>
 
-            <section class="card landing-block landing-objection" aria-labelledby="landing-objection-heading">
-              <h2 class="sr-only" id="landing-objection-heading">Budget owner and trigger</h2>
-              <p class="landing-objection-lead">Technical founder or CTO who owns developer-productivity and internal AI-tooling spend.</p>
-              <p class="landing-objection-detail">The team is moving from one agent to several on a live repo and coordination is starting to slip.</p>
-            </section>
-          </div>
+          <section class="card landing-section" aria-labelledby="landing-problem-heading">
+            <div class="landing-section-header">
+              <div class="landing-kicker">Problem / solution</div>
+              <h2 class="landing-section-title" id="landing-problem-heading">The problem is not getting one agent to do a trick. It is managing a team of them without becoming the middleware.</h2>
+              <p class="landing-section-copy">Most multi-agent setups still make the operator stitch together prompts, tools, approvals, and follow-up by hand. WUPHF turns that coordination layer into a visible office.</p>
+            </div>
+            <div class="landing-problem-grid">
+              <div class="landing-problem-card">
+                <p class="landing-section-copy landing-problem-lead">Once work spans multiple sessions, the hard part is no longer raw output. It is knowing which agent owns the thread, which decision changed the plan, and where the human actually needs to step in.</p>
+              </div>
+              <div class="landing-problem-card">
+                <ol class="landing-problem-points">
+                  <li><span class="landing-point-index">1</span><span><strong>Context drifts.</strong> Teams reconstruct history from terminals, tabs, and memory.</span></li>
+                  <li><span class="landing-point-index">2</span><span><strong>Ownership blurs.</strong> Multiple agents move, but nobody can tell who is accountable for the next step.</span></li>
+                  <li><span class="landing-point-index">3</span><span><strong>Escalations come late.</strong> Humans hear about the blocker after time has already been burned.</span></li>
+                </ol>
+              </div>
+              <div class="landing-problem-card landing-solution-card">
+                <div class="landing-solution-title">WUPHF gives the team one room for delegation, context, and escalation.</div>
+                <ul class="landing-solution-points">
+                  <li><span class="landing-point-index">A</span><span>Agents work in the open with shared task state, thread history, and clear ownership.</span></li>
+                  <li><span class="landing-point-index">B</span><span>Humans stay in the loop through explicit checkpoints instead of monitoring invisible automations.</span></li>
+                  <li><span class="landing-point-index">C</span><span>The system can be judged on completed work, not on how impressive the demo video looked.</span></li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <section class="card landing-section" aria-labelledby="landing-props-heading">
+            <div class="landing-section-header">
+              <div class="landing-kicker">Value props</div>
+              <h2 class="landing-section-title" id="landing-props-heading">Three homepage-ready value props for the current wedge.</h2>
+              <p class="landing-section-copy">Lead with the office story, then stack context and cost as the two supporting reasons to believe.</p>
+            </div>
+            <div class="landing-props-grid">
+              <article class="card landing-prop-card">
+                <div class="landing-prop-label">Lead angle</div>
+                <h3 class="landing-prop-title">Run an AI office, not a pile of AI tools.</h3>
+                <p class="landing-prop-copy">WUPHF gives you a live delegation desk for autonomous agents across workstreams, channels, and devices.</p>
+                <p class="landing-prop-proof">Proof: Work stays visible in one room, so specialists can claim tasks, coordinate in-thread, and keep momentum without another SaaS maze.</p>
+              </article>
+              <article class="card landing-prop-card">
+                <div class="landing-prop-label">Differentiator</div>
+                <h3 class="landing-prop-title">Agents with context, not goldfish with APIs.</h3>
+                <p class="landing-prop-copy">Every agent works with shared memory, org history, and live task context, so execution compounds instead of restarting from scratch.</p>
+                <p class="landing-prop-proof">Proof: Decisions, blockers, and prior work stay attached to the thread, which makes handoffs sharper and escalation less expensive.</p>
+              </article>
+              <article class="card landing-prop-card">
+                <div class="landing-prop-label">Commercial angle</div>
+                <h3 class="landing-prop-title">Replace bloated GTM tooling with one operator layer.</h3>
+                <p class="landing-prop-copy">WUPHF coordinates outreach, follow-up, research, and execution at a fraction of the usual software spend.</p>
+                <p class="landing-prop-proof">Proof: Instead of buying separate tooling for every narrow GTM task, operators get one accountable layer that can route work across specialists.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="card landing-section" aria-labelledby="landing-how-heading">
+            <div class="landing-section-header">
+              <div class="landing-kicker">How it works</div>
+              <h2 class="landing-section-title" id="landing-how-heading">Simple structure for explaining the workflow.</h2>
+            </div>
+            <div class="landing-flow-grid">
+              <article class="card landing-flow-step">
+                <div class="landing-step-number">01</div>
+                <div class="landing-step-label">Set up the office</div>
+                <p class="landing-step-copy">Pick the team, connect the repo, and give the room a real task.</p>
+              </article>
+              <article class="card landing-flow-step">
+                <div class="landing-step-number">02</div>
+                <div class="landing-step-label">Let specialists execute</div>
+                <p class="landing-step-copy">Agents claim work, post updates, and keep the task graph visible while they ship.</p>
+              </article>
+              <article class="card landing-flow-step">
+                <div class="landing-step-number">03</div>
+                <div class="landing-step-label">Intervene with precision</div>
+                <p class="landing-step-copy">Humans review, approve, or redirect only when the system asks for judgment.</p>
+              </article>
+            </div>
+          </section>
+
+          <section class="card landing-section" aria-labelledby="landing-controls-heading">
+            <div class="landing-section-header">
+              <div class="landing-kicker">Operator controls</div>
+              <h2 class="landing-section-title" id="landing-controls-heading">Foundation for the “why trust this” section.</h2>
+            </div>
+            <div class="landing-control-grid">
+              <article class="landing-control-card">
+                <div class="landing-control-label">Threaded history</div>
+                <p class="landing-control-copy">Conversations, task claims, and blocking questions stay in one visible timeline.</p>
+              </article>
+              <article class="landing-control-card">
+                <div class="landing-control-label">Shared task board</div>
+                <p class="landing-control-copy">The office shows active work, ownership, and blockers instead of hiding progress in side sessions.</p>
+              </article>
+              <article class="landing-control-card">
+                <div class="landing-control-label">Human judgment lane</div>
+                <p class="landing-control-copy">Approvals and interviews are explicit, so the human stays in control without micromanaging every step.</p>
+              </article>
+            </div>
+          </section>
 
           <section class="card landing-final-cta" aria-labelledby="landing-final-heading">
-            <h2 class="sr-only" id="landing-final-heading">Final call to action</h2>
+            <div class="landing-final-copy-wrap">
+              <div class="landing-kicker">Call to action</div>
+              <h2 class="landing-final-title" id="landing-final-heading">Start with one real task and watch the office run it in public.</h2>
+              <p class="landing-final-copy">Bring a live repo, pipeline motion, or ops workflow, invite the specialists you need, and evaluate WUPHF from visible execution.</p>
+            </div>
             <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
-              Run one live task in WUPHF on a real repo and judge it from the office, not a demo.
+              Open the office
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
             </button>
           </section>
@@ -1966,8 +2503,8 @@ function launchOffice() {
   showSplashScreen(function() { showOffice(); });
 }
 
-function showSplashScreen(onDone) {
-  var teamCount = AGENTS.filter(function(a) { return a.checked; }).length;
+function showSplashScreen(onDone, agentCount) {
+  var teamCount = (typeof agentCount === 'number' && agentCount > 0) ? agentCount : AGENTS.filter(function(a) { return a.checked; }).length;
 
   var splash = document.createElement('div');
   splash.className = 'splash-overlay';
@@ -2201,8 +2738,6 @@ function renderSidebarAgents() {
   newAgentBtn.appendChild(plusLabel);
   newAgentBtn.addEventListener('click', function() { openAgentWizard(null); });
   container.appendChild(newAgentBtn);
-  // Set up double-click handlers for DM mode
-  setupAgentDMHandlers();
 }
 // --- Apps sidebar (#28) ---
 function renderSidebarApps() {
@@ -2855,10 +3390,9 @@ function switchChannel(name) {
   document.getElementById('messages').textContent = '';
   var ch = CHANNELS.find(function(c) { return c.name === name; });
   if (name.indexOf('dm-') === 0) {
+    // Header is already set by onDMChannelEnter above; only set placeholder here.
     var dmSlug = name.slice(3);
     var dmAgent = AGENTS.find(function(a) { return a.slug === dmSlug; });
-    document.getElementById('channel-title').textContent = (dmAgent ? dmAgent.name : dmSlug);
-    document.getElementById('channel-desc').textContent = dmAgent ? (dmAgent.role || '') : '';
     document.getElementById('composer-input').placeholder = 'Message ' + (dmAgent ? dmAgent.name : dmSlug) + '\u2026';
   } else {
     document.getElementById('channel-title').textContent = '# ' + name;
@@ -3880,7 +4414,7 @@ function updateStatusBar() {
   if (!chEl) return;
   chEl.textContent = currentApp ? currentApp : '# ' + currentChannel;
   modeEl.textContent = dmModeActive ? '1:1' : 'office';
-  var agentCount = cachedMembers.filter(function(m) { return m.slug !== 'human' && m.slug !== 'you'; }).length;
+  var agentCount = cachedMembers.filter(function(m) { return m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system'; }).length;
   agentsEl.textContent = agentCount + ' agent' + (agentCount !== 1 ? 's' : '');
   if (connEl) {
     connEl.textContent = brokerConnected ? 'connected' : 'disconnected';
@@ -3909,7 +4443,7 @@ function renderComposerHint() {
   // Count active agents
   var activeCount = 0;
   cachedMembers.forEach(function(m) {
-    if (m.slug !== 'human' && m.slug !== 'you') {
+    if (m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system') {
       var ac = classifyActivity(m);
       if (ac.state !== 'lurking') activeCount++;
     }
@@ -5134,7 +5668,12 @@ function initApp() {
         brokerConnected = true;
         document.getElementById('onboarding').style.display = 'none';
         console.log('[wuphf] broker connected, showing splash + office');
-        showSplashScreen(function() { showOffice(); });
+        WuphfAPI.getOfficeMembers().then(function(membersData) {
+          var realCount = (membersData.members || []).filter(function(m) { return m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system'; }).length;
+          showSplashScreen(function() { showOffice(); }, realCount);
+        }).catch(function() {
+          showSplashScreen(function() { showOffice(); });
+        });
       } else {
         console.log('[wuphf] health not ok, showing onboarding');
         renderProgress();
