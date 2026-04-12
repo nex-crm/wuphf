@@ -631,6 +631,7 @@ type channelModel struct {
 	posting              bool
 	selectedOption       int
 	notice               string
+	noticeExpireAt       time.Time
 	snoozedInterview     string
 	confirm              *channelConfirm
 	doctor               *channelDoctorReport
@@ -720,6 +721,12 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 	}
 	m.syncSidebarCursorToActive()
 	return m
+}
+
+// setTransientNotice sets a notice that auto-clears after the next few ticks.
+func (m *channelModel) setTransientNotice(text string) {
+	m.notice = text
+	m.noticeExpireAt = time.Now().Add(4 * time.Second)
 }
 
 func (m channelModel) isOneOnOne() bool {
@@ -936,7 +943,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.lastCtrlCAt = now
-			m.notice = "Press Ctrl+C again to quit WUPHF."
+			m.setTransientNotice("Press Ctrl+C again to quit WUPHF.")
 			return m, nil
 		case "ctrl+b":
 			if m.isOneOnOne() {
@@ -946,26 +953,26 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+g":
 			if m.isOneOnOne() {
-				m.notice = "1:1 mode has no channel sidebar."
+				m.setTransientNotice("1:1 mode has no channel sidebar.")
 				return m, nil
 			}
 			if m.quickJumpTarget == quickJumpChannels {
 				m.quickJumpTarget = quickJumpNone
 			} else {
 				m.quickJumpTarget = quickJumpChannels
-				m.notice = "Quick nav: 1-9 switches channels."
+				m.setTransientNotice("Quick nav: 1-9 switches channels.")
 			}
 			return m, nil
 		case "ctrl+o":
 			if m.isOneOnOne() {
-				m.notice = "1:1 mode is just the direct conversation."
+				m.setTransientNotice("1:1 mode is just the direct conversation.")
 				return m, nil
 			}
 			if m.quickJumpTarget == quickJumpApps {
 				m.quickJumpTarget = quickJumpNone
 			} else {
 				m.quickJumpTarget = quickJumpApps
-				m.notice = "Quick nav: 1-9 switches office apps."
+				m.setTransientNotice("Quick nav: 1-9 switches office apps.")
 			}
 			return m, nil
 		case "ctrl+d":
@@ -974,7 +981,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeChannel = "general"
 				m.lastID = ""
 				m.messages = nil
-				m.notice = "Back to #general"
+				m.setTransientNotice("Back to #general")
 				return m, pollBroker("", m.activeChannel)
 			}
 			return m, nil
@@ -992,9 +999,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.selectSidebarItem(items[idx])
 				}
 				if target == quickJumpChannels {
-					m.notice = "No channel on that number."
+					m.setTransientNotice("No channel on that number.")
 				} else {
-					m.notice = "No app on that number."
+					m.setTransientNotice("No app on that number.")
 				}
 				return m, nil
 			case "esc":
@@ -2173,6 +2180,10 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelTickMsg:
 		m.tickFrame++
+		if m.notice != "" && !m.noticeExpireAt.IsZero() && time.Now().After(m.noticeExpireAt) {
+			m.notice = ""
+			m.noticeExpireAt = time.Time{}
+		}
 		return m, m.pollCurrentState()
 	}
 

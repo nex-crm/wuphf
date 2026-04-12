@@ -317,7 +317,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		if detail != "" {
 			appendHeadlessCodexLatency(slug, fmt.Sprintf("status=error total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d detail=%q",
-				time.Since(startedAt).Milliseconds(),
+				metrics.TotalMs,
 				durationMillis(startedAt, firstEventAt),
 				durationMillis(startedAt, firstTextAt),
 				durationMillis(startedAt, firstToolAt),
@@ -328,7 +328,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			return fmt.Errorf("%w: %s", err, detail)
 		}
 		appendHeadlessCodexLatency(slug, fmt.Sprintf("status=error total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d detail=%q",
-			time.Since(startedAt).Milliseconds(),
+			metrics.TotalMs,
 			durationMillis(startedAt, firstEventAt),
 			durationMillis(startedAt, firstTextAt),
 			durationMillis(startedAt, firstToolAt),
@@ -343,7 +343,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	}
 	metrics.TotalMs = time.Since(startedAt).Milliseconds()
 	appendHeadlessCodexLatency(slug, fmt.Sprintf("status=ok total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d final_chars=%d",
-		time.Since(startedAt).Milliseconds(),
+		metrics.TotalMs,
 		durationMillis(startedAt, firstEventAt),
 		durationMillis(startedAt, firstTextAt),
 		durationMillis(startedAt, firstToolAt),
@@ -456,17 +456,22 @@ func buildHeadlessCodexPrompt(systemPrompt string, prompt string) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func appendHeadlessCodexLog(slug string, line string) {
+func wuphfLogDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
+		return ""
+	}
+	dir := filepath.Join(home, ".wuphf", "logs")
+	_ = os.MkdirAll(dir, 0o700)
+	return dir
+}
+
+func appendHeadlessCodexLog(slug string, line string) {
+	dir := wuphfLogDir()
+	if dir == "" {
 		return
 	}
-	logDir := filepath.Join(home, ".wuphf", "logs")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		return
-	}
-	path := filepath.Join(logDir, "headless-codex-"+slug+".log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, "headless-codex-"+slug+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}
@@ -475,16 +480,11 @@ func appendHeadlessCodexLog(slug string, line string) {
 }
 
 func appendHeadlessCodexLatency(slug string, line string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir := wuphfLogDir()
+	if dir == "" {
 		return
 	}
-	logDir := filepath.Join(home, ".wuphf", "logs")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		return
-	}
-	path := filepath.Join(logDir, "headless-codex-latency.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, "headless-codex-latency.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}

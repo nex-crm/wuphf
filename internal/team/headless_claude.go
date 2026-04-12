@@ -218,16 +218,11 @@ func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
 }
 
 func appendHeadlessClaudeLog(slug string, line string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir := wuphfLogDir()
+	if dir == "" {
 		return
 	}
-	logDir := filepath.Join(home, ".wuphf", "logs")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		return
-	}
-	path := filepath.Join(logDir, "headless-claude-"+slug+".log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, "headless-claude-"+slug+".log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}
@@ -236,16 +231,11 @@ func appendHeadlessClaudeLog(slug string, line string) {
 }
 
 func appendHeadlessClaudeLatency(slug string, line string) {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	dir := wuphfLogDir()
+	if dir == "" {
 		return
 	}
-	logDir := filepath.Join(home, ".wuphf", "logs")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		return
-	}
-	path := filepath.Join(logDir, "headless-claude-latency.log")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	f, err := os.OpenFile(filepath.Join(dir, "headless-claude-latency.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return
 	}
