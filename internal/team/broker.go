@@ -3710,12 +3710,15 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	tagged := uniqueSlugs(body.Tagged)
 
-	// Thread auto-tagging: ALL thread participants get notified about
-	// every new message in the thread. If CEO, PM, and you are in a
-	// thread, any new reply notifies the other two. This applies to
-	// both human and agent messages.
+	// Thread auto-tagging: when a HUMAN replies in a thread, notify all
+	// other agents who have already participated. This keeps the team
+	// aligned without requiring the human to re-tag on every reply.
+	// Agent-to-agent auto-tagging is intentionally skipped: focus mode
+	// routing (specialist → lead only) already handles that path, and
+	// auto-tagging agent replies causes broadcast loops.
 	replyTo := strings.TrimSpace(body.ReplyTo)
-	if replyTo != "" {
+	isHumanSender := body.From == "you" || body.From == "human"
+	if replyTo != "" && isHumanSender {
 		threadRoot := replyTo
 		threadParticipants := []string{}
 		for _, existing := range b.messages {
