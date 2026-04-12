@@ -126,15 +126,9 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 			titleLine = defaultHumanMessageTitle(msg.Kind, msg.From)
 		}
 		appendWrappedLine(prefix + subtlePill("for you", "#FEF3C7", "#92400E") + " " + lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#F8FAFC")).Render(titleLine))
-		textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-		for _, paragraph := range strings.Split(textPart, "\n") {
+		for _, paragraph := range strings.Split(msg.Content, "\n") {
 			paragraph = highlightMentions(paragraph, agentColorMap)
 			appendWrappedLine(prefix + paragraph)
-		}
-		if a2uiRendered != "" {
-			for _, lineText := range strings.Split(a2uiRendered, "\n") {
-				lines = append(lines, renderedLine{Text: prefix + lineText})
-			}
 		}
 		return lines
 	}
@@ -151,15 +145,9 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 		if tm.Depth > 0 {
 			meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
 		}
-		textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
 		titleLine := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(color)).Render(fallbackString(msg.Title, "Automation update"))
-		for _, lineText := range renderRuntimeEventCard(contentWidth, subtlePill("automation", "#F8FAFC", "#334155")+" "+titleLine, meta, "#7C3AED", strings.Split(textPart, "\n")) {
+		for _, lineText := range renderRuntimeEventCard(contentWidth, subtlePill("automation", "#F8FAFC", "#334155")+" "+titleLine, meta, "#7C3AED", strings.Split(msg.Content, "\n")) {
 			lines = append(lines, renderedLine{Text: "  " + lineText})
-		}
-		if a2uiRendered != "" {
-			for _, lineText := range strings.Split(a2uiRendered, "\n") {
-				lines = append(lines, renderedLine{Text: "    " + lineText})
-			}
 		}
 		return lines
 	}
@@ -210,16 +198,10 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 		prefix += ruleStyle.Render("│") + " "
 	}
 
-	textPart, a2uiRendered := renderA2UIBlocks(msg.Content, contentWidth-4)
-	rendered := renderMarkdown(textPart, contentWidth-len(prefix)-2)
+	rendered := renderMarkdown(msg.Content, contentWidth-len(prefix)-2)
 	for _, paragraph := range strings.Split(rendered, "\n") {
 		paragraph = highlightMentions(paragraph, agentColorMap)
 		appendWrappedLine(prefix + paragraph)
-	}
-	if a2uiRendered != "" {
-		for _, lineText := range strings.Split(a2uiRendered, "\n") {
-			lines = append(lines, renderedLine{Text: prefix + lineText})
-		}
 	}
 	if reactionLine := renderReactions(msg.Reactions); reactionLine != "" {
 		appendWrappedLine(prefix + reactionLine)

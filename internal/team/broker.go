@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/provider"
 	"io"
 	"net"
 	"net/http"
@@ -313,6 +314,7 @@ type brokerState struct {
 	Channels          []teamChannel                `json:"channels,omitempty"`
 	SessionMode       string                       `json:"session_mode,omitempty"`
 	OneOnOneAgent     string                       `json:"one_on_one_agent,omitempty"`
+	FocusMode         bool                         `json:"focus_mode,omitempty"`
 	Tasks             []teamTask                   `json:"tasks,omitempty"`
 	Requests          []humanInterview             `json:"requests,omitempty"`
 	Actions           []officeActionLog            `json:"actions,omitempty"`
@@ -355,6 +357,7 @@ type Broker struct {
 	channels            []teamChannel
 	sessionMode         string
 	oneOnOneAgent       string
+	focusMode           bool
 	tasks               []teamTask
 	requests            []humanInterview
 	actions             []officeActionLog
@@ -652,6 +655,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
+	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
 	mux.HandleFunc("/reactions", b.requireAuth(b.handleReactions))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
@@ -1315,6 +1319,7 @@ func (b *Broker) loadState() error {
 	b.channels = state.Channels
 	b.sessionMode = state.SessionMode
 	b.oneOnOneAgent = state.OneOnOneAgent
+	b.focusMode = state.FocusMode
 	b.tasks = state.Tasks
 	b.requests = state.Requests
 	b.actions = state.Actions
@@ -1360,6 +1365,7 @@ func (b *Broker) saveLocked() error {
 		Channels:          b.channels,
 		SessionMode:       b.sessionMode,
 		OneOnOneAgent:     b.oneOnOneAgent,
+		FocusMode:         b.focusMode,
 		Tasks:             b.tasks,
 		Requests:          b.requests,
 		Actions:           b.actions,
@@ -1680,6 +1686,19 @@ func (b *Broker) SetSessionMode(mode, agent string) error {
 		b.oneOnOneAgent = DefaultOneOnOneAgent
 	}
 	return b.saveLocked()
+}
+
+func (b *Broker) SetFocusMode(enabled bool) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.focusMode = enabled
+	return b.saveLocked()
+}
+
+func (b *Broker) FocusModeEnabled() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.focusMode
 }
 
 func (b *Broker) findChannelLocked(slug string) *teamChannel {
@@ -2453,6 +2472,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	mode := b.sessionMode
 	agent := b.oneOnOneAgent
+	focus := b.focusMode
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -2460,6 +2480,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status":           "ok",
 		"session_mode":     mode,
 		"one_on_one_agent": agent,
+		"focus_mode":       focus,
 		"provider":         b.runtimeProvider,
 	})
 }
@@ -2491,6 +2512,34 @@ func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
 			"session_mode":     mode,
 			"one_on_one_agent": agent,
+		})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (b *Broker) handleFocusMode(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"focus_mode": b.FocusModeEnabled(),
+		})
+	case http.MethodPost:
+		var body struct {
+			FocusMode bool `json:"focus_mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+		if err := b.SetFocusMode(body.FocusMode); err != nil {
+			http.Error(w, "failed to persist", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"focus_mode": b.FocusModeEnabled(),
 		})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -3487,6 +3536,22 @@ func applyUsageEvent(dst *usageTotals, event usageEvent) {
 	dst.TotalTokens += event.InputTokens + event.OutputTokens + event.CacheReadTokens + event.CacheCreationTokens
 	dst.CostUsd += event.CostUsd
 	dst.Requests++
+}
+
+// RecordAgentUsage records token usage from a Claude stream result for a given agent.
+func (b *Broker) RecordAgentUsage(slug, model string, usage provider.ClaudeUsage) {
+	event := usageEvent{
+		AgentSlug:           slug,
+		InputTokens:         usage.InputTokens,
+		OutputTokens:        usage.OutputTokens,
+		CacheReadTokens:     usage.CacheReadTokens,
+		CacheCreationTokens: usage.CacheCreationTokens,
+		CostUsd:             usage.CostUSD,
+	}
+	b.mu.Lock()
+	b.recordUsageLocked(event)
+	_ = b.saveLocked()
+	b.mu.Unlock()
 }
 
 func parseOTLPUsageEvents(payload map[string]any) []usageEvent {

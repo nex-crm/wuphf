@@ -577,6 +577,39 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .dm-back-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-secondary); background: none; border: none; cursor: pointer; padding: 4px 8px; border-radius: 6px; font-family: var(--font-sans); }
 .dm-back-btn:hover { background: rgba(0,0,0,0.06); color: var(--text); }
 
+/* ─── Usage Panel (collapsible in sidebar) ─── */
+.usage-toggle { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 12px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); background: none; border: none; border-top: 1px solid var(--border); cursor: pointer; font-family: var(--font-sans); }
+.usage-toggle:hover { color: var(--text-secondary); }
+.usage-toggle svg { transition: transform 0.2s; }
+.usage-toggle.open svg { transform: rotate(90deg); }
+.usage-panel { display: none; padding: 4px 12px 8px; font-size: 11px; }
+.usage-panel.open { display: block; }
+.usage-table { width: 100%; border-collapse: collapse; }
+.usage-table th { text-align: left; font-weight: 500; color: var(--text-tertiary); padding: 2px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+.usage-table td { padding: 2px 4px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.usage-table tr:hover td { color: var(--text); }
+.usage-total { margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--border-light); font-size: 11px; color: var(--text-secondary); display: flex; justify-content: space-between; }
+.usage-total-cost { font-weight: 600; color: var(--accent); }
+
+/* ─── Agent Stream Panel ─── */
+.agent-stream-section { margin-top: 12px; }
+.agent-stream-section-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.agent-stream-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse-dot 1.5s ease-in-out infinite; }
+.agent-stream-log { font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary); line-height: 1.6; max-height: 120px; overflow-y: auto; padding: 6px 8px; background: var(--bg); border-radius: var(--radius-sm); border: 1px solid var(--border-light); }
+.agent-stream-entry { padding: 1px 0; }
+.agent-stream-phase { font-weight: 500; color: var(--accent); }
+.agent-stream-tool { color: var(--blue); }
+.agent-stream-detail { color: var(--text-tertiary); }
+
+/* ─── Lightweight DM Input ─── */
+.agent-dm-section { margin-top: 12px; }
+.agent-dm-row { display: flex; gap: 6px; align-items: flex-end; }
+.agent-dm-input { flex: 1; padding: 6px 10px; font-size: 12px; font-family: var(--font-sans); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); resize: none; }
+.agent-dm-input:focus { outline: none; border-color: var(--accent); }
+.agent-dm-send { padding: 6px 12px; font-size: 11px; font-weight: 600; font-family: var(--font-sans); background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; }
+.agent-dm-send:hover { background: var(--accent-warm); }
+.agent-dm-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
 /* ─── Recovery View ─── */
 .recovery-panel { display: none; flex-direction: column; gap: 16px; padding: 20px; overflow-y: auto; flex: 1; animation: fadeIn 0.3s ease-out; }
 .recovery-panel.open { display: flex; }
@@ -1171,6 +1204,12 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <p class="sidebar-section-title">Apps</p>
       </div>
       <div class="sidebar-channels" id="sidebar-apps"></div>
+      <button class="usage-toggle" id="usage-toggle" onclick="toggleUsagePanel()">
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+        Usage
+        <span id="usage-total-badge" style="margin-left:auto;font-weight:400;color:var(--accent);"></span>
+      </button>
+      <div class="usage-panel" id="usage-panel"></div>
       <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
         <label class="sr-only" for="theme-switcher">Switch theme</label>
         <select id="theme-switcher" aria-label="Switch theme" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
@@ -1652,6 +1691,13 @@ var WuphfAPI = (function() {
   }
   function getScheduler() { return get('/scheduler'); }
   function getSkills() { return get('/skills'); }
+  function getUsage() { return get('/usage'); }
+
+  function sseURL(path) {
+    var url = baseURL() + path;
+    if (!useProxy && token) url += '?token=' + encodeURIComponent(token);
+    return url;
+  }
 
   return {
     init: init,
@@ -1676,7 +1722,9 @@ var WuphfAPI = (function() {
     createPolicy: createPolicy,
     deletePolicy: deletePolicy,
     getScheduler: getScheduler,
-    getSkills: getSkills
+    getSkills: getSkills,
+    getUsage: getUsage,
+    sseURL: sseURL
   };
 })();
 
@@ -4749,6 +4797,44 @@ function openAgentPanel(slug) {
   editBtn.addEventListener('click', function() { closeAgentPanel(); openAgentWizard(agent); });
   actionsSection.appendChild(editBtn);
 
+  // Live stream section (Item 7)
+  var streamSection = document.createElement('div');
+  streamSection.className = 'agent-stream-section';
+  var streamTitle = document.createElement('p');
+  streamTitle.className = 'agent-stream-section-title';
+  var streamDot = document.createElement('span');
+  streamDot.className = 'agent-stream-dot';
+  streamTitle.appendChild(streamDot);
+  var streamLabel = document.createTextNode(' Live Activity');
+  streamTitle.appendChild(streamLabel);
+  streamSection.appendChild(streamTitle);
+  // Start streaming for this agent
+  startAgentStream(agent.slug, streamSection);
+
+  // Lightweight DM section (Item 8)
+  var dmSection = document.createElement('div');
+  dmSection.className = 'agent-dm-section';
+  var dmLabel = document.createElement('p');
+  dmLabel.className = 'agent-panel-section-title';
+  dmLabel.textContent = 'Quick Message';
+  dmSection.appendChild(dmLabel);
+  var dmRow = document.createElement('div');
+  dmRow.className = 'agent-dm-row';
+  var dmInput = document.createElement('input');
+  dmInput.type = 'text';
+  dmInput.className = 'agent-dm-input';
+  dmInput.placeholder = 'Message ' + agent.name + '...';
+  var dmSendBtn = document.createElement('button');
+  dmSendBtn.className = 'agent-dm-send';
+  dmSendBtn.textContent = 'Send';
+  dmSendBtn.addEventListener('click', function() { sendLightweightDM(agent.slug, dmInput); });
+  dmInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); sendLightweightDM(agent.slug, dmInput); }
+  });
+  dmRow.appendChild(dmInput);
+  dmRow.appendChild(dmSendBtn);
+  dmSection.appendChild(dmRow);
+
   body.appendChild(avatar);
   body.appendChild(nameEl);
   body.appendChild(roleEl);
@@ -4757,11 +4843,14 @@ function openAgentPanel(slug) {
   body.appendChild(toggleSection);
   body.appendChild(skillsSection);
   body.appendChild(actionsSection);
+  body.appendChild(streamSection);
+  body.appendChild(dmSection);
 
   panel.classList.add('open');
 }
 
 function closeAgentPanel() {
+  stopAgentStream();
   document.getElementById('agent-panel').classList.remove('open');
 }
 
@@ -7253,6 +7342,187 @@ cmdPaletteInput.addEventListener('input', function() {
     renderInsertPickerResults(cmdPaletteInput.value.trim());
   }
 });
+
+// ═══════════════════════════════════════════════════════════════
+//   USAGE PANEL (Item 5)
+// ═══════════════════════════════════════════════════════════════
+var usagePollTimer = null;
+
+function toggleUsagePanel() {
+  var toggle = document.getElementById('usage-toggle');
+  var panel = document.getElementById('usage-panel');
+  var isOpen = toggle.classList.toggle('open');
+  if (isOpen) {
+    panel.classList.add('open');
+    fetchUsage();
+    if (!usagePollTimer) usagePollTimer = setInterval(fetchUsage, 5000);
+  } else {
+    panel.classList.remove('open');
+    if (usagePollTimer) { clearInterval(usagePollTimer); usagePollTimer = null; }
+  }
+}
+
+function formatUSD(n) {
+  return '$' + (n || 0).toFixed(4);
+}
+
+function formatTokens(n) {
+  if (!n) return '0';
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+function fetchUsage() {
+  if (!brokerConnected) return;
+  WuphfAPI.getUsage().then(function(data) {
+    renderUsagePanel(data);
+  }).catch(function() {});
+}
+
+function renderUsagePanel(usage) {
+  var panel = document.getElementById('usage-panel');
+  var badge = document.getElementById('usage-total-badge');
+  var totalCost = (usage.total && usage.total.cost_usd) || 0;
+  badge.textContent = formatUSD(totalCost);
+
+  var agents = usage.agents || {};
+  var slugs = Object.keys(agents);
+  panel.textContent = '';
+
+  if (slugs.length === 0 && totalCost === 0) {
+    var emptyMsg = document.createElement('p');
+    emptyMsg.style.cssText = 'font-size:11px;color:var(--text-tertiary);padding:4px 0;';
+    emptyMsg.textContent = 'No usage recorded yet.';
+    panel.appendChild(emptyMsg);
+    return;
+  }
+
+  var table = document.createElement('table');
+  table.className = 'usage-table';
+  var thead = document.createElement('thead');
+  var headerRow = document.createElement('tr');
+  ['Agent', 'In', 'Out', 'Cache', 'Cost'].forEach(function(h) {
+    var th = document.createElement('th');
+    th.textContent = h;
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  slugs.sort();
+  slugs.forEach(function(slug) {
+    var a = agents[slug];
+    var tr = document.createElement('tr');
+    var cells = [slug, formatTokens(a.input_tokens), formatTokens(a.output_tokens), formatTokens(a.cache_read_tokens), formatUSD(a.cost_usd)];
+    cells.forEach(function(val) {
+      var td = document.createElement('td');
+      td.textContent = val;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  panel.appendChild(table);
+
+  var totalRow = document.createElement('div');
+  totalRow.className = 'usage-total';
+  var session = usage.session || {};
+  var sessionSpan = document.createElement('span');
+  sessionSpan.textContent = 'Session: ' + formatTokens(session.total_tokens || 0) + ' tokens';
+  var costSpan = document.createElement('span');
+  costSpan.className = 'usage-total-cost';
+  costSpan.textContent = formatUSD(totalCost);
+  totalRow.appendChild(sessionSpan);
+  totalRow.appendChild(costSpan);
+  panel.appendChild(totalRow);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   LIVE AGENT STREAMING (Item 7)
+// ═══════════════════════════════════════════════════════════════
+var agentStreamSource = null;
+var agentStreamSlug = null;
+
+function startAgentStream(slug, container) {
+  stopAgentStream();
+  agentStreamSlug = slug;
+
+  var logEl = document.createElement('div');
+  logEl.className = 'agent-stream-log';
+  logEl.id = 'agent-stream-log';
+  container.appendChild(logEl);
+
+  var url = WuphfAPI.sseURL('/agent-stream/' + encodeURIComponent(slug));
+  agentStreamSource = new EventSource(url);
+  var entryCount = 0;
+
+  agentStreamSource.onmessage = function(e) {
+    try {
+      var snap = JSON.parse(e.data);
+      var line = document.createElement('div');
+      line.className = 'agent-stream-entry';
+
+      var phaseSpan = document.createElement('span');
+      phaseSpan.className = 'agent-stream-phase';
+      phaseSpan.textContent = snap.activity || snap.status || 'idle';
+      line.appendChild(phaseSpan);
+
+      var detail = snap.detail || '';
+      if (detail.length > 80) detail = detail.substring(0, 80) + '...';
+      if (detail) {
+        var detailSpan = document.createElement('span');
+        detailSpan.className = 'agent-stream-detail';
+        detailSpan.textContent = ' ' + detail;
+        line.appendChild(detailSpan);
+      }
+
+      logEl.appendChild(line);
+      entryCount++;
+      while (logEl.children.length > 50) logEl.removeChild(logEl.firstChild);
+      logEl.scrollTop = logEl.scrollHeight;
+
+      if (snap.status === 'idle' && entryCount > 1) {
+        stopAgentStream();
+      }
+    } catch (ex) {}
+  };
+
+  agentStreamSource.onerror = function() {
+    stopAgentStream();
+  };
+}
+
+function stopAgentStream() {
+  if (agentStreamSource) {
+    agentStreamSource.close();
+    agentStreamSource = null;
+  }
+  agentStreamSlug = null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   LIGHTWEIGHT DM (Item 8)
+// ═══════════════════════════════════════════════════════════════
+function sendLightweightDM(slug, inputEl) {
+  var text = inputEl.value.trim();
+  if (!text) return;
+
+  var content = '@' + slug + ' ' + text;
+  WuphfAPI.post('/messages', {
+    from: 'you',
+    channel: currentChannel,
+    content: content,
+    tagged: [slug]
+  }).then(function() {
+    inputEl.value = '';
+    showNotice('DM sent to ' + slug, 'success');
+    fetchMessages();
+  }).catch(function(err) {
+    showNotice('DM failed: ' + (err.message || err), 'error');
+  });
+}
 </script>
 
 </body>
