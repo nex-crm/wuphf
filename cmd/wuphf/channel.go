@@ -658,6 +658,13 @@ type channelModel struct {
 	// Telegram connect flow state
 	telegramGroups []team.TelegramGroup
 	telegramToken  string
+
+	// Inline DM — office stays active, no session mode switch.
+	dmTargetSlug string
+	dmTargetName string
+
+	// lastAgentContent tracks the latest streaming text per agent for sidebar display.
+	lastAgentContent map[string]string
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
@@ -697,6 +704,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		sessionMode:          sessionMode,
 		oneOnOneAgent:        oneOnOneAgent,
 		threadInputHistory:   newComposerHistory(),
+		lastAgentContent:     make(map[string]string),
 	}
 	if m.isOneOnOne() {
 		m.sidebarCollapsed = true
@@ -960,6 +968,15 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.notice = "Quick nav: 1-9 switches office apps."
 			}
 			return m, nil
+		case "ctrl+d":
+			// Close inline DM (Ctrl+D toggles the DM target).
+			if m.dmTargetSlug != "" {
+				prevName := m.dmTargetName
+				m.dmTargetSlug = ""
+				m.dmTargetName = ""
+				m.notice = fmt.Sprintf("DM with %s closed — back to office.", prevName)
+			}
+			return m, nil
 		}
 
 		if m.quickJumpTarget != quickJumpNone {
@@ -1195,7 +1212,12 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputPos = 0
 				m.notice = ""
 				m.posting = true
-				return m, postToChannel(text, m.replyToID, m.activeChannel)
+				// When inline DM is active, target the message directly at that agent.
+				postText := text
+				if m.dmTargetSlug != "" && !strings.HasPrefix(text, "@"+m.dmTargetSlug) {
+					postText = "@" + m.dmTargetSlug + " " + text
+				}
+				return m, postToChannel(postText, m.replyToID, m.activeChannel)
 			}
 			if m.pending != nil {
 				if opt := m.selectedInterviewOption(); opt != nil {
@@ -1612,6 +1634,20 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.messages = uniqueMessages
 			m.lastID = msg.messages[len(msg.messages)-1].ID
+			// Track latest streaming text per agent for sidebar display.
+			if m.lastAgentContent == nil {
+				m.lastAgentContent = make(map[string]string)
+			}
+			for _, bm := range addedMessages {
+				if bm.From != "" && bm.From != "you" && bm.From != "human" && bm.Content != "" {
+					snippet := strings.TrimSpace(bm.Content)
+					if len([]rune(snippet)) > 38 {
+						runes := []rune(snippet)
+						snippet = "…" + string(runes[len(runes)-37:])
+					}
+					m.lastAgentContent[bm.From] = snippet
+				}
+			}
 			if m.scroll > 0 || m.focus != focusMain || m.threadPanelOpen {
 				m.noteIncomingMessages(addedMessages)
 			} else {
@@ -1625,6 +1661,15 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case channelMembersMsg:
 		m.members = msg.members
+		// Overlay last-seen streaming content into LiveActivity when the broker
+		// hasn't set it yet (e.g. between polls or when liveActivity is stale).
+		if m.lastAgentContent != nil {
+			for i, mem := range m.members {
+				if snippet, ok := m.lastAgentContent[mem.Slug]; ok && snippet != "" && mem.LiveActivity == "" {
+					m.members[i].LiveActivity = snippet
+				}
+			}
+		}
 		m.updateOverlaysForCurrentInput()
 
 	case channelOfficeMembersMsg:
@@ -2927,6 +2972,9 @@ func (m channelModel) composerTargetLabel() string {
 	if m.isOneOnOne() {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
+	if m.dmTargetSlug != "" {
+		return "DM→" + m.dmTargetName
+	}
 	return m.activeChannel
 }
 
@@ -3195,6 +3243,27 @@ func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, m.selectSidebarItem(items[m.sidebarCursor])
+	case "d":
+		// Open inline DM with the agent visible at current roster scroll position.
+		// Office stays active — no session mode switch.
+		roster := mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo())
+		if len(roster) > 0 {
+			idx := m.sidebarRosterOffset
+			if idx < 0 {
+				idx = 0
+			}
+			if idx >= len(roster) {
+				idx = len(roster) - 1
+			}
+			target := roster[idx]
+			m.dmTargetSlug = target.Slug
+			m.dmTargetName = target.Name
+			if m.dmTargetName == "" {
+				m.dmTargetName = target.Slug
+			}
+			m.focus = focusMain
+			m.notice = fmt.Sprintf("DM open with %s — Ctrl+D to close, office stays active", m.dmTargetName)
+		}
 	}
 	return m, nil
 }
@@ -6456,7 +6525,7 @@ func runChannelView(threadsCollapsed bool, initialApp officeApp, skipSplash bool
 		}
 	}()
 
-	if !skipSplash {
+	if !skipSplash && os.Getenv("WUPHF_NO_SPLASH") == "" {
 		splash := tea.NewProgram(newSplashModel(), tea.WithAltScreen())
 		if _, err := splash.Run(); err != nil {
 			reportChannelCrash(fmt.Sprintf("splash error: %v\n", err))

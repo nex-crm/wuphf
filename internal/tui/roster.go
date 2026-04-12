@@ -9,6 +9,9 @@ import (
 
 const rosterWidth = 28
 
+// latestTextLen is the max chars of streaming text shown per agent row.
+const latestTextLen = 22
+
 var activePhases = map[string]bool{
 	"build_context": true,
 	"stream_llm":    true,
@@ -27,16 +30,70 @@ type AgentEntry struct {
 }
 
 type RosterModel struct {
-	agents  []AgentEntry
-	spinner SpinnerModel
-	width   int
+	agents     []AgentEntry
+	spinner    SpinnerModel
+	width      int
+	latestText map[string]string // last streaming snippet per agent
+	cursor     int               // selected agent index (-1 = none)
+	focused    bool              // roster has keyboard focus
 }
 
 func NewRoster() RosterModel {
 	s := NewSpinner("")
 	return RosterModel{
-		spinner: s,
-		width:   rosterWidth,
+		spinner:    s,
+		width:      rosterWidth,
+		latestText: make(map[string]string),
+		cursor:     -1,
+	}
+}
+
+// SetAgentText updates the latest streaming snippet shown for an agent.
+func (r *RosterModel) SetAgentText(slug, text string) {
+	if r.latestText == nil {
+		r.latestText = make(map[string]string)
+	}
+	// Keep only the trailing portion so it fits on one line.
+	if len([]rune(text)) > latestTextLen {
+		runes := []rune(text)
+		text = "…" + string(runes[len(runes)-latestTextLen+1:])
+	}
+	r.latestText[slug] = text
+}
+
+// SetCursor moves the selection cursor. Pass -1 to clear.
+func (r *RosterModel) SetCursor(i int) {
+	if len(r.agents) == 0 {
+		r.cursor = -1
+		return
+	}
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(r.agents) {
+		i = len(r.agents) - 1
+	}
+	r.cursor = i
+}
+
+// CursorAgent returns the slug of the currently selected agent, or "".
+func (r *RosterModel) CursorAgent() string {
+	if r.cursor < 0 || r.cursor >= len(r.agents) {
+		return ""
+	}
+	return r.agents[r.cursor].Slug
+}
+
+// AgentCount returns the number of agents in the roster.
+func (r *RosterModel) AgentCount() int {
+	return len(r.agents)
+}
+
+// SetFocused marks the roster as having keyboard focus.
+func (r *RosterModel) SetFocused(b bool) {
+	r.focused = b
+	if !b {
+		r.cursor = -1
 	}
 }
 
@@ -100,6 +157,11 @@ func (r RosterModel) Update(msg tea.Msg) (RosterModel, tea.Cmd) {
 }
 
 func (r RosterModel) View() string {
+	borderColor := "#374151"
+	if r.focused {
+		borderColor = NexPurple
+	}
+
 	header := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color(NexPurple)).
@@ -108,11 +170,15 @@ func (r RosterModel) View() string {
 	var rows []string
 	rows = append(rows, header)
 
-	for _, ag := range r.agents {
+	for i, ag := range r.agents {
 		icon := r.agentIcon(ag.Phase)
 		nameStr := ag.Name
-		if len(nameStr) > rosterWidth-11 {
-			nameStr = nameStr[:rosterWidth-11]
+		maxName := rosterWidth - 11
+		if maxName < 4 {
+			maxName = 4
+		}
+		if len([]rune(nameStr)) > maxName {
+			nameStr = string([]rune(nameStr)[:maxName])
 		}
 
 		label := phaseLabel(ag.Phase)
@@ -122,14 +188,37 @@ func (r RosterModel) View() string {
 			lipgloss.NewStyle().Foreground(lipgloss.Color(ValueColor)).Render(nameStr) +
 			" " + pStyle.Render(label)
 
+		// Show latest streaming text as a dim subtitle.
+		if snippet, ok := r.latestText[ag.Slug]; ok && snippet != "" {
+			dim := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Italic(true)
+			line += "\n  " + dim.Render(snippet)
+		}
+
+		// Highlight cursor row when roster is focused.
+		if r.focused && i == r.cursor {
+			line = lipgloss.NewStyle().
+				Background(lipgloss.Color("#1F2937")).
+				Foreground(lipgloss.Color(NexPurple)).
+				Bold(true).
+				Render("▶ " + strings.TrimLeft(line, " "))
+		}
+
 		rows = append(rows, line)
+	}
+
+	// Keyboard hint when focused.
+	if r.focused {
+		hint := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6B7280")).
+			Render("↑↓ nav  d DM  Esc close")
+		rows = append(rows, "", hint)
 	}
 
 	inner := strings.Join(rows, "\n")
 
 	sidebar := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#374151")).
+		BorderForeground(lipgloss.Color(borderColor)).
 		Padding(1, 1).
 		Width(rosterWidth)
 
