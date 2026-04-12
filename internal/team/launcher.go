@@ -430,15 +430,10 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	for _, target := range immediate {
 		l.sendChannelUpdate(target, msg)
 	}
-	for _, target := range delayed {
-		go func(target notificationTarget, msg channelMessage) {
-			time.Sleep(ceoHeadStartDelay)
-			if !l.shouldDeliverDelayedNotification(target.Slug, msg) {
-				return
-			}
-			l.sendChannelUpdate(target, msg)
-		}(target, msg)
-	}
+	// Note: delayed is always empty for message notifications — notificationTargetsForMessage
+	// only ever populates immediate. The delayed path is used only for task notifications
+	// via taskNotificationTargets/deliverTaskNotification.
+	_ = delayed
 }
 
 func (l *Launcher) deliverTaskNotification(action officeActionLog, task teamTask) {
@@ -810,69 +805,6 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		}
 	}
 	return immediate, delayed
-}
-
-func (l *Launcher) shouldDeliverDelayedNotification(targetSlug string, source channelMessage) bool {
-	if l.broker == nil {
-		return true
-	}
-	if !containsSlug(l.broker.EnabledMembers(source.Channel), targetSlug) {
-		return false
-	}
-	// Explicit @-tags always deliver regardless of domain.
-	if containsSlug(source.Tagged, targetSlug) {
-		return true
-	}
-	domain := inferMessageDomain(source)
-	if owner := l.taskOwnerForDomain(source.Channel, domain); owner != "" && owner != targetSlug && targetSlug != l.officeLeadSlug() {
-		return false
-	}
-	if domain != "" && domain != "general" && targetSlug != l.officeLeadSlug() && inferAgentDomain(targetSlug) != domain {
-		return false
-	}
-
-	threadRoot := source.ID
-	if source.ReplyTo != "" {
-		threadRoot = source.ReplyTo
-	}
-	sourceIndex := -1
-	messages := l.broker.ChannelMessages(source.Channel)
-	for i := range messages {
-		if messages[i].ID == source.ID {
-			sourceIndex = i
-			break
-		}
-	}
-	if sourceIndex >= 0 {
-		for _, msg := range messages[sourceIndex+1:] {
-			sameThread := msg.ID == threadRoot || msg.ReplyTo == threadRoot || msg.ReplyTo == source.ID
-			if !sameThread {
-				continue
-			}
-			if msg.From == targetSlug {
-				return false
-			}
-			if msg.From == l.officeLeadSlug() && !containsSlug(msg.Tagged, targetSlug) {
-				return false
-			}
-			if msg.From != "you" && msg.From != "human" && msg.From != "nex" && msg.Kind != "automation" && !containsSlug(msg.Tagged, targetSlug) {
-				return false
-			}
-		}
-	}
-
-	for _, task := range l.broker.ChannelTasks(source.Channel) {
-		if task.Status == "done" {
-			continue
-		}
-		if task.ThreadID != "" && task.ThreadID != source.ID && task.ThreadID != threadRoot {
-			continue
-		}
-		if task.Owner != "" && task.Owner != targetSlug && targetSlug != l.officeLeadSlug() {
-			return false
-		}
-	}
-	return true
 }
 
 func (l *Launcher) taskOwnerForDomain(channel, domain string) string {
@@ -2209,8 +2141,13 @@ func (l *Launcher) relevantTaskForTarget(msg channelMessage, slug string) (teamT
 	}
 	domain := inferMessageDomain(msg)
 
+	// Search all channels: a specialist's task may live in a dedicated channel (e.g.
+	// "engineering") even when the triggering message arrived from "general". Using
+	// ChannelTasks(channel) here caused cross-channel delegations to silently omit the
+	// "Active task" line from work packets and give specialists the wrong response
+	// instruction ("stay quiet" instead of "you own matching work").
 	var domainOwned teamTask
-	for _, task := range l.broker.ChannelTasks(channel) {
+	for _, task := range l.broker.AllTasks() {
 		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
 			continue
 		}

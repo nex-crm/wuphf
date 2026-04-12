@@ -548,78 +548,6 @@ func TestNotificationTargetsForCEOMessageNotifyTaggedOnly(t *testing.T) {
 	}
 }
 
-func TestShouldDeliverDelayedNotificationSkipsAfterCEOAlreadyAnswered(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
-	msg1, err := b.PostMessage("you", "general", "Build the landing page", []string{"fe"}, "")
-	if err != nil {
-		t.Fatalf("post human message: %v", err)
-	}
-	if _, err := b.PostMessage("ceo", "general", "I have this. PM and CMO first.", []string{"pm", "cmo"}, msg1.ID); err != nil {
-		t.Fatalf("post ceo message: %v", err)
-	}
-
-	l := &Launcher{
-		broker: b,
-		pack: &agent.PackDefinition{
-			LeadSlug: "ceo",
-			Agents: []agent.AgentConfig{
-				{Slug: "ceo", Name: "CEO"},
-				{Slug: "fe", Name: "Frontend Engineer"},
-				{Slug: "pm", Name: "Product Manager"},
-				{Slug: "cmo", Name: "CMO"},
-			},
-		},
-	}
-	if l.shouldDeliverDelayedNotification("fe", msg1) {
-		t.Fatal("expected FE delayed notification to be skipped after CEO answered without FE tag")
-	}
-}
-
-func TestShouldDeliverDelayedNotificationSkipsWrongDomainAndTaskOwnerConflict(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
-	task, _, err := b.EnsureTask("general", "Positioning work", "Marketing follow-up", "cmo", "ceo", "")
-	if err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	b.mu.Lock()
-	if ch := b.findChannelLocked("general"); ch != nil && !containsString(ch.Members, "cmo") {
-		ch.Members = append(ch.Members, "cmo")
-	}
-	b.mu.Unlock()
-	if task.Owner != "cmo" {
-		t.Fatalf("expected task owner cmo, got %+v", task)
-	}
-
-	l := &Launcher{
-		broker: b,
-		pack: &agent.PackDefinition{
-			LeadSlug: "ceo",
-			Agents: []agent.AgentConfig{
-				{Slug: "ceo", Name: "CEO"},
-				{Slug: "fe", Name: "Frontend Engineer"},
-				{Slug: "cmo", Name: "CMO"},
-			},
-		},
-	}
-	msg := channelMessage{From: "you", Channel: "general", Content: "We need a positioning shift and launch campaign.", ID: "msg-1"}
-	if l.shouldDeliverDelayedNotification("fe", msg) {
-		t.Fatal("expected FE delayed notification to be skipped for marketing work owned by CMO")
-	}
-	if !l.shouldDeliverDelayedNotification("cmo", msg) {
-		t.Fatal("expected CMO delayed notification to be allowed for matching domain owner")
-	}
-}
-
 func TestTaskNotificationTargetsFollowOwnerAndCEOHeadStart(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -1439,5 +1367,103 @@ func TestBuildNotificationContextFallsBackToChannelWhenThreadEmpty(t *testing.T)
 	}
 	if !strings.Contains(ctx, "Earlier channel message") {
 		t.Error("expected earlier channel message in fallback context")
+	}
+}
+
+func TestRelevantTaskForTargetCrossChannel(t *testing.T) {
+	// When CEO delegates in "general" but the specialist's task lives in "engineering",
+	// relevantTaskForTarget must still find it. Before the AllTasks() fix, it searched
+	// only ChannelTasks("general") and returned nothing — causing work packets to omit
+	// the "Active task" line and giving specialists the wrong response instruction.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+
+	// Create "engineering" channel directly in broker state.
+	b.mu.Lock()
+	b.channels = append(b.channels, teamChannel{
+		Slug:    "engineering",
+		Members: []string{"ceo", "engineering"},
+	})
+	b.mu.Unlock()
+
+	// Human asks in "general".
+	humanMsg, err := b.PostMessage("you", "general", "Implement rate limiting middleware", nil, "")
+	if err != nil {
+		t.Fatalf("post human msg: %v", err)
+	}
+
+	// CEO creates task in "engineering" channel with threadID pointing to human's message.
+	task, _, err := b.EnsureTask("engineering", "Rate limiting middleware", "Implement middleware", "engineering", "ceo", humanMsg.ID)
+	if err != nil {
+		t.Fatalf("ensure task: %v", err)
+	}
+	_ = task
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "engineering", Name: "Engineering"},
+			},
+		},
+	}
+
+	// CEO delegates as a REPLY to the human's original message. ReplyTo = humanMsg.ID,
+	// so threadRoot = humanMsg.ID which matches task.ThreadID. Message channel is "general"
+	// but the task lives in "engineering" — this tests the AllTasks() cross-channel search.
+	ceoMsg := channelMessage{
+		ID:      "ceo-msg-1",
+		From:    "ceo",
+		Channel: "general",
+		Content: "Please implement rate limiting. @engineering",
+		ReplyTo: humanMsg.ID, // CEO replies in the same thread as the human ask
+		Tagged:  []string{"engineering"},
+	}
+
+	// relevantTaskForTarget should find the task in "engineering" even though the
+	// message arrived from "general". The thread match (threadRoot = humanMsg.ID =
+	// task.ThreadID) succeeds because we now search AllTasks() not just ChannelTasks("general").
+	found, ok := l.relevantTaskForTarget(ceoMsg, "engineering")
+	if !ok {
+		t.Fatal("expected to find task across channels via thread match, got nothing")
+	}
+	if found.Title != "Rate limiting middleware" {
+		t.Errorf("expected rate limiting task, got %q", found.Title)
+	}
+
+	// Confirm that with the OLD ChannelTasks("general") search, the task would NOT be found.
+	// This validates the fix is necessary: ChannelTasks returns nothing for "general" when
+	// the task is in "engineering".
+	if len(b.ChannelTasks("general")) != 0 {
+		t.Error("ChannelTasks(general) should be empty — task is in 'engineering', not 'general'")
+	}
+	if len(b.AllTasks()) == 0 {
+		t.Error("AllTasks() should include the engineering task")
+	}
+
+	// responseInstructionForTarget: engineering is tagged → "directly tagged" instruction.
+	instr := l.responseInstructionForTarget(ceoMsg, "engineering")
+	if !strings.Contains(instr, "directly tagged") {
+		t.Errorf("expected 'directly tagged' instruction, got %q", instr)
+	}
+
+	// A different specialist not in Tagged and not owning the task should stay quiet.
+	unrelatedMsg := channelMessage{
+		ID:      "ceo-msg-2",
+		From:    "ceo",
+		Channel: "general",
+		Content: "Just an update.",
+		ReplyTo: humanMsg.ID,
+		Tagged:  []string{},
+	}
+	_, ok2 := l.relevantTaskForTarget(unrelatedMsg, "marketing")
+	if ok2 {
+		t.Error("marketing should not find an engineering-owned task")
 	}
 }
