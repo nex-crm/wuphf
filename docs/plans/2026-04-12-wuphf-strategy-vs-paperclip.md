@@ -203,36 +203,45 @@ Don't dilute the collaboration model to match Paperclip. Double down as the posi
 
 ## Part 4: Final Positioning (Converged)
 
-### One-liner
-"Your AI team, same office, 70% cheaper than Paperclip."
+### One-liner (revised after ICP panel — lead with visibility, not cost)
+"See your AI agents work. Steer them mid-flight."
 
-### The pitch (for Paperclip switchers)
+### Why this changed
+The 10-persona ICP test revealed: visibility (live streaming + mid-flight DM) is the
+emotional hook that converts. Token savings is the rational justification AFTER the hook
+lands. 5 of 9 active personas identified Scene 5 (streaming) as their aha moment. Only
+Lena rated the 73% token claim — and scored it 4/10 on "marketing claim earned right now."
+Lead with what IS proven, not what WILL BE proven after a benchmark.
 
-> "Paperclip treats agents like remote contractors: assign a ticket, wait for the result.
-> WUPHF treats agents like your founding team: same office, same context, same room.
-> Start in delegation mode — familiar, clean, cheap. When you're ready, unlock team mode
-> and watch your agents collaborate. Your Claude bill is 70% lower either way."
+### The pitch (revised after ICP panel)
 
-### Four pillars (updated from three)
+> "Most multi-agent tools are ticket queues wearing a dashboard.
+> WUPHF is a shared office. Watch your agents work. Steer them mid-flight.
+> Start in delegation mode — familiar, clean, cheap. When you're ready, type /collab
+> and watch your agents coordinate. Your Claude bill drops as a side effect."
 
-1. **"Your bill dropped 70%"** — token discipline baked in from day one.
-   Fresh sessions (no --resume accumulation), per-agent MCP scope (~24k tokens/turn saved),
-   tool output truncation, no LLM polling. These directly address Paperclip issues
-   #544, #1183, #3401, #3402.
+(Lena's language, validated as the strongest single line by the DevRel persona who
+would actually write about the product.)
 
-2. **"Nothing corrupts"** — workspace isolation by default (git worktree per agent per task),
-   atomic task checkout (compare-and-swap under broker mutex), paused = fully stopped.
-   Directly addresses Paperclip issue #3335 (222 workspaces sharing one cwd).
+### Four pillars (reordered after ICP panel — visibility leads, cost follows)
 
-3. **"Two modes, one office"** — delegation mode (focus, CEO-routed) is the default.
-   Familiar to Paperclip users. Team mode (collaborative channels) is one command away.
-   CEO agent suggests switching when 2+ agents work on related tasks. Paperclip can only
-   do delegation. WUPHF can do both. PR #25 already shipped.
+1. **"See and steer"** — live streaming of agent work + mid-flight DM without mode switch.
+   This is the #1 aha moment across all personas. The hero demo. The conversion trigger.
+   Alex: "a different way of working with agents." Lena: "the first AI tool that treats
+   observability as a first-class feature." Sam: "I can screenshot these tool call traces
+   for my VP. That's evidence, not vibes."
 
-4. **"A world model that compounds"** — Nex integration as the shared knowledge graph.
-   Dorsey's Layer 2, ericosiu's Single Brain. Contacts, companies, deals, emails, meetings,
-   call transcripts — all indexed, queryable by every agent. "The data accumulates in ways
-   that can't be fast-forwarded." Paperclip has no equivalent.
+2. **"Two modes, one office"** — delegation mode (CEO-routed, quiet) is the default.
+   /collab mode (agents coordinate in shared channels) is one command away. CEO suggests
+   switching when appropriate. Paperclip can only do delegation. WUPHF does both. PR #25.
+
+3. **"Your bill drops as a side effect"** — token discipline baked in. Fresh sessions,
+   per-agent MCP scope, tool output truncation, no LLM polling. BUT: don't lead with
+   "70% cheaper" until the benchmark exists. Lena scored the claim 4/10 on "earned right
+   now." Lead with the architectural reasoning; earn the number in Week 5.
+
+4. **"A world model that compounds"** — Nex as shared knowledge graph. Dorsey's Layer 2,
+   ericosiu's Single Brain. The moat that can't be fast-forwarded.
 
 ### The switch progression (user journey)
 - **Minute 0**: `wuphf import paperclip --from ~/.paperclip` → office loads with their agents
