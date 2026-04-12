@@ -1325,6 +1325,83 @@ func TestBuildNotificationContextIncludesDeepThreadMessages(t *testing.T) {
 	}
 }
 
+func TestBuildTaskNotificationContextCEOSeesAllChannels(t *testing.T) {
+	// CEO task context must include tasks from ALL channels, not just the channel of
+	// the message that woke the CEO. When woken from "engineering" channel, the CEO
+	// should still see tasks in "general".
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	// Post a task in "general" channel
+	if _, err := b.PostMessage("you", "general", "initial ask", nil, ""); err != nil {
+		t.Fatalf("post initial: %v", err)
+	}
+	if _, _, err := b.EnsureTask("general", "general-task", "Task in general channel", "ceo", "you", ""); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "engineering", Name: "Engineering"},
+			},
+		},
+	}
+
+	// Passing "" to buildTaskNotificationContext means AllTasks — should see general tasks.
+	ctx := l.buildTaskNotificationContext("", "ceo", 3)
+	if !strings.Contains(ctx, "general-task") {
+		t.Errorf("expected task from general channel in AllTasks context, got %q", ctx)
+	}
+
+	// Passing "engineering" only shows engineering tasks — should NOT see general task.
+	ctxEngOnly := l.buildTaskNotificationContext("engineering", "ceo", 3)
+	if strings.Contains(ctxEngOnly, "general-task") {
+		t.Errorf("channel-scoped context should not include general-channel task, got %q", ctxEngOnly)
+	}
+}
+
+func TestResponseInstructionForTargetLeadFromSpecialist(t *testing.T) {
+	// When the CEO is woken by a specialist, the instruction should differ from
+	// when woken by the human. Specialist completion should prompt "stay quiet or
+	// coordinate" behavior, not "give first reply quickly".
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "engineering", Name: "Engineering"},
+			},
+		},
+	}
+
+	// Woken by human → should get "reply quickly" instruction
+	humanInstr := l.responseInstructionForTarget(channelMessage{From: "you"}, "ceo")
+	if !strings.Contains(humanInstr, "Give the first top-level reply quickly") {
+		t.Errorf("expected quick-reply instruction when woken by human, got %q", humanInstr)
+	}
+
+	// Woken by specialist → should get "stay quiet unless needed" instruction
+	specialistInstr := l.responseInstructionForTarget(channelMessage{From: "engineering"}, "ceo")
+	if strings.Contains(specialistInstr, "Give the first top-level reply quickly") {
+		t.Errorf("specialist wake-up should not use human-style quick-reply instruction, got %q", specialistInstr)
+	}
+	if !strings.Contains(specialistInstr, "stay quiet") {
+		t.Errorf("specialist wake-up should include stay-quiet guidance, got %q", specialistInstr)
+	}
+}
+
 func TestBuildNotificationContextFallsBackToChannelWhenThreadEmpty(t *testing.T) {
 	// When threadRootID is given but the thread has no displayable messages
 	// (e.g. the trigger IS the root and no other replies exist yet), the function
