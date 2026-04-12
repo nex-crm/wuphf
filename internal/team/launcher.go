@@ -3038,11 +3038,13 @@ func (l *Launcher) ensureAgentMCPConfig(slug string) (string, error) {
 }
 
 // agentActiveTask returns the first in_progress task owned by the given agent slug.
+// AllTasks() is used so agents working in non-general channels still get their
+// worktree set up correctly.
 func (l *Launcher) agentActiveTask(slug string) *teamTask {
 	if l.broker == nil {
 		return nil
 	}
-	tasks := l.broker.ChannelTasks("general")
+	tasks := l.broker.AllTasks()
 	for i := range tasks {
 		if tasks[i].Owner == slug && tasks[i].Status == "in_progress" {
 			return &tasks[i]
