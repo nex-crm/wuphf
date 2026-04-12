@@ -4699,7 +4699,7 @@ function sendThreadReply() {
   var mentionRe = /@(\S+)/g;
   var mentionMatch;
   while ((mentionMatch = mentionRe.exec(raw)) !== null) {
-    var mentionSlug = mentionMatch[1].toLowerCase();
+    var mentionSlug = mentionMatch[1].toLowerCase().replace(/[^a-z0-9-]/g, '');
     var mentionAgent = AGENTS.find(function(a) { return a.slug === mentionSlug; });
     if (mentionAgent) tagged.push(mentionAgent.slug);
   }
@@ -5008,7 +5008,7 @@ function sendMessage() {
   var mentionRe = /@(\S+)/g;
   var mentionMatch;
   while ((mentionMatch = mentionRe.exec(raw)) !== null) {
-    var mentionSlug = mentionMatch[1].toLowerCase();
+    var mentionSlug = mentionMatch[1].toLowerCase().replace(/[^a-z0-9-]/g, '');
     var mentionAgent = AGENTS.find(function(a) { return a.slug === mentionSlug; });
     if (mentionAgent) tagged.push(mentionAgent.slug);
   }
