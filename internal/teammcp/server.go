@@ -2446,6 +2446,11 @@ func formatMessages(messages []brokerMessage, mySlug string) string {
 		if msg.ReplyTo != "" {
 			threadNote = " ↳ " + msg.ReplyTo
 		}
+		// Truncate content to avoid token explosion when agents return long code
+		// blocks or reports. 800 chars is enough for context without burning tokens.
+		// team_poll is background context; agents who need the full output can read
+		// it directly from the thread via a targeted team_poll with thread_id.
+		const pollContentLimit = 800
 		if msg.Kind == "automation" || msg.From == "wuphf" || msg.From == "nex" {
 			source := msg.Source
 			if source == "" {
@@ -2459,10 +2464,18 @@ func formatMessages(messages []brokerMessage, mySlug string) string {
 			if msg.Title != "" {
 				title = msg.Title + ": "
 			}
-			lines = append(lines, fmt.Sprintf("%s %s%s [%s/%s]: %s%s%s", ts, msg.ID, threadNote, label, source, title, msg.Content, tagNote))
+			content := msg.Content
+			if len(content) > pollContentLimit {
+				content = content[:pollContentLimit] + "…"
+			}
+			lines = append(lines, fmt.Sprintf("%s %s%s [%s/%s]: %s%s%s", ts, msg.ID, threadNote, label, source, title, content, tagNote))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("%s %s%s @%s: %s%s", ts, msg.ID, threadNote, msg.From, msg.Content, tagNote))
+		content := msg.Content
+		if len(content) > pollContentLimit {
+			content = content[:pollContentLimit] + "…"
+		}
+		lines = append(lines, fmt.Sprintf("%s %s%s @%s: %s%s", ts, msg.ID, threadNote, msg.From, content, tagNote))
 	}
 	return strings.Join(lines, "\n")
 }
