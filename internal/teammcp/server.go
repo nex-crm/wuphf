@@ -466,6 +466,11 @@ func Run(ctx context.Context) error {
 		"Create, claim, assign, complete, block, or release a shared task in the office task list.",
 	), handleTeamTask)
 
+	mcp.AddTool(server, officeWriteTool(
+		"team_plan",
+		"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
+	), handleTeamPlan)
+
 	mcp.AddTool(server, readOnlyTool(
 		"team_requests",
 		"List the current office requests so you know whether the human already owes the team a decision.",
