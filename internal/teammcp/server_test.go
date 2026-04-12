@@ -1024,3 +1024,58 @@ func TestDetectUntaggedMentions(t *testing.T) {
 		t.Fatalf("expected @marketing after stripping punctuation, got %v", got)
 	}
 }
+
+// TestHandleTeamPlanCreatesDependentBlockedTasks verifies the team_plan MCP tool
+// round-trips through the HTTP broker, creates both tasks, and marks the dependent
+// task as BLOCKED when its dependency is still open.
+func TestHandleTeamPlanCreatesDependentBlockedTasks(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	result, _, err := handleTeamPlan(context.Background(), nil, TeamPlanArgs{
+		Channel: "general",
+		MySlug:  "ceo",
+		Tasks: []struct {
+			Title     string   `json:"title" jsonschema:"Task title"`
+			Assignee  string   `json:"assignee" jsonschema:"Agent slug to own this task"`
+			Details   string   `json:"details,omitempty" jsonschema:"Optional task details"`
+			DependsOn []string `json:"depends_on,omitempty" jsonschema:"Titles or IDs of tasks this depends on"`
+		}{
+			{Title: "Research competitors", Assignee: "research"},
+			{Title: "Write positioning copy", Assignee: "marketing", DependsOn: []string{"Research competitors"}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("handleTeamPlan: %v", err)
+	}
+	text := textFromResult(t, result)
+
+	if !strings.Contains(text, "Created 2 tasks") {
+		t.Fatalf("expected 2 tasks created, got %q", text)
+	}
+	if !strings.Contains(text, "Research competitors") {
+		t.Fatalf("expected research task in output, got %q", text)
+	}
+	if !strings.Contains(text, "Write positioning copy") {
+		t.Fatalf("expected marketing task in output, got %q", text)
+	}
+	// The dependent task must be marked BLOCKED in the output.
+	if !strings.Contains(text, "BLOCKED") {
+		t.Fatalf("expected BLOCKED flag for dependent task, got %q", text)
+	}
+	// The first task (no deps) must NOT be blocked.
+	lines := strings.Split(text, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, "Research competitors") && strings.Contains(line, "BLOCKED") {
+			t.Fatalf("research task should not be BLOCKED: %q", line)
+		}
+	}
+}

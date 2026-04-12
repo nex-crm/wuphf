@@ -549,12 +549,9 @@ func (l *Launcher) taskForAction(action officeActionLog) (teamTask, bool) {
 	if l.broker == nil || strings.TrimSpace(action.RelatedID) == "" {
 		return teamTask{}, false
 	}
-	channel := normalizeChannelSlug(action.Channel)
-	if channel == "" {
-		channel = "general"
-	}
-	for _, task := range l.broker.ChannelTasks(channel) {
-		if task.ID == strings.TrimSpace(action.RelatedID) {
+	id := strings.TrimSpace(action.RelatedID)
+	for _, task := range l.broker.AllTasks() {
+		if task.ID == id {
 			return task, true
 		}
 	}
@@ -825,7 +822,7 @@ func (l *Launcher) taskOwnerForDomain(channel, domain string) string {
 		return ""
 	}
 	var owner string
-	for _, task := range l.broker.ChannelTasks(channel) {
+	for _, task := range l.broker.AllTasks() {
 		if task.Status == "done" {
 			continue
 		}

@@ -1493,22 +1493,10 @@ func TestBlockedTaskNotificationAndUnblockFlow(t *testing.T) {
 	}
 
 	// Create marketing task depending on the research task → should be Blocked.
-	// We need to use the HTTP endpoint to pass DependsOn correctly.
-	// EnsureTask doesn't support DependsOn, so we manipulate directly.
-	marketingTask, _, err := b.EnsureTask("general", "Write blog copy", "Based on research results", "marketing", "ceo", "")
+	marketingTask, _, err := b.EnsureTask("general", "Write blog copy", "Based on research results", "marketing", "ceo", "", researchTask.ID)
 	if err != nil {
 		t.Fatalf("create marketing task: %v", err)
 	}
-
-	// Manually set DependsOn and Blocked to simulate a properly created dependent task.
-	b.mu.Lock()
-	for i := range b.tasks {
-		if b.tasks[i].ID == marketingTask.ID {
-			b.tasks[i].DependsOn = []string{researchTask.ID}
-			b.tasks[i].Blocked = true
-		}
-	}
-	b.mu.Unlock()
 
 	// Set broker members so agentPaneTargets can build notification targets.
 	b.mu.Lock()

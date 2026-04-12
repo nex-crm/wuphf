@@ -5134,7 +5134,7 @@ func (b *Broker) handleTaskAck(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "task not found", http.StatusNotFound)
 }
 
-func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID string) (teamTask, bool, error) {
+func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID string, dependsOn ...string) (teamTask, bool, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	channel = normalizeChannelSlug(channel)
@@ -5154,7 +5154,9 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		}
 		if existing.Owner == "" && strings.TrimSpace(owner) != "" {
 			existing.Owner = strings.TrimSpace(owner)
-			existing.Status = "in_progress"
+			if !existing.Blocked {
+				existing.Status = "in_progress"
+			}
 		}
 		if existing.ThreadID == "" && strings.TrimSpace(threadID) != "" {
 			existing.ThreadID = strings.TrimSpace(threadID)
@@ -5180,10 +5182,13 @@ func (b *Broker) EnsureTask(channel, title, details, owner, createdBy, threadID 
 		Status:    "open",
 		CreatedBy: strings.TrimSpace(createdBy),
 		ThreadID:  strings.TrimSpace(threadID),
+		DependsOn: dependsOn,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
-	if task.Owner != "" {
+	if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
+		task.Blocked = true
+	} else if task.Owner != "" {
 		task.Status = "in_progress"
 	}
 	b.scheduleTaskLifecycleLocked(&task)
@@ -5211,6 +5216,7 @@ type plannedTaskInput struct {
 	ReviewState      string
 	SourceSignalID   string
 	SourceDecisionID string
+	DependsOn        []string
 }
 
 func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, error) {
@@ -5267,8 +5273,9 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		return *existing, true, nil
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	b.counter++
 	task := teamTask{
-		ID:               fmt.Sprintf("task-%d", b.counter+1),
+		ID:               fmt.Sprintf("task-%d", b.counter),
 		Channel:          channel,
 		Title:            title,
 		Details:          strings.TrimSpace(input.Details),
@@ -5282,11 +5289,13 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 		ReviewState:      strings.TrimSpace(input.ReviewState),
 		SourceSignalID:   strings.TrimSpace(input.SourceSignalID),
 		SourceDecisionID: strings.TrimSpace(input.SourceDecisionID),
+		DependsOn:        input.DependsOn,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
-	b.counter++
-	if task.Owner != "" {
+	if len(task.DependsOn) > 0 && b.hasUnresolvedDepsLocked(&task) {
+		task.Blocked = true
+	} else if task.Owner != "" {
 		task.Status = "in_progress"
 	}
 	b.scheduleTaskLifecycleLocked(&task)
