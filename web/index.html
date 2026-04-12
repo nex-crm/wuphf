@@ -859,37 +859,22 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .runtime-strip.paused { border-bottom-color: var(--red); box-shadow: inset 0 -2px 0 var(--red); }
 .runtime-paused-pill { background: var(--red-bg); color: var(--red); font-weight: 600; padding: 2px 8px; border-radius: var(--radius-full); font-size: 10px; animation: pulse-dot 1.5s ease-in-out infinite; }
 
-/* ─── Full-window agent DM view (Slack-style) ─── */
-.dm-view { display: none; flex: 1; flex-direction: column; height: 100vh; overflow: hidden; background: var(--bg); }
-.dm-view.active { display: flex; }
-.dm-view-header { display: flex; align-items: center; justify-content: space-between; padding: 0 20px; height: 52px; min-height: 52px; border-bottom: 1px solid var(--border); background: var(--bg-card); flex-shrink: 0; }
-.dm-view-agent { display: flex; align-items: center; gap: 10px; }
-.dm-view-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--accent-bg); display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
-.dm-view-name { font-size: 15px; font-weight: 700; color: var(--text); }
-.dm-view-status { font-size: 11px; color: var(--text-tertiary); }
-.dm-view-close { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 4px 10px; cursor: pointer; transition: all 0.15s; }
-.dm-view-close:hover { background: var(--bg); color: var(--text); }
-.dm-view-body { display: flex; flex: 1; overflow: hidden; flex-direction: column; }
-/* Stream pane — live agent stdout */
-.dm-stream-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; border-bottom: 2px solid var(--border); overflow: hidden; }
-.dm-stream-header { display: flex; align-items: center; gap: 8px; padding: 6px 16px; background: #1a1a1a; border-bottom: 1px solid #333; flex-shrink: 0; }
-.dm-stream-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #888; font-family: var(--font-mono); }
+/* ─── Agent stdout stream strip (inside .main, shown on dm-* channels) ─── */
+#dm-stream-strip { flex-shrink: 0; border-bottom: 1px solid var(--border); max-height: 260px; display: flex; flex-direction: column; }
+.dm-stream-header { display: flex; align-items: center; gap: 8px; padding: 5px 20px; background: #1a1a1a; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
+.dm-stream-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #888; font-family: var(--font-mono); flex: 1; }
 .dm-stream-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; animation: pulse-dot 1.5s ease-in-out infinite; flex-shrink: 0; }
 .dm-stream-dot.idle { background: #555; animation: none; }
-.dm-stream-lines { flex: 1; overflow-y: auto; padding: 8px 16px; background: #1a1a1a; font-family: var(--font-mono); font-size: 12px; line-height: 1.55; color: #d4d4d4; }
+.dm-stream-toggle { background: transparent; border: none; color: #555; cursor: pointer; font-size: 12px; padding: 0 2px; line-height: 1; }
+.dm-stream-toggle:hover { color: #aaa; }
+#dm-stream-strip.collapsed .dm-stream-lines { display: none; }
+#dm-stream-strip.collapsed { max-height: none; }
+.dm-stream-lines { flex: 1; overflow-y: auto; padding: 6px 20px 8px; background: #1a1a1a; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: #d4d4d4; }
 .dm-stream-line { white-space: pre-wrap; word-break: break-all; padding: 1px 0; }
 .dm-stream-line.thinking { color: #888; font-style: italic; }
 .dm-stream-line.tool { color: #60a5fa; }
 .dm-stream-line.result { color: #86efac; }
-.dm-stream-empty { color: #555; font-style: italic; font-size: 11px; padding: 12px 0; }
-/* Conversation pane */
-.dm-convo-pane { display: flex; flex-direction: column; max-height: 45%; min-height: 120px; overflow: hidden; flex-shrink: 0; }
-.dm-convo-messages { flex: 1; overflow-y: auto; padding: 12px 20px; display: flex; flex-direction: column; gap: 8px; }
-/* Composer */
-.dm-composer { padding: 8px 16px 12px; border-top: 1px solid var(--border); background: var(--bg-card); flex-shrink: 0; }
-.dm-composer-inner { display: flex; align-items: flex-end; gap: 8px; }
-.dm-composer-input { flex: 1; border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; font-family: var(--font-sans); font-size: 13px; color: var(--text); background: var(--bg); outline: none; resize: none; line-height: 1.4; transition: border-color 0.2s; }
-.dm-composer-input:focus { border-color: var(--accent); }
+.dm-stream-empty { color: #555; font-style: italic; }
 /* DM button on sidebar agent rows */
 .sidebar-agent-dm-btn { font-size: 9px; font-weight: 600; opacity: 0; padding: 1px 5px; border: 1px solid var(--border); border-radius: 3px; background: transparent; color: var(--text-tertiary); cursor: pointer; margin-left: auto; transition: all 0.12s; font-family: var(--font-sans); text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0; }
 .sidebar-agent:hover .sidebar-agent-dm-btn { opacity: 1; }
@@ -1179,6 +1164,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       </div>
       <div class="sidebar-channels" id="sidebar-channels"></div>
       <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
+        <p class="sidebar-section-title">Direct messages</p>
+      </div>
+      <div class="sidebar-channels" id="sidebar-dms"></div>
+      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
         <p class="sidebar-section-title">Apps</p>
       </div>
       <div class="sidebar-channels" id="sidebar-apps"></div>
@@ -1216,6 +1205,15 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
           Back to office
         </button>
+      </div>
+      <!-- Agent stdout stream strip — shown when currentChannel is dm-* -->
+      <div id="dm-stream-strip" style="display:none;">
+        <div class="dm-stream-header">
+          <span class="dm-stream-dot idle" id="dm-stream-dot"></span>
+          <span class="dm-stream-title" id="dm-stream-title">Live output</span>
+          <button class="dm-stream-toggle" id="dm-stream-toggle" aria-label="Toggle stream" onclick="toggleDMStream()">&#x25B4;</button>
+        </div>
+        <div class="dm-stream-lines" id="dm-stream-lines"></div>
       </div>
       <div class="messages" id="messages"></div>
       <div class="messages" id="dm-messages" style="display:none;"></div>
@@ -1273,48 +1271,6 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </div>
       </div>
     </aside>
-
-    <!-- Full-window agent DM view (replaces main panel, sidebar stays) -->
-    <div class="dm-view" id="dm-view" role="region" aria-label="Direct message">
-      <div class="dm-view-header">
-        <div class="dm-view-agent">
-          <div class="dm-view-avatar" id="dm-view-avatar">?</div>
-          <div>
-            <div class="dm-view-name" id="dm-view-name">Agent</div>
-            <div class="dm-view-status" id="dm-view-status">active</div>
-          </div>
-        </div>
-        <button class="dm-view-close" onclick="closeAgentDM()" aria-label="Back to office">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-          Back to office
-        </button>
-      </div>
-      <div class="dm-view-body">
-        <!-- Live stream pane -->
-        <div class="dm-stream-pane">
-          <div class="dm-stream-header">
-            <span class="dm-stream-dot" id="dm-stream-dot"></span>
-            <span class="dm-stream-title">Live output</span>
-          </div>
-          <div class="dm-stream-lines" id="dm-stream-lines">
-            <div class="dm-stream-empty">Waiting for agent output&hellip;</div>
-          </div>
-        </div>
-        <!-- Conversation pane -->
-        <div class="dm-convo-pane">
-          <div class="dm-convo-messages" id="dm-convo-messages"></div>
-        </div>
-      </div>
-      <!-- Composer -->
-      <div class="dm-composer">
-        <div class="dm-composer-inner">
-          <textarea class="dm-composer-input" id="dm-composer-input" aria-label="Message agent directly" rows="1" placeholder="Message agent…"></textarea>
-          <button class="composer-send" id="dm-composer-send" aria-label="Send direct message" disabled>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/></svg>
-          </button>
-        </div>
-      </div>
-    </div>
 
     <!-- Agent Panel -->
     <aside class="agent-panel" id="agent-panel">
@@ -2032,6 +1988,7 @@ function showOffice() {
           });
         }
         renderSidebarAgents();
+        renderSidebarDMs();
         renderSidebarChannels();
         renderSidebarApps();
         startMessagePolling();
@@ -2040,12 +1997,14 @@ function showOffice() {
       })
       .catch(function() {
         renderSidebarAgents();
+        renderSidebarDMs();
         renderSidebarChannels();
         renderSidebarApps();
         animateMessages();
       });
   } else {
     renderSidebarAgents();
+    renderSidebarDMs();
     renderSidebarChannels();
     renderSidebarApps();
     animateMessages();
@@ -2102,6 +2061,7 @@ function normalizeMemberActivityHints(members) {
 
 function refreshLiveActivityUI() {
   renderSidebarAgents();
+  renderSidebarDMs();
   renderWorkspaceSummary();
   renderRuntimeStrip();
   renderLiveWork();
@@ -2207,7 +2167,7 @@ function renderSidebarAgents() {
     dmBtn.title = 'Open direct channel with ' + a.name;
     dmBtn.addEventListener('click', function(e) {
       e.stopPropagation(); // don't open agent panel
-      openAgentDM(a.slug);
+      switchChannel('dm-' + a.slug);
     });
     btn.appendChild(avatarEl);
     btn.appendChild(wrap);
@@ -2863,7 +2823,14 @@ function switchChannel(name) {
   if (lastMessageId) {
     localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
   }
+  // DM channel enter/leave hooks (Slack-style)
+  var prevChannel = currentChannel;
   currentChannel = name;
+  if (name.indexOf('dm-') === 0) {
+    onDMChannelEnter(name.slice(3));
+  } else if (prevChannel && prevChannel.indexOf('dm-') === 0) {
+    onDMChannelLeave();
+  }
   lastMessageId = null;
   // Reset unread/grouping/date state for new channel
   lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + name) || null;
@@ -2875,9 +2842,17 @@ function switchChannel(name) {
   lastRenderedDate = null;
   document.getElementById('messages').textContent = '';
   var ch = CHANNELS.find(function(c) { return c.name === name; });
-  document.getElementById('channel-title').textContent = '# ' + name;
-  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
-  document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
+  if (name.indexOf('dm-') === 0) {
+    var dmSlug = name.slice(3);
+    var dmAgent = AGENTS.find(function(a) { return a.slug === dmSlug; });
+    document.getElementById('channel-title').textContent = (dmAgent ? dmAgent.name : dmSlug);
+    document.getElementById('channel-desc').textContent = dmAgent ? (dmAgent.role || '') : '';
+    document.getElementById('composer-input').placeholder = 'Message ' + (dmAgent ? dmAgent.name : dmSlug) + '\u2026';
+  } else {
+    document.getElementById('channel-title').textContent = '# ' + name;
+    document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+    document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
+  }
   // Close recovery view if open
   if (recoveryViewOpen) closeRecoveryView();
 
@@ -5592,76 +5567,81 @@ function setupAgentDMHandlers() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-//   AGENT DM VIEW — full-window Slack-style direct message
+//   AGENT DM — Slack-style navigation (sidebar stays, channel switches)
 // ═══════════════════════════════════════════════════════════════
-var inlineDMAgent = null;   // keep for any legacy refs
-var dmViewAgent   = null;   // agent currently open in the DM view
-var dmStreamES    = null;   // active EventSource for live stdout
+var inlineDMAgent = null;   // compat alias; tracks current DM agent
 var agentLatestText = {};   // sidebar streaming snippets
+var dmStreamES    = null;   // active EventSource for live stdout
 
-function messageTagsAgent(msg, agentSlug) {
-  return Array.isArray(msg.tagged) && msg.tagged.indexOf(agentSlug) !== -1;
+// Called by switchChannel when entering / leaving a dm-* channel.
+function onDMChannelEnter(slug) {
+  var agent = AGENTS.find(function(a) { return a.slug === slug; });
+  inlineDMAgent = agent || null;
+  // Update header to show agent name instead of raw channel id
+  if (agent) {
+    document.getElementById('channel-title').textContent = agent.emoji
+      ? agent.emoji + '\u2009' + agent.name
+      : '@ ' + agent.name;
+    document.getElementById('channel-desc').textContent = (agent.status || 'active') + ' \u00B7 direct message';
+    document.getElementById('composer-input').placeholder = 'Message ' + agent.name + '\u2026';
+  }
+  // Show and connect stream strip
+  var strip = document.getElementById('dm-stream-strip');
+  if (strip) strip.style.display = '';
+  connectAgentStream(slug);
+  renderSidebarDMs();
 }
 
-function isDMViewRelevantMessage(msg, agentSlug) {
-  if (!msg || !agentSlug || msg.reply_to) return false;
-  if (msg.from === agentSlug) return true;
-  if (msg.from === 'you' || msg.from === 'human') return messageTagsAgent(msg, agentSlug);
-  return false;
-}
-
-function setStreamEmpty(container, text) {
-  container.textContent = '';
-  var el = document.createElement('div');
-  el.className = 'dm-stream-empty';
-  el.textContent = text;
-  container.appendChild(el);
-}
-
-function openAgentDM(agentSlug) {
-  var agent = AGENTS.find(function(a) { return a.slug === agentSlug; });
-  if (!agent) return;
-
+function onDMChannelLeave() {
+  inlineDMAgent = null;
   if (dmStreamES) { dmStreamES.close(); dmStreamES = null; }
-  dmViewAgent   = agent;
-  inlineDMAgent = agent;
+  var strip = document.getElementById('dm-stream-strip');
+  if (strip) strip.style.display = 'none';
+  renderSidebarDMs();
+}
 
-  document.getElementById('dm-view-avatar').textContent = agent.emoji || agent.name.charAt(0).toUpperCase();
-  document.getElementById('dm-view-name').textContent = agent.name;
-  document.getElementById('dm-view-status').textContent = agent.status || 'active';
-
-  var convo = document.getElementById('dm-convo-messages');
-  convo.textContent = '';
-  var sorted = Object.values(allMessages).sort(function(a, b) { return (a.id || 0) - (b.id || 0); });
-  sorted.forEach(function(msg) {
-    if (isDMViewRelevantMessage(msg, agent.slug)) appendMessageToContainer(msg, convo);
+// Render "Direct messages" section in the sidebar listing all agents.
+function renderSidebarDMs() {
+  var container = document.getElementById('sidebar-dms');
+  if (!container) return;
+  container.textContent = '';
+  var dmChannel = currentChannel && currentChannel.indexOf('dm-') === 0
+    ? currentChannel.replace('dm-', '') : null;
+  AGENTS.forEach(function(agent) {
+    var btn = document.createElement('button');
+    btn.className = 'sidebar-item' + (dmChannel === agent.slug ? ' active' : '');
+    btn.setAttribute('aria-label', 'Direct message ' + agent.name);
+    // Status dot
+    var dot = document.createElement('span');
+    dot.className = 'status-dot ' + (agent.status === 'thinking' || agent.status === 'active' ? 'active' : 'lurking');
+    dot.style.cssText = 'flex-shrink:0;';
+    // Name
+    var nameEl = document.createElement('span');
+    nameEl.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    nameEl.textContent = agent.name;
+    btn.appendChild(dot);
+    btn.appendChild(nameEl);
+    btn.addEventListener('click', function() { switchChannel('dm-' + agent.slug); });
+    container.appendChild(btn);
   });
-  convo.scrollTop = convo.scrollHeight;
+}
 
+// Connect EventSource to /api/agent-stream/{slug} for live stdout.
+function connectAgentStream(slug) {
+  if (dmStreamES) { dmStreamES.close(); dmStreamES = null; }
   var streamLines = document.getElementById('dm-stream-lines');
-  setStreamEmpty(streamLines, 'Connecting to agent stream\u2026');
+  if (!streamLines) return;
+  streamLines.textContent = '';
+  var placeholder = document.createElement('div');
+  placeholder.className = 'dm-stream-empty';
+  placeholder.textContent = 'Connecting\u2026';
+  streamLines.appendChild(placeholder);
   document.getElementById('dm-stream-dot').className = 'dm-stream-dot idle';
 
-  var dmInput = document.getElementById('dm-composer-input');
-  dmInput.placeholder = 'Message ' + agent.name + '\u2026';
-  dmInput.value = '';
-  document.getElementById('dm-composer-send').disabled = true;
-
-  document.getElementById('dm-view').classList.add('active');
-  document.querySelector('.main').style.display = 'none';
-  document.getElementById('thread-panel').style.display = 'none';
-
-  dmInput.focus();
-  connectAgentStream(agent.slug);
-}
-
-function connectAgentStream(slug) {
-  var streamLines = document.getElementById('dm-stream-lines');
   if (!brokerConnected) {
-    setStreamEmpty(streamLines, 'Broker not connected \u2014 stream unavailable.');
+    placeholder.textContent = 'Broker not connected \u2014 stream unavailable.';
     return;
   }
-  // EventSource cannot set custom headers; pass auth token as query param.
   fetch('/api-token')
     .then(function(r) { return r.json(); })
     .then(function(data) {
@@ -5674,23 +5654,35 @@ function connectAgentStream(slug) {
         if (!hasContent) {
           streamLines.textContent = '';
           hasContent = true;
-          document.getElementById('dm-stream-dot').className = 'dm-stream-dot';
+          var dot = document.getElementById('dm-stream-dot');
+          if (dot) dot.className = 'dm-stream-dot';
         }
         var line = document.createElement('div');
         line.className = 'dm-stream-line' + classifyStreamLine(e.data);
         line.textContent = e.data;
         streamLines.appendChild(line);
-        if (streamLines.scrollHeight - streamLines.scrollTop < streamLines.clientHeight + 120) {
+        if (streamLines.scrollHeight - streamLines.scrollTop < streamLines.clientHeight + 100) {
           streamLines.scrollTop = streamLines.scrollHeight;
         }
       };
       es.onerror = function() {
-        document.getElementById('dm-stream-dot').className = 'dm-stream-dot idle';
-        if (!hasContent) setStreamEmpty(streamLines, 'Agent stream idle \u2014 no output yet.');
+        var dot = document.getElementById('dm-stream-dot');
+        if (dot) dot.className = 'dm-stream-dot idle';
+        if (!hasContent) {
+          streamLines.textContent = '';
+          var el = document.createElement('div');
+          el.className = 'dm-stream-empty';
+          el.textContent = 'Agent stream idle \u2014 no output yet.';
+          streamLines.appendChild(el);
+        }
       };
     })
     .catch(function() {
-      setStreamEmpty(streamLines, 'Could not connect to stream.');
+      streamLines.textContent = '';
+      var el = document.createElement('div');
+      el.className = 'dm-stream-empty';
+      el.textContent = 'Could not connect to stream.';
+      streamLines.appendChild(el);
     });
 }
 
@@ -5703,56 +5695,17 @@ function classifyStreamLine(text) {
   return '';
 }
 
-function closeAgentDM() {
-  if (dmStreamES) { dmStreamES.close(); dmStreamES = null; }
-  dmViewAgent   = null;
-  inlineDMAgent = null;
-  document.getElementById('dm-view').classList.remove('active');
-  document.querySelector('.main').style.display = '';
-  document.getElementById('thread-panel').style.display = '';
+var dmStreamCollapsed = false;
+function toggleDMStream() {
+  dmStreamCollapsed = !dmStreamCollapsed;
+  var strip = document.getElementById('dm-stream-strip');
+  var btn = document.getElementById('dm-stream-toggle');
+  if (strip) strip.classList.toggle('collapsed', dmStreamCollapsed);
+  if (btn) btn.textContent = dmStreamCollapsed ? '\u25BE' : '\u25B4';
 }
 
-function sendDirectMessage() {
-  if (!dmViewAgent) return;
-  var dmInput = document.getElementById('dm-composer-input');
-  var text = dmInput.value.trim();
-  if (!text) return;
-  dmInput.value = '';
-  document.getElementById('dm-composer-send').disabled = true;
-  var payload = { from: 'you', channel: 'dm-' + dmViewAgent.slug, content: text, tagged: [dmViewAgent.slug] };
-  if (brokerConnected) {
-    WuphfAPI.post('/messages', payload).catch(function(err) {
-      showNotice('DM send failed: ' + err.message, 'error');
-    });
-  }
-}
-
-function maybeAppendToDMView(msg) {
-  if (!dmViewAgent) return;
-  if (!isDMViewRelevantMessage(msg, dmViewAgent.slug)) return;
-  var convo = document.getElementById('dm-convo-messages');
-  if (!convo) return;
-  appendMessageToContainer(msg, convo);
-  convo.scrollTop = convo.scrollHeight;
-}
-
-(function() {
-  function wireDMComposer() {
-    var dmInput = document.getElementById('dm-composer-input');
-    var dmSend  = document.getElementById('dm-composer-send');
-    if (!dmInput || !dmSend) return;
-    dmInput.addEventListener('input', function() { dmSend.disabled = dmInput.value.trim() === ''; });
-    dmInput.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendDirectMessage(); }
-    });
-    dmSend.addEventListener('click', sendDirectMessage);
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', wireDMComposer);
-  } else {
-    wireDMComposer();
-  }
-})();
+// No-op kept for any remaining call sites from the legacy appendBrokerMessage path.
+function maybeAppendToDMView(msg) {}
 
 // ═══════════════════════════════════════════════════════════════
 //   RECOVERY VIEW (#55)
