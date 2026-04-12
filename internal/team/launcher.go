@@ -2573,7 +2573,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("\n== TEAM CHANNEL ==\n")
 		sb.WriteString("You are in a shared WUPHF office. Your tools default to the active conversation context: the channel, thread, or direct session that most recently needs your reply.\n")
-		sb.WriteString("- team_broadcast: Post a message to the channel (all agents see it)\n")
+		sb.WriteString("- team_broadcast: Post a message to the channel (all agents see it). CRITICAL: text @-mentions alone do NOT wake agents — include the slug in the `tagged` parameter.\n")
 		sb.WriteString("- team_poll: Read recent messages when you need fresher or broader context than the notification already gives you\n")
 		sb.WriteString("- team_office_members: See the full office roster, including members outside the current channel\n")
 		sb.WriteString("- team_channels: See every office channel, what it is for, and who is in it\n")
@@ -2597,8 +2597,6 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("- query_context: Look up prior decisions, customer context, contacts, companies, and history before reinventing things\n")
 			sb.WriteString("- add_context: Store explicit decisions, meeting-style summaries, and durable facts after the team lands them\n\n")
 		}
-		sb.WriteString("Tag agents with @slug in your message (e.g., '@fe can you handle this?').\n")
-		sb.WriteString("CRITICAL: text @-mentions alone do NOT wake agents. You MUST include the agent slug in the `tagged` parameter of team_broadcast for them to receive and act on your message.\n")
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
 		if l.isFocusModeEnabled() {
 			sb.WriteString("== DELEGATION MODE ==\n")
@@ -2650,7 +2648,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("\n== TEAM CHANNEL ==\n")
 		sb.WriteString("You are in a shared WUPHF office. Your tools default to the active conversation context: the channel, thread, or direct session that most recently needs your reply.\n")
-		sb.WriteString("- team_broadcast: Post a message to the channel (all agents see it)\n")
+		sb.WriteString("- team_broadcast: Post a message to the channel (all agents see it). CRITICAL: text @-mentions alone do NOT wake agents — include the slug in the `tagged` parameter.\n")
 		sb.WriteString("- team_poll: Read recent messages when the pushed notification context is not enough\n")
 		sb.WriteString("- team_office_members: See the full office roster, including members outside the current channel\n")
 		sb.WriteString("- team_channels: See every office channel, what it is for, and who is in it\n")
@@ -2686,18 +2684,17 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
 		sb.WriteString("1. Start with the pushed notification context and respond directly when it is enough; use team_poll only if you need genuinely fresher or broader context\n")
-		sb.WriteString("2. Stay in your lane. Speak only when tagged, when you own a task, or when you are blocked. Don't jump in just because a topic matches your domain.\n")
-		sb.WriteString("3. When @tagged, respond from your domain perspective. If someone else already covered it well and you have no real delta, stay quiet.\n")
-		sb.WriteString("4. Push back when you disagree — explain why using your expertise\n")
-		sb.WriteString("5. Check team_requests before asking the human anything new\n")
-		sb.WriteString("6. For completion or recommendations, use human_message. For blocking human decisions, use human_interview with options.\n")
-		sb.WriteString("7. When assigned a task, claim it with team_task first, use team_status to show what you're working on, then mark complete and broadcast when done. If the result is mainly for the human, also send it via human_message.\n")
-		sb.WriteString("8. You can see other channel names and descriptions, but cannot access their content unless you are a member. If context from another channel is needed, ask the CEO to bridge it.\n")
-		sb.WriteString("9. If a task or status line shows a worktree path, use that as working_directory for local file and bash tools.\n")
+		sb.WriteString("2. Stay in your lane. Speak only when tagged, owning a task, blocked, or adding real delta that others haven't covered. Don't jump in just because a topic matches your domain.\n")
+		sb.WriteString("3. Push back when you disagree — explain why using your expertise\n")
+		sb.WriteString("4. Check team_requests before asking the human anything new\n")
+		sb.WriteString("5. For completion or recommendations, use human_message. For blocking human decisions, use human_interview with options.\n")
+		sb.WriteString("6. When assigned a task, claim it with team_task first, use team_status to show what you're working on, then mark complete and broadcast when done. If the result is mainly for the human, also send it via human_message.\n")
+		sb.WriteString("7. You can see other channel names and descriptions, but cannot access their content unless you are a member. If context from another channel is needed, ask the CEO to bridge it.\n")
+		sb.WriteString("8. If a task or status line shows a worktree path, use that as working_directory for local file and bash tools.\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("10. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n\n")
+			sb.WriteString("9. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n\n")
 		} else {
-			sb.WriteString("10. Use query_context when prior knowledge matters. Only use add_context for durable conclusions, and don't claim something stored unless add_context actually succeeded.\n\n")
+			sb.WriteString("9. Use query_context when prior knowledge matters. Only use add_context for durable conclusions, and don't claim something stored unless add_context actually succeeded.\n\n")
 		}
 		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use markdown tables/checklists for structured data.\n")
 	}
