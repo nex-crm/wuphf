@@ -1157,6 +1157,64 @@ func TestUltimateThreadRootTopLevel(t *testing.T) {
 	}
 }
 
+func TestThreadMessageIDsParallelDelegation(t *testing.T) {
+	// Regression: CEO delegates to two specialists in parallel (both reply to the
+	// original human ask X). When Specialist A finishes, CEO should see that
+	// Specialist B also already acted — even though B's message is at the X level,
+	// not the Y level.
+	//
+	// Thread structure:
+	//   X (human ask)
+	//   ├── B_reply (specialist-b replies to X)
+	//   └── Y (ceo delegates to A, replyTo X)
+	//       └── A_reply (specialist-a reply to CEO, replyTo Y)
+	//
+	// CEO gets notified about A_reply. threadMessageIDs from ultimate root X must
+	// include B_reply so CEO knows B already acted.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	x, err := b.PostMessage("human", "general", "What is the plan?", nil, "")
+	if err != nil {
+		t.Fatalf("post x: %v", err)
+	}
+	bReply, err := b.PostMessage("you", "general", "B answer (parallel)", nil, x.ID)
+	if err != nil {
+		t.Fatalf("post b_reply: %v", err)
+	}
+	y, err := b.PostMessage("ceo", "general", "A: please handle this", nil, x.ID)
+	if err != nil {
+		t.Fatalf("post y: %v", err)
+	}
+	aReply, err := b.PostMessage("you", "general", "A done", nil, y.ID)
+	if err != nil {
+		t.Fatalf("post a_reply: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+
+	root := l.ultimateThreadRoot("general", y.ID) // from Y, walk to X
+	if root != x.ID {
+		t.Fatalf("expected root=%s got %s", x.ID, root)
+	}
+
+	ids := l.threadMessageIDs("general", root)
+
+	for _, want := range []string{x.ID, bReply.ID, y.ID, aReply.ID} {
+		if _, ok := ids[want]; !ok {
+			t.Errorf("expected message %s in thread IDs, not found", want)
+		}
+	}
+}
+
 func TestBuildNotificationContextThreadFiltering(t *testing.T) {
 	// Verifies that when a threadRootID is given, only messages in that thread
 	// appear in the context (labeled [Recent thread]), and messages from a

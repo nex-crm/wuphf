@@ -2066,6 +2066,38 @@ func (l *Launcher) ultimateThreadRoot(channel, startID string) string {
 	return root
 }
 
+// threadMessageIDs returns the set of all message IDs that belong to the thread
+// rooted at rootID (BFS traversal via replyTo reverse index). The root itself is
+// included. Returns an empty set when rootID is empty or broker is nil.
+func (l *Launcher) threadMessageIDs(channel, rootID string) map[string]struct{} {
+	rootID = strings.TrimSpace(rootID)
+	result := make(map[string]struct{})
+	if rootID == "" || l.broker == nil {
+		return result
+	}
+	msgs := l.broker.ChannelMessages(channel)
+	byParent := make(map[string][]string, len(msgs))
+	for _, m := range msgs {
+		parent := strings.TrimSpace(m.ReplyTo)
+		if parent != "" {
+			byParent[parent] = append(byParent[parent], strings.TrimSpace(m.ID))
+		}
+	}
+	result[rootID] = struct{}{}
+	queue := []string{rootID}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, child := range byParent[cur] {
+			if _, seen := result[child]; !seen {
+				result[child] = struct{}{}
+				queue = append(queue, child)
+			}
+		}
+	}
+	return result
+}
+
 func (l *Launcher) buildTaskNotificationContext(channel, slug string, limit int) string {
 	if l.broker == nil || limit <= 0 {
 		return ""
@@ -2223,11 +2255,18 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 		// Rule: if a specialist is in this list, HOLD — do not tag them.
 		activeAgents := map[string]struct{}{}
 		if l.broker != nil {
+			// Collect all message IDs that belong to this thread (full BFS from
+			// the ultimate root). This prevents the CEO from re-routing specialists
+			// who already acted at any depth, including the case of parallel
+			// delegations where two specialists both replied to the original ask.
+			threadRoot := strings.TrimSpace(l.ultimateThreadRoot(channel, msg.ReplyTo))
+			if threadRoot == "" {
+				threadRoot = strings.TrimSpace(msg.ID)
+			}
+			threadIDs := l.threadMessageIDs(channel, threadRoot)
 			allMsgs := l.broker.ChannelMessages(channel)
 			for _, tm := range allMsgs {
-				inThread := tm.ID == msg.ID || tm.ReplyTo == msg.ID ||
-					(msg.ReplyTo != "" && (tm.ID == msg.ReplyTo || tm.ReplyTo == msg.ReplyTo))
-				if !inThread {
+				if _, inThread := threadIDs[strings.TrimSpace(tm.ID)]; !inThread {
 					continue
 				}
 				if tm.From != "" && tm.From != "you" && tm.From != "human" && tm.From != "nex" && tm.From != slug {
