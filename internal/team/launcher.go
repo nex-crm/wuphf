@@ -33,7 +33,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/provider"
-	"github.com/nex-crm/wuphf/internal/tui"
 )
 
 const (
@@ -1804,7 +1803,7 @@ func containsSlug(items []string, want string) bool {
 // Otherwise: uses regular tmux attach with -L wuphf to avoid nesting.
 func (l *Launcher) Attach() error {
 	var cmd *exec.Cmd
-	if tui.IsITerm2() {
+	if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
 		// tmux -CC mode: iTerm2 takes over window management.
 		// Creates native iTerm2 tabs/splits for each tmux window/pane.
 		cmd = exec.Command("tmux", "-L", tmuxSocketName, "-CC", "attach-session", "-t", l.sessionName)
