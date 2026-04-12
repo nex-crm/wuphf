@@ -1944,7 +1944,23 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 
 // buildNotificationContext returns a compact summary of recent channel messages
 // for inline injection into agent notifications. Filters system and status messages.
-func (l *Launcher) buildNotificationContext(channel, triggerMsgID string, limit int) string {
+// buildNotificationContext returns a pre-labeled context section for work packets.
+//
+// When threadRootID is non-empty, the function first tries to build thread-scoped
+// context: messages whose ID equals threadRootID (the root) or whose ReplyTo equals
+// threadRootID (direct replies). This is labeled "[Recent thread]" and gives agents
+// only the relevant sub-conversation, not unrelated channel noise.
+//
+// When threadRootID is empty, or when the thread has no displayable messages (e.g.
+// the trigger is the first message in a new thread), the function falls back to the
+// last N channel messages and labels the section "[Recent channel]". Agents should
+// treat "[Recent channel]" as broad ambient context rather than the specific thread
+// they are responding in.
+//
+// The trigger message (triggerMsgID) is always excluded — it is already delivered
+// explicitly as "[New from @...]" in the notification, so including it again wastes
+// ~150 tokens per turn.
+func (l *Launcher) buildNotificationContext(channel, triggerMsgID, threadRootID string, limit int) string {
 	if l.broker == nil {
 		return ""
 	}
@@ -1957,38 +1973,62 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID string, limit 
 		return ""
 	}
 
-	// Filter: skip system messages, STATUS messages, and the trigger message itself
-	// (the trigger is already included explicitly as "[New from @...]" in the notification,
-	// so including it again here wastes ~150 tokens per notification).
-	filtered := make([]channelMessage, 0, len(msgs))
-	for _, msg := range msgs {
-		if msg.From == "system" {
-			continue
+	// baseFilter excludes system messages, STATUS messages, and the trigger itself.
+	baseFilter := func(m channelMessage) bool {
+		if m.From == "system" {
+			return false
 		}
-		if strings.TrimSpace(triggerMsgID) != "" && strings.TrimSpace(msg.ID) == strings.TrimSpace(triggerMsgID) {
-			continue
+		if strings.TrimSpace(triggerMsgID) != "" && strings.TrimSpace(m.ID) == strings.TrimSpace(triggerMsgID) {
+			return false
 		}
-		content := strings.TrimSpace(msg.Content)
-		if strings.HasPrefix(content, "[STATUS]") {
-			continue
+		if strings.HasPrefix(strings.TrimSpace(m.Content), "[STATUS]") {
+			return false
 		}
-		filtered = append(filtered, msg)
+		return true
 	}
 
-	// Take last N
-	if len(filtered) > limit {
-		filtered = filtered[len(filtered)-limit:]
+	formatContext := func(items []channelMessage) string {
+		var b strings.Builder
+		for _, m := range items {
+			b.WriteString(fmt.Sprintf("@%s: %s\n", m.From, truncate(m.Content, 600)))
+		}
+		return strings.TrimRight(b.String(), "\n")
 	}
 
+	// Thread-scoped context: prefer messages that belong to the given thread root.
+	threadRoot := strings.TrimSpace(threadRootID)
+	if threadRoot != "" {
+		var thread []channelMessage
+		for _, m := range msgs {
+			if !baseFilter(m) {
+				continue
+			}
+			if strings.TrimSpace(m.ID) == threadRoot || strings.TrimSpace(m.ReplyTo) == threadRoot {
+				thread = append(thread, m)
+			}
+		}
+		if len(thread) > 0 {
+			if len(thread) > limit {
+				thread = thread[len(thread)-limit:]
+			}
+			return "[Recent thread]\n" + formatContext(thread)
+		}
+	}
+
+	// Fall back to recent channel messages when there is no thread context.
+	var filtered []channelMessage
+	for _, m := range msgs {
+		if baseFilter(m) {
+			filtered = append(filtered, m)
+		}
+	}
 	if len(filtered) == 0 {
 		return ""
 	}
-
-	var b strings.Builder
-	for _, msg := range filtered {
-		b.WriteString(fmt.Sprintf("@%s: %s\n", msg.From, truncate(msg.Content, 600)))
+	if len(filtered) > limit {
+		filtered = filtered[len(filtered)-limit:]
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return "[Recent channel]\n" + formatContext(filtered)
 }
 
 func (l *Launcher) buildTaskNotificationContext(channel, slug string, limit int) string {
@@ -2127,8 +2167,11 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 			lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 		}
 	}
-	if ctx := l.buildNotificationContext(channel, msg.ID, 4); ctx != "" {
-		lines = append(lines, "[Recent thread]\n"+ctx)
+	// Pass msg.ReplyTo as the thread root so buildNotificationContext can filter to
+	// the current thread when the trigger is a reply. For top-level messages (ReplyTo
+	// == ""), the function falls back to recent channel context automatically.
+	if ctx := l.buildNotificationContext(channel, msg.ID, msg.ReplyTo, 4); ctx != "" {
+		lines = append(lines, ctx)
 	}
 	if slug == l.officeLeadSlug() {
 		if taskCtx := l.buildTaskNotificationContext(channel, slug, 3); taskCtx != "" {
@@ -2208,11 +2251,12 @@ func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog,
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 	}
-	// Pass "" as triggerMsgID: task.ThreadID is the thread root (the original human
-	// ask), not a duplicate. It is not explicitly included elsewhere in this packet,
-	// so we must NOT exclude it from the recent thread context.
-	if ctx := l.buildNotificationContext(channel, "", 3); ctx != "" {
-		lines = append(lines, "[Recent thread]\n"+ctx)
+	// Pass task.ThreadID as the thread root so agents see only messages from this
+	// task's thread, not unrelated discussions in the same channel. The thread root
+	// is never excluded (triggerMsgID = "") because the human's original ask is the
+	// useful anchor for context, not a duplicate of anything in the packet header.
+	if ctx := l.buildNotificationContext(channel, "", task.ThreadID, 3); ctx != "" {
+		lines = append(lines, ctx)
 	}
 	lines = append(lines, fmt.Sprintf("%s Reply with the concrete next step and update via team_task with my_slug \"%s\".", truncate(content, 1000), slug))
 	return strings.Join(lines, "\n")

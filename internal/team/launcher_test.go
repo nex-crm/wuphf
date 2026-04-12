@@ -933,7 +933,7 @@ func TestRecordPolicyPersistsAndLoads(t *testing.T) {
 
 func TestBuildNotificationContextEmpty(t *testing.T) {
 	l := &Launcher{}
-	ctx := l.buildNotificationContext("general", "msg-1", 5)
+	ctx := l.buildNotificationContext("general", "msg-1", "", 5)
 	if ctx != "" {
 		t.Fatalf("expected empty context for nil broker, got %q", ctx)
 	}
@@ -962,7 +962,7 @@ func TestBuildNotificationContextFormatsMessages(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b}
-	ctx := l.buildNotificationContext("general", "", 5)
+	ctx := l.buildNotificationContext("general", "", "", 5)
 
 	if !strings.Contains(ctx, "@you") {
 		t.Error("expected @you in context")
@@ -972,6 +972,9 @@ func TestBuildNotificationContextFormatsMessages(t *testing.T) {
 	}
 	if !strings.Contains(ctx, "@human") {
 		t.Error("expected @human in context")
+	}
+	if !strings.Contains(ctx, "[Recent channel]") {
+		t.Error("expected [Recent channel] label when no thread root is given")
 	}
 }
 
@@ -996,7 +999,7 @@ func TestBuildNotificationContextFiltersSystem(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b}
-	ctx := l.buildNotificationContext("general", "", 5)
+	ctx := l.buildNotificationContext("general", "", "", 5)
 
 	if !strings.Contains(ctx, "@you") {
 		t.Error("expected @you in context")
@@ -1028,7 +1031,7 @@ func TestBuildNotificationContextRespectsLimit(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b}
-	ctx := l.buildNotificationContext("general", "", 3)
+	ctx := l.buildNotificationContext("general", "", "", 3)
 
 	count := strings.Count(ctx, "@you")
 	if count > 3 {
@@ -1058,12 +1061,100 @@ func TestBuildNotificationContextExcludesTrigger(t *testing.T) {
 	}
 
 	l := &Launcher{broker: b}
-	ctx := l.buildNotificationContext("general", trigger.ID, 5)
+	ctx := l.buildNotificationContext("general", trigger.ID, "", 5)
 
 	if strings.Contains(ctx, "The trigger message") {
 		t.Error("trigger message should be excluded from context (it is sent separately as [New from @...])")
 	}
 	if !strings.Contains(ctx, "Earlier message") {
 		t.Errorf("expected earlier message in context, got %q (prev.ID=%s)", ctx, prev.ID)
+	}
+}
+
+func TestBuildNotificationContextThreadFiltering(t *testing.T) {
+	// Verifies that when a threadRootID is given, only messages in that thread
+	// appear in the context (labeled [Recent thread]), and messages from a
+	// concurrent unrelated thread are excluded.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	// Thread A: human root + ceo reply
+	threadA, err := b.PostMessage("human", "general", "Thread A root", nil, "")
+	if err != nil {
+		t.Fatalf("post threadA root: %v", err)
+	}
+	if _, err := b.PostMessage("ceo", "general", "Thread A reply", nil, threadA.ID); err != nil {
+		t.Fatalf("post threadA reply: %v", err)
+	}
+
+	// Thread B: unrelated top-level discussion
+	if _, err := b.PostMessage("you", "general", "Thread B unrelated", nil, ""); err != nil {
+		t.Fatalf("post threadB: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+
+	// Context filtered to thread A should include root + reply, not thread B.
+	ctx := l.buildNotificationContext("general", "", threadA.ID, 10)
+
+	if !strings.Contains(ctx, "[Recent thread]") {
+		t.Errorf("expected [Recent thread] label for thread-filtered context, got %q", ctx)
+	}
+	if !strings.Contains(ctx, "Thread A root") {
+		t.Error("expected Thread A root in thread context")
+	}
+	if !strings.Contains(ctx, "Thread A reply") {
+		t.Error("expected Thread A reply in thread context")
+	}
+	if strings.Contains(ctx, "Thread B unrelated") {
+		t.Error("Thread B message should be excluded when filtering by thread A root")
+	}
+}
+
+func TestBuildNotificationContextFallsBackToChannelWhenThreadEmpty(t *testing.T) {
+	// When threadRootID is given but the thread has no displayable messages
+	// (e.g. the trigger IS the root and no other replies exist yet), the function
+	// should fall back to recent channel messages labeled [Recent channel].
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	// Older unrelated channel message
+	if _, err := b.PostMessage("you", "general", "Earlier channel message", nil, ""); err != nil {
+		t.Fatalf("post earlier: %v", err)
+	}
+	// The trigger is a new top-level message — no prior thread members exist.
+	trigger, err := b.PostMessage("human", "general", "Brand new topic", nil, "")
+	if err != nil {
+		t.Fatalf("post trigger: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+	// triggerMsgID = trigger.ID (excluded), threadRootID = trigger.ID (new root, no replies)
+	ctx := l.buildNotificationContext("general", trigger.ID, trigger.ID, 5)
+
+	if !strings.Contains(ctx, "[Recent channel]") {
+		t.Errorf("expected [Recent channel] fallback label when thread has no prior messages, got %q", ctx)
+	}
+	if strings.Contains(ctx, "Brand new topic") {
+		t.Error("trigger message should still be excluded even in fallback path")
+	}
+	if !strings.Contains(ctx, "Earlier channel message") {
+		t.Error("expected earlier channel message in fallback context")
 	}
 }
