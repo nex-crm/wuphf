@@ -2108,7 +2108,6 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 	}
 	lines := []string{
 		"Work packet:",
-		fmt.Sprintf("- Ask: %s", truncate(msg.Content, 160)),
 		fmt.Sprintf("- Thread: #%s reply_to %s", channel, msg.ID),
 	}
 	if containsSlug(msg.Tagged, slug) {
