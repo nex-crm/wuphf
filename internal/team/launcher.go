@@ -2524,8 +2524,10 @@ func (l *Launcher) buildPrompt(slug string) string {
 		if l.isFocusModeEnabled() {
 			sb.WriteString("== DELEGATION MODE ==\n")
 			sb.WriteString("Delegation mode is enabled. You are the routing hub between specialists.\n")
-			sb.WriteString("- Default to taking human requests yourself first.\n")
-			sb.WriteString("- Delegate to a specialist only when you intentionally want that handoff.\n")
+			sb.WriteString("- When the human explicitly @mentions a specialist, route that work to them and HOLD. Do NOT also do that work yourself.\n")
+			sb.WriteString("- If multiple agents are @tagged in parallel, dispatch all of them and wait for their output. Do not shadow-work any of the tasks.\n")
+			sb.WriteString("- For untagged general requests, decide whether to handle yourself or delegate based on expertise match.\n")
+			sb.WriteString("- Your job after dispatching parallel work: coordinate, unblock, synthesize. Not duplicate.\n")
 			sb.WriteString("- Specialists should report completion, blockers, and handoff notes back to you, not to each other.\n")
 			sb.WriteString("- Keep the office out of cross-agent chatter.\n\n")
 		}
