@@ -789,19 +789,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .pixel-avatar-panel { width: 56px; height: 56px; }
 
 /* ─── Inbox/Outbox DM Lanes ─── */
-.dm-lanes { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; flex: 1; overflow: hidden; padding: 16px 20px; }
-.dm-lane { display: flex; flex-direction: column; overflow-y: auto; gap: 12px; }
-.dm-lane-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding-bottom: 8px; border-bottom: 2px solid var(--border); display: flex; align-items: center; gap: 6px; }
-.dm-lane-empty { text-align: center; padding: 20px; color: var(--text-tertiary); font-size: 13px; }
 
 /* ─── Execution Timeline (#78) ─── */
-.exec-timeline { margin-top: 12px; }
-.exec-timeline-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); margin-bottom: 6px; }
-.exec-timeline-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 12px; color: var(--text-secondary); border-bottom: 1px solid var(--border-light); }
-.exec-timeline-item:last-child { border-bottom: none; }
-.exec-timeline-time { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); min-width: 52px; flex-shrink: 0; }
-.exec-timeline-agent { font-size: 14px; flex-shrink: 0; }
-.exec-timeline-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ─── Wait State (#79) ─── */
 @keyframes wait-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
@@ -1207,16 +1196,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </button>
       </div>
       <div class="messages" id="messages"></div>
-      <div class="dm-lanes" id="dm-lanes" style="display:none;">
-        <div class="dm-lane">
-          <div class="dm-lane-header">Inbox (from agent)</div>
-          <div id="dm-inbox" style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;"></div>
-        </div>
-        <div class="dm-lane">
-          <div class="dm-lane-header">Outbox (from you)</div>
-          <div id="dm-outbox" style="display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;"></div>
-        </div>
-      </div>
+      <div class="messages" id="dm-messages" style="display:none;"></div>
       <div class="app-panel" id="app-tasks"></div>
       <div class="app-panel" id="app-requests"></div>
       <div class="app-panel" id="app-policies"></div>
@@ -2751,47 +2731,6 @@ function renderLiveWork() {
   }
 }
 
-// ─── Execution Timeline (#78) ───
-function renderExecutionTimeline() {
-  var section = document.getElementById('live-work-section');
-  if (!section) return;
-  var existing = section.querySelector('.exec-timeline');
-  if (existing) existing.remove();
-
-  WuphfAPI.getActions().catch(function() { return { actions: [] }; }).then(function(resp) {
-    var actions = resp.actions || resp || [];
-    if (!Array.isArray(actions) || actions.length === 0) return;
-    var recent = actions.slice(-8).reverse();
-    var timeline = document.createElement('div');
-    timeline.className = 'exec-timeline';
-    var title = document.createElement('div');
-    title.className = 'exec-timeline-title';
-    title.textContent = 'Recent actions';
-    timeline.appendChild(title);
-    recent.forEach(function(action) {
-      var item = document.createElement('div');
-      item.className = 'exec-timeline-item';
-      var timeEl = document.createElement('span');
-      timeEl.className = 'exec-timeline-time';
-      if (action.timestamp || action.created_at || action.time) {
-        var d = new Date(action.timestamp || action.created_at || action.time);
-        timeEl.textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-      }
-      item.appendChild(timeEl);
-      var agentEmoji = document.createElement('span');
-      agentEmoji.className = 'exec-timeline-agent';
-      var agent = AGENTS.find(function(a) { return a.slug === (action.agent || action.from || action.owner); });
-      agentEmoji.textContent = agent ? agent.emoji : '\u2699';
-      item.appendChild(agentEmoji);
-      var summary = document.createElement('span');
-      summary.className = 'exec-timeline-summary';
-      summary.textContent = action.summary || action.description || action.action || action.type || '';
-      item.appendChild(summary);
-      timeline.appendChild(item);
-    });
-    section.appendChild(timeline);
-  });
-}
 
 function renderSidebarChannels() {
   var container = document.getElementById('sidebar-channels');
@@ -3199,19 +3138,16 @@ function appendBrokerMessage(msg) {
 
   var container = document.getElementById('messages');
 
-  // In DM mode, route messages to inbox/outbox lanes
+  // In DM mode, route messages to the DM thread
   if (dmModeActive && dmAgent) {
     var isFromAgent = msg.from === dmAgent.slug;
     var isFromHuman = msg.from === 'you' || msg.from === 'human';
-    if (isFromAgent) {
-      appendMessageToContainer(msg, document.getElementById('dm-inbox'));
-      var inbox = document.getElementById('dm-inbox');
-      inbox.scrollTop = inbox.scrollHeight;
-    } else if (isFromHuman) {
-      appendMessageToContainer(msg, document.getElementById('dm-outbox'));
-      var outbox = document.getElementById('dm-outbox');
-      outbox.scrollTop = outbox.scrollHeight;
+    if (isFromAgent || isFromHuman) {
+      var dmMessages = document.getElementById('dm-messages');
+      appendMessageToContainer(msg, dmMessages);
+      dmMessages.scrollTop = dmMessages.scrollHeight;
     }
+    return;
   }
 
   // Insert date separator if day changed
@@ -3717,7 +3653,6 @@ function fetchMemberActivity() {
     cachedTasks = (results[1].tasks || results[1] || []);
     if (Array.isArray(cachedTasks) === false) cachedTasks = [];
     refreshLiveActivityUI();
-    renderExecutionTimeline();
   });
 }
 
@@ -4332,8 +4267,7 @@ function handleSlashCommand(input) {
           onConfirm: function() {
             WuphfAPI.post('/reset-dm', { agent: resetAgent.slug })
               .then(function() {
-                document.getElementById('dm-inbox').textContent = '';
-                document.getElementById('dm-outbox').textContent = '';
+                document.getElementById('dm-messages').textContent = '';
                 showNotice('1:1 session reset', 'success');
                 showSystem('DM session with ' + resetAgent.name + ' cleared');
               })
@@ -5512,11 +5446,11 @@ function enterDMMode(agentSlug) {
   // Update composer placeholder
   document.getElementById('composer-input').placeholder = 'Message ' + agent.name + ' directly...';
 
-  // Show DM lanes, hide regular messages
+  // Show DM thread, hide regular messages
   document.getElementById('messages').style.display = 'none';
-  document.getElementById('dm-lanes').style.display = 'grid';
-  document.getElementById('dm-inbox').textContent = '';
-  document.getElementById('dm-outbox').textContent = '';
+  var dmMessages = document.getElementById('dm-messages');
+  dmMessages.textContent = '';
+  dmMessages.style.display = '';
   lastMessageId = null;
 
   // Try to switch mode via broker
@@ -5534,8 +5468,8 @@ function exitDMMode() {
   dmModeActive = false;
   dmAgent = null;
 
-  // Hide DM lanes, show regular messages
-  document.getElementById('dm-lanes').style.display = 'none';
+  // Hide DM thread, show regular messages
+  document.getElementById('dm-messages').style.display = 'none';
   document.getElementById('messages').style.display = '';
 
   // Hide DM banner

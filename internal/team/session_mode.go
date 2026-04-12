@@ -11,7 +11,7 @@ const (
 
 func NormalizeSessionMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case SessionModeOneOnOne, "one-on-one", "one_on_one", "1on1", "solo":
+	case SessionModeOneOnOne, "1:1", "one-on-one", "one_on_one", "1on1", "solo":
 		return SessionModeOneOnOne
 	default:
 		return SessionModeOffice
