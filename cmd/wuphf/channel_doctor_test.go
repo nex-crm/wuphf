@@ -52,9 +52,12 @@ func TestInspectDoctorUsesCapabilityRegistry(t *testing.T) {
 	}
 
 	card := renderDoctorCard(report, 80)
-	for _, want := range []string{"Capability map:", "needs setup", "partial", "Connected accounts"} {
+	for _, want := range []string{"needs setup", "partial", "Connected accounts"} {
 		if !strings.Contains(card, want) {
 			t.Fatalf("expected %q in doctor card: %q", want, card)
 		}
+	}
+	if strings.Contains(card, "Capability map:") {
+		t.Fatalf("doctor card should not contain redundant capability map section")
 	}
 }

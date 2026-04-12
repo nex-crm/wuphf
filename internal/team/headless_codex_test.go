@@ -185,8 +185,10 @@ func TestEnqueueHeadlessCodexTurnProcessesFIFO(t *testing.T) {
 
 	l := newHeadlessLauncherForTest()
 
-	l.enqueueHeadlessCodexTurn("ceo", "first")
-	l.enqueueHeadlessCodexTurn("ceo", "second")
+	// Use a specialist slug (not the lead/ceo) so the cap-at-1 and queue-hold
+	// logic for the lead agent does not interfere with this FIFO test.
+	l.enqueueHeadlessCodexTurn("fe", "first")
+	l.enqueueHeadlessCodexTurn("fe", "second")
 
 	first := waitForString(t, processed)
 	second := waitForString(t, processed)

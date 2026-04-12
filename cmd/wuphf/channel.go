@@ -5080,7 +5080,9 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	default:
 		// Check if the command matches a skill name
 		cmdName := strings.TrimPrefix(trimmed, "/")
-		cmdName = strings.Fields(cmdName)[0] // first word only
+		if len(strings.Fields(cmdName)) > 0 {
+			cmdName = strings.Fields(cmdName)[0] // first word only
+		}
 		for _, sk := range m.skills {
 			if sk.Name == cmdName && sk.Status == "active" {
 				clearCurrent()
@@ -5088,6 +5090,9 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 				m.notice = "Invoking skill: " + sk.Title
 				return m, invokeSkill(sk.Name)
 			}
+		}
+		if strings.HasPrefix(trimmed, "/") && cmdName != "" {
+			m.setTransientNotice(fmt.Sprintf("Unknown command /%s — type / to see available commands.", cmdName))
 		}
 		return m, nil
 	}

@@ -147,7 +147,6 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 		turn, turnCtx, ok := l.beginHeadlessCodexTurn(slug)
 		if !ok {
 			l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
-			l.finishHeadlessWorker(slug)
 			return
 		}
 		appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
@@ -180,21 +179,17 @@ func (l *Launcher) finishHeadlessTurn(slug string) {
 	l.headlessMu.Unlock()
 }
 
-func (l *Launcher) finishHeadlessWorker(slug string) {
-	l.headlessMu.Lock()
-	delete(l.headlessWorkers, slug)
-	if len(l.headlessQueues[slug]) == 0 {
-		delete(l.headlessQueues, slug)
-	}
-	l.headlessMu.Unlock()
-}
-
 func (l *Launcher) beginHeadlessCodexTurn(slug string) (headlessCodexTurn, context.Context, bool) {
 	l.headlessMu.Lock()
 	defer l.headlessMu.Unlock()
 
 	queue := l.headlessQueues[slug]
 	if len(queue) == 0 {
+		// Atomically mark the worker as done. This must happen while the lock is
+		// held so that any concurrent enqueueHeadlessCodexTurn will observe
+		// headlessWorkers[slug] = false and start a new goroutine rather than
+		// assuming the current one will pick up the new item.
+		delete(l.headlessWorkers, slug)
 		delete(l.headlessQueues, slug)
 		return headlessCodexTurn{}, nil, false
 	}

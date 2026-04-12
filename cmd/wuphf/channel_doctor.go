@@ -135,17 +135,6 @@ func renderDoctorCard(report channelDoctorReport, width int) string {
 		}
 		lines = append(lines, "")
 	}
-	if len(report.Registry.Entries) > 0 {
-		lines = append(lines, "Capability map:")
-		for _, entry := range report.Registry.Entries {
-			lines = append(lines, fmt.Sprintf("  %s [%s · %s] %s", entry.Label, entry.Category, entry.Lifecycle, entry.Level))
-			lines = append(lines, "    "+entry.Detail)
-			if strings.TrimSpace(entry.NextStep) != "" {
-				lines = append(lines, "    "+mutedText("Next: "+entry.NextStep))
-			}
-		}
-		lines = append(lines, "")
-	}
 	lines = append(lines, mutedText("Esc or /cancel closes this panel."))
 
 	return lipgloss.NewStyle().
