@@ -388,8 +388,14 @@ func TestPrimeVisibleAgentsWithoutBrokerDoesNotPanic(t *testing.T) {
 	l.primeVisibleAgents()
 }
 
-func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
+func TestNotificationTargetsForHumanMessageDirectToTaggedSpecialists(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
 	l := &Launcher{
+		focusMode: true,
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
 			Agents: []agent.AgentConfig{
@@ -407,9 +413,26 @@ func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
 		Tagged:  []string{"fe", "be"},
 	})
 
-	// CEO + tagged specialists are all immediate now
-	if len(immediate) != 3 {
-		t.Fatalf("expected 3 immediate targets (ceo + fe + be), got %+v", immediate)
+	// In focus mode, when a human explicitly tags specialists, CEO is skipped.
+	// The human's intent is explicit — no CEO re-routing needed.
+	if len(immediate) != 2 {
+		t.Fatalf("expected 2 immediate targets (fe + be, no CEO), got %+v", immediate)
+	}
+	slugs := make([]string, 0, len(immediate))
+	for _, t2 := range immediate {
+		slugs = append(slugs, t2.Slug)
+	}
+	for _, want := range []string{"fe", "be"} {
+		found := false
+		for _, s := range slugs {
+			if s == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected specialist %q in immediate targets, got %v", want, slugs)
+		}
 	}
 	if len(delayed) != 0 {
 		t.Fatalf("expected 0 delayed targets for tagged message, got %+v", delayed)
@@ -417,6 +440,11 @@ func TestNotificationTargetsForHumanMessageGiveCEOHeadStart(t *testing.T) {
 }
 
 func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -444,6 +472,11 @@ func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
 }
 
 func TestNotificationTargetsTaggedSpecialistsGetImmediateDelivery(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -483,6 +516,11 @@ func TestNotificationTargetsTaggedSpecialistsGetImmediateDelivery(t *testing.T) 
 }
 
 func TestNotificationTargetsForCEOMessageNotifyTaggedOnly(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -582,6 +620,11 @@ func TestShouldDeliverDelayedNotificationSkipsWrongDomainAndTaskOwnerConflict(t 
 }
 
 func TestTaskNotificationTargetsFollowOwnerAndCEOHeadStart(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
@@ -731,16 +774,20 @@ func TestBuildPromptIncludesTaskStatusAndWorktreeGuidance(t *testing.T) {
 }
 
 func TestTaskNotificationTargetsWakeOwnerOnWatchdog(t *testing.T) {
-	l := &Launcher{
-		broker: &Broker{
-			channels: []teamChannel{{
-				Slug:    "general",
-				Name:    "general",
-				Members: []string{"ceo", "fe"},
-			}},
-		},
+	b := &Broker{
+		channels: []teamChannel{{
+			Slug:    "general",
+			Name:    "general",
+			Members: []string{"ceo", "fe"},
+		}},
 	}
-	l.broker.ensureDefaultOfficeMembersLocked()
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO", },
+		{Slug: "fe", Name: "Frontend Engineer", },
+	}
+	b.mu.Unlock()
+	l := &Launcher{broker: b}
 	task := teamTask{
 		ID:      "task-1",
 		Channel: "general",
@@ -764,16 +811,20 @@ func TestTaskNotificationTargetsWakeOwnerOnWatchdog(t *testing.T) {
 }
 
 func TestTaskNotificationTargetsDoNotRewakeCEOForOwnCreatedTask(t *testing.T) {
-	l := &Launcher{
-		broker: &Broker{
-			channels: []teamChannel{{
-				Slug:    "general",
-				Name:    "general",
-				Members: []string{"ceo", "fe"},
-			}},
-		},
+	b := &Broker{
+		channels: []teamChannel{{
+			Slug:    "general",
+			Name:    "general",
+			Members: []string{"ceo", "fe"},
+		}},
 	}
-	l.broker.ensureDefaultOfficeMembersLocked()
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO", },
+		{Slug: "fe", Name: "Frontend Engineer", },
+	}
+	b.mu.Unlock()
+	l := &Launcher{broker: b}
 	task := teamTask{
 		ID:      "task-2",
 		Channel: "general",

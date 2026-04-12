@@ -27,8 +27,8 @@ var (
 )
 
 var (
-	headlessCodexTurnTimeout      = 2 * time.Minute
-	headlessCodexStaleCancelAfter = 8 * time.Second
+	headlessCodexTurnTimeout      = 4 * time.Minute
+	headlessCodexStaleCancelAfter = 90 * time.Second
 )
 
 type headlessCodexTurn struct {
@@ -78,6 +78,43 @@ func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string) {
 	startWorker := false
 
 	l.headlessMu.Lock()
+	// For the lead (CEO) agent, suppress the notification if any other specialist
+	// is still active or has pending work. The lead should only step in when all
+	// parallel work is done — not when one specialist finishes while others are
+	// still running. This eliminates the race condition where CEO fires after the
+	// first specialist completes and redundantly re-routes to still-running agents.
+	if slug == l.officeLeadSlug() {
+		for workerSlug, queue := range l.headlessQueues {
+			if workerSlug == slug {
+				continue
+			}
+			if len(queue) > 0 {
+				l.headlessMu.Unlock()
+				appendHeadlessCodexLog(slug, "queue-hold: specialist still queued, deferring lead notification until all work lands")
+				return
+			}
+		}
+		for workerSlug, active := range l.headlessActive {
+			if workerSlug == slug {
+				continue
+			}
+			if active != nil {
+				l.headlessMu.Unlock()
+				appendHeadlessCodexLog(slug, "queue-hold: specialist still running, deferring lead notification until all work lands")
+				return
+			}
+		}
+	}
+	// For the lead (CEO) agent, cap the pending queue at 1 turn.
+	// Multiple rapid-fire notifications (agent completions, status pings) can
+	// stack up redundant CEO turns that each re-route the same task. One pending
+	// turn is enough to catch the latest state; extras are dropped.
+	const leadMaxPending = 1
+	if slug == l.officeLeadSlug() && len(l.headlessQueues[slug]) >= leadMaxPending {
+		l.headlessMu.Unlock()
+		appendHeadlessCodexLog(slug, "queue-drop: lead queue at cap, dropping redundant notification")
+		return
+	}
 	l.headlessQueues[slug] = append(l.headlessQueues[slug], headlessCodexTurn{
 		Prompt:     prompt,
 		EnqueuedAt: time.Now(),

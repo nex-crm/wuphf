@@ -7,9 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/nex-crm/wuphf/internal/company"
-	"github.com/nex-crm/wuphf/internal/config"
-	"github.com/nex-crm/wuphf/internal/provider"
 	"io"
 	"net"
 	"net/http"
@@ -20,10 +17,21 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/buildinfo"
+	"github.com/nex-crm/wuphf/internal/company"
+	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 const BrokerPort = 7890
-const brokerTokenFile = "/tmp/wuphf-broker-token"
+
+// brokerTokenFilePath is the path where the broker writes its auth token on start.
+// Tests can redirect this to a temp directory to avoid clobbering the live broker token.
+var brokerTokenFilePath = "/tmp/wuphf-broker-token"
+
+const defaultRateLimitRequestsPerWindow = 100
+const defaultRateLimitWindow = time.Minute
 
 var brokerStatePath = defaultBrokerStatePath
 
@@ -349,6 +357,10 @@ type teamUsageState struct {
 	Since   string                 `json:"since,omitempty"`
 }
 
+type ipRateLimitBucket struct {
+	timestamps []time.Time
+}
+
 // Broker is a lightweight HTTP message broker for the team channel.
 // All agent MCP instances connect to this shared broker.
 type Broker struct {
@@ -384,11 +396,15 @@ type Broker struct {
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
 	server              *http.Server
-	token               string   // shared secret for authenticating requests
-	addr                string   // actual listen address (useful when port=0)
-	webUIOrigins        []string // allowed CORS origins for web UI (set by ServeWebUI)
+	token               string         // shared secret for authenticating requests
+	addr                string         // actual listen address (useful when port=0)
+	webUIOrigins        []string       // allowed CORS origins for web UI (set by ServeWebUI)
 	runtimeProvider     string         // "codex" or "claude" — set by launcher
 	policies            []officePolicy // active office operating rules
+	rateLimitBuckets    map[string]ipRateLimitBucket
+	rateLimitWindow     time.Duration
+	rateLimitRequests   int
+	lastRateLimitPrune  time.Time
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -472,6 +488,9 @@ func NewBroker() *Broker {
 		activity:            make(map[string]agentActivitySnapshot),
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
 		agentStreams:        make(map[string]*agentStreamBuffer),
+		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
+		rateLimitWindow:     defaultRateLimitWindow,
+		rateLimitRequests:   defaultRateLimitRequestsPerWindow,
 	}
 	_ = b.loadState()
 	b.mu.Lock()
@@ -633,7 +652,7 @@ func (b *Broker) Addr() string {
 }
 
 // requireAuth wraps a handler to enforce Bearer token authentication.
-// The /health endpoint is excluded so uptime checks work without credentials.
+// The /health and /version endpoints are excluded so liveness and build checks work without credentials.
 func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
@@ -654,6 +673,7 @@ func (b *Broker) Start() error {
 func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
+	mux.HandleFunc("/version", b.handleVersion)
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
@@ -699,14 +719,16 @@ func (b *Broker) StartOnPort(port int) error {
 
 	b.server = &http.Server{
 		Addr:         addr,
-		Handler:      b.corsMiddleware(mux),
+		Handler:      b.corsMiddleware(b.rateLimitMiddleware(mux)),
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
 
 	// Write token to well-known path so tests and tools can authenticate.
 	// Use /tmp directly (not os.TempDir which varies by OS).
-	_ = os.WriteFile(brokerTokenFile, []byte(b.token), 0600)
+	if brokerTokenFilePath != "" {
+		_ = os.WriteFile(brokerTokenFilePath, []byte(b.token), 0600)
+	}
 
 	go func() {
 		_ = b.server.Serve(ln)
@@ -718,6 +740,144 @@ func (b *Broker) StartOnPort(port int) error {
 func (b *Broker) Stop() {
 	if b.server != nil {
 		b.server.Close()
+	}
+}
+
+func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		retryAfter, limited := b.consumeRateLimit(clientIPFromRequest(r))
+		if limited {
+			seconds := int((retryAfter + time.Second - 1) / time.Second)
+			if seconds < 1 {
+				seconds = 1
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, `{"error":"rate_limited"}`)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (b *Broker) consumeRateLimit(clientIP string) (time.Duration, bool) {
+	limit := b.rateLimitRequests
+	if limit <= 0 {
+		limit = defaultRateLimitRequestsPerWindow
+	}
+	window := b.rateLimitWindow
+	if window <= 0 {
+		window = defaultRateLimitWindow
+	}
+
+	now := time.Now()
+	key := rateLimitKey(clientIP)
+	cutoff := now.Add(-window)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.rateLimitBuckets == nil {
+		b.rateLimitBuckets = make(map[string]ipRateLimitBucket)
+	}
+	if b.lastRateLimitPrune.IsZero() || now.Sub(b.lastRateLimitPrune) >= window {
+		for ip, bucket := range b.rateLimitBuckets {
+			bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, cutoff)
+			if len(bucket.timestamps) == 0 {
+				delete(b.rateLimitBuckets, ip)
+				continue
+			}
+			b.rateLimitBuckets[ip] = bucket
+		}
+		b.lastRateLimitPrune = now
+	}
+
+	bucket := b.rateLimitBuckets[key]
+	bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, cutoff)
+	if len(bucket.timestamps) >= limit {
+		retryAfter := bucket.timestamps[0].Add(window).Sub(now)
+		if retryAfter < time.Second {
+			retryAfter = time.Second
+		}
+		b.rateLimitBuckets[key] = bucket
+		return retryAfter, true
+	}
+
+	bucket.timestamps = append(bucket.timestamps, now)
+	b.rateLimitBuckets[key] = bucket
+	return 0, false
+}
+
+func pruneRateLimitEntries(entries []time.Time, cutoff time.Time) []time.Time {
+	keepIdx := 0
+	for keepIdx < len(entries) && !entries[keepIdx].After(cutoff) {
+		keepIdx++
+	}
+	if keepIdx == 0 {
+		return entries
+	}
+	if keepIdx >= len(entries) {
+		return nil
+	}
+	return entries[keepIdx:]
+}
+
+func rateLimitKey(remoteAddr string) string {
+	remoteAddr = strings.TrimSpace(remoteAddr)
+	if remoteAddr == "" {
+		return "unknown"
+	}
+	if host, _, err := net.SplitHostPort(remoteAddr); err == nil && strings.TrimSpace(host) != "" {
+		return host
+	}
+	return remoteAddr
+}
+
+func clientIPFromRequest(r *http.Request) string {
+	if r == nil {
+		return "unknown"
+	}
+	if trustForwardedClientIP(r.RemoteAddr) {
+		if forwarded := firstForwardedIP(r.Header.Get("X-Forwarded-For")); forwarded != "" {
+			return forwarded
+		}
+		if realIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); realIP != "" {
+			return rateLimitKey(realIP)
+		}
+	}
+	return rateLimitKey(r.RemoteAddr)
+}
+
+func firstForwardedIP(value string) string {
+	for _, part := range strings.Split(value, ",") {
+		candidate := rateLimitKey(part)
+		if candidate == "" || candidate == "unknown" {
+			continue
+		}
+		if ip := net.ParseIP(candidate); ip != nil {
+			return ip.String()
+		}
+	}
+	return ""
+}
+
+func trustForwardedClientIP(remoteAddr string) bool {
+	host := rateLimitKey(remoteAddr)
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func setProxyClientIPHeaders(header http.Header, remoteAddr string) {
+	if header == nil {
+		return
+	}
+	if clientIP := rateLimitKey(remoteAddr); clientIP != "unknown" {
+		header.Set("X-Forwarded-For", clientIP)
+		header.Set("X-Real-IP", clientIP)
 	}
 }
 
@@ -928,6 +1088,7 @@ func (b *Broker) ServeWebUI(port int) {
 			http.Error(w, "proxy error", http.StatusBadGateway)
 			return
 		}
+		setProxyClientIPHeaders(proxyReq.Header, r.RemoteAddr)
 		// Forward auth header
 		proxyReq.Header.Set("Authorization", "Bearer "+b.token)
 		proxyReq.Header.Set("Content-Type", r.Header.Get("Content-Type"))
@@ -1313,6 +1474,11 @@ func (b *Broker) Reset() {
 	b.insightsSince = ""
 	b.usage = teamUsageState{Agents: make(map[string]usageTotals)}
 	b.normalizeLoadedStateLocked()
+	// Restore session preferences after normalization: Reset() clears content but
+	// should not re-validate the user's explicit 1:1 agent choice against the
+	// current default member list (which may differ from the active pack).
+	b.sessionMode = mode
+	b.oneOnOneAgent = agent
 	_ = b.saveLocked()
 	b.mu.Unlock()
 }
@@ -2497,6 +2663,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	mode := b.sessionMode
 	agent := b.oneOnOneAgent
 	focus := b.focusMode
+	provider := b.runtimeProvider
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -2505,8 +2672,15 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"session_mode":     mode,
 		"one_on_one_agent": agent,
 		"focus_mode":       focus,
-		"provider":         b.runtimeProvider,
+		"provider":         provider,
+		"build":            buildinfo.Current(),
 	})
+}
+
+func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(buildinfo.Current())
 }
 
 func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {

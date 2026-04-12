@@ -9,13 +9,13 @@ func inferAgentDomain(slug string) string {
 	switch strings.ToLower(strings.TrimSpace(slug)) {
 	case "fe", "frontend":
 		return "frontend"
-	case "be", "backend":
+	case "be", "backend", "eng", "engineer", "engineering":
 		return "backend"
 	case "ai", "ml", "llm":
 		return "ai"
 	case "designer", "design":
 		return "design"
-	case "cmo", "growth", "marketing":
+	case "cmo", "growth", "marketing", "gtm":
 		return "marketing"
 	case "cro", "sales", "revenue":
 		return "sales"

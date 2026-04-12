@@ -721,11 +721,33 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 	if l.isFocusModeEnabled() {
 		switch {
 		case msg.From == "you" || msg.From == "human" || msg.Kind == "automation" || msg.From == "nex":
-			addImmediate(lead)
+			// When the human explicitly @tags one or more specialists, deliver directly
+			// to those specialists only. CEO does not need to re-route explicit assignments —
+			// the specialist is already awake and acting. CEO only sees untagged human messages
+			// (general questions, requests that need routing decisions).
+			humanExplicitlyTaggedSpecialists := false
 			for _, slug := range msg.Tagged {
-				if slug != lead && allowTarget(slug) {
-					addImmediate(slug)
+				if slug == "" || slug == msg.From || slug == lead {
+					continue
 				}
+				// Human explicitly tagged this specialist. Skip domain inference —
+				// the human's intent is explicit and trumps content-based routing.
+				// Only check that the specialist is an enabled channel member.
+				isEnabled := len(enabledMembers) == 0
+				if !isEnabled {
+					_, isEnabled = enabledMembers[slug]
+				}
+				if isEnabled {
+					if target, ok := targetMap[slug]; ok {
+						immediate = append(immediate, target)
+						delete(targetMap, slug)
+						humanExplicitlyTaggedSpecialists = true
+					}
+				}
+			}
+			if !humanExplicitlyTaggedSpecialists {
+				// No specialist tagged — CEO decides who handles this.
+				addImmediate(lead)
 			}
 		case msg.From == lead:
 			for _, slug := range msg.Tagged {
@@ -734,8 +756,12 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 				}
 			}
 		default:
-			// Specialist message: only wake CEO
-			addImmediate(lead)
+			// Specialist message: wake CEO only if it is a substantive update (not a status ping).
+			// [STATUS] lines are internal progress markers — CEO does not need to re-route on them.
+			isStatusOnly := strings.HasPrefix(strings.TrimSpace(msg.Content), "[STATUS]")
+			if !isStatusOnly {
+				addImmediate(lead)
+			}
 		}
 		return immediate, delayed
 	}
@@ -2100,6 +2126,53 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 		if taskCtx := l.buildTaskNotificationContext(channel, slug, 3); taskCtx != "" {
 			lines = append(lines, taskCtx)
 		}
+		// For the lead (CEO), explicitly list which specialist agents have already
+		// posted in this thread OR are currently queued/active in the headless runner.
+		// This prevents CEO from re-routing agents who are already working, including
+		// the race-condition case where a specialist was notified but hasn't posted yet.
+		// Rule: if a specialist is in this list, HOLD — do not tag them.
+		activeAgents := map[string]struct{}{}
+		if l.broker != nil {
+			allMsgs := l.broker.ChannelMessages(channel)
+			for _, tm := range allMsgs {
+				inThread := tm.ID == msg.ID || tm.ReplyTo == msg.ID ||
+					(msg.ReplyTo != "" && (tm.ID == msg.ReplyTo || tm.ReplyTo == msg.ReplyTo))
+				if !inThread {
+					continue
+				}
+				if tm.From != "" && tm.From != "you" && tm.From != "human" && tm.From != "nex" && tm.From != slug {
+					activeAgents[tm.From] = struct{}{}
+				}
+			}
+		}
+		// Also include specialists who have pending or active headless turns.
+		// These agents were notified but may not have posted to the broker yet,
+		// causing a timing gap where the broker list misses them.
+		l.headlessMu.Lock()
+		for workerSlug, queue := range l.headlessQueues {
+			if workerSlug == slug {
+				continue
+			}
+			if len(queue) > 0 {
+				activeAgents[workerSlug] = struct{}{}
+			}
+		}
+		for workerSlug, active := range l.headlessActive {
+			if workerSlug == slug && active != nil {
+				continue
+			}
+			if active != nil {
+				activeAgents[workerSlug] = struct{}{}
+			}
+		}
+		l.headlessMu.Unlock()
+		if len(activeAgents) > 0 {
+			names := make([]string, 0, len(activeAgents))
+			for name := range activeAgents {
+				names = append(names, "@"+name)
+			}
+			lines = append(lines, fmt.Sprintf("- Already active in this thread (do NOT re-route): %s", strings.Join(names, ", ")))
+		}
 	}
 	return strings.Join(lines, "\n")
 }
@@ -2154,7 +2227,11 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 	}
 
 	if l.usesCodexRuntime() || l.webMode {
-		l.enqueueHeadlessCodexTurn(target.Slug, notification)
+		// Prepend a brief runtime note: the go build cache and some syscalls are
+		// unavailable in the Codex sandbox, so agents should skip test execution
+		// when commands fail with permission errors.
+		const sandboxNote = "Runtime: if shell commands fail with 'operation not permitted' or 'permission denied' (e.g. go test, go build cache), skip execution and deliver the code without running it.\n\n"
+		l.enqueueHeadlessCodexTurn(target.Slug, sandboxNote+notification)
 		return
 	}
 	l.sendNotificationToPane(target.PaneTarget, notification)
@@ -2524,13 +2601,10 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
 		if l.isFocusModeEnabled() {
 			sb.WriteString("== DELEGATION MODE ==\n")
-			sb.WriteString("Delegation mode is enabled. You are the routing hub between specialists.\n")
-			sb.WriteString("- When the human explicitly @mentions a specialist, route that work to them and HOLD. Do NOT also do that work yourself.\n")
-			sb.WriteString("- If multiple agents are @tagged in parallel, dispatch all of them and wait for their output. Do not shadow-work any of the tasks.\n")
-			sb.WriteString("- For untagged general requests, decide whether to handle yourself or delegate based on expertise match.\n")
-			sb.WriteString("- Your job after dispatching parallel work: coordinate, unblock, synthesize. Not duplicate.\n")
-			sb.WriteString("- Specialists should report completion, blockers, and handoff notes back to you, not to each other.\n")
-			sb.WriteString("- Keep the office out of cross-agent chatter.\n\n")
+			sb.WriteString("You are the routing hub. Specialists only act when you or the human explicitly @tag them.\n")
+			sb.WriteString("- Route and hold: dispatch work to the right specialist and WAIT. Never do their work while they are working.\n")
+			sb.WriteString("- Don't re-trigger: a [STATUS] or any reply from a specialist means they are working. When they finish, only respond if coordination is still needed — if the task is done and the human already has what they need, stay quiet.\n")
+			sb.WriteString("- Specialists report up, not sideways: keep them out of cross-agent chatter. Coordinate through you.\n\n")
 		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
@@ -2540,7 +2614,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 			sb.WriteString("1. On strategy or prior decisions, call query_context early\n")
 		}
 		sb.WriteString("2. Start with the pushed notification context and respond directly when it is enough; use team_poll only when you need fresher or broader context\n")
-		sb.WriteString("3. Give the short public reply first, then assign explicit tasks with team_task and @tags\n")
+		sb.WriteString("3. When routing a human's @tagged request: tag the specialist in your message. Do NOT also create a team_task for the same work. One notification wakes them — two causes duplicate turns. Use team_task only for work you are independently originating, not for pass-through routing.\n")
 		sb.WriteString("4. Tag only the specialists who should weigh in. Unowned background chatter is a bug.\n")
 		sb.WriteString("5. Keep specialists in their lane and mostly offstage. You make the FINAL decision.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")

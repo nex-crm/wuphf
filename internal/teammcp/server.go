@@ -567,7 +567,18 @@ func suppressBroadcastReason(slug, content, replyTo string, messages []brokerMes
 	if latestDomain == "general" && latest != nil {
 		latestDomain = inferOfficeTextDomain(latest.Title + " " + latest.Content)
 	}
+	// An agent is explicitly needed if it was tagged in the latest relevant
+	// message OR in any message in the thread (e.g. the root human message that
+	// originally requested work from multiple agents in parallel).
 	explicitNeed := latest != nil && containsSlug(latest.Tagged, slug)
+	if !explicitNeed && replyTo != "" {
+		for _, msg := range messages {
+			if (msg.ID == replyTo || strings.TrimSpace(msg.ReplyTo) == replyTo) && containsSlug(msg.Tagged, slug) {
+				explicitNeed = true
+				break
+			}
+		}
+	}
 	ownsTask := ownsRelevantTask(slug, replyTo, latestDomain, tasks)
 
 	if explicitNeed || ownsTask {
@@ -627,13 +638,13 @@ func inferOfficeAgentDomain(slug string) string {
 	switch strings.ToLower(strings.TrimSpace(slug)) {
 	case "fe", "frontend":
 		return "frontend"
-	case "be", "backend":
+	case "be", "backend", "eng", "engineer", "engineering":
 		return "backend"
 	case "ai", "ml", "llm":
 		return "ai"
 	case "designer", "design":
 		return "design"
-	case "cmo", "growth", "marketing":
+	case "cmo", "growth", "marketing", "gtm":
 		return "marketing"
 	case "cro", "sales", "revenue":
 		return "sales"

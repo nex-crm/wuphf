@@ -8,13 +8,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/commands"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/teammcp"
 )
 
-const version = "0.1.0"
 const appName = "wuphf"
 
 func main() {
@@ -36,7 +36,7 @@ func main() {
 	collabMode := flag.Bool("collab", false, "Start in collaborative mode (all agents see all messages)")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "WUPHF v%s\n\n", version)
+		fmt.Fprintf(os.Stderr, "WUPHF v%s\n\n", buildinfo.Current().Version)
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
 		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
@@ -64,7 +64,7 @@ func main() {
 	}
 
 	if *showVersion {
-		fmt.Printf("%s v%s\n", appName, version)
+		fmt.Printf("%s v%s\n", appName, buildinfo.Current().Version)
 		os.Exit(0)
 	}
 

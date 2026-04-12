@@ -7,13 +7,28 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/config"
 )
+
+func TestMain(m *testing.M) {
+	// Redirect broker token file to a temp path so tests don't clobber the live broker token
+	// at /tmp/wuphf-broker-token. Tests get the token directly from b.Token(), not from the file.
+	dir, err := os.MkdirTemp("", "wuphf-broker-test-*")
+	if err == nil {
+		brokerTokenFilePath = filepath.Join(dir, "broker-token")
+		defer os.RemoveAll(dir)
+	}
+	os.Exit(m.Run())
+}
 
 func TestFormatChannelViewIncludesThreadReference(t *testing.T) {
 	got := FormatChannelView([]channelMessage{
@@ -65,6 +80,15 @@ func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = append(b.channels[i].Members, "pm")
+			break
+		}
+	}
+	b.mu.Unlock()
 	if err := b.SetSessionMode(SessionModeOneOnOne, "pm"); err != nil {
 		t.Fatalf("SetSessionMode failed: %v", err)
 	}
@@ -243,7 +267,7 @@ func TestBrokerMessageKindAndTitleRoundTrip(t *testing.T) {
 
 	base := fmt.Sprintf("http://%s", b.Addr())
 	body, _ := json.Marshal(map[string]any{
-		"from":    "fe",
+		"from":    "ceo",
 		"channel": "general",
 		"kind":    "human_report",
 		"title":   "Frontend ready for review",
@@ -307,11 +331,11 @@ func TestBrokerMessagesCanScopeToThread(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post root: %v", err)
 	}
-	reply, err := b.PostMessage("fe", "general", "Reply in thread", nil, root.ID)
+	reply, err := b.PostMessage("ceo", "general", "Reply in thread", nil, root.ID)
 	if err != nil {
 		t.Fatalf("post reply: %v", err)
 	}
-	if _, err := b.PostMessage("pm", "general", "Separate topic", nil, ""); err != nil {
+	if _, err := b.PostMessage("you", "general", "Separate topic", nil, ""); err != nil {
 		t.Fatalf("post unrelated: %v", err)
 	}
 
@@ -349,6 +373,18 @@ func TestBrokerMessagesCanScopeToAgentInbox(t *testing.T) {
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members,
+		officeMember{Slug: "pm", Name: "Product Manager"},
+		officeMember{Slug: "fe", Name: "Frontend Engineer"},
+	)
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = append(b.channels[i].Members, "pm", "fe")
+			break
+		}
+	}
+	b.mu.Unlock()
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
@@ -601,6 +637,10 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	var health struct {
 		SessionMode   string `json:"session_mode"`
 		OneOnOneAgent string `json:"one_on_one_agent"`
+		Build         struct {
+			Version        string `json:"version"`
+			BuildTimestamp string `json:"build_timestamp"`
+		} `json:"build"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&health); err != nil {
 		resp.Body.Close()
@@ -612,6 +652,37 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	}
 	if health.OneOnOneAgent != DefaultOneOnOneAgent {
 		t.Fatalf("expected health to report default 1o1 agent %q, got %q", DefaultOneOnOneAgent, health.OneOnOneAgent)
+	}
+	wantBuild := buildinfo.Current()
+	if health.Build.Version != wantBuild.Version {
+		t.Fatalf("expected health build version %q, got %q", wantBuild.Version, health.Build.Version)
+	}
+	if health.Build.BuildTimestamp != wantBuild.BuildTimestamp {
+		t.Fatalf("expected health build timestamp %q, got %q", wantBuild.BuildTimestamp, health.Build.BuildTimestamp)
+	}
+
+	resp, err = http.Get(base + "/version")
+	if err != nil {
+		t.Fatalf("version request failed: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("expected 200 on /version, got %d", resp.StatusCode)
+	}
+	var version struct {
+		Version        string `json:"version"`
+		BuildTimestamp string `json:"build_timestamp"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&version); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode version: %v", err)
+	}
+	resp.Body.Close()
+	if version.Version != wantBuild.Version {
+		t.Fatalf("expected /version version %q, got %q", wantBuild.Version, version.Version)
+	}
+	if version.BuildTimestamp != wantBuild.BuildTimestamp {
+		t.Fatalf("expected /version build timestamp %q, got %q", wantBuild.BuildTimestamp, version.BuildTimestamp)
 	}
 
 	// Messages without auth should be rejected
@@ -647,6 +718,137 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected 401 on /messages with wrong token, got %d", resp.StatusCode)
+	}
+}
+
+func TestBrokerRateLimitsRequestsPerIP(t *testing.T) {
+	b := NewBroker()
+	b.rateLimitRequests = 100
+	b.rateLimitWindow = 1100 * time.Millisecond
+	mux := http.NewServeMux()
+	mux.HandleFunc("/messages", b.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	handler := b.corsMiddleware(b.rateLimitMiddleware(mux))
+	doRequest := func(forwardedFor string) *http.Response {
+		req := httptest.NewRequest(http.MethodGet, "/messages", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		if forwardedFor != "" {
+			req.Header.Set("X-Forwarded-For", forwardedFor)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+
+	for i := 0; i < 100; i++ {
+		resp := doRequest("")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected request %d to succeed, got %d", i+1, resp.StatusCode)
+		}
+	}
+
+	resp := doRequest("")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 101st request to be rate limited, got %d", resp.StatusCode)
+	}
+	retryAfter := resp.Header.Get("Retry-After")
+	if retryAfter == "" {
+		t.Fatal("expected Retry-After header on rate-limited response")
+	}
+	seconds, err := strconv.Atoi(retryAfter)
+	if err != nil || seconds < 1 || seconds > 2 {
+		t.Fatalf("expected sane Retry-After seconds, got %q", retryAfter)
+	}
+
+	time.Sleep(b.rateLimitWindow + 50*time.Millisecond)
+
+	resp = doRequest("")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected request after rolling window expiry to succeed, got %d", resp.StatusCode)
+	}
+}
+
+func TestBrokerRateLimitsUsingForwardedClientIP(t *testing.T) {
+	b := NewBroker()
+	b.rateLimitRequests = 1
+	b.rateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	doRequest := func(remoteAddr, forwardedFor string) *http.Response {
+		req := httptest.NewRequest(http.MethodGet, "/messages", nil)
+		req.RemoteAddr = remoteAddr
+		if forwardedFor != "" {
+			req.Header.Set("X-Forwarded-For", forwardedFor)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+
+	resp := doRequest("127.0.0.1:1111", "203.0.113.10")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected first forwarded request to succeed, got %d", resp.StatusCode)
+	}
+
+	resp = doRequest("127.0.0.1:2222", "203.0.113.10")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected repeated forwarded client IP to be limited, got %d", resp.StatusCode)
+	}
+
+	resp = doRequest("127.0.0.1:3333", "203.0.113.11")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected distinct forwarded client IP to get its own bucket, got %d", resp.StatusCode)
+	}
+}
+
+func TestBrokerIgnoresForwardedClientIPFromNonLoopbackPeer(t *testing.T) {
+	b := NewBroker()
+	b.rateLimitRequests = 1
+	b.rateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	doRequest := func(remoteAddr, forwardedFor string) *http.Response {
+		req := httptest.NewRequest(http.MethodGet, "/messages", nil)
+		req.RemoteAddr = remoteAddr
+		if forwardedFor != "" {
+			req.Header.Set("X-Forwarded-For", forwardedFor)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+
+	resp := doRequest("198.51.100.8:1111", "203.0.113.10")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected first request to succeed, got %d", resp.StatusCode)
+	}
+
+	resp = doRequest("198.51.100.8:2222", "203.0.113.11")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected non-loopback peer to be bucketed by remote addr, got %d", resp.StatusCode)
+	}
+}
+
+func TestSetProxyClientIPHeaders(t *testing.T) {
+	headers := make(http.Header)
+	setProxyClientIPHeaders(headers, "203.0.113.44:5678")
+	if got := headers.Get("X-Forwarded-For"); got != "203.0.113.44" {
+		t.Fatalf("expected X-Forwarded-For to preserve remote IP, got %q", got)
+	}
+	if got := headers.Get("X-Real-IP"); got != "203.0.113.44" {
+		t.Fatalf("expected X-Real-IP to preserve remote IP, got %q", got)
 	}
 }
 
@@ -1414,6 +1616,12 @@ func TestBrokerBridgeEndpointRecordsVisibleBridge(t *testing.T) {
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members,
+		officeMember{Slug: "pm", Name: "Product Manager"},
+		officeMember{Slug: "cmo", Name: "Chief Marketing Officer"},
+	)
+	b.mu.Unlock()
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
@@ -1738,6 +1946,18 @@ func TestBrokerGetMessagesAgentScopeKeepsHumanAndCEOContext(t *testing.T) {
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members,
+		officeMember{Slug: "pm", Name: "Product Manager"},
+		officeMember{Slug: "fe", Name: "Frontend Engineer"},
+	)
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = append(b.channels[i].Members, "pm", "fe")
+			break
+		}
+	}
+	b.mu.Unlock()
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
