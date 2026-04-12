@@ -192,11 +192,16 @@ func importFromPaperclipDB(portOverride int) (importedBrokerState, int, int, err
 	var companies []dbCompany
 	for companyRows.Next() {
 		var c dbCompany
-		if err := companyRows.Scan(&c.ID, &c.Name); err == nil {
-			companies = append(companies, c)
+		if err := companyRows.Scan(&c.ID, &c.Name); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: scan company row: %v\n", err)
+			continue
 		}
+		companies = append(companies, c)
 	}
 	companyRows.Close()
+	if err := companyRows.Err(); err != nil {
+		return importedBrokerState{}, 0, 0, fmt.Errorf("iterate companies: %w", err)
+	}
 
 	if len(companies) == 0 {
 		return importedBrokerState{}, 0, 0, fmt.Errorf("no companies found in Paperclip database")
@@ -226,12 +231,17 @@ func importFromPaperclipDB(portOverride int) (importedBrokerState, int, int, err
 	agentIDToSlug := map[string]string{}
 	for agentRows.Next() {
 		var a dbAgent
-		if err := agentRows.Scan(&a.ID, &a.CompanyID, &a.Name, &a.Role, &a.Status); err == nil {
-			dbAgents = append(dbAgents, a)
-			agentIDToSlug[a.ID] = toSlug(a.Name)
+		if err := agentRows.Scan(&a.ID, &a.CompanyID, &a.Name, &a.Role, &a.Status); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: scan agent row: %v\n", err)
+			continue
 		}
+		dbAgents = append(dbAgents, a)
+		agentIDToSlug[a.ID] = toSlug(a.Name)
 	}
 	agentRows.Close()
+	if err := agentRows.Err(); err != nil {
+		return importedBrokerState{}, 0, 0, fmt.Errorf("iterate agents: %w", err)
+	}
 
 	// Read issues
 	type dbIssue struct {
@@ -251,11 +261,16 @@ func importFromPaperclipDB(portOverride int) (importedBrokerState, int, int, err
 	var dbIssues []dbIssue
 	for issueRows.Next() {
 		var i dbIssue
-		if err := issueRows.Scan(&i.ID, &i.Title, &i.Status, &i.AssigneeAgentID, &i.CreatedAt, &i.UpdatedAt); err == nil {
-			dbIssues = append(dbIssues, i)
+		if err := issueRows.Scan(&i.ID, &i.Title, &i.Status, &i.AssigneeAgentID, &i.CreatedAt, &i.UpdatedAt); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: scan issue row: %v\n", err)
+			continue
 		}
+		dbIssues = append(dbIssues, i)
 	}
 	issueRows.Close()
+	if err := issueRows.Err(); err != nil {
+		return importedBrokerState{}, 0, 0, fmt.Errorf("iterate issues: %w", err)
+	}
 
 	fmt.Printf("Found %d agents, %d tasks across %d company.\n", len(dbAgents), len(dbIssues), len(companies))
 
