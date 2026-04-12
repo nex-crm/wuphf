@@ -24,6 +24,8 @@ var (
 		}
 		return l.runHeadlessCodexTurn(ctx, slug, notification)
 	}
+	// headlessWakeLeadFn is nil in production; override in tests to intercept lead wake-ups.
+	headlessWakeLeadFn func(l *Launcher, specialistSlug string)
 )
 
 var (
@@ -176,7 +178,89 @@ func (l *Launcher) finishHeadlessTurn(slug string) {
 		active.Cancel()
 	}
 	delete(l.headlessActive, slug)
+	lead := l.officeLeadSlug()
+	// Determine if this was a specialist finishing (not the lead), and if so whether
+	// any other specialists are still active or queued. If the slate is clear, we
+	// need to wake the lead so it can react to the specialist's completion messages.
+	// Without this, the CEO misses completion broadcasts because the queue-hold
+	// fires while the specialist is still "active" (process running), and after the
+	// process exits there is nothing else to re-trigger the CEO.
+	shouldWakeLead := slug != lead && lead != ""
+	if shouldWakeLead {
+		for workerSlug, queue := range l.headlessQueues {
+			if workerSlug == lead {
+				continue
+			}
+			if len(queue) > 0 {
+				shouldWakeLead = false
+				break
+			}
+		}
+	}
+	if shouldWakeLead {
+		for workerSlug, active := range l.headlessActive {
+			if workerSlug == lead {
+				continue
+			}
+			if active != nil {
+				shouldWakeLead = false
+				break
+			}
+		}
+	}
+	// Check if the lead already has work queued — no need to wake it.
+	if shouldWakeLead && len(l.headlessQueues[lead]) > 0 {
+		shouldWakeLead = false
+	}
 	l.headlessMu.Unlock()
+
+	if shouldWakeLead {
+		if headlessWakeLeadFn != nil {
+			headlessWakeLeadFn(l, slug)
+		} else {
+			l.wakeLeadAfterSpecialist(slug)
+		}
+	}
+}
+
+// wakeLeadAfterSpecialist re-queues the lead (CEO) with the most recent message
+// posted by the finishing specialist. This is needed because the lead's queue-hold
+// suppresses notifications while a specialist is running, so the lead never sees
+// the completion broadcast. We only do this when no other specialists remain active.
+func (l *Launcher) wakeLeadAfterSpecialist(specialistSlug string) {
+	if l.broker == nil {
+		return
+	}
+	lead := l.officeLeadSlug()
+	if lead == "" {
+		return
+	}
+	targets := l.agentPaneTargets()
+	target, ok := targets[lead]
+	if !ok {
+		return
+	}
+	// Find the most recent substantive message from the specialist that the lead
+	// should react to. Look in all channels the lead has access to.
+	msgs := l.broker.ChannelMessages("general")
+	var lastMsg *channelMessage
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m := msgs[i]
+		if m.From != specialistSlug {
+			continue
+		}
+		content := strings.TrimSpace(m.Content)
+		if strings.HasPrefix(content, "[STATUS]") {
+			continue
+		}
+		lastMsg = &msgs[i]
+		break
+	}
+	if lastMsg == nil {
+		return
+	}
+	appendHeadlessCodexLog(lead, fmt.Sprintf("wake-lead: re-delivering specialist completion from @%s (msg %s)", specialistSlug, lastMsg.ID))
+	l.sendChannelUpdate(target, *lastMsg)
 }
 
 func (l *Launcher) beginHeadlessCodexTurn(slug string) (headlessCodexTurn, context.Context, bool) {
