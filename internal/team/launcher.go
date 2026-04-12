@@ -701,14 +701,13 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		if slug == lead {
 			return true
 		}
+		// Explicit @-tag: always allow regardless of domain. Domain inference is
+		// for implicit routing only — it should never suppress an explicit mention.
+		if containsSlug(msg.Tagged, slug) {
+			return true
+		}
 		if owner != "" && slug != owner {
 			return false
-		}
-		if containsSlug(msg.Tagged, slug) {
-			if domain == "" || domain == "general" {
-				return true
-			}
-			return inferAgentDomain(slug) == domain
 		}
 		if domain == "" || domain == "general" {
 			return false
@@ -816,6 +815,10 @@ func (l *Launcher) shouldDeliverDelayedNotification(targetSlug string, source ch
 	}
 	if !containsSlug(l.broker.EnabledMembers(source.Channel), targetSlug) {
 		return false
+	}
+	// Explicit @-tags always deliver regardless of domain.
+	if containsSlug(source.Tagged, targetSlug) {
+		return true
 	}
 	domain := inferMessageDomain(source)
 	if owner := l.taskOwnerForDomain(source.Channel, domain); owner != "" && owner != targetSlug && targetSlug != l.officeLeadSlug() {

@@ -439,7 +439,7 @@ func TestNotificationTargetsForHumanMessageDirectToTaggedSpecialists(t *testing.
 	}
 }
 
-func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
+func TestNotificationTargetsExplicitTagsAlwaysDeliverRegardlessOfDomain(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
@@ -462,9 +462,10 @@ func TestNotificationTargetsPreferMatchingDomainOverWrongTags(t *testing.T) {
 		Tagged:  []string{"fe", "cmo"},
 	})
 
-	// CEO + domain-matching CMO are immediate; FE filtered out by domain mismatch
-	if len(immediate) != 2 {
-		t.Fatalf("expected 2 immediate targets (ceo + cmo), got %+v", immediate)
+	// Explicit @-tags always deliver regardless of domain inference. Domain is
+	// "marketing" here, but fe was explicitly tagged — so ceo + fe + cmo all wake.
+	if len(immediate) != 3 {
+		t.Fatalf("expected 3 immediate targets (ceo + fe + cmo), got %+v", immediate)
 	}
 	if len(delayed) != 0 {
 		t.Fatalf("expected 0 delayed targets, got %+v", delayed)
