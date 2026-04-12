@@ -1035,3 +1035,35 @@ func TestBuildNotificationContextRespectsLimit(t *testing.T) {
 		t.Fatalf("expected at most 3 messages, got %d", count)
 	}
 }
+
+func TestBuildNotificationContextExcludesTrigger(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	prev, err := b.PostMessage("you", "general", "Earlier message", nil, "")
+	if err != nil {
+		t.Fatalf("post prev: %v", err)
+	}
+	trigger, err := b.PostMessage("human", "general", "The trigger message", nil, "")
+	if err != nil {
+		t.Fatalf("post trigger: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+	ctx := l.buildNotificationContext("general", trigger.ID, 5)
+
+	if strings.Contains(ctx, "The trigger message") {
+		t.Error("trigger message should be excluded from context (it is sent separately as [New from @...])")
+	}
+	if !strings.Contains(ctx, "Earlier message") {
+		t.Errorf("expected earlier message in context, got %q (prev.ID=%s)", ctx, prev.ID)
+	}
+}
