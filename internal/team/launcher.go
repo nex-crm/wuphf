@@ -795,6 +795,8 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 			}
 		}
 	default:
+		// Specialist-to-channel message in collaborative mode: CEO stays in the loop
+		// plus any tagged agents and the task owner.
 		addImmediate(lead)
 		if owner != "" && owner != lead && allowTarget(owner) {
 			addImmediate(owner)
@@ -2576,10 +2578,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_office_members: See the full office roster, including members outside the current channel\n")
 		sb.WriteString("- team_channels: See every office channel, what it is for, and who is in it\n")
 		sb.WriteString("- team_channel: Create or remove a channel when the human explicitly wants that structure. New channels need a clear description and an initial roster.\n")
-		sb.WriteString("- team_bridge: Carry relevant context from one channel into another with a visible CEO bridge trail\n")
+		sb.WriteString("- team_bridge: CEO-only bridge — carry context from one channel into another with a visible trail\n")
 		sb.WriteString("- team_member: Create or remove office-wide members when the human explicitly asks to expand the team\n")
 		sb.WriteString("- team_channel_member: Add, remove, disable, or enable agents in a channel\n")
-		sb.WriteString("- team_bridge: CEO-only bridge that carries relevant context from one channel into another with a visible trail\n")
 		sb.WriteString("- team_tasks: See current owned/unowned work when you need the broader task board beyond the pushed task snapshot\n")
 		sb.WriteString("- team_task_status: See how many team tasks are active and which ones are isolated in worktrees\n")
 		sb.WriteString("- team_task: Create and assign tasks so ownership is explicit\n")
@@ -2684,31 +2685,19 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
-		sb.WriteString("1. Start with the pushed notification context and respond directly when it is enough; use team_poll only if you need fresher or broader context\n")
-		sb.WriteString("2. Stay in your lane. Do not do CMO work if you are FE, do not do FE work if you are CRO, etc.\n")
-		sb.WriteString("3. If @tagged by anyone, you MUST respond, but only from your domain perspective\n")
-		sb.WriteString("4. Do not jump into a thread just because it matches your domain. Speak only when tagged, when you own the task, or when you are blocked.\n")
-		sb.WriteString("5. If someone else already covered it well and you have no real delta, stay quiet\n")
-		sb.WriteString("6. Push back if you disagree — explain why with your expertise\n")
+		sb.WriteString("1. Start with the pushed notification context and respond directly when it is enough; use team_poll only if you need genuinely fresher or broader context\n")
+		sb.WriteString("2. Stay in your lane. Speak only when tagged, when you own a task, or when you are blocked. Don't jump in just because a topic matches your domain.\n")
+		sb.WriteString("3. When @tagged, respond from your domain perspective. If someone else already covered it well and you have no real delta, stay quiet.\n")
+		sb.WriteString("4. Push back when you disagree — explain why using your expertise\n")
+		sb.WriteString("5. Check team_requests before asking the human anything new\n")
+		sb.WriteString("6. For completion or recommendations, use human_message. For blocking human decisions, use human_interview with options.\n")
+		sb.WriteString("7. When assigned a task, claim it with team_task first, use team_status to show what you're working on, then mark complete and broadcast when done. If the result is mainly for the human, also send it via human_message.\n")
+		sb.WriteString("8. You can see other channel names and descriptions, but cannot access their content unless you are a member. If context from another channel is needed, ask the CEO to bridge it.\n")
+		sb.WriteString("9. If a task or status line shows a worktree path, use that as working_directory for local file and bash tools.\n")
 		if config.ResolveNoNex() {
-			sb.WriteString("7. Don't fake outside memory. If something is unclear, surface the uncertainty in-channel\n")
+			sb.WriteString("10. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n\n")
 		} else {
-			sb.WriteString("7. Use query_context when prior knowledge matters and don't fake remembered context\n")
-		}
-		sb.WriteString("8. Check team_requests before asking the human anything new\n")
-		sb.WriteString("9. If you need to present completion, flag a recommendation, or tell the human what they should do next, use human_message so it goes straight to the human in the main chat\n")
-		sb.WriteString("10. If you are blocked on a human decision, ask through human_interview with options and a recommendation\n")
-		sb.WriteString("11. When assigned a task by the leader, claim it with team_task before working on it\n")
-		sb.WriteString("12. Use team_status to share what you're working on\n")
-		sb.WriteString("13. When you finish, mark the task complete and then broadcast the result. If the result is mainly for the human, also send it with human_message.\n")
-		sb.WriteString("14. You can inspect other channel names and descriptions, but you do not have automatic access to their content unless you are a member there.\n")
-		sb.WriteString("15. If another channel may have context or needs help from your channel, ask the CEO to bridge it. Do not assume you can read or act inside channels you are not in.\n")
-		sb.WriteString("16. If a task or status line shows a worktree path, use that path as working_directory for local file and bash tools.\n")
-		if config.ResolveNoNex() {
-			sb.WriteString("17. Keep outcomes explicit in-thread so the rest of the team can build on them\n\n")
-		} else {
-			sb.WriteString("17. Only use add_context for durable conclusions that should survive this session\n")
-			sb.WriteString("18. Do not claim something is stored in the graph unless add_context actually succeeded\n\n")
+			sb.WriteString("10. Use query_context when prior knowledge matters. Only use add_context for durable conclusions, and don't claim something stored unless add_context actually succeeded.\n\n")
 		}
 		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use markdown tables/checklists for structured data.\n")
 	}
