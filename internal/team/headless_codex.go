@@ -240,10 +240,11 @@ func (l *Launcher) wakeLeadAfterSpecialist(specialistSlug string) {
 	if !ok {
 		return
 	}
-	// Find the most recent substantive message from the specialist that the lead
-	// should react to. General channel covers the common case; multi-channel
-	// support would need a Broker.AllChannelMessages() method.
-	msgs := l.broker.ChannelMessages("general")
+	// Find the most recent substantive message from the specialist across all
+	// channels. A specialist may complete work on a non-general channel (e.g.
+	// "engineering" or "marketing"), so scanning only "general" would miss those
+	// completions and the lead would never react.
+	msgs := l.broker.AllMessages()
 	var lastMsg *channelMessage
 	for i := len(msgs) - 1; i >= 0; i-- {
 		m := msgs[i]

@@ -1223,6 +1223,17 @@ func (b *Broker) ChannelMessages(channel string) []channelMessage {
 	return out
 }
 
+// AllMessages returns a copy of all messages across all channels, ordered by
+// creation time. Use this when the caller needs to search across channels rather
+// than in a single known channel.
+func (b *Broker) AllMessages() []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]channelMessage, len(b.messages))
+	copy(out, b.messages)
+	return out
+}
+
 // SurfaceChannels returns all channels that have a surface configured for the given provider.
 func (b *Broker) SurfaceChannels(provider string) []teamChannel {
 	b.mu.Lock()
