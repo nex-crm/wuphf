@@ -699,84 +699,12 @@ func ownsRelevantTask(slug, replyTo, domain string, tasks []brokerTaskSummary) b
 	return false
 }
 
-func inferOfficeAgentDomain(slug string) string {
-	switch strings.ToLower(strings.TrimSpace(slug)) {
-	case "fe", "frontend":
-		return "frontend"
-	case "be", "backend", "eng", "engineer", "engineering":
-		return "backend"
-	case "ai", "ml", "llm":
-		return "ai"
-	case "designer", "design":
-		return "design"
-	case "cmo", "growth", "marketing", "gtm":
-		return "marketing"
-	case "cro", "sales", "revenue":
-		return "sales"
-	case "pm", "product", "ceo":
-		return "product"
-	default:
-		return "general"
-	}
-}
+// inferOfficeAgentDomain and inferOfficeTextDomain are canonical wrappers around
+// team.InferAgentDomain / team.InferTextDomain. All domain classification lives in
+// team/domains.go — update keywords there and both packages stay in sync.
 
-func inferOfficeTextDomain(text string) string {
-	text = strings.ToLower(strings.TrimSpace(text))
-	tokens := tokenizeOfficeText(text)
-	switch {
-	case hasAnyOfficeToken(tokens, "frontend", "ui", "ux", "web", "component") || containsAnyFragment(text, "hero", "cta", "signup page"):
-		return "frontend"
-	case hasAnyOfficeToken(tokens, "backend", "database", "api", "sync", "queue", "service", "auth", "integration"):
-		return "backend"
-	case hasAnyOfficeToken(tokens, "model", "prompt", "llm", "ai", "transcript", "embedding", "rag"):
-		return "ai"
-	case hasAnyOfficeToken(tokens, "design", "visual", "typography", "layout") || containsAnyFragment(text, "brand system"):
-		return "design"
-	case hasAnyOfficeToken(tokens, "positioning", "campaign", "launch", "brand", "marketing", "copy", "persona", "messaging", "growth"):
-		return "marketing"
-	case hasAnyOfficeToken(tokens, "sales", "pipeline", "pricing", "revenue", "deal", "budget", "buyer"):
-		return "sales"
-	case hasAnyOfficeToken(tokens, "product", "roadmap", "scope", "planning", "priority"):
-		return "product"
-	default:
-		return "general"
-	}
-}
-
-func tokenizeOfficeText(text string) map[string]bool {
-	var b strings.Builder
-	for _, r := range text {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			b.WriteRune(unicode.ToLower(r))
-		} else {
-			b.WriteRune(' ')
-		}
-	}
-	parts := strings.Fields(b.String())
-	out := make(map[string]bool, len(parts))
-	for _, part := range parts {
-		out[part] = true
-	}
-	return out
-}
-
-func hasAnyOfficeToken(tokens map[string]bool, words ...string) bool {
-	for _, word := range words {
-		if tokens[word] {
-			return true
-		}
-	}
-	return false
-}
-
-func containsAnyFragment(text string, needles ...string) bool {
-	for _, needle := range needles {
-		if strings.Contains(text, needle) {
-			return true
-		}
-	}
-	return false
-}
+func inferOfficeAgentDomain(slug string) string   { return team.InferAgentDomain(slug) }
+func inferOfficeTextDomain(text string) string    { return team.InferTextDomain(text) }
 
 func containsSlug(items []string, want string) bool {
 	want = strings.TrimSpace(strings.ToLower(want))
@@ -830,7 +758,7 @@ func handleTeamPoll(ctx context.Context, _ *mcp.CallToolRequest, args TeamPollAr
 		return textResult("Direct conversation\n\n" + summary), nil, nil
 	}
 	if scope == "inbox" || scope == "outbox" {
-		scopeTitle := strings.Title(scope)
+		scopeTitle := strings.ToUpper(scope[:1]) + scope[1:]
 		if slug := strings.TrimSpace(resolveSlugOptional(args.MySlug)); slug != "" {
 			return textResult(fmt.Sprintf("%s for @%s in #%s\n\n%s", scopeTitle, slug, channel, summary)), nil, nil
 		}

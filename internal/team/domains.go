@@ -5,6 +5,16 @@ import (
 	"unicode"
 )
 
+// InferAgentDomain maps an agent slug to its primary work domain.
+func InferAgentDomain(slug string) string {
+	return inferAgentDomain(slug)
+}
+
+// InferTextDomain classifies a text snippet into a work domain.
+func InferTextDomain(text string) string {
+	return inferTextDomain(text)
+}
+
 func inferAgentDomain(slug string) string {
 	switch strings.ToLower(strings.TrimSpace(slug)) {
 	case "fe", "frontend":
@@ -34,15 +44,17 @@ func inferTextDomain(text string) string {
 	text = strings.ToLower(strings.TrimSpace(text))
 	tokens := tokenize(text)
 	switch {
-	case hasAnyToken(tokens, "frontend", "ui", "ux", "web", "component") || containsAny(text, "hero", "cta", "signup page"):
+	case hasAnyToken(tokens, "frontend", "ui", "ux", "web", "component", "page", "button", "form", "modal", "css", "html", "animation", "responsive") || containsAny(text, "hero", "cta", "signup page"):
 		return "frontend"
-	case hasAnyToken(tokens, "backend", "database", "api", "sync", "queue", "service", "auth", "integration"):
+	case hasAnyToken(tokens, "backend", "database", "api", "sync", "queue", "service", "auth", "integration",
+		"middleware", "endpoint", "http", "server", "request", "response", "cache", "rate", "latency", "webhook"):
 		return "backend"
 	case hasAnyToken(tokens, "model", "prompt", "llm", "ai", "transcript", "embedding", "rag"):
 		return "ai"
 	case hasAnyToken(tokens, "design", "visual", "typography", "layout") || containsAny(text, "brand system"):
 		return "design"
-	case hasAnyToken(tokens, "positioning", "campaign", "launch", "brand", "marketing", "copy", "persona", "messaging", "growth"):
+	case hasAnyToken(tokens, "positioning", "campaign", "launch", "brand", "marketing", "copy", "persona", "messaging", "growth",
+		"content", "blog", "post", "article", "seo", "audience", "email", "newsletter", "social"):
 		return "marketing"
 	case hasAnyToken(tokens, "sales", "pipeline", "pricing", "revenue", "deal", "budget", "buyer"):
 		return "sales"
