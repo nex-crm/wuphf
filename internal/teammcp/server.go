@@ -605,18 +605,22 @@ func detectUntaggedMentions(content string, tagged []string) []string {
 }
 
 func fetchBroadcastContext(ctx context.Context, channel, mySlug string) ([]brokerMessage, []brokerTaskSummary, error) {
-	values := url.Values{}
-	values.Set("channel", channel)
-	values.Set("limit", "40")
+	msgValues := url.Values{}
+	msgValues.Set("channel", channel)
+	msgValues.Set("limit", "40")
 	if mySlug != "" {
-		values.Set("my_slug", mySlug)
+		msgValues.Set("my_slug", mySlug)
 	}
 	var messages brokerMessagesResponse
-	if err := brokerGetJSON(ctx, "/messages?"+values.Encode(), &messages); err != nil {
+	if err := brokerGetJSON(ctx, "/messages?"+msgValues.Encode(), &messages); err != nil {
 		return nil, nil, err
 	}
+	// Fetch tasks across ALL channels so ownsRelevantTask can find tasks that live
+	// in dedicated channels (e.g. "engineering") even when the specialist broadcasts
+	// into "general". Without all_channels=true, a specialist who completes work
+	// cross-channel would be incorrectly suppressed.
 	var tasks brokerTasksResponse
-	if err := brokerGetJSON(ctx, "/tasks?channel="+url.QueryEscape(channel), &tasks); err != nil {
+	if err := brokerGetJSON(ctx, "/tasks?all_channels=true", &tasks); err != nil {
 		return messages.Messages, nil, err
 	}
 	return messages.Messages, tasks.Tasks, nil

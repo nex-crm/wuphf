@@ -4678,20 +4678,21 @@ func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	mySlug := strings.TrimSpace(r.URL.Query().Get("my_slug"))
 	viewerSlug := strings.TrimSpace(r.URL.Query().Get("viewer_slug"))
 	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
-	if channel == "" {
+	allChannels := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("all_channels")), "true")
+	if channel == "" && !allChannels {
 		channel = "general"
 	}
 	includeDone := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_done")), "true")
 
 	b.mu.Lock()
-	if !b.canAccessChannelLocked(viewerSlug, channel) {
+	if !allChannels && !b.canAccessChannelLocked(viewerSlug, channel) {
 		b.mu.Unlock()
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
 	result := make([]teamTask, 0, len(b.tasks))
 	for _, task := range b.tasks {
-		if normalizeChannelSlug(task.Channel) != channel {
+		if !allChannels && normalizeChannelSlug(task.Channel) != channel {
 			continue
 		}
 		if task.Status == "done" && !includeDone && statusFilter == "" {
