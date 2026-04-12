@@ -2330,7 +2330,8 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 			}
 		}
 		for workerSlug, active := range l.headlessActive {
-			if workerSlug == slug && active != nil {
+			// Skip the lead itself — it should never list itself as "already active".
+			if workerSlug == slug {
 				continue
 			}
 			if active != nil {
