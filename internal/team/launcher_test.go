@@ -1071,6 +1071,92 @@ func TestBuildNotificationContextExcludesTrigger(t *testing.T) {
 	}
 }
 
+func TestUltimateThreadRootFlat(t *testing.T) {
+	// Flat thread: human ask (X) → CEO reply (Y, replyTo=X).
+	// ultimateThreadRoot starting from Y should return X.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	humanAsk, err := b.PostMessage("human", "general", "Original human ask", nil, "")
+	if err != nil {
+		t.Fatalf("post humanAsk: %v", err)
+	}
+	ceoDelegate, err := b.PostMessage("ceo", "general", "CEO delegation", nil, humanAsk.ID)
+	if err != nil {
+		t.Fatalf("post ceoDelegate: %v", err)
+	}
+	l := &Launcher{broker: b}
+	got := l.ultimateThreadRoot("general", ceoDelegate.ID)
+	if got != humanAsk.ID {
+		t.Errorf("expected ultimateThreadRoot(%s) = %s (humanAsk), got %s", ceoDelegate.ID, humanAsk.ID, got)
+	}
+}
+
+func TestUltimateThreadRootDeep(t *testing.T) {
+	// Deep thread: X → Y (replyTo=X) → Z (replyTo=Y).
+	// ultimateThreadRoot starting from Z should return X.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	x, err := b.PostMessage("human", "general", "Root X", nil, "")
+	if err != nil {
+		t.Fatalf("post x: %v", err)
+	}
+	y, err := b.PostMessage("ceo", "general", "Mid Y", nil, x.ID)
+	if err != nil {
+		t.Fatalf("post y: %v", err)
+	}
+	z, err := b.PostMessage("you", "general", "Leaf Z", nil, y.ID)
+	if err != nil {
+		t.Fatalf("post z: %v", err)
+	}
+	l := &Launcher{broker: b}
+	got := l.ultimateThreadRoot("general", z.ID)
+	if got != x.ID {
+		t.Errorf("expected ultimateThreadRoot(%s) = %s (x), got %s", z.ID, x.ID, got)
+	}
+}
+
+func TestUltimateThreadRootTopLevel(t *testing.T) {
+	// Top-level message has no replyTo: walk returns the message itself.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	x, err := b.PostMessage("human", "general", "Top level", nil, "")
+	if err != nil {
+		t.Fatalf("post x: %v", err)
+	}
+	l := &Launcher{broker: b}
+	got := l.ultimateThreadRoot("general", x.ID)
+	if got != x.ID {
+		t.Errorf("expected ultimateThreadRoot(%s) = %s (self), got %s", x.ID, x.ID, got)
+	}
+}
+
 func TestBuildNotificationContextThreadFiltering(t *testing.T) {
 	// Verifies that when a threadRootID is given, only messages in that thread
 	// appear in the context (labeled [Recent thread]), and messages from a

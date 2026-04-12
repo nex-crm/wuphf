@@ -2031,6 +2031,41 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID, threadRootID 
 	return "[Recent channel]\n" + formatContext(filtered)
 }
 
+// ultimateThreadRoot walks the reply-to chain from startID up to the topmost
+// ancestor (the message with no ReplyTo) and returns its ID. This ensures that
+// when building thread context for a deep reply chain — e.g., human ask → CEO
+// delegation → specialist response — the filtering anchors at the original human
+// ask rather than a mid-thread message, so all participants see the full context.
+//
+// If startID is empty, startID itself is returned. The walk is capped at 8 hops
+// to prevent cycles or unbounded work on pathological data.
+func (l *Launcher) ultimateThreadRoot(channel, startID string) string {
+	startID = strings.TrimSpace(startID)
+	if startID == "" || l.broker == nil {
+		return startID
+	}
+	msgs := l.broker.ChannelMessages(channel)
+	byID := make(map[string]channelMessage, len(msgs))
+	for _, m := range msgs {
+		if id := strings.TrimSpace(m.ID); id != "" {
+			byID[id] = m
+		}
+	}
+	root := startID
+	for depth := 0; depth < 8; depth++ {
+		m, ok := byID[root]
+		if !ok {
+			break
+		}
+		parent := strings.TrimSpace(m.ReplyTo)
+		if parent == "" {
+			break
+		}
+		root = parent
+	}
+	return root
+}
+
 func (l *Launcher) buildTaskNotificationContext(channel, slug string, limit int) string {
 	if l.broker == nil || limit <= 0 {
 		return ""
@@ -2167,10 +2202,14 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 			lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 		}
 	}
-	// Pass msg.ReplyTo as the thread root so buildNotificationContext can filter to
-	// the current thread when the trigger is a reply. For top-level messages (ReplyTo
-	// == ""), the function falls back to recent channel context automatically.
-	if ctx := l.buildNotificationContext(channel, msg.ID, msg.ReplyTo, 4); ctx != "" {
+	// Walk up the reply chain to find the ultimate thread root (the original human
+	// ask) before filtering. This ensures that for a deep thread — human ask (X) →
+	// CEO delegation (Y) → specialist response (Z) — all participants see X as the
+	// anchor, not just the immediate parent. For top-level messages (ReplyTo == ""),
+	// ultimateThreadRoot returns "" and the function falls back to recent channel
+	// context automatically.
+	threadRoot := l.ultimateThreadRoot(channel, msg.ReplyTo)
+	if ctx := l.buildNotificationContext(channel, msg.ID, threadRoot, 4); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	if slug == l.officeLeadSlug() {
@@ -2251,11 +2290,12 @@ func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog,
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 	}
-	// Pass task.ThreadID as the thread root so agents see only messages from this
-	// task's thread, not unrelated discussions in the same channel. The thread root
-	// is never excluded (triggerMsgID = "") because the human's original ask is the
-	// useful anchor for context, not a duplicate of anything in the packet header.
-	if ctx := l.buildNotificationContext(channel, "", task.ThreadID, 3); ctx != "" {
+	// Walk up from task.ThreadID to the ultimate thread root (the original human ask)
+	// so agents see the full ancestry, not just a mid-thread branch. The thread root
+	// is never excluded (triggerMsgID = "") because the human's ask is the useful
+	// anchor, not a duplicate of anything in the packet header.
+	threadRoot := l.ultimateThreadRoot(channel, task.ThreadID)
+	if ctx := l.buildNotificationContext(channel, "", threadRoot, 3); ctx != "" {
 		lines = append(lines, ctx)
 	}
 	lines = append(lines, fmt.Sprintf("%s Reply with the concrete next step and update via team_task with my_slug \"%s\".", truncate(content, 1000), slug))
