@@ -5,44 +5,161 @@ One method: write the content first, build only what makes it true.
 
 ---
 
+## Context (why this plan exists)
+
+Paperclip (github.com/paperclipai/paperclip) is the leading multi-agent orchestrator.
+52k GitHub stars. Node.js + React. Created by @cryppadotta. Launched March 2026. It
+orchestrates AI agents (Claude Code, Codex, OpenClaw) as a "company" with org charts,
+tasks, budgets.
+
+Paperclip got famous because of timing (multi-agent pain was acute) and framing
+("zero-human company"). But its GitHub issue tracker reveals massive production pain:
+
+**We cloned Paperclip's source (94k lines TS, 68k lines TSX) and read their issues.**
+The research is at `docs/plans/2026-04-11-paperclip-vs-wuphf-grounded.md`. The full
+strategy context is at `docs/plans/2026-04-12-wuphf-strategy-vs-paperclip.md`. A
+10-persona ICP test is at `docs/plans/2026-04-12-product-experience-test.md`.
+
+This execution plan is the distilled output. Everything else is research context.
+
+### Why people use Paperclip
+- They have too many Claude Code terminals open and can't track what's happening
+- They want a dashboard to see agent status, costs, tasks
+- They want a "company" structure (CEO delegates, specialists execute)
+- @dotta's origin story: "running an automated hedge fund, 20+ Claude tabs, no shared
+  context, no cost tracking, no state recovery"
+
+### Why people are frustrated with Paperclip (from their issue tracker)
+- **Issue #544:** 10x token consumption vs running Claude Code directly. User debugged
+  and found 3 root causes: (1) `--resume` accumulates full session history across runs,
+  ~70% of waste, (2) every agent inherits ALL 12 MCP servers globally, ~24k tokens/turn
+  overhead, (3) heartbeat polls LLM to learn "nothing to do"
+- **Issue #3335:** 222 workspaces across 8 agents, ALL pointing at the same working
+  directory. Agents corrupt each other's work. Fix exists in code but gated behind 3
+  experimental flags. Default is still broken.
+- **Issue #3401:** Heartbeat burns tokens on empty inbox. Maintainer confirmed:
+  "This is a legitimate architectural concern."
+- **Issue #1756:** Budget tracks dollars, not tokens. Claude Enterprise/Pro users
+  track tokens. Budget UI is useless to them.
+
+### What WUPHF already has that Paperclip doesn't
+- **Shared office with channels** — agents work in a Slack-like channel, see each
+  other's output. Paperclip explicitly rejected chat ("Tasks + comments only").
+- **Push-driven wakes** — agents only fire when broker pushes a notification. No polling.
+- **Fresh sessions per turn** — no `--resume` accumulation. Each turn starts clean.
+- **CEO delegation mode** (PR #25, merged) — CEO routes, specialists only wake when
+  assigned. Same model as Paperclip but without the token overhead.
+- **Per-agent model selection** — CEO gets Opus, specialists get Sonnet (configurable).
+- **Nex integration** — knowledge graph for CRM, email, calendar context. Paperclip
+  has no equivalent world model.
+- **Terminal-first TUI + web view** — both surfaces on one broker.
+- **Go single binary** — vs Paperclip's Node.js server + React app.
+
+### What's missing (the 10 items in this plan)
+The architectural advantages exist but some aren't fully wired or visible to users.
+This plan builds only the 10 things needed to make every claim in our Reddit post true.
+
+### How the content strategy works
+We wrote the exact Reddit post, Show HN post, X thread, Product Hunt launch, and
+landing page FIRST. Each piece makes specific claims about the product. The claims
+audit table under each piece lists what must be true before publishing. The features
+we build are reverse-engineered from those claims. If a claim isn't in the content,
+we don't build the feature. If a feature doesn't support a claim, we don't build it.
+
+---
+
 ## The ICP (one sentence)
 
 Claude Pro/Max users running 3+ agents who are hitting rate limits and
 can't see what their agents are doing.
 
-## The pain (from Paperclip's issue tracker, filed by real users)
+## The pain (from real Paperclip users, real issue numbers)
 
-1. **Token burn** — 10x consumption vs alternatives (#544). Root causes:
+1. **Token burn** — 10x consumption vs alternatives (issue #544). Root causes:
    session resume accumulation, global MCP inheritance, LLM polling.
-2. **Workspace corruption** — 8 agents, 222 workspaces, 1 cwd (#3335).
+2. **Workspace corruption** — 8 agents, 222 workspaces, 1 cwd (issue #3335).
 3. **No visibility** — can't see agents working, can't steer mid-task.
-4. **No cost tracking** — dollar budgets, no per-task token visibility (#1756).
+4. **No cost tracking** — dollar budgets, no per-task token visibility (issue #1756).
 
 ## The switch trigger (what makes them move)
 
-A Reddit post with real benchmark numbers showing the same workload
-running on dramatically fewer tokens, with visible agents and zero
-workspace corruption. Plus a one-command import of their existing setup.
+A Reddit post with real benchmark numbers showing the same workload running on
+dramatically fewer tokens, with visible agents and zero workspace corruption.
+Plus a one-command import of their existing setup. The discovery hook is TOKEN
+COST (what makes them click). The product aha is VISIBILITY (what makes them stay).
+These are different stages of the funnel — cost draws them in, visibility converts.
 
 ---
 
 ## 10 things to build (nothing else)
 
-| # | What | Work | Unblocks |
-|---|------|------|----------|
-| 1 | CEO on Sonnet by default | 1-line change | Claude Pro compatibility |
-| 2 | Delegation mode as default | Flip in launcher | Familiar feel for switchers |
-| 3 | `/collab` command | Add inverse of `/focus` | The upgrade path |
-| 4 | Per-agent MCP scoping | ~30 lines Go | The token claim |
-| 5 | Cost tracking (per-task, per-agent, tokens) | Hook budget infra to headless turns | The "I can see what it costs" claim |
-| 6 | Workspace isolation as default | Wire existing worktree code | The "nothing corrupts" claim |
-| 7 | Live agent streaming in web view | Streaming panel on agent click | The product aha |
-| 8 | Lightweight DM (no /1o1 shutdown) | Sidebar DM while office runs | The "steer mid-flight" claim |
-| 9 | `wuphf import --from <path>` | ~400 lines Go | Zero switch cost |
-| 10 | Prebuilt binary (curl install) | goreleaser | No Go required |
+### Item 1: CEO on Sonnet by default
+**File:** `internal/team/headless_claude.go:152-157`
+**Current:** `headlessClaudeModel()` returns `claude-opus-4-6` for `officeLeadSlug()`, `claude-sonnet-4-6` for everyone else.
+**Change:** Return `claude-sonnet-4-6` for ALL agents by default. Add `--opus-ceo` CLI flag or config option to upgrade the lead to Opus when the user explicitly wants it.
+**Why:** Paperclip's ICP is Claude Pro/Max users. Opus burns Pro quota fast. Sonnet for routing decisions is sufficient.
 
-Plus: LICENSE file, verify no --resume, verify Claude Pro works, delete A2UI,
-3-agent minimal default pack.
+### Item 2: Delegation mode as default
+**File:** `internal/team/launcher.go` — the focus mode logic from PR #25 (`codex/focus-mode`).
+**Current:** Office mode (all agents see all messages) is default. Focus mode is opt-in via `--focus` flag.
+**Change:** Flip. Delegation mode (focus) is default. Agents only wake when CEO delegates or human tags directly. Add `--collab` flag to start in collaborative mode.
+**Also:** `cmd/wuphf/channel.go:843,2015,4679` — the `/focus` slash command handlers. Keep them but also add `/collab` as the inverse toggle.
+**Also:** `web/index.html` — add `/collab` to the slash command list.
+
+### Item 3: `/collab` command
+**Files:** `cmd/wuphf/channel.go` (TUI handler), `web/index.html` (web handler), `internal/team/session_mode.go` (mode constants).
+**Current:** `/focus` toggles focus mode on. No inverse command exists.
+**Change:** Add `/collab` that disables focus mode (enables collaborative mode). Both `/focus` and `/collab` are toggles to their respective modes.
+
+### Item 4: Per-agent MCP scoping
+**File:** `internal/team/launcher.go:2634` — `ensureMCPConfig()` generates ONE mcp config used by ALL agents.
+**File:** `internal/team/headless_claude.go:38` — `"--mcp-config", l.mcpConfig` passes the global config.
+**Change:** Generate a per-agent mcp config at turn start. Each agent's config includes only the MCP servers relevant to its role/expertise. Write to `/tmp/wuphf-mcp-<slug>.json`. Pass that per-agent path in `--mcp-config`.
+**Impact:** Saves ~24k tokens/turn for agents with unnecessary tool definitions. This is Paperclip's #2 token killer (issue #544).
+
+### Item 5: Cost tracking (per-task, per-agent, tokens)
+**File:** `internal/team/broker.go:283-301` — `teamUsageState` and `usageTotals` structs already exist.
+**File:** `internal/team/headless_claude.go:73-104` — `ReadClaudeJSONStream` callback already receives token usage in the result.
+**Change:** After each headless turn completes, write `{agent, provider, model, input_tokens, output_tokens, cached_tokens, cost_cents, task_id, occurred_at}` to broker state via the existing `teamUsageState`. Expose via broker HTTP API for web view.
+**Web:** Add a cost panel to `web/index.html` showing per-agent, per-task token usage.
+
+### Item 6: Workspace isolation as default
+**File:** `internal/team/worktree.go` (100 lines) — `defaultPrepareTaskWorktree()` and `defaultCleanupTaskWorktree()` already exist.
+**Change:** When a task is assigned to an agent and the task involves code changes, auto-create a git worktree via `prepareTaskWorktree(taskID)`. Branch: `wuphf-<taskID>`, path: `/tmp/wuphf-task-<taskID>/`. Pass the worktree path as the agent's working directory.
+**Default:** ON for any task assigned to agents with coding-related expertise (fe, be, ai, tech-lead, qa). OFF for non-coding agents (cmo, cro, designer) unless explicitly requested.
+
+### Item 7: Live agent streaming in web view
+**File:** `web/index.html` — current agent panel shows static info (name, role, skills, toggle, edit).
+**File:** `internal/team/headless_claude.go:66-103` — `updateHeadlessProgress()` already broadcasts progress events (thinking, text, tool_use, tool_result) to broker state.
+**Change:** When user clicks an agent in the web sidebar while the agent is active, open a streaming panel that shows the real-time progress events. Use SSE or polling against the broker's `/health` or a new `/agent-stream/<slug>` endpoint. Show: current phase (thinking/tool_use/text), tool name, truncated input/output.
+
+### Item 8: Lightweight DM (no /1o1 shutdown)
+**File:** `web/index.html` — current 1:1 mode (`enterDMMode` at line ~5496) hides the main messages div, shows a separate dm-messages div, and POSTs to `/session-mode` changing the broker to 1o1 mode. This shuts down the office.
+**File:** `internal/team/broker.go:2346` — `handleSessionMode` changes `b.sessionMode` which affects ALL message routing.
+**Change:** Add a lightweight DM that does NOT change session mode. Instead: user clicks agent → a DM input appears in the detail panel or a sidebar overlay → message is posted to broker as a direct message to that agent (tagged with `to: <slug>`) → agent receives it as a steer/follow-up → office keeps running in current mode. The `/1o1` full-mode-switch stays for deep sessions.
+
+### Item 9: `wuphf import --from <path>`
+**New file:** `cmd/wuphf/import.go` (~400 lines)
+**What it does:**
+1. Reads Paperclip's PGlite DB or JSON state from the given path
+2. Maps: companies → packs, agents → officeMembers (slug, name, role, adapterType), issues → tasks (title, status, owner)
+3. Rewrites adapter configs (claude_local → claude, codex_local → codex)
+4. Imports cost history if available
+5. Writes to `~/.wuphf/` state files
+6. Prints: "Imported N agents, M tasks. Office running at :7891"
+
+### Item 10: Prebuilt binary (curl install)
+**New file:** `.goreleaser.yml`
+**New file:** `scripts/install.sh` — curl-downloadable installer
+**What it does:** goreleaser builds binaries for darwin-arm64, darwin-amd64, linux-amd64, linux-arm64. The install script detects platform, downloads the right binary, puts it in PATH.
+**Enables:** `curl -sSL https://wuphf.dev/install | sh`
+
+### Housekeeping (do on Day 1)
+- **LICENSE file:** Add MIT LICENSE to repo root.
+- **Verify no --resume:** Confirm `headless_claude.go:29-40` args list does not include `--resume`. Document as invariant.
+- **Verify Claude Pro:** Test that `claude --print` with Pro subscription works in headless mode.
+- **Delete A2UI:** Remove `internal/tui/generative.go` (269 lines), `generative_registry.go` (294), `generative_test.go` (465). Remove `renderA2UIBlocks` + `isA2UIType` from `cmd/wuphf/channel.go:6321-6431`. Remove `/generative` case from `internal/tui/stream.go:750-792`. Remove 57 A2UI references from `web/index.html` (CSS classes `.a2ui-*` at lines 768-784, rendering code at lines 3359-3365 and 6301+).
+- **3-agent minimal pack:** Add a "solo" or "starter" pack to `internal/agent/packs.go` with CEO + 2 specialists (e.g., CEO + Frontend + Backend). Make it the default when agent count is not specified.
 
 ---
 
