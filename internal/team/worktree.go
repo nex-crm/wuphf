@@ -24,14 +24,15 @@ func defaultPrepareTaskWorktree(taskID string) (string, string, error) {
 		return path, branch, nil
 	}
 
-	if err := runGit(repoRoot, "worktree", "add", "-b", branch, path, "HEAD"); err == nil {
+	firstErr := runGit(repoRoot, "worktree", "add", "-b", branch, path, "HEAD")
+	if firstErr == nil {
 		return path, branch, nil
 	}
 	if err := runGit(repoRoot, "worktree", "add", path, branch); err == nil {
 		return path, branch, nil
 	}
 
-	return "", "", fmt.Errorf("create git worktree for %s", taskID)
+	return "", "", fmt.Errorf("create git worktree for %s: %w", taskID, firstErr)
 }
 
 func defaultCleanupTaskWorktree(path, branch string) error {

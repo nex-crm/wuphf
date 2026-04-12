@@ -2518,8 +2518,9 @@ func (l *Launcher) spawnOverflowAgents() {
 func (l *Launcher) buildPrompt(slug string) string {
 	member := l.officeMemberBySlug(slug)
 	agentCfg := agentConfigFromMember(member)
-	lead := l.officeLeadSlug()
 	officeMembers := l.officeMembersSnapshot()
+	lead := officeLeadSlugFrom(officeMembers, l.pack)
+	noNex := config.ResolveNoNex()
 
 	var sb strings.Builder
 
@@ -2535,7 +2536,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_broadcast: Send a normal direct chat reply into the 1:1 conversation\n")
 		sb.WriteString("- human_message: Send an emphasized report, recommendation, or action card directly to the human when you want it to stand out\n")
 		sb.WriteString("- human_interview: Ask a blocking decision question only when you truly cannot proceed responsibly without it\n\n")
-		if config.ResolveNoNex() {
+		if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
 		} else {
 			sb.WriteString("Use the Nex context graph when it materially helps:\n")
@@ -2581,7 +2582,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a blocking decision question — only when the team cannot proceed without it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member.\n\n")
-		if config.ResolveNoNex() {
+		if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Work only with the shared office channel and human answers.\n\n")
 		} else {
 			sb.WriteString("Nex memory: query_context before reinventing; add_context only after a decision is actually landed.\n\n")
@@ -2596,7 +2597,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
-		if config.ResolveNoNex() {
+		if noNex {
 			sb.WriteString("1. Coordinate inside the office channel first and keep the team aligned there\n")
 		} else {
 			sb.WriteString("1. On strategy or prior decisions, call query_context early\n")
@@ -2607,7 +2608,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("5. Keep specialists in their lane and mostly offstage. You make the FINAL decision.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for blocking decisions\n")
-		if config.ResolveNoNex() {
+		if noNex {
 			sb.WriteString("8. Summarize final decisions clearly in-channel\n")
 		} else {
 			sb.WriteString("8. When you lock a decision, call add_context before claiming it is stored\n")
@@ -2617,7 +2618,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n")
 		sb.WriteString("12. If a task shows a worktree path, that path is the working_directory for local file and bash tools on that task\n\n")
 		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data.\n")
-		if config.ResolveNoNex() {
+		if noNex {
 			sb.WriteString("Do not claim you stored anything outside the office.\n")
 		} else {
 			sb.WriteString("Do not pretend the graph was updated; verify add_context succeeded.\n")
@@ -2644,7 +2645,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human only for blocking clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member.\n\n")
-		if config.ResolveNoNex() {
+		if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the office conversation and direct human answers only.\n\n")
 		} else {
 			sb.WriteString("Nex memory: query_context before making assumptions; add_context only for durable conclusions.\n\n")
@@ -2668,7 +2669,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("6. When assigned a task, claim it with team_task first, use team_status to show what you're working on, then mark complete and broadcast when done. If the result is mainly for the human, also send it via human_message.\n")
 		sb.WriteString("7. You can see other channel names and descriptions, but cannot access their content unless you are a member. If context from another channel is needed, ask the CEO to bridge it.\n")
 		sb.WriteString("8. If a task or status line shows a worktree path, use that as working_directory for local file and bash tools.\n")
-		if config.ResolveNoNex() {
+		if noNex {
 			sb.WriteString("9. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n\n")
 		} else {
 			sb.WriteString("9. Use query_context when prior knowledge matters. Only use add_context for durable conclusions, and don't claim something stored unless add_context actually succeeded.\n\n")
@@ -3028,7 +3029,8 @@ func (l *Launcher) officeMemberBySlug(slug string) officeMember {
 }
 
 func (l *Launcher) officeLeadSlug() string {
-	for _, member := range l.officeMembersSnapshot() {
+	members := l.officeMembersSnapshot()
+	for _, member := range members {
 		if member.Slug == "ceo" {
 			return "ceo"
 		}
@@ -3036,7 +3038,23 @@ func (l *Launcher) officeLeadSlug() string {
 	if l.pack != nil && l.pack.LeadSlug != "" {
 		return l.pack.LeadSlug
 	}
-	members := l.officeMembersSnapshot()
+	if len(members) > 0 {
+		return members[0].Slug
+	}
+	return ""
+}
+
+// officeLeadSlugFrom derives the lead slug from an already-loaded member
+// snapshot, avoiding a redundant officeMembersSnapshot call.
+func officeLeadSlugFrom(members []officeMember, pack *agent.PackDefinition) string {
+	for _, member := range members {
+		if member.Slug == "ceo" {
+			return "ceo"
+		}
+	}
+	if pack != nil && pack.LeadSlug != "" {
+		return pack.LeadSlug
+	}
 	if len(members) > 0 {
 		return members[0].Slug
 	}
