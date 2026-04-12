@@ -2208,7 +2208,10 @@ func (l *Launcher) buildTaskExecutionPacket(slug string, action officeActionLog,
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		lines = append(lines, fmt.Sprintf("- Working directory: %q", path))
 	}
-	if ctx := l.buildNotificationContext(channel, task.ThreadID, 3); ctx != "" {
+	// Pass "" as triggerMsgID: task.ThreadID is the thread root (the original human
+	// ask), not a duplicate. It is not explicitly included elsewhere in this packet,
+	// so we must NOT exclude it from the recent thread context.
+	if ctx := l.buildNotificationContext(channel, "", 3); ctx != "" {
 		lines = append(lines, "[Recent thread]\n"+ctx)
 	}
 	lines = append(lines, fmt.Sprintf("%s Reply with the concrete next step and update via team_task with my_slug \"%s\".", truncate(content, 1000), slug))
