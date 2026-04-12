@@ -536,7 +536,72 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 		text += " in reply to " + replyTo
 	}
 	text += "."
+
+	// Warn when the message text contains @-mentions but none were passed in
+	// the `tagged` parameter. Text @-mentions are display-only — they do NOT
+	// wake agents. This is the most common CEO mistake: writing "@engineering
+	// please do X" without tagging engineering in the tool call.
+	if len(args.Tagged) == 0 && !isOneOnOneMode() {
+		if untaggedMentions := detectUntaggedMentions(args.Content, args.Tagged); len(untaggedMentions) > 0 {
+			text += fmt.Sprintf(
+				" WARNING: message text mentions %s but `tagged` is empty — those agents will NOT be woken. Re-send with tagged: %s to notify them.",
+				strings.Join(untaggedMentions, ", "),
+				strings.Join(untaggedMentions, ", "),
+			)
+		}
+	}
+
 	return textResult(text), nil, nil
+}
+
+// detectUntaggedMentions returns @-slugs found in content that are not in the
+// tagged list. Only slug-like words (alphanumeric + hyphen, 2-20 chars) are
+// flagged to avoid false positives from conversational @-references.
+func detectUntaggedMentions(content string, tagged []string) []string {
+	taggedSet := make(map[string]struct{}, len(tagged))
+	for _, t := range tagged {
+		taggedSet[strings.ToLower(strings.TrimSpace(t))] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	var out []string
+	parts := strings.Fields(content)
+	for _, p := range parts {
+		if !strings.HasPrefix(p, "@") {
+			continue
+		}
+		// Strip trailing punctuation
+		raw := strings.TrimLeft(p, "@")
+		raw = strings.TrimRight(raw, ".,;:!?)")
+		raw = strings.ToLower(raw)
+		if len(raw) < 2 || len(raw) > 20 {
+			continue
+		}
+		// Only flag slug-like strings: alphanumeric + hyphens
+		valid := true
+		for _, r := range raw {
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '-' {
+				valid = false
+				break
+			}
+		}
+		if !valid {
+			continue
+		}
+		// Skip common non-agent references
+		switch raw {
+		case "you", "human", "nex", "system", "everyone", "all", "team", "channel":
+			continue
+		}
+		if _, inTagged := taggedSet[raw]; inTagged {
+			continue
+		}
+		if _, already := seen[raw]; already {
+			continue
+		}
+		seen[raw] = struct{}{}
+		out = append(out, "@"+raw)
+	}
+	return out
 }
 
 func fetchBroadcastContext(ctx context.Context, channel, mySlug string) ([]brokerMessage, []brokerTaskSummary, error) {

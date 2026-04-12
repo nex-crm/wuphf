@@ -953,3 +953,42 @@ func TestHandleTeamInboxAndOutboxExposeOwnedTranscriptSlices(t *testing.T) {
 		t.Fatalf("unexpected non-authored content in outbox slice: %q", outboxText)
 	}
 }
+
+func TestDetectUntaggedMentions(t *testing.T) {
+	// No @-mentions → nothing flagged
+	if got := detectUntaggedMentions("Hello there, nice work!", nil); len(got) != 0 {
+		t.Fatalf("expected no mentions, got %v", got)
+	}
+
+	// @-mention that IS in tagged → not flagged
+	if got := detectUntaggedMentions("@engineering please write this", []string{"engineering"}); len(got) != 0 {
+		t.Fatalf("expected no untagged, got %v", got)
+	}
+
+	// @-mention NOT in tagged → flagged
+	got := detectUntaggedMentions("@engineering please write this", nil)
+	if len(got) != 1 || got[0] != "@engineering" {
+		t.Fatalf("expected @engineering flagged, got %v", got)
+	}
+
+	// Known non-agent @-references → not flagged
+	nonAgents := []string{"you", "human", "nex", "team", "everyone"}
+	for _, na := range nonAgents {
+		content := fmt.Sprintf("@%s please reply", na)
+		if got := detectUntaggedMentions(content, nil); len(got) != 0 {
+			t.Fatalf("@%s should not be flagged, got %v", na, got)
+		}
+	}
+
+	// Multiple @-mentions, one tagged → only untagged one flagged
+	got = detectUntaggedMentions("@ceo @marketing please coordinate", []string{"ceo"})
+	if len(got) != 1 || got[0] != "@marketing" {
+		t.Fatalf("expected only @marketing untagged, got %v", got)
+	}
+
+	// Trailing punctuation stripped correctly
+	got = detectUntaggedMentions("@marketing, please write a draft.", nil)
+	if len(got) != 1 || got[0] != "@marketing" {
+		t.Fatalf("expected @marketing after stripping punctuation, got %v", got)
+	}
+}
