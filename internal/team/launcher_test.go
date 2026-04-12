@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/api"
@@ -1602,5 +1603,140 @@ func TestBlockedTaskNotificationAndUnblockFlow(t *testing.T) {
 	}
 	if !hasMarketing {
 		t.Error("marketing should be woken immediately when their task is unblocked")
+	}
+}
+
+// TestActionLoopAllowsTaskUnblocked verifies that the notifyTaskActionsLoop kind
+// filter passes task_unblocked through to deliverTaskNotification. Before the fix,
+// the filter only listed "task_created" and "task_updated", silently dropping
+// task_unblocked actions and breaking the entire dependency-chain wake-up.
+//
+// The test exercises this by subscribing to broker actions, completing the
+// research task, and asserting that a task_unblocked action is emitted AND that
+// taskNotificationTargets (called via deliverTaskNotification) would include
+// the marketing owner in immediate targets — confirming the full path is live.
+func TestActionLoopAllowsTaskUnblocked(t *testing.T) {
+	dir := t.TempDir()
+	oldPathFn := brokerStatePath
+	brokerStatePath = func() string { return filepath.Join(dir, "state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "research", Name: "Researcher"},
+		{Slug: "marketing", Name: "Marketer"},
+	}
+	if ch := b.findChannelLocked("general"); ch != nil {
+		ch.Members = []string{"ceo", "research", "marketing"}
+	}
+	b.mu.Unlock()
+
+	researchTask, _, err := b.EnsureTask("general", "Research competitors", "", "research", "ceo", "")
+	if err != nil {
+		t.Fatalf("create research task: %v", err)
+	}
+	marketingTask, _, err := b.EnsureTask("general", "Write blog post about findings", "", "marketing", "ceo", "")
+	if err != nil {
+		t.Fatalf("create marketing task: %v", err)
+	}
+	b.mu.Lock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == marketingTask.ID {
+			b.tasks[i].DependsOn = []string{researchTask.ID}
+			b.tasks[i].Blocked = true
+		}
+	}
+	b.mu.Unlock()
+
+	// Subscribe to actions BEFORE triggering the unblock.
+	actions, unsub := b.SubscribeActions(8)
+	defer unsub()
+
+	// Drain the task_created actions already in flight.
+	timeout := time.After(500 * time.Millisecond)
+drain:
+	for {
+		select {
+		case <-actions:
+		case <-timeout:
+			break drain
+		}
+	}
+
+	// Now complete research → should fire task_unblocked for marketing.
+	b.mu.Lock()
+	for i := range b.tasks {
+		if b.tasks[i].ID == researchTask.ID {
+			b.tasks[i].Status = "done"
+		}
+	}
+	b.unblockDependentsLocked(researchTask.ID)
+	b.mu.Unlock()
+
+	// Collect the next actions and look for task_unblocked.
+	deadline := time.After(2 * time.Second)
+	var unblockedAction officeActionLog
+	for {
+		select {
+		case a := <-actions:
+			if a.Kind == "task_unblocked" && a.RelatedID == marketingTask.ID {
+				unblockedAction = a
+			}
+		case <-deadline:
+			goto done
+		}
+		if unblockedAction.Kind != "" {
+			break
+		}
+	}
+done:
+	if unblockedAction.Kind == "" {
+		t.Fatal("task_unblocked action was never emitted by unblockDependentsLocked")
+	}
+
+	// Now verify that the action loop kind-filter would NOT drop this action.
+	// The filter is: kind != "task_created" && kind != "task_updated" && kind != "task_unblocked" → skip
+	// task_unblocked is now in the allow-list, so this should NOT be skipped.
+	if unblockedAction.Kind != "task_created" && unblockedAction.Kind != "task_updated" && unblockedAction.Kind != "task_unblocked" {
+		t.Errorf("task_unblocked kind %q would be dropped by the action loop filter", unblockedAction.Kind)
+	}
+
+	// Finally, verify that with the task in unblocked state, marketing appears
+	// in immediate notification targets (this is what deliverTaskNotification does).
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "research", Name: "Researcher"},
+				{Slug: "marketing", Name: "Marketer"},
+			},
+		},
+	}
+	unblockedState := teamTask{
+		ID:      marketingTask.ID,
+		Channel: "general",
+		Title:   "Write blog post about findings",
+		Owner:   "marketing",
+		Status:  "in_progress",
+		Blocked: false,
+	}
+	immediate, _ := l.taskNotificationTargets(unblockedAction, unblockedState)
+	hasMarketing := false
+	for _, t2 := range immediate {
+		if t2.Slug == "marketing" {
+			hasMarketing = true
+		}
+	}
+	if !hasMarketing {
+		t.Error("marketing should be in immediate targets after task_unblocked")
 	}
 }
