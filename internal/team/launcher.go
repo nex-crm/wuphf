@@ -1957,10 +1957,15 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID string, limit 
 		return ""
 	}
 
-	// Filter: skip system messages, STATUS messages, and routing messages
+	// Filter: skip system messages, STATUS messages, and the trigger message itself
+	// (the trigger is already included explicitly as "[New from @...]" in the notification,
+	// so including it again here wastes ~150 tokens per notification).
 	filtered := make([]channelMessage, 0, len(msgs))
 	for _, msg := range msgs {
 		if msg.From == "system" {
+			continue
+		}
+		if strings.TrimSpace(triggerMsgID) != "" && strings.TrimSpace(msg.ID) == strings.TrimSpace(triggerMsgID) {
 			continue
 		}
 		content := strings.TrimSpace(msg.Content)
