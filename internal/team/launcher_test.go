@@ -1263,6 +1263,68 @@ func TestBuildNotificationContextThreadFiltering(t *testing.T) {
 	}
 }
 
+func TestBuildNotificationContextIncludesDeepThreadMessages(t *testing.T) {
+	// Regression: in a research→marketing chain the marketing agent's context must
+	// include the researcher's results (a grandchild of root), not just root + direct
+	// children. Previous filter only showed root + replyTo==root messages.
+	//
+	// Thread tree:
+	//   X (human: "research competitors and write email")
+	//   └── Y (ceo: "@researcher please research")
+	//       └── R (researcher: "here are the findings...")
+	//           └── Z (ceo: "@marketing write email based on research") ← TRIGGER
+	//
+	// Marketing agent's context should show X (root anchor) and R (research results),
+	// NOT just X and Y (which is all the old shallow filter produced).
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	x, err := b.PostMessage("human", "general", "Research competitors and write email", nil, "")
+	if err != nil {
+		t.Fatalf("post x: %v", err)
+	}
+	y, err := b.PostMessage("ceo", "general", "Researcher: please research", nil, x.ID)
+	if err != nil {
+		t.Fatalf("post y: %v", err)
+	}
+	r, err := b.PostMessage("you", "general", "Research findings: competitor A does X, B does Y", nil, y.ID)
+	if err != nil {
+		t.Fatalf("post r: %v", err)
+	}
+	z, err := b.PostMessage("ceo", "general", "Marketing: write email based on research", nil, r.ID)
+	if err != nil {
+		t.Fatalf("post z: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+	// Marketing agent receives z as trigger; thread root is x.
+	ctx := l.buildNotificationContext("general", z.ID, x.ID, 4)
+
+	if !strings.Contains(ctx, "[Recent thread]") {
+		t.Errorf("expected [Recent thread] label, got %q", ctx)
+	}
+	// Root (human ask) must always appear — it's the anchor.
+	if !strings.Contains(ctx, "Research competitors") {
+		t.Error("expected root human message in context")
+	}
+	// Research results must appear — this is the key regression fix.
+	if !strings.Contains(ctx, "Research findings") {
+		t.Error("expected researcher's results in context (deep thread message missing)")
+	}
+	// Trigger (z) must be excluded.
+	if strings.Contains(ctx, "write email based on research") {
+		t.Error("trigger message should be excluded from context")
+	}
+}
+
 func TestBuildNotificationContextFallsBackToChannelWhenThreadEmpty(t *testing.T) {
 	// When threadRootID is given but the thread has no displayable messages
 	// (e.g. the trigger IS the root and no other replies exist yet), the function

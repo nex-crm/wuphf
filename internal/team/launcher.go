@@ -1995,22 +1995,45 @@ func (l *Launcher) buildNotificationContext(channel, triggerMsgID, threadRootID 
 		return strings.TrimRight(b.String(), "\n")
 	}
 
-	// Thread-scoped context: prefer messages that belong to the given thread root.
+	// Thread-scoped context: show all messages in the thread tree (full BFS from
+	// root), always anchoring with the root message so agents see the original
+	// human ask. This matters for dependent task chains — e.g., a marketing agent
+	// writing an email "based on research" needs to see the researcher's results,
+	// which are grandchildren of the thread root, not direct children.
+	//
+	// Approach: always include the root, fill remaining slots with the most recent
+	// non-root thread messages (so the latest activity is always visible).
 	threadRoot := strings.TrimSpace(threadRootID)
 	if threadRoot != "" {
-		var thread []channelMessage
-		for _, m := range msgs {
-			if !baseFilter(m) {
+		threadIDs := l.threadMessageIDs(channel, threadRoot)
+		// Separate root from rest so we can always preserve it.
+		var rootMsg *channelMessage
+		var rest []channelMessage
+		for i := range msgs {
+			m := &msgs[i]
+			if !baseFilter(*m) {
 				continue
 			}
-			if strings.TrimSpace(m.ID) == threadRoot || strings.TrimSpace(m.ReplyTo) == threadRoot {
-				thread = append(thread, m)
+			if strings.TrimSpace(m.ID) == threadRoot {
+				rootMsg = m
+			} else if _, inThread := threadIDs[strings.TrimSpace(m.ID)]; inThread {
+				rest = append(rest, *m)
 			}
 		}
-		if len(thread) > 0 {
-			if len(thread) > limit {
-				thread = thread[len(thread)-limit:]
+		if rootMsg != nil || len(rest) > 0 {
+			// Take last (limit-1) from rest to leave a slot for the root.
+			remaining := limit
+			if rootMsg != nil {
+				remaining--
 			}
+			if len(rest) > remaining {
+				rest = rest[len(rest)-remaining:]
+			}
+			var thread []channelMessage
+			if rootMsg != nil {
+				thread = append(thread, *rootMsg)
+			}
+			thread = append(thread, rest...)
 			return "[Recent thread]\n" + formatContext(thread)
 		}
 	}
