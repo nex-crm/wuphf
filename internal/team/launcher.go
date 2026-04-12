@@ -2113,6 +2113,13 @@ func (l *Launcher) buildTaskNotificationContext(channel, slug string, limit int)
 		return line
 	}
 
+	// Sort tasks so the most recently updated active work surfaces first.
+	// This prevents a fixed insertion-order view where the first 3 tasks created
+	// always fill the slot, potentially hiding newer or more urgent work.
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].UpdatedAt > tasks[j].UpdatedAt
+	})
+
 	lines := make([]string, 0, limit)
 	seen := make(map[string]struct{}, limit)
 	addTask := func(task teamTask) {
