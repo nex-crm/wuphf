@@ -61,6 +61,7 @@ func (l *Launcher) launchHeadlessCodex() error {
 
 	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
 
+	l.resumeInFlightWork()
 	go l.notifyAgentsLoop()
 	if !l.isOneOnOne() {
 		go l.notifyTaskActionsLoop()
