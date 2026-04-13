@@ -33,15 +33,18 @@ func TestLoadMissingFileReturnsEmpty(t *testing.T) {
 func TestRoundtrip(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		in := Config{
-			APIKey:         "test-key",
-			Email:          "user@example.com",
-			WorkspaceID:    "ws-123",
-			WorkspaceSlug:  "my-ws",
-			LLMProvider:    "gemini",
-			GeminiAPIKey:   "gemini-key",
-			DefaultFormat:  "json",
-			DefaultTimeout: 30_000,
-			DevURL:         "http://localhost:3000",
+			APIKey:          "test-key",
+			Email:           "user@example.com",
+			WorkspaceID:     "ws-123",
+			WorkspaceSlug:   "my-ws",
+			LLMProvider:     "gemini",
+			GeminiAPIKey:    "gemini-key",
+			AnthropicAPIKey: "anthropic-key",
+			OpenAIAPIKey:    "openai-key",
+			MinimaxAPIKey:   "minimax-key",
+			DefaultFormat:   "json",
+			DefaultTimeout:  30_000,
+			DevURL:          "http://localhost:3000",
 		}
 		if err := Save(in); err != nil {
 			t.Fatalf("Save failed: %v", err)
@@ -150,6 +153,118 @@ func TestResolveComposioAPIKeyFallsBackToConfig(t *testing.T) {
 		_ = Save(Config{ComposioAPIKey: "cmp-key"})
 		if got := ResolveComposioAPIKey(); got != "cmp-key" {
 			t.Fatalf("expected composio key from config, got %q", got)
+		}
+	})
+}
+
+func TestResolveGeminiAPIKeyEnvOverride(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_GEMINI_API_KEY", "wuphf-gemini")
+		_ = Save(Config{GeminiAPIKey: "file-gemini"})
+		if got := ResolveGeminiAPIKey(); got != "wuphf-gemini" {
+			t.Fatalf("expected WUPHF env override, got %q", got)
+		}
+	})
+}
+
+func TestResolveGeminiAPIKeyFallbackEnv(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("GEMINI_API_KEY", "generic-gemini")
+		if got := ResolveGeminiAPIKey(); got != "generic-gemini" {
+			t.Fatalf("expected GEMINI_API_KEY fallback, got %q", got)
+		}
+	})
+}
+
+func TestResolveGeminiAPIKeyConfig(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{GeminiAPIKey: "cfg-gemini"})
+		if got := ResolveGeminiAPIKey(); got != "cfg-gemini" {
+			t.Fatalf("expected config fallback, got %q", got)
+		}
+	})
+}
+
+func TestResolveAnthropicAPIKeyEnvOverride(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_ANTHROPIC_API_KEY", "wuphf-anthropic")
+		_ = Save(Config{AnthropicAPIKey: "file-anthropic"})
+		if got := ResolveAnthropicAPIKey(); got != "wuphf-anthropic" {
+			t.Fatalf("expected WUPHF env override, got %q", got)
+		}
+	})
+}
+
+func TestResolveAnthropicAPIKeyFallbackEnv(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("ANTHROPIC_API_KEY", "generic-anthropic")
+		if got := ResolveAnthropicAPIKey(); got != "generic-anthropic" {
+			t.Fatalf("expected ANTHROPIC_API_KEY fallback, got %q", got)
+		}
+	})
+}
+
+func TestResolveAnthropicAPIKeyConfig(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{AnthropicAPIKey: "cfg-anthropic"})
+		if got := ResolveAnthropicAPIKey(); got != "cfg-anthropic" {
+			t.Fatalf("expected config fallback, got %q", got)
+		}
+	})
+}
+
+func TestResolveOpenAIAPIKeyEnvOverride(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_OPENAI_API_KEY", "wuphf-openai")
+		_ = Save(Config{OpenAIAPIKey: "file-openai"})
+		if got := ResolveOpenAIAPIKey(); got != "wuphf-openai" {
+			t.Fatalf("expected WUPHF env override, got %q", got)
+		}
+	})
+}
+
+func TestResolveOpenAIAPIKeyFallbackEnv(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("OPENAI_API_KEY", "generic-openai")
+		if got := ResolveOpenAIAPIKey(); got != "generic-openai" {
+			t.Fatalf("expected OPENAI_API_KEY fallback, got %q", got)
+		}
+	})
+}
+
+func TestResolveOpenAIAPIKeyConfig(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{OpenAIAPIKey: "cfg-openai"})
+		if got := ResolveOpenAIAPIKey(); got != "cfg-openai" {
+			t.Fatalf("expected config fallback, got %q", got)
+		}
+	})
+}
+
+func TestResolveMinimaxAPIKeyEnvOverride(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_MINIMAX_API_KEY", "wuphf-minimax")
+		_ = Save(Config{MinimaxAPIKey: "file-minimax"})
+		if got := ResolveMinimaxAPIKey(); got != "wuphf-minimax" {
+			t.Fatalf("expected WUPHF env override, got %q", got)
+		}
+	})
+}
+
+func TestResolveMinimaxAPIKeyFallbackEnv(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("MINIMAX_API_KEY", "generic-minimax")
+		if got := ResolveMinimaxAPIKey(); got != "generic-minimax" {
+			t.Fatalf("expected MINIMAX_API_KEY fallback, got %q", got)
+		}
+	})
+}
+
+func TestResolveMinimaxAPIKeyConfig(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{MinimaxAPIKey: "cfg-minimax"})
+		if got := ResolveMinimaxAPIKey(); got != "cfg-minimax" {
+			t.Fatalf("expected config fallback, got %q", got)
 		}
 	})
 }

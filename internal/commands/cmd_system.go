@@ -85,6 +85,27 @@ func cmdInit(ctx *SlashContext, args string) error {
 		ctx.AddMessage("system", "No WUPHF API key is configured yet. Run interactive /init inside WUPHF to add one.")
 	}
 	ctx.AddMessage("system", config.OneSetupBlurb())
+
+	// Provider API key summary
+	type pkEntry struct {
+		name string
+		set  bool
+	}
+	providerKeys := []pkEntry{
+		{"Gemini", config.ResolveGeminiAPIKey() != ""},
+		{"Anthropic", config.ResolveAnthropicAPIKey() != ""},
+		{"OpenAI", config.ResolveOpenAIAPIKey() != ""},
+		{"Minimax", config.ResolveMinimaxAPIKey() != ""},
+	}
+	var pkLines []string
+	for _, pk := range providerKeys {
+		status := "not set"
+		if pk.set {
+			status = "configured"
+		}
+		pkLines = append(pkLines, fmt.Sprintf("  %s: %s", pk.name, status))
+	}
+	ctx.AddMessage("system", "Provider API keys:\n"+strings.Join(pkLines, "\n"))
 	return nil
 }
 

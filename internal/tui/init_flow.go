@@ -331,6 +331,29 @@ func (f InitFlowModel) readinessChecks() []initReadinessCheck {
 		},
 	}
 
+	// Provider API key readiness
+	providerKeys := []struct {
+		label   string
+		resolve func() string
+	}{
+		{"Gemini API key", config.ResolveGeminiAPIKey},
+		{"Anthropic API key", config.ResolveAnthropicAPIKey},
+		{"OpenAI API key", config.ResolveOpenAIAPIKey},
+		{"Minimax API key", config.ResolveMinimaxAPIKey},
+	}
+	for _, pk := range providerKeys {
+		set := pk.resolve() != ""
+		detail := "Not configured. Set via /config set or env var."
+		if set {
+			detail = "Configured."
+		}
+		checks = append(checks, initReadinessCheck{
+			Label:  pk.label,
+			Status: readinessStatusForOptional(set),
+			Detail: detail,
+		})
+	}
+
 	return checks
 }
 
@@ -339,6 +362,13 @@ func readinessStatusForBool(ok bool) string {
 		return "ready"
 	}
 	return "missing"
+}
+
+func readinessStatusForOptional(set bool) string {
+	if set {
+		return "ready"
+	}
+	return "next"
 }
 
 func apiKeyReadinessDetail(ok bool) string {

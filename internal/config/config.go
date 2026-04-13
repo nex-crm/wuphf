@@ -23,6 +23,9 @@ type Config struct {
 	WorkspaceSlug       string `json:"workspace_slug,omitempty"`
 	LLMProvider         string `json:"llm_provider,omitempty"`
 	GeminiAPIKey        string `json:"gemini_api_key,omitempty"`
+	AnthropicAPIKey     string `json:"anthropic_api_key,omitempty"`
+	OpenAIAPIKey        string `json:"openai_api_key,omitempty"`
+	MinimaxAPIKey       string `json:"minimax_api_key,omitempty"`
 	Pack                string `json:"pack,omitempty"`
 	TeamLeadSlug        string `json:"team_lead_slug,omitempty"`
 	MaxConcurrent       int    `json:"max_concurrent_agents,omitempty"`
@@ -353,6 +356,58 @@ func SaveTelegramBotToken(token string) {
 	cfg, _ := Load()
 	cfg.TelegramBotToken = strings.TrimSpace(token)
 	_ = Save(cfg)
+}
+
+// ResolveGeminiAPIKey resolves the Gemini API key.
+// Resolution: WUPHF_GEMINI_API_KEY env > GEMINI_API_KEY env > config file.
+func ResolveGeminiAPIKey() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_GEMINI_API_KEY")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("GEMINI_API_KEY")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.GeminiAPIKey)
+}
+
+// ResolveAnthropicAPIKey resolves the Anthropic API key.
+// Resolution: WUPHF_ANTHROPIC_API_KEY env > ANTHROPIC_API_KEY env > config file.
+func ResolveAnthropicAPIKey() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_ANTHROPIC_API_KEY")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("ANTHROPIC_API_KEY")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.AnthropicAPIKey)
+}
+
+// ResolveOpenAIAPIKey resolves the OpenAI API key.
+// Resolution: WUPHF_OPENAI_API_KEY env > OPENAI_API_KEY env > config file.
+func ResolveOpenAIAPIKey() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_OPENAI_API_KEY")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.OpenAIAPIKey)
+}
+
+// ResolveMinimaxAPIKey resolves the Minimax API key.
+// Resolution: WUPHF_MINIMAX_API_KEY env > MINIMAX_API_KEY env > config file.
+func ResolveMinimaxAPIKey() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_MINIMAX_API_KEY")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("MINIMAX_API_KEY")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.MinimaxAPIKey)
 }
 
 // ResolveComposioUserID resolves the Composio user identity WUPHF should use.
