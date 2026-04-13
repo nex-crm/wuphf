@@ -1744,6 +1744,11 @@ func handleTeamMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemb
 }
 
 func reconfigureLiveOffice() error {
+	if !team.HasLiveTmuxSession() {
+		// Web mode: no tmux session to reconfigure. The broker state is already
+		// updated, and the headless turn system picks up new members by slug.
+		return nil
+	}
 	l, err := team.NewLauncher("")
 	if err != nil {
 		return err

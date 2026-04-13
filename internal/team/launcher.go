@@ -2521,6 +2521,12 @@ func (l *Launcher) listTeamPanes() ([]int, error) {
 	return parseAgentPaneIndices(string(out)), nil
 }
 
+// HasLiveTmuxSession returns true if a wuphf-team tmux session is running.
+func HasLiveTmuxSession() bool {
+	err := exec.Command("tmux", "-L", tmuxSocketName, "has-session", "-t", SessionName).Run()
+	return err == nil
+}
+
 func isMissingTmuxSession(output string) bool {
 	normalized := strings.ToLower(strings.TrimSpace(output))
 	if normalized == "" {
@@ -3336,6 +3342,8 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
+	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)
+	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
 	l.broker.ServeWebUI(webPort)
 
 	// Web mode always uses queued headless turns so notifications can push
