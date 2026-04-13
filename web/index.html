@@ -2719,6 +2719,7 @@ function showOffice() {
         startMessagePolling();
         startRequestPolling();
         startMemberActivityPolling();
+        connectOfficeEvents();
       })
       .catch(function() {
         renderSidebarAgents();
@@ -3536,6 +3537,178 @@ function renderSidebarChannels() {
     btn.appendChild(name);
     container.appendChild(btn);
   });
+
+  // "New Channel" button
+  var addBtn = document.createElement('button');
+  addBtn.className = 'sidebar-item sidebar-add-btn';
+  addBtn.style.cssText = 'color:var(--text-secondary);opacity:0.7;font-size:12px;';
+  addBtn.addEventListener('click', function() { openChannelWizard(); });
+  var plusIcon = document.createElement('span');
+  plusIcon.className = 'sidebar-item-icon';
+  plusIcon.style.cssText = 'font-weight:bold;font-size:14px;';
+  plusIcon.textContent = '+';
+  var addLabel = document.createElement('span');
+  addLabel.textContent = 'New Channel';
+  addBtn.appendChild(plusIcon);
+  addBtn.appendChild(addLabel);
+  container.appendChild(addBtn);
+}
+
+function openChannelWizard() {
+  var overlay = document.createElement('div');
+  overlay.className = 'agent-wizard-overlay';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var card = document.createElement('div');
+  card.className = 'agent-wizard-card';
+
+  var title = document.createElement('h3');
+  title.textContent = 'New Channel';
+  card.appendChild(title);
+
+  var promptSection = document.createElement('div');
+  var formSection = document.createElement('div');
+
+  // ── Mode toggle ──
+  var modeToggle = document.createElement('div');
+  modeToggle.style.cssText = 'display:flex;gap:0;margin-bottom:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;';
+  var describeTab = document.createElement('button');
+  describeTab.textContent = 'Describe';
+  describeTab.className = 'btn btn-sm';
+  describeTab.style.cssText = 'flex:1;border-radius:0;border:none;background:var(--accent);color:#fff;';
+  var manualTab = document.createElement('button');
+  manualTab.textContent = 'Manual';
+  manualTab.className = 'btn btn-sm';
+  manualTab.style.cssText = 'flex:1;border-radius:0;border:none;background:transparent;color:var(--text-secondary);';
+
+  function setMode(mode) {
+    if (mode === 'describe') {
+      describeTab.style.background = 'var(--accent)';
+      describeTab.style.color = '#fff';
+      manualTab.style.background = 'transparent';
+      manualTab.style.color = 'var(--text-secondary)';
+      promptSection.style.display = '';
+      formSection.style.display = 'none';
+    } else {
+      manualTab.style.background = 'var(--accent)';
+      manualTab.style.color = '#fff';
+      describeTab.style.background = 'transparent';
+      describeTab.style.color = 'var(--text-secondary)';
+      promptSection.style.display = 'none';
+      formSection.style.display = '';
+    }
+  }
+  describeTab.addEventListener('click', function() { setMode('describe'); });
+  manualTab.addEventListener('click', function() { setMode('manual'); });
+  modeToggle.appendChild(describeTab);
+  modeToggle.appendChild(manualTab);
+  card.appendChild(modeToggle);
+
+  // ── Describe section ──
+  var promptField = document.createElement('div');
+  promptField.className = 'agent-wizard-field';
+  var promptLabel = document.createElement('label');
+  promptLabel.textContent = 'Describe the channel you want';
+  promptField.appendChild(promptLabel);
+  var promptInput = document.createElement('textarea');
+  promptInput.placeholder = 'e.g. "A channel for the frontend team to discuss UI work"';
+  promptInput.style.minHeight = '80px';
+  promptField.appendChild(promptInput);
+  promptSection.appendChild(promptField);
+
+  var generateBtn = document.createElement('button');
+  generateBtn.className = 'btn btn-primary';
+  generateBtn.style.width = '100%';
+  generateBtn.textContent = 'Generate';
+  generateBtn.addEventListener('click', function() {
+    var prompt = (promptInput.value || '').trim();
+    if (!prompt) { showNotice('Describe the channel first', 'error'); return; }
+    generateBtn.disabled = true;
+    generateBtn.textContent = 'Generating...';
+    WuphfAPI.post('/channels/generate', { prompt: prompt })
+      .then(function(tmpl) {
+        chInputs.slug.value = tmpl.slug || '';
+        chInputs.name.value = tmpl.name || '';
+        chInputs.description.value = tmpl.description || '';
+        setMode('manual');
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate';
+      })
+      .catch(function(e) {
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate';
+        showNotice('Generation failed: ' + (e.message || e), 'error');
+      });
+  });
+  promptSection.appendChild(generateBtn);
+  card.appendChild(promptSection);
+
+  // ── Manual form fields ──
+  var chFields = [
+    { key: 'slug', label: 'Slug', placeholder: 'e.g. frontend' },
+    { key: 'name', label: 'Name', placeholder: 'e.g. Frontend' },
+    { key: 'description', label: 'Description', placeholder: 'What is this channel for?', type: 'textarea' }
+  ];
+  var chInputs = {};
+  chFields.forEach(function(f) {
+    var fieldDiv = document.createElement('div');
+    fieldDiv.className = 'agent-wizard-field';
+    var label = document.createElement('label');
+    label.textContent = f.label;
+    fieldDiv.appendChild(label);
+    var inp;
+    if (f.type === 'textarea') {
+      inp = document.createElement('textarea');
+    } else {
+      inp = document.createElement('input');
+      inp.type = 'text';
+    }
+    inp.placeholder = f.placeholder || '';
+    chInputs[f.key] = inp;
+    fieldDiv.appendChild(inp);
+    formSection.appendChild(fieldDiv);
+  });
+  card.appendChild(formSection);
+  formSection.style.display = 'none';
+
+  // ── Actions ──
+  var actions = document.createElement('div');
+  actions.className = 'agent-wizard-actions';
+  var cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-secondary';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', function() { overlay.remove(); });
+
+  var submitBtn = document.createElement('button');
+  submitBtn.className = 'btn btn-primary';
+  submitBtn.textContent = 'Create Channel';
+  submitBtn.addEventListener('click', function() {
+    var slug = (chInputs.slug.value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    var chName = (chInputs.name.value || '').trim();
+    var desc = (chInputs.description.value || '').trim();
+    if (!slug) { showNotice('Slug is required', 'error'); return; }
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating...';
+    WuphfAPI.post('/channels', { action: 'create', slug: slug, name: chName || slug, description: desc, created_by: 'you' })
+      .then(function() {
+        overlay.remove();
+        showNotice('Channel #' + slug + ' created', 'success');
+        CHANNELS.push({ name: chName || slug, desc: desc });
+        renderSidebarChannels();
+        switchChannel(chName || slug);
+      })
+      .catch(function(e) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Channel';
+        showNotice('Failed: ' + (e.message || e), 'error');
+      });
+  });
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(submitBtn);
+  card.appendChild(actions);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
 }
 
 function switchChannel(name) {
@@ -4459,6 +4632,48 @@ function fetchMemberActivity() {
     if (Array.isArray(cachedTasks) === false) cachedTasks = [];
     if (results[2]) cachedUsage = results[2];
     refreshLiveActivityUI();
+  });
+}
+
+// ─── Office change SSE (live sidebar updates) ───
+var officeEventSource = null;
+function connectOfficeEvents() {
+  if (officeEventSource) { officeEventSource.close(); officeEventSource = null; }
+  var url = WuphfAPI.sseURL('/events');
+  officeEventSource = new EventSource(url);
+  officeEventSource.addEventListener('office_changed', function() {
+    refreshOfficeSidebar();
+  });
+  officeEventSource.onerror = function() {
+    // Reconnection is automatic with EventSource
+  };
+}
+function refreshOfficeSidebar() {
+  Promise.all([
+    WuphfAPI.getOfficeMembers().catch(function() { return { members: [] }; }),
+    WuphfAPI.getChannels().catch(function() { return { channels: [] }; })
+  ]).then(function(results) {
+    if (results[0].members && results[0].members.length > 0) {
+      AGENTS = results[0].members.map(function(m) {
+        return {
+          slug: m.slug,
+          emoji: m.emoji || m.slug.charAt(0).toUpperCase(),
+          name: m.name || m.slug,
+          role: m.role || '',
+          checked: true,
+          type: m.type || 'specialist',
+          expertise: m.expertise || [],
+          personality: m.personality || ''
+        };
+      });
+    }
+    if (results[1].channels && results[1].channels.length > 0) {
+      CHANNELS = results[1].channels.map(function(ch) {
+        return { name: ch.name || ch.slug, desc: ch.description || '' };
+      });
+    }
+    renderSidebarAgents();
+    renderSidebarChannels();
   });
 }
 
@@ -5530,6 +5745,88 @@ function openAgentWizard(existingAgent) {
   title.textContent = isEdit ? 'Edit Agent' : 'New Agent';
   card.appendChild(title);
 
+  // ── Mode toggle (Describe / Manual) ──
+  var promptSection = document.createElement('div');
+  var formSection = document.createElement('div');
+
+  if (!isEdit) {
+    var modeToggle = document.createElement('div');
+    modeToggle.style.cssText = 'display:flex;gap:0;margin-bottom:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;';
+    var describeTab = document.createElement('button');
+    describeTab.textContent = 'Describe';
+    describeTab.className = 'btn btn-sm';
+    describeTab.style.cssText = 'flex:1;border-radius:0;border:none;background:var(--accent);color:#fff;';
+    var manualTab = document.createElement('button');
+    manualTab.textContent = 'Manual';
+    manualTab.className = 'btn btn-sm';
+    manualTab.style.cssText = 'flex:1;border-radius:0;border:none;background:transparent;color:var(--text-secondary);';
+
+    function setMode(mode) {
+      if (mode === 'describe') {
+        describeTab.style.background = 'var(--accent)';
+        describeTab.style.color = '#fff';
+        manualTab.style.background = 'transparent';
+        manualTab.style.color = 'var(--text-secondary)';
+        promptSection.style.display = '';
+        formSection.style.display = 'none';
+      } else {
+        manualTab.style.background = 'var(--accent)';
+        manualTab.style.color = '#fff';
+        describeTab.style.background = 'transparent';
+        describeTab.style.color = 'var(--text-secondary)';
+        promptSection.style.display = 'none';
+        formSection.style.display = '';
+      }
+    }
+    describeTab.addEventListener('click', function() { setMode('describe'); });
+    manualTab.addEventListener('click', function() { setMode('manual'); });
+    modeToggle.appendChild(describeTab);
+    modeToggle.appendChild(manualTab);
+    card.appendChild(modeToggle);
+
+    // ── Describe section ──
+    var promptField = document.createElement('div');
+    promptField.className = 'agent-wizard-field';
+    var promptLabel = document.createElement('label');
+    promptLabel.textContent = 'Describe the agent you want';
+    promptField.appendChild(promptLabel);
+    var promptInput = document.createElement('textarea');
+    promptInput.placeholder = 'e.g. "A DevOps engineer who manages CI/CD and infrastructure"';
+    promptInput.style.minHeight = '80px';
+    promptField.appendChild(promptInput);
+    promptSection.appendChild(promptField);
+
+    var generateBtn = document.createElement('button');
+    generateBtn.className = 'btn btn-primary';
+    generateBtn.style.width = '100%';
+    generateBtn.textContent = 'Generate';
+    generateBtn.addEventListener('click', function() {
+      var prompt = (promptInput.value || '').trim();
+      if (!prompt) { showNotice('Describe the agent first', 'error'); return; }
+      generateBtn.disabled = true;
+      generateBtn.textContent = 'Generating...';
+      WuphfAPI.post('/office-members/generate', { prompt: prompt })
+        .then(function(tmpl) {
+          inputs.slug.value = tmpl.slug || '';
+          inputs.name.value = tmpl.name || '';
+          inputs.role.value = tmpl.role || '';
+          inputs.expertise.value = (tmpl.expertise || []).join(', ');
+          inputs.personality.value = tmpl.personality || '';
+          setMode('manual');
+          generateBtn.disabled = false;
+          generateBtn.textContent = 'Generate';
+        })
+        .catch(function(e) {
+          generateBtn.disabled = false;
+          generateBtn.textContent = 'Generate';
+          showNotice('Generation failed: ' + (e.message || e), 'error');
+        });
+    });
+    promptSection.appendChild(generateBtn);
+    card.appendChild(promptSection);
+  }
+
+  // ── Manual form fields ──
   var fields = [
     { key: 'slug', label: 'Slug', type: 'input', placeholder: 'e.g. devops', disabled: isEdit },
     { key: 'name', label: 'Name', type: 'input', placeholder: 'e.g. DevOps Engineer' },
@@ -5563,8 +5860,10 @@ function openAgentWizard(existingAgent) {
     }
     inputs[f.key] = inp;
     fieldDiv.appendChild(inp);
-    card.appendChild(fieldDiv);
+    formSection.appendChild(fieldDiv);
   });
+  card.appendChild(formSection);
+  if (!isEdit) formSection.style.display = 'none';
 
   var actions = document.createElement('div');
   actions.className = 'agent-wizard-actions';
@@ -5625,7 +5924,9 @@ function openAgentWizard(existingAgent) {
   card.appendChild(actions);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
-  inputs[isEdit ? 'name' : 'slug'].focus();
+  if (isEdit) {
+    inputs.name.focus();
+  }
 }
 
 // ─── Doctor Panel (#82, #97) ───

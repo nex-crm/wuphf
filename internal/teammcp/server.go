@@ -372,7 +372,7 @@ func Run(ctx context.Context) error {
 
 		mcp.AddTool(server, readOnlyTool(
 			"read_conversation",
-			"Read recent messages from the 1:1 conversation so you stay in sync before replying.",
+			"LAST RESORT: Read recent 1:1 messages only when the pushed notification is missing context you genuinely need. Do NOT call this before every reply.",
 		), handleTeamPoll)
 
 		mcp.AddTool(server, officeWriteTool(
@@ -431,7 +431,7 @@ func Run(ctx context.Context) error {
 	), handleTeamBroadcast)
 	mcp.AddTool(server, readOnlyTool(
 		"team_poll",
-		"Read recent channel messages.",
+		"Read recent channel messages. Only when pushed context is insufficient.",
 	), handleTeamPoll)
 	mcp.AddTool(server, officeWriteTool(
 		"human_message",
@@ -1746,6 +1746,11 @@ func handleTeamMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemb
 }
 
 func reconfigureLiveOffice() error {
+	if !team.HasLiveTmuxSession() {
+		// Web mode: no tmux session to reconfigure. The broker state is already
+		// updated, and the headless turn system picks up new members by slug.
+		return nil
+	}
 	l, err := team.NewLauncher("")
 	if err != nil {
 		return err
