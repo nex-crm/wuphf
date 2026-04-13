@@ -1615,8 +1615,27 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </div>
       </div>
 
-      <!-- Step 5: GitHub -->
+      <!-- Step 5: API Keys -->
       <div class="step" data-step="5">
+        <h1 class="step-title">Provider API Keys</h1>
+        <p class="step-subtitle">Connect the LLM providers you want your agents to use. All keys are optional &mdash; configure what you need now and add more later via <code>/config set</code>.</p>
+        <div class="card" style="padding:24px;max-width:540px;margin:0 auto;">
+          <div class="api-key-list" id="api-key-list"></div>
+        </div>
+        <div class="step-nav" style="max-width:540px;margin:0 auto;">
+          <button class="btn btn-secondary" onclick="goToStep(4)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+            Back
+          </button>
+          <button class="btn btn-primary" onclick="goToStep(6)">
+            Next
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 6: GitHub -->
+      <div class="step" data-step="6">
         <div class="emoji-backdrop">
           <div class="cloud-row emoji-float" style="top:-5%;left:-8%;opacity:0.4;--dur:34s;animation-delay:-8s;">&#x2728;</div>
           <div class="cloud-row cloud-row-reverse emoji-float" style="top:5%;left:55%;opacity:0.35;--dur:42s;animation-delay:-17s;">&#x2728;</div>
@@ -1645,11 +1664,11 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
             </div>
           </div>
           <div class="step-nav" style="max-width:600px;margin:16px auto 0;">
-            <button class="btn btn-secondary" onclick="goToStep(4)">
+            <button class="btn btn-secondary" onclick="goToStep(5)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
               Back
             </button>
-            <button class="btn btn-primary" onclick="goToStep(6)">
+            <button class="btn btn-primary" onclick="goToStep(7)">
               Next
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
             </button>
@@ -1657,8 +1676,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </div>
       </div>
 
-      <!-- Step 6: Discord + Launch -->
-      <div class="step" data-step="6">
+      <!-- Step 7: Discord + Launch -->
+      <div class="step" data-step="7">
         <div class="emoji-backdrop">
           <div class="cloud-row emoji-float" style="top:-5%;left:-8%;opacity:0.4;--dur:34s;animation-delay:-8s;">&#x1F4AC;</div>
           <div class="cloud-row cloud-row-reverse emoji-float" style="top:5%;left:55%;opacity:0.35;--dur:42s;animation-delay:-17s;">&#x1F4AC;</div>
@@ -1687,7 +1706,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
             </div>
           </div>
           <div class="step-nav" style="max-width:600px;margin:16px auto 0;">
-            <button class="btn btn-secondary" onclick="goToStep(5)">
+            <button class="btn btn-secondary" onclick="goToStep(6)">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
               Back
             </button>
@@ -2262,7 +2281,7 @@ var WuphfAPI = (function() {
 })();
 
 // ─── State ───
-var TOTAL_STEPS = 7;
+var TOTAL_STEPS = 8;
 var currentStep = 0;
 var selectedSize = '';
 var brokerConnected = false;
@@ -2429,6 +2448,58 @@ function renderPrereqs() {
 }
 
 function recheckPrereqs() { renderPrereqs(); }
+
+// ─── API Keys ───
+var API_KEYS = [
+  { id: 'gemini',    name: 'Gemini',    configKey: 'gemini_api_key',    envHint: 'GEMINI_API_KEY',    icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>' },
+  { id: 'anthropic', name: 'Anthropic',  configKey: 'anthropic_api_key', envHint: 'ANTHROPIC_API_KEY', icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a5 5 0 0 0-5 5v3H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8a2 2 0 0 0-2-2h-1V7a5 5 0 0 0-5-5z"/></svg>' },
+  { id: 'openai',    name: 'OpenAI',    configKey: 'openai_api_key',    envHint: 'OPENAI_API_KEY',    icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>' },
+  { id: 'minimax',   name: 'Minimax',   configKey: 'minimax_api_key',   envHint: 'MINIMAX_API_KEY',   icon: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12h8"/><path d="M12 8v8"/></svg>' },
+];
+
+function renderAPIKeys() {
+  var container = document.getElementById('api-key-list');
+  if (!container) return;
+  container.textContent = '';
+  API_KEYS.forEach(function(k) {
+    var item = document.createElement('div');
+    item.className = 'prereq-item';
+    item.style.marginBottom = '8px';
+
+    var icon = document.createElement('div');
+    icon.className = 'prereq-icon';
+    // Static SVG icons — same pattern as renderPrereqs
+    icon.innerHTML = k.icon;
+
+    var info = document.createElement('div');
+    info.className = 'prereq-info';
+    info.style.flex = '1';
+    var nameEl = document.createElement('p');
+    nameEl.className = 'prereq-name';
+    nameEl.textContent = k.name;
+    var hintEl = document.createElement('p');
+    hintEl.className = 'prereq-status';
+    hintEl.textContent = '/config set ' + k.configKey + '  or  ' + k.envHint;
+    info.appendChild(nameEl);
+    info.appendChild(hintEl);
+
+    var input = document.createElement('input');
+    input.className = 'input';
+    input.type = 'password';
+    input.placeholder = k.envHint;
+    input.id = 'ak-' + k.id;
+    input.style.cssText = 'width:180px;font-size:13px;padding:6px 10px;';
+    input.addEventListener('input', function() {
+      var filled = input.value.trim() !== '';
+      item.className = 'prereq-item' + (filled ? ' ready' : '');
+    });
+
+    item.appendChild(icon);
+    item.appendChild(info);
+    item.appendChild(input);
+    container.appendChild(item);
+  });
+}
 
 // ─── Build team ───
 function buildTeam() {
@@ -5679,6 +5750,7 @@ function initApp() {
         renderProgress();
         renderSizeOptions();
         renderPrereqs();
+        renderAPIKeys();
       }
     })
     .catch(function(err) {
@@ -5690,6 +5762,7 @@ function initApp() {
       renderProgress();
       renderSizeOptions();
       renderPrereqs();
+      renderAPIKeys();
     });
 }
 
