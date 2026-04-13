@@ -37,6 +37,11 @@ type Config struct {
 	TaskReminderMinutes int    `json:"task_reminder_minutes,omitempty"`
 	TaskRecheckMinutes  int    `json:"task_recheck_minutes,omitempty"`
 	TelegramBotToken    string `json:"telegram_bot_token,omitempty"`
+	CompanyName         string `json:"company_name,omitempty"`
+	CompanyDescription  string `json:"company_description,omitempty"`
+	CompanyGoals        string `json:"company_goals,omitempty"`
+	CompanySize         string `json:"company_size,omitempty"`
+	CompanyPriority     string `json:"company_priority,omitempty"`
 }
 
 // ConfigPath returns the absolute path to ~/.wuphf/config.json, with a legacy
@@ -356,6 +361,30 @@ func SaveTelegramBotToken(token string) {
 	cfg, _ := Load()
 	cfg.TelegramBotToken = strings.TrimSpace(token)
 	_ = Save(cfg)
+}
+
+// CompanyContextBlock returns a prompt fragment with company context for agent
+// system prompts. Returns empty string if no company name is configured.
+func CompanyContextBlock() string {
+	cfg, _ := Load()
+	name := strings.TrimSpace(cfg.CompanyName)
+	if name == "" {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("== COMPANY CONTEXT ==\n")
+	sb.WriteString(fmt.Sprintf("Company: %s\n", name))
+	if desc := strings.TrimSpace(cfg.CompanyDescription); desc != "" {
+		sb.WriteString(fmt.Sprintf("What they do: %s\n", desc))
+	}
+	if goals := strings.TrimSpace(cfg.CompanyGoals); goals != "" {
+		sb.WriteString(fmt.Sprintf("Current goals: %s\n", goals))
+	}
+	if priority := strings.TrimSpace(cfg.CompanyPriority); priority != "" {
+		sb.WriteString(fmt.Sprintf("Immediate priority: %s\n", priority))
+	}
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 // ResolveGeminiAPIKey resolves the Gemini API key.
