@@ -417,9 +417,10 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	l.notifyMu.Unlock()
 	immediate = filtered
 
-	// Broadcast stage update only for untagged messages in team mode
-	// (tagged messages go directly to the agent — user already knows who's handling it)
-	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && len(msg.Tagged) == 0 {
+	// Broadcast stage update only for untagged messages in public channels.
+	// Never in DMs — DMs are private 1:1 conversations, no routing noise.
+	isDM := IsDMSlug(normalizeChannelSlug(msg.Channel))
+	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && !isDM && len(msg.Tagged) == 0 {
 		names := make([]string, 0, len(immediate))
 		for _, t := range immediate {
 			names = append(names, "@"+t.Slug)
@@ -657,6 +658,17 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
 	targetMap := l.agentPaneTargets()
 	if len(targetMap) == 0 {
+		return nil, nil
+	}
+	// DMs are isolated: only the target agent gets notified, never CEO or others.
+	if ch := normalizeChannelSlug(msg.Channel); IsDMSlug(ch) {
+		agentSlug := DMTargetAgent(ch)
+		if agentSlug == msg.From {
+			return nil, nil // agent's own message, don't echo back
+		}
+		if target, ok := targetMap[agentSlug]; ok {
+			return []notificationTarget{target}, nil
+		}
 		return nil, nil
 	}
 	if l.isOneOnOne() {

@@ -30,7 +30,7 @@ const BrokerPort = 7890
 // Tests can redirect this to a temp directory to avoid clobbering the live broker token.
 var brokerTokenFilePath = "/tmp/wuphf-broker-token"
 
-const defaultRateLimitRequestsPerWindow = 100
+const defaultRateLimitRequestsPerWindow = 600
 const defaultRateLimitWindow = time.Minute
 
 var brokerStatePath = defaultBrokerStatePath
@@ -182,6 +182,7 @@ type channelSurface struct {
 type teamChannel struct {
 	Slug        string          `json:"slug"`
 	Name        string          `json:"name"`
+	Type        string          `json:"type,omitempty"` // "channel" (default) or "dm"
 	Description string          `json:"description,omitempty"`
 	Members     []string        `json:"members,omitempty"`
 	Disabled    []string        `json:"disabled,omitempty"`
@@ -189,6 +190,29 @@ type teamChannel struct {
 	CreatedBy   string          `json:"created_by,omitempty"`
 	CreatedAt   string          `json:"created_at,omitempty"`
 	UpdatedAt   string          `json:"updated_at,omitempty"`
+}
+
+func (ch *teamChannel) isDM() bool {
+	return ch.Type == "dm" || strings.HasPrefix(ch.Slug, "dm-")
+}
+
+// IsDMSlug checks whether a channel slug represents a direct message.
+func IsDMSlug(slug string) bool {
+	return strings.HasPrefix(slug, "dm-")
+}
+
+// DMSlugFor returns the DM channel slug for a given agent.
+func DMSlugFor(agentSlug string) string {
+	return "dm-" + agentSlug
+}
+
+// DMTargetAgent extracts the agent slug from a DM channel slug.
+// Returns "" if the slug is not a DM.
+func DMTargetAgent(slug string) string {
+	if !IsDMSlug(slug) {
+		return ""
+	}
+	return strings.TrimPrefix(slug, "dm-")
 }
 
 type officeMember struct {
@@ -652,15 +676,19 @@ func (b *Broker) Addr() string {
 }
 
 // requireAuth wraps a handler to enforce Bearer token authentication.
-// The /health and /version endpoints are excluded so liveness and build checks work without credentials.
+// Accepts token via Authorization header or ?token= query parameter (for EventSource which can't set headers).
 func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
-		if auth != "Bearer "+b.token {
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		if auth == "Bearer "+b.token {
+			next(w, r)
 			return
 		}
-		next(w, r)
+		if r.URL.Query().Get("token") == b.token {
+			next(w, r)
+			return
+		}
+		http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 	}
 }
 
@@ -719,10 +747,10 @@ func (b *Broker) StartOnPort(port int) error {
 	b.addr = ln.Addr().String()
 
 	b.server = &http.Server{
-		Addr:         addr,
-		Handler:      b.corsMiddleware(b.rateLimitMiddleware(mux)),
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
+		Addr:        addr,
+		Handler:     b.corsMiddleware(b.rateLimitMiddleware(mux)),
+		ReadTimeout: 5 * time.Second,
+		// No WriteTimeout — SSE streams (agent-stream, events) are open-ended.
 	}
 
 	// Write token to well-known path so tests and tools can authenticate.
@@ -746,6 +774,11 @@ func (b *Broker) Stop() {
 
 func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Exempt liveness and version checks from rate limiting
+		if r.URL.Path == "/health" || r.URL.Path == "/version" || r.URL.Path == "/web-token" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		retryAfter, limited := b.consumeRateLimit(clientIPFromRequest(r))
 		if limited {
 			seconds := int((retryAfter + time.Second - 1) / time.Second)
@@ -1024,8 +1057,15 @@ func (b *Broker) handleAgentStream(w http.ResponseWriter, r *http.Request) {
 	stream := b.AgentStream(slug)
 
 	// Replay recent history so the client sees context immediately.
-	for _, line := range stream.recent() {
+	history := stream.recent()
+	for _, line := range history {
 		if _, err := fmt.Fprintf(w, "data: %s\n\n", line); err != nil {
+			return
+		}
+	}
+	// If no history, send a connected event so the client knows the stream is live.
+	if len(history) == 0 {
+		if _, err := fmt.Fprintf(w, "data: [connected]\n\n"); err != nil {
 			return
 		}
 	}
@@ -1291,7 +1331,11 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 		return channelMessage{}, fmt.Errorf("channel required for surface message")
 	}
 	if b.findChannelLocked(channel) == nil {
-		return channelMessage{}, fmt.Errorf("channel not found: %s", channel)
+		if IsDMSlug(channel) {
+			b.ensureDMConversationLocked(channel)
+		} else {
+			return channelMessage{}, fmt.Errorf("channel not found: %s", channel)
+		}
 	}
 	b.counter++
 	msg := channelMessage{
@@ -1921,6 +1965,30 @@ func (b *Broker) findChannelLocked(slug string) *teamChannel {
 		}
 	}
 	return nil
+}
+
+// ensureDMConversationLocked returns the DM conversation for the given slug,
+// creating it on the fly if it doesn't exist. Mirrors Slack's conversations.open.
+func (b *Broker) ensureDMConversationLocked(slug string) *teamChannel {
+	if ch := b.findChannelLocked(slug); ch != nil {
+		return ch
+	}
+	if !IsDMSlug(slug) {
+		return nil
+	}
+	agentSlug := DMTargetAgent(slug)
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.channels = append(b.channels, teamChannel{
+		Slug:        slug,
+		Name:        slug,
+		Type:        "dm",
+		Description: "Direct messages with " + agentSlug,
+		Members:     []string{"human", agentSlug},
+		CreatedBy:   "wuphf",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	return &b.channels[len(b.channels)-1]
 }
 
 func (b *Broker) findMemberLocked(slug string) *officeMember {
@@ -3421,9 +3489,21 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		typeFilter := r.URL.Query().Get("type") // "dm" to see DMs, default excludes them
 		b.mu.Lock()
-		channels := make([]teamChannel, len(b.channels))
-		copy(channels, b.channels)
+		channels := make([]teamChannel, 0, len(b.channels))
+		for _, ch := range b.channels {
+			if typeFilter == "dm" {
+				if ch.isDM() {
+					channels = append(channels, ch)
+				}
+			} else {
+				// Default: only return real channels, never DMs
+				if !ch.isDM() {
+					channels = append(channels, ch)
+				}
+			}
+		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{"channels": channels})
@@ -3945,10 +4025,15 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if channel == "" {
 		channel = "general"
 	}
+	// Auto-create DM conversations on first message (like Slack's conversations.open)
 	if b.findChannelLocked(channel) == nil {
-		b.mu.Unlock()
-		http.Error(w, "channel not found", http.StatusNotFound)
-		return
+		if IsDMSlug(channel) {
+			b.ensureDMConversationLocked(channel)
+		} else {
+			b.mu.Unlock()
+			http.Error(w, "channel not found", http.StatusNotFound)
+			return
+		}
 	}
 	if !b.canAccessChannelLocked(body.From, channel) {
 		b.mu.Unlock()
@@ -4274,6 +4359,10 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.mu.Lock()
+	// Auto-create DM conversation on read (user opens DM before sending)
+	if IsDMSlug(channel) && b.findChannelLocked(channel) == nil {
+		b.ensureDMConversationLocked(channel)
+	}
 	if !b.canAccessChannelLocked(accessSlug, channel) {
 		b.mu.Unlock()
 		http.Error(w, "channel access denied", http.StatusForbidden)

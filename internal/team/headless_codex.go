@@ -1,9 +1,11 @@
 package team
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -345,6 +347,28 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 		return fmt.Errorf("attach codex stdout: %w", err)
 	}
 
+	// Tee raw stdout to the agent stream so the web UI can display live output.
+	// The ReadCodexJSONStream parser doesn't emit streaming events for exec mode's
+	// item.started/item.completed format, so we pipe raw lines directly.
+	var agentStream *agentStreamBuffer
+	if l.broker != nil {
+		agentStream = l.broker.AgentStream(slug)
+	}
+	pr, pw := io.Pipe()
+	teedStdout := io.TeeReader(stdout, pw)
+	// Pipe every raw line from the provider (codex/claude) to the web UI's live stream.
+	// No filtering — the user sees everything the agent sees.
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if agentStream != nil && line != "" {
+				agentStream.Push(line)
+			}
+		}
+	}()
+
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
@@ -363,7 +387,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	var firstTextAt time.Time
 	var firstToolAt time.Time
 	textStarted := false
-	result, parseErr := provider.ReadCodexJSONStream(stdout, func(event provider.CodexStreamEvent) {
+	result, parseErr := provider.ReadCodexJSONStream(teedStdout, func(event provider.CodexStreamEvent) {
 		if firstEventAt.IsZero() {
 			firstEventAt = time.Now()
 			metrics.FirstEventMs = durationMillis(startedAt, firstEventAt)
@@ -383,16 +407,19 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 				firstToolAt = time.Now()
 				metrics.FirstToolMs = durationMillis(startedAt, firstToolAt)
 			}
-			appendHeadlessCodexLog(slug, fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120)))
+			line := fmt.Sprintf("tool_use: %s %s", event.ToolName, truncate(event.ToolInput, 120))
+			appendHeadlessCodexLog(slug, line)
 			l.updateHeadlessProgress(slug, "active", "tool_use", fmt.Sprintf("running %s", strings.TrimSpace(event.ToolName)), metrics)
 		case "tool_result":
-			appendHeadlessCodexLog(slug, "tool_result: "+truncate(event.Text, 140))
+			line := "tool_result: " + truncate(event.Text, 140)
+			appendHeadlessCodexLog(slug, line)
 			l.updateHeadlessProgress(slug, "active", "tool_result", truncate(event.Text, 140), metrics)
 		case "error":
 			appendHeadlessCodexLog(slug, "stream_error: "+event.Detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
 		}
 	})
+	pw.Close() // signal scanner goroutine that stream is done
 	if err := cmd.Wait(); err != nil {
 		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()

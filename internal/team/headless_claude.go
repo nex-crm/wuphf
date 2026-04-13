@@ -1,8 +1,10 @@
 package team
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -75,9 +77,28 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		return fmt.Errorf("attach claude stdout: %w", err)
 	}
 
+	// Pipe raw stdout to the agent stream for the web UI's live output pane.
+	var agentStream *agentStreamBuffer
+	if l.broker != nil {
+		agentStream = l.broker.AgentStream(slug)
+	}
+	pr, pw := io.Pipe()
+	teedStdout := io.TeeReader(stdout, pw)
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if agentStream != nil && line != "" {
+				agentStream.Push(line)
+			}
+		}
+	}()
+
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
+		pw.Close()
 		return err
 	}
 
@@ -95,7 +116,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	var firstToolAt time.Time
 	textStarted := false
 
-	result, parseErr := provider.ReadClaudeJSONStream(stdout, func(event provider.ClaudeStreamEvent) {
+	result, parseErr := provider.ReadClaudeJSONStream(teedStdout, func(event provider.ClaudeStreamEvent) {
 		if firstEventAt.IsZero() {
 			firstEventAt = time.Now()
 			metrics.FirstEventMs = durationMillis(startedAt, firstEventAt)
@@ -127,6 +148,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
 		}
 	})
+	pw.Close() // signal scanner goroutine that stream is done
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()), err.Error()))
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
