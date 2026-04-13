@@ -2301,6 +2301,7 @@ var memberActivityPollTimer = null;
 var cachedMembers = []; // latest /office-members data for activity classification
 var cachedTasks = []; // latest /tasks data
 var cachedRequests = []; // latest /requests data for runtime strip
+var cachedUsage = null; // latest /usage data for token counts
 
 var SIDEBAR_APPS = [
   { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
@@ -3301,7 +3302,13 @@ function renderWorkspaceSummary() {
   var activeAgents = 0;
   cachedMembers.forEach(function(m) { if (classifyActivity(m).state !== 'lurking') activeAgents++; });
   var openTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; }).length;
-  summaryEl.textContent = activeAgents + ' agent' + (activeAgents !== 1 ? 's' : '') + ' active, ' + openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' open';
+  var summaryParts = [activeAgents + ' agent' + (activeAgents !== 1 ? 's' : '') + ' active', openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' open'];
+  // Add total token count if available
+  if (cachedUsage && cachedUsage.total) {
+    var totalTokens = (cachedUsage.total.input_tokens || 0) + (cachedUsage.total.output_tokens || 0) + (cachedUsage.total.cache_read_tokens || 0);
+    if (totalTokens > 0) summaryParts.push(formatTokens(totalTokens) + ' tokens');
+  }
+  summaryEl.textContent = summaryParts.join(', ');
   hintEl.textContent = openTasks > 0 ? (openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' in progress') : 'Type / for commands';
 }
 
@@ -3405,6 +3412,18 @@ function renderLiveWork() {
       card.appendChild(dot);
       card.appendChild(agentName);
       card.appendChild(taskText);
+      // Session token count for this agent
+      if (cachedUsage && cachedUsage.agents && cachedUsage.agents[a.slug]) {
+        var au = cachedUsage.agents[a.slug];
+        var agentTokens = (au.input_tokens || 0) + (au.output_tokens || 0);
+        if (agentTokens > 0) {
+          var tokenBadge = document.createElement('span');
+          tokenBadge.className = 'live-work-card-tokens';
+          tokenBadge.textContent = formatTokens(agentTokens);
+          tokenBadge.title = 'Session tokens: ' + agentTokens.toLocaleString() + ' (in: ' + (au.input_tokens || 0).toLocaleString() + ', out: ' + (au.output_tokens || 0).toLocaleString() + ')';
+          card.appendChild(tokenBadge);
+        }
+      }
       card.addEventListener('click', (function(slug) {
         return function() { switchChannel('dm-' + slug); };
       })(a.slug));
@@ -4385,11 +4404,13 @@ function startMemberActivityPolling() {
 function fetchMemberActivity() {
   Promise.all([
     WuphfAPI.getMembers(currentChannel).catch(function() { return { members: [] }; }),
-    WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; })
+    WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; }),
+    WuphfAPI.getUsage().catch(function() { return null; })
   ]).then(function(results) {
     cachedMembers = normalizeMemberActivityHints(results[0].members || []);
     cachedTasks = (results[1].tasks || results[1] || []);
     if (Array.isArray(cachedTasks) === false) cachedTasks = [];
+    if (results[2]) cachedUsage = results[2];
     refreshLiveActivityUI();
   });
 }

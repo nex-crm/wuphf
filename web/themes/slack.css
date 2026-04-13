@@ -2417,3 +2417,18 @@ html[data-theme="slack-dark"] .dm-stream-collapse-icon {
   margin-left: auto;
   transition: transform 0.15s;
 }
+
+/* ─── Token count badge in live work pills ─── */
+html[data-theme="slack"] .live-work-card-tokens,
+html[data-theme="slack-dark"] .live-work-card-tokens {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  background: var(--bg-warm);
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
