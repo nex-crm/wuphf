@@ -95,7 +95,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
 				os.Exit(1)
 			}
-			fmt.Println("Team session shredded.")
+			fmt.Println("Session shredded. The office is dark. Michael is probably crying in the parking lot.")
 			return
 		case "init":
 			dispatch("/init", *apiKeyFlag, *format)
@@ -160,7 +160,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 	if unsafe {
 		l.SetUnsafe(true)
 		fmt.Fprintf(os.Stderr, "\n\u26a0\ufe0f  UNSAFE MODE: All agents have unrestricted permissions.\n")
-		fmt.Fprintf(os.Stderr, "   This bypasses all tool approval prompts. Use for local dev only.\n\n")
+		fmt.Fprintf(os.Stderr, "   Prison Mike would be proud. Use for local dev only.\n\n")
 	}
 
 	if err := l.Preflight(); err != nil {
@@ -168,7 +168,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 		os.Exit(1)
 	}
 
-	fmt.Printf("Launching %s (%d agents)...\n", l.PackName(), l.AgentCount())
+	fmt.Printf("Launching %s (%d agents)... the cast is assembling.\n", l.PackName(), l.AgentCount())
 
 	if err := l.Launch(); err != nil {
 		fmt.Fprintf(os.Stderr, "error launching team: %v\n", err)
@@ -188,7 +188,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 		return
 	}
 
-	fmt.Println("Team launched. Attaching...")
+	fmt.Println("Team launched. Welcome to The WUPHF Office. Attaching...")
 	fmt.Println()
 	fmt.Println("  Ctrl+B arrow     switch between panes")
 	fmt.Println("  Ctrl+B { or }    swap panes left/right")
@@ -201,7 +201,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 	if err := l.Attach(); err != nil {
 		// Attach failed (not a terminal, or tmux error).
 		// Keep the process alive to maintain the broker.
-		fmt.Fprintf(os.Stderr, "Could not attach to tmux (not a terminal?).\n")
+		fmt.Fprintf(os.Stderr, "Could not attach to tmux (not a terminal?). The office is running without you — like when Michael went to New York.\n")
 		fmt.Fprintf(os.Stderr, "Team is running in background. Attach manually:\n")
 		fmt.Fprintf(os.Stderr, "  tmux -L wuphf attach -t wuphf-team\n")
 		fmt.Fprintf(os.Stderr, "Broker running on http://127.0.0.1:7890\n")
@@ -229,7 +229,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("Launching %s web view (%d agents)...\n", l.PackName(), l.AgentCount())
+	fmt.Printf("Launching %s web view (%d agents)... the browser is the office now.\n", l.PackName(), l.AgentCount())
 	if err := l.LaunchWeb(webPort); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
@@ -238,7 +238,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 
 func dispatch(cmd string, apiKeyFlag string, format string) {
 	if config.ResolveNoNex() {
-		fmt.Fprintf(os.Stderr, "Nex integration is disabled for this session (--no-nex). Start %s without --no-nex to use backend commands.\n", appName)
+		fmt.Fprintf(os.Stderr, "Nex is disabled (--no-nex). Running on local memory — like Creed, but better organized. Start %s without --no-nex to use backend commands.\n", appName)
 		os.Exit(1)
 	}
 	if isSetupCommand(cmd) {

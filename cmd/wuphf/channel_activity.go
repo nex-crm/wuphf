@@ -228,11 +228,11 @@ func buildWaitStateLines(tasks []channelTask, contentWidth int, focusSlug string
 	}
 
 	title := subtlePill("quiet", "#E2E8F0", "#334155") + " " + lipgloss.NewStyle().Bold(true).Render("Nothing is moving right now")
-	body := "This lane is idle. Use the quiet moment to recover context, choose the next conversation, or give the team a sharper direction."
+	body := "This lane is idle. Stanley would be doing the crossword. Use the quiet moment to recover context, choose the next conversation, or give the team a sharper direction."
 	extra := []string{"/switcher for active work · /recover for recap · /search to jump directly"}
 	if strings.TrimSpace(focusSlug) != "" {
 		title = subtlePill("idle", "#E2E8F0", "#334155") + " " + lipgloss.NewStyle().Bold(true).Render(displayName(focusSlug)+" is waiting for direction")
-		body = "This direct session is idle. Ask for a plan, request a review pass, or drop in a concrete decision to unlock the next move."
+		body = "This direct session is idle. Ask for a plan, request a review pass, or drop in a concrete decision to unlock the next move. Unlike Jim, this agent is not pranking anyone."
 		extra = []string{"Try: give one clear goal, ask for a brief, or request a tradeoff decision"}
 	}
 
