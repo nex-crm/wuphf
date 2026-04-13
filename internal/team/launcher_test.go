@@ -13,6 +13,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/api"
+	"github.com/nex-crm/wuphf/internal/channel"
 )
 
 func TestParseAgentPaneIndicesSkipsChannelPane(t *testing.T) {
@@ -483,6 +484,108 @@ func TestNotificationTargetsForDMChannel(t *testing.T) {
 	})
 	if len(immediate2) != 0 {
 		t.Errorf("agent's own DM message should not echo back, got %+v", immediate2)
+	}
+}
+
+func TestNotificationTargetsForDMChannelNewSlugFormat(t *testing.T) {
+	// New-style deterministic DM slugs (e.g. "fe__human") should route the same
+	// way as legacy "dm-fe" slugs: only the target agent is notified.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	// Override broker members so officeMembersSnapshot returns test agents.
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "fe", Name: "Frontend Engineer"},
+		{Slug: "be", Name: "Backend Engineer"},
+	}
+	b.mu.Unlock()
+	// Seed the channelStore so isChannelDM can resolve the new slug.
+	if _, err := b.ChannelStore().GetOrCreateDirect("fe", "human"); err != nil {
+		t.Fatalf("seed DM channel: %v", err)
+	}
+
+	l := &Launcher{
+		broker:    b,
+		focusMode: true,
+	}
+
+	dmSlug := channel.DirectSlug("fe", "human") // → "fe__human"
+
+	// Human sends DM via new deterministic slug — only fe should be notified.
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Channel: dmSlug,
+		Content: "Check this component",
+	})
+	if len(immediate) != 1 {
+		t.Fatalf("expected 1 immediate target for DM (new slug), got %d: %+v", len(immediate), immediate)
+	}
+	if immediate[0].Slug != "fe" {
+		t.Errorf("expected DM target 'fe', got %q", immediate[0].Slug)
+	}
+	if len(delayed) != 0 {
+		t.Errorf("expected 0 delayed targets for DM (new slug), got %d", len(delayed))
+	}
+
+	// Agent's own message in new-slug DM should not echo back.
+	immediate2, _ := l.notificationTargetsForMessage(channelMessage{
+		From:    "fe",
+		Channel: dmSlug,
+		Content: "Here's what I found",
+	})
+	if len(immediate2) != 0 {
+		t.Errorf("agent's own DM message (new slug) should not echo back, got %+v", immediate2)
+	}
+}
+
+func TestResponseInstructionForTargetDMChannelNewSlugFormat(t *testing.T) {
+	// New-style deterministic DM slugs should produce the same "messaging you directly"
+	// instruction as legacy dm-* slugs, ensuring specialists respond in DMs.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	// Override broker members so officeMembersSnapshot returns test agents.
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "engineering", Name: "Engineering"},
+	}
+	b.mu.Unlock()
+	if _, err := b.ChannelStore().GetOrCreateDirect("engineering", "human"); err != nil {
+		t.Fatalf("seed DM channel: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+
+	dmSlug := channel.DirectSlug("engineering", "human") // → "engineering__human"
+
+	// DM to specialist via new slug — should respond helpfully, not stay quiet.
+	dmInstr := l.responseInstructionForTarget(channelMessage{
+		From:    "you",
+		Channel: dmSlug,
+	}, "engineering")
+	if strings.Contains(dmInstr, "Stay quiet") {
+		t.Errorf("DM instruction (new slug) should not say stay quiet, got %q", dmInstr)
+	}
+	if !strings.Contains(dmInstr, "messaging you directly") {
+		t.Errorf("DM instruction (new slug) should indicate direct message, got %q", dmInstr)
+	}
+
+	// Wrong agent should not receive the DM instruction for this channel.
+	wrongAgentInstr := l.responseInstructionForTarget(channelMessage{
+		From:    "you",
+		Channel: dmSlug,
+	}, "ceo")
+	if strings.Contains(wrongAgentInstr, "messaging you directly") {
+		t.Errorf("DM to engineering (new slug) should not give DM instruction to CEO, got %q", wrongAgentInstr)
 	}
 }
 

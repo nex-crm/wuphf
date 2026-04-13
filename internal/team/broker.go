@@ -1616,7 +1616,12 @@ func (b *Broker) loadState() error {
 		}
 		b.channelStore.MigrateLegacyDM()
 	}
-	// Migrate task/request channel refs from dm-* to deterministic pair slugs.
+	// Migrate channel refs from dm-* to deterministic pair slugs across all entities.
+	// Messages are the primary data loss risk: legacy Channel:"dm-engineering" would not
+	// match Store lookups keyed by "engineering__human".
+	for i := range b.messages {
+		b.messages[i].Channel = channel.MigrateDMSlugString(b.messages[i].Channel)
+	}
 	for i := range b.tasks {
 		b.tasks[i].Channel = channel.MigrateDMSlugString(b.tasks[i].Channel)
 	}
@@ -1785,7 +1790,11 @@ func isDefaultOfficeMemberState(members []officeMember) bool {
 func normalizeChannelSlug(slug string) string {
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	slug = strings.ReplaceAll(slug, " ", "-")
+	// Preserve "__" (DM slug separator) before replacing single underscores.
+	const placeholder = "\x00"
+	slug = strings.ReplaceAll(slug, "__", placeholder)
 	slug = strings.ReplaceAll(slug, "_", "-")
+	slug = strings.ReplaceAll(slug, placeholder, "__")
 	if slug == "" {
 		return "general"
 	}
