@@ -1357,6 +1357,42 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .sidebar-agent-stream { font-size: 10px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; font-family: var(--font-mono); animation: fadeInStream 0.3s ease; }
 @keyframes fadeInStream { from { opacity: 0; } to { opacity: 1; } }
 
+/* ─── Thought Bubbles ─── */
+.thought-bubble-anchor { position: relative; }
+.thought-bubble {
+  position: absolute;
+  left: 36px; bottom: 100%;
+  margin-bottom: 2px;
+  background: #F2EDE6; color: #2E2827;
+  font-size: 10px; font-weight: 600; font-family: var(--font-sans);
+  padding: 3px 8px; border-radius: 10px 10px 10px 2px;
+  white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+  pointer-events: none;
+  animation: thoughtFloat 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  opacity: 1; transition: opacity 0.25s ease;
+  z-index: 10;
+}
+.thought-bubble::after {
+  content: ''; position: absolute; bottom: -4px; left: 6px;
+  width: 6px; height: 6px; background: #F2EDE6;
+  border-radius: 50%;
+}
+.thought-bubble::before {
+  content: ''; position: absolute; bottom: -8px; left: 3px;
+  width: 4px; height: 4px; background: #F2EDE6;
+  border-radius: 50%; opacity: 0.7;
+}
+.sidebar-agent:hover .thought-bubble { opacity: 0; transition: opacity 0.15s ease; }
+@keyframes thoughtFloat {
+  0% { opacity: 0; transform: translateY(4px) scale(0.9); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.thought-bubble.thought-exit { animation: thoughtFade 0.3s ease forwards; }
+@keyframes thoughtFade {
+  to { opacity: 0; transform: translateY(-2px) scale(0.95); }
+}
+
 /* ─── Connect panel (#84, #85, #118) ─── */
 .connect-panel { padding: 20px; }
 .connect-item { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: 8px; background: var(--bg-card); }
@@ -3338,6 +3374,53 @@ function findAgentTask(slug) {
   }
   return null;
 }
+// ─── Office Aside: thought bubble text generator ───
+var _officeAsideLists = {
+  'ceo:talking':['Delegating.','Have a plan.'],
+  'ceo:plotting':['Smells strategic.','Possible reorg.'],
+  'pm:plotting':['Scope creep.','Needs triage.'],
+  'pm:lurking':['Hidden work.','Roadmap vibes.'],
+  'fe:shipping':['Shipping it.','Please no redesign.'],
+  'fe:plotting':['That button though.','UI is loaded.'],
+  'be:shipping':['It will work.','DB has feelings.'],
+  'be:plotting':['Too many moving parts.','One less service?'],
+  'ai:plotting':['Eval first.','Latency says hi.'],
+  'ai:talking':['Could be smarter.','This becomes a system.'],
+  'designer:plotting':['Needs whitespace.','Not polished.'],
+  'designer:lurking':['I have notes.','That color dies.'],
+  'cmo:talking':['Message matters.','No oatmeal copy.'],
+  'cmo:plotting':['Bland alert.','We need a hook.'],
+  'cro:talking':['Price question.','Revenue is real.'],
+  'cro:lurking':['Objection incoming.','What are we selling?'],
+  'default:talking':['Have a thought.','Need opinions.'],
+  'default:plotting':['Mild concern.','Needs follow-up.'],
+  'default:shipping':['Doing it.','My problem now.'],
+  'default:lurking':['Still here.','Thinking quietly.']
+};
+function _fnv32a(str) {
+  var h = 0x811c9dc5;
+  for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+function officeAside(slug, activity, lastMessage) {
+  var key = slug + ':' + activity;
+  var options = _officeAsideLists[key] || _officeAsideLists['default:' + activity];
+  if (!options || !options.length) return '';
+  var h = _fnv32a(key + '|' + (lastMessage || ''));
+  var offset = h % 9;
+  var phase = (Math.floor(Date.now() / 1000) + offset) % 18;
+  if (activity !== 'talking' && phase >= 5) return '';
+  if (activity === 'talking' && !lastMessage) return '';
+  var lower = (lastMessage || '').toLowerCase();
+  if (lower) {
+    if (lower.indexOf('blocked') !== -1) return 'Blocked.';
+    if (lower.indexOf('launch') !== -1) return 'Launch mode.';
+    if (lower.indexOf('design') !== -1) return 'Taste fight.';
+    if (lower.indexOf('pricing') !== -1) return 'Money time.';
+  }
+  return options[h % options.length];
+}
+var _activeBubbles = {};
 function renderSidebarAgents() {
   var container = document.getElementById('sidebar-agents');
   container.textContent = '';
@@ -3350,7 +3433,7 @@ function renderSidebarAgents() {
       return meta && meta.type === 'D' && meta.agentSlug === agSlug;
     })(a.slug);
     var btn = document.createElement('button');
-    btn.className = 'sidebar-agent' + (isDMActive ? ' active' : '');
+    btn.className = 'sidebar-agent thought-bubble-anchor' + (isDMActive ? ' active' : '');
     btn.setAttribute('data-slug', a.slug);
     btn.title = a.name + ' — ' + ac.label;
     var avatarEl = renderPixelAvatar(a.slug, 24);
@@ -3377,6 +3460,18 @@ function renderSidebarAgents() {
     btn.appendChild(avatarEl);
     btn.appendChild(wrap);
     btn.appendChild(dot);
+    // Thought bubble
+    var bubbleText = officeAside(a.slug, ac.state, member ? member.lastMessage || '' : '');
+    var prev = _activeBubbles[a.slug];
+    if (bubbleText) {
+      var bubble = document.createElement('span');
+      bubble.className = 'thought-bubble';
+      bubble.textContent = bubbleText;
+      btn.appendChild(bubble);
+      _activeBubbles[a.slug] = bubbleText;
+    } else if (prev) {
+      delete _activeBubbles[a.slug];
+    }
     container.appendChild(btn);
   });
   // New Agent button (#73)
