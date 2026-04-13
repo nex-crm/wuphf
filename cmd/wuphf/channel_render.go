@@ -25,11 +25,11 @@ func buildOfficeMessageLines(messages []brokerMessage, expanded map[string]bool,
 	if len(messages) == 0 {
 		lines = append(lines,
 			renderedLine{Text: ""},
-			renderedLine{Text: mutedStyle.Render("  Welcome to The WUPHF Office.")},
-			renderedLine{Text: mutedStyle.Render("  This is #general. Drop a company-building thought here or tag a teammate.")},
+			renderedLine{Text: mutedStyle.Render("  Welcome to The WUPHF Office. The cast is assembled.")},
+			renderedLine{Text: mutedStyle.Render("  Drop a company-building thought in #general, or tag a teammate to get things moving.")},
 			renderedLine{Text: ""},
-			renderedLine{Text: mutedStyle.Render("  Suggested: Let's build an AI notetaking company.")},
-			renderedLine{Text: mutedStyle.Render("  WUPHF will let the CEO triage first, then the right specialists pile in if they actually should.")},
+			renderedLine{Text: mutedStyle.Render("  Suggested: Let's build an AI notetaking company. (Ryan Howard would've called it NoteWUPHF.)")},
+			renderedLine{Text: mutedStyle.Render("  The CEO triages first, then the right specialists pile in — unlike the original WUPHF.com, this ships.")},
 		)
 		return lines
 	}
@@ -73,11 +73,11 @@ func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]boo
 		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))
 		return []renderedLine{
 			{Text: ""},
-			{Text: mutedStyle.Render("  Direct session reset. Agent pane reloaded in place.")},
-			{Text: mutedStyle.Render("  There is no office, no channel, and no teammate roster in this mode.")},
+			{Text: mutedStyle.Render("  Conference room reserved. Direct session reset. Agent pane reloaded in place.")},
+			{Text: mutedStyle.Render("  No colleagues, no sidebar, no Toby. Just you and " + agentName + ".")},
 			{Text: ""},
 			{Text: mutedStyle.Render("  Suggested: Help me think through the v1 launch plan.")},
-			{Text: mutedStyle.Render("  This conversation is just you and " + agentName + ".")},
+			{Text: mutedStyle.Render("  Whatever you say here stays in this room. Like Vegas. Or Threat Level Midnight.")},
 		}
 	}
 	return buildOfficeMessageLines(messages, expanded, contentWidth, true, unreadAnchorID, unreadCount)
@@ -148,8 +148,8 @@ func buildRequestLines(requests []channelInterview, contentWidth int) []rendered
 	if len(requests) == 0 {
 		return []renderedLine{
 			{Text: ""},
-			{Text: muted.Render("  No open requests right now.")},
-			{Text: muted.Render("  If an agent needs a real decision, it will show up here.")},
+			{Text: muted.Render("  No open requests right now. The team is self-sufficient.")},
+			{Text: muted.Render("  When an agent needs a real decision, it shows up here — unlike Toby's requests, these matter.")},
 		}
 	}
 	var lines []renderedLine
@@ -184,7 +184,7 @@ func buildRequestLines(requests []channelInterview, contentWidth int) []rendered
 		if req.RecommendedID != "" {
 			lines = append(lines, renderedLine{Text: "  " + highlight.Render("Recommended: "+req.RecommendedID), RequestID: req.ID})
 		}
-		lines = append(lines, renderedLine{Text: "  " + muted.Render("Click to focus, answer, or snooze. Esc hides it locally; the team still waits."), RequestID: req.ID})
+		lines = append(lines, renderedLine{Text: "  " + muted.Render("Click to focus, answer, or snooze. Esc hides it locally — the team still waits. Unlike Toby's requests, these are worth your time."), RequestID: req.ID})
 	}
 	return lines
 }
@@ -196,11 +196,11 @@ func buildPolicyLines(signals []channelSignal, decisions []channelDecision, aler
 
 	if len(signals) == 0 && len(decisions) == 0 && len(alerts) == 0 && len(actions) == 0 {
 		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: muted.Render("  No office insights yet.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  No office insights yet. Give the team a minute.")})
 		lines = append(lines, renderedLine{Text: muted.Render("  Signals, decisions, watchdogs, and external actions will appear here")})
-		lines = append(lines, renderedLine{Text: muted.Render("  as the office starts tracking higher-signal work.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  as the office starts tracking higher-signal work — like the Dundies, but actually useful.")})
 		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: muted.Render("  Use /policies to refresh this ledger at any time.")})
+		lines = append(lines, renderedLine{Text: muted.Render("  Use /policies to refresh this ledger. Even Michael checked his metrics eventually.")})
 		return lines
 	}
 
@@ -338,8 +338,8 @@ func buildTaskLines(tasks []channelTask, contentWidth int) []renderedLine {
 	if len(tasks) == 0 {
 		return []renderedLine{
 			{Text: ""},
-			{Text: muted.Render("  No active work tracked yet.")},
-			{Text: muted.Render("  When the team claims real work, it will appear here.")},
+			{Text: muted.Render("  No active work tracked yet. Either the team is ahead of schedule,")},
+			{Text: muted.Render("  or everyone's at the vending machine. Tag someone in #general to find out.")},
 		}
 	}
 	statusColor := map[string]string{

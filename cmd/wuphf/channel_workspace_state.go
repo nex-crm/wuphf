@@ -366,7 +366,7 @@ func (m channelModel) buildOfficeIntroLines(contentWidth int) []renderedLine {
 		{Text: ""},
 	}
 	title := subtlePill("office", "#F8FAFC", "#1264A3") + " " + lipgloss.NewStyle().Bold(true).Render("The WUPHF Office")
-	body := "Welcome to The WUPHF Office. Live company-building coordination across channels, direct sessions, tasks, and decisions."
+	body := "Welcome to The WUPHF Office. Live company-building coordination across channels, direct sessions, tasks, and decisions. Michael Scott would be proud — and also confused, but mostly proud."
 	extra := []string{
 		fmt.Sprintf("%d teammates · %d running tasks · %d open requests", state.PeerCount, state.RunningTasks, state.OpenRequests),
 	}
@@ -394,7 +394,7 @@ func (m channelModel) buildOfficeIntroLines(contentWidth int) []renderedLine {
 		}
 	} else {
 		lines = append(lines, renderedLine{Text: ""})
-		lines = append(lines, renderedLine{Text: mutedStyle.Render("  Suggested: /switcher for active work, /recover for context, or tag a teammate in #general.")})
+		lines = append(lines, renderedLine{Text: mutedStyle.Render("  Suggested: /switcher for active work, /recover for context, or tag a teammate in #general. Bears. Beets. Ship it.")})
 	}
 	return lines
 }
@@ -407,7 +407,7 @@ func (m channelModel) buildDirectIntroLines(contentWidth int) []renderedLine {
 		{Text: ""},
 	}
 	title := subtlePill("1:1", "#F8FAFC", "#334155") + " " + lipgloss.NewStyle().Bold(true).Render("Direct session with "+m.oneOnOneAgentName())
-	body := "Direct session reset. Agent pane reloaded in place. This surface is just you and the selected agent. Office channels and teammate chatter stay out of the way."
+	body := "Direct session reset. Agent pane reloaded in place. This surface is just you and the selected agent. No office channels, no colleague chatter, no Toby. The door is closed."
 	extra := []string{"Use /switcher to jump back to the office."}
 	if strings.TrimSpace(state.Focus) != "" {
 		extra = append(extra, "Focus: "+state.Focus)
@@ -425,7 +425,7 @@ func (m channelModel) buildDirectIntroLines(contentWidth int) []renderedLine {
 			lines = append(lines, renderedLine{Text: "  " + line})
 		}
 	} else {
-		lines = append(lines, renderedLine{Text: mutedStyle.Render("  Suggested: ask for planning help, a review pass, or a direct decision memo.")})
+		lines = append(lines, renderedLine{Text: mutedStyle.Render("  Suggested: ask for planning help, a review pass, or a direct decision memo. Dwight would want a full briefing first. You do not have to do that.")})
 	}
 	return lines
 }
