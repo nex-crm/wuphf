@@ -1160,12 +1160,27 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .skill-card-meta { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-tertiary); }
 .skill-card-stat { display: flex; align-items: center; gap: 4px; }
 
-/* ─── Splash Screen ─── */
-.splash-overlay { position: fixed; inset: 0; background: var(--bg); z-index: 150; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 20px; }
-.splash-logo { font-family: var(--font-logo); font-style: italic; font-size: 72px; letter-spacing: -0.02em; opacity: 0; animation: splashFadeIn 0.6s ease-out 0.2s forwards; }
-.splash-team-count { font-size: 16px; color: var(--text-secondary); opacity: 0; animation: splashFadeIn 0.4s ease-out 0.6s forwards; }
-.splash-bar-track { width: 200px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; opacity: 0; animation: splashFadeIn 0.3s ease-out 0.8s forwards; }
-.splash-bar-fill { height: 100%; width: 0; background: var(--accent); border-radius: 2px; animation: splashBarFill 1.5s ease-in-out 1s forwards; }
+/* ─── Splash Screen (Office Intro) ─── */
+.splash-overlay { position: fixed; inset: 0; background: #0D0D12; z-index: 150; display: flex; align-items: center; justify-content: center; flex-direction: column; overflow: hidden; }
+.splash-stage { position: relative; display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.splash-cast-row { display: flex; align-items: flex-end; gap: 12px; min-height: 120px; position: relative; }
+.splash-avatar-slot { display: flex; flex-direction: column; align-items: center; gap: 6px; opacity: 0; transform: translateY(30px); transition: opacity 0.3s ease-out, transform 0.3s ease-out; }
+.splash-avatar-slot.visible { opacity: 1; transform: translateY(0); }
+.splash-avatar-slot canvas { image-rendering: pixelated; }
+.splash-avatar-name { font-size: 11px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase; }
+.splash-pm-rush { position: absolute; bottom: 0; opacity: 0; transition: opacity 0.1s; }
+.splash-subtitle { font-size: 14px; color: #7A7A7E; font-style: italic; min-height: 20px; opacity: 0; transition: opacity 0.3s; }
+.splash-subtitle.visible { opacity: 1; }
+.splash-speech-bubble { position: absolute; top: -70px; left: 50%; transform: translateX(-50%); background: transparent; border: 1px solid #EF4444; border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 700; color: #EF4444; white-space: nowrap; opacity: 0; transition: opacity 0.3s; }
+.splash-speech-bubble.visible { opacity: 1; }
+.splash-speech-bubble::after { content: ''; position: absolute; bottom: -8px; left: 50%; transform: translateX(-50%); border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #EF4444; }
+.splash-coffee-particles { position: absolute; top: -40px; left: 50%; transform: translateX(-50%); font-size: 24px; opacity: 0; transition: opacity 0.2s; }
+.splash-coffee-particles.visible { opacity: 1; animation: splashCoffeeFloat 0.5s ease-out; }
+@keyframes splashCoffeeFloat { from { transform: translateX(-50%) translateY(10px); } to { transform: translateX(-50%) translateY(-5px); } }
+.splash-title-card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; opacity: 0; transition: opacity 0.5s ease-in; }
+.splash-title-card.visible { opacity: 1; }
+.splash-title-text { font-family: var(--font-logo); font-style: italic; font-size: 84px; letter-spacing: -0.02em; color: #EAB308; font-weight: 700; }
+.splash-title-tagline { font-size: 16px; color: #7A7A7E; font-style: italic; }
 @keyframes splashFadeIn { to { opacity: 1; } }
 @keyframes splashBarFill { to { width: 100%; } }
 @keyframes splashFadeOut { to { opacity: 0; } }
@@ -2354,14 +2369,256 @@ var cachedRequests = []; // latest /requests data for runtime strip
 var cachedUsage = null; // latest /usage data for token counts
 
 var SIDEBAR_APPS = [
-  { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
-  { id: 'requests', icon: '\uD83D\uDCCB', name: 'Requests' },
-  { id: 'policies', icon: '\uD83D\uDEE1', name: 'Policies' },
-  { id: 'calendar', icon: '\uD83D\uDCC5', name: 'Calendar' },
-  { id: 'skills',   icon: '\u26A1', name: 'Skills' },
-  { id: 'artifacts', icon: '\uD83D\uDCE6', name: 'Artifacts' },
-  { id: 'recover',  icon: '\uD83D\uDD0D', name: 'Recovery' },
+  { id: 'tasks',        icon: '\u2705', name: 'Tasks' },
+  { id: 'requests',     icon: '\uD83D\uDCCB', name: 'Requests' },
+  { id: 'policies',     icon: '\uD83D\uDEE1', name: 'Policies' },
+  { id: 'calendar',     icon: '\uD83D\uDCC5', name: 'Calendar' },
+  { id: 'skills',       icon: '\u26A1', name: 'Skills' },
+  { id: 'activity',     icon: '\uD83D\uDCE6', name: 'Activity' },
+  { id: 'health-check', icon: '\uD83D\uDD0D', name: 'Health Check' },
 ];
+
+// ═══════════════════════════════════════════════════════════════
+//   HASH ROUTER — single source of truth for navigation state
+// ═══════════════════════════════════════════════════════════════
+//
+// Routes:
+//   #/channels/{slug}            → channel messages view
+//   #/dm/{agentSlug}             → DM with agent (creates channel if needed)
+//   #/apps/{appId}               → app panel (tasks, requests, health-check, etc.)
+//   #/threads                    → all threads view
+//   #/agents                     → agent grid view
+//
+// navigate(hash) is the ONLY way to change views. Everything else
+// calls navigate() and the hashchange handler does the rest.
+
+var _routerReady = false;
+var _navigating = false; // prevent re-entrant hashchange
+
+function navigate(hash) {
+  if (hash === location.hash) {
+    // Force re-handle even if hash unchanged (e.g. clicking same DM again)
+    handleRoute();
+    return;
+  }
+  location.hash = hash;
+  // hashchange listener will fire handleRoute()
+}
+
+function parseRoute() {
+  var hash = (location.hash || '').replace(/^#\/?/, '');
+  var parts = hash.split('/');
+  if (parts[0] === 'channels' && parts[1]) return { view: 'channel', channel: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'dm' && parts[1]) return { view: 'dm', agent: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'apps' && parts[1]) return { view: 'app', app: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'threads') return { view: 'threads' };
+  if (parts[0] === 'agents') return { view: 'agents' };
+  return { view: 'channel', channel: 'general' };
+}
+
+function handleRoute() {
+  if (_navigating || !_routerReady) return;
+  _navigating = true;
+  try {
+    var route = parseRoute();
+    _applyRoute(route);
+  } finally {
+    _navigating = false;
+  }
+}
+
+function _applyRoute(route) {
+  // ── 1. Tear down everything from previous view ──
+  _cleanupAllViews();
+
+  switch (route.view) {
+    case 'channel':
+      _enterChannel(route.channel);
+      break;
+    case 'dm':
+      _enterDM(route.agent);
+      break;
+    case 'app':
+      _enterApp(route.app);
+      break;
+    case 'threads':
+      _enterOverlay('threads');
+      break;
+    case 'agents':
+      _enterOverlay('agents');
+      break;
+    default:
+      _enterChannel('general');
+  }
+}
+
+function _cleanupAllViews() {
+  // Save last-seen for current channel
+  if (lastMessageId && currentChannel) {
+    localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
+  }
+
+  // Close overlays
+  if (typeof threadsViewOpen !== 'undefined' && threadsViewOpen) closeThreadsView();
+  if (typeof agentsViewOpen !== 'undefined' && agentsViewOpen) closeAgentsView();
+  if (typeof recoveryViewOpen !== 'undefined' && recoveryViewOpen) closeRecoveryView();
+
+  // Hide ALL app panels
+  var allAppIds = ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills', 'app-activity', 'app-artifacts'];
+  allAppIds.forEach(function(pid) {
+    var p = document.getElementById(pid);
+    if (p) { p.classList.remove('active'); p.style.display = 'none'; }
+  });
+
+  // Leave DM mode if active
+  var prevChType = currentChannel ? getChannelType(currentChannel) : 'O';
+  if (prevChType === 'D' || prevChType === 'G') {
+    onDMChannelLeave();
+  }
+
+  // Restore main layout elements
+  var messagesEl = document.getElementById('messages');
+  var composerEl = document.querySelector('.composer');
+  var typingEl = document.getElementById('typing-indicator');
+  var splitLayout = document.getElementById('dm-split-layout');
+  var liveWorkSection = document.getElementById('live-work-section');
+  var runtimeStrip = document.getElementById('runtime-strip');
+  if (messagesEl) messagesEl.style.display = '';
+  if (composerEl) composerEl.style.display = '';
+  if (typingEl) typingEl.style.display = '';
+  if (splitLayout) { splitLayout.style.display = ''; splitLayout.classList.remove('active'); }
+  if (liveWorkSection) liveWorkSection.style.display = '';
+  if (runtimeStrip) runtimeStrip.style.display = '';
+
+  currentApp = null;
+}
+
+function _enterChannel(name) {
+  currentChannel = name;
+
+  // Reset message state
+  lastMessageId = null;
+  lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + name) || null;
+  unreadDividerInserted = false;
+  lastSeenPassed = false;
+  newMessageCount = 0;
+  lastRenderedFrom = null;
+  lastRenderedTime = null;
+  lastRenderedDate = null;
+  document.getElementById('messages').textContent = '';
+  var dmSplitMsgs = document.getElementById('dm-split-messages');
+  if (dmSplitMsgs) dmSplitMsgs.textContent = '';
+
+  // Update header
+  var ch = CHANNELS.find(function(c) { return c.name === name; });
+  document.getElementById('channel-title').textContent = '# ' + name;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+  document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
+
+  markChannelSeen(name);
+  _refreshSidebars();
+
+  if (brokerConnected) {
+    fetchMessages();
+    fetchRequests();
+    fetchMemberActivity();
+  }
+}
+
+function _enterDM(agentSlug) {
+  // Create/get the DM channel, then set up the DM view
+  WuphfAPI.post('/channels/dm', { members: ['human', agentSlug], type: 'direct' })
+    .then(function(resp) {
+      channelMetadata[resp.slug] = {
+        type: resp.type || 'D',
+        name: resp.name || ('DM with ' + agentSlug),
+        agentSlug: agentSlug,
+        members: ['human', agentSlug]
+      };
+      currentChannel = resp.slug;
+
+      // Reset message state
+      lastMessageId = null;
+      lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + resp.slug) || null;
+      unreadDividerInserted = false;
+      lastSeenPassed = false;
+      newMessageCount = 0;
+      lastRenderedFrom = null;
+      lastRenderedTime = null;
+      lastRenderedDate = null;
+      document.getElementById('messages').textContent = '';
+      var dmSplitMsgs = document.getElementById('dm-split-messages');
+      if (dmSplitMsgs) dmSplitMsgs.textContent = '';
+
+      onDMChannelEnter(agentSlug);
+      markChannelSeen(resp.slug);
+      _refreshSidebars();
+
+      if (brokerConnected) {
+        fetchMessages();
+        fetchRequests();
+        fetchMemberActivity();
+      }
+    })
+    .catch(function(e) {
+      console.error('openDM failed:', e);
+      showNotice('Failed to open DM', 'error');
+      navigate('#/channels/general');
+    });
+}
+
+function _enterApp(appId) {
+  // Map old IDs to new ones for backward compat with any stored hashes
+  if (appId === 'artifacts') appId = 'activity';
+  if (appId === 'recover' || appId === 'recovery') appId = 'health-check';
+
+  currentApp = appId;
+
+  // Health check uses a special view
+  if (appId === 'health-check') {
+    openRecoveryView();
+    _refreshSidebars();
+    return;
+  }
+
+  // Hide messages, show app panel
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+  var composerEl = document.querySelector('.composer');
+  var splitLayout = document.getElementById('dm-split-layout');
+  var liveWorkSection = document.getElementById('live-work-section');
+  var runtimeStrip = document.getElementById('runtime-strip');
+  if (messagesEl) messagesEl.style.display = 'none';
+  if (typingEl) typingEl.style.display = 'none';
+  if (composerEl) composerEl.style.display = 'none';
+  if (splitLayout) splitLayout.style.display = 'none';
+  if (liveWorkSection) liveWorkSection.style.display = 'none';
+  if (runtimeStrip) runtimeStrip.style.display = 'none';
+
+  // Try both old and new panel IDs
+  var activePanel = document.getElementById('app-' + appId) || document.getElementById('app-artifacts');
+  if (activePanel) { activePanel.style.display = 'flex'; activePanel.classList.add('active'); }
+
+  // Set title
+  var appDef = SIDEBAR_APPS.find(function(a) { return a.id === appId; });
+  document.getElementById('channel-title').textContent = appDef ? appDef.name : appId;
+  document.getElementById('channel-desc').textContent = '';
+  renderAppContent(appId);
+  _refreshSidebars();
+}
+
+function _enterOverlay(type) {
+  if (type === 'threads') openThreadsView();
+  if (type === 'agents') openAgentsView();
+  _refreshSidebars();
+}
+
+function _refreshSidebars() {
+  renderSidebarChannels();
+  renderSidebarDMs();
+  renderSidebarAgents();
+  renderSidebarApps();
+}
 
 var AGENTS = [
   { slug: 'ceo',      emoji: '\uD83D\uDC54', name: 'CEO',               role: 'Strategy, delegation, goal tracking',           checked: true,  type: 'lead' },
@@ -2650,45 +2907,285 @@ function launchOffice() {
     });
 }
 
+function renderSplashSprite(sprite, slug, size) {
+  var accentHex = getAgentColor(slug);
+  var ar = parseInt(accentHex.slice(1,3), 16);
+  var ag = parseInt(accentHex.slice(3,5), 16);
+  var ab = parseInt(accentHex.slice(5,7), 16);
+  var palette = {
+    1: [36, 32, 30], 2: [235, 215, 190], 3: [ar, ag, ab],
+    4: [Math.max(0,ar-60), Math.max(0,ag-60), Math.max(0,ab-60)],
+    5: [180, 170, 155], 6: [255, 255, 255]
+  };
+  var rows = sprite.length, cols = sprite[0].length;
+  var canvas = document.createElement('canvas');
+  canvas.width = cols; canvas.height = rows;
+  canvas.style.width = size + 'px';
+  canvas.style.height = (size * rows / cols) + 'px';
+  canvas.style.imageRendering = 'pixelated';
+  var ctx = canvas.getContext('2d');
+  var imgData = ctx.createImageData(cols, rows);
+  for (var r = 0; r < rows; r++) {
+    for (var c = 0; c < cols; c++) {
+      var px = sprite[r][c], idx = (r * cols + c) * 4;
+      if (px === 0) { imgData.data[idx+3] = 0; }
+      else { var rgb = palette[px] || [128,128,128]; imgData.data[idx] = rgb[0]; imgData.data[idx+1] = rgb[1]; imgData.data[idx+2] = rgb[2]; imgData.data[idx+3] = 255; }
+    }
+  }
+  ctx.putImageData(imgData, 0, 0);
+  return canvas;
+}
+
 function showSplashScreen(onDone, agentCount) {
-  var teamCount = (typeof agentCount === 'number' && agentCount > 0) ? agentCount : AGENTS.filter(function(a) { return a.checked; }).length;
+  // ── The Office Intro ──
+  // Phase 0: cast enters one by one
+  // Phase 1: full cast beat
+  // Phase 2: PM rushes in from right
+  // Phase 3: CRASH — coffee spills
+  // Phase 4: CEO grumpy + speech bubble
+  // Phase 5: CEO forces a fake smile
+  // Phase 6: WUPHF title card
+  // Phase 7: fade out
 
   var splash = document.createElement('div');
   splash.className = 'splash-overlay';
   splash.id = 'splash-screen';
 
-  var logo = document.createElement('div');
-  logo.className = 'splash-logo';
-  logo.textContent = 'wuphf';
+  // Skip on click/key
+  var skipped = false;
+  function skipSplash() {
+    if (skipped) return;
+    skipped = true;
+    splash.style.transition = 'opacity 0.3s';
+    splash.style.opacity = '0';
+    setTimeout(function() { splash.remove(); if (onDone) onDone(); }, 300);
+  }
+  splash.addEventListener('click', skipSplash);
+  document.addEventListener('keydown', function onKey(e) {
+    document.removeEventListener('keydown', onKey);
+    skipSplash();
+  });
 
-  var count = document.createElement('div');
-  count.className = 'splash-team-count';
-  count.textContent = teamCount + ' agent' + (teamCount !== 1 ? 's' : '') + ' ready';
+  var stage = document.createElement('div');
+  stage.className = 'splash-stage';
 
-  var barTrack = document.createElement('div');
-  barTrack.className = 'splash-bar-track';
-  var barFill = document.createElement('div');
-  barFill.className = 'splash-bar-fill';
-  barTrack.appendChild(barFill);
+  // Speech bubble and coffee particles will be appended to ceoSlot later
 
-  splash.appendChild(logo);
-  splash.appendChild(count);
-  splash.appendChild(barTrack);
+  var nameMap = { ceo: 'CEO', pm: 'PM', fe: 'Frontend', be: 'Backend', ai: 'AI Eng', designer: 'Designer', cmo: 'CMO', cro: 'CRO' };
+
+  // Top row: CEO
+  var topRow = document.createElement('div');
+  topRow.className = 'splash-cast-row';
+  topRow.style.justifyContent = 'center';
+  stage.appendChild(topRow);
+
+  // Bottom row: rest of cast
+  var bottomRow = document.createElement('div');
+  bottomRow.className = 'splash-cast-row';
+  bottomRow.style.justifyContent = 'center';
+  stage.appendChild(bottomRow);
+
+  // Subtitle
+  var subtitle = document.createElement('div');
+  subtitle.className = 'splash-subtitle';
+  stage.appendChild(subtitle);
+
+  // Title card (overlays everything)
+  var titleCard = document.createElement('div');
+  titleCard.className = 'splash-title-card';
+  var titleText = document.createElement('div');
+  titleText.className = 'splash-title-text';
+  titleText.textContent = 'wuphf';
+  var tagline = document.createElement('div');
+  tagline.className = 'splash-title-tagline';
+  tagline.textContent = 'Somehow still operational.';
+  titleCard.appendChild(titleText);
+  titleCard.appendChild(tagline);
+  stage.appendChild(titleCard);
+
+  splash.appendChild(stage);
   document.body.appendChild(splash);
 
-  // Fade out and remove after animation completes
+  // Build avatar slots
+  var slots = {};
+  var ceoSlot = document.createElement('div');
+  ceoSlot.className = 'splash-avatar-slot';
+  ceoSlot.style.position = 'relative';
+  ceoSlot.appendChild(renderSplashSprite(SPRITE_DATA.ceo, 'ceo', 70));
+  var ceoName = document.createElement('div');
+  ceoName.className = 'splash-avatar-name';
+  ceoName.style.color = getAgentColor('ceo');
+  ceoName.textContent = 'CEO';
+  ceoSlot.appendChild(ceoName);
+
+  // Speech bubble attached to CEO
+  var speechBubble = document.createElement('div');
+  speechBubble.className = 'splash-speech-bubble';
+  speechBubble.textContent = 'STAY IN YOUR LANE';
+  ceoSlot.appendChild(speechBubble);
+
+  // Coffee particles attached to CEO
+  var coffeeParticles = document.createElement('div');
+  coffeeParticles.className = 'splash-coffee-particles';
+  coffeeParticles.textContent = '\u2615 ~~';
+  ceoSlot.appendChild(coffeeParticles);
+
+  topRow.appendChild(ceoSlot);
+  slots.ceo = { el: ceoSlot };
+
+  // PM slot (will be used for rush-in)
+  var pmSlot = document.createElement('div');
+  pmSlot.className = 'splash-avatar-slot splash-pm-rush';
+  pmSlot.appendChild(renderSplashSprite(SPRITE_DATA.pm, 'pm', 70));
+  var pmName = document.createElement('div');
+  pmName.className = 'splash-avatar-name';
+  pmName.style.color = getAgentColor('pm');
+  pmName.textContent = 'PM';
+  pmSlot.appendChild(pmName);
+  topRow.appendChild(pmSlot);
+  slots.pm = { el: pmSlot };
+
+  var bottomSlugs = ['fe', 'be', 'ai', 'designer', 'cmo', 'cro'];
+  bottomSlugs.forEach(function(slug) {
+    var spriteData = SPRITE_DATA[slug] || SPRITE_GENERIC;
+    var slot = document.createElement('div');
+    slot.className = 'splash-avatar-slot';
+    slot.appendChild(renderSplashSprite(spriteData, slug, 56));
+    var name = document.createElement('div');
+    name.className = 'splash-avatar-name';
+    name.style.color = getAgentColor(slug);
+    name.textContent = nameMap[slug] || slug.toUpperCase();
+    slot.appendChild(name);
+    bottomRow.appendChild(slot);
+    slots[slug] = { el: slot };
+  });
+
+  // ── Animation timeline ──
+  var t = 0;
+
+  // Phase 0: Cast entrance (CEO first, then bottom row one by one)
+  setTimeout(function() { if (skipped) return; ceoSlot.classList.add('visible'); }, t += 300);
+
+  bottomSlugs.forEach(function(slug, i) {
+    setTimeout(function() { if (skipped) return; slots[slug].el.classList.add('visible'); }, t += 250);
+  });
+
+  // Phase 1: Full cast beat
+  t += 500;
+
+  // Phase 2: PM rushes in from right
   setTimeout(function() {
-    splash.style.animation = 'splashFadeOut 0.4s ease-in forwards';
-    setTimeout(function() {
-      splash.remove();
-      if (onDone) onDone();
-    }, 400);
-  }, 2600);
+    if (skipped) return;
+    subtitle.textContent = '*running footsteps*';
+    subtitle.classList.add('visible');
+
+    // Calculate target: land just right of CEO
+    var ceoRect = ceoSlot.getBoundingClientRect();
+    var topRowRect = topRow.getBoundingClientRect();
+    var targetLeft = (ceoRect.right - topRowRect.left) + 12; // 12px gap
+    var startLeft = topRowRect.width + 80; // off-screen right
+
+    pmSlot.style.left = startLeft + 'px';
+    pmSlot.style.opacity = '1';
+    pmSlot.style.transform = 'translateY(0)';
+
+    // Animate PM sliding in
+    var currentLeft = startLeft;
+    var rushInterval = setInterval(function() {
+      if (skipped) { clearInterval(rushInterval); return; }
+      currentLeft = Math.max(targetLeft, currentLeft - 40);
+      pmSlot.style.left = currentLeft + 'px';
+      if (currentLeft <= targetLeft) {
+        clearInterval(rushInterval);
+
+        // Phase 3: CRASH
+        subtitle.textContent = '!! CRASH !!';
+        subtitle.style.color = '#EF4444';
+        subtitle.style.fontWeight = '700';
+        coffeeParticles.classList.add('visible');
+
+        // Swap CEO sprite to spill variant
+        var ceoCanvas = ceoSlot.querySelector('canvas');
+        if (ceoCanvas) {
+          var newCanvas = renderSplashSprite(SPRITE_CEO_SPILL, 'ceo', 70);
+          ceoSlot.replaceChild(newCanvas, ceoCanvas);
+        }
+
+        setTimeout(function() {
+          if (skipped) return;
+          coffeeParticles.classList.remove('visible');
+
+          // Phase 4: CEO grumpy + speech bubble
+          var grumpyCanvas = renderSplashSprite(SPRITE_CEO_GRUMPY, 'ceo', 70);
+          var currentCanvas = ceoSlot.querySelector('canvas');
+          if (currentCanvas) ceoSlot.replaceChild(grumpyCanvas, currentCanvas);
+          speechBubble.classList.add('visible');
+          subtitle.textContent = '';
+          subtitle.classList.remove('visible');
+
+          setTimeout(function() {
+            if (skipped) return;
+            speechBubble.classList.remove('visible');
+
+            // Phase 5: CEO forces a fake smile
+            var smileCanvas = renderSplashSprite(SPRITE_CEO_FAKESMILE, 'ceo', 70);
+            var curCanvas = ceoSlot.querySelector('canvas');
+            if (curCanvas) ceoSlot.replaceChild(smileCanvas, curCanvas);
+
+            // Twitch: alternate between smile and grumpy
+            var twitchCount = 0;
+            var twitchInterval = setInterval(function() {
+              if (skipped) { clearInterval(twitchInterval); return; }
+              twitchCount++;
+              var twitchSprite = twitchCount % 2 === 0 ? SPRITE_CEO_FAKESMILE : SPRITE_CEO_GRUMPY;
+              var tc = renderSplashSprite(twitchSprite, 'ceo', 70);
+              var cc = ceoSlot.querySelector('canvas');
+              if (cc) ceoSlot.replaceChild(tc, cc);
+              if (twitchCount >= 4) clearInterval(twitchInterval);
+            }, 200);
+
+            setTimeout(function() {
+              if (skipped) return;
+
+              // Phase 6: Title card
+              // Hide cast
+              topRow.style.transition = 'opacity 0.4s';
+              bottomRow.style.transition = 'opacity 0.4s';
+              subtitle.style.transition = 'opacity 0.4s';
+              topRow.style.opacity = '0';
+              bottomRow.style.opacity = '0';
+              subtitle.style.opacity = '0';
+
+              setTimeout(function() {
+                if (skipped) return;
+                titleCard.classList.add('visible');
+
+                // Phase 7: Fade out after title
+                setTimeout(function() {
+                  if (skipped) return;
+                  splash.style.transition = 'opacity 0.4s ease-in';
+                  splash.style.opacity = '0';
+                  setTimeout(function() {
+                    splash.remove();
+                    if (onDone) onDone();
+                  }, 400);
+                }, 1500);
+              }, 400);
+            }, 1200);
+          }, 800);
+        }, 500);
+      }
+    }, 60);
+  }, t);
 }
 
 // ─── Show office ───
 function showOffice() {
   document.getElementById('office').classList.add('active');
+
+  // Wire up hash router
+  window.addEventListener('hashchange', handleRoute);
+
   if (brokerConnected) {
     Promise.all([WuphfAPI.getOfficeMembers(), WuphfAPI.getChannels(), WuphfAPI.getMembers(currentChannel)])
       .then(function(results) {
@@ -2715,16 +3212,21 @@ function showOffice() {
             return { name: ch.name || ch.slug, desc: ch.description || '' };
           });
         }
-        renderSidebarAgents();
-        renderSidebarDMs();
-        renderSidebarChannels();
-        renderSidebarApps();
         startMessagePolling();
         startRequestPolling();
         startMemberActivityPolling();
         connectOfficeEvents();
+
+        // Router is ready — navigate to initial route
+        _routerReady = true;
+        if (!location.hash || location.hash === '#' || location.hash === '#/') {
+          navigate('#/channels/general');
+        } else {
+          handleRoute();
+        }
       })
       .catch(function() {
+        _routerReady = true;
         renderSidebarAgents();
         renderSidebarDMs();
         renderSidebarChannels();
@@ -2732,6 +3234,7 @@ function showOffice() {
         animateMessages();
       });
   } else {
+    _routerReady = true;
     renderSidebarAgents();
     renderSidebarDMs();
     renderSidebarChannels();
@@ -2866,7 +3369,7 @@ function renderSidebarAgents() {
     wrap.addEventListener('click', (function(agSlug) {
       return function(e) {
         e.stopPropagation();
-        openDM(agSlug);
+        navigate('#/dm/' + encodeURIComponent(agSlug));
       };
     })(a.slug));
     var dot = document.createElement('span');
@@ -2899,7 +3402,7 @@ function renderSidebarApps() {
   SIDEBAR_APPS.forEach(function(app) {
     var btn = document.createElement('button');
     btn.className = 'sidebar-item' + (currentApp === app.id ? ' active' : '');
-    btn.addEventListener('click', function() { switchApp(app.id); });
+    btn.addEventListener('click', function() { navigate('#/apps/' + app.id); });
     var icon = document.createElement('span');
     icon.className = 'sidebar-item-emoji';
     icon.textContent = app.icon;
@@ -2911,83 +3414,24 @@ function renderSidebarApps() {
   });
 }
 function switchApp(appId) {
-  // Close recovery/threads/agents views if switching away
-  if (recoveryViewOpen && appId !== 'recover') closeRecoveryView();
-  if (threadsViewOpen) closeThreadsView();
-  if (agentsViewOpen) closeAgentsView();
-
-  // Handle recovery app specially
-  if (appId === 'recover') {
-    currentApp = (currentApp === 'recover') ? null : 'recover';
-    if (currentApp === 'recover') {
-      openRecoveryView();
+  // Toggle: if already on this app, go back to current channel
+  if (currentApp === appId) {
+    var chType = currentChannel ? getChannelType(currentChannel) : 'O';
+    if (chType === 'D' || chType === 'G') {
+      var meta = channelMetadata[currentChannel];
+      navigate('#/dm/' + encodeURIComponent(meta ? meta.agentSlug : currentChannel));
     } else {
-      closeRecoveryView();
+      navigate('#/channels/' + encodeURIComponent(currentChannel));
     }
-    renderSidebarApps();
     return;
   }
-
-  currentApp = (currentApp === appId) ? null : appId;
-  var messagesEl = document.getElementById('messages');
-  var typingEl = document.getElementById('typing-indicator');
-  var composerEl = document.querySelector('.composer');
-  ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills', 'app-artifacts'].forEach(function(pid) {
-    var p = document.getElementById(pid);
-    if (p) { p.classList.remove('active'); p.style.display = 'none'; }
-  });
-  var splitLayout = document.getElementById('dm-split-layout');
-  var liveWorkSection = document.getElementById('live-work-section');
-  var runtimeStrip = document.getElementById('runtime-strip');
-  if (currentApp) {
-    // Hide everything: messages, DM split, composer, live-work strip
-    messagesEl.style.display = 'none';
-    typingEl.style.display = 'none';
-    composerEl.style.display = 'none';
-    if (splitLayout) splitLayout.style.display = 'none';
-    if (liveWorkSection) liveWorkSection.style.display = 'none';
-    if (runtimeStrip) runtimeStrip.style.display = 'none';
-    var activePanel = document.getElementById('app-' + currentApp);
-    if (activePanel) { activePanel.style.display = 'flex'; activePanel.classList.add('active'); }
-    document.getElementById('channel-title').textContent = currentApp.charAt(0).toUpperCase() + currentApp.slice(1);
-    document.getElementById('channel-desc').textContent = '';
-    renderAppContent(currentApp);
-  } else {
-    // Restore: show correct view based on channel type
-    if (splitLayout) splitLayout.style.display = '';
-    if (liveWorkSection) liveWorkSection.style.display = '';
-    if (runtimeStrip) runtimeStrip.style.display = '';
-    var isDM = currentChannel && (getChannelType(currentChannel) === 'D' || getChannelType(currentChannel) === 'G');
-    if (isDM) {
-      messagesEl.style.display = 'none';
-      if (splitLayout) splitLayout.classList.add('active');
-    } else {
-      messagesEl.style.display = '';
-      if (splitLayout) splitLayout.classList.remove('active');
-    }
-    composerEl.style.display = '';
-    var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
-    if (isDM) {
-      var meta = channelMetadata[currentChannel];
-      var dmSlug = meta ? meta.agentSlug : null;
-      var agent = dmSlug ? AGENTS.find(function(a) { return a.slug === dmSlug; }) : null;
-      var dmName = (meta && meta.name) ? meta.name : (agent ? agent.name : (dmSlug || currentChannel));
-      document.getElementById('channel-title').textContent = dmName;
-      document.getElementById('channel-desc').textContent = 'direct message';
-    } else {
-      document.getElementById('channel-title').textContent = '# ' + currentChannel;
-      document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
-    }
-  }
-  renderSidebarApps();
-  if (currentApp) {
-    document.querySelectorAll('#sidebar-channels .sidebar-item').forEach(function(b) { b.classList.remove('active'); });
-  } else {
-    renderSidebarChannels();
-  }
+  navigate('#/apps/' + encodeURIComponent(appId));
 }
 function renderAppContent(appId) {
-  var panel = document.getElementById('app-' + appId);
+  // Map new IDs to panel elements (activity uses app-artifacts panel)
+  var panelId = appId;
+  if (appId === 'activity') panelId = 'artifacts';
+  var panel = document.getElementById('app-' + panelId);
   if (!panel) return;
   panel.textContent = '';
   if (appId === 'tasks') renderTasksApp(panel);
@@ -2995,7 +3439,7 @@ function renderAppContent(appId) {
   else if (appId === 'policies') renderPoliciesApp(panel);
   else if (appId === 'calendar') renderCalendarApp(panel);
   else if (appId === 'skills') renderSkillsApp(panel);
-  else if (appId === 'artifacts') renderArtifactsApp(panel);
+  else if (appId === 'artifacts' || appId === 'activity') renderArtifactsApp(panel);
 }
 function renderTasksApp(panel) {
   if (!brokerConnected) {
@@ -3307,7 +3751,7 @@ function renderArtifactsApp(panel) {
         return;
       }
       var header = el('div', { style: { padding: '0 20px 12px', borderBottom: '1px solid var(--border)' } });
-      header.appendChild(el('h3', { style: { fontSize: '16px', fontWeight: '600' } }, 'Artifacts'));
+      header.appendChild(el('h3', { style: { fontSize: '16px', fontWeight: '600' } }, 'Activity'));
       header.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' } }, actions.length + ' actions recorded'));
       panel.appendChild(header);
       var timeline = el('div', { className: 'artifact-timeline' });
@@ -3530,9 +3974,7 @@ function renderSidebarChannels() {
     var btn = document.createElement('button');
     btn.className = 'sidebar-item' + (isActive ? ' active' : '');
     btn.addEventListener('click', function() {
-      switchChannel(ch.name);
-      container.querySelectorAll('.sidebar-item').forEach(function(b) { b.classList.remove('active'); });
-      btn.classList.add('active');
+      navigate('#/channels/' + encodeURIComponent(ch.name));
     });
 
     var hash = document.createElement('span');
@@ -3722,74 +4164,8 @@ function openChannelWizard() {
 }
 
 function switchChannel(name) {
-  // Close overlay views when switching channels
-  if (typeof threadsViewOpen !== 'undefined' && threadsViewOpen) closeThreadsView();
-  if (typeof agentsViewOpen !== 'undefined' && agentsViewOpen) closeAgentsView();
-  // Exit app mode when switching channels
-  if (currentApp) {
-    currentApp = null;
-    var messagesEl = document.getElementById('messages');
-    var composerEl = document.querySelector('.composer');
-    ['app-tasks', 'app-requests', 'app-calendar'].forEach(function(pid) {
-      var p = document.getElementById(pid);
-      if (p) { p.classList.remove('active'); p.style.display = 'none'; }
-    });
-    if (messagesEl) messagesEl.style.display = '';
-    if (composerEl) composerEl.style.display = '';
-    renderSidebarApps();
-  }
-  // Save last-seen for previous channel before switching
-  if (lastMessageId) {
-    localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
-  }
-  // DM channel enter/leave hooks (Slack-style)
-  var prevChannel = currentChannel;
-  currentChannel = name;
-  renderSidebarChannels();
-  var chType = getChannelType(name);
-  var prevChType = prevChannel ? getChannelType(prevChannel) : 'O';
-  if (chType === 'D' || chType === 'G') {
-    var meta = channelMetadata[name];
-    var agSlug = meta ? meta.agentSlug : null;
-    if (agSlug) onDMChannelEnter(agSlug);
-  } else if (prevChType === 'D' || prevChType === 'G') {
-    onDMChannelLeave();
-  }
-  lastMessageId = null;
-  // Reset unread/grouping/date state for new channel
-  lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + name) || null;
-  unreadDividerInserted = false;
-  lastSeenPassed = false;
-  newMessageCount = 0;
-  lastRenderedFrom = null;
-  lastRenderedTime = null;
-  lastRenderedDate = null;
-  document.getElementById('messages').textContent = '';
-  var dmSplitMsgs = document.getElementById('dm-split-messages');
-  if (dmSplitMsgs) dmSplitMsgs.textContent = '';
-  var ch = CHANNELS.find(function(c) { return c.name === name; });
-  if (chType === 'D' || chType === 'G') {
-    // Header is already set by onDMChannelEnter above; only set placeholder here.
-    var dmMeta = channelMetadata[name];
-    var dmAgentSlug = dmMeta ? dmMeta.agentSlug : null;
-    var dmAgentObj = dmAgentSlug ? AGENTS.find(function(a) { return a.slug === dmAgentSlug; }) : null;
-    document.getElementById('composer-input').placeholder = 'Message ' + (dmAgentObj ? dmAgentObj.name : (dmMeta ? dmMeta.name : name)) + '\u2026';
-  } else {
-    document.getElementById('channel-title').textContent = '# ' + name;
-    document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
-    document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
-  }
-  // Close recovery view if open
-  if (recoveryViewOpen) closeRecoveryView();
-
-  // Mark channel as seen and update badges
-  markChannelSeen(name);
-
-  if (brokerConnected) {
-    fetchMessages();
-    fetchRequests();
-    fetchMemberActivity();
-  }
+  // Delegate to router — this is the only way to change views
+  navigate('#/channels/' + encodeURIComponent(name));
 }
 
 // ─── Animate messages ───
@@ -4907,7 +5283,7 @@ var SLASH_COMMANDS = [
   { name: '/search', desc: 'Search messages', icon: '🔎' },
   { name: '/tasks', desc: 'Open task board', icon: '📋' },
   { name: '/requests', desc: 'Open requests', icon: '🔔' },
-  { name: '/recover', desc: 'Recovery view', icon: '🔁' },
+  { name: '/recover', desc: 'Health Check view', icon: '🔁' },
   { name: '/1o1', desc: '1:1 with agent', icon: '💬' },
   { name: '/task', desc: 'Task actions (claim/release/complete/block)', icon: '✅' },
   { name: '/cancel', desc: 'Cancel a task', icon: '❌' },
@@ -5246,7 +5622,7 @@ function handleSlashCommand(input) {
       });
       break;
     case '/recover':
-      openRecoveryView();
+      navigate('#/apps/health-check');
       break;
     case '/search':
       openSearchMode(args || '');
@@ -5298,10 +5674,10 @@ function handleSlashCommand(input) {
       }
       break;
     case '/threads':
-      openThreadsView();
+      navigate('#/threads');
       break;
     case '/agents':
-      openAgentsView();
+      navigate('#/agents');
       break;
     case '/insert':
       openInsertPicker();
@@ -6301,7 +6677,7 @@ function buildCommandPaletteItems(query) {
   });
   // Add palette-specific commands
   var extraCmds = [
-    { icon: '🔍', label: '/recover', desc: 'Show workspace recovery info', action: function() { openRecoveryView(); } },
+    { icon: '🔍', label: '/recover', desc: 'Show health check / diagnostics', action: function() { navigate('#/apps/health-check'); } },
   ];
   extraCmds.forEach(function(c) {
     if (!q || c.label.toLowerCase().indexOf(q) !== -1 || c.desc.toLowerCase().indexOf(q) !== -1) {
@@ -6657,17 +7033,7 @@ function getChannelType(slug) {
 // Opens (or creates) a 1:1 DM with the given agent slug.
 // Calls POST /channels/dm, stores metadata, then switches to the channel.
 function openDM(agentSlug) {
-  WuphfAPI.post('/channels/dm', { members: ['human', agentSlug], type: 'direct' })
-    .then(function(resp) {
-      channelMetadata[resp.slug] = {
-        type: resp.type || 'D',
-        name: resp.name || ('DM with ' + agentSlug),
-        agentSlug: agentSlug,
-        members: ['human', agentSlug]
-      };
-      switchChannel(resp.slug);
-    })
-    .catch(function(e) { console.error('openDM failed:', e); showNotice('Failed to open DM', 'error'); });
+  navigate('#/dm/' + encodeURIComponent(agentSlug));
 }
 
 // Called by switchChannel when entering / leaving a DM channel.
@@ -6737,7 +7103,7 @@ function renderSidebarDMs() {
     btn.appendChild(dot);
     btn.appendChild(nameEl);
     btn.addEventListener('click', (function(agSlug) {
-      return function() { openDM(agSlug); };
+      return function() { navigate('#/dm/' + encodeURIComponent(agSlug)); };
     })(agent.slug));
     container.appendChild(btn);
   });
@@ -7136,8 +7502,8 @@ function openRecoveryView() {
   recoveryViewOpen = true;
 
   // Update header
-  document.getElementById('channel-title').textContent = 'Recovery';
-  document.getElementById('channel-desc').textContent = 'Workspace state and recovery info';
+  document.getElementById('channel-title').textContent = 'Health Check';
+  document.getElementById('channel-desc').textContent = 'Workspace state and diagnostics';
 
   panel.textContent = '';
 
@@ -7293,7 +7659,7 @@ function renderRecoveryData(panel, state, tasksData, membersData) {
   closeBtn.className = 'btn btn-ghost';
   closeBtn.textContent = 'Back to messages';
   closeBtn.style.alignSelf = 'flex-start';
-  closeBtn.addEventListener('click', closeRecoveryView);
+  closeBtn.addEventListener('click', function() { navigate('#/channels/' + encodeURIComponent(currentChannel)); });
   panel.appendChild(closeBtn);
 }
 
@@ -8072,6 +8438,56 @@ var SPRITE_DATA = {
   ]
 };
 
+// CEO variant sprites for the splash collision gag
+var SPRITE_CEO_SPILL = [
+  [0,0,0,0,1,1,1,1,1,1,0,0,5,0],
+  [0,0,0,1,4,4,4,4,4,4,1,0,5,5],
+  [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+  [0,0,0,1,1,1,2,2,1,1,1,0,0,0],
+  [0,0,0,1,2,2,1,1,2,2,1,0,0,0],
+  [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
+  [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+  [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+  [0,0,2,2,3,5,3,3,3,3,2,2,0,0],
+  [0,0,1,2,1,5,5,3,3,1,2,1,0,0],
+  [0,0,0,1,0,1,1,1,1,0,1,0,0,0],
+  [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+];
+var SPRITE_CEO_GRUMPY = [
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+  [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+  [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+  [0,0,0,1,1,1,2,2,1,1,1,0,0,0],
+  [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+  [0,0,0,0,1,2,1,1,2,1,0,0,0,0],
+  [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+  [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+  [0,0,2,2,3,5,3,3,3,3,2,2,0,0],
+  [0,0,1,2,1,5,5,3,3,1,2,1,0,0],
+  [0,0,0,1,0,1,1,1,1,0,1,0,0,0],
+  [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+];
+var SPRITE_CEO_FAKESMILE = [
+  [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
+  [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
+  [0,0,1,1,2,2,2,2,2,2,1,1,0,0],
+  [0,0,0,1,1,1,2,2,1,1,1,0,0,0],
+  [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
+  [0,0,0,0,1,6,6,6,6,1,0,0,0,0],
+  [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+  [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
+  [0,0,2,2,3,5,3,3,3,3,2,2,0,0],
+  [0,0,1,2,1,5,5,3,3,1,2,1,0,0],
+  [0,0,0,1,0,1,1,1,1,0,1,0,0,0],
+  [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
+  [0,0,0,1,1,0,0,0,0,1,1,0,0,0]
+];
+
 var SPRITE_GENERIC = [
   [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
   [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
@@ -8327,7 +8743,7 @@ function openThreadsView() {
 
   if (threads.length === 0) {
     panel.appendChild(el('div', { className: 'cmd-palette-empty', style: { padding: '40px 20px' } }, 'No threads yet. Start a conversation to see threads here.'));
-    var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start' }, onClick: closeThreadsView }, 'Back to messages');
+    var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start' }, onClick: function() { navigate('#/channels/' + encodeURIComponent(currentChannel)); } }, 'Back to messages');
     panel.appendChild(closeBtn);
     return;
   }
@@ -8368,7 +8784,7 @@ function openThreadsView() {
     panel.appendChild(item);
   });
 
-  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: closeThreadsView }, 'Back to messages');
+  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: function() { navigate('#/channels/' + encodeURIComponent(currentChannel)); } }, 'Back to messages');
   panel.appendChild(closeBtn);
 }
 
@@ -8440,7 +8856,7 @@ function openAgentsView() {
 
   panel.appendChild(grid);
 
-  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: closeAgentsView }, 'Back to messages');
+  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: function() { navigate('#/channels/' + encodeURIComponent(currentChannel)); } }, 'Back to messages');
   panel.appendChild(closeBtn);
 }
 
