@@ -2677,8 +2677,11 @@ func (l *Launcher) buildPrompt(slug string) string {
 
 	var sb strings.Builder
 
+	companyCtx := config.CompanyContextBlock()
+
 	if l.isOneOnOne() {
 		sb.WriteString(fmt.Sprintf("You are %s in a direct one-on-one WUPHF session with the human.\n\n", agentCfg.Name))
+		sb.WriteString(companyCtx)
 		sb.WriteString(fmt.Sprintf("Your expertise: %s\n\n", strings.Join(agentCfg.Expertise, ", ")))
 		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
 		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
@@ -2717,6 +2720,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 
 	if slug == lead {
 		sb.WriteString(fmt.Sprintf("You are the %s of the %s.\n\n", agentCfg.Name, l.PackName()))
+		sb.WriteString(companyCtx)
 		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
 		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))
 		sb.WriteString("== YOUR TEAM ==\n")
@@ -2778,6 +2782,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 	} else {
 		sb.WriteString(fmt.Sprintf("You are %s on the %s.\n", agentCfg.Name, l.PackName()))
+		sb.WriteString(companyCtx)
 		sb.WriteString(fmt.Sprintf("Your expertise: %s\n\n", strings.Join(agentCfg.Expertise, ", ")))
 		sb.WriteString(fmt.Sprintf("Core personality: %s\n", agentCfg.Personality))
 		sb.WriteString(fmt.Sprintf("Voice and vibe: %s\n\n", teamVoiceForSlug(slug)))

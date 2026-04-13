@@ -705,6 +705,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/telegram/groups", b.requireAuth(b.handleTelegramGroups))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
+	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
@@ -3218,6 +3219,57 @@ func (b *Broker) handleQueue(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(b.QueueSnapshot())
+}
+
+func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg, _ := config.Load()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"name":        cfg.CompanyName,
+			"description": cfg.CompanyDescription,
+			"goals":       cfg.CompanyGoals,
+			"size":        cfg.CompanySize,
+			"priority":    cfg.CompanyPriority,
+		})
+	case http.MethodPost:
+		var body struct {
+			Name        string `json:"name"`
+			Description string `json:"description"`
+			Goals       string `json:"goals"`
+			Size        string `json:"size"`
+			Priority    string `json:"priority"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		cfg, _ := config.Load()
+		if body.Name != "" {
+			cfg.CompanyName = strings.TrimSpace(body.Name)
+		}
+		if body.Description != "" {
+			cfg.CompanyDescription = strings.TrimSpace(body.Description)
+		}
+		if body.Goals != "" {
+			cfg.CompanyGoals = strings.TrimSpace(body.Goals)
+		}
+		if body.Size != "" {
+			cfg.CompanySize = strings.TrimSpace(body.Size)
+		}
+		if body.Priority != "" {
+			cfg.CompanyPriority = strings.TrimSpace(body.Priority)
+		}
+		if err := config.Save(cfg); err != nil {
+			http.Error(w, "save failed", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
