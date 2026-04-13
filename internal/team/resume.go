@@ -9,16 +9,29 @@ import (
 // when building resume packets.
 const recentHumanMessageLimit = 10
 
+// isHumanOrSystemSender reports whether a message sender is a human or system
+// source (not an agent). Only agent replies count as "answers".
+func isHumanOrSystemSender(from string) bool {
+	f := strings.ToLower(strings.TrimSpace(from))
+	return f == "you" || f == "human" || f == "nex" || f == "system" || f == ""
+}
+
 // findUnansweredMessages returns the subset of humanMsgs that have received no
-// agent reply in allMessages. A human message is considered "answered" when at
-// least one message in allMessages has ReplyTo set to that human message's ID.
+// agent reply in allMessages. A human message is considered "answered" only when
+// at least one AGENT message (not human/nex/system) in allMessages has ReplyTo
+// set to that human message's ID.
 func findUnansweredMessages(humanMsgs, allMessages []channelMessage) []channelMessage {
-	// Build a set of human message IDs that have been replied to.
+	// Build a set of human message IDs that have been replied to by agents.
+	// Skip replies from human/nex/system senders — only agent replies count.
 	replied := make(map[string]struct{})
 	for _, msg := range allMessages {
-		if msg.ReplyTo != "" {
-			replied[msg.ReplyTo] = struct{}{}
+		if msg.ReplyTo == "" {
+			continue
 		}
+		if isHumanOrSystemSender(msg.From) {
+			continue
+		}
+		replied[msg.ReplyTo] = struct{}{}
 	}
 
 	var out []channelMessage

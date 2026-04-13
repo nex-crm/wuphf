@@ -72,6 +72,46 @@ func TestFindUnansweredMessagesEmptyInputs(t *testing.T) {
 	}
 }
 
+func TestFindUnansweredMessagesHumanThreadReplyDoesNotCountAsAgentAnswer(t *testing.T) {
+	// Spec: only AGENT replies should mark a message as answered.
+	// A human following up in a thread (ReplyTo pointing at another human message)
+	// must NOT cause the original message to be treated as answered.
+	humanMsgs := []channelMessage{
+		{ID: "h1", From: "you", Content: "Can you build the login page?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	allMessages := []channelMessage{
+		{ID: "h1", From: "you", Content: "Can you build the login page?", Timestamp: "2026-04-14T10:00:00Z"},
+		// Human follow-up reply — NOT an agent answer
+		{ID: "h2", From: "human", Content: "Adding more context here", ReplyTo: "h1", Timestamp: "2026-04-14T10:01:00Z"},
+	}
+
+	got := findUnansweredMessages(humanMsgs, allMessages)
+	// h1 should still be unanswered — h2 is a human reply, not an agent reply.
+	if len(got) != 1 {
+		t.Fatalf("expected h1 to remain unanswered (human thread reply is not an agent answer), got %d: %+v", len(got), got)
+	}
+	if got[0].ID != "h1" {
+		t.Errorf("expected unanswered message h1, got %q", got[0].ID)
+	}
+}
+
+func TestFindUnansweredMessagesNexReplyDoesNotCountAsAgentAnswer(t *testing.T) {
+	// Nex automation messages (kind=automation) are not agent replies.
+	humanMsgs := []channelMessage{
+		{ID: "h1", From: "you", Content: "What is the status?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	allMessages := []channelMessage{
+		{ID: "h1", From: "you", Content: "What is the status?", Timestamp: "2026-04-14T10:00:00Z"},
+		{ID: "n1", From: "nex", Content: "Here is context from Nex", ReplyTo: "h1", Timestamp: "2026-04-14T10:01:00Z"},
+	}
+
+	got := findUnansweredMessages(humanMsgs, allMessages)
+	// h1 should still be unanswered — nex reply is not an agent answer.
+	if len(got) != 1 {
+		t.Fatalf("expected h1 to remain unanswered (nex reply is not an agent answer), got %d: %+v", len(got), got)
+	}
+}
+
 func TestBuildResumePacketWithTasksAndMessages(t *testing.T) {
 	// Suppress broker state path for this test.
 	oldPathFn := brokerStatePath
