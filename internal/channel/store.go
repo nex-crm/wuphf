@@ -158,7 +158,14 @@ func (s *Store) Delete(id string) error {
 
 // GetOrCreateDirect returns the DM channel between two members, creating it if absent.
 // The channel slug is deterministic: DirectSlug(a, b). Both members get NotifyLevel "all".
+// Returns an error if either slug is empty or if a == b (self-DM).
 func (s *Store) GetOrCreateDirect(a, b string) (*Channel, error) {
+	if a == "" || b == "" {
+		return nil, fmt.Errorf("GetOrCreateDirect: member slugs must not be empty")
+	}
+	if a == b {
+		return nil, fmt.Errorf("GetOrCreateDirect: cannot create DM with self (%q)", a)
+	}
 	slug := DirectSlug(a, b)
 
 	s.mu.RLock()

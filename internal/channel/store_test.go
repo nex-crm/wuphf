@@ -92,6 +92,22 @@ func TestStoreGetOrCreateDirectAddsMembersWithAllNotify(t *testing.T) {
 	}
 }
 
+func TestGetOrCreateDirectRejectsSelfDM(t *testing.T) {
+	s := NewStore()
+	_, err := s.GetOrCreateDirect("human", "human")
+	if err == nil {
+		t.Error("expected error for self-DM (a == b)")
+	}
+	_, err = s.GetOrCreateDirect("", "engineering")
+	if err == nil {
+		t.Error("expected error for empty member slug")
+	}
+	_, err = s.GetOrCreateDirect("human", "")
+	if err == nil {
+		t.Error("expected error for empty member slug")
+	}
+}
+
 func TestStoreGetOrCreateGroup(t *testing.T) {
 	s := NewStore()
 	ch, err := s.GetOrCreateGroup([]string{"human", "engineering", "design"}, "human")
