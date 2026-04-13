@@ -2234,6 +2234,11 @@ func (l *Launcher) responseInstructionForTarget(msg channelMessage, slug string)
 		}
 		return fmt.Sprintf("You are @%s. Give the first top-level reply quickly, then pull in specialists only when needed.", slug)
 	}
+	// DMs are direct conversations: the human chose to message this agent
+	// specifically. Always respond, regardless of @tags or task ownership.
+	if ch := normalizeChannelSlug(msg.Channel); IsDMSlug(ch) && DMTargetAgent(ch) == slug {
+		return fmt.Sprintf("You are @%s. The human is messaging you directly in a DM. Respond helpfully from your domain expertise.", slug)
+	}
 	if containsSlug(msg.Tagged, slug) {
 		return fmt.Sprintf("You are @%s. You were directly tagged. Reply only from your domain with concrete progress, a blocker, or a handoff.", slug)
 	}

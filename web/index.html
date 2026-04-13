@@ -4841,6 +4841,11 @@ function sendThreadReply() {
     var mentionAgent = AGENTS.find(function(a) { return a.slug === mentionSlug; });
     if (mentionAgent) tagged.push(mentionAgent.slug);
   }
+  // Auto-tag the DM target agent so the backend treats it as a direct address
+  if (currentChannel && currentChannel.indexOf('dm-') === 0) {
+    var dmTarget = currentChannel.slice(3);
+    if (tagged.indexOf(dmTarget) === -1) tagged.push(dmTarget);
+  }
 
   threadInput.value = '';
   threadInput.style.height = 'auto';
@@ -5149,6 +5154,11 @@ function sendMessage() {
     var mentionSlug = mentionMatch[1].toLowerCase().replace(/[^a-z0-9-]/g, '');
     var mentionAgent = AGENTS.find(function(a) { return a.slug === mentionSlug; });
     if (mentionAgent) tagged.push(mentionAgent.slug);
+  }
+  // Auto-tag the DM target agent so the backend treats it as a direct address
+  if (currentChannel && currentChannel.indexOf('dm-') === 0) {
+    var dmTarget = currentChannel.slice(3);
+    if (tagged.indexOf(dmTarget) === -1) tagged.push(dmTarget);
   }
 
   composerInput.value = '';
