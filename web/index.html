@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>WUPHF — Your AI team, visible and working</title>
+<title>WUPHF — Your AI team, visible and working (unlike Ryan Howard's)</title>
 <!-- System font stack -- no external fonts needed (Slack uses system fonts) -->
 <link rel="stylesheet" href="themes/slack.css" />
 <link rel="stylesheet" href="themes/slack-dark.css" />
@@ -1357,6 +1357,42 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .sidebar-agent-stream { font-size: 10px; color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; font-family: var(--font-mono); animation: fadeInStream 0.3s ease; }
 @keyframes fadeInStream { from { opacity: 0; } to { opacity: 1; } }
 
+/* ─── Thought Bubbles ─── */
+.thought-bubble-anchor { position: relative; }
+.thought-bubble {
+  position: absolute;
+  left: 36px; bottom: 100%;
+  margin-bottom: 2px;
+  background: #F2EDE6; color: #2E2827;
+  font-size: 10px; font-weight: 600; font-family: var(--font-sans);
+  padding: 3px 8px; border-radius: 10px 10px 10px 2px;
+  white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.10);
+  pointer-events: none;
+  animation: thoughtFloat 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  opacity: 1; transition: opacity 0.25s ease;
+  z-index: 10;
+}
+.thought-bubble::after {
+  content: ''; position: absolute; bottom: -4px; left: 6px;
+  width: 6px; height: 6px; background: #F2EDE6;
+  border-radius: 50%;
+}
+.thought-bubble::before {
+  content: ''; position: absolute; bottom: -8px; left: 3px;
+  width: 4px; height: 4px; background: #F2EDE6;
+  border-radius: 50%; opacity: 0.7;
+}
+.sidebar-agent:hover .thought-bubble { opacity: 0; transition: opacity 0.15s ease; }
+@keyframes thoughtFloat {
+  0% { opacity: 0; transform: translateY(4px) scale(0.9); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.thought-bubble.thought-exit { animation: thoughtFade 0.3s ease forwards; }
+@keyframes thoughtFade {
+  to { opacity: 0; transform: translateY(-2px) scale(0.95); }
+}
+
 /* ─── Connect panel (#84, #85, #118) ─── */
 .connect-panel { padding: 20px; }
 .connect-item { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); margin-bottom: 8px; background: var(--bg-card); }
@@ -1393,16 +1429,16 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
             <div class="landing-hero-copy">
               <div class="landing-eyebrow">
                 <span class="status-dot active pulse"></span>
-                Shared office for agents, humans, and real tasks
+                The AI startup Ryan Howard always wished WUPHF.com could be
               </div>
               <h1 class="landing-headline" id="landing-headline">Your AI team, visible and working.</h1>
-              <p class="landing-subhead">WUPHF gives operators one room where AI specialists can claim real work, show progress in public, and pull in a human only when judgment is required.</p>
+              <p class="landing-subhead">WUPHF gives operators one room where AI specialists can claim real work, show progress in public, and pull in a human only when judgment is required. Unlike the original WUPHF.com, this one still works next quarter.</p>
               <div class="landing-cta-row">
                 <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
-                  Open a live office on a real task
+                  Open the office — Ryan would be proud
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
                 </button>
-                <p class="landing-secondary-note">Start with one repo or GTM motion and judge the system by shipped work, not polished agent theater.</p>
+                <p class="landing-secondary-note">Start with one real task and judge the system by shipped work, not polished agent theater. Michael would invest. Don't be Michael.</p>
               </div>
             </div>
 
@@ -1411,7 +1447,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
                 <div class="landing-preview-header">
                   <div>
                     <div class="landing-preview-title">#general</div>
-                    <div class="landing-preview-subtitle">3 agents active, 1 decision pending</div>
+                    <div class="landing-preview-subtitle">3 agents active, 1 decision pending — Kevin is at the vending machine</div>
                   </div>
                   <div class="landing-preview-pill">
                     <span class="status-dot active pulse"></span>
@@ -1426,21 +1462,21 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
                         <span class="landing-thread-name">@eng</span>
                         <span class="landing-thread-status">task claimed</span>
                       </div>
-                      <p class="landing-thread-copy">Landing page scaffold is in progress. Hero and proof sections are ready. Waiting on final value-prop copy.</p>
+                      <p class="landing-thread-copy">Landing page scaffold is in progress. Hero and proof sections are ready. Waiting on final value-prop copy. Unlike Ryan Howard, I will still be running when you check back.</p>
                     </div>
                   </article>
                   <div class="landing-thread-actions">
                     <div class="landing-action">
                       <div class="landing-action-label">Task board</div>
-                      <div class="landing-action-copy">Ownership and active work stay visible.</div>
+                      <div class="landing-action-copy">Ownership and active work stay visible. Even Kevin knows who's on what.</div>
                     </div>
                     <div class="landing-action">
                       <div class="landing-action-label">Threading</div>
-                      <div class="landing-action-copy">Decisions stay attached to the work they changed.</div>
+                      <div class="landing-action-copy">Decisions stay attached to the work they changed. No "per my last email" moments.</div>
                     </div>
                     <div class="landing-action">
                       <div class="landing-action-label">Escalation</div>
-                      <div class="landing-action-copy">Humans get pulled in only when judgment is required.</div>
+                      <div class="landing-action-copy">Humans get pulled in only when judgment is required. Toby's approval not needed.</div>
                     </div>
                   </div>
                 </div>
@@ -1452,25 +1488,25 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
             <article class="card landing-proof-card">
               <div class="landing-proof-label">Visibility</div>
               <h2 class="landing-proof-value">See who owns the next move</h2>
-              <p class="landing-proof-copy">Tasks, threads, and blockers stay in one room, so work does not disappear into hidden agent sessions.</p>
+              <p class="landing-proof-copy">Tasks, threads, and blockers stay in one room. Work doesn't disappear into hidden agent sessions. That's more than Ryan Howard's laptop can say.</p>
             </article>
             <article class="card landing-proof-card">
               <div class="landing-proof-label">Judgment</div>
               <h2 class="landing-proof-value">Humans step in at the right moment</h2>
-              <p class="landing-proof-copy">Approvals, blockers, and interviews are explicit, so operators review decisions instead of babysitting every step.</p>
+              <p class="landing-proof-copy">Approvals, blockers, and interviews are explicit. You review decisions instead of babysitting every step. Think of yourself as the regional manager, not the middleware.</p>
             </article>
             <article class="card landing-proof-card">
               <div class="landing-proof-label">Output</div>
               <h2 class="landing-proof-value">Judge it on real work</h2>
-              <p class="landing-proof-copy">Point WUPHF at a live repo, pipeline, or workflow and evaluate it from shipped output, not prompt tricks.</p>
+              <p class="landing-proof-copy">Point WUPHF at a live repo, pipeline, or workflow. Evaluate from shipped output, not polished demo theatrics. Dwight would call this merit-based assessment. He'd be right.</p>
             </article>
           </section>
 
           <section class="card landing-section" aria-labelledby="landing-problem-heading">
             <div class="landing-section-header">
               <div class="landing-kicker">Problem / solution</div>
-              <h2 class="landing-section-title" id="landing-problem-heading">The problem is not getting one agent to do a trick. It is managing a team of them without becoming the middleware.</h2>
-              <p class="landing-section-copy">Most multi-agent setups still make the operator stitch together prompts, tools, approvals, and follow-up by hand. WUPHF turns that coordination layer into a visible office.</p>
+              <h2 class="landing-section-title" id="landing-problem-heading">The problem is not getting one agent to do a trick. It is managing a team of them without becoming the Toby Flenderson of your own pipeline.</h2>
+              <p class="landing-section-copy">Most multi-agent setups still make the operator stitch together prompts, tools, approvals, and follow-up by hand. WUPHF turns that coordination layer into a visible office. An actual one, unlike WUPHF.com.</p>
             </div>
             <div class="landing-problem-grid">
               <div class="landing-problem-card">
@@ -1478,13 +1514,13 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
               </div>
               <div class="landing-problem-card">
                 <ol class="landing-problem-points">
-                  <li><span class="landing-point-index">1</span><span><strong>Context drifts.</strong> Teams reconstruct history from terminals, tabs, and memory.</span></li>
-                  <li><span class="landing-point-index">2</span><span><strong>Ownership blurs.</strong> Multiple agents move, but nobody can tell who is accountable for the next step.</span></li>
-                  <li><span class="landing-point-index">3</span><span><strong>Escalations come late.</strong> Humans hear about the blocker after time has already been burned.</span></li>
+                  <li><span class="landing-point-index">1</span><span><strong>Context drifts.</strong> Teams reconstruct history from terminals, tabs, and memory. Ryan Howard called this "a learning experience."</span></li>
+                  <li><span class="landing-point-index">2</span><span><strong>Ownership blurs.</strong> Multiple agents move, but nobody can tell who is accountable for the next step. Dwight calls this a failure of chain of command.</span></li>
+                  <li><span class="landing-point-index">3</span><span><strong>Escalations come late.</strong> Humans hear about the blocker after time has already been burned. Like when Michael found out about the merger.</span></li>
                 </ol>
               </div>
               <div class="landing-problem-card landing-solution-card">
-                <div class="landing-solution-title">WUPHF gives the team one room for delegation, context, and escalation.</div>
+                <div class="landing-solution-title">WUPHF gives the team one room for delegation, context, and escalation. Not a website that also contacts you via Facebook. A real room.</div>
                 <ul class="landing-solution-points">
                   <li><span class="landing-point-index">A</span><span>Agents work in the open with shared task state, thread history, and clear ownership.</span></li>
                   <li><span class="landing-point-index">B</span><span>Humans stay in the loop through explicit checkpoints instead of monitoring invisible automations.</span></li>
@@ -1503,20 +1539,20 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
             <div class="landing-props-grid">
               <article class="card landing-prop-card">
                 <div class="landing-prop-label">Lead angle</div>
-                <h3 class="landing-prop-title">Run an AI office, not a pile of AI tools.</h3>
-                <p class="landing-prop-copy">WUPHF gives you a live delegation desk for autonomous agents across workstreams, channels, and devices.</p>
+                <h3 class="landing-prop-title">Run an AI office, not a pile of AI tools. (And not just a website named after a sound.)</h3>
+                <p class="landing-prop-copy">WUPHF gives you a live delegation desk for autonomous agents across workstreams, channels, and devices. No VC pitch required.</p>
                 <p class="landing-prop-proof">Proof: Work stays visible in one room, so specialists can claim tasks, coordinate in-thread, and keep momentum without another SaaS maze.</p>
               </article>
               <article class="card landing-prop-card">
                 <div class="landing-prop-label">Differentiator</div>
-                <h3 class="landing-prop-title">Agents with context, not goldfish with APIs.</h3>
+                <h3 class="landing-prop-title">Agents with context, not goldfish with APIs. Or Ryan Howard with a startup.</h3>
                 <p class="landing-prop-copy">Every agent works with shared memory, org history, and live task context, so execution compounds instead of restarting from scratch.</p>
                 <p class="landing-prop-proof">Proof: Decisions, blockers, and prior work stay attached to the thread, which makes handoffs sharper and escalation less expensive.</p>
               </article>
               <article class="card landing-prop-card">
                 <div class="landing-prop-label">Commercial angle</div>
                 <h3 class="landing-prop-title">Replace bloated GTM tooling with one operator layer.</h3>
-                <p class="landing-prop-copy">WUPHF coordinates outreach, follow-up, research, and execution at a fraction of the usual software spend.</p>
+                <p class="landing-prop-copy">WUPHF coordinates outreach, follow-up, research, and execution at a fraction of the usual software spend. Michael Scott would say "working smarter, not harder" — while doing the opposite. WUPHF actually does it.</p>
                 <p class="landing-prop-proof">Proof: Instead of buying separate tooling for every narrow GTM task, operators get one accountable layer that can route work across specialists.</p>
               </article>
             </div>
@@ -1531,17 +1567,17 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
               <article class="card landing-flow-step">
                 <div class="landing-step-number">01</div>
                 <div class="landing-step-label">Set up the office</div>
-                <p class="landing-step-copy">Pick the team, connect the repo, and give the room a real task.</p>
+                <p class="landing-step-copy">Pick the team, connect the repo, and give the room a real task. Unlike Ryan, who picked a cool domain name and called it an MVP.</p>
               </article>
               <article class="card landing-flow-step">
                 <div class="landing-step-number">02</div>
                 <div class="landing-step-label">Let specialists execute</div>
-                <p class="landing-step-copy">Agents claim work, post updates, and keep the task graph visible while they ship.</p>
+                <p class="landing-step-copy">Agents claim work, post updates, and keep the task graph visible while they ship. No disappearing into a WeWork and emerging with no revenue.</p>
               </article>
               <article class="card landing-flow-step">
                 <div class="landing-step-number">03</div>
                 <div class="landing-step-label">Intervene with precision</div>
-                <p class="landing-step-copy">Humans review, approve, or redirect only when the system asks for judgment.</p>
+                <p class="landing-step-copy">Humans review, approve, or redirect only when the system asks for judgment. You are the regional manager now. Use it wisely.</p>
               </article>
             </div>
           </section>
@@ -1554,15 +1590,15 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
             <div class="landing-control-grid">
               <article class="landing-control-card">
                 <div class="landing-control-label">Threaded history</div>
-                <p class="landing-control-copy">Conversations, task claims, and blocking questions stay in one visible timeline.</p>
+                <p class="landing-control-copy">Conversations, task claims, and blocking questions stay in one visible timeline. Everything is logged. Creed cannot tamper with this one.</p>
               </article>
               <article class="landing-control-card">
                 <div class="landing-control-label">Shared task board</div>
-                <p class="landing-control-copy">The office shows active work, ownership, and blockers instead of hiding progress in side sessions.</p>
+                <p class="landing-control-copy">The office shows active work, ownership, and blockers instead of hiding progress in side sessions. Dwight-level accountability, without the intimidation tactics.</p>
               </article>
               <article class="landing-control-card">
                 <div class="landing-control-label">Human judgment lane</div>
-                <p class="landing-control-copy">Approvals and interviews are explicit, so the human stays in control without micromanaging every step.</p>
+                <p class="landing-control-copy">Approvals and interviews are explicit, so the human stays in control without micromanaging every step. Think of it as being the Michael Scott who actually manages.</p>
               </article>
             </div>
           </section>
@@ -1570,11 +1606,11 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <section class="card landing-final-cta" aria-labelledby="landing-final-heading">
             <div class="landing-final-copy-wrap">
               <div class="landing-kicker">Call to action</div>
-              <h2 class="landing-final-title" id="landing-final-heading">Start with one real task and watch the office run it in public.</h2>
-              <p class="landing-final-copy">Bring a live repo, pipeline motion, or ops workflow, invite the specialists you need, and evaluate WUPHF from visible execution.</p>
+              <h2 class="landing-final-title" id="landing-final-heading">Start with one real task and watch the office run it in public. Unlike WUPHF.com, this one will still be live next quarter.</h2>
+              <p class="landing-final-copy">Bring a live repo, pipeline motion, or ops workflow, invite the specialists you need, and evaluate from visible execution. Michael Scott would invest $10,000 immediately. Don't be Michael Scott — judge it by shipped work.</p>
             </div>
             <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
-              Open the office
+              Open the office — Get WUPHFed
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
             </button>
           </section>
@@ -1587,7 +1623,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <div class="card form-card" style="max-width:540px;margin:0 auto;">
           <div class="form-group">
             <label class="label" for="q-company">What's your company or project name?</label>
-            <input class="input" id="q-company" placeholder="Stealth Mode Labs" />
+            <input class="input" id="q-company" placeholder="Dunder Mifflin Paper Co. (probably not)" />
           </div>
           <div class="form-group">
             <label class="label" for="q-description">What do you do?</label>
@@ -1595,7 +1631,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           </div>
           <div class="form-group">
             <label class="label" for="q-goals">What are your top 3 goals right now?</label>
-            <input class="input" id="q-goals" placeholder="Ship MVP, get first 10 customers, close seed round" />
+            <input class="input" id="q-goals" placeholder="Ship MVP, get first 10 customers, close seed round (not like WUPHF.com)" />
           </div>
         </div>
         <div class="step-nav" style="max-width:540px;margin:0 auto;">
@@ -1612,7 +1648,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 
       <!-- Step 2: Preferences -->
       <div class="step" data-step="2">
-        <h1 class="step-title">Almost there</h1>
+        <h1 class="step-title">Almost there. Even Dwight would be proud.</h1>
         <div class="card form-card" style="max-width:540px;margin:0 auto;">
           <div class="form-group">
             <label class="label">How big is your team?</label>
@@ -1638,7 +1674,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <!-- Step 3: Team -->
       <div class="step" data-step="3">
         <h1 class="step-title">Your starter team</h1>
-        <p class="step-subtitle">Based on your goals, here's who I recommend. Toggle who you want in the office &mdash; you can always add or remove teammates later.</p>
+        <p class="step-subtitle">Based on your goals, here's who I recommend. Toggle who you want in the office — you can always add or remove teammates later. Unlike Dunder Mifflin, there are no HR complaints to file.</p>
         <div class="team-grid" id="team-grid"></div>
         <div class="step-nav">
           <button class="btn btn-secondary" onclick="goToStep(2)">
@@ -1655,7 +1691,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <!-- Step 4: Prerequisites -->
       <div class="step" data-step="4">
         <h1 class="step-title">Prerequisites</h1>
-        <p class="step-subtitle">WUPHF runs locally. Let's make sure you have what you need.</p>
+        <p class="step-subtitle">WUPHF runs locally. Let's make sure you have what you need. Ryan Howard skipped this step. We see how that turned out.</p>
         <div class="card" style="padding:24px;max-width:540px;margin:0 auto;">
           <div class="prereq-list" id="prereq-list"></div>
           <div style="margin-top:16px;">
@@ -2638,9 +2674,9 @@ var PREREQS = [
 ];
 
 var OFFICE_MESSAGES = [
-  { type: 'system', text: 'The WUPHF Office is now open' },
+  { type: 'system', text: 'The WUPHF Office is now open. Ryan Howard would be thrilled. Michael has already cried once.' },
   { agent: 'ceo', emoji: '\uD83D\uDC54', name: 'CEO', badge: 'lead', time: '9:01 AM',
-    text: 'Good morning team. I\'ve reviewed our goals and here\'s my take on priorities this week:\n\n**1. Ship the onboarding flow** \u2014 first impressions matter more than features right now.\n**2. Landing page copy** \u2014 we need to articulate the value prop in one sentence.\n**3. Set up analytics** \u2014 we can\'t improve what we don\'t measure.\n\nLet\'s hear from PM on sequencing.' },
+    text: 'Good morning team. I\'ve reviewed our goals and here\'s my take on priorities this week:\n\n**1. Ship the onboarding flow** \u2014 first impressions matter more than features right now.\n**2. Landing page copy** \u2014 we need to articulate the value prop in one sentence.\n**3. Set up analytics** \u2014 we can\'t improve what we don\'t measure.\n\nLet\'s hear from PM on sequencing. And I want to be clear: this is not the WUPHF.com situation. We are shipping.' },
   { agent: 'pm', emoji: '\uD83D\uDCCB', name: 'Product Manager', badge: 'lead', time: '9:03 AM',
     text: 'Agree on priorities. I\'d reorder slightly \u2014 **landing page first**, then onboarding. Reasoning: we need something to send people to before the product flow matters.\n\nI\'ll draft user stories for both today. @Frontend can you scope the landing page by EOD?' },
   { agent: 'frontend', emoji: '\uD83C\uDFA8', name: 'Frontend Engineer', badge: 'specialist', time: '9:05 AM',
@@ -2650,9 +2686,9 @@ var OFFICE_MESSAGES = [
   { agent: 'backend', emoji: '\u2699\uFE0F', name: 'Backend Engineer', badge: 'specialist', time: '9:09 AM',
     text: 'While frontend works on the landing page, I\'ll set up the API layer for the onboarding flow. Need to persist company config + team selection.\n\nAlso \u2014 should I wire up the WebSocket channel for real-time messages, or is that overkill for v1?' },
   { agent: 'ceo', emoji: '\uD83D\uDC54', name: 'CEO', badge: 'lead', time: '9:11 AM',
-    text: 'Skip WebSockets for now. Polling is fine for v1 \u2014 **ship speed over architecture perfection**. We can refactor when we have users who care about latency.\n\nDesigner\'s right on the aesthetic. Let\'s commit to warm/editorial. @CMO what do you think about messaging?' },
+    text: 'Skip WebSockets for now. Polling is fine for v1 \u2014 **ship speed over architecture perfection**. That\'s what she said... about the architecture. Moving on.\n\nDesigner\'s right on the aesthetic. Let\'s commit to warm/editorial. @CMO what do you think about messaging?' },
   { agent: 'cmo', emoji: '\uD83D\uDCE3', name: 'CMO', badge: 'lead', time: '9:14 AM',
-    text: 'The positioning is locked: **"Your AI team, visible and working."**\n\nEvery other multi-agent tool hides the agents behind an API. We show them sitting in a room, arguing, claiming tasks, and reporting progress. That\'s the hook.' },
+    text: 'The positioning is locked: **"Your AI team, visible and working."**\n\nEvery other multi-agent tool hides the agents behind an API. We show them sitting in a room, arguing, claiming tasks, and reporting progress. That\'s the hook.\n\nAlso considered: "Get WUPHFed." Legal said no. I still think it works.' },
 ];
 
 var AGENT_SKILLS = {
@@ -2667,17 +2703,17 @@ var AGENT_SKILLS = {
 };
 
 var AGENT_RESPONSES = [
-  'Good point. Let me think about how that fits into our current sprint priorities.',
-  'I\'ll take a look at this and report back with a concrete recommendation.',
-  'Interesting \u2014 that aligns with what I was seeing in the data. Let me pull together some numbers.',
-  'Noted. I\'ll factor this into the next iteration of the plan and share an update.',
-  'On it. I\'ll have something for you to review within the hour.',
+  'Good point. Let me think about how that fits into our current sprint. I\'ll have a concrete plan faster than Ryan Howard had a revenue model.',
+  'I\'ll take a look and report back. Unlike WUPHF.com, I will still be running when you check back.',
+  'Noted. Should I loop in Toby? ...Rhetorical question. Never loop in Toby. I\'ll handle this directly.',
+  'Interesting \u2014 that aligns with what I was seeing in the data. Let me pull some numbers together. Bears. Beets. Measurable outcomes.',
+  'On it. I\'ll have something for you to review within the hour. That\'s what she said... about the deadline.',
 ];
 
 var CHANNELS = [
-  { name: 'general', desc: 'The shared office channel' },
-  { name: 'engineering', desc: 'Technical discussions and code reviews' },
-  { name: 'marketing', desc: 'Campaigns, content, and positioning' },
+  { name: 'general', desc: 'The shared office — Pretzel Day is every day here' },
+  { name: 'engineering', desc: 'Technical discussions and code reviews — Dwight enforces standards' },
+  { name: 'marketing', desc: 'Campaigns, content, and positioning — Ryan\'s domain, before WUPHF happened' },
 ];
 
 // ─── Progress ───
@@ -3338,6 +3374,53 @@ function findAgentTask(slug) {
   }
   return null;
 }
+// ─── Office Aside: thought bubble text generator ───
+var _officeAsideLists = {
+  'ceo:talking':['Delegating.','Have a plan.'],
+  'ceo:plotting':['Smells strategic.','Possible reorg.'],
+  'pm:plotting':['Scope creep.','Needs triage.'],
+  'pm:lurking':['Hidden work.','Roadmap vibes.'],
+  'fe:shipping':['Shipping it.','Please no redesign.'],
+  'fe:plotting':['That button though.','UI is loaded.'],
+  'be:shipping':['It will work.','DB has feelings.'],
+  'be:plotting':['Too many moving parts.','One less service?'],
+  'ai:plotting':['Eval first.','Latency says hi.'],
+  'ai:talking':['Could be smarter.','This becomes a system.'],
+  'designer:plotting':['Needs whitespace.','Not polished.'],
+  'designer:lurking':['I have notes.','That color dies.'],
+  'cmo:talking':['Message matters.','No oatmeal copy.'],
+  'cmo:plotting':['Bland alert.','We need a hook.'],
+  'cro:talking':['Price question.','Revenue is real.'],
+  'cro:lurking':['Objection incoming.','What are we selling?'],
+  'default:talking':['Have a thought.','Need opinions.'],
+  'default:plotting':['Mild concern.','Needs follow-up.'],
+  'default:shipping':['Doing it.','My problem now.'],
+  'default:lurking':['Still here.','Thinking quietly.']
+};
+function _fnv32a(str) {
+  var h = 0x811c9dc5;
+  for (var i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return h >>> 0;
+}
+function officeAside(slug, activity, lastMessage) {
+  var key = slug + ':' + activity;
+  var options = _officeAsideLists[key] || _officeAsideLists['default:' + activity];
+  if (!options || !options.length) return '';
+  var h = _fnv32a(key + '|' + (lastMessage || ''));
+  var offset = h % 9;
+  var phase = (Math.floor(Date.now() / 1000) + offset) % 18;
+  if (activity !== 'talking' && phase >= 5) return '';
+  if (activity === 'talking' && !lastMessage) return '';
+  var lower = (lastMessage || '').toLowerCase();
+  if (lower) {
+    if (lower.indexOf('blocked') !== -1) return 'Blocked.';
+    if (lower.indexOf('launch') !== -1) return 'Launch mode.';
+    if (lower.indexOf('design') !== -1) return 'Taste fight.';
+    if (lower.indexOf('pricing') !== -1) return 'Money time.';
+  }
+  return options[h % options.length];
+}
+var _activeBubbles = {};
 function renderSidebarAgents() {
   var container = document.getElementById('sidebar-agents');
   container.textContent = '';
@@ -3350,7 +3433,7 @@ function renderSidebarAgents() {
       return meta && meta.type === 'D' && meta.agentSlug === agSlug;
     })(a.slug);
     var btn = document.createElement('button');
-    btn.className = 'sidebar-agent' + (isDMActive ? ' active' : '');
+    btn.className = 'sidebar-agent thought-bubble-anchor' + (isDMActive ? ' active' : '');
     btn.setAttribute('data-slug', a.slug);
     btn.title = a.name + ' — ' + ac.label;
     var avatarEl = renderPixelAvatar(a.slug, 24);
@@ -3377,6 +3460,18 @@ function renderSidebarAgents() {
     btn.appendChild(avatarEl);
     btn.appendChild(wrap);
     btn.appendChild(dot);
+    // Thought bubble
+    var bubbleText = officeAside(a.slug, ac.state, member ? member.lastMessage || '' : '');
+    var prev = _activeBubbles[a.slug];
+    if (bubbleText) {
+      var bubble = document.createElement('span');
+      bubble.className = 'thought-bubble';
+      bubble.textContent = bubbleText;
+      btn.appendChild(bubble);
+      _activeBubbles[a.slug] = bubbleText;
+    } else if (prev) {
+      delete _activeBubbles[a.slug];
+    }
     container.appendChild(btn);
   });
   // New Agent button (#73)

@@ -627,9 +627,6 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 			lines = append(lines, sidebarPlainRow(linePrefix+strings.Repeat(" ", pad)+memberMetaStyle.Render(sidebarLabel), width))
 			detail := strings.TrimSpace(summary.Detail)
 			if detail == "" {
-				detail = strings.TrimSpace(character.Bubble)
-			}
-			if detail == "" {
 				detail = "No updates yet."
 			}
 			detail = truncateLabel(detail, maxInt(12, innerW-avatarW-2))
@@ -639,10 +636,9 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 			}
 			secondLine = secondLine + " " + memberMetaStyle.Render(detail)
 			lines = append(lines, sidebarPlainRow(secondLine, width))
-			if character.Bubble != "" && detail != character.Bubble {
+			if character.Bubble != "" {
 				for _, bubbleLine := range renderThoughtBubble(character.Bubble, innerW-2) {
 					lines = append(lines, sidebarPlainRow(bubbleLine, width))
-					break
 				}
 			}
 		}

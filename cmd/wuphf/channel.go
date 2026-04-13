@@ -450,45 +450,45 @@ func newBrokerRequest(method, url string, body io.Reader) (*http.Request, error)
 }
 
 var channelSlashCommands = []tui.SlashCommand{
-	{Name: "init", Description: "Run setup", Category: "setup"},
-	{Name: "provider", Description: "Switch LLM provider", Category: "setup"},
-	{Name: "doctor", Description: "Check readiness, integrations, and runtime health", Category: "setup"},
-	{Name: "integrate", Description: "Connect an integration", Category: "setup"},
-	{Name: "connect", Description: "Connect an external channel (Telegram, Slack, Discord)", Category: "setup"},
-	{Name: "1o1", Description: "Enable, switch, or disable direct 1:1 mode", Category: "session"},
-	{Name: "messages", Description: "Show the main office feed", Category: "navigate"},
+	{Name: "init", Description: "Run setup (Ryan Howard skipped this step — don't be Ryan)", Category: "setup"},
+	{Name: "provider", Description: "Switch LLM provider (choose wisely, Michael)", Category: "setup"},
+	{Name: "doctor", Description: "Check readiness and runtime health (Meredith not involved)", Category: "setup"},
+	{Name: "integrate", Description: "Connect an integration (beat the Dunder Mifflin fax)", Category: "setup"},
+	{Name: "connect", Description: "Connect Telegram, Slack, or Discord to the office", Category: "setup"},
+	{Name: "1o1", Description: "Direct 1:1 with an agent — Toby not invited", Category: "session"},
+	{Name: "messages", Description: "Show the main office feed — where it all happens", Category: "navigate"},
 	{Name: "inbox", Description: "Show the selected agent inbox lane in 1:1 mode", Category: "navigate"},
 	{Name: "outbox", Description: "Show the selected agent outbox lane in 1:1 mode", Category: "navigate"},
-	{Name: "recover", Description: "Open the session recovery summary", Category: "navigate"},
+	{Name: "recover", Description: "Session recovery — Creed would call this 'continuity'", Category: "navigate"},
 	{Name: "resume", Description: "Alias for /recover", Category: "navigate"},
-	{Name: "rewind", Description: "Insert a summarize-from-here recovery prompt", Category: "navigate"},
-	{Name: "search", Description: "Search channels, tasks, requests, and threads", Category: "navigate"},
+	{Name: "rewind", Description: "Catch up from here — not a full Threat Level Midnight", Category: "navigate"},
+	{Name: "search", Description: "Search channels, tasks, requests (Creed files too)", Category: "navigate"},
 	{Name: "insert", Description: "Insert a channel, task, request, or message reference", Category: "navigate"},
-	{Name: "switcher", Description: "Open the unified office/direct switcher", Category: "navigate"},
-	{Name: "tasks", Description: "Show active work in this channel", Category: "navigate"},
+	{Name: "switcher", Description: "Switch office/direct — faster than Dwight's fire drill", Category: "navigate"},
+	{Name: "tasks", Description: "Show active work — Dwight tracks these on paper too", Category: "navigate"},
 	{Name: "switch", Description: "Switch to another channel", Category: "navigate"},
 	{Name: "channels", Description: "Browse and manage channels", Category: "navigate"},
 	{Name: "channel", Description: "Create or remove a channel", Category: "channels"},
-	{Name: "agents", Description: "Manage channel agents", Category: "people"},
-	{Name: "agent", Description: "Add, remove, enable, or disable an agent", Category: "people"},
-	{Name: "agent prompt", Description: "Generate a new agent from a prompt", Category: "people"},
-	{Name: "task", Description: "Claim, release, or complete a task", Category: "work"},
-	{Name: "policies", Description: "Show signals, decisions, external actions, and watchdogs", Category: "navigate"},
-	{Name: "calendar", Description: "Show the office schedule and team calendars", Category: "navigate"},
+	{Name: "agents", Description: "Manage your team (no downsizing announcements)", Category: "people"},
+	{Name: "agent", Description: "Add, remove, enable, or disable a teammate", Category: "people"},
+	{Name: "agent prompt", Description: "New teammate from a prompt — Ryan calls this 'disruption'", Category: "people"},
+	{Name: "task", Description: "Claim, release, or complete a task — ownership matters here", Category: "work"},
+	{Name: "policies", Description: "Signals, watchdogs, decisions — no beet farm required", Category: "navigate"},
+	{Name: "calendar", Description: "Office schedule — more reliable than Michael's personal calendar", Category: "navigate"},
 	{Name: "queue", Description: "Alias for /calendar", Category: "navigate"},
-	{Name: "artifacts", Description: "Show recent task logs, approvals, and workflow artifacts", Category: "navigate"},
-	{Name: "skills", Description: "Show available skills", Category: "navigate"},
-	{Name: "skill", Description: "Create, invoke, or manage a skill", Category: "work"},
-	{Name: "reply", Description: "Reply in thread by message ID", Category: "conversation"},
-	{Name: "threads", Description: "Browse and manage threads", Category: "conversation"},
-	{Name: "expand", Description: "Expand a collapsed thread", Category: "conversation"},
-	{Name: "collapse", Description: "Collapse a thread", Category: "conversation"},
-	{Name: "cancel", Description: "Exit reply/setup/doctor mode", Category: "conversation"},
-	{Name: "collab", Description: "Switch to collaborative mode (all agents see all messages)", Category: "session"},
-	{Name: "focus", Description: "Switch to delegation mode (CEO routes, specialists execute)", Category: "session"},
+	{Name: "artifacts", Description: "Task logs, approvals, and workflow artifacts — the paper trail Dwight demands", Category: "navigate"},
+	{Name: "skills", Description: "Show available skills — everyone has a specialty, even Kevin", Category: "navigate"},
+	{Name: "skill", Description: "Create, invoke, or manage a skill — the office gets smarter over time", Category: "work"},
+	{Name: "reply", Description: "Reply in thread — threads keep context, unlike forwarded email chains", Category: "conversation"},
+	{Name: "threads", Description: "Browse threads — the antidote to 'per my last email'", Category: "conversation"},
+	{Name: "expand", Description: "Expand a collapsed thread — Michael never collapses anything", Category: "conversation"},
+	{Name: "collapse", Description: "Collapse a thread — keep the office tidy, Dwight approves", Category: "conversation"},
+	{Name: "cancel", Description: "Exit current mode — that's what she said (probably)", Category: "conversation"},
+	{Name: "collab", Description: "Open-floor mode — everyone hears everything, Michael Scott style", Category: "session"},
+	{Name: "focus", Description: "Delegation mode — CEO routes, specialists execute (that's how it was always meant to work)", Category: "session"},
 	{Name: "reset", Description: "Reset channel and agents", Category: "session"},
 	{Name: "reset-dm", Description: "Clear direct messages with an agent", Category: "session"},
-	{Name: "quit", Description: "Exit WUPHF", Category: "session"},
+	{Name: "quit", Description: "Exit WUPHF — Michael would make a speech first", Category: "session"},
 }
 
 // oneOnOneBlacklist lists command names blocked in 1:1 mode.
@@ -722,7 +722,7 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		m.sidebarCollapsed = true
 		m.threadsDefaultExpand = true
 		m.autocomplete = tui.NewAutocomplete(buildOneOnOneSlashCommands())
-		m.notice = "Direct session reset. Agent pane reloaded in place."
+		m.notice = "Conference room reserved. Direct session reset. Agent pane reloaded in place. No Toby."
 	}
 	if config.ResolveNoNex() {
 		m.notice = "Running in office-only mode. Nex tools are disabled for this session."
@@ -954,7 +954,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.lastCtrlCAt = now
-			m.setTransientNotice("Press Ctrl+C again to quit WUPHF.")
+			m.setTransientNotice("Press Ctrl+C again to quit WUPHF. Toby will file the exit paperwork.")
 			return m, nil
 		case "ctrl+b":
 			if m.isOneOnOne() {
@@ -964,26 +964,26 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+g":
 			if m.isOneOnOne() {
-				m.setTransientNotice("1:1 mode has no channel sidebar.")
+				m.setTransientNotice("1:1 mode: no sidebar, no distractions, no Toby. Ideal.")
 				return m, nil
 			}
 			if m.quickJumpTarget == quickJumpChannels {
 				m.quickJumpTarget = quickJumpNone
 			} else {
 				m.quickJumpTarget = quickJumpChannels
-				m.setTransientNotice("Quick nav: 1-9 switches channels.")
+				m.setTransientNotice("Quick nav: 1-9 switches channels. Faster than Dwight in a fire drill.")
 			}
 			return m, nil
 		case "ctrl+o":
 			if m.isOneOnOne() {
-				m.setTransientNotice("1:1 mode is just the direct conversation.")
+				m.setTransientNotice("1:1 mode: just the direct conversation. Like a conference room with no Toby.")
 				return m, nil
 			}
 			if m.quickJumpTarget == quickJumpApps {
 				m.quickJumpTarget = quickJumpNone
 			} else {
 				m.quickJumpTarget = quickJumpApps
-				m.setTransientNotice("Quick nav: 1-9 switches office apps.")
+				m.setTransientNotice("Quick nav: 1-9 switches apps. Even faster than Stanley doing the crossword.")
 			}
 			return m, nil
 		case "ctrl+d":
@@ -992,7 +992,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeChannel = "general"
 				m.lastID = ""
 				m.messages = nil
-				m.setTransientNotice("Back to #general")
+				m.setTransientNotice("Back to #general — the heart of the office.")
 				return m, pollBroker("", m.activeChannel)
 			}
 			return m, nil
@@ -1010,9 +1010,9 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.selectSidebarItem(items[idx])
 				}
 				if target == quickJumpChannels {
-					m.setTransientNotice("No channel on that number.")
+					m.setTransientNotice("No channel on that number. Even Michael checks the directory first.")
 				} else {
-					m.setTransientNotice("No app on that number.")
+					m.setTransientNotice("No app on that number. Try a different one — WUPHF believes in you.")
 				}
 				return m, nil
 			case "esc":
@@ -1040,7 +1040,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.notice = "Integration canceled."
 				} else {
 					m.initFlow = tui.NewInitFlow()
-					m.notice = "Setup canceled."
+					m.notice = "Setup canceled. Come back when you're ready. That's what she said."
 				}
 				m.pickerMode = channelPickerNone
 				return m, nil
@@ -1058,7 +1058,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case contextDoctor:
 				m.doctor = nil
-				m.notice = "Doctor closed."
+				m.notice = "Health check closed. The doctor says you're fine — or at least healthy enough to ship."
 				return m, nil
 			case contextInterview:
 				if m.pending.Blocking || m.pending.Required {
@@ -1760,7 +1760,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.clearUnreadState()
 				m.refreshSlashCommands()
 				if m.isOneOnOne() && strings.TrimSpace(m.notice) == "" {
-					m.notice = "Direct session reset. Agent pane reloaded in place."
+					m.notice = "Conference room reserved. Direct session reset. Agent pane reloaded in place. No Toby."
 				}
 				return m, m.pollCurrentState()
 			}
@@ -4421,7 +4421,7 @@ func (m *channelModel) maybeActivateChannelPickerFromInput() bool {
 	case "/switch ", "/s ":
 		options := m.buildSwitchChannelPickerOptions()
 		if len(options) == 0 {
-			m.notice = "No channels yet."
+			m.notice = "No channels yet. Even Michael Scott had a #general. Create one."
 			return false
 		}
 		m.input = nil
@@ -4598,7 +4598,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		options := m.buildRecoveryPromptPickerOptions()
 		if len(options) == 0 {
-			m.notice = "Nothing recent to rewind from yet."
+			m.notice = "Nothing to rewind yet. Give it a minute — or a Pretzel Day."
 			return m, nil
 		}
 		m.picker = tui.NewPicker("Rewind From...", options)
@@ -4610,7 +4610,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		options := m.buildInsertPickerOptions()
 		if len(options) == 0 {
-			m.notice = "Nothing useful to insert right now."
+			m.notice = "Nothing to insert. Creed hasn't updated the archives yet."
 			return m, nil
 		}
 		m.picker = tui.NewPicker("Insert Reference", options)
@@ -4622,7 +4622,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		options := m.buildSearchPickerOptions()
 		if len(options) == 0 {
-			m.notice = "Nothing searchable yet."
+			m.notice = "Nothing searchable yet. Creed is still organizing the filing system."
 			return m, nil
 		}
 		m.picker = tui.NewPicker("Search Workspace", options)
@@ -4640,7 +4640,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		options := m.buildTaskPickerOptions()
 		if len(options) == 0 {
-			m.notice = "No open tasks in #" + m.activeChannel + "."
+			m.notice = "No open tasks in #" + m.activeChannel + ". Either ahead of schedule, or at the vending machine."
 			return m, nil
 		}
 		m.picker = tui.NewPicker("Tasks in #"+m.activeChannel, options)
@@ -4665,11 +4665,11 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		}
 	case trimmed == "/collab":
 		clearCurrent()
-		m.notice = "Switched to collaborative mode. All agents see all messages."
+		m.notice = "Collaborative mode: all agents see all messages — open floor plan, Michael Scott style."
 		return m, switchFocusMode(false)
 	case trimmed == "/focus":
 		clearCurrent()
-		m.notice = "Switched to delegation mode. CEO routes, specialists execute."
+		m.notice = "Delegation mode: CEO routes, specialists execute. This is how a real office works."
 		return m, switchFocusMode(true)
 	case trimmed == "/reset":
 		clearCurrent()
@@ -4696,18 +4696,18 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	case trimmed == "/integrate":
 		clearCurrent()
 		if config.ResolveNoNex() {
-			m.notice = "Nex integration is disabled for this session (--no-nex)."
+			m.notice = "Nex is disabled (--no-nex). Running on local memory — like Creed, but better organized."
 			return m, nil
 		}
 		if config.ResolveAPIKey("") == "" {
-			m.notice = "Run /init first. No WUPHF API key is configured."
+			m.notice = "No WUPHF API key configured. Run /init — Ryan Howard skipped this step. Don't be Ryan."
 			m.initFlow, _ = m.initFlow.Start()
 			return m, nil
 		}
 		m.picker = tui.NewPicker("Choose Integration", channelIntegrationOptions())
 		m.picker.SetActive(true)
 		m.pickerMode = channelPickerIntegrations
-		m.notice = "Choose an integration to connect."
+		m.notice = "Choose an integration to connect. Ryan Howard would've connected them all to one site."
 		return m, nil
 	case trimmed == "/doctor":
 		clearCurrent()
@@ -4730,7 +4730,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		options := m.buildSwitchChannelPickerOptions()
 		if len(options) == 0 {
-			m.notice = "No channels yet."
+			m.notice = "No channels yet. Even Michael Scott had a #general. Create one."
 			return m, nil
 		}
 		m.picker = tui.NewPicker("Switch Channel", options)
@@ -4754,7 +4754,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		options := m.buildChannelPickerOptions()
 		if len(options) == 0 {
-			m.notice = "No channels yet."
+			m.notice = "No channels yet. Even Michael Scott had a #general. Create one."
 			return m, nil
 		}
 		m.picker = tui.NewPicker("Channels", options)
@@ -4771,7 +4771,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		clearCurrent()
 		options := m.buildRequestPickerOptions()
 		if len(options) == 0 {
-			m.notice = "No open requests in #" + m.activeChannel + "."
+			m.notice = "No open requests in #" + m.activeChannel + ". The team is self-sufficient — unlike some regional managers."
 			return m, nil
 		}
 		m.picker = tui.NewPicker("Requests in #"+m.activeChannel, options)
@@ -4996,7 +4996,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	case trimmed == "/init":
 		clearCurrent()
 		if config.ResolveNoNex() {
-			m.notice = "Nex integration is disabled for this session (--no-nex). Restart WUPHF without --no-nex to run setup."
+			m.notice = "Nex is disabled (--no-nex). Ryan Howard did not let integration issues stop him. But he also failed. Restart without --no-nex to run setup."
 			return m, nil
 		}
 		m.notice = "Starting setup..."
@@ -5021,16 +5021,16 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			if m.focus == focusThread {
 				m.focus = focusMain
 			}
-			m.notice = "Reply mode cleared."
+			m.notice = "Reply mode cleared. Thread closed — cleaner than a Dwight negotiation."
 		} else if m.doctor != nil {
 			m.doctor = nil
-			m.notice = "Doctor closed."
+			m.notice = "Health check done. The doctor says ship it (not medical advice)."
 		} else if m.initFlow.IsActive() || m.initFlow.Phase() == tui.InitDone || m.picker.IsActive() {
 			m.initFlow = tui.NewInitFlow()
 			m.picker.SetActive(false)
-			m.notice = "Setup canceled."
+			m.notice = "Setup canceled. Come back when you're ready. That's what she said."
 		} else {
-			m.notice = "Nothing to cancel."
+			m.notice = "Nothing to cancel. Even Michael Scott knows when there's nothing to cancel."
 		}
 		return m, nil
 	case strings.HasPrefix(trimmed, "/reply"):
@@ -5041,7 +5041,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			return m, nil
 		}
 		if _, ok := findMessageByID(m.messages, target); !ok {
-			m.notice = fmt.Sprintf("Message %s not found.", target)
+			m.notice = fmt.Sprintf("Message %s not found. Maybe Creed filed it.", target)
 			return m, nil
 		}
 		m.replyToID = target
@@ -5070,7 +5070,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			return m, nil
 		}
 		if _, ok := findMessageByID(m.messages, target); !ok {
-			m.notice = fmt.Sprintf("Message %s not found.", target)
+			m.notice = fmt.Sprintf("Message %s not found. Maybe Creed filed it.", target)
 			return m, nil
 		}
 		m.expandedThreads[target] = true
@@ -5089,7 +5089,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			return m, nil
 		}
 		if _, ok := findMessageByID(m.messages, target); !ok {
-			m.notice = fmt.Sprintf("Message %s not found.", target)
+			m.notice = fmt.Sprintf("Message %s not found. Maybe Creed filed it.", target)
 			return m, nil
 		}
 		delete(m.expandedThreads, target)
@@ -5121,7 +5121,7 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 			}
 		}
 		if strings.HasPrefix(trimmed, "/") && cmdName != "" {
-			m.setTransientNotice(fmt.Sprintf("Unknown command /%s — type / to see available commands.", cmdName))
+			m.setTransientNotice(fmt.Sprintf("Unknown command /%s — type / to see available commands. Even Michael knows the commands.", cmdName))
 		}
 		return m, nil
 	}

@@ -33,6 +33,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/calendar"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -2774,7 +2775,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 	agentCfg := agentConfigFromMember(member)
 	officeMembers := l.officeMembersSnapshot()
 	lead := officeLeadSlugFrom(officeMembers, l.pack)
-	noNex := config.ResolveNoNex()
+	noNex := config.ResolveNoNex() || config.ResolveAPIKey("") == ""
 
 	var sb strings.Builder
 
@@ -3064,20 +3065,15 @@ func (l *Launcher) buildMCPServerMap() (map[string]any, error) {
 		entry["env"] = env
 	}
 
-	if !config.ResolveNoNex() {
+	if !config.ResolveNoNex() && apiKey != "" {
 		if nexMCP, err := exec.LookPath("nex-mcp"); err == nil {
-			nexEnv := map[string]string{}
-			if apiKey != "" {
-				nexEnv["WUPHF_API_KEY"] = apiKey
-				nexEnv["NEX_API_KEY"] = apiKey
-			}
-			nexEntry := map[string]any{
+			servers["nex"] = map[string]any{
 				"command": nexMCP,
+				"env": map[string]string{
+					"WUPHF_API_KEY": apiKey,
+					"NEX_API_KEY":   apiKey,
+				},
 			}
-			if len(nexEnv) > 0 {
-				nexEntry["env"] = nexEnv
-			}
-			servers["nex"] = nexEntry
 		}
 	}
 
@@ -3413,6 +3409,44 @@ func (l *Launcher) PreflightWeb() error {
 
 // LaunchWeb starts the broker, web UI server, and background agents without tmux.
 func (l *Launcher) LaunchWeb(webPort int) error {
+	// Ask user about Nex setup if API key is missing
+	if !config.ResolveNoNex() && config.ResolveAPIKey("") == "" {
+		fmt.Println()
+		fmt.Print("  Connect Nex for memory and context? [Y/n] ")
+		var answer string
+		fmt.Scanln(&answer)
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer == "" || answer == "y" || answer == "yes" {
+			fmt.Println()
+			nexBin, err := exec.LookPath("nex")
+			if err != nil {
+				fmt.Println("  Nex CLI not found. Installing...")
+				if _, installErr := setup.InstallLatestCLI(); installErr != nil {
+					fmt.Printf("  Could not install: %v\n", installErr)
+					fmt.Println("  Continuing without Nex.")
+				} else {
+					nexBin, _ = exec.LookPath("nex")
+				}
+			}
+			if nexBin != "" {
+				cmd := exec.Command(nexBin, "setup")
+				cmd.Stdin = os.Stdin
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					fmt.Printf("  Setup did not complete: %v\n", err)
+					fmt.Println("  Continuing without Nex.")
+				} else {
+					fmt.Println("  Nex connected.")
+				}
+			}
+			fmt.Println()
+		} else {
+			fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
+			fmt.Println()
+		}
+	}
+
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)

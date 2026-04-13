@@ -1,8 +1,13 @@
 # WUPHF
 
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gjSySC3PzV)
+
 A terminal office where your AI team works in the open.
 
-One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API.
+> *"WUPHF. When you type it in, it contacts someone via phone, text, email, IM, Facebook, Twitter, and then... WUPHF."*
+> — Ryan Howard, Season 7
+
+One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
 
 <video width="630" height="300" src="https://github.com/user-attachments/assets/f4cdffbf-4388-49bc-891d-6bd050ff8247"></video>
 
@@ -17,7 +22,7 @@ go build -o wuphf ./cmd/wuphf
 ./wuphf
 ```
 
-That's it. The browser opens automatically and you're in the office.
+That's it. The browser opens automatically and you're in the office. Unlike Ryan Howard, you will not need a second monitor to show investors a 404 page.
 
 ## Options
 
@@ -48,7 +53,7 @@ That's it. The browser opens automatically and you're in the office.
 - The team visible and working
 - A composer to send messages and slash commands
 
-If it feels like a hidden agent loop, something is wrong.
+If it feels like a hidden agent loop, something is wrong. If it feels like The Office, you're exactly where you need to be.
 
 ## Telegram Bridge
 
@@ -105,4 +110,11 @@ Full methodology, per-turn data, and Paperclip source references: [`docs/benchma
 
 ## The Name
 
-From [*The Office*](https://theoffice.fandom.com/wiki/WUPHF.com_(Website)). One thing hitting a bunch of people at once. The joke still fits.
+From [*The Office*](https://theoffice.fandom.com/wiki/WUPHF.com_(Website)), Season 7. Ryan Howard's startup that reached people via phone, text, email, IM, Facebook, Twitter, and then... WUPHF. Michael Scott invested $10,000. Ryan burned through it. The site went offline.
+
+The joke still fits. Except this WUPHF ships.
+
+> *"I invested ten thousand dollars in WUPHF. Just need one good quarter."*
+> — Michael Scott
+
+Michael: still waiting on that quarter. We are not.
