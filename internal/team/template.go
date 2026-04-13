@@ -89,6 +89,83 @@ func parseGeneratedMemberTemplate(raw string) (generatedMemberTemplate, error) {
 	return tmpl, nil
 }
 
+type generatedChannelTemplate struct {
+	Slug        string   `json:"slug"`
+	Name        string   `json:"name"`
+	Description string   `json:"description"`
+	Members     []string `json:"members"`
+}
+
+func (l *Launcher) GenerateChannelTemplateFromPrompt(request string) (generatedChannelTemplate, error) {
+	request = strings.TrimSpace(request)
+	if request == "" {
+		return generatedChannelTemplate{}, fmt.Errorf("prompt is required")
+	}
+	if stub := strings.TrimSpace(os.Getenv("WUPHF_CHANNEL_TEMPLATE_STUB")); stub != "" {
+		return parseGeneratedChannelTemplate(stub)
+	}
+	systemPrompt := l.buildPrompt(l.officeLeadSlug()) + `
+
+You are designing a NEW office channel for WUPHF.
+Return exactly one JSON object and nothing else.
+Do not wrap it in markdown fences.
+Do not explain your reasoning.
+
+Required schema:
+{
+  "slug": "lowercase-hyphen-slug",
+  "name": "Display Name",
+  "description": "One sentence explaining the channel purpose",
+  "members": ["ceo", "relevant-member-slug"]
+}
+
+Constraints:
+- Never use slug "general".
+- Keep the channel focused on a specific topic or workstream.
+- Always include "ceo" in members.
+- Pick members that match the channel topic from the existing office roster.
+- If the prompt is vague, still make a crisp decision.
+`
+	userPrompt := "Design a new office channel from this request:\n\n" + request
+	raw, err := provider.RunConfiguredOneShot(systemPrompt, userPrompt, l.cwd)
+	if err != nil {
+		return generatedChannelTemplate{}, err
+	}
+	jsonText := extractJSONObjectString(raw)
+	if jsonText == "" {
+		jsonText = strings.TrimSpace(raw)
+	}
+	return parseGeneratedChannelTemplate(jsonText)
+}
+
+func parseGeneratedChannelTemplate(raw string) (generatedChannelTemplate, error) {
+	var tmpl generatedChannelTemplate
+	if err := json.Unmarshal([]byte(raw), &tmpl); err != nil {
+		return generatedChannelTemplate{}, fmt.Errorf("parse generated channel template: %w", err)
+	}
+	tmpl.Slug = normalizeChannelSlug(tmpl.Slug)
+	if tmpl.Slug == "" || tmpl.Slug == "general" {
+		return generatedChannelTemplate{}, fmt.Errorf("generated invalid slug %q", tmpl.Slug)
+	}
+	if tmpl.Name == "" {
+		tmpl.Name = humanizeSlug(tmpl.Slug)
+	}
+	if tmpl.Description == "" {
+		tmpl.Description = defaultTeamChannelDescription(tmpl.Slug, tmpl.Name)
+	}
+	hasCEO := false
+	for _, m := range tmpl.Members {
+		if m == "ceo" {
+			hasCEO = true
+			break
+		}
+	}
+	if !hasCEO {
+		tmpl.Members = append([]string{"ceo"}, tmpl.Members...)
+	}
+	return tmpl, nil
+}
+
 func extractJSONObjectString(raw string) string {
 	start := strings.Index(raw, "{")
 	if start < 0 {
