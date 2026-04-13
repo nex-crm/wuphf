@@ -576,3 +576,49 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 		t.Error("fe specialist resume packet was not enqueued")
 	}
 }
+
+func TestBuildResumePacketSpecHeader(t *testing.T) {
+	// Spec: header must be "[Session resumed — picking up where you left off]"
+	tasks := []teamTask{
+		{ID: "t1", Title: "Build login", Owner: "fe", Status: "in_progress"},
+	}
+	packet := buildResumePacket("fe", tasks, nil)
+
+	if !strings.Contains(packet, "[Session resumed — picking up where you left off]") {
+		t.Errorf("expected spec header '[Session resumed — picking up where you left off]', got packet:\n%s", packet)
+	}
+	// Old header must not appear.
+	if strings.Contains(packet, "You are @") {
+		t.Error("old header 'You are @...' must not appear in spec-format packet")
+	}
+}
+
+func TestBuildResumePacketSpecSectionTasksLabel(t *testing.T) {
+	// Spec: tasks section label must be "Active tasks:" (not "## Your assigned tasks")
+	tasks := []teamTask{
+		{ID: "t1", Title: "Build login", Owner: "fe", Status: "in_progress"},
+	}
+	packet := buildResumePacket("fe", tasks, nil)
+
+	if !strings.Contains(packet, "Active tasks:") {
+		t.Errorf("expected section label 'Active tasks:', got packet:\n%s", packet)
+	}
+	if strings.Contains(packet, "## Your assigned tasks") {
+		t.Error("old section label '## Your assigned tasks' must not appear")
+	}
+}
+
+func TestBuildResumePacketSpecSectionMessagesLabel(t *testing.T) {
+	// Spec: messages section label must be "Unanswered messages:" (not "## Unanswered messages awaiting your response")
+	msgs := []channelMessage{
+		{ID: "h1", From: "you", Channel: "general", Content: "What is the plan?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	packet := buildResumePacket("ceo", nil, msgs)
+
+	if !strings.Contains(packet, "Unanswered messages:") {
+		t.Errorf("expected section label 'Unanswered messages:', got packet:\n%s", packet)
+	}
+	if strings.Contains(packet, "## Unanswered messages awaiting your response") {
+		t.Error("old section label '## Unanswered messages awaiting your response' must not appear")
+	}
+}

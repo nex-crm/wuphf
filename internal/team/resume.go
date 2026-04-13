@@ -53,10 +53,10 @@ func buildResumePacket(slug string, tasks []teamTask, msgs []channelMessage) str
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("You are @%s. Here is your in-flight work to resume:\n\n", slug))
+	sb.WriteString("[Session resumed — picking up where you left off]\n\n")
 
 	if len(tasks) > 0 {
-		sb.WriteString("## Your assigned tasks\n\n")
+		sb.WriteString("Active tasks:\n")
 		for _, task := range tasks {
 			sb.WriteString(fmt.Sprintf("- [%s] %s (status: %s)\n", task.ID, task.Title, task.Status))
 			if task.Details != "" {
@@ -70,7 +70,7 @@ func buildResumePacket(slug string, tasks []teamTask, msgs []channelMessage) str
 	}
 
 	if len(msgs) > 0 {
-		sb.WriteString("## Unanswered messages awaiting your response\n\n")
+		sb.WriteString("Unanswered messages:\n")
 		for _, msg := range msgs {
 			channel := msg.Channel
 			if channel == "" {
