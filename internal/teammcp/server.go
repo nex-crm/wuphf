@@ -372,7 +372,7 @@ func Run(ctx context.Context) error {
 
 		mcp.AddTool(server, readOnlyTool(
 			"read_conversation",
-			"Read recent messages from the 1:1 conversation so you stay in sync before replying.",
+			"LAST RESORT: Read recent 1:1 messages only when the pushed notification is missing context you genuinely need. Do NOT call this before every reply.",
 		), handleTeamPoll)
 
 		mcp.AddTool(server, officeWriteTool(
@@ -407,7 +407,7 @@ func Run(ctx context.Context) error {
 
 	mcp.AddTool(server, readOnlyTool(
 		"team_poll",
-		"Read recent messages from the team channel so you stay in sync before replying.",
+		"LAST RESORT: Read recent channel messages only when the pushed notification is genuinely missing context. The notification already includes thread context and task state — do NOT call this by default.",
 	), handleTeamPoll)
 	mcp.AddTool(server, readOnlyTool(
 		"team_inbox",
