@@ -13,6 +13,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/api"
+	"github.com/nex-crm/wuphf/internal/channel"
 )
 
 func TestParseAgentPaneIndicesSkipsChannelPane(t *testing.T) {
@@ -437,6 +438,154 @@ func TestNotificationTargetsForHumanMessageDirectToTaggedSpecialists(t *testing.
 	}
 	if len(delayed) != 0 {
 		t.Fatalf("expected 0 delayed targets for tagged message, got %+v", delayed)
+	}
+}
+
+func TestNotificationTargetsForDMChannel(t *testing.T) {
+	// DMs should route only to the target agent, not to CEO or other specialists.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	l := &Launcher{
+		focusMode: true,
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+				{Slug: "be", Name: "Backend Engineer"},
+			},
+		},
+	}
+
+	// Human sends DM to frontend engineer without @mention in text
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Channel: "dm-fe",
+		Content: "Check this component",
+	})
+	if len(immediate) != 1 {
+		t.Fatalf("expected 1 immediate target for DM, got %d: %+v", len(immediate), immediate)
+	}
+	if immediate[0].Slug != "fe" {
+		t.Errorf("expected DM target 'fe', got %q", immediate[0].Slug)
+	}
+	if len(delayed) != 0 {
+		t.Errorf("expected 0 delayed targets for DM, got %d", len(delayed))
+	}
+
+	// Agent's own message in DM should not echo back
+	immediate2, _ := l.notificationTargetsForMessage(channelMessage{
+		From:    "fe",
+		Channel: "dm-fe",
+		Content: "Here's what I found",
+	})
+	if len(immediate2) != 0 {
+		t.Errorf("agent's own DM message should not echo back, got %+v", immediate2)
+	}
+}
+
+func TestNotificationTargetsForDMChannelNewSlugFormat(t *testing.T) {
+	// New-style deterministic DM slugs (e.g. "fe__human") should route the same
+	// way as legacy "dm-fe" slugs: only the target agent is notified.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	// Override broker members so officeMembersSnapshot returns test agents.
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "fe", Name: "Frontend Engineer"},
+		{Slug: "be", Name: "Backend Engineer"},
+	}
+	b.mu.Unlock()
+	// Seed the channelStore so isChannelDM can resolve the new slug.
+	if _, err := b.ChannelStore().GetOrCreateDirect("fe", "human"); err != nil {
+		t.Fatalf("seed DM channel: %v", err)
+	}
+
+	l := &Launcher{
+		broker:    b,
+		focusMode: true,
+	}
+
+	dmSlug := channel.DirectSlug("fe", "human") // → "fe__human"
+
+	// Human sends DM via new deterministic slug — only fe should be notified.
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Channel: dmSlug,
+		Content: "Check this component",
+	})
+	if len(immediate) != 1 {
+		t.Fatalf("expected 1 immediate target for DM (new slug), got %d: %+v", len(immediate), immediate)
+	}
+	if immediate[0].Slug != "fe" {
+		t.Errorf("expected DM target 'fe', got %q", immediate[0].Slug)
+	}
+	if len(delayed) != 0 {
+		t.Errorf("expected 0 delayed targets for DM (new slug), got %d", len(delayed))
+	}
+
+	// Agent's own message in new-slug DM should not echo back.
+	immediate2, _ := l.notificationTargetsForMessage(channelMessage{
+		From:    "fe",
+		Channel: dmSlug,
+		Content: "Here's what I found",
+	})
+	if len(immediate2) != 0 {
+		t.Errorf("agent's own DM message (new slug) should not echo back, got %+v", immediate2)
+	}
+}
+
+func TestResponseInstructionForTargetDMChannelNewSlugFormat(t *testing.T) {
+	// New-style deterministic DM slugs should produce the same "messaging you directly"
+	// instruction as legacy dm-* slugs, ensuring specialists respond in DMs.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	// Override broker members so officeMembersSnapshot returns test agents.
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "engineering", Name: "Engineering"},
+	}
+	b.mu.Unlock()
+	if _, err := b.ChannelStore().GetOrCreateDirect("engineering", "human"); err != nil {
+		t.Fatalf("seed DM channel: %v", err)
+	}
+
+	l := &Launcher{broker: b}
+
+	dmSlug := channel.DirectSlug("engineering", "human") // → "engineering__human"
+
+	// DM to specialist via new slug — should respond helpfully, not stay quiet.
+	dmInstr := l.responseInstructionForTarget(channelMessage{
+		From:    "you",
+		Channel: dmSlug,
+	}, "engineering")
+	if strings.Contains(dmInstr, "Stay quiet") {
+		t.Errorf("DM instruction (new slug) should not say stay quiet, got %q", dmInstr)
+	}
+	if !strings.Contains(dmInstr, "messaging you directly") {
+		t.Errorf("DM instruction (new slug) should indicate direct message, got %q", dmInstr)
+	}
+
+	// Wrong agent should not receive the DM instruction for this channel.
+	wrongAgentInstr := l.responseInstructionForTarget(channelMessage{
+		From:    "you",
+		Channel: dmSlug,
+	}, "ceo")
+	if strings.Contains(wrongAgentInstr, "messaging you directly") {
+		t.Errorf("DM to engineering (new slug) should not give DM instruction to CEO, got %q", wrongAgentInstr)
 	}
 }
 
@@ -1328,6 +1477,52 @@ func TestResponseInstructionForTargetLeadFromSpecialist(t *testing.T) {
 	}
 	if !strings.Contains(specialistInstr, "stay quiet") {
 		t.Errorf("specialist wake-up should include stay-quiet guidance, got %q", specialistInstr)
+	}
+}
+
+func TestResponseInstructionForTargetDMChannelRespondsHelpfully(t *testing.T) {
+	// When a human sends a message in a DM channel (dm-engineering), the specialist
+	// should get a "respond helpfully" instruction, not the default "stay quiet".
+	// This is the root cause of the "DMs don't get responses" bug.
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "engineering", Name: "Engineering"},
+			},
+		},
+	}
+
+	// DM to specialist without @tag — should respond helpfully
+	dmInstr := l.responseInstructionForTarget(channelMessage{
+		From:    "you",
+		Channel: "dm-engineering",
+	}, "engineering")
+	if strings.Contains(dmInstr, "Stay quiet") {
+		t.Errorf("DM instruction should not say stay quiet, got %q", dmInstr)
+	}
+	if !strings.Contains(dmInstr, "messaging you directly") {
+		t.Errorf("DM instruction should indicate direct message, got %q", dmInstr)
+	}
+
+	// Non-DM without @tag — should still stay quiet (existing behavior preserved)
+	channelInstr := l.responseInstructionForTarget(channelMessage{
+		From:    "you",
+		Channel: "general",
+	}, "engineering")
+	if !strings.Contains(channelInstr, "Stay quiet") {
+		t.Errorf("non-DM untagged should stay quiet, got %q", channelInstr)
+	}
+
+	// DM with agent slug mismatch — wrong agent should not get DM instruction
+	wrongAgentInstr := l.responseInstructionForTarget(channelMessage{
+		From:    "you",
+		Channel: "dm-engineering",
+	}, "ceo")
+	// CEO gets its own instruction (lead branch), not the DM branch
+	if strings.Contains(wrongAgentInstr, "messaging you directly") {
+		t.Errorf("DM to engineering should not give DM instruction to CEO, got %q", wrongAgentInstr)
 	}
 }
 

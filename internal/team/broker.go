@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/buildinfo"
+	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/provider"
@@ -341,6 +342,7 @@ type teamSkill struct {
 }
 
 type brokerState struct {
+	ChannelStore      json.RawMessage              `json:"channel_store,omitempty"`
 	Messages          []channelMessage             `json:"messages"`
 	Members           []officeMember               `json:"members,omitempty"`
 	Channels          []teamChannel                `json:"channels,omitempty"`
@@ -388,6 +390,7 @@ type ipRateLimitBucket struct {
 // Broker is a lightweight HTTP message broker for the team channel.
 // All agent MCP instances connect to this shared broker.
 type Broker struct {
+	channelStore        *channel.Store
 	messages            []channelMessage
 	members             []officeMember
 	channels            []teamChannel
@@ -509,6 +512,7 @@ func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
 // NewBroker creates a new channel broker with a random auth token.
 func NewBroker() *Broker {
 	b := &Broker{
+		channelStore:        channel.NewStore(),
 		token:               generateToken(),
 		messageSubscribers:  make(map[int]chan channelMessage),
 		actionSubscribers:   make(map[int]chan officeActionLog),
@@ -715,6 +719,11 @@ func (b *Broker) Addr() string {
 	return b.addr
 }
 
+// ChannelStore returns the channel store for DM type checks and member lookups.
+func (b *Broker) ChannelStore() *channel.Store {
+	return b.channelStore
+}
+
 // requireAuth wraps a handler to enforce Bearer token authentication.
 // Accepts token via Authorization header or ?token= query parameter (for EventSource which can't set headers).
 func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
@@ -750,6 +759,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
 	mux.HandleFunc("/office-members/generate", b.requireAuth(b.handleGenerateMember))
 	mux.HandleFunc("/channels", b.requireAuth(b.handleChannels))
+	mux.HandleFunc("/channels/dm", b.requireAuth(b.handleCreateDM))
 	mux.HandleFunc("/channels/generate", b.requireAuth(b.handleGenerateChannel))
 	mux.HandleFunc("/channel-members", b.requireAuth(b.handleChannelMembers))
 	mux.HandleFunc("/members", b.requireAuth(b.handleMembers))
@@ -1646,6 +1656,26 @@ func (b *Broker) loadState() error {
 	if len(b.requests) == 0 && b.pendingInterview != nil {
 		b.requests = []humanInterview{*b.pendingInterview}
 	}
+	// Load channel store: if present, unmarshal it.
+	// Legacy states without channel_store start with an empty store; DMs are created on demand.
+	if len(state.ChannelStore) > 0 {
+		if err := json.Unmarshal(state.ChannelStore, b.channelStore); err != nil {
+			return fmt.Errorf("unmarshal channel_store: %w", err)
+		}
+		b.channelStore.MigrateLegacyDM()
+	}
+	// Migrate channel refs from dm-* to deterministic pair slugs across all entities.
+	// Messages are the primary data loss risk: legacy Channel:"dm-engineering" would not
+	// match Store lookups keyed by "engineering__human".
+	for i := range b.messages {
+		b.messages[i].Channel = channel.MigrateDMSlugString(b.messages[i].Channel)
+	}
+	for i := range b.tasks {
+		b.tasks[i].Channel = channel.MigrateDMSlugString(b.tasks[i].Channel)
+	}
+	for i := range b.requests {
+		b.requests[i].Channel = channel.MigrateDMSlugString(b.requests[i].Channel)
+	}
 	b.ensureDefaultChannelsLocked()
 	b.ensureDefaultOfficeMembersLocked()
 	b.normalizeLoadedStateLocked()
@@ -1663,7 +1693,14 @@ func (b *Broker) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
+	var channelStoreRaw json.RawMessage
+	if b.channelStore != nil {
+		if raw, err := json.Marshal(b.channelStore); err == nil {
+			channelStoreRaw = raw
+		}
+	}
 	state := brokerState{
+		ChannelStore:      channelStoreRaw,
 		Messages:          b.messages,
 		Members:           b.members,
 		Channels:          b.channels,
@@ -1801,7 +1838,11 @@ func isDefaultOfficeMemberState(members []officeMember) bool {
 func normalizeChannelSlug(slug string) string {
 	slug = strings.ToLower(strings.TrimSpace(slug))
 	slug = strings.ReplaceAll(slug, " ", "-")
+	// Preserve "__" (DM slug separator) before replacing single underscores.
+	const placeholder = "\x00"
+	slug = strings.ReplaceAll(slug, "__", placeholder)
 	slug = strings.ReplaceAll(slug, "_", "-")
+	slug = strings.ReplaceAll(slug, placeholder, "__")
 	if slug == "" {
 		return "general"
 	}
@@ -2025,6 +2066,7 @@ func (b *Broker) findChannelLocked(slug string) *teamChannel {
 
 // ensureDMConversationLocked returns the DM conversation for the given slug,
 // creating it on the fly if it doesn't exist. Mirrors Slack's conversations.open.
+// It delegates creation to channelStore so DM channels have proper types and members.
 func (b *Broker) ensureDMConversationLocked(slug string) *teamChannel {
 	if ch := b.findChannelLocked(slug); ch != nil {
 		return ch
@@ -2034,6 +2076,16 @@ func (b *Broker) ensureDMConversationLocked(slug string) *teamChannel {
 	}
 	agentSlug := DMTargetAgent(slug)
 	now := time.Now().UTC().Format(time.RFC3339)
+	// Register in channelStore for proper type-based DM detection.
+	if b.channelStore != nil {
+		newSlug := channel.DirectSlug("human", agentSlug)
+		if _, err := b.channelStore.GetOrCreateDirect("human", agentSlug); err == nil {
+			// Update slug in broker to the new deterministic format if different.
+			if newSlug != slug {
+				slug = newSlug
+			}
+		}
+	}
 	b.channels = append(b.channels, teamChannel{
 		Slug:        slug,
 		Name:        slug,
@@ -2458,6 +2510,10 @@ func inferOfficePersonality(slug, role string) string {
 func (b *Broker) channelHasMemberLocked(channel, slug string) bool {
 	ch := b.findChannelLocked(channel)
 	if ch == nil {
+		// Fall back to channelStore for new-format channels (e.g. "eng__human")
+		if b.channelStore != nil {
+			return b.channelStore.IsMemberBySlug(channel, slug)
+		}
 		return false
 	}
 	for _, member := range ch.Members {
@@ -3753,6 +3809,100 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleCreateDM creates or returns an existing DM channel.
+// POST /channels/dm — body: {members: ["human", "engineering"], type: "direct"|"group"}
+func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Members []string `json:"members"`
+		Type    string   `json:"type"` // "direct" or "group"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if len(body.Members) < 2 {
+		http.Error(w, "at least 2 members required", http.StatusBadRequest)
+		return
+	}
+	// Validate: at least one member must be "human" (no agent-to-agent DMs).
+	hasHuman := false
+	for _, m := range body.Members {
+		if m == "human" || m == "you" {
+			hasHuman = true
+			break
+		}
+	}
+	if !hasHuman {
+		http.Error(w, "DM must include a human member; agent-to-agent DMs are not allowed", http.StatusBadRequest)
+		return
+	}
+
+	if b.channelStore == nil {
+		http.Error(w, "channel store not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	var (
+		ch      *channel.Channel
+		err     error
+		created bool
+	)
+	dmType := strings.TrimSpace(strings.ToLower(body.Type))
+	if dmType == "group" && len(body.Members) > 2 {
+		existing, ok := b.channelStore.FindDirectByMembers(body.Members[0], body.Members[1])
+		if !ok || existing == nil {
+			created = true
+		}
+		ch, err = b.channelStore.GetOrCreateGroup(body.Members, "human")
+	} else {
+		// Default: direct (1:1). For >2 members use group.
+		if len(body.Members) > 2 {
+			existing, ok := b.channelStore.FindDirectByMembers(body.Members[0], body.Members[1])
+			if !ok || existing == nil {
+				created = true
+			}
+			ch, err = b.channelStore.GetOrCreateGroup(body.Members, "human")
+		} else {
+			// Normalize: find the non-human member for the slug.
+			agentSlug := ""
+			for _, m := range body.Members {
+				if m != "human" && m != "you" {
+					agentSlug = m
+					break
+				}
+			}
+			if agentSlug == "" {
+				http.Error(w, "could not determine agent member", http.StatusBadRequest)
+				return
+			}
+			_, exists := b.channelStore.FindDirectByMembers("human", agentSlug)
+			created = !exists
+			ch, err = b.channelStore.GetOrCreateDirect("human", agentSlug)
+		}
+	}
+	if err != nil {
+		http.Error(w, "failed to create DM: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	b.mu.Lock()
+	_ = b.saveLocked()
+	b.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"id":      ch.ID,
+		"slug":    ch.Slug,
+		"type":    ch.Type,
+		"name":    ch.Name,
+		"created": created,
+	})
+}
+
 func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
@@ -4149,6 +4299,12 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if b.findChannelLocked(channel) == nil {
 		if IsDMSlug(channel) {
 			b.ensureDMConversationLocked(channel)
+		} else if b.channelStore != nil {
+			if _, ok := b.channelStore.GetBySlug(channel); !ok {
+				b.mu.Unlock()
+				http.Error(w, "channel not found", http.StatusNotFound)
+				return
+			}
 		} else {
 			b.mu.Unlock()
 			http.Error(w, "channel not found", http.StatusNotFound)

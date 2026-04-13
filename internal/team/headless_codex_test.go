@@ -177,7 +177,7 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 func TestEnqueueHeadlessCodexTurnProcessesFIFO(t *testing.T) {
 	oldRunTurn := headlessCodexRunTurn
 	processed := make(chan string, 4)
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, _ string, notification string) error {
+	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
 		processed <- notification
 		return nil
 	}
@@ -212,7 +212,7 @@ func TestEnqueueHeadlessCodexTurnCancelsStaleTurn(t *testing.T) {
 	started := make(chan struct{}, 1)
 	cancelled := make(chan struct{}, 1)
 	processed := make(chan string, 4)
-	headlessCodexRunTurn = func(_ *Launcher, ctx context.Context, _ string, notification string) error {
+	headlessCodexRunTurn = func(_ *Launcher, ctx context.Context, _ string, notification string, channel ...string) error {
 		if notification == "first" {
 			select {
 			case started <- struct{}{}:
