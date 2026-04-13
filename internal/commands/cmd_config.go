@@ -127,9 +127,19 @@ func configSet(ctx *SlashContext, key, value string) error {
 		cfg.DevURL = value
 	case "default_format":
 		cfg.DefaultFormat = value
+	case "company_name":
+		cfg.CompanyName = value
+	case "company_description":
+		cfg.CompanyDescription = value
+	case "company_goals":
+		cfg.CompanyGoals = value
+	case "company_size":
+		cfg.CompanySize = value
+	case "company_priority":
+		cfg.CompanyPriority = value
 	default:
 		ctx.AddMessage("system", "Unknown config key: "+key+
-			"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, llm_provider, gemini_api_key, anthropic_api_key, openai_api_key, minimax_api_key, pack, team_lead_slug, dev_url, default_format")
+			"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, llm_provider, gemini_api_key, anthropic_api_key, openai_api_key, minimax_api_key, pack, team_lead_slug, dev_url, default_format, company_name, company_description, company_goals, company_size, company_priority")
 		return nil
 	}
 
