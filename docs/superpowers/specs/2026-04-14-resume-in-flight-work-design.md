@@ -101,7 +101,7 @@ If an agent has only tasks or only messages, omit the empty section. If an agent
 | File | Change |
 |---|---|
 | `internal/team/launcher.go` | Add `resumeInFlightWork()`, `buildResumePacket()`, `findUnansweredMessages()`. Call from end of `primeVisibleAgents()`. |
-| `internal/team/headless_codex.go` | Add `go l.resumeInFlightWork()` to `launchHeadlessCodex()` with startup delay. |
+| `internal/team/headless_codex.go` | Call `l.resumeInFlightWork()` synchronously before notification loops in `launchHeadlessCodex()`. |
 | `internal/team/broker.go` | Add `InFlightTasks() []teamTask` and `RecentHumanMessages(limit int) []channelMessage` exported accessors for the resume scanner. |
 | `internal/team/launcher_test.go` | Test resume detection: tasks with various statuses, unanswered message detection, pack membership filtering, empty state no-op. |
 
