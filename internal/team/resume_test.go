@@ -274,3 +274,75 @@ func TestBuildResumePacketsEmptyWhenNothingInFlight(t *testing.T) {
 		t.Fatalf("expected empty packets when nothing in flight, got %d", len(packets))
 	}
 }
+
+// --- Integration tests for edge cases ---
+
+func TestResumeInFlightWorkNoBrokerNoPanic(t *testing.T) {
+	// Launcher with nil broker must not panic.
+	l := &Launcher{broker: nil}
+	// Should complete without panicking.
+	l.resumeInFlightWork()
+}
+
+func TestResumeInFlightWorkNoPackNoPanic(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		{ID: "h1", From: "you", Content: "unanswered question", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	// Launcher with broker but nil pack — officeLeadSlug() should handle gracefully.
+	l := &Launcher{broker: b, pack: nil}
+	// Should complete without panicking.
+	l.resumeInFlightWork()
+}
+
+func TestBuildResumePacketsUnansweredRoutesToLead(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		// answered: has a reply
+		{ID: "h1", From: "you", Content: "old answered question", Timestamp: "2026-04-14T09:00:00Z"},
+		{ID: "a1", From: "ceo", Content: "Here is the answer", ReplyTo: "h1", Timestamp: "2026-04-14T09:01:00Z"},
+		// unanswered: no reply
+		{ID: "h2", From: "you", Content: "new unanswered question", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	packets := l.buildResumePackets()
+
+	// Only the unanswered message (h2) should be in the packet.
+	// It is untagged → routes to ceo (lead).
+	if _, ok := packets["ceo"]; !ok {
+		t.Fatal("expected 'ceo' to receive a resume packet for unanswered message")
+	}
+	if !strings.Contains(packets["ceo"], "unanswered question") {
+		t.Error("ceo packet should contain the unanswered message content")
+	}
+	if strings.Contains(packets["ceo"], "old answered question") {
+		t.Error("ceo packet should NOT contain already-answered message content")
+	}
+}
