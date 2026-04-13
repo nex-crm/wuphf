@@ -127,20 +127,23 @@ func ReadClaudeJSONStream(r io.Reader, onEvent func(ClaudeStreamEvent)) (ClaudeS
 				result.FinalMessage = textOut
 			}
 			// Parse usage fields from the raw result line.
-			var usageRaw struct {
-				InputTokens              int     `json:"input_tokens"`
-				OutputTokens             int     `json:"output_tokens"`
-				CacheCreationInputTokens int     `json:"cache_creation_input_tokens"`
-				CacheReadInputTokens     int     `json:"cache_read_input_tokens"`
-				CostUSD                  float64 `json:"cost_usd"`
+			// Claude CLI nests token counts under "usage" and reports cost as "total_cost_usd".
+			var resultRaw struct {
+				TotalCostUSD float64 `json:"total_cost_usd"`
+				Usage        struct {
+					InputTokens              int `json:"input_tokens"`
+					OutputTokens             int `json:"output_tokens"`
+					CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+					CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+				} `json:"usage"`
 			}
-			if err := json.Unmarshal([]byte(line), &usageRaw); err == nil {
+			if err := json.Unmarshal([]byte(line), &resultRaw); err == nil {
 				result.Usage = ClaudeUsage{
-					InputTokens:         usageRaw.InputTokens,
-					OutputTokens:        usageRaw.OutputTokens,
-					CacheReadTokens:     usageRaw.CacheReadInputTokens,
-					CacheCreationTokens: usageRaw.CacheCreationInputTokens,
-					CostUSD:             usageRaw.CostUSD,
+					InputTokens:         resultRaw.Usage.InputTokens,
+					OutputTokens:        resultRaw.Usage.OutputTokens,
+					CacheReadTokens:     resultRaw.Usage.CacheReadInputTokens,
+					CacheCreationTokens: resultRaw.Usage.CacheCreationInputTokens,
+					CostUSD:             resultRaw.TotalCostUSD,
 				}
 			}
 			if errors := parseClaudeErrors(msg.Errors); len(errors) > 0 {
