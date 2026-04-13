@@ -2454,6 +2454,10 @@ func inferOfficePersonality(slug, role string) string {
 func (b *Broker) channelHasMemberLocked(channel, slug string) bool {
 	ch := b.findChannelLocked(channel)
 	if ch == nil {
+		// Fall back to channelStore for new-format channels (e.g. "eng__human")
+		if b.channelStore != nil {
+			return b.channelStore.IsMemberBySlug(channel, slug)
+		}
 		return false
 	}
 	for _, member := range ch.Members {
@@ -4175,6 +4179,12 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if b.findChannelLocked(channel) == nil {
 		if IsDMSlug(channel) {
 			b.ensureDMConversationLocked(channel)
+		} else if b.channelStore != nil {
+			if _, ok := b.channelStore.GetBySlug(channel); !ok {
+				b.mu.Unlock()
+				http.Error(w, "channel not found", http.StatusNotFound)
+				return
+			}
 		} else {
 			b.mu.Unlock()
 			http.Error(w, "channel not found", http.StatusNotFound)

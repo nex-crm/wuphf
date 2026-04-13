@@ -343,6 +343,23 @@ func (s *Store) IsMember(channelID, slug string) bool {
 	return false
 }
 
+// IsMemberBySlug checks if a slug is a member of the channel identified by channelSlug.
+func (s *Store) IsMemberBySlug(channelSlug, memberSlug string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	ch, ok := s.bySlug[channelSlug]
+	if !ok {
+		return false
+	}
+	for _, id := range s.memberOf[memberSlug] {
+		if id == ch.ID {
+			return true
+		}
+	}
+	return false
+}
+
 // MemberChannels returns all channels a member belongs to.
 func (s *Store) MemberChannels(slug string) []Channel {
 	s.mu.RLock()
