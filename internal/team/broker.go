@@ -2869,12 +2869,14 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	nexConnected := !config.ResolveNoNex() && config.ResolveAPIKey("") != ""
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":           "ok",
 		"session_mode":     mode,
 		"one_on_one_agent": agent,
 		"focus_mode":       focus,
 		"provider":         provider,
+		"nex_connected":    nexConnected,
 		"build":            buildinfo.Current(),
 	})
 }
