@@ -40,14 +40,7 @@ func configShow(ctx *SlashContext) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	masked := "(not set)"
-	if cfg.APIKey != "" {
-		if len(cfg.APIKey) > 8 {
-			masked = cfg.APIKey[:4] + "…" + cfg.APIKey[len(cfg.APIKey)-4:]
-		} else {
-			masked = "****"
-		}
-	}
+	masked := maskKey(cfg.APIKey)
 	workspace := cfg.WorkspaceSlug
 	if workspace == "" {
 		workspace = cfg.WorkspaceID
@@ -79,10 +72,24 @@ func configShow(ctx *SlashContext) error {
 	sb.WriteString(fmt.Sprintf("  Action provider: %s\n", actionProvider))
 	sb.WriteString(fmt.Sprintf("  Workspace: %s\n", workspace))
 	sb.WriteString(fmt.Sprintf("  Provider:  %s\n", provider))
+	sb.WriteString(fmt.Sprintf("  Gemini:    %s\n", maskKey(cfg.GeminiAPIKey)))
+	sb.WriteString(fmt.Sprintf("  Anthropic: %s\n", maskKey(cfg.AnthropicAPIKey)))
+	sb.WriteString(fmt.Sprintf("  OpenAI:    %s\n", maskKey(cfg.OpenAIAPIKey)))
+	sb.WriteString(fmt.Sprintf("  Minimax:   %s\n", maskKey(cfg.MinimaxAPIKey)))
 	sb.WriteString(fmt.Sprintf("  Pack:      %s\n", pack))
 	sb.WriteString(fmt.Sprintf("  Base URL:  %s", baseURL))
 	ctx.AddMessage("system", sb.String())
 	return nil
+}
+
+func maskKey(key string) string {
+	if key == "" {
+		return "(not set)"
+	}
+	if len(key) > 8 {
+		return key[:4] + "…" + key[len(key)-4:]
+	}
+	return "****"
 }
 
 func configSet(ctx *SlashContext, key, value string) error {
@@ -106,6 +113,12 @@ func configSet(ctx *SlashContext, key, value string) error {
 		cfg.LLMProvider = value
 	case "gemini_api_key":
 		cfg.GeminiAPIKey = value
+	case "anthropic_api_key":
+		cfg.AnthropicAPIKey = value
+	case "openai_api_key":
+		cfg.OpenAIAPIKey = value
+	case "minimax_api_key":
+		cfg.MinimaxAPIKey = value
 	case "pack":
 		cfg.Pack = value
 	case "team_lead_slug":
@@ -116,7 +129,7 @@ func configSet(ctx *SlashContext, key, value string) error {
 		cfg.DefaultFormat = value
 	default:
 		ctx.AddMessage("system", "Unknown config key: "+key+
-			"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, llm_provider, gemini_api_key, pack, team_lead_slug, dev_url, default_format")
+			"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, llm_provider, gemini_api_key, anthropic_api_key, openai_api_key, minimax_api_key, pack, team_lead_slug, dev_url, default_format")
 		return nil
 	}
 
