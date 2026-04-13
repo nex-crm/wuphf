@@ -2279,3 +2279,129 @@ func TestBrokerPostInboundSurfaceMessage(t *testing.T) {
 		t.Fatalf("expected 1 channel message, got %d", len(msgs))
 	}
 }
+
+func TestInFlightTasksReturnsOnlyNonTerminalOwned(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "t1", Title: "Active task", Owner: "fe", Status: "in_progress"},
+		{ID: "t2", Title: "Done task", Owner: "fe", Status: "done"},
+		{ID: "t3", Title: "No owner", Owner: "", Status: "in_progress"},
+		{ID: "t4", Title: "Canceled task", Owner: "be", Status: "canceled"},
+		{ID: "t5", Title: "Cancelled task", Owner: "be", Status: "cancelled"},
+		{ID: "t6", Title: "Pending with owner", Owner: "pm", Status: "pending"},
+		{ID: "t7", Title: "Open with owner", Owner: "ceo", Status: "open"},
+	}
+	b.mu.Unlock()
+
+	got := b.InFlightTasks()
+
+	// Only tasks with owner AND non-terminal status should be returned.
+	// "done", "canceled", "cancelled" are terminal. No-owner tasks excluded.
+	if len(got) != 3 {
+		t.Fatalf("expected 3 in-flight tasks, got %d: %+v", len(got), got)
+	}
+	ids := make(map[string]bool)
+	for _, task := range got {
+		ids[task.ID] = true
+	}
+	if !ids["t1"] {
+		t.Error("expected t1 (in_progress+owner) to be included")
+	}
+	if !ids["t6"] {
+		t.Error("expected t6 (pending+owner) to be included")
+	}
+	if !ids["t7"] {
+		t.Error("expected t7 (open+owner) to be included")
+	}
+	if ids["t2"] {
+		t.Error("expected t2 (done) to be excluded")
+	}
+	if ids["t3"] {
+		t.Error("expected t3 (no owner) to be excluded")
+	}
+	if ids["t4"] {
+		t.Error("expected t4 (canceled) to be excluded")
+	}
+	if ids["t5"] {
+		t.Error("expected t5 (cancelled) to be excluded")
+	}
+}
+
+func TestRecentHumanMessagesReturnsLastNHumanMessages(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		{ID: "m1", From: "fe", Content: "agent reply 1", Timestamp: "2026-04-14T10:00:00Z"},
+		{ID: "m2", From: "you", Content: "human says hi", Timestamp: "2026-04-14T10:01:00Z"},
+		{ID: "m3", From: "nex", Content: "nex automation", Timestamp: "2026-04-14T10:02:00Z"},
+		{ID: "m4", From: "be", Content: "agent reply 2", Timestamp: "2026-04-14T10:03:00Z"},
+		{ID: "m5", From: "human", Content: "human follow-up", Timestamp: "2026-04-14T10:04:00Z"},
+		{ID: "m6", From: "you", Content: "human again", Timestamp: "2026-04-14T10:05:00Z"},
+	}
+	b.mu.Unlock()
+
+	// Request last 2 human messages — should return m5 and m6 (the most recent 2 from human senders).
+	got := b.RecentHumanMessages(2)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 recent human messages, got %d: %+v", len(got), got)
+	}
+	if got[0].ID != "m5" {
+		t.Errorf("expected first message m5, got %q", got[0].ID)
+	}
+	if got[1].ID != "m6" {
+		t.Errorf("expected second message m6, got %q", got[1].ID)
+	}
+}
+
+func TestRecentHumanMessagesLimitCapsResults(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		{ID: "m1", From: "you", Content: "first", Timestamp: "2026-04-14T10:00:00Z"},
+		{ID: "m2", From: "you", Content: "second", Timestamp: "2026-04-14T10:01:00Z"},
+		{ID: "m3", From: "nex", Content: "nex msg", Timestamp: "2026-04-14T10:02:00Z"},
+	}
+	b.mu.Unlock()
+
+	// Only 2 human messages exist; limit=5 should return all 2.
+	got := b.RecentHumanMessages(5)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 human messages (all available), got %d", len(got))
+	}
+}
+
+func TestRecentHumanMessagesExcludesNonHuman(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		{ID: "m1", From: "fe", Content: "agent", Timestamp: "2026-04-14T10:00:00Z"},
+		{ID: "m2", From: "be", Content: "agent2", Timestamp: "2026-04-14T10:01:00Z"},
+	}
+	b.mu.Unlock()
+
+	got := b.RecentHumanMessages(10)
+	if len(got) != 0 {
+		t.Fatalf("expected 0 human messages, got %d", len(got))
+	}
+}

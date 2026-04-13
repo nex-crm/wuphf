@@ -1444,6 +1444,44 @@ func (b *Broker) AllTasks() []teamTask {
 	return out
 }
 
+// InFlightTasks returns tasks that have an assigned owner and a non-terminal
+// status (anything except "done", "canceled", or "cancelled").
+func (b *Broker) InFlightTasks() []teamTask {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]teamTask, 0)
+	for _, task := range b.tasks {
+		if task.Owner == "" {
+			continue
+		}
+		s := strings.ToLower(strings.TrimSpace(task.Status))
+		if s == "done" || s == "canceled" || s == "cancelled" {
+			continue
+		}
+		out = append(out, task)
+	}
+	return out
+}
+
+// RecentHumanMessages returns up to limit messages sent by a human sender
+// ("you" or "human"). The returned slice contains the most recent messages
+// in chronological order (earliest first).
+func (b *Broker) RecentHumanMessages(limit int) []channelMessage {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	var human []channelMessage
+	for _, msg := range b.messages {
+		f := strings.ToLower(strings.TrimSpace(msg.From))
+		if f == "you" || f == "human" {
+			human = append(human, msg)
+		}
+	}
+	if len(human) <= limit {
+		return human
+	}
+	return human[len(human)-limit:]
+}
+
 // UnackedTasks returns in_progress tasks with an owner that have not been acked
 // and were created more than the given duration ago.
 func (b *Broker) UnackedTasks(timeout time.Duration) []teamTask {
