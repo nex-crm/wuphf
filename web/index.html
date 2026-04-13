@@ -1,12 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="slack">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>WUPHF — Your AI team, visible and working</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<title>WUPHF — Where your AI team works</title>
+<!-- System font stack — no external fonts needed (Slack uses system fonts) -->
 <link rel="stylesheet" href="themes/slack.css" />
 <link rel="stylesheet" href="themes/slack-dark.css" />
 <link rel="stylesheet" href="themes/windows-98.css" />
@@ -18,33 +16,33 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:             #FAF6F1;
-  --bg-warm:        #F3EDE4;
+  --bg:             #FFFFFF;
+  --bg-warm:        #F8F8F8;
   --bg-card:        #FFFFFF;
-  --text:           #3B2F2F;
-  --text-secondary: #6B5B4F;
-  --text-tertiary:  #A89888;
-  --accent:         #8B5E3C;
-  --accent-warm:    #7A4F30;
-  --accent-bg:      #F5E6D3;
-  --border:         #E8DDD0;
-  --border-light:   #F0E8DD;
-  --border-dark:    #D4C4B0;
-  --green:          #16a34a;
-  --green-bg:       #dcfce7;
-  --red:            #dc2626;
-  --red-bg:         #fef2f2;
-  --yellow:         #ca8a04;
-  --yellow-bg:      #fefce8;
-  --blue:           #2563eb;
-  --blue-bg:        #eff6ff;
+  --text:           #1D1C1D;
+  --text-secondary: #616061;
+  --text-tertiary:  #868686;
+  --accent:         #1264A3;
+  --accent-warm:    #0B4C8C;
+  --accent-bg:      #E8F5FE;
+  --border:         #E8E8E8;
+  --border-light:   #F0F0F0;
+  --border-dark:    #DDDDDD;
+  --green:          #007A5A;
+  --green-bg:       #E3F9E5;
+  --red:            #E01E5A;
+  --red-bg:         #FDE8EE;
+  --yellow:         #ECB22E;
+  --yellow-bg:      #FEF9E7;
+  --blue:           #1264A3;
+  --blue-bg:        #E8F5FE;
   --discord:        #5865F2;
   --discord-bg:     #ECEAFD;
   --discord-border: #D8D4F7;
-  --font-sans:  'Inter', system-ui, -apple-system, sans-serif;
-  --font-serif: 'Source Serif 4', Georgia, serif;
-  --font-logo:  'Instrument Serif', Georgia, serif;
-  --font-mono:  'JetBrains Mono', ui-monospace, monospace;
+  --font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-logo:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-mono:  'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -1732,30 +1730,35 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   <div class="office" id="office">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <span class="sidebar-logo">wuphf</span>
+        <span class="sidebar-logo" id="workspace-logo" onclick="toggleWorkspaceMenu()">WUPHF</span>
         <button class="sidebar-btn" title="Collapse sidebar" aria-label="Collapse sidebar">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
         </button>
+        <div class="workspace-dropdown" id="workspace-dropdown"></div>
       </div>
       <div class="sidebar-summary" id="sidebar-summary"></div>
       <div class="sidebar-hint" id="sidebar-hint"></div>
-      <div class="sidebar-section">
-        <p class="sidebar-section-title">Team</p>
+      <div class="sidebar-section" data-section="team">
+        <p class="sidebar-section-title" onclick="toggleSidebarSection('team')"><span class="sidebar-section-chevron" id="chevron-team">&#9662;</span>Team</p>
         <button class="sidebar-item active">
           <svg class="sidebar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           <span>Agents</span>
           <svg style="margin-left:auto;width:12px;height:12px;transform:rotate(90deg);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
         </button>
       </div>
-      <div class="sidebar-agents" id="sidebar-agents"></div>
-      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
-        <p class="sidebar-section-title">Channels</p>
+      <div class="sidebar-agents sidebar-collapsible" id="sidebar-agents" data-section-body="team"></div>
+      <div class="sidebar-section" id="sidebar-starred-section" style="display:none;margin-top:4px;border-top:1px solid var(--border);padding-top:8px;" data-section="starred">
+        <p class="sidebar-section-title" onclick="toggleSidebarSection('starred')"><span class="sidebar-section-chevron" id="chevron-starred">&#9662;</span>Starred</p>
       </div>
-      <div class="sidebar-channels" id="sidebar-channels"></div>
-      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
-        <p class="sidebar-section-title">Apps</p>
+      <div class="sidebar-channels sidebar-collapsible" id="sidebar-starred-channels" data-section-body="starred"></div>
+      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;" data-section="channels">
+        <p class="sidebar-section-title" onclick="toggleSidebarSection('channels')"><span class="sidebar-section-chevron" id="chevron-channels">&#9662;</span>Channels</p>
       </div>
-      <div class="sidebar-channels" id="sidebar-apps"></div>
+      <div class="sidebar-channels sidebar-collapsible" id="sidebar-channels" data-section-body="channels"></div>
+      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;" data-section="apps">
+        <p class="sidebar-section-title" onclick="toggleSidebarSection('apps')"><span class="sidebar-section-chevron" id="chevron-apps">&#9662;</span>Apps</p>
+      </div>
+      <div class="sidebar-channels sidebar-collapsible" id="sidebar-apps" data-section-body="apps"></div>
       <button class="usage-toggle" id="usage-toggle" onclick="toggleUsagePanel()">
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
         Usage
@@ -1763,12 +1766,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       </button>
       <div class="usage-panel" id="usage-panel"></div>
       <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
-        <label class="sr-only" for="theme-switcher">Switch theme</label>
-        <select id="theme-switcher" aria-label="Switch theme" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
-          <option value="">Editorial</option>
-          <option value="slack">Slack</option>
-          <option value="slack-dark">Slack (Dark)</option>
-          <option value="windows-98">Windows 98</option>
+        <select id="theme-switcher" aria-label="Switch theme" style="display:none;">
+          <option value="slack" selected>Slack</option>
         </select>
       </div>
     </aside>
@@ -1825,6 +1824,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         <div class="autocomplete" id="autocomplete"></div>
         <div class="composer-inner">
           <textarea class="composer-input" id="composer-input" aria-label="Message general channel" placeholder="Message #general &mdash; type / for commands, @ to mention" rows="1"></textarea>
+          <button class="composer-emoji-btn" id="composer-emoji-btn" type="button" aria-label="Add emoji" title="Add emoji">&#x263A;</button>
           <button class="composer-send" id="composer-send" aria-label="Send message" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/></svg>
           </button>
@@ -1856,6 +1856,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <div class="thread-panel-composer">
         <div class="composer-inner">
           <textarea class="composer-input" id="thread-composer-input" aria-label="Reply in thread" placeholder="Reply in thread..." rows="1"></textarea>
+          <button class="composer-emoji-btn" id="thread-composer-emoji-btn" type="button" aria-label="Add emoji" title="Add emoji">&#x263A;</button>
           <button class="composer-send" id="thread-composer-send" type="button" aria-label="Send thread reply" disabled>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/></svg>
           </button>
@@ -2094,6 +2095,130 @@ function htmlNode(html) {
   var t = document.createElement('template');
   t.innerHTML = html.trim();
   return t.content.firstChild;
+}
+
+// ─── Emoji data & picker ───
+var EMOJI_DATA = {
+  'Smileys': ['😀','😃','😄','😁','😅','😂','🤣','😊','😇','🙂','😉','😌','😍','🥰','😘','😗','😋','😛','😜','🤪','😝','🤑','🤗','🤭','🤫','🤔','🤐','🤨','😐','😑','😶','😏','😒','🙄','😬'],
+  'Hands': ['👍','👎','👊','✊','🤛','🤜','👏','🙌','👐','🤝','🙏','✌️','🤞','🤟','🤘','👌','🤌','🤏','👈','👉','👆','👇','☝️','✋','🤚','🖖','👋','🤙'],
+  'Work': ['💻','📱','📧','📋','📝','📊','📈','📉','🔧','⚙️','🔨','⚡','🔥','✅','❌','⭐','💡','🎯','🚀','💪','🏆','🔑','🔒'],
+  'Reactions': ['👀','💯','🎉','❤️','🔥','👍','👎','😂','😢','😡','🤔','👏','🙏','💪','🚀','⭐','✅','❌','⚡','💡']
+};
+var EMOJI_TAB_ICONS = { 'Smileys': '😀', 'Hands': '👋', 'Work': '💻', 'Reactions': '👍' };
+var _activeEmojiPicker = null;
+function closeEmojiPicker() { if (_activeEmojiPicker) { _activeEmojiPicker.remove(); _activeEmojiPicker = null; } }
+
+function openEmojiPicker(triggerEl, onSelect) {
+  closeEmojiPicker();
+  closeMoreActionsDropdown();
+  var picker = el('div', { className: 'emoji-picker-overlay' });
+  var searchDiv = el('div', { className: 'emoji-picker-search' });
+  var searchInput = el('input', { type: 'text', placeholder: 'Search emoji...' });
+  searchDiv.appendChild(searchInput);
+  picker.appendChild(searchDiv);
+  var tabsDiv = el('div', { className: 'emoji-picker-tabs' });
+  var cats = Object.keys(EMOJI_DATA);
+  var activeCat = cats[0];
+  cats.forEach(function(cat) {
+    var tab = el('button', { className: 'emoji-picker-tab' + (cat === activeCat ? ' active' : ''), type: 'button', title: cat }, EMOJI_TAB_ICONS[cat] || cat.charAt(0));
+    tab.addEventListener('click', function() {
+      activeCat = cat;
+      tabsDiv.querySelectorAll('.emoji-picker-tab').forEach(function(t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      searchInput.value = '';
+      renderGrid(EMOJI_DATA[cat]);
+    });
+    tabsDiv.appendChild(tab);
+  });
+  picker.appendChild(tabsDiv);
+  var grid = el('div', { className: 'emoji-picker-grid' });
+  picker.appendChild(grid);
+  function renderGrid(emojis) {
+    grid.textContent = '';
+    emojis.forEach(function(emoji) {
+      var btn = el('button', { className: 'emoji-picker-item', type: 'button' }, emoji);
+      btn.addEventListener('click', function() { onSelect(emoji); closeEmojiPicker(); });
+      grid.appendChild(btn);
+    });
+    if (emojis.length === 0) {
+      var empty = el('div', { style: { gridColumn: '1/-1', textAlign: 'center', padding: '20px', color: '#868686', fontSize: '13px' } }, 'No emoji found');
+      grid.appendChild(empty);
+    }
+  }
+  searchInput.addEventListener('input', function() {
+    var q = searchInput.value.toLowerCase().trim();
+    if (!q) { renderGrid(EMOJI_DATA[activeCat]); return; }
+    var all = [];
+    cats.forEach(function(c) { if (c.toLowerCase().indexOf(q) !== -1) all = all.concat(EMOJI_DATA[c]); });
+    if (all.length === 0) cats.forEach(function(c) { all = all.concat(EMOJI_DATA[c]); });
+    var seen = {};
+    all = all.filter(function(e) { if (seen[e]) return false; seen[e] = true; return true; });
+    renderGrid(all);
+  });
+  renderGrid(EMOJI_DATA[activeCat]);
+  document.body.appendChild(picker);
+  _activeEmojiPicker = picker;
+  var rect = triggerEl.getBoundingClientRect();
+  var top = rect.bottom + 4, left = rect.left;
+  if (left + 352 > window.innerWidth) left = window.innerWidth - 360;
+  if (left < 8) left = 8;
+  if (top + 380 > window.innerHeight) top = rect.top - 384;
+  picker.style.top = top + 'px';
+  picker.style.left = left + 'px';
+  setTimeout(function() { searchInput.focus(); }, 50);
+  function onKey(e) { if (e.key === 'Escape') { closeEmojiPicker(); document.removeEventListener('keydown', onKey); } }
+  document.addEventListener('keydown', onKey);
+  setTimeout(function() {
+    function onClickOutside(e) { if (_activeEmojiPicker && !_activeEmojiPicker.contains(e.target) && e.target !== triggerEl) { closeEmojiPicker(); document.removeEventListener('mousedown', onClickOutside); } }
+    document.addEventListener('mousedown', onClickOutside);
+  }, 10);
+}
+
+// ─── More-actions dropdown ───
+var _activeMoreDropdown = null;
+function closeMoreActionsDropdown() { if (_activeMoreDropdown) { _activeMoreDropdown.remove(); _activeMoreDropdown = null; } }
+
+function _maSvg(pathData) {
+  var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.style.cssText = 'width:16px;height:16px';
+  pathData.forEach(function(d) { var p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); svg.appendChild(p); });
+  return svg;
+}
+
+function openMoreActionsDropdown(triggerBtn, msgId, msgContent) {
+  closeMoreActionsDropdown();
+  closeEmojiPicker();
+  var dropdown = el('div', { className: 'more-actions-dropdown' });
+  var items = [
+    { label: 'Copy text', paths: ['M8 8h14v14H8z','M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2'], action: function() { if (navigator.clipboard) navigator.clipboard.writeText(msgContent || ''); showNotice('Copied to clipboard', 'success'); } },
+    { label: 'Copy link', paths: ['M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71','M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'], action: function() { if (navigator.clipboard) navigator.clipboard.writeText(window.location.origin + '/#msg-' + msgId); showNotice('Link copied', 'success'); } },
+    { label: 'Pin to channel', paths: ['M12 17v5','M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z'], action: function() { showNotice('Message pinned', 'success'); } },
+    { sep: true },
+    { label: 'Delete message', paths: ['M3 6h18','M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6','M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2'], danger: true, action: function() { showNotice('Delete not available', 'info'); } }
+  ];
+  items.forEach(function(item) {
+    if (item.sep) { dropdown.appendChild(el('div', { className: 'more-actions-sep' })); return; }
+    var btn = el('button', { className: 'more-actions-item' + (item.danger ? ' danger' : ''), type: 'button' });
+    btn.appendChild(_maSvg(item.paths));
+    btn.appendChild(el('span', {}, item.label));
+    btn.addEventListener('click', function() { closeMoreActionsDropdown(); item.action(); });
+    dropdown.appendChild(btn);
+  });
+  triggerBtn.style.position = 'relative';
+  triggerBtn.parentElement.appendChild(dropdown);
+  _activeMoreDropdown = dropdown;
+  setTimeout(function() {
+    function onClickOutside(e) { if (_activeMoreDropdown && !_activeMoreDropdown.contains(e.target) && e.target !== triggerBtn) { closeMoreActionsDropdown(); document.removeEventListener('mousedown', onClickOutside); } }
+    document.addEventListener('mousedown', onClickOutside);
+  }, 10);
+  function onKey(e) { if (e.key === 'Escape') { closeMoreActionsDropdown(); document.removeEventListener('keydown', onKey); } }
+  document.addEventListener('keydown', onKey);
 }
 
 // ─── Broker API client ───
@@ -3410,7 +3535,9 @@ function renderSidebarChannels() {
   CHANNELS.forEach(function(ch, idx) {
     var isActive = ch.name === currentChannel || (idx === 0 && !currentChannel);
     var btn = document.createElement('button');
-    btn.className = 'sidebar-item' + (isActive ? ' active' : '');
+    var count = (typeof channelUnreadCounts !== 'undefined') ? (channelUnreadCounts[ch.name] || 0) : 0;
+    var hasUnread = count > 0 && !isActive;
+    btn.className = 'sidebar-item' + (isActive ? ' active' : '') + (hasUnread ? ' unread' : '');
     btn.addEventListener('click', function() {
       switchChannel(ch.name);
       container.querySelectorAll('.sidebar-item').forEach(function(b) { b.classList.remove('active'); });
@@ -3425,10 +3552,24 @@ function renderSidebarChannels() {
     var name = document.createElement('span');
     name.textContent = ch.name;
 
+    // Star icon (visible on hover, persisted on starred)
+    var starred = (typeof isChannelStarred === 'function') && isChannelStarred(ch.name);
+    var star = document.createElement('button');
+    star.className = 'sidebar-star' + (starred ? ' starred' : '');
+    star.textContent = starred ? '\u2605' : '\u2606';
+    star.title = starred ? 'Unstar channel' : 'Star channel';
+    star.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (typeof toggleStarChannel === 'function') toggleStarChannel(ch.name);
+    });
+
     btn.appendChild(hash);
     btn.appendChild(name);
+    btn.appendChild(star);
     container.appendChild(btn);
   });
+  // Also refresh starred section
+  if (typeof renderStarredChannels === 'function') renderStarredChannels();
 }
 
 function switchChannel(name) {
@@ -4057,10 +4198,10 @@ function appendMessageToContainer(msg, container, opts) {
 
   // Threads are flat conversations — no per-message reply indicators
 
-  // Reactions display
+  // Reactions display (with add button and tooltips)
+  var reactionsDiv = document.createElement('div');
+  reactionsDiv.className = 'message-reactions';
   if (msg.reactions && msg.reactions.length > 0) {
-    var reactionsDiv = document.createElement('div');
-    reactionsDiv.className = 'message-reactions';
     msg.reactions.forEach(function(r) {
       var pill = document.createElement('button');
       pill.className = 'reaction-pill';
@@ -4074,8 +4215,41 @@ function appendMessageToContainer(msg, container, opts) {
       pill.addEventListener('click', function() {
         WuphfAPI.toggleReaction(msg.id, r.emoji, currentChannel);
       });
+      // Tooltip on hover
+      pill.addEventListener('mouseenter', function() {
+        var names = [];
+        if (r.users && r.users.length > 0) {
+          r.users.forEach(function(u) {
+            var a = AGENTS.find(function(ag) { return ag.slug === u; });
+            names.push(a ? a.name : u);
+          });
+        } else {
+          names.push((r.count || 1) + (r.count === 1 ? ' person' : ' people'));
+        }
+        var tip = document.createElement('div');
+        tip.className = 'reaction-tooltip';
+        tip.textContent = names.join(', ');
+        pill.appendChild(tip);
+      });
+      pill.addEventListener('mouseleave', function() {
+        var tip = pill.querySelector('.reaction-tooltip');
+        if (tip) tip.remove();
+      });
       reactionsDiv.appendChild(pill);
     });
+    // Add reaction "+" button
+    var addReactBtn = document.createElement('button');
+    addReactBtn.className = 'reaction-add-btn';
+    addReactBtn.type = 'button';
+    addReactBtn.title = 'Add reaction';
+    addReactBtn.setAttribute('aria-label', 'Add reaction');
+    addReactBtn.textContent = '+';
+    addReactBtn.addEventListener('click', function() {
+      openEmojiPicker(addReactBtn, function(emoji) {
+        WuphfAPI.toggleReaction(msg.id, emoji, currentChannel);
+      });
+    });
+    reactionsDiv.appendChild(addReactBtn);
     content.appendChild(reactionsDiv);
   }
 
@@ -4140,8 +4314,96 @@ function appendMessageToContainer(msg, container, opts) {
   })(msg));
   quoteActions.appendChild(quoteBtn);
 
-  // Main-feed thread controls are always keyboard reachable.
+  // Main-feed hover toolbar: emoji, thread, bookmark, more
   if (container.id === 'messages') {
+    var hoverActions = document.createElement('div');
+    hoverActions.className = 'message-actions';
+
+    // Emoji reaction button
+    var emojiBtn = document.createElement('button');
+    emojiBtn.className = 'message-action-btn';
+    emojiBtn.type = 'button';
+    emojiBtn.title = 'Add reaction';
+    emojiBtn.setAttribute('aria-label', 'Add reaction');
+    emojiBtn.textContent = '\u263A';
+    emojiBtn.style.fontSize = '16px';
+    emojiBtn.addEventListener('click', function() {
+      openEmojiPicker(emojiBtn, function(emoji) {
+        WuphfAPI.toggleReaction(msg.id, emoji, currentChannel);
+      });
+    });
+    hoverActions.appendChild(emojiBtn);
+
+    // Reply in thread button
+    var threadBtn = document.createElement('button');
+    threadBtn.className = 'message-action-btn';
+    threadBtn.type = 'button';
+    threadBtn.title = 'Reply in thread';
+    threadBtn.setAttribute('aria-label', 'Reply in thread');
+    var threadSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    threadSvg.setAttribute('width', '14');
+    threadSvg.setAttribute('height', '14');
+    threadSvg.setAttribute('viewBox', '0 0 24 24');
+    threadSvg.setAttribute('fill', 'none');
+    threadSvg.setAttribute('stroke', 'currentColor');
+    threadSvg.setAttribute('stroke-width', '2');
+    threadSvg.setAttribute('stroke-linecap', 'round');
+    threadSvg.setAttribute('stroke-linejoin', 'round');
+    var tp1 = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    tp1.setAttribute('d', 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z');
+    threadSvg.appendChild(tp1);
+    threadBtn.appendChild(threadSvg);
+    threadBtn.addEventListener('click', function() { openThread(msg.id); });
+    hoverActions.appendChild(threadBtn);
+
+    // Bookmark button
+    var bookmarkBtn = document.createElement('button');
+    bookmarkBtn.className = 'message-action-btn';
+    bookmarkBtn.type = 'button';
+    bookmarkBtn.title = 'Save for later';
+    bookmarkBtn.setAttribute('aria-label', 'Save for later');
+    var bmSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    bmSvg.setAttribute('width', '14');
+    bmSvg.setAttribute('height', '14');
+    bmSvg.setAttribute('viewBox', '0 0 24 24');
+    bmSvg.setAttribute('fill', 'none');
+    bmSvg.setAttribute('stroke', 'currentColor');
+    bmSvg.setAttribute('stroke-width', '2');
+    bmSvg.setAttribute('stroke-linecap', 'round');
+    bmSvg.setAttribute('stroke-linejoin', 'round');
+    var bp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    bp.setAttribute('d', 'm19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z');
+    bmSvg.appendChild(bp);
+    bookmarkBtn.appendChild(bmSvg);
+    bookmarkBtn.addEventListener('click', function() { showNotice('Message saved', 'success'); });
+    hoverActions.appendChild(bookmarkBtn);
+
+    // More actions button
+    var moreBtn = document.createElement('button');
+    moreBtn.className = 'message-action-btn';
+    moreBtn.type = 'button';
+    moreBtn.title = 'More actions';
+    moreBtn.setAttribute('aria-label', 'More actions');
+    var moreSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    moreSvg.setAttribute('width', '14');
+    moreSvg.setAttribute('height', '14');
+    moreSvg.setAttribute('viewBox', '0 0 24 24');
+    moreSvg.setAttribute('fill', 'currentColor');
+    var c1 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c1.setAttribute('cx', '12'); c1.setAttribute('cy', '5'); c1.setAttribute('r', '1.5');
+    var c2 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c2.setAttribute('cx', '12'); c2.setAttribute('cy', '12'); c2.setAttribute('r', '1.5');
+    var c3 = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    c3.setAttribute('cx', '12'); c3.setAttribute('cy', '19'); c3.setAttribute('r', '1.5');
+    moreSvg.appendChild(c1); moreSvg.appendChild(c2); moreSvg.appendChild(c3);
+    moreBtn.appendChild(moreSvg);
+    moreBtn.addEventListener('click', function() {
+      openMoreActionsDropdown(moreBtn, msg.id, msg.content || '');
+    });
+    hoverActions.appendChild(moreBtn);
+
+    msgDiv.appendChild(hoverActions);
+
     var threadControls = document.createElement('div');
     threadControls.className = 'message-thread-controls';
     threadControls.id = threadControlsId(msg.id);
@@ -4168,40 +4430,127 @@ function appendMessageToContainer(msg, container, opts) {
 
 var inlineExpandedThreads = {};
 
+function getThreadParticipants(parentId) {
+  var participants = [];
+  var seen = {};
+  var parent = allMessages[parentId];
+  if (parent && parent.from) {
+    seen[parent.from] = true;
+    var pa = AGENTS.find(function(a) { return a.slug === parent.from; });
+    participants.push({ slug: parent.from, emoji: pa ? pa.emoji : (parent.from === 'you' ? '\uD83D\uDC64' : '\uD83E\uDD16') });
+  }
+  Object.keys(allMessages).forEach(function(id) {
+    var m = allMessages[id];
+    if (m.reply_to === parentId && m.from && !seen[m.from]) {
+      seen[m.from] = true;
+      var ag = AGENTS.find(function(a) { return a.slug === m.from; });
+      participants.push({ slug: m.from, emoji: ag ? ag.emoji : (m.from === 'you' ? '\uD83D\uDC64' : '\uD83E\uDD16') });
+    }
+  });
+  return participants.slice(0, 3);
+}
+
+function getLastReplyTime(parentId) {
+  var latest = null;
+  Object.keys(allMessages).forEach(function(id) {
+    var m = allMessages[id];
+    if (m.reply_to === parentId) {
+      var t = m.ts || m.timestamp || m.id;
+      if (!latest || t > latest) latest = t;
+    }
+  });
+  if (!latest) return '';
+  var d = new Date(latest);
+  if (isNaN(d.getTime())) return '';
+  var now = new Date();
+  var diff = Math.floor((now - d) / 60000);
+  if (diff < 1) return 'Just now';
+  if (diff < 60) return diff + ' min ago';
+  if (diff < 1440) return Math.floor(diff / 60) + ' hr ago';
+  return d.toLocaleDateString();
+}
+
 function updateThreadLink(parentId) {
   var controls = document.getElementById(threadControlsId(parentId));
   if (!controls) return;
   var count = threadReplyCounts[parentId] || 0;
-  var inlineExpanded = !!inlineExpandedThreads[parentId];
   var panelOpen = activeThreadId === parentId && isThreadPanelOpen();
 
   controls.textContent = '';
 
   if (count > 0) {
-    var inlineBtn = document.createElement('button');
-    inlineBtn.className = 'inline-thread-toggle' + (inlineExpanded ? ' expanded' : '');
-    inlineBtn.type = 'button';
-    inlineBtn.setAttribute('data-active', inlineExpanded ? 'true' : 'false');
-    inlineBtn.setAttribute('aria-controls', threadInlineContainerId(parentId));
-    inlineBtn.setAttribute('aria-expanded', inlineExpanded ? 'true' : 'false');
-    inlineBtn.setAttribute('aria-label', (inlineExpanded ? 'Hide ' : 'Show ') + threadRepliesLabel(count) + ' inline');
-    inlineBtn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg><span>' + threadRepliesLabel(count) + '</span>';
-    inlineBtn.addEventListener('click', function() { toggleInlineThread(parentId); });
-    controls.appendChild(inlineBtn);
-  }
+    var row = document.createElement('div');
+    row.className = 'thread-reply-row';
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-label', 'Open thread with ' + threadRepliesLabel(count));
+    row.tabIndex = 0;
 
-  var panelBtn = document.createElement('button');
-  panelBtn.className = 'message-thread-link';
-  panelBtn.type = 'button';
-  panelBtn.setAttribute('data-active', panelOpen ? 'true' : 'false');
-  panelBtn.setAttribute('aria-controls', 'thread-panel');
-  panelBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
-  panelBtn.setAttribute('aria-label', panelOpen ? 'Thread panel open' : (count > 0 ? 'Open thread panel' : 'Reply in thread'));
-  panelBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg><span>' + (count > 0 ? (panelOpen ? 'Thread open' : 'Open thread') : 'Reply in thread') + '</span>';
-  panelBtn.addEventListener('click', function() {
-    openThread(parentId, { triggerEl: panelBtn });
-  });
-  controls.appendChild(panelBtn);
+    var avatarStack = document.createElement('div');
+    avatarStack.className = 'thread-avatar-stack';
+    var participants = getThreadParticipants(parentId);
+    participants.forEach(function(p) {
+      var av = document.createElement('span');
+      av.className = 'thread-avatar-mini';
+      av.textContent = p.emoji;
+      av.title = p.slug;
+      avatarStack.appendChild(av);
+    });
+    row.appendChild(avatarStack);
+
+    var countEl = document.createElement('span');
+    countEl.className = 'thread-reply-count';
+    countEl.textContent = threadRepliesLabel(count);
+    row.appendChild(countEl);
+
+    var lastTime = getLastReplyTime(parentId);
+    if (lastTime) {
+      var timeEl = document.createElement('span');
+      timeEl.className = 'thread-reply-time';
+      timeEl.textContent = 'Last reply ' + lastTime;
+      row.appendChild(timeEl);
+    }
+
+    row.addEventListener('click', function() {
+      openThread(parentId, { triggerEl: row });
+    });
+    row.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openThread(parentId, { triggerEl: row });
+      }
+    });
+    controls.appendChild(row);
+  } else {
+    var panelBtn = document.createElement('button');
+    panelBtn.className = 'message-thread-link';
+    panelBtn.type = 'button';
+    panelBtn.setAttribute('data-active', panelOpen ? 'true' : 'false');
+    panelBtn.setAttribute('aria-controls', 'thread-panel');
+    panelBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
+    panelBtn.setAttribute('aria-label', 'Reply in thread');
+    // Static SVG for thread icon (trusted content, no user data)
+    var linkSpan = document.createElement('span');
+    linkSpan.textContent = 'Reply in thread';
+    var svgNs = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(svgNs, 'svg');
+    svg.setAttribute('width', '12');
+    svg.setAttribute('height', '12');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '2');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    var path = document.createElementNS(svgNs, 'path');
+    path.setAttribute('d', 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z');
+    svg.appendChild(path);
+    panelBtn.appendChild(svg);
+    panelBtn.appendChild(linkSpan);
+    panelBtn.addEventListener('click', function() {
+      openThread(parentId, { triggerEl: panelBtn });
+    });
+    controls.appendChild(panelBtn);
+  }
 }
 
 function toggleInlineThread(parentId) {
@@ -4433,6 +4782,18 @@ function renderRequestBanner(pending) {
 // ─── Composer ───
 var composerInput = document.getElementById('composer-input');
 var composerSend = document.getElementById('composer-send');
+
+// Composer emoji button
+var composerEmojiBtn = document.getElementById('composer-emoji-btn');
+if (composerEmojiBtn) {
+  composerEmojiBtn.addEventListener('click', function() {
+    openEmojiPicker(composerEmojiBtn, function(emoji) {
+      composerInput.value += emoji;
+      composerInput.focus();
+      composerInput.dispatchEvent(new Event('input'));
+    });
+  });
+}
 
 // ─── Reply-to mode state ───
 var replyToMsgId = null;
@@ -4726,6 +5087,17 @@ composerInput.addEventListener('keydown', function(e) {
 
 composerSend.addEventListener('click', sendMessage);
 
+// Thread composer emoji button
+var threadEmojiBtn = document.getElementById('thread-composer-emoji-btn');
+if (threadEmojiBtn) {
+  threadEmojiBtn.addEventListener('click', function() {
+    var ti = document.getElementById('thread-composer-input');
+    openEmojiPicker(threadEmojiBtn, function(emoji) {
+      if (ti) { ti.value += emoji; ti.focus(); ti.dispatchEvent(new Event('input')); }
+    });
+  });
+}
+
 // Thread composer
 var threadInput = document.getElementById('thread-composer-input');
 var threadSend = document.getElementById('thread-composer-send');
@@ -4798,6 +5170,17 @@ function sendThreadReply() {
     tagged: tagged,
     reply_to: activeThreadId
   }).catch(function(e) { console.error('Thread reply failed:', e); showNotice('Thread reply failed', 'error'); });
+
+  // "Also send to channel" checkbox
+  var alsoSendCb = document.getElementById('thread-also-send-checkbox');
+  if (alsoSendCb && alsoSendCb.checked) {
+    WuphfAPI.post('/messages', {
+      from: 'you',
+      channel: currentChannel,
+      content: raw,
+      tagged: tagged
+    }).catch(function() {});
+  }
 }
 
 function handleSlashCommand(input) {
@@ -5779,25 +6162,11 @@ function initApp() {
 }
 
 // ─── Theme Switcher ───
+// Theme is permanently set to Slack via data-theme="slack" on <html>.
+// Force Slack theme — override any stale localStorage value.
+document.documentElement.setAttribute('data-theme', 'slack');
+localStorage.setItem('wuphf-theme', 'slack');
 var themeSwitcher = document.getElementById('theme-switcher');
-if (themeSwitcher) {
-  // Restore saved theme
-  var savedTheme = localStorage.getItem('wuphf-theme') || '';
-  if (savedTheme) {
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    themeSwitcher.value = savedTheme;
-  }
-  themeSwitcher.addEventListener('change', function() {
-    var theme = themeSwitcher.value;
-    if (theme) {
-      document.documentElement.setAttribute('data-theme', theme);
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
-    localStorage.setItem('wuphf-theme', theme);
-    showNotice('Theme changed to ' + (theme || 'Editorial'), 'success');
-  });
-}
 
 
 // ═══════════════════════════════════════════════════════════════
@@ -6084,8 +6453,23 @@ document.addEventListener('keydown', function(e) {
 
   // Skip remaining shortcuts if in an input field
   if (inInput) {
+    // Escape in composer: cancel editing if active
+    if (e.target.id === 'composer-input' && e.key === 'Escape' && editingMessageId) {
+      e.preventDefault();
+      cancelEditing();
+      return;
+    }
+    // Up arrow in EMPTY composer: enter edit mode for last human message
+    if (e.target.id === 'composer-input' && e.key === 'ArrowUp' && !e.target.value.trim() && !editingMessageId) {
+      var lastHumanMsg = findLastHumanMessage();
+      if (lastHumanMsg) {
+        e.preventDefault();
+        startEditing(lastHumanMsg);
+        return;
+      }
+    }
     // Up/Down arrow in composer: navigate input history (#40)
-    if (e.target.id === 'composer-input' && composerHistory.length > 0) {
+    if (e.target.id === 'composer-input' && composerHistory.length > 0 && !editingMessageId) {
       if (e.key === 'ArrowUp' && (!e.target.value.trim() || composerHistoryIdx >= 0)) {
         e.preventDefault();
         if (composerHistoryIdx < 0) composerHistoryDraft = e.target.value;
@@ -6121,6 +6505,227 @@ document.addEventListener('keydown', function(e) {
     return;
   }
 });
+
+// ═══════════════════════════════════════════════════════════════
+//   FORMATTING TOOLBAR — Markdown shortcuts
+// ═══════════════════════════════════════════════════════════════
+function wrapSelection(textarea, before, after) {
+  var start = textarea.selectionStart;
+  var end = textarea.selectionEnd;
+  var text = textarea.value;
+  var selected = text.substring(start, end);
+  textarea.value = text.substring(0, start) + before + selected + (after || before) + text.substring(end);
+  textarea.selectionStart = start + before.length;
+  textarea.selectionEnd = start + before.length + selected.length;
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input'));
+}
+
+function prependLine(textarea, prefix) {
+  var start = textarea.selectionStart;
+  var text = textarea.value;
+  var lineStart = text.lastIndexOf('\n', start - 1) + 1;
+  var lineEnd = text.indexOf('\n', start);
+  if (lineEnd === -1) lineEnd = text.length;
+  var line = text.substring(lineStart, lineEnd);
+  textarea.value = text.substring(0, lineStart) + prefix + line + text.substring(lineEnd);
+  textarea.selectionStart = textarea.selectionEnd = lineStart + prefix.length + line.length;
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input'));
+}
+
+function applyFormat(textarea, fmt) {
+  switch (fmt) {
+    case 'bold': wrapSelection(textarea, '**'); break;
+    case 'italic': wrapSelection(textarea, '*'); break;
+    case 'strike': wrapSelection(textarea, '~~'); break;
+    case 'code': wrapSelection(textarea, '`'); break;
+    case 'codeblock': wrapSelection(textarea, '\n```\n', '\n```\n'); break;
+    case 'quote': prependLine(textarea, '> '); break;
+    case 'bullet': prependLine(textarea, '- '); break;
+    case 'number': prependLine(textarea, '1. '); break;
+  }
+}
+
+function initFormattingToolbar(toolbarId, textareaId) {
+  var toolbar = document.getElementById(toolbarId);
+  var textarea = document.getElementById(textareaId);
+  if (!toolbar || !textarea) return;
+  toolbar.addEventListener('click', function(e) {
+    var btn = e.target.closest('[data-fmt]');
+    if (!btn) return;
+    e.preventDefault();
+    applyFormat(textarea, btn.getAttribute('data-fmt'));
+  });
+}
+initFormattingToolbar('main-formatting-toolbar', 'composer-input');
+initFormattingToolbar('thread-formatting-toolbar', 'thread-composer-input');
+
+// ═══════════════════════════════════════════════════════════════
+//   JUMP TO LATEST — Floating pill button
+// ═══════════════════════════════════════════════════════════════
+var jumpToLatestBtn = document.createElement('button');
+jumpToLatestBtn.className = 'jump-to-latest';
+jumpToLatestBtn.type = 'button';
+jumpToLatestBtn.textContent = '\u2193 Jump to latest';
+var jumpNewCount = 0;
+var mainEl = document.querySelector('.main');
+if (mainEl) {
+  mainEl.style.position = 'relative';
+  mainEl.appendChild(jumpToLatestBtn);
+}
+
+var messagesEl = document.getElementById('messages');
+function isNearBottom() {
+  if (!messagesEl) return true;
+  return messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 100;
+}
+
+function updateJumpToLatest() {
+  if (!isNearBottom()) {
+    jumpToLatestBtn.classList.add('visible');
+  } else {
+    jumpToLatestBtn.classList.remove('visible');
+    jumpNewCount = 0;
+    jumpToLatestBtn.textContent = '\u2193 Jump to latest';
+  }
+}
+
+if (messagesEl) {
+  messagesEl.addEventListener('scroll', updateJumpToLatest);
+}
+jumpToLatestBtn.addEventListener('click', function() {
+  if (messagesEl) {
+    messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: 'smooth' });
+  }
+  jumpNewCount = 0;
+  jumpToLatestBtn.classList.remove('visible');
+});
+
+var _messagesObserver = new MutationObserver(function(mutations) {
+  if (!isNearBottom()) {
+    var addedMessages = false;
+    mutations.forEach(function(m) {
+      m.addedNodes.forEach(function(n) {
+        if (n.nodeType === 1 && (n.classList.contains('message') || n.classList.contains('message-system'))) {
+          addedMessages = true;
+        }
+      });
+    });
+    if (addedMessages) {
+      jumpNewCount++;
+      jumpToLatestBtn.textContent = '\u2193 ' + jumpNewCount + ' new message' + (jumpNewCount > 1 ? 's' : '');
+      jumpToLatestBtn.classList.add('visible');
+    }
+  } else {
+    jumpNewCount = 0;
+    jumpToLatestBtn.textContent = '\u2193 Jump to latest';
+  }
+});
+if (messagesEl) {
+  _messagesObserver.observe(messagesEl, { childList: true });
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   "ALSO SEND TO CHANNEL" — update channel name
+// ═══════════════════════════════════════════════════════════════
+function updateThreadAlsoSendLabel() {
+  var span = document.getElementById('thread-also-send-channel');
+  if (span) span.textContent = currentChannel;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//   MESSAGE EDITING — Up arrow in empty composer
+// ═══════════════════════════════════════════════════════════════
+var editingMessageId = null;
+var editingOriginalText = '';
+
+function findLastHumanMessage() {
+  var candidates = [];
+  Object.keys(allMessages).forEach(function(id) {
+    var m = allMessages[id];
+    if (m.from === 'you' && m.channel === currentChannel && !m.reply_to) {
+      candidates.push(m);
+    }
+  });
+  if (!candidates.length) return null;
+  candidates.sort(function(a, b) {
+    var ta = a.ts || a.timestamp || a.id;
+    var tb = b.ts || b.timestamp || b.id;
+    return ta > tb ? -1 : 1;
+  });
+  return candidates[0];
+}
+
+function startEditing(msg) {
+  editingMessageId = msg.id;
+  editingOriginalText = msg.content || '';
+  var ci = document.getElementById('composer-input');
+  ci.value = editingOriginalText;
+  ci.style.height = 'auto';
+  ci.style.height = Math.min(ci.scrollHeight, 120) + 'px';
+  composerSend.disabled = false;
+  showEditingIndicator();
+  ci.focus();
+  ci.setSelectionRange(ci.value.length, ci.value.length);
+}
+
+function cancelEditing() {
+  editingMessageId = null;
+  editingOriginalText = '';
+  var ci = document.getElementById('composer-input');
+  ci.value = '';
+  ci.style.height = 'auto';
+  composerSend.disabled = true;
+  hideEditingIndicator();
+}
+
+function showEditingIndicator() {
+  hideEditingIndicator();
+  var indicator = document.createElement('div');
+  indicator.className = 'editing-indicator';
+  indicator.id = 'editing-indicator';
+  var editLabel = document.createElement('span');
+  editLabel.textContent = '\u270F\uFE0F Editing message';
+  var cancelLabel = document.createElement('span');
+  cancelLabel.className = 'editing-cancel';
+  cancelLabel.textContent = '\u2022 Escape to cancel';
+  indicator.appendChild(editLabel);
+  indicator.appendChild(document.createTextNode(' '));
+  indicator.appendChild(cancelLabel);
+  var composerEl = document.querySelector('.composer');
+  if (composerEl) {
+    composerEl.insertBefore(indicator, composerEl.querySelector('.composer-inner'));
+  }
+}
+
+function hideEditingIndicator() {
+  var existing = document.getElementById('editing-indicator');
+  if (existing) existing.remove();
+}
+
+// Intercept sendMessage to handle editing
+var _origSendMessage = sendMessage;
+sendMessage = function() {
+  if (editingMessageId) {
+    var ci = document.getElementById('composer-input');
+    var newText = ci.value.trim();
+    if (newText && newText !== editingOriginalText) {
+      showNotice('Edit saved', 'success');
+      if (allMessages[editingMessageId]) {
+        allMessages[editingMessageId].content = newText;
+        var msgEl = document.querySelector('[data-msg-id="' + editingMessageId + '"]');
+        if (msgEl) {
+          var textEl = msgEl.querySelector('.message-text');
+          if (textEl) textEl.textContent = newText;
+        }
+      }
+    }
+    cancelEditing();
+    return;
+  }
+  _origSendMessage();
+};
 
 // ═══════════════════════════════════════════════════════════════
 //   1:1 DIRECT SESSION MODE (#65)
@@ -6576,10 +7181,18 @@ function updateChannelBadges() {
     if (idx >= CHANNELS.length) return;
     var chName = CHANNELS[idx].name;
     var count = channelUnreadCounts[chName] || 0;
+    var isActive = item.classList.contains('active');
 
     // Remove existing badge
     var existingBadge = item.querySelector('.sidebar-badge');
     if (existingBadge) existingBadge.remove();
+
+    // Unread bold + white dot class
+    if (count > 0 && !isActive) {
+      item.classList.add('unread');
+    } else {
+      item.classList.remove('unread');
+    }
 
     // Add badge if unread count > 0
     if (count > 0) {
@@ -6589,12 +7202,186 @@ function updateChannelBadges() {
       item.appendChild(badge);
     }
   });
+  // Update starred section too
+  if (typeof renderStarredChannels === 'function') renderStarredChannels();
 }
 
 // Hook into message polling to track unreads
 var _originalAppendBrokerMessage = typeof appendBrokerMessage === 'function' ? appendBrokerMessage : null;
 
 loadLastSeenState();
+
+// ═══════════════════════════════════════════════════════════════
+//   SIDEBAR SECTION COLLAPSE
+// ═══════════════════════════════════════════════════════════════
+var _sidebarCollapsed = (function() {
+  try {
+    var s = localStorage.getItem('wuphf-sidebar-collapsed');
+    return s ? JSON.parse(s) : {};
+  } catch(e) { return {}; }
+})();
+
+function toggleSidebarSection(sectionName) {
+  _sidebarCollapsed[sectionName] = !_sidebarCollapsed[sectionName];
+  try { localStorage.setItem('wuphf-sidebar-collapsed', JSON.stringify(_sidebarCollapsed)); } catch(e) {}
+  applySidebarCollapse();
+}
+
+function applySidebarCollapse() {
+  ['team', 'channels', 'apps', 'starred'].forEach(function(sec) {
+    var body = document.querySelector('[data-section-body="' + sec + '"]');
+    var chevron = document.getElementById('chevron-' + sec);
+    if (!body) return;
+    var isCollapsed = !!_sidebarCollapsed[sec];
+    if (isCollapsed) {
+      body.classList.add('collapsed');
+      if (chevron) { chevron.textContent = '\u25B8'; chevron.classList.add('collapsed'); }
+    } else {
+      body.classList.remove('collapsed');
+      if (chevron) { chevron.textContent = '\u25BE'; chevron.classList.remove('collapsed'); }
+    }
+  });
+}
+applySidebarCollapse();
+
+// ═══════════════════════════════════════════════════════════════
+//   WORKSPACE HEADER DROPDOWN
+// ═══════════════════════════════════════════════════════════════
+var _workspaceMenuOpen = false;
+
+function toggleWorkspaceMenu() {
+  _workspaceMenuOpen = !_workspaceMenuOpen;
+  var dd = document.getElementById('workspace-dropdown');
+  if (_workspaceMenuOpen) {
+    renderWorkspaceMenu(dd);
+    dd.classList.add('open');
+  } else {
+    dd.classList.remove('open');
+  }
+}
+
+function closeWorkspaceMenu() {
+  _workspaceMenuOpen = false;
+  var dd = document.getElementById('workspace-dropdown');
+  if (dd) dd.classList.remove('open');
+}
+
+function renderWorkspaceMenu(container) {
+  container.textContent = '';
+  var items = [
+    { icon: '\uD83D\uDFE2', label: 'Set Status', action: function() { showNotice('Coming soon', 'info'); } },
+    { icon: '\uD83D\uDD15', label: 'Pause Notifications', action: function() { showNotice('Coming soon', 'info'); } },
+    { icon: '\uD83D\uDC64', label: 'Profile & Account', action: function() { showNotice('Coming soon', 'info'); } },
+    { icon: '\u2699\uFE0F', label: 'Preferences', action: function() { showNotice('Coming soon', 'info'); } },
+    { sep: true },
+    { icon: '\u2795', label: 'Invite People', action: function() { showNotice('Coming soon', 'info'); } },
+    { icon: '\uD83C\uDFE2', label: 'Workspace Settings', action: function() { showNotice('Coming soon', 'info'); } },
+    { sep: true },
+    { icon: '\uD83D\uDD27', label: 'Doctor', action: function() { openDoctorPanel(); } },
+    { icon: '\uD83D\uDD0C', label: 'Provider', action: function() { openProviderSwitcher(); } }
+  ];
+  items.forEach(function(it) {
+    if (it.sep) {
+      var sep = document.createElement('div');
+      sep.className = 'workspace-dropdown-sep';
+      container.appendChild(sep);
+      return;
+    }
+    var btn = document.createElement('button');
+    btn.className = 'workspace-dropdown-item';
+    var iconSpan = document.createElement('span');
+    iconSpan.className = 'ws-menu-icon';
+    iconSpan.textContent = it.icon;
+    var labelSpan = document.createElement('span');
+    labelSpan.textContent = it.label;
+    btn.appendChild(iconSpan);
+    btn.appendChild(labelSpan);
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      closeWorkspaceMenu();
+      it.action();
+    });
+    container.appendChild(btn);
+  });
+}
+
+document.addEventListener('click', function(e) {
+  if (!_workspaceMenuOpen) return;
+  var dd = document.getElementById('workspace-dropdown');
+  var logo = document.getElementById('workspace-logo');
+  if (dd && !dd.contains(e.target) && e.target !== logo) {
+    closeWorkspaceMenu();
+  }
+});
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape' && _workspaceMenuOpen) closeWorkspaceMenu();
+});
+
+// ═══════════════════════════════════════════════════════════════
+//   STARRED / FAVORITE CHANNELS
+// ═══════════════════════════════════════════════════════════════
+var _starredChannels = (function() {
+  try {
+    var s = localStorage.getItem('wuphf-starred-channels');
+    return s ? JSON.parse(s) : [];
+  } catch(e) { return []; }
+})();
+
+function isChannelStarred(name) {
+  return _starredChannels.indexOf(name) !== -1;
+}
+
+function toggleStarChannel(name) {
+  var idx = _starredChannels.indexOf(name);
+  if (idx === -1) { _starredChannels.push(name); }
+  else { _starredChannels.splice(idx, 1); }
+  try { localStorage.setItem('wuphf-starred-channels', JSON.stringify(_starredChannels)); } catch(e) {}
+  renderSidebarChannels();
+  renderStarredChannels();
+}
+
+function renderStarredChannels() {
+  var container = document.getElementById('sidebar-starred-channels');
+  var section = document.getElementById('sidebar-starred-section');
+  if (!container || !section) return;
+  if (_starredChannels.length === 0) {
+    section.style.display = 'none';
+    container.textContent = '';
+    return;
+  }
+  section.style.display = '';
+  container.textContent = '';
+  _starredChannels.forEach(function(chName) {
+    var ch = CHANNELS.find(function(c) { return c.name === chName; });
+    if (!ch) return;
+    var isActive = ch.name === currentChannel;
+    var count = channelUnreadCounts[ch.name] || 0;
+    var btn = document.createElement('button');
+    btn.className = 'sidebar-item' + (isActive ? ' active' : '') + (count > 0 ? ' unread' : '');
+    btn.addEventListener('click', function() { switchChannel(ch.name); });
+    var hash = document.createElement('span');
+    hash.className = 'sidebar-item-icon';
+    hash.style.fontWeight = 'bold';
+    hash.style.fontSize = '14px';
+    hash.textContent = '#';
+    var name = document.createElement('span');
+    name.textContent = ch.name;
+    var star = document.createElement('button');
+    star.className = 'sidebar-star starred';
+    star.textContent = '\u2605';
+    star.title = 'Unstar channel';
+    star.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleStarChannel(ch.name);
+    });
+    btn.appendChild(hash);
+    btn.appendChild(name);
+    btn.appendChild(star);
+    container.appendChild(btn);
+  });
+  applySidebarCollapse();
+}
+
 
 // ─── SVG icon helper (static trusted icons only) ───
 function svgIcon(paths, size) {
