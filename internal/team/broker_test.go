@@ -2409,10 +2409,10 @@ func TestRecentHumanMessagesLimitCapsResults(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	// Only 2 human messages exist; limit=5 should return all 2.
+	// nex is also a human/external sender — all 3 qualify; limit=5 returns all 3.
 	got := b.RecentHumanMessages(5)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 human messages (all available), got %d", len(got))
+	if len(got) != 3 {
+		t.Fatalf("expected 3 messages (you+you+nex), got %d", len(got))
 	}
 }
 
@@ -2433,5 +2433,42 @@ func TestRecentHumanMessagesExcludesNonHuman(t *testing.T) {
 	got := b.RecentHumanMessages(10)
 	if len(got) != 0 {
 		t.Fatalf("expected 0 human messages, got %d", len(got))
+	}
+}
+
+func TestRecentHumanMessagesIncludesNexSender(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		{ID: "m1", From: "fe", Content: "agent msg", Timestamp: "2026-04-14T10:00:00Z"},
+		{ID: "m2", From: "nex", Content: "nex automation context", Timestamp: "2026-04-14T10:01:00Z"},
+		{ID: "m3", From: "you", Content: "human question", Timestamp: "2026-04-14T10:02:00Z"},
+	}
+	b.mu.Unlock()
+
+	// Spec: "nex" is treated as human/external alongside "you" and "human".
+	// Without nex messages in resume packets, conversations triggered by Nex automation
+	// are silently dropped on restart.
+	got := b.RecentHumanMessages(10)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 messages (nex+you), got %d", len(got))
+	}
+	ids := map[string]bool{}
+	for _, m := range got {
+		ids[m.ID] = true
+	}
+	if !ids["m2"] {
+		t.Error("expected nex message m2 to be included")
+	}
+	if !ids["m3"] {
+		t.Error("expected human message m3 to be included")
+	}
+	if ids["m1"] {
+		t.Error("expected agent message m1 to be excluded")
 	}
 }

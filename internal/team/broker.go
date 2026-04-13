@@ -1463,16 +1463,16 @@ func (b *Broker) InFlightTasks() []teamTask {
 	return out
 }
 
-// RecentHumanMessages returns up to limit messages sent by a human sender
-// ("you" or "human"). The returned slice contains the most recent messages
-// in chronological order (earliest first).
+// RecentHumanMessages returns up to limit messages sent by a human or external
+// sender ("you", "human", or "nex"). The returned slice contains the most
+// recent messages in chronological order (earliest first).
 func (b *Broker) RecentHumanMessages(limit int) []channelMessage {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	var human []channelMessage
 	for _, msg := range b.messages {
 		f := strings.ToLower(strings.TrimSpace(msg.From))
-		if f == "you" || f == "human" {
+		if f == "you" || f == "human" || f == "nex" {
 			human = append(human, msg)
 		}
 	}
