@@ -66,26 +66,42 @@ To let agents take real actions (send emails, update CRMs, etc.):
    /config set action_provider composio
    ```
 
-## Token Efficiency
+## Benchmark: WUPHF vs Paperclip
 
-WUPHF uses 3.3x fewer tokens than [Paperclip](https://github.com/paperclipai/paperclip) for the same workload. Measured, not estimated.
+Same task, same machine, same codex binary. 5-turn CEO DM session. All numbers measured from live runs.
 
-| | WUPHF + Claude Code | WUPHF + Codex | Paperclip |
+| | WUPHF + Claude Code | WUPHF + Codex | Paperclip + Codex |
 |---|---|---|---|
-| 5-turn session | **$0.07** | **87k billed** | **284k billed** |
-| Avg per turn | ~32k ctx (97% cached) | 17k billed | 57k billed |
-| Input trend | Flat | Flat | Growing (308k→500k) |
+| 5-turn cost | **$0.06** | **87k billed** | **284k billed** |
+| Avg per turn | $0.01 (97% cached) | 17k billed | 57k billed |
+| vs Paperclip | **9x cheaper** | **3.3x cheaper** | baseline |
+| Input trend | Flat (31k) | Flat (128k) | Growing (308k → 500k) |
 | Idle cost | Zero | Zero | Heartbeat every 30s |
 
-Why: fresh sessions per turn (no context accumulation), per-role MCP tool sets (4 tools in DM vs 27), push-driven agent wakes (zero idle burn), and Anthropic prompt caching (97% cache read with Claude Code).
+### Why WUPHF wins
 
-Full methodology and raw data: [`docs/benchmark-results.md`](docs/benchmark-results.md)
+**Fresh sessions.** Each agent turn starts clean. No conversation history accumulates. Paperclip's input grows from 308k to 500k over 5 turns because each heartbeat injects more inbox and issue context.
 
-Run it yourself:
+**Prompt caching.** Claude Code gets 97% cache read because WUPHF's identical prompt prefixes across fresh sessions align with Anthropic's prompt cache. Paperclip's growing context breaks cache prefix alignment.
+
+**Per-role tools.** DM mode loads 4 MCP tools instead of 27. Fewer tool schemas = smaller prompt = better cache hits.
+
+**Zero idle burn.** Agents only spawn when the broker pushes a notification. No heartbeat polling. Paperclip polls every 30 seconds even when nothing is happening.
+
+### Reproduce it
 
 ```bash
+# Start WUPHF
+wuphf --pack starter &
+
+# Start Paperclip
+npx paperclipai run --data-dir /tmp/paperclip-bench &
+
+# Run the benchmark
 ./scripts/benchmark.sh
 ```
+
+Full methodology, per-turn data, and Paperclip source references: [`docs/benchmark-results.md`](docs/benchmark-results.md)
 
 ## The Name
 
