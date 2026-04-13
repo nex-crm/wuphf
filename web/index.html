@@ -1275,16 +1275,61 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .dm-split-layout.active { display: flex; }
 .dm-split-left { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 .dm-split-right { width: 42%; min-width: 320px; max-width: 560px; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: #1a1a1a; }
-.dm-stream-header { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #111; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
-.dm-stream-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #888; font-family: var(--font-mono); flex: 1; }
-.dm-stream-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; animation: pulse-dot 1.5s ease-in-out infinite; flex-shrink: 0; }
-.dm-stream-dot.idle { background: #555; animation: none; }
-.dm-stream-lines { flex: 1; overflow-y: auto; padding: 8px 16px; background: #1a1a1a; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: #d4d4d4; }
-.dm-stream-line { white-space: pre-wrap; word-break: break-all; padding: 1px 0; }
-.dm-stream-line.thinking { color: #888; font-style: italic; }
-.dm-stream-line.tool { color: #60a5fa; }
-.dm-stream-line.result { color: #86efac; }
-.dm-stream-empty { color: #555; font-style: italic; font-size: 13px; padding: 20px 0; }
+.dm-stream-header { display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: #0d1117; border-bottom: 1px solid #21262d; flex-shrink: 0; cursor: pointer; user-select: none; }
+.dm-stream-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #7d8590; font-family: var(--font-mono); flex: 1; }
+.dm-stream-dot { width: 6px; height: 6px; border-radius: 50%; background: #3fb950; animation: pulse-dot 1.5s ease-in-out infinite; flex-shrink: 0; }
+.dm-stream-dot.idle { background: #484f58; animation: none; }
+.dm-stream-collapse-icon { font-size: 10px; color: #484f58; }
+.dm-stream-lines { flex: 1; overflow-y: auto; padding: 0; background: #0d1117; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: #e6edf3; }
+.dm-stream-line { white-space: pre-wrap; word-break: break-word; padding: 2px 14px; border-bottom: 1px solid #161b22; }
+.dm-stream-line.thinking { color: #7d8590; font-style: italic; }
+.dm-stream-line.tool { color: #79c0ff; }
+.dm-stream-line.result { color: #56d364; }
+.dm-stream-empty { color: #484f58; font-style: italic; font-size: 12px; padding: 24px 14px; }
+
+/* ─── Claude Code-style stream cards ─── */
+.stream-card { padding: 0; border-bottom: 1px solid #161b22; }
+.stream-card-header { display: flex; align-items: center; gap: 8px; padding: 5px 14px 3px; }
+.stream-card-phase { font-size: 11px; font-weight: 600; font-family: var(--font-mono); padding: 1px 6px; border-radius: 3px; }
+.stream-phase-thinking, .stream-phase-agentmessage { background: #1c1e26; color: #7d8590; }
+.stream-phase-tool, .stream-phase-tooluse, .stream-phase-mcptoolcall, .stream-phase-functioncall { background: #0c2d6b; color: #79c0ff; }
+.stream-phase-completed, .stream-phase-turncomplete { background: #0f2d1a; color: #3fb950; }
+.stream-phase-active { background: #0f2d1a; color: #3fb950; }
+.stream-phase-idle { background: #1c1e26; color: #484f58; }
+.stream-phase-error { background: #3d1117; color: #f85149; }
+.stream-card-agent { font-size: 11px; color: #7d8590; }
+.stream-card-ts { font-size: 10px; color: #484f58; margin-left: auto; font-family: var(--font-mono); }
+.stream-card-detail { padding: 0 14px 4px; color: #e6edf3; font-size: 13px; line-height: 1.5; font-family: var(--font-mono); word-break: break-word; }
+.stream-card-tool { padding: 2px 14px; color: #79c0ff; font-size: 12px; font-family: var(--font-mono); }
+
+/* Structured values (Claude Code key-value style) */
+.sv-obj { padding: 0 14px 4px; font-size: 12px; font-family: var(--font-mono); }
+.sv-obj-row { display: flex; gap: 0; padding: 0; line-height: 1.6; }
+.sv-obj-key { color: #7d8590; flex-shrink: 0; min-width: 0; }
+.sv-obj-key::after { content: '='; color: #484f58; margin: 0 1px; }
+.sv-str { color: #a5d6ff; word-break: break-word; }
+.sv-num { color: #79c0ff; font-variant-numeric: tabular-nums; }
+.sv-bool { color: #d2a8ff; }
+.sv-null { color: #484f58; font-style: italic; }
+.sv-ts { color: #7d8590; }
+.sv-array { padding-left: 12px; }
+.sv-array-item { padding: 0; line-height: 1.6; }
+.sv-array-item::before { content: '-'; color: #484f58; margin-right: 6px; }
+/* ─── Claude Code-style stream elements ─── */
+.cc-thinking { padding: 4px 14px; color: #7d8590; font-style: italic; font-size: 13px; font-family: var(--font-mono); line-height: 1.5; border-bottom: 1px solid #161b22; word-break: break-word; }
+.cc-tool-call { border-bottom: 1px solid #161b22; }
+.cc-tool-header { display: flex; align-items: center; gap: 6px; padding: 4px 14px; cursor: pointer; user-select: none; transition: background 0.1s; }
+.cc-tool-header:hover { background: #161b22; }
+.cc-tool-chevron { color: #484f58; font-size: 10px; flex-shrink: 0; width: 10px; transition: transform 0.15s; }
+.cc-tool-chevron.open { transform: rotate(90deg); }
+.cc-tool-name { color: #79c0ff; font-weight: 600; font-size: 12px; font-family: var(--font-mono); flex-shrink: 0; }
+.cc-tool-summary { color: #7d8590; font-size: 12px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.cc-tool-body { padding: 0 14px 6px 30px; font-size: 12px; font-family: var(--font-mono); background: #0d1117; }
+.cc-tool-body .sv-obj { padding: 0; }
+.cc-tool-result { padding: 2px 14px 4px 30px; color: #3fb950; font-size: 12px; font-family: var(--font-mono); }
+.cc-tool-error { padding: 2px 14px 4px 30px; color: #f85149; font-size: 12px; font-family: var(--font-mono); }
+.cc-token-line { padding: 4px 14px; color: #484f58; font-size: 11px; font-family: var(--font-mono); border-bottom: 1px solid #161b22; }
+
 /* Hide old strip — replaced by split layout */
 #dm-stream-strip { display: none !important; }
 /* DM button on sidebar agent rows */
@@ -6489,24 +6534,16 @@ function renderStreamLine(container, rawText) {
   var card = document.createElement('div');
   card.className = 'stream-card';
 
-  // ── turn.completed → show token usage summary ──
+  // ── turn.completed → compact token line ──
   if (evtType === 'turn.completed' && parsed.usage) {
     var u = parsed.usage;
-    var header = document.createElement('div');
-    header.className = 'stream-card-header';
-    var badge = document.createElement('span');
-    badge.className = 'stream-card-phase stream-phase-completed';
-    badge.textContent = 'turn complete';
-    header.appendChild(badge);
-    var tokens = document.createElement('span');
-    tokens.className = 'stream-card-ts';
+    var tokenLine = document.createElement('div');
+    tokenLine.className = 'cc-token-line';
     var inTok = u.input_tokens || 0;
     var outTok = u.output_tokens || 0;
     var cached = u.cached_input_tokens || 0;
-    tokens.textContent = formatTokens(inTok) + ' in / ' + formatTokens(outTok) + ' out' + (cached > 0 ? ' (' + formatTokens(cached) + ' cached)' : '');
-    header.appendChild(tokens);
-    card.appendChild(header);
-    container.appendChild(card);
+    tokenLine.textContent = '\u2500\u2500 ' + formatTokens(inTok + outTok) + ' tokens (' + formatTokens(inTok) + ' in, ' + formatTokens(outTok) + ' out' + (cached > 0 ? ', ' + formatTokens(cached) + ' cached' : '') + ')';
+    container.appendChild(tokenLine);
     return;
   }
 
@@ -6515,80 +6552,93 @@ function renderStreamLine(container, rawText) {
     var item = parsed.item;
     var itemType = item.type || '';
 
-    // Agent message → show the text
+    // Agent message → Claude Code style: dimmed italic thinking text
     if (itemType === 'agent_message') {
       var msgText = (item.text || '').trim();
-      if (!msgText) return; // skip empty messages
-      var header = document.createElement('div');
-      header.className = 'stream-card-header';
-      var badge = document.createElement('span');
-      badge.className = 'stream-card-phase stream-phase-thinking';
-      badge.textContent = 'thinking';
-      header.appendChild(badge);
-      card.appendChild(header);
-      var detail = document.createElement('div');
-      detail.className = 'stream-card-detail';
-      detail.textContent = msgText.length > 300 ? msgText.substring(0, 300) + '\u2026' : msgText;
-      card.appendChild(detail);
-      container.appendChild(card);
+      if (!msgText) return;
+      var thinkDiv = document.createElement('div');
+      thinkDiv.className = 'cc-thinking';
+      thinkDiv.textContent = msgText.length > 400 ? msgText.substring(0, 400) + '\u2026' : msgText;
+      container.appendChild(thinkDiv);
       return;
     }
 
-    // Tool call → show tool name + human-readable args + result
+    // Tool call → Claude Code style: collapsible with chevron
     if (itemType === 'mcp_tool_call' || itemType === 'tool_call' || itemType === 'function_call') {
       var toolName = item.tool || item.name || '';
-      var header = document.createElement('div');
-      header.className = 'stream-card-header';
-      var badge = document.createElement('span');
-      badge.className = 'stream-card-phase stream-phase-tool';
-      badge.textContent = toolName || 'tool';
-      header.appendChild(badge);
-      if (item.server) {
-        var serverEl = document.createElement('span');
-        serverEl.className = 'stream-card-agent';
-        serverEl.textContent = item.server;
-        header.appendChild(serverEl);
-      }
-      card.appendChild(header);
+      var toolCard = document.createElement('div');
+      toolCard.className = 'cc-tool-call';
 
-      // Show key arguments (filter out noise fields)
+      // Header: ⏵ ToolName (clickable to expand/collapse)
+      var toolHeader = document.createElement('div');
+      toolHeader.className = 'cc-tool-header';
+      var chevron = document.createElement('span');
+      chevron.className = 'cc-tool-chevron';
+      chevron.textContent = '\u25B8';
+      var toolLabel = document.createElement('span');
+      toolLabel.className = 'cc-tool-name';
+      toolLabel.textContent = toolName;
+      toolHeader.appendChild(chevron);
+      toolHeader.appendChild(toolLabel);
+
+      // One-line summary of key arg (for collapsed view)
       var args = item.arguments || item.args || {};
+      var argSkip = {my_slug:1, new_topic:1, viewer_slug:1, tagged:1};
+      var summaryArg = args.content || args.command || args.text || args.query || args.channel || '';
+      if (typeof summaryArg === 'string' && summaryArg.length > 0) {
+        var summaryEl = document.createElement('span');
+        summaryEl.className = 'cc-tool-summary';
+        summaryEl.textContent = summaryArg.length > 80 ? summaryArg.substring(0, 80) + '\u2026' : summaryArg;
+        toolHeader.appendChild(summaryEl);
+      }
+
+      toolCard.appendChild(toolHeader);
+
+      // Collapsible body (hidden by default)
+      var toolBody = document.createElement('div');
+      toolBody.className = 'cc-tool-body';
+      toolBody.style.display = 'none';
+
+      // Args as key=value lines
       if (typeof args === 'object' && Object.keys(args).length > 0) {
-        // Only show the interesting args, skip internal ones
-        var argSkip = {my_slug:1, new_topic:1, viewer_slug:1};
         var cleanArgs = {};
         Object.keys(args).forEach(function(k) {
           if (!argSkip[k] && args[k] != null && args[k] !== '') cleanArgs[k] = args[k];
         });
         if (Object.keys(cleanArgs).length > 0) {
-          card.appendChild(renderValue(cleanArgs, 1));
+          toolBody.appendChild(renderValue(cleanArgs, 1));
         }
       }
+      toolCard.appendChild(toolBody);
 
-      // Show result text (extract from content array)
+      // Toggle collapse on header click
+      toolHeader.addEventListener('click', function() {
+        var isOpen = toolBody.style.display !== 'none';
+        toolBody.style.display = isOpen ? 'none' : 'block';
+        chevron.textContent = isOpen ? '\u25B8' : '\u25BE';
+        chevron.className = 'cc-tool-chevron' + (isOpen ? '' : ' open');
+      });
+
+      // Result line (always visible, below the card)
       var result = item.result;
       if (result && result.content && Array.isArray(result.content)) {
         result.content.forEach(function(c) {
           if (c.text) {
             var resEl = document.createElement('div');
-            resEl.className = 'stream-card-detail';
-            resEl.style.color = 'var(--green)';
+            resEl.className = 'cc-tool-result';
             resEl.textContent = '\u2713 ' + c.text;
-            card.appendChild(resEl);
+            toolCard.appendChild(resEl);
           }
         });
       }
-
-      // Show error if present
       if (item.error) {
         var errEl = document.createElement('div');
-        errEl.className = 'stream-card-detail';
-        errEl.style.color = 'var(--red)';
+        errEl.className = 'cc-tool-error';
         errEl.textContent = '\u2717 ' + (typeof item.error === 'string' ? item.error : JSON.stringify(item.error));
-        card.appendChild(errEl);
+        toolCard.appendChild(errEl);
       }
 
-      container.appendChild(card);
+      container.appendChild(toolCard);
       return;
     }
   }
