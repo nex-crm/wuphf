@@ -1,12 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="slack-dark">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>WUPHF — Your AI team, visible and working</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<!-- System font stack -- no external fonts needed (Slack uses system fonts) -->
 <link rel="stylesheet" href="themes/slack.css" />
 <link rel="stylesheet" href="themes/slack-dark.css" />
 <link rel="stylesheet" href="themes/windows-98.css" />
@@ -18,33 +16,33 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:             #FAF6F1;
-  --bg-warm:        #F3EDE4;
+  --bg:             #FFFFFF;
+  --bg-warm:        #F8F8F8;
   --bg-card:        #FFFFFF;
-  --text:           #3B2F2F;
-  --text-secondary: #6B5B4F;
-  --text-tertiary:  #A89888;
-  --accent:         #8B5E3C;
-  --accent-warm:    #7A4F30;
-  --accent-bg:      #F5E6D3;
-  --border:         #E8DDD0;
-  --border-light:   #F0E8DD;
-  --border-dark:    #D4C4B0;
-  --green:          #16a34a;
-  --green-bg:       #dcfce7;
-  --red:            #dc2626;
-  --red-bg:         #fef2f2;
-  --yellow:         #ca8a04;
-  --yellow-bg:      #fefce8;
-  --blue:           #2563eb;
-  --blue-bg:        #eff6ff;
+  --text:           #1D1C1D;
+  --text-secondary: #616061;
+  --text-tertiary:  #868686;
+  --accent:         #1264A3;
+  --accent-warm:    #0B4C8C;
+  --accent-bg:      #E8F5FE;
+  --border:         #E8E8E8;
+  --border-light:   #F0F0F0;
+  --border-dark:    #DDDDDD;
+  --green:          #007A5A;
+  --green-bg:       #E3F9E5;
+  --red:            #E01E5A;
+  --red-bg:         #FDE8EE;
+  --yellow:         #ECB22E;
+  --yellow-bg:      #FEF9E7;
+  --blue:           #1264A3;
+  --blue-bg:        #E8F5FE;
   --discord:        #5865F2;
   --discord-bg:     #ECEAFD;
   --discord-border: #D8D4F7;
-  --font-sans:  'Inter', system-ui, -apple-system, sans-serif;
-  --font-serif: 'Source Serif 4', Georgia, serif;
-  --font-logo:  'Instrument Serif', Georgia, serif;
-  --font-mono:  'JetBrains Mono', ui-monospace, monospace;
+  --font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-logo:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-mono:  'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -1277,16 +1275,63 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .dm-split-layout.active { display: flex; }
 .dm-split-left { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 .dm-split-right { width: 42%; min-width: 320px; max-width: 560px; display: flex; flex-direction: column; border-left: 1px solid var(--border); background: #1a1a1a; }
-.dm-stream-header { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: #111; border-bottom: 1px solid #2a2a2a; flex-shrink: 0; }
-.dm-stream-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: #888; font-family: var(--font-mono); flex: 1; }
-.dm-stream-dot { width: 6px; height: 6px; border-radius: 50%; background: #22c55e; animation: pulse-dot 1.5s ease-in-out infinite; flex-shrink: 0; }
-.dm-stream-dot.idle { background: #555; animation: none; }
-.dm-stream-lines { flex: 1; overflow-y: auto; padding: 8px 16px; background: #1a1a1a; font-family: var(--font-mono); font-size: 12px; line-height: 1.6; color: #d4d4d4; }
-.dm-stream-line { white-space: pre-wrap; word-break: break-all; padding: 1px 0; }
-.dm-stream-line.thinking { color: #888; font-style: italic; }
-.dm-stream-line.tool { color: #60a5fa; }
-.dm-stream-line.result { color: #86efac; }
-.dm-stream-empty { color: #555; font-style: italic; font-size: 13px; padding: 20px 0; }
+.dm-stream-header { display: flex; align-items: center; gap: 8px; padding: 6px 14px; background: #0d1117; border-bottom: 1px solid #21262d; flex-shrink: 0; cursor: pointer; user-select: none; }
+.dm-stream-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #7d8590; font-family: var(--font-mono); flex: 1; }
+.dm-stream-dot { width: 6px; height: 6px; border-radius: 50%; background: #3fb950; animation: pulse-dot 1.5s ease-in-out infinite; flex-shrink: 0; }
+.dm-stream-dot.idle { background: #484f58; animation: none; }
+.dm-stream-collapse-icon { font-size: 10px; color: #484f58; }
+.dm-stream-lines { flex: 1; overflow-y: auto; padding: 0; background: #0d1117; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; color: #e6edf3; }
+.dm-stream-line { white-space: pre-wrap; word-break: break-word; padding: 2px 14px; border-bottom: 1px solid #161b22; }
+.dm-stream-line.thinking { color: #7d8590; font-style: italic; }
+.dm-stream-line.tool { color: #79c0ff; }
+.dm-stream-line.result { color: #56d364; }
+.dm-stream-empty { color: #484f58; font-style: italic; font-size: 12px; padding: 24px 14px; }
+
+/* ─── Claude Code-style stream cards ─── */
+.stream-card { padding: 0; border-bottom: 1px solid #161b22; }
+.stream-card-header { display: flex; align-items: center; gap: 8px; padding: 5px 14px 3px; }
+.stream-card-phase { font-size: 11px; font-weight: 600; font-family: var(--font-mono); padding: 1px 6px; border-radius: 3px; }
+.stream-phase-thinking, .stream-phase-agentmessage { background: #1c1e26; color: #7d8590; }
+.stream-phase-tool, .stream-phase-tooluse, .stream-phase-mcptoolcall, .stream-phase-functioncall { background: #0c2d6b; color: #79c0ff; }
+.stream-phase-completed, .stream-phase-turncomplete { background: #0f2d1a; color: #3fb950; }
+.stream-phase-active { background: #0f2d1a; color: #3fb950; }
+.stream-phase-idle { background: #1c1e26; color: #484f58; }
+.stream-phase-error { background: #3d1117; color: #f85149; }
+.stream-card-agent { font-size: 11px; color: #7d8590; }
+.stream-card-ts { font-size: 10px; color: #484f58; margin-left: auto; font-family: var(--font-mono); }
+.stream-card-detail { padding: 0 14px 4px; color: #e6edf3; font-size: 13px; line-height: 1.5; font-family: var(--font-mono); word-break: break-word; }
+.stream-card-tool { padding: 2px 14px; color: #79c0ff; font-size: 12px; font-family: var(--font-mono); }
+
+/* Structured values (Claude Code key-value style) */
+.sv-obj { padding: 0 14px 4px; font-size: 12px; font-family: var(--font-mono); }
+.sv-obj-row { display: flex; gap: 0; padding: 0; line-height: 1.6; }
+.sv-obj-key { color: #7d8590; flex-shrink: 0; min-width: 0; }
+.sv-obj-key::after { content: '='; color: #484f58; margin: 0 1px; }
+.sv-str { color: #a5d6ff; word-break: break-word; }
+.sv-num { color: #79c0ff; font-variant-numeric: tabular-nums; }
+.sv-bool { color: #d2a8ff; }
+.sv-null { color: #484f58; font-style: italic; }
+.sv-ts { color: #7d8590; }
+.sv-array { padding-left: 12px; }
+.sv-array-item { padding: 0; line-height: 1.6; }
+.sv-array-item::before { content: '-'; color: #484f58; margin-right: 6px; }
+/* ─── Claude Code-style stream elements ─── */
+.cc-thinking { padding: 4px 14px; color: #7d8590; font-style: italic; font-size: 13px; font-family: var(--font-mono); line-height: 1.5; border-bottom: 1px solid #161b22; word-break: break-word; }
+.cc-tool-call { border-bottom: 1px solid #161b22; }
+.cc-tool-header { display: flex; align-items: center; gap: 6px; padding: 4px 14px; cursor: pointer; user-select: none; transition: background 0.1s; }
+.cc-tool-header:hover { background: #161b22; }
+.cc-tool-chevron { color: #484f58; font-size: 10px; flex-shrink: 0; width: 10px; transition: transform 0.15s; }
+.cc-tool-chevron.open { transform: rotate(90deg); }
+.cc-tool-name { color: #79c0ff; font-weight: 600; font-size: 12px; font-family: var(--font-mono); flex-shrink: 0; }
+.cc-tool-summary { color: #7d8590; font-size: 12px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.cc-tool-body { padding: 0 14px 6px 30px; font-size: 12px; font-family: var(--font-mono); background: #0d1117; }
+.cc-tool-body .sv-obj { padding: 0; }
+.cc-tool-result, .cc-tool-result-inline { padding: 2px 0 4px; color: #3fb950; font-size: 12px; font-family: var(--font-mono); }
+.cc-tool-result-label { padding: 4px 0 2px; color: #3fb950; font-size: 11px; font-weight: 600; font-family: var(--font-mono); }
+.cc-tool-result-summary { padding: 2px 14px 4px 30px; color: #3fb950; font-size: 12px; font-family: var(--font-mono); opacity: 0.8; }
+.cc-tool-error { padding: 2px 0 4px; color: #f85149; font-size: 12px; font-family: var(--font-mono); }
+.cc-token-line { padding: 4px 14px; color: #484f58; font-size: 11px; font-family: var(--font-mono); border-bottom: 1px solid #161b22; }
+
 /* Hide old strip — replaced by split layout */
 #dm-stream-strip { display: none !important; }
 /* DM button on sidebar agent rows */
@@ -1734,7 +1779,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   <div class="office" id="office">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <span class="sidebar-logo">wuphf</span>
+        <span class="sidebar-logo" id="workspace-logo" onclick="toggleWorkspaceMenu()">WUPHF</span>
         <button class="sidebar-btn" title="Collapse sidebar" aria-label="Collapse sidebar">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
         </button>
@@ -1767,9 +1812,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
         <label class="sr-only" for="theme-switcher">Switch theme</label>
         <select id="theme-switcher" aria-label="Switch theme" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
-          <option value="">Editorial</option>
           <option value="slack">Slack</option>
-          <option value="slack-dark">Slack (Dark)</option>
+          <option value="slack-dark" selected>Slack (Dark)</option>
           <option value="windows-98">Windows 98</option>
         </select>
       </div>
@@ -1806,9 +1850,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <!-- composer moves here via JS in DM mode -->
         </div>
         <div class="dm-split-right" id="dm-split-right">
-          <div class="dm-stream-header">
+          <div class="dm-stream-header" onclick="toggleDMStreamPane()">
             <span class="dm-stream-dot idle" id="dm-stream-dot"></span>
             <span class="dm-stream-title" id="dm-stream-title">Live output</span>
+            <span class="dm-stream-collapse-icon" id="dm-stream-collapse-icon">&#9662;</span>
           </div>
           <div class="dm-stream-lines" id="dm-stream-lines"></div>
         </div>
@@ -2306,6 +2351,7 @@ var memberActivityPollTimer = null;
 var cachedMembers = []; // latest /office-members data for activity classification
 var cachedTasks = []; // latest /tasks data
 var cachedRequests = []; // latest /requests data for runtime strip
+var cachedUsage = null; // latest /usage data for token counts
 
 var SIDEBAR_APPS = [
   { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
@@ -2676,6 +2722,7 @@ function showOffice() {
         startMessagePolling();
         startRequestPolling();
         startMemberActivityPolling();
+        connectOfficeEvents();
       })
       .catch(function() {
         renderSidebarAgents();
@@ -3313,7 +3360,13 @@ function renderWorkspaceSummary() {
   var activeAgents = 0;
   cachedMembers.forEach(function(m) { if (classifyActivity(m).state !== 'lurking') activeAgents++; });
   var openTasks = cachedTasks.filter(function(t) { return t.status !== 'done' && t.status !== 'completed'; }).length;
-  summaryEl.textContent = activeAgents + ' agent' + (activeAgents !== 1 ? 's' : '') + ' active, ' + openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' open';
+  var summaryParts = [activeAgents + ' agent' + (activeAgents !== 1 ? 's' : '') + ' active', openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' open'];
+  // Add total token count if available
+  if (cachedUsage && cachedUsage.total) {
+    var totalTokens = (cachedUsage.total.input_tokens || 0) + (cachedUsage.total.output_tokens || 0) + (cachedUsage.total.cache_read_tokens || 0);
+    if (totalTokens > 0) summaryParts.push(formatTokens(totalTokens) + ' tokens');
+  }
+  summaryEl.textContent = summaryParts.join(', ');
   hintEl.textContent = openTasks > 0 ? (openTasks + ' task' + (openTasks !== 1 ? 's' : '') + ' in progress') : 'Type / for commands';
 }
 
@@ -3417,6 +3470,18 @@ function renderLiveWork() {
       card.appendChild(dot);
       card.appendChild(agentName);
       card.appendChild(taskText);
+      // Session token count for this agent
+      if (cachedUsage && cachedUsage.agents && cachedUsage.agents[a.slug]) {
+        var au = cachedUsage.agents[a.slug];
+        var agentTokens = (au.input_tokens || 0) + (au.output_tokens || 0);
+        if (agentTokens > 0) {
+          var tokenBadge = document.createElement('span');
+          tokenBadge.className = 'live-work-card-tokens';
+          tokenBadge.textContent = formatTokens(agentTokens);
+          tokenBadge.title = 'Session tokens: ' + agentTokens.toLocaleString() + ' (in: ' + (au.input_tokens || 0).toLocaleString() + ', out: ' + (au.output_tokens || 0).toLocaleString() + ')';
+          card.appendChild(tokenBadge);
+        }
+      }
       card.addEventListener('click', (function(slug) {
         return function() { openDM(slug); };
       })(a.slug));
@@ -3482,6 +3547,178 @@ function renderSidebarChannels() {
     btn.appendChild(name);
     container.appendChild(btn);
   });
+
+  // "New Channel" button
+  var addBtn = document.createElement('button');
+  addBtn.className = 'sidebar-item sidebar-add-btn';
+  addBtn.style.cssText = 'color:var(--text-secondary);opacity:0.7;font-size:12px;';
+  addBtn.addEventListener('click', function() { openChannelWizard(); });
+  var plusIcon = document.createElement('span');
+  plusIcon.className = 'sidebar-item-icon';
+  plusIcon.style.cssText = 'font-weight:bold;font-size:14px;';
+  plusIcon.textContent = '+';
+  var addLabel = document.createElement('span');
+  addLabel.textContent = 'New Channel';
+  addBtn.appendChild(plusIcon);
+  addBtn.appendChild(addLabel);
+  container.appendChild(addBtn);
+}
+
+function openChannelWizard() {
+  var overlay = document.createElement('div');
+  overlay.className = 'agent-wizard-overlay';
+  overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+
+  var card = document.createElement('div');
+  card.className = 'agent-wizard-card';
+
+  var title = document.createElement('h3');
+  title.textContent = 'New Channel';
+  card.appendChild(title);
+
+  var promptSection = document.createElement('div');
+  var formSection = document.createElement('div');
+
+  // ── Mode toggle ──
+  var modeToggle = document.createElement('div');
+  modeToggle.style.cssText = 'display:flex;gap:0;margin-bottom:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;';
+  var describeTab = document.createElement('button');
+  describeTab.textContent = 'Describe';
+  describeTab.className = 'btn btn-sm';
+  describeTab.style.cssText = 'flex:1;border-radius:0;border:none;background:var(--accent);color:#fff;';
+  var manualTab = document.createElement('button');
+  manualTab.textContent = 'Manual';
+  manualTab.className = 'btn btn-sm';
+  manualTab.style.cssText = 'flex:1;border-radius:0;border:none;background:transparent;color:var(--text-secondary);';
+
+  function setMode(mode) {
+    if (mode === 'describe') {
+      describeTab.style.background = 'var(--accent)';
+      describeTab.style.color = '#fff';
+      manualTab.style.background = 'transparent';
+      manualTab.style.color = 'var(--text-secondary)';
+      promptSection.style.display = '';
+      formSection.style.display = 'none';
+    } else {
+      manualTab.style.background = 'var(--accent)';
+      manualTab.style.color = '#fff';
+      describeTab.style.background = 'transparent';
+      describeTab.style.color = 'var(--text-secondary)';
+      promptSection.style.display = 'none';
+      formSection.style.display = '';
+    }
+  }
+  describeTab.addEventListener('click', function() { setMode('describe'); });
+  manualTab.addEventListener('click', function() { setMode('manual'); });
+  modeToggle.appendChild(describeTab);
+  modeToggle.appendChild(manualTab);
+  card.appendChild(modeToggle);
+
+  // ── Describe section ──
+  var promptField = document.createElement('div');
+  promptField.className = 'agent-wizard-field';
+  var promptLabel = document.createElement('label');
+  promptLabel.textContent = 'Describe the channel you want';
+  promptField.appendChild(promptLabel);
+  var promptInput = document.createElement('textarea');
+  promptInput.placeholder = 'e.g. "A channel for the frontend team to discuss UI work"';
+  promptInput.style.minHeight = '80px';
+  promptField.appendChild(promptInput);
+  promptSection.appendChild(promptField);
+
+  var generateBtn = document.createElement('button');
+  generateBtn.className = 'btn btn-primary';
+  generateBtn.style.width = '100%';
+  generateBtn.textContent = 'Generate';
+  generateBtn.addEventListener('click', function() {
+    var prompt = (promptInput.value || '').trim();
+    if (!prompt) { showNotice('Describe the channel first', 'error'); return; }
+    generateBtn.disabled = true;
+    generateBtn.textContent = 'Generating...';
+    WuphfAPI.post('/channels/generate', { prompt: prompt })
+      .then(function(tmpl) {
+        chInputs.slug.value = tmpl.slug || '';
+        chInputs.name.value = tmpl.name || '';
+        chInputs.description.value = tmpl.description || '';
+        setMode('manual');
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate';
+      })
+      .catch(function(e) {
+        generateBtn.disabled = false;
+        generateBtn.textContent = 'Generate';
+        showNotice('Generation failed: ' + (e.message || e), 'error');
+      });
+  });
+  promptSection.appendChild(generateBtn);
+  card.appendChild(promptSection);
+
+  // ── Manual form fields ──
+  var chFields = [
+    { key: 'slug', label: 'Slug', placeholder: 'e.g. frontend' },
+    { key: 'name', label: 'Name', placeholder: 'e.g. Frontend' },
+    { key: 'description', label: 'Description', placeholder: 'What is this channel for?', type: 'textarea' }
+  ];
+  var chInputs = {};
+  chFields.forEach(function(f) {
+    var fieldDiv = document.createElement('div');
+    fieldDiv.className = 'agent-wizard-field';
+    var label = document.createElement('label');
+    label.textContent = f.label;
+    fieldDiv.appendChild(label);
+    var inp;
+    if (f.type === 'textarea') {
+      inp = document.createElement('textarea');
+    } else {
+      inp = document.createElement('input');
+      inp.type = 'text';
+    }
+    inp.placeholder = f.placeholder || '';
+    chInputs[f.key] = inp;
+    fieldDiv.appendChild(inp);
+    formSection.appendChild(fieldDiv);
+  });
+  card.appendChild(formSection);
+  formSection.style.display = 'none';
+
+  // ── Actions ──
+  var actions = document.createElement('div');
+  actions.className = 'agent-wizard-actions';
+  var cancelBtn = document.createElement('button');
+  cancelBtn.className = 'btn btn-secondary';
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.addEventListener('click', function() { overlay.remove(); });
+
+  var submitBtn = document.createElement('button');
+  submitBtn.className = 'btn btn-primary';
+  submitBtn.textContent = 'Create Channel';
+  submitBtn.addEventListener('click', function() {
+    var slug = (chInputs.slug.value || '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    var chName = (chInputs.name.value || '').trim();
+    var desc = (chInputs.description.value || '').trim();
+    if (!slug) { showNotice('Slug is required', 'error'); return; }
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Creating...';
+    WuphfAPI.post('/channels', { action: 'create', slug: slug, name: chName || slug, description: desc, created_by: 'you' })
+      .then(function() {
+        overlay.remove();
+        showNotice('Channel #' + slug + ' created', 'success');
+        CHANNELS.push({ name: chName || slug, desc: desc });
+        renderSidebarChannels();
+        switchChannel(chName || slug);
+      })
+      .catch(function(e) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Create Channel';
+        showNotice('Failed: ' + (e.message || e), 'error');
+      });
+  });
+
+  actions.appendChild(cancelBtn);
+  actions.appendChild(submitBtn);
+  card.appendChild(actions);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
 }
 
 function switchChannel(name) {
@@ -4402,12 +4639,56 @@ function startMemberActivityPolling() {
 function fetchMemberActivity() {
   Promise.all([
     WuphfAPI.getMembers(currentChannel).catch(function() { return { members: [] }; }),
-    WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; })
+    WuphfAPI.getTasks(currentChannel).catch(function() { return { tasks: [] }; }),
+    WuphfAPI.getUsage().catch(function() { return null; })
   ]).then(function(results) {
     cachedMembers = normalizeMemberActivityHints(results[0].members || []);
     cachedTasks = (results[1].tasks || results[1] || []);
     if (Array.isArray(cachedTasks) === false) cachedTasks = [];
+    if (results[2]) cachedUsage = results[2];
     refreshLiveActivityUI();
+  });
+}
+
+// ─── Office change SSE (live sidebar updates) ───
+var officeEventSource = null;
+function connectOfficeEvents() {
+  if (officeEventSource) { officeEventSource.close(); officeEventSource = null; }
+  var url = WuphfAPI.sseURL('/events');
+  officeEventSource = new EventSource(url);
+  officeEventSource.addEventListener('office_changed', function() {
+    refreshOfficeSidebar();
+  });
+  officeEventSource.onerror = function() {
+    // Reconnection is automatic with EventSource
+  };
+}
+function refreshOfficeSidebar() {
+  Promise.all([
+    WuphfAPI.getOfficeMembers().catch(function() { return { members: [] }; }),
+    WuphfAPI.getChannels().catch(function() { return { channels: [] }; })
+  ]).then(function(results) {
+    if (results[0].members && results[0].members.length > 0) {
+      AGENTS = results[0].members.map(function(m) {
+        return {
+          slug: m.slug,
+          emoji: m.emoji || m.slug.charAt(0).toUpperCase(),
+          name: m.name || m.slug,
+          role: m.role || '',
+          checked: true,
+          type: m.type || 'specialist',
+          expertise: m.expertise || [],
+          personality: m.personality || ''
+        };
+      });
+    }
+    if (results[1].channels && results[1].channels.length > 0) {
+      CHANNELS = results[1].channels.map(function(ch) {
+        return { name: ch.name || ch.slug, desc: ch.description || '' };
+      });
+    }
+    renderSidebarAgents();
+    renderSidebarChannels();
   });
 }
 
@@ -5497,6 +5778,88 @@ function openAgentWizard(existingAgent) {
   title.textContent = isEdit ? 'Edit Agent' : 'New Agent';
   card.appendChild(title);
 
+  // ── Mode toggle (Describe / Manual) ──
+  var promptSection = document.createElement('div');
+  var formSection = document.createElement('div');
+
+  if (!isEdit) {
+    var modeToggle = document.createElement('div');
+    modeToggle.style.cssText = 'display:flex;gap:0;margin-bottom:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden;';
+    var describeTab = document.createElement('button');
+    describeTab.textContent = 'Describe';
+    describeTab.className = 'btn btn-sm';
+    describeTab.style.cssText = 'flex:1;border-radius:0;border:none;background:var(--accent);color:#fff;';
+    var manualTab = document.createElement('button');
+    manualTab.textContent = 'Manual';
+    manualTab.className = 'btn btn-sm';
+    manualTab.style.cssText = 'flex:1;border-radius:0;border:none;background:transparent;color:var(--text-secondary);';
+
+    function setMode(mode) {
+      if (mode === 'describe') {
+        describeTab.style.background = 'var(--accent)';
+        describeTab.style.color = '#fff';
+        manualTab.style.background = 'transparent';
+        manualTab.style.color = 'var(--text-secondary)';
+        promptSection.style.display = '';
+        formSection.style.display = 'none';
+      } else {
+        manualTab.style.background = 'var(--accent)';
+        manualTab.style.color = '#fff';
+        describeTab.style.background = 'transparent';
+        describeTab.style.color = 'var(--text-secondary)';
+        promptSection.style.display = 'none';
+        formSection.style.display = '';
+      }
+    }
+    describeTab.addEventListener('click', function() { setMode('describe'); });
+    manualTab.addEventListener('click', function() { setMode('manual'); });
+    modeToggle.appendChild(describeTab);
+    modeToggle.appendChild(manualTab);
+    card.appendChild(modeToggle);
+
+    // ── Describe section ──
+    var promptField = document.createElement('div');
+    promptField.className = 'agent-wizard-field';
+    var promptLabel = document.createElement('label');
+    promptLabel.textContent = 'Describe the agent you want';
+    promptField.appendChild(promptLabel);
+    var promptInput = document.createElement('textarea');
+    promptInput.placeholder = 'e.g. "A DevOps engineer who manages CI/CD and infrastructure"';
+    promptInput.style.minHeight = '80px';
+    promptField.appendChild(promptInput);
+    promptSection.appendChild(promptField);
+
+    var generateBtn = document.createElement('button');
+    generateBtn.className = 'btn btn-primary';
+    generateBtn.style.width = '100%';
+    generateBtn.textContent = 'Generate';
+    generateBtn.addEventListener('click', function() {
+      var prompt = (promptInput.value || '').trim();
+      if (!prompt) { showNotice('Describe the agent first', 'error'); return; }
+      generateBtn.disabled = true;
+      generateBtn.textContent = 'Generating...';
+      WuphfAPI.post('/office-members/generate', { prompt: prompt })
+        .then(function(tmpl) {
+          inputs.slug.value = tmpl.slug || '';
+          inputs.name.value = tmpl.name || '';
+          inputs.role.value = tmpl.role || '';
+          inputs.expertise.value = (tmpl.expertise || []).join(', ');
+          inputs.personality.value = tmpl.personality || '';
+          setMode('manual');
+          generateBtn.disabled = false;
+          generateBtn.textContent = 'Generate';
+        })
+        .catch(function(e) {
+          generateBtn.disabled = false;
+          generateBtn.textContent = 'Generate';
+          showNotice('Generation failed: ' + (e.message || e), 'error');
+        });
+    });
+    promptSection.appendChild(generateBtn);
+    card.appendChild(promptSection);
+  }
+
+  // ── Manual form fields ──
   var fields = [
     { key: 'slug', label: 'Slug', type: 'input', placeholder: 'e.g. devops', disabled: isEdit },
     { key: 'name', label: 'Name', type: 'input', placeholder: 'e.g. DevOps Engineer' },
@@ -5530,8 +5893,10 @@ function openAgentWizard(existingAgent) {
     }
     inputs[f.key] = inp;
     fieldDiv.appendChild(inp);
-    card.appendChild(fieldDiv);
+    formSection.appendChild(fieldDiv);
   });
+  card.appendChild(formSection);
+  if (!isEdit) formSection.style.display = 'none';
 
   var actions = document.createElement('div');
   actions.className = 'agent-wizard-actions';
@@ -5592,7 +5957,9 @@ function openAgentWizard(existingAgent) {
   card.appendChild(actions);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
-  inputs[isEdit ? 'name' : 'slug'].focus();
+  if (isEdit) {
+    inputs.name.focus();
+  }
 }
 
 // ─── Doctor Panel (#82, #97) ───
@@ -5870,20 +6237,14 @@ function initApp() {
 var themeSwitcher = document.getElementById('theme-switcher');
 if (themeSwitcher) {
   // Restore saved theme
-  var savedTheme = localStorage.getItem('wuphf-theme') || '';
-  if (savedTheme) {
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    themeSwitcher.value = savedTheme;
-  }
+  var savedTheme = localStorage.getItem('wuphf-theme') || 'slack-dark';
+  document.documentElement.setAttribute('data-theme', savedTheme);
+  themeSwitcher.value = savedTheme;
   themeSwitcher.addEventListener('change', function() {
-    var theme = themeSwitcher.value;
-    if (theme) {
-      document.documentElement.setAttribute('data-theme', theme);
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
+    var theme = themeSwitcher.value || 'slack-dark';
+    document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('wuphf-theme', theme);
-    showNotice('Theme changed to ' + (theme || 'Editorial'), 'success');
+    showNotice('Theme changed to ' + theme, 'success');
   });
 }
 
@@ -6435,10 +6796,7 @@ function connectAgentStream(slug) {
       var dot = document.getElementById('dm-stream-dot');
       if (dot) dot.className = 'dm-stream-dot';
     }
-    var line = document.createElement('div');
-    line.className = 'dm-stream-line' + classifyStreamLine(e.data);
-    line.textContent = e.data;
-    streamLines.appendChild(line);
+    renderStreamLine(streamLines, e.data);
     if (streamLines.scrollHeight - streamLines.scrollTop < streamLines.clientHeight + 100) {
       streamLines.scrollTop = streamLines.scrollHeight;
     }
@@ -6465,13 +6823,297 @@ function classifyStreamLine(text) {
   return '';
 }
 
-var dmStreamCollapsed = false;
+// ─── Render a value as readable DOM (recursive for nested objects/arrays) ───
+function renderValue(val, depth) {
+  depth = depth || 0;
+  if (val == null) { var s = document.createElement('span'); s.className = 'sv-null'; s.textContent = 'null'; return s; }
+  if (typeof val === 'boolean') { var s = document.createElement('span'); s.className = 'sv-bool'; s.textContent = String(val); return s; }
+  if (typeof val === 'number') { var s = document.createElement('span'); s.className = 'sv-num'; s.textContent = String(val); return s; }
+  if (typeof val === 'string') {
+    // Detect timestamps
+    if (/^\d{4}-\d{2}-\d{2}T/.test(val)) {
+      var s = document.createElement('span'); s.className = 'sv-ts';
+      try { s.textContent = new Date(val).toLocaleString([], {hour:'numeric',minute:'2-digit',second:'2-digit'}); s.title = val; }
+      catch(_) { s.textContent = val; }
+      return s;
+    }
+    if (val.length > 150 && depth > 0) val = val.substring(0, 150) + '\u2026';
+    var s = document.createElement('span'); s.className = 'sv-str'; s.textContent = val; return s;
+  }
+  if (Array.isArray(val)) {
+    if (val.length === 0) { var s = document.createElement('span'); s.className = 'sv-null'; s.textContent = '[]'; return s; }
+    if (depth > 2 || val.length > 10) { var s = document.createElement('span'); s.className = 'sv-str'; s.textContent = '[' + val.length + ' items]'; return s; }
+    var list = document.createElement('div'); list.className = 'sv-array';
+    val.forEach(function(item) {
+      var row = document.createElement('div'); row.className = 'sv-array-item';
+      row.appendChild(renderValue(item, depth + 1));
+      list.appendChild(row);
+    });
+    return list;
+  }
+  if (typeof val === 'object') {
+    var keys = Object.keys(val);
+    if (keys.length === 0) { var s = document.createElement('span'); s.className = 'sv-null'; s.textContent = '{}'; return s; }
+    if (depth > 2) { var s = document.createElement('span'); s.className = 'sv-str'; s.textContent = '{' + keys.length + ' fields}'; return s; }
+    var table = document.createElement('div'); table.className = 'sv-obj';
+    keys.forEach(function(k) {
+      var row = document.createElement('div'); row.className = 'sv-obj-row';
+      var keyEl = document.createElement('span'); keyEl.className = 'sv-obj-key'; keyEl.textContent = k;
+      row.appendChild(keyEl);
+      row.appendChild(renderValue(val[k], depth + 1));
+      table.appendChild(row);
+    });
+    return table;
+  }
+  var s = document.createElement('span'); s.textContent = String(val); return s;
+}
+
+// ─── Formatted stream line renderer ───
+// Understands OpenAI Responses API SSE events from the broker agent-stream.
+// Filters noise, extracts signal, renders human-readable cards.
+function renderStreamLine(container, rawText) {
+  if (!rawText) return;
+  var parsed = null;
+  try { parsed = JSON.parse(rawText); } catch(_) {}
+
+  if (!parsed || typeof parsed !== 'object') {
+    // Plain text fallback
+    var line = document.createElement('div');
+    line.className = 'dm-stream-line' + classifyStreamLine(rawText);
+    line.textContent = rawText;
+    container.appendChild(line);
+    return;
+  }
+
+  var evtType = parsed.type || '';
+
+  // ── Skip noise events entirely ──
+  if (evtType === 'thread.started' || evtType === 'turn.started') return;
+  // Skip in-progress tool calls (we'll show the completed version)
+  if (evtType === 'item.started') return;
+
+  var card = document.createElement('div');
+  card.className = 'stream-card';
+
+  // ── turn.completed → compact token line ──
+  if (evtType === 'turn.completed' && parsed.usage) {
+    var u = parsed.usage;
+    var tokenLine = document.createElement('div');
+    tokenLine.className = 'cc-token-line';
+    var inTok = u.input_tokens || 0;
+    var outTok = u.output_tokens || 0;
+    var cached = u.cached_input_tokens || 0;
+    tokenLine.textContent = '\u2500\u2500 ' + formatTokens(inTok + outTok) + ' tokens (' + formatTokens(inTok) + ' in, ' + formatTokens(outTok) + ' out' + (cached > 0 ? ', ' + formatTokens(cached) + ' cached' : '') + ')';
+    container.appendChild(tokenLine);
+    return;
+  }
+
+  // ── item.completed → extract the useful content ──
+  if (evtType === 'item.completed' && parsed.item) {
+    var item = parsed.item;
+    var itemType = item.type || '';
+
+    // Agent message → Claude Code style: dimmed italic thinking text
+    if (itemType === 'agent_message') {
+      var msgText = (item.text || '').trim();
+      if (!msgText) return;
+      var thinkDiv = document.createElement('div');
+      thinkDiv.className = 'cc-thinking';
+      thinkDiv.textContent = msgText.length > 400 ? msgText.substring(0, 400) + '\u2026' : msgText;
+      container.appendChild(thinkDiv);
+      return;
+    }
+
+    // Tool call → Claude Code style: collapsible with chevron
+    if (itemType === 'mcp_tool_call' || itemType === 'tool_call' || itemType === 'function_call') {
+      var toolName = item.tool || item.name || '';
+      var toolCard = document.createElement('div');
+      toolCard.className = 'cc-tool-call';
+
+      // Header: ⏵ ToolName (clickable to expand/collapse)
+      var toolHeader = document.createElement('div');
+      toolHeader.className = 'cc-tool-header';
+      var chevron = document.createElement('span');
+      chevron.className = 'cc-tool-chevron';
+      chevron.textContent = '\u25B8';
+      var toolLabel = document.createElement('span');
+      toolLabel.className = 'cc-tool-name';
+      toolLabel.textContent = toolName;
+      toolHeader.appendChild(chevron);
+      toolHeader.appendChild(toolLabel);
+
+      // One-line summary of key arg (for collapsed view)
+      var args = item.arguments || item.args || {};
+      var argSkip = {my_slug:1, new_topic:1, viewer_slug:1, tagged:1};
+      var summaryArg = args.content || args.command || args.text || args.query || args.channel || '';
+      if (typeof summaryArg === 'string' && summaryArg.length > 0) {
+        var summaryEl = document.createElement('span');
+        summaryEl.className = 'cc-tool-summary';
+        summaryEl.textContent = summaryArg.length > 80 ? summaryArg.substring(0, 80) + '\u2026' : summaryArg;
+        toolHeader.appendChild(summaryEl);
+      }
+
+      toolCard.appendChild(toolHeader);
+
+      // Collapsible body (hidden by default)
+      var toolBody = document.createElement('div');
+      toolBody.className = 'cc-tool-body';
+      toolBody.style.display = 'none';
+
+      // Args as key=value lines
+      if (typeof args === 'object' && Object.keys(args).length > 0) {
+        var cleanArgs = {};
+        Object.keys(args).forEach(function(k) {
+          if (!argSkip[k] && args[k] != null && args[k] !== '') cleanArgs[k] = args[k];
+        });
+        if (Object.keys(cleanArgs).length > 0) {
+          toolBody.appendChild(renderValue(cleanArgs, 1));
+        }
+      }
+      toolCard.appendChild(toolBody);
+
+      // Result/error go inside the collapsible body too (prettified)
+      var result = item.result;
+      if (result && result.content && Array.isArray(result.content)) {
+        result.content.forEach(function(c) {
+          if (c.text) {
+            // Try to parse result text as JSON for prettification
+            var resultParsed = null;
+            try { resultParsed = JSON.parse(c.text); } catch(_) {}
+            if (resultParsed && typeof resultParsed === 'object') {
+              var resLabel = document.createElement('div');
+              resLabel.className = 'cc-tool-result-label';
+              resLabel.textContent = '\u2713 Response:';
+              toolBody.appendChild(resLabel);
+              toolBody.appendChild(renderValue(resultParsed, 1));
+            } else {
+              var resEl = document.createElement('div');
+              resEl.className = 'cc-tool-result-inline';
+              resEl.textContent = '\u2713 ' + c.text;
+              toolBody.appendChild(resEl);
+            }
+          }
+        });
+      }
+      if (item.error) {
+        var errParsed = null;
+        if (typeof item.error === 'object') errParsed = item.error;
+        else { try { errParsed = JSON.parse(item.error); } catch(_) {} }
+        if (errParsed && typeof errParsed === 'object') {
+          var errLabel = document.createElement('div');
+          errLabel.className = 'cc-tool-error';
+          errLabel.textContent = '\u2717 Error:';
+          toolBody.appendChild(errLabel);
+          toolBody.appendChild(renderValue(errParsed, 1));
+        } else {
+          var errEl = document.createElement('div');
+          errEl.className = 'cc-tool-error';
+          errEl.textContent = '\u2717 ' + String(item.error);
+          toolBody.appendChild(errEl);
+        }
+      }
+
+      toolCard.appendChild(toolBody);
+
+      // Visible summary line: short result or error (shown when collapsed)
+      var resultSummary = '';
+      if (result && result.content && Array.isArray(result.content)) {
+        for (var ri = 0; ri < result.content.length; ri++) {
+          if (result.content[ri].text) { resultSummary = result.content[ri].text; break; }
+        }
+      }
+      if (resultSummary) {
+        // Try to extract a short human-readable summary from JSON responses
+        var shortResult = resultSummary;
+        try {
+          var rp = JSON.parse(resultSummary);
+          if (rp && typeof rp === 'object') {
+            shortResult = rp.message || rp.status || rp.result || rp.text || (Object.keys(rp).length + ' fields');
+          }
+        } catch(_) {}
+        if (shortResult.length > 60) shortResult = shortResult.substring(0, 60) + '\u2026';
+        var visResult = document.createElement('div');
+        visResult.className = 'cc-tool-result-summary';
+        visResult.textContent = '\u2713 ' + shortResult;
+        toolCard.appendChild(visResult);
+      }
+      if (item.error) {
+        var visErr = document.createElement('div');
+        visErr.className = 'cc-tool-error';
+        visErr.textContent = '\u2717 ' + (typeof item.error === 'string' ? item.error.substring(0, 60) : 'Error');
+        toolCard.appendChild(visErr);
+      }
+
+      // Toggle collapse on header click
+      toolHeader.addEventListener('click', function() {
+        var isOpen = toolBody.style.display !== 'none';
+        toolBody.style.display = isOpen ? 'none' : 'block';
+        chevron.textContent = isOpen ? '\u25B8' : '\u25BE';
+        chevron.className = 'cc-tool-chevron' + (isOpen ? '' : ' open');
+      });
+
+      container.appendChild(toolCard);
+      return;
+    }
+  }
+
+  // ── Fallback for any other structured event ──
+  // Show type badge + only meaningful fields
+  var header = document.createElement('div');
+  header.className = 'stream-card-header';
+  var phase = parsed.activity || parsed.phase || parsed.status || evtType || '';
+  if (phase) {
+    var phaseEl = document.createElement('span');
+    phaseEl.className = 'stream-card-phase stream-phase-' + phase.replace(/[^a-z]/g, '');
+    phaseEl.textContent = phase;
+    header.appendChild(phaseEl);
+  }
+  var agent = parsed.agent || parsed.from || parsed.slug || '';
+  if (agent) {
+    var agentEl = document.createElement('span');
+    agentEl.className = 'stream-card-agent';
+    agentEl.textContent = agent;
+    header.appendChild(agentEl);
+  }
+  card.appendChild(header);
+
+  var detail = parsed.detail || parsed.content || parsed.message || parsed.text || parsed.summary || '';
+  if (detail && typeof detail === 'string') {
+    var detailEl = document.createElement('div');
+    detailEl.className = 'stream-card-detail';
+    detailEl.textContent = detail.length > 300 ? detail.substring(0, 300) + '\u2026' : detail;
+    card.appendChild(detailEl);
+  }
+
+  // Show non-noise extra fields
+  var noiseKeys = {type:1,activity:1,phase:1,status:1,event:1,agent:1,from:1,slug:1,timestamp:1,ts:1,time:1,detail:1,content:1,message:1,text:1,summary:1,thread_id:1,item:1,id:1,error:1,result:1,structured_content:1};
+  var extras = Object.keys(parsed).filter(function(k) { return !noiseKeys[k] && parsed[k] != null && parsed[k] !== '' && parsed[k] !== false; });
+  if (extras.length > 0 && extras.length <= 8) {
+    var extrasObj = {};
+    extras.forEach(function(k) { extrasObj[k] = parsed[k]; });
+    card.appendChild(renderValue(extrasObj, 0));
+  }
+
+  container.appendChild(card);
+}
+
+var dmStreamCollapsed = localStorage.getItem('wuphf-stream-collapsed') === 'true';
 function toggleDMStream() {
   dmStreamCollapsed = !dmStreamCollapsed;
+  localStorage.setItem('wuphf-stream-collapsed', dmStreamCollapsed);
   var strip = document.getElementById('dm-stream-strip');
   var btn = document.getElementById('dm-stream-toggle');
   if (strip) strip.classList.toggle('collapsed', dmStreamCollapsed);
   if (btn) btn.textContent = dmStreamCollapsed ? '\u25BE' : '\u25B4';
+}
+function toggleDMStreamPane() {
+  var lines = document.getElementById('dm-stream-lines');
+  var icon = document.getElementById('dm-stream-collapse-icon');
+  if (!lines) return;
+  var isCollapsed = lines.style.display === 'none';
+  lines.style.display = isCollapsed ? '' : 'none';
+  if (icon) icon.textContent = isCollapsed ? '\u25BE' : '\u25B8';
+  localStorage.setItem('wuphf-stream-pane-collapsed', !isCollapsed);
 }
 
 // No-op kept for any remaining call sites from the legacy appendBrokerMessage path.
@@ -8159,32 +8801,18 @@ function startAgentStream(slug, container) {
 
   agentStreamSource.onmessage = function(e) {
     try {
-      var snap = JSON.parse(e.data);
-      var line = document.createElement('div');
-      line.className = 'agent-stream-entry';
-
-      var phaseSpan = document.createElement('span');
-      phaseSpan.className = 'agent-stream-phase';
-      phaseSpan.textContent = snap.activity || snap.status || 'idle';
-      line.appendChild(phaseSpan);
-
-      var detail = snap.detail || '';
-      if (detail.length > 80) detail = detail.substring(0, 80) + '...';
-      if (detail) {
-        var detailSpan = document.createElement('span');
-        detailSpan.className = 'agent-stream-detail';
-        detailSpan.textContent = ' ' + detail;
-        line.appendChild(detailSpan);
-      }
-
-      logEl.appendChild(line);
+      renderStreamLine(logEl, e.data);
       entryCount++;
       while (logEl.children.length > 50) logEl.removeChild(logEl.firstChild);
       logEl.scrollTop = logEl.scrollHeight;
 
-      if (snap.status === 'idle' && entryCount > 1) {
-        stopAgentStream();
-      }
+      // Check for idle status to auto-stop
+      try {
+        var snap = JSON.parse(e.data);
+        if (snap.status === 'idle' && entryCount > 1) {
+          stopAgentStream();
+        }
+      } catch(_) {}
     } catch (ex) {}
   };
 

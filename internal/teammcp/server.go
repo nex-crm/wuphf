@@ -377,7 +377,7 @@ func Run(ctx context.Context) error {
 
 		mcp.AddTool(server, readOnlyTool(
 			"read_conversation",
-			"Read recent messages from the 1:1 conversation so you stay in sync before replying.",
+			"LAST RESORT: Read recent 1:1 messages only when the pushed notification is missing context you genuinely need. Do NOT call this before every reply.",
 		), handleTeamPoll)
 
 		mcp.AddTool(server, officeWriteTool(
@@ -400,19 +400,43 @@ func Run(ctx context.Context) error {
 		return server.Run(ctx, &mcp.StdioTransport{})
 	}
 
+	// ─── Role-based tool registration ───
+	// Each role gets only the tools it needs. Cuts MCP schema overhead
+	// from ~125k tokens (27 tools) down to ~15k (4 tools in DM mode).
+	slug := resolveSlugOptional("")
+	channel := strings.TrimSpace(os.Getenv("WUPHF_CHANNEL"))
+	isDM := strings.HasPrefix(channel, "dm-")
+	isLead := slug == "" || slug == "ceo"
+
+	// DM mode: minimal tool set (same as 1:1 mode)
+	if isDM {
+		mcp.AddTool(server, officeWriteTool(
+			"team_broadcast",
+			"Reply in the conversation.",
+		), handleTeamBroadcast)
+		mcp.AddTool(server, readOnlyTool(
+			"team_poll",
+			"Read recent messages.",
+		), handleTeamPoll)
+		mcp.AddTool(server, officeWriteTool(
+			"human_message",
+			"Send a direct note to the human.",
+		), handleHumanMessage)
+		mcp.AddTool(server, officeWriteTool(
+			"human_interview",
+			"Ask the human a blocking decision question.",
+		), handleHumanInterview)
+		return server.Run(ctx, &mcp.StdioTransport{})
+	}
+
+	// Office mode: core tools for all agents
 	mcp.AddTool(server, officeWriteTool(
 		"team_broadcast",
-		"Post a message into the team channel for all teammates to see.",
+		"Post a message to the channel.",
 	), handleTeamBroadcast)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_react",
-		"React to a message with an emoji instead of posting a full reply. Use when you agree and have nothing new to add.",
-	), handleTeamReact)
-
 	mcp.AddTool(server, readOnlyTool(
 		"team_poll",
-		"Read recent messages from the team channel so you stay in sync before replying.",
+		"Read recent channel messages. Only when pushed context is insufficient.",
 	), handleTeamPoll)
 	mcp.AddTool(server, readOnlyTool(
 		"team_inbox",
@@ -510,10 +534,77 @@ func Run(ctx context.Context) error {
 
 	mcp.AddTool(server, officeWriteTool(
 		"human_message",
-		"Send a direct human-facing note into the main chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
+		"Send a direct note to the human.",
 	), handleHumanMessage)
+	mcp.AddTool(server, officeWriteTool(
+		"human_interview",
+		"Ask the human a blocking decision question.",
+	), handleHumanInterview)
+	mcp.AddTool(server, readOnlyTool(
+		"team_tasks",
+		"List shared tasks and ownership.",
+	), handleTeamTasks)
+	mcp.AddTool(server, officeWriteTool(
+		"team_react",
+		"React to a message with an emoji.",
+	), handleTeamReact)
+	mcp.AddTool(server, officeWriteTool(
+		"team_status",
+		"Share a short status update.",
+	), handleTeamStatus)
 
-	registerActionTools(server)
+	// Lead-only tools: CEO gets coordination, delegation, and structural tools
+	if isLead {
+		mcp.AddTool(server, officeWriteTool(
+			"team_task",
+			"Create, assign, complete, or block a task.",
+		), handleTeamTask)
+		mcp.AddTool(server, officeWriteTool(
+			"team_plan",
+			"Create a batch of tasks with dependency ordering.",
+		), handleTeamPlan)
+		mcp.AddTool(server, officeWriteTool(
+			"team_bridge",
+			"Bridge context from one channel to another.",
+		), handleTeamBridge)
+		mcp.AddTool(server, readOnlyTool(
+			"team_members",
+			"List channel participants and activity.",
+		), handleTeamMembers)
+		mcp.AddTool(server, readOnlyTool(
+			"team_requests",
+			"List pending human requests.",
+		), handleTeamRequests)
+		mcp.AddTool(server, officeWriteTool(
+			"team_request",
+			"Create a structured request for the human.",
+		), handleTeamRequest)
+		mcp.AddTool(server, readOnlyTool(
+			"team_runtime_state",
+			"Office runtime snapshot: tasks, requests, recovery.",
+		), handleTeamRuntimeState)
+		mcp.AddTool(server, readOnlyTool(
+			"team_office_members",
+			"List the full office roster.",
+		), handleTeamOfficeMembers)
+		mcp.AddTool(server, readOnlyTool(
+			"team_channels",
+			"List office channels and memberships.",
+		), handleTeamChannels)
+		mcp.AddTool(server, officeDestructiveTool(
+			"team_channel",
+			"Create or remove a channel.",
+		), handleTeamChannel)
+		mcp.AddTool(server, officeDestructiveTool(
+			"team_channel_member",
+			"Add or remove an agent from a channel.",
+		), handleTeamChannelMember)
+		mcp.AddTool(server, officeDestructiveTool(
+			"team_member",
+			"Create or remove an office member.",
+		), handleTeamMember)
+		registerActionTools(server)
+	}
 
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
@@ -1796,6 +1887,11 @@ func handleTeamMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemb
 }
 
 func reconfigureLiveOffice() error {
+	if !team.HasLiveTmuxSession() {
+		// Web mode: no tmux session to reconfigure. The broker state is already
+		// updated, and the headless turn system picks up new members by slug.
+		return nil
+	}
 	l, err := team.NewLauncher("")
 	if err != nil {
 		return err

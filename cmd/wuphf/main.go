@@ -34,6 +34,7 @@ func main() {
 	noNex := flag.Bool("no-nex", false, "Disable Nex completely for this run")
 	opusCEO := flag.Bool("opus-ceo", false, "Upgrade CEO agent from Sonnet to Opus")
 	collabMode := flag.Bool("collab", false, "Start in collaborative mode (all agents see all messages)")
+	noOpen := flag.Bool("no-open", false, "Don't open browser automatically on launch")
 
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "WUPHF v%s\n\n", buildinfo.Current().Version)
@@ -131,7 +132,7 @@ func main() {
 	}
 
 	// Default: web UI
-	runWeb(args, *packFlag, *unsafeMode, *webPort, *opusCEO, *collabMode)
+	runWeb(args, *packFlag, *unsafeMode, *webPort, *opusCEO, *collabMode, *noOpen)
 }
 
 func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO bool, collabMode bool) {
@@ -210,7 +211,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 	}
 }
 
-func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bool, collabMode bool) {
+func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bool, collabMode bool, noOpen bool) {
 	l, err := team.NewLauncher(packSlug)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -223,6 +224,7 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 		l.SetOpusCEO(true)
 	}
 	l.SetFocusMode(!collabMode)
+	l.SetNoOpen(noOpen)
 	if err := l.PreflightWeb(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -20,7 +20,7 @@ var (
 	headlessCodexLookPath       = exec.LookPath
 	headlessCodexCommandContext = exec.CommandContext
 	headlessCodexExecutablePath = os.Executable
-	headlessCodexRunTurn        = func(l *Launcher, ctx context.Context, slug, notification string) error {
+	headlessCodexRunTurn        = func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
 		if l != nil && !l.usesCodexRuntime() {
 			return l.runHeadlessClaudeTurn(ctx, slug, notification)
 		}
@@ -37,6 +37,7 @@ var (
 
 type headlessCodexTurn struct {
 	Prompt     string
+	Channel    string // channel slug (e.g. "dm-ceo", "general")
 	EnqueuedAt time.Time
 }
 
@@ -70,7 +71,11 @@ func (l *Launcher) launchHeadlessCodex() error {
 	return nil
 }
 
-func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string) {
+func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string, channel ...string) {
+	ch := ""
+	if len(channel) > 0 {
+		ch = channel[0]
+	}
 	slug = strings.TrimSpace(slug)
 	prompt = strings.TrimSpace(prompt)
 	if slug == "" || prompt == "" {
@@ -121,6 +126,7 @@ func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string) {
 	}
 	l.headlessQueues[slug] = append(l.headlessQueues[slug], headlessCodexTurn{
 		Prompt:     prompt,
+		Channel:    ch,
 		EnqueuedAt: time.Now(),
 	})
 	if !l.headlessWorkers[slug] {
@@ -156,7 +162,13 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 		appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
 		l.updateHeadlessProgress(slug, "active", "queued", "queued work packet received", headlessProgressMetrics{})
 
-		err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt)
+		// Set channel env so MCP server can register DM-specific tool sets
+		if turn.Channel != "" {
+			os.Setenv("WUPHF_CHANNEL", turn.Channel)
+		} else {
+			os.Unsetenv("WUPHF_CHANNEL")
+		}
+		err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
 		ctxErr := turnCtx.Err()
 		switch {
 		case err == nil:

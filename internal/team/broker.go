@@ -419,6 +419,7 @@ type Broker struct {
 	actionSubscribers   map[int]chan officeActionLog
 	activity            map[string]agentActivitySnapshot
 	activitySubscribers map[int]chan agentActivitySnapshot
+	officeSubscribers   map[int]chan officeChangeEvent
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
@@ -427,6 +428,8 @@ type Broker struct {
 	addr                string         // actual listen address (useful when port=0)
 	webUIOrigins        []string       // allowed CORS origins for web UI (set by ServeWebUI)
 	runtimeProvider     string         // "codex" or "claude" — set by launcher
+	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
+	generateChannelFn   func(prompt string) (generatedChannelTemplate, error)
 	policies            []officePolicy // active office operating rules
 	rateLimitBuckets    map[string]ipRateLimitBucket
 	rateLimitWindow     time.Duration
@@ -515,6 +518,7 @@ func NewBroker() *Broker {
 		actionSubscribers:   make(map[int]chan officeActionLog),
 		activity:            make(map[string]agentActivitySnapshot),
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
+		officeSubscribers:   make(map[int]chan officeChangeEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
@@ -627,6 +631,42 @@ func (b *Broker) SubscribeActivity(buffer int) (<-chan agentActivitySnapshot, fu
 	}
 }
 
+type officeChangeEvent struct {
+	Kind string `json:"kind"` // "member_created", "member_removed", "channel_created", "channel_removed"
+	Slug string `json:"slug"`
+}
+
+func (b *Broker) SubscribeOfficeChanges(buffer int) (<-chan officeChangeEvent, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan officeChangeEvent, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.officeSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.officeSubscribers[id]; ok {
+			delete(b.officeSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+func (b *Broker) publishOfficeChangeLocked(evt officeChangeEvent) {
+	for _, ch := range b.officeSubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
 func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	slug := normalizeChannelSlug(update.Slug)
 	if slug == "" {
@@ -717,8 +757,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/reactions", b.requireAuth(b.handleReactions))
 	mux.HandleFunc("/notifications/nex", b.requireAuth(b.handleNexNotifications))
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
+	mux.HandleFunc("/office-members/generate", b.requireAuth(b.handleGenerateMember))
 	mux.HandleFunc("/channels", b.requireAuth(b.handleChannels))
 	mux.HandleFunc("/channels/dm", b.requireAuth(b.handleCreateDM))
+	mux.HandleFunc("/channels/generate", b.requireAuth(b.handleGenerateChannel))
 	mux.HandleFunc("/channel-members", b.requireAuth(b.handleChannelMembers))
 	mux.HandleFunc("/members", b.requireAuth(b.handleMembers))
 	mux.HandleFunc("/tasks", b.requireAuth(b.handleTasks))
@@ -1000,6 +1042,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeActions()
 	activity, unsubscribeActivity := b.SubscribeActivity(256)
 	defer unsubscribeActivity()
+	officeChanges, unsubscribeOffice := b.SubscribeOfficeChanges(64)
+	defer unsubscribeOffice()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1034,6 +1078,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case snapshot, ok := <-activity:
 			if !ok || writeEvent("activity", map[string]any{"activity": snapshot}) != nil {
+				return
+			}
+		case evt, ok := <-officeChanges:
+			if !ok || writeEvent("office_changed", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:
@@ -1990,6 +2038,14 @@ func (b *Broker) SetFocusMode(enabled bool) error {
 	defer b.mu.Unlock()
 	b.focusMode = enabled
 	return b.saveLocked()
+}
+
+func (b *Broker) SetGenerateMemberFn(fn func(string) (generatedMemberTemplate, error)) {
+	b.generateMemberFn = fn
+}
+
+func (b *Broker) SetGenerateChannelFn(fn func(string) (generatedChannelTemplate, error)) {
+	b.generateChannelFn = fn
 }
 
 func (b *Broker) FocusModeEnabled() bool {
@@ -3454,6 +3510,7 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
+			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"member": member})
 		case "update":
@@ -3532,6 +3589,7 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
+			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_removed", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
@@ -3540,6 +3598,66 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (b *Broker) handleGenerateMember(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if b.generateMemberFn == nil {
+		http.Error(w, "generate not available", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	prompt := strings.TrimSpace(body.Prompt)
+	if prompt == "" {
+		http.Error(w, "prompt required", http.StatusBadRequest)
+		return
+	}
+	tmpl, err := b.generateMemberFn(prompt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tmpl)
+}
+
+func (b *Broker) handleGenerateChannel(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if b.generateChannelFn == nil {
+		http.Error(w, "generate not available", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Prompt string `json:"prompt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	prompt := strings.TrimSpace(body.Prompt)
+	if prompt == "" {
+		http.Error(w, "prompt required", http.StatusBadRequest)
+		return
+	}
+	tmpl, err := b.generateChannelFn(prompt)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(tmpl)
 }
 
 func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
@@ -3634,6 +3752,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
+			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_created", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"channel": ch})
 		case "remove":
@@ -3679,6 +3798,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
+			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_removed", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
