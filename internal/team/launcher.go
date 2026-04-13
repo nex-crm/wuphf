@@ -644,7 +644,7 @@ func (l *Launcher) taskNotificationContent(action officeActionLog, task teamTask
 	if path := strings.TrimSpace(task.WorktreePath); path != "" {
 		guidance = fmt.Sprintf(" If you own this task, use working_directory=%q for local file and bash tools.", path)
 	}
-	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Context is already included here; respond with the concrete next step immediately when you can, and use team_poll or team_tasks only if you need more detail. Stay in your lane.%s", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance)
+	return fmt.Sprintf("[%s #%s on #%s]: %s%s (owner %s, status %s%s%s%s%s). Context is included — do NOT call team_poll or team_tasks. Respond with the concrete next step immediately. Stay in your lane.%s", verb, task.ID, channel, task.Title, details, owner, status, pipeline, review, execMode, worktree, guidance)
 }
 
 func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeActionLog, task teamTask, content string) {
@@ -2394,7 +2394,7 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 	} else {
 		packet := l.buildMessageWorkPacket(msg, target.Slug)
 		notification = fmt.Sprintf(
-			"%s\n---\n[New from @%s]: %s\n%s Only call team_poll or team_tasks if the pushed packet is not enough. Reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\".",
+			"%s\n---\n[New from @%s]: %s\n%s This packet is your complete context — do NOT call team_poll or team_tasks. Just do the work and reply via team_broadcast with my_slug \"%s\", channel \"%s\", reply_to_id \"%s\".",
 			packet, msg.From, truncate(msg.Content, 1000), l.responseInstructionForTarget(msg, target.Slug), target.Slug, channel, msg.ID,
 		)
 	}
@@ -2711,7 +2711,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("== DIRECT SESSION ==\n")
 		sb.WriteString("This is not the shared office. There are no teammates, no channels, and no collaboration mechanics in this mode.\n")
 		sb.WriteString("You are only talking to the human.\n")
-		sb.WriteString("- team_poll: Read the recent 1:1 conversation before replying\n")
+		sb.WriteString("- team_poll: LAST RESORT — read recent 1:1 messages only if the pushed notification is missing context you genuinely need. Do NOT call this by default.\n")
 		sb.WriteString("- team_broadcast: Send a normal direct chat reply into the 1:1 conversation\n")
 		sb.WriteString("- human_message: Send an emphasized report, recommendation, or action card directly to the human when you want it to stand out\n")
 		sb.WriteString("- human_interview: Ask a blocking decision question only when you truly cannot proceed responsibly without it\n\n")
@@ -2726,7 +2726,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("1. Do not talk as if a team exists. There are no other agents in this session.\n")
 		sb.WriteString("2. Do not create or suggest channels, teammates, bridges, shared tasks, or office structure.\n")
 		sb.WriteString("3. Default to direct, useful conversation with the human. Keep it crisp and human.\n")
-		sb.WriteString("4. Before you reply, poll the conversation so you respond to the latest state.\n")
+		sb.WriteString("4. The pushed notification IS the latest state. Respond directly from it. Do NOT poll before replying.\n")
 		sb.WriteString("5. Use team_broadcast for normal replies. Use human_message only when you are deliberately presenting completion, a recommendation, or a next action.\n")
 		sb.WriteString("6. Use human_interview only for truly blocking decisions.\n")
 		sb.WriteString("7. If Nex is enabled, do not claim something is stored unless add_context actually succeeded.\n")
@@ -2756,7 +2756,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("\n== TEAM CHANNEL ==\n")
 		sb.WriteString("Your tools default to the active conversation context.\n")
 		sb.WriteString("- team_broadcast: Post to channel. CRITICAL: text @-mentions alone do NOT wake agents — include the slug in the `tagged` parameter.\n")
-		sb.WriteString("- team_poll: Read recent messages. Use only when pushed context is insufficient.\n")
+		sb.WriteString("- team_poll: LAST RESORT — read recent messages only when pushed context is genuinely missing something you need. Do NOT call this by default; the pushed notification already contains thread context, task state, and active agents.\n")
 		sb.WriteString("- team_bridge: Carry context from one channel into another (CEO only).\n")
 		sb.WriteString("- team_task: Create and assign tasks so ownership is explicit.\n")
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
@@ -2782,7 +2782,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		} else {
 			sb.WriteString("1. On strategy or prior decisions, call query_context early\n")
 		}
-		sb.WriteString("2. Start with the pushed notification context and respond directly when it is enough; use team_poll only when you need fresher or broader context\n")
+		sb.WriteString("2. The pushed notification is authoritative — it contains thread context, task state, and agent activity. Respond directly from it. Do NOT call team_poll or team_tasks unless the notification explicitly says context is missing. Every unnecessary tool call burns tokens without adding value.\n")
 		sb.WriteString("3. When routing a human's @tagged request: tag the specialist in your message. Do NOT also create a team_task for the same work. One notification wakes them — two causes duplicate turns. Use team_task only for work you are independently originating, not for pass-through routing.\n")
 		sb.WriteString("4. Tag only the specialists who should weigh in. Unowned background chatter is a bug.\n")
 		sb.WriteString("5. Keep specialists in their lane and mostly offstage. You make the FINAL decision.\n")
@@ -2820,7 +2820,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("\n== TEAM CHANNEL ==\n")
 		sb.WriteString("Your tools default to the active conversation context.\n")
 		sb.WriteString("- team_broadcast: Post to channel. CRITICAL: text @-mentions alone do NOT wake agents — include the slug in the `tagged` parameter.\n")
-		sb.WriteString("- team_poll: Read recent messages. Use only when pushed context is insufficient.\n")
+		sb.WriteString("- team_poll: LAST RESORT — read recent messages only when pushed context is genuinely missing something you need. Do NOT call this by default; the pushed notification already contains thread context and task state.\n")
 		sb.WriteString("- team_bridge: CEO-only bridge for cross-channel context. Ask the CEO to use it.\n")
 		sb.WriteString("- team_task: Claim, complete, block, or release tasks in your domain.\n")
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
@@ -2842,7 +2842,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS SPECIALIST:\n")
-		sb.WriteString("1. Start with the pushed notification context and respond directly when it is enough; use team_poll only if you need genuinely fresher or broader context\n")
+		sb.WriteString("1. The pushed notification is authoritative — it contains thread context and task state. Respond directly from it. Do NOT call team_poll or team_tasks unless context is genuinely missing. Every unnecessary tool call burns tokens without adding value. Just do the work.\n")
 		sb.WriteString("2. Stay in your lane. Speak only when tagged, owning a task, blocked, or adding real delta that others haven't covered. Don't jump in just because a topic matches your domain.\n")
 		sb.WriteString("3. Push back when you disagree — explain why using your expertise\n")
 		sb.WriteString("4. Check team_requests before asking the human anything new\n")
@@ -3410,7 +3410,7 @@ func (l *Launcher) headlessClaudeCommand(slug, systemPrompt string) string {
 		brokerToken = l.broker.Token()
 	}
 	model := l.headlessClaudeModel(slug)
-	initialPrompt := "You are now active in the WUPHF office. Use your MCP tools (team_poll, team_post) to read messages and participate. Start by polling the channel for recent messages and respond to anything relevant. When done, poll again."
+	initialPrompt := "You are now active in the WUPHF office. Notifications are pushed to you — do NOT poll for messages. Focus entirely on the work described in each pushed notification. Use team_broadcast to post replies. Only use team_poll if a pushed notification explicitly tells you context is missing."
 	return fmt.Sprintf(
 		"WUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 claude --model %s --print %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -p '%s'",
 		slug, brokerToken, config.ResolveNoNex(), model, permFlags, escaped, mcpConfig,
