@@ -419,7 +419,7 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 
 	// Broadcast stage update only for untagged messages in public channels.
 	// Never in DMs — DMs are private 1:1 conversations, no routing noise.
-	isDM := IsDMSlug(normalizeChannelSlug(msg.Channel))
+	isDM, _ := l.isChannelDM(normalizeChannelSlug(msg.Channel))
 	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && !isDM && len(msg.Tagged) == 0 {
 		names := make([]string, 0, len(immediate))
 		for _, t := range immediate {
@@ -655,6 +655,31 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 	l.sendNotificationToPane(target.PaneTarget, notification)
 }
 
+// isChannelDM returns true if the channel is a DM (either old dm-* format or new Store type).
+// agentTarget returns the agent slug that should receive the DM notification (non-human side).
+func (l *Launcher) isChannelDM(channelSlug string) (isDM bool, agentTarget string) {
+	// Legacy format: dm-{agent}
+	if IsDMSlug(channelSlug) {
+		return true, DMTargetAgent(channelSlug)
+	}
+	// New store format: channel type == D
+	if l.broker != nil {
+		cs := l.broker.ChannelStore()
+		if cs != nil && cs.IsDirectMessageBySlug(channelSlug) {
+			ch, ok := cs.GetBySlug(channelSlug)
+			if ok {
+				members := cs.Members(ch.ID)
+				for _, m := range members {
+					if m.Slug != "human" && m.Slug != "you" {
+						return true, m.Slug
+					}
+				}
+			}
+		}
+	}
+	return false, ""
+}
+
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
 	targetMap := l.agentPaneTargets()
 	if len(targetMap) == 0 {
@@ -670,6 +695,18 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 			return []notificationTarget{target}, nil
 		}
 		return nil, nil
+	}
+	// Also check the new Store-based DM format.
+	if ch := normalizeChannelSlug(msg.Channel); !IsDMSlug(ch) {
+		if isDM, agentSlug := l.isChannelDM(ch); isDM {
+			if agentSlug == msg.From {
+				return nil, nil
+			}
+			if target, ok := targetMap[agentSlug]; ok {
+				return []notificationTarget{target}, nil
+			}
+			return nil, nil
+		}
 	}
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
@@ -2239,6 +2276,10 @@ func (l *Launcher) responseInstructionForTarget(msg channelMessage, slug string)
 	if ch := normalizeChannelSlug(msg.Channel); IsDMSlug(ch) && DMTargetAgent(ch) == slug {
 		return fmt.Sprintf("You are @%s. The human is messaging you directly in a DM. Respond helpfully from your domain expertise.", slug)
 	}
+	// Also check the new Store-based DM format (deterministic slug).
+	if isDM, agentTarget := l.isChannelDM(normalizeChannelSlug(msg.Channel)); isDM && agentTarget == slug {
+		return fmt.Sprintf("You are @%s. The human is messaging you directly in a DM. Respond helpfully from your domain expertise.", slug)
+	}
 	if containsSlug(msg.Tagged, slug) {
 		return fmt.Sprintf("You are @%s. You were directly tagged. Reply only from your domain with concrete progress, a blocker, or a handoff.", slug)
 	}
@@ -2256,6 +2297,38 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 	lines := []string{
 		"Work packet:",
 		fmt.Sprintf("- Thread: #%s reply_to %s", channel, msg.ID),
+	}
+	// Add DM context preamble when the agent is receiving a direct message.
+	// This replaces the "stay quiet unless tagged" default with explicit DM semantics.
+	if isDM, _ := l.isChannelDM(channel); isDM {
+		dmPreamble := []string{
+			"Context: DIRECT MESSAGE",
+			"This is a private 1:1 conversation with the human. Respond to every message.",
+			"You do not need to coordinate with other agents.",
+			"---",
+		}
+		lines = append(dmPreamble, lines...)
+	} else if l.broker != nil {
+		// Check for group DM context.
+		cs := l.broker.ChannelStore()
+		if cs != nil {
+			if storeChannel, ok := cs.GetBySlug(channel); ok && storeChannel.Type == "G" {
+				members := cs.Members(storeChannel.ID)
+				names := make([]string, 0, len(members))
+				for _, m := range members {
+					if m.Slug != slug {
+						names = append(names, "@"+m.Slug)
+					}
+				}
+				groupPreamble := []string{
+					"Context: GROUP MESSAGE",
+					fmt.Sprintf("This is a group conversation with: %s.", strings.Join(names, ", ")),
+					"Respond to messages directed at you or within your expertise.",
+					"---",
+				}
+				lines = append(groupPreamble, lines...)
+			}
+		}
 	}
 	if containsSlug(msg.Tagged, slug) {
 		lines = append(lines, "- Trigger: you were explicitly tagged")
