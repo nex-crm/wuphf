@@ -2293,6 +2293,9 @@ var currentStep = 0;
 var selectedSize = '';
 var brokerConnected = false;
 var currentChannel = 'general';
+// channelMetadata maps channel slug → {type: "O"|"D"|"G", name, members, agentSlug}
+// Populated when DM channels are opened via openDM().
+var channelMetadata = {};
 var lastMessageId = null;
 var pollTimer = null;
 var requestPollTimer = null;
@@ -2792,7 +2795,10 @@ function renderSidebarAgents() {
     var member = cachedMembers.find(function(m) { return m.slug === a.slug; });
     var ac = classifyActivity(member);
     var task = findAgentTask(a.slug);
-    var isDMActive = currentChannel === 'dm-' + a.slug;
+    var isDMActive = (function(agSlug) {
+      var meta = channelMetadata[currentChannel];
+      return meta && meta.type === 'D' && meta.agentSlug === agSlug;
+    })(a.slug);
     var btn = document.createElement('button');
     btn.className = 'sidebar-agent' + (isDMActive ? ' active' : '');
     btn.setAttribute('data-slug', a.slug);
@@ -2810,10 +2816,12 @@ function renderSidebarAgents() {
     nameEl.className = 'sidebar-agent-name';
     nameEl.textContent = a.name;
     wrap.appendChild(nameEl);
-    wrap.addEventListener('click', function(e) {
-      e.stopPropagation();
-      switchChannel('dm-' + a.slug);
-    });
+    wrap.addEventListener('click', (function(agSlug) {
+      return function(e) {
+        e.stopPropagation();
+        openDM(agSlug);
+      };
+    })(a.slug));
     var dot = document.createElement('span');
     dot.className = 'status-dot ' + ac.dotClass;
     btn.appendChild(avatarEl);
@@ -2902,7 +2910,7 @@ function switchApp(appId) {
     if (splitLayout) splitLayout.style.display = '';
     if (liveWorkSection) liveWorkSection.style.display = '';
     if (runtimeStrip) runtimeStrip.style.display = '';
-    var isDM = currentChannel && currentChannel.indexOf('dm-') === 0;
+    var isDM = currentChannel && (getChannelType(currentChannel) === 'D' || getChannelType(currentChannel) === 'G');
     if (isDM) {
       messagesEl.style.display = 'none';
       if (splitLayout) splitLayout.classList.add('active');
@@ -3408,7 +3416,7 @@ function renderLiveWork() {
       card.appendChild(agentName);
       card.appendChild(taskText);
       card.addEventListener('click', (function(slug) {
-        return function() { switchChannel('dm-' + slug); };
+        return function() { openDM(slug); };
       })(a.slug));
       cards.appendChild(card);
     });
@@ -3499,9 +3507,13 @@ function switchChannel(name) {
   var prevChannel = currentChannel;
   currentChannel = name;
   renderSidebarChannels();
-  if (name.indexOf('dm-') === 0) {
-    onDMChannelEnter(name.slice(3));
-  } else if (prevChannel && prevChannel.indexOf('dm-') === 0) {
+  var chType = getChannelType(name);
+  var prevChType = prevChannel ? getChannelType(prevChannel) : 'O';
+  if (chType === 'D' || chType === 'G') {
+    var meta = channelMetadata[name];
+    var agSlug = meta ? meta.agentSlug : null;
+    if (agSlug) onDMChannelEnter(agSlug);
+  } else if (prevChType === 'D' || prevChType === 'G') {
     onDMChannelLeave();
   }
   lastMessageId = null;
@@ -3517,11 +3529,12 @@ function switchChannel(name) {
   var dmSplitMsgs = document.getElementById('dm-split-messages');
   if (dmSplitMsgs) dmSplitMsgs.textContent = '';
   var ch = CHANNELS.find(function(c) { return c.name === name; });
-  if (name.indexOf('dm-') === 0) {
+  if (chType === 'D' || chType === 'G') {
     // Header is already set by onDMChannelEnter above; only set placeholder here.
-    var dmSlug = name.slice(3);
-    var dmAgent = AGENTS.find(function(a) { return a.slug === dmSlug; });
-    document.getElementById('composer-input').placeholder = 'Message ' + (dmAgent ? dmAgent.name : dmSlug) + '\u2026';
+    var dmMeta = channelMetadata[name];
+    var dmAgentSlug = dmMeta ? dmMeta.agentSlug : null;
+    var dmAgentObj = dmAgentSlug ? AGENTS.find(function(a) { return a.slug === dmAgentSlug; }) : null;
+    document.getElementById('composer-input').placeholder = 'Message ' + (dmAgentObj ? dmAgentObj.name : (dmMeta ? dmMeta.name : name)) + '\u2026';
   } else {
     document.getElementById('channel-title').textContent = '# ' + name;
     document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
@@ -3887,7 +3900,7 @@ function appendBrokerMessage(msg) {
   }
 
   // Use split layout container in DM mode, main messages otherwise
-  var container = (currentChannel && currentChannel.indexOf('dm-') === 0)
+  var container = (currentChannel && (getChannelType(currentChannel) === 'D' || getChannelType(currentChannel) === 'G'))
     ? document.getElementById('dm-split-messages')
     : document.getElementById('messages');
   if (!container) container = document.getElementById('messages');
@@ -4842,9 +4855,13 @@ function sendThreadReply() {
     if (mentionAgent) tagged.push(mentionAgent.slug);
   }
   // Auto-tag the DM target agent so the backend treats it as a direct address
-  if (currentChannel && currentChannel.indexOf('dm-') === 0) {
-    var dmTarget = currentChannel.slice(3);
-    if (tagged.indexOf(dmTarget) === -1) tagged.push(dmTarget);
+  if (currentChannel && (getChannelType(currentChannel) === 'D' || getChannelType(currentChannel) === 'G')) {
+    var chMeta = channelMetadata[currentChannel];
+    if (chMeta && chMeta.members) {
+      chMeta.members.forEach(function(m) {
+        if (m !== 'human' && m !== 'you' && tagged.indexOf(m) === -1) tagged.push(m);
+      });
+    }
   }
 
   threadInput.value = '';
@@ -5156,9 +5173,13 @@ function sendMessage() {
     if (mentionAgent) tagged.push(mentionAgent.slug);
   }
   // Auto-tag the DM target agent so the backend treats it as a direct address
-  if (currentChannel && currentChannel.indexOf('dm-') === 0) {
-    var dmTarget = currentChannel.slice(3);
-    if (tagged.indexOf(dmTarget) === -1) tagged.push(dmTarget);
+  if (currentChannel && (getChannelType(currentChannel) === 'D' || getChannelType(currentChannel) === 'G')) {
+    var mainMeta = channelMetadata[currentChannel];
+    if (mainMeta && mainMeta.members) {
+      mainMeta.members.forEach(function(m) {
+        if (m !== 'human' && m !== 'you' && tagged.indexOf(m) === -1) tagged.push(m);
+      });
+    }
   }
 
   composerInput.value = '';
@@ -5432,7 +5453,7 @@ function openAgentPanel(slug) {
   dmBtn.style.width = '100%';
   dmBtn.style.marginBottom = '8px';
   dmBtn.textContent = 'Open DM';
-  dmBtn.addEventListener('click', function() { closeAgentPanel(); switchChannel('dm-' + agent.slug); });
+  dmBtn.addEventListener('click', function() { closeAgentPanel(); openDM(agent.slug); });
   actionsSection.appendChild(dmBtn);
 
   var editBtn = document.createElement('button');
@@ -6263,7 +6284,30 @@ var inlineDMAgent = null;   // compat alias; tracks current DM agent
 var agentLatestText = {};   // sidebar streaming snippets
 var dmStreamES    = null;   // active EventSource for live stdout
 
-// Called by switchChannel when entering / leaving a dm-* channel.
+// Returns the channel type ("D", "G", or "O") for a given slug.
+// Falls back to "O" (public) if the slug is not found in metadata.
+function getChannelType(slug) {
+  var meta = channelMetadata[slug];
+  return meta ? meta.type : 'O';
+}
+
+// Opens (or creates) a 1:1 DM with the given agent slug.
+// Calls POST /channels/dm, stores metadata, then switches to the channel.
+function openDM(agentSlug) {
+  WuphfAPI.post('/channels/dm', { members: ['human', agentSlug], type: 'direct' })
+    .then(function(resp) {
+      channelMetadata[resp.slug] = {
+        type: resp.type || 'D',
+        name: resp.name || ('DM with ' + agentSlug),
+        agentSlug: agentSlug,
+        members: ['human', agentSlug]
+      };
+      switchChannel(resp.slug);
+    })
+    .catch(function(e) { console.error('openDM failed:', e); showNotice('Failed to open DM', 'error'); });
+}
+
+// Called by switchChannel when entering / leaving a DM channel.
 function onDMChannelEnter(slug) {
   var agent = AGENTS.find(function(a) { return a.slug === slug; });
   inlineDMAgent = agent || null;
@@ -6313,8 +6357,8 @@ function renderSidebarDMs() {
   var container = document.getElementById('sidebar-dms');
   if (!container) return;
   container.textContent = '';
-  var dmChannel = currentChannel && currentChannel.indexOf('dm-') === 0
-    ? currentChannel.replace('dm-', '') : null;
+  var currentMeta = currentChannel ? channelMetadata[currentChannel] : null;
+  var dmChannel = (currentMeta && currentMeta.type === 'D') ? currentMeta.agentSlug : null;
   AGENTS.forEach(function(agent) {
     var btn = document.createElement('button');
     btn.className = 'sidebar-item' + (dmChannel === agent.slug ? ' active' : '');
@@ -6329,7 +6373,9 @@ function renderSidebarDMs() {
     nameEl.textContent = agent.name;
     btn.appendChild(dot);
     btn.appendChild(nameEl);
-    btn.addEventListener('click', function() { switchChannel('dm-' + agent.slug); });
+    btn.addEventListener('click', (function(agSlug) {
+      return function() { openDM(agSlug); };
+    })(agent.slug));
     container.appendChild(btn);
   });
 }
@@ -6676,7 +6722,12 @@ function updateChannelBadges() {
   if (agentContainer) {
     agentContainer.querySelectorAll('.sidebar-agent[data-slug]').forEach(function(item) {
       var slug = item.getAttribute('data-slug');
-      var count = channelUnreadCounts['dm-' + slug] || 0;
+      // Find the DM channel slug for this agent (if any DM has been opened)
+      var dmSlugForAgent = Object.keys(channelMetadata).find(function(s) {
+        var m = channelMetadata[s];
+        return m && m.type === 'D' && m.agentSlug === slug;
+      });
+      var count = (dmSlugForAgent ? channelUnreadCounts[dmSlugForAgent] : 0) || 0;
       var existingBadge = item.querySelector('.sidebar-badge');
       if (existingBadge) existingBadge.remove();
       if (count > 0) {
