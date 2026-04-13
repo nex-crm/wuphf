@@ -61,11 +61,9 @@ func (s *Store) Create(ch Channel) (*Channel, error) {
 	ch.UpdatedAt = ts
 
 	s.channels = append(s.channels, ch)
-	ptr := &s.channels[len(s.channels)-1]
-	s.byID[ch.ID] = ptr
-	s.bySlug[ch.Slug] = ptr
+	s.rebuildIndexes()
 
-	return ptr, nil
+	return s.byID[ch.ID], nil
 }
 
 // Get returns a channel by UUID.
@@ -126,7 +124,7 @@ func (s *Store) Delete(id string) error {
 	delete(s.bySlug, slug)
 
 	// Remove from channels slice
-	filtered := s.channels[:0]
+	filtered := make([]Channel, 0, len(s.channels)-1)
 	for _, c := range s.channels {
 		if c.ID != id {
 			filtered = append(filtered, c)
@@ -134,25 +132,16 @@ func (s *Store) Delete(id string) error {
 	}
 	s.channels = filtered
 
-	// Remove associated members and update memberOf index
-	filteredMembers := s.members[:0]
+	// Remove associated members
+	filteredMembers := make([]ChannelMember, 0, len(s.members))
 	for _, m := range s.members {
 		if m.ChannelID != id {
 			filteredMembers = append(filteredMembers, m)
-		} else {
-			// Remove channel from member's index
-			ids := s.memberOf[m.Slug]
-			newIDs := ids[:0]
-			for _, cid := range ids {
-				if cid != id {
-					newIDs = append(newIDs, cid)
-				}
-			}
-			s.memberOf[m.Slug] = newIDs
 		}
 	}
 	s.members = filteredMembers
 
+	s.rebuildIndexes()
 	return nil
 }
 
@@ -193,14 +182,11 @@ func (s *Store) GetOrCreateDirect(a, b string) (*Channel, error) {
 		UpdatedAt: now(),
 	}
 	s.channels = append(s.channels, ch)
-	ptr := &s.channels[len(s.channels)-1]
-	s.byID[ch.ID] = ptr
-	s.bySlug[ch.Slug] = ptr
-
 	s.addMemberLocked(ch.ID, a, "all")
 	s.addMemberLocked(ch.ID, b, "all")
+	s.rebuildIndexes()
 
-	return ptr, nil
+	return s.byID[ch.ID], nil
 }
 
 // GetOrCreateGroup returns the group DM channel for the given members, creating if absent.
@@ -231,15 +217,12 @@ func (s *Store) GetOrCreateGroup(members []string, createdBy string) (*Channel, 
 		UpdatedAt: now(),
 	}
 	s.channels = append(s.channels, ch)
-	ptr := &s.channels[len(s.channels)-1]
-	s.byID[ch.ID] = ptr
-	s.bySlug[ch.Slug] = ptr
-
 	for _, m := range members {
 		s.addMemberLocked(ch.ID, m, "all")
 	}
+	s.rebuildIndexes()
 
-	return ptr, nil
+	return s.byID[ch.ID], nil
 }
 
 // FindDirectByMembers returns the DM channel between two members if it exists.
