@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,18 +34,23 @@ func TestLoadMissingFileReturnsEmpty(t *testing.T) {
 func TestRoundtrip(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		in := Config{
-			APIKey:          "test-key",
-			Email:           "user@example.com",
-			WorkspaceID:     "ws-123",
-			WorkspaceSlug:   "my-ws",
-			LLMProvider:     "gemini",
-			GeminiAPIKey:    "gemini-key",
-			AnthropicAPIKey: "anthropic-key",
-			OpenAIAPIKey:    "openai-key",
-			MinimaxAPIKey:   "minimax-key",
-			DefaultFormat:   "json",
-			DefaultTimeout:  30_000,
-			DevURL:          "http://localhost:3000",
+			APIKey:             "test-key",
+			Email:              "user@example.com",
+			WorkspaceID:        "ws-123",
+			WorkspaceSlug:      "my-ws",
+			LLMProvider:        "gemini",
+			GeminiAPIKey:       "gemini-key",
+			AnthropicAPIKey:    "anthropic-key",
+			OpenAIAPIKey:       "openai-key",
+			MinimaxAPIKey:      "minimax-key",
+			DefaultFormat:      "json",
+			DefaultTimeout:     30_000,
+			DevURL:             "http://localhost:3000",
+			CompanyName:        "Acme Corp",
+			CompanyDescription: "AI-powered analytics",
+			CompanyGoals:       "Ship MVP, get 10 customers",
+			CompanySize:        "2-5",
+			CompanyPriority:    "Launch landing page",
 		}
 		if err := Save(in); err != nil {
 			t.Fatalf("Save failed: %v", err)
@@ -265,6 +271,51 @@ func TestResolveMinimaxAPIKeyConfig(t *testing.T) {
 		_ = Save(Config{MinimaxAPIKey: "cfg-minimax"})
 		if got := ResolveMinimaxAPIKey(); got != "cfg-minimax" {
 			t.Fatalf("expected config fallback, got %q", got)
+		}
+	})
+}
+
+func TestCompanyContextBlockFull(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{
+			CompanyName:        "Acme Corp",
+			CompanyDescription: "AI analytics for e-commerce",
+			CompanyGoals:       "Ship MVP, get 10 customers",
+			CompanyPriority:    "Launch landing page",
+		})
+		block := CompanyContextBlock()
+		if block == "" {
+			t.Fatal("expected non-empty company context block")
+		}
+		for _, want := range []string{"Acme Corp", "AI analytics", "Ship MVP", "Launch landing page"} {
+			if !strings.Contains(block, want) {
+				t.Errorf("expected block to contain %q, got:\n%s", want, block)
+			}
+		}
+	})
+}
+
+func TestCompanyContextBlockEmpty(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		block := CompanyContextBlock()
+		if block != "" {
+			t.Fatalf("expected empty block when no company name, got: %q", block)
+		}
+	})
+}
+
+func TestCompanyContextBlockNameOnly(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{CompanyName: "Solo Inc"})
+		block := CompanyContextBlock()
+		if block == "" {
+			t.Fatal("expected non-empty block with name only")
+		}
+		if !strings.Contains(block, "Solo Inc") {
+			t.Errorf("expected block to contain company name")
+		}
+		if strings.Contains(block, "Current goals") {
+			t.Errorf("should not contain goals when empty")
 		}
 	})
 }

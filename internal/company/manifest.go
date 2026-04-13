@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
+	"github.com/nex-crm/wuphf/internal/config"
 )
 
 type MemberSpec struct {
@@ -84,8 +85,26 @@ func LoadManifest() (Manifest, error) {
 	if err := json.Unmarshal(data, &manifest); err != nil {
 		return Manifest{}, err
 	}
+	manifest = backfillFromConfig(manifest)
 	manifest = normalizeManifest(manifest)
 	return manifest, nil
+}
+
+// backfillFromConfig fills empty manifest Name/Description from config
+// so onboarding answers flow into the company manifest.
+func backfillFromConfig(manifest Manifest) Manifest {
+	cfg, _ := config.Load()
+	if strings.TrimSpace(manifest.Name) == "" || manifest.Name == "The WUPHF Office" {
+		if name := strings.TrimSpace(cfg.CompanyName); name != "" {
+			manifest.Name = name
+		}
+	}
+	if strings.TrimSpace(manifest.Description) == "" || manifest.Description == "Autonomous office runtime for the founding team." {
+		if desc := strings.TrimSpace(cfg.CompanyDescription); desc != "" {
+			manifest.Description = desc
+		}
+	}
+	return manifest
 }
 
 func SaveManifest(manifest Manifest) error {
