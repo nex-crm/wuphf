@@ -2432,3 +2432,74 @@ html[data-theme="slack-dark"] .live-work-card-tokens {
   flex-shrink: 0;
   font-variant-numeric: tabular-nums;
 }
+
+/* ─── Structured value rendering (recursive JSON display) ─── */
+html[data-theme="slack"] .sv-obj,
+html[data-theme="slack-dark"] .sv-obj {
+  margin-left: 12px;
+  padding: 2px 0;
+  font-size: 12px;
+}
+html[data-theme="slack"] .sv-obj-row,
+html[data-theme="slack-dark"] .sv-obj-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 1px 0;
+  line-height: 1.5;
+}
+html[data-theme="slack"] .sv-obj-key,
+html[data-theme="slack-dark"] .sv-obj-key {
+  font-weight: 600;
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+html[data-theme="slack"] .sv-obj-key::after,
+html[data-theme="slack-dark"] .sv-obj-key::after {
+  content: ':';
+  color: var(--text-tertiary);
+}
+html[data-theme="slack"] .sv-str,
+html[data-theme="slack-dark"] .sv-str {
+  color: var(--text);
+  word-break: break-word;
+}
+html[data-theme="slack"] .sv-num,
+html[data-theme="slack-dark"] .sv-num {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+html[data-theme="slack"] .sv-bool,
+html[data-theme="slack-dark"] .sv-bool {
+  color: var(--yellow);
+  font-family: var(--font-mono);
+}
+html[data-theme="slack"] .sv-null,
+html[data-theme="slack-dark"] .sv-null {
+  color: var(--text-tertiary);
+  font-style: italic;
+}
+html[data-theme="slack"] .sv-ts,
+html[data-theme="slack-dark"] .sv-ts {
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+html[data-theme="slack"] .sv-array,
+html[data-theme="slack-dark"] .sv-array {
+  margin-left: 12px;
+}
+html[data-theme="slack"] .sv-array-item,
+html[data-theme="slack-dark"] .sv-array-item {
+  padding: 1px 0;
+}
+html[data-theme="slack"] .sv-array-item::before,
+html[data-theme="slack-dark"] .sv-array-item::before {
+  content: '\2022';
+  color: var(--text-tertiary);
+  margin-right: 6px;
+  font-size: 10px;
+}
