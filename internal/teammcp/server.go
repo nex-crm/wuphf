@@ -302,6 +302,11 @@ type TeamChannelArgs struct {
 	MySlug      string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
+type TeamDMOpenArgs struct {
+	Members []string `json:"members" jsonschema:"Array of member slugs. Must include 'human'. For 1:1 DMs: ['human', 'agent-slug']. Agent-to-agent DMs are not allowed."`
+	Type    string   `json:"type,omitempty" jsonschema:"Channel type: 'direct' (default, 1:1) or 'group' (multi-member). Defaults to direct."`
+}
+
 type TeamChannelMemberArgs struct {
 	Action     string `json:"action" jsonschema:"One of: add, remove, disable, enable"`
 	Channel    string `json:"channel" jsonschema:"Channel slug"`
@@ -437,6 +442,11 @@ func Run(ctx context.Context) error {
 		"team_channels",
 		"List available office channels, their descriptions, and their memberships. Agents can see channel metadata even when they are not members.",
 	), handleTeamChannels)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_dm_open",
+		"Open or find a direct message channel with the human. Use this when the human explicitly asks to DM an agent. Agent-to-agent DMs are not allowed — all inter-agent communication must happen in public channels.",
+	), handleTeamDMOpen)
 
 	mcp.AddTool(server, officeDestructiveTool(
 		"team_channel",
@@ -1617,6 +1627,48 @@ func handleTeamChannels(ctx context.Context, _ *mcp.CallToolRequest, _ TeamChann
 		lines = append(lines, line)
 	}
 	return textResult("Office channels:\n" + strings.Join(lines, "\n") + "\n\nYou can inspect channel names and descriptions even if you are not a member. Only the CEO has full cross-channel content context by default."), nil, nil
+}
+
+func handleTeamDMOpen(ctx context.Context, _ *mcp.CallToolRequest, args TeamDMOpenArgs) (*mcp.CallToolResult, any, error) {
+	if len(args.Members) < 2 {
+		return toolError(fmt.Errorf("members must have at least 2 entries (e.g. [\"human\", \"engineering\"])")), nil, nil
+	}
+	// Validate: must include human. Agent-to-agent DMs are not allowed.
+	hasHuman := false
+	for _, m := range args.Members {
+		if m == "human" || m == "you" {
+			hasHuman = true
+			break
+		}
+	}
+	if !hasHuman {
+		return toolError(fmt.Errorf("DM must include 'human' as a member; agent-to-agent DMs are not allowed")), nil, nil
+	}
+
+	dmType := strings.TrimSpace(strings.ToLower(args.Type))
+	if dmType == "" {
+		dmType = "direct"
+	}
+
+	var result struct {
+		ID      string `json:"id"`
+		Slug    string `json:"slug"`
+		Type    string `json:"type"`
+		Name    string `json:"name"`
+		Created bool   `json:"created"`
+	}
+	if err := brokerPostJSON(ctx, "/channels/dm", map[string]any{
+		"members": args.Members,
+		"type":    dmType,
+	}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+
+	action := "Found existing"
+	if result.Created {
+		action = "Created new"
+	}
+	return textResult(fmt.Sprintf("%s DM channel: #%s (id: %s, type: %s, name: %s)", action, result.Slug, result.ID, result.Type, result.Name)), nil, nil
 }
 
 func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamChannelArgs) (*mcp.CallToolResult, any, error) {
