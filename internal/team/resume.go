@@ -83,18 +83,39 @@ func buildResumePacket(slug string, tasks []teamTask, msgs []channelMessage) str
 //   - tagged messages: each tagged agent receives the message
 //   - untagged messages: the pack lead receives the message
 //
+// Only agents in the current pack receive packets. Agents not in the pack
+// (e.g. removed members with leftover tasks) are silently skipped.
+//
 // Returns a map of agent slug → resume packet (empty strings are omitted).
 func (l *Launcher) buildResumePackets() map[string]string {
 	if l.broker == nil {
 		return nil
 	}
 
+	// Build the set of valid pack agent slugs to filter recipients.
+	packSlugs := make(map[string]struct{})
+	if l.pack != nil {
+		for _, a := range l.pack.Agents {
+			packSlugs[a.Slug] = struct{}{}
+		}
+	}
+	inPack := func(slug string) bool {
+		if len(packSlugs) == 0 {
+			return true // no pack defined — allow all (nil-pack safety)
+		}
+		_, ok := packSlugs[slug]
+		return ok
+	}
+
 	// Determine pack lead slug.
 	lead := l.officeLeadSlug()
 
-	// Collect in-flight tasks per owner.
+	// Collect in-flight tasks per owner — skip owners not in the pack.
 	tasksByAgent := make(map[string][]teamTask)
 	for _, task := range l.broker.InFlightTasks() {
+		if !inPack(task.Owner) {
+			continue
+		}
 		tasksByAgent[task.Owner] = append(tasksByAgent[task.Owner], task)
 	}
 
@@ -104,19 +125,23 @@ func (l *Launcher) buildResumePackets() map[string]string {
 	unanswered := findUnansweredMessages(humanMsgs, allMsgs)
 
 	// Route unanswered messages: explicit tags → tagged agents; untagged → lead.
+	// Skip agents not in the current pack.
 	msgsByAgent := make(map[string][]channelMessage)
 	for _, msg := range unanswered {
 		if len(msg.Tagged) > 0 {
 			for _, tag := range msg.Tagged {
 				slug := strings.TrimPrefix(tag, "@")
 				// Skip human/you tags — those are not agents.
-				if slug == "you" || slug == "human" {
+				if isHumanOrSystemSender(slug) {
+					continue
+				}
+				if !inPack(slug) {
 					continue
 				}
 				msgsByAgent[slug] = append(msgsByAgent[slug], msg)
 			}
 		} else {
-			if lead != "" {
+			if lead != "" && inPack(lead) {
 				msgsByAgent[lead] = append(msgsByAgent[lead], msg)
 			}
 		}

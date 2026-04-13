@@ -386,3 +386,80 @@ func TestBuildResumePacketsUnansweredRoutesToLead(t *testing.T) {
 		t.Error("ceo packet should NOT contain already-answered message content")
 	}
 }
+
+func TestBuildResumePacketsSkipsAgentsNotInPack(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		// "designer" is NOT in the pack below — their task should be skipped.
+		{ID: "t1", Title: "Design the landing page", Owner: "designer", Status: "in_progress"},
+		// "fe" IS in the pack — their task should be included.
+		{ID: "t2", Title: "Build the login form", Owner: "fe", Status: "in_progress"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			Slug:     "coding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	packets := l.buildResumePackets()
+
+	// "designer" is not in the pack → no packet for them.
+	if _, ok := packets["designer"]; ok {
+		t.Error("expected no resume packet for 'designer' (not in current pack)")
+	}
+	// "fe" is in the pack → should have a packet.
+	if _, ok := packets["fe"]; !ok {
+		t.Fatal("expected resume packet for 'fe' (in current pack)")
+	}
+	if !strings.Contains(packets["fe"], "Build the login form") {
+		t.Error("fe packet should contain their task title")
+	}
+}
+
+func TestBuildResumePacketsSkipsTaggedAgentsNotInPack(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		// Tagged @old-agent who is no longer in the pack.
+		{ID: "h1", From: "you", Content: "hey @old-agent can you help?", Tagged: []string{"old-agent"}, Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			Slug:     "coding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	packets := l.buildResumePackets()
+
+	// "old-agent" is not in the pack → no packet should be generated for them.
+	if _, ok := packets["old-agent"]; ok {
+		t.Error("expected no resume packet for 'old-agent' (not in current pack)")
+	}
+}
