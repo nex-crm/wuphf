@@ -6463,89 +6463,174 @@ function renderValue(val, depth) {
 }
 
 // ─── Formatted stream line renderer ───
+// Understands OpenAI Responses API SSE events from the broker agent-stream.
+// Filters noise, extracts signal, renders human-readable cards.
 function renderStreamLine(container, rawText) {
   if (!rawText) return;
   var parsed = null;
   try { parsed = JSON.parse(rawText); } catch(_) {}
 
-  if (parsed && typeof parsed === 'object') {
-    var card = document.createElement('div');
-    card.className = 'stream-card';
-
-    // Header row: phase/status + agent + timestamp
-    var header = document.createElement('div');
-    header.className = 'stream-card-header';
-    var phase = parsed.activity || parsed.phase || parsed.status || parsed.type || parsed.event || '';
-    if (phase) {
-      var phaseEl = document.createElement('span');
-      phaseEl.className = 'stream-card-phase stream-phase-' + phase.replace(/[^a-z]/g, '');
-      phaseEl.textContent = phase;
-      header.appendChild(phaseEl);
-    }
-    var agent = parsed.agent || parsed.from || parsed.slug || '';
-    if (agent) {
-      var agentEl = document.createElement('span');
-      agentEl.className = 'stream-card-agent';
-      agentEl.textContent = agent;
-      header.appendChild(agentEl);
-    }
-    var ts = parsed.timestamp || parsed.ts || parsed.time || '';
-    if (ts) {
-      var tsEl = document.createElement('span');
-      tsEl.className = 'stream-card-ts';
-      try { tsEl.textContent = new Date(ts).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'}); }
-      catch(_) { tsEl.textContent = ts; }
-      header.appendChild(tsEl);
-    }
-    card.appendChild(header);
-
-    // Detail / content as readable text
-    var detail = parsed.detail || parsed.content || parsed.message || parsed.text || parsed.summary || '';
-    if (detail) {
-      var detailEl = document.createElement('div');
-      detailEl.className = 'stream-card-detail';
-      detailEl.textContent = detail.length > 300 ? detail.substring(0, 300) + '\u2026' : detail;
-      card.appendChild(detailEl);
-    }
-
-    // Tool call info
-    var tool = parsed.tool || parsed.tool_name || parsed.function || '';
-    if (tool) {
-      var toolEl = document.createElement('div');
-      toolEl.className = 'stream-card-tool';
-      toolEl.textContent = '\u2192 ' + tool;
-      card.appendChild(toolEl);
-      // Render tool input as structured key-value, not raw JSON
-      var toolInput = parsed.tool_input || parsed.args || parsed.input;
-      if (toolInput && typeof toolInput === 'object') {
-        card.appendChild(renderValue(toolInput, 1));
-      } else if (toolInput) {
-        var inputEl = document.createElement('div');
-        inputEl.className = 'stream-card-detail';
-        inputEl.style.marginLeft = '12px';
-        var inputStr = String(toolInput);
-        inputEl.textContent = inputStr.length > 200 ? inputStr.substring(0, 200) + '\u2026' : inputStr;
-        card.appendChild(inputEl);
-      }
-    }
-
-    // All remaining fields rendered as structured key-value tree
-    var skip = {activity:1,phase:1,status:1,type:1,event:1,agent:1,from:1,slug:1,timestamp:1,ts:1,time:1,detail:1,content:1,message:1,text:1,summary:1,tool:1,tool_name:1,'function':1,tool_input:1,args:1,input:1};
-    var extras = Object.keys(parsed).filter(function(k) { return !skip[k] && parsed[k] != null && parsed[k] !== ''; });
-    if (extras.length > 0) {
-      var extrasObj = {};
-      extras.forEach(function(k) { extrasObj[k] = parsed[k]; });
-      card.appendChild(renderValue(extrasObj, 0));
-    }
-
-    container.appendChild(card);
-  } else {
-    // Plain text line
+  if (!parsed || typeof parsed !== 'object') {
+    // Plain text fallback
     var line = document.createElement('div');
     line.className = 'dm-stream-line' + classifyStreamLine(rawText);
     line.textContent = rawText;
     container.appendChild(line);
+    return;
   }
+
+  var evtType = parsed.type || '';
+
+  // ── Skip noise events entirely ──
+  if (evtType === 'thread.started' || evtType === 'turn.started') return;
+  // Skip in-progress tool calls (we'll show the completed version)
+  if (evtType === 'item.started') return;
+
+  var card = document.createElement('div');
+  card.className = 'stream-card';
+
+  // ── turn.completed → show token usage summary ──
+  if (evtType === 'turn.completed' && parsed.usage) {
+    var u = parsed.usage;
+    var header = document.createElement('div');
+    header.className = 'stream-card-header';
+    var badge = document.createElement('span');
+    badge.className = 'stream-card-phase stream-phase-completed';
+    badge.textContent = 'turn complete';
+    header.appendChild(badge);
+    var tokens = document.createElement('span');
+    tokens.className = 'stream-card-ts';
+    var inTok = u.input_tokens || 0;
+    var outTok = u.output_tokens || 0;
+    var cached = u.cached_input_tokens || 0;
+    tokens.textContent = formatTokens(inTok) + ' in / ' + formatTokens(outTok) + ' out' + (cached > 0 ? ' (' + formatTokens(cached) + ' cached)' : '');
+    header.appendChild(tokens);
+    card.appendChild(header);
+    container.appendChild(card);
+    return;
+  }
+
+  // ── item.completed → extract the useful content ──
+  if (evtType === 'item.completed' && parsed.item) {
+    var item = parsed.item;
+    var itemType = item.type || '';
+
+    // Agent message → show the text
+    if (itemType === 'agent_message') {
+      var msgText = (item.text || '').trim();
+      if (!msgText) return; // skip empty messages
+      var header = document.createElement('div');
+      header.className = 'stream-card-header';
+      var badge = document.createElement('span');
+      badge.className = 'stream-card-phase stream-phase-thinking';
+      badge.textContent = 'thinking';
+      header.appendChild(badge);
+      card.appendChild(header);
+      var detail = document.createElement('div');
+      detail.className = 'stream-card-detail';
+      detail.textContent = msgText.length > 300 ? msgText.substring(0, 300) + '\u2026' : msgText;
+      card.appendChild(detail);
+      container.appendChild(card);
+      return;
+    }
+
+    // Tool call → show tool name + human-readable args + result
+    if (itemType === 'mcp_tool_call' || itemType === 'tool_call' || itemType === 'function_call') {
+      var toolName = item.tool || item.name || '';
+      var header = document.createElement('div');
+      header.className = 'stream-card-header';
+      var badge = document.createElement('span');
+      badge.className = 'stream-card-phase stream-phase-tool';
+      badge.textContent = toolName || 'tool';
+      header.appendChild(badge);
+      if (item.server) {
+        var serverEl = document.createElement('span');
+        serverEl.className = 'stream-card-agent';
+        serverEl.textContent = item.server;
+        header.appendChild(serverEl);
+      }
+      card.appendChild(header);
+
+      // Show key arguments (filter out noise fields)
+      var args = item.arguments || item.args || {};
+      if (typeof args === 'object' && Object.keys(args).length > 0) {
+        // Only show the interesting args, skip internal ones
+        var argSkip = {my_slug:1, new_topic:1, viewer_slug:1};
+        var cleanArgs = {};
+        Object.keys(args).forEach(function(k) {
+          if (!argSkip[k] && args[k] != null && args[k] !== '') cleanArgs[k] = args[k];
+        });
+        if (Object.keys(cleanArgs).length > 0) {
+          card.appendChild(renderValue(cleanArgs, 1));
+        }
+      }
+
+      // Show result text (extract from content array)
+      var result = item.result;
+      if (result && result.content && Array.isArray(result.content)) {
+        result.content.forEach(function(c) {
+          if (c.text) {
+            var resEl = document.createElement('div');
+            resEl.className = 'stream-card-detail';
+            resEl.style.color = 'var(--green)';
+            resEl.textContent = '\u2713 ' + c.text;
+            card.appendChild(resEl);
+          }
+        });
+      }
+
+      // Show error if present
+      if (item.error) {
+        var errEl = document.createElement('div');
+        errEl.className = 'stream-card-detail';
+        errEl.style.color = 'var(--red)';
+        errEl.textContent = '\u2717 ' + (typeof item.error === 'string' ? item.error : JSON.stringify(item.error));
+        card.appendChild(errEl);
+      }
+
+      container.appendChild(card);
+      return;
+    }
+  }
+
+  // ── Fallback for any other structured event ──
+  // Show type badge + only meaningful fields
+  var header = document.createElement('div');
+  header.className = 'stream-card-header';
+  var phase = parsed.activity || parsed.phase || parsed.status || evtType || '';
+  if (phase) {
+    var phaseEl = document.createElement('span');
+    phaseEl.className = 'stream-card-phase stream-phase-' + phase.replace(/[^a-z]/g, '');
+    phaseEl.textContent = phase;
+    header.appendChild(phaseEl);
+  }
+  var agent = parsed.agent || parsed.from || parsed.slug || '';
+  if (agent) {
+    var agentEl = document.createElement('span');
+    agentEl.className = 'stream-card-agent';
+    agentEl.textContent = agent;
+    header.appendChild(agentEl);
+  }
+  card.appendChild(header);
+
+  var detail = parsed.detail || parsed.content || parsed.message || parsed.text || parsed.summary || '';
+  if (detail && typeof detail === 'string') {
+    var detailEl = document.createElement('div');
+    detailEl.className = 'stream-card-detail';
+    detailEl.textContent = detail.length > 300 ? detail.substring(0, 300) + '\u2026' : detail;
+    card.appendChild(detailEl);
+  }
+
+  // Show non-noise extra fields
+  var noiseKeys = {type:1,activity:1,phase:1,status:1,event:1,agent:1,from:1,slug:1,timestamp:1,ts:1,time:1,detail:1,content:1,message:1,text:1,summary:1,thread_id:1,item:1,id:1,error:1,result:1,structured_content:1};
+  var extras = Object.keys(parsed).filter(function(k) { return !noiseKeys[k] && parsed[k] != null && parsed[k] !== '' && parsed[k] !== false; });
+  if (extras.length > 0 && extras.length <= 8) {
+    var extrasObj = {};
+    extras.forEach(function(k) { extrasObj[k] = parsed[k]; });
+    card.appendChild(renderValue(extrasObj, 0));
+  }
+
+  container.appendChild(card);
 }
 
 var dmStreamCollapsed = localStorage.getItem('wuphf-stream-collapsed') === 'true';
