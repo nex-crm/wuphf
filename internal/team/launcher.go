@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -111,6 +112,7 @@ type Launcher struct {
 	headlessActive  map[string]*headlessCodexActiveTurn
 	headlessQueues  map[string][]headlessCodexTurn
 	webMode         bool
+	noOpen          bool
 
 	notifyMu            sync.Mutex
 	notifyLastDelivered map[string]time.Time
@@ -124,6 +126,9 @@ func (l *Launcher) SetOpusCEO(v bool) { l.opusCEO = v }
 
 // SetFocusMode enables CEO-routed delegation mode.
 func (l *Launcher) SetFocusMode(v bool) { l.focusMode = v }
+
+// SetNoOpen suppresses automatic browser launch on startup.
+func (l *Launcher) SetNoOpen(v bool) { l.noOpen = v }
 
 func (l *Launcher) SetOneOnOne(slug string) {
 	l.sessionMode = SessionModeOneOnOne
@@ -3342,11 +3347,31 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	go l.pollNexNotificationsLoop()
 	go l.watchdogSchedulerLoop()
 
-	fmt.Printf("\n  Web UI:  http://localhost:%d\n", webPort)
+	webURL := fmt.Sprintf("http://localhost:%d", webPort)
+	fmt.Printf("\n  Web UI:  %s\n", webURL)
 	fmt.Printf("  Broker:  http://localhost:%d\n", BrokerPort)
 	fmt.Printf("  Press Ctrl+C to stop.\n\n")
 
+	if !l.noOpen {
+		openBrowser(webURL)
+	}
+
 	select {}
+}
+
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "linux":
+		cmd = exec.Command("xdg-open", url)
+	case "windows":
+		cmd = exec.Command("cmd", "/c", "start", "", url)
+	default:
+		return
+	}
+	_ = cmd.Start()
 }
 
 // spawnBackgroundAgents starts all agents as headless background processes (no tmux).
