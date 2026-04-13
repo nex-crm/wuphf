@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/config"
 )
@@ -2031,6 +2032,7 @@ func TestResolveTaskIntervalsRespectMinimumFloor(t *testing.T) {
 
 func TestParseSkillProposalFromMessage(t *testing.T) {
 	b := &Broker{}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO"}}
 	msg := channelMessage{
 		ID:      "msg-1",
 		From:    "ceo",
@@ -2277,5 +2279,321 @@ func TestBrokerPostInboundSurfaceMessage(t *testing.T) {
 	msgs := b.ChannelMessages("surf")
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 channel message, got %d", len(msgs))
+	}
+}
+
+// --- Skill proposal system tests ---
+
+// Helper: skillProposalContent returns a well-formed [SKILL PROPOSAL] block.
+func skillProposalContent(name, title string) string {
+	return fmt.Sprintf("[SKILL PROPOSAL]\nName: %s\nTitle: %s\nDescription: Test description\nTrigger: on test\nTags: test\n---\n1. Do the thing\n[/SKILL PROPOSAL]", name, title)
+}
+
+// Test 1: CEO (lead) message creates a proposed skill.
+func TestParseSkillProposalCEOHappyPath(t *testing.T) {
+	b := &Broker{}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
+	msg := channelMessage{
+		ID:      "msg-1",
+		From:    "ceo",
+		Channel: "general",
+		Content: "I noticed a pattern.\n\n" + skillProposalContent("my-skill", "My Skill"),
+	}
+	b.parseSkillProposalLocked(msg)
+	if len(b.skills) != 1 {
+		t.Fatalf("expected 1 skill from CEO, got %d", len(b.skills))
+	}
+	if b.skills[0].Status != "proposed" {
+		t.Fatalf("expected status 'proposed', got %q", b.skills[0].Status)
+	}
+}
+
+// Test 2: Non-CEO message is silently skipped.
+func TestParseSkillProposalNonCEOSkipped(t *testing.T) {
+	b := &Broker{}
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO", Role: "lead"},
+		{Slug: "fe", Name: "Frontend Engineer"},
+	}
+	msg := channelMessage{
+		ID:      "msg-1",
+		From:    "fe",
+		Channel: "general",
+		Content: skillProposalContent("fe-skill", "FE Skill"),
+	}
+	b.parseSkillProposalLocked(msg)
+	if len(b.skills) != 0 {
+		t.Fatalf("expected 0 skills from non-CEO, got %d", len(b.skills))
+	}
+}
+
+// Test 3: Malformed proposal (missing Name) is skipped.
+func TestParseSkillProposalMalformedSkipped(t *testing.T) {
+	b := &Broker{}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	msg := channelMessage{
+		From:    "ceo",
+		Channel: "general",
+		Content: "[SKILL PROPOSAL]\nTitle: No Name Skill\nDescription: missing name field\n---\n1. Do thing\n[/SKILL PROPOSAL]",
+	}
+	b.parseSkillProposalLocked(msg)
+	if len(b.skills) != 0 {
+		t.Fatalf("expected 0 skills for malformed proposal, got %d", len(b.skills))
+	}
+}
+
+// Test 4: Duplicate proposal (same name, non-archived) is skipped.
+func TestParseSkillProposalDedup(t *testing.T) {
+	b := &Broker{}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
+	b.skills = []teamSkill{{
+		ID: "dup-skill", Name: "dup-skill", Title: "Dup Skill",
+		Status: "proposed", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	}}
+	msg := channelMessage{
+		From:    "ceo",
+		Channel: "general",
+		Content: skillProposalContent("dup-skill", "Dup Skill"),
+	}
+	b.parseSkillProposalLocked(msg)
+	if len(b.skills) != 1 {
+		t.Fatalf("expected dedup to skip re-proposal, got %d skills", len(b.skills))
+	}
+}
+
+// Test 5: Archived skill can be re-proposed (not deduped).
+func TestParseSkillProposalAllowsReproposalAfterArchive(t *testing.T) {
+	b := &Broker{}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
+	b.skills = []teamSkill{{
+		ID: "old-skill", Name: "old-skill", Title: "Old Skill",
+		Status: "archived", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	}}
+	msg := channelMessage{
+		From:    "ceo",
+		Channel: "general",
+		Content: skillProposalContent("old-skill", "Old Skill Revised"),
+	}
+	b.parseSkillProposalLocked(msg)
+	if len(b.skills) != 2 {
+		t.Fatalf("expected archived skill to allow re-proposal (2 total), got %d", len(b.skills))
+	}
+}
+
+// Test 6: parseSkillProposalLocked creates a non-blocking humanInterview in b.requests.
+func TestParseSkillProposalCreatesNonBlockingInterview(t *testing.T) {
+	b := &Broker{}
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
+	msg := channelMessage{
+		From:    "ceo",
+		Channel: "general",
+		Content: skillProposalContent("interview-skill", "Interview Skill"),
+	}
+	b.parseSkillProposalLocked(msg)
+	if len(b.requests) != 1 {
+		t.Fatalf("expected 1 interview request, got %d", len(b.requests))
+	}
+	req := b.requests[0]
+	if req.Blocking {
+		t.Fatalf("expected non-blocking skill proposal interview, got Blocking=true")
+	}
+	if req.Kind != "skill_proposal" {
+		t.Fatalf("expected kind 'skill_proposal', got %q", req.Kind)
+	}
+	if req.ReplyTo != "interview-skill" {
+		t.Fatalf("expected ReplyTo='interview-skill', got %q", req.ReplyTo)
+	}
+}
+
+// Test 7: Answering "accept" via HTTP activates the skill.
+func TestSkillProposalAcceptCallbackActivatesSkill(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	// Seed a proposed skill and matching interview request.
+	b.mu.Lock()
+	b.skills = append(b.skills, teamSkill{
+		ID: "deploy-check", Name: "deploy-check", Title: "Deploy Check",
+		Status: "proposed", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	})
+	b.counter++
+	reqID := fmt.Sprintf("request-%d", b.counter)
+	b.requests = append(b.requests, humanInterview{
+		ID:        reqID,
+		Kind:      "skill_proposal",
+		Status:    "pending",
+		From:      "ceo",
+		Channel:   "general",
+		Title:     "Approve skill: Deploy Check",
+		Question:  "Activate?",
+		ReplyTo:   "deploy-check",
+		Blocking:  false,
+		CreatedAt: "2026-01-01T00:00:00Z",
+		UpdatedAt: "2026-01-01T00:00:00Z",
+		Options:   []interviewOption{{ID: "accept", Label: "Accept"}, {ID: "reject", Label: "Reject"}},
+	})
+	b.mu.Unlock()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	answerBody, _ := json.Marshal(map[string]any{
+		"id":          reqID,
+		"choice_id":   "accept",
+		"choice_text": "Accept",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests/answer", bytes.NewReader(answerBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request answer: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, raw)
+	}
+
+	b.mu.Lock()
+	status := b.skills[0].Status
+	b.mu.Unlock()
+	if status != "active" {
+		t.Fatalf("expected skill status 'active' after accept, got %q", status)
+	}
+}
+
+// Test 8: Answering "reject" via HTTP archives the skill.
+func TestSkillProposalRejectCallbackArchivesSkill(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	b.mu.Lock()
+	b.skills = append(b.skills, teamSkill{
+		ID: "risky-skill", Name: "risky-skill", Title: "Risky Skill",
+		Status: "proposed", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
+	})
+	b.counter++
+	reqID := fmt.Sprintf("request-%d", b.counter)
+	b.requests = append(b.requests, humanInterview{
+		ID:        reqID,
+		Kind:      "skill_proposal",
+		Status:    "pending",
+		From:      "ceo",
+		Channel:   "general",
+		Title:     "Approve skill: Risky Skill",
+		Question:  "Activate?",
+		ReplyTo:   "risky-skill",
+		Blocking:  false,
+		CreatedAt: "2026-01-01T00:00:00Z",
+		UpdatedAt: "2026-01-01T00:00:00Z",
+		Options:   []interviewOption{{ID: "accept", Label: "Accept"}, {ID: "reject", Label: "Reject"}},
+	})
+	b.mu.Unlock()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	answerBody, _ := json.Marshal(map[string]any{
+		"id":          reqID,
+		"choice_id":   "reject",
+		"choice_text": "Reject",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests/answer", bytes.NewReader(answerBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request answer: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, raw)
+	}
+
+	b.mu.Lock()
+	status := b.skills[0].Status
+	b.mu.Unlock()
+	if status != "archived" {
+		t.Fatalf("expected skill status 'archived' after reject, got %q", status)
+	}
+}
+
+// Test 9: buildPrompt for the lead includes SKILL & AGENT AWARENESS section.
+func TestBuildPromptLeadIncludesSkillAwareness(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+	prompt := l.buildPrompt("ceo")
+	if !strings.Contains(prompt, "SKILL & AGENT AWARENESS") {
+		t.Fatalf("expected SKILL & AGENT AWARENESS block in lead prompt")
+	}
+	if !strings.Contains(prompt, "[SKILL PROPOSAL]") {
+		t.Fatalf("expected [SKILL PROPOSAL] format example in lead prompt")
+	}
+}
+
+// Test 10: Skill proposal and interview persist and reload correctly.
+func TestSkillProposalPersistenceRoundTrip(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = append(b.channels[i].Members, "ceo")
+		}
+	}
+	msg := channelMessage{
+		ID:      "msg-1",
+		From:    "ceo",
+		Channel: "general",
+		Content: skillProposalContent("persist-skill", "Persist Skill"),
+	}
+	b.parseSkillProposalLocked(msg)
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("saveLocked: %v", err)
+	}
+	b.mu.Unlock()
+
+	reloaded := NewBroker()
+	reloaded.mu.Lock()
+	skills := append([]teamSkill(nil), reloaded.skills...)
+	requests := append([]humanInterview(nil), reloaded.requests...)
+	reloaded.mu.Unlock()
+
+	if len(skills) != 1 || skills[0].Name != "persist-skill" {
+		t.Fatalf("expected persisted skill 'persist-skill', got %d skills", len(skills))
+	}
+	if len(requests) != 1 || requests[0].Kind != "skill_proposal" {
+		t.Fatalf("expected persisted skill_proposal request, got %d requests", len(requests))
 	}
 }

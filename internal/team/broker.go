@@ -6055,6 +6055,34 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
 		b.pendingInterview = firstBlockingRequest(b.requests)
 
+		// Skill proposal callback: accept activates the skill, reject archives it.
+		if b.requests[i].Kind == "skill_proposal" {
+			replyTo := strings.TrimSpace(b.requests[i].ReplyTo)
+			for j := range b.skills {
+				if b.skills[j].Name == replyTo && b.skills[j].Status != "archived" {
+					activatedAt := time.Now().UTC().Format(time.RFC3339)
+					if choiceID == "accept" {
+						b.skills[j].Status = "active"
+						b.skills[j].UpdatedAt = activatedAt
+						b.counter++
+						b.appendMessageLocked(channelMessage{
+							ID:        fmt.Sprintf("msg-%d", b.counter),
+							From:      "system",
+							Channel:   normalizeChannelSlug(b.requests[i].Channel),
+							Kind:      "skill_activated",
+							Title:     "Skill Activated: " + b.skills[j].Title,
+							Content:   fmt.Sprintf("Skill **%s** is now active and ready to use.", b.skills[j].Title),
+							Timestamp: activatedAt,
+						})
+					} else {
+						b.skills[j].Status = "archived"
+						b.skills[j].UpdatedAt = activatedAt
+					}
+					break
+				}
+			}
+		}
+
 		b.counter++
 		msg := channelMessage{
 			ID:        fmt.Sprintf("msg-%d", b.counter),
@@ -6647,6 +6675,13 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 // parseSkillProposalLocked extracts a [SKILL PROPOSAL] block from a message
 // and creates a proposed skill. Must be called with b.mu held.
 func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
+	// Only the team lead (CEO) may propose skills via message blocks.
+	// If no lead exists (empty office), reject all proposals to prevent injection.
+	lead := officeLeadSlugFrom(b.members, nil)
+	if lead == "" || msg.From != lead {
+		return
+	}
+
 	const startTag = "[SKILL PROPOSAL]"
 	const endTag = "[/SKILL PROPOSAL]"
 
@@ -6742,4 +6777,25 @@ func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
 		Content:   fmt.Sprintf("@%s proposed a new skill **%s**: %s. Use /skills to review and approve.", msg.From, title, description),
 		Timestamp: now,
 	})
+
+	// Surface the proposal in the Requests panel as a non-blocking human decision.
+	b.counter++
+	interview := humanInterview{
+		ID:            fmt.Sprintf("request-%d", b.counter),
+		Kind:          "skill_proposal",
+		Status:        "pending",
+		From:          msg.From,
+		Channel:       channel,
+		Title:         "Approve skill: " + title,
+		Question:      fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", msg.From, title, description),
+		ReplyTo:       slug,
+		Blocking:      false,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
+		{ID: "accept", Label: "Accept"},
+		{ID: "reject", Label: "Reject"},
+	})
+	b.requests = append(b.requests, interview)
 }
