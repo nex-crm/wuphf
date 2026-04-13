@@ -2369,14 +2369,256 @@ var cachedRequests = []; // latest /requests data for runtime strip
 var cachedUsage = null; // latest /usage data for token counts
 
 var SIDEBAR_APPS = [
-  { id: 'tasks',    icon: '\u2705', name: 'Tasks' },
-  { id: 'requests', icon: '\uD83D\uDCCB', name: 'Requests' },
-  { id: 'policies', icon: '\uD83D\uDEE1', name: 'Policies' },
-  { id: 'calendar', icon: '\uD83D\uDCC5', name: 'Calendar' },
-  { id: 'skills',   icon: '\u26A1', name: 'Skills' },
-  { id: 'artifacts', icon: '\uD83D\uDCE6', name: 'Artifacts' },
-  { id: 'recover',  icon: '\uD83D\uDD0D', name: 'Recovery' },
+  { id: 'tasks',        icon: '\u2705', name: 'Tasks' },
+  { id: 'requests',     icon: '\uD83D\uDCCB', name: 'Requests' },
+  { id: 'policies',     icon: '\uD83D\uDEE1', name: 'Policies' },
+  { id: 'calendar',     icon: '\uD83D\uDCC5', name: 'Calendar' },
+  { id: 'skills',       icon: '\u26A1', name: 'Skills' },
+  { id: 'activity',     icon: '\uD83D\uDCE6', name: 'Activity' },
+  { id: 'health-check', icon: '\uD83D\uDD0D', name: 'Health Check' },
 ];
+
+// ═══════════════════════════════════════════════════════════════
+//   HASH ROUTER — single source of truth for navigation state
+// ═══════════════════════════════════════════════════════════════
+//
+// Routes:
+//   #/channels/{slug}            → channel messages view
+//   #/dm/{agentSlug}             → DM with agent (creates channel if needed)
+//   #/apps/{appId}               → app panel (tasks, requests, health-check, etc.)
+//   #/threads                    → all threads view
+//   #/agents                     → agent grid view
+//
+// navigate(hash) is the ONLY way to change views. Everything else
+// calls navigate() and the hashchange handler does the rest.
+
+var _routerReady = false;
+var _navigating = false; // prevent re-entrant hashchange
+
+function navigate(hash) {
+  if (hash === location.hash) {
+    // Force re-handle even if hash unchanged (e.g. clicking same DM again)
+    handleRoute();
+    return;
+  }
+  location.hash = hash;
+  // hashchange listener will fire handleRoute()
+}
+
+function parseRoute() {
+  var hash = (location.hash || '').replace(/^#\/?/, '');
+  var parts = hash.split('/');
+  if (parts[0] === 'channels' && parts[1]) return { view: 'channel', channel: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'dm' && parts[1]) return { view: 'dm', agent: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'apps' && parts[1]) return { view: 'app', app: decodeURIComponent(parts[1]) };
+  if (parts[0] === 'threads') return { view: 'threads' };
+  if (parts[0] === 'agents') return { view: 'agents' };
+  return { view: 'channel', channel: 'general' };
+}
+
+function handleRoute() {
+  if (_navigating || !_routerReady) return;
+  _navigating = true;
+  try {
+    var route = parseRoute();
+    _applyRoute(route);
+  } finally {
+    _navigating = false;
+  }
+}
+
+function _applyRoute(route) {
+  // ── 1. Tear down everything from previous view ──
+  _cleanupAllViews();
+
+  switch (route.view) {
+    case 'channel':
+      _enterChannel(route.channel);
+      break;
+    case 'dm':
+      _enterDM(route.agent);
+      break;
+    case 'app':
+      _enterApp(route.app);
+      break;
+    case 'threads':
+      _enterOverlay('threads');
+      break;
+    case 'agents':
+      _enterOverlay('agents');
+      break;
+    default:
+      _enterChannel('general');
+  }
+}
+
+function _cleanupAllViews() {
+  // Save last-seen for current channel
+  if (lastMessageId && currentChannel) {
+    localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
+  }
+
+  // Close overlays
+  if (typeof threadsViewOpen !== 'undefined' && threadsViewOpen) closeThreadsView();
+  if (typeof agentsViewOpen !== 'undefined' && agentsViewOpen) closeAgentsView();
+  if (typeof recoveryViewOpen !== 'undefined' && recoveryViewOpen) closeRecoveryView();
+
+  // Hide ALL app panels
+  var allAppIds = ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills', 'app-activity', 'app-artifacts'];
+  allAppIds.forEach(function(pid) {
+    var p = document.getElementById(pid);
+    if (p) { p.classList.remove('active'); p.style.display = 'none'; }
+  });
+
+  // Leave DM mode if active
+  var prevChType = currentChannel ? getChannelType(currentChannel) : 'O';
+  if (prevChType === 'D' || prevChType === 'G') {
+    onDMChannelLeave();
+  }
+
+  // Restore main layout elements
+  var messagesEl = document.getElementById('messages');
+  var composerEl = document.querySelector('.composer');
+  var typingEl = document.getElementById('typing-indicator');
+  var splitLayout = document.getElementById('dm-split-layout');
+  var liveWorkSection = document.getElementById('live-work-section');
+  var runtimeStrip = document.getElementById('runtime-strip');
+  if (messagesEl) messagesEl.style.display = '';
+  if (composerEl) composerEl.style.display = '';
+  if (typingEl) typingEl.style.display = '';
+  if (splitLayout) { splitLayout.style.display = ''; splitLayout.classList.remove('active'); }
+  if (liveWorkSection) liveWorkSection.style.display = '';
+  if (runtimeStrip) runtimeStrip.style.display = '';
+
+  currentApp = null;
+}
+
+function _enterChannel(name) {
+  currentChannel = name;
+
+  // Reset message state
+  lastMessageId = null;
+  lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + name) || null;
+  unreadDividerInserted = false;
+  lastSeenPassed = false;
+  newMessageCount = 0;
+  lastRenderedFrom = null;
+  lastRenderedTime = null;
+  lastRenderedDate = null;
+  document.getElementById('messages').textContent = '';
+  var dmSplitMsgs = document.getElementById('dm-split-messages');
+  if (dmSplitMsgs) dmSplitMsgs.textContent = '';
+
+  // Update header
+  var ch = CHANNELS.find(function(c) { return c.name === name; });
+  document.getElementById('channel-title').textContent = '# ' + name;
+  document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
+  document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
+
+  markChannelSeen(name);
+  _refreshSidebars();
+
+  if (brokerConnected) {
+    fetchMessages();
+    fetchRequests();
+    fetchMemberActivity();
+  }
+}
+
+function _enterDM(agentSlug) {
+  // Create/get the DM channel, then set up the DM view
+  WuphfAPI.post('/channels/dm', { members: ['human', agentSlug], type: 'direct' })
+    .then(function(resp) {
+      channelMetadata[resp.slug] = {
+        type: resp.type || 'D',
+        name: resp.name || ('DM with ' + agentSlug),
+        agentSlug: agentSlug,
+        members: ['human', agentSlug]
+      };
+      currentChannel = resp.slug;
+
+      // Reset message state
+      lastMessageId = null;
+      lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + resp.slug) || null;
+      unreadDividerInserted = false;
+      lastSeenPassed = false;
+      newMessageCount = 0;
+      lastRenderedFrom = null;
+      lastRenderedTime = null;
+      lastRenderedDate = null;
+      document.getElementById('messages').textContent = '';
+      var dmSplitMsgs = document.getElementById('dm-split-messages');
+      if (dmSplitMsgs) dmSplitMsgs.textContent = '';
+
+      onDMChannelEnter(agentSlug);
+      markChannelSeen(resp.slug);
+      _refreshSidebars();
+
+      if (brokerConnected) {
+        fetchMessages();
+        fetchRequests();
+        fetchMemberActivity();
+      }
+    })
+    .catch(function(e) {
+      console.error('openDM failed:', e);
+      showNotice('Failed to open DM', 'error');
+      navigate('#/channels/general');
+    });
+}
+
+function _enterApp(appId) {
+  // Map old IDs to new ones for backward compat with any stored hashes
+  if (appId === 'artifacts') appId = 'activity';
+  if (appId === 'recover' || appId === 'recovery') appId = 'health-check';
+
+  currentApp = appId;
+
+  // Health check uses a special view
+  if (appId === 'health-check') {
+    openRecoveryView();
+    _refreshSidebars();
+    return;
+  }
+
+  // Hide messages, show app panel
+  var messagesEl = document.getElementById('messages');
+  var typingEl = document.getElementById('typing-indicator');
+  var composerEl = document.querySelector('.composer');
+  var splitLayout = document.getElementById('dm-split-layout');
+  var liveWorkSection = document.getElementById('live-work-section');
+  var runtimeStrip = document.getElementById('runtime-strip');
+  if (messagesEl) messagesEl.style.display = 'none';
+  if (typingEl) typingEl.style.display = 'none';
+  if (composerEl) composerEl.style.display = 'none';
+  if (splitLayout) splitLayout.style.display = 'none';
+  if (liveWorkSection) liveWorkSection.style.display = 'none';
+  if (runtimeStrip) runtimeStrip.style.display = 'none';
+
+  // Try both old and new panel IDs
+  var activePanel = document.getElementById('app-' + appId) || document.getElementById('app-artifacts');
+  if (activePanel) { activePanel.style.display = 'flex'; activePanel.classList.add('active'); }
+
+  // Set title
+  var appDef = SIDEBAR_APPS.find(function(a) { return a.id === appId; });
+  document.getElementById('channel-title').textContent = appDef ? appDef.name : appId;
+  document.getElementById('channel-desc').textContent = '';
+  renderAppContent(appId);
+  _refreshSidebars();
+}
+
+function _enterOverlay(type) {
+  if (type === 'threads') openThreadsView();
+  if (type === 'agents') openAgentsView();
+  _refreshSidebars();
+}
+
+function _refreshSidebars() {
+  renderSidebarChannels();
+  renderSidebarDMs();
+  renderSidebarAgents();
+  renderSidebarApps();
+}
 
 var AGENTS = [
   { slug: 'ceo',      emoji: '\uD83D\uDC54', name: 'CEO',               role: 'Strategy, delegation, goal tracking',           checked: true,  type: 'lead' },
@@ -2940,6 +3182,10 @@ function showSplashScreen(onDone, agentCount) {
 // ─── Show office ───
 function showOffice() {
   document.getElementById('office').classList.add('active');
+
+  // Wire up hash router
+  window.addEventListener('hashchange', handleRoute);
+
   if (brokerConnected) {
     Promise.all([WuphfAPI.getOfficeMembers(), WuphfAPI.getChannels(), WuphfAPI.getMembers(currentChannel)])
       .then(function(results) {
@@ -2966,16 +3212,21 @@ function showOffice() {
             return { name: ch.name || ch.slug, desc: ch.description || '' };
           });
         }
-        renderSidebarAgents();
-        renderSidebarDMs();
-        renderSidebarChannels();
-        renderSidebarApps();
         startMessagePolling();
         startRequestPolling();
         startMemberActivityPolling();
         connectOfficeEvents();
+
+        // Router is ready — navigate to initial route
+        _routerReady = true;
+        if (!location.hash || location.hash === '#' || location.hash === '#/') {
+          navigate('#/channels/general');
+        } else {
+          handleRoute();
+        }
       })
       .catch(function() {
+        _routerReady = true;
         renderSidebarAgents();
         renderSidebarDMs();
         renderSidebarChannels();
@@ -2983,6 +3234,7 @@ function showOffice() {
         animateMessages();
       });
   } else {
+    _routerReady = true;
     renderSidebarAgents();
     renderSidebarDMs();
     renderSidebarChannels();
@@ -3117,7 +3369,7 @@ function renderSidebarAgents() {
     wrap.addEventListener('click', (function(agSlug) {
       return function(e) {
         e.stopPropagation();
-        openDM(agSlug);
+        navigate('#/dm/' + encodeURIComponent(agSlug));
       };
     })(a.slug));
     var dot = document.createElement('span');
@@ -3150,7 +3402,7 @@ function renderSidebarApps() {
   SIDEBAR_APPS.forEach(function(app) {
     var btn = document.createElement('button');
     btn.className = 'sidebar-item' + (currentApp === app.id ? ' active' : '');
-    btn.addEventListener('click', function() { switchApp(app.id); });
+    btn.addEventListener('click', function() { navigate('#/apps/' + app.id); });
     var icon = document.createElement('span');
     icon.className = 'sidebar-item-emoji';
     icon.textContent = app.icon;
@@ -3162,83 +3414,24 @@ function renderSidebarApps() {
   });
 }
 function switchApp(appId) {
-  // Close recovery/threads/agents views if switching away
-  if (recoveryViewOpen && appId !== 'recover') closeRecoveryView();
-  if (threadsViewOpen) closeThreadsView();
-  if (agentsViewOpen) closeAgentsView();
-
-  // Handle recovery app specially
-  if (appId === 'recover') {
-    currentApp = (currentApp === 'recover') ? null : 'recover';
-    if (currentApp === 'recover') {
-      openRecoveryView();
+  // Toggle: if already on this app, go back to current channel
+  if (currentApp === appId) {
+    var chType = currentChannel ? getChannelType(currentChannel) : 'O';
+    if (chType === 'D' || chType === 'G') {
+      var meta = channelMetadata[currentChannel];
+      navigate('#/dm/' + encodeURIComponent(meta ? meta.agentSlug : currentChannel));
     } else {
-      closeRecoveryView();
+      navigate('#/channels/' + encodeURIComponent(currentChannel));
     }
-    renderSidebarApps();
     return;
   }
-
-  currentApp = (currentApp === appId) ? null : appId;
-  var messagesEl = document.getElementById('messages');
-  var typingEl = document.getElementById('typing-indicator');
-  var composerEl = document.querySelector('.composer');
-  ['app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills', 'app-artifacts'].forEach(function(pid) {
-    var p = document.getElementById(pid);
-    if (p) { p.classList.remove('active'); p.style.display = 'none'; }
-  });
-  var splitLayout = document.getElementById('dm-split-layout');
-  var liveWorkSection = document.getElementById('live-work-section');
-  var runtimeStrip = document.getElementById('runtime-strip');
-  if (currentApp) {
-    // Hide everything: messages, DM split, composer, live-work strip
-    messagesEl.style.display = 'none';
-    typingEl.style.display = 'none';
-    composerEl.style.display = 'none';
-    if (splitLayout) splitLayout.style.display = 'none';
-    if (liveWorkSection) liveWorkSection.style.display = 'none';
-    if (runtimeStrip) runtimeStrip.style.display = 'none';
-    var activePanel = document.getElementById('app-' + currentApp);
-    if (activePanel) { activePanel.style.display = 'flex'; activePanel.classList.add('active'); }
-    document.getElementById('channel-title').textContent = currentApp.charAt(0).toUpperCase() + currentApp.slice(1);
-    document.getElementById('channel-desc').textContent = '';
-    renderAppContent(currentApp);
-  } else {
-    // Restore: show correct view based on channel type
-    if (splitLayout) splitLayout.style.display = '';
-    if (liveWorkSection) liveWorkSection.style.display = '';
-    if (runtimeStrip) runtimeStrip.style.display = '';
-    var isDM = currentChannel && (getChannelType(currentChannel) === 'D' || getChannelType(currentChannel) === 'G');
-    if (isDM) {
-      messagesEl.style.display = 'none';
-      if (splitLayout) splitLayout.classList.add('active');
-    } else {
-      messagesEl.style.display = '';
-      if (splitLayout) splitLayout.classList.remove('active');
-    }
-    composerEl.style.display = '';
-    var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
-    if (isDM) {
-      var meta = channelMetadata[currentChannel];
-      var dmSlug = meta ? meta.agentSlug : null;
-      var agent = dmSlug ? AGENTS.find(function(a) { return a.slug === dmSlug; }) : null;
-      var dmName = (meta && meta.name) ? meta.name : (agent ? agent.name : (dmSlug || currentChannel));
-      document.getElementById('channel-title').textContent = dmName;
-      document.getElementById('channel-desc').textContent = 'direct message';
-    } else {
-      document.getElementById('channel-title').textContent = '# ' + currentChannel;
-      document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
-    }
-  }
-  renderSidebarApps();
-  if (currentApp) {
-    document.querySelectorAll('#sidebar-channels .sidebar-item').forEach(function(b) { b.classList.remove('active'); });
-  } else {
-    renderSidebarChannels();
-  }
+  navigate('#/apps/' + encodeURIComponent(appId));
 }
 function renderAppContent(appId) {
-  var panel = document.getElementById('app-' + appId);
+  // Map new IDs to panel elements (activity uses app-artifacts panel)
+  var panelId = appId;
+  if (appId === 'activity') panelId = 'artifacts';
+  var panel = document.getElementById('app-' + panelId);
   if (!panel) return;
   panel.textContent = '';
   if (appId === 'tasks') renderTasksApp(panel);
@@ -3246,7 +3439,7 @@ function renderAppContent(appId) {
   else if (appId === 'policies') renderPoliciesApp(panel);
   else if (appId === 'calendar') renderCalendarApp(panel);
   else if (appId === 'skills') renderSkillsApp(panel);
-  else if (appId === 'artifacts') renderArtifactsApp(panel);
+  else if (appId === 'artifacts' || appId === 'activity') renderArtifactsApp(panel);
 }
 function renderTasksApp(panel) {
   if (!brokerConnected) {
@@ -3558,7 +3751,7 @@ function renderArtifactsApp(panel) {
         return;
       }
       var header = el('div', { style: { padding: '0 20px 12px', borderBottom: '1px solid var(--border)' } });
-      header.appendChild(el('h3', { style: { fontSize: '16px', fontWeight: '600' } }, 'Artifacts'));
+      header.appendChild(el('h3', { style: { fontSize: '16px', fontWeight: '600' } }, 'Activity'));
       header.appendChild(el('div', { style: { fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' } }, actions.length + ' actions recorded'));
       panel.appendChild(header);
       var timeline = el('div', { className: 'artifact-timeline' });
@@ -3781,9 +3974,7 @@ function renderSidebarChannels() {
     var btn = document.createElement('button');
     btn.className = 'sidebar-item' + (isActive ? ' active' : '');
     btn.addEventListener('click', function() {
-      switchChannel(ch.name);
-      container.querySelectorAll('.sidebar-item').forEach(function(b) { b.classList.remove('active'); });
-      btn.classList.add('active');
+      navigate('#/channels/' + encodeURIComponent(ch.name));
     });
 
     var hash = document.createElement('span');
@@ -3973,74 +4164,8 @@ function openChannelWizard() {
 }
 
 function switchChannel(name) {
-  // Close overlay views when switching channels
-  if (typeof threadsViewOpen !== 'undefined' && threadsViewOpen) closeThreadsView();
-  if (typeof agentsViewOpen !== 'undefined' && agentsViewOpen) closeAgentsView();
-  // Exit app mode when switching channels
-  if (currentApp) {
-    currentApp = null;
-    var messagesEl = document.getElementById('messages');
-    var composerEl = document.querySelector('.composer');
-    ['app-tasks', 'app-requests', 'app-calendar'].forEach(function(pid) {
-      var p = document.getElementById(pid);
-      if (p) { p.classList.remove('active'); p.style.display = 'none'; }
-    });
-    if (messagesEl) messagesEl.style.display = '';
-    if (composerEl) composerEl.style.display = '';
-    renderSidebarApps();
-  }
-  // Save last-seen for previous channel before switching
-  if (lastMessageId) {
-    localStorage.setItem('wuphf_last_seen_msg_' + currentChannel, lastMessageId);
-  }
-  // DM channel enter/leave hooks (Slack-style)
-  var prevChannel = currentChannel;
-  currentChannel = name;
-  renderSidebarChannels();
-  var chType = getChannelType(name);
-  var prevChType = prevChannel ? getChannelType(prevChannel) : 'O';
-  if (chType === 'D' || chType === 'G') {
-    var meta = channelMetadata[name];
-    var agSlug = meta ? meta.agentSlug : null;
-    if (agSlug) onDMChannelEnter(agSlug);
-  } else if (prevChType === 'D' || prevChType === 'G') {
-    onDMChannelLeave();
-  }
-  lastMessageId = null;
-  // Reset unread/grouping/date state for new channel
-  lastSeenMessageId = localStorage.getItem('wuphf_last_seen_msg_' + name) || null;
-  unreadDividerInserted = false;
-  lastSeenPassed = false;
-  newMessageCount = 0;
-  lastRenderedFrom = null;
-  lastRenderedTime = null;
-  lastRenderedDate = null;
-  document.getElementById('messages').textContent = '';
-  var dmSplitMsgs = document.getElementById('dm-split-messages');
-  if (dmSplitMsgs) dmSplitMsgs.textContent = '';
-  var ch = CHANNELS.find(function(c) { return c.name === name; });
-  if (chType === 'D' || chType === 'G') {
-    // Header is already set by onDMChannelEnter above; only set placeholder here.
-    var dmMeta = channelMetadata[name];
-    var dmAgentSlug = dmMeta ? dmMeta.agentSlug : null;
-    var dmAgentObj = dmAgentSlug ? AGENTS.find(function(a) { return a.slug === dmAgentSlug; }) : null;
-    document.getElementById('composer-input').placeholder = 'Message ' + (dmAgentObj ? dmAgentObj.name : (dmMeta ? dmMeta.name : name)) + '\u2026';
-  } else {
-    document.getElementById('channel-title').textContent = '# ' + name;
-    document.getElementById('channel-desc').textContent = ch ? ch.desc : '';
-    document.getElementById('composer-input').placeholder = 'Message #' + name + ' \u2014 type / for commands, @ to mention';
-  }
-  // Close recovery view if open
-  if (recoveryViewOpen) closeRecoveryView();
-
-  // Mark channel as seen and update badges
-  markChannelSeen(name);
-
-  if (brokerConnected) {
-    fetchMessages();
-    fetchRequests();
-    fetchMemberActivity();
-  }
+  // Delegate to router — this is the only way to change views
+  navigate('#/channels/' + encodeURIComponent(name));
 }
 
 // ─── Animate messages ───
@@ -5158,7 +5283,7 @@ var SLASH_COMMANDS = [
   { name: '/search', desc: 'Search messages', icon: '🔎' },
   { name: '/tasks', desc: 'Open task board', icon: '📋' },
   { name: '/requests', desc: 'Open requests', icon: '🔔' },
-  { name: '/recover', desc: 'Recovery view', icon: '🔁' },
+  { name: '/recover', desc: 'Health Check view', icon: '🔁' },
   { name: '/1o1', desc: '1:1 with agent', icon: '💬' },
   { name: '/task', desc: 'Task actions (claim/release/complete/block)', icon: '✅' },
   { name: '/cancel', desc: 'Cancel a task', icon: '❌' },
@@ -5497,7 +5622,7 @@ function handleSlashCommand(input) {
       });
       break;
     case '/recover':
-      openRecoveryView();
+      navigate('#/apps/health-check');
       break;
     case '/search':
       openSearchMode(args || '');
@@ -5549,10 +5674,10 @@ function handleSlashCommand(input) {
       }
       break;
     case '/threads':
-      openThreadsView();
+      navigate('#/threads');
       break;
     case '/agents':
-      openAgentsView();
+      navigate('#/agents');
       break;
     case '/insert':
       openInsertPicker();
@@ -6552,7 +6677,7 @@ function buildCommandPaletteItems(query) {
   });
   // Add palette-specific commands
   var extraCmds = [
-    { icon: '🔍', label: '/recover', desc: 'Show workspace recovery info', action: function() { openRecoveryView(); } },
+    { icon: '🔍', label: '/recover', desc: 'Show health check / diagnostics', action: function() { navigate('#/apps/health-check'); } },
   ];
   extraCmds.forEach(function(c) {
     if (!q || c.label.toLowerCase().indexOf(q) !== -1 || c.desc.toLowerCase().indexOf(q) !== -1) {
@@ -6908,17 +7033,7 @@ function getChannelType(slug) {
 // Opens (or creates) a 1:1 DM with the given agent slug.
 // Calls POST /channels/dm, stores metadata, then switches to the channel.
 function openDM(agentSlug) {
-  WuphfAPI.post('/channels/dm', { members: ['human', agentSlug], type: 'direct' })
-    .then(function(resp) {
-      channelMetadata[resp.slug] = {
-        type: resp.type || 'D',
-        name: resp.name || ('DM with ' + agentSlug),
-        agentSlug: agentSlug,
-        members: ['human', agentSlug]
-      };
-      switchChannel(resp.slug);
-    })
-    .catch(function(e) { console.error('openDM failed:', e); showNotice('Failed to open DM', 'error'); });
+  navigate('#/dm/' + encodeURIComponent(agentSlug));
 }
 
 // Called by switchChannel when entering / leaving a DM channel.
@@ -6988,7 +7103,7 @@ function renderSidebarDMs() {
     btn.appendChild(dot);
     btn.appendChild(nameEl);
     btn.addEventListener('click', (function(agSlug) {
-      return function() { openDM(agSlug); };
+      return function() { navigate('#/dm/' + encodeURIComponent(agSlug)); };
     })(agent.slug));
     container.appendChild(btn);
   });
@@ -7387,8 +7502,8 @@ function openRecoveryView() {
   recoveryViewOpen = true;
 
   // Update header
-  document.getElementById('channel-title').textContent = 'Recovery';
-  document.getElementById('channel-desc').textContent = 'Workspace state and recovery info';
+  document.getElementById('channel-title').textContent = 'Health Check';
+  document.getElementById('channel-desc').textContent = 'Workspace state and diagnostics';
 
   panel.textContent = '';
 
@@ -7544,7 +7659,7 @@ function renderRecoveryData(panel, state, tasksData, membersData) {
   closeBtn.className = 'btn btn-ghost';
   closeBtn.textContent = 'Back to messages';
   closeBtn.style.alignSelf = 'flex-start';
-  closeBtn.addEventListener('click', closeRecoveryView);
+  closeBtn.addEventListener('click', function() { navigate('#/channels/' + encodeURIComponent(currentChannel)); });
   panel.appendChild(closeBtn);
 }
 
@@ -8628,7 +8743,7 @@ function openThreadsView() {
 
   if (threads.length === 0) {
     panel.appendChild(el('div', { className: 'cmd-palette-empty', style: { padding: '40px 20px' } }, 'No threads yet. Start a conversation to see threads here.'));
-    var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start' }, onClick: closeThreadsView }, 'Back to messages');
+    var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start' }, onClick: function() { navigate('#/channels/' + encodeURIComponent(currentChannel)); } }, 'Back to messages');
     panel.appendChild(closeBtn);
     return;
   }
@@ -8669,7 +8784,7 @@ function openThreadsView() {
     panel.appendChild(item);
   });
 
-  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: closeThreadsView }, 'Back to messages');
+  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: function() { navigate('#/channels/' + encodeURIComponent(currentChannel)); } }, 'Back to messages');
   panel.appendChild(closeBtn);
 }
 
@@ -8741,7 +8856,7 @@ function openAgentsView() {
 
   panel.appendChild(grid);
 
-  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: closeAgentsView }, 'Back to messages');
+  var closeBtn = el('button', { className: 'btn btn-ghost', style: { alignSelf: 'flex-start', marginTop: '8px' }, onClick: function() { navigate('#/channels/' + encodeURIComponent(currentChannel)); } }, 'Back to messages');
   panel.appendChild(closeBtn);
 }
 
