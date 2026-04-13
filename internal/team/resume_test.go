@@ -577,6 +577,14 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 	}
 }
 
+func TestBuildResumePacketsUsesLimit50ForRecentHumanMessages(t *testing.T) {
+	// Spec: buildResumePackets() must pass limit=50 to RecentHumanMessages().
+	// The constant recentHumanMessageLimit must be 50.
+	if recentHumanMessageLimit != 50 {
+		t.Errorf("recentHumanMessageLimit = %d, want 50 (per spec)", recentHumanMessageLimit)
+	}
+}
+
 func TestBuildResumePacketSpecHeader(t *testing.T) {
 	// Spec: header must be "[Session resumed — picking up where you left off]"
 	tasks := []teamTask{

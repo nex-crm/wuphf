@@ -6,8 +6,8 @@ import (
 )
 
 // recentHumanMessageLimit is the number of recent human messages to consider
-// when building resume packets.
-const recentHumanMessageLimit = 10
+// when building resume packets. The spec requires the last 50 messages.
+const recentHumanMessageLimit = 50
 
 // isHumanOrSystemSender reports whether a message sender is a human or system
 // source (not an agent). Only agent replies count as "answers".
