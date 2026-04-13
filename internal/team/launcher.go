@@ -3399,6 +3399,19 @@ func (l *Launcher) PreflightWeb() error {
 
 // LaunchWeb starts the broker, web UI server, and background agents without tmux.
 func (l *Launcher) LaunchWeb(webPort int) error {
+	// Prompt user about Nex setup if API key is missing
+	if !config.ResolveNoNex() && config.ResolveAPIKey("") == "" {
+		fmt.Println()
+		fmt.Println("  ⚠  Nex API key not configured.")
+		fmt.Println("     Agents will run without organizational memory (no knowledge graph,")
+		fmt.Println("     no cross-session context, no CRM/email/calendar integration).")
+		fmt.Println()
+		fmt.Println("     To set up Nex:  wuphf init")
+		fmt.Println("     To register:    nex setup")
+		fmt.Println("     To skip:        wuphf --no-nex")
+		fmt.Println()
+	}
+
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)
