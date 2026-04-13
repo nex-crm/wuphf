@@ -44,8 +44,9 @@ func findUnansweredMessages(humanMsgs, allMessages []channelMessage) []channelMe
 }
 
 // buildResumePacket constructs a context string that an agent can use to resume
-// in-flight work. It combines the agent's assigned tasks and any unanswered human
-// messages directed at them. Returns an empty string when there is nothing to resume.
+// in-flight work. It combines the agent's assigned tasks (with worktree paths)
+// and any unanswered human messages (with channel/reply_to routing instructions).
+// Returns an empty string when there is nothing to resume.
 func buildResumePacket(slug string, tasks []teamTask, msgs []channelMessage) string {
 	if len(tasks) == 0 && len(msgs) == 0 {
 		return ""
@@ -61,6 +62,9 @@ func buildResumePacket(slug string, tasks []teamTask, msgs []channelMessage) str
 			if task.Details != "" {
 				sb.WriteString(fmt.Sprintf("  %s\n", task.Details))
 			}
+			if path := strings.TrimSpace(task.WorktreePath); path != "" {
+				sb.WriteString(fmt.Sprintf("  Working directory: %s\n", path))
+			}
 		}
 		sb.WriteString("\n")
 	}
@@ -68,9 +72,14 @@ func buildResumePacket(slug string, tasks []teamTask, msgs []channelMessage) str
 	if len(msgs) > 0 {
 		sb.WriteString("## Unanswered messages awaiting your response\n\n")
 		for _, msg := range msgs {
-			sb.WriteString(fmt.Sprintf("- @%s: %s\n", msg.From, msg.Content))
+			channel := msg.Channel
+			if channel == "" {
+				channel = "general"
+			}
+			sb.WriteString(fmt.Sprintf("- @%s (channel: %q, reply_to_id: %q): %s\n", msg.From, channel, msg.ID, msg.Content))
 		}
 		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("Reply using team_broadcast with my_slug %q and the channel and reply_to_id shown above.\n", slug))
 	}
 
 	sb.WriteString("Please pick up where you left off.\n")

@@ -464,6 +464,56 @@ func TestBuildResumePacketsSkipsTaggedAgentsNotInPack(t *testing.T) {
 	}
 }
 
+func TestBuildResumePacketIncludesWorktreePath(t *testing.T) {
+	tasks := []teamTask{
+		{ID: "t1", Title: "Build the API", Owner: "be", Status: "in_progress", WorktreePath: "/workspace/feat-api"},
+		{ID: "t2", Title: "No worktree task", Owner: "be", Status: "in_progress", WorktreePath: ""},
+	}
+	packet := buildResumePacket("be", tasks, nil)
+
+	// Task with worktree should include the working directory instruction.
+	if !strings.Contains(packet, "/workspace/feat-api") {
+		t.Error("expected packet to include WorktreePath for t1")
+	}
+	// Task without worktree should not add spurious path lines.
+	if strings.Contains(packet, "working_directory") && !strings.Contains(packet, "/workspace/feat-api") {
+		t.Error("unexpected working_directory reference for task without WorktreePath")
+	}
+}
+
+func TestBuildResumePacketIncludesReplyToInstructions(t *testing.T) {
+	msgs := []channelMessage{
+		{ID: "h1", From: "you", Channel: "general", Content: "What is the plan?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	packet := buildResumePacket("ceo", nil, msgs)
+
+	// Spec: packet must include channel and reply_to_id so agent knows how to thread their response.
+	if !strings.Contains(packet, "general") {
+		t.Error("expected packet to include channel 'general' for reply routing")
+	}
+	if !strings.Contains(packet, "h1") {
+		t.Error("expected packet to include message ID 'h1' as reply_to_id")
+	}
+	if !strings.Contains(packet, "team_broadcast") {
+		t.Error("expected packet to include team_broadcast instruction for routing response")
+	}
+}
+
+func TestBuildResumePacketReplyInstructionsMentionsSlug(t *testing.T) {
+	msgs := []channelMessage{
+		{ID: "h2", From: "you", Channel: "engineering", Content: "Can you review this?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	packet := buildResumePacket("be", nil, msgs)
+
+	// Agent slug must appear in the routing instructions so the agent knows my_slug.
+	if !strings.Contains(packet, "be") {
+		t.Error("expected packet to reference agent slug 'be' in reply instructions")
+	}
+	if !strings.Contains(packet, "engineering") {
+		t.Error("expected packet to include channel 'engineering'")
+	}
+}
+
 func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *testing.T) {
 	// Spec: CEO's resume packet must not be silently dropped by the queue-hold
 	// guard when specialists are also receiving resume packets.
