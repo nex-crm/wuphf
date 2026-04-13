@@ -2299,3 +2299,121 @@ html[data-theme="slack-dark"] .thread-reply-time {
 html[data-theme="slack-dark"] .thread-reply-count {
   color: #1D9BD1;
 }
+
+/* ═══════════════════════════════════════
+   STREAM CARDS — formatted JSON output
+   ═══════════════════════════════════════ */
+html[data-theme="slack"] .stream-card,
+html[data-theme="slack-dark"] .stream-card {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-light);
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+html[data-theme="slack"] .stream-card:last-child,
+html[data-theme="slack-dark"] .stream-card:last-child {
+  border-bottom: none;
+}
+html[data-theme="slack"] .stream-card-header,
+html[data-theme="slack-dark"] .stream-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 2px;
+}
+html[data-theme="slack"] .stream-card-phase,
+html[data-theme="slack-dark"] .stream-card-phase {
+  font-weight: 700;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+html[data-theme="slack"] .stream-phase-active,
+html[data-theme="slack-dark"] .stream-phase-active {
+  background: var(--green-bg);
+  color: var(--green);
+}
+html[data-theme="slack"] .stream-phase-thinking,
+html[data-theme="slack-dark"] .stream-phase-thinking {
+  background: var(--yellow-bg);
+  color: var(--yellow);
+}
+html[data-theme="slack"] .stream-phase-tooluse,
+html[data-theme="slack-dark"] .stream-phase-tooluse,
+html[data-theme="slack"] .stream-phase-tool,
+html[data-theme="slack-dark"] .stream-phase-tool {
+  background: var(--accent-bg);
+  color: var(--accent);
+}
+html[data-theme="slack"] .stream-phase-idle,
+html[data-theme="slack-dark"] .stream-phase-idle {
+  background: var(--bg-warm);
+  color: var(--text-tertiary);
+}
+html[data-theme="slack"] .stream-phase-error,
+html[data-theme="slack-dark"] .stream-phase-error {
+  background: var(--red-bg);
+  color: var(--red);
+}
+html[data-theme="slack"] .stream-card-agent,
+html[data-theme="slack-dark"] .stream-card-agent {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 12px;
+}
+html[data-theme="slack"] .stream-card-ts,
+html[data-theme="slack-dark"] .stream-card-ts {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+}
+html[data-theme="slack"] .stream-card-detail,
+html[data-theme="slack-dark"] .stream-card-detail {
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-size: 13px;
+}
+html[data-theme="slack"] .stream-card-tool,
+html[data-theme="slack-dark"] .stream-card-tool {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html[data-theme="slack"] .stream-card-kv,
+html[data-theme="slack-dark"] .stream-card-kv {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 3px;
+  font-size: 11px;
+}
+html[data-theme="slack"] .stream-card-kv-pair,
+html[data-theme="slack-dark"] .stream-card-kv-pair {
+  color: var(--text-tertiary);
+}
+html[data-theme="slack"] .stream-card-kv-key,
+html[data-theme="slack-dark"] .stream-card-kv-key {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ─── Collapsible stream pane ─── */
+html[data-theme="slack"] .dm-stream-header,
+html[data-theme="slack-dark"] .dm-stream-header {
+  cursor: pointer;
+  user-select: none;
+}
+html[data-theme="slack"] .dm-stream-collapse-icon,
+html[data-theme="slack-dark"] .dm-stream-collapse-icon {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: auto;
+  transition: transform 0.15s;
+}

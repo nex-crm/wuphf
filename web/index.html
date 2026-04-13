@@ -1803,9 +1803,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <!-- composer moves here via JS in DM mode -->
         </div>
         <div class="dm-split-right" id="dm-split-right">
-          <div class="dm-stream-header">
+          <div class="dm-stream-header" onclick="toggleDMStreamPane()">
             <span class="dm-stream-dot idle" id="dm-stream-dot"></span>
             <span class="dm-stream-title" id="dm-stream-title">Live output</span>
+            <span class="dm-stream-collapse-icon" id="dm-stream-collapse-icon">&#9662;</span>
           </div>
           <div class="dm-stream-lines" id="dm-stream-lines"></div>
         </div>
@@ -6368,10 +6369,7 @@ function connectAgentStream(slug) {
       var dot = document.getElementById('dm-stream-dot');
       if (dot) dot.className = 'dm-stream-dot';
     }
-    var line = document.createElement('div');
-    line.className = 'dm-stream-line' + classifyStreamLine(e.data);
-    line.textContent = e.data;
-    streamLines.appendChild(line);
+    renderStreamLine(streamLines, e.data);
     if (streamLines.scrollHeight - streamLines.scrollTop < streamLines.clientHeight + 100) {
       streamLines.scrollTop = streamLines.scrollHeight;
     }
@@ -6398,13 +6396,119 @@ function classifyStreamLine(text) {
   return '';
 }
 
-var dmStreamCollapsed = false;
+// ─── Formatted stream line renderer ───
+function renderStreamLine(container, rawText) {
+  if (!rawText) return;
+  var parsed = null;
+  try { parsed = JSON.parse(rawText); } catch(_) {}
+
+  if (parsed && typeof parsed === 'object') {
+    var card = document.createElement('div');
+    card.className = 'stream-card';
+
+    // Header row: phase/status + agent + timestamp
+    var header = document.createElement('div');
+    header.className = 'stream-card-header';
+    var phase = parsed.activity || parsed.phase || parsed.status || parsed.type || parsed.event || '';
+    if (phase) {
+      var phaseEl = document.createElement('span');
+      phaseEl.className = 'stream-card-phase stream-phase-' + phase.replace(/[^a-z]/g, '');
+      phaseEl.textContent = phase;
+      header.appendChild(phaseEl);
+    }
+    var agent = parsed.agent || parsed.from || parsed.slug || '';
+    if (agent) {
+      var agentEl = document.createElement('span');
+      agentEl.className = 'stream-card-agent';
+      agentEl.textContent = agent;
+      header.appendChild(agentEl);
+    }
+    var ts = parsed.timestamp || parsed.ts || parsed.time || '';
+    if (ts) {
+      var tsEl = document.createElement('span');
+      tsEl.className = 'stream-card-ts';
+      try { tsEl.textContent = new Date(ts).toLocaleTimeString([], {hour:'numeric',minute:'2-digit',second:'2-digit'}); }
+      catch(_) { tsEl.textContent = ts; }
+      header.appendChild(tsEl);
+    }
+    card.appendChild(header);
+
+    // Detail / content
+    var detail = parsed.detail || parsed.content || parsed.message || parsed.text || parsed.summary || '';
+    if (detail) {
+      var detailEl = document.createElement('div');
+      detailEl.className = 'stream-card-detail';
+      detailEl.textContent = detail.length > 200 ? detail.substring(0, 200) + '\u2026' : detail;
+      card.appendChild(detailEl);
+    }
+
+    // Tool call info
+    var tool = parsed.tool || parsed.tool_name || parsed.function || '';
+    if (tool) {
+      var toolEl = document.createElement('div');
+      toolEl.className = 'stream-card-tool';
+      var toolText = '\u2192 ' + tool;
+      if (parsed.tool_input || parsed.args || parsed.input) {
+        var input = parsed.tool_input || parsed.args || parsed.input;
+        var inputStr = typeof input === 'string' ? input : JSON.stringify(input);
+        if (inputStr.length > 120) inputStr = inputStr.substring(0, 120) + '\u2026';
+        toolText += '(' + inputStr + ')';
+      }
+      toolEl.textContent = toolText;
+      card.appendChild(toolEl);
+    }
+
+    // Extra fields as key-value pairs (skip already-rendered ones)
+    var skip = {activity:1,phase:1,status:1,type:1,event:1,agent:1,from:1,slug:1,timestamp:1,ts:1,time:1,detail:1,content:1,message:1,text:1,summary:1,tool:1,tool_name:1,'function':1,tool_input:1,args:1,input:1};
+    var extras = Object.keys(parsed).filter(function(k) { return !skip[k] && parsed[k] != null && parsed[k] !== ''; });
+    if (extras.length > 0 && extras.length <= 6) {
+      var kvRow = document.createElement('div');
+      kvRow.className = 'stream-card-kv';
+      extras.forEach(function(k) {
+        var val = parsed[k];
+        var valStr = typeof val === 'object' ? JSON.stringify(val) : String(val);
+        if (valStr.length > 60) valStr = valStr.substring(0, 60) + '\u2026';
+        var keySpan = document.createElement('span');
+        keySpan.className = 'stream-card-kv-key';
+        keySpan.textContent = k;
+        var valSpan = document.createElement('span');
+        valSpan.textContent = ' ' + valStr;
+        var pair = document.createElement('span');
+        pair.className = 'stream-card-kv-pair';
+        pair.appendChild(keySpan);
+        pair.appendChild(valSpan);
+        kvRow.appendChild(pair);
+      });
+      card.appendChild(kvRow);
+    }
+
+    container.appendChild(card);
+  } else {
+    // Plain text line
+    var line = document.createElement('div');
+    line.className = 'dm-stream-line' + classifyStreamLine(rawText);
+    line.textContent = rawText;
+    container.appendChild(line);
+  }
+}
+
+var dmStreamCollapsed = localStorage.getItem('wuphf-stream-collapsed') === 'true';
 function toggleDMStream() {
   dmStreamCollapsed = !dmStreamCollapsed;
+  localStorage.setItem('wuphf-stream-collapsed', dmStreamCollapsed);
   var strip = document.getElementById('dm-stream-strip');
   var btn = document.getElementById('dm-stream-toggle');
   if (strip) strip.classList.toggle('collapsed', dmStreamCollapsed);
   if (btn) btn.textContent = dmStreamCollapsed ? '\u25BE' : '\u25B4';
+}
+function toggleDMStreamPane() {
+  var lines = document.getElementById('dm-stream-lines');
+  var icon = document.getElementById('dm-stream-collapse-icon');
+  if (!lines) return;
+  var isCollapsed = lines.style.display === 'none';
+  lines.style.display = isCollapsed ? '' : 'none';
+  if (icon) icon.textContent = isCollapsed ? '\u25BE' : '\u25B8';
+  localStorage.setItem('wuphf-stream-pane-collapsed', !isCollapsed);
 }
 
 // No-op kept for any remaining call sites from the legacy appendBrokerMessage path.
@@ -8087,32 +8191,18 @@ function startAgentStream(slug, container) {
 
   agentStreamSource.onmessage = function(e) {
     try {
-      var snap = JSON.parse(e.data);
-      var line = document.createElement('div');
-      line.className = 'agent-stream-entry';
-
-      var phaseSpan = document.createElement('span');
-      phaseSpan.className = 'agent-stream-phase';
-      phaseSpan.textContent = snap.activity || snap.status || 'idle';
-      line.appendChild(phaseSpan);
-
-      var detail = snap.detail || '';
-      if (detail.length > 80) detail = detail.substring(0, 80) + '...';
-      if (detail) {
-        var detailSpan = document.createElement('span');
-        detailSpan.className = 'agent-stream-detail';
-        detailSpan.textContent = ' ' + detail;
-        line.appendChild(detailSpan);
-      }
-
-      logEl.appendChild(line);
+      renderStreamLine(logEl, e.data);
       entryCount++;
       while (logEl.children.length > 50) logEl.removeChild(logEl.firstChild);
       logEl.scrollTop = logEl.scrollHeight;
 
-      if (snap.status === 'idle' && entryCount > 1) {
-        stopAgentStream();
-      }
+      // Check for idle status to auto-stop
+      try {
+        var snap = JSON.parse(e.data);
+        if (snap.status === 'idle' && entryCount > 1) {
+          stopAgentStream();
+        }
+      } catch(_) {}
     } catch (ex) {}
   };
 
