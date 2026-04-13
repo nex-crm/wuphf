@@ -33,6 +33,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/calendar"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -3399,17 +3400,42 @@ func (l *Launcher) PreflightWeb() error {
 
 // LaunchWeb starts the broker, web UI server, and background agents without tmux.
 func (l *Launcher) LaunchWeb(webPort int) error {
-	// Prompt user about Nex setup if API key is missing
+	// Ask user about Nex setup if API key is missing
 	if !config.ResolveNoNex() && config.ResolveAPIKey("") == "" {
 		fmt.Println()
-		fmt.Println("  ⚠  Nex API key not configured.")
-		fmt.Println("     Agents will run without organizational memory (no knowledge graph,")
-		fmt.Println("     no cross-session context, no CRM/email/calendar integration).")
-		fmt.Println()
-		fmt.Println("     To set up Nex:  wuphf init")
-		fmt.Println("     To register:    nex setup")
-		fmt.Println("     To skip:        wuphf --no-nex")
-		fmt.Println()
+		fmt.Print("  Connect Nex for organizational memory? (agents remember across sessions) [Y/n] ")
+		var answer string
+		fmt.Scanln(&answer)
+		answer = strings.TrimSpace(strings.ToLower(answer))
+		if answer == "" || answer == "y" || answer == "yes" {
+			fmt.Println()
+			nexBin, err := exec.LookPath("nex")
+			if err != nil {
+				fmt.Println("  Nex CLI not found. Installing...")
+				if _, installErr := setup.InstallLatestCLI(); installErr != nil {
+					fmt.Printf("  Could not install: %v\n", installErr)
+					fmt.Println("  Continuing without Nex.")
+				} else {
+					nexBin, _ = exec.LookPath("nex")
+				}
+			}
+			if nexBin != "" {
+				cmd := exec.Command(nexBin, "setup")
+				cmd.Stdin = os.Stdin
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+				if err := cmd.Run(); err != nil {
+					fmt.Printf("  Setup did not complete: %v\n", err)
+					fmt.Println("  Continuing without Nex.")
+				} else {
+					fmt.Println("  Nex connected.")
+				}
+			}
+			fmt.Println()
+		} else {
+			fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
+			fmt.Println()
+		}
 	}
 
 	mcpConfig, err := l.ensureMCPConfig()
