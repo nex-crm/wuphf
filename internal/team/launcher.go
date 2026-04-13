@@ -2404,7 +2404,7 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		// unavailable in the Codex sandbox, so agents should skip test execution
 		// when commands fail with permission errors.
 		const sandboxNote = "Runtime: if shell commands fail with 'operation not permitted' or 'permission denied' (e.g. go test, go build cache), skip execution and deliver the code without running it.\n\n"
-		l.enqueueHeadlessCodexTurn(target.Slug, sandboxNote+notification)
+		l.enqueueHeadlessCodexTurn(target.Slug, sandboxNote+notification, channel)
 		return
 	}
 	l.sendNotificationToPane(target.PaneTarget, notification)
@@ -2934,6 +2934,11 @@ var codingAgentSlugs = map[string]bool{
 
 // agentMCPServers returns the MCP server keys that a given agent should receive.
 func agentMCPServers(slug string) []string {
+	channel := strings.TrimSpace(os.Getenv("WUPHF_CHANNEL"))
+	// DM mode: only wuphf-office (minimal tool set, no nex overhead)
+	if strings.HasPrefix(channel, "dm-") {
+		return []string{"wuphf-office"}
+	}
 	if codingAgentSlugs[slug] {
 		return []string{"wuphf-office"}
 	}

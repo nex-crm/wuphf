@@ -66,6 +66,27 @@ To let agents take real actions (send emails, update CRMs, etc.):
    /config set action_provider composio
    ```
 
+## Token Efficiency
+
+WUPHF uses 3.3x fewer tokens than [Paperclip](https://github.com/paperclipai/paperclip) for the same workload. Measured, not estimated.
+
+| | WUPHF + Claude Code | WUPHF + Codex | Paperclip |
+|---|---|---|---|
+| 5-turn session | **$0.07** | **87k billed** | **284k billed** |
+| Avg per turn | ~32k ctx (97% cached) | 17k billed | 57k billed |
+| Input trend | Flat | Flat | Growing (308k→500k) |
+| Idle cost | Zero | Zero | Heartbeat every 30s |
+
+Why: fresh sessions per turn (no context accumulation), per-role MCP tool sets (4 tools in DM vs 27), push-driven agent wakes (zero idle burn), and Anthropic prompt caching (97% cache read with Claude Code).
+
+Full methodology and raw data: [`docs/benchmark-results.md`](docs/benchmark-results.md)
+
+Run it yourself:
+
+```bash
+./scripts/benchmark.sh
+```
+
 ## The Name
 
 From [*The Office*](https://theoffice.fandom.com/wiki/WUPHF.com_(Website)). One thing hitting a bunch of people at once. The joke still fits.

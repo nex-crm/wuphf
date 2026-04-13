@@ -395,115 +395,117 @@ func Run(ctx context.Context) error {
 		return server.Run(ctx, &mcp.StdioTransport{})
 	}
 
+	// ─── Role-based tool registration ───
+	// Each role gets only the tools it needs. Cuts MCP schema overhead
+	// from ~125k tokens (27 tools) down to ~15k (4 tools in DM mode).
+	slug := resolveSlugOptional("")
+	channel := strings.TrimSpace(os.Getenv("WUPHF_CHANNEL"))
+	isDM := strings.HasPrefix(channel, "dm-")
+	isLead := slug == "" || slug == "ceo"
+
+	// DM mode: minimal tool set (same as 1:1 mode)
+	if isDM {
+		mcp.AddTool(server, officeWriteTool(
+			"team_broadcast",
+			"Reply in the conversation.",
+		), handleTeamBroadcast)
+		mcp.AddTool(server, readOnlyTool(
+			"team_poll",
+			"Read recent messages.",
+		), handleTeamPoll)
+		mcp.AddTool(server, officeWriteTool(
+			"human_message",
+			"Send a direct note to the human.",
+		), handleHumanMessage)
+		mcp.AddTool(server, officeWriteTool(
+			"human_interview",
+			"Ask the human a blocking decision question.",
+		), handleHumanInterview)
+		return server.Run(ctx, &mcp.StdioTransport{})
+	}
+
+	// Office mode: core tools for all agents
 	mcp.AddTool(server, officeWriteTool(
 		"team_broadcast",
-		"Post a message into the team channel for all teammates to see.",
+		"Post a message to the channel.",
 	), handleTeamBroadcast)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_react",
-		"React to a message with an emoji instead of posting a full reply. Use when you agree and have nothing new to add.",
-	), handleTeamReact)
-
 	mcp.AddTool(server, readOnlyTool(
 		"team_poll",
-		"LAST RESORT: Read recent channel messages only when the pushed notification is genuinely missing context. The notification already includes thread context and task state — do NOT call this by default.",
+		"Read recent channel messages. Only when pushed context is insufficient.",
 	), handleTeamPoll)
-	mcp.AddTool(server, readOnlyTool(
-		"team_inbox",
-		"Read only the messages that currently belong in your agent inbox: human asks, CEO guidance, tags to you, and replies in your threads.",
-	), handleTeamInbox)
-	mcp.AddTool(server, readOnlyTool(
-		"team_outbox",
-		"Read only the messages you authored, so you can review what you already told the office.",
-	), handleTeamOutbox)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_status",
-		"Share a short status update in the team channel. This is rendered as lightweight activity in the channel UI.",
-	), handleTeamStatus)
-
-	mcp.AddTool(server, readOnlyTool(
-		"team_members",
-		"List active participants in the shared team channel with their latest visible activity.",
-	), handleTeamMembers)
-
-	mcp.AddTool(server, readOnlyTool(
-		"team_office_members",
-		"List the office-wide roster, including members who are not in the current channel.",
-	), handleTeamOfficeMembers)
-
-	mcp.AddTool(server, readOnlyTool(
-		"team_channels",
-		"List available office channels, their descriptions, and their memberships. Agents can see channel metadata even when they are not members.",
-	), handleTeamChannels)
-
-	mcp.AddTool(server, officeDestructiveTool(
-		"team_channel",
-		"Create or remove an office channel. When creating a channel, include a clear description of what work belongs there and the initial roster that should be in it. Only do this when the human explicitly wants channel structure.",
-	), handleTeamChannel)
-
-	mcp.AddTool(server, officeDestructiveTool(
-		"team_channel_member",
-		"Add, remove, disable, or enable an agent in a specific office channel.",
-	), handleTeamChannelMember)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_bridge",
-		"CEO-only tool to bridge relevant context from one channel into another and leave a visible cross-channel trail.",
-	), handleTeamBridge)
-
-	mcp.AddTool(server, officeDestructiveTool(
-		"team_member",
-		"Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
-	), handleTeamMember)
-
-	mcp.AddTool(server, readOnlyTool(
-		"team_tasks",
-		"List the current shared tasks and who owns them so the team does not duplicate work.",
-	), handleTeamTasks)
-
-	mcp.AddTool(server, readOnlyTool(
-		"team_task_status",
-		"Summarize how many shared tasks are running and whether any are isolated in local worktrees.",
-	), handleTeamTaskStatus)
-
-	mcp.AddTool(server, readOnlyTool(
-		"team_runtime_state",
-		"Return the canonical office runtime snapshot, including tasks, pending human requests, recovery summary, and runtime capabilities.",
-	), handleTeamRuntimeState)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_task",
-		"Create, claim, assign, complete, block, or release a shared task in the office task list.",
-	), handleTeamTask)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_plan",
-		"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
-	), handleTeamPlan)
-
-	mcp.AddTool(server, readOnlyTool(
-		"team_requests",
-		"List the current office requests so you know whether the human already owes the team a decision.",
-	), handleTeamRequests)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_request",
-		"Create a structured request for the human: confirmation, choice, approval, freeform answer, or private/secret answer.",
-	), handleTeamRequest)
-
-	mcp.AddTool(server, officeWriteTool(
-		"human_interview",
-		"Ask the human a blocking interview question when the team cannot proceed responsibly without a decision.",
-	), handleHumanInterview)
-
 	mcp.AddTool(server, officeWriteTool(
 		"human_message",
-		"Send a direct human-facing note into the main chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
+		"Send a direct note to the human.",
 	), handleHumanMessage)
+	mcp.AddTool(server, officeWriteTool(
+		"human_interview",
+		"Ask the human a blocking decision question.",
+	), handleHumanInterview)
+	mcp.AddTool(server, readOnlyTool(
+		"team_tasks",
+		"List shared tasks and ownership.",
+	), handleTeamTasks)
+	mcp.AddTool(server, officeWriteTool(
+		"team_react",
+		"React to a message with an emoji.",
+	), handleTeamReact)
+	mcp.AddTool(server, officeWriteTool(
+		"team_status",
+		"Share a short status update.",
+	), handleTeamStatus)
 
-	registerActionTools(server)
+	// Lead-only tools: CEO gets coordination, delegation, and structural tools
+	if isLead {
+		mcp.AddTool(server, officeWriteTool(
+			"team_task",
+			"Create, assign, complete, or block a task.",
+		), handleTeamTask)
+		mcp.AddTool(server, officeWriteTool(
+			"team_plan",
+			"Create a batch of tasks with dependency ordering.",
+		), handleTeamPlan)
+		mcp.AddTool(server, officeWriteTool(
+			"team_bridge",
+			"Bridge context from one channel to another.",
+		), handleTeamBridge)
+		mcp.AddTool(server, readOnlyTool(
+			"team_members",
+			"List channel participants and activity.",
+		), handleTeamMembers)
+		mcp.AddTool(server, readOnlyTool(
+			"team_requests",
+			"List pending human requests.",
+		), handleTeamRequests)
+		mcp.AddTool(server, officeWriteTool(
+			"team_request",
+			"Create a structured request for the human.",
+		), handleTeamRequest)
+		mcp.AddTool(server, readOnlyTool(
+			"team_runtime_state",
+			"Office runtime snapshot: tasks, requests, recovery.",
+		), handleTeamRuntimeState)
+		mcp.AddTool(server, readOnlyTool(
+			"team_office_members",
+			"List the full office roster.",
+		), handleTeamOfficeMembers)
+		mcp.AddTool(server, readOnlyTool(
+			"team_channels",
+			"List office channels and memberships.",
+		), handleTeamChannels)
+		mcp.AddTool(server, officeDestructiveTool(
+			"team_channel",
+			"Create or remove a channel.",
+		), handleTeamChannel)
+		mcp.AddTool(server, officeDestructiveTool(
+			"team_channel_member",
+			"Add or remove an agent from a channel.",
+		), handleTeamChannelMember)
+		mcp.AddTool(server, officeDestructiveTool(
+			"team_member",
+			"Create or remove an office member.",
+		), handleTeamMember)
+		registerActionTools(server)
+	}
 
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
