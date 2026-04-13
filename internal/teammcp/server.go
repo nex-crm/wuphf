@@ -302,6 +302,11 @@ type TeamChannelArgs struct {
 	MySlug      string   `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
+type TeamDMOpenArgs struct {
+	Members []string `json:"members" jsonschema:"Array of member slugs. Must include 'human'. For 1:1 DMs: ['human', 'agent-slug']. Agent-to-agent DMs are not allowed."`
+	Type    string   `json:"type,omitempty" jsonschema:"Channel type: 'direct' (default, 1:1) or 'group' (multi-member). Defaults to direct."`
+}
+
 type TeamChannelMemberArgs struct {
 	Action     string `json:"action" jsonschema:"One of: add, remove, disable, enable"`
 	Channel    string `json:"channel" jsonschema:"Channel slug"`
@@ -433,6 +438,100 @@ func Run(ctx context.Context) error {
 		"team_poll",
 		"Read recent channel messages. Only when pushed context is insufficient.",
 	), handleTeamPoll)
+	mcp.AddTool(server, readOnlyTool(
+		"team_inbox",
+		"Read only the messages that currently belong in your agent inbox: human asks, CEO guidance, tags to you, and replies in your threads.",
+	), handleTeamInbox)
+	mcp.AddTool(server, readOnlyTool(
+		"team_outbox",
+		"Read only the messages you authored, so you can review what you already told the office.",
+	), handleTeamOutbox)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_status",
+		"Share a short status update in the team channel. This is rendered as lightweight activity in the channel UI.",
+	), handleTeamStatus)
+
+	mcp.AddTool(server, readOnlyTool(
+		"team_members",
+		"List active participants in the shared team channel with their latest visible activity.",
+	), handleTeamMembers)
+
+	mcp.AddTool(server, readOnlyTool(
+		"team_office_members",
+		"List the office-wide roster, including members who are not in the current channel.",
+	), handleTeamOfficeMembers)
+
+	mcp.AddTool(server, readOnlyTool(
+		"team_channels",
+		"List available office channels, their descriptions, and their memberships. Agents can see channel metadata even when they are not members.",
+	), handleTeamChannels)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_dm_open",
+		"Open or find a direct message channel with the human. Use this when the human explicitly asks to DM an agent. Agent-to-agent DMs are not allowed — all inter-agent communication must happen in public channels.",
+	), handleTeamDMOpen)
+
+	mcp.AddTool(server, officeDestructiveTool(
+		"team_channel",
+		"Create or remove an office channel. When creating a channel, include a clear description of what work belongs there and the initial roster that should be in it. Only do this when the human explicitly wants channel structure.",
+	), handleTeamChannel)
+
+	mcp.AddTool(server, officeDestructiveTool(
+		"team_channel_member",
+		"Add, remove, disable, or enable an agent in a specific office channel.",
+	), handleTeamChannelMember)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_bridge",
+		"CEO-only tool to bridge relevant context from one channel into another and leave a visible cross-channel trail.",
+	), handleTeamBridge)
+
+	mcp.AddTool(server, officeDestructiveTool(
+		"team_member",
+		"Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
+	), handleTeamMember)
+
+	mcp.AddTool(server, readOnlyTool(
+		"team_tasks",
+		"List the current shared tasks and who owns them so the team does not duplicate work.",
+	), handleTeamTasks)
+
+	mcp.AddTool(server, readOnlyTool(
+		"team_task_status",
+		"Summarize how many shared tasks are running and whether any are isolated in local worktrees.",
+	), handleTeamTaskStatus)
+
+	mcp.AddTool(server, readOnlyTool(
+		"team_runtime_state",
+		"Return the canonical office runtime snapshot, including tasks, pending human requests, recovery summary, and runtime capabilities.",
+	), handleTeamRuntimeState)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_task",
+		"Create, claim, assign, complete, block, or release a shared task in the office task list.",
+	), handleTeamTask)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_plan",
+		"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
+	), handleTeamPlan)
+
+	mcp.AddTool(server, readOnlyTool(
+		"team_requests",
+		"List the current office requests so you know whether the human already owes the team a decision.",
+	), handleTeamRequests)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_request",
+		"Create a structured request for the human: confirmation, choice, approval, freeform answer, or private/secret answer.",
+	), handleTeamRequest)
+
+	mcp.AddTool(server, officeWriteTool(
+		"human_interview",
+		"Ask the human a blocking interview question when the team cannot proceed responsibly without a decision.",
+	), handleHumanInterview)
+
 	mcp.AddTool(server, officeWriteTool(
 		"human_message",
 		"Send a direct note to the human.",
@@ -1619,6 +1718,48 @@ func handleTeamChannels(ctx context.Context, _ *mcp.CallToolRequest, _ TeamChann
 		lines = append(lines, line)
 	}
 	return textResult("Office channels:\n" + strings.Join(lines, "\n") + "\n\nYou can inspect channel names and descriptions even if you are not a member. Only the CEO has full cross-channel content context by default."), nil, nil
+}
+
+func handleTeamDMOpen(ctx context.Context, _ *mcp.CallToolRequest, args TeamDMOpenArgs) (*mcp.CallToolResult, any, error) {
+	if len(args.Members) < 2 {
+		return toolError(fmt.Errorf("members must have at least 2 entries (e.g. [\"human\", \"engineering\"])")), nil, nil
+	}
+	// Validate: must include human. Agent-to-agent DMs are not allowed.
+	hasHuman := false
+	for _, m := range args.Members {
+		if m == "human" || m == "you" {
+			hasHuman = true
+			break
+		}
+	}
+	if !hasHuman {
+		return toolError(fmt.Errorf("DM must include 'human' as a member; agent-to-agent DMs are not allowed")), nil, nil
+	}
+
+	dmType := strings.TrimSpace(strings.ToLower(args.Type))
+	if dmType == "" {
+		dmType = "direct"
+	}
+
+	var result struct {
+		ID      string `json:"id"`
+		Slug    string `json:"slug"`
+		Type    string `json:"type"`
+		Name    string `json:"name"`
+		Created bool   `json:"created"`
+	}
+	if err := brokerPostJSON(ctx, "/channels/dm", map[string]any{
+		"members": args.Members,
+		"type":    dmType,
+	}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+
+	action := "Found existing"
+	if result.Created {
+		action = "Created new"
+	}
+	return textResult(fmt.Sprintf("%s DM channel: #%s (id: %s, type: %s, name: %s)", action, result.Slug, result.ID, result.Type, result.Name)), nil, nil
 }
 
 func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamChannelArgs) (*mcp.CallToolResult, any, error) {
