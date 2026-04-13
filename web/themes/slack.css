@@ -2078,3 +2078,224 @@ html[data-theme="slack-dark"] .thread-reply-time {
 html[data-theme="slack-dark"] .thread-reply-count {
   color: #1D9BD1;
 }
+/* ═══════════════════════════════════════
+   FORMATTING TOOLBAR — Slack composer bar
+   ═══════════════════════════════════════ */
+html[data-theme="slack"] .formatting-toolbar,
+html[data-theme="slack-dark"] .formatting-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 0 6px 0;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 6px;
+}
+html[data-theme="slack"] .fmt-btn,
+html[data-theme="slack-dark"] .fmt-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  line-height: 1;
+  min-width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s, color 0.1s;
+}
+html[data-theme="slack"] .fmt-btn:hover {
+  background: #F0F0F0;
+  color: var(--text);
+}
+html[data-theme="slack-dark"] .fmt-btn:hover {
+  background: rgba(255,255,255,0.08);
+  color: #D1D2D3;
+}
+html[data-theme="slack"] .fmt-sep,
+html[data-theme="slack-dark"] .fmt-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════
+   JUMP TO LATEST — floating pill
+   ═══════════════════════════════════════ */
+html[data-theme="slack"] .jump-to-latest,
+html[data-theme="slack-dark"] .jump-to-latest {
+  position: absolute;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: #FFFFFF;
+  border: 1px solid var(--border-dark);
+  border-radius: 24px;
+  padding: 6px 16px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  color: #1264A3;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  display: none;
+  align-items: center;
+  gap: 4px;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+html[data-theme="slack"] .jump-to-latest:hover {
+  background: #F8F8F8;
+}
+html[data-theme="slack-dark"] .jump-to-latest {
+  background: #1A1D21;
+  border-color: #565856;
+  color: #1D9BD1;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+html[data-theme="slack-dark"] .jump-to-latest:hover {
+  background: #222529;
+}
+html[data-theme="slack"] .jump-to-latest.visible,
+html[data-theme="slack-dark"] .jump-to-latest.visible {
+  display: flex;
+}
+
+/* ═══════════════════════════════════════
+   ALSO SEND TO CHANNEL — checkbox
+   ═══════════════════════════════════════ */
+html[data-theme="slack"] .thread-send-to-channel,
+html[data-theme="slack-dark"] .thread-send-to-channel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 0 0;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+html[data-theme="slack"] .thread-send-to-channel input[type="checkbox"],
+html[data-theme="slack-dark"] .thread-send-to-channel input[type="checkbox"] {
+  accent-color: #1264A3;
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════
+   STICKY DATE SEPARATORS
+   ═══════════════════════════════════════ */
+html[data-theme="slack"] .date-separator,
+html[data-theme="slack-dark"] .date-separator {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+}
+html[data-theme="slack-dark"] .date-separator {
+  background: #1A1D21;
+}
+
+/* ═══════════════════════════════════════
+   EDITING INDICATOR — above composer
+   ═══════════════════════════════════════ */
+html[data-theme="slack"] .editing-indicator,
+html[data-theme="slack-dark"] .editing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  color: #1264A3;
+  background: #E8F5FE;
+  border-radius: 6px 6px 0 0;
+  margin-bottom: -1px;
+}
+html[data-theme="slack-dark"] .editing-indicator {
+  background: rgba(29,155,209,0.15);
+  color: #1D9BD1;
+}
+html[data-theme="slack"] .editing-indicator .editing-cancel,
+html[data-theme="slack-dark"] .editing-indicator .editing-cancel {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+/* ═══════════════════════════════════════
+   THREAD REPLY ROW — Slack avatar stack
+   ═══════════════════════════════════════ */
+html[data-theme="slack"] .thread-reply-row,
+html[data-theme="slack-dark"] .thread-reply-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+html[data-theme="slack"] .thread-reply-row:hover,
+html[data-theme="slack-dark"] .thread-reply-row:hover {
+  background: rgba(0,0,0,0.03);
+}
+html[data-theme="slack-dark"] .thread-reply-row:hover {
+  background: rgba(255,255,255,0.04);
+}
+html[data-theme="slack"] .thread-avatar-stack,
+html[data-theme="slack-dark"] .thread-avatar-stack {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+html[data-theme="slack"] .thread-avatar-mini,
+html[data-theme="slack-dark"] .thread-avatar-mini {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: #F0E6F0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  line-height: 1;
+  margin-right: -4px;
+  border: 2px solid #FFFFFF;
+  position: relative;
+}
+html[data-theme="slack-dark"] .thread-avatar-mini {
+  background: #3F0E40;
+  border-color: #1A1D21;
+}
+html[data-theme="slack"] .thread-reply-count,
+html[data-theme="slack-dark"] .thread-reply-count {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  color: #1264A3;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+html[data-theme="slack"] .thread-reply-count:hover,
+html[data-theme="slack-dark"] .thread-reply-count:hover {
+  text-decoration: underline;
+}
+html[data-theme="slack"] .thread-reply-time,
+html[data-theme="slack-dark"] .thread-reply-time {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+}
+html[data-theme="slack-dark"] .thread-reply-count {
+  color: #1D9BD1;
+}
