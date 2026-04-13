@@ -170,6 +170,11 @@ func (l *Launcher) buildResumePackets() map[string]string {
 // delivers them via the appropriate runtime:
 //   - Headless (Codex / web mode): enqueueHeadlessCodexTurn
 //   - tmux: sendNotificationToPane
+//
+// In headless mode the lead is enqueued FIRST to avoid the queue-hold guard:
+// enqueueHeadlessCodexTurn suppresses lead notifications when any specialist
+// queue is non-empty. Enqueuing the lead before specialists ensures the lead's
+// resume packet is not silently dropped at startup.
 func (l *Launcher) resumeInFlightWork() {
 	packets := l.buildResumePackets()
 	if len(packets) == 0 {
@@ -177,7 +182,15 @@ func (l *Launcher) resumeInFlightWork() {
 	}
 
 	if l.usesCodexRuntime() || l.webMode {
+		lead := l.officeLeadSlug()
+		// Enqueue lead first to bypass the queue-hold guard.
+		if packet, ok := packets[lead]; ok {
+			l.enqueueHeadlessCodexTurn(lead, packet)
+		}
 		for slug, packet := range packets {
+			if slug == lead {
+				continue
+			}
 			l.enqueueHeadlessCodexTurn(slug, packet)
 		}
 		return

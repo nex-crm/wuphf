@@ -463,3 +463,66 @@ func TestBuildResumePacketsSkipsTaggedAgentsNotInPack(t *testing.T) {
 		t.Error("expected no resume packet for 'old-agent' (not in current pack)")
 	}
 }
+
+func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *testing.T) {
+	// Spec: CEO's resume packet must not be silently dropped by the queue-hold
+	// guard when specialists are also receiving resume packets.
+	// Fix: enqueue the lead first so its queue entry is set before specialists'
+	// queues are populated — the queue-hold check fires only when OTHER slugs
+	// have non-empty queues at the time of the CEO enqueue.
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	// fe has an in-flight task (specialist).
+	b.tasks = []teamTask{
+		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
+	}
+	// ceo has an unanswered message (lead).
+	b.messages = []channelMessage{
+		{ID: "h1", From: "you", Content: "what is the strategy?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		provider: "codex", // headless path
+		broker:   b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+		headlessWorkers: make(map[string]bool),
+		headlessActive:  make(map[string]*headlessCodexActiveTurn),
+		headlessQueues:  make(map[string][]headlessCodexTurn),
+	}
+
+	l.resumeInFlightWork()
+
+	// Workers start goroutines that drain headlessQueues into headlessActive.
+	// Check both queue and active entries to avoid a race where the goroutine
+	// has already consumed the queue entry before we read it.
+	ceoPresent := func() bool {
+		l.headlessMu.Lock()
+		defer l.headlessMu.Unlock()
+		return len(l.headlessQueues["ceo"]) > 0 || l.headlessActive["ceo"] != nil
+	}
+	fePresent := func() bool {
+		l.headlessMu.Lock()
+		defer l.headlessMu.Unlock()
+		return len(l.headlessQueues["fe"]) > 0 || l.headlessActive["fe"] != nil
+	}
+
+	if !ceoPresent() {
+		t.Error("CEO resume packet was dropped by queue-hold guard — lead must be enqueued before specialists")
+	}
+	if !fePresent() {
+		t.Error("fe specialist resume packet was not enqueued")
+	}
+}
