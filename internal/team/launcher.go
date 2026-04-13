@@ -2774,7 +2774,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 	agentCfg := agentConfigFromMember(member)
 	officeMembers := l.officeMembersSnapshot()
 	lead := officeLeadSlugFrom(officeMembers, l.pack)
-	noNex := config.ResolveNoNex()
+	noNex := config.ResolveNoNex() || config.ResolveAPIKey("") == ""
 
 	var sb strings.Builder
 
@@ -3055,20 +3055,15 @@ func (l *Launcher) buildMCPServerMap() (map[string]any, error) {
 		entry["env"] = env
 	}
 
-	if !config.ResolveNoNex() {
+	if !config.ResolveNoNex() && apiKey != "" {
 		if nexMCP, err := exec.LookPath("nex-mcp"); err == nil {
-			nexEnv := map[string]string{}
-			if apiKey != "" {
-				nexEnv["WUPHF_API_KEY"] = apiKey
-				nexEnv["NEX_API_KEY"] = apiKey
-			}
-			nexEntry := map[string]any{
+			servers["nex"] = map[string]any{
 				"command": nexMCP,
+				"env": map[string]string{
+					"WUPHF_API_KEY": apiKey,
+					"NEX_API_KEY":   apiKey,
+				},
 			}
-			if len(nexEnv) > 0 {
-				nexEntry["env"] = nexEnv
-			}
-			servers["nex"] = nexEntry
 		}
 	}
 
