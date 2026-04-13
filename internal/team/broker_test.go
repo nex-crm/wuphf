@@ -2333,6 +2333,36 @@ func TestInFlightTasksReturnsOnlyNonTerminalOwned(t *testing.T) {
 	}
 }
 
+func TestInFlightTasksExcludesCompletedStatus(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "t1", Title: "Active task", Owner: "fe", Status: "in_progress"},
+		{ID: "t2", Title: "Completed task", Owner: "fe", Status: "completed"},
+	}
+	b.mu.Unlock()
+
+	got := b.InFlightTasks()
+
+	// "completed" is a terminal status — should be excluded just like "done".
+	if len(got) != 1 {
+		t.Fatalf("expected 1 in-flight task, got %d: %+v", len(got), got)
+	}
+	if got[0].ID != "t1" {
+		t.Errorf("expected t1 (in_progress), got %q", got[0].ID)
+	}
+	for _, task := range got {
+		if task.Status == "completed" {
+			t.Errorf("completed task %q should not appear in InFlightTasks()", task.ID)
+		}
+	}
+}
+
 func TestRecentHumanMessagesReturnsLastNHumanMessages(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()

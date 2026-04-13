@@ -1445,7 +1445,7 @@ func (b *Broker) AllTasks() []teamTask {
 }
 
 // InFlightTasks returns tasks that have an assigned owner and a non-terminal
-// status (anything except "done", "canceled", or "cancelled").
+// status (anything except "done", "completed", "canceled", or "cancelled").
 func (b *Broker) InFlightTasks() []teamTask {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -1455,7 +1455,7 @@ func (b *Broker) InFlightTasks() []teamTask {
 			continue
 		}
 		s := strings.ToLower(strings.TrimSpace(task.Status))
-		if s == "done" || s == "canceled" || s == "cancelled" {
+		if s == "done" || s == "completed" || s == "canceled" || s == "cancelled" {
 			continue
 		}
 		out = append(out, task)
