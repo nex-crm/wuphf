@@ -35,7 +35,7 @@ html[data-theme="slack-dark"] {
   --radius-full: 9999px;
 
   /* Sidebar stays the same dark aubergine */
-  --slack-sidebar:             #19171D;
+  --slack-sidebar:             #3F0E40;
   --slack-sidebar-hover:       rgba(255,255,255,0.04);
   --slack-sidebar-active:      #1164A3;
   --slack-sidebar-text:        rgba(255,255,255,0.7);

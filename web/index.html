@@ -1,12 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="slack">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>WUPHF — Your AI team, visible and working</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@1&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Source+Serif+4:ital,wght@0,400;0,500;1,400&display=swap" rel="stylesheet" />
+<title>WUPHF — Where your AI team works</title>
+<!-- System font stack — no external fonts needed (Slack uses system fonts) -->
 <link rel="stylesheet" href="themes/slack.css" />
 <link rel="stylesheet" href="themes/slack-dark.css" />
 <link rel="stylesheet" href="themes/windows-98.css" />
@@ -18,33 +16,33 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:             #FAF6F1;
-  --bg-warm:        #F3EDE4;
+  --bg:             #FFFFFF;
+  --bg-warm:        #F8F8F8;
   --bg-card:        #FFFFFF;
-  --text:           #3B2F2F;
-  --text-secondary: #6B5B4F;
-  --text-tertiary:  #A89888;
-  --accent:         #8B5E3C;
-  --accent-warm:    #7A4F30;
-  --accent-bg:      #F5E6D3;
-  --border:         #E8DDD0;
-  --border-light:   #F0E8DD;
-  --border-dark:    #D4C4B0;
-  --green:          #16a34a;
-  --green-bg:       #dcfce7;
-  --red:            #dc2626;
-  --red-bg:         #fef2f2;
-  --yellow:         #ca8a04;
-  --yellow-bg:      #fefce8;
-  --blue:           #2563eb;
-  --blue-bg:        #eff6ff;
+  --text:           #1D1C1D;
+  --text-secondary: #616061;
+  --text-tertiary:  #868686;
+  --accent:         #1264A3;
+  --accent-warm:    #0B4C8C;
+  --accent-bg:      #E8F5FE;
+  --border:         #E8E8E8;
+  --border-light:   #F0F0F0;
+  --border-dark:    #DDDDDD;
+  --green:          #007A5A;
+  --green-bg:       #E3F9E5;
+  --red:            #E01E5A;
+  --red-bg:         #FDE8EE;
+  --yellow:         #ECB22E;
+  --yellow-bg:      #FEF9E7;
+  --blue:           #1264A3;
+  --blue-bg:        #E8F5FE;
   --discord:        #5865F2;
   --discord-bg:     #ECEAFD;
   --discord-border: #D8D4F7;
-  --font-sans:  'Inter', system-ui, -apple-system, sans-serif;
-  --font-serif: 'Source Serif 4', Georgia, serif;
-  --font-logo:  'Instrument Serif', Georgia, serif;
-  --font-mono:  'JetBrains Mono', ui-monospace, monospace;
+  --font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-logo:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-mono:  'SFMono-Regular', Menlo, Monaco, Consolas, monospace;
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
@@ -1713,7 +1711,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   <div class="office" id="office">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <span class="sidebar-logo">wuphf</span>
+        <span class="sidebar-logo">WUPHF</span>
         <button class="sidebar-btn" title="Collapse sidebar" aria-label="Collapse sidebar">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
         </button>
@@ -1744,12 +1742,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       </button>
       <div class="usage-panel" id="usage-panel"></div>
       <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
-        <label class="sr-only" for="theme-switcher">Switch theme</label>
-        <select id="theme-switcher" aria-label="Switch theme" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
-          <option value="">Editorial</option>
-          <option value="slack">Slack</option>
-          <option value="slack-dark">Slack (Dark)</option>
-          <option value="windows-98">Windows 98</option>
+        <select id="theme-switcher" aria-label="Switch theme" style="display:none;">
+          <option value="slack" selected>Slack</option>
         </select>
       </div>
     </aside>
@@ -5694,25 +5688,11 @@ function initApp() {
 }
 
 // ─── Theme Switcher ───
+// Theme is permanently set to Slack via data-theme="slack" on <html>.
+// Force Slack theme — override any stale localStorage value.
+document.documentElement.setAttribute('data-theme', 'slack');
+localStorage.setItem('wuphf-theme', 'slack');
 var themeSwitcher = document.getElementById('theme-switcher');
-if (themeSwitcher) {
-  // Restore saved theme
-  var savedTheme = localStorage.getItem('wuphf-theme') || '';
-  if (savedTheme) {
-    document.documentElement.setAttribute('data-theme', savedTheme);
-    themeSwitcher.value = savedTheme;
-  }
-  themeSwitcher.addEventListener('change', function() {
-    var theme = themeSwitcher.value;
-    if (theme) {
-      document.documentElement.setAttribute('data-theme', theme);
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
-    localStorage.setItem('wuphf-theme', theme);
-    showNotice('Theme changed to ' + (theme || 'Editorial'), 'success');
-  });
-}
 
 
 // ═══════════════════════════════════════════════════════════════
