@@ -190,9 +190,14 @@ type officeMemberInfo struct {
 type channelInfo struct {
 	Slug        string   `json:"slug"`
 	Name        string   `json:"name"`
+	Type        string   `json:"type,omitempty"` // "O", "D", or "G" (channel store types)
 	Description string   `json:"description,omitempty"`
 	Members     []string `json:"members"`
 	Disabled    []string `json:"disabled"`
+}
+
+func (ch channelInfo) isDM() bool {
+	return ch.Type == "D" || ch.Type == "G"
 }
 
 type channelInterviewOption struct {
@@ -360,6 +365,12 @@ type channelResetDoneMsg struct {
 type channelResetDMDoneMsg struct {
 	err     error
 	removed int
+}
+type channelDMCreatedMsg struct {
+	err       error
+	slug      string // deterministic DM slug e.g. "engineering__human"
+	agentSlug string // agent side of the DM
+	name      string // display name
 }
 type channelInitDoneMsg struct {
 	err    error
@@ -977,7 +988,7 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "ctrl+d":
 			// Return to #general from a DM channel.
-			if strings.HasPrefix(m.activeChannel, "dm-") {
+			if chInfo := m.findChannelInfo(m.activeChannel); chInfo != nil && chInfo.isDM() {
 				m.activeChannel = "general"
 				m.lastID = ""
 				m.messages = nil
@@ -1478,6 +1489,23 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastID = ""
 		}
 		return m, m.pollCurrentState()
+
+	case channelDMCreatedMsg:
+		if msg.err != nil {
+			m.notice = "Failed to open DM: " + msg.err.Error()
+			return m, nil
+		}
+		// Switch to the DM channel (slug is now deterministic, e.g. "engineering__human").
+		m.activeChannel = msg.slug
+		m.focus = focusMain
+		m.lastID = ""
+		m.messages = nil
+		agentDisplay := msg.agentSlug
+		if msg.name != "" {
+			agentDisplay = msg.name
+		}
+		m.notice = fmt.Sprintf("DM with %s — Ctrl+D to return to #general", agentDisplay)
+		return m, tea.Batch(pollBroker("", m.activeChannel), pollMembers(m.activeChannel))
 
 	case channelInitDoneMsg:
 		m.posting = false
@@ -2979,9 +3007,12 @@ func (m channelModel) composerTargetLabel() string {
 	if m.isOneOnOne() {
 		return "1:1 with " + m.oneOnOneAgentName()
 	}
-	if strings.HasPrefix(m.activeChannel, "dm-") {
-		slug := strings.TrimPrefix(m.activeChannel, "dm-")
-		return "DM→" + slug
+	if chInfo := m.currentChannelInfo(); chInfo != nil && chInfo.isDM() {
+		name := chInfo.Name
+		if name == "" {
+			name = chInfo.Slug
+		}
+		return "DM→" + name
 	}
 	return m.activeChannel
 }
@@ -3268,11 +3299,9 @@ func (m channelModel) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if name == "" {
 				name = target.Slug
 			}
-			m.activeChannel = "dm-" + target.Slug
-			m.focus = focusMain
-			m.lastID = ""
-			m.messages = nil
-			m.notice = fmt.Sprintf("DM with %s — Ctrl+D to return to #general", name)
+			// Use POST /channels/dm to get the deterministic DM slug.
+			m.notice = fmt.Sprintf("Opening DM with %s\u2026", name)
+			return m, createDMChannel(target.Slug)
 		}
 	}
 	return m, nil
@@ -5225,6 +5254,34 @@ func pollChannels() tea.Cmd {
 	}
 }
 
+// createDMChannel calls POST /channels/dm to open or find a 1:1 DM with agentSlug.
+func createDMChannel(agentSlug string) tea.Cmd {
+	return func() tea.Msg {
+		body, _ := json.Marshal(map[string]any{
+			"members": []string{"human", agentSlug},
+			"type":    "direct",
+		})
+		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channels/dm", bytes.NewReader(body))
+		if err != nil {
+			return channelDMCreatedMsg{err: err, agentSlug: agentSlug}
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			return channelDMCreatedMsg{err: err, agentSlug: agentSlug}
+		}
+		defer resp.Body.Close()
+		var result struct {
+			Slug string `json:"slug"`
+			Name string `json:"name"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return channelDMCreatedMsg{err: err, agentSlug: agentSlug}
+		}
+		return channelDMCreatedMsg{slug: result.Slug, name: result.Name, agentSlug: agentSlug}
+	}
+}
+
 func channelExists(channels []channelInfo, slug string) bool {
 	for _, ch := range channels {
 		if ch.Slug == slug {
@@ -5235,8 +5292,12 @@ func channelExists(channels []channelInfo, slug string) bool {
 }
 
 func (m channelModel) currentChannelInfo() *channelInfo {
+	return m.findChannelInfo(m.activeChannel)
+}
+
+func (m channelModel) findChannelInfo(slug string) *channelInfo {
 	for i := range m.channels {
-		if m.channels[i].Slug == m.activeChannel {
+		if m.channels[i].Slug == slug {
 			return &m.channels[i]
 		}
 	}
