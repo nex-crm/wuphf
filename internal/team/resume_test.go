@@ -8,8 +8,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 )
 
-// Silence the agent import for now — it's used in Task 3 for buildResumePackets.
-// This reference ensures the import is used across the test file.
+// agent is used by TestBuildResumePacketsRouting to construct a Launcher with a pack.
 var _ = agent.Packs
 
 func TestFindUnansweredMessagesAllAnswered(t *testing.T) {
@@ -138,5 +137,140 @@ func TestBuildResumePacketMessagesOnly(t *testing.T) {
 	}
 	if !strings.Contains(packet, "sprint plan") {
 		t.Error("expected packet to contain message content")
+	}
+}
+
+// --- Tests for Launcher.buildResumePackets ---
+
+func TestBuildResumePacketsTaggedMessageRoutesToTaggedAgent(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		{ID: "h1", From: "you", Content: "hey @fe please build the login page", Tagged: []string{"fe"}, Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	packets := l.buildResumePackets()
+
+	// h1 is tagged @fe — only fe should receive a packet about this message.
+	if _, ok := packets["fe"]; !ok {
+		t.Fatal("expected 'fe' to receive a resume packet for tagged message")
+	}
+	if strings.Contains(packets["fe"], "ceo") {
+		t.Error("fe packet should not route to ceo")
+	}
+	// ceo should not receive a packet for this message (it was tagged only @fe).
+	if p, ok := packets["ceo"]; ok && strings.Contains(p, "login page") {
+		t.Error("expected ceo NOT to receive the tagged message meant for fe")
+	}
+}
+
+func TestBuildResumePacketsUntaggedMessageRoutesToLead(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		{ID: "h1", From: "you", Content: "what should we build next?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	packets := l.buildResumePackets()
+
+	// Untagged message with no reply → goes to pack lead (ceo).
+	if _, ok := packets["ceo"]; !ok {
+		t.Fatal("expected 'ceo' to receive a resume packet for untagged message")
+	}
+	if !strings.Contains(packets["ceo"], "build next") {
+		t.Error("ceo packet should contain the untagged message content")
+	}
+}
+
+func TestBuildResumePacketsInFlightTasksIncluded(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "t1", Title: "Build dashboard", Owner: "fe", Status: "in_progress"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	packets := l.buildResumePackets()
+
+	if _, ok := packets["fe"]; !ok {
+		t.Fatal("expected 'fe' to receive a resume packet for their in-flight task")
+	}
+	if !strings.Contains(packets["fe"], "Build dashboard") {
+		t.Error("fe packet should contain their task title")
+	}
+}
+
+func TestBuildResumePacketsEmptyWhenNothingInFlight(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	// No tasks, no messages.
+	l := &Launcher{
+		broker: b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+		},
+	}
+
+	packets := l.buildResumePackets()
+	if len(packets) != 0 {
+		t.Fatalf("expected empty packets when nothing in flight, got %d", len(packets))
 	}
 }

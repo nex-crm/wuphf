@@ -5,6 +5,10 @@ import (
 	"strings"
 )
 
+// recentHumanMessageLimit is the number of recent human messages to consider
+// when building resume packets.
+const recentHumanMessageLimit = 10
+
 // findUnansweredMessages returns the subset of humanMsgs that have received no
 // agent reply in allMessages. A human message is considered "answered" when at
 // least one message in allMessages has ReplyTo set to that human message's ID.
@@ -58,4 +62,96 @@ func buildResumePacket(slug string, tasks []teamTask, msgs []channelMessage) str
 
 	sb.WriteString("Please pick up where you left off.\n")
 	return sb.String()
+}
+
+// buildResumePackets scans the broker for in-flight tasks and unanswered
+// human messages, then builds a resume packet per agent. Routing:
+//   - tasks: routed to their owner slug
+//   - tagged messages: each tagged agent receives the message
+//   - untagged messages: the pack lead receives the message
+//
+// Returns a map of agent slug → resume packet (empty strings are omitted).
+func (l *Launcher) buildResumePackets() map[string]string {
+	if l.broker == nil {
+		return nil
+	}
+
+	// Determine pack lead slug.
+	lead := l.officeLeadSlug()
+
+	// Collect in-flight tasks per owner.
+	tasksByAgent := make(map[string][]teamTask)
+	for _, task := range l.broker.InFlightTasks() {
+		tasksByAgent[task.Owner] = append(tasksByAgent[task.Owner], task)
+	}
+
+	// Collect unanswered human messages.
+	humanMsgs := l.broker.RecentHumanMessages(recentHumanMessageLimit)
+	allMsgs := l.broker.AllMessages()
+	unanswered := findUnansweredMessages(humanMsgs, allMsgs)
+
+	// Route unanswered messages: explicit tags → tagged agents; untagged → lead.
+	msgsByAgent := make(map[string][]channelMessage)
+	for _, msg := range unanswered {
+		if len(msg.Tagged) > 0 {
+			for _, tag := range msg.Tagged {
+				slug := strings.TrimPrefix(tag, "@")
+				// Skip human/you tags — those are not agents.
+				if slug == "you" || slug == "human" {
+					continue
+				}
+				msgsByAgent[slug] = append(msgsByAgent[slug], msg)
+			}
+		} else {
+			if lead != "" {
+				msgsByAgent[lead] = append(msgsByAgent[lead], msg)
+			}
+		}
+	}
+
+	// Build packets — include an agent only if they have tasks or messages.
+	allSlugs := make(map[string]struct{})
+	for slug := range tasksByAgent {
+		allSlugs[slug] = struct{}{}
+	}
+	for slug := range msgsByAgent {
+		allSlugs[slug] = struct{}{}
+	}
+
+	packets := make(map[string]string)
+	for slug := range allSlugs {
+		packet := buildResumePacket(slug, tasksByAgent[slug], msgsByAgent[slug])
+		if packet != "" {
+			packets[slug] = packet
+		}
+	}
+	return packets
+}
+
+// resumeInFlightWork builds resume packets for all agents with pending work and
+// delivers them via the appropriate runtime:
+//   - Headless (Codex / web mode): enqueueHeadlessCodexTurn
+//   - tmux: sendNotificationToPane
+func (l *Launcher) resumeInFlightWork() {
+	packets := l.buildResumePackets()
+	if len(packets) == 0 {
+		return
+	}
+
+	if l.usesCodexRuntime() || l.webMode {
+		for slug, packet := range packets {
+			l.enqueueHeadlessCodexTurn(slug, packet)
+		}
+		return
+	}
+
+	// tmux path — need pane targets.
+	paneTargets := l.agentPaneTargets()
+	for slug, packet := range packets {
+		target, ok := paneTargets[slug]
+		if !ok {
+			continue
+		}
+		l.sendNotificationToPane(target.PaneTarget, packet)
+	}
 }
