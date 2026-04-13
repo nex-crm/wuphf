@@ -1326,8 +1326,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .cc-tool-summary { color: #7d8590; font-size: 12px; font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 .cc-tool-body { padding: 0 14px 6px 30px; font-size: 12px; font-family: var(--font-mono); background: #0d1117; }
 .cc-tool-body .sv-obj { padding: 0; }
-.cc-tool-result { padding: 2px 14px 4px 30px; color: #3fb950; font-size: 12px; font-family: var(--font-mono); }
-.cc-tool-error { padding: 2px 14px 4px 30px; color: #f85149; font-size: 12px; font-family: var(--font-mono); }
+.cc-tool-result, .cc-tool-result-inline { padding: 2px 0 4px; color: #3fb950; font-size: 12px; font-family: var(--font-mono); }
+.cc-tool-result-label { padding: 4px 0 2px; color: #3fb950; font-size: 11px; font-weight: 600; font-family: var(--font-mono); }
+.cc-tool-result-summary { padding: 2px 14px 4px 30px; color: #3fb950; font-size: 12px; font-family: var(--font-mono); opacity: 0.8; }
+.cc-tool-error { padding: 2px 0 4px; color: #f85149; font-size: 12px; font-family: var(--font-mono); }
 .cc-token-line { padding: 4px 14px; color: #484f58; font-size: 11px; font-family: var(--font-mono); border-bottom: 1px solid #161b22; }
 
 /* Hide old strip — replaced by split layout */
@@ -6611,6 +6613,78 @@ function renderStreamLine(container, rawText) {
       }
       toolCard.appendChild(toolBody);
 
+      // Result/error go inside the collapsible body too (prettified)
+      var result = item.result;
+      if (result && result.content && Array.isArray(result.content)) {
+        result.content.forEach(function(c) {
+          if (c.text) {
+            // Try to parse result text as JSON for prettification
+            var resultParsed = null;
+            try { resultParsed = JSON.parse(c.text); } catch(_) {}
+            if (resultParsed && typeof resultParsed === 'object') {
+              var resLabel = document.createElement('div');
+              resLabel.className = 'cc-tool-result-label';
+              resLabel.textContent = '\u2713 Response:';
+              toolBody.appendChild(resLabel);
+              toolBody.appendChild(renderValue(resultParsed, 1));
+            } else {
+              var resEl = document.createElement('div');
+              resEl.className = 'cc-tool-result-inline';
+              resEl.textContent = '\u2713 ' + c.text;
+              toolBody.appendChild(resEl);
+            }
+          }
+        });
+      }
+      if (item.error) {
+        var errParsed = null;
+        if (typeof item.error === 'object') errParsed = item.error;
+        else { try { errParsed = JSON.parse(item.error); } catch(_) {} }
+        if (errParsed && typeof errParsed === 'object') {
+          var errLabel = document.createElement('div');
+          errLabel.className = 'cc-tool-error';
+          errLabel.textContent = '\u2717 Error:';
+          toolBody.appendChild(errLabel);
+          toolBody.appendChild(renderValue(errParsed, 1));
+        } else {
+          var errEl = document.createElement('div');
+          errEl.className = 'cc-tool-error';
+          errEl.textContent = '\u2717 ' + String(item.error);
+          toolBody.appendChild(errEl);
+        }
+      }
+
+      toolCard.appendChild(toolBody);
+
+      // Visible summary line: short result or error (shown when collapsed)
+      var resultSummary = '';
+      if (result && result.content && Array.isArray(result.content)) {
+        for (var ri = 0; ri < result.content.length; ri++) {
+          if (result.content[ri].text) { resultSummary = result.content[ri].text; break; }
+        }
+      }
+      if (resultSummary) {
+        // Try to extract a short human-readable summary from JSON responses
+        var shortResult = resultSummary;
+        try {
+          var rp = JSON.parse(resultSummary);
+          if (rp && typeof rp === 'object') {
+            shortResult = rp.message || rp.status || rp.result || rp.text || (Object.keys(rp).length + ' fields');
+          }
+        } catch(_) {}
+        if (shortResult.length > 60) shortResult = shortResult.substring(0, 60) + '\u2026';
+        var visResult = document.createElement('div');
+        visResult.className = 'cc-tool-result-summary';
+        visResult.textContent = '\u2713 ' + shortResult;
+        toolCard.appendChild(visResult);
+      }
+      if (item.error) {
+        var visErr = document.createElement('div');
+        visErr.className = 'cc-tool-error';
+        visErr.textContent = '\u2717 ' + (typeof item.error === 'string' ? item.error.substring(0, 60) : 'Error');
+        toolCard.appendChild(visErr);
+      }
+
       // Toggle collapse on header click
       toolHeader.addEventListener('click', function() {
         var isOpen = toolBody.style.display !== 'none';
@@ -6618,25 +6692,6 @@ function renderStreamLine(container, rawText) {
         chevron.textContent = isOpen ? '\u25B8' : '\u25BE';
         chevron.className = 'cc-tool-chevron' + (isOpen ? '' : ' open');
       });
-
-      // Result line (always visible, below the card)
-      var result = item.result;
-      if (result && result.content && Array.isArray(result.content)) {
-        result.content.forEach(function(c) {
-          if (c.text) {
-            var resEl = document.createElement('div');
-            resEl.className = 'cc-tool-result';
-            resEl.textContent = '\u2713 ' + c.text;
-            toolCard.appendChild(resEl);
-          }
-        });
-      }
-      if (item.error) {
-        var errEl = document.createElement('div');
-        errEl.className = 'cc-tool-error';
-        errEl.textContent = '\u2717 ' + (typeof item.error === 'string' ? item.error : JSON.stringify(item.error));
-        toolCard.appendChild(errEl);
-      }
 
       container.appendChild(toolCard);
       return;
