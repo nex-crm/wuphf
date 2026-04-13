@@ -765,3 +765,139 @@ html[data-theme="slack-dark"] ::selection {
   background: rgba(18, 100, 163, 0.3);
   color: #D1D2D3;
 }
+
+/* ═══════════════════════════════════════
+   SIDEBAR SECTION COLLAPSE (dark)
+   ═══════════════════════════════════════ */
+html[data-theme="slack-dark"] .sidebar-section-title {
+  cursor: pointer;
+  display: flex !important;
+  align-items: center;
+  gap: 4px;
+  user-select: none;
+}
+html[data-theme="slack-dark"] .sidebar-section-title:hover {
+  color: var(--slack-sidebar-text-active) !important;
+}
+html[data-theme="slack-dark"] .sidebar-section-chevron {
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  color: inherit;
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  flex-shrink: 0;
+}
+html[data-theme="slack-dark"] .sidebar-section-chevron.collapsed {
+  transform: rotate(0deg);
+}
+html[data-theme="slack-dark"] .sidebar-collapsible {
+  overflow: hidden;
+  transition: max-height 0.2s ease, opacity 0.2s ease;
+  max-height: 1000px;
+  opacity: 1;
+}
+html[data-theme="slack-dark"] .sidebar-collapsible.collapsed {
+  max-height: 0 !important;
+  opacity: 0;
+}
+
+/* ═══════════════════════════════════════
+   UNREAD CHANNEL BOLD + WHITE DOT (dark)
+   ═══════════════════════════════════════ */
+html[data-theme="slack-dark"] .sidebar-item.unread {
+  color: var(--slack-sidebar-text-active) !important;
+  font-weight: 700 !important;
+  position: relative;
+}
+html[data-theme="slack-dark"] .sidebar-item.unread::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #FFFFFF;
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* ═══════════════════════════════════════
+   WORKSPACE HEADER DROPDOWN (dark)
+   ═══════════════════════════════════════ */
+html[data-theme="slack-dark"] .sidebar-header {
+  position: relative;
+}
+html[data-theme="slack-dark"] .sidebar-logo {
+  cursor: pointer !important;
+}
+html[data-theme="slack-dark"] .workspace-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 8px;
+  right: 8px;
+  background: #1A1D21;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  z-index: 1000;
+  padding: 8px 0;
+  display: none;
+  font-family: var(--font-sans);
+}
+html[data-theme="slack-dark"] .workspace-dropdown.open {
+  display: block;
+}
+html[data-theme="slack-dark"] .workspace-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 16px;
+  color: #D1D2D3;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  width: 100%;
+  text-align: left;
+  font-family: var(--font-sans);
+}
+html[data-theme="slack-dark"] .workspace-dropdown-item:hover {
+  background: #1264A3;
+  color: #FFFFFF;
+}
+html[data-theme="slack-dark"] .workspace-dropdown-item .ws-menu-icon {
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+  font-size: 15px;
+}
+html[data-theme="slack-dark"] .workspace-dropdown-sep {
+  height: 1px;
+  background: rgba(255,255,255,0.1);
+  margin: 4px 0;
+}
+
+/* ═══════════════════════════════════════
+   STARRED CHANNELS (dark)
+   ═══════════════════════════════════════ */
+html[data-theme="slack-dark"] .sidebar-star {
+  opacity: 0;
+  cursor: pointer;
+  font-size: 13px;
+  margin-left: auto;
+  transition: opacity 0.1s;
+  color: var(--slack-sidebar-text);
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  line-height: 1;
+}
+html[data-theme="slack-dark"] .sidebar-item:hover .sidebar-star {
+  opacity: 1;
+}
+html[data-theme="slack-dark"] .sidebar-star.starred {
+  opacity: 1 !important;
+  color: #ECB22E !important;
+}
