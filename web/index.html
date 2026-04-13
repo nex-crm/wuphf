@@ -2570,6 +2570,18 @@ function renderTeamGrid() {
 
 // ─── Launch ───
 function launchOffice() {
+  // Persist onboarding answers to broker config — fire and forget
+  var companyData = {
+    name: (document.getElementById('q-company') ? document.getElementById('q-company').value.trim() : ''),
+    description: (document.getElementById('q-description') ? document.getElementById('q-description').value.trim() : ''),
+    goals: (document.getElementById('q-goals') ? document.getElementById('q-goals').value.trim() : ''),
+    size: selectedSize || '',
+    priority: (document.getElementById('q-priority') ? document.getElementById('q-priority').value.trim() : '')
+  };
+  if (companyData.name || companyData.description || companyData.goals) {
+    WuphfAPI.post('/company', companyData).catch(function() {});
+  }
+
   document.getElementById('onboarding').style.display = 'none';
   showSplashScreen(function() { showOffice(); });
 }
