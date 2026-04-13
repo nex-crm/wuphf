@@ -3403,7 +3403,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	// Ask user about Nex setup if API key is missing
 	if !config.ResolveNoNex() && config.ResolveAPIKey("") == "" {
 		fmt.Println()
-		fmt.Print("  Connect Nex for organizational memory? (agents remember across sessions) [Y/n] ")
+		fmt.Print("  Connect Nex for memory and context? [Y/n] ")
 		var answer string
 		fmt.Scanln(&answer)
 		answer = strings.TrimSpace(strings.ToLower(answer))
