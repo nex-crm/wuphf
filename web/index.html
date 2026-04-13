@@ -2921,9 +2921,11 @@ function switchApp(appId) {
     composerEl.style.display = '';
     var ch = CHANNELS.find(function(c) { return c.name === currentChannel; });
     if (isDM) {
-      var dmSlug = currentChannel.slice(3);
-      var agent = AGENTS.find(function(a) { return a.slug === dmSlug; });
-      document.getElementById('channel-title').textContent = agent ? agent.name : dmSlug;
+      var meta = channelMetadata[currentChannel];
+      var dmSlug = meta ? meta.agentSlug : null;
+      var agent = dmSlug ? AGENTS.find(function(a) { return a.slug === dmSlug; }) : null;
+      var dmName = (meta && meta.name) ? meta.name : (agent ? agent.name : (dmSlug || currentChannel));
+      document.getElementById('channel-title').textContent = dmName;
       document.getElementById('channel-desc').textContent = 'direct message';
     } else {
       document.getElementById('channel-title').textContent = '# ' + currentChannel;
