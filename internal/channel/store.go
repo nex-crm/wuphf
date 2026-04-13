@@ -384,6 +384,28 @@ func (s *Store) IsGroupMessage(channelID string) bool {
 	return ok && ch.Type == ChannelTypeGroup
 }
 
+// IsDirectMessageBySlug returns true if the given slug identifies a DM channel.
+// Unlike IsDirectMessage (which takes a UUID), this checks by slug.
+func (s *Store) IsDirectMessageBySlug(slug string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ch, ok := s.bySlug[slug]
+	return ok && ch.Type == ChannelTypeDirect
+}
+
+// OtherMemberBySlug returns the other member in a DM channel identified by slug.
+func (s *Store) OtherMemberBySlug(channelSlug, memberSlug string) (string, bool) {
+	s.mu.RLock()
+	ch, ok := s.bySlug[channelSlug]
+	if !ok || ch.Type != ChannelTypeDirect {
+		s.mu.RUnlock()
+		return "", false
+	}
+	channelID := ch.ID
+	s.mu.RUnlock()
+	return s.OtherMember(channelID, memberSlug)
+}
+
 // storeJSON is the on-disk representation of the store.
 type storeJSON struct {
 	Channels []Channel       `json:"channels"`
