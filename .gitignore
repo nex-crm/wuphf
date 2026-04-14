@@ -3,6 +3,7 @@
 /nex
 
 # Local artifacts
+/docs/
 /termwright-artifacts/
 .worktrees/
 .vexp/
