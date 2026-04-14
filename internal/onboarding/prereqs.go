@@ -32,13 +32,16 @@ type prereqSpec struct {
 var prereqSpecs = map[string]prereqSpec{
 	"node":   {required: true, installURL: "https://nodejs.org"},
 	"git":    {required: true, installURL: "https://git-scm.com"},
-	"claude": {required: true, installURL: "https://claude.ai/code"},
+	"claude": {required: false, installURL: "https://claude.ai/code"},
+	"codex":  {required: false, installURL: "https://github.com/openai/codex"},
 }
 
 // CheckAll returns a PrereqResult for each tracked binary in a stable order:
-// node, git, claude.
+// node, git, claude, codex. At least one of claude/codex must be present
+// for wuphf to actually run a turn, but both are marked optional here so
+// the user can proceed with whichever runtime they have.
 func CheckAll() []PrereqResult {
-	names := []string{"node", "git", "claude"}
+	names := []string{"node", "git", "claude", "codex"}
 	results := make([]PrereqResult, 0, len(names))
 	for _, name := range names {
 		results = append(results, CheckOne(name))

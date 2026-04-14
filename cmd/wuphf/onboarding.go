@@ -705,9 +705,10 @@ func (m onboardingModel) fetchPrereqsCmd() tea.Cmd {
 
 func defaultPrereqs() []prereqResult {
 	return []prereqResult{
-		{Name: "git", Required: true, Found: false},
-		{Name: "node", Required: false, Found: false},
-		{Name: "claude", Required: false, Found: false, InstallURL: "claude.ai/code"},
+		{Name: "node", Required: true, Found: false, InstallURL: "https://nodejs.org"},
+		{Name: "git", Required: true, Found: false, InstallURL: "https://git-scm.com"},
+		{Name: "claude", Required: false, Found: false, InstallURL: "https://claude.ai/code"},
+		{Name: "codex", Required: false, Found: false, InstallURL: "https://github.com/openai/codex"},
 	}
 }
 

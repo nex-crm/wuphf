@@ -1531,50 +1531,9 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </div>
 
         <div class="wizard-panel">
-          <p class="wizard-panel-title">Connect your AI providers</p>
-          <div class="key-row">
-            <div class="key-label-wrap">
-              <span class="key-label">Anthropic</span>
-              <span class="key-hint">Required &mdash; the office won't start without this</span>
-            </div>
-            <div class="key-input-wrap">
-              <input class="input" type="password" id="wiz-key-anthropic" placeholder="sk-ant-..." autocomplete="off"
-                oninput="onKeyInput('anthropic',this.value)"
-                onblur="validateKey('anthropic', this.value)" />
-              <span class="key-status" id="wiz-key-status-anthropic"></span>
-              <div class="unreachable-notice" id="wiz-unreachable-anthropic" style="display:none;">
-                Couldn't reach Anthropic &mdash; key looks valid but unverified.
-                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;">
-                  <input type="checkbox" id="wiz-unreachable-accept" onchange="updateReadyButton()" />
-                  Continue anyway?
-                </label>
-              </div>
-            </div>
-          </div>
-          <div class="key-row">
-            <div class="key-label-wrap">
-              <span class="key-label">OpenAI</span>
-              <span class="key-hint">Optional</span>
-            </div>
-            <div class="key-input-wrap">
-              <input class="input" type="password" id="wiz-key-openai" placeholder="sk-..." autocomplete="off"
-                oninput="onKeyInput('openai',this.value)"
-                onblur="validateKey('openai', this.value)" />
-              <span class="key-status" id="wiz-key-status-openai"></span>
-            </div>
-          </div>
-          <div class="key-row">
-            <div class="key-label-wrap">
-              <span class="key-label">Gemini</span>
-              <span class="key-hint">Optional</span>
-            </div>
-            <div class="key-input-wrap">
-              <input class="input" type="password" id="wiz-key-gemini" placeholder="AIza..." autocomplete="off"
-                oninput="onKeyInput('gemini',this.value)"
-                onblur="validateKey('gemini', this.value)" />
-              <span class="key-status" id="wiz-key-status-gemini"></span>
-            </div>
-          </div>
+          <p class="wizard-panel-title">Pick your runtime</p>
+          <p style="font-size:12px;color:var(--text-secondary);margin:-8px 0 12px 0;">The CLI that runs your agents. Pick the one you already use.</p>
+          <div id="wiz-runtime-tiles"></div>
         </div>
 
         <div style="display:flex;justify-content:flex-end;">
@@ -6613,6 +6572,7 @@ function recheckWizPrereqs() {
         wizPrereqState[p.name] = p;
       });
       renderWizPrereqs(prereqs);
+      renderRuntimeTiles();
       updateReadyButton();
     })
     .catch(function() {
@@ -6629,13 +6589,24 @@ var PREREQ_INSTALL_LINKS = {
   node: 'https://nodejs.org',
   git: 'https://git-scm.com',
   claude: 'https://claude.ai/download',
+  codex: 'https://github.com/openai/codex',
 };
+
+// Infrastructure prereqs (shown in the "tools" panel). Runtimes (claude, codex)
+// render separately in the "Pick your runtime" tile panel.
+var INFRA_PREREQS = { node: true, git: true };
+
+// The runtime the user selected in the wizard. Used to gate the Ready button
+// and persisted in onboarding progress so the broker knows which runtime to
+// spawn. Null means the user has not picked yet.
+var wizSelectedRuntime = null;
 
 function renderWizPrereqs(prereqs) {
   var listEl = document.getElementById('wiz-prereq-list');
   if (!listEl) return;
   listEl.textContent = '';
   prereqs.forEach(function(p) {
+    if (!INFRA_PREREQS[(p.name || '').toLowerCase()]) return;
     var row = _wE('div', 'prereq-row');
     var dot = _wE('span', 'prereq-dot ' + (p.ok ? 'ok' : 'fail'));
     var name = _wE('span', 'prereq-name', p.name);
@@ -6655,6 +6626,110 @@ function renderWizPrereqs(prereqs) {
     row.appendChild(name);
     row.appendChild(right);
     listEl.appendChild(row);
+  });
+}
+
+// Metadata for the runtime tiles shown in step 2. Keys match the prereq names
+// the broker returns so we can look up detection status by slug.
+var RUNTIME_TILES = [
+  {
+    id: 'claude',
+    name: 'Claude Code',
+    desc: "Anthropic's CLI. Uses your Claude Code subscription, no API key needed.",
+    install: 'npm install -g @anthropic-ai/claude-code',
+  },
+  {
+    id: 'codex',
+    name: 'Codex',
+    desc: "OpenAI's CLI. Uses your OpenAI account login.",
+    install: 'npm install -g @openai/codex',
+  },
+];
+
+function renderRuntimeTiles() {
+  var host = document.getElementById('wiz-runtime-tiles');
+  if (!host) return;
+  host.textContent = '';
+
+  // Auto-select the first detected runtime when the user has not picked one.
+  if (!wizSelectedRuntime) {
+    for (var i = 0; i < RUNTIME_TILES.length; i++) {
+      var s = wizPrereqState[RUNTIME_TILES[i].id];
+      if (s && s.ok) { wizSelectedRuntime = RUNTIME_TILES[i].id; break; }
+    }
+  }
+
+  RUNTIME_TILES.forEach(function(rt) {
+    var state = wizPrereqState[rt.id];
+    var detected = !!(state && state.ok);
+    var isActive = wizSelectedRuntime === rt.id;
+
+    var tile = _wE('div', 'provider-option' + (isActive ? ' active' : ''));
+    tile.style.display = 'block';
+    tile.style.cursor = 'pointer';
+
+    var header = _wE('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    var dot = _wE('span', 'prereq-dot ' + (detected ? 'ok' : 'fail'));
+    dot.style.flex = '0 0 auto';
+    var nameEl = _wE('div', 'provider-option-name', rt.name);
+    header.appendChild(dot);
+    header.appendChild(nameEl);
+    if (isActive) {
+      var check = _wE('span', 'provider-option-check', '\u2713');
+      check.style.marginLeft = 'auto';
+      header.appendChild(check);
+    }
+    tile.appendChild(header);
+
+    var descEl = _wE('div', 'provider-option-desc', rt.desc);
+    descEl.style.marginTop = '4px';
+    tile.appendChild(descEl);
+
+    var statusEl = _wE('div');
+    statusEl.style.cssText = 'font-size:12px;margin-top:6px;';
+    if (detected) {
+      statusEl.textContent = 'Detected' + (state.version ? ' — ' + state.version : '');
+      statusEl.style.color = 'var(--green, #22c55e)';
+    } else {
+      statusEl.textContent = 'Not installed';
+      statusEl.style.color = 'var(--text-tertiary)';
+    }
+    tile.appendChild(statusEl);
+
+    // Show install command only when the user selects an uninstalled tile.
+    if (isActive && !detected) {
+      var installBox = _wE('div');
+      installBox.style.cssText = 'margin-top:10px;padding:10px;background:var(--bg-card,#1a1a1f);border-radius:6px;font-family:var(--font-mono,monospace);font-size:12px;display:flex;align-items:center;gap:8px;';
+      var cmd = _wE('code', null, rt.install);
+      cmd.style.flex = '1';
+      installBox.appendChild(cmd);
+      var copyBtn = _wE('button', 'btn btn-ghost btn-sm', 'Copy');
+      copyBtn.type = 'button';
+      copyBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(rt.install).then(function() {
+            copyBtn.textContent = 'Copied';
+            setTimeout(function() { copyBtn.textContent = 'Copy'; }, 1500);
+          });
+        }
+      });
+      installBox.appendChild(copyBtn);
+      tile.appendChild(installBox);
+
+      var hint = _wE('div', null, "After installing, press Re-check on the tools panel above.");
+      hint.style.cssText = 'font-size:11px;color:var(--text-tertiary);margin-top:6px;';
+      tile.appendChild(hint);
+    }
+
+    tile.addEventListener('click', function() {
+      wizSelectedRuntime = rt.id;
+      renderRuntimeTiles();
+      updateReadyButton();
+    });
+
+    host.appendChild(tile);
   });
 }
 
@@ -6726,19 +6801,18 @@ function validateKey(provider, value) {
 function updateReadyButton() {
   var btn = document.getElementById('wiz-btn-ready');
   if (!btn) return;
-  var prereqsOk = !!wizPrereqState._fallback || Object.keys(wizPrereqState).every(function(k) {
+  // Infrastructure tools (node, git) must be present.
+  var infraOk = !!wizPrereqState._fallback || ['node', 'git'].every(function(k) {
     return wizPrereqState[k] && wizPrereqState[k].ok;
   });
-  var anthropicStatus = wizKeyState['anthropic'] || 'empty';
-  var acceptCheckbox = document.getElementById('wiz-unreachable-accept');
-  // Users running Claude Code have their own auth via the `claude` CLI, so
-  // a pasted Anthropic API key is not required. Detect that path via the
-  // prereq result and treat it as valid.
-  var claudeCliFound = !!(wizPrereqState['claude'] && wizPrereqState['claude'].ok);
-  var anthropicOk = (anthropicStatus === 'valid') ||
-    (anthropicStatus === 'unreachable' && acceptCheckbox && acceptCheckbox.checked) ||
-    claudeCliFound;
-  btn.disabled = !(prereqsOk && anthropicOk);
+  // The selected runtime must also be detected — picking Codex without
+  // having Codex installed shouldn't unlock Ready.
+  var runtimeOk = !!(
+    wizSelectedRuntime &&
+    wizPrereqState[wizSelectedRuntime] &&
+    wizPrereqState[wizSelectedRuntime].ok
+  );
+  btn.disabled = !(infraOk && runtimeOk);
 }
 
 function loadTemplates() {
