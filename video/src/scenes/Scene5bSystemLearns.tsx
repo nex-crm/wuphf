@@ -3,7 +3,6 @@ import { colors, fonts, sec, FPS, slack } from "../theme";
 import { AgentAvatar } from "../components/AgentAvatar";
 import { FadeIn } from "../components/FadeIn";
 import { DotGrid, RadialGlow } from "../components/DotGrid";
-import { Confetti } from "../components/Confetti";
 
 export const Scene5bSystemLearns: React.FC = () => {
   const frame = useCurrentFrame();
@@ -79,7 +78,6 @@ export const Scene5bSystemLearns: React.FC = () => {
     <AbsoluteFill style={{ backgroundColor: "#0B0D10", opacity: uiOpacity }}>
       <DotGrid color="#FFFFFF" opacity={0.04} spacing={40} size={1.2} />
       <RadialGlow color={slack.presence} x="50%" y="50%" size={1200} opacity={0.18} />
-      <Confetti startFrame={sec(5)} count={50} originX={0.5} originY={0.5} />
       <div
         style={{
           position: "absolute", inset: 0,
