@@ -317,7 +317,35 @@ func (l *Launcher) notifyAgentsLoop() {
 		if msg.From == "system" {
 			continue
 		}
-		l.deliverMessageNotification(msg)
+		l.safeDeliverMessage(msg)
+	}
+}
+
+// safeDeliverMessage wraps deliverMessageNotification in a panic recover so a
+// bad message doesn't take the whole broker down. Stack is written to stderr
+// and logs/panics.log so we can diagnose the next occurrence.
+func (l *Launcher) safeDeliverMessage(msg channelMessage) {
+	defer recoverPanicTo("deliverMessageNotification", fmt.Sprintf("msg=%+v", msg))
+	l.deliverMessageNotification(msg)
+}
+
+// recoverPanicTo is the shared panic-recovery body used by broker background
+// goroutines. It logs the goroutine stack to stderr and to
+// ~/.wuphf/logs/panics.log so the broker stays up even if a specific action
+// path blows up. Call as: defer recoverPanicTo("loopName", "extra context").
+func recoverPanicTo(site, extra string) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	buf := make([]byte, 16<<10)
+	n := runtime.Stack(buf, false)
+	fmt.Fprintf(os.Stderr, "panic in %s: %v\n%s\n%s\n", site, r, extra, buf[:n])
+	if home, err := os.UserHomeDir(); err == nil {
+		if f, ferr := os.OpenFile(filepath.Join(home, ".wuphf", "logs", "panics.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); ferr == nil {
+			fmt.Fprintf(f, "%s panic in %s: %v\n%s\n%s\n\n", time.Now().UTC().Format(time.RFC3339), site, r, extra, buf[:n])
+			f.Close()
+		}
 	}
 }
 
@@ -347,7 +375,10 @@ func (l *Launcher) notifyTaskActionsLoop() {
 		if action.Kind != "task_unblocked" && strings.EqualFold(strings.TrimSpace(task.Status), "done") {
 			continue
 		}
-		l.deliverTaskNotification(action, task)
+		func() {
+			defer recoverPanicTo("deliverTaskNotification", fmt.Sprintf("action=%+v task=%+v", action, task))
+			l.deliverTaskNotification(action, task)
+		}()
 	}
 }
 
