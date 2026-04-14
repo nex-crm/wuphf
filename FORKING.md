@@ -25,13 +25,25 @@ WUPHF ships with optional Nex context graph integration. If you want a clean, ve
 
 That's the whole fix. The `--no-nex` flag skips all Nex wiring at startup. No code edits needed.
 
-If you want Nex gone from your fork entirely:
+If you want Nex gone from your fork entirely, there are four integration points to remove:
 
 ```bash
+# 1. Delete the Nex packages
 rm -rf nex/ mcp/nex*/
-# then delete the "nex" import blocks in cmd/wuphf/main.go
-# and the --no-nex flag (it becomes always-on)
+
+# 2. Delete the Nex API client
+rm internal/action/nex_client.go
+
+# 3. Remove the nex-mcp lookPath blocks (2 places)
+#    internal/team/launcher.go      ~ line 3069  (search: nex-mcp)
+#    internal/team/headless_codex.go ~ line 555   (search: nex-mcp)
+
+# 4. Remove nex types from launcher context
+#    internal/team/launcher.go ~ line 55   (nexFeedItemContentItem)
+#    internal/team/launcher.go ~ line 1489 (selectImportantInsights / nexInsight)
 ```
+
+Then in `cmd/wuphf/main.go`: delete the `--no-nex` flag and the import blocks that reference `nex`. The `ResolveNoNex()` calls in `cmd/wuphf/channel.go` and `internal/config/config.go` can be deleted or replaced with a constant `true`.
 
 ## 2. Strip the Office branding
 
@@ -46,15 +58,25 @@ WUPHF uses *The Office* (US) references throughout the UI and copy. If you're sh
 | `internal/team/template.go` | Agent prompt templates that reference Office tone |
 | `internal/teammcp/actions.go` | Action descriptions |
 
-A fast pass:
+A fast pass scoped to source files only:
 
 ```bash
-grep -rn "Ryan\|Michael\|Dunder\|Scranton\|WUPHF\.com" --include='*.go' --include='*.html' --include='*.md'
+grep -rn "Ryan\|Michael\|Dunder\|Scranton\|WUPHF\.com" \
+  --include='*.go' --include='*.html' \
+  ./cmd ./internal ./web ./mcp
 ```
 
-That will surface ~40 hits across two clusters:
-- **Slash-command help text** in `cmd/wuphf/channel.go` — every slash command has a one-line Office joke. Edit in-place; removing the strings doesn't affect command behavior.
-- **Web UI splash** in `web/index.html` — search for "WUPHF" in the HTML to find the intro screen copy.
+That will surface ~50 hits across 5 files:
+
+| File | Hits | What to change |
+|---|---|---|
+| `web/index.html` | 25 | Intro splash copy, channel header strings |
+| `cmd/wuphf/channel.go` | 18 | Slash-command help text (one joke per command) |
+| `cmd/wuphf/channel_render.go` | 3 | Status line strings |
+| `cmd/wuphf/main.go` | 2 | Startup notice strings |
+| `cmd/wuphf/channel_workspace_state.go` | 1 | Workspace state notice |
+
+Removing these strings doesn't affect command behavior — they're display copy only.
 
 Rename the binary in `cmd/wuphf/` + `go.mod` + goreleaser config if you want a different command name.
 
