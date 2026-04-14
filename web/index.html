@@ -6671,6 +6671,19 @@ var RUNTIME_TILES = [
   },
 ];
 
+// Persist the wizard runtime tile choice to ~/.wuphf/config.json so
+// config.ResolveLLMProvider (and /health) reflect the user's pick after
+// the wizard. Tile ids map: 'claude' -> 'claude-code', 'codex' -> 'codex'.
+function persistRuntimeChoice(tileId) {
+  var provider = tileId === 'claude' ? 'claude-code' : (tileId === 'codex' ? 'codex' : '');
+  if (!provider) return;
+  fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ llm_provider: provider })
+  }).catch(function() { /* best-effort; wizard still completes */ });
+}
+
 function renderRuntimeTiles() {
   var host = document.getElementById('wiz-runtime-tiles');
   if (!host) return;
@@ -6750,6 +6763,7 @@ function renderRuntimeTiles() {
 
     tile.addEventListener('click', function() {
       wizSelectedRuntime = rt.id;
+      persistRuntimeChoice(rt.id);
       renderRuntimeTiles();
       updateReadyButton();
     });
@@ -6894,6 +6908,9 @@ function completeOnboarding(skipTask) {
     var ta = document.getElementById('wiz-task-input');
     task = ta ? (ta.value || '') : '';
   }
+  // Safety net: persist the selected runtime in case the user landed on the
+  // auto-selected default without clicking a tile.
+  if (wizSelectedRuntime) persistRuntimeChoice(wizSelectedRuntime);
   fetch('/api/onboarding/complete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -797,6 +797,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
+	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
@@ -3501,6 +3502,52 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleConfig exposes a narrow GET/POST surface over ~/.wuphf/config.json so
+// the onboarding wizard can persist the user's runtime pick (claude-code | codex)
+// without shelling into the full config. Only llm_provider is writable here;
+// other fields are owned by their dedicated endpoints (e.g. /company, Nex register).
+func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		cfg, _ := config.Load()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"llm_provider": cfg.LLMProvider,
+		})
+	case http.MethodPost:
+		var body struct {
+			LLMProvider string `json:"llm_provider"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		provider := strings.TrimSpace(strings.ToLower(body.LLMProvider))
+		switch provider {
+		case "claude-code", "codex":
+			// ok
+		default:
+			http.Error(w, "unsupported llm_provider", http.StatusBadRequest)
+			return
+		}
+		cfg, _ := config.Load()
+		cfg.LLMProvider = provider
+		if err := config.Save(cfg); err != nil {
+			http.Error(w, "save failed", http.StatusInternalServerError)
+			return
+		}
+		// Keep /health in sync for this process so the wizard choice is
+		// reflected immediately without requiring a broker restart.
+		b.mu.Lock()
+		b.runtimeProvider = provider
+		b.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "llm_provider": provider})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
