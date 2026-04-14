@@ -17,6 +17,27 @@ import (
 
 const appName = "wuphf"
 
+// printVisibleFlags prints all registered flags except those tagged "(internal)"
+// or the meta-flag --help-all. Matches Go's flag.PrintDefaults() layout so
+// users get the same familiar formatting.
+func printVisibleFlags(w *os.File) {
+	flag.VisitAll(func(f *flag.Flag) {
+		if f.Name == "help-all" {
+			return
+		}
+		if strings.Contains(f.Usage, "(internal)") {
+			return
+		}
+		fmt.Fprintf(w, "  -%s\n    \t%s", f.Name, f.Usage)
+		// Only emit a trailing (default ...) when the usage string hasn't
+		// already mentioned the default itself.
+		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && !strings.Contains(f.Usage, "default") {
+			fmt.Fprintf(w, " (default %q)", f.DefValue)
+		}
+		fmt.Fprintln(w)
+	})
+}
+
 func main() {
 	cmd := flag.String("cmd", "", "Run a command non-interactively")
 	format := flag.String("format", "text", "Output format (text, json)")
@@ -35,21 +56,29 @@ func main() {
 	opusCEO := flag.Bool("opus-ceo", false, "Upgrade CEO agent from Sonnet to Opus")
 	collabMode := flag.Bool("collab", false, "Start in collaborative mode (all agents see all messages)")
 	noOpen := flag.Bool("no-open", false, "Don't open browser automatically on launch")
+	helpAll := flag.Bool("help-all", false, "Show all flags including internal ones")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "WUPHF v%s\n\n", buildinfo.Current().Version)
+		fmt.Fprintf(os.Stderr, "WUPHF v%s — the terminal office Ryan Howard always wanted.\n\n", buildinfo.Current().Version)
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
 		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
-		fmt.Fprintf(os.Stderr, "  %s shred        Stop the running team\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s shred        Stop the running team (Michael will not be happy)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from paperclip  Import from running Paperclip (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
-		flag.PrintDefaults()
+		printVisibleFlags(os.Stderr)
+		fmt.Fprintf(os.Stderr, "\nFor all flags including internal ones: %s --help-all\n", appName)
 	}
 
 	flag.Parse()
+
+	if *helpAll {
+		fmt.Fprintf(os.Stderr, "WUPHF v%s — all flags (including internal):\n\n", buildinfo.Current().Version)
+		flag.PrintDefaults()
+		os.Exit(0)
+	}
 
 	if *noNex {
 		_ = os.Setenv("WUPHF_NO_NEX", "1")
