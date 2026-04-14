@@ -80,18 +80,22 @@ WUPHF can bridge to Telegram. Run `/connect` inside the office, pick Telegram, p
 
 ## External Actions
 
-To let agents take real actions (send emails, update CRMs, etc.), WUPHF ships with two action providers — pick whichever fits your style:
+To let agents take real actions (send emails, update CRMs, etc.), WUPHF ships with two action providers. Pick whichever fits your style.
 
-**One CLI** (default, local-first). Uses a local CLI binary to execute actions on your machine. Good if you want everything running locally and don't want to send credentials to a third party.
+### One CLI — default, local-first
+
+Uses a local CLI binary to execute actions on your machine. Good if you want everything running locally and don't want to send credentials to a third party.
 
 ```
 /config set action_provider one
 ```
 
-**Composio** (cloud-hosted). Connect SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flows. Good if you'd rather not manage local CLI auth.
+### Composio — cloud-hosted
 
-1. Create a [Composio](https://composio.dev) project and generate an API key
-2. Connect the accounts you want (Gmail, Slack, etc.)
+Connects SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flows. Good if you'd rather not manage local CLI auth.
+
+1. Create a [Composio](https://composio.dev) project and generate an API key.
+2. Connect the accounts you want (Gmail, Slack, etc.).
 3. Inside the office:
    ```
    /config set composio_api_key <key>
