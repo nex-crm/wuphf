@@ -1225,11 +1225,11 @@ html[data-theme="slack"] .welcome-copy {
   font-family: var(--font-sans) !important;
 }
 
-/* Step titles */
+/* Step titles — drop the !important 900 override; inherit 700 from base to
+   match the wizard-headline (H1) weight and keep the system coherent. */
 html[data-theme="slack"] .step-title {
   font-family: var(--font-sans) !important;
   font-style: normal !important;
-  font-weight: 900 !important;
   font-size: 28px !important;
 }
 html[data-theme="slack"] .step-subtitle {
