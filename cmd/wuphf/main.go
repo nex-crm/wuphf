@@ -254,7 +254,7 @@ func dispatch(cmd string, apiKeyFlag string, format string) {
 	}
 	apiKey := config.ResolveAPIKey(apiKeyFlag)
 	if apiKey == "" {
-		fmt.Fprintf(os.Stderr, "No API key found. Set WUPHF_API_KEY or run: %s (interactive) then /init\n", appName)
+		fmt.Fprintf(os.Stderr, "No API key found. Set WUPHF_API_KEY, or run `%s` and type /init.\n", appName)
 		os.Exit(2)
 	}
 
