@@ -145,6 +145,9 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	if !strings.Contains(joinedArgs, "exec") || !strings.Contains(joinedArgs, "--ephemeral") {
 		t.Fatalf("expected codex exec args, got %#v", record.Args)
 	}
+	if !strings.Contains(joinedArgs, "--disable plugins") {
+		t.Fatalf("expected plugins feature to be disabled, got %#v", record.Args)
+	}
 	if !strings.Contains(joinedArgs, `mcp_servers.wuphf-office.command="/tmp/wuphf"`) {
 		t.Fatalf("expected office MCP override, got %#v", record.Args)
 	}
@@ -271,8 +274,12 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForCodingAgents(t *testing.T) {
 	}
 
 	record := readHeadlessCodexRecord(t, recordFile)
+	joinedArgs := strings.Join(record.Args, " ")
 	if got := argValue(record.Args, "-C"); !samePath(got, worktreeDir) {
 		t.Fatalf("expected codex worktree %q, got %q", worktreeDir, got)
+	}
+	if !strings.Contains(joinedArgs, "--disable plugins") {
+		t.Fatalf("expected plugins feature to be disabled, got %#v", record.Args)
 	}
 	if !samePath(record.Dir, worktreeDir) {
 		t.Fatalf("expected command dir %q, got %q", worktreeDir, record.Dir)

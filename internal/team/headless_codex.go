@@ -601,6 +601,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	} else {
 		args = append(args, "-a", "never", "-s", "workspace-write")
 	}
+	args = append(args, "--disable", "plugins")
 	args = append(args,
 		"exec",
 		"-C", workspaceDir,
