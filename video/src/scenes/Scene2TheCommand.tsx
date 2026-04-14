@@ -1,8 +1,8 @@
 import { AbsoluteFill, useCurrentFrame, interpolate, Easing } from "remotion";
-import { colors, fonts, slack } from "../theme";
+import { colors, fonts } from "../theme";
 import { Terminal } from "../components/Terminal";
 import { TypeWriter } from "../components/TypeWriter";
-import { DotGrid, RadialGlow } from "../components/DotGrid";
+import { DotGrid } from "../components/DotGrid";
 
 export const Scene2TheCommand: React.FC = () => {
   const frame = useCurrentFrame();
@@ -37,7 +37,6 @@ export const Scene2TheCommand: React.FC = () => {
   return (
     <AbsoluteFill style={{ backgroundColor: colors.bgBlack }}>
       <DotGrid color="#FFFFFF" opacity={0.04} spacing={40} size={1.2} />
-      <RadialGlow color={slack.presence} x="50%" y="55%" size={900} opacity={0.12} />
       <div
       style={{
         position: "absolute", inset: 0,

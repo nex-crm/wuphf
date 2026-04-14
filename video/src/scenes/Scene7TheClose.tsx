@@ -35,7 +35,6 @@ export const Scene7TheClose: React.FC = () => {
   return (
     <AbsoluteFill style={{ backgroundColor: "#0B0D10" }}>
       <DotGrid color="#FFFFFF" opacity={0.04} spacing={40} size={1.2} />
-      <RadialGlow color={colors.yellow} x="50%" y="60%" size={1100} opacity={0.12} />
       <RadialGlow color={slack.sidebar} x="50%" y="30%" size={900} opacity={0.25} />
       <div style={{
         position: "absolute", inset: 0,
