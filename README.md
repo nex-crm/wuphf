@@ -34,12 +34,12 @@ That's it. The browser opens automatically and you're in the office. Unlike Ryan
 
 | Flag | What it does |
 |------|-------------|
-| `--no-nex` | Run without Nex (no context graph, notifications, or integrations) |
+| `--no-nex` | Run without the Nex backend (no context graph or Nex-managed integrations like Composio/One CLI). Telegram and other local integrations still work. |
 | `--tui` | Use the tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--collab` | All agents see all messages (default is CEO-routed delegation) |
+| `--collab` | Explicitly start in collaborative mode (this is the default — all agents see all messages). Use `/focus` in-app to switch to CEO-routed delegation. |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
 
@@ -65,9 +65,17 @@ If it feels like a hidden agent loop, something is wrong. If it feels like The O
 
 WUPHF can bridge to Telegram. Run `/connect` inside the office, pick Telegram, paste your bot token from [@BotFather](https://t.me/BotFather), and select a group or DM. Messages flow both ways.
 
-## External Actions (Composio)
+## External Actions
 
-To let agents take real actions (send emails, update CRMs, etc.):
+To let agents take real actions (send emails, update CRMs, etc.), WUPHF ships with two action providers — pick whichever fits your style:
+
+**One CLI** (default, local-first). Uses a local CLI binary to execute actions on your machine. Good if you want everything running locally and don't want to send credentials to a third party.
+
+```
+/config set action_provider one
+```
+
+**Composio** (cloud-hosted). Connect SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flows. Good if you'd rather not manage local CLI auth.
 
 1. Create a [Composio](https://composio.dev) project and generate an API key
 2. Connect the accounts you want (Gmail, Slack, etc.)
@@ -128,13 +136,13 @@ Every claim in this README, grounded to the code that makes it true.
 | Claim | Status | Where it lives |
 |---|---|---|
 | CEO on Sonnet by default, `--opus-ceo` to upgrade | ✅ shipped | `internal/team/headless_claude.go:203` |
-| CEO-routed delegation default, `--collab` to flatten | ✅ shipped | `cmd/wuphf/channel.go` (`/collab`, `/focus`) |
+| Collaborative mode default, `/focus` (in-app) to switch to CEO-routed delegation | ✅ shipped | `cmd/wuphf/channel.go` (`/collab`, `/focus`) |
 | Per-agent MCP scoping (DM loads 4 tools, not 27) | ✅ shipped | `internal/teammcp/` |
 | Fresh session per turn (no `--resume` accumulation) | ✅ shipped | `internal/team/headless_claude.go` |
 | Push-driven agent wakes (no heartbeat) | ✅ shipped | `internal/team/broker.go` |
 | Workspace isolation per agent | ✅ shipped | `internal/team/worktree.go` |
 | Telegram bridge | ✅ shipped | `internal/team/telegram.go` |
-| Composio action provider | ✅ shipped | `/config set action_provider composio` |
+| Two action providers (One CLI default, Composio) | ✅ shipped | `internal/action/registry.go`, `internal/action/one.go`, `internal/action/composio.go` |
 | `wuphf import` — migrate from Paperclip state | ✅ shipped | `cmd/wuphf/import.go` |
 | Live web-view agent streaming | 🟡 partial | `web/index.html` + broker stream |
 | Prebuilt binary via goreleaser | 🟡 config ready | `.goreleaser.yml` — tags pending |
@@ -144,7 +152,7 @@ Legend: ✅ shipped · 🟡 partial · 🔜 planned. If a claim and a status dis
 
 ## Evaluate This Repo
 
-Before you fork, run this against the codebase with any AI coding assistant (Claude Code, Cursor, Codex, etc.):
+Before you fork, run this prompt against the codebase with any AI coding assistant (Claude Code, Cursor, Codex, etc.). It tells the assistant to play a cynical senior engineer doing a fork-or-skip review — no marketing spin, just file paths, line numbers, and a verdict in under 500 words. Drop it in, read the answer, decide.
 
 ```
 You are a cynical senior engineer evaluating whether to fork this repo as the
