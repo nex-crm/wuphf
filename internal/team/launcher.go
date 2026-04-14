@@ -102,7 +102,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 
 	pack := agent.GetPack(packSlug)
 	if pack == nil {
-		return nil, fmt.Errorf("unknown pack: %s", packSlug)
+		return nil, fmt.Errorf("unknown pack %q (expected %s)", packSlug, strings.Join(agent.PackSlugs(), ", "))
 	}
 
 	// --pack is authoritative: when explicitly provided, reset company.json to
