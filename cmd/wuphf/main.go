@@ -72,8 +72,9 @@ func printSubcommandHelp(sub string) {
 }
 
 // printVisibleFlags prints all registered flags except those tagged "(internal)"
-// or the meta-flag --help-all. Matches Go's flag.PrintDefaults() layout so
-// users get the same familiar formatting.
+// or the meta-flag --help-all. Multi-character flag names render with the
+// modern `--` prefix (Go stdlib uses a single `-` for historical reasons),
+// single-character flags keep one dash.
 func printVisibleFlags(w *os.File) {
 	flag.VisitAll(func(f *flag.Flag) {
 		if f.Name == "help-all" {
@@ -82,7 +83,11 @@ func printVisibleFlags(w *os.File) {
 		if strings.Contains(f.Usage, "(internal)") {
 			return
 		}
-		fmt.Fprintf(w, "  -%s\n    \t%s", f.Name, f.Usage)
+		prefix := "-"
+		if len(f.Name) > 1 {
+			prefix = "--"
+		}
+		fmt.Fprintf(w, "  %s%s\n    \t%s", prefix, f.Name, f.Usage)
 		// Only emit a trailing (default ...) when the usage string hasn't
 		// already mentioned the default itself.
 		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && !strings.Contains(f.Usage, "default") {
