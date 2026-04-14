@@ -1403,416 +1403,209 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .connect-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: var(--radius-full); }
 .connect-badge-ok { background: var(--green-bg); color: var(--green); }
 .connect-badge-off { background: var(--bg); color: var(--text-tertiary); }
+
+/* ═══════════════════════════════════════════
+   ONBOARDING WIZARD
+   ═══════════════════════════════════════════ */
+.onboarding-wizard { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
+.wizard-body { width: 100%; max-width: 640px; }
+.wizard-step { display: none; flex-direction: column; gap: 24px; }
+.wizard-step.active { display: flex; }
+.wizard-progress { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 40px; }
+.wizard-progress .progress-dot.active { width: 40px; background: var(--accent); }
+.wizard-progress .progress-dot.inactive { width: 24px; background: var(--border-light); }
+
+/* Step 1 */
+.wizard-hero { text-align: center; }
+.wizard-eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 12px; }
+.wizard-headline { font-family: var(--font-logo); font-style: italic; font-size: 36px; letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 12px; }
+.wizard-subhead { font-size: 14px; line-height: 1.65; color: var(--text-secondary); max-width: 54ch; margin: 0 auto; }
+
+/* Prereqs */
+.prereq-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.prereq-row:last-child { border-bottom: none; }
+.prereq-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border); }
+.prereq-dot.ok { background: var(--green, #22c55e); }
+.prereq-dot.fail { background: var(--red, #ef4444); }
+.prereq-name { font-size: 13px; font-weight: 500; flex: 1; }
+.prereq-version { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+.prereq-install { font-size: 11px; color: var(--accent); text-decoration: none; }
+.prereq-install:hover { text-decoration: underline; }
+
+/* Keys */
+.key-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.key-row:last-child { border-bottom: none; }
+.key-label-wrap { flex: 1; min-width: 0; }
+.key-label { font-size: 13px; font-weight: 500; display: block; margin-bottom: 2px; }
+.key-hint { font-size: 11px; color: var(--text-tertiary); }
+.key-input-wrap { flex: 1.2; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.key-status { font-size: 11px; min-height: 16px; }
+.key-status.checking { color: var(--text-tertiary); }
+.key-status.valid { color: var(--green, #22c55e); }
+.key-status.invalid { color: var(--red, #ef4444); }
+.key-status.unverified { color: var(--yellow, #f59e0b); }
+.unreachable-notice { font-size: 12px; color: var(--yellow, #f59e0b); display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: rgba(245,158,11,0.08); border-radius: var(--radius-md); border: 1px solid rgba(245,158,11,0.25); }
+
+/* Templates */
+.template-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.template-tile { padding: 14px 16px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.template-tile:hover { border-color: var(--accent); background: var(--accent-bg); }
+.template-tile.selected { border-color: var(--accent); background: var(--accent-bg); }
+.template-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
+.template-desc { font-size: 11px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 6px; }
+.template-owner { font-size: 10px; font-family: var(--font-mono); color: var(--accent); }
+.task-textarea { width: 100%; min-height: 80px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg-card); color: var(--text); font-family: var(--font-sans); font-size: 13px; line-height: 1.5; resize: vertical; box-sizing: border-box; }
+.task-textarea:focus { outline: none; border-color: var(--accent); }
+.task-skip { font-size: 12px; color: var(--text-tertiary); background: none; border: none; cursor: pointer; padding: 0; text-decoration: underline; }
+.task-skip:hover { color: var(--text-secondary); }
+
+/* Wizard panels */
+.wizard-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 20px 24px; }
+.wizard-panel-title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-secondary); margin-bottom: 16px; }
+
+/* Checklist sidebar */
+.sidebar-checklist { padding: 0 12px 4px; }
+.checklist-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px; margin-left: 4px; font-size: 11px; color: var(--text-secondary); }
+.checklist-item.done { text-decoration: line-through; color: var(--text-tertiary); }
+.checklist-checkbox { width: 12px; height: 12px; border-radius: 2px; border: 1px solid var(--border); flex-shrink: 0; }
+.checklist-checkbox.checked { background: var(--green, #22c55e); border-color: var(--green, #22c55e); }
+.checklist-link { color: inherit; text-decoration: none; flex: 1; }
+.checklist-link:hover { color: var(--text); }
+.checklist-dismiss { background: none; border: none; color: var(--text-tertiary); cursor: pointer; font-size: 12px; padding: 0 2px; margin-left: auto; }
+.checklist-dismiss:hover { color: var(--text); }
 </style>
 </head>
 <body>
 
 <div id="app">
-  <!-- ONBOARDING -->
-  <main class="onboarding dot-grid" id="onboarding" data-step="0">
-    <div class="onboarding-inner">
-      <div class="progress-dots" id="progress-dots"></div>
+  <!-- ONBOARDING WIZARD -->
+  <main class="onboarding-wizard dot-grid" id="onboarding-wizard" style="display:none">
+    <div class="wizard-body">
+      <div class="wizard-progress" id="wizard-progress"></div>
 
-      <!-- Step 0: Welcome -->
-      <div class="step active animate-fade" data-step="0">
-        <div class="landing-shell">
-          <header class="landing-topbar" aria-label="WUPHF overview">
-            <div class="landing-brand">WUPHF</div>
-            <div class="landing-topbar-meta">
-              <span class="badge badge-accent">Private alpha</span>
-              <span class="landing-dot" aria-hidden="true"></span>
-              <span>Visible multi-agent execution for live work</span>
-            </div>
-          </header>
-
-          <section class="card landing-hero" aria-labelledby="landing-headline">
-            <div class="landing-hero-copy">
-              <div class="landing-eyebrow">
-                <span class="status-dot active pulse"></span>
-                The AI startup Ryan Howard always wished WUPHF.com could be
-              </div>
-              <h1 class="landing-headline" id="landing-headline">Your AI team, visible and working.</h1>
-              <p class="landing-subhead">WUPHF gives operators one room where AI specialists can claim real work, show progress in public, and pull in a human only when judgment is required. Unlike the original WUPHF.com, this one still works next quarter.</p>
-              <div class="landing-cta-row">
-                <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
-                  Open the office — Ryan would be proud
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-                </button>
-                <p class="landing-secondary-note">Start with one real task and judge the system by shipped work, not polished agent theater. Michael would invest. Don't be Michael.</p>
-              </div>
-            </div>
-
-            <aside class="landing-preview" aria-label="Office preview">
-              <div class="landing-preview-card">
-                <div class="landing-preview-header">
-                  <div>
-                    <div class="landing-preview-title">#general</div>
-                    <div class="landing-preview-subtitle">3 agents active, 1 decision pending — Kevin is at the vending machine</div>
-                  </div>
-                  <div class="landing-preview-pill">
-                    <span class="status-dot active pulse"></span>
-                    Live office
-                  </div>
-                </div>
-                <div class="landing-preview-body">
-                  <article class="landing-thread">
-                    <div class="landing-thread-avatar">🤖</div>
-                    <div>
-                      <div class="landing-thread-meta">
-                        <span class="landing-thread-name">@eng</span>
-                        <span class="landing-thread-status">task claimed</span>
-                      </div>
-                      <p class="landing-thread-copy">Landing page scaffold is in progress. Hero and proof sections are ready. Waiting on final value-prop copy. Unlike Ryan Howard, I will still be running when you check back.</p>
-                    </div>
-                  </article>
-                  <div class="landing-thread-actions">
-                    <div class="landing-action">
-                      <div class="landing-action-label">Task board</div>
-                      <div class="landing-action-copy">Ownership and active work stay visible. Even Kevin knows who's on what.</div>
-                    </div>
-                    <div class="landing-action">
-                      <div class="landing-action-label">Threading</div>
-                      <div class="landing-action-copy">Decisions stay attached to the work they changed. No "per my last email" moments.</div>
-                    </div>
-                    <div class="landing-action">
-                      <div class="landing-action-label">Escalation</div>
-                      <div class="landing-action-copy">Humans get pulled in only when judgment is required. Toby's approval not needed.</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </aside>
-          </section>
-
-          <section class="landing-proof-grid" aria-label="What the foundation needs to communicate">
-            <article class="card landing-proof-card">
-              <div class="landing-proof-label">Visibility</div>
-              <h2 class="landing-proof-value">See who owns the next move</h2>
-              <p class="landing-proof-copy">Tasks, threads, and blockers stay in one room. Work doesn't disappear into hidden agent sessions. That's more than Ryan Howard's laptop can say.</p>
-            </article>
-            <article class="card landing-proof-card">
-              <div class="landing-proof-label">Judgment</div>
-              <h2 class="landing-proof-value">Humans step in at the right moment</h2>
-              <p class="landing-proof-copy">Approvals, blockers, and interviews are explicit. You review decisions instead of babysitting every step. Think of yourself as the regional manager, not the middleware.</p>
-            </article>
-            <article class="card landing-proof-card">
-              <div class="landing-proof-label">Output</div>
-              <h2 class="landing-proof-value">Judge it on real work</h2>
-              <p class="landing-proof-copy">Point WUPHF at a live repo, pipeline, or workflow. Evaluate from shipped output, not polished demo theatrics. Dwight would call this merit-based assessment. He'd be right.</p>
-            </article>
-          </section>
-
-          <section class="card landing-section" aria-labelledby="landing-problem-heading">
-            <div class="landing-section-header">
-              <div class="landing-kicker">Problem / solution</div>
-              <h2 class="landing-section-title" id="landing-problem-heading">The problem is not getting one agent to do a trick. It is managing a team of them without becoming the Toby Flenderson of your own pipeline.</h2>
-              <p class="landing-section-copy">Most multi-agent setups still make the operator stitch together prompts, tools, approvals, and follow-up by hand. WUPHF turns that coordination layer into a visible office. An actual one, unlike WUPHF.com.</p>
-            </div>
-            <div class="landing-problem-grid">
-              <div class="landing-problem-card">
-                <p class="landing-section-copy landing-problem-lead">Once work spans multiple sessions, the hard part is no longer raw output. It is knowing which agent owns the thread, which decision changed the plan, and where the human actually needs to step in.</p>
-              </div>
-              <div class="landing-problem-card">
-                <ol class="landing-problem-points">
-                  <li><span class="landing-point-index">1</span><span><strong>Context drifts.</strong> Teams reconstruct history from terminals, tabs, and memory. Ryan Howard called this "a learning experience."</span></li>
-                  <li><span class="landing-point-index">2</span><span><strong>Ownership blurs.</strong> Multiple agents move, but nobody can tell who is accountable for the next step. Dwight calls this a failure of chain of command.</span></li>
-                  <li><span class="landing-point-index">3</span><span><strong>Escalations come late.</strong> Humans hear about the blocker after time has already been burned. Like when Michael found out about the merger.</span></li>
-                </ol>
-              </div>
-              <div class="landing-problem-card landing-solution-card">
-                <div class="landing-solution-title">WUPHF gives the team one room for delegation, context, and escalation. Not a website that also contacts you via Facebook. A real room.</div>
-                <ul class="landing-solution-points">
-                  <li><span class="landing-point-index">A</span><span>Agents work in the open with shared task state, thread history, and clear ownership.</span></li>
-                  <li><span class="landing-point-index">B</span><span>Humans stay in the loop through explicit checkpoints instead of monitoring invisible automations.</span></li>
-                  <li><span class="landing-point-index">C</span><span>The system can be judged on completed work, not on how impressive the demo video looked.</span></li>
-                </ul>
-              </div>
-            </div>
-          </section>
-
-          <section class="card landing-section" aria-labelledby="landing-props-heading">
-            <div class="landing-section-header">
-              <div class="landing-kicker">Value props</div>
-              <h2 class="landing-section-title" id="landing-props-heading">Three homepage-ready value props for the current wedge.</h2>
-              <p class="landing-section-copy">Lead with the office story, then stack context and cost as the two supporting reasons to believe.</p>
-            </div>
-            <div class="landing-props-grid">
-              <article class="card landing-prop-card">
-                <div class="landing-prop-label">Lead angle</div>
-                <h3 class="landing-prop-title">Run an AI office, not a pile of AI tools. (And not just a website named after a sound.)</h3>
-                <p class="landing-prop-copy">WUPHF gives you a live delegation desk for autonomous agents across workstreams, channels, and devices. No VC pitch required.</p>
-                <p class="landing-prop-proof">Proof: Work stays visible in one room, so specialists can claim tasks, coordinate in-thread, and keep momentum without another SaaS maze.</p>
-              </article>
-              <article class="card landing-prop-card">
-                <div class="landing-prop-label">Differentiator</div>
-                <h3 class="landing-prop-title">Agents with context, not goldfish with APIs. Or Ryan Howard with a startup.</h3>
-                <p class="landing-prop-copy">Every agent works with shared memory, org history, and live task context, so execution compounds instead of restarting from scratch.</p>
-                <p class="landing-prop-proof">Proof: Decisions, blockers, and prior work stay attached to the thread, which makes handoffs sharper and escalation less expensive.</p>
-              </article>
-              <article class="card landing-prop-card">
-                <div class="landing-prop-label">Commercial angle</div>
-                <h3 class="landing-prop-title">Replace bloated GTM tooling with one operator layer.</h3>
-                <p class="landing-prop-copy">WUPHF coordinates outreach, follow-up, research, and execution at a fraction of the usual software spend. Michael Scott would say "working smarter, not harder" — while doing the opposite. WUPHF actually does it.</p>
-                <p class="landing-prop-proof">Proof: Instead of buying separate tooling for every narrow GTM task, operators get one accountable layer that can route work across specialists.</p>
-              </article>
-            </div>
-          </section>
-
-          <section class="card landing-section" aria-labelledby="landing-how-heading">
-            <div class="landing-section-header">
-              <div class="landing-kicker">How it works</div>
-              <h2 class="landing-section-title" id="landing-how-heading">Simple structure for explaining the workflow.</h2>
-            </div>
-            <div class="landing-flow-grid">
-              <article class="card landing-flow-step">
-                <div class="landing-step-number">01</div>
-                <div class="landing-step-label">Set up the office</div>
-                <p class="landing-step-copy">Pick the team, connect the repo, and give the room a real task. Unlike Ryan, who picked a cool domain name and called it an MVP.</p>
-              </article>
-              <article class="card landing-flow-step">
-                <div class="landing-step-number">02</div>
-                <div class="landing-step-label">Let specialists execute</div>
-                <p class="landing-step-copy">Agents claim work, post updates, and keep the task graph visible while they ship. No disappearing into a WeWork and emerging with no revenue.</p>
-              </article>
-              <article class="card landing-flow-step">
-                <div class="landing-step-number">03</div>
-                <div class="landing-step-label">Intervene with precision</div>
-                <p class="landing-step-copy">Humans review, approve, or redirect only when the system asks for judgment. You are the regional manager now. Use it wisely.</p>
-              </article>
-            </div>
-          </section>
-
-          <section class="card landing-section" aria-labelledby="landing-controls-heading">
-            <div class="landing-section-header">
-              <div class="landing-kicker">Operator controls</div>
-              <h2 class="landing-section-title" id="landing-controls-heading">Foundation for the “why trust this” section.</h2>
-            </div>
-            <div class="landing-control-grid">
-              <article class="landing-control-card">
-                <div class="landing-control-label">Threaded history</div>
-                <p class="landing-control-copy">Conversations, task claims, and blocking questions stay in one visible timeline. Everything is logged. Creed cannot tamper with this one.</p>
-              </article>
-              <article class="landing-control-card">
-                <div class="landing-control-label">Shared task board</div>
-                <p class="landing-control-copy">The office shows active work, ownership, and blockers instead of hiding progress in side sessions. Dwight-level accountability, without the intimidation tactics.</p>
-              </article>
-              <article class="landing-control-card">
-                <div class="landing-control-label">Human judgment lane</div>
-                <p class="landing-control-copy">Approvals and interviews are explicit, so the human stays in control without micromanaging every step. Think of it as being the Michael Scott who actually manages.</p>
-              </article>
-            </div>
-          </section>
-
-          <section class="card landing-final-cta" aria-labelledby="landing-final-heading">
-            <div class="landing-final-copy-wrap">
-              <div class="landing-kicker">Call to action</div>
-              <h2 class="landing-final-title" id="landing-final-heading">Start with one real task and watch the office run it in public. Unlike WUPHF.com, this one will still be live next quarter.</h2>
-              <p class="landing-final-copy">Bring a live repo, pipeline motion, or ops workflow, invite the specialists you need, and evaluate from visible execution. Michael Scott would invest $10,000 immediately. Don't be Michael Scott — judge it by shipped work.</p>
-            </div>
-            <button class="btn btn-primary btn-lg landing-cta-btn" onclick="goToStep(1)">
-              Open the office — Get WUPHFed
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-            </button>
-          </section>
+      <!-- Step 1: Welcome + Company -->
+      <div class="wizard-step active" id="wizard-step-welcome">
+        <div class="wizard-hero">
+          <div class="wizard-eyebrow">
+            <span class="status-dot active pulse"></span>
+            The AI startup Ryan Howard always wished WUPHF.com could be
+          </div>
+          <h1 class="wizard-headline" id="wizard-headline">Your AI team, visible and working.</h1>
+          <p class="wizard-subhead">WUPHF gives operators one room where AI specialists can claim real work, show progress in public, and pull in a human only when judgment is required. Unlike the original WUPHF.com, this one still works next quarter.</p>
         </div>
-      </div>
 
-      <!-- Step 1: Company info -->
-      <div class="step" data-step="1">
-        <h1 class="step-title">Tell me about your company</h1>
-        <div class="card form-card" style="max-width:540px;margin:0 auto;">
+        <div class="wizard-panel">
           <div class="form-group">
-            <label class="label" for="q-company">What's your company or project name?</label>
-            <input class="input" id="q-company" placeholder="Dunder Mifflin Paper Co. (probably not)" />
+            <label class="label" for="wiz-company">Company or project name <span style="color:var(--red,#ef4444)">*</span></label>
+            <input class="input" id="wiz-company" placeholder="Dunder Mifflin Paper Co. (probably not)" autocomplete="organization" />
           </div>
           <div class="form-group">
-            <label class="label" for="q-description">What do you do?</label>
-            <input class="input" id="q-description" placeholder="We build AI-powered analytics for e-commerce" />
+            <label class="label" for="wiz-description">One-liner description <span style="color:var(--red,#ef4444)">*</span></label>
+            <input class="input" id="wiz-description" placeholder="We build AI-powered ops for lean teams" />
           </div>
-          <div class="form-group">
-            <label class="label" for="q-goals">What are your top 3 goals right now?</label>
-            <input class="input" id="q-goals" placeholder="Ship MVP, get first 10 customers, close seed round (not like WUPHF.com)" />
+          <div class="form-group" style="margin-bottom:0">
+            <label class="label" for="wiz-priority">Top priority right now <span style="color:var(--red,#ef4444)">*</span></label>
+            <input class="input" id="wiz-priority" placeholder="Ship MVP, close first 3 customers, stop being Michael Scott about the roadmap" />
           </div>
         </div>
-        <div class="step-nav" style="max-width:540px;margin:0 auto;">
-          <button class="btn btn-secondary" onclick="goToStep(0)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-            Back
-          </button>
-          <button class="btn btn-primary" onclick="goToStep(2)">
-            Next
+
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" id="wiz-btn-welcome" onclick="submitWelcome()">
+            Assemble the team
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </button>
         </div>
       </div>
 
-      <!-- Step 2: Preferences -->
-      <div class="step" data-step="2">
-        <h1 class="step-title">Almost there. Even Dwight would be proud.</h1>
-        <div class="card form-card" style="max-width:540px;margin:0 auto;">
-          <div class="form-group">
-            <label class="label">How big is your team?</label>
-            <div class="size-options" id="size-options"></div>
-          </div>
-          <div class="form-group">
-            <label class="label" for="q-priority">What's your most immediate priority?</label>
-            <input class="input" id="q-priority" placeholder="Get the landing page live and start collecting leads" />
-          </div>
-        </div>
-        <div class="step-nav" style="max-width:540px;margin:0 auto;">
-          <button class="btn btn-secondary" onclick="goToStep(1)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-            Back
-          </button>
-          <button class="btn btn-primary" onclick="buildTeam()">
-            Next
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 3: Team -->
-      <div class="step" data-step="3">
-        <h1 class="step-title">Your starter team</h1>
-        <p class="step-subtitle">Based on your goals, here's who I recommend. Toggle who you want in the office — you can always add or remove teammates later. Unlike Dunder Mifflin, there are no HR complaints to file.</p>
-        <div class="team-grid" id="team-grid"></div>
-        <div class="step-nav">
-          <button class="btn btn-secondary" onclick="goToStep(2)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-            Back
-          </button>
-          <button class="btn btn-primary" onclick="goToStep(4)">
-            Next
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-          </button>
-        </div>
-      </div>
-
-      <!-- Step 4: Prerequisites -->
-      <div class="step" data-step="4">
-        <h1 class="step-title">Prerequisites</h1>
-        <p class="step-subtitle">WUPHF runs locally. Let's make sure you have what you need. Ryan Howard skipped this step. We see how that turned out.</p>
-        <div class="card" style="padding:24px;max-width:540px;margin:0 auto;">
-          <div class="prereq-list" id="prereq-list"></div>
-          <div style="margin-top:16px;">
-            <button class="btn btn-ghost btn-sm" onclick="recheckPrereqs()">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+      <!-- Step 2: Prereqs + Keys -->
+      <div class="wizard-step" id="wizard-step-setup">
+        <div class="wizard-panel">
+          <p class="wizard-panel-title">First, make sure you have the tools</p>
+          <div id="wiz-prereq-list"></div>
+          <div style="margin-top:12px;">
+            <button class="btn btn-ghost btn-sm" onclick="recheckWizPrereqs()">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
               Re-check
             </button>
           </div>
         </div>
-        <div class="step-nav" style="max-width:540px;margin:0 auto;">
-          <button class="btn btn-secondary" onclick="goToStep(3)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-            Back
-          </button>
-          <button class="btn btn-primary" onclick="goToStep(5)">
-            Next
+
+        <div class="wizard-panel">
+          <p class="wizard-panel-title">Connect your AI providers</p>
+          <div class="key-row">
+            <div class="key-label-wrap">
+              <span class="key-label">Anthropic</span>
+              <span class="key-hint">Required &mdash; the office won't start without this</span>
+            </div>
+            <div class="key-input-wrap">
+              <input class="input" type="password" id="wiz-key-anthropic" placeholder="sk-ant-..." autocomplete="off"
+                oninput="onKeyInput('anthropic',this.value)"
+                onblur="validateKey('anthropic', this.value)" />
+              <span class="key-status" id="wiz-key-status-anthropic"></span>
+              <div class="unreachable-notice" id="wiz-unreachable-anthropic" style="display:none;">
+                Couldn't reach Anthropic &mdash; key looks valid but unverified.
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap;">
+                  <input type="checkbox" id="wiz-unreachable-accept" onchange="updateReadyButton()" />
+                  Continue anyway?
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="key-row">
+            <div class="key-label-wrap">
+              <span class="key-label">OpenAI</span>
+              <span class="key-hint">Optional</span>
+            </div>
+            <div class="key-input-wrap">
+              <input class="input" type="password" id="wiz-key-openai" placeholder="sk-..." autocomplete="off"
+                oninput="onKeyInput('openai',this.value)"
+                onblur="validateKey('openai', this.value)" />
+              <span class="key-status" id="wiz-key-status-openai"></span>
+            </div>
+          </div>
+          <div class="key-row">
+            <div class="key-label-wrap">
+              <span class="key-label">Gemini</span>
+              <span class="key-hint">Optional</span>
+            </div>
+            <div class="key-input-wrap">
+              <input class="input" type="password" id="wiz-key-gemini" placeholder="AIza..." autocomplete="off"
+                oninput="onKeyInput('gemini',this.value)"
+                onblur="validateKey('gemini', this.value)" />
+              <span class="key-status" id="wiz-key-status-gemini"></span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" id="wiz-btn-ready" onclick="showWizardStep('task')" disabled>
+            Ready
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </button>
         </div>
       </div>
 
-      <!-- Step 5: API Keys -->
-      <div class="step" data-step="5">
-        <h1 class="step-title">Provider API Keys</h1>
-        <p class="step-subtitle">Connect the LLM providers you want your agents to use. All keys are optional &mdash; configure what you need now and add more later via <code>/config set</code>.</p>
-        <div class="card" style="padding:24px;max-width:540px;margin:0 auto;">
-          <div class="api-key-list" id="api-key-list"></div>
+      <!-- Step 3: First task -->
+      <div class="wizard-step" id="wizard-step-task">
+        <div>
+          <h2 class="step-title" style="text-align:left;margin-bottom:4px;">What's the first thing you want done?</h2>
         </div>
-        <div class="step-nav" style="max-width:540px;margin:0 auto;">
-          <button class="btn btn-secondary" onclick="goToStep(4)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-            Back
-          </button>
-          <button class="btn btn-primary" onclick="goToStep(6)">
-            Next
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-          </button>
-        </div>
-      </div>
 
-      <!-- Step 6: GitHub -->
-      <div class="step" data-step="6">
-        <div class="emoji-backdrop">
-          <div class="cloud-row emoji-float" style="top:-5%;left:-8%;opacity:0.4;--dur:34s;animation-delay:-8s;">&#x2728;</div>
-          <div class="cloud-row cloud-row-reverse emoji-float" style="top:5%;left:55%;opacity:0.35;--dur:42s;animation-delay:-17s;">&#x2728;</div>
-          <div class="cloud-row cloud-row-reverse emoji-float" style="top:40%;left:-5%;opacity:0.3;--dur:38s;animation-delay:-12s;">&#x2728;</div>
-          <div class="cloud-row emoji-float" style="top:50%;left:60%;opacity:0.35;--dur:46s;animation-delay:-22s;">&#x2728;</div>
-          <div class="cloud-row emoji-float" style="top:75%;left:20%;opacity:0.3;--dur:40s;animation-delay:-5s;">&#x2728;</div>
+        <div class="template-grid" id="wiz-template-grid">
+          <div style="color:var(--text-tertiary);font-size:13px;grid-column:1/-1;">Loading templates&hellip;</div>
         </div>
-        <div style="position:relative;z-index:1;">
-          <div class="card" style="padding:24px;max-width:600px;margin:0 auto;">
-            <h2 class="font-logo" style="font-size:22px;margin-bottom:8px;">Help the WUPHF community grow</h2>
-            <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;margin-bottom:8px;">A GitHub star helps more people discover WUPHF and build their own AI offices.</p>
-            <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">If WUPHF feels like something you'd use, give it a star.</p>
-            <div style="margin-top:24px;">
-              <a href="https://github.com/nex-crm/wuphf" target="_blank" rel="noopener noreferrer"
-                class="community-cta" style="background:var(--accent-bg);border:1px solid var(--border);">
-                <span class="community-cta-left">
-                  <span class="community-cta-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--accent)" stroke="none"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-                  </span>
-                  <span class="community-cta-text">
-                    <span class="community-cta-title">Star WUPHF on GitHub</span>
-                    <span class="community-cta-sub">Help more people find the community</span>
-                  </span>
-                </span>
-              </a>
-            </div>
-          </div>
-          <div class="step-nav" style="max-width:600px;margin:16px auto 0;">
-            <button class="btn btn-secondary" onclick="goToStep(5)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-              Back
-            </button>
-            <button class="btn btn-primary" onclick="goToStep(7)">
-              Next
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-            </button>
-          </div>
-        </div>
-      </div>
 
-      <!-- Step 7: Discord + Launch -->
-      <div class="step" data-step="7">
-        <div class="emoji-backdrop">
-          <div class="cloud-row emoji-float" style="top:-5%;left:-8%;opacity:0.4;--dur:34s;animation-delay:-8s;">&#x1F4AC;</div>
-          <div class="cloud-row cloud-row-reverse emoji-float" style="top:5%;left:55%;opacity:0.35;--dur:42s;animation-delay:-17s;">&#x1F4AC;</div>
-          <div class="cloud-row cloud-row-reverse emoji-float" style="top:40%;left:-5%;opacity:0.3;--dur:38s;animation-delay:-12s;">&#x1F4AC;</div>
-          <div class="cloud-row emoji-float" style="top:50%;left:60%;opacity:0.35;--dur:46s;animation-delay:-22s;">&#x1F4AC;</div>
+        <div>
+          <label class="label" for="wiz-task-input" style="margin-bottom:8px;display:block;">Or describe it yourself</label>
+          <textarea class="task-textarea" id="wiz-task-input" placeholder="Or tell me what's really on your mind&hellip;"></textarea>
         </div>
-        <div style="position:relative;z-index:1;">
-          <div class="card" style="padding:24px;max-width:600px;margin:0 auto;">
-            <h2 class="font-logo" style="font-size:22px;margin-bottom:8px;">Where the good chaos happens</h2>
-            <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;margin-bottom:8px;">This is where agent configs get debated, bugs get caught before they ship, and somebody always finds the edge case first.</p>
-            <p style="font-size:14px;color:var(--text-secondary);line-height:1.6;">If you prefer &ldquo;come chat&rdquo; over &ldquo;please submit a ticket,&rdquo; this is your room.</p>
-            <div style="margin-top:24px;">
-              <a href="https://discord.gg/nex-community" target="_blank" rel="noopener noreferrer"
-                class="community-cta" style="background:var(--discord-bg);border:1px solid var(--discord-border);">
-                <span class="community-cta-left">
-                  <span class="community-cta-icon">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--discord)"><path d="M20.32 4.37a16.4 16.4 0 0 0-4.1-1.28.06.06 0 0 0-.07.03c-.18.32-.38.73-.52 1.06a15.16 15.16 0 0 0-4.56 0c-.15-.34-.35-.74-.53-1.06a.06.06 0 0 0-.07-.03c-1.43.24-2.8.68-4.1 1.28a.05.05 0 0 0-.02.02C3.77 8.17 3.12 11.87 3.44 15.53a.06.06 0 0 0 .02.04 16.52 16.52 0 0 0 5.03 2.54.06.06 0 0 0 .07-.02c.39-.54.74-1.12 1.04-1.73a.06.06 0 0 0-.03-.08 10.73 10.73 0 0 1-1.6-.77.06.06 0 0 1-.01-.1l.32-.24a.06.06 0 0 1 .06-.01c3.35 1.53 6.98 1.53 10.29 0a.06.06 0 0 1 .06 0c.1.08.21.16.32.24a.06.06 0 0 1-.01.1c-.51.3-1.05.56-1.6.77a.06.06 0 0 0-.03.08c.3.61.65 1.19 1.04 1.73a.06.06 0 0 0 .07.02 16.42 16.42 0 0 0 5.03-2.54.06.06 0 0 0 .02-.04c.38-4.23-.64-7.9-2.89-11.14a.04.04 0 0 0-.02-.02ZM9.68 13.3c-.98 0-1.78-.9-1.78-2s.79-2 1.78-2c.99 0 1.79.9 1.78 2 0 1.1-.8 2-1.78 2Zm4.64 0c-.98 0-1.78-.9-1.78-2s.79-2 1.78-2c.99 0 1.79.9 1.78 2 0 1.1-.79 2-1.78 2Z"/></svg>
-                  </span>
-                  <span class="community-cta-text">
-                    <span class="community-cta-title">Join the Discord</span>
-                    <span class="community-cta-sub">Chat with the people building WUPHF</span>
-                  </span>
-                </span>
-                <span class="community-cta-badge" style="background:var(--discord-border);color:var(--discord);">Join</span>
-              </a>
-            </div>
-          </div>
-          <div class="step-nav" style="max-width:600px;margin:16px auto 0;">
-            <button class="btn btn-secondary" onclick="goToStep(6)">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
-              Back
-            </button>
-            <button class="btn btn-primary" onclick="launchOffice()">
-              Open the office
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-            </button>
-          </div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+          <button class="task-skip" onclick="completeOnboarding(true)">I'll figure it out &mdash; open the empty office</button>
+          <button class="btn btn-primary" onclick="completeOnboarding(false)">
+            Start working
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+          </button>
         </div>
       </div>
 
@@ -1844,6 +1637,16 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <span>Agents</span>
           <svg style="margin-left:auto;width:12px;height:12px;transform:rotate(90deg);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
         </button>
+      </div>
+      <!-- Getting Started checklist (shown after onboarding, hidden until populated) -->
+      <div id="sidebar-checklist-section" style="display:none;">
+        <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
+          <p class="sidebar-section-title" style="display:flex;align-items:center;justify-content:space-between;">
+            Getting started
+            <button class="checklist-dismiss" title="Dismiss" onclick="dismissChecklist()">&#xd7;</button>
+          </p>
+        </div>
+        <div class="sidebar-checklist" id="sidebar-checklist"></div>
       </div>
       <div class="sidebar-agents" id="sidebar-agents"></div>
       <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
@@ -2387,6 +2190,19 @@ var WuphfAPI = (function() {
 var TOTAL_STEPS = 8;
 var currentStep = 0;
 var selectedSize = '';
+var ONBOARDING_COPY = {
+  step1_headline: 'Your AI team, visible and working.',
+  step1_subhead: 'WUPHF gives operators one room where AI specialists can claim real work, show progress in public, and pull in a human only when judgment is required. Unlike the original WUPHF.com, this one still works next quarter.',
+  step1_cta: 'Assemble the team',
+  step2_prereqs_title: 'First, make sure you have the tools',
+  step2_keys_title: 'Connect your AI providers',
+  step2_cta: 'Ready',
+  step3_title: "What's the first thing you want done?",
+  step3_placeholder: 'Or tell me what\'s really on your mind\u2026',
+  step3_skip: "I'll figure it out \u2014 open the empty office",
+  step3_cta: 'Start working',
+};
+
 var brokerConnected = false;
 var currentChannel = 'general';
 // channelMetadata maps channel slug → {type: "O"|"D"|"G", name, members, agentSlug}
@@ -2931,7 +2747,8 @@ function launchOffice() {
     WuphfAPI.post('/company', companyData).catch(function() {});
   }
 
-  document.getElementById('onboarding').style.display = 'none';
+  var _legacyOnboarding = document.getElementById('onboarding');
+  if (_legacyOnboarding) _legacyOnboarding.style.display = 'none';
   // Re-check health before showing office — broker may have started since page load
   WuphfAPI.getHealth()
     .then(function(data) {
@@ -6663,45 +6480,365 @@ closeCommandPalette = function() {
   _origCloseCP();
 };
 
-// ─── Init ───
-function initApp() {
-  console.log('[wuphf] initApp starting...');
+// ═══════════════════════════════════════════════════════════════
+//   ONBOARDING WIZARD
+// ═══════════════════════════════════════════════════════════════
+
+// Wizard state
+var wizPrereqState = {};
+var wizKeyState = {};
+var wizTemplates = [];
+
+// Small DOM helper used in wizard code to avoid innerHTML with untrusted data
+function _wE(tag, cls, text) {
+  var e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function initWizard() {
+  console.log('[wizard] initWizard starting...');
   WuphfAPI.init()
     .then(function() {
-      console.log('[wuphf] init done, fetching health...');
       return WuphfAPI.getHealth();
     })
-    .then(function(data) {
-      console.log('[wuphf] health response:', JSON.stringify(data));
-      if (data.status === 'ok') {
+    .then(function(healthData) {
+      console.log('[wizard] health:', JSON.stringify(healthData));
+      return fetch('/onboarding/state').then(function(r) { return r.json(); });
+    })
+    .then(function(state) {
+      console.log('[wizard] onboarding state:', JSON.stringify(state));
+      if (state && state.onboarded) {
         brokerConnected = true;
-        document.getElementById('onboarding').style.display = 'none';
-        console.log('[wuphf] broker connected, showing splash + office');
+        document.getElementById('onboarding-wizard').style.display = 'none';
         WuphfAPI.getOfficeMembers().then(function(membersData) {
-          var realCount = (membersData.members || []).filter(function(m) { return m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system'; }).length;
+          var realCount = (membersData.members || []).filter(function(m) {
+            return m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system';
+          }).length;
           showSplashScreen(function() { showOffice(); }, realCount);
         }).catch(function() {
           showSplashScreen(function() { showOffice(); });
         });
+        if (state.checklist && state.checklist.some(function(i) { return !i.done; })) {
+          updateChecklistSidebar(state.checklist);
+        }
       } else {
-        console.log('[wuphf] health not ok, showing onboarding');
-        renderProgress();
-        renderSizeOptions();
-        renderPrereqs();
-        renderAPIKeys();
+        var startStep = (state && state.step) ? state.step : 'welcome';
+        document.getElementById('onboarding-wizard').style.display = '';
+        renderWizardProgress(startStep);
+        showWizardStep(startStep);
       }
     })
     .catch(function(err) {
       var errMsg = err && err.message ? err.message : String(err);
-      console.error('[wuphf] initApp FAILED: ' + errMsg);
-      // Show error on page for debugging
-      document.title = 'WUPHF ERROR: ' + errMsg;
-      // Broker not running — fall back to demo/onboarding
-      renderProgress();
-      renderSizeOptions();
-      renderPrereqs();
-      renderAPIKeys();
+      console.error('[wizard] initWizard error: ' + errMsg);
+      document.getElementById('onboarding-wizard').style.display = '';
+      renderWizardProgress('welcome');
+      showWizardStep('welcome');
     });
+}
+
+var _wizStepOrder = ['welcome', 'setup', 'task'];
+
+function renderWizardProgress(activeStep) {
+  var container = document.getElementById('wizard-progress');
+  if (!container) return;
+  container.textContent = '';
+  var activeIdx = _wizStepOrder.indexOf(activeStep);
+  _wizStepOrder.forEach(function(_, i) {
+    var dot = _wE('div', 'progress-dot ' + (i <= activeIdx ? 'active' : 'inactive'));
+    dot.style.height = '8px';
+    dot.style.borderRadius = '9999px';
+    dot.style.transition = 'all 0.3s ease';
+    container.appendChild(dot);
+  });
+}
+
+function showWizardStep(stepName) {
+  document.querySelectorAll('.wizard-step').forEach(function(s) { s.classList.remove('active'); });
+  var target = document.getElementById('wizard-step-' + stepName);
+  if (target) target.classList.add('active');
+  renderWizardProgress(stepName);
+  if (stepName === 'setup') initSetup();
+  if (stepName === 'task') loadTemplates();
+}
+
+function submitWelcome() {
+  var company = (document.getElementById('wiz-company').value || '').trim();
+  var description = (document.getElementById('wiz-description').value || '').trim();
+  var priority = (document.getElementById('wiz-priority').value || '').trim();
+  if (!company || !description || !priority) {
+    showNotice('Please fill in all three fields. Unlike Ryan Howard, we finish what we start.', 'error');
+    return;
+  }
+  var btn = document.getElementById('wiz-btn-welcome');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
+  fetch('/onboarding/progress', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company: company, description: description, priority: priority, step: 'setup' })
+  })
+    .catch(function() {})
+    .then(function() {
+      showWizardStep('setup');
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = 'Assemble the team \u2192';
+      }
+    });
+}
+
+function initSetup() {
+  recheckWizPrereqs();
+  fetch('/onboarding/templates')
+    .then(function(r) { return r.json(); })
+    .then(function(data) { wizTemplates = data.templates || data || []; })
+    .catch(function() { wizTemplates = []; });
+}
+
+function recheckWizPrereqs() {
+  var listEl = document.getElementById('wiz-prereq-list');
+  if (!listEl) return;
+  listEl.textContent = '';
+  listEl.appendChild(_wE('div', null, 'Checking\u2026'));
+  listEl.firstChild.style.cssText = 'font-size:12px;color:var(--text-tertiary);padding:8px 0;';
+  fetch('/onboarding/prereqs')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var prereqs = data.prereqs || data || [];
+      wizPrereqState = {};
+      prereqs.forEach(function(p) { wizPrereqState[p.name] = p; });
+      renderWizPrereqs(prereqs);
+      updateReadyButton();
+    })
+    .catch(function() {
+      listEl.textContent = '';
+      var msg = _wE('div', null, 'Could not reach prereq check. You can still continue.');
+      msg.style.cssText = 'font-size:12px;color:var(--text-tertiary);padding:8px 0;';
+      listEl.appendChild(msg);
+      wizPrereqState = { _fallback: true };
+      updateReadyButton();
+    });
+}
+
+var PREREQ_INSTALL_LINKS = {
+  node: 'https://nodejs.org',
+  git: 'https://git-scm.com',
+  claude: 'https://claude.ai/download',
+};
+
+function renderWizPrereqs(prereqs) {
+  var listEl = document.getElementById('wiz-prereq-list');
+  if (!listEl) return;
+  listEl.textContent = '';
+  prereqs.forEach(function(p) {
+    var row = _wE('div', 'prereq-row');
+    var dot = _wE('span', 'prereq-dot ' + (p.ok ? 'ok' : 'fail'));
+    var name = _wE('span', 'prereq-name', p.name);
+    var right = _wE('span');
+    right.style.marginLeft = 'auto';
+    if (p.ok && p.version) {
+      right.appendChild(_wE('span', 'prereq-version', p.version));
+    } else if (!p.ok) {
+      var href = PREREQ_INSTALL_LINKS[(p.name || '').toLowerCase()] || '#';
+      var link = _wE('a', 'prereq-install', 'Install');
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      right.appendChild(link);
+    }
+    row.appendChild(dot);
+    row.appendChild(name);
+    row.appendChild(right);
+    listEl.appendChild(row);
+  });
+}
+
+function onKeyInput(provider, value) {
+  if (!value || !value.trim()) {
+    wizKeyState[provider] = 'empty';
+    var statusEl = document.getElementById('wiz-key-status-' + provider);
+    if (statusEl) { statusEl.textContent = ''; statusEl.className = 'key-status'; }
+    if (provider === 'anthropic') {
+      var notice = document.getElementById('wiz-unreachable-anthropic');
+      if (notice) notice.style.display = 'none';
+    }
+    updateReadyButton();
+  }
+}
+
+function validateKey(provider, value) {
+  if (!value || !value.trim()) {
+    wizKeyState[provider] = 'empty';
+    updateReadyButton();
+    return;
+  }
+  var statusEl = document.getElementById('wiz-key-status-' + provider);
+  if (statusEl) { statusEl.textContent = 'Checking\u2026'; statusEl.className = 'key-status checking'; }
+  wizKeyState[provider] = 'checking';
+  updateReadyButton();
+  fetch('/onboarding/validate-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ provider: provider, key: value.trim() })
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var status = data.status || 'invalid';
+      wizKeyState[provider] = status;
+      if (statusEl) {
+        if (status === 'valid') {
+          statusEl.textContent = '\u2713 Valid';
+          statusEl.className = 'key-status valid';
+        } else if (status === 'unreachable') {
+          statusEl.textContent = '';
+          statusEl.className = 'key-status';
+          wizKeyState[provider] = 'unreachable';
+          if (provider === 'anthropic') {
+            var notice = document.getElementById('wiz-unreachable-anthropic');
+            if (notice) notice.style.display = '';
+          }
+        } else if (status === 'invalid') {
+          statusEl.textContent = '\u2717 Invalid key';
+          statusEl.className = 'key-status invalid';
+        } else {
+          statusEl.textContent = '\u26A0 Unverified';
+          statusEl.className = 'key-status unverified';
+        }
+      }
+      updateReadyButton();
+    })
+    .catch(function() {
+      wizKeyState[provider] = 'unreachable';
+      if (statusEl) { statusEl.textContent = '\u26A0 Unverified'; statusEl.className = 'key-status unverified'; }
+      if (provider === 'anthropic') {
+        var notice = document.getElementById('wiz-unreachable-anthropic');
+        if (notice) notice.style.display = '';
+      }
+      updateReadyButton();
+    });
+}
+
+function updateReadyButton() {
+  var btn = document.getElementById('wiz-btn-ready');
+  if (!btn) return;
+  var prereqsOk = !!wizPrereqState._fallback || Object.keys(wizPrereqState).every(function(k) {
+    return wizPrereqState[k] && wizPrereqState[k].ok;
+  });
+  var anthropicStatus = wizKeyState['anthropic'] || 'empty';
+  var acceptCheckbox = document.getElementById('wiz-unreachable-accept');
+  var anthropicOk = (anthropicStatus === 'valid') ||
+    (anthropicStatus === 'unreachable' && acceptCheckbox && acceptCheckbox.checked);
+  btn.disabled = !(prereqsOk && anthropicOk);
+}
+
+function loadTemplates() {
+  var grid = document.getElementById('wiz-template-grid');
+  if (!grid) return;
+  if (wizTemplates.length > 0) { renderTemplateGrid(wizTemplates); return; }
+  fetch('/onboarding/templates')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      wizTemplates = data.templates || data || [];
+      renderTemplateGrid(wizTemplates);
+    })
+    .catch(function() {
+      grid.textContent = '';
+      var msg = _wE('div', null, 'No templates available \u2014 just describe what you need below.');
+      msg.style.cssText = 'color:var(--text-tertiary);font-size:13px;grid-column:1/-1;';
+      grid.appendChild(msg);
+    });
+}
+
+function renderTemplateGrid(templates) {
+  var grid = document.getElementById('wiz-template-grid');
+  if (!grid) return;
+  grid.textContent = '';
+  if (!templates || !templates.length) {
+    var msg = _wE('div', null, 'No templates available \u2014 just describe what you need below.');
+    msg.style.cssText = 'color:var(--text-tertiary);font-size:13px;grid-column:1/-1;';
+    grid.appendChild(msg);
+    return;
+  }
+  templates.slice(0, 5).forEach(function(t) {
+    var tile = _wE('div', 'template-tile');
+    var titleEl = _wE('div', 'template-title', t.title || '');
+    var descEl = _wE('div', 'template-desc', t.description || '');
+    var ownerEl = _wE('div', 'template-owner', t.owner ? '\u2192 ' + t.owner : '');
+    tile.appendChild(titleEl);
+    tile.appendChild(descEl);
+    tile.appendChild(ownerEl);
+    tile.addEventListener('click', function() { selectTemplate(t, tile); });
+    grid.appendChild(tile);
+  });
+}
+
+function selectTemplate(template, tileEl) {
+  document.querySelectorAll('.template-tile').forEach(function(t) { t.classList.remove('selected'); });
+  if (tileEl) tileEl.classList.add('selected');
+  var textarea = document.getElementById('wiz-task-input');
+  if (textarea) textarea.value = template.prompt || template.title || '';
+}
+
+function completeOnboarding(skipTask) {
+  var task = '';
+  if (!skipTask) {
+    var ta = document.getElementById('wiz-task-input');
+    task = ta ? (ta.value || '') : '';
+  }
+  fetch('/onboarding/complete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ task: task, skip_task: !!skipTask })
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      _finishOnboarding(data);
+    })
+    .catch(function() {
+      _finishOnboarding({});
+    });
+}
+
+function _finishOnboarding(data) {
+  brokerConnected = true;
+  document.getElementById('onboarding-wizard').style.display = 'none';
+  var generalEl = document.getElementById('general');
+  if (generalEl) generalEl.setAttribute('data-first-task', 'seeded');
+  if (data && data.checklist && data.checklist.length) updateChecklistSidebar(data.checklist);
+  showSplashScreen(function() { showOffice(); });
+}
+
+function updateChecklistSidebar(checklist) {
+  var section = document.getElementById('sidebar-checklist-section');
+  var container = document.getElementById('sidebar-checklist');
+  if (!section || !container) return;
+  container.textContent = '';
+  var hasIncomplete = checklist.some(function(item) { return !item.done; });
+  if (!hasIncomplete) { section.style.display = 'none'; return; }
+  section.style.display = '';
+  checklist.slice(0, 5).forEach(function(item) {
+    var row = _wE('div', 'checklist-item' + (item.done ? ' done' : ''));
+    var box = _wE('span', 'checklist-checkbox' + (item.done ? ' checked' : ''));
+    var label = _wE('a', 'checklist-link', item.label || item.title || '');
+    if (item.action) label.href = item.action;
+    row.appendChild(box);
+    row.appendChild(label);
+    container.appendChild(row);
+  });
+}
+
+function dismissChecklist() {
+  var section = document.getElementById('sidebar-checklist-section');
+  if (section) section.style.display = 'none';
+  fetch('/onboarding/checklist/dismiss', { method: 'POST' }).catch(function() {});
+}
+
+// ─── Init ───
+function initApp() {
+  console.log('[wuphf] initApp starting...');
+  initWizard();
 }
 
 // ─── Theme Switcher ───

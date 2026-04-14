@@ -677,6 +677,9 @@ type channelModel struct {
 
 	// lastAgentContent tracks the latest streaming text per agent for sidebar display.
 	lastAgentContent map[string]string
+
+	// onboardingChecklist holds the "Getting started" checklist rendered in the sidebar.
+	onboardingChecklist onboardingChecklist
 }
 
 func newChannelModel(threadsCollapsed bool) channelModel {
@@ -2229,7 +2232,7 @@ func (m channelModel) View() string {
 	// ── Sidebar ──────────────────────────────────────────────────────
 	sidebar := ""
 	if layout.ShowSidebar && !m.isOneOnOne() {
-		sidebar = cachedSidebarRender(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, workspaceState, layout.SidebarW, layout.ContentH)
+		sidebar = cachedSidebarRender(m.channels, mergeOfficeMembers(m.officeMembers, m.members, m.currentChannelInfo()), m.tasks, m.activeChannel, m.activeApp, m.sidebarCursor, m.sidebarRosterOffset, m.focus == focusSidebar, m.quickJumpTarget, workspaceState, layout.SidebarW, layout.ContentH, m.onboardingChecklist)
 	}
 
 	// ── Thread panel ─────────────────────────────────────────────────
@@ -6508,6 +6511,20 @@ func runChannelView(threadsCollapsed bool, initialApp officeApp, skipSplash bool
 			reportChannelCrash(fmt.Sprintf("panic: %v\n\n%s", r, debug.Stack()))
 		}
 	}()
+
+	// Check if onboarding is needed before launching the channel view.
+	if os.Getenv("WUPHF_SKIP_ONBOARDING") == "" {
+		state, err := fetchOnboardingState(brokerBaseURL)
+		if err == nil && !state.Onboarded {
+			om := newOnboardingModel(brokerBaseURL, 0, 0)
+			op := tea.NewProgram(om, tea.WithAltScreen())
+			if _, err := op.Run(); err != nil {
+				reportChannelCrash(fmt.Sprintf("onboarding error: %v\n", err))
+				return
+			}
+			// Fall through to channel view after onboarding completes.
+		}
+	}
 
 	if !skipSplash && os.Getenv("WUPHF_NO_SPLASH") == "" {
 		splash := tea.NewProgram(newSplashModel(), tea.WithAltScreen())

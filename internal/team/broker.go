@@ -22,6 +22,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -790,6 +791,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
 	mux.HandleFunc("/web-token", b.handleWebToken)
+	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
+	// completeFn posts the first task as a human message and seeds the team.
+	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)

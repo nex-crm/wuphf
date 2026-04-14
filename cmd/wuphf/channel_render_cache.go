@@ -41,13 +41,19 @@ var channelRenderCache = channelRenderCacheStore{
 	blocks:    make(map[uint64][]renderedLine),
 }
 
-func cachedSidebarRender(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int) string {
+func cachedSidebarRender(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int, checklist ...onboardingChecklist) string {
 	key := hashSidebarState(channels, members, tasks, activeChannel, activeApp, cursor, rosterOffset, focused, quickJump, workspace, width, height)
-	if cached, ok := channelRenderCache.getSidebar(key); ok {
-		return cached
+	// Checklist is dynamic per render — bypass cache when it's active.
+	checklistActive := len(checklist) > 0 && !checklist[0].Dismissed
+	if !checklistActive {
+		if cached, ok := channelRenderCache.getSidebar(key); ok {
+			return cached
+		}
 	}
-	rendered := renderSidebar(channels, members, tasks, activeChannel, activeApp, cursor, rosterOffset, focused, quickJump, workspace, width, height)
-	channelRenderCache.putSidebar(key, rendered)
+	rendered := renderSidebar(channels, members, tasks, activeChannel, activeApp, cursor, rosterOffset, focused, quickJump, workspace, width, height, checklist...)
+	if !checklistActive {
+		channelRenderCache.putSidebar(key, rendered)
+	}
 	return rendered
 }
 

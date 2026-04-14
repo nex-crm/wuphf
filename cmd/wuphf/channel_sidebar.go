@@ -386,7 +386,7 @@ func visibleSidebarApps(apps []officeSidebarApp, activeApp officeApp, maxRows in
 }
 
 // renderSidebar renders the Slack-style sidebar with channels and team members.
-func renderSidebar(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int) string {
+func renderSidebar(channels []channelInfo, members []channelMember, tasks []channelTask, activeChannel string, activeApp officeApp, cursor int, rosterOffset int, focused bool, quickJump quickJumpTarget, workspace workspaceUIState, width, height int, checklist ...onboardingChecklist) string {
 	if width < 2 {
 		return ""
 	}
@@ -511,6 +511,18 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 	dividerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(sidebarDivider))
 	divider := dividerStyle.Render(strings.Repeat("\u2500", innerW))
 	lines = append(lines, sidebarPlainRow(divider, width))
+
+	// Insert onboarding checklist section above the agents list, if provided and active.
+	if len(checklist) > 0 {
+		if cl := checklist[0]; !cl.Dismissed {
+			clSection := renderOnboardingChecklist(cl, width)
+			if clSection != "" {
+				for _, clLine := range strings.Split(clSection, "\n") {
+					lines = append(lines, clLine)
+				}
+			}
+		}
+	}
 
 	usedLines := len(lines)
 	availableLines := height - usedLines - 1
