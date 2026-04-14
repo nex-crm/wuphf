@@ -44,15 +44,17 @@ That's it. The browser opens automatically and you're in the office. Unlike Ryan
 
 | Flag | What it does |
 |------|-------------|
-| `--no-nex` | Run without the Nex backend (no context graph or Nex-managed integrations like Composio/One CLI). Telegram and other local integrations still work. |
+| `--no-nex` | Skip the Nex backend (no context graph, no Nex-managed integrations) |
 | `--tui` | Use the tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override for this run (`claude-code`, `codex`) |
-| `--collab` | Explicitly start in collaborative mode (this is the default — all agents see all messages). Use `/focus` in-app to switch to CEO-routed delegation. |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`) |
+| `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
+
+`--no-nex` still lets Telegram and any other local integration keep working. To switch back to CEO-routed delegation after launch, use `/focus` inside the office.
 
 ## Other Commands
 
