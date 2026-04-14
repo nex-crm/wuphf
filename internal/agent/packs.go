@@ -77,13 +77,20 @@ var Packs = []PackDefinition{
 		Slug:        "revops",
 		Name:        "RevOps Team",
 		Description: "Revenue operations team — CRM hygiene, pipeline health, and GTM execution",
-		LeadSlug:    "ops-lead",
+		LeadSlug:    "ceo",
 		Agents: []AgentConfig{
+			{
+				Slug:           "ceo",
+				Name:           "Chief Revenue Officer",
+				Expertise:      []string{"revenue-leadership", "GTM-strategy", "prioritization", "delegation", "orchestration", "forecasting"},
+				Personality:    "Revenue-obsessed leader who breaks down GTM directives into clear specialist assignments. Routes CRM hygiene to the analyst, deal work to the AE, outbound to the SDR, and keeps ops-lead focused on pipeline mechanics.",
+				PermissionMode: "plan",
+			},
 			{
 				Slug:           "ops-lead",
 				Name:           "Revenue Operations Lead",
 				Expertise:      []string{"revenue-operations", "GTM-strategy", "pipeline-management", "forecasting", "CRM", "data-quality", "process-design"},
-				Personality:    "Data-driven RevOps lead who spots pipeline leaks, enforces CRM discipline, and keeps the GTM machine humming. Routes work to the right specialist without ceremony.",
+				Personality:    "Data-driven RevOps lead who spots pipeline leaks, enforces CRM discipline, and keeps the GTM machine humming. Reports to the CRO on pipeline health and process improvements.",
 				PermissionMode: "plan",
 			},
 			{

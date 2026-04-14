@@ -80,11 +80,23 @@ func TestRevOpsPack(t *testing.T) {
 	if p == nil {
 		t.Fatal("revops pack not found")
 	}
-	if p.LeadSlug != "ops-lead" {
-		t.Errorf("expected lead 'ops-lead', got '%s'", p.LeadSlug)
+	if p.LeadSlug != "ceo" {
+		t.Errorf("expected lead 'ceo', got '%s'", p.LeadSlug)
 	}
-	if len(p.Agents) != 4 {
-		t.Errorf("expected 4 agents, got %d", len(p.Agents))
+	if len(p.Agents) != 5 {
+		t.Errorf("expected 5 agents, got %d", len(p.Agents))
+	}
+	// CEO (Chief Revenue Officer) must be present so the broker's CEO-routed
+	// delegation and hardcoded "ceo" checks keep working.
+	hasCEO := false
+	for _, a := range p.Agents {
+		if a.Slug == "ceo" {
+			hasCEO = true
+			break
+		}
+	}
+	if !hasCEO {
+		t.Error("revops pack missing required 'ceo' agent")
 	}
 	if len(p.DefaultSkills) != 5 {
 		t.Errorf("expected 5 default skills, got %d", len(p.DefaultSkills))
