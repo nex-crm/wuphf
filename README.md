@@ -55,11 +55,13 @@ That's it. The browser opens automatically and you're in the office. Unlike Ryan
 
 ## Other Commands
 
+The examples below assume `wuphf` is on your `PATH`. If you just built the binary and haven't moved it, prefix with `./` (as in Get Started above) or run `go install ./cmd/wuphf` to drop it in `$GOPATH/bin`.
+
 ```bash
-./wuphf init          # First-time setup
-./wuphf shred         # Kill a running session
-./wuphf --1o1         # 1:1 with the CEO
-./wuphf --1o1 cro     # 1:1 with a specific agent
+wuphf init          # First-time setup
+wuphf shred         # Kill a running session
+wuphf --1o1         # 1:1 with the CEO
+wuphf --1o1 cro     # 1:1 with a specific agent
 ```
 
 ## What You Should See
