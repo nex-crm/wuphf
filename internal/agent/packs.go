@@ -355,3 +355,12 @@ func GetPack(slug string) *PackDefinition {
 	}
 	return nil
 }
+
+// PackSlugs returns the list of all registered pack slugs, in registration order.
+func PackSlugs() []string {
+	slugs := make([]string, 0, len(Packs))
+	for i := range Packs {
+		slugs = append(slugs, Packs[i].Slug)
+	}
+	return slugs
+}
