@@ -26,6 +26,10 @@
 .gocache/
 .gomodcache/
 .playwright-mcp/
+.playwright-cli/
+
+# QA/browse scratch artifacts
+task*-buttons.json
 
 # Video renders and intermediate audio
 video/out/*.mp4

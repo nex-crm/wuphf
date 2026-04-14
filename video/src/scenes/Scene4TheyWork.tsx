@@ -10,10 +10,10 @@ export const Scene4TheyWork: React.FC = () => {
     extrapolateRight: "clamp",
   });
 
-  const tokensUsed = Math.floor(interpolate(frame, [sec(2), sec(9)], [0, 31400], {
+  const tokensUsed = interpolate(frame, [sec(2), sec(9)], [0, 3.2], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-  }));
+  });
 
   const statusColors = [slack.greenPresence, "#1D9BD1", slack.yellow];
   const tasks = ["delegating to team", "scaffolding page", "writing hero copy"];
@@ -95,11 +95,10 @@ export const Scene4TheyWork: React.FC = () => {
               <div style={{ fontSize: 14, color: slack.sidebarText, textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: 4 }}>
                 Tokens this turn
               </div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
                 <div style={{ fontSize: 36, fontWeight: 800, color: slack.presence, fontFamily: fonts.mono }}>
-                  {tokensUsed.toLocaleString()}
+                  {tokensUsed.toFixed(1)}K
                 </div>
-                <div style={{ fontSize: 16, color: slack.sidebarText, fontFamily: fonts.mono }}>flat</div>
               </div>
             </div>
           )}

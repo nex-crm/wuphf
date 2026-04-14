@@ -82,7 +82,7 @@ const Panel1Savings: React.FC = () => {
         <circle cx={pcX} cy={pcY} r="10" fill={slack.red} />
         {progress > 0.5 && (
           <text x={pcX - 20} y={pcY - 20} fill={slack.red} fontFamily={fonts.mono} fontSize="20" fontWeight="700" textAnchor="end">
-            Paperclip — 500k tokens
+            Paperclip — 500K
           </text>
         )}
 
@@ -91,7 +91,7 @@ const Panel1Savings: React.FC = () => {
         <circle cx={wuphfX} cy={wuphfY} r="10" fill={slack.presence} />
         {progress > 0.3 && (
           <text x={wuphfX - 20} y={wuphfY + 36} fill={slack.presence} fontFamily={fonts.mono} fontSize="20" fontWeight="700" textAnchor="end">
-            WUPHF — flat 31k
+            WUPHF — 31K
           </text>
         )}
       </svg>
@@ -112,10 +112,11 @@ const Panel1Savings: React.FC = () => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// PANEL 2: Knowledge graph — your company, in a graph
+// PANEL 2: Context graph — your company, in a graph
 // ═══════════════════════════════════════════════════════════════
-const Panel2Graph: React.FC = () => {
-  const frame = useCurrentFrame();
+const Panel2Graph: React.FC<{ freezeAfter?: number }> = ({ freezeAfter }) => {
+  const raw = useCurrentFrame();
+  const frame = freezeAfter !== undefined ? Math.min(raw, freezeAfter) : raw;
 
   const headlineOp = interpolate(frame, [0, 12], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   const jokeOp = interpolate(frame, [50, 65], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
@@ -151,7 +152,7 @@ const Panel2Graph: React.FC = () => {
           fontFamily: fonts.mono, fontSize: 20, color: slack.textTertiary,
           textTransform: "uppercase" as const, letterSpacing: 4, marginBottom: 20,
         }}>
-          Context · powered by Nex
+          Memory · powered by Nex
         </div>
         <div style={{
           fontFamily: fonts.sans,
@@ -160,10 +161,10 @@ const Panel2Graph: React.FC = () => {
           color: "#FFF",
           lineHeight: 0.95,
           letterSpacing: -3,
-          maxWidth: 640,
+          maxWidth: 680,
         }}>
-          Your company,<br/>
-          <span style={{ color: colors.ai }}>in a graph.</span>
+          Your company's<br/>
+          <span style={{ color: colors.ai }}>context graph.</span>
         </div>
       </div>
 
@@ -376,9 +377,79 @@ const Panel3Integrations: React.FC = () => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// MAIN SCENE: 3 sequential full-bleed panels
+// PAUSE OVERLAY — fourth-wall break "paused video" effect
 // ═══════════════════════════════════════════════════════════════
+const PauseOverlay: React.FC<{ durationFrames: number }> = ({ durationFrames }) => {
+  const frame = useCurrentFrame();
+  // Quick fade in (3 frames), hold, click-press + fade out at end (last 5 frames)
+  const fadeIn = interpolate(frame, [0, 3], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const fadeOut = interpolate(frame, [durationFrames - 5, durationFrames], [1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const opacity = Math.min(fadeIn, fadeOut);
+
+  // Subtle pulse on play button during hold
+  const pulse = 1 + Math.sin(frame * 0.08) * 0.03;
+  // Click: in last 5 frames, scale down (pressed) then vanish
+  const clickScale = interpolate(frame, [durationFrames - 5, durationFrames - 2], [1, 0.82], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const scale = frame < durationFrames - 5 ? pulse : clickScale;
+
+  return (
+    <AbsoluteFill style={{ opacity, pointerEvents: "none" }}>
+      {/* Dim layer */}
+      <AbsoluteFill style={{ backgroundColor: "rgba(0, 0, 0, 0.55)" }} />
+      {/* Centered play button */}
+      <AbsoluteFill style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{
+          width: 260, height: 260,
+          borderRadius: "50%",
+          backgroundColor: "rgba(255,255,255,0.12)",
+          backdropFilter: "blur(4px)",
+          border: "3px solid rgba(255,255,255,0.85)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          transform: `scale(${scale})`,
+          boxShadow: "0 0 80px rgba(255,255,255,0.15)",
+        }}>
+          {/* Play triangle */}
+          <svg width="100" height="110" viewBox="0 0 100 110">
+            <polygon points="15,10 15,100 95,55" fill="#FFF" />
+          </svg>
+        </div>
+      </AbsoluteFill>
+      {/* Small "PAUSED" label below button */}
+      <AbsoluteFill style={{ display: "flex", alignItems: "center", justifyContent: "center", marginTop: 220 }}>
+        <div style={{
+          fontFamily: fonts.mono,
+          fontSize: 18,
+          color: "rgba(255,255,255,0.75)",
+          textTransform: "uppercase" as const,
+          letterSpacing: 6,
+        }}>
+          Paused
+        </div>
+      </AbsoluteFill>
+    </AbsoluteFill>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// MAIN SCENE: 3 sequential full-bleed panels + fourth-wall pause overlay
+// ═══════════════════════════════════════════════════════════════
+//
+// Timing (local to Scene 6, which runs 26s):
+//   0.0s-4.0s       Panel 1 (token burn)
+//   4.0s-21.48s     Panel 2 (context graph) — freezes at local frame 99
+//   7.3s-21.48s     PauseOverlay (14.18s = 425 frames) — fourth-wall break
+//   21.48s-26.0s    Panel 3 (integrations)
+//
+// Narration sync (WuphfDemo.tsx places audio clips):
+//   Scene 6a "nine times less token burn. a context graph of your entire company."  @ Scene 6 start+1s
+//   Scene 6b "...wait. what the heck is a context graph?... if that's what the VCs want." — break window
+//   Scene 6c "context graph. a thousand integrations, one click away." — resumes with play
 export const Scene6MoneyShot: React.FC = () => {
+  const PANEL2_FREEZE_FRAME = 99; // Panel-2-local frame where pause hits (~3.3s into Panel 2)
+  const PAUSE_FROM = 219;         // Scene-6-local frame when pause overlay begins (7.3s)
+  const PAUSE_DURATION = 361;     // 12.04s — matches trimmed break audio
+  const PANEL3_FROM = 580;        // Scene-6-local frame when Panel 3 starts (19.33s)
+
   return (
     <AbsoluteFill style={{ backgroundColor: "#0B0D10" }}>
       <DotGrid color="#FFFFFF" opacity={0.04} spacing={40} size={1.2} />
@@ -387,11 +458,15 @@ export const Scene6MoneyShot: React.FC = () => {
         <Panel1Savings />
       </Sequence>
 
-      <Sequence from={sec(4)} durationInFrames={sec(4)}>
-        <Panel2Graph />
+      <Sequence from={sec(4)} durationInFrames={PANEL3_FROM - sec(4)}>
+        <Panel2Graph freezeAfter={PANEL2_FREEZE_FRAME} />
       </Sequence>
 
-      <Sequence from={sec(8)} durationInFrames={sec(4)}>
+      <Sequence from={PAUSE_FROM} durationInFrames={PAUSE_DURATION}>
+        <PauseOverlay durationFrames={PAUSE_DURATION} />
+      </Sequence>
+
+      <Sequence from={PANEL3_FROM} durationInFrames={sec(24) - PANEL3_FROM}>
         <Panel3Integrations />
       </Sequence>
     </AbsoluteFill>

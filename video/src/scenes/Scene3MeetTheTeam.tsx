@@ -76,6 +76,19 @@ export const Scene3MeetTheTeam: React.FC = () => {
     <AbsoluteFill style={{ backgroundColor: "#0B0D10" }}>
       <DotGrid color="#FFFFFF" opacity={0.04} spacing={40} size={1.2} />
       <RadialGlow color={slack.sidebar} x="50%" y="50%" size={1200} opacity={0.25} />
+      {/* Overall title — present throughout pack cycling */}
+      <div style={{
+        position: "absolute", top: 120, left: 0, right: 0,
+        display: "flex", justifyContent: "center",
+      }}>
+        <div style={{
+          fontFamily: fonts.mono, fontSize: 22, color: slack.textTertiary,
+          textTransform: "uppercase" as const, letterSpacing: 10, fontWeight: 600,
+        }}>
+          Team Packs
+        </div>
+      </div>
+
       <div style={{
       position: "absolute", inset: 0,
       display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 28,
