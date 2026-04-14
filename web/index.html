@@ -82,6 +82,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   display: inline-flex; align-items: center; justify-content: center;
   gap: 8px; font-family: var(--font-sans); font-weight: 500;
   border: none; cursor: pointer; transition: all 0.2s; text-decoration: none;
+  min-height: 44px; /* WCAG 2.5.5 / Apple HIG touch target minimum */
 }
 .btn:hover { transform: translateY(-1px); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
@@ -90,7 +91,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .btn-secondary { background: transparent; color: var(--text-secondary); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
 .btn-ghost { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--border); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
 .btn-lg { padding: 16px 40px; font-size: 16px; }
-.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-sm { padding: 6px 12px; font-size: 12px; min-height: 32px; } /* inline/dense-action buttons opt out of 44px */
 
 /* ─── Cards ─── */
 .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 1px 3px rgba(59,47,47,0.04), 0 8px 30px rgba(59,47,47,0.04); }
@@ -154,7 +155,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 
 .step { display: none; }
 .step.active { display: block; }
-.step-title { font-family: var(--font-logo); font-style: italic; font-size: 28px; letter-spacing: -0.01em; text-align: center; margin-bottom: 8px; }
+.step-title { font-family: var(--font-logo); font-style: italic; font-size: 28px; font-weight: 700; letter-spacing: -0.01em; text-align: center; margin-bottom: 8px; }
 .step-subtitle { font-size: 14px; color: var(--text-secondary); text-align: center; line-height: 1.6; margin-bottom: 32px; }
 .step-nav { display: flex; align-items: center; justify-content: space-between; padding-top: 16px; }
 
@@ -676,6 +677,15 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .channel-actions { display: flex; gap: 4px; }
 
 .messages { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+
+/* ─── Channel empty state ─── */
+.channel-empty-state { margin: auto; max-width: 420px; text-align: center; color: var(--text-secondary); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.channel-empty-state .eyebrow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-tertiary); }
+.channel-empty-state .title { font-family: var(--font-logo); font-style: italic; font-size: 24px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.channel-empty-state .body { font-size: 14px; line-height: 1.5; }
+.channel-empty-state .hints { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); text-align: left; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 12px 16px; width: 100%; }
+.channel-empty-state .hints code { font-family: var(--font-mono); font-size: 12px; background: var(--bg-warm); padding: 1px 6px; border-radius: 4px; color: var(--text); }
+.channel-empty-state .foot { font-size: 12px; color: var(--text-tertiary); font-style: italic; }
 .message { display: flex; gap: 12px; animation: fadeIn 0.3s ease-out; }
 .message-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--accent-bg); }
 .message-content { flex: 1; min-width: 0; }
@@ -1422,7 +1432,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 /* Step 1 */
 .wizard-hero { text-align: center; }
 .wizard-eyebrow { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-tertiary); margin-bottom: 12px; }
-.wizard-headline { font-family: var(--font-logo); font-style: italic; font-size: 36px; letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 12px; }
+.wizard-headline { font-family: var(--font-logo); font-style: italic; font-size: 36px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; margin-bottom: 12px; }
 .wizard-subhead { font-size: 14px; line-height: 1.65; color: var(--text-secondary); max-width: 54ch; margin: 0 auto; }
 
 /* Prereqs */
@@ -2323,6 +2333,9 @@ function _enterChannel(name) {
   document.getElementById('messages').textContent = '';
   var dmSplitMsgs = document.getElementById('dm-split-messages');
   if (dmSplitMsgs) dmSplitMsgs.textContent = '';
+  // Show the empty state right away so the channel never reads as broken.
+  // fetchMessages() will clear it as soon as the broker returns any content.
+  showChannelEmptyState(name);
 
   // Update header
   var ch = CHANNELS.find(function(c) { return c.name === name; });
@@ -4205,6 +4218,64 @@ function switchChannel(name) {
   navigate('#/channels/' + encodeURIComponent(name));
 }
 
+// ─── Channel empty state ───
+// A warm placeholder shown when a channel has no messages yet. Removed the
+// instant any message lands; restored whenever the channel is entered cold.
+function showChannelEmptyState(channelName) {
+  var container = document.getElementById('messages');
+  if (!container) return;
+  // Don't clobber the state if it's already visible
+  if (container.querySelector('.channel-empty-state')) return;
+
+  var mk = function(cls, text) {
+    var el = document.createElement('div');
+    el.className = cls;
+    if (text) el.textContent = text;
+    return el;
+  };
+  var wrap = document.createElement('div');
+  wrap.className = 'channel-empty-state';
+  wrap.setAttribute('data-empty-state', '1');
+
+  wrap.appendChild(mk('eyebrow', 'quiet before the standup'));
+  var label = channelName ? '#' + channelName : 'this channel';
+  wrap.appendChild(mk('title', label + ' is empty. For now.'));
+  wrap.appendChild(mk('body',
+    'This is where your agents will argue, claim tasks, and show progress. ' +
+    'Unlike Ryan Howard, they actually ship.'));
+
+  var hints = mk('hints');
+  var hintTry = document.createElement('div');
+  hintTry.appendChild(document.createTextNode('Try '));
+  var codeTry = document.createElement('code');
+  codeTry.textContent = '@ceo what should we build this week?';
+  hintTry.appendChild(codeTry);
+  hints.appendChild(hintTry);
+
+  var hintKeys = document.createElement('div');
+  hintKeys.appendChild(document.createTextNode('Type '));
+  var codeSlash = document.createElement('code');
+  codeSlash.textContent = '/';
+  hintKeys.appendChild(codeSlash);
+  hintKeys.appendChild(document.createTextNode(' for commands, '));
+  var codeAt = document.createElement('code');
+  codeAt.textContent = '@';
+  hintKeys.appendChild(codeAt);
+  hintKeys.appendChild(document.createTextNode(' to mention an agent.'));
+  hints.appendChild(hintKeys);
+  wrap.appendChild(hints);
+
+  wrap.appendChild(mk('foot', 'Michael would be proud. Probably.'));
+  container.appendChild(wrap);
+}
+
+function hideChannelEmptyState() {
+  var container = document.getElementById('messages');
+  if (!container) return;
+  var el = container.querySelector('.channel-empty-state');
+  if (el) el.remove();
+}
+
 // ─── Animate messages ───
 function animateMessages() {
   var container = document.getElementById('messages');
@@ -4506,6 +4577,8 @@ function appendBrokerMessage(msg) {
   if (applyStatusActivity(msg)) {
     return;
   }
+  // As soon as any real message arrives for this channel, drop the empty state.
+  hideChannelEmptyState();
 
   // Track unread counts for non-active channels
   var msgChannel = msg.channel || currentChannel;
@@ -6780,10 +6853,13 @@ function recheckWizPrereqs() {
     })
     .catch(function() {
       listEl.textContent = '';
-      var msg = _wE('div', null, 'Could not reach prereq check. You can still continue.');
+      var msg = _wE('div', null, "Couldn't auto-check — pick the runtime you already have installed.");
       msg.style.cssText = 'font-size:12px;color:var(--text-tertiary);padding:8px 0;';
       listEl.appendChild(msg);
       wizPrereqState = { _fallback: true };
+      // Still render the runtime tiles so the user has something to pick.
+      // updateReadyButton() treats _fallback as "trust the user's selection."
+      renderRuntimeTiles();
       updateReadyButton();
     });
 }
@@ -7023,12 +7099,19 @@ function updateReadyButton() {
     return wizPrereqState[k] && wizPrereqState[k].ok;
   });
   // The selected runtime must also be detected — picking Codex without
-  // having Codex installed shouldn't unlock Ready.
-  var runtimeOk = !!(
-    wizSelectedRuntime &&
-    wizPrereqState[wizSelectedRuntime] &&
-    wizPrereqState[wizSelectedRuntime].ok
-  );
+  // having Codex installed shouldn't unlock Ready. In _fallback mode the
+  // prereq check couldn't run, so we trust the user's selection instead of
+  // trapping them with an always-disabled button.
+  var runtimeOk;
+  if (wizPrereqState._fallback) {
+    runtimeOk = !!wizSelectedRuntime;
+  } else {
+    runtimeOk = !!(
+      wizSelectedRuntime &&
+      wizPrereqState[wizSelectedRuntime] &&
+      wizPrereqState[wizSelectedRuntime].ok
+    );
+  }
   btn.disabled = !(infraOk && runtimeOk);
 }
 

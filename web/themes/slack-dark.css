@@ -449,7 +449,9 @@ html[data-theme="slack-dark"] .btn-ghost:hover {
 html[data-theme="slack-dark"] .onboarding { background: #1A1D21 !important; }
 html[data-theme="slack-dark"] .dot-grid { background-image: none !important; }
 html[data-theme="slack-dark"] .progress-dot.active { background: #D1D2D3 !important; }
-html[data-theme="slack-dark"] .progress-dot { background: #35373B !important; }
+/* Inactive dot raised from #35373B (1.4:1 contrast against #1A1D21) to
+   #6C6E72 (~3.2:1) so the step indicator is actually scannable. */
+html[data-theme="slack-dark"] .progress-dot { background: #6C6E72 !important; }
 html[data-theme="slack-dark"] .dict-word {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
   font-style: normal !important;
@@ -469,7 +471,6 @@ html[data-theme="slack-dark"] .tagline-gradient {
 html[data-theme="slack-dark"] .step-title {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif !important;
   font-style: normal !important;
-  font-weight: 900 !important;
   color: #D1D2D3 !important;
 }
 html[data-theme="slack-dark"] .step-desc {

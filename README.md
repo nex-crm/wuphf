@@ -1,21 +1,31 @@
 # WUPHF
 
-[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gjSySC3PzV)
+<p align="center">
+  <img src="assets/hero.png" alt="WUPHF onboarding — Your AI team, visible and working." width="720" />
+</p>
 
-A terminal office where your AI team works in the open.
+[![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gjSySC3PzV)
+[![License: MIT](https://img.shields.io/badge/License-MIT-A87B4F)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](go.mod)
+
+### A terminal office where your AI team works in the open.
+
+One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
 
 > *"WUPHF. When you type it in, it contacts someone via phone, text, email, IM, Facebook, Twitter, and then... WUPHF."*
 > — Ryan Howard, Season 7
 
-One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
+> _30-second teaser — what the office feels like when the agents are actually working._
 
 <video width="630" height="300" src="https://github.com/user-attachments/assets/d62766ba-ebb3-4948-bc02-770ebcc51d5a"></video>
+
+> _Full walkthrough — launch to first shipped task, end to end._
 
 <video width="630" height="300" src="https://github.com/user-attachments/assets/f4cdffbf-4388-49bc-891d-6bd050ff8247"></video>
 
 ## Get Started
 
-**Prerequisites:** [Go](https://go.dev/dl/), [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (or [Codex CLI](https://github.com/openai/codex) if you set `--provider codex`). [tmux](https://github.com/tmux/tmux/wiki/Installing) is only needed for `--tui` mode.
+**Prerequisites:** [Go](https://go.dev/dl/) and one agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) by default, or [Codex CLI](https://github.com/openai/codex) when you pass `--provider codex`. [tmux](https://github.com/tmux/tmux/wiki/Installing) is only required for `--tui` mode.
 
 ```bash
 git clone https://github.com/nex-crm/wuphf.git
@@ -34,23 +44,27 @@ That's it. The browser opens automatically and you're in the office. Unlike Ryan
 
 | Flag | What it does |
 |------|-------------|
-| `--no-nex` | Run without the Nex backend (no context graph or Nex-managed integrations like Composio/One CLI). Telegram and other local integrations still work. |
+| `--no-nex` | Skip the Nex backend (no context graph, no Nex-managed integrations) |
 | `--tui` | Use the tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
-| `--provider <name>` | LLM provider override for this run (`claude-code`, `codex`) |
-| `--collab` | Explicitly start in collaborative mode (this is the default — all agents see all messages). Use `/focus` in-app to switch to CEO-routed delegation. |
+| `--provider <name>` | LLM provider override (`claude-code`, `codex`) |
+| `--collab` | Start in collaborative mode — all agents see all messages (this is the default) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
 
+`--no-nex` still lets Telegram and any other local integration keep working. To switch back to CEO-routed delegation after launch, use `/focus` inside the office.
+
 ## Other Commands
 
+The examples below assume `wuphf` is on your `PATH`. If you just built the binary and haven't moved it, prefix with `./` (as in Get Started above) or run `go install ./cmd/wuphf` to drop it in `$GOPATH/bin`.
+
 ```bash
-./wuphf init          # First-time setup
-./wuphf shred         # Kill a running session
-./wuphf --1o1         # 1:1 with the CEO
-./wuphf --1o1 cro     # 1:1 with a specific agent
+wuphf init          # First-time setup
+wuphf shred         # Kill a running session
+wuphf --1o1         # 1:1 with the CEO
+wuphf --1o1 cro     # 1:1 with a specific agent
 ```
 
 ## What You Should See
@@ -68,18 +82,22 @@ WUPHF can bridge to Telegram. Run `/connect` inside the office, pick Telegram, p
 
 ## External Actions
 
-To let agents take real actions (send emails, update CRMs, etc.), WUPHF ships with two action providers — pick whichever fits your style:
+To let agents take real actions (send emails, update CRMs, etc.), WUPHF ships with two action providers. Pick whichever fits your style.
 
-**One CLI** (default, local-first). Uses a local CLI binary to execute actions on your machine. Good if you want everything running locally and don't want to send credentials to a third party.
+### One CLI — default, local-first
+
+Uses a local CLI binary to execute actions on your machine. Good if you want everything running locally and don't want to send credentials to a third party.
 
 ```
 /config set action_provider one
 ```
 
-**Composio** (cloud-hosted). Connect SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flows. Good if you'd rather not manage local CLI auth.
+### Composio — cloud-hosted
 
-1. Create a [Composio](https://composio.dev) project and generate an API key
-2. Connect the accounts you want (Gmail, Slack, etc.)
+Connects SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flows. Good if you'd rather not manage local CLI auth.
+
+1. Create a [Composio](https://composio.dev) project and generate an API key.
+2. Connect the accounts you want (Gmail, Slack, etc.).
 3. Inside the office:
    ```
    /config set composio_api_key <key>
@@ -105,12 +123,14 @@ Naive is a [hosted fork of Paperclip](https://not-so-naive.vercel.app/) (YC S25)
 
 Same task, same machine, same codex binary. 5-turn CEO DM session. All numbers measured from live runs.
 
+All "billed" rows are input + output tokens actually charged by the provider; Claude Code is expressed as USD because Anthropic bills by cost tier, not by token count.
+
 | | WUPHF + Claude Code | WUPHF + Codex | Paperclip + Codex |
 |---|---|---|---|
-| 5-turn cost | **$0.06** | **87k billed** | **284k billed** |
-| Avg per turn | $0.01 (97% cached) | 17k billed | 57k billed |
+| 5-turn total billed | **$0.06** | **87k tokens** | **284k tokens** |
+| Avg per turn | $0.01 (97% cached) | 17k tokens | 57k tokens |
 | vs Paperclip | **9x cheaper** | **3.3x cheaper** | baseline |
-| Input trend | Flat (31k) | Flat (128k) | Growing (308k → 500k) |
+| Input trend | Flat (31k tokens) | Flat (128k tokens) | Growing (308k → 500k tokens) |
 | Idle cost | Zero | Zero | Heartbeat every 30s |
 
 **Fresh sessions.** Each agent turn starts clean. No conversation history accumulates.

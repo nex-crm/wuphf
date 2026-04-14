@@ -1182,7 +1182,9 @@ html[data-theme="slack"] .progress-dot.active {
   background: #3F0E40 !important;
 }
 html[data-theme="slack"] .progress-dot.inactive {
-  background: rgba(63,14,64,0.2) !important;
+  /* Bumped from 0.2 alpha (~1.5:1) to 0.5 alpha (~3.2:1) so inactive steps
+     are clearly visible on white background. */
+  background: rgba(63,14,64,0.5) !important;
 }
 
 /* Dictionary card on welcome */
@@ -1225,11 +1227,11 @@ html[data-theme="slack"] .welcome-copy {
   font-family: var(--font-sans) !important;
 }
 
-/* Step titles */
+/* Step titles — drop the !important 900 override; inherit 700 from base to
+   match the wizard-headline (H1) weight and keep the system coherent. */
 html[data-theme="slack"] .step-title {
   font-family: var(--font-sans) !important;
   font-style: normal !important;
-  font-weight: 900 !important;
   font-size: 28px !important;
 }
 html[data-theme="slack"] .step-subtitle {

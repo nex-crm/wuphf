@@ -17,6 +17,86 @@ import (
 
 const appName = "wuphf"
 
+// subcommandWantsHelp reports whether the remaining args after the subcommand
+// name request help. We intercept this BEFORE invoking the subcommand so that
+// `wuphf init --help` (and similar) never fire the destructive action.
+func subcommandWantsHelp(rest []string) bool {
+	for _, a := range rest {
+		switch a {
+		case "-h", "--help", "-help":
+			return true
+		}
+	}
+	return false
+}
+
+// printSubcommandHelp writes usage text for the given subcommand to stderr.
+// Keeping descriptions short and on-brand — users reading --help are browsing,
+// not debugging.
+func printSubcommandHelp(sub string) {
+	switch sub {
+	case "init":
+		fmt.Fprintln(os.Stderr, "wuphf init — first-time setup")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Installs the latest Nex CLI from npm and saves your default provider")
+		fmt.Fprintln(os.Stderr, "and pack so future `wuphf` invocations just work.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf init")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "This writes to ~/.wuphf/config.json. Safe to re-run.")
+	case "shred", "kill":
+		fmt.Fprintln(os.Stderr, "wuphf shred — stop the running team")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Kills any running WUPHF session (tmux or web), clears broker state, and")
+		fmt.Fprintln(os.Stderr, "leaves the office dark. Michael will not be happy.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf shred")
+		fmt.Fprintln(os.Stderr, "  wuphf kill       (alias)")
+	case "import":
+		fmt.Fprintln(os.Stderr, "wuphf import — pull state from another tool")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf import --from paperclip        Auto-detect a running Paperclip")
+		fmt.Fprintln(os.Stderr, "  wuphf import --from <directory>      Directory with state.json")
+		fmt.Fprintln(os.Stderr, "  wuphf import --from <file.json>      Direct path to an export")
+	case "mcp-team":
+		fmt.Fprintln(os.Stderr, "wuphf mcp-team — start the team MCP server (used by agents, not humans)")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf mcp-team")
+	default:
+		fmt.Fprintf(os.Stderr, "wuphf: unknown subcommand %q — run `wuphf --help` for the list.\n", sub)
+	}
+}
+
+// printVisibleFlags prints all registered flags except those tagged "(internal)"
+// or the meta-flag --help-all. Multi-character flag names render with the
+// modern `--` prefix (Go stdlib uses a single `-` for historical reasons),
+// single-character flags keep one dash.
+func printVisibleFlags(w *os.File) {
+	flag.VisitAll(func(f *flag.Flag) {
+		if f.Name == "help-all" {
+			return
+		}
+		if strings.Contains(f.Usage, "(internal)") {
+			return
+		}
+		prefix := "-"
+		if len(f.Name) > 1 {
+			prefix = "--"
+		}
+		fmt.Fprintf(w, "  %s%s\n    \t%s", prefix, f.Name, f.Usage)
+		// Only emit a trailing (default ...) when the usage string hasn't
+		// already mentioned the default itself.
+		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && !strings.Contains(f.Usage, "default") {
+			fmt.Fprintf(w, " (default %q)", f.DefValue)
+		}
+		fmt.Fprintln(w)
+	})
+}
+
 func main() {
 	cmd := flag.String("cmd", "", "Run a command non-interactively")
 	format := flag.String("format", "text", "Output format (text, json)")
@@ -35,21 +115,29 @@ func main() {
 	opusCEO := flag.Bool("opus-ceo", false, "Upgrade CEO agent from Sonnet to Opus")
 	collabMode := flag.Bool("collab", false, "Start in collaborative mode (all agents see all messages)")
 	noOpen := flag.Bool("no-open", false, "Don't open browser automatically on launch")
+	helpAll := flag.Bool("help-all", false, "Show all flags including internal ones")
 
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "WUPHF v%s\n\n", buildinfo.Current().Version)
+		fmt.Fprintf(os.Stderr, "WUPHF v%s — the terminal office Ryan Howard always wanted.\n\n", buildinfo.Current().Version)
 		fmt.Fprintf(os.Stderr, "Usage:\n")
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
 		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
-		fmt.Fprintf(os.Stderr, "  %s shred        Stop the running team\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s shred        Stop the running team (Michael will not be happy)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from paperclip  Import from running Paperclip (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
-		flag.PrintDefaults()
+		printVisibleFlags(os.Stderr)
+		fmt.Fprintf(os.Stderr, "\nFor all flags including internal ones: %s --help-all\n", appName)
 	}
 
 	flag.Parse()
+
+	if *helpAll {
+		fmt.Fprintf(os.Stderr, "WUPHF v%s — all flags (including internal):\n\n", buildinfo.Current().Version)
+		flag.PrintDefaults()
+		os.Exit(0)
+	}
 
 	if *noNex {
 		_ = os.Setenv("WUPHF_NO_NEX", "1")
@@ -78,7 +166,12 @@ func main() {
 	// Handle subcommands
 	args := flag.Args()
 	if len(args) > 0 {
-		switch args[0] {
+		sub := args[0]
+		if subcommandWantsHelp(args[1:]) {
+			printSubcommandHelp(sub)
+			return
+		}
+		switch sub {
 		case "mcp-team":
 			if err := teammcp.Run(context.Background()); err != nil {
 				fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -254,7 +347,7 @@ func dispatch(cmd string, apiKeyFlag string, format string) {
 	}
 	apiKey := config.ResolveAPIKey(apiKeyFlag)
 	if apiKey == "" {
-		fmt.Fprintf(os.Stderr, "No API key found. Set WUPHF_API_KEY or run: %s (interactive) then /init\n", appName)
+		fmt.Fprintf(os.Stderr, "No API key found. Set WUPHF_API_KEY, or run `%s` and type /init.\n", appName)
 		os.Exit(2)
 	}
 
