@@ -121,8 +121,6 @@ npx paperclipai run --data-dir /tmp/paperclip-bench &
 ./scripts/benchmark.sh
 ```
 
-Full methodology, per-turn data, and Paperclip source references available in the benchmark results docs.
-
 ## The Name
 
 From [*The Office*](https://theoffice.fandom.com/wiki/WUPHF.com_(Website)), Season 7. Ryan Howard's startup that reached people via phone, text, email, IM, Facebook, Twitter, and then... WUPHF. Michael Scott invested $10,000. Ryan burned through it. The site went offline.
