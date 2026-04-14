@@ -1,6 +1,12 @@
 # WUPHF
 
+<p align="center">
+  <img src="assets/hero.png" alt="WUPHF onboarding — Your AI team, visible and working." width="720" />
+</p>
+
 [![Discord](https://img.shields.io/badge/Discord-Join%20Community-5865F2?logo=discord&logoColor=white)](https://discord.gg/gjSySC3PzV)
+[![License: MIT](https://img.shields.io/badge/License-MIT-A87B4F)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](go.mod)
 
 A terminal office where your AI team works in the open.
 
