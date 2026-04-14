@@ -23,6 +23,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/nex"
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
@@ -2923,7 +2924,10 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	nexConnected := !config.ResolveNoNex() && config.ResolveAPIKey("") != ""
+	// nex_connected now reflects whether the local nex-cli binary is available
+	// and the user hasn't disabled Nex for this session via --no-nex. The legacy
+	// HTTP ping to app.nex.ai is gone; Nex memory now lives behind nex-cli.
+	nexConnected := nex.Connected()
 	json.NewEncoder(w).Encode(map[string]any{
 		"status":           "ok",
 		"session_mode":     mode,

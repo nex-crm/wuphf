@@ -64,6 +64,11 @@ func ConfigPath() string {
 
 // BaseURL returns the resolved base URL.
 // Priority: WUPHF_DEV_URL env > NEX_DEV_URL env > config dev_url > production default.
+//
+// Note: as of the nex-cli migration, BaseURL is only used by the legacy
+// developer API client surface (api.Client) which still backs the workflow
+// engine's /v1/insights and /v1/context/ask calls. New Nex integrations
+// should shell out via the internal/nex package instead.
 func BaseURL() string {
 	if v := os.Getenv("WUPHF_DEV_URL"); v != "" {
 		return v
@@ -80,11 +85,6 @@ func BaseURL() string {
 // APIBase returns the developer API base URL.
 func APIBase() string {
 	return fmt.Sprintf("%s/api/developers", BaseURL())
-}
-
-// RegisterURL returns the agent registration URL.
-func RegisterURL() string {
-	return fmt.Sprintf("%s/api/v1/agents/register", BaseURL())
 }
 
 // Load reads the config file. Returns an empty config if the file is missing or unreadable.
