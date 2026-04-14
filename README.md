@@ -121,7 +121,7 @@ npx paperclipai run --data-dir /tmp/paperclip-bench &
 ./scripts/benchmark.sh
 ```
 
-Full methodology, per-turn data, and Paperclip source references: [`docs/benchmark-results.md`](docs/benchmark-results.md)
+Full methodology, per-turn data, and Paperclip source references available in the benchmark results docs.
 
 ## The Name
 
@@ -129,12 +129,6 @@ From [*The Office*](https://theoffice.fandom.com/wiki/WUPHF.com_(Website)), Seas
 
 The joke still fits. Except this WUPHF ships.
 
-<!--
-  PS: We made our launch demo video with Claude Code + Remotion + Eleven Labs.
-  If you want to make one like it, the full playbook is in docs/make-demo-video.md
-  — scripts, scene recipes, voice IDs, music prompts, the AI slop patterns to
-  avoid, and the hard-won lessons from ~10 rerenders.
--->
 
 
 > *"I invested ten thousand dollars in WUPHF. Just need one good quarter."*
