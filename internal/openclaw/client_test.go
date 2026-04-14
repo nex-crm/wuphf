@@ -3,6 +3,7 @@ package openclaw
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -128,5 +129,82 @@ func TestClientAllowsPlaintextNonLoopbackWhenEnvSet(t *testing.T) {
 	// The error should NOT be the insecure-url message.
 	if strings.Contains(err.Error(), "insecure") || strings.Contains(err.Error(), "plaintext") {
 		t.Fatalf("env-allowed insecure URL rejected at policy: %v", err)
+	}
+}
+
+func TestClientCallRoundTrip(t *testing.T) {
+	srv := startFakeGateway(t, func(method string, params json.RawMessage) (any, string) {
+		if method == "sessions.list" {
+			return map[string]any{"sessions": []any{}, "path": "/tmp/x"}, ""
+		}
+		return nil, "unknown method"
+	})
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	payload, err := c.Call(ctx, "sessions.list", map[string]any{"limit": 10})
+	if err != nil {
+		t.Fatalf("Call: %v", err)
+	}
+	var got struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.Path != "/tmp/x" {
+		t.Fatalf("path: %q", got.Path)
+	}
+}
+
+func TestClientCallServerError(t *testing.T) {
+	srv := startFakeGateway(t, func(method string, params json.RawMessage) (any, string) {
+		return nil, "no such method"
+	})
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	_, err = c.Call(ctx, "bogus", nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var ge *GatewayError
+	if !errors.As(err, &ge) {
+		t.Fatalf("expected GatewayError, got %T: %v", err, err)
+	}
+	if ge.Code != "BAD" {
+		t.Fatalf("code: %q", ge.Code)
+	}
+}
+
+func TestClientCallContextCancel(t *testing.T) {
+	// Server never responds.
+	srv := startFakeGateway(t, func(method string, params json.RawMessage) (any, string) {
+		time.Sleep(2 * time.Second)
+		return nil, ""
+	})
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	if err != nil {
+		t.Fatalf("Dial: %v", err)
+	}
+	defer c.Close()
+	callCtx, callCancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer callCancel()
+	_, err = c.Call(callCtx, "slow.method", nil)
+	if err == nil {
+		t.Fatal("expected timeout error")
 	}
 }

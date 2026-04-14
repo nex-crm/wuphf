@@ -255,3 +255,55 @@ func (c *Client) newID() string {
 var runtimeOS = func() string {
 	return runtime.GOOS
 }
+
+// GatewayError is returned by Call when the gateway responds with ok=false.
+type GatewayError struct {
+	Code    string
+	Message string
+	Details json.RawMessage
+}
+
+func (e *GatewayError) Error() string {
+	return fmt.Sprintf("openclaw gateway error: %s: %s", e.Code, e.Message)
+}
+
+// Call sends a request and returns the response payload. The returned raw payload
+// should be unmarshaled by typed callers in methods.go.
+func (c *Client) Call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	id := c.newID()
+	resCh := make(chan ResponseFrame, 1)
+	c.mu.Lock()
+	if c.closed || c.pending == nil {
+		c.mu.Unlock()
+		return nil, errors.New("openclaw: client closed")
+	}
+	c.pending[id] = resCh
+	c.mu.Unlock()
+
+	req := RequestFrame{Type: "req", ID: id, Method: method, Params: params}
+	if err := c.conn.WriteJSON(req); err != nil {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, fmt.Errorf("openclaw: write %s: %w", method, err)
+	}
+
+	select {
+	case <-ctx.Done():
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+		return nil, ctx.Err()
+	case res, ok := <-resCh:
+		if !ok {
+			return nil, errors.New("openclaw: connection closed while awaiting response")
+		}
+		if !res.OK {
+			if res.Error == nil {
+				return nil, fmt.Errorf("openclaw: %s failed (no error detail)", method)
+			}
+			return nil, &GatewayError{Code: res.Error.Code, Message: res.Error.Message, Details: res.Error.Details}
+		}
+		return res.Payload, nil
+	}
+}
