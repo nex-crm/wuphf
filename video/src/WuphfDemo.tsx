@@ -133,12 +133,12 @@ export const WuphfDemo: React.FC = () => {
         <Audio src={staticFile("audio/record-scratch.mp3")} volume={0.45} />
       </Sequence>
 
-      {/* Background music — Hobbit-style, cuts at break, resumes with play */}
+      {/* Background music — funk/upbeat, cuts at break, resumes with play */}
       <Sequence from={sec(0)} durationInFrames={sec(55.8)}>
-        <Audio src={staticFile("audio/bg-music-hobbit-loud.mp3")} volume={0.4} loop />
+        <Audio src={staticFile("audio/bg-music-funk-raw.mp3")} volume={0.25} loop />
       </Sequence>
       <Sequence from={sec(67.8)} durationInFrames={sec(18.2)}>
-        <Audio src={staticFile("audio/bg-music-hobbit-loud.mp3")} volume={0.4} loop />
+        <Audio src={staticFile("audio/bg-music-funk-raw.mp3")} volume={0.25} loop />
       </Sequence>
     </AbsoluteFill>
   );

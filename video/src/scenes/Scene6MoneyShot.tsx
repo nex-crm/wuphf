@@ -123,14 +123,14 @@ const Panel2Graph: React.FC<{ freezeAfter?: number }> = ({ freezeAfter }) => {
 
   // Graph positioned on the right half, clear of the left-aligned headline
   const nodes = [
-    { x: 1340, y: 280, label: "My Startup", emoji: "🏢", color: colors.ceo, size: 28, delay: 0 },
-    { x: 1140, y: 420, label: "Sarah",      emoji: "👩",  color: colors.pm, size: 22, delay: 6 },
-    { x: 1340, y: 480, label: "Acme Corp",  emoji: "🏭", color: colors.fe, size: 22, delay: 10 },
-    { x: 1540, y: 420, label: "Q2 Launch",  emoji: "🚀", color: colors.gtm, size: 22, delay: 14 },
-    { x: 1060, y: 620, label: "Roadmap",    emoji: "🗺️", color: colors.ai, size: 18, delay: 22 },
-    { x: 1240, y: 680, label: "$40k deal",  emoji: "💰", color: colors.cro, size: 18, delay: 26 },
-    { x: 1440, y: 680, label: "Contract",   emoji: "📄", color: colors.designer, size: 18, delay: 30 },
-    { x: 1620, y: 620, label: "Pricing",    emoji: "💵", color: colors.be, size: 18, delay: 34 },
+    { x: 1340, y: 280, label: "My Startup", color: colors.ceo, size: 28, delay: 0 },
+    { x: 1140, y: 420, label: "Sarah",      color: colors.pm, size: 22, delay: 6 },
+    { x: 1340, y: 480, label: "Acme Corp",  color: colors.fe, size: 22, delay: 10 },
+    { x: 1540, y: 420, label: "Q2 Launch",  color: colors.gtm, size: 22, delay: 14 },
+    { x: 1060, y: 620, label: "Roadmap",    color: colors.ai, size: 18, delay: 22 },
+    { x: 1240, y: 680, label: "$40k deal",  color: colors.cro, size: 18, delay: 26 },
+    { x: 1440, y: 680, label: "Contract",   color: colors.designer, size: 18, delay: 30 },
+    { x: 1620, y: 620, label: "Pricing",    color: colors.be, size: 18, delay: 34 },
   ];
 
   const edges = [
@@ -210,7 +210,6 @@ const Panel2Graph: React.FC<{ freezeAfter?: number }> = ({ freezeAfter }) => {
             <g key={i} opacity={nodeOp} transform={`translate(${n.x}, ${n.y}) scale(${nodeScale})`}>
               <circle r={pulse} fill={n.color} fillOpacity="0.18" />
               <circle r={n.size} fill={n.color} />
-              <text textAnchor="middle" dy={n.size * 0.35} fontSize={n.size * 1.1}>{n.emoji}</text>
               <text y={n.size + 28} textAnchor="middle" fill="#FFF" fontFamily={fonts.sans} fontSize="18" fontWeight="700">{n.label}</text>
             </g>
           );
@@ -228,7 +227,7 @@ const Panel2Graph: React.FC<{ freezeAfter?: number }> = ({ freezeAfter }) => {
         fontStyle: "italic",
         maxWidth: 720,
       }}>
-        Already better memory than your new hire. 🧠
+        Already better memory than your new hire.
       </div>
     </AbsoluteFill>
   );
@@ -252,18 +251,18 @@ const Panel3Integrations: React.FC = () => {
 
   // Tools scatter around the screen, each entering from a random direction
   const tools = [
-    { emoji: "🐙", label: "GitHub" },
-    { emoji: "📧", label: "Gmail" },
-    { emoji: "💬", label: "Slack" },
-    { emoji: "📊", label: "HubSpot" },
-    { emoji: "💳", label: "Stripe" },
-    { emoji: "📅", label: "Calendar" },
-    { emoji: "🎯", label: "Linear" },
-    { emoji: "🗃️", label: "Notion" },
-    { emoji: "📞", label: "Twilio" },
-    { emoji: "✉️", label: "Postmark" },
-    { emoji: "🔍", label: "Apollo" },
-    { emoji: "📨", label: "Intercom" },
+    { label: "GitHub",   dot: "#6E7681" },
+    { label: "Gmail",    dot: "#EA4335" },
+    { label: "Slack",    dot: "#611F69" },
+    { label: "HubSpot",  dot: "#FF7A59" },
+    { label: "Stripe",   dot: "#635BFF" },
+    { label: "Calendar", dot: "#4285F4" },
+    { label: "Linear",   dot: "#5E6AD2" },
+    { label: "Notion",   dot: "#6B7280" },
+    { label: "Twilio",   dot: "#F22F46" },
+    { label: "Postmark", dot: "#1D9BD1" },
+    { label: "Apollo",   dot: "#6E3EFF" },
+    { label: "Intercom", dot: "#1F8AE6" },
   ];
 
   // Positions around the headline
@@ -354,7 +353,10 @@ const Panel3Integrations: React.FC = () => {
               boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
             }}
           >
-            <span style={{ fontSize: 22 }}>{tool.emoji}</span>
+            <div style={{
+              width: 12, height: 12, borderRadius: "50%",
+              backgroundColor: tool.dot, flexShrink: 0,
+            }} />
             {tool.label}
           </div>
         );
