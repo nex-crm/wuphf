@@ -1,16 +1,12 @@
 import { AbsoluteFill, useCurrentFrame, interpolate } from "remotion";
 import { colors, fonts, sec, starterAgents, slack } from "../theme";
 import { ChatMessage } from "../components/ChatMessage";
+import { PixelAvatar } from "../components/PixelAvatar";
 
 export const Scene4TheyWork: React.FC = () => {
   const frame = useCurrentFrame();
 
   const uiOpacity = interpolate(frame, [0, 12], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-
-  const tokensUsed = interpolate(frame, [sec(2), sec(9)], [0, 3.2], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -36,7 +32,7 @@ export const Scene4TheyWork: React.FC = () => {
             backgroundColor: "rgba(255,255,255,0.04)",
             display: "flex", alignItems: "center", justifyContent: "space-between",
           }}>
-            <div style={{ fontSize: 32, fontWeight: 700, color: "#FFF", fontStyle: "italic" }}>WUPHF</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "#FFF", fontStyle: "italic" }}>WUPHF</div>
             <div style={{ width: 14, height: 14, borderRadius: "50%", backgroundColor: slack.presence }} />
           </div>
 
@@ -67,41 +63,27 @@ export const Scene4TheyWork: React.FC = () => {
 
               return (
                 <div key={agent.slug} style={{
-                  display: "flex", alignItems: "center", gap: 12,
-                  padding: "10px 10px", borderRadius: 8, marginBottom: 4,
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "8px 10px", borderRadius: 6, marginBottom: 2,
                   color: slack.sidebarText,
                 }}>
-                  <div style={{ width: 12, height: 12, borderRadius: "50%", backgroundColor: statusColors[i], opacity: dotPulse, flexShrink: 0 }} />
-                  <div style={{
-                    width: 40, height: 40, borderRadius: 8,
-                    backgroundColor: agent.color,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontSize: 22, flexShrink: 0,
-                  }}>
-                    {agent.emoji}
-                  </div>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", backgroundColor: statusColors[i], opacity: dotPulse, flexShrink: 0 }} />
+                  <PixelAvatar slug={agent.slug} color={agent.color} size={32} />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 20, fontWeight: 600, color: "rgba(255,255,255,0.9)" }}>{agent.name}</div>
-                    <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", fontFamily: fonts.mono, marginTop: 2 }}>{tasks[i]}</div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: "rgba(255,255,255,0.9)" }}>{agent.name}</div>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.5)", fontFamily: fonts.mono, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const }}>{tasks[i]}</div>
                   </div>
                 </div>
               );
             })}
           </div>
 
-          {/* Token tracker */}
-          {frame > sec(2) && (
-            <div style={{ marginTop: "auto", padding: "20px 24px", borderTop: `1px solid ${slack.sidebarBorder}` }}>
-              <div style={{ fontSize: 14, color: slack.sidebarText, textTransform: "uppercase" as const, letterSpacing: "0.08em", marginBottom: 4 }}>
-                Tokens this turn
-              </div>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-                <div style={{ fontSize: 36, fontWeight: 800, color: slack.presence, fontFamily: fonts.mono }}>
-                  {tokensUsed.toFixed(1)}K
-                </div>
-              </div>
+          {/* Usage section (collapsed, matches real sidebar bottom) */}
+          <div style={{ marginTop: "auto", padding: "8px 16px", borderTop: `1px solid ${slack.sidebarBorder}` }}>
+            <div style={{ fontSize: 10, color: slack.sidebarText, textTransform: "uppercase" as const, letterSpacing: "0.05em", opacity: 0.7 }}>
+              Usage
             </div>
-          )}
+          </div>
         </div>
 
         {/* ── MAIN CHANNEL ── */}

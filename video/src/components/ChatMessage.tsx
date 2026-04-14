@@ -1,6 +1,7 @@
 import React from "react";
 import { useCurrentFrame, interpolate, Easing } from "remotion";
-import { fonts, slack, colors, agentEmojis } from "../theme";
+import { fonts, slack, agentEmojis } from "../theme";
+import { PixelAvatar } from "./PixelAvatar";
 
 interface ChatMessageProps {
   name: string;
@@ -77,9 +78,10 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
 
   if (elapsed < 0) return null;
 
-  const slug = name.toLowerCase().replace(/ /g, "").slice(0, 3);
-  const emoji = agentEmojis[slug] || name === "You" ? agentEmojis.human : "💬";
-  const displayEmoji = name === "You" ? "👤" : agentEmojis[Object.keys(agentEmojis).find(k => name.toLowerCase().includes(k)) || ""] || "💬";
+  // Derive avatar slug from agent name
+  const avatarSlug = name === "You" || name === "human"
+    ? "generic"
+    : Object.keys(agentEmojis).find(k => name.toLowerCase().includes(k)) ?? name.toLowerCase().replace(/ /g, "").slice(0, 3);
 
   const visibleText = text.slice(0, visibleChars);
   const renderedText = renderTextWithMentions(visibleText, mentions);
@@ -91,14 +93,14 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         transform: `translateY(${translateY}px)`,
         display: "flex",
         gap: 14,
-        padding: isReply ? "4px 20px 4px 72px" : "6px 24px",
+        padding: isReply ? "4px 20px 4px 56px" : "6px 24px",
       }}
     >
       {/* Reply indent line */}
       {isReply && (
         <div style={{
           position: "absolute",
-          left: 46,
+          left: 36,
           top: 0,
           bottom: 0,
           width: 2,
@@ -107,22 +109,8 @@ export const ChatMessage: React.FC<ChatMessageProps> = ({
         }} />
       )}
 
-      {/* Avatar — emoji in colored rounded square */}
-      <div
-        style={{
-          width: 54,
-          height: 54,
-          borderRadius: 12,
-          backgroundColor: color,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: 28,
-          flexShrink: 0,
-        }}
-      >
-        {displayEmoji}
-      </div>
+      {/* Avatar — pixel art from platform's sprite data */}
+      <PixelAvatar slug={avatarSlug} color={color} size={42} />
 
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 6 }}>

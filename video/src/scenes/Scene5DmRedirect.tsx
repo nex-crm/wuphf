@@ -1,6 +1,7 @@
 import { AbsoluteFill, useCurrentFrame, interpolate } from "remotion";
 import { colors, fonts, sec, slack } from "../theme";
 import { ChatMessage } from "../components/ChatMessage";
+import { PixelAvatar } from "../components/PixelAvatar";
 
 export const Scene5DmRedirect: React.FC = () => {
   const frame = useCurrentFrame();
@@ -25,14 +26,7 @@ export const Scene5DmRedirect: React.FC = () => {
           padding: 44,
           display: "flex", flexDirection: "column", alignItems: "center", gap: 18,
         }}>
-          <div style={{
-            width: 120, height: 120, borderRadius: 24,
-            backgroundColor: colors.gtm,
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 64,
-          }}>
-            💰
-          </div>
+          <PixelAvatar slug="gtm" color={colors.gtm} size={96} />
 
           <div style={{ fontFamily: fonts.sans, fontSize: 32, fontWeight: 700, color: slack.text }}>
             GTM Lead
@@ -73,10 +67,7 @@ export const Scene5DmRedirect: React.FC = () => {
             padding: "24px 32px", borderBottom: `1px solid ${slack.border}`,
             fontFamily: fonts.sans, display: "flex", alignItems: "center", gap: 14,
           }}>
-            <div style={{
-              width: 32, height: 32, borderRadius: 8, backgroundColor: colors.gtm,
-              display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18,
-            }}>💰</div>
+            <PixelAvatar slug="gtm" color={colors.gtm} size={32} />
             <span style={{ fontSize: 28, fontWeight: 700, color: slack.text }}>GTM Lead</span>
             <span style={{ fontSize: 18, color: slack.textTertiary }}>DM</span>
           </div>

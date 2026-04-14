@@ -1,5 +1,5 @@
 import React from "react";
-import { fonts } from "../theme";
+import { PixelAvatar } from "./PixelAvatar";
 
 interface AgentAvatarProps {
   name: string;
@@ -14,33 +14,11 @@ export const AgentAvatar: React.FC<AgentAvatarProps> = ({
   size = 36,
   status = "active",
 }) => {
-  const initials = name
-    .split(" ")
-    .map((w) => w[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+  const slug = name.toLowerCase().replace(/ /g, "").slice(0, 3);
 
   return (
     <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-      <div
-        style={{
-          width: size,
-          height: size,
-          borderRadius: 8,
-          backgroundColor: color,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontFamily: fonts.sans,
-          fontSize: size * 0.38,
-          fontWeight: 700,
-          color: "#FFF",
-          letterSpacing: -0.5,
-        }}
-      >
-        {initials}
-      </div>
+      <PixelAvatar slug={slug} color={color} size={size} />
       {/* Status dot */}
       <div
         style={{
@@ -50,7 +28,7 @@ export const AgentAvatar: React.FC<AgentAvatarProps> = ({
           width: size * 0.3,
           height: size * 0.3,
           borderRadius: "50%",
-          backgroundColor: status === "active" ? "#44B078" : "#868686",
+          backgroundColor: status === "active" ? "#2BAC76" : "#868686",
           border: "2px solid #1A1D21",
         }}
       />
