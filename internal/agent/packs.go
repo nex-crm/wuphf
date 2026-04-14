@@ -20,6 +20,28 @@ type PackDefinition struct {
 	DefaultSkills []PackSkillSpec
 }
 
+// revopsDriveConnection is the shared prelude for RevOps skills. It tells the
+// agent not to fabricate CRM data, and to walk the user end-to-end through
+// connecting their CRM (or other required tool) via Composio before doing any
+// work. Never stop at "which CRM do you use?" — drive the full connection.
+const revopsDriveConnection = `## Step 0: Drive the connection before you start
+
+This skill acts on real company data. Never fabricate deals, contacts, pipeline numbers, or activity. If the required integration is not connected, DRIVE the user through connecting it end-to-end before you do any work. Do not just ask "which CRM do you use" and stop — walk them through the full setup.
+
+1. Call **team_action_connections** to see what is connected right now.
+2. If the integration you need is missing, ask the user via **human_interview**:
+   - "Which CRM do you use? Options: HubSpot, Salesforce, Attio, Pipedrive, Zoho, Close, Copper, Other (please specify)."
+   - If this skill also needs email / calendar / outbound, ask which tool they use for that too (Gmail, Outlook, Google Calendar, Apollo, Outreach, Salesloft, SendGrid, or manual).
+3. Once they name the tool, drive the connection:
+   a. Check whether a Composio API key is configured (the presence of composio actions in team_action_connections is a good signal). If not, tell the user: "I need a Composio API key to connect your CRM. Sign up at composio.dev — the free tier works. Then run ` + "`/config set composio_api_key <your key>`" + ` in #general. Reply 'set' here when done." Wait for confirmation.
+   b. Once the API key is set, tell the user: "Go to composio.dev → Connected Accounts → Add [their tool] → Authorize. Reply 'done' when it is connected." Wait for confirmation.
+   c. Re-run **team_action_connections** to verify the specific tool the user named is now authorized. If it is still missing, help debug: wrong API key scope, wrong tool slug, OAuth redirect issue. Iterate until the connection is verified.
+4. Once verified, call **team_action_search** with the tool name and the action you need (e.g., "HubSpot list deals" or "Salesforce update contact") to discover the exact action slug. You will use that slug in **team_action_execute**.
+
+If the user explicitly says "skip" or "work from context only", you may proceed using Nex and the thread alone. In that case, flag "Data source: thread + Nex only, no live CRM data" at the top of your output so they know the gap.
+
+`
+
 // Packs is the registry of all available agent packs.
 var Packs = []PackDefinition{
 	{
@@ -124,18 +146,18 @@ var Packs = []PackDefinition{
 				Trigger:     "When asked to audit the CRM, check data quality, or find stale records",
 				Content: `You are performing a CRM hygiene audit. Your goal is to surface data quality issues so the team can keep the CRM accurate and actionable.
 
-## What to do
+` + revopsDriveConnection + `## What to do
 
-1. **Query Nex for CRM context**: Ask Nex "What contacts or companies in our CRM have incomplete or stale data?" and "What are the most common data quality issues in our pipeline?"
+1. **Query Nex for context first**: Ask "What contacts, companies, or deals in our CRM are most at risk from data gaps?" Nex may surface patterns before you hit the CRM directly.
 
-2. **Identify the worst offenders** across these dimensions:
+2. **Pull live CRM data** via **team_action_execute** using the actions you discovered in Step 0. Audit across:
    - Contacts missing email, phone, or job title
    - Companies missing industry, size, or website
    - Open deals with no activity in 14+ days
    - Deals missing close date or next step
    - Leads with no owner assigned
 
-3. **Prioritize by revenue impact**: Focus first on open deals and high-value accounts. A stale $200k opportunity matters more than a missing phone number on a cold contact.
+3. **Prioritize by revenue impact**: a stale $200k opportunity matters more than a missing phone number on a cold contact.
 
 4. **Structure your output** as a prioritized list:
    - Critical (blocks forecasting): deals missing close date, stage, or ARR
@@ -143,13 +165,13 @@ var Packs = []PackDefinition{
    - Medium (reduces signal): contacts missing key fields
    - Low (nice-to-have): cosmetic or optional fields
 
-5. **For each issue**, include: what's missing, how many records affected, and a recommended fix action.
+5. **For each issue**, include: what is missing, how many records, and a recommended fix action.
 
-6. **Propose fixes** where you can automate them (e.g., enrichment via known data sources, bulk updates to assignee). Gate destructive changes (bulk delete, stage resets) on human approval via a human_interview.
+6. **Propose fixes** where you can automate them. Gate destructive changes (bulk delete, stage resets) on human approval via **human_interview** with the exact change count.
 
 ## Output format
 
-Post findings to #general as a summary table with issue, count, impact, and recommended action. If using Composio to make CRM updates, confirm the change count before executing.`,
+Post findings to #general as a summary table with issue, count, impact, and recommended action.`,
 			},
 			{
 				Name:        "Meeting Prep Brief",
@@ -159,35 +181,32 @@ Post findings to #general as a summary table with issue, count, impact, and reco
 				Trigger:     "When asked to prep for a meeting, generate a brief, or summarize a prospect before a call",
 				Content: `You are preparing a meeting brief for an upcoming sales or customer call. Your goal is to give the rep everything they need to walk in sharp.
 
-## What to do
+` + revopsDriveConnection + `## What to do
 
-1. **Identify the meeting**: Who is it with? What company? What stage is the deal or relationship?
+1. **Identify the meeting**: Who is it with? What company? What stage?
 
 2. **Query Nex for context**:
-   - Ask "What do we know about [company name] — their business, buying signals, and recent activity?"
-   - Ask "What is the current status of our relationship or deal with [company name]?"
-   - Ask "Are there any open action items, blockers, or commitments from previous interactions?"
+   - "What do we know about [company name] — their business, buying signals, and recent activity?"
+   - "What is the current status of our relationship or deal with [company name]?"
+   - "Are there any open action items, blockers, or commitments from previous interactions?"
 
-3. **Pull CRM data** (via Composio if configured):
-   - Last interaction date and type (email, call, demo)
+3. **Pull live data** via **team_action_execute** against whatever CRM / calendar / email is connected:
+   - Last interaction date and type
    - Deal stage, ARR, close date
    - Key stakeholders and their roles
    - Any recorded objections or concerns
 
-4. **Research the prospect** (if first meeting):
-   - Company size, industry, recent news
-   - Known tech stack or competitive tools in use
-   - ICP fit score if lead scoring is active
+4. **Research the prospect** (if first meeting): company size, industry, recent news, tech stack.
 
-5. **Build the brief** with these sections:
-   - **Who you're meeting**: Name, title, company, decision-maker status
-   - **Where we are**: Deal stage, last touch, next step on file
-   - **Context from Nex**: Buying signals, known pain points, company priorities
-   - **Your agenda**: 2-3 suggested talking points based on where the deal is
-   - **Watch-outs**: Open objections, competitor mentions, any red flags
-   - **Ask**: The one clear ask for this call (demo booked, POC scoped, legal introduced, etc.)
+5. **Build the brief** with:
+   - **Who you're meeting**: name, title, company, decision-maker status
+   - **Where we are**: deal stage, last touch, next step on file
+   - **Context from Nex**: buying signals, known pain points, priorities
+   - **Your agenda**: 2-3 suggested talking points for the current stage
+   - **Watch-outs**: open objections, competitor mentions, red flags, data gaps
+   - **Ask**: the one clear ask for this call (demo booked, POC scoped, legal introduced)
 
-6. **Keep it under one page**. If the rep has to scroll past the fold, it's too long.
+6. **Keep it under one page**. If the rep has to scroll past the fold, it is too long.
 
 Post the brief to #general tagged with the rep's name and meeting time.`,
 			},
@@ -197,35 +216,35 @@ Post the brief to #general tagged with the rep's name and meeting time.`,
 				Description: "Re-engage closed-lost deals that may be ready to revisit",
 				Tags:        []string{"sales", "re-engagement", "closed-lost", "outbound"},
 				Trigger:     "When asked to find re-engagement opportunities, surface closed-lost deals, or run a win-back campaign",
-				Content: `You are running a closed-lost re-engagement motion. Your goal is to find deals that went cold but may now be worth revisiting, and draft outreach that's worth opening.
+				Content: `You are running a closed-lost re-engagement motion. Your goal is to find deals that went cold but may now be worth revisiting, and draft outreach that is worth opening.
 
-## What to do
+` + revopsDriveConnection + `## What to do
 
 1. **Query Nex for signal**:
-   - Ask "Are there any closed-lost deals where the company has since had a leadership change, funding event, or relevant trigger?"
-   - Ask "Which lost deals had the most positive engagement before they closed-lost?"
-   - Ask "What were the most common reasons we lost deals in the last 6 months?"
+   - "Are there closed-lost deals where the company has since had a leadership change, funding event, or relevant trigger?"
+   - "Which lost deals had the most positive engagement before they closed-lost?"
+   - "What were the most common reasons we lost deals in the last 6 months?"
 
-2. **Filter closed-lost deals** by re-engagement potential:
+2. **Pull closed-lost deals** via **team_action_execute** against the CRM. Filter by:
    - Lost 3-18 months ago (not too fresh, not too stale)
-   - Lost reason was timing, budget, or internal priority — not product fit
-   - Company has had a trigger event: new funding, new exec, product launch, or hiring surge
+   - Lost reason: timing, budget, or internal priority — not product fit
+   - Company has had a trigger event: new funding, new exec, product launch, hiring surge
    - Deal size was meaningful (above your ACV floor)
 
 3. **Score each opportunity** (1-5):
-   - 5: Strong fit, timing trigger, positive prior relationship
-   - 3: Good fit, no clear trigger, but worth a touch
-   - 1: Bad fit or hard no — skip entirely
+   - 5: strong fit, timing trigger, positive prior relationship
+   - 3: good fit, no clear trigger, but worth a touch
+   - 1: bad fit or hard no, skip entirely
 
 4. **Draft re-engagement messages** for each scored 4+:
    - Reference the specific trigger event ("I saw you just raised a Series B...")
    - Acknowledge the prior conversation briefly without being weird about it
-   - Lead with what's changed on your side (new capability, customer win in their space, etc.)
+   - Lead with what has changed on your side
    - One clear ask: 20-minute catch-up, not a full demo
 
-5. **Gate sending** on human approval: present the draft list with scores and messages via human_interview before any outreach is sent.
+5. **Gate sending** on human approval via **human_interview**. Present the draft list with scores and messages. Never send outbound email without approval.
 
-Output a re-engagement queue with: company, deal size, lost reason, trigger event, score, and draft message. Post to #general.`,
+Output a re-engagement queue: company, deal size, lost reason, trigger event, score, draft message, and which channel will send it. Post to #general.`,
 			},
 			{
 				Name:        "Deals Going Dark",
@@ -233,16 +252,16 @@ Output a re-engagement queue with: company, deal size, lost reason, trigger even
 				Description: "Surface active pipeline deals with no recent activity before they go cold",
 				Tags:        []string{"pipeline", "sales", "alerts", "crm"},
 				Trigger:     "When asked to check pipeline health, find stalled deals, or surface deals with no recent activity",
-				Content: `You are running a pipeline health check to surface deals at risk of going dark before they're formally lost.
+				Content: `You are running a pipeline health check to surface deals at risk of going dark before they are formally lost.
 
-## What to do
+` + revopsDriveConnection + `## What to do
 
 1. **Query Nex for deal context**:
    - Ask "Which of our open deals have had no recent activity or contact?"
    - Ask "Are there any deals where the champion has gone quiet or changed roles?"
    - Ask "What deals are approaching their close date without a clear next step?"
 
-2. **Pull open pipeline** (via Composio if configured):
+2. **Pull open pipeline** via **team_action_execute** against the connected CRM:
    - Filter deals with no logged activity (call, email, meeting) in 10+ days
    - Flag deals where close date is within 30 days but no next step is set
    - Flag deals where the primary contact hasn't responded to the last 2 touches
@@ -278,14 +297,14 @@ Gate any CRM stage updates on human review via human_interview.`,
 				Trigger:     "When asked to score leads, prioritize inbound, or identify best-fit prospects",
 				Content: `You are scoring inbound leads to help the team focus time on the prospects most likely to convert.
 
-## What to do
+` + revopsDriveConnection + `## What to do
 
 1. **Query Nex for ICP and playbook context**:
    - Ask "What does our ideal customer profile look like — industry, size, buying signals?"
    - Ask "What are the strongest indicators that a lead is ready to buy?"
    - Ask "Which lead sources have historically converted best?"
 
-2. **Pull the lead list** (via Composio if configured):
+2. **Pull the lead list** via **team_action_execute** against the connected CRM:
    - Unworked leads added in the last 14 days
    - Leads that re-engaged (opened email, visited pricing page, booked a demo)
    - MQLs that haven't been contacted within 48 hours
