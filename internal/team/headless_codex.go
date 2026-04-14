@@ -156,35 +156,47 @@ func (l *Launcher) enqueueHeadlessCodexTurn(slug string, prompt string, channel 
 
 func (l *Launcher) runHeadlessCodexQueue(slug string) {
 	for {
-		turn, turnCtx, ok := l.beginHeadlessCodexTurn(slug)
-		if !ok {
-			l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
+		// beginHeadlessCodexTurn deletes headlessWorkers[slug] when the queue is
+		// empty, so the worker flag is self-clearing on normal exit. We check
+		// it after the panic-guarded body to decide whether to loop or exit.
+		func() {
+			defer recoverPanicTo("runHeadlessCodexQueue", fmt.Sprintf("slug=%s", slug))
+			turn, turnCtx, ok := l.beginHeadlessCodexTurn(slug)
+			if !ok {
+				l.updateHeadlessProgress(slug, "idle", "idle", "waiting for work", headlessProgressMetrics{})
+				return
+			}
+			appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
+			l.updateHeadlessProgress(slug, "active", "queued", "queued work packet received", headlessProgressMetrics{})
+
+			// Set channel env so MCP server can register DM-specific tool sets
+			if turn.Channel != "" {
+				os.Setenv("WUPHF_CHANNEL", turn.Channel)
+			} else {
+				os.Unsetenv("WUPHF_CHANNEL")
+			}
+			err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
+			ctxErr := turnCtx.Err()
+			switch {
+			case err == nil:
+			case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
+				appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", headlessCodexTurnTimeout))
+				l.updateHeadlessProgress(slug, "error", "error", fmt.Sprintf("turn timed out after %s", headlessCodexTurnTimeout), headlessProgressMetrics{})
+			case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
+				appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
+				l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
+			default:
+				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
+				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
+			}
+			l.finishHeadlessTurn(slug)
+		}()
+		l.headlessMu.Lock()
+		running := l.headlessWorkers[slug]
+		l.headlessMu.Unlock()
+		if !running {
 			return
 		}
-		appendHeadlessCodexLatency(slug, fmt.Sprintf("stage=started queue_wait_ms=%d", time.Since(turn.EnqueuedAt).Milliseconds()))
-		l.updateHeadlessProgress(slug, "active", "queued", "queued work packet received", headlessProgressMetrics{})
-
-		// Set channel env so MCP server can register DM-specific tool sets
-		if turn.Channel != "" {
-			os.Setenv("WUPHF_CHANNEL", turn.Channel)
-		} else {
-			os.Unsetenv("WUPHF_CHANNEL")
-		}
-		err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
-		ctxErr := turnCtx.Err()
-		switch {
-		case err == nil:
-		case errors.Is(ctxErr, context.DeadlineExceeded) || errors.Is(err, context.DeadlineExceeded):
-			appendHeadlessCodexLog(slug, fmt.Sprintf("error: headless codex turn timed out after %s", headlessCodexTurnTimeout))
-			l.updateHeadlessProgress(slug, "error", "error", fmt.Sprintf("turn timed out after %s", headlessCodexTurnTimeout), headlessProgressMetrics{})
-		case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
-			appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
-			l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
-		default:
-			appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
-			l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
-		}
-		l.finishHeadlessTurn(slug)
 	}
 }
 
