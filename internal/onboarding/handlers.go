@@ -38,7 +38,11 @@ func RegisterRoutes(mux *http.ServeMux, completeFn func(task string, skipTask bo
 }
 
 // HandleState handles GET /onboarding/state.
-// Returns the full onboarding State as JSON.
+// Returns the full onboarding State plus an "onboarded" convenience boolean.
+// The frontend wizard reads state.onboarded to decide whether to show itself
+// on page load. Without this boolean, a completed user who refreshes the
+// page sees the wizard again because the frontend has no simple flag to
+// check.
 func HandleState(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -49,8 +53,18 @@ func HandleState(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to load state", http.StatusInternalServerError)
 		return
 	}
+	payload := map[string]any{
+		"version":             s.Version,
+		"completed_at":        s.CompletedAt,
+		"company_name":        s.CompanyName,
+		"completed_steps":     s.CompletedSteps,
+		"checklist_dismissed": s.ChecklistDismissed,
+		"partial":             s.Partial,
+		"checklist":           s.Checklist,
+		"onboarded":           s.Onboarded(),
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(s)
+	json.NewEncoder(w).Encode(payload)
 }
 
 // HandleProgress handles POST /onboarding/progress.
