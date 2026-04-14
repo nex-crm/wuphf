@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/channel"
 	"github.com/nex-crm/wuphf/internal/company"
@@ -6838,4 +6839,46 @@ func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
 		{ID: "reject", Label: "Reject"},
 	})
 	b.requests = append(b.requests, interview)
+}
+
+// SeedDefaultSkills pre-populates the broker with the pack's default skills.
+// It is idempotent: skills whose name already exists (by slug) are skipped.
+// Call this after broker.Start() from the Launcher so that the first time a
+// pack is launched the team has its playbooks ready to reference.
+func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
+	if len(specs) == 0 {
+		return
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, spec := range specs {
+		name := strings.TrimSpace(spec.Name)
+		if name == "" {
+			continue
+		}
+		if b.findSkillByNameLocked(name) != nil {
+			continue // already exists, skip
+		}
+		title := strings.TrimSpace(spec.Title)
+		if title == "" {
+			title = name
+		}
+		b.counter++
+		sk := teamSkill{
+			ID:          fmt.Sprintf("skill-%s", skillSlug(name)),
+			Name:        name,
+			Title:       title,
+			Description: strings.TrimSpace(spec.Description),
+			Content:     strings.TrimSpace(spec.Content),
+			CreatedBy:   "system",
+			Tags:        append([]string(nil), spec.Tags...),
+			Trigger:     strings.TrimSpace(spec.Trigger),
+			Status:      "active",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}
+		b.skills = append(b.skills, sk)
+	}
+	b.saveLocked()
 }

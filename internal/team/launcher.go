@@ -229,6 +229,11 @@ func (l *Launcher) Launch() error {
 		return fmt.Errorf("start broker: %w", err)
 	}
 
+	// Pre-seed any default skills declared by the pack (idempotent).
+	if l.pack != nil && len(l.pack.DefaultSkills) > 0 {
+		l.broker.SeedDefaultSkills(l.pack.DefaultSkills)
+	}
+
 	// Kill any existing session
 	exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
@@ -3466,6 +3471,11 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	}
 	if err := l.broker.Start(); err != nil {
 		return fmt.Errorf("start broker: %w", err)
+	}
+
+	// Pre-seed any default skills declared by the pack (idempotent).
+	if l.pack != nil && len(l.pack.DefaultSkills) > 0 {
+		l.broker.SeedDefaultSkills(l.pack.DefaultSkills)
 	}
 
 	l.broker.SetGenerateMemberFn(l.GenerateMemberTemplateFromPrompt)

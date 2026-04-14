@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
@@ -70,7 +71,17 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		env = append(env, "WUPHF_WORKTREE_PATH="+worktreeDir)
 	}
 	cmd.Env = env
-	cmd.Stdin = strings.NewReader(notification)
+
+	// Enrich the notification with Nex entity context. Use a 2s deadline so a
+	// slow or unreachable Nex API never holds up the agent turn. The brief is
+	// prepended to the notification so the original work packet stays intact.
+	stdinPayload := notification
+	nexCtx, nexCancel := context.WithTimeout(ctx, 2*time.Second)
+	if brief := action.FetchEntityBrief(nexCtx, notification); brief != "" {
+		stdinPayload = brief + "\n\n" + notification
+	}
+	nexCancel()
+	cmd.Stdin = strings.NewReader(stdinPayload)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

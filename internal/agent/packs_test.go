@@ -3,8 +3,8 @@ package agent
 import "testing"
 
 func TestPacksRegistered(t *testing.T) {
-	if len(Packs) != 4 {
-		t.Fatalf("expected 4 packs, got %d", len(Packs))
+	if len(Packs) != 5 {
+		t.Fatalf("expected 5 packs, got %d", len(Packs))
 	}
 	founding := GetPack("founding-team")
 	if founding == nil {
@@ -72,5 +72,33 @@ func TestLeadGenAgencyPack(t *testing.T) {
 	}
 	if len(p.Agents) != 4 {
 		t.Errorf("expected 4 agents, got %d", len(p.Agents))
+	}
+}
+
+func TestRevOpsPack(t *testing.T) {
+	p := GetPack("revops")
+	if p == nil {
+		t.Fatal("revops pack not found")
+	}
+	if p.LeadSlug != "ops-lead" {
+		t.Errorf("expected lead 'ops-lead', got '%s'", p.LeadSlug)
+	}
+	if len(p.Agents) != 4 {
+		t.Errorf("expected 4 agents, got %d", len(p.Agents))
+	}
+	if len(p.DefaultSkills) != 5 {
+		t.Errorf("expected 5 default skills, got %d", len(p.DefaultSkills))
+	}
+	// Every default skill must have non-empty Name, Title, and Content.
+	for i, s := range p.DefaultSkills {
+		if s.Name == "" {
+			t.Errorf("skill[%d]: empty Name", i)
+		}
+		if s.Title == "" {
+			t.Errorf("skill[%d]: empty Title", i)
+		}
+		if s.Content == "" {
+			t.Errorf("skill[%d]: empty Content", i)
+		}
 	}
 }
