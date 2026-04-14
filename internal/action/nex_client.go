@@ -10,6 +10,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/nex"
 )
 
 type nexAskResponse struct {
@@ -49,43 +50,31 @@ func nexAsk(query string) (nexAskResponse, error) {
 
 // FetchEntityBrief asks Nex for context relevant to the given work notification
 // and returns a formatted brief string to prepend to the agent's stdin input.
-// Returns an empty string when Nex is disabled, not configured, or the call
-// fails — callers should always append the original notification regardless.
-// The provided context is used for the request timeout.
+// Returns an empty string when Nex is disabled, not connected (nex-cli missing),
+// or the call fails — callers should always append the original notification
+// regardless. The provided context bounds the shell-out duration.
+//
+// Migration note: this used to POST to app.nex.ai/api/v1/context/ask. It now
+// shells out to `nex-cli recall <query>`. If the binary is missing or errors,
+// we silently degrade so the agent turn still runs on the raw notification.
 func FetchEntityBrief(ctx context.Context, notification string) string {
-	if config.ResolveNoNex() {
+	if !nex.Connected() {
 		return ""
 	}
 	query := strings.TrimSpace(notification)
 	if query == "" {
 		return ""
 	}
-	// Summarise the notification into a concise Nex query.
-	// We limit the query length to avoid runaway token usage.
+	// Cap the recall query so we don't blast the CLI with massive payloads.
 	if len(query) > 400 {
 		query = query[:400]
 	}
-	query = "Given this work item, what company context, contacts, or recent activity is most relevant? Work item: " + query
 
-	type result struct {
-		answer string
-		err    error
-	}
-	ch := make(chan result, 1)
-	go func() {
-		resp, err := nexAsk(query)
-		ch <- result{resp.Answer, err}
-	}()
-
-	select {
-	case <-ctx.Done():
+	answer, err := nex.Recall(ctx, query)
+	if err != nil || strings.TrimSpace(answer) == "" {
 		return ""
-	case r := <-ch:
-		if r.err != nil || strings.TrimSpace(r.answer) == "" {
-			return ""
-		}
-		return "== NEX CONTEXT ==\n" + strings.TrimSpace(r.answer) + "\n== END NEX CONTEXT =="
 	}
+	return "== NEX CONTEXT ==\n" + strings.TrimSpace(answer) + "\n== END NEX CONTEXT =="
 }
 
 func nexInsightsSince(since time.Time, limit int) (nexInsightsResponse, error) {

@@ -181,20 +181,7 @@ func Delete[T any](c *Client, path string, timeout time.Duration) (T, error) {
 	return request[T](c, http.MethodDelete, c.BaseURL+path, nil, timeout)
 }
 
-// Register creates a new account. Does not require authentication.
-// On success, sets the API key from the response if present.
-func (c *Client) Register(email, name, companyName string) (map[string]interface{}, error) {
-	payload := RegisterRequest{
-		Email:       email,
-		Name:        name,
-		CompanyName: companyName,
-	}
-	result, err := request[map[string]interface{}](c, http.MethodPost, config.RegisterURL(), payload, 0)
-	if err != nil {
-		return nil, err
-	}
-	if key, ok := result["api_key"].(string); ok && key != "" {
-		c.SetAPIKey(key)
-	}
-	return result, nil
-}
+// Registration has moved off the legacy HTTP API. Callers that need to
+// register a WUPHF user now shell out via internal/nex.Register, which
+// drives the nex-cli binary. RegisterRequest is kept in this package for
+// backwards compatibility with existing JSON callers only.

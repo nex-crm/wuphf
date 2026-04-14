@@ -31,6 +31,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/calendar"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/nex"
 	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
@@ -3137,8 +3138,10 @@ func (l *Launcher) PreflightWeb() error {
 
 // LaunchWeb starts the broker, web UI server, and background agents without tmux.
 func (l *Launcher) LaunchWeb(webPort int) error {
-	// Ask user about Nex setup if API key is missing
-	if !config.ResolveNoNex() && config.ResolveAPIKey("") == "" {
+	// Offer to wire Nex when the user hasn't opted out and nex-cli isn't yet
+	// installed. `nex setup` handles detection and wiring for us — we just
+	// surface the prompt.
+	if !config.ResolveNoNex() && !nex.IsInstalled() {
 		fmt.Println()
 		fmt.Print("  Connect Nex for memory and context? [Y/n] ")
 		var answer string
@@ -3146,17 +3149,12 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		answer = strings.TrimSpace(strings.ToLower(answer))
 		if answer == "" || answer == "y" || answer == "yes" {
 			fmt.Println()
-			nexBin, err := exec.LookPath("nex")
-			if err != nil {
-				fmt.Println("  Nex CLI not found. Installing...")
-				if _, installErr := setup.InstallLatestCLI(); installErr != nil {
-					fmt.Printf("  Could not install: %v\n", installErr)
-					fmt.Println("  Continuing without Nex.")
-				} else {
-					nexBin, _ = exec.LookPath("nex")
-				}
+			fmt.Println("  Nex CLI not found. Installing...")
+			if _, installErr := setup.InstallLatestCLI(); installErr != nil {
+				fmt.Printf("  Could not install: %v\n", installErr)
+				fmt.Println("  Continuing without Nex.")
 			}
-			if nexBin != "" {
+			if nexBin := nex.BinaryPath(); nexBin != "" {
 				cmd := exec.Command(nexBin, "setup")
 				cmd.Stdin = os.Stdin
 				cmd.Stdout = os.Stdout

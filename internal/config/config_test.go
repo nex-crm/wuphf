@@ -539,12 +539,6 @@ func TestAPIBase(t *testing.T) {
 	})
 }
 
-func TestRegisterURL(t *testing.T) {
-	t.Setenv("WUPHF_DEV_URL", "")
-	withTempConfig(t, func(_ string) {
-		want := "https://app.nex.ai/api/v1/agents/register"
-		if got := RegisterURL(); got != want {
-			t.Fatalf("RegisterURL: got %q, want %q", got, want)
-		}
-	})
-}
+// RegisterURL used to point at the legacy HTTP registration endpoint.
+// Registration now shells out via internal/nex.Register (nex-cli), so the
+// URL builder is gone. The test is removed along with it.

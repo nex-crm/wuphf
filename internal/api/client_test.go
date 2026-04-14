@@ -145,40 +145,32 @@ func TestGetRaw_ReturnsText(t *testing.T) {
 	}
 }
 
-func TestRegister_SetsAPIKey(t *testing.T) {
-	// Register posts to RegisterURL (not BaseURL), so we point the whole client
-	// at the test server and override RegisterURL by setting BaseURL is not
-	// enough — Register uses config.RegisterURL() directly.
-	// We work around this by temporarily replacing the server via a local helper
-	// that calls the unexported request directly.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
-			"api_key": "new-key-from-server",
-			"email":   "test@example.com",
-		})
-	}))
-	defer srv.Close()
-
-	c := NewClient("")
-	// Call request directly (same package) to simulate Register behaviour
-	// against our test server, since Register calls config.RegisterURL().
-	result, err := request[map[string]interface{}](c, http.MethodPost, srv.URL, RegisterRequest{
-		Email: "test@example.com",
-	}, 0)
+// TestRegisterRequest_RoundTrips locks in the JSON shape of the legacy
+// RegisterRequest struct for any external callers still marshaling it.
+// The HTTP Register() method itself has been removed — nex-cli owns
+// registration now (see internal/nex.Register).
+func TestRegisterRequest_RoundTrips(t *testing.T) {
+	payload := RegisterRequest{
+		Email:       "test@example.com",
+		Name:        "Test",
+		CompanyName: "Acme",
+	}
+	data, err := json.Marshal(payload)
 	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+		t.Fatalf("marshal RegisterRequest: %v", err)
 	}
-	if key, ok := result["api_key"].(string); !ok || key != "new-key-from-server" {
-		t.Fatalf("unexpected api_key in response: %v", result)
+	var got map[string]string
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal RegisterRequest: %v", err)
 	}
-
-	// Simulate the key-setting logic from Register
-	if key, ok := result["api_key"].(string); ok && key != "" {
-		c.SetAPIKey(key)
+	if got["email"] != "test@example.com" {
+		t.Fatalf("email: got %q", got["email"])
 	}
-	if c.APIKey != "new-key-from-server" {
-		t.Fatalf("expected API key to be set, got %q", c.APIKey)
+	if got["name"] != "Test" {
+		t.Fatalf("name: got %q", got["name"])
+	}
+	if got["company_name"] != "Acme" {
+		t.Fatalf("company_name: got %q", got["company_name"])
 	}
 }
 
