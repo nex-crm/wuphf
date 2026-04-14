@@ -152,17 +152,11 @@ export const Scene3MeetTheTeam: React.FC = () => {
         ))}
       </div>
 
-      {/* "or build your own" — with unbothered shrug emoji */}
+      {/* "or build your own" */}
       <div style={{
         opacity: customOpacity,
         display: "flex", flexDirection: "column", alignItems: "center", gap: 8,
       }}>
-        <div style={{
-          fontSize: 88,
-          transform: `translateY(${Math.sin(frame * 0.15) * 8}px) rotate(${Math.sin(frame * 0.1) * 5}deg)`,
-        }}>
-          🤷
-        </div>
         <div style={{
           fontFamily: fonts.sans, fontSize: 38, fontWeight: 700, color: colors.yellow, fontStyle: "italic",
         }}>
