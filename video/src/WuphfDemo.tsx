@@ -119,13 +119,13 @@ export const WuphfDemo: React.FC = () => {
 
       {/* Transitions */}
       <Sequence from={sec(10.5) - 3} durationInFrames={sec(1)}>
-        <Audio src={staticFile("audio/whoosh.mp3")} volume={0.2} />
+        <Audio src={staticFile("audio/whoosh.mp3")} volume={0.86} />
       </Sequence>
       <Sequence from={sec(18) - 3} durationInFrames={sec(1)}>
-        <Audio src={staticFile("audio/whoosh.mp3")} volume={0.15} />
+        <Audio src={staticFile("audio/whoosh.mp3")} volume={0.67} />
       </Sequence>
       <Sequence from={sec(48.5) - 3} durationInFrames={sec(1)}>
-        <Audio src={staticFile("audio/whoosh.mp3")} volume={0.2} />
+        <Audio src={staticFile("audio/whoosh.mp3")} volume={0.86} />
       </Sequence>
 
       {/* Record scratch at music cut */}
@@ -135,10 +135,10 @@ export const WuphfDemo: React.FC = () => {
 
       {/* Background music — funk/upbeat, cuts at break, resumes with play */}
       <Sequence from={sec(0)} durationInFrames={sec(55.8)}>
-        <Audio src={staticFile("audio/bg-music-funk-raw.mp3")} volume={0.25} loop />
+        <Audio src={staticFile("audio/bg-music-d.mp3")} volume={0.13} loop />
       </Sequence>
       <Sequence from={sec(67.8)} durationInFrames={sec(18.2)}>
-        <Audio src={staticFile("audio/bg-music-funk-raw.mp3")} volume={0.25} loop />
+        <Audio src={staticFile("audio/bg-music-d.mp3")} volume={0.13} loop />
       </Sequence>
     </AbsoluteFill>
   );
