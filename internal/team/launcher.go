@@ -1058,11 +1058,11 @@ func (l *Launcher) primeVisibleAgents() {
 		return
 	}
 	msgs := l.broker.Messages()
-	if len(msgs) == 0 {
-		return
+	if len(msgs) > 0 {
+		latest := msgs[len(msgs)-1]
+		l.deliverMessageNotification(latest)
 	}
-	latest := msgs[len(msgs)-1]
-	l.deliverMessageNotification(latest)
+	l.resumeInFlightWork()
 }
 
 func (l *Launcher) pollNexNotificationsLoop() {
