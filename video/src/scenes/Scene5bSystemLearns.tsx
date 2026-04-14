@@ -103,7 +103,7 @@ export const Scene5bSystemLearns: React.FC = () => {
             marginBottom: 16,
           }}
         >
-          ✨ Pattern Detected
+          Pattern Detected
         </div>
       </FadeIn>
 
@@ -157,9 +157,6 @@ export const Scene5bSystemLearns: React.FC = () => {
             gap: 12,
           }}
         >
-          <div style={{ fontSize: 24 }}>
-            {"\u2728"}
-          </div>
           <div style={{ fontFamily: fonts.sans, fontSize: 22, fontWeight: 700, color: colors.green }}>
             New Skill Proposal
           </div>
