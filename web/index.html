@@ -6505,7 +6505,7 @@ function initWizard() {
     })
     .then(function(healthData) {
       console.log('[wizard] health:', JSON.stringify(healthData));
-      return fetch('/onboarding/state').then(function(r) { return r.json(); });
+      return fetch('/api/onboarding/state').then(function(r) { return r.json(); });
     })
     .then(function(state) {
       console.log('[wizard] onboarding state:', JSON.stringify(state));
@@ -6574,7 +6574,7 @@ function submitWelcome() {
   }
   var btn = document.getElementById('wiz-btn-welcome');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
-  fetch('/onboarding/progress', {
+  fetch('/api/onboarding/progress', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ company: company, description: description, priority: priority, step: 'setup' })
@@ -6591,7 +6591,7 @@ function submitWelcome() {
 
 function initSetup() {
   recheckWizPrereqs();
-  fetch('/onboarding/templates')
+  fetch('/api/onboarding/templates')
     .then(function(r) { return r.json(); })
     .then(function(data) { wizTemplates = data.templates || data || []; })
     .catch(function() { wizTemplates = []; });
@@ -6603,12 +6603,15 @@ function recheckWizPrereqs() {
   listEl.textContent = '';
   listEl.appendChild(_wE('div', null, 'Checking\u2026'));
   listEl.firstChild.style.cssText = 'font-size:12px;color:var(--text-tertiary);padding:8px 0;';
-  fetch('/onboarding/prereqs')
+  fetch('/api/onboarding/prereqs')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       var prereqs = data.prereqs || data || [];
       wizPrereqState = {};
-      prereqs.forEach(function(p) { wizPrereqState[p.name] = p; });
+      prereqs.forEach(function(p) {
+        if (p.ok === undefined) p.ok = !!p.found;
+        wizPrereqState[p.name] = p;
+      });
       renderWizPrereqs(prereqs);
       updateReadyButton();
     })
@@ -6678,7 +6681,7 @@ function validateKey(provider, value) {
   if (statusEl) { statusEl.textContent = 'Checking\u2026'; statusEl.className = 'key-status checking'; }
   wizKeyState[provider] = 'checking';
   updateReadyButton();
-  fetch('/onboarding/validate-key', {
+  fetch('/api/onboarding/validate-key', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider: provider, key: value.trim() })
@@ -6728,8 +6731,13 @@ function updateReadyButton() {
   });
   var anthropicStatus = wizKeyState['anthropic'] || 'empty';
   var acceptCheckbox = document.getElementById('wiz-unreachable-accept');
+  // Users running Claude Code have their own auth via the `claude` CLI, so
+  // a pasted Anthropic API key is not required. Detect that path via the
+  // prereq result and treat it as valid.
+  var claudeCliFound = !!(wizPrereqState['claude'] && wizPrereqState['claude'].ok);
   var anthropicOk = (anthropicStatus === 'valid') ||
-    (anthropicStatus === 'unreachable' && acceptCheckbox && acceptCheckbox.checked);
+    (anthropicStatus === 'unreachable' && acceptCheckbox && acceptCheckbox.checked) ||
+    claudeCliFound;
   btn.disabled = !(prereqsOk && anthropicOk);
 }
 
@@ -6737,7 +6745,7 @@ function loadTemplates() {
   var grid = document.getElementById('wiz-template-grid');
   if (!grid) return;
   if (wizTemplates.length > 0) { renderTemplateGrid(wizTemplates); return; }
-  fetch('/onboarding/templates')
+  fetch('/api/onboarding/templates')
     .then(function(r) { return r.json(); })
     .then(function(data) {
       wizTemplates = data.templates || data || [];
@@ -6787,7 +6795,7 @@ function completeOnboarding(skipTask) {
     var ta = document.getElementById('wiz-task-input');
     task = ta ? (ta.value || '') : '';
   }
-  fetch('/onboarding/complete', {
+  fetch('/api/onboarding/complete', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ task: task, skip_task: !!skipTask })
@@ -6832,7 +6840,7 @@ function updateChecklistSidebar(checklist) {
 function dismissChecklist() {
   var section = document.getElementById('sidebar-checklist-section');
   if (section) section.style.display = 'none';
-  fetch('/onboarding/checklist/dismiss', { method: 'POST' }).catch(function() {});
+  fetch('/api/onboarding/checklist/dismiss', { method: 'POST' }).catch(function() {});
 }
 
 // ─── Init ───
