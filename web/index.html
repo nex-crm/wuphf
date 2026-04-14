@@ -6853,10 +6853,13 @@ function recheckWizPrereqs() {
     })
     .catch(function() {
       listEl.textContent = '';
-      var msg = _wE('div', null, 'Could not reach prereq check. You can still continue.');
+      var msg = _wE('div', null, "Couldn't auto-check — pick the runtime you already have installed.");
       msg.style.cssText = 'font-size:12px;color:var(--text-tertiary);padding:8px 0;';
       listEl.appendChild(msg);
       wizPrereqState = { _fallback: true };
+      // Still render the runtime tiles so the user has something to pick.
+      // updateReadyButton() treats _fallback as "trust the user's selection."
+      renderRuntimeTiles();
       updateReadyButton();
     });
 }
@@ -7096,12 +7099,19 @@ function updateReadyButton() {
     return wizPrereqState[k] && wizPrereqState[k].ok;
   });
   // The selected runtime must also be detected — picking Codex without
-  // having Codex installed shouldn't unlock Ready.
-  var runtimeOk = !!(
-    wizSelectedRuntime &&
-    wizPrereqState[wizSelectedRuntime] &&
-    wizPrereqState[wizSelectedRuntime].ok
-  );
+  // having Codex installed shouldn't unlock Ready. In _fallback mode the
+  // prereq check couldn't run, so we trust the user's selection instead of
+  // trapping them with an always-disabled button.
+  var runtimeOk;
+  if (wizPrereqState._fallback) {
+    runtimeOk = !!wizSelectedRuntime;
+  } else {
+    runtimeOk = !!(
+      wizSelectedRuntime &&
+      wizPrereqState[wizSelectedRuntime] &&
+      wizPrereqState[wizSelectedRuntime].ok
+    );
+  }
   btn.disabled = !(infraOk && runtimeOk);
 }
 
