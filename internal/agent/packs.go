@@ -21,24 +21,34 @@ type PackDefinition struct {
 }
 
 // revopsDriveConnection is the shared prelude for RevOps skills. It tells the
-// agent not to fabricate CRM data, and to walk the user end-to-end through
-// connecting their CRM (or other required tool) via Composio before doing any
-// work. Never stop at "which CRM do you use?" — drive the full connection.
+// agent not to fabricate data and to walk the user through connecting the
+// required tool end-to-end before doing any work.
+//
+// Skills are provider-agnostic by design. Which backend actually serves a
+// call (One CLI or Composio) is decided by the action Registry in
+// internal/action/registry.go, not by skill content. One is preferred because
+// it is local and personal; Composio is the fallback for tools One does not
+// cover. If you need to change provider priority, change it in the Registry,
+// not here.
 const revopsDriveConnection = `## Step 0: Drive the connection before you start
 
-This skill acts on real company data. Never fabricate deals, contacts, pipeline numbers, or activity. If the required integration is not connected, DRIVE the user through connecting it end-to-end before you do any work. Do not just ask "which CRM do you use" and stop — walk them through the full setup.
+This skill acts on real company data. Never fabricate deals, contacts, pipeline numbers, or activity. If the required integration is not connected, DRIVE the user through connecting it end-to-end before you do any work.
 
-1. Call **team_action_connections** to see what is connected right now.
-2. If the integration you need is missing, ask the user via **human_interview**:
-   - "Which CRM do you use? Options: HubSpot, Salesforce, Attio, Pipedrive, Zoho, Close, Copper, Other (please specify)."
-   - If this skill also needs email / calendar / outbound, ask which tool they use for that too (Gmail, Outlook, Google Calendar, Apollo, Outreach, Salesloft, SendGrid, or manual).
-3. Once they name the tool, drive the connection:
-   a. Check whether a Composio API key is configured (the presence of composio actions in team_action_connections is a good signal). If not, tell the user: "I need a Composio API key to connect your CRM. Sign up at composio.dev — the free tier works. Then run ` + "`/config set composio_api_key <your key>`" + ` in #general. Reply 'set' here when done." Wait for confirmation.
-   b. Once the API key is set, tell the user: "Go to composio.dev → Connected Accounts → Add [their tool] → Authorize. Reply 'done' when it is connected." Wait for confirmation.
-   c. Re-run **team_action_connections** to verify the specific tool the user named is now authorized. If it is still missing, help debug: wrong API key scope, wrong tool slug, OAuth redirect issue. Iterate until the connection is verified.
-4. Once verified, call **team_action_search** with the tool name and the action you need (e.g., "HubSpot list deals" or "Salesforce update contact") to discover the exact action slug. You will use that slug in **team_action_execute**.
+1. Call **team_action_connections** to see what is already connected. The framework picks the right backend automatically — you do not need to reason about One versus Composio.
+2. If what you need is already connected, skip to step 4.
+3. The integration is missing. Drive the user through connecting it:
+   a. Ask via **human_interview** which tool they use. Give concrete options:
+      - CRM: HubSpot, Salesforce, Attio, Pipedrive, Zoho, Close, Copper, Other
+      - If the skill also needs email / calendar / outbound, ask for that tool too: Gmail, Outlook, Google Calendar, Apollo, Outreach, Salesloft, SendGrid, or manual
+   b. Call **team_action_guide** with the tool name. The guide returns step-by-step setup instructions for the backend the framework selected (set a config key, authorize an account, run a CLI command, etc.). Walk the user through each step. Wait for confirmation after each.
+   c. Re-call **team_action_connections** to verify. Iterate on failures until connected.
+   d. If **team_action_guide** reports that no configured backend supports the tool, offer three options via **human_interview**:
+      1. Pick a supported tool instead — list what the guide surfaces for common categories.
+      2. Ask you to propose a dedicated skill for the tool. Draft an instruction-based skill that wraps its public API and save it for review.
+      3. Provide an API key and base URL for the tool. Save it via ` + "`/config set <tool>_api_key <value>`" + ` and make direct HTTP calls. Gate every write on **human_interview**.
+4. Once connected, use **team_action_search** to discover the action slug and **team_action_execute** to run it.
 
-If the user explicitly says "skip" or "work from context only", you may proceed using Nex and the thread alone. In that case, flag "Data source: thread + Nex only, no live CRM data" at the top of your output so they know the gap.
+If the user explicitly says "skip" or "work from context only", proceed using Nex and the thread alone. Flag "Data source: thread + Nex only, no live data" at the top of your output so the gap is visible.
 
 `
 

@@ -57,7 +57,7 @@ func (p registryStubProvider) GetRelayEvent(context.Context, string) (RelayEvent
 	return RelayEventDetail{}, nil
 }
 
-func TestRegistryPrefersComposioForActionsInAutoMode(t *testing.T) {
+func TestRegistryPrefersOneForActionsInAutoMode(t *testing.T) {
 	t.Setenv("WUPHF_ACTION_PROVIDER", "auto")
 	registry := &Registry{
 		providers: []Provider{
@@ -81,12 +81,12 @@ func TestRegistryPrefersComposioForActionsInAutoMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provider for action execute: %v", err)
 	}
-	if provider.Name() != "composio" {
-		t.Fatalf("expected composio, got %s", provider.Name())
+	if provider.Name() != "one" {
+		t.Fatalf("expected one (local-first), got %s", provider.Name())
 	}
 }
 
-func TestRegistryPrefersComposioForWorkflowsInAutoMode(t *testing.T) {
+func TestRegistryPrefersOneForWorkflowsInAutoMode(t *testing.T) {
 	t.Setenv("WUPHF_ACTION_PROVIDER", "auto")
 	registry := &Registry{
 		providers: []Provider{
@@ -110,8 +110,37 @@ func TestRegistryPrefersComposioForWorkflowsInAutoMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("provider for workflow execute: %v", err)
 	}
+	if provider.Name() != "one" {
+		t.Fatalf("expected one (local-first), got %s", provider.Name())
+	}
+}
+
+func TestRegistryFallsBackToComposioWhenOneMissing(t *testing.T) {
+	t.Setenv("WUPHF_ACTION_PROVIDER", "auto")
+	registry := &Registry{
+		providers: []Provider{
+			registryStubProvider{
+				name:       "composio",
+				configured: true,
+				supports: map[Capability]bool{
+					CapabilityActionExecute: true,
+				},
+			},
+			registryStubProvider{
+				name:       "one",
+				configured: false, // Not configured: One binary not installed or ONE_SECRET unset.
+				supports: map[Capability]bool{
+					CapabilityActionExecute: true,
+				},
+			},
+		},
+	}
+	provider, err := registry.ProviderFor(CapabilityActionExecute)
+	if err != nil {
+		t.Fatalf("provider for action execute: %v", err)
+	}
 	if provider.Name() != "composio" {
-		t.Fatalf("expected composio, got %s", provider.Name())
+		t.Fatalf("expected composio fallback, got %s", provider.Name())
 	}
 }
 

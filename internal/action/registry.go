@@ -93,6 +93,12 @@ func (r *Registry) ProviderNamed(name string, cap Capability) (Provider, error) 
 	return nil, fmt.Errorf("unknown action provider %q", name)
 }
 
+// preferredProvidersFor returns providers in the order they should be tried
+// for a capability. One CLI wins by default because it is local-first and
+// personal — no SaaS account required, auth handled by the local CLI.
+// Composio is the fallback for tools One does not cover, since Composio has
+// a broader third-party catalog but requires a paid API key and cloud auth.
+// The user can still pin a specific provider via `/config set action_provider`.
 func preferredProvidersFor(cap Capability) []string {
 	switch cap {
 	case CapabilityConnections,
@@ -103,14 +109,14 @@ func preferredProvidersFor(cap Capability) []string {
 		CapabilityRelayEventTypes,
 		CapabilityRelayCreate,
 		CapabilityRelayActivate:
-		return []string{"composio", "one"}
+		return []string{"one", "composio"}
 	case CapabilityWorkflowCreate,
 		CapabilityWorkflowExecute,
 		CapabilityWorkflowRuns,
 		CapabilityRelayEvents,
 		CapabilityRelayEvent:
-		return []string{"composio", "one"}
+		return []string{"one", "composio"}
 	default:
-		return []string{"composio", "one"}
+		return []string{"one", "composio"}
 	}
 }
