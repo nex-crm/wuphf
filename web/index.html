@@ -861,6 +861,9 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-card-routing { display: flex; align-items: center; gap: 8px; padding: 6px 0 6px 48px; }
 .message-card-routing-icon { font-size: 14px; flex-shrink: 0; }
 .message-card-routing-text { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); }
+.message-card-skill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; margin: 6px 0 6px 48px; background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.25); border-radius: 12px; width: fit-content; }
+.message-card-skill-icon { font-size: 13px; flex-shrink: 0; }
+.message-card-skill-text { font-size: 12px; color: var(--text-secondary); font-family: var(--font-mono); font-weight: 500; }
 /* ─── Thread expand/collapse toggle (#19) ─── */
 /* ─── Thread reply-to indicator (#20) ─── */
 .thread-reply-to { font-size: 11px; color: var(--text-tertiary); font-style: italic; margin-bottom: 2px; }
@@ -3736,6 +3739,33 @@ function renderSkillsList(panel, skills) {
       meta.appendChild(el('span', null, new Date(ts).toLocaleString()));
     }
     card.appendChild(meta);
+
+    var actions = el('div', { className: 'skill-card-actions', style: { display: 'flex', gap: '8px', marginTop: '10px' } });
+    var runBtn = el('button', {
+      className: 'btn btn-primary',
+      style: { fontSize: '12px', padding: '6px 12px' }
+    }, '\u26A1 Invoke');
+    runBtn.onclick = function() {
+      var name = skill.name || skill.id;
+      if (!name) return;
+      runBtn.disabled = true;
+      runBtn.textContent = 'Invoking...';
+      WuphfAPI.post('/skills/' + encodeURIComponent(name) + '/invoke', {
+        invoked_by: 'you',
+        channel: (typeof currentChannel !== 'undefined' && currentChannel) ? currentChannel : 'general'
+      }).then(function() {
+        runBtn.textContent = '\u2713 Invoked';
+        showNotice('Skill invoked: ' + (skill.title || name), 'success');
+        setTimeout(function() { runBtn.textContent = '\u26A1 Invoke'; runBtn.disabled = false; }, 1500);
+      }).catch(function(err) {
+        runBtn.disabled = false;
+        runBtn.textContent = '\u26A1 Invoke';
+        showNotice('Invoke failed: ' + (err && err.message ? err.message : 'unknown'), 'error');
+      });
+    };
+    actions.appendChild(runBtn);
+    card.appendChild(actions);
+
     panel.appendChild(card);
   });
 }
@@ -4620,6 +4650,19 @@ function appendMessageToContainer(msg, container, opts) {
     routeDiv.appendChild(el('span', { className: 'message-card-routing-text' }, msg.content || ''));
     container.appendChild(routeDiv);
     return routeDiv;
+  }
+
+  // Skill invocation marker — distinct pill so users can tell when a skill
+  // ran vs. when an agent freelanced a reply.
+  if (msg.kind === 'skill_invocation') {
+    var skillDiv = el('div', { className: 'message-card-skill animate-fade' });
+    skillDiv.dataset.msgId = msg.id;
+    skillDiv.appendChild(el('span', { className: 'message-card-skill-icon' }, '\u26A1'));
+    var label = 'Ran skill: ' + (msg.title || 'unknown');
+    if (msg.from) label += ' — by @' + msg.from;
+    skillDiv.appendChild(el('span', { className: 'message-card-skill-text' }, label));
+    container.appendChild(skillDiv);
+    return skillDiv;
   }
 
   var msgDiv = document.createElement('div');
@@ -7065,7 +7108,15 @@ function _finishOnboarding(data) {
   document.getElementById('onboarding-wizard').style.display = 'none';
   var generalEl = document.getElementById('general');
   if (generalEl) generalEl.setAttribute('data-first-task', 'seeded');
-  if (data && data.checklist && data.checklist.length) updateChecklistSidebar(data.checklist);
+  if (data && data.checklist && data.checklist.length) {
+    updateChecklistSidebar(data.checklist);
+  } else {
+    // /complete returns {ok, redirect} — no checklist. Refetch /state so the
+    // Getting Started sidebar populates the 5 default items.
+    fetch('/api/onboarding/state').then(function(r) { return r.json(); }).then(function(s) {
+      if (s && s.checklist && s.checklist.length) updateChecklistSidebar(s.checklist);
+    }).catch(function() {});
+  }
   // Fetch the real pack cast so the splash introduces the correct members
   // for non-default packs (see ISSUE-003). Fall back to legacy intro on failure.
   WuphfAPI.getOfficeMembers().then(function(membersData) {
