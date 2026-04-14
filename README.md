@@ -25,7 +25,7 @@ One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all v
 
 ## Get Started
 
-**Prerequisites:** [Go](https://go.dev/dl/), [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (or [Codex CLI](https://github.com/openai/codex) if you set `--provider codex`). [tmux](https://github.com/tmux/tmux/wiki/Installing) is only needed for `--tui` mode.
+**Prerequisites:** [Go](https://go.dev/dl/) and one agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) by default, or [Codex CLI](https://github.com/openai/codex) when you pass `--provider codex`. [tmux](https://github.com/tmux/tmux/wiki/Installing) is only required for `--tui` mode.
 
 ```bash
 git clone https://github.com/nex-crm/wuphf.git
