@@ -38,12 +38,12 @@ export const Scene4TheyWork: React.FC = () => {
 
           {/* Channels */}
           <div style={{ padding: "20px 20px 8px" }}>
-            <div style={{ fontSize: 16, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: slack.sidebarText, marginBottom: 10 }}>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", color: slack.sidebarText, marginBottom: 4 }}>
               Channels
             </div>
             <div style={{
-              padding: "12px 16px", borderRadius: 10,
-              fontSize: 22, color: "#FFF",
+              padding: "6px 10px", borderRadius: 6,
+              fontSize: 14, color: "#FFF",
               backgroundColor: slack.sidebarActive, fontWeight: 600,
             }}>
               # general
@@ -52,7 +52,7 @@ export const Scene4TheyWork: React.FC = () => {
 
           {/* Team */}
           <div style={{ padding: "20px 20px 12px" }}>
-            <div style={{ fontSize: 16, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: slack.sidebarText }}>
+            <div style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", color: slack.sidebarText }}>
               Team
             </div>
           </div>
@@ -138,14 +138,35 @@ export const Scene4TheyWork: React.FC = () => {
           </div>
 
           {/* Composer */}
-          <div style={{ padding: "16px 32px 24px" }}>
+          <div style={{ padding: "12px 32px 16px" }}>
             <div style={{
               backgroundColor: slack.bgWarm, border: `1px solid ${slack.border}`,
-              borderRadius: 12, padding: "18px 22px",
-              fontSize: 20, color: slack.textTertiary, fontFamily: fonts.sans,
+              borderRadius: 8, padding: "14px 18px",
+              fontSize: 18, color: slack.textTertiary, fontFamily: fonts.sans,
+              display: "flex", alignItems: "center", justifyContent: "space-between",
             }}>
-              Message #general...
+              <span>Message #general — type / for commands, @ to mention</span>
+              {/* Send arrow */}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={slack.textTertiary} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m22 2-7 20-4-9-9-4z"/><path d="m22 2-10 10"/>
+              </svg>
             </div>
+          </div>
+
+          {/* Status bar — matches real platform exactly */}
+          <div style={{
+            padding: "4px 16px", borderTop: `1px solid ${slack.borderLight}`,
+            display: "flex", alignItems: "center", gap: 16,
+            fontFamily: fonts.mono, fontSize: 12, color: slack.textTertiary,
+            backgroundColor: slack.bgWarm,
+          }}>
+            <span style={{ color: slack.text }}># general office</span>
+            <span style={{ marginLeft: "auto" }}>codex</span>
+            <span>3 agents</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: slack.greenPresence }} />
+              connected
+            </span>
           </div>
         </div>
       </div>
