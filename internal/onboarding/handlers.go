@@ -14,6 +14,10 @@ import (
 // Pass nil to defer wiring — the broker should supply a real implementation
 // that seeds the team, posts the first message, and triggers the CEO turn.
 //
+// packSlug identifies the active agent pack (e.g. "founding-team", "revops").
+// HandleTemplates uses it to return pack-appropriate first-task suggestions.
+// Pass "" to fall back to the default founding-team templates.
+//
 // Routes registered:
 //
 //	GET  /onboarding/state
@@ -24,13 +28,13 @@ import (
 //	GET  /onboarding/templates
 //	POST /onboarding/checklist/{id}/done
 //	POST /onboarding/checklist/dismiss
-func RegisterRoutes(mux *http.ServeMux, completeFn func(task string, skipTask bool) error) {
+func RegisterRoutes(mux *http.ServeMux, completeFn func(task string, skipTask bool) error, packSlug string) {
 	mux.HandleFunc("/onboarding/state", HandleState)
 	mux.HandleFunc("/onboarding/progress", HandleProgress)
 	mux.HandleFunc("/onboarding/complete", makeHandleComplete(completeFn))
 	mux.HandleFunc("/onboarding/prereqs", HandlePrereqs)
 	mux.HandleFunc("/onboarding/validate-key", HandleValidateKey)
-	mux.HandleFunc("/onboarding/templates", HandleTemplates)
+	mux.HandleFunc("/onboarding/templates", makeHandleTemplates(packSlug))
 	mux.HandleFunc("/onboarding/checklist/dismiss", HandleChecklistDismiss)
 	// Pattern must be registered after the more-specific /dismiss route so
 	// that /dismiss is not swallowed by the /{id}/done prefix match.
@@ -302,15 +306,25 @@ func HandleValidateKey(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
+// makeHandleTemplates returns a handler for GET /onboarding/templates that
+// closes over packSlug. The broker supplies the active pack slug so the
+// first-task suggestions match the team the user is actually launching.
+func makeHandleTemplates(packSlug string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		HandleTemplates(w, r, packSlug)
+	}
+}
+
 // HandleTemplates handles GET /onboarding/templates.
-// Returns JSON array of TaskTemplate for the default starter pack.
-func HandleTemplates(w http.ResponseWriter, r *http.Request) {
+// Returns JSON array of TaskTemplate for the given pack. An empty packSlug
+// falls back to the default founding-team templates.
+func HandleTemplates(w http.ResponseWriter, r *http.Request, packSlug string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(DefaultTemplates())
+	json.NewEncoder(w).Encode(TemplatesForPack(packSlug))
 }
 
 // HandleChecklistDismiss handles POST /onboarding/checklist/dismiss.

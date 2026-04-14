@@ -171,6 +171,7 @@ func (l *Launcher) Launch() error {
 	// Start the shared channel broker
 	l.broker = NewBroker()
 	l.broker.runtimeProvider = l.provider
+	l.broker.packSlug = l.packSlug
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
@@ -3181,6 +3182,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 
 	l.broker = NewBroker()
 	l.broker.runtimeProvider = l.provider
+	l.broker.packSlug = l.packSlug
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}

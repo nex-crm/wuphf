@@ -54,3 +54,54 @@ func DefaultTemplates() []TaskTemplate {
 		},
 	}
 }
+
+// RevOpsTemplates returns the five starter task templates scoped to the
+// RevOps pack (CRO, ops-lead, AE, SDR, analyst). These map to the skills
+// already pre-seeded by the pack so the first-task suggestions read as
+// real work the team can execute on day one.
+func RevOpsTemplates() []TaskTemplate {
+	return []TaskTemplate{
+		{
+			ID:          "pipeline_audit",
+			Title:       "Run a pipeline audit",
+			Description: "CRM hygiene sweep — stale deals, missing fields, bad data. Find the leaks before forecast.",
+			OwnerSlug:   "analyst",
+		},
+		{
+			ID:          "meeting_prep",
+			Title:       "Prep me for my next call",
+			Description: "One-page brief on the account, deal stage, stakeholders, and the ask. No fluff.",
+			OwnerSlug:   "ae",
+		},
+		{
+			ID:          "revive_closed_lost",
+			Title:       "Revive closed-lost leads",
+			Description: "Surface deals lost 3–18 months ago with trigger events. Draft re-engagement outreach.",
+			OwnerSlug:   "sdr",
+		},
+		{
+			ID:          "score_inbound",
+			Title:       "Score new inbound",
+			Description: "Rate unworked leads on fit and intent. Route Tier 1 to the AE within 24 hours.",
+			OwnerSlug:   "analyst",
+		},
+		{
+			ID:          "stalled_deals",
+			Title:       "Find stalled deals",
+			Description: "Open pipeline with no activity in 10+ days. Diagnose the cause and recommend a next step.",
+			OwnerSlug:   "ops-lead",
+		},
+	}
+}
+
+// TemplatesForPack returns the starter task templates for the given pack
+// slug. Unknown or empty slugs fall through to DefaultTemplates so the
+// founding-team behavior is preserved verbatim.
+func TemplatesForPack(packSlug string) []TaskTemplate {
+	switch packSlug {
+	case "revops":
+		return RevOpsTemplates()
+	default:
+		return DefaultTemplates()
+	}
+}

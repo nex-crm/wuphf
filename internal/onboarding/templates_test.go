@@ -62,3 +62,56 @@ func TestDefaultTemplatesUniqueIDs(t *testing.T) {
 		seen[tmpl.ID] = true
 	}
 }
+
+func TestRevOpsTemplatesReturnsFiveItems(t *testing.T) {
+	templates := RevOpsTemplates()
+	if len(templates) != 5 {
+		t.Fatalf("RevOpsTemplates: got %d items, want 5", len(templates))
+	}
+}
+
+func TestRevOpsTemplatesExpectedIDs(t *testing.T) {
+	wantIDs := []string{"pipeline_audit", "meeting_prep", "revive_closed_lost", "score_inbound", "stalled_deals"}
+	templates := RevOpsTemplates()
+	for i, want := range wantIDs {
+		if templates[i].ID != want {
+			t.Errorf("revops templates[%d].ID: got %q, want %q", i, templates[i].ID, want)
+		}
+	}
+}
+
+func TestRevOpsTemplatesNonEmptyFields(t *testing.T) {
+	for _, tmpl := range RevOpsTemplates() {
+		if tmpl.ID == "" || tmpl.Title == "" || tmpl.Description == "" || tmpl.OwnerSlug == "" {
+			t.Errorf("revops template %+v: all fields must be non-empty", tmpl)
+		}
+	}
+}
+
+func TestRevOpsTemplatesOwnerSlugsMatchPack(t *testing.T) {
+	// Every owner slug should be one of the slugs present in the RevOps pack.
+	validSlugs := map[string]bool{"ceo": true, "ops-lead": true, "ae": true, "sdr": true, "analyst": true}
+	for _, tmpl := range RevOpsTemplates() {
+		if !validSlugs[tmpl.OwnerSlug] {
+			t.Errorf("revops template %q: OwnerSlug %q not in RevOps pack", tmpl.ID, tmpl.OwnerSlug)
+		}
+	}
+}
+
+func TestTemplatesForPackRouting(t *testing.T) {
+	cases := []struct {
+		slug    string
+		firstID string
+	}{
+		{"", "landing"},                    // fallback to default
+		{"founding-team", "landing"},       // explicit default
+		{"revops", "pipeline_audit"},       // revops-specific
+		{"unknown-pack", "landing"},        // unknown falls through to default
+	}
+	for _, tc := range cases {
+		got := TemplatesForPack(tc.slug)
+		if len(got) == 0 || got[0].ID != tc.firstID {
+			t.Errorf("TemplatesForPack(%q): first ID got %q, want %q", tc.slug, got[0].ID, tc.firstID)
+		}
+	}
+}

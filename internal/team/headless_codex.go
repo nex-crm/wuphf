@@ -52,6 +52,7 @@ func (l *Launcher) launchHeadlessCodex() error {
 	exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	l.broker = NewBroker()
+	l.broker.packSlug = l.packSlug
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}

@@ -430,6 +430,7 @@ type Broker struct {
 	addr                string         // actual listen address (useful when port=0)
 	webUIOrigins        []string       // allowed CORS origins for web UI (set by ServeWebUI)
 	runtimeProvider     string         // "codex" or "claude" — set by launcher
+	packSlug            string         // active agent pack slug ("founding-team", "revops", ...) — set by launcher
 	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
 	generateChannelFn   func(prompt string) (generatedChannelTemplate, error)
 	policies            []officePolicy // active office operating rules
@@ -803,7 +804,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
-	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn)
+	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
