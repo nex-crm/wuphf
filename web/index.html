@@ -3005,7 +3005,10 @@ function showOffice() {
         var channelsData = results[1];
         var liveMembersData = results[2];
         if (membersData.members) {
-          AGENTS = membersData.members.map(function(m) {
+          // Filter out entries with an empty slug. Stale broker state from a
+          // previous pack could leave nameless placeholder members here, and
+          // passing them to the @-mention autocomplete broke filtering.
+          AGENTS = membersData.members.filter(function(m) { return m && m.slug; }).map(function(m) {
             return {
               slug: m.slug,
               emoji: m.emoji || m.slug.charAt(0).toUpperCase(),
@@ -4899,12 +4902,34 @@ function fetchMemberActivity() {
 
 // ─── Office change SSE (live sidebar updates) ───
 var officeEventSource = null;
+// IDs of messages we have already applied to the unread counter. The SSE
+// `message` stream can overlap with the per-channel poll on the active
+// channel, so we dedupe by id to avoid double-counting.
+var seenMessageIds = {};
 function connectOfficeEvents() {
   if (officeEventSource) { officeEventSource.close(); officeEventSource = null; }
   var url = WuphfAPI.sseURL('/events');
   officeEventSource = new EventSource(url);
   officeEventSource.addEventListener('office_changed', function() {
     refreshOfficeSidebar();
+  });
+  // Message events fire for every channel. Use them to track unreads for
+  // channels the user is not currently looking at — the per-channel poll
+  // only delivers messages for currentChannel so it cannot maintain a
+  // badge count for anywhere else.
+  officeEventSource.addEventListener('message', function(e) {
+    try {
+      var data = JSON.parse(e.data || '{}');
+      var msg = data.message || data;
+      if (!msg || !msg.id || !msg.channel) return;
+      if (seenMessageIds[msg.id]) return;
+      seenMessageIds[msg.id] = true;
+      if (msg.channel === currentChannel) return;
+      if (msg.from === 'you' || msg.from === 'human' || msg.from === 'system') return;
+      incrementUnreadCount(msg.channel);
+    } catch (err) {
+      // Ignore malformed payloads — reconnection handles transient errors.
+    }
   });
   officeEventSource.onerror = function() {
     // Reconnection is automatic with EventSource
@@ -4916,7 +4941,7 @@ function refreshOfficeSidebar() {
     WuphfAPI.getChannels().catch(function() { return { channels: [] }; })
   ]).then(function(results) {
     if (results[0].members && results[0].members.length > 0) {
-      AGENTS = results[0].members.map(function(m) {
+      AGENTS = results[0].members.filter(function(m) { return m && m.slug; }).map(function(m) {
         return {
           slug: m.slug,
           emoji: m.emoji || m.slug.charAt(0).toUpperCase(),
