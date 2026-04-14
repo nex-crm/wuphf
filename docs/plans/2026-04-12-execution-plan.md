@@ -12,6 +12,13 @@ Paperclip (github.com/paperclipai/paperclip) is the leading multi-agent orchestr
 orchestrates AI agents (Claude Code, Codex, OpenClaw) as a "company" with org charts,
 tasks, budgets.
 
+**Naive (usenaive.ai)** is a YC S25 company (Relixir Inc.) that forked Paperclip 4 days
+after launch, added a Stripe billing layer + real-world identity (email, phone, virtual
+cards per agent), and sells it as a hosted SaaS at $49-149/mo + $0.50/credit. 71+
+Paperclip references remain in their production bundle. Same architecture underneath,
+same token waste problems, but polished UI with template store, per-agent compute
+dashboards, and a Getting Started wizard. Full analysis: `docs/plans/2026-04-13-naive-competitive-analysis.md`.
+
 Paperclip got famous because of timing (multi-agent pain was acute) and framing
 ("zero-human company"). But its GitHub issue tracker reveals massive production pain:
 
@@ -314,16 +321,19 @@ The moment agents shared a channel, everything changed."
 **CTA:** "Watch the 2-minute demo"
 **Demo:** Video of clicking agent → streaming → DM mid-task → cost panel.
 
-**Comparison table (no competitor name):**
+**Comparison table (3-way, no competitor names in public version):**
 
 ```
-                     Ticket queue    Shared office
-See agents working   No              Yes, real-time
-Steer mid-task       Kill & restart  DM, no restart
-Session tokens       Accumulate      Fresh per turn
-Tool definitions     All agents, all Per-agent scoped
-Empty inbox cost     Burns tokens    Zero (push-only)
-Import existing      —               One command
+                     Ticket queue    Hosted fork       Shared office
+See agents working   No              No                Yes, real-time
+Steer mid-task       Kill & restart  Kill & restart    DM, no restart
+Session tokens       Accumulate      Accumulate        Fresh per turn
+Tool definitions     All agents      All agents        Per-agent scoped
+Empty inbox cost     Burns tokens    Burns tokens      Zero (push-only)
+Self-hosted          Yes             No                Yes
+Price                Free            $49-149/mo        Free
+Your own API keys    Yes             No (credits)      Yes
+Import existing      —               —                 One command
 ```
 
 ---
@@ -380,6 +390,35 @@ They are reference material, not action items:
 - `docs/plans/2026-04-11-paperclip-vs-wuphf-grounded.md` — source code comparison
 - `docs/plans/2026-04-12-wuphf-strategy-vs-paperclip.md` — full strategy context
 - `docs/plans/2026-04-12-product-experience-test.md` — 10-persona ICP panel
+- `docs/plans/2026-04-13-naive-competitive-analysis.md` — live product walkthrough of Naive (Paperclip fork, YC S25)
 
 The strategy doc (718 lines + 467 lines of content plan) was valuable for
 arriving at the 10-item execution list. The execution list is 10 items.
+
+---
+
+## Competitive landscape update (2026-04-13)
+
+The market now has three players, not two:
+
+| | Paperclip | Naive | WUPHF |
+|---|---|---|---|
+| Architecture | Node.js + React | Same (fork) | Go single binary |
+| Session model | --resume (accumulates) | Same (inherited) | Fresh per turn |
+| MCP scoping | Global (all agents, all tools) | Same (inherited) | Per-agent |
+| Agent wakes | Heartbeat polling | Same (inherited) | Push-driven |
+| Visibility | No live streaming | Browser tab "inactive" | Live stdout SSE |
+| Mid-task steering | Kill & restart | Kill & restart | DM, no restart |
+| Price | Free (self-hosted) | $49-149/mo + credits | Free (self-hosted) |
+| API keys | Your own | Naive credits ($0.50/ea) | Your own |
+| License | MIT | Proprietary (stripped MIT) | MIT |
+| UX polish | Dashboard + tasks | Very polished | Slack-native |
+
+**Naive's additions we should watch:** Template store, Getting Started wizard,
+per-agent compute dashboard, Strategy page, Drive (shared files). These are
+UX features, not architecture. We can add them post-launch if needed.
+
+**Naive's vulnerability:** They inherited ALL of Paperclip's token waste and charge
+a markup on top. Our content angle is even stronger: "Why pay $149/mo for a fork
+that inherits the same architectural problems, when you can run something better
+for free?"
