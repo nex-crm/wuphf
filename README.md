@@ -8,12 +8,12 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-A87B4F)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](go.mod)
 
-A terminal office where your AI team works in the open.
+### A terminal office where your AI team works in the open.
+
+One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
 
 > *"WUPHF. When you type it in, it contacts someone via phone, text, email, IM, Facebook, Twitter, and then... WUPHF."*
 > — Ryan Howard, Season 7
-
-One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
 
 > _30-second teaser — what the office feels like when the agents are actually working._
 
