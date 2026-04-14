@@ -6917,6 +6917,17 @@ function _finishOnboarding(data) {
   showSplashScreen(function() { showOffice(); });
 }
 
+// The server returns checklist items with only {id, done}. Map each known
+// id to a human label + optional action link. Unknown ids fall back to the
+// id itself so they are still visible instead of rendering as empty rows.
+var CHECKLIST_LABELS = {
+  pick_team: { label: 'Pick your team', action: '#team-picker' },
+  second_key: { label: 'Add a second provider key', action: '#settings' },
+  github_repo: { label: 'Browse the WUPHF repo', action: 'https://github.com/nex-crm/wuphf' },
+  github_star: { label: 'Star WUPHF on GitHub', action: 'https://github.com/nex-crm/wuphf' },
+  discord: { label: 'Join the Discord', action: 'https://discord.gg/gjSySC3PzV' }
+};
+
 function updateChecklistSidebar(checklist) {
   var section = document.getElementById('sidebar-checklist-section');
   var container = document.getElementById('sidebar-checklist');
@@ -6926,10 +6937,19 @@ function updateChecklistSidebar(checklist) {
   if (!hasIncomplete) { section.style.display = 'none'; return; }
   section.style.display = '';
   checklist.slice(0, 5).forEach(function(item) {
+    var meta = CHECKLIST_LABELS[item.id] || {};
+    var text = item.label || item.title || meta.label || item.id || '';
+    var href = item.action || meta.action || '';
     var row = _wE('div', 'checklist-item' + (item.done ? ' done' : ''));
     var box = _wE('span', 'checklist-checkbox' + (item.done ? ' checked' : ''));
-    var label = _wE('a', 'checklist-link', item.label || item.title || '');
-    if (item.action) label.href = item.action;
+    var label = _wE('a', 'checklist-link', text);
+    if (href) {
+      label.href = href;
+      if (href.indexOf('http') === 0) {
+        label.target = '_blank';
+        label.rel = 'noopener noreferrer';
+      }
+    }
     row.appendChild(box);
     row.appendChild(label);
     container.appendChild(row);
