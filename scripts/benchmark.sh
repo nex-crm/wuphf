@@ -2,7 +2,7 @@
 # ═══════════════════════════════════════════════════════════════
 # WUPHF Token Benchmark
 # Measures real token consumption per test scenario.
-# Compares against Paperclip's known numbers (issue #544, #3401).
+# Compares against accumulated-session orchestrator baselines.
 #
 # Usage:
 #   ./scripts/benchmark.sh              # run all tests
@@ -181,7 +181,7 @@ test_single_turn() {
   local wuphf_billed
   wuphf_billed=$(python3 -c "import json; print(json.load(open('$REPORT_DIR/single-total.json'))['total']['total_billed'])")
   echo ""
-  echo -e "  ${BOLD}vs Paperclip (issue #544 data):${NC}"
+  echo -e "  ${BOLD}vs session-resume-based orchestrators (industry baseline):${NC}"
   echo -e "    Paperclip CEO turn:     ~300,000 input (session resume accumulation)"
   echo -e "    Paperclip MCP overhead: ~24,000/agent (12 servers loaded globally)"
   echo -e "    Paperclip estimated:    ~372,000 tokens"
@@ -276,7 +276,7 @@ test_session() {
 # Test 3: Idle burn
 # Start the system, leave it idle for 2 minutes, measure tokens.
 # WUPHF: zero (push-driven, no polling).
-# Paperclip: heartbeat polls every 30s (issue #3401).
+# Paperclip: heartbeat polls every 30s.
 # ═══════════════════════════════════════════════════════════════
 test_idle() {
   print_header "TEST 3: Idle burn (2 minutes)"

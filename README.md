@@ -26,6 +26,10 @@ go build -o wuphf ./cmd/wuphf
 
 That's it. The browser opens automatically and you're in the office. Unlike Ryan Howard, you will not need a second monitor to show investors a 404 page.
 
+> **Forking this?** See [FORKING.md](FORKING.md) for running WUPHF without Nex, swapping branding, and adding your own agent packs. For the internals, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+> **Stability:** pre-1.0. `main` moves daily. Pin your fork to a release tag, not `main`.
+
 ## Options
 
 | Flag | What it does |
@@ -111,15 +115,32 @@ Same task, same machine, same codex binary. 5-turn CEO DM session. All numbers m
 ### Reproduce it
 
 ```bash
-# Start WUPHF
 wuphf --pack starter &
-
-# Start Paperclip
-npx paperclipai run --data-dir /tmp/paperclip-bench &
-
-# Run the benchmark
 ./scripts/benchmark.sh
 ```
+
+WUPHF numbers are live-measured. The Paperclip baseline comes from user-reported benchmarks; reproduce those on your own install if you want to verify.
+
+## Claim Status
+
+Every claim in this README, grounded to the code that makes it true.
+
+| Claim | Status | Where it lives |
+|---|---|---|
+| CEO on Sonnet by default, `--opus-ceo` to upgrade | ✅ shipped | `internal/team/headless_claude.go:203` |
+| CEO-routed delegation default, `--collab` to flatten | ✅ shipped | `cmd/wuphf/channel.go` (`/collab`, `/focus`) |
+| Per-agent MCP scoping (DM loads 4 tools, not 27) | ✅ shipped | `internal/teammcp/` |
+| Fresh session per turn (no `--resume` accumulation) | ✅ shipped | `internal/team/headless_claude.go` |
+| Push-driven agent wakes (no heartbeat) | ✅ shipped | `internal/team/broker.go` |
+| Workspace isolation per agent | ✅ shipped | `internal/team/worktree.go` |
+| Telegram bridge | ✅ shipped | `internal/telegram/` |
+| Composio action provider | ✅ shipped | `/config set action_provider composio` |
+| `wuphf import` — migrate from Paperclip state | ✅ shipped | `cmd/wuphf/import.go` |
+| Live web-view agent streaming | 🟡 partial | `web/index.html` + broker stream |
+| Prebuilt binary via goreleaser | 🟡 config ready | `.goreleaser.yml` — tags pending |
+| Resume in-flight work on restart | ✅ shipped v0.0.2.0 | see `CHANGELOG.md` |
+
+Legend: ✅ shipped · 🟡 partial · 🔜 planned. If a claim and a status disagree, the code wins — file an issue.
 
 ## The Name
 
