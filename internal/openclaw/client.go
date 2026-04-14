@@ -8,7 +8,7 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"strings"
+	"runtime"
 	"sync"
 	"time"
 
@@ -202,15 +202,20 @@ func (c *Client) dispatchEvent(e EventFrame) {
 		if err != nil {
 			return
 		}
-		// Seq-gap detection.
+		// Seq-gap detection: capture gap under mu, emit after unlock so a slow
+		// consumer can't deadlock producers that need the mutex.
+		var gap *GapEvent
 		if parsed.MessageSeq != nil {
 			c.mu.Lock()
 			last, ok := c.lastSeq[parsed.SessionKey]
 			if ok && *parsed.MessageSeq > last+1 {
-				c.events <- ClientEvent{Kind: EventKindGap, Gap: &GapEvent{SessionKey: parsed.SessionKey, FromSeq: last, ToSeq: *parsed.MessageSeq}}
+				gap = &GapEvent{SessionKey: parsed.SessionKey, FromSeq: last, ToSeq: *parsed.MessageSeq}
 			}
 			c.lastSeq[parsed.SessionKey] = *parsed.MessageSeq
 			c.mu.Unlock()
+		}
+		if gap != nil {
+			c.events <- ClientEvent{Kind: EventKindGap, Gap: gap}
 		}
 		c.events <- ClientEvent{Kind: EventKindMessage, SessionMessage: parsed}
 	case "sessions.changed":
@@ -246,13 +251,7 @@ func (c *Client) newID() string {
 	return fmt.Sprintf("req-%d-%d", time.Now().UnixNano(), n)
 }
 
-// runtimeOS is split out so tests can override in the future if needed.
+// runtimeOS reports the current OS. Split out as a var so tests can override.
 var runtimeOS = func() string {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("GOOS"))) {
-	case "":
-		// best-effort, not critical
-		return "unknown"
-	default:
-		return os.Getenv("GOOS")
-	}
+	return runtime.GOOS
 }
