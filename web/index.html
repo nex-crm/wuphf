@@ -82,6 +82,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   display: inline-flex; align-items: center; justify-content: center;
   gap: 8px; font-family: var(--font-sans); font-weight: 500;
   border: none; cursor: pointer; transition: all 0.2s; text-decoration: none;
+  min-height: 44px; /* WCAG 2.5.5 / Apple HIG touch target minimum */
 }
 .btn:hover { transform: translateY(-1px); }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
@@ -90,7 +91,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .btn-secondary { background: transparent; color: var(--text-secondary); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
 .btn-ghost { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--border); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
 .btn-lg { padding: 16px 40px; font-size: 16px; }
-.btn-sm { padding: 6px 12px; font-size: 12px; }
+.btn-sm { padding: 6px 12px; font-size: 12px; min-height: 32px; } /* inline/dense-action buttons opt out of 44px */
 
 /* ─── Cards ─── */
 .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: 0 1px 3px rgba(59,47,47,0.04), 0 8px 30px rgba(59,47,47,0.04); }
