@@ -17,6 +17,22 @@ func TestParseSessionMessageEvent(t *testing.T) {
 	if evt.MessageSeq == nil || *evt.MessageSeq != 7 {
 		t.Fatalf("messageSeq: %v", evt.MessageSeq)
 	}
+	if evt.MessageText != "hello" {
+		t.Fatalf("MessageText from nested content: %q", evt.MessageText)
+	}
+
+	// state extraction + text fallback
+	raw2 := []byte(`{"sessionKey":"k","message":{"state":"delta","text":"partial"}}`)
+	evt2, err := parseSessionMessage(raw2)
+	if err != nil {
+		t.Fatalf("parseSessionMessage state: %v", err)
+	}
+	if evt2.MessageState != "delta" {
+		t.Fatalf("MessageState: %q", evt2.MessageState)
+	}
+	if evt2.MessageText != "partial" {
+		t.Fatalf("MessageText from text fallback: %q", evt2.MessageText)
+	}
 	_ = json.RawMessage(raw)
 }
 
@@ -26,7 +42,7 @@ func TestParseSessionsChangedEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseSessionsChanged: %v", err)
 	}
-	if evt.SessionKey != "k" || evt.Reason != "ended" {
+	if evt.SessionKey != "k" || evt.Reason != "ended" || evt.Phase != "message" {
 		t.Fatalf("event: %+v", evt)
 	}
 }
