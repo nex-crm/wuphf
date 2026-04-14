@@ -15,7 +15,7 @@ One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all v
 
 ## Get Started
 
-**Prerequisites:** [Go](https://go.dev/dl/), [tmux](https://github.com/tmux/tmux/wiki/Installing), [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+**Prerequisites:** [Go](https://go.dev/dl/), [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (or [Codex CLI](https://github.com/openai/codex) if you set `--provider codex`). [tmux](https://github.com/tmux/tmux/wiki/Installing) is only needed for `--tui` mode.
 
 ```bash
 git clone https://github.com/nex-crm/wuphf.git
@@ -39,6 +39,7 @@ That's it. The browser opens automatically and you're in the office. Unlike Ryan
 | `--no-open` | Don't auto-open the browser |
 | `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
+| `--provider <name>` | LLM provider override for this run (`claude-code`, `codex`) |
 | `--collab` | Explicitly start in collaborative mode (this is the default — all agents see all messages). Use `/focus` in-app to switch to CEO-routed delegation. |
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
