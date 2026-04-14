@@ -71,7 +71,22 @@ To let agents take real actions (send emails, update CRMs, etc.):
    /config set action_provider composio
    ```
 
-## Benchmark: WUPHF vs Paperclip
+## Why WUPHF over Paperclip or Naive
+
+| | WUPHF | Paperclip | Naive |
+|---|---|---|---|
+| Sessions | Fresh per turn | --resume (accumulates) | Same as Paperclip |
+| Tools | Per-agent scoped | Global (all agents) | Same as Paperclip |
+| Agent wakes | Push-driven | Heartbeat polling | Same as Paperclip |
+| Live visibility | Stdout streaming | No | No |
+| Mid-task steering | DM, no restart | Kill & restart | Kill & restart |
+| Price | Free (self-hosted) | Free (self-hosted) | $49-149/mo + credits |
+| Your API keys | Yes | Yes | No (buy credits) |
+| License | MIT | MIT | Proprietary |
+
+Naive is a [hosted fork of Paperclip](https://not-so-naive.vercel.app/) (YC S25). Same architecture underneath, same token waste, plus a billing markup. WUPHF is built from scratch with a different architecture.
+
+## Benchmark
 
 Same task, same machine, same codex binary. 5-turn CEO DM session. All numbers measured from live runs.
 
@@ -83,15 +98,13 @@ Same task, same machine, same codex binary. 5-turn CEO DM session. All numbers m
 | Input trend | Flat (31k) | Flat (128k) | Growing (308k → 500k) |
 | Idle cost | Zero | Zero | Heartbeat every 30s |
 
-### Why WUPHF wins
+**Fresh sessions.** Each agent turn starts clean. No conversation history accumulates.
 
-**Fresh sessions.** Each agent turn starts clean. No conversation history accumulates. Paperclip's input grows from 308k to 500k over 5 turns because each heartbeat injects more inbox and issue context.
-
-**Prompt caching.** Claude Code gets 97% cache read because WUPHF's identical prompt prefixes across fresh sessions align with Anthropic's prompt cache. Paperclip's growing context breaks cache prefix alignment.
+**Prompt caching.** Claude Code gets 97% cache read because identical prompt prefixes across fresh sessions align with Anthropic's prompt cache.
 
 **Per-role tools.** DM mode loads 4 MCP tools instead of 27. Fewer tool schemas = smaller prompt = better cache hits.
 
-**Zero idle burn.** Agents only spawn when the broker pushes a notification. No heartbeat polling. Paperclip polls every 30 seconds even when nothing is happening.
+**Zero idle burn.** Agents only spawn when the broker pushes a notification. No heartbeat polling.
 
 ### Reproduce it
 
@@ -113,6 +126,14 @@ Full methodology, per-turn data, and Paperclip source references: [`docs/benchma
 From [*The Office*](https://theoffice.fandom.com/wiki/WUPHF.com_(Website)), Season 7. Ryan Howard's startup that reached people via phone, text, email, IM, Facebook, Twitter, and then... WUPHF. Michael Scott invested $10,000. Ryan burned through it. The site went offline.
 
 The joke still fits. Except this WUPHF ships.
+
+<!--
+  PS: We made our launch demo video with Claude Code + Remotion + Eleven Labs.
+  If you want to make one like it, the full playbook is in docs/make-demo-video.md
+  — scripts, scene recipes, voice IDs, music prompts, the AI slop patterns to
+  avoid, and the hard-won lessons from ~10 rerenders.
+-->
+
 
 > *"I invested ten thousand dollars in WUPHF. Just need one good quarter."*
 > — Michael Scott
