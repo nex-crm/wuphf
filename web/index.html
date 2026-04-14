@@ -660,7 +660,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .sidebar-item-icon { width: 14px; height: 14px; flex-shrink: 0; }
 .sidebar-item-emoji { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
 
-.sidebar-agents { padding: 0 12px 4px; max-height: 40vh; overflow-y: auto; }
+.sidebar-agents { padding: 4px 12px; max-height: 40vh; overflow-y: auto; overflow-x: visible; }
 .sidebar-agent { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; margin-left: 12px; border-radius: 6px; font-size: 11px; border: none; background: transparent; cursor: pointer; transition: all 0.15s; color: var(--text-secondary); font-family: var(--font-sans); text-align: left; }
 .sidebar-agent:hover { background: rgba(0,0,0,0.04); color: var(--text); }
 .sidebar-agent.active { background: var(--accent-bg); color: var(--text); font-weight: 600; }
@@ -1206,9 +1206,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .wait-state-icon { font-size: 18px; margin-bottom: 4px; }
 .wait-state-label { font-weight: 500; }
 
-/* ─── Thought Bubbles (#26) ─── */
-.thought-bubble { position: relative; display: inline-block; max-width: 140px; padding: 2px 8px; margin-top: 2px; background: rgba(0,0,0,0.05); border-radius: 8px 8px 8px 2px; font-size: 10px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.4; }
-.thought-bubble::before { content: ''; position: absolute; left: 2px; bottom: -4px; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid rgba(0,0,0,0.05); }
+/* ─── Thought Bubbles (#26) — see main rules below at ~L1361 ─── */
 
 /* ─── Agent Wizard (#73-75) ─── */
 .agent-wizard-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.15s ease-out; }
@@ -1359,29 +1357,32 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 
 /* ─── Thought Bubbles ─── */
 .thought-bubble-anchor { position: relative; }
+/* Reserve vertical space above rows that carry a bubble so it never
+   overlaps the agent name on its own row or the row above it. */
+.sidebar-agent:has(.thought-bubble) { margin-top: 16px; }
 .thought-bubble {
   position: absolute;
-  left: 36px; bottom: 100%;
-  margin-bottom: 2px;
+  left: 36px;
+  bottom: calc(100% - 2px);
   background: #F2EDE6; color: #2E2827;
   font-size: 10px; font-weight: 600; font-family: var(--font-sans);
   padding: 3px 8px; border-radius: 10px 10px 10px 2px;
-  white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: calc(100% - 44px);
+  overflow: hidden; text-overflow: ellipsis;
   box-shadow: 0 1px 4px rgba(0,0,0,0.10);
   pointer-events: none;
   animation: thoughtFloat 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   opacity: 1; transition: opacity 0.25s ease;
   z-index: 10;
 }
+/* Downward-pointing arrow so it reads as a label for the row below. */
 .thought-bubble::after {
-  content: ''; position: absolute; bottom: -4px; left: 6px;
-  width: 6px; height: 6px; background: #F2EDE6;
-  border-radius: 50%;
-}
-.thought-bubble::before {
-  content: ''; position: absolute; bottom: -8px; left: 3px;
-  width: 4px; height: 4px; background: #F2EDE6;
-  border-radius: 50%; opacity: 0.7;
+  content: ''; position: absolute; bottom: -4px; left: 8px;
+  width: 0; height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 4px solid #F2EDE6;
 }
 .sidebar-agent:hover .thought-bubble { opacity: 0; transition: opacity 0.15s ease; }
 @keyframes thoughtFloat {
