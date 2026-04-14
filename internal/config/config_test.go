@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -59,7 +60,7 @@ func TestRoundtrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Load failed: %v", err)
 		}
-		if out != in {
+		if !reflect.DeepEqual(out, in) {
 			t.Fatalf("roundtrip mismatch:\n  got:  %+v\n  want: %+v", out, in)
 		}
 	})
@@ -542,3 +543,37 @@ func TestAPIBase(t *testing.T) {
 // RegisterURL used to point at the legacy HTTP registration endpoint.
 // Registration now shells out via internal/nex.Register (nex-cli), so the
 // URL builder is gone. The test is removed along with it.
+
+func TestOpenclawConfigRoundTrip(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		want := Config{
+			OpenclawGatewayURL: "ws://127.0.0.1:18789",
+			OpenclawToken:      "secret-token",
+			OpenclawBridges: []OpenclawBridgeBinding{
+				{SessionKey: "agent:main:main", Slug: "openclaw-ops", DisplayName: "Ops Agent"},
+			},
+		}
+		if err := Save(want); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		got, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got.OpenclawGatewayURL != want.OpenclawGatewayURL ||
+			got.OpenclawToken != want.OpenclawToken ||
+			len(got.OpenclawBridges) != 1 ||
+			got.OpenclawBridges[0].Slug != "openclaw-ops" {
+			t.Fatalf("round-trip mismatch: got %+v want %+v", got, want)
+		}
+	})
+}
+
+func TestResolveOpenclawTokenEnvWins(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_OPENCLAW_TOKEN", "env-token")
+		if got := ResolveOpenclawToken(); got != "env-token" {
+			t.Fatalf("expected env-token, got %q", got)
+		}
+	})
+}
