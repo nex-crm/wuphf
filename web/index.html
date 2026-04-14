@@ -2715,7 +2715,16 @@ function launchOffice() {
     })
     .catch(function() {})
     .then(function() {
-      showSplashScreen(function() { showOffice(); });
+      // Fetch real pack members so the splash can render the correct cast
+      // (see ISSUE-003). If the fetch fails, fall back to the legacy intro.
+      WuphfAPI.getOfficeMembers().then(function(membersData) {
+        var realMembers = (membersData.members || []).filter(function(m) {
+          return m && m.slug && m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system';
+        });
+        showSplashScreen(function() { showOffice(); }, realMembers.length, realMembers);
+      }).catch(function() {
+        showSplashScreen(function() { showOffice(); });
+      });
     });
 }
 
@@ -2748,7 +2757,121 @@ function renderSplashSprite(sprite, slug, size) {
   return canvas;
 }
 
-function showSplashScreen(onDone, agentCount) {
+// Pack-agnostic cast reveal. Used for non-default packs (RevOps, Support,
+// etc.) where the scripted founding-team gags don't fit. Cycles the real
+// pack members as fade-in avatars with their real names, then shows the
+// WUPHF title card and fades out. Keeps click/keypress dismiss behavior.
+function _renderGenericSplash(splash, onDone, agents, isSkipped) {
+  var members = (agents || []).filter(function(m) {
+    return m && m.slug && m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system';
+  });
+
+  var stage = document.createElement('div');
+  stage.className = 'splash-stage';
+
+  var topRow = document.createElement('div');
+  topRow.className = 'splash-cast-row';
+  topRow.style.justifyContent = 'center';
+  topRow.style.flexWrap = 'wrap';
+  topRow.style.maxWidth = '640px';
+  stage.appendChild(topRow);
+
+  var subtitle = document.createElement('div');
+  subtitle.className = 'splash-subtitle';
+  subtitle.textContent = 'assembling the team...';
+  stage.appendChild(subtitle);
+
+  var titleCard = document.createElement('div');
+  titleCard.className = 'splash-title-card';
+  var titleText = document.createElement('div');
+  titleText.className = 'splash-title-text';
+  titleText.textContent = 'wuphf';
+  var tagline = document.createElement('div');
+  tagline.className = 'splash-title-tagline';
+  tagline.textContent = 'Somehow still operational.';
+  titleCard.appendChild(titleText);
+  titleCard.appendChild(tagline);
+  stage.appendChild(titleCard);
+
+  splash.appendChild(stage);
+  document.body.appendChild(splash);
+
+  // Reveal subtitle right away
+  setTimeout(function() { if (!isSkipped()) subtitle.classList.add('visible'); }, 150);
+
+  // Build and fade each slot in, one by one
+  var perSlotMs = 220;
+  members.forEach(function(m, i) {
+    var slot = document.createElement('div');
+    slot.className = 'splash-avatar-slot';
+    var spriteKey = (typeof SPRITE_SLUG_MAP !== 'undefined' && SPRITE_SLUG_MAP[m.slug]) || m.slug;
+    var spriteData = (typeof SPRITE_DATA !== 'undefined' && SPRITE_DATA[spriteKey]) || (typeof SPRITE_GENERIC !== 'undefined' ? SPRITE_GENERIC : null);
+    if (spriteData) {
+      slot.appendChild(renderSplashSprite(spriteData, m.slug, 64));
+    }
+    var name = document.createElement('div');
+    name.className = 'splash-avatar-name';
+    name.style.color = getAgentColor(m.slug);
+    name.textContent = m.name || m.slug;
+    slot.appendChild(name);
+    topRow.appendChild(slot);
+    setTimeout(function() {
+      if (isSkipped()) return;
+      slot.classList.add('visible');
+    }, 300 + i * perSlotMs);
+  });
+
+  var revealEnd = 300 + members.length * perSlotMs;
+
+  // Beat, then hide cast + show title card
+  setTimeout(function() {
+    if (isSkipped()) return;
+    subtitle.textContent = '';
+    subtitle.classList.remove('visible');
+    topRow.style.transition = 'opacity 0.4s';
+    topRow.style.opacity = '0';
+  }, revealEnd + 700);
+
+  setTimeout(function() {
+    if (isSkipped()) return;
+    titleCard.classList.add('visible');
+  }, revealEnd + 1100);
+
+  // Fade out splash
+  setTimeout(function() {
+    if (isSkipped()) return;
+    splash.style.transition = 'opacity 0.4s ease-in';
+    splash.style.opacity = '0';
+    setTimeout(function() {
+      if (!splash.parentNode) return;
+      splash.remove();
+      if (onDone) onDone();
+    }, 400);
+  }, revealEnd + 2700);
+}
+
+// Founding-team pack detection: if the broker's pack matches (a subset of) the
+// original cast, run the scripted intro (coffee spill, PM rush-in, CEO bits).
+// Otherwise we're on a non-default pack (RevOps, etc.) and should show a
+// pack-agnostic cast reveal instead — hardcoded gags don't apply to different
+// casts. See ISSUE-003.
+function _isFoundingTeamPack(agents) {
+  if (!agents || !agents.length) return true; // fall back to legacy behavior
+  var foundingSlugs = { ceo: 1, pm: 1, fe: 1, frontend: 1, be: 1, backend: 1, ai: 1, 'ai-eng': 1, ai_eng: 1, designer: 1, cmo: 1, cro: 1 };
+  var nonHuman = 0, matching = 0;
+  for (var i = 0; i < agents.length; i++) {
+    var slug = agents[i] && agents[i].slug;
+    if (!slug || slug === 'human' || slug === 'you' || slug === 'system') continue;
+    nonHuman++;
+    if (foundingSlugs[slug]) matching++;
+  }
+  if (nonHuman === 0) return true;
+  // Require the *entire* pack to be founding-team slugs. A RevOps pack with
+  // overlap on "ceo" alone should still take the generic path.
+  return matching === nonHuman;
+}
+
+function showSplashScreen(onDone, agentCount, agents) {
   // ── The Office Intro ──
   // Phase 0: cast enters one by one
   // Phase 1: full cast beat
@@ -2777,6 +2900,15 @@ function showSplashScreen(onDone, agentCount) {
     document.removeEventListener('keydown', onKey);
     skipSplash();
   });
+
+  // Non-default pack → show a generic cast reveal. We don't know who these
+  // agents are, so skip the coffee-spill / PM rush-in gags (which only make
+  // sense for the founding-team cast) and just introduce the real pack
+  // members by slug/name with a simple fade-in + title card.
+  if (!_isFoundingTeamPack(agents)) {
+    _renderGenericSplash(splash, onDone, agents, function() { return skipped; });
+    return;
+  }
 
   var stage = document.createElement('div');
   stage.className = 'splash-stage';
@@ -6497,10 +6629,12 @@ function initWizard() {
         brokerConnected = true;
         document.getElementById('onboarding-wizard').style.display = 'none';
         WuphfAPI.getOfficeMembers().then(function(membersData) {
-          var realCount = (membersData.members || []).filter(function(m) {
-            return m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system';
-          }).length;
-          showSplashScreen(function() { showOffice(); }, realCount);
+          var realMembers = (membersData.members || []).filter(function(m) {
+            return m && m.slug && m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system';
+          });
+          // Pass members through so the splash can render the correct cast
+          // for non-default packs (see ISSUE-003).
+          showSplashScreen(function() { showOffice(); }, realMembers.length, realMembers);
         }).catch(function() {
           showSplashScreen(function() { showOffice(); });
         });
@@ -6914,7 +7048,16 @@ function _finishOnboarding(data) {
   var generalEl = document.getElementById('general');
   if (generalEl) generalEl.setAttribute('data-first-task', 'seeded');
   if (data && data.checklist && data.checklist.length) updateChecklistSidebar(data.checklist);
-  showSplashScreen(function() { showOffice(); });
+  // Fetch the real pack cast so the splash introduces the correct members
+  // for non-default packs (see ISSUE-003). Fall back to legacy intro on failure.
+  WuphfAPI.getOfficeMembers().then(function(membersData) {
+    var realMembers = (membersData.members || []).filter(function(m) {
+      return m && m.slug && m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system';
+    });
+    showSplashScreen(function() { showOffice(); }, realMembers.length, realMembers);
+  }).catch(function() {
+    showSplashScreen(function() { showOffice(); });
+  });
 }
 
 function updateChecklistSidebar(checklist) {
