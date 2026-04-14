@@ -37,7 +37,7 @@ That's it. The browser opens automatically and you're in the office. Unlike Ryan
 | `--no-nex` | Run without Nex (no context graph, notifications, or integrations) |
 | `--tui` | Use the tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
-| `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`) |
+| `--pack <name>` | Pick an agent pack (`starter`, `founding-team`, `coding-team`, `lead-gen-agency`, `revops`) |
 | `--opus-ceo` | Upgrade CEO from Sonnet to Opus |
 | `--collab` | All agents see all messages (default is CEO-routed delegation) |
 | `--unsafe` | Bypass agent permission checks (local dev only) |

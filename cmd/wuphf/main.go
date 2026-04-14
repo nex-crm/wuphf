@@ -22,7 +22,7 @@ func main() {
 	format := flag.String("format", "text", "Output format (text, json)")
 	apiKeyFlag := flag.String("api-key", "", "API key for authentication")
 	showVersion := flag.Bool("version", false, "Print version and exit")
-	packFlag := flag.String("pack", "", "Agent pack (starter, founding-team, coding-team, lead-gen-agency)")
+	packFlag := flag.String("pack", "", "Agent pack (starter, founding-team, coding-team, lead-gen-agency, revops)")
 	providerFlag := flag.String("provider", "", "LLM provider override for this run (claude-code, codex)")
 	oneOnOne := flag.Bool("1o1", false, "Launch a direct 1:1 session with a single agent (default ceo)")
 	channelView := flag.Bool("channel-view", false, "Run as channel view (internal)")
