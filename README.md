@@ -9,7 +9,11 @@ A terminal office where your AI team works in the open.
 
 One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
 
+> _30-second teaser — what the office feels like when the agents are actually working._
+
 <video width="630" height="300" src="https://github.com/user-attachments/assets/d62766ba-ebb3-4948-bc02-770ebcc51d5a"></video>
+
+> _Full walkthrough — launch to first shipped task, end to end._
 
 <video width="630" height="300" src="https://github.com/user-attachments/assets/f4cdffbf-4388-49bc-891d-6bd050ff8247"></video>
 
