@@ -2,6 +2,11 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.2.1] - 2026-04-14
+
+### Removed
+- **`docs/` removed from version control.** All planning documents, specs, and analysis files under `docs/` are now gitignored — local-only, never committed. Keeps the repo focused on shipped code.
+
 ## [0.0.2.0] - 2026-04-14
 
 ### Added
