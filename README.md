@@ -106,12 +106,14 @@ Naive is a [hosted fork of Paperclip](https://not-so-naive.vercel.app/) (YC S25)
 
 Same task, same machine, same codex binary. 5-turn CEO DM session. All numbers measured from live runs.
 
+All "billed" rows are input + output tokens actually charged by the provider; Claude Code is expressed as USD because Anthropic bills by cost tier, not by token count.
+
 | | WUPHF + Claude Code | WUPHF + Codex | Paperclip + Codex |
 |---|---|---|---|
-| 5-turn cost | **$0.06** | **87k billed** | **284k billed** |
-| Avg per turn | $0.01 (97% cached) | 17k billed | 57k billed |
+| 5-turn total billed | **$0.06** | **87k tokens** | **284k tokens** |
+| Avg per turn | $0.01 (97% cached) | 17k tokens | 57k tokens |
 | vs Paperclip | **9x cheaper** | **3.3x cheaper** | baseline |
-| Input trend | Flat (31k) | Flat (128k) | Growing (308k → 500k) |
+| Input trend | Flat (31k tokens) | Flat (128k tokens) | Growing (308k → 500k tokens) |
 | Idle cost | Zero | Zero | Heartbeat every 30s |
 
 **Fresh sessions.** Each agent turn starts clean. No conversation history accumulates.
