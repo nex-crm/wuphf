@@ -2,7 +2,6 @@ import { AbsoluteFill, useCurrentFrame, interpolate, Easing } from "remotion";
 import { colors, fonts } from "../theme";
 import { Terminal } from "../components/Terminal";
 import { TypeWriter } from "../components/TypeWriter";
-import { DotGrid } from "../components/DotGrid";
 
 export const Scene2TheCommand: React.FC = () => {
   const frame = useCurrentFrame();
@@ -36,7 +35,6 @@ export const Scene2TheCommand: React.FC = () => {
 
   return (
     <AbsoluteFill style={{ backgroundColor: colors.bgBlack }}>
-      <DotGrid color="#FFFFFF" opacity={0.04} spacing={40} size={1.2} />
       <div
       style={{
         position: "absolute", inset: 0,

@@ -2,7 +2,7 @@ import { AbsoluteFill, useCurrentFrame, interpolate, Easing, spring } from "remo
 import { colors, fonts, sec, FPS, slack } from "../theme";
 import { Terminal } from "../components/Terminal";
 import { TypeWriter } from "../components/TypeWriter";
-import { DotGrid, RadialGlow } from "../components/DotGrid";
+import { RadialGlow } from "../components/DotGrid";
 
 export const Scene7TheClose: React.FC = () => {
   const frame = useCurrentFrame();
@@ -34,7 +34,6 @@ export const Scene7TheClose: React.FC = () => {
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#0B0D10" }}>
-      <DotGrid color="#FFFFFF" opacity={0.04} spacing={40} size={1.2} />
       <RadialGlow color={slack.sidebar} x="50%" y="30%" size={900} opacity={0.25} />
       <div style={{
         position: "absolute", inset: 0,
