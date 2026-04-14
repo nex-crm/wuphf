@@ -72,7 +72,7 @@ const Panel1Savings: React.FC = () => {
         letterSpacing: -2,
         marginTop: -16,
       }}>
-        less token burn. 🔥
+        less token burn.
       </div>
 
       {/* Animated chart */}
