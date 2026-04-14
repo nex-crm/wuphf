@@ -426,6 +426,10 @@ func Run(ctx context.Context) error {
 			"human_interview",
 			"Ask the human a blocking decision question.",
 		), handleHumanInterview)
+		mcp.AddTool(server, officeWriteTool(
+			"team_skill_run",
+			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
+		), handleTeamSkillRun)
 		return server.Run(ctx, &mcp.StdioTransport{})
 	}
 
@@ -552,6 +556,10 @@ func Run(ctx context.Context) error {
 		"team_status",
 		"Share a short status update.",
 	), handleTeamStatus)
+	mcp.AddTool(server, officeWriteTool(
+		"team_skill_run",
+		"Invoke a named team skill. When the request matches an available skill (see the skill list in your prompt), call this BEFORE doing the work — do not freelance. Bumps the skill's usage, logs a skill_invocation in the channel so the office sees you followed the playbook, and returns the skill's canonical step-by-step content for you to execute.",
+	), handleTeamSkillRun)
 
 	// Lead-only tools: CEO gets coordination, delegation, and structural tools
 	if isLead {
