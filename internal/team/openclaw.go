@@ -96,7 +96,65 @@ func (b *OpenclawBridge) eventLoop() {
 	}
 }
 
-// handleClientEvent is implemented in Task 9.
-func (b *OpenclawBridge) handleClientEvent(_ openclaw.ClientEvent) {
-	// placeholder — Task 9 fills in
+// handleClientEvent dispatches one event from the OpenClaw Client into the
+// appropriate broker surface: delta chunks flow into the per-agent stream so
+// they render as a live typing indicator, while finals (and bare messages
+// without an explicit state) become chat messages authored by the bridged
+// slug. Error/aborted states and "session ended" changes fan out as system
+// notices. Gap/Close kinds are intentionally no-ops here; Task 11 will wire
+// them up to catch-up + reconnect.
+func (b *OpenclawBridge) handleClientEvent(evt openclaw.ClientEvent) {
+	switch evt.Kind {
+	case openclaw.EventKindMessage:
+		if evt.SessionMessage == nil {
+			return
+		}
+		slug, ok := b.slugByKey[evt.SessionMessage.SessionKey]
+		if !ok {
+			return // not a bridged session, ignore
+		}
+		switch evt.SessionMessage.MessageState {
+		case "delta":
+			if stream := b.broker.AgentStream(slug); stream != nil && evt.SessionMessage.MessageText != "" {
+				stream.Push(evt.SessionMessage.MessageText)
+			}
+		case "final", "":
+			// Treat empty state as a complete message (some servers omit state).
+			if text := evt.SessionMessage.MessageText; text != "" {
+				b.postBridgeMessage(slug, text)
+			}
+		case "error":
+			b.postSystemMessage(fmt.Sprintf("openclaw agent %q reported an error", slug))
+		case "aborted":
+			b.postSystemMessage(fmt.Sprintf("openclaw agent %q aborted the turn", slug))
+		}
+	case openclaw.EventKindChanged:
+		if evt.SessionsChanged != nil && evt.SessionsChanged.Reason == "ended" {
+			if slug, ok := b.slugByKey[evt.SessionsChanged.SessionKey]; ok {
+				b.postSystemMessage(fmt.Sprintf("openclaw agent %q is no longer active", slug))
+			}
+		}
+	case openclaw.EventKindGap:
+		// Task 11 handles catch-up via SessionsHistory; no-op here.
+	case openclaw.EventKindClose:
+		// Task 11 handles reconnect; no-op here.
+	}
+}
+
+// postBridgeMessage posts a bridged-agent chat message into #general via the
+// same broker entrypoint telegram.go uses for incoming chat.
+func (b *OpenclawBridge) postBridgeMessage(slug, text string) {
+	if b.broker == nil {
+		return
+	}
+	_, _ = b.broker.PostInboundSurfaceMessage(slug, "general", text, "openclaw")
+}
+
+// postSystemMessage posts a `system`-authored notice into #general.
+// PostSystemMessage already uses sender="system", which the tests rely on.
+func (b *OpenclawBridge) postSystemMessage(text string) {
+	if b.broker == nil {
+		return
+	}
+	b.broker.PostSystemMessage("general", "[openclaw] "+text, "openclaw")
 }

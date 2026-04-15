@@ -79,3 +79,58 @@ func TestBridgeStartSubscribesAllBindings(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+func TestHandleClientEventSplitsDeltaAndFinal(t *testing.T) {
+	fake := newFakeOC()
+	broker := NewBroker()
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a", DisplayName: "A"}}
+	b := NewOpenclawBridge(broker, fake, bindings)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := b.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer b.Stop()
+
+	// Push a delta event.
+	seq := int64(1)
+	fake.events <- openclaw.ClientEvent{
+		Kind: openclaw.EventKindMessage,
+		SessionMessage: &openclaw.SessionMessageEvent{
+			SessionKey:   "k",
+			MessageSeq:   &seq,
+			MessageState: "delta",
+			MessageText:  "partial chunk",
+		},
+	}
+	// Give event loop a tick.
+	time.Sleep(30 * time.Millisecond)
+	// agentStreamBuffer has an unexported recent() usable from within internal/team tests.
+	if buf := broker.AgentStream("openclaw-a"); buf == nil || len(buf.recent()) == 0 {
+		t.Fatalf("expected delta in AgentStream for openclaw-a")
+	}
+
+	// Push a final event.
+	seq2 := int64(2)
+	fake.events <- openclaw.ClientEvent{
+		Kind: openclaw.EventKindMessage,
+		SessionMessage: &openclaw.SessionMessageEvent{
+			SessionKey:   "k",
+			MessageSeq:   &seq2,
+			MessageState: "final",
+			MessageText:  "complete response",
+		},
+	}
+	time.Sleep(30 * time.Millisecond)
+	msgs := broker.AllMessages()
+	found := false
+	for _, m := range msgs {
+		if m.From == "openclaw-a" && m.Content == "complete response" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected final message posted to broker from openclaw-a; got %+v", msgs)
+	}
+}
