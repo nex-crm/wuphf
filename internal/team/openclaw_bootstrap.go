@@ -34,6 +34,19 @@ func StartOpenclawBridgeFromConfig(ctx context.Context, broker *Broker) (*Opencl
 	}
 
 	bridge := NewOpenclawBridgeWithDialer(broker, nil, dialer, cfg.OpenclawBridges)
+	// Register each bridged session as an office member before starting the
+	// supervise loop. Without this, bridged agents post messages into #general
+	// but don't appear in the sidebar or the @mention autocomplete, so users
+	// can't actually discover or talk to them.
+	for _, b := range cfg.OpenclawBridges {
+		name := b.DisplayName
+		if name == "" {
+			name = b.Slug
+		}
+		if err := broker.EnsureBridgedMember(b.Slug, name, "openclaw"); err != nil {
+			return nil, fmt.Errorf("register bridged member %q: %w", b.Slug, err)
+		}
+	}
 	if err := bridge.Start(ctx); err != nil {
 		return nil, fmt.Errorf("openclaw bridge start: %w", err)
 	}

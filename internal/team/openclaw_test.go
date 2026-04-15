@@ -348,6 +348,44 @@ func TestStartOpenclawBridgeFromConfigWithBindings(t *testing.T) {
 	if bridge.HasSlug("not-bridged") {
 		t.Fatal("HasSlug should report false for unknown slug")
 	}
+
+	// Bridged session must be registered as an office member, otherwise
+	// users can't see it in the sidebar or autocomplete @mentions against it.
+	var member *officeMember
+	for _, m := range broker.OfficeMembers() {
+		m := m
+		if m.Slug == "openclaw-boot" {
+			member = &m
+			break
+		}
+	}
+	if member == nil {
+		t.Fatal("bound slug should be registered as an office member")
+	}
+	if member.Name != "Boot" {
+		t.Fatalf("member name: got %q want %q", member.Name, "Boot")
+	}
+	if member.CreatedBy != "openclaw" {
+		t.Fatalf("member CreatedBy: got %q want %q", member.CreatedBy, "openclaw")
+	}
+	// And #general should list the slug so routing + mention autocomplete work.
+	broker.mu.Lock()
+	var generalHasBridged bool
+	for _, ch := range broker.channels {
+		if ch.Slug == "general" {
+			for _, s := range ch.Members {
+				if s == "openclaw-boot" {
+					generalHasBridged = true
+					break
+				}
+			}
+			break
+		}
+	}
+	broker.mu.Unlock()
+	if !generalHasBridged {
+		t.Fatal("bridged slug should be a member of #general")
+	}
 }
 
 func TestRouteOpenclawMentionsLoopForwardsHumanMention(t *testing.T) {

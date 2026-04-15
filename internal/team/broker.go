@@ -1397,6 +1397,48 @@ func (b *Broker) ExternalQueue(provider string) []channelMessage {
 	return out
 }
 
+// EnsureBridgedMember registers a bridged external agent as an office member
+// so it appears in the sidebar and can be @mentioned. Idempotent — calling with
+// an existing slug is a no-op. CreatedBy tags the source (e.g. "openclaw") so
+// the UI can distinguish bridged agents from built-ins or user-generated ones.
+func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
+	slug = normalizeChannelSlug(slug)
+	if slug == "" {
+		return fmt.Errorf("slug required")
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.findMemberLocked(slug) != nil {
+		return nil
+	}
+	member := officeMember{
+		Slug:      slug,
+		Name:      strings.TrimSpace(name),
+		Role:      "Bridged agent",
+		CreatedBy: strings.TrimSpace(createdBy),
+		CreatedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	if member.Name == "" {
+		member.Name = slug
+	}
+	applyOfficeMemberDefaults(&member)
+	b.members = append(b.members, member)
+	// Make sure the bridged agent shows up in #general so @mentions work.
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			if !containsString(b.channels[i].Members, slug) {
+				b.channels[i].Members = append(b.channels[i].Members, slug)
+			}
+			break
+		}
+	}
+	if err := b.saveLocked(); err != nil {
+		return err
+	}
+	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
+	return nil
+}
+
 // PostInboundSurfaceMessage posts a message from an external surface into the broker channel.
 func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider string) (channelMessage, error) {
 	b.mu.Lock()
