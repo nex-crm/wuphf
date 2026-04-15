@@ -9,8 +9,12 @@
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
 
+  // ── Mobile detection ───────────────────────────────────────────
+  const isMobile = window.innerWidth < 768;
+
   // ── Canvas sizing ──────────────────────────────────────────────
-  const W = 800, H = 460;
+  const W = isMobile ? window.innerWidth : 800;
+  const H = isMobile ? 260 : 460;
   canvas.width  = W;
   canvas.height = H;
   canvas.style.width  = '100%';
@@ -141,6 +145,50 @@
       else ctx.fillStyle = C.text;
       ctx.fillText(line, rx + 8, ry + 8 + i * 14);
     });
+  }
+
+  // ── Mobile scene (2D fallback) ─────────────────────────────────
+  function drawMobileScene() {
+    // Dark background
+    ctx.fillStyle = C.wall; ctx.fillRect(0, 0, W, H);
+
+    // Floor strip (bottom 60px)
+    ctx.fillStyle = C.carpet; ctx.fillRect(0, H - 60, W, 60);
+    ctx.fillStyle = C.carpetLine; ctx.fillRect(0, H - 61, W, 2);
+
+    // Back wall stripe
+    ctx.fillStyle = '#201C14'; ctx.fillRect(0, 0, W, H - 60);
+
+    // WUPHF sign centered
+    const sw = Math.min(280, W - 40), sh = 48;
+    const sx = (W - sw) / 2, sy = 14;
+    ctx.fillStyle = '#0E0C08'; ctx.fillRect(sx, sy, sw, sh);
+    ctx.fillStyle = C.yellow;
+    ctx.fillRect(sx, sy, sw, 3); ctx.fillRect(sx, sy + sh - 3, sw, 3);
+    ctx.fillRect(sx, sy, 3, sh); ctx.fillRect(sx + sw - 3, sy, 3, sh);
+    ctx.shadowColor = C.yellow; ctx.shadowBlur = 10;
+    ctx.fillStyle   = C.yellow;
+    ctx.font = `bold ${Math.floor(sw / 6)}px "Press Start 2P"`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('WUPHF', sx + sw / 2, sy + sh / 2);
+    ctx.shadowBlur = 0;
+
+    // Three character silhouettes in a row (Pam, Michael, Dwight)
+    const charY = H - 60;
+    const positions = [W * 0.25, W * 0.5, W * 0.75];
+    const charFns   = [drawPam, drawMichael, drawDwight];
+    for (let i = 0; i < 3; i++) {
+      const cx = positions[i] - 10;
+      const cy = charY - 52;
+      ctx.fillStyle = C.shadow;
+      ctx.beginPath(); ctx.ellipse(positions[i], charY + 2, 11, 5, 0, 0, Math.PI*2); ctx.fill();
+      charFns[i](cx, cy, animF);
+    }
+
+    // Hint text
+    ctx.fillStyle    = C.textMuted;
+    ctx.font = '6px "Press Start 2P"'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText('Best viewed on desktop', W / 2, H - 20);
   }
 
   // ── Back wall ──────────────────────────────────────────────────
@@ -495,6 +543,7 @@
   // ── Main draw ──────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, W, H);
+    if (isMobile) { drawMobileScene(); return; }
     drawWall();
 
     // Floor tiles
