@@ -85,8 +85,8 @@ func TestBuildRecoveryLinesShowsSummaryAndHighlights(t *testing.T) {
 	if !strings.Contains(plain, "Current state") {
 		t.Fatalf("expected runtime-state card, got %q", plain)
 	}
-	if !strings.Contains(plain, "Waiting on you") {
-		t.Fatalf("expected normalized readiness card, got %q", plain)
+	if headline := strings.TrimSpace(workspace.Readiness.Headline); headline == "" || !strings.Contains(plain, headline) {
+		t.Fatalf("expected readiness headline %q, got %q", headline, plain)
 	}
 }
 
