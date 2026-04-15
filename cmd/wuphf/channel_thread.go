@@ -211,6 +211,9 @@ func renderThreadReply(reply threadedMessage, width int) []string {
 	}
 
 	meta := roleLabel(msg.From)
+	if usageMeta := renderMessageUsageMeta(msg.Usage, color); usageMeta != "" {
+		meta += " · " + usageMeta
+	}
 	if reply.ParentLabel != "" {
 		meta += " · reply to " + reply.ParentLabel
 	}
@@ -268,6 +271,9 @@ func renderThreadMessage(msg brokerMessage, width int, isParent bool) []string {
 	var lines []string
 	lines = append(lines, fmt.Sprintf("  %s %s%s%s",
 		agentAvatar(msg.From), nameRendered, strings.Repeat(" ", gap), tsRendered))
+	if usageMeta := renderMessageUsageMeta(msg.Usage, color); usageMeta != "" {
+		lines = append(lines, "  "+usageMeta)
+	}
 
 	// Render content
 	for _, paragraph := range strings.Split(msg.Content, "\n") {

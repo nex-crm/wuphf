@@ -70,6 +70,13 @@ type brokerMessage struct {
 	Tagged      []string `json:"tagged,omitempty"`
 	ReplyTo     string   `json:"reply_to,omitempty"`
 	Timestamp   string   `json:"timestamp"`
+	Usage       *struct {
+		InputTokens         int `json:"input_tokens,omitempty"`
+		OutputTokens        int `json:"output_tokens,omitempty"`
+		CacheReadTokens     int `json:"cache_read_tokens,omitempty"`
+		CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+		TotalTokens         int `json:"total_tokens,omitempty"`
+	} `json:"usage,omitempty"`
 }
 
 type brokerMessagesResponse struct {
@@ -858,8 +865,8 @@ func ownsRelevantTask(slug, replyTo, domain string, tasks []brokerTaskSummary) b
 // team.InferAgentDomain / team.InferTextDomain. All domain classification lives in
 // team/domains.go — update keywords there and both packages stay in sync.
 
-func inferOfficeAgentDomain(slug string) string   { return team.InferAgentDomain(slug) }
-func inferOfficeTextDomain(text string) string    { return team.InferTextDomain(text) }
+func inferOfficeAgentDomain(slug string) string { return team.InferAgentDomain(slug) }
+func inferOfficeTextDomain(text string) string  { return team.InferTextDomain(text) }
 
 func containsSlug(items []string, want string) bool {
 	want = strings.TrimSpace(strings.ToLower(want))

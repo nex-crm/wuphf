@@ -692,6 +692,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .message-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .message-author { font-size: 13px; font-weight: 600; }
 .message-time { font-size: 11px; color: var(--text-tertiary); }
+.message-token-badge { display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 999px; background: rgba(18, 100, 163, 0.08); border: 1px solid rgba(18, 100, 163, 0.18); color: var(--accent); font-size: 11px; font-weight: 600; font-family: var(--font-mono); }
+.message-token-row { margin-bottom: 4px; }
 .message-text { font-size: 14px; line-height: 1.6; color: var(--text-secondary); }
 .message-text strong { color: var(--text); font-weight: 600; }
 .message-text code { background: var(--bg-warm); border-radius: 4px; padding: 1px 5px; font-family: var(--font-mono); font-size: 12px; }
@@ -4814,6 +4816,14 @@ function appendMessageToContainer(msg, container, opts) {
     timeEl.textContent = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   }
   header.appendChild(timeEl);
+  var usageTotal = messageUsageTotal(msg.usage);
+  if (usageTotal > 0) {
+    var usageEl = document.createElement('span');
+    usageEl.className = 'message-token-badge';
+    usageEl.textContent = formatTokens(usageTotal) + ' tok';
+    usageEl.title = messageUsageTitle(msg.usage);
+    header.appendChild(usageEl);
+  }
 
   // Mood inference (#10)
   if (!isHuman && msg.content) {
@@ -4836,6 +4846,16 @@ function appendMessageToContainer(msg, container, opts) {
   }
 
   content.appendChild(header);
+  if (opts.grouped && usageTotal > 0) {
+    var usageRow = document.createElement('div');
+    usageRow.className = 'message-token-row';
+    var groupedUsageEl = document.createElement('span');
+    groupedUsageEl.className = 'message-token-badge';
+    groupedUsageEl.textContent = formatTokens(usageTotal) + ' tok';
+    groupedUsageEl.title = messageUsageTitle(msg.usage);
+    usageRow.appendChild(groupedUsageEl);
+    content.appendChild(usageRow);
+  }
 
   if (opts.showReplyContext && opts.parentName) {
     content.appendChild(el('div', { className: 'thread-reply-to' }, 'Replying to ' + opts.parentName));
@@ -7924,15 +7944,21 @@ function renderStreamLine(container, rawText) {
   var card = document.createElement('div');
   card.className = 'stream-card';
 
-  // ── turn.completed → compact token line ──
-  if (evtType === 'turn.completed' && parsed.usage) {
-    var u = parsed.usage;
+  // ── turn/response completed → compact token line ──
+  var completedUsage = extractStreamUsage(parsed);
+  if ((evtType === 'turn.completed' || evtType === 'response.completed') && completedUsage) {
+    var u = completedUsage;
     var tokenLine = document.createElement('div');
     tokenLine.className = 'cc-token-line';
     var inTok = u.input_tokens || 0;
     var outTok = u.output_tokens || 0;
-    var cached = u.cached_input_tokens || 0;
-    tokenLine.textContent = '\u2500\u2500 ' + formatTokens(inTok + outTok) + ' tokens (' + formatTokens(inTok) + ' in, ' + formatTokens(outTok) + ' out' + (cached > 0 ? ', ' + formatTokens(cached) + ' cached' : '') + ')';
+    var cacheRead = u.cached_input_tokens || u.cache_read_input_tokens || u.cache_read_tokens || 0;
+    var cacheCreate = u.cache_creation_input_tokens || u.cache_creation_tokens || 0;
+    var total = inTok + outTok + cacheRead + cacheCreate;
+    var extra = '';
+    if (cacheRead > 0) extra += ', ' + formatTokens(cacheRead) + ' cache read';
+    if (cacheCreate > 0) extra += ', ' + formatTokens(cacheCreate) + ' cache write';
+    tokenLine.textContent = '\u2500\u2500 ' + formatTokens(total) + ' tokens (' + formatTokens(inTok) + ' in, ' + formatTokens(outTok) + ' out' + extra + ')';
     container.appendChild(tokenLine);
     return;
   }
@@ -9791,6 +9817,30 @@ function formatTokens(n) {
   if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
   if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
   return String(n);
+}
+
+function messageUsageTotal(usage) {
+  if (!usage) return 0;
+  if (usage.total_tokens) return usage.total_tokens;
+  return (usage.input_tokens || 0) + (usage.output_tokens || 0) + (usage.cache_read_tokens || 0) + (usage.cache_creation_tokens || 0);
+}
+
+function messageUsageTitle(usage) {
+  if (!usage) return '';
+  var parts = [formatTokens(messageUsageTotal(usage)) + ' total'];
+  if (usage.input_tokens) parts.push(formatTokens(usage.input_tokens) + ' in');
+  if (usage.output_tokens) parts.push(formatTokens(usage.output_tokens) + ' out');
+  if (usage.cache_read_tokens) parts.push(formatTokens(usage.cache_read_tokens) + ' cache read');
+  if (usage.cache_creation_tokens) parts.push(formatTokens(usage.cache_creation_tokens) + ' cache write');
+  return parts.join(' · ');
+}
+
+function extractStreamUsage(parsed) {
+  if (!parsed || typeof parsed !== 'object') return null;
+  if (parsed.usage) return parsed.usage;
+  if (parsed.response && parsed.response.usage) return parsed.response.usage;
+  if (parsed.data && parsed.data.usage) return parsed.data.usage;
+  return null;
 }
 
 function fetchUsage() {

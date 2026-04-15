@@ -103,7 +103,16 @@ type channelMessage struct {
 	Tagged      []string          `json:"tagged"`
 	ReplyTo     string            `json:"reply_to,omitempty"`
 	Timestamp   string            `json:"timestamp"`
+	Usage       *messageUsage     `json:"usage,omitempty"`
 	Reactions   []messageReaction `json:"reactions,omitempty"`
+}
+
+type messageUsage struct {
+	InputTokens         int `json:"input_tokens,omitempty"`
+	OutputTokens        int `json:"output_tokens,omitempty"`
+	CacheReadTokens     int `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+	TotalTokens         int `json:"total_tokens,omitempty"`
 }
 
 type interviewOption struct {
@@ -427,11 +436,11 @@ type Broker struct {
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
 	server              *http.Server
-	token               string         // shared secret for authenticating requests
-	addr                string         // actual listen address (useful when port=0)
-	webUIOrigins        []string       // allowed CORS origins for web UI (set by ServeWebUI)
-	runtimeProvider     string         // "codex" or "claude" — set by launcher
-	packSlug            string         // active agent pack slug ("founding-team", "revops", ...) — set by launcher
+	token               string   // shared secret for authenticating requests
+	addr                string   // actual listen address (useful when port=0)
+	webUIOrigins        []string // allowed CORS origins for web UI (set by ServeWebUI)
+	runtimeProvider     string   // "codex" or "claude" — set by launcher
+	packSlug            string   // active agent pack slug ("founding-team", "revops", ...) — set by launcher
 	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
 	generateChannelFn   func(prompt string) (generatedChannelTemplate, error)
 	policies            []officePolicy // active office operating rules
@@ -4277,6 +4286,8 @@ type usageEvent struct {
 	CostUsd             float64
 }
 
+const messageUsageAttachMaxAge = 15 * time.Minute
+
 func (b *Broker) recordUsageLocked(event usageEvent) {
 	if b.usage.Agents == nil {
 		b.usage.Agents = make(map[string]usageTotals)
@@ -4295,6 +4306,7 @@ func (b *Broker) recordUsageLocked(event usageEvent) {
 	total := b.usage.Total
 	applyUsageEvent(&total, event)
 	b.usage.Total = total
+	b.attachUsageToRecentMessagesLocked(event)
 }
 
 func applyUsageEvent(dst *usageTotals, event usageEvent) {
@@ -4305,6 +4317,68 @@ func applyUsageEvent(dst *usageTotals, event usageEvent) {
 	dst.TotalTokens += event.InputTokens + event.OutputTokens + event.CacheReadTokens + event.CacheCreationTokens
 	dst.CostUsd += event.CostUsd
 	dst.Requests++
+}
+
+func usageEventToMessageUsage(event usageEvent) *messageUsage {
+	total := event.InputTokens + event.OutputTokens + event.CacheReadTokens + event.CacheCreationTokens
+	if total == 0 {
+		return nil
+	}
+	return &messageUsage{
+		InputTokens:         event.InputTokens,
+		OutputTokens:        event.OutputTokens,
+		CacheReadTokens:     event.CacheReadTokens,
+		CacheCreationTokens: event.CacheCreationTokens,
+		TotalTokens:         total,
+	}
+}
+
+func cloneMessageUsage(src *messageUsage) *messageUsage {
+	if src == nil {
+		return nil
+	}
+	cp := *src
+	return &cp
+}
+
+func messageIsWithinUsageAttachWindow(timestamp string, now time.Time) bool {
+	ts := strings.TrimSpace(timestamp)
+	if ts == "" {
+		return true
+	}
+	parsed, err := time.Parse(time.RFC3339, ts)
+	if err != nil {
+		parsed, err = time.Parse(time.RFC3339Nano, ts)
+		if err != nil {
+			return true
+		}
+	}
+	return now.Sub(parsed) <= messageUsageAttachMaxAge
+}
+
+func (b *Broker) attachUsageToRecentMessagesLocked(event usageEvent) {
+	usage := usageEventToMessageUsage(event)
+	if usage == nil {
+		return
+	}
+	slug := strings.TrimSpace(event.AgentSlug)
+	if slug == "" {
+		return
+	}
+	now := time.Now().UTC()
+	for i := len(b.messages) - 1; i >= 0; i-- {
+		msg := &b.messages[i]
+		if strings.TrimSpace(msg.From) != slug {
+			continue
+		}
+		if msg.Usage != nil {
+			break
+		}
+		if !messageIsWithinUsageAttachWindow(msg.Timestamp, now) {
+			break
+		}
+		msg.Usage = cloneMessageUsage(usage)
+	}
 }
 
 // RecordAgentUsage records token usage from a Claude stream result for a given agent.
@@ -6362,16 +6436,30 @@ func FormatChannelView(messages []channelMessage) string {
 			continue
 		}
 		if strings.HasPrefix(m.Content, "[STATUS]") {
-			sb.WriteString(fmt.Sprintf("  %s  @%s %s\n", ts, prefix, m.Content))
+			sb.WriteString(fmt.Sprintf("  %s  @%s %s%s\n", ts, prefix, m.Content, formatMessageUsageSuffix(m.Usage)))
 		} else {
 			thread := ""
 			if m.ReplyTo != "" {
 				thread = fmt.Sprintf(" ↳ %s", m.ReplyTo)
 			}
-			sb.WriteString(fmt.Sprintf("  %s%s  @%s: %s\n", ts, thread, prefix, m.Content))
+			sb.WriteString(fmt.Sprintf("  %s%s  @%s: %s%s\n", ts, thread, prefix, m.Content, formatMessageUsageSuffix(m.Usage)))
 		}
 	}
 	return sb.String()
+}
+
+func formatMessageUsageSuffix(usage *messageUsage) string {
+	if usage == nil {
+		return ""
+	}
+	total := usage.TotalTokens
+	if total == 0 {
+		total = usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheCreationTokens
+	}
+	if total == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" [%d tok]", total)
 }
 
 // --------------- Skills ---------------
@@ -6929,17 +7017,17 @@ func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
 	// Surface the proposal in the Requests panel as a non-blocking human decision.
 	b.counter++
 	interview := humanInterview{
-		ID:            fmt.Sprintf("request-%d", b.counter),
-		Kind:          "skill_proposal",
-		Status:        "pending",
-		From:          msg.From,
-		Channel:       channel,
-		Title:         "Approve skill: " + title,
-		Question:      fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", msg.From, title, description),
-		ReplyTo:       slug,
-		Blocking:      false,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:        fmt.Sprintf("request-%d", b.counter),
+		Kind:      "skill_proposal",
+		Status:    "pending",
+		From:      msg.From,
+		Channel:   channel,
+		Title:     "Approve skill: " + title,
+		Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", msg.From, title, description),
+		ReplyTo:   slug,
+		Blocking:  false,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 	interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
 		{ID: "accept", Label: "Accept"},

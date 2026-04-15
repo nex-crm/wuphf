@@ -152,19 +152,28 @@ type brokerReaction struct {
 	From  string `json:"from"`
 }
 
+type brokerMessageUsage struct {
+	InputTokens         int `json:"input_tokens,omitempty"`
+	OutputTokens        int `json:"output_tokens,omitempty"`
+	CacheReadTokens     int `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int `json:"cache_creation_tokens,omitempty"`
+	TotalTokens         int `json:"total_tokens,omitempty"`
+}
+
 type brokerMessage struct {
-	ID          string           `json:"id"`
-	From        string           `json:"from"`
-	Kind        string           `json:"kind,omitempty"`
-	Source      string           `json:"source,omitempty"`
-	SourceLabel string           `json:"source_label,omitempty"`
-	EventID     string           `json:"event_id,omitempty"`
-	Title       string           `json:"title,omitempty"`
-	Content     string           `json:"content"`
-	Tagged      []string         `json:"tagged"`
-	ReplyTo     string           `json:"reply_to"`
-	Timestamp   string           `json:"timestamp"`
-	Reactions   []brokerReaction `json:"reactions,omitempty"`
+	ID          string              `json:"id"`
+	From        string              `json:"from"`
+	Kind        string              `json:"kind,omitempty"`
+	Source      string              `json:"source,omitempty"`
+	SourceLabel string              `json:"source_label,omitempty"`
+	EventID     string              `json:"event_id,omitempty"`
+	Title       string              `json:"title,omitempty"`
+	Content     string              `json:"content"`
+	Tagged      []string            `json:"tagged"`
+	ReplyTo     string              `json:"reply_to"`
+	Timestamp   string              `json:"timestamp"`
+	Usage       *brokerMessageUsage `json:"usage,omitempty"`
+	Reactions   []brokerReaction    `json:"reactions,omitempty"`
 }
 
 type channelMember struct {
