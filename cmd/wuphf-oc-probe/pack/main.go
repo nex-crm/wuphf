@@ -176,6 +176,80 @@ func main() {
 		fmt.Printf("  RECV DM←%s: %q\n", m.slug, truncate(replies[m.slug], 140))
 	}
 
+	// 4. Multi-turn channel test. Address just pm-bot so we also verify that
+	// @mention targeting keeps routing correctly across turns and that the
+	// per-session conversation history OpenClaw keeps is visible through the
+	// bridge.
+	fmt.Println("\n--- channel multi-turn (@pm-bot only) ---")
+	channelTurns := []string{
+		"pm-bot: please remember the number 42 for me. Reply with exactly: ok, 42",
+		"pm-bot: what number did I ask you to remember? Reply with just the digits.",
+		"pm-bot: add 8 to that number. Reply with just the digits.",
+	}
+	for i, prompt := range channelTurns {
+		beforeT := len(broker.AllMessages())
+		if _, err := broker.PostMessage("human", "general", prompt, []string{members[0].slug}, ""); err != nil {
+			die("channel turn %d post: %v", i+1, err)
+		}
+		fmt.Printf("SEND ch-turn-%d: %q\n", i+1, prompt)
+		want := map[string]bool{members[0].slug: false}
+		r := waitForReplies(broker, beforeT, want, "general", 45*time.Second)
+		fmt.Printf("  RECV ch-turn-%d from %s: %q\n", i+1, members[0].slug, truncate(r[members[0].slug], 160))
+	}
+
+	// 5. Multi-turn DM test. Same shape, but in eng-bot's DM — confirms
+	// DM-partner inference handles repeated sends without the router falling
+	// back to "general" on turn N when it got it right on turn 1.
+	fmt.Println("\n--- DM multi-turn (eng-bot) ---")
+	engDM, err := broker.EnsureDirectChannel(members[1].slug)
+	if err != nil {
+		die("eng DM open: %v", err)
+	}
+	dmTurns := []string{
+		"pick a fruit (just one lowercase word) and tell me what it is.",
+		"now spell that fruit backwards. Reply with just the reversed word, lowercase.",
+		"how many letters does the fruit you picked have? Reply with just the digit.",
+	}
+	for i, prompt := range dmTurns {
+		beforeT := len(broker.AllMessages())
+		if _, err := broker.PostMessage("human", engDM, prompt, nil, ""); err != nil {
+			die("DM turn %d post: %v", i+1, err)
+		}
+		fmt.Printf("SEND dm-turn-%d: %q\n", i+1, prompt)
+		want := map[string]bool{members[1].slug: false}
+		r := waitForReplies(broker, beforeT, want, engDM, 45*time.Second)
+		fmt.Printf("  RECV dm-turn-%d from %s: %q\n", i+1, members[1].slug, truncate(r[members[1].slug], 160))
+	}
+
+	// 6. "Pick up a task" test — give one agent a multi-step task in a single
+	// DM message and verify the deterministic final answer. This is the
+	// closest smoke for "can this agent actually do work" short of wiring
+	// MCP tools, files, or shell access.
+	fmt.Println("\n--- DM task handoff (pm-bot) ---")
+	pmDM, err := broker.EnsureDirectChannel(members[0].slug)
+	if err != nil {
+		die("pm DM open: %v", err)
+	}
+	taskPrompt := strings.Join([]string{
+		"I'm going to give you a small task. Do each step, then answer.",
+		"Step 1: take the number 7.",
+		"Step 2: multiply it by 6.",
+		"Step 3: subtract 2 from the result.",
+		"Step 4: reply with just the final number, no words, no punctuation.",
+	}, " ")
+	beforeTask := len(broker.AllMessages())
+	if _, err := broker.PostMessage("human", pmDM, taskPrompt, nil, ""); err != nil {
+		die("task post: %v", err)
+	}
+	fmt.Printf("SEND task: %q\n", truncate(taskPrompt, 200))
+	want := map[string]bool{members[0].slug: false}
+	r := waitForReplies(broker, beforeTask, want, pmDM, 60*time.Second)
+	taskReply := strings.TrimSpace(r[members[0].slug])
+	fmt.Printf("  RECV task from %s: %q\n", members[0].slug, truncate(taskReply, 160))
+	if !strings.Contains(taskReply, "40") {
+		die("task answer does not contain expected value 40 — got %q", taskReply)
+	}
+
 	fmt.Println("\nall checks passed")
 	fmt.Println("PASS")
 }
