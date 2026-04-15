@@ -205,32 +205,40 @@ func TestOnOfficeMessageRetriesTransient(t *testing.T) {
 func TestGapEventTriggersHistoryReplay(t *testing.T) {
 	fake := newFakeOC()
 	fake.historyByKey = map[string][]openclaw.HistoricMessage{
-		"k": {
-			{SessionKey: "k", Message: []byte(`{"state":"final","content":"missed 1"}`)},
-			{SessionKey: "k", Message: []byte(`{"state":"final","content":"missed 2"}`)},
+		"k-gaptest": {
+			{SessionKey: "k-gaptest", Message: []byte(`{"state":"final","content":"missed 1"}`)},
+			{SessionKey: "k-gaptest", Message: []byte(`{"state":"final","content":"missed 2"}`)},
 		},
 	}
 	broker := NewBroker()
-	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k-gaptest", Slug: "openclaw-gaptest"}}
 	b := NewOpenclawBridge(broker, fake, bindings)
 	_ = b.Start(context.Background())
 	defer b.Stop()
 
+	// The broker may have persisted messages from prior runs. Snapshot the catch-up
+	// count BEFORE pushing the gap event and count only the delta.
+	before := countCatchups(broker, "openclaw-gaptest")
+
 	fake.events <- openclaw.ClientEvent{
 		Kind: openclaw.EventKindGap,
-		Gap:  &openclaw.GapEvent{SessionKey: "k", FromSeq: 5, ToSeq: 7},
+		Gap:  &openclaw.GapEvent{SessionKey: "k-gaptest", FromSeq: 5, ToSeq: 7},
 	}
 	time.Sleep(100 * time.Millisecond)
-	msgs := broker.AllMessages()
-	catchupCount := 0
-	for _, m := range msgs {
-		if m.From == "openclaw-a" && strings.Contains(m.Content, "[catch-up]") {
-			catchupCount++
+	delta := countCatchups(broker, "openclaw-gaptest") - before
+	if delta != 2 {
+		t.Fatalf("expected 2 NEW catch-up messages, got %d (broker state may be polluted)", delta)
+	}
+}
+
+func countCatchups(broker *Broker, slug string) int {
+	n := 0
+	for _, m := range broker.AllMessages() {
+		if m.From == slug && strings.Contains(m.Content, "[catch-up]") {
+			n++
 		}
 	}
-	if catchupCount != 2 {
-		t.Fatalf("expected 2 catch-up messages, got %d: %v", catchupCount, msgs)
-	}
+	return n
 }
 
 func TestReconnectOnClientClose(t *testing.T) {
