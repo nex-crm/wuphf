@@ -732,11 +732,21 @@ func newChannelModelWithApp(threadsCollapsed bool, initialApp officeApp) channel
 		m.autocomplete = tui.NewAutocomplete(buildOneOnOneSlashCommands())
 		m.notice = "Conference room reserved. Direct session reset. Agent pane reloaded in place. No Toby."
 	}
-	if config.ResolveNoNex() {
-		m.notice = "Running in office-only mode. Nex tools are disabled for this session."
-	} else if config.ResolveAPIKey("") == "" {
+	memoryStatus := team.ResolveMemoryBackendStatus()
+	if memoryStatus.SelectedKind == config.MemoryBackendNone {
+		if config.ResolveNoNex() {
+			m.notice = "Running in office-only mode. Nex tools are disabled for this session."
+		} else {
+			m.notice = "Running without an external memory backend for this session."
+		}
+	} else if memoryStatus.SelectedKind == config.MemoryBackendNex && memoryStatus.ActiveKind == config.MemoryBackendNone && strings.TrimSpace(config.ResolveAPIKey("")) == "" {
 		m.notice = "No WUPHF API key configured. Starting setup..."
 		m.initFlow, _ = m.initFlow.Start()
+	} else if memoryStatus.SelectedKind == config.MemoryBackendGBrain && strings.TrimSpace(config.ResolveOpenAIAPIKey()) == "" && strings.TrimSpace(config.ResolveAnthropicAPIKey()) == "" {
+		m.notice = "No OpenAI or Anthropic API key configured for GBrain. Starting setup..."
+		m.initFlow, _ = m.initFlow.Start()
+	} else if memoryStatus.SelectedKind == config.MemoryBackendGBrain && memoryStatus.ActiveKind == config.MemoryBackendNone && strings.TrimSpace(memoryStatus.Detail) != "" {
+		m.notice = memoryStatus.Detail
 	}
 	m.syncSidebarCursorToActive()
 	return m
@@ -4813,8 +4823,13 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		return m, createDMChannel(slug)
 	case trimmed == "/integrate":
 		clearCurrent()
+		memoryStatus := team.ResolveMemoryBackendStatus()
+		if memoryStatus.SelectedKind != config.MemoryBackendNex {
+			m.notice = "Managed integrations are Nex-only right now. Select the Nex memory backend to use /integrate."
+			return m, nil
+		}
 		if config.ResolveNoNex() {
-			m.notice = "Nex is disabled (--no-nex). Running on local memory — like Creed, but better organized."
+			m.notice = "Nex is disabled (--no-nex), so managed integrations are unavailable for this run."
 			return m, nil
 		}
 		if config.ResolveAPIKey("") == "" {
@@ -5118,10 +5133,6 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 		return m, mutateChannelMember(m.activeChannel, parts[1], parts[2])
 	case trimmed == "/init":
 		clearCurrent()
-		if config.ResolveNoNex() {
-			m.notice = "Nex is disabled (--no-nex). Ryan Howard did not let integration issues stop him. But he also failed. Restart without --no-nex to run setup."
-			return m, nil
-		}
 		m.notice = "Starting setup..."
 		var cmd tea.Cmd
 		m.initFlow, cmd = m.initFlow.Start()

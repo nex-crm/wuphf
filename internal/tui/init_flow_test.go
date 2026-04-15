@@ -64,7 +64,7 @@ func TestInitFlowViewShowsReadinessSummary(t *testing.T) {
 	flow.provider = "claude-code"
 
 	view := flow.View()
-	if !containsAll(view, "Setup Readiness", "Nex identity", "tmux office runtime", "LLM runtime", "Agent pack") {
+	if !containsAll(view, "Setup Readiness", "Memory backend", "Nex API key", "tmux office runtime", "LLM runtime", "Agent pack") {
 		t.Fatalf("expected readiness summary in init view, got %q", view)
 	}
 	if !strings.Contains(view, "Paste your WUPHF/Nex API key") {
@@ -81,8 +81,73 @@ func TestInitFlowMentionsManagedIntegrations(t *testing.T) {
 	flow := NewInitFlow()
 	flow.phase = InitAPIKey
 	_, instructions = flow.phaseText()
-	if instructions == "" || !containsAll(instructions, "One", "automatically") {
-		t.Fatalf("expected managed integration copy, got %q", instructions)
+	if instructions == "" || !containsAll(instructions, "Nex", "managed integrations") {
+		t.Fatalf("expected Nex setup copy, got %q", instructions)
+	}
+}
+
+func TestInitFlowStartsWithGBrainProviderKeyWhenMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
+
+	flow, _ := NewInitFlow().Start()
+	if flow.Phase() != InitAPIKey {
+		t.Fatalf("expected API key phase for gbrain, got %q", flow.Phase())
+	}
+
+	flow.phase = InitAPIKey
+	view := flow.View()
+	if !containsAll(view, "GBrain", "OpenAI or Anthropic", "embeddings", "reduced mode") {
+		t.Fatalf("expected GBrain key guidance, got %q", view)
+	}
+}
+
+func TestInitFlowSkipsGBrainKeyStepWhenProviderCredentialExists(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
+	t.Setenv("WUPHF_OPENAI_API_KEY", "sk-test-openai")
+
+	flow, _ := NewInitFlow().Start()
+	if flow.Phase() != InitProviderChoice {
+		t.Fatalf("expected provider choice phase, got %q", flow.Phase())
+	}
+}
+
+func TestInitFlowFinishSavesGBrainKeysByProvider(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
+
+	flow := NewInitFlow()
+	flow.apiKey = "sk-ant-test-anthropic"
+	flow.provider = "codex"
+	flow.pack = "founding-team"
+	if _, cmd := flow.finish(); cmd == nil {
+		t.Fatal("expected finish to emit a phase transition")
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if cfg.AnthropicAPIKey != "sk-ant-test-anthropic" {
+		t.Fatalf("expected anthropic key to be saved, got %#v", cfg)
+	}
+	if cfg.OpenAIAPIKey != "" {
+		t.Fatalf("did not expect OpenAI key to be set, got %#v", cfg)
+	}
+}
+
+func TestInitFlowAnthropicOnlyExplainsReducedMode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
+	t.Setenv("WUPHF_ANTHROPIC_API_KEY", "sk-ant-test-anthropic")
+
+	flow := NewInitFlow()
+	flow.phase = InitProviderChoice
+	view := flow.View()
+
+	if !containsAll(view, "reduced mode", "OpenAI", "vector search") {
+		t.Fatalf("expected Anthropic-only reduced mode guidance, got %q", view)
 	}
 }
 

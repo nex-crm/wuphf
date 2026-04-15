@@ -32,8 +32,8 @@ import (
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
-	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/setup"
 )
 
 const (
@@ -127,13 +127,13 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	sessionMode, oneOnOne := loadRunningSessionMode()
 
 	return &Launcher{
-		packSlug:        packSlug,
-		pack:            pack,
-		sessionName:     SessionName,
-		cwd:             cwd,
-		sessionMode:     sessionMode,
-		oneOnOne:        oneOnOne,
-		provider:        config.ResolveLLMProvider(""),
+		packSlug:            packSlug,
+		pack:                pack,
+		sessionName:         SessionName,
+		cwd:                 cwd,
+		sessionMode:         sessionMode,
+		oneOnOne:            oneOnOne,
+		provider:            config.ResolveLLMProvider(""),
 		headlessWorkers:     make(map[string]bool),
 		headlessActive:      make(map[string]*headlessCodexActiveTurn),
 		headlessQueues:      make(map[string][]headlessCodexTurn),
@@ -300,7 +300,9 @@ func (l *Launcher) Launch() error {
 	go l.notifyAgentsLoop()
 	if !l.isOneOnOne() {
 		go l.notifyTaskActionsLoop()
-		go l.pollNexNotificationsLoop()
+		if shouldPollNexNotifications() {
+			go l.pollNexNotificationsLoop()
+		}
 		go l.watchdogSchedulerLoop()
 	}
 
@@ -358,7 +360,6 @@ func recoverPanicTo(site, extra string) {
 		}
 	}
 }
-
 
 func (l *Launcher) notifyTaskActionsLoop() {
 	if l.broker == nil {
@@ -2541,7 +2542,6 @@ func (l *Launcher) buildPrompt(slug string) string {
 	agentCfg := agentConfigFromMember(member)
 	officeMembers := l.officeMembersSnapshot()
 	lead := officeLeadSlugFrom(officeMembers, l.pack)
-	noNex := config.ResolveNoNex() || config.ResolveAPIKey("") == ""
 
 	var sb strings.Builder
 
@@ -2560,13 +2560,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_broadcast: Send a normal direct chat reply into the 1:1 conversation\n")
 		sb.WriteString("- human_message: Send an emphasized report, recommendation, or action card directly to the human when you want it to stand out\n")
 		sb.WriteString("- human_interview: Ask a blocking decision question only when you truly cannot proceed responsibly without it\n\n")
-		if noNex {
-			sb.WriteString("Nex tools are disabled for this run. Base your work on the conversation and direct human answers only.\n\n")
-		} else {
-			sb.WriteString("Use the Nex context graph when it materially helps:\n")
-			sb.WriteString("- query_context: Look up prior decisions, people, projects, and history before guessing\n")
-			sb.WriteString("- add_context: Store durable conclusions only after you have actually landed them\n\n")
-		}
+		sb.WriteString(directMemoryPromptBlock())
 		sb.WriteString("RULES:\n")
 		sb.WriteString("1. Do not talk as if a team exists. There are no other agents in this session.\n")
 		sb.WriteString("2. Do not create or suggest channels, teammates, bridges, shared tasks, or office structure.\n")
@@ -2574,14 +2568,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("4. The pushed notification IS the latest state. Respond directly from it. Do NOT poll before replying.\n")
 		sb.WriteString("5. Use team_broadcast for normal replies. Use human_message only when you are deliberately presenting completion, a recommendation, or a next action.\n")
 		sb.WriteString("6. Use human_interview only for truly blocking decisions.\n")
-		sb.WriteString("7. If Nex is enabled, do not claim something is stored unless add_context actually succeeded.\n")
+		sb.WriteString(directMemoryStorageRule())
 		sb.WriteString("8. No fake collaboration language like 'I'll ask the team' or 'let me route this'. It is just you and the human here.\n\n")
 		sb.WriteString("CONVERSATION STYLE:\n")
 		sb.WriteString("- Sound like a sharp human operator, not a formal assistant.\n")
 		sb.WriteString("- Be concise, direct, and a little alive.\n")
 		sb.WriteString("- Light humor is fine. Don't turn the 1:1 into a bit.\n")
 		sb.WriteString("- If the human asks for a plan, recommendation, explanation, or judgment you can reasonably give now, answer now.\n")
-		sb.WriteString("- Do not go silent and over-research by default. Only inspect files, run tools, or query Nex first when the answer genuinely depends on that context.\n")
+		sb.WriteString("- Do not go silent and over-research by default. Only inspect files, run tools, or query the active memory backend first when the answer genuinely depends on that context.\n")
 		sb.WriteString("- If you need a deeper pass, give the human the quick answer first, then continue with the deeper work.\n")
 		return sb.String()
 	}
@@ -2608,11 +2602,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a blocking decision question — only when the team cannot proceed without it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member.\n\n")
-		if noNex {
-			sb.WriteString("Nex tools are disabled for this run. Work only with the shared office channel and human answers.\n\n")
-		} else {
-			sb.WriteString("Nex memory: query_context before reinventing; add_context only after a decision is actually landed.\n\n")
-		}
+		sb.WriteString(leadMemoryPromptBlock())
 		sb.WriteString("Tagged agents are expected to respond.\n\n")
 		if l.isFocusModeEnabled() {
 			sb.WriteString("== DELEGATION MODE ==\n")
@@ -2623,22 +2613,14 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
-		if noNex {
-			sb.WriteString("1. Coordinate inside the office channel first and keep the team aligned there\n")
-		} else {
-			sb.WriteString("1. On strategy or prior decisions, call query_context early\n")
-		}
+		sb.WriteString(leadMemoryFirstRule())
 		sb.WriteString("2. The pushed notification is authoritative — it contains thread context, task state, and agent activity. Respond directly from it. Do NOT call team_poll or team_tasks unless the notification explicitly says context is missing. Every unnecessary tool call burns tokens without adding value.\n")
 		sb.WriteString("3. When routing a human's @tagged request: tag the specialist in your message. Do NOT also create a team_task for the same work. One notification wakes them — two causes duplicate turns. Use team_task only for work you are independently originating, not for pass-through routing.\n")
 		sb.WriteString("4. Tag only the specialists who should weigh in. Unowned background chatter is a bug.\n")
 		sb.WriteString("5. Keep specialists in their lane and mostly offstage. You make the FINAL decision.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for blocking decisions\n")
-		if noNex {
-			sb.WriteString("8. Summarize final decisions clearly in-channel\n")
-		} else {
-			sb.WriteString("8. When you lock a decision, call add_context before claiming it is stored\n")
-		}
+		sb.WriteString(leadMemoryStorageRule())
 		sb.WriteString("9. Once decided, broadcast clear task assignments and create them in team_task\n")
 		sb.WriteString("10. Create channels (team_channel) or agents (team_member) when the human asks or scope genuinely warrants it\n")
 		sb.WriteString("11. Use team_bridge to carry context between channels when relevant\n")
@@ -2655,11 +2637,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- The human will be asked to approve before it becomes active\n")
 		sb.WriteString("- To suggest adding a new specialist agent, use team_member with a clear expertise and rationale\n\n")
 		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data.\n")
-		if noNex {
-			sb.WriteString("Do not claim you stored anything outside the office.\n")
-		} else {
-			sb.WriteString("Do not pretend the graph was updated; verify add_context succeeded.\n")
-		}
+		sb.WriteString(leadMemoryFinalWarning())
 	} else {
 		sb.WriteString(fmt.Sprintf("You are %s on the %s.\n", agentCfg.Name, l.PackName()))
 		sb.WriteString(companyCtx)
@@ -2684,11 +2662,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human only for blocking clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member.\n\n")
-		if noNex {
-			sb.WriteString("Nex tools are disabled for this run. Base your work on the office conversation and direct human answers only.\n\n")
-		} else {
-			sb.WriteString("Nex memory: query_context before making assumptions; add_context only for durable conclusions.\n\n")
-		}
+		sb.WriteString(specialistMemoryPromptBlock())
 		sb.WriteString("Tag agents with @slug. Tagged agents must respond.\n")
 		if l.isFocusModeEnabled() {
 			sb.WriteString("== DELEGATION MODE ==\n")
@@ -2708,11 +2682,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("6. When assigned a task, claim it with team_task first, use team_status to show what you're working on, then mark complete and broadcast when done. If the result is mainly for the human, also send it via human_message.\n")
 		sb.WriteString("7. You can see other channel names and descriptions, but cannot access their content unless you are a member. If context from another channel is needed, ask the CEO to bridge it.\n")
 		sb.WriteString("8. If a task or status line shows a worktree path, use that as working_directory for local file and bash tools.\n")
-		if noNex {
-			sb.WriteString("9. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n\n")
-		} else {
-			sb.WriteString("9. Use query_context when prior knowledge matters. Only use add_context for durable conclusions, and don't claim something stored unless add_context actually succeeded.\n\n")
-		}
+		sb.WriteString(specialistMemoryStorageRule())
 		sb.WriteString("STYLE: Be concise, stay in lane, short lively messages. Use markdown tables/checklists for structured data.\n")
 	}
 
@@ -2756,12 +2726,13 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 	model := l.headlessClaudeModel(slug)
 
 	return fmt.Sprintf(
-		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_MEMORY_BACKEND=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:%d/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
 		oneOnOneEnv,
 		oneSecretEnv,
 		oneIdentityEnv,
 		slug,
 		brokerToken,
+		config.ResolveMemoryBackend(""),
 		config.ResolveNoNex(),
 		BrokerPort,
 		brokerToken,
@@ -2792,59 +2763,59 @@ var codingAgentSlugs = map[string]bool{
 
 // agentMCPServers returns the MCP server keys that a given agent should receive.
 func agentMCPServers(slug string) []string {
-	channel := strings.TrimSpace(os.Getenv("WUPHF_CHANNEL"))
-	// DM mode: only wuphf-office (minimal tool set, no nex overhead)
-	if strings.HasPrefix(channel, "dm-") {
-		return []string{"wuphf-office"}
-	}
 	if codingAgentSlugs[slug] {
 		return []string{"wuphf-office"}
 	}
-	return []string{"wuphf-office", "nex"}
+	servers := []string{"wuphf-office"}
+	if backend := activeMemoryBackendKind(); backend != config.MemoryBackendNone {
+		servers = append(servers, backend)
+	}
+	return servers
 }
 
 // buildMCPServerMap constructs the full set of MCP server entries.
 // This is the shared helper used by both ensureMCPConfig and ensureAgentMCPConfig.
 func (l *Launcher) buildMCPServerMap() (map[string]any, error) {
-	apiKey := config.ResolveAPIKey("")
 	servers := map[string]any{}
 	wuphfBinary, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
 
+	officeEnv := map[string]string{
+		"WUPHF_MEMORY_BACKEND": config.ResolveMemoryBackend(""),
+	}
+	if config.ResolveNoNex() {
+		officeEnv["WUPHF_NO_NEX"] = "1"
+	}
 	servers["wuphf-office"] = map[string]any{
 		"command": wuphfBinary,
 		"args":    []string{"mcp-team"},
+		"env":     officeEnv,
 	}
 	if oneSecret := strings.TrimSpace(config.ResolveOneSecret()); oneSecret != "" {
-		servers["wuphf-office"].(map[string]any)["env"] = map[string]string{
-			"ONE_SECRET": oneSecret,
-		}
+		officeEnv["ONE_SECRET"] = oneSecret
 	}
 	if identity := strings.TrimSpace(config.ResolveOneIdentity()); identity != "" {
-		entry := servers["wuphf-office"].(map[string]any)
-		env, _ := entry["env"].(map[string]string)
-		if env == nil {
-			env = map[string]string{}
-		}
-		env["ONE_IDENTITY"] = identity
+		officeEnv["ONE_IDENTITY"] = identity
 		if identityType := strings.TrimSpace(config.ResolveOneIdentityType()); identityType != "" {
-			env["ONE_IDENTITY_TYPE"] = identityType
+			officeEnv["ONE_IDENTITY_TYPE"] = identityType
 		}
-		entry["env"] = env
 	}
 
-	if !config.ResolveNoNex() && apiKey != "" {
-		if nexMCP, err := exec.LookPath("nex-mcp"); err == nil {
-			servers["nex"] = map[string]any{
-				"command": nexMCP,
-				"env": map[string]string{
-					"WUPHF_API_KEY": apiKey,
-					"NEX_API_KEY":   apiKey,
-				},
-			}
+	if server, err := resolvedMemoryMCPServer(); err != nil {
+		return nil, err
+	} else if server != nil {
+		entry := map[string]any{
+			"command": server.Command,
 		}
+		if len(server.Args) > 0 {
+			entry["args"] = server.Args
+		}
+		if len(server.Env) > 0 {
+			entry["env"] = server.Env
+		}
+		servers[server.Name] = entry
 	}
 
 	return servers, nil
@@ -3179,10 +3150,11 @@ func (l *Launcher) PreflightWeb() error {
 
 // LaunchWeb starts the broker, web UI server, and background agents without tmux.
 func (l *Launcher) LaunchWeb(webPort int) error {
+	memoryStatus := ResolveMemoryBackendStatus()
 	// Offer to wire Nex when the user hasn't opted out and nex-cli isn't yet
 	// installed. `nex setup` handles detection and wiring for us — we just
 	// surface the prompt.
-	if !config.ResolveNoNex() && !nex.IsInstalled() {
+	if memoryStatus.SelectedKind == config.MemoryBackendNex && memoryStatus.ActiveKind == config.MemoryBackendNone && !config.ResolveNoNex() && !nex.IsInstalled() {
 		fmt.Println()
 		fmt.Print("  Connect Nex for memory and context? [Y/n] ")
 		var answer string
@@ -3212,6 +3184,14 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 			fmt.Println("  Skipping Nex. Agents will work without organizational memory.")
 			fmt.Println()
 		}
+	} else if memoryStatus.SelectedKind == config.MemoryBackendGBrain && memoryStatus.ActiveKind == config.MemoryBackendNone && strings.TrimSpace(memoryStatus.Detail) != "" {
+		fmt.Println()
+		fmt.Printf("  %s\n", memoryStatus.Detail)
+		if strings.TrimSpace(memoryStatus.NextStep) != "" {
+			fmt.Printf("  %s\n", memoryStatus.NextStep)
+		}
+		fmt.Println("  Continuing without external memory.")
+		fmt.Println()
 	}
 
 	mcpConfig, err := l.ensureMCPConfig()
@@ -3251,7 +3231,9 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 
 	go l.notifyAgentsLoop()
 	go l.notifyTaskActionsLoop()
-	go l.pollNexNotificationsLoop()
+	if shouldPollNexNotifications() {
+		go l.pollNexNotificationsLoop()
+	}
 	go l.watchdogSchedulerLoop()
 
 	// Same opt-in OpenClaw wire-up as Launch() — see that method's comment.

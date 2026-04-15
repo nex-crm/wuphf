@@ -53,6 +53,13 @@ func configShow(ctx *SlashContext) error {
 	if provider == "" {
 		provider = "(not set)"
 	}
+	memoryBackend := cfg.MemoryBackend
+	if memoryBackend == "" {
+		memoryBackend = config.ResolveMemoryBackend("")
+	}
+	if memoryBackend == "" {
+		memoryBackend = "(not set)"
+	}
 
 	pack := cfg.Pack
 	if pack == "" {
@@ -71,6 +78,7 @@ func configShow(ctx *SlashContext) error {
 	sb.WriteString(fmt.Sprintf("  Integrations: %s\n", config.OneSetupSummary()))
 	sb.WriteString(fmt.Sprintf("  Action provider: %s\n", actionProvider))
 	sb.WriteString(fmt.Sprintf("  Workspace: %s\n", workspace))
+	sb.WriteString(fmt.Sprintf("  Memory:    %s\n", memoryBackend))
 	sb.WriteString(fmt.Sprintf("  Provider:  %s\n", provider))
 	sb.WriteString(fmt.Sprintf("  Gemini:    %s\n", maskKey(cfg.GeminiAPIKey)))
 	sb.WriteString(fmt.Sprintf("  Anthropic: %s\n", maskKey(cfg.AnthropicAPIKey)))
@@ -109,6 +117,13 @@ func configSet(ctx *SlashContext, key, value string) error {
 		cfg.WorkspaceID = value
 	case "workspace_slug":
 		cfg.WorkspaceSlug = value
+	case "memory_backend":
+		normalized := config.NormalizeMemoryBackend(value)
+		if normalized == "" {
+			ctx.AddMessage("system", "Unsupported memory backend. Valid values: nex, gbrain, none")
+			return nil
+		}
+		cfg.MemoryBackend = normalized
 	case "llm_provider":
 		cfg.LLMProvider = value
 	case "gemini_api_key":
@@ -139,7 +154,7 @@ func configSet(ctx *SlashContext, key, value string) error {
 		cfg.CompanyPriority = value
 	default:
 		ctx.AddMessage("system", "Unknown config key: "+key+
-			"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, llm_provider, gemini_api_key, anthropic_api_key, openai_api_key, minimax_api_key, pack, team_lead_slug, dev_url, default_format, company_name, company_description, company_goals, company_size, company_priority")
+			"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, memory_backend, llm_provider, gemini_api_key, anthropic_api_key, openai_api_key, minimax_api_key, pack, team_lead_slug, dev_url, default_format, company_name, company_description, company_goals, company_size, company_priority")
 		return nil
 	}
 

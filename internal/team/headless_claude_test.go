@@ -242,6 +242,46 @@ func TestBuildMCPServerMap_NexPresentWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestBuildMCPServerMap_GBrainPresentWhenSelected(t *testing.T) {
+	t.Setenv("WUPHF_MEMORY_BACKEND", "gbrain")
+	t.Setenv("WUPHF_OPENAI_API_KEY", "openai-test-key")
+
+	binDir := t.TempDir()
+	gbrainBin := filepath.Join(binDir, "gbrain")
+	if err := os.WriteFile(gbrainBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("create fake gbrain: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	l := minimalLauncher(false)
+	servers, err := l.buildMCPServerMap()
+	if err != nil {
+		t.Fatalf("buildMCPServerMap: %v", err)
+	}
+	entry, ok := servers["gbrain"]
+	if !ok {
+		t.Fatalf("'gbrain' server must be present when GBrain is selected, got servers: %v", mapKeys(servers))
+	}
+	server, ok := entry.(map[string]any)
+	if !ok {
+		t.Fatalf("expected gbrain entry to be an object, got %T", entry)
+	}
+	if got := server["command"]; got != gbrainBin {
+		t.Fatalf("expected gbrain command %q, got %#v", gbrainBin, got)
+	}
+	args, ok := server["args"].([]string)
+	if !ok || len(args) != 1 || args[0] != "serve" {
+		t.Fatalf("expected gbrain args [serve], got %#v", server["args"])
+	}
+	env, ok := server["env"].(map[string]string)
+	if !ok {
+		t.Fatalf("expected gbrain env map, got %#v", server["env"])
+	}
+	if env["OPENAI_API_KEY"] != "openai-test-key" {
+		t.Fatalf("expected OPENAI_API_KEY to be forwarded, got %#v", env)
+	}
+}
+
 // mapKeys returns the keys of map[string]V for human-readable error messages.
 func mapKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))

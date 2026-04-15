@@ -112,6 +112,7 @@ func main() {
 	tuiMode := flag.Bool("tui", false, "Launch with tmux TUI instead of the web UI")
 	webPort := flag.Int("web-port", 7891, "Port for the web UI (default 7891)")
 	noNex := flag.Bool("no-nex", false, "Disable Nex completely for this run")
+	memoryBackend := flag.String("memory-backend", "", "Memory backend for organizational context (nex, gbrain, none)")
 	opusCEO := flag.Bool("opus-ceo", false, "Upgrade CEO agent from Sonnet to Opus")
 	collabMode := flag.Bool("collab", false, "Start in collaborative mode (all agents see all messages)")
 	noOpen := flag.Bool("no-open", false, "Don't open browser automatically on launch")
@@ -141,6 +142,14 @@ func main() {
 
 	if *noNex {
 		_ = os.Setenv("WUPHF_NO_NEX", "1")
+	}
+	if backend := strings.TrimSpace(*memoryBackend); backend != "" {
+		normalized := config.NormalizeMemoryBackend(backend)
+		if normalized == "" {
+			fmt.Fprintf(os.Stderr, "error: unsupported memory backend %q (expected nex, gbrain, or none)\n", backend)
+			os.Exit(1)
+		}
+		_ = os.Setenv("WUPHF_MEMORY_BACKEND", normalized)
 	}
 	if provider := strings.TrimSpace(*providerFlag); provider != "" {
 		switch provider {
@@ -330,8 +339,8 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 }
 
 func dispatch(cmd string, apiKeyFlag string, format string) {
-	if config.ResolveNoNex() {
-		fmt.Fprintf(os.Stderr, "Nex is disabled (--no-nex). Running on local memory — like Creed, but better organized. Start %s without --no-nex to use backend commands.\n", appName)
+	if config.ResolveMemoryBackend("") != config.MemoryBackendNex {
+		fmt.Fprintf(os.Stderr, "Non-interactive backend commands currently require the Nex memory backend. Selected backend: %s.\n", config.MemoryBackendLabel(config.ResolveMemoryBackend("")))
 		os.Exit(1)
 	}
 	if isSetupCommand(cmd) {

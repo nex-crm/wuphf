@@ -596,7 +596,7 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 		"Current focus: Approve release from @ceo.",
 		"working_directory /tmp/wuphf-task-77",
 		"Runtime capabilities:",
-		"Nex memory [info]: Disabled for this session with --no-nex.",
+		"Memory backend [info]: Nex is disabled for this run, so the office is operating without an external memory backend.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in %q", want, text)

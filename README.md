@@ -44,6 +44,7 @@ That's it. The browser opens automatically and you're in the office. Unlike Ryan
 
 | Flag | What it does |
 |------|-------------|
+| `--memory-backend <name>` | Pick the organizational memory backend (`nex`, `gbrain`, `none`) |
 | `--no-nex` | Skip the Nex backend (no context graph, no Nex-managed integrations) |
 | `--tui` | Use the tmux TUI instead of the web UI |
 | `--no-open` | Don't auto-open the browser |
@@ -55,6 +56,24 @@ That's it. The browser opens automatically and you're in the office. Unlike Ryan
 | `--web-port <n>` | Change the web UI port (default 7891) |
 
 `--no-nex` still lets Telegram and any other local integration keep working. To switch back to CEO-routed delegation after launch, use `/focus` inside the office.
+
+## Memory Backends
+
+WUPHF can run with three organizational context modes:
+
+- `nex` is the default. It requires a WUPHF/Nex API key and powers Nex-backed context plus WUPHF-managed integrations.
+- `gbrain` mounts `gbrain serve` as the office memory layer. It requires an API key during `/init`: `OpenAI` gives you the full path with embeddings and vector search, while `Anthropic` alone is reduced mode.
+- `none` disables the external memory layer entirely.
+
+Examples:
+
+```bash
+wuphf --memory-backend nex
+wuphf --memory-backend gbrain
+wuphf --memory-backend none
+```
+
+When you select `gbrain`, onboarding asks for an OpenAI or Anthropic key up front and explains the tradeoff. If you want embeddings and vector search, use OpenAI.
 
 ## Other Commands
 

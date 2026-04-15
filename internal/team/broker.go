@@ -3034,20 +3034,23 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	focus := b.focusMode
 	provider := b.runtimeProvider
 	b.mu.Unlock()
+	if strings.TrimSpace(provider) == "" {
+		provider = config.ResolveLLMProvider("")
+	}
+	memoryStatus := ResolveMemoryBackendStatus()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	// nex_connected now reflects whether the local nex-cli binary is available
-	// and the user hasn't disabled Nex for this session via --no-nex. The legacy
-	// HTTP ping to app.nex.ai is gone; Nex memory now lives behind nex-cli.
-	nexConnected := nex.Connected()
 	json.NewEncoder(w).Encode(map[string]any{
-		"status":           "ok",
-		"session_mode":     mode,
-		"one_on_one_agent": agent,
-		"focus_mode":       focus,
-		"provider":         provider,
-		"nex_connected":    nexConnected,
-		"build":            buildinfo.Current(),
+		"status":                "ok",
+		"session_mode":          mode,
+		"one_on_one_agent":      agent,
+		"focus_mode":            focus,
+		"provider":              provider,
+		"memory_backend":        memoryStatus.SelectedKind,
+		"memory_backend_active": memoryStatus.ActiveKind,
+		"memory_backend_ready":  memoryStatus.ActiveKind != config.MemoryBackendNone,
+		"nex_connected":         memoryStatus.ActiveKind == config.MemoryBackendNex && nex.Connected(),
+		"build":                 buildinfo.Current(),
 	})
 }
 
@@ -3631,10 +3634,10 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		cfg, _ := config.Load()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"llm_provider": cfg.LLMProvider,
+			"llm_provider":   config.ResolveLLMProvider(""),
+			"memory_backend": config.ResolveMemoryBackend(""),
 		})
 	case http.MethodPost:
 		var body struct {

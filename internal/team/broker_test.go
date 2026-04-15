@@ -680,6 +680,9 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
+	b.runtimeProvider = "codex"
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
+	t.Setenv("WUPHF_OPENAI_API_KEY", "sk-test-openai")
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
 	}
@@ -697,9 +700,13 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 		t.Fatalf("expected 200 on /health, got %d", resp.StatusCode)
 	}
 	var health struct {
-		SessionMode   string `json:"session_mode"`
-		OneOnOneAgent string `json:"one_on_one_agent"`
-		Build         struct {
+		SessionMode         string `json:"session_mode"`
+		OneOnOneAgent       string `json:"one_on_one_agent"`
+		Provider            string `json:"provider"`
+		MemoryBackend       string `json:"memory_backend"`
+		MemoryBackendActive string `json:"memory_backend_active"`
+		NexConnected        bool   `json:"nex_connected"`
+		Build               struct {
 			Version        string `json:"version"`
 			BuildTimestamp string `json:"build_timestamp"`
 		} `json:"build"`
@@ -714,6 +721,18 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	}
 	if health.OneOnOneAgent != DefaultOneOnOneAgent {
 		t.Fatalf("expected health to report default 1o1 agent %q, got %q", DefaultOneOnOneAgent, health.OneOnOneAgent)
+	}
+	if health.Provider != "codex" {
+		t.Fatalf("expected health to report provider codex, got %q", health.Provider)
+	}
+	if health.MemoryBackend != config.MemoryBackendGBrain {
+		t.Fatalf("expected health to report selected memory backend gbrain, got %q", health.MemoryBackend)
+	}
+	if health.MemoryBackendActive != config.MemoryBackendNone {
+		t.Fatalf("expected inactive gbrain backend without CLI installed, got %q", health.MemoryBackendActive)
+	}
+	if health.NexConnected {
+		t.Fatal("expected nex_connected=false when gbrain is selected")
 	}
 	wantBuild := buildinfo.Current()
 	if health.Build.Version != wantBuild.Version {

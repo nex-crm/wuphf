@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
@@ -73,14 +72,14 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	cmd.Env = env
 
 	// Enrich the notification with Nex entity context. Use a 2s deadline so a
-	// slow or unreachable Nex API never holds up the agent turn. The brief is
+	// slow or unreachable memory backend never holds up the agent turn. The brief is
 	// prepended to the notification so the original work packet stays intact.
 	stdinPayload := notification
-	nexCtx, nexCancel := context.WithTimeout(ctx, 2*time.Second)
-	if brief := action.FetchEntityBrief(nexCtx, notification); brief != "" {
+	memoryCtx, memoryCancel := context.WithTimeout(ctx, 2*time.Second)
+	if brief := fetchMemoryBrief(memoryCtx, notification); brief != "" {
 		stdinPayload = brief + "\n\n" + notification
 	}
-	nexCancel()
+	memoryCancel()
 	cmd.Stdin = strings.NewReader(stdinPayload)
 
 	stdout, err := cmd.StdoutPipe()
@@ -223,6 +222,7 @@ func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
 		"WUPHF_AGENT_SLUG="+slug,
 		"WUPHF_BROKER_TOKEN="+l.broker.Token(),
 		"WUPHF_HEADLESS_PROVIDER=claude",
+		"WUPHF_MEMORY_BACKEND="+config.ResolveMemoryBackend(""),
 		fmt.Sprintf("WUPHF_NO_NEX=%t", config.ResolveNoNex()),
 		"ANTHROPIC_PROMPT_CACHING=1",
 	)

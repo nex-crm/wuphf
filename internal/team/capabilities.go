@@ -68,7 +68,7 @@ func DetectRuntimeCapabilitiesWithOptions(opts CapabilityProbeOptions) RuntimeCa
 	summaryKeys := []string{
 		CapabilityKeyOfficeRuntime,
 		CapabilityKeyDirectRuntime,
-		CapabilityKeyNex,
+		CapabilityKeyMemory,
 		CapabilityKeyActions,
 		CapabilityKeyWorkflows,
 		CapabilityKeyOfficeActions,

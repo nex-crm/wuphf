@@ -36,6 +36,7 @@ func TestRoundtrip(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		in := Config{
 			APIKey:             "test-key",
+			MemoryBackend:      MemoryBackendGBrain,
 			Email:              "user@example.com",
 			WorkspaceID:        "ws-123",
 			WorkspaceSlug:      "my-ws",
@@ -118,6 +119,46 @@ func TestResolveAPIKeyConfigFile(t *testing.T) {
 		_ = Save(Config{APIKey: "file-key"})
 		if got := ResolveAPIKey(""); got != "file-key" {
 			t.Fatalf("config file fallback failed, got: %s", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendDefaultsToNex(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "")
+		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		if got := ResolveMemoryBackend(""); got != MemoryBackendNex {
+			t.Fatalf("expected default memory backend nex, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendDefaultsToNoneWhenNoNex(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "1")
+		t.Setenv("WUPHF_MEMORY_BACKEND", "")
+		if got := ResolveMemoryBackend(""); got != MemoryBackendNone {
+			t.Fatalf("expected no-nex default to resolve to none, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendAllowsGBrainUnderNoNex(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "1")
+		t.Setenv("WUPHF_MEMORY_BACKEND", MemoryBackendGBrain)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendGBrain {
+			t.Fatalf("expected explicit gbrain to survive no-nex, got %q", got)
+		}
+	})
+}
+
+func TestResolveMemoryBackendForcesNexToNoneUnderNoNex(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_NO_NEX", "1")
+		t.Setenv("WUPHF_MEMORY_BACKEND", MemoryBackendNex)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendNone {
+			t.Fatalf("expected nex to resolve to none under no-nex, got %q", got)
 		}
 	})
 }

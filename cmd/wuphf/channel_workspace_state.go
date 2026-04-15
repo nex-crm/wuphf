@@ -27,6 +27,7 @@ type workspaceReadinessState struct {
 
 type workspaceUIState struct {
 	Runtime         team.RuntimeSnapshot
+	Memory          team.MemoryBackendStatus
 	Readiness       workspaceReadinessState
 	CurrentApp      officeApp
 	BrokerConnected bool
@@ -46,7 +47,6 @@ type workspaceUIState struct {
 	NeedsYou        *channelInterview
 	PrimaryTask     *channelTask
 	NoNex           bool
-	APIConfigured   bool
 }
 
 func (m channelModel) currentWorkspaceUIState() workspaceUIState {
@@ -67,8 +67,8 @@ func (m channelModel) currentWorkspaceUIState() workspaceUIState {
 		UnreadCount:     m.unreadCount,
 		AwaySummary:     awaySummary,
 		Focus:           trimRecoverySentence(snapshot.Recovery.Focus),
+		Memory:          team.ResolveMemoryBackendStatus(),
 		NoNex:           config.ResolveNoNex(),
-		APIConfigured:   strings.TrimSpace(config.ResolveAPIKey("")) != "",
 	}
 
 	for _, req := range snapshot.Requests {
@@ -128,20 +128,20 @@ func deriveWorkspaceReadiness(state workspaceUIState, doctor *channelDoctorRepor
 			NextStep: "Launch WUPHF to attach the live office, or run /doctor to inspect runtime readiness.",
 		}
 	}
-	if state.NoNex {
+	if state.Memory.SelectedKind == config.MemoryBackendNone {
 		return workspaceReadinessState{
 			Level:    workspaceReadinessReady,
 			Headline: "Local-only runtime",
-			Detail:   "The office is live, but Nex-backed memory and integrations are disabled for this run.",
-			NextStep: "Restart without --no-nex when you want memory, integrations, and provider-backed context.",
+			Detail:   state.Memory.Detail,
+			NextStep: state.Memory.NextStep,
 		}
 	}
-	if !state.APIConfigured {
+	if state.Memory.ActiveKind == config.MemoryBackendNone {
 		return workspaceReadinessState{
 			Level:    workspaceReadinessWarn,
-			Headline: "Finish setup",
-			Detail:   "The office runtime is up, but Nex-backed context and integrations are not configured yet.",
-			NextStep: "Run /init to finish API-key setup, or /doctor to inspect the remaining blockers.",
+			Headline: "Memory backend needs setup",
+			Detail:   state.Memory.Detail,
+			NextStep: firstWorkspaceString(state.Memory.NextStep, "/doctor shows the remaining runtime blockers."),
 		}
 	}
 	if doctor != nil {
@@ -174,7 +174,7 @@ func deriveWorkspaceReadiness(state workspaceUIState, doctor *channelDoctorRepor
 	return workspaceReadinessState{
 		Level:    workspaceReadinessReady,
 		Headline: "Ready to work",
-		Detail:   "The live office runtime is attached and ready for collaboration.",
+		Detail:   fmt.Sprintf("The live office runtime is attached and ready for collaboration with %s memory.", state.Memory.ActiveLabel),
 		NextStep: "Use /switcher to move through the office, or /recover to regain context before replying.",
 	}
 }
@@ -189,6 +189,15 @@ func firstDoctorNextStep(report channelDoctorReport, fallback string) string {
 		}
 	}
 	return fallback
+}
+
+func firstWorkspaceString(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func (s workspaceUIState) readinessCard() (title, body, accent string, extra []string) {
@@ -326,8 +335,10 @@ func (s workspaceUIState) sidebarHintLine() string {
 		return s.Readiness.NextStep
 	case strings.TrimSpace(s.AwaySummary) != "" && s.UnreadCount > 0:
 		return "While away: " + s.AwaySummary
-	case !s.NoNex && !s.APIConfigured:
-		return "/init finishes setup · /doctor explains what is missing"
+	case s.Memory.SelectedKind == config.MemoryBackendNex && s.Memory.ActiveKind == config.MemoryBackendNone:
+		return "/init finishes Nex setup · /doctor explains what is missing"
+	case s.Memory.SelectedKind == config.MemoryBackendGBrain && s.Memory.ActiveKind == config.MemoryBackendNone:
+		return firstWorkspaceString(s.Memory.NextStep, "/doctor explains what is missing")
 	case strings.TrimSpace(s.NextStep) != "":
 		return s.NextStep
 	case strings.TrimSpace(s.Focus) != "":
@@ -381,8 +392,12 @@ func (m channelModel) buildOfficeIntroLines(contentWidth int) []renderedLine {
 	}
 
 	readinessTitle, readinessBody, readinessAccent, readinessExtra := state.readinessCard()
-	if state.NoNex && state.BrokerConnected {
-		readinessExtra = append(readinessExtra, "Nex is disabled for this run; memory and integrations are local-only.")
+	if state.BrokerConnected {
+		if state.Memory.ActiveKind != config.MemoryBackendNone {
+			readinessExtra = append(readinessExtra, "Memory backend: "+state.Memory.ActiveLabel)
+		} else {
+			readinessExtra = append(readinessExtra, "Memory backend: "+state.Memory.SelectedLabel)
+		}
 	}
 	for _, line := range renderRuntimeEventCard(contentWidth, readinessTitle, readinessBody, readinessAccent, readinessExtra) {
 		lines = append(lines, renderedLine{Text: "  " + line})

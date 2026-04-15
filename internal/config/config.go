@@ -15,6 +15,7 @@ import (
 // Config mirrors ~/.wuphf/config.json.
 type Config struct {
 	APIKey              string `json:"api_key,omitempty"`
+	MemoryBackend       string `json:"memory_backend,omitempty"`
 	OneAPIKey           string `json:"one_api_key,omitempty"`
 	ComposioAPIKey      string `json:"composio_api_key,omitempty"`
 	ActionProvider      string `json:"action_provider,omitempty"`
@@ -47,6 +48,12 @@ type Config struct {
 	OpenclawGatewayURL string                  `json:"openclaw_gateway_url,omitempty"`
 	OpenclawToken      string                  `json:"openclaw_token,omitempty"`
 }
+
+const (
+	MemoryBackendNone   = "none"
+	MemoryBackendNex    = "nex"
+	MemoryBackendGBrain = "gbrain"
+)
 
 // OpenclawBridgeBinding binds a WUPHF agent session to an OpenClaw bridge slug.
 type OpenclawBridgeBinding struct {
@@ -139,6 +146,62 @@ func ResolveNoNex() bool {
 		return false
 	}
 	return v == "1" || strings.EqualFold(v, "true") || strings.EqualFold(v, "yes")
+}
+
+// NormalizeMemoryBackend returns a supported memory backend or the empty string.
+func NormalizeMemoryBackend(value string) string {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case MemoryBackendNone:
+		return MemoryBackendNone
+	case MemoryBackendNex:
+		return MemoryBackendNex
+	case MemoryBackendGBrain:
+		return MemoryBackendGBrain
+	default:
+		return ""
+	}
+}
+
+// ResolveMemoryBackend resolves the active organizational memory backend.
+// Resolution: flag/env override > config file > default.
+//
+// Defaults:
+//   - `nex` when Nex is allowed for the run
+//   - `none` when --no-nex is set and no alternate backend was selected
+//
+// `--no-nex` always disables the Nex backend itself, but does not prevent an
+// alternate backend like GBrain from being selected.
+func ResolveMemoryBackend(flagValue string) string {
+	backend := NormalizeMemoryBackend(flagValue)
+	if backend == "" {
+		backend = NormalizeMemoryBackend(os.Getenv("WUPHF_MEMORY_BACKEND"))
+	}
+	if backend == "" {
+		cfg, _ := Load()
+		backend = NormalizeMemoryBackend(cfg.MemoryBackend)
+	}
+	if backend == "" {
+		if ResolveNoNex() {
+			return MemoryBackendNone
+		}
+		return MemoryBackendNex
+	}
+	if backend == MemoryBackendNex && ResolveNoNex() {
+		return MemoryBackendNone
+	}
+	return backend
+}
+
+// MemoryBackendLabel returns a short user-facing label for the backend.
+func MemoryBackendLabel(backend string) string {
+	switch NormalizeMemoryBackend(backend) {
+	case MemoryBackendNex:
+		return "Nex"
+	case MemoryBackendGBrain:
+		return "GBrain"
+	default:
+		return "Local-only"
+	}
 }
 
 // ResolveLLMProvider resolves the active LLM provider for this run.

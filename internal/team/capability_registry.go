@@ -38,7 +38,8 @@ const (
 	CapabilityKeyCodex         = "codex"
 	CapabilityKeyOfficeRuntime = "office_runtime"
 	CapabilityKeyDirectRuntime = "direct_runtime"
-	CapabilityKeyNex           = "nex"
+	CapabilityKeyMemory        = "memory"
+	CapabilityKeyNex           = CapabilityKeyMemory
 	CapabilityKeyConnections   = "connections"
 	CapabilityKeyActions       = "actions"
 	CapabilityKeyWorkflows     = "workflows"
@@ -129,7 +130,7 @@ func buildCapabilityRegistry(providerName string, tmuxStatus, claudeStatus, code
 		descriptorFromStatus(CapabilityKeyTmux, "tmux", CapabilityCategoryRuntime, tmuxStatus),
 		descriptorFromStatus(CapabilityKeyClaude, "claude", CapabilityCategoryRuntime, claudeStatus),
 		descriptorFromStatus(CapabilityKeyCodex, "codex", CapabilityCategoryRuntime, codexStatus),
-		buildNexDescriptor(),
+		buildMemoryDescriptor(),
 		buildActionCapabilityDescriptor(CapabilityKeyActions, "Action execution", CapabilityCategoryAction, action.CapabilityActionExecute),
 		buildActionCapabilityDescriptor(CapabilityKeyWorkflows, "Workflow execution", CapabilityCategoryWorkflow, action.CapabilityWorkflowExecute),
 		buildActionCapabilityDescriptor(CapabilityKeyOfficeActions, "Office actions", CapabilityCategoryOffice, action.CapabilityActionExecute),
@@ -213,36 +214,44 @@ func buildDirectRuntimeDescriptor(providerName string, claudeStatus, codexStatus
 	}
 }
 
-func buildNexDescriptor() CapabilityDescriptor {
-	if config.ResolveNoNex() {
+func buildMemoryDescriptor() CapabilityDescriptor {
+	status := ResolveMemoryBackendStatus()
+	switch status.SelectedKind {
+	case config.MemoryBackendNone:
 		return CapabilityDescriptor{
-			Key:       CapabilityKeyNex,
-			Label:     "Nex memory",
+			Key:       CapabilityKeyMemory,
+			Label:     "Memory backend",
 			Category:  CapabilityCategoryMemory,
 			Level:     CapabilityInfo,
 			Lifecycle: CapabilityLifecycleDisabled,
-			Detail:    "Disabled for this session with --no-nex.",
-			NextStep:  "Restart without --no-nex to enable organizational context and memory.",
+			Detail:    status.Detail,
+			NextStep:  status.NextStep,
 		}
-	}
-	if strings.TrimSpace(config.ResolveAPIKey("")) == "" {
+	default:
+		if status.ActiveKind == config.MemoryBackendNone {
+			label := status.SelectedLabel + " memory"
+			if strings.TrimSpace(label) == "" {
+				label = "Memory backend"
+			}
+			return CapabilityDescriptor{
+				Key:       CapabilityKeyMemory,
+				Label:     label,
+				Category:  CapabilityCategoryMemory,
+				Level:     CapabilityWarn,
+				Lifecycle: CapabilityLifecycleNeedsSetup,
+				Detail:    status.Detail,
+				NextStep:  status.NextStep,
+			}
+		}
+		label := status.ActiveLabel + " memory"
 		return CapabilityDescriptor{
-			Key:       CapabilityKeyNex,
-			Label:     "Nex memory",
+			Key:       CapabilityKeyMemory,
+			Label:     label,
 			Category:  CapabilityCategoryMemory,
-			Level:     CapabilityWarn,
-			Lifecycle: CapabilityLifecycleNeedsSetup,
-			Detail:    "No WUPHF/Nex API key is configured.",
-			NextStep:  "Run /init or set WUPHF_API_KEY to enable Nex-backed context.",
+			Level:     CapabilityReady,
+			Lifecycle: CapabilityLifecycleReady,
+			Detail:    status.Detail,
 		}
-	}
-	return CapabilityDescriptor{
-		Key:       CapabilityKeyNex,
-		Label:     "Nex memory",
-		Category:  CapabilityCategoryMemory,
-		Level:     CapabilityReady,
-		Lifecycle: CapabilityLifecycleReady,
-		Detail:    "Nex-backed organizational context is configured.",
 	}
 }
 

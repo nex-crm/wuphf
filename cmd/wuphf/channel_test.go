@@ -1303,6 +1303,50 @@ func TestNewChannelModelAutoStartsInitWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestNewChannelModelAutoStartsInitForGBrainWithoutProviderKey(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
+	t.Setenv("WUPHF_ANTHROPIC_API_KEY", "")
+	defer os.Setenv("HOME", origHome)
+
+	m := newChannelModel(false)
+
+	if !m.initFlow.IsActive() && m.initFlow.Phase() != tui.InitAPIKey {
+		t.Fatalf("expected init flow to auto-start for missing gbrain credentials, got phase %q", m.initFlow.Phase())
+	}
+	if !strings.Contains(m.notice, "GBrain") || !strings.Contains(m.notice, "Starting setup") {
+		t.Fatalf("expected GBrain setup notice, got %q", m.notice)
+	}
+}
+
+func TestInitCommandRunsForGBrainBackend(t *testing.T) {
+	origHome := os.Getenv("HOME")
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendGBrain)
+	defer os.Setenv("HOME", origHome)
+
+	m := newChannelModel(false)
+	m.initFlow = tui.NewInitFlow()
+	m.notice = ""
+	m.input = []rune("/init")
+	m.inputPos = len(m.input)
+
+	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := next.(channelModel)
+
+	if !strings.Contains(got.notice, "Starting setup...") {
+		t.Fatalf("expected setup notice, got %q", got.notice)
+	}
+	if cmd == nil && got.initFlow.Phase() == tui.InitIdle {
+		t.Fatalf("expected /init to activate setup, got phase %q", got.initFlow.Phase())
+	}
+	if got.initFlow.Phase() != tui.InitAPIKey {
+		t.Fatalf("expected gbrain setup to ask for a provider key, got %q", got.initFlow.Phase())
+	}
+}
+
 func TestSlashAutocompleteShowsAllCommandsOnSlash(t *testing.T) {
 	m := newChannelModel(false)
 	m.input = []rune("/")

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"os"
 	"os/exec"
 	"strings"
 
@@ -60,9 +61,9 @@ func (f InitFlowModel) IsActive() bool {
 
 // Start begins the init flow. API key → provider choice → pack choice → done.
 func (f InitFlowModel) Start() (InitFlowModel, tea.Cmd) {
-	f.apiKey = strings.TrimSpace(config.ResolveAPIKey(""))
+	f.apiKey = strings.TrimSpace(initFlowResolvedMemoryKey())
 	f.provider = config.ResolveLLMProvider("")
-	if f.apiKey == "" {
+	if initFlowNeedsMemoryKey(f.apiKey) {
 		f.phase = InitAPIKey
 		return f, f.emitPhase(InitAPIKey)
 	}
@@ -112,9 +113,13 @@ func (f InitFlowModel) requiresTextInput() bool {
 func (f InitFlowModel) updateAPIKeyInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		key := string(f.keyInput)
-		if strings.TrimSpace(key) == "" {
-			f.keyError = "API key cannot be empty."
+		key := strings.TrimSpace(string(f.keyInput))
+		if key == "" {
+			f.keyError = initFlowEmptyKeyError()
+			return f, nil
+		}
+		if err := initFlowValidateMemoryKey(key); err != "" {
+			f.keyError = err
 			return f, nil
 		}
 		f.apiKey = key
@@ -150,8 +155,23 @@ func (f InitFlowModel) updateAPIKeyInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd
 // finish saves config and transitions to done.
 func (f InitFlowModel) finish() (InitFlowModel, tea.Cmd) {
 	cfg, _ := config.Load()
-	if f.apiKey != "" {
-		cfg.APIKey = f.apiKey
+	switch config.ResolveMemoryBackend("") {
+	case config.MemoryBackendNex:
+		if f.apiKey != "" {
+			cfg.APIKey = f.apiKey
+		}
+	case config.MemoryBackendGBrain:
+		if key := strings.TrimSpace(f.apiKey); key != "" {
+			if strings.HasPrefix(strings.ToLower(key), "sk-ant-") {
+				cfg.AnthropicAPIKey = key
+			} else {
+				cfg.OpenAIAPIKey = key
+			}
+		}
+	default:
+	}
+	if selected := config.NormalizeMemoryBackend(os.Getenv("WUPHF_MEMORY_BACKEND")); selected != "" {
+		cfg.MemoryBackend = selected
 	}
 	cfg.LLMProvider = f.provider
 	cfg.Pack = f.pack
@@ -236,7 +256,7 @@ func (f InitFlowModel) View() string {
 func (f InitFlowModel) renderAPIKeyInput() string {
 	input := string(f.keyInput)
 	cursorStyle := lipgloss.NewStyle().Reverse(true)
-	label := "API Key: "
+	label := initFlowAPIKeyLabel()
 	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(NexBlue)).Bold(true).Render(label)
 
 	display := prompt + input + cursorStyle.Render(" ")
@@ -294,9 +314,10 @@ func readinessStatusColor(status string) string {
 }
 
 func (f InitFlowModel) readinessChecks() []initReadinessCheck {
+	backend := config.ResolveMemoryBackend("")
 	effectiveAPIKey := strings.TrimSpace(f.apiKey)
 	if effectiveAPIKey == "" {
-		effectiveAPIKey = strings.TrimSpace(config.ResolveAPIKey(""))
+		effectiveAPIKey = strings.TrimSpace(initFlowResolvedMemoryKey())
 	}
 	provider := strings.TrimSpace(f.provider)
 	if provider == "" {
@@ -305,9 +326,14 @@ func (f InitFlowModel) readinessChecks() []initReadinessCheck {
 
 	checks := []initReadinessCheck{
 		{
-			Label:  "Nex identity",
-			Status: readinessStatusForBool(effectiveAPIKey != ""),
-			Detail: apiKeyReadinessDetail(effectiveAPIKey != ""),
+			Label:  "Memory backend",
+			Status: initFlowMemoryBackendStatus(backend, effectiveAPIKey),
+			Detail: initFlowMemoryBackendDetail(backend, effectiveAPIKey),
+		},
+		{
+			Label:  initFlowMemoryCredentialLabel(backend),
+			Status: initFlowMemoryCredentialStatus(backend, effectiveAPIKey),
+			Detail: initFlowMemoryCredentialDetail(backend, effectiveAPIKey),
 		},
 		{
 			Label:  "tmux office runtime",
@@ -326,8 +352,8 @@ func (f InitFlowModel) readinessChecks() []initReadinessCheck {
 		},
 		{
 			Label:  "Integrations",
-			Status: "ready",
-			Detail: config.OneSetupSummary(),
+			Status: initFlowIntegrationsStatus(backend),
+			Detail: initFlowIntegrationsDetail(backend),
 		},
 	}
 
@@ -369,13 +395,6 @@ func readinessStatusForOptional(set bool) string {
 		return "ready"
 	}
 	return "next"
-}
-
-func apiKeyReadinessDetail(ok bool) string {
-	if ok {
-		return "WUPHF/Nex API key is configured."
-	}
-	return "Paste your WUPHF/Nex API key to enable memory and managed integrations."
 }
 
 func packReadinessStatus(pack string) string {
@@ -434,13 +453,28 @@ func binaryAvailable(name string) bool {
 }
 
 func (f InitFlowModel) phaseText() (heading, instructions string) {
+	backend := config.ResolveMemoryBackend("")
 	switch f.phase {
 	case InitIdle:
 		return "Setup", "Run /init to begin."
 	case InitAPIKey:
-		return "Enter Nex API Key", "Paste your WUPHF/Nex API key. WUPHF uses One for integrations and manages it automatically through your Nex identity."
+		switch backend {
+		case config.MemoryBackendNex:
+			return "Enter Nex API Key", "Paste your WUPHF/Nex API key. Nex memory and managed integrations both depend on it."
+		case config.MemoryBackendGBrain:
+			return "Enter GBrain Provider Key", "Paste an OpenAI or Anthropic API key for GBrain. OpenAI is the full path: embeddings and vector search depend on it. Anthropic alone works in reduced mode."
+		default:
+			return "Setup", "External memory is disabled for this run, so no memory key is required."
+		}
 	case InitProviderChoice:
-		return "Choose LLM Provider", "Select your preferred AI provider. Integrations are handled automatically through Nex using One."
+		switch backend {
+		case config.MemoryBackendNex:
+			return "Choose LLM Provider", "Select your preferred AI provider. Nex memory uses your WUPHF/Nex API key, and WUPHF-managed integrations remain Nex-backed."
+		case config.MemoryBackendGBrain:
+			return "Choose LLM Provider", "Select your preferred AI provider. GBrain uses the provider key you configured separately here. OpenAI unlocks embeddings and vector search; Anthropic alone is reduced mode."
+		default:
+			return "Choose LLM Provider", "Select your preferred AI provider. External memory is disabled for this run."
+		}
 	case InitPackChoice:
 		return "Choose Agent Pack", "Select the team of agents to work with."
 	case InitDone:
@@ -448,8 +482,162 @@ func (f InitFlowModel) phaseText() (heading, instructions string) {
 		if p := agent.GetPack(f.pack); p != nil {
 			packName = p.Name
 		}
-		return "Setup Complete", "Provider: " + f.provider + " | Pack: " + packName + ". " + config.OneSetupBlurb()
+		summary := "Memory: " + config.MemoryBackendLabel(backend) + " | Provider: " + f.provider + " | Pack: " + packName + "."
+		switch backend {
+		case config.MemoryBackendNex:
+			return "Setup Complete", summary + " " + config.OneSetupBlurb()
+		case config.MemoryBackendGBrain:
+			if strings.TrimSpace(config.ResolveOpenAIAPIKey()) != "" {
+				return "Setup Complete", summary + " GBrain will use your OpenAI key for embeddings and vector search."
+			}
+			return "Setup Complete", summary + " GBrain is configured in reduced mode. Add an OpenAI key if you want embeddings and vector search."
+		default:
+			return "Setup Complete", summary + " External memory is disabled for this run."
+		}
 	default:
 		return "Setup", "Run /init to begin."
+	}
+}
+
+func initFlowSelectedMemoryBackend() string {
+	return config.ResolveMemoryBackend("")
+}
+
+func initFlowResolvedMemoryKey() string {
+	switch initFlowSelectedMemoryBackend() {
+	case config.MemoryBackendNex:
+		return strings.TrimSpace(config.ResolveAPIKey(""))
+	case config.MemoryBackendGBrain:
+		if key := strings.TrimSpace(config.ResolveOpenAIAPIKey()); key != "" {
+			return key
+		}
+		return strings.TrimSpace(config.ResolveAnthropicAPIKey())
+	default:
+		return ""
+	}
+}
+
+func initFlowNeedsMemoryKey(current string) bool {
+	switch initFlowSelectedMemoryBackend() {
+	case config.MemoryBackendNex, config.MemoryBackendGBrain:
+		return strings.TrimSpace(current) == ""
+	default:
+		return false
+	}
+}
+
+func initFlowAPIKeyLabel() string {
+	switch initFlowSelectedMemoryBackend() {
+	case config.MemoryBackendNex:
+		return "Nex API Key: "
+	case config.MemoryBackendGBrain:
+		return "Provider Key: "
+	default:
+		return "API Key: "
+	}
+}
+
+func initFlowEmptyKeyError() string {
+	switch initFlowSelectedMemoryBackend() {
+	case config.MemoryBackendNex:
+		return "Nex API key cannot be empty."
+	case config.MemoryBackendGBrain:
+		return "Enter an OpenAI or Anthropic API key for GBrain. OpenAI is required for embeddings and vector search."
+	default:
+		return "API key cannot be empty."
+	}
+}
+
+func initFlowValidateMemoryKey(key string) string {
+	if initFlowSelectedMemoryBackend() != config.MemoryBackendGBrain {
+		return ""
+	}
+	lower := strings.ToLower(strings.TrimSpace(key))
+	if strings.HasPrefix(lower, "sk-ant-") || strings.HasPrefix(lower, "sk-") {
+		return ""
+	}
+	return "Paste an OpenAI key (sk-...) or an Anthropic key (sk-ant-...)."
+}
+
+func initFlowMemoryBackendStatus(backend, key string) string {
+	if backend == config.MemoryBackendNone {
+		return "ready"
+	}
+	return readinessStatusForBool(strings.TrimSpace(key) != "")
+}
+
+func initFlowMemoryBackendDetail(backend, key string) string {
+	switch backend {
+	case config.MemoryBackendNex:
+		if strings.TrimSpace(key) != "" {
+			return "Nex selected. WUPHF/Nex API key is configured."
+		}
+		return "Nex selected. WUPHF/Nex API key is required."
+	case config.MemoryBackendGBrain:
+		if strings.TrimSpace(key) != "" {
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "sk-ant-") {
+				return "GBrain selected. Anthropic-only mode is configured; embeddings and vector search still require OpenAI."
+			}
+			return "GBrain selected. OpenAI is configured, including embeddings and vector search."
+		}
+		return "GBrain selected. Configure a provider key before GBrain can run. OpenAI is required for embeddings and vector search."
+	default:
+		return "Local-only selected. No external memory key is required."
+	}
+}
+
+func initFlowMemoryCredentialLabel(backend string) string {
+	switch backend {
+	case config.MemoryBackendNex:
+		return "Nex API key"
+	case config.MemoryBackendGBrain:
+		return "GBrain provider key"
+	default:
+		return "Memory credentials"
+	}
+}
+
+func initFlowMemoryCredentialStatus(backend, key string) string {
+	if backend == config.MemoryBackendNone {
+		return "ready"
+	}
+	return readinessStatusForBool(strings.TrimSpace(key) != "")
+}
+
+func initFlowMemoryCredentialDetail(backend, key string) string {
+	switch backend {
+	case config.MemoryBackendNex:
+		if strings.TrimSpace(key) != "" {
+			return "Configured for Nex-backed context and managed integrations."
+		}
+		return "Paste your WUPHF/Nex API key to enable Nex-backed context."
+	case config.MemoryBackendGBrain:
+		if strings.TrimSpace(key) != "" {
+			if strings.HasPrefix(strings.ToLower(strings.TrimSpace(key)), "sk-ant-") {
+				return "Anthropic key configured for GBrain reduced mode. Add OpenAI for embeddings and vector search."
+			}
+			return "OpenAI key configured for GBrain, including embeddings and vector search."
+		}
+		return "Paste an OpenAI or Anthropic API key before using GBrain. OpenAI is required for embeddings and vector search."
+	default:
+		return "No external memory credentials required."
+	}
+}
+
+func initFlowIntegrationsStatus(backend string) string {
+	if backend == config.MemoryBackendNex {
+		return "ready"
+	}
+	return "next"
+}
+
+func initFlowIntegrationsDetail(backend string) string {
+	switch backend {
+	case config.MemoryBackendNex:
+		return config.OneSetupSummary()
+	case config.MemoryBackendGBrain:
+		return "WUPHF-managed integrations currently require the Nex memory backend and a WUPHF/Nex API key."
+	default:
+		return "Managed integrations are off in local-only mode. Select Nex if you want WUPHF-managed integration setup."
 	}
 }

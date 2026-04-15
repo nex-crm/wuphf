@@ -200,7 +200,7 @@ func hashSidebarState(channels []channelInfo, members []channelMember, tasks []c
 	h.addInt(workspace.IsolatedCount)
 	h.addInt(workspace.UnreadCount)
 	h.addBool(workspace.NoNex)
-	h.addBool(workspace.APIConfigured)
+	h.add(workspace.Memory.SelectedKind, workspace.Memory.SelectedLabel, workspace.Memory.ActiveKind, workspace.Memory.ActiveLabel, workspace.Memory.Detail, workspace.Memory.NextStep)
 	h.add(string(workspace.Readiness.Level), workspace.Readiness.Headline, workspace.Readiness.Detail, workspace.Readiness.NextStep)
 	if workspace.NeedsYou != nil {
 		h.add(workspace.NeedsYou.ID, workspace.NeedsYou.TitleOrQuestion())

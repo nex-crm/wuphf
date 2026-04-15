@@ -4,6 +4,7 @@
 // a fork that does not use Nex, delete this file and remove the calls to:
 //   - pollNexNotificationsLoop (in launcher.go Launch())
 //   - pollNexInsightsLoop      (in launcher.go Launch())
+//
 // That is the complete surface area; no other files need changes.
 package team
 
@@ -80,6 +81,9 @@ type insightTaskPlan struct {
 
 func (l *Launcher) pollNexNotificationsLoop() {
 	if l.broker == nil {
+		return
+	}
+	if !shouldPollNexNotifications() {
 		return
 	}
 	apiKey := config.ResolveAPIKey("")

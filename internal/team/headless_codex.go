@@ -52,6 +52,7 @@ func (l *Launcher) launchHeadlessCodex() error {
 	exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	l.broker = NewBroker()
+	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
@@ -66,7 +67,9 @@ func (l *Launcher) launchHeadlessCodex() error {
 	go l.notifyAgentsLoop()
 	if !l.isOneOnOne() {
 		go l.notifyTaskActionsLoop()
-		go l.pollNexNotificationsLoop()
+		if shouldPollNexNotifications() {
+			go l.pollNexNotificationsLoop()
+		}
 		go l.watchdogSchedulerLoop()
 	}
 
@@ -366,7 +369,13 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	cmd := headlessCodexCommandContext(ctx, "codex", args...)
 	cmd.Dir = l.cwd
 	cmd.Env = l.buildHeadlessCodexEnv(slug)
-	cmd.Stdin = strings.NewReader(buildHeadlessCodexPrompt(l.buildPrompt(slug), notification))
+	stdinPayload := notification
+	memoryCtx, memoryCancel := context.WithTimeout(ctx, 2*time.Second)
+	if brief := fetchMemoryBrief(memoryCtx, notification); brief != "" {
+		stdinPayload = brief + "\n\n" + notification
+	}
+	memoryCancel()
+	cmd.Stdin = strings.NewReader(buildHeadlessCodexPrompt(l.buildPrompt(slug), stdinPayload))
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -505,6 +514,7 @@ func (l *Launcher) buildHeadlessCodexEnv(slug string) []string {
 		"WUPHF_AGENT_SLUG="+slug,
 		"WUPHF_BROKER_TOKEN="+l.broker.Token(),
 		"WUPHF_HEADLESS_PROVIDER=codex",
+		"WUPHF_MEMORY_BACKEND="+config.ResolveMemoryBackend(""),
 	)
 	if config.ResolveNoNex() {
 		env = append(env, "WUPHF_NO_NEX=1")
@@ -530,6 +540,12 @@ func (l *Launcher) buildHeadlessCodexEnv(slug string) []string {
 			"NEX_API_KEY="+apiKey,
 		)
 	}
+	if apiKey := strings.TrimSpace(config.ResolveOpenAIAPIKey()); apiKey != "" {
+		env = append(env, "OPENAI_API_KEY="+apiKey)
+	}
+	if apiKey := strings.TrimSpace(config.ResolveAnthropicAPIKey()); apiKey != "" {
+		env = append(env, "ANTHROPIC_API_KEY="+apiKey)
+	}
 	return env
 }
 
@@ -541,6 +557,7 @@ func (l *Launcher) buildCodexOfficeConfigOverrides(slug string) ([]string, error
 	wuphfEnvVars := []string{
 		"WUPHF_AGENT_SLUG",
 		"WUPHF_BROKER_TOKEN",
+		"WUPHF_MEMORY_BACKEND",
 	}
 	if config.ResolveNoNex() {
 		wuphfEnvVars = append(wuphfEnvVars, "WUPHF_NO_NEX")
@@ -567,15 +584,15 @@ func (l *Launcher) buildCodexOfficeConfigOverrides(slug string) ([]string, error
 		fmt.Sprintf(`mcp_servers.wuphf-office.env_vars=%s`, tomlStringArray(wuphfEnvVars)),
 	}
 
-	if !config.ResolveNoNex() {
-		if nexMCP, err := headlessCodexLookPath("nex-mcp"); err == nil {
-			overrides = append(overrides, fmt.Sprintf(`mcp_servers.nex.command=%s`, tomlQuote(nexMCP)))
-			if apiKey := strings.TrimSpace(config.ResolveAPIKey("")); apiKey != "" {
-				overrides = append(overrides, fmt.Sprintf(`mcp_servers.nex.env_vars=%s`, tomlStringArray([]string{
-					"WUPHF_API_KEY",
-					"NEX_API_KEY",
-				})))
-			}
+	if server, err := resolvedMemoryMCPServer(); err != nil {
+		return nil, err
+	} else if server != nil {
+		overrides = append(overrides, fmt.Sprintf(`mcp_servers.%s.command=%s`, server.Name, tomlQuote(server.Command)))
+		if len(server.Args) > 0 {
+			overrides = append(overrides, fmt.Sprintf(`mcp_servers.%s.args=%s`, server.Name, tomlStringArray(server.Args)))
+		}
+		if len(server.EnvVars) > 0 {
+			overrides = append(overrides, fmt.Sprintf(`mcp_servers.%s.env_vars=%s`, server.Name, tomlStringArray(server.EnvVars)))
 		}
 	}
 

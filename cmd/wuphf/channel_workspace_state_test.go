@@ -6,6 +6,7 @@ import (
 )
 
 func TestBuildOfficeIntroLinesUsesWorkspaceState(t *testing.T) {
+	t.Setenv("WUPHF_NO_NEX", "1")
 	m := newChannelModel(false)
 	m.brokerConnected = true
 	m.members = []channelMember{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "Product Manager"}}
@@ -18,10 +19,10 @@ func TestBuildOfficeIntroLinesUsesWorkspaceState(t *testing.T) {
 	if !strings.Contains(plain, "Welcome to The WUPHF Office.") {
 		t.Fatalf("expected office welcome copy, got %q", plain)
 	}
-	if !strings.Contains(plain, "Ready to work") {
-		t.Fatalf("expected ready-to-work card, got %q", plain)
+	if !strings.Contains(plain, "Local-only runtime") {
+		t.Fatalf("expected local-only readiness card, got %q", plain)
 	}
-	if !strings.Contains(plain, "Use /switcher to move through the office, or /recover to regain context before replying.") {
+	if !strings.Contains(plain, "Restart without --no-nex or select --memory-backend gbrain when you want external context.") {
 		t.Fatalf("expected switcher guidance, got %q", plain)
 	}
 }
@@ -76,6 +77,7 @@ func TestCurrentHeaderMetaUsesWorkspaceStateForOfficeMessages(t *testing.T) {
 }
 
 func TestCurrentWorkspaceUIStatePromotesDoctorWarningsIntoReadiness(t *testing.T) {
+	t.Setenv("WUPHF_NO_NEX", "1")
 	m := newChannelModel(false)
 	m.brokerConnected = true
 	m.activeChannel = "general"
@@ -91,10 +93,10 @@ func TestCurrentWorkspaceUIStatePromotesDoctorWarningsIntoReadiness(t *testing.T
 	}
 
 	state := m.currentWorkspaceUIState()
-	if state.Readiness.Level != workspaceReadinessWarn {
-		t.Fatalf("expected warning readiness, got %+v", state.Readiness)
+	if state.Readiness.Level != workspaceReadinessReady {
+		t.Fatalf("expected ready local-only readiness, got %+v", state.Readiness)
 	}
-	if !strings.Contains(state.Readiness.NextStep, "Connect Gmail, CRM") {
-		t.Fatalf("expected doctor next step to flow into readiness, got %+v", state.Readiness)
+	if !strings.Contains(state.Readiness.Headline, "Local-only") {
+		t.Fatalf("expected local-only readiness headline, got %+v", state.Readiness)
 	}
 }
