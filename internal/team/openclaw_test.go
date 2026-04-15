@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -132,5 +133,84 @@ func TestHandleClientEventSplitsDeltaAndFinal(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected final message posted to broker from openclaw-a; got %+v", msgs)
+	}
+}
+
+func TestOnOfficeMessageSuccess(t *testing.T) {
+	fake := newFakeOC()
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
+	b := NewOpenclawBridge(NewBroker(), fake, bindings)
+	_ = b.Start(context.Background())
+	defer b.Stop()
+	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "hello")
+	if err != nil {
+		t.Fatalf("OnOfficeMessage: %v", err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.sentKeys) != 1 {
+		t.Fatalf("expected 1 send, got %v", fake.sentKeys)
+	}
+}
+
+func TestOnOfficeMessageRetriesTransient(t *testing.T) {
+	fake := newFakeOC()
+	fake.nextSendErrs = []error{errors.New("transient 1"), errors.New("transient 2")} // first two fail, third succeeds
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
+	b := NewOpenclawBridge(NewBroker(), fake, bindings)
+	// Shrink retry delays for the test.
+	b.SetRetryDelaysForTest([]time.Duration{10 * time.Millisecond, 10 * time.Millisecond})
+	_ = b.Start(context.Background())
+	defer b.Stop()
+	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "hello")
+	if err != nil {
+		t.Fatalf("expected retry to succeed: %v", err)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.sentKeys) != 3 {
+		t.Fatalf("expected 3 send attempts, got %d: %v", len(fake.sentKeys), fake.sentKeys)
+	}
+	// All three attempts MUST reuse the same idempotency key (last field).
+	// Each entry is "key|message|idempotencyKey".
+	prev := ""
+	for _, entry := range fake.sentKeys {
+		parts := strings.Split(entry, "|")
+		if len(parts) != 3 {
+			t.Fatalf("malformed sentKeys entry: %q", entry)
+		}
+		if prev == "" {
+			prev = parts[2]
+			continue
+		}
+		if parts[2] != prev {
+			t.Fatalf("idempotency key changed across retries: %v", fake.sentKeys)
+		}
+	}
+}
+
+func TestOnOfficeMessagePermanentFailurePostsSystemMessage(t *testing.T) {
+	fake := newFakeOC()
+	fake.sendErr = errors.New("forever broken")
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
+	broker := NewBroker()
+	b := NewOpenclawBridge(broker, fake, bindings)
+	b.SetRetryDelaysForTest([]time.Duration{5 * time.Millisecond, 5 * time.Millisecond})
+	_ = b.Start(context.Background())
+	defer b.Stop()
+	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "hello")
+	if err == nil {
+		t.Fatal("expected permanent failure error")
+	}
+	msgs := broker.AllMessages()
+	sysFound := false
+	for _, m := range msgs {
+		if m.From == "system" {
+			sysFound = true
+			break
+		}
+	}
+	if !sysFound {
+		t.Fatal("expected system message posted on permanent failure")
 	}
 }

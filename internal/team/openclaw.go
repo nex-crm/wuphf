@@ -4,10 +4,14 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/openclaw"
 )
+
+var defaultOpenclawRetryDelays = []time.Duration{1 * time.Second, 5 * time.Second, 30 * time.Second}
 
 // openclawClient is the subset of internal/openclaw.Client the bridge uses.
 // Having it here (not in the openclaw package) keeps the mock test-local.
@@ -29,6 +33,8 @@ type OpenclawBridge struct {
 
 	slugByKey map[string]string // sessionKey -> slug
 	keyBySlug map[string]string // slug -> sessionKey
+
+	retryDelays []time.Duration // nil = use defaults
 
 	mu     sync.RWMutex
 	ctx    context.Context
@@ -139,6 +145,53 @@ func (b *OpenclawBridge) handleClientEvent(evt openclaw.ClientEvent) {
 	case openclaw.EventKindClose:
 		// Task 11 handles reconnect; no-op here.
 	}
+}
+
+// retryDelaysList returns the configured retry delays, falling back to the
+// package default when nothing has been injected.
+func (b *OpenclawBridge) retryDelaysList() []time.Duration {
+	if b.retryDelays != nil {
+		return b.retryDelays
+	}
+	return defaultOpenclawRetryDelays
+}
+
+// SetRetryDelaysForTest is only used by tests.
+func (b *OpenclawBridge) SetRetryDelaysForTest(d []time.Duration) { b.retryDelays = d }
+
+// OnOfficeMessage sends an office message from user/@mention to the OpenClaw
+// agent identified by slug. Retries on transient errors with a SINGLE reused
+// idempotency key (per-call, per pre-implementation decision 3).
+func (b *OpenclawBridge) OnOfficeMessage(ctx context.Context, slug, message string) error {
+	key, ok := b.keyBySlug[slug]
+	if !ok {
+		return fmt.Errorf("openclaw: unknown bridged slug %q", slug)
+	}
+	idem := uuid.NewString()
+	delays := b.retryDelaysList()
+	var lastErr error
+	for attempt := 0; attempt <= len(delays); attempt++ {
+		err := b.client.SessionsSend(ctx, key, message, idem)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if ctx.Err() != nil {
+			break
+		}
+		if attempt >= len(delays) {
+			break
+		}
+		t := time.NewTimer(delays[attempt])
+		select {
+		case <-t.C:
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		}
+	}
+	b.postSystemMessage(fmt.Sprintf("failed to reach @%s: %v", slug, lastErr))
+	return lastErr
 }
 
 // postBridgeMessage posts a bridged-agent chat message into #general via the
