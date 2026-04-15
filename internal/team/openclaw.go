@@ -51,6 +51,24 @@ type OpenclawBridge struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
+
+	// noticedOffline is true while the circuit breaker has been reported as
+	// open via a system message; reset to false when the breaker closes so
+	// each offline episode posts exactly one notice (not one per 5-minute
+	// supervise tick — reviewer Important issue 5).
+	noticedOffline bool
+}
+
+// HasSlug reports whether the given slug is bound to a bridged OpenClaw
+// session. Used by the launcher's mention dispatcher to decide whether to
+// route a tagged message through the bridge instead of (or in addition to)
+// the normal agent-spawn path.
+func (b *OpenclawBridge) HasSlug(slug string) bool {
+	if b == nil {
+		return false
+	}
+	_, ok := b.keyBySlug[slug]
+	return ok
 }
 
 // NewOpenclawBridge constructs a bridge with a single preconstructed client.
@@ -128,7 +146,13 @@ func (b *OpenclawBridge) supervise() {
 			return
 		}
 		if b.breaker != nil && b.breaker.Open() {
-			b.postSystemMessage("openclaw gateway offline")
+			// Post the offline notice at most once per breaker-open episode.
+			// Without this guard supervise() loops every 5 minutes and floods
+			// #general with the same system message until the breaker closes.
+			if !b.noticedOffline {
+				b.postSystemMessage("openclaw gateway offline")
+				b.noticedOffline = true
+			}
 			select {
 			case <-time.After(5 * time.Minute):
 				continue
@@ -136,6 +160,10 @@ func (b *OpenclawBridge) supervise() {
 				return
 			}
 		}
+		// Once the breaker has closed (or was never open) we're back in a state
+		// where a future trip should re-notify. Clearing here covers both the
+		// cold-start path and the half-open-recovery path.
+		b.noticedOffline = false
 		err := b.runOnce()
 		if err != nil && !errors.Is(err, context.Canceled) {
 			if b.breaker != nil {

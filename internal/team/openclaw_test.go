@@ -286,6 +286,200 @@ func TestReconnectOnClientClose(t *testing.T) {
 	}
 }
 
+// TestStartOpenclawBridgeFromConfigNoBindings confirms the bootstrap is a
+// no-op when config has no bridges — the integration is opt-in and must not
+// dial the gateway or spin up a supervise goroutine.
+func TestStartOpenclawBridgeFromConfigNoBindings(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	// No config file written; Load() will return zero-value Config.
+	broker := NewBroker()
+	bridge, err := StartOpenclawBridgeFromConfig(context.Background(), broker)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bridge != nil {
+		t.Fatalf("expected nil bridge when no bindings are configured, got %+v", bridge)
+	}
+}
+
+// TestStartOpenclawBridgeFromConfigWithBindings confirms the bootstrap builds
+// and starts a supervised bridge when bindings are present. We inject a fake
+// dialer so this test never touches the real gateway.
+func TestStartOpenclawBridgeFromConfigWithBindings(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	cfg := config.Config{
+		OpenclawBridges: []config.OpenclawBridgeBinding{
+			{SessionKey: "boot-k", Slug: "openclaw-boot", DisplayName: "Boot"},
+		},
+	}
+	if err := config.Save(cfg); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	fake := newFakeOC()
+	openclawBootstrapDialer = func(ctx context.Context) (openclawClient, error) { return fake, nil }
+	defer func() { openclawBootstrapDialer = nil }()
+
+	broker := NewBroker()
+	bridge, err := StartOpenclawBridgeFromConfig(context.Background(), broker)
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if bridge == nil {
+		t.Fatal("expected non-nil bridge when bindings are configured")
+	}
+	defer bridge.Stop()
+
+	// Give supervise a tick to dial + subscribe.
+	time.Sleep(80 * time.Millisecond)
+	fake.mu.Lock()
+	subs := len(fake.subscribed)
+	fake.mu.Unlock()
+	if subs == 0 {
+		t.Fatal("expected bootstrap to subscribe the bound session")
+	}
+	if !bridge.HasSlug("openclaw-boot") {
+		t.Fatal("HasSlug should report true for bound slug")
+	}
+	if bridge.HasSlug("not-bridged") {
+		t.Fatal("HasSlug should report false for unknown slug")
+	}
+}
+
+// TestRouteOpenclawMentionsLoopForwardsHumanMention confirms the mention
+// dispatcher invokes OnOfficeMessage when a human posts an @mention that
+// matches a bridged slug — the missing runtime link this PR closes.
+func TestRouteOpenclawMentionsLoopForwardsHumanMention(t *testing.T) {
+	fake := newFakeOC()
+	broker := NewBroker()
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "mk", Slug: "openclaw-mentions"}}
+	bridge := NewOpenclawBridge(broker, fake, bindings)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := bridge.Start(ctx); err != nil {
+		t.Fatalf("bridge start: %v", err)
+	}
+	defer bridge.Stop()
+
+	// Kick off the mention-routing loop.
+	go routeOpenclawMentionsLoop(ctx, broker, bridge)
+	// Let the subscriber register before we publish.
+	time.Sleep(20 * time.Millisecond)
+
+	// Simulate a human posting into #general with the bridged slug tagged.
+	broker.mu.Lock()
+	broker.counter++
+	msg := channelMessage{
+		ID:        "msg-mention-1",
+		From:      "human",
+		Channel:   "general",
+		Content:   "ping from the office",
+		Tagged:    []string{"openclaw-mentions"},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	broker.appendMessageLocked(msg)
+	broker.mu.Unlock()
+
+	// Allow the subscriber + OnOfficeMessage goroutine to run.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		fake.mu.Lock()
+		got := len(fake.sentKeys)
+		fake.mu.Unlock()
+		if got >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.sentKeys) != 1 {
+		t.Fatalf("expected 1 forwarded send, got %d: %v", len(fake.sentKeys), fake.sentKeys)
+	}
+	if !strings.HasPrefix(fake.sentKeys[0], "mk|ping from the office|") {
+		t.Fatalf("forwarded send has unexpected shape: %q", fake.sentKeys[0])
+	}
+}
+
+// TestRouteOpenclawMentionsLoopIgnoresUnrelated confirms the dispatcher is
+// narrow: it does not forward system messages, agent-to-agent chatter, or
+// mentions of non-bridged slugs. Without this the bridge would double-post
+// every office message.
+func TestRouteOpenclawMentionsLoopIgnoresUnrelated(t *testing.T) {
+	fake := newFakeOC()
+	broker := NewBroker()
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "mk", Slug: "openclaw-only"}}
+	bridge := NewOpenclawBridge(broker, fake, bindings)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = bridge.Start(ctx)
+	defer bridge.Stop()
+
+	go routeOpenclawMentionsLoop(ctx, broker, bridge)
+	time.Sleep(20 * time.Millisecond)
+
+	// Three negatives: system author, agent author, and mention of
+	// a non-bridged slug. None should reach the gateway.
+	cases := []channelMessage{
+		{ID: "msg-neg-1", From: "system", Channel: "general", Content: "sys", Tagged: []string{"openclaw-only"}},
+		{ID: "msg-neg-2", From: "ceo", Channel: "general", Content: "agent", Tagged: []string{"openclaw-only"}},
+		{ID: "msg-neg-3", From: "human", Channel: "general", Content: "wrong", Tagged: []string{"someone-else"}},
+	}
+	for _, m := range cases {
+		broker.mu.Lock()
+		broker.counter++
+		m.Timestamp = time.Now().UTC().Format(time.RFC3339)
+		broker.appendMessageLocked(m)
+		broker.mu.Unlock()
+	}
+	time.Sleep(150 * time.Millisecond)
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.sentKeys) != 0 {
+		t.Fatalf("expected 0 forwarded sends for unrelated messages, got %v", fake.sentKeys)
+	}
+}
+
+// TestSuperviseOfflineNoticeDeduped drives the supervise loop into
+// breaker-open state and confirms the "openclaw gateway offline" system
+// message is posted at most once per episode — not every 5-minute tick
+// (reviewer Important issue 5).
+func TestSuperviseOfflineNoticeDeduped(t *testing.T) {
+	broker := NewBroker()
+	dialer := func(ctx context.Context) (openclawClient, error) {
+		return nil, errors.New("dial refused")
+	}
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-dead"}}
+	bridge := NewOpenclawBridgeWithDialer(broker, nil, dialer, bindings)
+	// Fast-fail backoff + low threshold so the breaker trips quickly.
+	bridge.backoff = NewBridgeBackoff(1*time.Millisecond, 2*time.Millisecond)
+	bridge.breaker = NewCircuitBreaker(2, 5*time.Minute)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	_ = bridge.Start(ctx)
+
+	// Give supervise time to fail twice (trips breaker) and iterate the
+	// breaker-open branch several times. Without the noticedOffline guard
+	// each iteration would post another system message.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	bridge.Stop()
+
+	n := 0
+	for _, m := range broker.AllMessages() {
+		if m.From == "system" && strings.Contains(m.Content, "openclaw gateway offline") {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly 1 offline notice per breaker-open episode, got %d", n)
+	}
+}
+
 func TestOnOfficeMessagePermanentFailurePostsSystemMessage(t *testing.T) {
 	fake := newFakeOC()
 	fake.sendErr = errors.New("forever broken")
