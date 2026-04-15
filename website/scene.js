@@ -1,6 +1,5 @@
 // WUPHF Pixel Office — scene engine
 // Loaded by website/index.html. No dependencies.
-// See DESIGN.md for the full spec.
 
 (function () {
   'use strict';
@@ -9,16 +8,19 @@
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
 
-  // ── Mobile detection ───────────────────────────────────────────
+  // ── Mobile detection ──────────────────────────────────────────
   const isMobile = window.innerWidth < 768;
 
-  // ── Canvas sizing ──────────────────────────────────────────────
-  const W = isMobile ? window.innerWidth : 800;
-  const H = isMobile ? 260 : 460;
-  canvas.width  = W;
-  canvas.height = H;
-  canvas.style.width  = '100%';
-  canvas.style.height = 'auto';
+  // ── Canvas sizing (full viewport, DPR-aware) ──────────────────
+  const W = window.innerWidth;
+  const H = isMobile ? 260 : (window.innerHeight - 44);
+  const DPR = window.devicePixelRatio || 1;
+
+  canvas.width  = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  canvas.style.width  = W + 'px';
+  canvas.style.height = H + 'px';
+  ctx.scale(DPR, DPR);
 
   // ── Design tokens ──────────────────────────────────────────────
   const C = {
@@ -47,9 +49,10 @@
   };
 
   // ── Isometric grid ─────────────────────────────────────────────
-  const TW = 60, TH = 30;
-  const OX = 420, OY = 100;
-  const COLS = 9, ROWS = 6;
+  const COLS = 12, ROWS = 8;
+  const TW = 80, TH = 40;
+  const OX = Math.round(W * 0.52);
+  const OY = 150;
 
   function iso(gx, gy) {
     return {
@@ -62,17 +65,113 @@
     return { x: p.x + TW / 2, y: p.y + TH / 2 };
   }
 
-  // ── State ──────────────────────────────────────────────────────
-  let flashOn   = true;
-  let animF     = 0;
-  let drawerHit = null;
-  let drawerOpen = false;
-  const interactHits = [];  // { id, x, y, w, h }
-  let   activeReveal = null; // { id, x, y, content: string[] }
-  let   revealTimer  = null;
-
-  setInterval(() => { flashOn = !flashOn; }, 500);
+  // ── Animation state ────────────────────────────────────────────
+  let animF = 0;
   setInterval(() => { animF = (animF + 1) % 4; }, 280);
+
+  // ── Ambient speech bubble system ───────────────────────────────
+  const ambientMessages = [
+    { charId: 'pam',     text: 'WUPHF!' },
+    { charId: 'ceo',     text: 'One command. One office.' },
+    { charId: 'eng',     text: '$ go build -o wuphf && ./wuphf' },
+    { charId: 'michael', text: "I'm not superstitious, but I am a little stitious." },
+    { charId: 'cmo',     text: 'Open source. MIT license.' },
+    { charId: 'dwight',  text: 'Bears. Beets. Battlestar Galactica.' },
+    { charId: 'ceo',     text: 'Routing task to engineering. ETA: 3 minutes.' },
+    { charId: 'pam',     text: 'CEO, PM, engineers — all visible, all working.' },
+    { charId: 'eng',     text: 'Implementing feature... 47% complete.' },
+    { charId: 'jim',     text: "Unlike Ryan Howard's WUPHF, this one works." },
+    { charId: 'cmo',     text: 'Drafting launch post. You will not believe this lede.' },
+    { charId: 'kevin',   text: '... (stares at snacks)' },
+    { charId: 'creed',   text: 'Nobody steals from Creed Bratton and gets away with it.' },
+  ];
+
+  const activeBubbles = [];
+  const BUBBLE_DURATION = 5000;
+  const BUBBLE_INTERVAL = 2400;
+  let lastBubbleTime = 0;
+  let msgIndex = 0;
+  const charScreenPos = {};
+
+  function updateBubbles(now) {
+    for (let i = activeBubbles.length - 1; i >= 0; i--) {
+      if (now - activeBubbles[i].startTime > BUBBLE_DURATION) activeBubbles.splice(i, 1);
+    }
+    if (activeBubbles.length < 2 && now - lastBubbleTime > BUBBLE_INTERVAL) {
+      const activeIds = new Set(activeBubbles.map(b => b.charId));
+      for (let t = 0; t < ambientMessages.length; t++) {
+        const msg = ambientMessages[msgIndex % ambientMessages.length];
+        msgIndex++;
+        if (!activeIds.has(msg.charId)) {
+          activeBubbles.push({ charId: msg.charId, text: msg.text, startTime: now });
+          lastBubbleTime = now;
+          break;
+        }
+      }
+    }
+  }
+
+  function drawBubble(bubble, now) {
+    const pos = charScreenPos[bubble.charId];
+    if (!pos) return;
+    const age = now - bubble.startTime;
+
+    // Discrete pop-in / pop-out (no smooth easing — steps only)
+    let alpha = 1;
+    if      (age < 100)                        alpha = 0;
+    else if (age < 220)                        alpha = 0.6;
+    else if (age > BUBBLE_DURATION - 220)      alpha = 0.6;
+    else if (age > BUBBLE_DURATION - 100)      alpha = 0;
+    if (alpha === 0) return;
+
+    ctx.globalAlpha = alpha;
+    const BW = 240, BH = 94;
+    let bx = Math.min(pos.centerX - 110, W - BW - 12);
+    bx = Math.max(bx, 12);
+    const by = Math.max(pos.topY - 108, 5);
+
+    // Panel
+    ctx.fillStyle = C.surface;
+    ctx.fillRect(bx, by, BW, BH);
+    ctx.strokeStyle = C.yellow; ctx.lineWidth = 3;
+    ctx.strokeRect(bx, by, BW, BH);
+    // Pixel shadow
+    ctx.fillStyle = C.yellowDark;
+    ctx.fillRect(bx + 4, by + BH, BW, 4);
+    ctx.fillRect(bx + BW, by + 4, 4, BH);
+
+    // Tail
+    ctx.beginPath();
+    ctx.moveTo(bx + 22, by + BH);
+    ctx.lineTo(bx + 33, by + BH + 15);
+    ctx.lineTo(bx + 46, by + BH);
+    ctx.closePath();
+    ctx.fillStyle = C.surface; ctx.fill();
+    ctx.strokeStyle = C.yellow; ctx.stroke();
+    ctx.fillStyle = C.surface; ctx.fillRect(bx + 23, by + BH - 1, 23, 4);
+
+    // Speaker name
+    ctx.fillStyle = C.yellow;
+    ctx.font = '6px "Press Start 2P"'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    const char = CHARS.find(c => c.id === bubble.charId);
+    if (char) ctx.fillText(char.name, bx + 10, by + 9);
+
+    // Quote (VT323, word-wrapped)
+    ctx.fillStyle = C.text;
+    ctx.font = '22px "VT323"'; ctx.textBaseline = 'top';
+    const words = bubble.text.split(' ');
+    let line = '', lineY = by + 24;
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > BW - 22 && line) {
+        ctx.fillText(line, bx + 10, lineY);
+        line = w; lineY += 22;
+        if (lineY > by + BH - 8) { ctx.fillText(line + '...', bx + 10, lineY - 22); break; }
+      } else { line = test; }
+    }
+    ctx.fillText(line, bx + 10, lineY);
+    ctx.globalAlpha = 1;
+  }
 
   // ── Floor tile ─────────────────────────────────────────────────
   function drawFloorTile(gx, gy, color) {
@@ -83,470 +182,303 @@
     ctx.lineTo(p.x + TW / 2, p.y + TH);
     ctx.lineTo(p.x,           p.y + TH / 2);
     ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.strokeStyle = C.carpetLine;
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
+    ctx.fillStyle = color; ctx.fill();
+    ctx.strokeStyle = C.carpetLine; ctx.lineWidth = 0.5; ctx.stroke();
   }
 
-  // ── Iso box (w tiles wide × d tiles deep × h px tall) ─────────
+  // ── Iso box ────────────────────────────────────────────────────
   function drawIsoBox(gx, gy, w, d, h, top, left, right) {
     const p0 = iso(gx,     gy);
     const pw = iso(gx + w, gy);
     const pd = iso(gx,     gy + d);
     const pf = iso(gx + w, gy + d);
-
-    // top face
     ctx.beginPath();
-    ctx.moveTo(p0.x + TW/2, p0.y - h);
-    ctx.lineTo(pw.x + TW/2, pw.y - h);
-    ctx.lineTo(pf.x + TW/2, pf.y - h);
-    ctx.lineTo(pd.x + TW/2, pd.y - h);
-    ctx.closePath();
-    ctx.fillStyle = top; ctx.fill();
-
-    // left face
+    ctx.moveTo(p0.x + TW/2, p0.y - h); ctx.lineTo(pw.x + TW/2, pw.y - h);
+    ctx.lineTo(pf.x + TW/2, pf.y - h); ctx.lineTo(pd.x + TW/2, pd.y - h);
+    ctx.closePath(); ctx.fillStyle = top; ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(p0.x + TW/2, p0.y - h);
-    ctx.lineTo(pd.x + TW/2, pd.y - h);
-    ctx.lineTo(pd.x + TW/2, pd.y);
-    ctx.lineTo(p0.x + TW/2, p0.y);
-    ctx.closePath();
-    ctx.fillStyle = left; ctx.fill();
-
-    // right face
+    ctx.moveTo(p0.x + TW/2, p0.y - h); ctx.lineTo(pd.x + TW/2, pd.y - h);
+    ctx.lineTo(pd.x + TW/2, pd.y);    ctx.lineTo(p0.x + TW/2, p0.y);
+    ctx.closePath(); ctx.fillStyle = left; ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(pw.x + TW/2, pw.y - h);
-    ctx.lineTo(pf.x + TW/2, pf.y - h);
-    ctx.lineTo(pf.x + TW/2, pf.y);
-    ctx.lineTo(pw.x + TW/2, pw.y);
-    ctx.closePath();
-    ctx.fillStyle = right; ctx.fill();
-  }
-
-  // ── Reveal popup ──────────────────────────────────────────────
-  function drawReveal(x, y, lines) {
-    const PW = 220;
-    const PH = lines.length * 14 + 16;
-    let rx = Math.min(x, W - PW - 8);
-    let ry = Math.max(y - PH - 8, 5);
-
-    ctx.fillStyle = C.surface;
-    ctx.fillRect(rx, ry, PW, PH);
-    ctx.strokeStyle = C.yellow; ctx.lineWidth = 2;
-    ctx.strokeRect(rx, ry, PW, PH);
-
-    ctx.fillStyle    = C.text;
-    ctx.font = '7px "Press Start 2P"'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    lines.forEach((line, i) => {
-      if (line.startsWith('$')) ctx.fillStyle = C.yellow;
-      else if (line.startsWith('//')) ctx.fillStyle = C.blue;
-      else ctx.fillStyle = C.text;
-      ctx.fillText(line, rx + 8, ry + 8 + i * 14);
-    });
-  }
-
-  // ── Mobile scene (2D fallback) ─────────────────────────────────
-  function drawMobileScene() {
-    // Dark background
-    ctx.fillStyle = C.wall; ctx.fillRect(0, 0, W, H);
-
-    // Floor strip (bottom 60px)
-    ctx.fillStyle = C.carpet; ctx.fillRect(0, H - 60, W, 60);
-    ctx.fillStyle = C.carpetLine; ctx.fillRect(0, H - 61, W, 2);
-
-    // Back wall stripe
-    ctx.fillStyle = '#201C14'; ctx.fillRect(0, 0, W, H - 60);
-
-    // WUPHF sign centered
-    const sw = Math.min(280, W - 40), sh = 48;
-    const sx = (W - sw) / 2, sy = 14;
-    ctx.fillStyle = '#0E0C08'; ctx.fillRect(sx, sy, sw, sh);
-    ctx.fillStyle = C.yellow;
-    ctx.fillRect(sx, sy, sw, 3); ctx.fillRect(sx, sy + sh - 3, sw, 3);
-    ctx.fillRect(sx, sy, 3, sh); ctx.fillRect(sx + sw - 3, sy, 3, sh);
-    ctx.shadowColor = C.yellow; ctx.shadowBlur = 10;
-    ctx.fillStyle   = C.yellow;
-    ctx.font = `bold ${Math.floor(sw / 6)}px "Press Start 2P"`;
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText('WUPHF', sx + sw / 2, sy + sh / 2);
-    ctx.shadowBlur = 0;
-
-    // Three character silhouettes in a row (Pam, Michael, Dwight)
-    const charY = H - 60;
-    const positions = [W * 0.25, W * 0.5, W * 0.75];
-    const charFns   = [drawPam, drawMichael, drawDwight];
-    for (let i = 0; i < 3; i++) {
-      const cx = positions[i] - 10;
-      const cy = charY - 52;
-      ctx.fillStyle = C.shadow;
-      ctx.beginPath(); ctx.ellipse(positions[i], charY + 2, 11, 5, 0, 0, Math.PI*2); ctx.fill();
-      charFns[i](cx, cy, animF);
-    }
-
-    // Hint text
-    ctx.fillStyle    = C.textMuted;
-    ctx.font = '6px "Press Start 2P"'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-    ctx.fillText('Best viewed on desktop', W / 2, H - 20);
+    ctx.moveTo(pw.x + TW/2, pw.y - h); ctx.lineTo(pf.x + TW/2, pf.y - h);
+    ctx.lineTo(pf.x + TW/2, pf.y);    ctx.lineTo(pw.x + TW/2, pw.y);
+    ctx.closePath(); ctx.fillStyle = right; ctx.fill();
   }
 
   // ── Back wall ──────────────────────────────────────────────────
   function drawWall() {
-    // Back wall base
     ctx.fillStyle = C.wall;
     ctx.fillRect(0, 0, W, OY + 30);
-
-    // Baseboard strip
     ctx.fillStyle = C.wallLight;
     ctx.fillRect(0, OY + 22, W, 6);
 
-    // Fluorescent light fixtures (4 ceiling-mounted)
-    for (let i = 0; i < 4; i++) {
-      const lx = 60 + i * 170, ly = 6;
-      ctx.fillStyle = '#302820';
-      ctx.fillRect(lx, ly, 130, 10);
-      ctx.fillStyle = 'rgba(255,254,230,0.6)';
-      ctx.fillRect(lx + 4, ly + 2, 122, 6);
-      const grad = ctx.createLinearGradient(lx + 65, ly + 8, lx + 65, ly + 40);
-      grad.addColorStop(0, 'rgba(255,254,220,0.12)');
+    // Fluorescent lights distributed across viewport
+    const nLights = Math.max(3, Math.floor(W / 220));
+    const spacing = W / nLights;
+    for (let i = 0; i < nLights; i++) {
+      const lx = spacing * i + (spacing - 140) / 2, ly = 6;
+      ctx.fillStyle = '#302820'; ctx.fillRect(lx, ly, 140, 10);
+      ctx.fillStyle = 'rgba(255,254,230,0.6)'; ctx.fillRect(lx + 4, ly + 2, 132, 6);
+      const grad = ctx.createLinearGradient(lx + 70, ly + 8, lx + 70, ly + 50);
+      grad.addColorStop(0, 'rgba(255,254,220,0.14)');
       grad.addColorStop(1, 'rgba(255,254,220,0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(lx, ly + 8, 130, 32);
+      ctx.fillStyle = grad; ctx.fillRect(lx, ly + 8, 140, 42);
     }
 
-    // WUPHF sign (dark panel, golden amber letters, amber glow)
-    const sx = 250, sy = 26;
-    ctx.fillStyle = '#0E0C08';
-    ctx.fillRect(sx, sy, 300, 52);
+    // WUPHF sign (centered on viewport)
+    const sw = Math.min(360, W * 0.28), sh = 60;
+    const sx = Math.round(W / 2 - sw / 2), sy = 22;
+    ctx.fillStyle = '#0E0C08'; ctx.fillRect(sx, sy, sw, sh);
     ctx.fillStyle = C.yellow;
-    ctx.fillRect(sx,       sy,      300, 4);
-    ctx.fillRect(sx,       sy + 48, 300, 4);
-    ctx.fillRect(sx,       sy,      4,   52);
-    ctx.fillRect(sx + 296, sy,      4,   52);
-    ctx.fillStyle = 'rgba(236,178,46,0.08)';
-    ctx.fillRect(sx + 4, sy + 4, 292, 44);
-    ctx.shadowColor = C.yellow;
-    ctx.shadowBlur  = 12;
-    ctx.fillStyle   = C.yellow;
-    ctx.font = 'bold 28px "Press Start 2P"';
-    ctx.textAlign    = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('WUPHF', sx + 150, sy + 28);
+    ctx.fillRect(sx, sy, sw, 4); ctx.fillRect(sx, sy + sh - 4, sw, 4);
+    ctx.fillRect(sx, sy, 4, sh); ctx.fillRect(sx + sw - 4, sy, 4, sh);
+    ctx.fillStyle = 'rgba(236,178,46,0.08)'; ctx.fillRect(sx + 4, sy + 4, sw - 8, sh - 8);
+    ctx.shadowColor = C.yellow; ctx.shadowBlur = 18;
+    ctx.fillStyle = C.yellow;
+    ctx.font = `bold ${Math.round(sw / 6.5)}px "Press Start 2P"`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('WUPHF', W / 2, sy + sh / 2);
     ctx.shadowBlur = 0;
-    // sign mounting brackets
     ctx.fillStyle = C.deskDark;
-    ctx.fillRect(sx + 40,  sy + 50, 8, 14);
-    ctx.fillRect(sx + 252, sy + 50, 8, 14);
+    ctx.fillRect(sx + 50, sy + sh - 2, 10, 16); ctx.fillRect(sx + sw - 60, sy + sh - 2, 10, 16);
 
-    // Wall clock (top-right)
+    // Tagline below sign
+    ctx.fillStyle = C.textMuted;
+    ctx.font = '7px "Press Start 2P"';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText('Your AI team. Visible and working.', W / 2, sy + sh + 8);
+
+    // Wall clock (right side)
+    const clkX = W - 90, clkY = 52;
     ctx.fillStyle = C.wallLight;
-    ctx.beginPath(); ctx.arc(740, 48, 18, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(clkX, clkY, 22, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = C.surface;
-    ctx.beginPath(); ctx.arc(740, 48, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(clkX, clkY, 17, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = C.text; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(740, 36); ctx.lineTo(740, 48); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(740, 48); ctx.lineTo(750, 53); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(clkX, clkY - 14); ctx.lineTo(clkX, clkY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(clkX, clkY); ctx.lineTo(clkX + 11, clkY + 6); ctx.stroke();
 
-    // Beet farm map (left side, Dwight's territory)
-    const bx = iso(0, 3).x - 65;
-    ctx.fillStyle = '#2A2818';
-    ctx.fillRect(bx, OY - 22, 50, 38);
-    ctx.strokeStyle = '#504830'; ctx.lineWidth = 1.5;
-    ctx.strokeRect(bx, OY - 22, 50, 38);
+    // Beet farm map
+    const bx = iso(0, 3).x - 80;
+    ctx.fillStyle = '#2A2818'; ctx.fillRect(bx, OY - 24, 62, 44);
+    ctx.strokeStyle = '#504830'; ctx.lineWidth = 1.5; ctx.strokeRect(bx, OY - 24, 62, 44);
     ctx.fillStyle = '#807020';
-    ctx.font = '6px "Press Start 2P"'; ctx.textAlign = 'center';
-    ctx.fillText('BEET', bx + 25, OY - 7);
-    ctx.fillText('FARM', bx + 25, OY + 5);
+    ctx.font = '7px "Press Start 2P"'; ctx.textAlign = 'center';
+    ctx.fillText('BEET', bx + 31, OY - 8); ctx.fillText('FARM', bx + 31, OY + 6);
     ctx.fillStyle = '#2A5018';
-    ctx.fillRect(bx + 10, OY + 10, 8, 4);
-    ctx.fillRect(bx + 30, OY + 8,  8, 4);
-    ctx.fillRect(bx + 18, OY + 6,  8, 4);
+    ctx.fillRect(bx + 12, OY + 14, 10, 5); ctx.fillRect(bx + 36, OY + 11, 10, 5); ctx.fillRect(bx + 24, OY + 8, 10, 5);
 
-    // Conference room partition (left corner)
+    // Conference room partition
     const cp = iso(0, 0);
-    ctx.fillStyle = '#252018';
-    ctx.fillRect(cp.x - 40, OY - 2, 40, 30);
-    ctx.strokeStyle = C.border; ctx.lineWidth = 1;
-    ctx.strokeRect(cp.x - 40, OY - 2, 40, 30);
-    ctx.fillStyle   = C.textMuted;
+    ctx.fillStyle = '#252018'; ctx.fillRect(cp.x - 50, OY - 2, 50, 34);
+    ctx.strokeStyle = C.border; ctx.lineWidth = 1; ctx.strokeRect(cp.x - 50, OY - 2, 50, 34);
+    ctx.fillStyle = C.textMuted;
     ctx.font = '5px "Press Start 2P"'; ctx.textAlign = 'center';
-    ctx.fillText('CONF', cp.x - 20, OY + 8);
-    ctx.fillText('ROOM', cp.x - 20, OY + 17);
+    ctx.fillText('CONF', cp.x - 25, OY + 10); ctx.fillText('ROOM', cp.x - 25, OY + 22);
   }
 
   // ── Furniture ──────────────────────────────────────────────────
-  // Returns the hit-testable drawer rect: { drawerX, drawerY }
-  function drawDesk(gx, gy, w, flash) {
-    const DH = 22;
+  function drawDesk(gx, gy, w) {
+    const DH = 30;
     drawIsoBox(gx, gy, w, 1, DH, C.desk, C.deskDark, C.deskSide);
-
-    // Monitor
-    const p  = iso(gx, gy);
-    const mx = p.x + TW * w / 2 + 6;
-    const my = p.y - DH - 22;
-    ctx.fillStyle = '#1A2030'; ctx.fillRect(mx, my, 28, 18);
-    ctx.fillStyle = '#1A3858'; ctx.fillRect(mx + 2, my + 2, 24, 14);
+    const p = iso(gx, gy);
+    const mx = p.x + TW * w / 2 + 8;
+    const my = p.y - DH - 28;
+    ctx.fillStyle = '#1A2030'; ctx.fillRect(mx, my, 36, 24);
+    ctx.fillStyle = '#1A3858'; ctx.fillRect(mx + 2, my + 2, 32, 20);
     ctx.fillStyle = C.blue;
-    for (let i = 0; i < 3; i++) ctx.fillRect(mx + 4, my + 4 + i * 4, 8 + i * 4, 2);
-    ctx.fillStyle = '#1A1820';
-    ctx.fillRect(mx + 10, my + 18, 8, 5);
-    ctx.fillRect(mx + 6,  my + 22, 16, 3);
-
-    // Drawer (flashes amber when flash=true)
-    const dp = iso(gx + w - 1, gy);
-    const dx = dp.x + 6;
-    const dy = dp.y - DH + 6;
-    ctx.fillStyle = (flash && flashOn) ? C.yellow : C.deskDark;
-    if (flash && flashOn) { ctx.shadowColor = C.yellow; ctx.shadowBlur = 8; }
-    ctx.fillRect(dx, dy, 20, 12);
-    ctx.shadowBlur = 0;
-    ctx.strokeStyle = (flash && flashOn) ? C.yellow : C.deskSide;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(dx, dy, 20, 12);
-    ctx.fillStyle = C.yellow;
-    ctx.fillRect(dx + 7, dy + 4, 6, 4);
-
-    // Paper on desk
+    for (let i = 0; i < 3; i++) ctx.fillRect(mx + 4, my + 4 + i * 5, 12 + i * 4, 3);
+    ctx.fillStyle = '#1A1820'; ctx.fillRect(mx + 13, my + 24, 10, 7); ctx.fillRect(mx + 9, my + 30, 18, 3);
     const pp = iso(gx, gy);
-    ctx.fillStyle = C.surfaceHi; ctx.fillRect(pp.x + 16, pp.y - DH - 2, 16, 12);
+    ctx.fillStyle = C.surfaceHi; ctx.fillRect(pp.x + 18, pp.y - DH - 2, 22, 16);
     ctx.fillStyle = C.border;
-    for (let i = 0; i < 3; i++) ctx.fillRect(pp.x + 18, pp.y - DH + 1 + i * 3, 10, 1);
-
-    return { drawerX: dx, drawerY: dy };
+    for (let i = 0; i < 3; i++) ctx.fillRect(pp.x + 20, pp.y - DH + 2 + i * 4, 16, 1.5);
   }
 
   function drawPlant(gx, gy) {
     const c = isoCenter(gx, gy);
-    ctx.fillStyle = '#5A3A18'; ctx.fillRect(c.x - 5, c.y - 14, 10, 10);
-    ctx.fillStyle = C.plant;   ctx.fillRect(c.x - 10, c.y - 28, 20, 18);
-    ctx.fillStyle = '#2A4818'; ctx.fillRect(c.x - 7,  c.y - 32, 14, 8);
-    ctx.fillStyle = C.plant;   ctx.fillRect(c.x - 4,  c.y - 36, 8, 10);
+    ctx.fillStyle = '#5A3A18'; ctx.fillRect(c.x - 7, c.y - 18, 14, 14);
+    ctx.fillStyle = C.plant;   ctx.fillRect(c.x - 14, c.y - 36, 28, 22);
+    ctx.fillStyle = '#2A4818'; ctx.fillRect(c.x - 9,  c.y - 44, 18, 12);
+    ctx.fillStyle = C.plant;   ctx.fillRect(c.x - 6,  c.y - 52, 12, 14);
   }
 
   function drawSnackJar(gx, gy) {
     const c = isoCenter(gx, gy);
-    ctx.fillStyle = '#3A5878'; ctx.fillRect(c.x - 6, c.y - 18, 12, 14);
-    ctx.fillStyle = C.surface; ctx.fillRect(c.x - 5, c.y - 17, 10, 12);
-    ctx.fillStyle = C.yellow;  ctx.fillRect(c.x - 3, c.y - 12, 6, 6);
-    ctx.fillStyle = C.deskDark; ctx.fillRect(c.x - 5, c.y - 18, 12, 4);
+    ctx.fillStyle = '#3A5878'; ctx.fillRect(c.x - 8, c.y - 26, 16, 18);
+    ctx.fillStyle = C.surface; ctx.fillRect(c.x - 7, c.y - 24, 14, 16);
+    ctx.fillStyle = C.yellow;  ctx.fillRect(c.x - 4, c.y - 16, 9, 9);
+    ctx.fillStyle = C.deskDark; ctx.fillRect(c.x - 7, c.y - 26, 16, 5);
     ctx.fillStyle = C.text;
     ctx.font = '4px "Press Start 2P"'; ctx.textAlign = 'center';
-    ctx.fillText('NO',    c.x, c.y - 10);
-    ctx.fillText('WASTE', c.x, c.y - 6);
+    ctx.fillText('NO', c.x, c.y - 12); ctx.fillText('WASTE', c.x, c.y - 7);
   }
 
   // ── Sprite helpers ─────────────────────────────────────────────
-  // Generic head: hair, skin, eyes (dark), mouth
+  // bob: 0 or 2 based on frame; lean: -1, 0, or 1
   function drawHead(x, y, hair, skin, f) {
-    const b = f < 2 ? 0 : 1;
-    ctx.fillStyle = hair; ctx.fillRect(x + 2, y + b,      16, 9);
-    ctx.fillStyle = skin; ctx.fillRect(x + 2, y + 7 + b,  16, 13);
-    ctx.fillStyle = C.bg; ctx.fillRect(x + 5, y + 10 + b, 3, 3);
-                          ctx.fillRect(x + 12, y + 10 + b, 3, 3);
-    ctx.fillStyle = '#804040'; ctx.fillRect(x + 7, y + 17 + b, 6, 2);
+    const bob  = (f < 2) ? 0 : 2;
+    const lean = [0, 1, 0, -1][f];
+    ctx.fillStyle = hair; ctx.fillRect(x + 2 + lean, y + bob,      16, 9);
+    ctx.fillStyle = skin; ctx.fillRect(x + 2 + lean, y + 7 + bob,  16, 13);
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(x + 5 + lean, y + 10 + bob, 3, 3);
+    ctx.fillRect(x + 12 + lean, y + 10 + bob, 3, 3);
+    ctx.fillStyle = '#804040'; ctx.fillRect(x + 7 + lean, y + 17 + bob, 6, 2);
+  }
+
+  // Shared leg drawing — feet alternate forward on frames 1 and 3
+  function drawLegs(x, y, f, skinColor, shoeColor, legColor, wide) {
+    const lOff = (f === 1) ? -3 : 0;
+    const rOff = (f === 3) ? -3 : 0;
+    ctx.fillStyle = legColor;
+    ctx.fillRect(x + 1,           y + 34, wide ? 10 : 8, 12);
+    ctx.fillRect(x + (wide?13:11), y + 34, wide ? 10 : 8, 12);
+    ctx.fillStyle = skinColor;
+    ctx.fillRect(x + 2,           y + 46 + lOff, wide ? 7 : 6, 6);
+    ctx.fillRect(x + (wide?14:12), y + 46 + rOff, wide ? 7 : 6, 6);
+    ctx.fillStyle = shoeColor;
+    ctx.fillRect(x + 2,           y + 52 + lOff, wide ? 9 : 8, 4);
+    ctx.fillRect(x + (wide?13:10), y + 52 + rOff, wide ? 9 : 8, 4);
   }
 
   // ── Office cast ────────────────────────────────────────────────
   function drawPam(x, y, f) {
-    const b = f < 2 ? 0 : 1;
-    // Hair bun
-    ctx.fillStyle = '#C49838'; ctx.fillRect(x + 5, y - 4 + b, 10, 7);
-    drawHead(x, y + b, '#D4A850', C.skin, f);
-    // Pink cardigan + white collar
-    ctx.fillStyle = '#D09098'; ctx.fillRect(x,     y + 20 + b, 20, 14);
-    ctx.fillStyle = C.light;   ctx.fillRect(x + 7, y + 20 + b, 6, 4);
-    // Purple skirt
-    ctx.fillStyle = '#6868A8'; ctx.fillRect(x, y + 34 + b, 20, 12);
-    // Legs + shoes
-    ctx.fillStyle = C.skin;    ctx.fillRect(x + 2,  y + 46, 6, 6); ctx.fillRect(x + 12, y + 46, 6, 6);
-    ctx.fillStyle = '#2A1808'; ctx.fillRect(x + 2,  y + 52, 8, 4); ctx.fillRect(x + 10, y + 52, 8, 4);
+    const bob = (f < 2) ? 0 : 2;
+    ctx.fillStyle = '#C49838'; ctx.fillRect(x + 5, y - 4 + bob, 10, 7);
+    drawHead(x, y + bob, '#D4A850', C.skin, f);
+    ctx.fillStyle = '#D09098'; ctx.fillRect(x,     y + 20 + bob, 20, 14);
+    ctx.fillStyle = C.light;   ctx.fillRect(x + 7, y + 20 + bob, 6, 4);
+    ctx.fillStyle = '#6868A8'; ctx.fillRect(x, y + 34 + bob, 20, 12);
+    drawLegs(x, y + bob, f, C.skin, '#2A1808', '#6868A8', false);
   }
 
   function drawMichael(x, y, f) {
-    const b = f < 2 ? 0 : 1;
-    drawHead(x, y + b, '#2A1A0A', C.skin, f);
-    // Big smile
-    ctx.fillStyle = '#A05050'; ctx.fillRect(x + 4, y + 16 + b, 12, 3);
-    // Blue suit
-    ctx.fillStyle = '#1A3858'; ctx.fillRect(x, y + 20 + b, 20, 14);
-    // White shirt
-    ctx.fillStyle = C.light;   ctx.fillRect(x + 7, y + 20 + b, 6, 10);
-    // Amber tie (he tries)
-    ctx.fillStyle = C.yellow;  ctx.fillRect(x + 9, y + 23 + b, 3, 8);
-    // Dark pants + shoes
-    ctx.fillStyle = '#0E2840'; ctx.fillRect(x, y + 34 + b, 20, 12);
-    ctx.fillStyle = '#0A0E14'; ctx.fillRect(x + 2, y + 46, 7, 4); ctx.fillRect(x + 11, y + 46, 7, 4);
+    const bob = (f < 2) ? 0 : 2;
+    drawHead(x, y + bob, '#2A1A0A', C.skin, f);
+    ctx.fillStyle = '#A05050'; ctx.fillRect(x + 4, y + 16 + bob, 12, 3);
+    ctx.fillStyle = '#1A3858'; ctx.fillRect(x, y + 20 + bob, 20, 14);
+    ctx.fillStyle = C.light;   ctx.fillRect(x + 7, y + 20 + bob, 6, 10);
+    ctx.fillStyle = C.yellow;  ctx.fillRect(x + 9, y + 23 + bob, 3, 8);
+    drawLegs(x, y + bob, f, C.skin, '#0A0E14', '#0E2840', false);
   }
 
   function drawDwight(x, y, f) {
-    const b = f < 2 ? 0 : 1;
-    drawHead(x, y + b, '#3A2010', '#C88858', f);
-    // Glasses
+    const bob = (f < 2) ? 0 : 2;
+    drawHead(x, y + bob, '#3A2010', '#C88858', f);
     ctx.fillStyle = C.bg;
-    ctx.fillRect(x + 3, y + 9 + b, 5, 3); ctx.fillRect(x + 11, y + 9 + b, 5, 3);
-    ctx.fillRect(x + 8, y + 10 + b, 3, 1);
-    // Scowl
-    ctx.fillStyle = '#604010'; ctx.fillRect(x + 5, y + 16 + b, 10, 2);
-    // Mustard shirt
-    ctx.fillStyle = '#A88018'; ctx.fillRect(x, y + 20 + b, 20, 14);
-    ctx.fillStyle = C.bg;      ctx.fillRect(x + 7, y + 20 + b, 6, 4);
-    // Dark pants
-    ctx.fillStyle = '#202020'; ctx.fillRect(x, y + 34 + b, 20, 12);
-    ctx.fillStyle = '#080808'; ctx.fillRect(x + 2, y + 46, 7, 4); ctx.fillRect(x + 11, y + 46, 7, 4);
+    ctx.fillRect(x + 3, y + 9 + bob, 5, 3); ctx.fillRect(x + 11, y + 9 + bob, 5, 3);
+    ctx.fillRect(x + 8, y + 10 + bob, 3, 1);
+    ctx.fillStyle = '#604010'; ctx.fillRect(x + 5, y + 16 + bob, 10, 2);
+    ctx.fillStyle = '#A88018'; ctx.fillRect(x, y + 20 + bob, 20, 14);
+    ctx.fillStyle = C.bg;      ctx.fillRect(x + 7, y + 20 + bob, 6, 4);
+    drawLegs(x, y + bob, f, '#C88858', '#080808', '#202020', false);
   }
 
   function drawJim(x, y, f) {
-    const b = f < 2 ? 0 : 1;
-    drawHead(x, y + b, '#5A3828', C.skin, f);
-    // Slightly messy hair
-    ctx.fillStyle = '#7A4838'; ctx.fillRect(x + 14, y + 2 + b, 4, 4);
-    // Smirk (asymmetric)
-    ctx.fillStyle = '#804848'; ctx.fillRect(x + 9, y + 17 + b, 7, 2);
-    // Casual blue shirt
-    ctx.fillStyle = '#3A5A78'; ctx.fillRect(x, y + 20 + b, 20, 14);
-    // Dark slacks
-    ctx.fillStyle = '#1A2428'; ctx.fillRect(x, y + 34 + b, 20, 12);
-    ctx.fillStyle = '#080C10'; ctx.fillRect(x + 2, y + 46, 7, 4); ctx.fillRect(x + 11, y + 46, 7, 4);
+    const bob = (f < 2) ? 0 : 2;
+    drawHead(x, y + bob, '#5A3828', C.skin, f);
+    ctx.fillStyle = '#7A4838'; ctx.fillRect(x + 14, y + 2 + bob, 4, 4);
+    ctx.fillStyle = '#804848'; ctx.fillRect(x + 9, y + 17 + bob, 7, 2);
+    ctx.fillStyle = '#3A5A78'; ctx.fillRect(x, y + 20 + bob, 20, 14);
+    drawLegs(x, y + bob, f, C.skin, '#080C10', '#1A2428', false);
   }
 
   function drawKevin(x, y, f) {
-    const b = f < 2 ? 0 : 1;
-    // Kevin is wider
-    ctx.fillStyle = '#201810'; ctx.fillRect(x, y + b, 24, 7);
-    ctx.fillStyle = '#D09858'; ctx.fillRect(x, y + 5 + b, 24, 15);
-    ctx.fillStyle = C.bg;      ctx.fillRect(x + 4, y + 9 + b, 4, 4); ctx.fillRect(x + 16, y + 9 + b, 4, 4);
-    ctx.fillStyle = '#805038'; ctx.fillRect(x + 8, y + 17 + b, 8, 2);
-    ctx.fillStyle = '#2A3A58'; ctx.fillRect(x, y + 20 + b, 24, 14);
-    ctx.fillStyle = '#181818'; ctx.fillRect(x, y + 34 + b, 24, 12);
-    ctx.fillStyle = '#080808'; ctx.fillRect(x + 2, y + 46, 8, 4); ctx.fillRect(x + 14, y + 46, 8, 4);
+    const bob = (f < 2) ? 0 : 2;
+    ctx.fillStyle = '#201810'; ctx.fillRect(x, y + bob, 24, 8);
+    ctx.fillStyle = '#D09858'; ctx.fillRect(x, y + 6 + bob, 24, 16);
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(x + 4, y + 10 + bob, 4, 4); ctx.fillRect(x + 16, y + 10 + bob, 4, 4);
+    ctx.fillStyle = '#805038'; ctx.fillRect(x + 8, y + 18 + bob, 8, 2);
+    ctx.fillStyle = '#2A3A58'; ctx.fillRect(x, y + 22 + bob, 24, 12);
+    drawLegs(x, y + bob, f, '#D09858', '#080808', '#181818', true);
   }
 
   function drawCreed(x, y, f) {
-    const b = f < 3 ? 0 : 1;
-    // Gray hair, knowing expression
-    drawHead(x, y + b, '#706860', '#B88858', f);
-    ctx.fillStyle = '#805038'; ctx.fillRect(x + 4, y + 17 + b, 12, 2);
-    // Green shirt (questionable origin)
-    ctx.fillStyle = '#284818'; ctx.fillRect(x, y + 20 + b, 20, 14);
-    ctx.fillStyle = '#201808'; ctx.fillRect(x, y + 34 + b, 20, 12);
-    ctx.fillStyle = '#100808'; ctx.fillRect(x + 2, y + 46, 7, 4); ctx.fillRect(x + 11, y + 46, 7, 4);
+    const bob = (f < 3) ? 0 : 2;
+    drawHead(x, y + bob, '#706860', '#B88858', f);
+    ctx.fillStyle = '#805038'; ctx.fillRect(x + 4, y + 17 + bob, 12, 2);
+    ctx.fillStyle = '#284818'; ctx.fillRect(x, y + 20 + bob, 20, 14);
+    drawLegs(x, y + bob, f, '#B88858', '#100808', '#201808', false);
   }
 
   function drawAgent(x, y, color, label, f) {
-    const b = f < 2 ? 0 : 1;
-    // Robot head block (solid color)
-    ctx.fillStyle = color; ctx.fillRect(x + 2, y + b, 16, 14);
-    // Screen face
-    ctx.fillStyle = C.bg; ctx.fillRect(x + 4, y + 3 + b, 12, 7);
-    const eyeCol = color === C.yellow ? '#AA7800' : C.blue;
+    const bob = (f < 2) ? 0 : 2;
+    ctx.fillStyle = color; ctx.fillRect(x + 2, y + bob, 16, 14);
+    ctx.fillStyle = C.bg; ctx.fillRect(x + 4, y + 3 + bob, 12, 7);
+    const eyeCol = color === C.yellow ? '#AA7800' : (color === C.green ? '#2A6040' : C.blue);
     ctx.fillStyle = eyeCol;
-    ctx.fillRect(x + 5,  y + 4 + b, 4, 4);
-    ctx.fillRect(x + 11, y + 4 + b, 4, 4);
-    // Blink on frame 3
+    ctx.fillRect(x + 5, y + 4 + bob, 4, 4); ctx.fillRect(x + 11, y + 4 + bob, 4, 4);
     if (f === 3) {
       ctx.fillStyle = C.bg;
-      ctx.fillRect(x + 5,  y + 6 + b, 4, 2);
-      ctx.fillRect(x + 11, y + 6 + b, 4, 2);
+      ctx.fillRect(x + 5, y + 6 + bob, 4, 2); ctx.fillRect(x + 11, y + 6 + bob, 4, 2);
     }
-    // Body
-    ctx.fillStyle = color; ctx.fillRect(x, y + 14 + b, 20, 16);
-    // Nameplate badge
-    ctx.fillStyle = C.bg;    ctx.fillRect(x + 2, y + 20 + b, 16, 8);
+    ctx.fillStyle = color; ctx.fillRect(x, y + 14 + bob, 20, 16);
+    ctx.fillStyle = C.bg; ctx.fillRect(x + 2, y + 20 + bob, 16, 8);
     ctx.fillStyle = color;
     ctx.font = '5px "Press Start 2P"'; ctx.textAlign = 'center';
-    ctx.fillText(label.substring(0, 3).toUpperCase(), x + 10, y + 27 + b);
-    // Legs
+    ctx.fillText(label.substring(0, 3).toUpperCase(), x + 10, y + 27 + bob);
     ctx.fillStyle = '#202020';
-    ctx.fillRect(x + 2,  y + 30 + b, 7,  16);
-    ctx.fillRect(x + 11, y + 30 + b, 7,  16);
-    ctx.fillRect(x,      y + 46,     9,  4);
-    ctx.fillRect(x + 11, y + 46,     9,  4);
+    ctx.fillRect(x + 2,  y + 30 + bob, 7, 16); ctx.fillRect(x + 11, y + 30 + bob, 7, 16);
+    ctx.fillRect(x,      y + 46, 9, 4);         ctx.fillRect(x + 11, y + 46, 9, 4);
   }
 
   // ── Characters ─────────────────────────────────────────────────
   const CHARS = [
-    { id: 'pam',     name: 'Pam Beesly',    quote: 'WUPHF!',
-      gx: 3.5, gy: 0.5, fn: drawPam },
-    { id: 'michael', name: 'Michael Scott', quote: "I'm not superstitious, but I am a little stitious.",
-      gx: 6.5, gy: 1.5, fn: drawMichael },
-    { id: 'dwight',  name: 'Dwight Schrute', quote: 'Bears. Beets. Battlestar Galactica.',
-      gx: 1,   gy: 3,   fn: drawDwight },
-    { id: 'jim',     name: 'Jim Halpert',    quote: 'How the turntables...',
-      gx: 3,   gy: 3,   fn: drawJim },
-    { id: 'kevin',   name: 'Kevin Malone',   quote: '... (stares at snacks)',
-      gx: 5.5, gy: 4,   fn: drawKevin, wide: true },
-    { id: 'creed',   name: 'Creed Bratton',  quote: "Nobody steals from Creed Bratton and gets away with it. The website is fine.",
-      gx: 0.5, gy: 5,   fn: drawCreed },
-    { id: 'ceo', name: 'CEO Agent',      quote: 'Routing task to engineering team. ETA: 3 minutes.',
-      gx: 5.5, gy: 2,   isAgent: true, color: C.yellow,  label: 'CEO' },
-    { id: 'eng', name: 'Engineer Agent', quote: 'Implementing feature... 47% complete.',
-      gx: 2.5, gy: 4,   isAgent: true, color: C.blue,    label: 'ENG' },
-    { id: 'cmo', name: 'CMO Agent',      quote: 'Drafting launch post. You will not believe this lede.',
-      gx: 4.2, gy: 3.2, isAgent: true, color: '#5AAA7A', label: 'CMO' },
+    { id: 'pam',     name: 'Pam Beesly',     gx: 4.5, gy: 0.5, fn: drawPam },
+    { id: 'michael', name: 'Michael Scott',  gx: 8.5, gy: 1.5, fn: drawMichael },
+    { id: 'dwight',  name: 'Dwight Schrute', gx: 1.5, gy: 3.5, fn: drawDwight },
+    { id: 'jim',     name: 'Jim Halpert',    gx: 4,   gy: 3,   fn: drawJim },
+    { id: 'kevin',   name: 'Kevin Malone',   gx: 7,   gy: 5,   fn: drawKevin, wide: true },
+    { id: 'creed',   name: 'Creed Bratton',  gx: 0.5, gy: 6.5, fn: drawCreed },
+    { id: 'ceo',     name: 'CEO Agent',      gx: 7,   gy: 2,   isAgent: true, color: C.yellow, label: 'CEO' },
+    { id: 'eng',     name: 'Engineer Agent', gx: 3,   gy: 4.5, isAgent: true, color: C.blue,   label: 'ENG' },
+    { id: 'cmo',     name: 'CMO Agent',      gx: 5.5, gy: 3.5, isAgent: true, color: C.green,  label: 'CMO' },
   ];
 
   const charHits = [];
-  let activeThought = null;
-  let thoughtTimer  = null;
 
-  // ── Thought bubble ─────────────────────────────────────────────
-  function drawThought(char, centerX, charTopY) {
-    if (!activeThought || activeThought.id !== char.id) return;
-
-    const BW = 210, BH = 82;
-    let bx = Math.min(centerX - 95, W - BW - 10);
-    bx = Math.max(bx, 10);
-    let by = Math.max(charTopY - 90, 5);
-
-    // Panel
-    ctx.fillStyle = C.surface;
-    ctx.fillRect(bx, by, BW, BH);
-    ctx.strokeStyle = C.yellow; ctx.lineWidth = 3;
-    ctx.strokeRect(bx, by, BW, BH);
-
-    // Tail (triangle below panel pointing to character)
-    ctx.beginPath();
-    ctx.moveTo(bx + 20, by + BH);
-    ctx.lineTo(bx + 30, by + BH + 14);
-    ctx.lineTo(bx + 42, by + BH);
-    ctx.closePath();
-    ctx.fillStyle = C.surface; ctx.fill();
-    ctx.strokeStyle = C.yellow; ctx.stroke();
-    // Hide inner line of tail
-    ctx.fillStyle = C.surface; ctx.fillRect(bx + 21, by + BH - 1, 21, 4);
-
-    // Speaker name
-    ctx.fillStyle    = C.yellow;
-    ctx.font = '6px "Press Start 2P"'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-    ctx.fillText(char.name, bx + 10, by + 8);
-
-    // Quote (word-wrapped)
-    ctx.fillStyle = C.text;
-    ctx.font = '18px "VT323"'; ctx.textBaseline = 'top';
-    const words  = char.quote.split(' ');
-    let line = '', lineY = by + 22;
-    for (const w of words) {
-      const test = line ? line + ' ' + w : w;
-      if (ctx.measureText(test).width > BW - 20 && line) {
-        ctx.fillText(line, bx + 10, lineY);
-        line  = w;
-        lineY += 18;
-        if (lineY > by + BH - 6) { ctx.fillText(line + '...', bx + 10, lineY - 18); return; }
-      } else {
-        line = test;
-      }
-    }
-    ctx.fillText(line, bx + 10, lineY);
+  // ── Mobile fallback ────────────────────────────────────────────
+  function drawMobileScene() {
+    ctx.fillStyle = C.wall; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = C.carpet; ctx.fillRect(0, H - 70, W, 70);
+    ctx.fillStyle = C.carpetLine; ctx.fillRect(0, H - 71, W, 2);
+    const sw = Math.min(300, W - 32), sh = 52;
+    const sx = (W - sw) / 2, sy = 16;
+    ctx.fillStyle = '#0E0C08'; ctx.fillRect(sx, sy, sw, sh);
+    ctx.fillStyle = C.yellow;
+    ctx.fillRect(sx, sy, sw, 4); ctx.fillRect(sx, sy + sh - 4, sw, 4);
+    ctx.fillRect(sx, sy, 4, sh); ctx.fillRect(sx + sw - 4, sy, 4, sh);
+    ctx.shadowColor = C.yellow; ctx.shadowBlur = 12;
+    ctx.fillStyle = C.yellow;
+    ctx.font = `bold ${Math.floor(sw / 6)}px "Press Start 2P"`;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('WUPHF', sx + sw / 2, sy + sh / 2);
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = C.textMuted;
+    ctx.font = '7px "Press Start 2P"'; ctx.textBaseline = 'top';
+    ctx.fillText('Your AI team. Visible and working.', W / 2, sy + sh + 8);
+    const charY = H - 70;
+    [[W * 0.2, drawPam], [W * 0.5, drawMichael], [W * 0.8, drawDwight]].forEach(([cx, fn]) => {
+      ctx.fillStyle = C.shadow;
+      ctx.beginPath(); ctx.ellipse(cx, charY + 2, 11, 5, 0, 0, Math.PI * 2); ctx.fill();
+      fn(cx - 10, charY - 56, animF);
+    });
+    ctx.fillStyle = C.textMuted;
+    ctx.font = '6px "Press Start 2P"'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    ctx.fillText('Best viewed on desktop', W / 2, H - 22);
   }
 
   // ── Main draw ──────────────────────────────────────────────────
-  function draw() {
+  function draw(now) {
     ctx.clearRect(0, 0, W, H);
     if (isMobile) { drawMobileScene(); return; }
+
+    updateBubbles(now);
     drawWall();
 
-    // Floor tiles
     for (let gy = 0; gy < ROWS; gy++) {
       for (let gx = 0; gx < COLS; gx++) {
         drawFloorTile(gx, gy, (gx + gy) % 2 === 0 ? C.carpet : C.carpetAlt);
@@ -554,150 +486,65 @@
     }
 
     // Props
-    drawPlant(8, 0);
-    drawPlant(8, 2);
-    drawSnackJar(5, 4);
+    drawPlant(COLS - 1, 0);
+    drawPlant(COLS - 1, 2);
+    drawPlant(COLS - 1, 5);
+    drawSnackJar(7, 5);
 
-    // Desks (back-to-front: lower gx+gy first)
-    drawerHit = drawDesk(2, 0, 2, true);  // reception desk — flashing drawer
-    drawDesk(0, 3, 1, false);             // Dwight's desk
-    drawDesk(2, 3, 1, false);             // Jim's desk
-    drawDesk(5, 1, 1, false);             // CEO Agent desk (back right)
-    drawDesk(2, 4, 1, false);             // Engineer Agent desk
-    drawDesk(4, 3, 1, false);             // CMO Agent desk
+    // Desks
+    drawDesk(3, 0, 2);   // reception
+    drawDesk(1, 3, 1);   // Dwight
+    drawDesk(3, 3, 1);   // Jim
+    drawDesk(6, 1, 1);   // CEO Agent
+    drawDesk(2, 4, 1);   // Engineer Agent
+    drawDesk(5, 3, 1);   // CMO Agent
+    drawDesk(9, 3, 1);   // extra desk
 
-    // "Click Me!" tooltip above the reception desk flashing drawer
-    if (!drawerOpen && flashOn && drawerHit) {
-      const { drawerX: dx, drawerY: dy } = drawerHit;
-      ctx.fillStyle = C.yellow;
-      ctx.fillRect(dx - 4, dy - 22, 72, 18);
-      // Down-pointing triangle
-      ctx.beginPath();
-      ctx.moveTo(dx + 8,  dy - 4);
-      ctx.lineTo(dx + 16, dy - 4);
-      ctx.lineTo(dx + 12, dy);
-      ctx.closePath(); ctx.fill();
-      ctx.fillStyle = C.bg;
-      ctx.font = '6px "Press Start 2P"'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.fillText('Click Me!', dx, dy - 13);
-    }
-
-    // Drawer reveal
-    if (drawerOpen && drawerHit) {
-      const { drawerX: dx, drawerY: dy } = drawerHit;
-      const rx = dx - 8, ry = dy + 14;
-      ctx.fillStyle = C.surface;
-      ctx.fillRect(rx, ry, 190, 44);
-      ctx.strokeStyle = C.yellow; ctx.lineWidth = 2;
-      ctx.strokeRect(rx, ry, 190, 44);
-      ctx.fillStyle = C.text;
-      ctx.font = '7px "Press Start 2P"'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.fillText('One command.', rx + 8, ry + 6);
-      ctx.fillText('One office.', rx + 8, ry + 18);
-      ctx.fillStyle = C.yellow;
-      ctx.fillText('./wuphf', rx + 8, ry + 30);
-    }
-
-    // Register interactable hit areas (rebuilt each frame from current positions)
-    interactHits.length = 0;
-
-    // 1. Paper on Pam's desk
-    const pamDesk = iso(2, 0);
-    interactHits.push({ id: 'paper', x: pamDesk.x + 16, y: pamDesk.y - 22 - 2, w: 16, h: 12,
-      content: ['CEO, PM, engineers,', 'all visible,', 'all working.'] });
-
-    // 2. Conference room whiteboard
-    const cp2 = iso(0, 0);
-    interactHits.push({ id: 'whiteboard', x: cp2.x - 40, y: OY - 2, w: 40, h: 30,
-      content: ['agent → broker', '→ channel', '→ human'] });
-
-    // 3. Agent monitor (CEO desk)
-    const ceoDesk = iso(5, 1);
-    interactHits.push({ id: 'monitor', x: ceoDesk.x + TW / 2 + 6, y: ceoDesk.y - 22 - 22, w: 28, h: 18,
-      content: ['Open source.', 'MIT license.', '$ go build -o wuphf'] });
-
-    // 4. Plant (first one — at gx=8,gy=0)
-    const plantC2 = isoCenter(8, 0);
-    interactHits.push({ id: 'plant', x: plantC2.x - 10, y: plantC2.y - 36, w: 20, h: 36,
-      content: ["Unlike Ryan Howard's", 'WUPHF, this one works.'] });
-
-    // 5. Snack jar (Kevin's area)
-    const jarC2 = isoCenter(5, 4);
-    interactHits.push({ id: 'snackjar', x: jarC2.x - 6, y: jarC2.y - 18, w: 12, h: 14,
-      content: ['No tokens wasted', 'on pleasantries.'] });
-
-    // 6. Beet farm map (Dwight's wall)
-    const bx2 = iso(0, 3).x - 65;
-    interactHits.push({ id: 'beetmap', x: bx2, y: OY - 22, w: 50, h: 38,
-      content: ['Identity theft is', 'not a joke, Jim!', '(easter egg found)'] });
-
-    // 7. Dundie award — small icon near conference room
-    const cp3 = iso(0, 0);
-    interactHits.push({ id: 'dundie', x: cp3.x - 36, y: OY + 18, w: 18, h: 18,
-      content: ['Best AI Office,', '2025.', '(Self-awarded.)'] });
-
-    // 8. Break room fridge — draw + register
-    const fridgeX = iso(8, 4).x + TW / 2 - 8;
-    const fridgeY = iso(8, 4).y - 20;
-    ctx.fillStyle = '#2A3040'; ctx.fillRect(fridgeX, fridgeY, 16, 20);
-    ctx.fillStyle = '#1A2030'; ctx.fillRect(fridgeX + 1, fridgeY + 10, 14, 9);
-    ctx.fillStyle = C.border;  ctx.fillRect(fridgeX + 13, fridgeY + 3, 2, 6);
-    if (flashOn) {
-      ctx.shadowColor = C.blue; ctx.shadowBlur = 4;
-      ctx.fillStyle   = C.blue; ctx.fillRect(fridgeX + 3, fridgeY + 5, 8, 3);
-      ctx.shadowBlur  = 0;
-    }
-    interactHits.push({ id: 'fridge', x: fridgeX, y: fridgeY, w: 16, h: 20,
-      content: ['$ git clone', '  github.com/', '  nex-crm/wuphf', '$ ./wuphf'] });
-
-    // Draw active reveal
-    if (activeReveal) {
-      drawReveal(activeReveal.x, activeReveal.y, activeReveal.content);
-    }
-
-    // Characters (back-to-front sort by gx+gy)
+    // Characters (back-to-front depth sort)
     charHits.length = 0;
     const sorted = [...CHARS].sort((a, b) => (a.gx + a.gy) - (b.gx + b.gy));
     for (const char of sorted) {
       const c  = isoCenter(char.gx, char.gy);
       const cw = char.wide ? 24 : 20;
       const cx = c.x - cw / 2 - 2;
-      const cy = c.y - 52;
+      const cy = c.y - 56;
 
-      // Shadow
       ctx.fillStyle = C.shadow;
       ctx.beginPath();
       ctx.ellipse(c.x, c.y + 2, char.wide ? 14 : 11, 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Sprite (agent or cast)
       if (char.isAgent) {
         drawAgent(cx, cy, char.color, char.label, animF);
       } else {
         char.fn(cx, cy, animF);
       }
 
-      // Nametag: Pam (so visitors know who she is) + all agents
       if (char.id === 'pam' || char.isAgent) {
-        const tagColor  = char.isAgent ? char.color : C.yellow;
+        const tagColor = char.isAgent ? char.color : C.yellow;
         const firstName = char.name.split(' ')[0].substring(0, 8);
-        const tagW      = firstName.length * 6 + 16;
-        ctx.fillStyle   = tagColor;
+        const tagW = firstName.length * 6 + 16;
+        ctx.fillStyle = tagColor;
         ctx.fillRect(c.x - tagW / 2, cy - 14, tagW, 11);
-        ctx.fillStyle    = C.bg;
+        ctx.fillStyle = C.bg;
         ctx.font = '5px "Press Start 2P"'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
         ctx.fillText(firstName, c.x, cy - 8);
       }
 
-      drawThought(char, c.x, cy);
+      charScreenPos[char.id] = { centerX: c.x, topY: cy };
+      charHits.push({ char, cx, cy, w: cw + 4, h: 56 });
+    }
 
-      charHits.push({ char, cx, cy, w: cw + 4, h: 54 });
+    // Ambient speech bubbles
+    for (const bubble of activeBubbles) {
+      drawBubble(bubble, now);
     }
   }
 
+  // ── RAF loop ───────────────────────────────────────────────────
   let rafId;
-  function loop() {
-    draw();
+  function loop(now) {
+    draw(now);
     rafId = requestAnimationFrame(loop);
   }
   rafId = requestAnimationFrame(loop);
@@ -707,99 +554,8 @@
     else rafId = requestAnimationFrame(loop);
   });
 
-  canvas.addEventListener('click', e => {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = W / rect.width;
-    const scaleY = H / rect.height;
-    const mx = (e.clientX - rect.left) * scaleX;
-    const my = (e.clientY - rect.top)  * scaleY;
-
-    // Check reception drawer click
-    if (drawerHit) {
-      const { drawerX: dx, drawerY: dy } = drawerHit;
-      if (mx >= dx - 4 && mx <= dx + 74 &&
-          my >= dy - 26 && my <= dy + 14) {
-        drawerOpen = !drawerOpen;
-        return;
-      }
-    }
-
-    // Check interactable props
-    for (const hit of interactHits) {
-      if (mx >= hit.x && mx <= hit.x + hit.w &&
-          my >= hit.y && my <= hit.y + hit.h) {
-        if (activeReveal && activeReveal.id === hit.id) {
-          activeReveal = null;
-        } else {
-          activeReveal = { id: hit.id, x: hit.x + hit.w / 2, y: hit.y, content: hit.content };
-          clearTimeout(revealTimer);
-          revealTimer = setTimeout(() => { activeReveal = null; }, 5000);
-        }
-        return;
-      }
-    }
-
-    // Check characters
-    for (const hit of charHits) {
-      if (mx >= hit.cx && mx <= hit.cx + hit.w &&
-          my >= hit.cy && my <= hit.cy + hit.h) {
-        if (activeThought && activeThought.id === hit.char.id) {
-          activeThought = null;
-        } else {
-          activeThought = hit.char;
-          clearTimeout(thoughtTimer);
-          thoughtTimer = setTimeout(() => {
-            if (activeThought && activeThought.id === hit.char.id) activeThought = null;
-          }, 5000);
-        }
-        return;
-      }
-    }
-
-    // Click elsewhere — dismiss thought bubble
-    activeThought = null;
-  });
-
-  canvas.addEventListener('mousemove', e => {
-    const rect   = canvas.getBoundingClientRect();
-    const scaleX = W / rect.width;
-    const scaleY = H / rect.height;
-    const mx = (e.clientX - rect.left) * scaleX;
-    const my = (e.clientY - rect.top)  * scaleY;
-
-    let pointer = false;
-
-    // Drawer
-    if (drawerHit) {
-      const { drawerX: dx, drawerY: dy } = drawerHit;
-      if (mx >= dx - 4 && mx <= dx + 74 && my >= dy - 26 && my <= dy + 14) pointer = true;
-    }
-
-    // Characters
-    if (!pointer) {
-      for (const hit of charHits) {
-        if (mx >= hit.cx && mx <= hit.cx + hit.w &&
-            my >= hit.cy && my <= hit.cy + hit.h) { pointer = true; break; }
-      }
-    }
-
-    // Interactables
-    if (!pointer) {
-      for (const hit of interactHits) {
-        if (mx >= hit.x && mx <= hit.x + hit.w &&
-            my >= hit.y && my <= hit.y + hit.h) { pointer = true; break; }
-      }
-    }
-
-    canvas.style.cursor = pointer ? 'pointer' : 'default';
-  });
-
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') {
-      activeThought = null;
-      activeReveal  = null;
-      drawerOpen    = false;
-    }
+    if (e.key === 'Escape') activeBubbles.length = 0;
   });
 
 })();
