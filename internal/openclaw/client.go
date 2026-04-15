@@ -31,10 +31,20 @@ type Client struct {
 	events   chan ClientEvent
 	pending  map[string]chan ResponseFrame
 	mu       sync.Mutex
+	writeMu  sync.Mutex // serializes WriteJSON; gorilla/websocket disallows concurrent writers
 	closed   bool
 	closeErr error
 	nextID   uint64
 	lastSeq  map[string]int64 // per-session last seen event seq
+}
+
+// writeJSON serializes WriteJSON calls. Multiple goroutines can be calling
+// Call concurrently (e.g. supervise's subscribe + a user-code SessionsSend),
+// and gorilla/websocket panics under concurrent writes.
+func (c *Client) writeJSON(v any) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.conn.WriteJSON(v)
 }
 
 // Dial establishes a connection and completes the hello handshake.
@@ -117,7 +127,7 @@ func (c *Client) doHandshake(ctx context.Context) error {
 			"auth": map[string]any{"token": c.cfg.Token},
 		},
 	}
-	if err := c.conn.WriteJSON(connectReq); err != nil {
+	if err := c.writeJSON(connectReq); err != nil {
 		return fmt.Errorf("openclaw: write connect: %w", err)
 	}
 	// Expect hello-ok.
@@ -239,7 +249,9 @@ func (c *Client) Close() error {
 	}
 	c.closed = true
 	c.mu.Unlock()
+	c.writeMu.Lock()
 	_ = c.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""), time.Now().Add(time.Second))
+	c.writeMu.Unlock()
 	return c.conn.Close()
 }
 
@@ -281,7 +293,7 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	c.mu.Unlock()
 
 	req := RequestFrame{Type: "req", ID: id, Method: method, Params: params}
-	if err := c.conn.WriteJSON(req); err != nil {
+	if err := c.writeJSON(req); err != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
