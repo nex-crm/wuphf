@@ -19,6 +19,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 func TestMain(m *testing.M) {
@@ -142,6 +143,64 @@ func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for subscribed message")
+	}
+}
+
+func TestRecordAgentUsageAttachesToCurrentTurnMessagesOnly(t *testing.T) {
+	b := NewBroker()
+	now := time.Now().UTC()
+	b.mu.Lock()
+	b.messages = []channelMessage{
+		{
+			ID:        "msg-1",
+			From:      "ceo",
+			Content:   "older turn",
+			Timestamp: now.Add(-2 * time.Minute).Format(time.RFC3339),
+			Usage:     &messageUsage{TotalTokens: 111},
+		},
+		{
+			ID:        "msg-2",
+			From:      "pm",
+			Content:   "interleaved",
+			Timestamp: now.Add(-30 * time.Second).Format(time.RFC3339),
+		},
+		{
+			ID:        "msg-3",
+			From:      "ceo",
+			Content:   "current turn kickoff",
+			Timestamp: now.Add(-10 * time.Second).Format(time.RFC3339),
+		},
+		{
+			ID:        "msg-4",
+			From:      "system",
+			Content:   "routing",
+			Timestamp: now.Add(-5 * time.Second).Format(time.RFC3339),
+		},
+		{
+			ID:        "msg-5",
+			From:      "ceo",
+			Content:   "current turn answer",
+			Timestamp: now.Format(time.RFC3339),
+		},
+	}
+	b.mu.Unlock()
+
+	b.RecordAgentUsage("ceo", "claude-sonnet-4-6", provider.ClaudeUsage{
+		InputTokens:         800,
+		OutputTokens:        200,
+		CacheReadTokens:     50,
+		CacheCreationTokens: 25,
+	})
+
+	msgs := b.Messages()
+	if msgs[0].Usage == nil || msgs[0].Usage.TotalTokens != 111 {
+		t.Fatalf("expected older turn usage to remain untouched, got %+v", msgs[0].Usage)
+	}
+	if msgs[2].Usage == nil || msgs[2].Usage.TotalTokens != 1075 {
+		t.Fatalf("expected msg-3 to receive usage, got %+v", msgs[2].Usage)
+	}
+	if msgs[4].Usage == nil || msgs[4].Usage.TotalTokens != 1075 {
+		t.Fatalf("expected msg-5 to receive usage, got %+v", msgs[4].Usage)
 	}
 }
 
@@ -2476,7 +2535,6 @@ func TestRecentHumanMessagesIncludesNexSender(t *testing.T) {
 		t.Error("expected agent message m1 to be excluded")
 	}
 }
-
 
 // --- Skill proposal system tests ---
 

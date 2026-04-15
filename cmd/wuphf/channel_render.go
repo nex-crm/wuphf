@@ -68,6 +68,27 @@ func renderReactions(reactions []brokerReaction) string {
 	return strings.Join(parts, " ")
 }
 
+func messageUsageTotal(usage *brokerMessageUsage) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.TotalTokens > 0 {
+		return usage.TotalTokens
+	}
+	return usage.InputTokens + usage.OutputTokens + usage.CacheReadTokens + usage.CacheCreationTokens
+}
+
+func renderMessageUsageMeta(usage *brokerMessageUsage, accent string) string {
+	total := messageUsageTotal(usage)
+	if total == 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(accent)).
+		Bold(true).
+		Render(formatTokenCount(total))
+}
+
 func buildOneOnOneMessageLines(messages []brokerMessage, expanded map[string]bool, contentWidth int, agentName string, unreadAnchorID string, unreadCount int) []renderedLine {
 	if len(messages) == 0 {
 		mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(slackMuted))

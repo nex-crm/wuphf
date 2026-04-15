@@ -2462,6 +2462,26 @@ func TestChannelViewShowsMessageIDInMeta(t *testing.T) {
 	}
 }
 
+func TestChannelViewShowsPerMessageTokenUsage(t *testing.T) {
+	m := newChannelModel(false)
+	m.width = 120
+	m.height = 30
+	m.messages = []brokerMessage{
+		{
+			ID:        "msg-token-1",
+			From:      "ceo",
+			Content:   "We should choose a sharper wedge.",
+			Timestamp: "2026-03-24T10:00:00Z",
+			Usage:     &brokerMessageUsage{TotalTokens: 1234},
+		},
+	}
+
+	view := stripANSI(m.View())
+	if !strings.Contains(view, "1.2k tok") {
+		t.Fatalf("expected per-message token usage in view, got %q", view)
+	}
+}
+
 func TestChannelViewShowsUsageTotals(t *testing.T) {
 	m := newChannelModel(false)
 	m.width = 120

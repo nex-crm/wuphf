@@ -177,6 +177,9 @@ func renderOfficeMessageBlock(tm threadedMessage, contentWidth int, unreadAnchor
 	if mood != "" {
 		meta += " · " + mood
 	}
+	if usageMeta := renderMessageUsageMeta(msg.Usage, color); usageMeta != "" {
+		meta += " · " + usageMeta
+	}
 	if tm.Depth > 0 {
 		meta += fmt.Sprintf(" · thread reply to %s", tm.ParentLabel)
 	}
