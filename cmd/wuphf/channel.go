@@ -442,7 +442,7 @@ var channelSlashCommands = []tui.SlashCommand{
 	{Name: "provider", Description: "Switch LLM provider (choose wisely, Michael)", Category: "setup"},
 	{Name: "doctor", Description: "Check readiness and runtime health (Meredith not involved)", Category: "setup"},
 	{Name: "integrate", Description: "Connect an integration (beat the Dunder Mifflin fax)", Category: "setup"},
-	{Name: "connect", Description: "Connect Telegram, Slack, or Discord to the office", Category: "setup"},
+	{Name: "connect", Description: "Bring Telegram, OpenClaw, or other integrations into the office", Category: "setup"},
 	{Name: "1o1", Description: "Direct 1:1 with an agent — Toby not invited", Category: "session"},
 	{Name: "messages", Description: "Show the main office feed — where it all happens", Category: "navigate"},
 	{Name: "inbox", Description: "Show the selected agent inbox lane in 1:1 mode", Category: "navigate"},
