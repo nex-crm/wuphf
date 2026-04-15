@@ -262,6 +262,122 @@
     ctx.fillText('WASTE', c.x, c.y - 6);
   }
 
+  // ── Sprite helpers ─────────────────────────────────────────────
+  // Generic head: hair, skin, eyes (dark), mouth
+  function drawHead(x, y, hair, skin, f) {
+    const b = f < 2 ? 0 : 1;
+    ctx.fillStyle = hair; ctx.fillRect(x + 2, y + b,      16, 9);
+    ctx.fillStyle = skin; ctx.fillRect(x + 2, y + 7 + b,  16, 13);
+    ctx.fillStyle = C.bg; ctx.fillRect(x + 5, y + 10 + b, 3, 3);
+                          ctx.fillRect(x + 12, y + 10 + b, 3, 3);
+    ctx.fillStyle = '#804040'; ctx.fillRect(x + 7, y + 17 + b, 6, 2);
+  }
+
+  // ── Office cast ────────────────────────────────────────────────
+  function drawPam(x, y, f) {
+    const b = f < 2 ? 0 : 1;
+    // Hair bun
+    ctx.fillStyle = '#C49838'; ctx.fillRect(x + 5, y - 4 + b, 10, 7);
+    drawHead(x, y + b, '#D4A850', C.skin, f);
+    // Pink cardigan + white collar
+    ctx.fillStyle = '#D09098'; ctx.fillRect(x,     y + 20 + b, 20, 14);
+    ctx.fillStyle = C.light;   ctx.fillRect(x + 7, y + 20 + b, 6, 4);
+    // Purple skirt
+    ctx.fillStyle = '#6868A8'; ctx.fillRect(x, y + 34 + b, 20, 12);
+    // Legs + shoes
+    ctx.fillStyle = C.skin;    ctx.fillRect(x + 2,  y + 46, 6, 6); ctx.fillRect(x + 12, y + 46, 6, 6);
+    ctx.fillStyle = '#2A1808'; ctx.fillRect(x + 2,  y + 52, 8, 4); ctx.fillRect(x + 10, y + 52, 8, 4);
+  }
+
+  function drawMichael(x, y, f) {
+    const b = f < 2 ? 0 : 1;
+    drawHead(x, y + b, '#2A1A0A', C.skin, f);
+    // Big smile
+    ctx.fillStyle = '#A05050'; ctx.fillRect(x + 4, y + 16 + b, 12, 3);
+    // Blue suit
+    ctx.fillStyle = '#1A3858'; ctx.fillRect(x, y + 20 + b, 20, 14);
+    // White shirt
+    ctx.fillStyle = C.light;   ctx.fillRect(x + 7, y + 20 + b, 6, 10);
+    // Amber tie (he tries)
+    ctx.fillStyle = C.yellow;  ctx.fillRect(x + 9, y + 23 + b, 3, 8);
+    // Dark pants + shoes
+    ctx.fillStyle = '#0E2840'; ctx.fillRect(x, y + 34 + b, 20, 12);
+    ctx.fillStyle = '#0A0E14'; ctx.fillRect(x + 2, y + 46, 7, 4); ctx.fillRect(x + 11, y + 46, 7, 4);
+  }
+
+  function drawDwight(x, y, f) {
+    const b = f < 2 ? 0 : 1;
+    drawHead(x, y + b, '#3A2010', '#C88858', f);
+    // Glasses
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(x + 3, y + 9 + b, 5, 3); ctx.fillRect(x + 11, y + 9 + b, 5, 3);
+    ctx.fillRect(x + 8, y + 10 + b, 3, 1);
+    // Scowl
+    ctx.fillStyle = '#604010'; ctx.fillRect(x + 5, y + 16 + b, 10, 2);
+    // Mustard shirt
+    ctx.fillStyle = '#A88018'; ctx.fillRect(x, y + 20 + b, 20, 14);
+    ctx.fillStyle = C.bg;      ctx.fillRect(x + 7, y + 20 + b, 6, 4);
+    // Dark pants
+    ctx.fillStyle = '#202020'; ctx.fillRect(x, y + 34 + b, 20, 12);
+    ctx.fillStyle = '#080808'; ctx.fillRect(x + 2, y + 46, 7, 4); ctx.fillRect(x + 11, y + 46, 7, 4);
+  }
+
+  function drawJim(x, y, f) {
+    const b = f < 2 ? 0 : 1;
+    drawHead(x, y + b, '#5A3828', C.skin, f);
+    // Slightly messy hair
+    ctx.fillStyle = '#7A4838'; ctx.fillRect(x + 14, y + 2 + b, 4, 4);
+    // Smirk (asymmetric)
+    ctx.fillStyle = '#804848'; ctx.fillRect(x + 9, y + 17 + b, 7, 2);
+    // Casual blue shirt
+    ctx.fillStyle = '#3A5A78'; ctx.fillRect(x, y + 20 + b, 20, 14);
+    // Dark slacks
+    ctx.fillStyle = '#1A2428'; ctx.fillRect(x, y + 34 + b, 20, 12);
+    ctx.fillStyle = '#080C10'; ctx.fillRect(x + 2, y + 46, 7, 4); ctx.fillRect(x + 11, y + 46, 7, 4);
+  }
+
+  function drawKevin(x, y, f) {
+    const b = f < 2 ? 0 : 1;
+    // Kevin is wider
+    ctx.fillStyle = '#201810'; ctx.fillRect(x, y + b, 24, 7);
+    ctx.fillStyle = '#D09858'; ctx.fillRect(x, y + 5 + b, 24, 15);
+    ctx.fillStyle = C.bg;      ctx.fillRect(x + 4, y + 9 + b, 4, 4); ctx.fillRect(x + 16, y + 9 + b, 4, 4);
+    ctx.fillStyle = '#805038'; ctx.fillRect(x + 8, y + 17 + b, 8, 2);
+    ctx.fillStyle = '#2A3A58'; ctx.fillRect(x, y + 20 + b, 24, 14);
+    ctx.fillStyle = '#181818'; ctx.fillRect(x, y + 34 + b, 24, 12);
+    ctx.fillStyle = '#080808'; ctx.fillRect(x + 2, y + 46, 8, 4); ctx.fillRect(x + 14, y + 46, 8, 4);
+  }
+
+  function drawCreed(x, y, f) {
+    const b = f < 3 ? 0 : 1;
+    // Gray hair, knowing expression
+    drawHead(x, y + b, '#706860', '#B88858', f);
+    ctx.fillStyle = '#805038'; ctx.fillRect(x + 4, y + 17 + b, 12, 2);
+    // Green shirt (questionable origin)
+    ctx.fillStyle = '#284818'; ctx.fillRect(x, y + 20 + b, 20, 14);
+    ctx.fillStyle = '#201808'; ctx.fillRect(x, y + 34 + b, 20, 12);
+    ctx.fillStyle = '#100808'; ctx.fillRect(x + 2, y + 46, 7, 4); ctx.fillRect(x + 11, y + 46, 7, 4);
+  }
+
+  // ── Characters ─────────────────────────────────────────────────
+  const CHARS = [
+    { id: 'pam',     name: 'Pam Beesly',    quote: 'WUPHF!',
+      gx: 3.5, gy: 0.5, fn: drawPam },
+    { id: 'michael', name: 'Michael Scott', quote: "I'm not superstitious, but I am a little stitious.",
+      gx: 6.5, gy: 1.5, fn: drawMichael },
+    { id: 'dwight',  name: 'Dwight Schrute', quote: 'Bears. Beets. Battlestar Galactica.',
+      gx: 1,   gy: 3,   fn: drawDwight },
+    { id: 'jim',     name: 'Jim Halpert',    quote: 'How the turntables...',
+      gx: 3,   gy: 3,   fn: drawJim },
+    { id: 'kevin',   name: 'Kevin Malone',   quote: '... (stares at snacks)',
+      gx: 5.5, gy: 4,   fn: drawKevin, wide: true },
+    { id: 'creed',   name: 'Creed Bratton',  quote: "Nobody steals from Creed Bratton and gets away with it. The website is fine.",
+      gx: 0.5, gy: 5,   fn: drawCreed },
+  ];
+
+  const charHits = [];
+  let activeThought = null;
+
   // ── Main draw ──────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, W, H);
@@ -286,6 +402,27 @@
     drawDesk(5, 1, 1, false);             // CEO Agent desk (back right)
     drawDesk(2, 4, 1, false);             // Engineer Agent desk
     drawDesk(4, 3, 1, false);             // CMO Agent desk
+
+    // Characters (back-to-front sort by gx+gy)
+    charHits.length = 0;
+    const sorted = [...CHARS].sort((a, b) => (a.gx + a.gy) - (b.gx + b.gy));
+    for (const char of sorted) {
+      const c  = isoCenter(char.gx, char.gy);
+      const cw = char.wide ? 24 : 20;
+      const cx = c.x - cw / 2 - 2;
+      const cy = c.y - 52;
+
+      // Shadow
+      ctx.fillStyle = C.shadow;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y + 2, char.wide ? 14 : 11, 5, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Sprite
+      char.fn(cx, cy, animF);
+
+      charHits.push({ char, cx, cy, w: cw + 4, h: 54 });
+    }
   }
 
   function loop() { draw(); requestAnimationFrame(loop); }
