@@ -19,6 +19,8 @@ type fakeOCClient struct {
 	events       chan openclaw.ClientEvent
 	sendErr      error
 	nextSendErrs []error // drained FIFO if non-empty
+	historyByKey map[string][]openclaw.HistoricMessage
+	closed       bool
 }
 
 func newFakeOC() *fakeOCClient {
@@ -53,11 +55,22 @@ func (f *fakeOCClient) SessionsMessagesUnsubscribe(ctx context.Context, key stri
 }
 
 func (f *fakeOCClient) SessionsHistory(ctx context.Context, key string, sinceSeq int64) ([]openclaw.HistoricMessage, error) {
-	return nil, nil
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.historyByKey[key], nil
 }
 
 func (f *fakeOCClient) Events() <-chan openclaw.ClientEvent { return f.events }
-func (f *fakeOCClient) Close() error                        { close(f.events); return nil }
+func (f *fakeOCClient) Close() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.closed {
+		return nil
+	}
+	f.closed = true
+	close(f.events)
+	return nil
+}
 
 func TestBridgeStartSubscribesAllBindings(t *testing.T) {
 	fake := newFakeOC()
@@ -186,6 +199,82 @@ func TestOnOfficeMessageRetriesTransient(t *testing.T) {
 		if parts[2] != prev {
 			t.Fatalf("idempotency key changed across retries: %v", fake.sentKeys)
 		}
+	}
+}
+
+func TestGapEventTriggersHistoryReplay(t *testing.T) {
+	fake := newFakeOC()
+	fake.historyByKey = map[string][]openclaw.HistoricMessage{
+		"k": {
+			{SessionKey: "k", Message: []byte(`{"state":"final","content":"missed 1"}`)},
+			{SessionKey: "k", Message: []byte(`{"state":"final","content":"missed 2"}`)},
+		},
+	}
+	broker := NewBroker()
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
+	b := NewOpenclawBridge(broker, fake, bindings)
+	_ = b.Start(context.Background())
+	defer b.Stop()
+
+	fake.events <- openclaw.ClientEvent{
+		Kind: openclaw.EventKindGap,
+		Gap:  &openclaw.GapEvent{SessionKey: "k", FromSeq: 5, ToSeq: 7},
+	}
+	time.Sleep(100 * time.Millisecond)
+	msgs := broker.AllMessages()
+	catchupCount := 0
+	for _, m := range msgs {
+		if m.From == "openclaw-a" && strings.Contains(m.Content, "[catch-up]") {
+			catchupCount++
+		}
+	}
+	if catchupCount != 2 {
+		t.Fatalf("expected 2 catch-up messages, got %d: %v", catchupCount, msgs)
+	}
+}
+
+func TestReconnectOnClientClose(t *testing.T) {
+	var mu sync.Mutex
+	dialCount := 0
+	clients := []*fakeOCClient{}
+	dialer := func(ctx context.Context) (openclawClient, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		dialCount++
+		c := newFakeOC()
+		clients = append(clients, c)
+		return c, nil
+	}
+	broker := NewBroker()
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
+	b := NewOpenclawBridgeWithDialer(broker, nil, dialer, bindings)
+	b.backoff = NewBridgeBackoff(5*time.Millisecond, 50*time.Millisecond)
+	_ = b.Start(context.Background())
+	defer b.Stop()
+
+	// Let supervise dial + subscribe the first client.
+	time.Sleep(40 * time.Millisecond)
+	mu.Lock()
+	first := clients[0]
+	mu.Unlock()
+
+	// Force the first client's event channel to close, simulating a drop.
+	_ = first.Close()
+
+	// Allow reconnect.
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+	if dialCount < 2 {
+		t.Fatalf("expected reconnect, dialCount=%d", dialCount)
+	}
+	latest := clients[len(clients)-1]
+	latest.mu.Lock()
+	subs := len(latest.subscribed)
+	latest.mu.Unlock()
+	if subs == 0 {
+		t.Fatal("reconnected client was not re-subscribed")
 	}
 }
 
