@@ -6775,7 +6775,7 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"skill": *sk})
+	json.NewEncoder(w).Encode(map[string]any{"skill": *sk, "channel": channel})
 }
 
 // parseSkillProposalLocked extracts a [SKILL PROPOSAL] block from a message
