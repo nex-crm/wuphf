@@ -36,6 +36,12 @@ type OpenclawBridge struct {
 	slugByKey map[string]string // sessionKey -> slug
 	keyBySlug map[string]string // slug -> sessionKey
 
+	// lastChannelByKey remembers where the most recent human-authored send for
+	// each session came from, so when the assistant reply arrives via the
+	// async event stream we can post it back to the same channel (DM, #general,
+	// thread, etc.) instead of always falling back to #general. Guarded by mu.
+	lastChannelByKey map[string]string
+
 	retryDelays []time.Duration // nil = use defaults
 
 	// Reconnect supervisor fields.
@@ -80,12 +86,13 @@ func NewOpenclawBridge(broker *Broker, client openclawClient, bindings []config.
 		keyBySlug[b.Slug] = b.SessionKey
 	}
 	return &OpenclawBridge{
-		broker:    broker,
-		client:    client,
-		bindings:  bindings,
-		slugByKey: slugByKey,
-		keyBySlug: keyBySlug,
-		done:      make(chan struct{}),
+		broker:           broker,
+		client:           client,
+		bindings:         bindings,
+		slugByKey:        slugByKey,
+		keyBySlug:        keyBySlug,
+		lastChannelByKey: make(map[string]string, len(bindings)),
+		done:             make(chan struct{}),
 	}
 }
 
@@ -247,7 +254,13 @@ func (b *OpenclawBridge) handleClientEvent(evt openclaw.ClientEvent) {
 			return
 		}
 		if text := evt.SessionMessage.MessageText; text != "" {
-			b.postBridgeMessage(slug, text)
+			b.mu.RLock()
+			channel := b.lastChannelByKey[evt.SessionMessage.SessionKey]
+			b.mu.RUnlock()
+			if channel == "" {
+				channel = "general"
+			}
+			b.postBridgeMessage(slug, channel, text)
 		}
 	case openclaw.EventKindChanged:
 		if evt.SessionsChanged != nil && evt.SessionsChanged.Reason == "ended" {
@@ -282,14 +295,30 @@ func (b *OpenclawBridge) retryDelaysList() []time.Duration {
 // SetRetryDelaysForTest is only used by tests.
 func (b *OpenclawBridge) SetRetryDelaysForTest(d []time.Duration) { b.retryDelays = d }
 
-// OnOfficeMessage sends an office message from user/@mention to the OpenClaw
-// agent identified by slug. Retries on transient errors with a SINGLE reused
-// idempotency key so the gateway can deduplicate.
-func (b *OpenclawBridge) OnOfficeMessage(ctx context.Context, slug, message string) error {
+// OnOfficeMessage sends a human-authored message to the OpenClaw agent
+// identified by slug. The channel argument is where the reply should land
+// (e.g. "general" for @mentions, a DM slug like "human__pm-bot" for DMs).
+// Retries on transient errors with a SINGLE reused idempotency key so the
+// gateway can deduplicate.
+//
+// Reply routing: OpenClaw streams the assistant reply via an async event.
+// We remember this channel here, keyed by the session key; handleClientEvent
+// reads it when the reply arrives. If channel is empty we fall back to
+// "general" so older callers and probes keep working.
+func (b *OpenclawBridge) OnOfficeMessage(ctx context.Context, slug, channel, message string) error {
 	key, ok := b.keyBySlug[slug]
 	if !ok {
 		return fmt.Errorf("openclaw: unknown bridged slug %q", slug)
 	}
+	if channel == "" {
+		channel = "general"
+	}
+	b.mu.Lock()
+	if b.lastChannelByKey == nil {
+		b.lastChannelByKey = make(map[string]string)
+	}
+	b.lastChannelByKey[key] = channel
+	b.mu.Unlock()
 	idem := uuid.NewString()
 	delays := b.retryDelaysList()
 	var lastErr error
@@ -322,13 +351,16 @@ func (b *OpenclawBridge) OnOfficeMessage(ctx context.Context, slug, message stri
 	return lastErr
 }
 
-// postBridgeMessage posts a bridged-agent chat message into #general via the
-// same broker entrypoint telegram.go uses for incoming chat.
-func (b *OpenclawBridge) postBridgeMessage(slug, text string) {
+// postBridgeMessage posts a bridged-agent chat message into the given channel
+// via the same broker entrypoint telegram.go uses for incoming chat.
+func (b *OpenclawBridge) postBridgeMessage(slug, channel, text string) {
 	if b.broker == nil {
 		return
 	}
-	_, _ = b.broker.PostInboundSurfaceMessage(slug, "general", text, "openclaw")
+	if channel == "" {
+		channel = "general"
+	}
+	_, _ = b.broker.PostInboundSurfaceMessage(slug, channel, text, "openclaw")
 }
 
 // postSystemMessage posts a `system`-authored notice into #general.

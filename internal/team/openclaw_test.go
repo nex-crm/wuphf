@@ -173,7 +173,7 @@ func TestOnOfficeMessageSuccess(t *testing.T) {
 	b := NewOpenclawBridge(NewBroker(), fake, bindings)
 	_ = b.Start(context.Background())
 	defer b.Stop()
-	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "hello")
+	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "general", "hello")
 	if err != nil {
 		t.Fatalf("OnOfficeMessage: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestOnOfficeMessageRetriesTransient(t *testing.T) {
 	b.SetRetryDelaysForTest([]time.Duration{10 * time.Millisecond, 10 * time.Millisecond})
 	_ = b.Start(context.Background())
 	defer b.Stop()
-	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "hello")
+	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "general", "hello")
 	if err != nil {
 		t.Fatalf("expected retry to succeed: %v", err)
 	}
@@ -471,6 +471,127 @@ func TestRouteOpenclawMentionsLoopIgnoresUnrelated(t *testing.T) {
 	}
 }
 
+func TestRouteOpenclawMentionsLoopForwardsDMPost(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	fake := newFakeOC()
+	broker := NewBroker()
+	// Register the bridged agent as a real office member so a DM channel can
+	// be opened against its slug.
+	if err := broker.EnsureBridgedMember("openclaw-dm", "DM Bot", "openclaw"); err != nil {
+		t.Fatalf("ensure bridged member: %v", err)
+	}
+	dmSlug, err := broker.ChannelStore().GetOrCreateDirect("human", "openclaw-dm")
+	if err != nil {
+		t.Fatalf("open DM channel: %v", err)
+	}
+	// Mirror the DM into the broker's channel table so findChannelLocked
+	// resolves it — ensureDMConversationLocked does the same when a surface
+	// post lands first.
+	broker.mu.Lock()
+	broker.channels = append(broker.channels, teamChannel{
+		Slug:    dmSlug.Slug,
+		Name:    dmSlug.Slug,
+		Type:    "dm",
+		Members: []string{"human", "openclaw-dm"},
+	})
+	broker.mu.Unlock()
+
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "sk-dm", Slug: "openclaw-dm"}}
+	bridge := NewOpenclawBridge(broker, fake, bindings)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := bridge.Start(ctx); err != nil {
+		t.Fatalf("bridge start: %v", err)
+	}
+	defer bridge.Stop()
+
+	go routeOpenclawMentionsLoop(ctx, broker, bridge)
+	time.Sleep(20 * time.Millisecond)
+
+	broker.mu.Lock()
+	broker.counter++
+	msg := channelMessage{
+		ID:        "msg-dm-1",
+		From:      "human",
+		Channel:   dmSlug.Slug,
+		Content:   "hey, quick q",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	broker.appendMessageLocked(msg)
+	broker.mu.Unlock()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		fake.mu.Lock()
+		got := len(fake.sentKeys)
+		fake.mu.Unlock()
+		if got >= 1 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.sentKeys) != 1 {
+		t.Fatalf("expected 1 forwarded DM send, got %d: %v", len(fake.sentKeys), fake.sentKeys)
+	}
+	if !strings.HasPrefix(fake.sentKeys[0], "sk-dm|hey, quick q|") {
+		t.Fatalf("forwarded DM send has unexpected shape: %q", fake.sentKeys[0])
+	}
+}
+
+func TestRouteOpenclawMentionsLoopDedupesDMAndMention(t *testing.T) {
+	// Guards against a regression where a DM post that also happens to
+	// @mention the partner would fire OnOfficeMessage twice.
+	t.Setenv("HOME", t.TempDir())
+	fake := newFakeOC()
+	broker := NewBroker()
+	if err := broker.EnsureBridgedMember("openclaw-both", "Both Bot", "openclaw"); err != nil {
+		t.Fatalf("ensure bridged member: %v", err)
+	}
+	dm, err := broker.ChannelStore().GetOrCreateDirect("human", "openclaw-both")
+	if err != nil {
+		t.Fatalf("open DM: %v", err)
+	}
+	broker.mu.Lock()
+	broker.channels = append(broker.channels, teamChannel{
+		Slug: dm.Slug, Type: "dm", Members: []string{"human", "openclaw-both"},
+	})
+	broker.mu.Unlock()
+
+	bindings := []config.OpenclawBridgeBinding{{SessionKey: "sk-both", Slug: "openclaw-both"}}
+	bridge := NewOpenclawBridge(broker, fake, bindings)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := bridge.Start(ctx); err != nil {
+		t.Fatalf("bridge start: %v", err)
+	}
+	defer bridge.Stop()
+
+	go routeOpenclawMentionsLoop(ctx, broker, bridge)
+	time.Sleep(20 * time.Millisecond)
+
+	broker.mu.Lock()
+	broker.counter++
+	broker.appendMessageLocked(channelMessage{
+		ID:        "msg-dedupe-1",
+		From:      "human",
+		Channel:   dm.Slug,
+		Content:   "@openclaw-both hey",
+		Tagged:    []string{"openclaw-both"},
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	})
+	broker.mu.Unlock()
+
+	time.Sleep(150 * time.Millisecond)
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.sentKeys) != 1 {
+		t.Fatalf("expected 1 forwarded send (deduped), got %d: %v", len(fake.sentKeys), fake.sentKeys)
+	}
+}
+
 func TestSuperviseOfflineNoticeDeduped(t *testing.T) {
 	broker := NewBroker()
 	dialer := func(ctx context.Context) (openclawClient, error) {
@@ -508,7 +629,7 @@ func TestOnOfficeMessagePermanentFailurePostsSystemMessage(t *testing.T) {
 	b.SetRetryDelaysForTest([]time.Duration{5 * time.Millisecond, 5 * time.Millisecond})
 	_ = b.Start(context.Background())
 	defer b.Stop()
-	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "hello")
+	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "general", "hello")
 	if err == nil {
 		t.Fatal("expected permanent failure error")
 	}

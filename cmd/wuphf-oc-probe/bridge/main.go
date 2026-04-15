@@ -151,15 +151,19 @@ func main() {
 	}
 
 	// 4. Multi-turn conversation. Send three distinct messages, collect replies.
+	// Use concrete questions so the agent produces real answers instead of
+	// shrugging the turn off as noise ("NO_REPLY"). Each prompt references the
+	// prior turn so we can visually confirm multi-turn context is preserved.
+	nonce := fmt.Sprint(time.Now().UnixNano())
 	prompts := []string{
-		"turn-1 " + fmt.Sprint(time.Now().UnixNano()),
-		"turn-2 " + fmt.Sprint(time.Now().UnixNano()),
-		"turn-3 " + fmt.Sprint(time.Now().UnixNano()),
+		"ping " + nonce + " — answer with exactly the single word: pong",
+		"what is 2+2? Reply with just the number.",
+		"in one short sentence, what was the first question I asked you in this session?",
 	}
 	repliesByTurn := make([]string, len(prompts))
 	for i, msg := range prompts {
 		before := len(broker.AllMessages())
-		if err := bridge.OnOfficeMessage(ctx, bridgeSlug, msg); err != nil {
+		if err := bridge.OnOfficeMessage(ctx, bridgeSlug, "general", msg); err != nil {
 			die("turn %d OnOfficeMessage: %v", i+1, err)
 		}
 		fmt.Printf("SEND turn-%d: %q\n", i+1, msg)

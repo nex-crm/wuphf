@@ -58,7 +58,7 @@ func TestOpenclawBridgeFullPipeline_E2E(t *testing.T) {
 	defer cancel()
 
 	// Outbound: bridge → gateway sessions.send
-	if err := bridge.OnOfficeMessage(ctx, "openclaw-demo-e2e", "hello agent"); err != nil {
+	if err := bridge.OnOfficeMessage(ctx, "openclaw-demo-e2e", "general", "hello agent"); err != nil {
 		t.Fatalf("OnOfficeMessage: %v", err)
 	}
 	waitForE2E(t, 2*time.Second, func() bool {

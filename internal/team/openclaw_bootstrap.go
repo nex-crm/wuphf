@@ -53,11 +53,23 @@ func StartOpenclawBridgeFromConfig(ctx context.Context, broker *Broker) (*Opencl
 	return bridge, nil
 }
 
-// routeOpenclawMentionsLoop subscribes to broker messages and forwards every
-// human-authored @mention of a bridged slug to the OpenClaw bridge via
-// OnOfficeMessage. Agent-to-agent mentions are intentionally skipped to
-// prevent broadcast loops (mirroring the thread auto-tag decision in broker.go).
-// The loop exits when ctx is cancelled and the subscriber channel drains.
+// StartOpenclawRouter starts the mention+DM routing goroutine. Exported so
+// out-of-package callers (e.g. bridge probes) can opt into the same routing
+// behavior production WUPHF runs via launcher.go. The goroutine exits when
+// ctx is cancelled.
+func StartOpenclawRouter(ctx context.Context, broker *Broker, bridge *OpenclawBridge) {
+	go routeOpenclawMentionsLoop(ctx, broker, bridge)
+}
+
+// routeOpenclawMentionsLoop subscribes to broker messages and forwards
+// human-authored posts to the OpenClaw bridge via OnOfficeMessage in two cases:
+//
+//  1. Channel posts that @mention a bridged slug (one forward per mention).
+//  2. 1:1 DM posts whose partner slug is bridged (no @mention required).
+//
+// Agent-to-agent mentions are intentionally skipped to prevent broadcast loops
+// (mirroring the thread auto-tag decision in broker.go). The loop exits when
+// ctx is cancelled and the subscriber channel drains.
 func routeOpenclawMentionsLoop(ctx context.Context, broker *Broker, bridge *OpenclawBridge) {
 	if broker == nil || bridge == nil {
 		return
@@ -82,19 +94,27 @@ func routeOpenclawMentionsLoop(ctx context.Context, broker *Broker, bridge *Open
 			if msg.From != "you" && msg.From != "human" {
 				continue
 			}
-			if len(msg.Tagged) == 0 {
-				continue
-			}
+
+			// Collect the set of bridged slugs to forward this message to.
+			// Mentions and DM partner can both apply; dedupe so a DM that
+			// also happens to @mention the same agent isn't double-fired.
+			targets := make(map[string]struct{})
 			for _, slug := range msg.Tagged {
-				if !bridge.HasSlug(slug) {
-					continue
+				if bridge.HasSlug(slug) {
+					targets[slug] = struct{}{}
 				}
+			}
+			if partner := broker.DMPartner(msg.Channel); partner != "" && bridge.HasSlug(partner) {
+				targets[partner] = struct{}{}
+			}
+
+			for slug := range targets {
 				// Best-effort: OnOfficeMessage retries internally and posts
 				// its own system message on permanent failure, so we do
 				// not propagate the error here.
-				go func(slug string) {
-					_ = bridge.OnOfficeMessage(ctx, slug, msg.Content)
-				}(slug)
+				go func(slug, channel, content string) {
+					_ = bridge.OnOfficeMessage(ctx, slug, channel, content)
+				}(slug, msg.Channel, msg.Content)
 			}
 		}
 	}

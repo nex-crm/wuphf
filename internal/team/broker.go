@@ -1448,6 +1448,67 @@ func (b *Broker) EnsureBridgedMember(slug, name, createdBy string) error {
 	return nil
 }
 
+// EnsureDirectChannel opens (or returns) the 1:1 DM channel between the
+// default human member and agentSlug. Returns the canonical channel slug
+// (pair-sorted via channel.DirectSlug). Safe to call repeatedly; the DM row
+// is upserted in both the channel store and the in-memory broker table so
+// it shows up in the sidebar and findChannelLocked resolves it.
+func (b *Broker) EnsureDirectChannel(agentSlug string) (string, error) {
+	agentSlug = normalizeActorSlug(agentSlug)
+	if agentSlug == "" {
+		return "", fmt.Errorf("agent slug required")
+	}
+	if b.channelStore == nil {
+		return "", fmt.Errorf("channel store not initialized")
+	}
+	ch, err := b.channelStore.GetOrCreateDirect("human", agentSlug)
+	if err != nil {
+		return "", fmt.Errorf("channel store GetOrCreateDirect: %w", err)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.findChannelLocked(ch.Slug) == nil {
+		now := time.Now().UTC().Format(time.RFC3339)
+		b.channels = append(b.channels, teamChannel{
+			Slug:        ch.Slug,
+			Name:        ch.Slug,
+			Type:        "dm",
+			Description: "Direct messages with " + agentSlug,
+			Members:     []string{"human", agentSlug},
+			CreatedBy:   "wuphf",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+		if err := b.saveLocked(); err != nil {
+			return "", err
+		}
+	}
+	return ch.Slug, nil
+}
+
+// DMPartner returns the non-human member slug of a 1:1 DM channel. Returns
+// "" if the channel is not a DM, does not exist, or is a group DM. Used by
+// surface bridges (OpenClaw, Slack, etc.) to resolve "who is the human
+// talking to" when routing DM posts to the right agent without requiring an
+// @mention.
+func (b *Broker) DMPartner(channelSlug string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	ch := b.findChannelLocked(normalizeChannelSlug(channelSlug))
+	if ch == nil || !ch.isDM() {
+		return ""
+	}
+	if len(ch.Members) != 2 {
+		return ""
+	}
+	for _, m := range ch.Members {
+		if m != "human" && m != "you" {
+			return m
+		}
+	}
+	return ""
+}
+
 // PostInboundSurfaceMessage posts a message from an external surface into the broker channel.
 func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider string) (channelMessage, error) {
 	b.mu.Lock()
