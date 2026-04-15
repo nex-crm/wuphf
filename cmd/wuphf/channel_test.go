@@ -2682,6 +2682,49 @@ func TestBlockingRequestCannotBeSnoozedByCommand(t *testing.T) {
 	}
 }
 
+func TestConnectOpenclawOpensPicker(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, _ := m.runCommand("/connect openclaw", "")
+	got := next.(channelModel)
+
+	if !got.picker.IsActive() {
+		t.Fatal("expected picker active after /connect openclaw")
+	}
+	if string(got.pickerMode) != "openclaw-url" {
+		t.Fatalf("expected picker mode openclaw-url, got %q", got.pickerMode)
+	}
+	view := stripANSI(got.picker.View())
+	if !strings.Contains(view, "Gateway URL") {
+		t.Fatalf("picker should prompt for Gateway URL: %q", view)
+	}
+}
+
+func TestConnectOpenclawChainsFromURLToToken(t *testing.T) {
+	m := newChannelModel(false)
+
+	next, _ := m.runCommand("/connect openclaw", "")
+	got := next.(channelModel)
+
+	// Submit URL (empty → default)
+	next2, _ := got.Update(tui.PickerSelectMsg{Value: "", Label: ""})
+	got2 := next2.(channelModel)
+
+	if !got2.picker.IsActive() {
+		t.Fatal("expected picker still active after URL submit")
+	}
+	if string(got2.pickerMode) != "openclaw-token" {
+		t.Fatalf("expected picker mode openclaw-token, got %q", got2.pickerMode)
+	}
+	if got2.openclawURL != "ws://127.0.0.1:18789" {
+		t.Fatalf("expected default URL, got %q", got2.openclawURL)
+	}
+	view := stripANSI(got2.picker.View())
+	if !strings.Contains(view, "Shared secret") {
+		t.Fatalf("picker should prompt for Shared secret: %q", view)
+	}
+}
+
 func TestMain(m *testing.M) {
 	// Use a temp home dir so tests don't read the real ~/.wuphf/config.json
 	tmp, _ := os.MkdirTemp("", "wuphf-test-*")
