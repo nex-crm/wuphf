@@ -12,20 +12,28 @@ type SessionsListFilter struct {
 	Kinds              []string `json:"kinds,omitempty"`
 	IncludeLastMessage bool     `json:"includeLastMessage,omitempty"`
 	Search             string   `json:"search,omitempty"`
+	AgentID            string   `json:"agentId,omitempty"`
 }
 
-// SessionRow is the subset of OpenClaw SessionListRow WUPHF needs.
+// SessionRow is the subset of OpenClaw session-list-row WUPHF needs.
+//
+// The real daemon uses "key" as the session identifier (NOT "sessionKey").
+// Verified 2026-04-15 against OpenClaw 2026.4.14 sessions.list output.
 type SessionRow struct {
-	SessionKey  string `json:"sessionKey"`
+	Key         string `json:"key"`
 	Label       string `json:"label,omitempty"`
 	DisplayName string `json:"displayName,omitempty"`
 	Kind        string `json:"kind,omitempty"`
+	ChatType    string `json:"chatType,omitempty"`
+	SessionID   string `json:"sessionId,omitempty"`
 	LastMessage string `json:"lastMessage,omitempty"`
+	UpdatedAt   int64  `json:"updatedAt,omitempty"`
 }
 
 type sessionsListResult struct {
 	Sessions []SessionRow `json:"sessions"`
 	Path     string       `json:"path,omitempty"`
+	Count    int          `json:"count,omitempty"`
 }
 
 func (c *Client) SessionsList(ctx context.Context, f SessionsListFilter) ([]SessionRow, error) {
@@ -40,15 +48,32 @@ func (c *Client) SessionsList(ctx context.Context, f SessionsListFilter) ([]Sess
 	return res.Sessions, nil
 }
 
-// SessionsSend fires a message into an OpenClaw session. Reply arrives as events.
-// idempotencyKey MUST be reused across retries of the same logical send.
-func (c *Client) SessionsSend(ctx context.Context, key, message, idempotencyKey string) error {
+// SessionsSend fires a message into an OpenClaw session. The agent's reply
+// arrives asynchronously as session.message events.
+//
+// idempotencyKey MUST be reused across retries of the same logical send so the
+// gateway deduplicates. The returned runId identifies the turn on the daemon
+// side and can be correlated with chat/session events.
+type SessionsSendResult struct {
+	RunID      string `json:"runId,omitempty"`
+	Status     string `json:"status,omitempty"` // "started" | ...
+	MessageSeq int64  `json:"messageSeq,omitempty"`
+}
+
+func (c *Client) SessionsSend(ctx context.Context, key, message, idempotencyKey string) (*SessionsSendResult, error) {
 	params := map[string]any{"key": key, "message": message}
 	if idempotencyKey != "" {
 		params["idempotencyKey"] = idempotencyKey
 	}
-	_, err := c.Call(ctx, "sessions.send", params)
-	return err
+	raw, err := c.Call(ctx, "sessions.send", params)
+	if err != nil {
+		return nil, err
+	}
+	var res SessionsSendResult
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
 }
 
 func (c *Client) SessionsMessagesSubscribe(ctx context.Context, key string) error {
@@ -59,36 +84,4 @@ func (c *Client) SessionsMessagesSubscribe(ctx context.Context, key string) erro
 func (c *Client) SessionsMessagesUnsubscribe(ctx context.Context, key string) error {
 	_, err := c.Call(ctx, "sessions.messages.unsubscribe", map[string]any{"key": key})
 	return err
-}
-
-// HistoricMessage is a minimal representation of a past transcript entry.
-type HistoricMessage struct {
-	SessionKey string          `json:"sessionKey,omitempty"`
-	Seq        *int64          `json:"messageSeq,omitempty"`
-	Message    json.RawMessage `json:"message,omitempty"`
-}
-
-// SessionsHistory fetches transcript entries since sinceSeq for gap catch-up.
-// Returns messages in chronological order.
-func (c *Client) SessionsHistory(ctx context.Context, key string, sinceSeq int64) ([]HistoricMessage, error) {
-	params := map[string]any{"sessionKey": key}
-	if sinceSeq > 0 {
-		params["sinceSeq"] = sinceSeq
-	}
-	raw, err := c.Call(ctx, "sessions.history", params)
-	if err != nil {
-		return nil, err
-	}
-	var wrap struct {
-		Messages []HistoricMessage `json:"messages"`
-	}
-	if err := json.Unmarshal(raw, &wrap); err != nil {
-		// Fallback: some servers return a bare array.
-		var arr []HistoricMessage
-		if err2 := json.Unmarshal(raw, &arr); err2 == nil {
-			return arr, nil
-		}
-		return nil, err
-	}
-	return wrap.Messages, nil
 }

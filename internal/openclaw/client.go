@@ -17,10 +17,10 @@ import (
 
 // Config configures a Client.
 type Config struct {
-	URL         string // e.g. ws://127.0.0.1:18789 or wss://host:18789
-	Token       string // shared secret (from wuphf config or env)
-	ClientID    string // defaults to "wuphf"
-	UserAgent   string // optional
+	URL         string          // e.g. ws://127.0.0.1:18789 or wss://host:18789
+	Token       string          // shared secret (from wuphf config or env)
+	Identity    *DeviceIdentity // required — OpenClaw grants zero scopes without device auth
+	UserAgent   string          // optional
 	DialTimeout time.Duration
 }
 
@@ -47,16 +47,16 @@ func (c *Client) writeJSON(v any) error {
 	return c.conn.WriteJSON(v)
 }
 
-// Dial establishes a connection and completes the hello handshake.
+// Dial establishes a connection and completes the challenge-response handshake.
 func Dial(ctx context.Context, cfg Config) (*Client, error) {
 	if err := enforceTransportSecurity(cfg.URL); err != nil {
 		return nil, err
 	}
+	if cfg.Identity == nil {
+		return nil, errors.New("openclaw: DeviceIdentity required (see LoadOrCreateDeviceIdentity)")
+	}
 	if cfg.DialTimeout == 0 {
 		cfg.DialTimeout = 10 * time.Second
-	}
-	if cfg.ClientID == "" {
-		cfg.ClientID = "wuphf"
 	}
 	dialer := websocket.Dialer{HandshakeTimeout: cfg.DialTimeout}
 	dctx, cancel := context.WithTimeout(ctx, cfg.DialTimeout)
@@ -110,49 +110,158 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// connectChallengeEvent is the shape of the first frame the gateway pushes.
+type connectChallengeEvent struct {
+	Nonce string `json:"nonce"`
+	TS    int64  `json:"ts"`
+}
+
+const (
+	clientIDBackend    = "gateway-client"
+	clientModeBackend  = "backend"
+	connectRole        = "operator"
+	connectDeviceFamily = "wuphf"
+	connectScopeAdmin  = "operator.admin"
+	supportedProtocol  = 3
+)
+
 func (c *Client) doHandshake(ctx context.Context) error {
+	// Deadline guards every read/write in the handshake.
+	deadline := time.Now().Add(c.cfg.DialTimeout)
+	_ = c.conn.SetReadDeadline(deadline)
+	_ = c.conn.SetWriteDeadline(deadline)
+	defer func() {
+		_ = c.conn.SetReadDeadline(time.Time{})
+		_ = c.conn.SetWriteDeadline(time.Time{})
+	}()
+
+	// 1. Wait for connect.challenge event with the server nonce.
+	nonce, err := c.readConnectChallenge()
+	if err != nil {
+		return err
+	}
+
+	// 2. Build + sign device auth payload (v3, pipe-delimited).
+	signedAtMs := nowMs()
+	platform := runtimeOS()
+	payload := BuildDeviceAuthPayloadV3(DeviceAuthPayloadV3{
+		DeviceID:     c.cfg.Identity.DeviceID(),
+		ClientID:     clientIDBackend,
+		ClientMode:   clientModeBackend,
+		Role:         connectRole,
+		Scopes:       []string{connectScopeAdmin},
+		SignedAtMs:   signedAtMs,
+		Token:        c.cfg.Token,
+		Nonce:        nonce,
+		Platform:     platform,
+		DeviceFamily: connectDeviceFamily,
+	})
+	signature := c.cfg.Identity.Sign(payload)
+
+	// 3. Send connect with device auth.
+	connectID := c.newID()
 	connectReq := RequestFrame{
 		Type:   "req",
-		ID:     c.newID(),
+		ID:     connectID,
 		Method: "connect",
 		Params: map[string]any{
-			"minProtocol": 1,
-			"maxProtocol": 2,
+			"minProtocol": supportedProtocol,
+			"maxProtocol": supportedProtocol,
 			"client": map[string]any{
-				"id":       c.cfg.ClientID,
-				"version":  "0.1",
-				"platform": runtimeOS(),
-				"mode":     "operator",
+				"id":           clientIDBackend,
+				"version":      "0.1",
+				"platform":     platform,
+				"deviceFamily": connectDeviceFamily,
+				"mode":         clientModeBackend,
 			},
-			"auth": map[string]any{"token": c.cfg.Token},
+			"auth":   map[string]any{"token": c.cfg.Token},
+			"role":   connectRole,
+			"scopes": []string{connectScopeAdmin},
+			"caps":   []string{},
+			"device": map[string]any{
+				"id":        c.cfg.Identity.DeviceID(),
+				"publicKey": c.cfg.Identity.PublicKeyB64URL(),
+				"signature": signature,
+				"signedAt":  signedAtMs,
+				"nonce":     nonce,
+			},
 		},
 	}
 	if err := c.writeJSON(connectReq); err != nil {
 		return fmt.Errorf("openclaw: write connect: %w", err)
 	}
-	// Expect hello-ok.
-	_, raw, err := c.conn.ReadMessage()
-	if err != nil {
-		return fmt.Errorf("openclaw: read hello-ok: %w", err)
-	}
-	var hello struct {
-		Type     string      `json:"type"`
-		Protocol int         `json:"protocol"`
-		Error    *ErrorShape `json:"error,omitempty"`
-	}
-	if err := json.Unmarshal(raw, &hello); err != nil {
-		return fmt.Errorf("openclaw: decode hello-ok: %w", err)
-	}
-	if hello.Type != "hello-ok" {
-		if hello.Error != nil {
-			return fmt.Errorf("openclaw: handshake refused: %s: %s", hello.Error.Code, hello.Error.Message)
+
+	// 4. Read frames until we see the hello-ok response (skipping pre-handshake events).
+	for {
+		_, raw, err := c.conn.ReadMessage()
+		if err != nil {
+			return fmt.Errorf("openclaw: read hello-ok: %w", err)
 		}
-		return fmt.Errorf("openclaw: unexpected handshake frame type %q", hello.Type)
+		kind, _, err := DecodeFrame(raw)
+		if err != nil {
+			continue // ignore unrecognized pre-handshake traffic
+		}
+		if kind != "res" {
+			continue
+		}
+		var res ResponseFrame
+		if err := json.Unmarshal(raw, &res); err != nil {
+			return fmt.Errorf("openclaw: decode connect response: %w", err)
+		}
+		if res.ID != connectID {
+			continue
+		}
+		if !res.OK {
+			if res.Error != nil {
+				return fmt.Errorf("openclaw: handshake refused: %s: %s", res.Error.Code, res.Error.Message)
+			}
+			return errors.New("openclaw: handshake refused (no error detail)")
+		}
+		var hello struct {
+			Type     string `json:"type"`
+			Protocol int    `json:"protocol"`
+		}
+		if err := json.Unmarshal(res.Payload, &hello); err != nil {
+			return fmt.Errorf("openclaw: decode hello-ok: %w", err)
+		}
+		if hello.Type != "hello-ok" {
+			return fmt.Errorf("openclaw: unexpected connect payload type %q", hello.Type)
+		}
+		if hello.Protocol < supportedProtocol {
+			return fmt.Errorf("openclaw: server protocol %d < required %d", hello.Protocol, supportedProtocol)
+		}
+		return nil
 	}
-	if hello.Protocol < 1 {
-		return fmt.Errorf("openclaw: unsupported protocol %d", hello.Protocol)
+}
+
+// readConnectChallenge consumes frames until it sees the connect.challenge event.
+// Other early events (e.g. health) are discarded to keep the handshake linear.
+func (c *Client) readConnectChallenge() (string, error) {
+	for {
+		_, raw, err := c.conn.ReadMessage()
+		if err != nil {
+			return "", fmt.Errorf("openclaw: read connect.challenge: %w", err)
+		}
+		kind, _, err := DecodeFrame(raw)
+		if err != nil || kind != "event" {
+			continue
+		}
+		var evt EventFrame
+		if err := json.Unmarshal(raw, &evt); err != nil {
+			continue
+		}
+		if evt.Event != "connect.challenge" {
+			continue
+		}
+		var ch connectChallengeEvent
+		if err := json.Unmarshal(evt.Payload, &ch); err != nil {
+			return "", fmt.Errorf("openclaw: decode connect.challenge payload: %w", err)
+		}
+		if ch.Nonce == "" {
+			return "", errors.New("openclaw: connect.challenge missing nonce")
+		}
+		return ch.Nonce, nil
 	}
-	return nil
 }
 
 func (c *Client) readLoop() {
@@ -266,6 +375,10 @@ func (c *Client) newID() string {
 // runtimeOS reports the current OS. Split out as a var so tests can override.
 var runtimeOS = func() string {
 	return runtime.GOOS
+}
+
+var nowMs = func() int64 {
+	return time.Now().UnixMilli()
 }
 
 // GatewayError is returned by Call when the gateway responds with ok=false.

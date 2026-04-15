@@ -13,14 +13,15 @@ func TestSessionsListSerialization(t *testing.T) {
 		if method == "sessions.list" {
 			captured.Method = method
 			_ = json.Unmarshal(params, &captured.Params)
-			return map[string]any{"sessions": []any{map[string]any{"sessionKey": "k", "label": "Agent"}}, "path": "/p"}, ""
+			// Real daemon uses "key" as the session identifier, not "sessionKey".
+			return map[string]any{"sessions": []any{map[string]any{"key": "agent:main:main", "kind": "direct"}}, "path": "/p"}, ""
 		}
 		return nil, "unknown"
 	})
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t", Identity: testIdentity(t)})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -30,10 +31,9 @@ func TestSessionsListSerialization(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SessionsList: %v", err)
 	}
-	if len(rows) != 1 || rows[0].SessionKey != "k" {
+	if len(rows) != 1 || rows[0].Key != "agent:main:main" {
 		t.Fatalf("rows: %+v", rows)
 	}
-	// Check the params were sent.
 	pm, _ := captured.Params.(map[string]any)
 	if pm == nil || pm["limit"].(float64) != 10 {
 		t.Fatalf("params: %+v", captured.Params)
@@ -45,20 +45,24 @@ func TestSessionsSendIncludesIdempotencyKey(t *testing.T) {
 	srv := startFakeGateway(t, func(method string, params json.RawMessage) (any, string) {
 		if method == "sessions.send" {
 			_ = json.Unmarshal(params, &got)
-			return map[string]any{"ok": true}, ""
+			return map[string]any{"runId": "r-1", "status": "started", "messageSeq": 1}, ""
 		}
 		return nil, "unknown"
 	})
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t", Identity: testIdentity(t)})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
 	defer c.Close()
-	if err := c.SessionsSend(ctx, "agent:main:main", "hello", "idem-1"); err != nil {
+	res, err := c.SessionsSend(ctx, "agent:main:main", "hello", "idem-1")
+	if err != nil {
 		t.Fatalf("SessionsSend: %v", err)
+	}
+	if res == nil || res.RunID != "r-1" || res.Status != "started" {
+		t.Fatalf("unexpected send result: %+v", res)
 	}
 	if got["idempotencyKey"] != "idem-1" {
 		t.Fatalf("idempotencyKey missing: %+v", got)
@@ -80,7 +84,7 @@ func TestSessionsMessagesSubscribe(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t", Identity: testIdentity(t)})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}

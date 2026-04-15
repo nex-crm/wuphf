@@ -5,8 +5,10 @@ import (
 	"testing"
 )
 
-func TestParseSessionMessageEvent(t *testing.T) {
-	raw := []byte(`{"sessionKey":"agent:main:main","message":{"id":"m1","role":"assistant","content":"hello"},"messageSeq":7}`)
+func TestParseSessionMessageAssistantPartsArray(t *testing.T) {
+	// Real OpenClaw shape for an assistant reply: content is an array of
+	// {type, text} parts. Verified 2026-04-15 against OpenClaw 2026.4.14.
+	raw := []byte(`{"sessionKey":"agent:main:main","message":{"role":"assistant","content":[{"type":"text","text":"hello there"}],"timestamp":1776254522461},"messageSeq":7}`)
 	evt, err := parseSessionMessage(raw)
 	if err != nil {
 		t.Fatalf("parseSessionMessage: %v", err)
@@ -17,23 +19,32 @@ func TestParseSessionMessageEvent(t *testing.T) {
 	if evt.MessageSeq == nil || *evt.MessageSeq != 7 {
 		t.Fatalf("messageSeq: %v", evt.MessageSeq)
 	}
-	if evt.MessageText != "hello" {
-		t.Fatalf("MessageText from nested content: %q", evt.MessageText)
+	if evt.Role != "assistant" {
+		t.Fatalf("Role: %q", evt.Role)
 	}
+	if evt.MessageText != "hello there" {
+		t.Fatalf("MessageText: %q", evt.MessageText)
+	}
+}
 
-	// state extraction + text fallback
-	raw2 := []byte(`{"sessionKey":"k","message":{"state":"delta","text":"partial"}}`)
-	evt2, err := parseSessionMessage(raw2)
+func TestParseSessionMessageUserStringContent(t *testing.T) {
+	// User-role messages in the real feed carry content as a plain string.
+	raw := []byte(`{"sessionKey":"k","message":{"role":"user","content":"hi","timestamp":0},"messageSeq":0}`)
+	evt, err := parseSessionMessage(raw)
 	if err != nil {
-		t.Fatalf("parseSessionMessage state: %v", err)
+		t.Fatalf("parseSessionMessage: %v", err)
 	}
-	if evt2.MessageState != "delta" {
-		t.Fatalf("MessageState: %q", evt2.MessageState)
+	if evt.Role != "user" || evt.MessageText != "hi" {
+		t.Fatalf("Role/Text: %q/%q", evt.Role, evt.MessageText)
 	}
-	if evt2.MessageText != "partial" {
-		t.Fatalf("MessageText from text fallback: %q", evt2.MessageText)
+}
+
+func TestExtractMessageTextMultiplePartsJoined(t *testing.T) {
+	parts := json.RawMessage(`[{"type":"text","text":"line 1"},{"type":"text","text":"line 2"}]`)
+	got := extractMessageText(parts, "")
+	if got != "line 1\nline 2" {
+		t.Fatalf("joined text: %q", got)
 	}
-	_ = json.RawMessage(raw)
 }
 
 func TestParseSessionsChangedEvent(t *testing.T) {

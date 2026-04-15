@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +14,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// startFakeGateway returns an httptest server that upgrades to WS and answers
-// the "connect" request with hello-ok. Additional handlers can be registered
-// via onRequest for req/res roundtrip tests in later tasks.
+// startFakeGateway returns an httptest server that mirrors the real OpenClaw
+// handshake closely enough for client tests: it pushes connect.challenge first,
+// accepts the device-authed connect request, and replies with a wrapped res
+// frame whose payload is `hello-ok`. Additional method handlers can be
+// registered via onRequest.
 func startFakeGateway(t *testing.T, onRequest func(method string, params json.RawMessage) (payload any, errMsg string)) *httptest.Server {
 	t.Helper()
 	up := websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
@@ -26,7 +29,14 @@ func startFakeGateway(t *testing.T, onRequest func(method string, params json.Ra
 			return
 		}
 		defer c.Close()
-		// Expect connect request.
+		// 1. Push connect.challenge FIRST — the real daemon does this before
+		// reading anything from the client.
+		_ = c.WriteJSON(map[string]any{
+			"type":    "event",
+			"event":   "connect.challenge",
+			"payload": map[string]any{"nonce": "test-nonce", "ts": time.Now().UnixMilli()},
+		})
+		// 2. Expect connect request.
 		_, raw, err := c.ReadMessage()
 		if err != nil {
 			return
@@ -40,17 +50,23 @@ func startFakeGateway(t *testing.T, onRequest func(method string, params json.Ra
 		if req.Method != "connect" {
 			return
 		}
-		// Reply hello-ok.
-		hello := map[string]any{
-			"type":     "hello-ok",
-			"protocol": 1,
-			"server":   map[string]any{"version": "test", "connId": "c1"},
-			"features": map[string]any{"methods": []string{"sessions.list"}, "events": []string{"session.message"}},
-			"snapshot": map[string]any{},
-			"policy":   map[string]any{"maxPayload": 1024 * 1024, "maxBufferedBytes": 1024 * 1024, "tickIntervalMs": 30000},
-		}
-		_ = c.WriteJSON(hello)
-		// Serve further requests.
+		// 3. Reply res(hello-ok) — matching the real server at
+		// dist/server.impl:22706 which wraps the hello-ok body inside a
+		// res frame rather than sending it as a top-level frame.
+		_ = c.WriteJSON(map[string]any{
+			"type": "res",
+			"id":   req.ID,
+			"ok":   true,
+			"payload": map[string]any{
+				"type":     "hello-ok",
+				"protocol": 3,
+				"server":   map[string]any{"version": "test", "connId": "c1"},
+				"features": map[string]any{"methods": []string{"sessions.list"}, "events": []string{"session.message"}},
+				"snapshot": map[string]any{},
+				"policy":   map[string]any{"maxPayload": 1024 * 1024, "maxBufferedBytes": 1024 * 1024, "tickIntervalMs": 30000},
+			},
+		})
+		// 4. Serve further requests.
 		for {
 			_, raw, err := c.ReadMessage()
 			if err != nil {
@@ -93,12 +109,23 @@ func wsURL(srv *httptest.Server) string {
 	return "ws" + strings.TrimPrefix(srv.URL, "http")
 }
 
+// testIdentity returns a fresh throwaway DeviceIdentity rooted in t.TempDir().
+// Each test gets its own file so the path is writeable under the sandbox.
+func testIdentity(t *testing.T) *DeviceIdentity {
+	t.Helper()
+	id, err := LoadOrCreateDeviceIdentity(filepath.Join(t.TempDir(), "identity.json"))
+	if err != nil {
+		t.Fatalf("LoadOrCreateDeviceIdentity: %v", err)
+	}
+	return id
+}
+
 func TestClientDialHappyPath(t *testing.T) {
 	srv := startFakeGateway(t, nil)
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t", Identity: testIdentity(t)})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -108,7 +135,7 @@ func TestClientDialHappyPath(t *testing.T) {
 func TestClientRejectsPlaintextNonLoopback(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	_, err := Dial(ctx, Config{URL: "ws://example.com:18789", Token: "t"})
+	_, err := Dial(ctx, Config{URL: "ws://example.com:18789", Token: "t", Identity: testIdentity(t)})
 	if err == nil {
 		t.Fatal("expected error for ws:// non-loopback")
 	}
@@ -119,16 +146,29 @@ func TestClientRejectsPlaintextNonLoopback(t *testing.T) {
 
 func TestClientAllowsPlaintextNonLoopbackWhenEnvSet(t *testing.T) {
 	t.Setenv("OPENCLAW_ALLOW_INSECURE_PRIVATE_WS", "1")
-	// No real server; we only verify Dial accepts the URL past the security check.
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
-	_, err := Dial(ctx, Config{URL: "ws://10.0.0.1:18789", Token: "t"})
+	_, err := Dial(ctx, Config{URL: "ws://10.0.0.1:18789", Token: "t", Identity: testIdentity(t)})
 	if err == nil {
 		t.Fatal("expected dial failure (no server); got nil")
 	}
-	// The error should NOT be the insecure-url message.
 	if strings.Contains(err.Error(), "insecure") || strings.Contains(err.Error(), "plaintext") {
 		t.Fatalf("env-allowed insecure URL rejected at policy: %v", err)
+	}
+}
+
+func TestDialRequiresDeviceIdentity(t *testing.T) {
+	// OpenClaw grants zero scopes to token-only clients, so the bridge MUST
+	// pass an identity — we'd rather fail fast with a clear error than hit
+	// cryptic missing-scope errors on every session method.
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	_, err := Dial(ctx, Config{URL: "ws://127.0.0.1:1", Token: "t"})
+	if err == nil {
+		t.Fatal("expected error when Identity is nil")
+	}
+	if !strings.Contains(err.Error(), "DeviceIdentity") {
+		t.Fatalf("expected DeviceIdentity error, got %v", err)
 	}
 }
 
@@ -142,7 +182,7 @@ func TestClientCallRoundTrip(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t", Identity: testIdentity(t)})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -169,7 +209,7 @@ func TestClientCallServerError(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t", Identity: testIdentity(t)})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
@@ -188,7 +228,6 @@ func TestClientCallServerError(t *testing.T) {
 }
 
 func TestClientCallContextCancel(t *testing.T) {
-	// Server never responds.
 	srv := startFakeGateway(t, func(method string, params json.RawMessage) (any, string) {
 		time.Sleep(2 * time.Second)
 		return nil, ""
@@ -196,7 +235,7 @@ func TestClientCallContextCancel(t *testing.T) {
 	defer srv.Close()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t"})
+	c, err := Dial(ctx, Config{URL: wsURL(srv), Token: "t", Identity: testIdentity(t)})
 	if err != nil {
 		t.Fatalf("Dial: %v", err)
 	}
