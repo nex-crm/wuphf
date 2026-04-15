@@ -87,14 +87,18 @@ func routeOpenclawMentionsLoop(ctx context.Context, broker *Broker, bridge *Open
 	}
 }
 
-// defaultOpenclawDialer is the production dialer: a thin wrapper that resolves
-// the gateway URL + token from env/config at dial-time (so rotated credentials
-// take effect on reconnect without a restart) and returns the Client unchanged
-// — *openclaw.Client already satisfies the openclawClient interface.
+// defaultOpenclawDialer is the production dialer. It resolves URL, token, and
+// device identity at dial-time so rotated credentials take effect on reconnect
+// without a WUPHF restart. OpenClaw rejects token-only clients with zero scopes,
+// so loading the Ed25519 identity is non-optional.
 func defaultOpenclawDialer(ctx context.Context) (openclawClient, error) {
 	url := config.ResolveOpenclawGatewayURL()
 	token := config.ResolveOpenclawToken()
-	c, err := openclaw.Dial(ctx, openclaw.Config{URL: url, Token: token})
+	identity, err := openclaw.LoadOrCreateDeviceIdentity(config.ResolveOpenclawIdentityPath())
+	if err != nil {
+		return nil, fmt.Errorf("openclaw identity: %w", err)
+	}
+	c, err := openclaw.Dial(ctx, openclaw.Config{URL: url, Token: token, Identity: identity})
 	if err != nil {
 		return nil, err
 	}

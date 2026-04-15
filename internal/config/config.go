@@ -613,3 +613,18 @@ func ResolveOpenclawGatewayURL() string {
 	}
 	return "ws://127.0.0.1:18789"
 }
+
+// ResolveOpenclawIdentityPath returns where the Ed25519 device identity is
+// persisted. OpenClaw's gateway requires device-pair auth — token alone grants
+// zero scopes — so this keypair is effectively credentials: write only to a
+// user-scoped 0600 file under the WUPHF home.
+func ResolveOpenclawIdentityPath() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_OPENCLAW_IDENTITY_PATH")); v != "" {
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".wuphf", "openclaw", "identity.json")
+	}
+	return filepath.Join(home, ".wuphf", "openclaw", "identity.json")
+}

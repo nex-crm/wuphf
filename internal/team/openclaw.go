@@ -2,7 +2,6 @@ package team
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -19,10 +18,9 @@ var defaultOpenclawRetryDelays = []time.Duration{1 * time.Second, 5 * time.Secon
 // Having it here (not in the openclaw package) keeps the mock test-local.
 type openclawClient interface {
 	SessionsList(ctx context.Context, f openclaw.SessionsListFilter) ([]openclaw.SessionRow, error)
-	SessionsSend(ctx context.Context, key, message, idempotencyKey string) error
+	SessionsSend(ctx context.Context, key, message, idempotencyKey string) (*openclaw.SessionsSendResult, error)
 	SessionsMessagesSubscribe(ctx context.Context, key string) error
 	SessionsMessagesUnsubscribe(ctx context.Context, key string) error
-	SessionsHistory(ctx context.Context, key string, sinceSeq int64) ([]openclaw.HistoricMessage, error)
 	Events() <-chan openclaw.ClientEvent
 	Close() error
 }
@@ -55,7 +53,7 @@ type OpenclawBridge struct {
 	// noticedOffline is true while the circuit breaker has been reported as
 	// open via a system message; reset to false when the breaker closes so
 	// each offline episode posts exactly one notice (not one per 5-minute
-	// supervise tick — reviewer Important issue 5).
+	// supervise tick).
 	noticedOffline bool
 }
 
@@ -146,9 +144,6 @@ func (b *OpenclawBridge) supervise() {
 			return
 		}
 		if b.breaker != nil && b.breaker.Open() {
-			// Post the offline notice at most once per breaker-open episode.
-			// Without this guard supervise() loops every 5 minutes and floods
-			// #general with the same system message until the breaker closes.
 			if !b.noticedOffline {
 				b.postSystemMessage("openclaw gateway offline")
 				b.noticedOffline = true
@@ -160,9 +155,6 @@ func (b *OpenclawBridge) supervise() {
 				return
 			}
 		}
-		// Once the breaker has closed (or was never open) we're back in a state
-		// where a future trip should re-notify. Clearing here covers both the
-		// cold-start path and the half-open-recovery path.
 		b.noticedOffline = false
 		err := b.runOnce()
 		if err != nil && !errors.Is(err, context.Canceled) {
@@ -210,7 +202,6 @@ func (b *OpenclawBridge) runOnce() error {
 			return err
 		}
 	}
-	// Successful subscribe => breaker reset (pre-impl decision 5).
 	if b.breaker != nil {
 		b.breaker.RecordSuccess()
 	}
@@ -234,12 +225,13 @@ func (b *OpenclawBridge) runOnce() error {
 }
 
 // handleClientEvent dispatches one event from the OpenClaw Client into the
-// appropriate broker surface: delta chunks flow into the per-agent stream so
-// they render as a live typing indicator, while finals (and bare messages
-// without an explicit state) become chat messages authored by the bridged
-// slug. Error/aborted states and "session ended" changes fan out as system
-// notices. Gap kinds trigger history catch-up; Close kinds are handled by
-// the supervise loop via the events channel close.
+// broker. session.message events arrive as finalized transcript entries (there
+// is no separate streaming path on the daemon's sessions.messages.subscribe).
+// We only forward role=assistant messages — user messages in the stream are
+// echoes of what we just sent, and forwarding them would double-post.
+//
+// sessions.changed events with reason=ended post a system notice so humans
+// know the agent shut down that conversation.
 func (b *OpenclawBridge) handleClientEvent(evt openclaw.ClientEvent) {
 	switch evt.Kind {
 	case openclaw.EventKindMessage:
@@ -250,20 +242,12 @@ func (b *OpenclawBridge) handleClientEvent(evt openclaw.ClientEvent) {
 		if !ok {
 			return // not a bridged session, ignore
 		}
-		switch evt.SessionMessage.MessageState {
-		case "delta":
-			if stream := b.broker.AgentStream(slug); stream != nil && evt.SessionMessage.MessageText != "" {
-				stream.Push(evt.SessionMessage.MessageText)
-			}
-		case "final", "":
-			// Treat empty state as a complete message (some servers omit state).
-			if text := evt.SessionMessage.MessageText; text != "" {
-				b.postBridgeMessage(slug, text)
-			}
-		case "error":
-			b.postSystemMessage(fmt.Sprintf("openclaw agent %q reported an error", slug))
-		case "aborted":
-			b.postSystemMessage(fmt.Sprintf("openclaw agent %q aborted the turn", slug))
+		// Skip user/system echoes — only publish agent replies.
+		if evt.SessionMessage.Role != "" && evt.SessionMessage.Role != "assistant" {
+			return
+		}
+		if text := evt.SessionMessage.MessageText; text != "" {
+			b.postBridgeMessage(slug, text)
 		}
 	case openclaw.EventKindChanged:
 		if evt.SessionsChanged != nil && evt.SessionsChanged.Reason == "ended" {
@@ -272,46 +256,17 @@ func (b *OpenclawBridge) handleClientEvent(evt openclaw.ClientEvent) {
 			}
 		}
 	case openclaw.EventKindGap:
+		// The real OpenClaw daemon does not expose sessions.history, so we have
+		// no authoritative catch-up source. Log a system notice instead so the
+		// user knows an event was dropped — they can re-prompt if needed.
 		if evt.Gap == nil {
 			return
 		}
-		slug, ok := b.slugByKey[evt.Gap.SessionKey]
-		if !ok {
-			return
+		if slug, ok := b.slugByKey[evt.Gap.SessionKey]; ok {
+			b.postSystemMessage(fmt.Sprintf("missed %d message(s) from @%s — daemon event gap", evt.Gap.ToSeq-evt.Gap.FromSeq-1, slug))
 		}
-		go b.catchUp(slug, evt.Gap.SessionKey, evt.Gap.FromSeq)
 	case openclaw.EventKindClose:
 		// Handled by supervise loop via events-channel close.
-	}
-}
-
-// catchUp fetches historic messages since fromSeq and replays final messages
-// as bridged "[catch-up] ..." chat messages in #general.
-func (b *OpenclawBridge) catchUp(slug, sessionKey string, sinceSeq int64) {
-	client := b.getClient()
-	if client == nil {
-		return
-	}
-	msgs, err := client.SessionsHistory(b.ctx, sessionKey, sinceSeq)
-	if err != nil {
-		b.postSystemMessage(fmt.Sprintf("openclaw catch-up failed for @%s: %v", slug, err))
-		return
-	}
-	for _, m := range msgs {
-		var inner struct {
-			State   string `json:"state"`
-			Content string `json:"content"`
-			Text    string `json:"text"`
-		}
-		_ = json.Unmarshal(m.Message, &inner)
-		text := inner.Content
-		if text == "" {
-			text = inner.Text
-		}
-		if text == "" || (inner.State != "" && inner.State != "final") {
-			continue
-		}
-		b.postBridgeMessage(slug, "[catch-up] "+text)
 	}
 }
 
@@ -329,7 +284,7 @@ func (b *OpenclawBridge) SetRetryDelaysForTest(d []time.Duration) { b.retryDelay
 
 // OnOfficeMessage sends an office message from user/@mention to the OpenClaw
 // agent identified by slug. Retries on transient errors with a SINGLE reused
-// idempotency key (per-call, per pre-implementation decision 3).
+// idempotency key so the gateway can deduplicate.
 func (b *OpenclawBridge) OnOfficeMessage(ctx context.Context, slug, message string) error {
 	key, ok := b.keyBySlug[slug]
 	if !ok {
@@ -343,7 +298,7 @@ func (b *OpenclawBridge) OnOfficeMessage(ctx context.Context, slug, message stri
 		if client == nil {
 			lastErr = fmt.Errorf("openclaw: no active client")
 		} else {
-			err := client.SessionsSend(ctx, key, message, idem)
+			_, err := client.SessionsSend(ctx, key, message, idem)
 			if err == nil {
 				return nil
 			}
@@ -377,7 +332,6 @@ func (b *OpenclawBridge) postBridgeMessage(slug, text string) {
 }
 
 // postSystemMessage posts a `system`-authored notice into #general.
-// PostSystemMessage already uses sender="system", which the tests rely on.
 func (b *OpenclawBridge) postSystemMessage(text string) {
 	if b.broker == nil {
 		return

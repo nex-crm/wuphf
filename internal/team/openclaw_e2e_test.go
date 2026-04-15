@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -16,14 +17,13 @@ import (
 )
 
 // TestOpenclawBridgeFullPipeline_E2E exercises the OpenClaw bridge end-to-end
-// against a fake gateway running over a real WebSocket. It proves the full data
-// flow:
+// against a fake gateway running over a real WebSocket. It proves:
 //
-//   1. Real openclaw.Dial → real WS handshake against fake gateway
-//   2. NewOpenclawBridgeWithDialer + Start → bridge subscribes bound sessions
-//   3. Bridge.OnOfficeMessage → real sessions.send frame delivered to gateway
-//   4. Gateway pushes session.message event → bridge routes to broker
-//   5. Outbound + inbound + delta + final all observable from the broker side
+//  1. Real openclaw.Dial → connect.challenge + device-authed connect + wrapped hello-ok
+//  2. NewOpenclawBridgeWithDialer + Start → bridge subscribes bound sessions
+//  3. Bridge.OnOfficeMessage → real sessions.send frame delivered to gateway
+//  4. Gateway pushes session.message event with assistant role → broker gets it
+//  5. Gateway pushes session.message with user role → broker is NOT echoed
 //
 // No mocks of the protocol layer. Real bytes flow over real sockets through
 // the real openclaw.Client.
@@ -31,12 +31,17 @@ func TestOpenclawBridgeFullPipeline_E2E(t *testing.T) {
 	gw := startFakeOpenclawGatewayE2E(t)
 	defer gw.Close()
 
+	identity, err := openclaw.LoadOrCreateDeviceIdentity(filepath.Join(t.TempDir(), "identity.json"))
+	if err != nil {
+		t.Fatalf("identity: %v", err)
+	}
+
 	broker := NewBroker()
 	bindings := []config.OpenclawBridgeBinding{
 		{SessionKey: "agent:e2e:demo", Slug: "openclaw-demo-e2e", DisplayName: "Demo"},
 	}
 	dialer := func(ctx context.Context) (openclawClient, error) {
-		return openclaw.Dial(ctx, openclaw.Config{URL: gw.URL(), Token: "test-token"})
+		return openclaw.Dial(ctx, openclaw.Config{URL: gw.URL(), Token: "test-token", Identity: identity})
 	}
 	bridge := NewOpenclawBridgeWithDialer(broker, nil, dialer, bindings)
 	if err := bridge.Start(context.Background()); err != nil {
@@ -60,20 +65,22 @@ func TestOpenclawBridgeFullPipeline_E2E(t *testing.T) {
 		return gw.lastSendForKey("agent:e2e:demo") == "hello agent"
 	}, "gateway never received hello agent")
 
-	// Inbound delta: gateway → bridge → AgentStream
-	gw.pushDelta("agent:e2e:demo", "thinking…")
-	waitForE2E(t, 2*time.Second, func() bool {
-		buf := broker.AgentStream("openclaw-demo-e2e")
-		return buf != nil && len(buf.recent()) > 0
-	}, "delta event never reached AgentStream")
+	// Inbound user echo: gateway pushes our own message back. Bridge MUST NOT
+	// re-post it (otherwise every outbound turn double-fires in #general).
+	beforeEchoes := countMessagesFrom(broker, "openclaw-demo-e2e", "hello agent")
+	gw.pushUserMessage("agent:e2e:demo", "hello agent")
+	time.Sleep(150 * time.Millisecond)
+	if got := countMessagesFrom(broker, "openclaw-demo-e2e", "hello agent"); got != beforeEchoes {
+		t.Fatalf("bridge re-posted a user-role echo; before=%d after=%d", beforeEchoes, got)
+	}
 
-	// Inbound final: gateway → bridge → broker message
+	// Inbound assistant reply: gateway → bridge → broker message.
 	wantContent := "hi from openclaw, tell Michael Scott we're back"
 	beforeCount := countMessagesFrom(broker, "openclaw-demo-e2e", wantContent)
-	gw.pushFinal("agent:e2e:demo", wantContent)
+	gw.pushAssistantMessage("agent:e2e:demo", wantContent)
 	waitForE2E(t, 2*time.Second, func() bool {
 		return countMessagesFrom(broker, "openclaw-demo-e2e", wantContent) > beforeCount
-	}, "final event never appeared as broker message")
+	}, "assistant event never appeared as broker message")
 }
 
 func countMessagesFrom(b *Broker, slug, contains string) int {
@@ -86,10 +93,13 @@ func countMessagesFrom(b *Broker, slug, contains string) int {
 	return n
 }
 
-// fakeOpenclawGatewayE2E implements the minimum OpenClaw Gateway protocol the
-// WUPHF bridge needs: hello-ok handshake, sessions.list, sessions.send,
-// sessions.messages.subscribe, sessions.history. Tests can push session.message
-// events into subscribed connections via pushFinal/pushDelta.
+// fakeOpenclawGatewayE2E implements the subset of OpenClaw Gateway protocol
+// the WUPHF bridge actually hits, matching the observed real-daemon shape:
+//
+//   - connect.challenge event pushed BEFORE reading client
+//   - wrapped res(hello-ok) as the connect response (protocol 3)
+//   - sessions.list uses "key" as the session identifier
+//   - session.message events use role + content parts (not state/content)
 type fakeOpenclawGatewayE2E struct {
 	srv          *httptest.Server
 	mu           sync.Mutex
@@ -135,7 +145,15 @@ func (g *fakeOpenclawGatewayE2E) Close() { g.srv.Close() }
 
 func (g *fakeOpenclawGatewayE2E) serve(fc *fakeOCGwConn) {
 	defer fc.c.Close()
-	// Expect connect.
+
+	// 1. Push connect.challenge first.
+	fc.write(map[string]any{
+		"type":    "event",
+		"event":   "connect.challenge",
+		"payload": map[string]any{"nonce": "e2e-nonce", "ts": time.Now().UnixMilli()},
+	})
+
+	// 2. Read connect.
 	_, raw, err := fc.c.ReadMessage()
 	if err != nil {
 		return
@@ -149,15 +167,24 @@ func (g *fakeOpenclawGatewayE2E) serve(fc *fakeOCGwConn) {
 	if req.Method != "connect" {
 		return
 	}
-	hello := map[string]any{
-		"type":     "hello-ok",
-		"protocol": 1,
-		"server":   map[string]any{"version": "fake", "connId": "fc-1"},
-		"features": map[string]any{"methods": []string{"sessions.list", "sessions.send", "sessions.messages.subscribe", "sessions.history"}, "events": []string{"session.message"}},
-		"snapshot": map[string]any{},
-		"policy":   map[string]any{"maxPayload": 1 << 20, "maxBufferedBytes": 1 << 20, "tickIntervalMs": 30000},
-	}
-	fc.write(hello)
+
+	// 3. Reply res(hello-ok) — wrapped.
+	fc.write(map[string]any{
+		"type": "res",
+		"id":   req.ID,
+		"ok":   true,
+		"payload": map[string]any{
+			"type":     "hello-ok",
+			"protocol": 3,
+			"server":   map[string]any{"version": "fake", "connId": "fc-1"},
+			"features": map[string]any{
+				"methods": []string{"sessions.list", "sessions.send", "sessions.messages.subscribe", "sessions.messages.unsubscribe"},
+				"events":  []string{"session.message", "sessions.changed"},
+			},
+			"snapshot": map[string]any{},
+			"policy":   map[string]any{"maxPayload": 1 << 20, "maxBufferedBytes": 1 << 20, "tickIntervalMs": 30000},
+		},
+	})
 
 	for {
 		_, raw, err := fc.c.ReadMessage()
@@ -176,8 +203,8 @@ func (g *fakeOpenclawGatewayE2E) serve(fc *fakeOCGwConn) {
 		switch r.Method {
 		case "sessions.list":
 			g.respond(fc, r.ID, true, map[string]any{"sessions": []any{
-				map[string]any{"sessionKey": "agent:e2e:demo", "label": "Demo", "displayName": "Demo Agent"},
-			}, "path": "/tmp/fake"}, nil)
+				map[string]any{"key": "agent:e2e:demo", "label": "Demo", "displayName": "Demo Agent", "kind": "direct"},
+			}, "path": "/tmp/fake", "count": 1}, nil)
 		case "sessions.send":
 			var p struct {
 				Key     string `json:"key"`
@@ -187,7 +214,7 @@ func (g *fakeOpenclawGatewayE2E) serve(fc *fakeOCGwConn) {
 			g.mu.Lock()
 			g.sentMessages[p.Key] = p.Message
 			g.mu.Unlock()
-			g.respond(fc, r.ID, true, map[string]any{"ok": true}, nil)
+			g.respond(fc, r.ID, true, map[string]any{"runId": "run-" + r.ID, "status": "started", "messageSeq": 1}, nil)
 		case "sessions.messages.subscribe":
 			var p struct {
 				Key string `json:"key"`
@@ -198,8 +225,6 @@ func (g *fakeOpenclawGatewayE2E) serve(fc *fakeOCGwConn) {
 			g.subsCount[p.Key]++
 			g.mu.Unlock()
 			g.respond(fc, r.ID, true, map[string]any{"ok": true}, nil)
-		case "sessions.history":
-			g.respond(fc, r.ID, true, map[string]any{"messages": []any{}}, nil)
 		default:
 			g.respond(fc, r.ID, false, nil, map[string]any{"code": "UNKNOWN", "message": "method not implemented in fake"})
 		}
@@ -235,15 +260,27 @@ func (g *fakeOpenclawGatewayE2E) lastSendForKey(key string) string {
 	return g.sentMessages[key]
 }
 
-func (g *fakeOpenclawGatewayE2E) pushFinal(sessionKey, content string) {
-	g.pushEvent(sessionKey, "final", content)
+// pushAssistantMessage emits the real-daemon shape for an agent reply: role
+// "assistant" with content as an array of {type,text} parts.
+func (g *fakeOpenclawGatewayE2E) pushAssistantMessage(sessionKey, text string) {
+	g.pushEvent(sessionKey, map[string]any{
+		"role":      "assistant",
+		"content":   []any{map[string]any{"type": "text", "text": text}},
+		"timestamp": time.Now().UnixMilli(),
+	})
 }
 
-func (g *fakeOpenclawGatewayE2E) pushDelta(sessionKey, content string) {
-	g.pushEvent(sessionKey, "delta", content)
+// pushUserMessage emits the shape the server uses to echo our own outbound
+// messages — a user role with a plain string content.
+func (g *fakeOpenclawGatewayE2E) pushUserMessage(sessionKey, text string) {
+	g.pushEvent(sessionKey, map[string]any{
+		"role":      "user",
+		"content":   text,
+		"timestamp": time.Now().UnixMilli(),
+	})
 }
 
-func (g *fakeOpenclawGatewayE2E) pushEvent(sessionKey, state, content string) {
+func (g *fakeOpenclawGatewayE2E) pushEvent(sessionKey string, message map[string]any) {
 	g.mu.Lock()
 	g.seq++
 	subs := g.subscribed[sessionKey]
@@ -256,7 +293,7 @@ func (g *fakeOpenclawGatewayE2E) pushEvent(sessionKey, state, content string) {
 		"payload": map[string]any{
 			"sessionKey": sessionKey,
 			"messageSeq": seq,
-			"message":    map[string]any{"state": state, "content": content},
+			"message":    message,
 		},
 	}
 	for _, fc := range subs {

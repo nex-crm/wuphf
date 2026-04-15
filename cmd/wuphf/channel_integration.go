@@ -308,7 +308,11 @@ func fetchOpenclawSessions(url, token string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		client, err := openclaw.Dial(ctx, openclaw.Config{URL: url, Token: token})
+		identity, err := openclaw.LoadOrCreateDeviceIdentity(config.ResolveOpenclawIdentityPath())
+		if err != nil {
+			return openclawSessionsMsg{err: err}
+		}
+		client, err := openclaw.Dial(ctx, openclaw.Config{URL: url, Token: token, Identity: identity})
 		if err != nil {
 			return openclawSessionsMsg{err: err}
 		}
@@ -324,14 +328,14 @@ func fetchOpenclawSessions(url, token string) tea.Cmd {
 				label = r.Label
 			}
 			if label == "" {
-				label = r.SessionKey
+				label = r.Key
 			}
 			preview := strings.TrimSpace(r.LastMessage)
 			if preview == "" && r.Kind != "" {
 				preview = r.Kind
 			}
 			out = append(out, openclawSessionOption{
-				SessionKey: r.SessionKey,
+				SessionKey: r.Key,
 				Label:      label,
 				Preview:    preview,
 			})
