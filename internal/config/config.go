@@ -42,6 +42,17 @@ type Config struct {
 	CompanyGoals        string `json:"company_goals,omitempty"`
 	CompanySize         string `json:"company_size,omitempty"`
 	CompanyPriority     string `json:"company_priority,omitempty"`
+
+	OpenclawBridges    []OpenclawBridgeBinding `json:"openclaw_bridges,omitempty"`
+	OpenclawGatewayURL string                  `json:"openclaw_gateway_url,omitempty"`
+	OpenclawToken      string                  `json:"openclaw_token,omitempty"`
+}
+
+// OpenclawBridgeBinding binds a WUPHF agent session to an OpenClaw bridge slug.
+type OpenclawBridgeBinding struct {
+	SessionKey  string `json:"session_key"`
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 // ConfigPath returns the absolute path to ~/.wuphf/config.json, with a legacy
@@ -580,4 +591,25 @@ func resolveTaskInterval(envKey, legacyEnvKey string, fromConfig func(Config) in
 		minutes = 2
 	}
 	return minutes
+}
+
+// ResolveOpenclawToken returns the OpenClaw gateway auth token from env > config.
+func ResolveOpenclawToken() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_OPENCLAW_TOKEN")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	return strings.TrimSpace(cfg.OpenclawToken)
+}
+
+// ResolveOpenclawGatewayURL returns the OpenClaw gateway URL from env > config > default loopback.
+func ResolveOpenclawGatewayURL() string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_OPENCLAW_GATEWAY_URL")); v != "" {
+		return v
+	}
+	cfg, _ := Load()
+	if v := strings.TrimSpace(cfg.OpenclawGatewayURL); v != "" {
+		return v
+	}
+	return "ws://127.0.0.1:18789"
 }

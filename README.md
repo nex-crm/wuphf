@@ -80,6 +80,12 @@ If it feels like a hidden agent loop, something is wrong. If it feels like The O
 
 WUPHF can bridge to Telegram. Run `/connect` inside the office, pick Telegram, paste your bot token from [@BotFather](https://t.me/BotFather), and select a group or DM. Messages flow both ways.
 
+## OpenClaw Bridge
+
+Already running [OpenClaw](https://openclaw.ai) agents? You can bring them into the WUPHF office.
+
+Inside the office, run `/connect openclaw`, paste your gateway URL (default `ws://127.0.0.1:18789`) and the `gateway.auth.token` from your `~/.openclaw/openclaw.json`, then pick which sessions to bridge. Each becomes a first-class office member you can `@mention`. OpenClaw agents keep running in their own sandbox; WUPHF just gives them a shared office to collaborate in.
+
 ## External Actions
 
 To let agents take real actions (send emails, update CRMs, etc.), WUPHF ships with two action providers. Pick whichever fits your style.
@@ -164,6 +170,7 @@ Every claim in this README, grounded to the code that makes it true.
 | Workspace isolation per agent | ✅ shipped | `internal/team/worktree.go` |
 | Telegram bridge | ✅ shipped | `internal/team/telegram.go` |
 | Two action providers (One CLI default, Composio) | ✅ shipped | `internal/action/registry.go`, `internal/action/one.go`, `internal/action/composio.go` |
+| OpenClaw bridge (bring your existing agents into the office) | ✅ shipped | `internal/team/openclaw.go`, `internal/openclaw/` |
 | `wuphf import` — migrate from Paperclip state | ✅ shipped | `cmd/wuphf/import.go` |
 | Live web-view agent streaming | 🟡 partial | `web/index.html` + broker stream |
 | Prebuilt binary via goreleaser | 🟡 config ready | `.goreleaser.yml` — tags pending |

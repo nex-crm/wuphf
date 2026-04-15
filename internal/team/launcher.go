@@ -70,6 +70,11 @@ type Launcher struct {
 
 	notifyMu            sync.Mutex
 	notifyLastDelivered map[string]time.Time
+
+	// openclawBridge is nil unless config.OpenclawBridges has at least one
+	// binding. When set, @mentions of bridged slugs are routed through
+	// OnOfficeMessage instead of the in-process agent spawn path.
+	openclawBridge *OpenclawBridge
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
@@ -298,6 +303,11 @@ func (l *Launcher) Launch() error {
 		go l.pollNexNotificationsLoop()
 		go l.watchdogSchedulerLoop()
 	}
+
+	// Optional: start the OpenClaw bridge if any bindings are persisted and
+	// route human @mentions of bridged slugs to it. Failures are logged but
+	// non-fatal — the office continues without the integration.
+	l.startOpenclawBridge()
 
 	return nil
 }
@@ -3244,6 +3254,9 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	go l.pollNexNotificationsLoop()
 	go l.watchdogSchedulerLoop()
 
+	// Same opt-in OpenClaw wire-up as Launch() — see that method's comment.
+	l.startOpenclawBridge()
+
 	webURL := fmt.Sprintf("http://localhost:%d", webPort)
 	fmt.Printf("\n  Web UI:  %s\n", webURL)
 	fmt.Printf("  Broker:  http://localhost:%d\n", BrokerPort)
@@ -3254,6 +3267,32 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	}
 
 	select {}
+}
+
+// startOpenclawBridge constructs and starts the OpenClaw bridge from persisted
+// config (idempotent no-op when no bindings are configured) and kicks off the
+// mention-routing subscriber. Safe to call from both Launch (tmux) and
+// LaunchWeb. Errors are logged rather than propagated: the office must keep
+// running even if a stale token or an unreachable gateway blocks the bridge.
+func (l *Launcher) startOpenclawBridge() {
+	if l.broker == nil {
+		return
+	}
+	// Use a background context so the bridge outlives request-scoped work
+	// but still terminates on Kill() via Stop() (future wiring) or process
+	// exit. We deliberately do not tie this to headlessCtx because that is
+	// cancelled on session reconfigure.
+	ctx := context.Background()
+	bridge, err := StartOpenclawBridgeFromConfig(ctx, l.broker)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[openclaw] bridge start failed: %v\n", err)
+		return
+	}
+	if bridge == nil {
+		return // no bindings configured; opt-in integration stays off
+	}
+	l.openclawBridge = bridge
+	go routeOpenclawMentionsLoop(ctx, l.broker, bridge)
 }
 
 func openBrowser(url string) {

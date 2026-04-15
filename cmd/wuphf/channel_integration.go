@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/openclaw"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
 )
@@ -268,4 +270,120 @@ func slugifyGroupTitle(title string) string {
 	}
 	// Prefix with tg- to make it clear it's a telegram channel
 	return "tg-" + slug
+}
+
+// startOpenclawConnect seeds the /connect openclaw picker flow at the URL step.
+// It reuses any saved gateway URL/token from config as defaults.
+func (m *channelModel) startOpenclawConnect() {
+	cfg, _ := config.Load()
+	if m.openclawURL == "" {
+		m.openclawURL = cfg.OpenclawGatewayURL
+	}
+	if m.openclawToken == "" {
+		m.openclawToken = cfg.OpenclawToken
+	}
+	m.promptOpenclawURL()
+}
+
+func (m *channelModel) promptOpenclawURL() {
+	m.picker = tui.NewPicker("Connect OpenClaw", nil)
+	m.picker.TextInput = true
+	m.picker.TextPrompt = "Gateway URL (default ws://127.0.0.1:18789):"
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerOpenclawURL
+	m.notice = "Paste your OpenClaw gateway URL or press Enter for the default."
+}
+
+func (m *channelModel) promptOpenclawToken() {
+	m.picker = tui.NewPicker("Connect OpenClaw", nil)
+	m.picker.TextInput = true
+	m.picker.TextPrompt = "Shared secret (gateway.auth.token from ~/.openclaw/openclaw.json):"
+	m.picker.SetActive(true)
+	m.pickerMode = channelPickerOpenclawToken
+	m.notice = "Paste the shared secret for the gateway."
+}
+
+// fetchOpenclawSessions dials the gateway and enumerates bridgeable sessions.
+func fetchOpenclawSessions(url, token string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		client, err := openclaw.Dial(ctx, openclaw.Config{URL: url, Token: token})
+		if err != nil {
+			return openclawSessionsMsg{err: err}
+		}
+		defer client.Close()
+		rows, err := client.SessionsList(ctx, openclaw.SessionsListFilter{Limit: 50, IncludeLastMessage: true})
+		if err != nil {
+			return openclawSessionsMsg{err: err}
+		}
+		out := make([]openclawSessionOption, 0, len(rows))
+		for _, r := range rows {
+			label := r.DisplayName
+			if label == "" {
+				label = r.Label
+			}
+			if label == "" {
+				label = r.SessionKey
+			}
+			preview := strings.TrimSpace(r.LastMessage)
+			if preview == "" && r.Kind != "" {
+				preview = r.Kind
+			}
+			out = append(out, openclawSessionOption{
+				SessionKey: r.SessionKey,
+				Label:      label,
+				Preview:    preview,
+			})
+		}
+		return openclawSessionsMsg{sessions: out}
+	}
+}
+
+// connectOpenclawSession persists the binding and saves gateway creds into config.
+func connectOpenclawSession(url, token string, session openclawSessionOption) tea.Cmd {
+	return func() tea.Msg {
+		slug := "openclaw-" + slugifyOpenclawLabel(session.Label)
+		cfg, err := config.Load()
+		if err != nil {
+			return openclawConnectDoneMsg{err: fmt.Errorf("load config: %w", err)}
+		}
+		cfg.OpenclawGatewayURL = url
+		cfg.OpenclawToken = token
+		// Dedupe on SessionKey: replace existing binding if present.
+		replaced := false
+		for i := range cfg.OpenclawBridges {
+			if cfg.OpenclawBridges[i].SessionKey == session.SessionKey {
+				cfg.OpenclawBridges[i] = config.OpenclawBridgeBinding{
+					SessionKey:  session.SessionKey,
+					Slug:        slug,
+					DisplayName: session.Label,
+				}
+				slug = cfg.OpenclawBridges[i].Slug
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			cfg.OpenclawBridges = append(cfg.OpenclawBridges, config.OpenclawBridgeBinding{
+				SessionKey:  session.SessionKey,
+				Slug:        slug,
+				DisplayName: session.Label,
+			})
+		}
+		if err := config.Save(cfg); err != nil {
+			return openclawConnectDoneMsg{err: fmt.Errorf("save config: %w", err)}
+		}
+		return openclawConnectDoneMsg{slug: slug, label: session.Label}
+	}
+}
+
+func slugifyOpenclawLabel(label string) string {
+	slug := strings.ToLower(strings.TrimSpace(label))
+	slug = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		slug = "session"
+	}
+	return slug
 }
