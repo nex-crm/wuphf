@@ -109,11 +109,94 @@
     ctx.fillStyle = right; ctx.fill();
   }
 
+  // ── Back wall ──────────────────────────────────────────────────
+  function drawWall() {
+    // Back wall base
+    ctx.fillStyle = C.wall;
+    ctx.fillRect(0, 0, W, OY + 30);
+
+    // Baseboard strip
+    ctx.fillStyle = C.wallLight;
+    ctx.fillRect(0, OY + 22, W, 6);
+
+    // Fluorescent light fixtures (4 ceiling-mounted)
+    for (let i = 0; i < 4; i++) {
+      const lx = 60 + i * 170, ly = 6;
+      ctx.fillStyle = '#302820';
+      ctx.fillRect(lx, ly, 130, 10);
+      ctx.fillStyle = 'rgba(255,254,230,0.6)';
+      ctx.fillRect(lx + 4, ly + 2, 122, 6);
+      const grad = ctx.createLinearGradient(lx + 65, ly + 8, lx + 65, ly + 40);
+      grad.addColorStop(0, 'rgba(255,254,220,0.12)');
+      grad.addColorStop(1, 'rgba(255,254,220,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(lx, ly + 8, 130, 32);
+    }
+
+    // WUPHF sign (dark panel, golden amber letters, amber glow)
+    const sx = 250, sy = 26;
+    ctx.fillStyle = '#0E0C08';
+    ctx.fillRect(sx, sy, 300, 52);
+    ctx.fillStyle = C.yellow;
+    ctx.fillRect(sx,       sy,      300, 4);
+    ctx.fillRect(sx,       sy + 48, 300, 4);
+    ctx.fillRect(sx,       sy,      4,   52);
+    ctx.fillRect(sx + 296, sy,      4,   52);
+    ctx.fillStyle = 'rgba(236,178,46,0.08)';
+    ctx.fillRect(sx + 4, sy + 4, 292, 44);
+    ctx.shadowColor = C.yellow;
+    ctx.shadowBlur  = 12;
+    ctx.fillStyle   = C.yellow;
+    ctx.font = 'bold 28px "Press Start 2P"';
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('WUPHF', sx + 150, sy + 28);
+    ctx.shadowBlur = 0;
+    // sign mounting brackets
+    ctx.fillStyle = C.deskDark;
+    ctx.fillRect(sx + 40,  sy + 50, 8, 14);
+    ctx.fillRect(sx + 252, sy + 50, 8, 14);
+
+    // Wall clock (top-right)
+    ctx.fillStyle = C.wallLight;
+    ctx.beginPath(); ctx.arc(740, 48, 18, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.surface;
+    ctx.beginPath(); ctx.arc(740, 48, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = C.text; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(740, 36); ctx.lineTo(740, 48); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(740, 48); ctx.lineTo(750, 53); ctx.stroke();
+
+    // Beet farm map (left side, Dwight's territory)
+    const bx = iso(0, 3).x - 65;
+    ctx.fillStyle = '#2A2818';
+    ctx.fillRect(bx, OY - 22, 50, 38);
+    ctx.strokeStyle = '#504830'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx, OY - 22, 50, 38);
+    ctx.fillStyle = '#807020';
+    ctx.font = '6px "Press Start 2P"'; ctx.textAlign = 'center';
+    ctx.fillText('BEET', bx + 25, OY - 7);
+    ctx.fillText('FARM', bx + 25, OY + 5);
+    ctx.fillStyle = '#2A5018';
+    ctx.fillRect(bx + 10, OY + 10, 8, 4);
+    ctx.fillRect(bx + 30, OY + 8,  8, 4);
+    ctx.fillRect(bx + 18, OY + 6,  8, 4);
+
+    // Conference room partition (left corner)
+    const cp = iso(0, 0);
+    ctx.fillStyle = '#252018';
+    ctx.fillRect(cp.x - 40, OY - 2, 40, 30);
+    ctx.strokeStyle = C.border; ctx.lineWidth = 1;
+    ctx.strokeRect(cp.x - 40, OY - 2, 40, 30);
+    ctx.fillStyle   = C.textMuted;
+    ctx.font = '5px "Press Start 2P"'; ctx.textAlign = 'center';
+    ctx.fillText('CONF', cp.x - 20, OY + 8);
+    ctx.fillText('ROOM', cp.x - 20, OY + 17);
+  }
+
   // ── Main draw ──────────────────────────────────────────────────
   function draw() {
     ctx.clearRect(0, 0, W, H);
-    ctx.fillStyle = C.wall;
-    ctx.fillRect(0, 0, W, OY + 30);
+    drawWall();
 
     for (let gy = 0; gy < ROWS; gy++) {
       for (let gx = 0; gx < COLS; gx++) {
