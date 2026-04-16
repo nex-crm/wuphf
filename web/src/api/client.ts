@@ -407,7 +407,7 @@ export function runStudioWorkflow(payload?: unknown) {
 
 export type LLMProvider = 'claude-code' | 'codex'
 export type MemoryBackend = 'nex' | 'gbrain' | 'none'
-export type ActionProvider = 'auto' | 'composio' | ''
+export type ActionProvider = 'auto' | 'one' | 'composio' | ''
 
 export interface ConfigSnapshot {
   // Runtime
