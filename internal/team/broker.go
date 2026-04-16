@@ -4887,37 +4887,99 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleConfig exposes a narrow GET/POST surface over ~/.wuphf/config.json so
-// the onboarding wizard can persist the user's runtime pick (claude-code | codex),
-// memory backend pick (none | nex | gbrain), and any third-party API keys those
-// backends need (OpenAI / Anthropic for GBrain). Other fields are owned by their
-// dedicated endpoints (e.g. /company, Nex register). All POST fields are optional;
-// clients can update one without touching the others. Key fields, if present, are
-// reported back as a boolean rather than echoing the secret.
+// handleConfig exposes GET/POST over ~/.wuphf/config.json for the web UI
+// settings page and onboarding wizard. All POST fields are optional; clients
+// can update one without touching the others. Secret fields (API keys, tokens)
+// are returned as boolean flags on GET and accepted as plain values on POST.
 func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
+		cfg, err := config.Load()
+		if err != nil {
+			http.Error(w, "failed to read config", http.StatusInternalServerError)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"llm_provider":      config.ResolveLLMProvider(""),
-			"memory_backend":    config.ResolveMemoryBackend(""),
-			"openai_key_set":    config.ResolveOpenAIAPIKey() != "",
-			"anthropic_key_set": config.ResolveAnthropicAPIKey() != "",
+			// Runtime
+			"llm_provider":        config.ResolveLLMProvider(""),
+			"memory_backend":      config.ResolveMemoryBackend(""),
+			"action_provider":     config.ResolveActionProvider(),
+			"team_lead_slug":      cfg.TeamLeadSlug,
+			"max_concurrent_agents": cfg.MaxConcurrent,
+			"default_format":      config.ResolveFormat(""),
+			"default_timeout":     config.ResolveTimeout(""),
+			"blueprint":           cfg.ActiveBlueprint(),
+			// Workspace
+			"email":          cfg.Email,
+			"workspace_id":   cfg.WorkspaceID,
+			"workspace_slug": cfg.WorkspaceSlug,
+			"dev_url":        cfg.DevURL,
+			// Company
+			"company_name":        cfg.CompanyName,
+			"company_description": cfg.CompanyDescription,
+			"company_goals":       cfg.CompanyGoals,
+			"company_size":        cfg.CompanySize,
+			"company_priority":    cfg.CompanyPriority,
+			// Polling intervals
+			"insights_poll_minutes":   config.ResolveInsightsPollInterval(),
+			"task_follow_up_minutes":  config.ResolveTaskFollowUpInterval(),
+			"task_reminder_minutes":   config.ResolveTaskReminderInterval(),
+			"task_recheck_minutes":    config.ResolveTaskRecheckInterval(),
+			// Integrations — secret fields as booleans
+			"api_key_set":        config.ResolveAPIKey("") != "",
+			"openai_key_set":     config.ResolveOpenAIAPIKey() != "",
+			"anthropic_key_set":  config.ResolveAnthropicAPIKey() != "",
+			"gemini_key_set":     config.ResolveGeminiAPIKey() != "",
+			"minimax_key_set":    config.ResolveMinimaxAPIKey() != "",
+			"one_key_set":        config.ResolveOneSecret() != "",
+			"composio_key_set":   config.ResolveComposioAPIKey() != "",
+			"telegram_token_set": config.ResolveTelegramBotToken() != "",
+			"openclaw_token_set": config.ResolveOpenclawToken() != "",
+			"openclaw_gateway_url": config.ResolveOpenclawGatewayURL(),
+			// Config file path (informational)
+			"config_path": config.ConfigPath(),
 		})
 	case http.MethodPost:
 		var body struct {
 			LLMProvider     *string `json:"llm_provider,omitempty"`
 			MemoryBackend   *string `json:"memory_backend,omitempty"`
+			ActionProvider  *string `json:"action_provider,omitempty"`
+			TeamLeadSlug    *string `json:"team_lead_slug,omitempty"`
+			MaxConcurrent   *int    `json:"max_concurrent_agents,omitempty"`
+			DefaultFormat   *string `json:"default_format,omitempty"`
+			DefaultTimeout  *int    `json:"default_timeout,omitempty"`
+			Blueprint       *string `json:"blueprint,omitempty"`
+			Email           *string `json:"email,omitempty"`
+			DevURL          *string `json:"dev_url,omitempty"`
+			CompanyName     *string `json:"company_name,omitempty"`
+			CompanyDesc     *string `json:"company_description,omitempty"`
+			CompanyGoals    *string `json:"company_goals,omitempty"`
+			CompanySize     *string `json:"company_size,omitempty"`
+			CompanyPriority *string `json:"company_priority,omitempty"`
+			InsightsPoll    *int    `json:"insights_poll_minutes,omitempty"`
+			TaskFollowUp    *int    `json:"task_follow_up_minutes,omitempty"`
+			TaskReminder    *int    `json:"task_reminder_minutes,omitempty"`
+			TaskRecheck     *int    `json:"task_recheck_minutes,omitempty"`
+			// Secret fields
+			APIKey          *string `json:"api_key,omitempty"`
 			OpenAIAPIKey    *string `json:"openai_api_key,omitempty"`
 			AnthropicAPIKey *string `json:"anthropic_api_key,omitempty"`
+			GeminiAPIKey    *string `json:"gemini_api_key,omitempty"`
+			MinimaxAPIKey   *string `json:"minimax_api_key,omitempty"`
+			OneAPIKey       *string `json:"one_api_key,omitempty"`
+			ComposioAPIKey  *string `json:"composio_api_key,omitempty"`
+			TelegramToken   *string `json:"telegram_bot_token,omitempty"`
+			OpenclawToken   *string `json:"openclaw_token,omitempty"`
+			OpenclawGateway *string `json:"openclaw_gateway_url,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 
-		var provider, memory, openaiKey, anthropicKey string
-		var openaiSet, anthropicSet bool
+		// Validate enum fields before touching config.
+		var provider string
 		if body.LLMProvider != nil {
 			provider = strings.TrimSpace(strings.ToLower(*body.LLMProvider))
 			switch provider {
@@ -4928,6 +4990,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var memory string
 		if body.MemoryBackend != nil {
 			memory = config.NormalizeMemoryBackend(*body.MemoryBackend)
 			if memory == "" {
@@ -4935,32 +4998,159 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+
+		cfg, _ := config.Load()
+		changed := false
+
+		// Enum/string fields
+		if provider != "" {
+			cfg.LLMProvider = provider
+			changed = true
+		}
+		if memory != "" {
+			cfg.MemoryBackend = memory
+			changed = true
+		}
+		if body.ActionProvider != nil {
+			ap := strings.TrimSpace(strings.ToLower(*body.ActionProvider))
+			switch ap {
+			case "auto", "composio", "":
+				cfg.ActionProvider = ap
+				changed = true
+			default:
+				http.Error(w, "unsupported action_provider", http.StatusBadRequest)
+				return
+			}
+		}
+		if body.TeamLeadSlug != nil {
+			cfg.TeamLeadSlug = strings.TrimSpace(*body.TeamLeadSlug)
+			changed = true
+		}
+		if body.MaxConcurrent != nil {
+			cfg.MaxConcurrent = *body.MaxConcurrent
+			changed = true
+		}
+		if body.DefaultFormat != nil {
+			cfg.DefaultFormat = strings.TrimSpace(*body.DefaultFormat)
+			changed = true
+		}
+		if body.DefaultTimeout != nil {
+			cfg.DefaultTimeout = *body.DefaultTimeout
+			changed = true
+		}
+		if body.Blueprint != nil {
+			cfg.SetActiveBlueprint(*body.Blueprint)
+			changed = true
+		}
+		if body.Email != nil {
+			cfg.Email = strings.TrimSpace(*body.Email)
+			changed = true
+		}
+		if body.DevURL != nil {
+			cfg.DevURL = strings.TrimSpace(*body.DevURL)
+			changed = true
+		}
+		// Company
+		if body.CompanyName != nil {
+			cfg.CompanyName = strings.TrimSpace(*body.CompanyName)
+			changed = true
+		}
+		if body.CompanyDesc != nil {
+			cfg.CompanyDescription = strings.TrimSpace(*body.CompanyDesc)
+			changed = true
+		}
+		if body.CompanyGoals != nil {
+			cfg.CompanyGoals = strings.TrimSpace(*body.CompanyGoals)
+			changed = true
+		}
+		if body.CompanySize != nil {
+			cfg.CompanySize = strings.TrimSpace(*body.CompanySize)
+			changed = true
+		}
+		if body.CompanyPriority != nil {
+			cfg.CompanyPriority = strings.TrimSpace(*body.CompanyPriority)
+			changed = true
+		}
+		// Polling intervals (minimum 2 minutes, matching resolve functions)
+		if body.InsightsPoll != nil {
+			if *body.InsightsPoll < 2 {
+				http.Error(w, "insights_poll_minutes must be >= 2", http.StatusBadRequest)
+				return
+			}
+			cfg.InsightsPollMinutes = *body.InsightsPoll
+			changed = true
+		}
+		if body.TaskFollowUp != nil {
+			if *body.TaskFollowUp < 2 {
+				http.Error(w, "task_follow_up_minutes must be >= 2", http.StatusBadRequest)
+				return
+			}
+			cfg.TaskFollowUpMinutes = *body.TaskFollowUp
+			changed = true
+		}
+		if body.TaskReminder != nil {
+			if *body.TaskReminder < 2 {
+				http.Error(w, "task_reminder_minutes must be >= 2", http.StatusBadRequest)
+				return
+			}
+			cfg.TaskReminderMinutes = *body.TaskReminder
+			changed = true
+		}
+		if body.TaskRecheck != nil {
+			if *body.TaskRecheck < 2 {
+				http.Error(w, "task_recheck_minutes must be >= 2", http.StatusBadRequest)
+				return
+			}
+			cfg.TaskRecheckMinutes = *body.TaskRecheck
+			changed = true
+		}
+		// Secret fields
+		if body.APIKey != nil {
+			cfg.APIKey = strings.TrimSpace(*body.APIKey)
+			changed = true
+		}
 		if body.OpenAIAPIKey != nil {
-			openaiSet = true
-			openaiKey = strings.TrimSpace(*body.OpenAIAPIKey)
+			cfg.OpenAIAPIKey = strings.TrimSpace(*body.OpenAIAPIKey)
+			changed = true
 		}
 		if body.AnthropicAPIKey != nil {
-			anthropicSet = true
-			anthropicKey = strings.TrimSpace(*body.AnthropicAPIKey)
+			cfg.AnthropicAPIKey = strings.TrimSpace(*body.AnthropicAPIKey)
+			changed = true
 		}
-		if provider == "" && memory == "" && !openaiSet && !anthropicSet {
+		if body.GeminiAPIKey != nil {
+			cfg.GeminiAPIKey = strings.TrimSpace(*body.GeminiAPIKey)
+			changed = true
+		}
+		if body.MinimaxAPIKey != nil {
+			cfg.MinimaxAPIKey = strings.TrimSpace(*body.MinimaxAPIKey)
+			changed = true
+		}
+		if body.OneAPIKey != nil {
+			cfg.OneAPIKey = strings.TrimSpace(*body.OneAPIKey)
+			changed = true
+		}
+		if body.ComposioAPIKey != nil {
+			cfg.ComposioAPIKey = strings.TrimSpace(*body.ComposioAPIKey)
+			changed = true
+		}
+		if body.TelegramToken != nil {
+			cfg.TelegramBotToken = strings.TrimSpace(*body.TelegramToken)
+			changed = true
+		}
+		if body.OpenclawToken != nil {
+			cfg.OpenclawToken = strings.TrimSpace(*body.OpenclawToken)
+			changed = true
+		}
+		if body.OpenclawGateway != nil {
+			cfg.OpenclawGatewayURL = strings.TrimSpace(*body.OpenclawGateway)
+			changed = true
+		}
+
+		if !changed {
 			http.Error(w, "no fields to update", http.StatusBadRequest)
 			return
 		}
 
-		cfg, _ := config.Load()
-		if provider != "" {
-			cfg.LLMProvider = provider
-		}
-		if memory != "" {
-			cfg.MemoryBackend = memory
-		}
-		if openaiSet {
-			cfg.OpenAIAPIKey = openaiKey
-		}
-		if anthropicSet {
-			cfg.AnthropicAPIKey = anthropicKey
-		}
 		if err := config.Save(cfg); err != nil {
 			http.Error(w, "save failed", http.StatusInternalServerError)
 			return
@@ -4972,21 +5162,8 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			b.runtimeProvider = provider
 			b.mu.Unlock()
 		}
-		resp := map[string]any{"status": "ok"}
-		if provider != "" {
-			resp["llm_provider"] = provider
-		}
-		if memory != "" {
-			resp["memory_backend"] = memory
-		}
-		if openaiSet {
-			resp["openai_key_set"] = openaiKey != ""
-		}
-		if anthropicSet {
-			resp["anthropic_key_set"] = anthropicKey != ""
-		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

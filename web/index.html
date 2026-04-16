@@ -137,6 +137,57 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .app-card-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .app-card-meta { font-size: 11px; color: var(--text-tertiary); }
 
+/* ─── Settings page ─── */
+.settings-shell { display: flex; height: 100%; min-height: 0; }
+.settings-nav { width: 200px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 16px 0; overflow-y: auto; }
+.settings-nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 16px; font-size: 13px; color: var(--text-secondary); cursor: pointer; border: none; background: none; width: 100%; text-align: left; font-family: var(--font-sans); }
+.settings-nav-item:hover { background: var(--bg-warm); color: var(--text); }
+.settings-nav-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.settings-nav-icon { width: 16px; text-align: center; flex-shrink: 0; }
+.settings-body { flex: 1; overflow-y: auto; padding: 24px 32px; max-width: 680px; }
+.settings-section { display: none; }
+.settings-section.active { display: block; }
+.settings-section-title { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+.settings-section-desc { font-size: 13px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5; }
+.settings-group { margin-bottom: 20px; }
+.settings-group-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--border-light); }
+.settings-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.settings-row-label { width: 160px; flex-shrink: 0; padding-top: 10px; }
+.settings-row-label-name { font-size: 13px; font-weight: 500; color: var(--text); }
+.settings-row-label-hint { font-size: 11px; color: var(--text-tertiary); margin-top: 2px; }
+.settings-row-field { flex: 1; min-width: 0; }
+.settings-input { background: var(--bg-card); border: 1px solid var(--border); color: var(--text); border-radius: var(--radius-sm); height: 36px; font-size: 13px; padding: 0 10px; outline: none; width: 100%; font-family: var(--font-sans); transition: border-color 0.15s; }
+.settings-input:focus { border-color: var(--accent); }
+.settings-input::placeholder { color: var(--text-tertiary); }
+.settings-textarea { height: auto; min-height: 60px; padding: 8px 10px; resize: vertical; line-height: 1.5; font-family: var(--font-sans); font-size: 13px; }
+.settings-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23868686' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px; cursor: pointer; }
+.settings-key-row { display: flex; gap: 8px; align-items: center; }
+.settings-key-input { flex: 1; font-family: var(--font-mono); font-size: 12px; letter-spacing: 0.02em; }
+.settings-key-status { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: var(--radius-full); white-space: nowrap; }
+.settings-key-status.set { background: var(--green-bg); color: var(--green); }
+.settings-key-status.unset { background: var(--bg-warm); color: var(--text-tertiary); }
+.settings-save-row { display: flex; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border-light); }
+.settings-save-btn { font-family: var(--font-sans); font-size: 13px; font-weight: 500; padding: 8px 20px; border: none; border-radius: var(--radius-full); cursor: pointer; transition: all 0.15s; }
+.settings-save-btn.primary { background: var(--accent); color: white; }
+.settings-save-btn.primary:hover { background: var(--accent-warm); }
+.settings-save-btn.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.settings-save-btn.secondary { background: transparent; color: var(--text-secondary); }
+.settings-save-btn.secondary:hover { background: var(--bg-warm); }
+.settings-filepath { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); padding: 6px 10px; background: var(--bg-warm); border-radius: var(--radius-sm); border: 1px solid var(--border-light); user-select: all; word-break: break-all; }
+.settings-flag-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.settings-flag-table th { text-align: left; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.settings-flag-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-light); vertical-align: top; }
+.settings-flag-table td:first-child { font-family: var(--font-mono); color: var(--accent); white-space: nowrap; }
+.settings-flag-table td:last-child { color: var(--text-secondary); }
+@media (max-width: 767px) {
+  .settings-shell { flex-direction: column; }
+  .settings-nav { width: 100%; border-right: none; border-bottom: 1px solid var(--border); padding: 8px; display: flex; overflow-x: auto; gap: 2px; }
+  .settings-nav-item { white-space: nowrap; padding: 6px 12px; border-radius: var(--radius-full); }
+  .settings-body { padding: 16px; }
+  .settings-row { flex-direction: column; gap: 4px; }
+  .settings-row-label { width: 100%; padding-top: 0; }
+}
+
 /* ─── Studio control plane ─── */
 .studio-shell { display: flex; flex-direction: column; gap: 16px; }
 .studio-hero {
@@ -2287,6 +2338,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
       <div class="app-panel" id="app-skills"></div>
       <div class="app-panel" id="app-artifacts"></div>
       <div class="app-panel" id="app-receipts"></div>
+      <div class="app-panel" id="app-settings"></div>
       <div class="recovery-panel" id="recovery-panel"></div>
       <div class="threads-view" id="threads-view"></div>
       <div class="agents-grid-view" id="agents-grid-view"></div>
@@ -2849,6 +2901,7 @@ var SIDEBAR_APPS = [
   { id: 'activity',     icon: '\uD83D\uDCE6', name: 'Activity' },
   { id: 'receipts',     icon: '\uD83E\uDDFE', name: 'Receipts' },
   { id: 'health-check', icon: '\uD83D\uDD0D', name: 'Health Check' },
+  { id: 'settings',     icon: '\u2699',       name: 'Settings' },
 ];
 
 var STUDIO_STORAGE_KEY = 'wuphf_studio_state_v2';
@@ -3984,7 +4037,7 @@ function _cleanupAllViews() {
   if (typeof recoveryViewOpen !== 'undefined' && recoveryViewOpen) closeRecoveryView();
 
   // Hide ALL app panels
-  var allAppIds = ['app-studio', 'app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills', 'app-activity', 'app-artifacts', 'app-receipts'];
+  var allAppIds = ['app-studio', 'app-tasks', 'app-requests', 'app-policies', 'app-calendar', 'app-skills', 'app-activity', 'app-artifacts', 'app-receipts', 'app-settings'];
   allAppIds.forEach(function(pid) {
     var p = document.getElementById(pid);
     if (p) { p.classList.remove('active'); p.style.display = 'none'; }
@@ -6042,7 +6095,449 @@ function renderAppContent(appId) {
   else if (appId === 'skills') renderSkillsApp(panel);
   else if (appId === 'artifacts' || appId === 'activity') renderArtifactsApp(panel);
   else if (appId === 'receipts') renderReceiptsApp(panel);
+  else if (appId === 'settings') renderSettingsApp(panel);
 }
+
+// ═══════════════════════════════════════════════════════════════
+//  Settings App
+// ═══════════════════════════════════════════════════════════════
+
+function renderSettingsApp(panel) {
+  panel.style.overflow = 'hidden';
+  panel.style.padding = '0';
+  panel.textContent = '';
+
+  var shell = el('div', { className: 'settings-shell' });
+
+  // -- Section definitions --
+  var sections = [
+    { id: 'general',      icon: '\u2699', name: 'General' },
+    { id: 'company',      icon: '\uD83C\uDFE2', name: 'Company' },
+    { id: 'keys',         icon: '\uD83D\uDD11', name: 'API Keys' },
+    { id: 'integrations', icon: '\uD83D\uDD0C', name: 'Integrations' },
+    { id: 'intervals',    icon: '\u23F1', name: 'Polling' },
+    { id: 'flags',        icon: '\uD83D\uDDA5', name: 'CLI Flags' },
+  ];
+
+  // -- Sidebar nav --
+  var nav = el('nav', { className: 'settings-nav' });
+  var activeSection = sections[0].id;
+
+  function switchSection(id) {
+    activeSection = id;
+    nav.querySelectorAll('.settings-nav-item').forEach(function(btn) {
+      btn.classList.toggle('active', btn.dataset.section === id);
+    });
+    body.querySelectorAll('.settings-section').forEach(function(sec) {
+      sec.classList.toggle('active', sec.id === 'settings-' + id);
+    });
+  }
+
+  sections.forEach(function(sec) {
+    var btn = el('button', {
+      className: 'settings-nav-item' + (sec.id === activeSection ? ' active' : ''),
+    });
+    btn.dataset.section = sec.id;
+    btn.appendChild(el('span', { className: 'settings-nav-icon' }, sec.icon));
+    btn.appendChild(el('span', null, sec.name));
+    btn.addEventListener('click', function() { switchSection(sec.id); });
+    nav.appendChild(btn);
+  });
+
+  // -- Body --
+  var body = el('div', { className: 'settings-body' });
+
+  // Loading state
+  body.appendChild(el('div', {
+    style: { padding: '40px 0', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '14px' }
+  }, 'Loading settings...'));
+
+  shell.appendChild(nav);
+  shell.appendChild(body);
+  panel.appendChild(shell);
+
+  // Fetch config
+  if (!brokerConnected) {
+    body.textContent = '';
+    body.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to manage settings.'));
+    return;
+  }
+
+  WuphfAPI.get('/config').then(function(cfg) {
+    body.textContent = '';
+    _buildSettingsSections(body, cfg, switchSection);
+    switchSection(activeSection);
+  }).catch(function(err) {
+    body.textContent = '';
+    body.appendChild(el('div', { className: 'request-empty' }, 'Failed to load settings: ' + (err.message || err)));
+  });
+}
+
+function _settingsField(label, hint, fieldEl) {
+  var row = el('div', { className: 'settings-row' });
+  var lbl = el('div', { className: 'settings-row-label' });
+  lbl.appendChild(el('div', { className: 'settings-row-label-name' }, label));
+  if (hint) lbl.appendChild(el('div', { className: 'settings-row-label-hint' }, hint));
+  var field = el('div', { className: 'settings-row-field' });
+  field.appendChild(fieldEl);
+  row.appendChild(lbl);
+  row.appendChild(field);
+  return row;
+}
+
+function _settingsInput(value, opts) {
+  opts = opts || {};
+  var cls = 'settings-input' + (opts.mono ? ' settings-key-input' : '') + (opts.select ? ' settings-select' : '') + (opts.textarea ? ' settings-textarea' : '');
+  var tag = opts.textarea ? 'textarea' : (opts.select ? 'select' : 'input');
+  var input = document.createElement(tag);
+  input.className = cls;
+  if (opts.type) input.type = opts.type;
+  if (opts.placeholder) input.placeholder = opts.placeholder;
+  if (opts.min != null) input.min = opts.min;
+  if (opts.readonly) { input.readOnly = true; input.style.opacity = '0.6'; input.style.cursor = 'default'; }
+  if (opts.select && opts.options) {
+    opts.options.forEach(function(o) {
+      var opt = document.createElement('option');
+      opt.value = typeof o === 'object' ? o.value : o;
+      opt.textContent = typeof o === 'object' ? o.label : o;
+      if (opt.value === String(value)) opt.selected = true;
+      input.appendChild(opt);
+    });
+  } else if (opts.textarea) {
+    input.textContent = value || '';
+  } else {
+    input.value = value != null ? value : '';
+  }
+  return input;
+}
+
+function _settingsKeyField(keyName, isSet, placeholder) {
+  var wrap = el('div', { className: 'settings-key-row' });
+  var input = _settingsInput('', { type: 'password', mono: true, placeholder: placeholder || (isSet ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (set)' : 'Not configured') });
+  input.dataset.keyName = keyName;
+  var status = el('span', { className: 'settings-key-status ' + (isSet ? 'set' : 'unset') }, isSet ? 'Set' : 'Not set');
+  wrap.appendChild(input);
+  wrap.appendChild(status);
+  return wrap;
+}
+
+function _settingsSaveBtn(label, onClick) {
+  var row = el('div', { className: 'settings-save-row' });
+  var btn = el('button', { className: 'settings-save-btn primary' }, label || 'Save changes');
+  btn.addEventListener('click', function() {
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+    var result = onClick();
+    if (result && typeof result.then === 'function') {
+      result.then(function() {
+        btn.textContent = 'Saved';
+        showNotice('Settings saved.', 'success');
+        setTimeout(function() { btn.disabled = false; btn.textContent = label || 'Save changes'; }, 1500);
+      }).catch(function(err) {
+        btn.disabled = false;
+        btn.textContent = label || 'Save changes';
+        showNotice('Save failed: ' + (err.message || err), 'error');
+      });
+    } else {
+      btn.disabled = false;
+      btn.textContent = label || 'Save changes';
+    }
+  });
+  row.appendChild(btn);
+  return row;
+}
+
+function _buildSettingsSections(body, cfg, switchSection) {
+
+  // ── General ──
+  var general = el('div', { id: 'settings-general', className: 'settings-section' });
+  general.appendChild(el('h2', { className: 'settings-section-title' }, 'General'));
+  general.appendChild(el('p', { className: 'settings-section-desc' }, 'Core runtime settings. These map to CLI flags and config file entries.'));
+
+  var providerSelect = _settingsInput(cfg.llm_provider, {
+    select: true,
+    options: [{ value: 'claude-code', label: 'Claude Code' }, { value: 'codex', label: 'Codex' }]
+  });
+  general.appendChild(_settingsField('LLM Provider', '--provider', providerSelect));
+
+  var memorySelect = _settingsInput(cfg.memory_backend, {
+    select: true,
+    options: [{ value: 'nex', label: 'Nex' }, { value: 'gbrain', label: 'GBrain' }, { value: 'none', label: 'None (local only)' }]
+  });
+  general.appendChild(_settingsField('Memory Backend', '--memory-backend', memorySelect));
+
+  var teamLeadInput = _settingsInput(cfg.team_lead_slug, { placeholder: 'e.g. ceo' });
+  general.appendChild(_settingsField('Team Lead', 'Default agent that leads operations', teamLeadInput));
+
+  var maxConcurrentInput = _settingsInput(cfg.max_concurrent_agents || '', { type: 'number', min: 1, placeholder: 'Unlimited' });
+  general.appendChild(_settingsField('Max Concurrent', 'Parallel agent limit', maxConcurrentInput));
+
+  var formatSelect = _settingsInput(cfg.default_format, {
+    select: true,
+    options: [{ value: 'text', label: 'Text' }, { value: 'json', label: 'JSON' }]
+  });
+  general.appendChild(_settingsField('Output Format', '--format', formatSelect));
+
+  var timeoutInput = _settingsInput(cfg.default_timeout || '', { type: 'number', min: 1000, placeholder: '120000' });
+  general.appendChild(_settingsField('Timeout (ms)', 'Default command timeout', timeoutInput));
+
+  var blueprintInput = _settingsInput(cfg.blueprint, { placeholder: 'Operation blueprint ID' });
+  general.appendChild(_settingsField('Blueprint', '--blueprint', blueprintInput));
+
+  var emailInput = _settingsInput(cfg.email, { placeholder: 'you@company.com' });
+  general.appendChild(_settingsField('Email', 'Identity scope for integrations', emailInput));
+
+  var devUrlInput = _settingsInput(cfg.dev_url, { placeholder: 'https://app.nex.ai' });
+  general.appendChild(_settingsField('Dev URL', 'API base URL override', devUrlInput));
+
+  general.appendChild(_settingsSaveBtn('Save general settings', function() {
+    var payload = { llm_provider: providerSelect.value, memory_backend: memorySelect.value, default_format: formatSelect.value };
+    if (teamLeadInput.value) payload.team_lead_slug = teamLeadInput.value;
+    if (maxConcurrentInput.value) payload.max_concurrent_agents = parseInt(maxConcurrentInput.value, 10);
+    if (timeoutInput.value) payload.default_timeout = parseInt(timeoutInput.value, 10);
+    payload.blueprint = blueprintInput.value;
+    payload.email = emailInput.value;
+    payload.dev_url = devUrlInput.value;
+    return WuphfAPI.post('/config', payload);
+  }));
+
+  // Config path info
+  if (cfg.config_path) {
+    var pathGroup = el('div', { className: 'settings-group', style: { marginTop: '24px' } });
+    pathGroup.appendChild(el('div', { className: 'settings-group-title' }, 'Config file'));
+    pathGroup.appendChild(el('div', { className: 'settings-filepath' }, cfg.config_path));
+    general.appendChild(pathGroup);
+  }
+
+  body.appendChild(general);
+
+  // ── Company ──
+  var company = el('div', { id: 'settings-company', className: 'settings-section' });
+  company.appendChild(el('h2', { className: 'settings-section-title' }, 'Company'));
+  company.appendChild(el('p', { className: 'settings-section-desc' }, 'Organizational context injected into agent system prompts. The more you fill in, the better agents understand your business.'));
+
+  var compNameInput = _settingsInput(cfg.company_name, { placeholder: 'Acme Corp' });
+  company.appendChild(_settingsField('Name', 'Your company or project name', compNameInput));
+
+  var compDescInput = _settingsInput(cfg.company_description, { textarea: true, placeholder: 'What does your company do?' });
+  company.appendChild(_settingsField('Description', 'One-liner about the business', compDescInput));
+
+  var compGoalsInput = _settingsInput(cfg.company_goals, { textarea: true, placeholder: 'Current organizational goals' });
+  company.appendChild(_settingsField('Goals', 'What the team is working toward', compGoalsInput));
+
+  var compSizeInput = _settingsInput(cfg.company_size, { placeholder: 'e.g. 5, 50, 500' });
+  company.appendChild(_settingsField('Size', 'Team or company size', compSizeInput));
+
+  var compPriorityInput = _settingsInput(cfg.company_priority, { textarea: true, placeholder: 'Immediate priority focus' });
+  company.appendChild(_settingsField('Priority', 'What matters most right now', compPriorityInput));
+
+  company.appendChild(_settingsSaveBtn('Save company info', function() {
+    return WuphfAPI.post('/config', {
+      company_name: compNameInput.value,
+      company_description: compDescInput.value,
+      company_goals: compGoalsInput.value,
+      company_size: compSizeInput.value,
+      company_priority: compPriorityInput.value
+    });
+  }));
+
+  body.appendChild(company);
+
+  // ── API Keys ──
+  var keys = el('div', { id: 'settings-keys', className: 'settings-section' });
+  keys.appendChild(el('h2', { className: 'settings-section-title' }, 'API Keys'));
+  keys.appendChild(el('p', { className: 'settings-section-desc' }, 'Authentication credentials for external services. Keys are stored in your local config file and never transmitted to WUPHF servers. Enter a new value to update, or leave blank to keep the current key.'));
+
+  var keyDefs = [
+    { key: 'api_key',           label: 'Nex API Key',       flag: 'api_key_set',        ph: 'nex_...',   env: 'WUPHF_API_KEY' },
+    { key: 'anthropic_api_key', label: 'Anthropic',         flag: 'anthropic_key_set',  ph: 'sk-ant-...', env: 'ANTHROPIC_API_KEY' },
+    { key: 'openai_api_key',    label: 'OpenAI',            flag: 'openai_key_set',     ph: 'sk-...',     env: 'OPENAI_API_KEY' },
+    { key: 'gemini_api_key',    label: 'Gemini',            flag: 'gemini_key_set',     ph: 'AI...',      env: 'GEMINI_API_KEY' },
+    { key: 'minimax_api_key',   label: 'Minimax',           flag: 'minimax_key_set',    ph: 'mm-...',     env: 'MINIMAX_API_KEY' },
+    { key: 'one_api_key',       label: 'One (integration)', flag: 'one_key_set',        ph: 'one_...',    env: 'ONE_SECRET' },
+    { key: 'composio_api_key',  label: 'Composio',          flag: 'composio_key_set',   ph: 'cmp_...',    env: 'COMPOSIO_API_KEY' },
+    { key: 'telegram_bot_token',label: 'Telegram Bot',      flag: 'telegram_token_set', ph: '123456:ABC...', env: 'WUPHF_TELEGRAM_BOT_TOKEN' },
+  ];
+
+  var keyFields = {};
+  keyDefs.forEach(function(def) {
+    var field = _settingsKeyField(def.key, cfg[def.flag], def.ph);
+    keyFields[def.key] = field.querySelector('input');
+    keys.appendChild(_settingsField(def.label, 'Env: ' + def.env, field));
+  });
+
+  keys.appendChild(_settingsSaveBtn('Save API keys', function() {
+    var payload = {};
+    var anySet = false;
+    keyDefs.forEach(function(def) {
+      var val = keyFields[def.key].value;
+      if (val) { payload[def.key] = val; anySet = true; }
+    });
+    if (!anySet) {
+      showNotice('No keys entered. Leave blank to keep existing keys.', 'info');
+      return null;
+    }
+    return WuphfAPI.post('/config', payload).then(function() {
+      // Clear inputs after save and refresh statuses
+      keyDefs.forEach(function(def) {
+        keyFields[def.key].value = '';
+        keyFields[def.key].placeholder = '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (set)';
+        var statusEl = keyFields[def.key].parentElement.querySelector('.settings-key-status');
+        if (statusEl) { statusEl.className = 'settings-key-status set'; statusEl.textContent = 'Set'; }
+      });
+    });
+  }));
+
+  body.appendChild(keys);
+
+  // ── Integrations ──
+  var integrations = el('div', { id: 'settings-integrations', className: 'settings-section' });
+  integrations.appendChild(el('h2', { className: 'settings-section-title' }, 'Integrations'));
+  integrations.appendChild(el('p', { className: 'settings-section-desc' }, 'External service connections and action providers.'));
+
+  var actionProviderSelect = _settingsInput(cfg.action_provider, {
+    select: true,
+    options: [{ value: 'auto', label: 'Auto' }, { value: 'composio', label: 'Composio' }]
+  });
+  integrations.appendChild(_settingsField('Action Provider', 'External action routing', actionProviderSelect));
+
+  var ocGroup = el('div', { className: 'settings-group' });
+  ocGroup.appendChild(el('div', { className: 'settings-group-title' }, 'OpenClaw'));
+
+  var ocGatewayInput = _settingsInput(cfg.openclaw_gateway_url, { placeholder: 'ws://127.0.0.1:18789', mono: true });
+  ocGroup.appendChild(_settingsField('Gateway URL', 'WebSocket endpoint', ocGatewayInput));
+
+  var ocTokenField = _settingsKeyField('openclaw_token', cfg.openclaw_token_set, 'oc_...');
+  ocGroup.appendChild(_settingsField('Token', 'Gateway auth token', ocTokenField));
+  integrations.appendChild(ocGroup);
+
+  var wsGroup = el('div', { className: 'settings-group' });
+  wsGroup.appendChild(el('div', { className: 'settings-group-title' }, 'Workspace'));
+
+  var wsIdInput = _settingsInput(cfg.workspace_id, { readonly: true, placeholder: '(set via Nex registration)' });
+  wsGroup.appendChild(_settingsField('Workspace ID', 'Read-only', wsIdInput));
+
+  var wsSlugInput = _settingsInput(cfg.workspace_slug, { readonly: true, placeholder: '(set via Nex registration)' });
+  wsGroup.appendChild(_settingsField('Workspace Slug', 'Read-only', wsSlugInput));
+  integrations.appendChild(wsGroup);
+
+  integrations.appendChild(_settingsSaveBtn('Save integration settings', function() {
+    var payload = { action_provider: actionProviderSelect.value };
+    if (ocGatewayInput.value) payload.openclaw_gateway_url = ocGatewayInput.value;
+    var ocTokenInput = ocTokenField.querySelector('input');
+    if (ocTokenInput && ocTokenInput.value) payload.openclaw_token = ocTokenInput.value;
+    return WuphfAPI.post('/config', payload);
+  }));
+
+  body.appendChild(integrations);
+
+  // ── Polling Intervals ──
+  var intervals = el('div', { id: 'settings-intervals', className: 'settings-section' });
+  intervals.appendChild(el('h2', { className: 'settings-section-title' }, 'Polling Intervals'));
+  intervals.appendChild(el('p', { className: 'settings-section-desc' }, 'How often background processes check for updates. All values in minutes. Minimum 2 minutes.'));
+
+  var insightsInput = _settingsInput(cfg.insights_poll_minutes, { type: 'number', min: 2, placeholder: '15' });
+  intervals.appendChild(_settingsField('Insights', 'Context graph polling', insightsInput));
+
+  var followUpInput = _settingsInput(cfg.task_follow_up_minutes, { type: 'number', min: 2, placeholder: '60' });
+  intervals.appendChild(_settingsField('Task Follow-up', 'Post-completion check-in', followUpInput));
+
+  var reminderInput = _settingsInput(cfg.task_reminder_minutes, { type: 'number', min: 2, placeholder: '30' });
+  intervals.appendChild(_settingsField('Task Reminder', 'Stalled task nudge', reminderInput));
+
+  var recheckInput = _settingsInput(cfg.task_recheck_minutes, { type: 'number', min: 2, placeholder: '15' });
+  intervals.appendChild(_settingsField('Task Recheck', 'Progress re-evaluation', recheckInput));
+
+  intervals.appendChild(_settingsSaveBtn('Save intervals', function() {
+    return WuphfAPI.post('/config', {
+      insights_poll_minutes: parseInt(insightsInput.value, 10) || 15,
+      task_follow_up_minutes: parseInt(followUpInput.value, 10) || 60,
+      task_reminder_minutes: parseInt(reminderInput.value, 10) || 30,
+      task_recheck_minutes: parseInt(recheckInput.value, 10) || 15
+    });
+  }));
+
+  body.appendChild(intervals);
+
+  // ── CLI Flags (read-only reference) ──
+  var flags = el('div', { id: 'settings-flags', className: 'settings-section' });
+  flags.appendChild(el('h2', { className: 'settings-section-title' }, 'CLI Flags'));
+  flags.appendChild(el('p', { className: 'settings-section-desc' }, 'All flags available when launching wuphf from the terminal. These are runtime-only and not persisted in the config file.'));
+
+  var flagData = [
+    ['--provider <name>',     'LLM provider (claude-code, codex)'],
+    ['--memory-backend <name>','Memory backend (nex, gbrain, none)'],
+    ['--blueprint <id>',      'Operation blueprint for this run'],
+    ['--tui',                 'Launch tmux TUI instead of web UI'],
+    ['--web-port <port>',     'Web UI port (default: 7891)'],
+    ['--broker-port <port>',  'Local broker port (default: 7890)'],
+    ['--opus-ceo',            'Upgrade CEO agent to Opus model'],
+    ['--collab',              'Collaborative mode (all agents see all messages)'],
+    ['--1o1',                 'Direct 1:1 session with a single agent'],
+    ['--unsafe',              'Bypass agent permission checks (dev only)'],
+    ['--no-nex',              'Disable Nex for this session'],
+    ['--no-open',             'Skip auto-opening browser on launch'],
+    ['--from-scratch',        'Start without saved blueprint'],
+    ['--threads-collapsed',   'Start with threads collapsed'],
+    ['--cmd <command>',       'Run a slash command non-interactively'],
+    ['--format <fmt>',        'Output format (text, json)'],
+    ['--api-key <key>',       'Nex API key override'],
+    ['--version',             'Print version and exit'],
+    ['--help-all',            'Show all flags including internal ones'],
+  ];
+
+  var table = el('table', { className: 'settings-flag-table' });
+  var thead = el('tr');
+  thead.appendChild(el('th', null, 'Flag'));
+  thead.appendChild(el('th', null, 'Description'));
+  table.appendChild(thead);
+  flagData.forEach(function(row) {
+    var tr = el('tr');
+    tr.appendChild(el('td', null, row[0]));
+    tr.appendChild(el('td', null, row[1]));
+    table.appendChild(tr);
+  });
+  flags.appendChild(table);
+
+  // Environment variable reference
+  var envGroup = el('div', { className: 'settings-group', style: { marginTop: '24px' } });
+  envGroup.appendChild(el('div', { className: 'settings-group-title' }, 'Environment Variables'));
+  envGroup.appendChild(el('p', { style: { fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6', marginBottom: '12px' } }, 'Settings resolve in order: CLI flag \u2192 environment variable \u2192 config file \u2192 default. Set these in your shell profile to override config file values.'));
+
+  var envData = [
+    ['WUPHF_LLM_PROVIDER',              'LLM provider override'],
+    ['WUPHF_MEMORY_BACKEND',             'Memory backend override'],
+    ['WUPHF_API_KEY',                    'Nex API key'],
+    ['WUPHF_BROKER_PORT',               'Broker port'],
+    ['WUPHF_CONFIG_PATH',               'Config file path override'],
+    ['WUPHF_RUNTIME_HOME',              'Runtime state directory'],
+    ['WUPHF_NO_NEX',                    'Disable Nex (1/true/yes)'],
+    ['WUPHF_START_FROM_SCRATCH',        'Start without blueprint (1)'],
+    ['WUPHF_ONE_ON_ONE',                'Enable 1:1 mode (1)'],
+    ['WUPHF_HEADLESS_PROVIDER',         'Headless provider override'],
+    ['WUPHF_INSIGHTS_INTERVAL_MINUTES', 'Insights poll interval'],
+    ['WUPHF_TASK_FOLLOWUP_MINUTES',     'Task follow-up interval'],
+    ['WUPHF_TASK_REMINDER_MINUTES',     'Task reminder interval'],
+    ['WUPHF_TASK_RECHECK_MINUTES',      'Task recheck interval'],
+  ];
+
+  var envTable = el('table', { className: 'settings-flag-table' });
+  var envThead = el('tr');
+  envThead.appendChild(el('th', null, 'Variable'));
+  envThead.appendChild(el('th', null, 'Purpose'));
+  envTable.appendChild(envThead);
+  envData.forEach(function(row) {
+    var tr = el('tr');
+    tr.appendChild(el('td', null, row[0]));
+    tr.appendChild(el('td', null, row[1]));
+    envTable.appendChild(tr);
+  });
+  envGroup.appendChild(envTable);
+  flags.appendChild(envGroup);
+
+  body.appendChild(flags);
+}
+
 function renderTasksApp(panel) {
   if (!brokerConnected) {
     panel.appendChild(el('div', { className: 'request-empty' }, 'Connect to broker to see tasks.'));
