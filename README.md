@@ -33,12 +33,10 @@ npx wuphf
 
 That's it. The browser opens automatically and you're in the office. Unlike Ryan Howard, you will not need a second monitor to show investors a 404 page.
 
-Prefer a global install or curl? Both work:
+Prefer a global install?
 
 ```bash
 npm install -g wuphf && wuphf
-# or
-curl -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh
 ```
 
 Building from source (requires Go):
