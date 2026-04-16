@@ -65,6 +65,12 @@ type OpenclawBridgeBinding struct {
 // ConfigPath returns the absolute path to ~/.wuphf/config.json, with a legacy
 // fallback to ~/.nex/config.json when the old file already exists.
 func ConfigPath() string {
+	// Env override for test harnesses that need to isolate config state from
+	// the user's real ~/.wuphf/config.json without remapping HOME (which
+	// breaks macOS keychain-backed CLI auth).
+	if p := strings.TrimSpace(os.Getenv("WUPHF_CONFIG_PATH")); p != "" {
+		return p
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(".wuphf", "config.json")
