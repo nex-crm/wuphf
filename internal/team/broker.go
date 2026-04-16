@@ -1505,6 +1505,10 @@ func (b *Broker) ServeWebUI(port int) {
 	if _, err := os.Stat(webDir); os.IsNotExist(err) {
 		webDir = "web"
 	}
+	// Prefer web/dist/ (Vite build output) when it exists.
+	if distDir := filepath.Join(webDir, "dist"); dirExists(distDir) {
+		webDir = distDir
+	}
 	mux := http.NewServeMux()
 	brokerURL := brokeraddr.ResolveBaseURL()
 	if addr := strings.TrimSpace(b.Addr()); addr != "" {
@@ -9358,4 +9362,10 @@ func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
 		b.skills = append(b.skills, sk)
 	}
 	b.saveLocked()
+}
+
+// dirExists returns true if path exists and is a directory.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
