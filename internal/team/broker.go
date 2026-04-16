@@ -1512,14 +1512,20 @@ func (b *Broker) ServeWebUI(port int) {
 	}
 	var fileServer http.Handler
 	serveLegacyFallback := false
-	if distDir := filepath.Join(webDir, "dist"); dirExists(distDir) {
+	distDir := filepath.Join(webDir, "dist")
+	distIndex := filepath.Join(distDir, "index.html")
+	if _, err := os.Stat(distIndex); err == nil {
+		// Real Vite build output on disk — use it.
 		fileServer = http.FileServer(http.Dir(distDir))
 	} else if embeddedFS, ok := wuphf.WebFS(); ok {
+		// No on-disk build; use embedded assets.
 		fileServer = http.FileServer(http.FS(embeddedFS))
 	} else if _, err := os.Stat(filepath.Join(webDir, "index.legacy.html")); err == nil {
+		// Source checkout without a React build — fall back to the legacy UI.
 		fileServer = http.FileServer(http.Dir(webDir))
 		serveLegacyFallback = true
 	} else {
+		// Nothing available; serve webDir as-is so 404s come from the actual FS.
 		fileServer = http.FileServer(http.Dir(webDir))
 	}
 	mux := http.NewServeMux()
