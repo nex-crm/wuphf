@@ -6,6 +6,9 @@ on:
 
 permissions:
   contents: write
+  # Needed to dispatch the Release workflow after pushing the tag. Without
+  # this, gh workflow run returns HTTP 403.
+  actions: write
 
 jobs:
   release:
@@ -51,3 +54,15 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag -a "${{ steps.bump.outputs.version }}" -m "Release ${{ steps.bump.outputs.version }}"
           git push origin "${{ steps.bump.outputs.version }}"
+
+      - name: Dispatch Release workflow at the new tag
+        # Tag pushes made with GITHUB_TOKEN do not fire other workflows, so
+        # the Release workflow's `on: push: tags` trigger never activates for
+        # auto-created tags. workflow_dispatch is the documented exception —
+        # gh triggers it explicitly and passes --ref so Release runs at the
+        # newly-created tag (goreleaser reads GITHUB_REF = refs/tags/<tag>).
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          gh workflow run release.yml --ref "$VERSION"
