@@ -38,6 +38,7 @@ type AgentService struct {
 	credTracker      *CredibilityTracker
 	client           *api.Client
 	streamFnResolver StreamFnResolver
+	escalator        Escalator
 	listeners        []func()
 	tickTimers       map[string]chan struct{} // per-agent worker stop channels
 	mu               sync.Mutex
@@ -80,6 +81,27 @@ func WithCredibilityTracker(ct *CredibilityTracker) AgentServiceOption {
 // This is the integration point for provider selection (nex-ask, claude-code, gemini).
 func WithStreamFnResolver(r StreamFnResolver) AgentServiceOption {
 	return func(s *AgentService) { s.streamFnResolver = r }
+}
+
+// WithEscalator sets the escalation callback that newly-created agents inherit.
+// Call this before Create(); for existing agents use AttachEscalator.
+func WithEscalator(fn Escalator) AgentServiceOption {
+	return func(s *AgentService) { s.escalator = fn }
+}
+
+// AttachEscalator overrides the escalator for every managed agent. Useful when
+// the transport is wired after agents already exist.
+func (s *AgentService) AttachEscalator(fn Escalator) {
+	s.mu.Lock()
+	s.escalator = fn
+	agents := make([]*ManagedAgent, 0, len(s.agents))
+	for _, ma := range s.agents {
+		agents = append(agents, ma)
+	}
+	s.mu.Unlock()
+	for _, ma := range agents {
+		ma.Loop.SetEscalator(fn)
+	}
 }
 
 // defaultStreamFnResolver returns a StreamFn that emits a configuration error.
@@ -161,6 +183,10 @@ func (s *AgentService) Create(cfg AgentConfig) (*ManagedAgent, error) {
 		Config: cfg,
 		State:  loop.GetState(),
 		Loop:   loop,
+	}
+
+	if s.escalator != nil {
+		ma.Loop.SetEscalator(s.escalator)
 	}
 
 	// Keep the cached state responsive without requiring callers to lock the loop.
@@ -330,6 +356,7 @@ func (s *AgentService) runAgentWorker(slug string, ma *ManagedAgent, stopCh <-ch
 		}
 
 		_ = ma.Loop.Tick()
+		ma.Loop.NotifyTick()
 		nextState := ma.Loop.GetState()
 
 		s.mu.Lock()
