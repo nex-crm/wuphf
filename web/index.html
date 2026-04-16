@@ -1012,6 +1012,80 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   .starter-card-points { grid-template-columns: 1fr; }
 }
 
+/* Wizard prefill chip — shows which blueprint pre-populated the form fields */
+.wiz-prefill-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 6px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid rgba(18,100,163,0.18);
+  background: rgba(232,245,254,0.6);
+  color: var(--accent);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+.wiz-prefill-chip button {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+/* Wizard team grid — used in step 3 to review the blueprint's team */
+.wiz-team-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+}
+@media (max-width: 640px) { .wiz-team-grid { grid-template-columns: 1fr; } }
+.wiz-team-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: all 0.2s;
+  text-align: left;
+  width: 100%;
+  font-family: var(--font-sans);
+}
+.wiz-team-tile:hover { border-color: var(--border-dark); }
+.wiz-team-tile.selected { border-color: var(--accent); background: var(--accent-bg); }
+.wiz-team-tile .wiz-team-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+.wiz-team-tile.selected .wiz-team-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.wiz-team-tile .wiz-team-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.wiz-team-tile .wiz-team-role { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+.wiz-team-empty {
+  padding: 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
 /* Team grid */
 .team-grid { display: grid; gap: 8px; grid-template-columns: repeat(2, 1fr); }
 @media (max-width: 640px) { .team-grid { grid-template-columns: 1fr; } }
@@ -1966,22 +2040,34 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
     <div class="wizard-body">
       <div class="wizard-progress" id="wizard-progress"></div>
 
-      <!-- Step 1: Welcome + Company -->
-      <div class="wizard-step active" id="wizard-step-welcome">
+      <!-- Step 1: Launch mode (blueprint picker only) -->
+      <div class="wizard-step active" id="wizard-step-launch">
         <div class="wizard-hero">
           <div class="wizard-eyebrow">
             <span class="status-dot active pulse"></span>
-            Start a real office from a blank slate or a preset launch mode
+            Pick the operating model the office starts with
           </div>
           <h1 class="wizard-headline" id="wizard-headline">Your office, visible and doing real work.</h1>
-          <p class="wizard-subhead">WUPHF gives operators one room where AI specialists can claim real business work, show progress in public, and pull in a human only when judgment is required. Live runs are judged on real outcomes, not proof artifacts or demo theater.</p>
+          <p class="wizard-subhead">Blueprints set the team, stages, and workflows this office will run. Start from a preset or from scratch. You'll confirm the details on the next screens.</p>
         </div>
 
         <div class="wizard-panel">
-          <div style="margin-bottom:16px;">
-            <p class="form-intro" style="margin-bottom:12px;">Want the office to start with an actual business model instead of blank fields and hope? Pick a starter, then edit anything you want.</p>
-            <div class="starter-grid" id="starter-templates"></div>
-          </div>
+          <div class="starter-grid" id="starter-templates"></div>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" id="wiz-btn-launch" onclick="submitLaunch()">
+            Continue
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2: Office identity -->
+      <div class="wizard-step" id="wizard-step-identity">
+        <div class="wizard-panel">
+          <p class="wizard-panel-title">Tell us about this office</p>
+          <div id="wiz-prefill-chip" class="wiz-prefill-chip" style="display:none;"></div>
           <div class="form-group">
             <label class="label" for="wiz-company">Company or project name <span style="color:var(--red,#ef4444)">*</span></label>
             <input class="input" id="wiz-company" placeholder="Acme Operations, or your real project name" autocomplete="organization" />
@@ -1996,15 +2082,33 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           </div>
         </div>
 
-        <div style="display:flex;justify-content:flex-end;">
-          <button class="btn btn-primary" id="wiz-btn-welcome" onclick="submitWelcome()">
-            Assemble the team
+        <div style="display:flex;justify-content:space-between;">
+          <button class="btn btn-ghost" onclick="showWizardStep('launch')">Back</button>
+          <button class="btn btn-primary" id="wiz-btn-identity" onclick="submitIdentity()">
+            Review the team
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
           </button>
         </div>
       </div>
 
-      <!-- Step 2: Prereqs + Keys -->
+      <!-- Step 3: Team review -->
+      <div class="wizard-step" id="wizard-step-team">
+        <div class="wizard-panel">
+          <p class="wizard-panel-title" id="wiz-team-title">Your team</p>
+          <p id="wiz-team-subtitle" style="font-size:12px;color:var(--text-secondary);margin:-8px 0 12px 0;">These are the specialists your blueprint assembled. Toggle anyone you don't need.</p>
+          <div id="wiz-team-grid" class="wiz-team-grid"></div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;">
+          <button class="btn btn-ghost" onclick="showWizardStep('identity')">Back</button>
+          <button class="btn btn-primary" id="wiz-btn-team" onclick="submitTeam()">
+            Continue
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 4: Tools + Memory -->
       <div class="wizard-step" id="wizard-step-setup">
         <div class="wizard-panel">
           <p class="wizard-panel-title">First, make sure you have the tools</p>
@@ -2023,7 +2127,14 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <div id="wiz-runtime-tiles"></div>
         </div>
 
-        <div style="display:flex;justify-content:flex-end;">
+        <div class="wizard-panel">
+          <p class="wizard-panel-title">Memory &amp; knowledge</p>
+          <p style="font-size:12px;color:var(--text-secondary);margin:-8px 0 12px 0;">Where should the office remember what it learns? Change this later in <code>/config</code>.</p>
+          <div id="wiz-memory-tiles"></div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;">
+          <button class="btn btn-ghost" onclick="showWizardStep('team')">Back</button>
           <button class="btn btn-primary" id="wiz-btn-ready" onclick="showWizardStep('task')" disabled>
             Ready
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
@@ -2031,7 +2142,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </div>
       </div>
 
-      <!-- Step 3: First task -->
+      <!-- Step 5: First task -->
       <div class="wizard-step" id="wizard-step-task">
         <div>
           <h2 class="step-title" style="text-align:left;margin-bottom:4px;">What should this office do first?</h2>
@@ -2047,11 +2158,14 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
         </div>
 
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;">
-          <button class="task-skip" onclick="completeOnboarding(true)">Open the office without a first task</button>
-          <button class="btn btn-primary" onclick="completeOnboarding(false)">
-            Start the first loop
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
-          </button>
+          <button class="btn btn-ghost" onclick="showWizardStep('setup')">Back</button>
+          <div style="display:flex;align-items:center;gap:12px;margin-left:auto;">
+            <button class="task-skip" onclick="completeOnboarding(true)">Open the office without a first task</button>
+            <button class="btn btn-primary" onclick="completeOnboarding(false)">
+              Start the first loop
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -9619,11 +9733,16 @@ function initWizard() {
         }
       } else {
         var partial = state && state.partial ? state.partial : null;
-        var startStep = (state && state.step) ? state.step : ((partial && partial.step) ? partial.step : 'welcome');
-        var welcome = partial && partial.answers ? (partial.answers.welcome || partial.answers.setup || {}) : {};
-        setFirstExistingFieldValue(['wiz-company'], welcome.company_name || welcome.company || '');
-        setFirstExistingFieldValue(['wiz-description'], welcome.description || '');
-        setFirstExistingFieldValue(['wiz-priority'], welcome.priority || '');
+        // Migrate legacy step IDs ('welcome' -> 'launch') so users mid-flow
+        // after this restructure resume on a real step.
+        var rawStartStep = (state && state.step) ? state.step : ((partial && partial.step) ? partial.step : 'launch');
+        var startStep = (rawStartStep === 'welcome') ? 'launch' : rawStartStep;
+        var identity = partial && partial.answers
+          ? (partial.answers.identity || partial.answers.welcome || partial.answers.setup || {})
+          : {};
+        document.getElementById('wiz-company').value = identity.company_name || identity.company || '';
+        document.getElementById('wiz-description').value = identity.description || '';
+        document.getElementById('wiz-priority').value = identity.priority || '';
         document.getElementById('onboarding-wizard').style.display = '';
         renderStarterTemplates();
         renderWizardProgress(startStep);
@@ -9635,12 +9754,12 @@ function initWizard() {
       console.error('[wizard] initWizard error: ' + errMsg);
       document.getElementById('onboarding-wizard').style.display = '';
       renderStarterTemplates();
-      renderWizardProgress('welcome');
-      showWizardStep('welcome');
+      renderWizardProgress('launch');
+      showWizardStep('launch');
     });
 }
 
-var _wizStepOrder = ['welcome', 'setup', 'task'];
+var _wizStepOrder = ['launch', 'identity', 'team', 'setup', 'task'];
 
 function renderWizardProgress(activeStep) {
   var container = document.getElementById('wizard-progress');
@@ -9661,11 +9780,20 @@ function showWizardStep(stepName) {
   var target = document.getElementById('wizard-step-' + stepName);
   if (target) target.classList.add('active');
   renderWizardProgress(stepName);
+  if (stepName === 'identity') renderWizPrefillChip();
+  if (stepName === 'team') renderWizTeamGrid();
   if (stepName === 'setup') initSetup();
   if (stepName === 'task') loadTemplates();
 }
 
-function submitWelcome() {
+// Step 1 → 2: blueprint already chosen via clicking a starter card; no
+// validation here — even "from scratch" is a valid choice.
+function submitLaunch() {
+  showWizardStep('identity');
+}
+
+// Step 2 → 3: persist identity fields, then advance to team review.
+function submitIdentity() {
   var company = (document.getElementById('wiz-company').value || '').trim();
   var description = (document.getElementById('wiz-description').value || '').trim();
   var priority = (document.getElementById('wiz-priority').value || '').trim();
@@ -9673,14 +9801,14 @@ function submitWelcome() {
     showNotice('Please fill in all three fields. Unlike Ryan Howard, we finish what we start.', 'error');
     return;
   }
-  var btn = document.getElementById('wiz-btn-welcome');
+  var btn = document.getElementById('wiz-btn-identity');
   if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
   Promise.all([
     fetch('/api/onboarding/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        step: 'welcome',
+        step: 'identity',
         answers: {
           company_name: company,
           description: description,
@@ -9705,27 +9833,359 @@ function submitWelcome() {
     })
   ])
     .then(function() {
-      showWizardStep('setup');
+      showWizardStep('team');
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Assemble the team \u2192';
+        btn.textContent = 'Review the team \u2192';
       }
     })
     .catch(function(err) {
       if (btn) {
         btn.disabled = false;
-        btn.textContent = 'Assemble the team \u2192';
+        btn.textContent = 'Review the team \u2192';
       }
       showNotice(err && err.message ? err.message : 'Could not save onboarding setup.', 'error');
     });
 }
 
+// Step 3 → 4: at least one teammate must be selected before continuing.
+function submitTeam() {
+  var anySelected = AGENTS.some(function(a) { return a.checked; });
+  if (!anySelected) {
+    showNotice('Pick at least one teammate. Even Michael Scott had Dwight.', 'error');
+    return;
+  }
+  showWizardStep('setup');
+}
+
+// Renders a chip on the identity step showing which blueprint pre-filled the
+// fields. Lets the user clear back to "from scratch" with one click.
+function renderWizPrefillChip() {
+  var chip = document.getElementById('wiz-prefill-chip');
+  if (!chip) return;
+  if (!activeStarterTemplate || activeStarterTemplate === BLANK_SLATE_STARTER_TEMPLATE) {
+    chip.style.display = 'none';
+    chip.textContent = '';
+    return;
+  }
+  var template = findStarterTemplate(activeStarterTemplate);
+  if (!template) {
+    chip.style.display = 'none';
+    chip.textContent = '';
+    return;
+  }
+  chip.textContent = '';
+  chip.appendChild(_wE('span', null, 'Prefilled from blueprint: ' + template.name));
+  var clearBtn = _wE('button', null, 'clear');
+  clearBtn.type = 'button';
+  clearBtn.addEventListener('click', function() {
+    applyBlankSlateStarter();
+    document.getElementById('wiz-company').value = '';
+    document.getElementById('wiz-description').value = '';
+    document.getElementById('wiz-priority').value = '';
+    renderWizPrefillChip();
+  });
+  chip.appendChild(clearBtn);
+  chip.style.display = 'inline-flex';
+}
+
+// Renders the team-review tiles in step 3. Each tile toggles AGENTS[i].checked.
+function renderWizTeamGrid() {
+  var grid = document.getElementById('wiz-team-grid');
+  var subtitle = document.getElementById('wiz-team-subtitle');
+  if (!grid) return;
+  grid.textContent = '';
+
+  var fromScratch = !activeStarterTemplate || activeStarterTemplate === BLANK_SLATE_STARTER_TEMPLATE;
+  if (subtitle) {
+    subtitle.textContent = fromScratch
+      ? 'No blueprint, so this is the default founding team. Toggle who you want.'
+      : 'These are the specialists your blueprint assembled. Toggle anyone you don\u2019t need.';
+  }
+
+  if (!AGENTS || AGENTS.length === 0) {
+    var empty = _wE('div', 'wiz-team-empty', 'No teammates yet. Go back and pick a blueprint, or open the office and add agents from the team panel.');
+    grid.appendChild(empty);
+    return;
+  }
+
+  AGENTS.forEach(function(a) {
+    var tile = _wE('button', 'wiz-team-tile' + (a.checked ? ' selected' : ''));
+    tile.type = 'button';
+    tile.addEventListener('click', function() {
+      a.checked = !a.checked;
+      renderWizTeamGrid();
+    });
+
+    var check = _wE('div', 'wiz-team-check');
+    var checkMark = _wE('span', null, '\u2713');
+    checkMark.style.cssText = 'color:white;font-size:14px;line-height:1;';
+    check.appendChild(checkMark);
+
+    if (a.emoji) {
+      var emoji = _wE('span', null, a.emoji);
+      emoji.style.fontSize = '20px';
+      tile.appendChild(check);
+      tile.appendChild(emoji);
+    } else {
+      tile.appendChild(check);
+    }
+
+    var info = _wE('div');
+    info.style.flex = '1';
+    info.appendChild(_wE('div', 'wiz-team-name', a.name));
+    if (a.role) info.appendChild(_wE('div', 'wiz-team-role', a.role));
+    tile.appendChild(info);
+
+    grid.appendChild(tile);
+  });
+}
+
 function initSetup() {
   recheckWizPrereqs();
+  loadMemoryBackendChoice();
   fetch('/api/onboarding/templates')
     .then(function(r) { return r.json(); })
     .then(function(data) { wizTemplates = data.templates || data || []; })
     .catch(function() { wizTemplates = []; });
+}
+
+// Memory backend tile metadata. Values match config.MemoryBackend* constants.
+var MEMORY_TILES = [
+  {
+    id: 'nex',
+    name: 'Nex (recommended)',
+    desc: 'Hosted org memory. Entity briefs, shared notes, and search backed by your Nex identity.',
+  },
+  {
+    id: 'gbrain',
+    name: 'GBrain',
+    desc: 'Local-first knowledge graph CLI. Good when you want everything on your machine.',
+  },
+  {
+    id: 'none',
+    name: 'No shared memory',
+    desc: 'Skip the memory layer. Agents only know what is in the current conversation.',
+  },
+];
+
+// The memory backend the user selected in the wizard. null until loaded from
+// /api/config or chosen by the user.
+var wizSelectedMemory = null;
+// Tracks whether keys are already configured so we can show checkmarks.
+var wizKeyStatus = { openai: false, anthropic: false, nex: false };
+
+function loadMemoryBackendChoice() {
+  fetch('/api/config')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      wizSelectedMemory = data && data.memory_backend ? data.memory_backend : 'nex';
+      wizKeyStatus.openai = !!(data && data.openai_key_set);
+      wizKeyStatus.anthropic = !!(data && data.anthropic_key_set);
+      wizKeyStatus.nex = !!(data && data.nex_connected);
+      renderMemoryTiles();
+    })
+    .catch(function() {
+      wizSelectedMemory = 'nex';
+      renderMemoryTiles();
+    });
+}
+
+function persistMemoryChoice(backend) {
+  fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ memory_backend: backend })
+  }).catch(function() { /* best-effort; wizard still completes */ });
+}
+
+function persistAPIKey(field, value) {
+  var body = {};
+  body[field] = value;
+  return fetch('/api/config', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function(r) { return r.json(); });
+}
+
+function nexRegister(email) {
+  return fetch('/api/nex/register', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: email })
+  }).then(function(r) { return r.json(); });
+}
+
+function _buildKeyInput(label, placeholder, statusKey, persistField, isRequired) {
+  var wrap = _wE('div');
+  wrap.style.cssText = 'margin-top:10px;padding:10px 12px;background:var(--bg-card,#1a1a1f);border-radius:6px;';
+
+  var labelRow = _wE('div');
+  labelRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+  var labelEl = _wE('span', null, label);
+  labelEl.style.cssText = 'font-size:12px;font-weight:600;color:var(--text);';
+  labelRow.appendChild(labelEl);
+  if (isRequired) {
+    var req = _wE('span', null, '(required)');
+    req.style.cssText = 'font-size:10px;color:var(--red,#ef4444);';
+    labelRow.appendChild(req);
+  } else {
+    var opt = _wE('span', null, '(optional)');
+    opt.style.cssText = 'font-size:10px;color:var(--text-tertiary);';
+    labelRow.appendChild(opt);
+  }
+  if (wizKeyStatus[statusKey]) {
+    var ok = _wE('span', null, '\u2713 Configured');
+    ok.style.cssText = 'font-size:11px;color:var(--green,#22c55e);margin-left:auto;';
+    labelRow.appendChild(ok);
+  }
+  wrap.appendChild(labelRow);
+
+  var inputRow = _wE('div');
+  inputRow.style.cssText = 'display:flex;gap:8px;';
+  var input = _wE('input');
+  input.type = 'password';
+  input.placeholder = placeholder;
+  input.style.cssText = 'flex:1;font-family:var(--font-mono,monospace);font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-sidebar);color:var(--text);';
+  if (wizKeyStatus[statusKey]) {
+    input.placeholder = '\u2022\u2022\u2022\u2022 already set';
+  }
+  inputRow.appendChild(input);
+
+  var saveBtn = _wE('button', 'btn btn-ghost btn-sm', 'Save');
+  saveBtn.type = 'button';
+  saveBtn.addEventListener('click', function() {
+    var val = input.value.trim();
+    if (!val) return;
+    saveBtn.textContent = 'Saving\u2026';
+    saveBtn.disabled = true;
+    persistAPIKey(persistField, val).then(function() {
+      wizKeyStatus[statusKey] = true;
+      input.value = '';
+      saveBtn.textContent = 'Save';
+      saveBtn.disabled = false;
+      renderMemoryTiles();
+    }).catch(function() {
+      saveBtn.textContent = 'Save';
+      saveBtn.disabled = false;
+      showNotice('Could not save key.', 'error');
+    });
+  });
+  inputRow.appendChild(saveBtn);
+  wrap.appendChild(inputRow);
+
+  return wrap;
+}
+
+function _buildNexRegisterPanel() {
+  var wrap = _wE('div');
+  wrap.style.cssText = 'margin-top:10px;padding:10px 12px;background:var(--bg-card,#1a1a1f);border-radius:6px;';
+
+  var labelRow = _wE('div');
+  labelRow.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:6px;';
+  var labelEl = _wE('span', null, 'Nex identity');
+  labelEl.style.cssText = 'font-size:12px;font-weight:600;color:var(--text);';
+  labelRow.appendChild(labelEl);
+
+  if (wizKeyStatus.nex) {
+    var ok = _wE('span', null, '\u2713 Connected');
+    ok.style.cssText = 'font-size:11px;color:var(--green,#22c55e);margin-left:auto;';
+    labelRow.appendChild(ok);
+    wrap.appendChild(labelRow);
+    return wrap;
+  }
+  wrap.appendChild(labelRow);
+
+  var desc = _wE('p', null, 'Enter your email to register or connect your Nex identity. This enables shared memory, entity briefs, and integrations.');
+  desc.style.cssText = 'font-size:11px;color:var(--text-secondary);margin:0 0 8px 0;';
+  wrap.appendChild(desc);
+
+  var inputRow = _wE('div');
+  inputRow.style.cssText = 'display:flex;gap:8px;';
+  var input = _wE('input');
+  input.type = 'email';
+  input.placeholder = 'you@company.com';
+  input.style.cssText = 'flex:1;font-family:var(--font-sans);font-size:12px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-sidebar);color:var(--text);';
+  inputRow.appendChild(input);
+
+  var registerBtn = _wE('button', 'btn btn-ghost btn-sm', 'Register');
+  registerBtn.type = 'button';
+  registerBtn.addEventListener('click', function() {
+    var email = input.value.trim();
+    if (!email) {
+      showNotice('Enter your email to register.', 'error');
+      return;
+    }
+    registerBtn.textContent = 'Registering\u2026';
+    registerBtn.disabled = true;
+    nexRegister(email).then(function(data) {
+      if (data && data.status === 'ok') {
+        wizKeyStatus.nex = true;
+        showNotice('Nex identity connected for ' + email + '.', 'success');
+        renderMemoryTiles();
+      } else {
+        showNotice((data && data.error) || 'Registration failed. Make sure nex-cli is installed.', 'error');
+      }
+      registerBtn.textContent = 'Register';
+      registerBtn.disabled = false;
+    }).catch(function(err) {
+      showNotice(err && err.message ? err.message : 'Could not reach Nex registration.', 'error');
+      registerBtn.textContent = 'Register';
+      registerBtn.disabled = false;
+    });
+  });
+  inputRow.appendChild(registerBtn);
+  wrap.appendChild(inputRow);
+
+  return wrap;
+}
+
+function renderMemoryTiles() {
+  var host = document.getElementById('wiz-memory-tiles');
+  if (!host) return;
+  host.textContent = '';
+
+  MEMORY_TILES.forEach(function(opt) {
+    var isActive = wizSelectedMemory === opt.id;
+    var tile = _wE('div', 'provider-option' + (isActive ? ' active' : ''));
+    tile.style.display = 'block';
+    tile.style.cursor = 'pointer';
+
+    var header = _wE('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    var nameEl = _wE('div', 'provider-option-name', opt.name);
+    header.appendChild(nameEl);
+    if (isActive) {
+      var check = _wE('span', 'provider-option-check', '\u2713');
+      check.style.marginLeft = 'auto';
+      header.appendChild(check);
+    }
+    tile.appendChild(header);
+
+    var descEl = _wE('div', 'provider-option-desc', opt.desc);
+    descEl.style.marginTop = '4px';
+    tile.appendChild(descEl);
+
+    // Conditional setup panels shown when this tile is selected.
+    if (isActive && opt.id === 'gbrain') {
+      tile.appendChild(_buildKeyInput('OpenAI API key', 'sk-...', 'openai', 'openai_api_key', true));
+      tile.appendChild(_buildKeyInput('Anthropic API key', 'sk-ant-...', 'anthropic', 'anthropic_api_key', false));
+    }
+    if (isActive && opt.id === 'nex') {
+      tile.appendChild(_buildNexRegisterPanel());
+    }
+
+    tile.addEventListener('click', function(e) {
+      // Don't re-select when user clicks inside the key inputs / register panel.
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+      wizSelectedMemory = opt.id;
+      persistMemoryChoice(opt.id);
+      renderMemoryTiles();
+    });
+
+    host.appendChild(tile);
+  });
 }
 
 function recheckWizPrereqs() {

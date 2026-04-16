@@ -11,6 +11,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/nex"
 	"github.com/nex-crm/wuphf/internal/operations"
 )
 
@@ -26,13 +27,17 @@ type initReadinessCheck struct {
 type InitPhase string
 
 const (
-	InitIdle            InitPhase = "idle"
-	InitAPIKey          InitPhase = "api_key"
-	InitProviderChoice  InitPhase = "provider_choice" // kept for backward compat, skipped in flow
-	InitOneAPIKey       InitPhase = "one_api_key"     // kept for backward compat, skipped in flow
-	InitBlueprintChoice InitPhase = "blueprint_choice"
-	InitPackChoice      InitPhase = "pack_choice" // legacy alias
-	InitDone            InitPhase = "done"
+	InitIdle             InitPhase = "idle"
+	InitAPIKey           InitPhase = "api_key"
+	InitProviderChoice   InitPhase = "provider_choice" // kept for backward compat, skipped in flow
+	InitOneAPIKey        InitPhase = "one_api_key"     // kept for backward compat, skipped in flow
+	InitMemoryChoice     InitPhase = "memory_choice"
+	InitGBrainOpenAIKey  InitPhase = "gbrain_openai_key"
+	InitGBrainAnthropKey InitPhase = "gbrain_anthropic_key"
+	InitNexRegister      InitPhase = "nex_register"
+	InitBlueprintChoice  InitPhase = "blueprint_choice"
+	InitPackChoice       InitPhase = "pack_choice" // legacy alias
+	InitDone             InitPhase = "done"
 )
 
 // InitFlowModel is the state machine for the /init onboarding flow.
@@ -40,9 +45,10 @@ type InitFlowModel struct {
 	phase     InitPhase
 	apiKey    string
 	provider  string
+	memory    string
 	blueprint string
 
-	// Text input buffer for API key entry
+	// Text input buffer for key / email entry
 	keyInput []rune
 	keyError string
 }
@@ -62,10 +68,14 @@ func (f InitFlowModel) IsActive() bool {
 	return f.phase != InitIdle && f.phase != InitDone
 }
 
-// Start begins the init flow. API key → provider choice → blueprint choice → done.
+// Start begins the init flow.
+// Order: API key → provider choice → memory choice → blueprint choice → done.
+// Memory comes before blueprint because it's a higher-level architectural
+// decision (where org knowledge lives) that the blueprint will then act on top of.
 func (f InitFlowModel) Start() (InitFlowModel, tea.Cmd) {
 	f.apiKey = strings.TrimSpace(config.ResolveAPIKey(""))
 	f.provider = config.ResolveLLMProvider("")
+	f.memory = config.ResolveMemoryBackend("")
 	if cfg, err := config.Load(); err == nil {
 		f.blueprint = cfg.ActiveBlueprint()
 	}
@@ -88,6 +98,9 @@ func (f InitFlowModel) Update(msg tea.Msg) (InitFlowModel, tea.Cmd) {
 		if v, ok := m.Data["provider"]; ok {
 			f.provider = v
 		}
+		if v, ok := m.Data["memory"]; ok {
+			f.memory = v
+		}
 		if v, ok := m.Data["blueprint"]; ok {
 			f.blueprint = v
 		}
@@ -99,8 +112,11 @@ func (f InitFlowModel) Update(msg tea.Msg) (InitFlowModel, tea.Cmd) {
 		switch f.phase {
 		case InitProviderChoice:
 			f.provider = m.Value
-			f.phase = InitBlueprintChoice
-			return f, f.emitPhase(InitBlueprintChoice)
+			f.phase = InitMemoryChoice
+			return f, f.emitPhase(InitMemoryChoice)
+		case InitMemoryChoice:
+			f.memory = m.Value
+			return f.advanceAfterMemoryChoice()
 		case InitBlueprintChoice, InitPackChoice:
 			f.blueprint = m.Value
 			return f.finish()
@@ -108,33 +124,56 @@ func (f InitFlowModel) Update(msg tea.Msg) (InitFlowModel, tea.Cmd) {
 
 	case tea.KeyMsg:
 		if f.requiresTextInput() {
-			return f.updateAPIKeyInput(m)
+			return f.updateTextInput(m)
 		}
 	}
 	return f, nil
 }
 
-func (f InitFlowModel) requiresTextInput() bool {
-	return f.phase == InitAPIKey
+// advanceAfterMemoryChoice transitions to the right key/registration phase
+// based on which memory backend the user chose, or straight to blueprint
+// if no additional setup is needed.
+func (f InitFlowModel) advanceAfterMemoryChoice() (InitFlowModel, tea.Cmd) {
+	switch f.memory {
+	case config.MemoryBackendGBrain:
+		// GBrain requires an OpenAI key for embeddings.
+		if config.ResolveOpenAIAPIKey() == "" {
+			f.phase = InitGBrainOpenAIKey
+			return f, f.emitPhase(InitGBrainOpenAIKey)
+		}
+		// Key already configured, skip to blueprint.
+		f.phase = InitBlueprintChoice
+		return f, f.emitPhase(InitBlueprintChoice)
+	case config.MemoryBackendNex:
+		// Nex requires a Nex identity. If no API key is configured, prompt
+		// the user to register via email.
+		if config.ResolveAPIKey("") == "" {
+			f.phase = InitNexRegister
+			return f, f.emitPhase(InitNexRegister)
+		}
+		f.phase = InitBlueprintChoice
+		return f, f.emitPhase(InitBlueprintChoice)
+	default:
+		f.phase = InitBlueprintChoice
+		return f, f.emitPhase(InitBlueprintChoice)
+	}
 }
 
-// updateAPIKeyInput handles keystrokes during the API key entry phase.
-func (f InitFlowModel) updateAPIKeyInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd) {
+func (f InitFlowModel) requiresTextInput() bool {
+	switch f.phase {
+	case InitAPIKey, InitGBrainOpenAIKey, InitGBrainAnthropKey, InitNexRegister:
+		return true
+	}
+	return false
+}
+
+// updateTextInput handles keystrokes during any text-entry phase
+// (API key, GBrain OpenAI/Anthropic keys, Nex email registration).
+func (f InitFlowModel) updateTextInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		key := string(f.keyInput)
-		if strings.TrimSpace(key) == "" {
-			f.keyError = "API key cannot be empty."
-			return f, nil
-		}
-		f.apiKey = key
-		f.keyError = ""
-		f.keyInput = nil
-		if strings.TrimSpace(f.provider) == "" {
-			f.provider = "claude-code"
-		}
-		f.phase = InitProviderChoice
-		return f, f.emitPhase(InitProviderChoice)
+		value := strings.TrimSpace(string(f.keyInput))
+		return f.submitTextInput(value)
 	case "backspace":
 		if len(f.keyInput) > 0 {
 			f.keyInput = f.keyInput[:len(f.keyInput)-1]
@@ -142,7 +181,6 @@ func (f InitFlowModel) updateAPIKeyInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd
 		}
 		return f, nil
 	case "esc":
-		// Cancel the flow
 		f.phase = InitIdle
 		f.keyInput = nil
 		f.keyError = ""
@@ -157,6 +195,75 @@ func (f InitFlowModel) updateAPIKeyInput(msg tea.KeyMsg) (InitFlowModel, tea.Cmd
 	}
 }
 
+func (f InitFlowModel) submitTextInput(value string) (InitFlowModel, tea.Cmd) {
+	switch f.phase {
+	case InitAPIKey:
+		if value == "" {
+			f.keyError = "API key cannot be empty."
+			return f, nil
+		}
+		f.apiKey = value
+		f.keyError = ""
+		f.keyInput = nil
+		if strings.TrimSpace(f.provider) == "" {
+			f.provider = "claude-code"
+		}
+		f.phase = InitProviderChoice
+		return f, f.emitPhase(InitProviderChoice)
+
+	case InitGBrainOpenAIKey:
+		if value == "" {
+			f.keyError = "OpenAI API key is required for GBrain."
+			return f, nil
+		}
+		// Persist immediately so gbrain can use it.
+		cfg, _ := config.Load()
+		cfg.OpenAIAPIKey = value
+		_ = config.Save(cfg)
+		f.keyError = ""
+		f.keyInput = nil
+		// Optional: ask for Anthropic key too.
+		if config.ResolveAnthropicAPIKey() == "" {
+			f.phase = InitGBrainAnthropKey
+			return f, f.emitPhase(InitGBrainAnthropKey)
+		}
+		f.phase = InitBlueprintChoice
+		return f, f.emitPhase(InitBlueprintChoice)
+
+	case InitGBrainAnthropKey:
+		// Anthropic key is optional; empty means skip.
+		if value != "" {
+			cfg, _ := config.Load()
+			cfg.AnthropicAPIKey = value
+			_ = config.Save(cfg)
+		}
+		f.keyError = ""
+		f.keyInput = nil
+		f.phase = InitBlueprintChoice
+		return f, f.emitPhase(InitBlueprintChoice)
+
+	case InitNexRegister:
+		if value == "" {
+			f.keyError = "Email is required to register with Nex."
+			return f, nil
+		}
+		// Shell out to nex-cli register synchronously. The TUI will block
+		// briefly (nex-cli should be fast), then proceed.
+		_, err := nex.Register(nil, value)
+		if err != nil {
+			f.keyError = "Registration failed: " + err.Error()
+			return f, nil
+		}
+		f.keyError = ""
+		f.keyInput = nil
+		// Reload API key since register should have written it.
+		f.apiKey = strings.TrimSpace(config.ResolveAPIKey(""))
+		f.phase = InitBlueprintChoice
+		return f, f.emitPhase(InitBlueprintChoice)
+	}
+	return f, nil
+}
+
 // finish saves config and transitions to done.
 func (f InitFlowModel) finish() (InitFlowModel, tea.Cmd) {
 	cfg, _ := config.Load()
@@ -164,6 +271,9 @@ func (f InitFlowModel) finish() (InitFlowModel, tea.Cmd) {
 		cfg.APIKey = f.apiKey
 	}
 	cfg.LLMProvider = f.provider
+	if normalized := config.NormalizeMemoryBackend(f.memory); normalized != "" {
+		cfg.MemoryBackend = normalized
+	}
 	if strings.TrimSpace(f.blueprint) != "" {
 		cfg.SetActiveBlueprint(f.blueprint)
 	}
@@ -179,6 +289,7 @@ func (f InitFlowModel) emitPhase(phase InitPhase) tea.Cmd {
 	data := map[string]string{
 		"api_key":   f.apiKey,
 		"provider":  f.provider,
+		"memory":    f.memory,
 		"blueprint": f.blueprint,
 		"pack":      f.blueprint,
 	}
@@ -202,6 +313,28 @@ func ProviderOptions() []PickerOption {
 		{Label: "Codex CLI", Value: "codex", Description: codexDesc},
 	}
 	return options
+}
+
+// MemoryOptions returns the picker options for organizational memory backend
+// selection. Order matches the recommended default-first, then opt-out.
+func MemoryOptions() []PickerOption {
+	return []PickerOption{
+		{
+			Label:       "Nex (recommended)",
+			Value:       config.MemoryBackendNex,
+			Description: "Hosted org memory: entity briefs, shared notes, and search backed by your Nex identity.",
+		},
+		{
+			Label:       "GBrain",
+			Value:       config.MemoryBackendGBrain,
+			Description: "Local-first knowledge graph CLI. Good when you want everything on your machine.",
+		},
+		{
+			Label:       "No shared memory",
+			Value:       config.MemoryBackendNone,
+			Description: "Skip the memory layer. Agents only know what's in the current conversation.",
+		},
+	}
 }
 
 // BlueprintOptions returns the picker options for operation blueprint selection.
@@ -269,11 +402,22 @@ func (f InitFlowModel) View() string {
 	return view
 }
 
-// renderAPIKeyInput renders the text input for API key entry.
+// renderAPIKeyInput renders the text input for the current text-entry phase.
 func (f InitFlowModel) renderAPIKeyInput() string {
 	input := string(f.keyInput)
 	cursorStyle := lipgloss.NewStyle().Reverse(true)
-	label := "API Key: "
+
+	var label string
+	switch f.phase {
+	case InitGBrainOpenAIKey:
+		label = "OpenAI Key: "
+	case InitGBrainAnthropKey:
+		label = "Anthropic Key (Enter to skip): "
+	case InitNexRegister:
+		label = "Email: "
+	default:
+		label = "API Key: "
+	}
 	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(NexBlue)).Bold(true).Render(label)
 
 	display := prompt + input + cursorStyle.Render(" ")
@@ -339,6 +483,10 @@ func (f InitFlowModel) readinessChecks() []initReadinessCheck {
 	if provider == "" {
 		provider = "claude-code"
 	}
+	memory := strings.TrimSpace(f.memory)
+	if memory == "" {
+		memory = config.ResolveMemoryBackend("")
+	}
 
 	checks := []initReadinessCheck{
 		{
@@ -355,6 +503,11 @@ func (f InitFlowModel) readinessChecks() []initReadinessCheck {
 			Label:  "LLM runtime",
 			Status: providerRuntimeStatus(provider),
 			Detail: providerRuntimeDetail(provider),
+		},
+		{
+			Label:  "Memory backend",
+			Status: memoryReadinessStatus(memory),
+			Detail: memoryReadinessDetail(memory),
 		},
 		{
 			Label:  "Operation template",
@@ -431,6 +584,30 @@ func blueprintReadinessDetail(blueprint string) string {
 	return "Choose which operation template or blueprint should open after setup."
 }
 
+func memoryReadinessStatus(backend string) string {
+	switch config.NormalizeMemoryBackend(backend) {
+	case config.MemoryBackendNex, config.MemoryBackendGBrain:
+		return "ready"
+	case config.MemoryBackendNone:
+		return "next"
+	default:
+		return "next"
+	}
+}
+
+func memoryReadinessDetail(backend string) string {
+	switch config.NormalizeMemoryBackend(backend) {
+	case config.MemoryBackendNex:
+		return "Hosted org memory via Nex."
+	case config.MemoryBackendGBrain:
+		return "Local knowledge graph via GBrain CLI."
+	case config.MemoryBackendNone:
+		return "No shared memory. Agents only know what's in the current conversation."
+	default:
+		return "Pick a memory backend so the office can remember what it learns."
+	}
+}
+
 func providerRuntimeStatus(provider string) string {
 	switch strings.TrimSpace(provider) {
 	case "", "claude-code":
@@ -477,11 +654,20 @@ func (f InitFlowModel) phaseText() (heading, instructions string) {
 		return "Enter Nex API Key", "Paste your WUPHF/Nex API key. WUPHF uses One for integrations and manages it automatically through your Nex identity."
 	case InitProviderChoice:
 		return "Choose LLM Provider", "Select your preferred AI provider. Integrations are handled automatically through Nex using One."
+	case InitMemoryChoice:
+		return "Choose Memory Backend", "Where should the office remember what it learns? Nex is hosted org memory, GBrain is a local knowledge graph, or skip for no shared memory."
+	case InitGBrainOpenAIKey:
+		return "Enter OpenAI API Key", "GBrain uses OpenAI for embeddings. Paste your OpenAI API key (starts with sk-)."
+	case InitGBrainAnthropKey:
+		return "Enter Anthropic API Key (optional)", "GBrain can optionally use Anthropic for reasoning. Press Enter to skip, or paste your key."
+	case InitNexRegister:
+		return "Register with Nex", "Enter your email to create or connect your Nex identity. This enables shared memory, entity briefs, and integrations."
 	case InitBlueprintChoice, InitPackChoice:
 		return "Choose Operation Template", "Select the blueprint or template that will seed your startup."
 	case InitDone:
 		blueprintName := blueprintDisplayName(f.blueprint)
-		return "Setup Complete", "Provider: " + f.provider + " | Blueprint: " + blueprintName + ". " + config.OneSetupBlurb()
+		memoryName := config.MemoryBackendLabel(f.memory)
+		return "Setup Complete", "Provider: " + f.provider + " | Memory: " + memoryName + " | Blueprint: " + blueprintName + ". " + config.OneSetupBlurb()
 	default:
 		return "Setup", "Run /init to begin."
 	}

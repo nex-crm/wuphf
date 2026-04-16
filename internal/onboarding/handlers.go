@@ -222,7 +222,9 @@ func onboardingPartialCompanyName(partial *PartialProgress) string {
 	if partial == nil || partial.Answers == nil {
 		return ""
 	}
-	for _, step := range []string{"welcome", "setup"} {
+	// "identity" is the current wizard step name; "welcome" and "setup"
+	// remain for back-compat with sessions saved before the wizard restructure.
+	for _, step := range []string{"identity", "welcome", "setup"} {
 		answers := partial.Answers[step]
 		for _, key := range []string{"company_name", "company"} {
 			if value, ok := answers[key].(string); ok && strings.TrimSpace(value) != "" {

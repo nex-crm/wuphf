@@ -1084,6 +1084,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
+	mux.HandleFunc("/nex/register", b.requireAuth(b.handleNexRegister))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
@@ -4877,49 +4878,147 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleConfig exposes a narrow GET/POST surface over ~/.wuphf/config.json so
-// the onboarding wizard can persist the user's runtime pick (claude-code | codex)
-// without shelling into the full config. Only llm_provider is writable here;
-// other fields are owned by their dedicated endpoints (e.g. /company, Nex register).
+// the onboarding wizard can persist the user's runtime pick (claude-code | codex),
+// memory backend pick (none | nex | gbrain), and any third-party API keys those
+// backends need (OpenAI / Anthropic for GBrain). Other fields are owned by their
+// dedicated endpoints (e.g. /company, Nex register). All POST fields are optional;
+// clients can update one without touching the others. Key fields, if present, are
+// reported back as a boolean rather than echoing the secret.
 func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"llm_provider":   config.ResolveLLMProvider(""),
-			"memory_backend": config.ResolveMemoryBackend(""),
+			"llm_provider":      config.ResolveLLMProvider(""),
+			"memory_backend":    config.ResolveMemoryBackend(""),
+			"openai_key_set":    config.ResolveOpenAIAPIKey() != "",
+			"anthropic_key_set": config.ResolveAnthropicAPIKey() != "",
 		})
 	case http.MethodPost:
 		var body struct {
-			LLMProvider string `json:"llm_provider"`
+			LLMProvider     *string `json:"llm_provider,omitempty"`
+			MemoryBackend   *string `json:"memory_backend,omitempty"`
+			OpenAIAPIKey    *string `json:"openai_api_key,omitempty"`
+			AnthropicAPIKey *string `json:"anthropic_api_key,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		provider := strings.TrimSpace(strings.ToLower(body.LLMProvider))
-		switch provider {
-		case "claude-code", "codex":
-			// ok
-		default:
-			http.Error(w, "unsupported llm_provider", http.StatusBadRequest)
+
+		var provider, memory, openaiKey, anthropicKey string
+		var openaiSet, anthropicSet bool
+		if body.LLMProvider != nil {
+			provider = strings.TrimSpace(strings.ToLower(*body.LLMProvider))
+			switch provider {
+			case "claude-code", "codex":
+				// ok
+			default:
+				http.Error(w, "unsupported llm_provider", http.StatusBadRequest)
+				return
+			}
+		}
+		if body.MemoryBackend != nil {
+			memory = config.NormalizeMemoryBackend(*body.MemoryBackend)
+			if memory == "" {
+				http.Error(w, "unsupported memory_backend", http.StatusBadRequest)
+				return
+			}
+		}
+		if body.OpenAIAPIKey != nil {
+			openaiSet = true
+			openaiKey = strings.TrimSpace(*body.OpenAIAPIKey)
+		}
+		if body.AnthropicAPIKey != nil {
+			anthropicSet = true
+			anthropicKey = strings.TrimSpace(*body.AnthropicAPIKey)
+		}
+		if provider == "" && memory == "" && !openaiSet && !anthropicSet {
+			http.Error(w, "no fields to update", http.StatusBadRequest)
 			return
 		}
+
 		cfg, _ := config.Load()
-		cfg.LLMProvider = provider
+		if provider != "" {
+			cfg.LLMProvider = provider
+		}
+		if memory != "" {
+			cfg.MemoryBackend = memory
+		}
+		if openaiSet {
+			cfg.OpenAIAPIKey = openaiKey
+		}
+		if anthropicSet {
+			cfg.AnthropicAPIKey = anthropicKey
+		}
 		if err := config.Save(cfg); err != nil {
 			http.Error(w, "save failed", http.StatusInternalServerError)
 			return
 		}
 		// Keep /health in sync for this process so the wizard choice is
 		// reflected immediately without requiring a broker restart.
-		b.mu.Lock()
-		b.runtimeProvider = provider
-		b.mu.Unlock()
+		if provider != "" {
+			b.mu.Lock()
+			b.runtimeProvider = provider
+			b.mu.Unlock()
+		}
+		resp := map[string]any{"status": "ok"}
+		if provider != "" {
+			resp["llm_provider"] = provider
+		}
+		if memory != "" {
+			resp["memory_backend"] = memory
+		}
+		if openaiSet {
+			resp["openai_key_set"] = openaiKey != ""
+		}
+		if anthropicSet {
+			resp["anthropic_key_set"] = anthropicKey != ""
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "llm_provider": provider})
+		json.NewEncoder(w).Encode(resp)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// handleNexRegister wraps `nex-cli register --email <email>` so the onboarding
+// wizard can register a Nex identity without the user dropping to the terminal.
+// Body: {"email": "..."}. Returns whatever the CLI prints on success, or the
+// CLI's stderr on failure. Requires nex-cli to be installed and on PATH.
+func (b *Broker) handleNexRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	email := strings.TrimSpace(body.Email)
+	if email == "" {
+		http.Error(w, "email is required", http.StatusBadRequest)
+		return
+	}
+	output, err := nex.Register(r.Context(), email)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "error",
+			"error":  err.Error(),
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status": "ok",
+		"email":  email,
+		"output": output,
+	})
 }
 
 func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
