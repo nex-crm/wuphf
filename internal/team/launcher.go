@@ -2763,14 +2763,7 @@ var codingAgentSlugs = map[string]bool{
 
 // agentMCPServers returns the MCP server keys that a given agent should receive.
 func agentMCPServers(slug string) []string {
-	if codingAgentSlugs[slug] {
-		return []string{"wuphf-office"}
-	}
-	servers := []string{"wuphf-office"}
-	if backend := activeMemoryBackendKind(); backend != config.MemoryBackendNone {
-		servers = append(servers, backend)
-	}
-	return servers
+	return []string{"wuphf-office"}
 }
 
 // buildMCPServerMap constructs the full set of MCP server entries.
@@ -2785,8 +2778,21 @@ func (l *Launcher) buildMCPServerMap() (map[string]any, error) {
 	officeEnv := map[string]string{
 		"WUPHF_MEMORY_BACKEND": config.ResolveMemoryBackend(""),
 	}
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		officeEnv["HOME"] = home
+	}
 	if config.ResolveNoNex() {
 		officeEnv["WUPHF_NO_NEX"] = "1"
+	}
+	if apiKey := strings.TrimSpace(config.ResolveAPIKey("")); apiKey != "" {
+		officeEnv["WUPHF_API_KEY"] = apiKey
+		officeEnv["NEX_API_KEY"] = apiKey
+	}
+	if apiKey := strings.TrimSpace(config.ResolveOpenAIAPIKey()); apiKey != "" {
+		officeEnv["OPENAI_API_KEY"] = apiKey
+	}
+	if apiKey := strings.TrimSpace(config.ResolveAnthropicAPIKey()); apiKey != "" {
+		officeEnv["ANTHROPIC_API_KEY"] = apiKey
 	}
 	servers["wuphf-office"] = map[string]any{
 		"command": wuphfBinary,
@@ -2801,21 +2807,6 @@ func (l *Launcher) buildMCPServerMap() (map[string]any, error) {
 		if identityType := strings.TrimSpace(config.ResolveOneIdentityType()); identityType != "" {
 			officeEnv["ONE_IDENTITY_TYPE"] = identityType
 		}
-	}
-
-	if server, err := resolvedMemoryMCPServer(); err != nil {
-		return nil, err
-	} else if server != nil {
-		entry := map[string]any{
-			"command": server.Command,
-		}
-		if len(server.Args) > 0 {
-			entry["args"] = server.Args
-		}
-		if len(server.Env) > 0 {
-			entry["env"] = server.Env
-		}
-		servers[server.Name] = entry
 	}
 
 	return servers, nil

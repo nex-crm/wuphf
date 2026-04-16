@@ -3,7 +3,6 @@ package team
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -78,30 +77,21 @@ func TestBuildCodexOfficeConfigOverridesIncludesOfficeMCPEnv(t *testing.T) {
 	if !strings.Contains(joined, `mcp_servers.wuphf-office.args=["mcp-team"]`) {
 		t.Fatalf("expected WUPHF MCP args override, got %q", joined)
 	}
-	if !strings.Contains(joined, `mcp_servers.wuphf-office.env_vars=["WUPHF_AGENT_SLUG", "WUPHF_BROKER_TOKEN", "WUPHF_MEMORY_BACKEND", "WUPHF_NO_NEX", "WUPHF_ONE_ON_ONE", "WUPHF_ONE_ON_ONE_AGENT"]`) {
+	if !strings.Contains(joined, `mcp_servers.wuphf-office.env_vars=["WUPHF_AGENT_SLUG", "WUPHF_BROKER_TOKEN", "HOME", "WUPHF_MEMORY_BACKEND", "WUPHF_NO_NEX", "WUPHF_ONE_ON_ONE", "WUPHF_ONE_ON_ONE_AGENT"]`) {
 		t.Fatalf("expected office env var forwarding, got %q", joined)
 	}
 	if strings.Contains(joined, broker.Token()) {
 		t.Fatalf("expected broker token value to stay out of args, got %q", joined)
 	}
-	if strings.Contains(joined, `mcp_servers.nex.command=`) {
-		t.Fatalf("expected Nex MCP to stay disabled with WUPHF_NO_NEX, got %q", joined)
-	}
 }
 
-func TestBuildCodexOfficeConfigOverridesIncludesGBrainWhenSelected(t *testing.T) {
+func TestBuildCodexOfficeConfigOverridesRoutesGBrainThroughOfficeEnv(t *testing.T) {
 	oldExecutablePath := headlessCodexExecutablePath
 	headlessCodexExecutablePath = func() (string, error) { return "/tmp/wuphf", nil }
 	defer func() {
 		headlessCodexExecutablePath = oldExecutablePath
 	}()
 
-	binDir := t.TempDir()
-	gbrainBin := filepath.Join(binDir, "gbrain")
-	if err := os.WriteFile(gbrainBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("create fake gbrain: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("WUPHF_MEMORY_BACKEND", "gbrain")
 	t.Setenv("WUPHF_OPENAI_API_KEY", "openai-test-key")
 	t.Setenv("WUPHF_ANTHROPIC_API_KEY", "anthropic-test-key")
@@ -116,14 +106,8 @@ func TestBuildCodexOfficeConfigOverridesIncludesGBrainWhenSelected(t *testing.T)
 		t.Fatalf("buildCodexOfficeConfigOverrides: %v", err)
 	}
 	joined := strings.Join(overrides, "\n")
-	if !strings.Contains(joined, fmt.Sprintf(`mcp_servers.gbrain.command=%q`, gbrainBin)) {
-		t.Fatalf("expected GBrain MCP command override, got %q", joined)
-	}
-	if !strings.Contains(joined, `mcp_servers.gbrain.args=["serve"]`) {
-		t.Fatalf("expected GBrain MCP args override, got %q", joined)
-	}
-	if !strings.Contains(joined, `mcp_servers.gbrain.env_vars=["HOME", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"]`) {
-		t.Fatalf("expected GBrain env forwarding, got %q", joined)
+	if !strings.Contains(joined, `mcp_servers.wuphf-office.env_vars=["WUPHF_AGENT_SLUG", "WUPHF_BROKER_TOKEN", "HOME", "WUPHF_MEMORY_BACKEND", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "WUPHF_ONE_ON_ONE", "WUPHF_ONE_ON_ONE_AGENT"]`) {
+		t.Fatalf("expected GBrain credentials to flow through office env, got %q", joined)
 	}
 
 	env := l.buildHeadlessCodexEnv("ceo")
@@ -167,12 +151,6 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	t.Setenv("WUPHF_ONE_SECRET", "one-secret-value")
 	t.Setenv("WUPHF_ONE_IDENTITY", "founder@example.com")
 	t.Setenv("WUPHF_ONE_IDENTITY_TYPE", "user")
-	binDir := t.TempDir()
-	nexMCP := filepath.Join(binDir, "nex-mcp")
-	if err := os.WriteFile(nexMCP, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("create fake nex-mcp: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	l := &Launcher{
 		pack:        agent.GetPack("founding-team"),
@@ -193,14 +171,8 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	if !strings.Contains(joinedArgs, `mcp_servers.wuphf-office.command="/tmp/wuphf"`) {
 		t.Fatalf("expected office MCP override, got %#v", record.Args)
 	}
-	if !strings.Contains(joinedArgs, `mcp_servers.wuphf-office.env_vars=["WUPHF_AGENT_SLUG", "WUPHF_BROKER_TOKEN", "WUPHF_MEMORY_BACKEND", "ONE_SECRET", "ONE_IDENTITY", "ONE_IDENTITY_TYPE"]`) {
+	if !strings.Contains(joinedArgs, `mcp_servers.wuphf-office.env_vars=["WUPHF_AGENT_SLUG", "WUPHF_BROKER_TOKEN", "HOME", "WUPHF_MEMORY_BACKEND", "WUPHF_API_KEY", "NEX_API_KEY", "ONE_SECRET", "ONE_IDENTITY", "ONE_IDENTITY_TYPE"]`) {
 		t.Fatalf("expected office env var forwarding, got %#v", record.Args)
-	}
-	if !strings.Contains(joinedArgs, fmt.Sprintf(`mcp_servers.nex.command=%q`, nexMCP)) {
-		t.Fatalf("expected nex MCP override, got %#v", record.Args)
-	}
-	if !strings.Contains(joinedArgs, `mcp_servers.nex.env_vars=["WUPHF_API_KEY", "NEX_API_KEY"]`) {
-		t.Fatalf("expected nex env var forwarding, got %#v", record.Args)
 	}
 	if !containsEnv(record.Env, "WUPHF_AGENT_SLUG=ceo") {
 		t.Fatalf("expected agent env, got %#v", record.Env)

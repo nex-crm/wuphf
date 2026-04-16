@@ -164,6 +164,20 @@ type brokerTasksResponse struct {
 	Tasks []brokerTaskSummary `json:"tasks"`
 }
 
+type brokerMemoryResponse struct {
+	Namespace string             `json:"namespace,omitempty"`
+	Entries   []brokerMemoryNote `json:"entries,omitempty"`
+}
+
+type brokerMemoryNote struct {
+	Key       string `json:"key"`
+	Title     string `json:"title,omitempty"`
+	Content   string `json:"content"`
+	Author    string `json:"author,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
+}
+
 type brokerTaskSummary struct {
 	ID               string   `json:"id"`
 	Channel          string   `json:"channel"`
@@ -354,10 +368,25 @@ type TeamPlanArgs struct {
 	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
+type TeamMemoryQueryArgs struct {
+	Query  string `json:"query" jsonschema:"What you want to look up in memory"`
+	Scope  string `json:"scope,omitempty" jsonschema:"One of: auto, private, shared. Defaults to auto."`
+	Limit  int    `json:"limit,omitempty" jsonschema:"Maximum hits to return per scope (default 5)"`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
 type TeamMemoryWriteArgs struct {
-	Key    string `json:"key" jsonschema:"Key to store under your namespace"`
-	Value  string `json:"value" jsonschema:"Value to store"`
-	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug (used as namespace). Defaults to WUPHF_AGENT_SLUG."`
+	Key        string `json:"key,omitempty" jsonschema:"Optional stable key. Omit to auto-generate one from the title or content."`
+	Title      string `json:"title,omitempty" jsonschema:"Optional short title for the note"`
+	Content    string `json:"content" jsonschema:"Note content to store"`
+	Visibility string `json:"visibility,omitempty" jsonschema:"One of: private, shared. Defaults to private."`
+	MySlug     string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
+}
+
+type TeamMemoryPromoteArgs struct {
+	Key    string `json:"key" jsonschema:"Private note key to promote into shared durable memory"`
+	Title  string `json:"title,omitempty" jsonschema:"Optional override title for the promoted shared note"`
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
 type TeamTaskAckArgs struct {
@@ -398,6 +427,21 @@ func Run(ctx context.Context) error {
 		), handleHumanMessage)
 
 		mcp.AddTool(server, readOnlyTool(
+			"team_memory_query",
+			"Query your private notes and, when configured, shared organizational memory. Results may suggest which teammate to ask for fresher working context.",
+		), handleTeamMemoryQuery)
+
+		mcp.AddTool(server, officeWriteTool(
+			"team_memory_write",
+			"Store a private note by default, or write directly to shared durable memory when the result is real. Durable private notes may be flagged as promotion candidates.",
+		), handleTeamMemoryWrite)
+
+		mcp.AddTool(server, officeWriteTool(
+			"team_memory_promote",
+			"Promote one of your private notes into shared durable memory after it becomes canonical.",
+		), handleTeamMemoryPromote)
+
+		mcp.AddTool(server, readOnlyTool(
 			"team_runtime_state",
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
 		), handleTeamRuntimeState)
@@ -433,6 +477,18 @@ func Run(ctx context.Context) error {
 			"human_interview",
 			"Ask the human a blocking decision question.",
 		), handleHumanInterview)
+		mcp.AddTool(server, readOnlyTool(
+			"team_memory_query",
+			"Query your private notes and, when configured, shared organizational memory. Results may suggest which teammate to ask for fresher working context.",
+		), handleTeamMemoryQuery)
+		mcp.AddTool(server, officeWriteTool(
+			"team_memory_write",
+			"Store a private note by default, or write directly to shared durable memory when the result is real. Durable private notes may be flagged as promotion candidates.",
+		), handleTeamMemoryWrite)
+		mcp.AddTool(server, officeWriteTool(
+			"team_memory_promote",
+			"Promote one of your private notes into shared durable memory after it becomes canonical.",
+		), handleTeamMemoryPromote)
 		mcp.AddTool(server, officeWriteTool(
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
@@ -527,6 +583,21 @@ func Run(ctx context.Context) error {
 		"team_plan",
 		"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
 	), handleTeamPlan)
+
+	mcp.AddTool(server, readOnlyTool(
+		"team_memory_query",
+		"Query your private notes and, when configured, shared organizational memory. Results may suggest which teammate to ask for fresher working context.",
+	), handleTeamMemoryQuery)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_memory_write",
+		"Store a private note by default, or write directly to shared durable memory when the result is real. Durable private notes may be flagged as promotion candidates.",
+	), handleTeamMemoryWrite)
+
+	mcp.AddTool(server, officeWriteTool(
+		"team_memory_promote",
+		"Promote one of your private notes into shared durable memory after it becomes canonical.",
+	), handleTeamMemoryPromote)
 
 	mcp.AddTool(server, readOnlyTool(
 		"team_requests",
@@ -1437,23 +1508,171 @@ func handleTeamPlan(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlanAr
 	return textResult(fmt.Sprintf("Created %d tasks in #%s:\n%s", len(result.Tasks), channel, strings.Join(lines, "\n"))), nil, nil
 }
 
+func handleTeamMemoryQuery(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemoryQueryArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	query := strings.TrimSpace(args.Query)
+	if query == "" {
+		return toolError(fmt.Errorf("query is required")), nil, nil
+	}
+	scope, err := normalizeMemoryScope(args.Scope)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	limit := args.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+
+	lines := []string{}
+	privateEntries := []brokerMemoryNote{}
+	sharedHits := []team.ScopedMemoryHit{}
+	if scope == "auto" || scope == "private" {
+		values := url.Values{}
+		values.Set("namespace", privateMemoryNamespace(mySlug))
+		values.Set("query", query)
+		values.Set("limit", fmt.Sprintf("%d", limit))
+		var result brokerMemoryResponse
+		if err := brokerGetJSON(ctx, "/memory?"+values.Encode(), &result); err != nil {
+			return toolError(err), nil, nil
+		}
+		privateEntries = append(privateEntries, result.Entries...)
+		if len(result.Entries) > 0 {
+			lines = append(lines, "Private memory:")
+			for _, entry := range result.Entries {
+				title := strings.TrimSpace(entry.Title)
+				if title == "" {
+					title = strings.TrimSpace(entry.Key)
+				}
+				lines = append(lines, fmt.Sprintf("- %s (%s): %s", title, entry.Key, truncate(strings.TrimSpace(strings.ReplaceAll(entry.Content, "\n", " ")), 220)))
+			}
+		}
+	}
+	if scope == "auto" || scope == "shared" {
+		hits, err := team.QuerySharedMemory(ctx, query, limit)
+		if err != nil {
+			return toolError(err), nil, nil
+		}
+		sharedHits = append(sharedHits, hits...)
+		if len(hits) > 0 {
+			header := "Shared memory:"
+			if scope == "shared" {
+				header = fmt.Sprintf("Shared %s memory:", strings.ToUpper(hits[0].Backend[:1])+hits[0].Backend[1:])
+			}
+			lines = append(lines, header)
+			for _, hit := range hits {
+				lines = append(lines, fmt.Sprintf("- %s (%s): %s", hit.Title, hit.Identifier, truncate(strings.TrimSpace(hit.Snippet), 220)))
+			}
+		} else if scope == "shared" {
+			lines = append(lines, "Shared memory: no relevant hits.")
+		}
+	}
+	if len(lines) == 0 {
+		lines = append(lines, "No memory hits.")
+	}
+	if hints := promotionHintsForNotes(privateEntries); len(hints) > 0 {
+		lines = append(lines, "", "Promotion hints:")
+		lines = append(lines, hints...)
+	}
+	if len(sharedHits) > 0 {
+		var office brokerOfficeMembersResponse
+		if err := brokerGetJSON(ctx, "/office-members", &office); err == nil {
+			if hints := sharedMemoryRoutingHints(mySlug, sharedHits, office); len(hints) > 0 {
+				lines = append(lines, "", "Routing hints:")
+				lines = append(lines, hints...)
+			}
+		}
+	}
+	return textResult(strings.Join(lines, "\n")), nil, nil
+}
+
 func handleTeamMemoryWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemoryWriteArgs) (*mcp.CallToolResult, any, error) {
 	mySlug, err := resolveSlug(args.MySlug)
 	if err != nil {
 		return toolError(err), nil, nil
 	}
-	key := strings.TrimSpace(args.Key)
-	if key == "" {
-		return toolError(fmt.Errorf("key is required")), nil, nil
+	visibility, err := normalizeMemoryVisibility(args.Visibility)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	content := strings.TrimSpace(args.Content)
+	if content == "" {
+		return toolError(fmt.Errorf("content is required")), nil, nil
+	}
+	key := derivedMemoryKey(args.Key, args.Title, content)
+	title := strings.TrimSpace(args.Title)
+	if visibility == "shared" {
+		identifier, err := team.WriteSharedMemory(ctx, team.SharedMemoryWrite{
+			Actor:   mySlug,
+			Key:     key,
+			Title:   title,
+			Content: content,
+		})
+		if err != nil {
+			return toolError(err), nil, nil
+		}
+		return textResult(fmt.Sprintf("Stored shared memory %s.", strings.TrimSpace(identifier))), nil, nil
 	}
 	if err := brokerPostJSON(ctx, "/memory", map[string]any{
-		"namespace": mySlug,
+		"namespace": privateMemoryNamespace(mySlug),
 		"key":       key,
-		"value":     args.Value,
+		"value": map[string]any{
+			"key":     key,
+			"title":   title,
+			"content": content,
+			"author":  mySlug,
+		},
 	}, nil); err != nil {
 		return toolError(err), nil, nil
 	}
-	return textResult(fmt.Sprintf("Saved %s/%s to shared memory.", mySlug, key)), nil, nil
+	lines := []string{fmt.Sprintf("Saved private note %s.", key)}
+	if hints := promotionHintsForNotes([]brokerMemoryNote{{
+		Key:     key,
+		Title:   title,
+		Content: content,
+		Author:  mySlug,
+	}}); len(hints) > 0 {
+		lines = append(lines, hints...)
+	}
+	return textResult(strings.Join(lines, "\n")), nil, nil
+}
+
+func handleTeamMemoryPromote(ctx context.Context, _ *mcp.CallToolRequest, args TeamMemoryPromoteArgs) (*mcp.CallToolResult, any, error) {
+	mySlug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	key := normalizeMemoryKey(args.Key)
+	if key == "" {
+		return toolError(fmt.Errorf("key is required")), nil, nil
+	}
+	values := url.Values{}
+	values.Set("namespace", privateMemoryNamespace(mySlug))
+	values.Set("key", key)
+	var result brokerMemoryResponse
+	if err := brokerGetJSON(ctx, "/memory?"+values.Encode(), &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	if len(result.Entries) == 0 {
+		return toolError(fmt.Errorf("private note %q not found", key)), nil, nil
+	}
+	entry := result.Entries[0]
+	title := strings.TrimSpace(args.Title)
+	if title == "" {
+		title = strings.TrimSpace(entry.Title)
+	}
+	identifier, err := team.WriteSharedMemory(ctx, team.SharedMemoryWrite{
+		Actor:   mySlug,
+		Key:     entry.Key,
+		Title:   title,
+		Content: strings.TrimSpace(entry.Content),
+	})
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(fmt.Sprintf("Promoted private note %s into shared memory as %s.", entry.Key, strings.TrimSpace(identifier))), nil, nil
 }
 
 func handleTeamTaskAck(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAckArgs) (*mcp.CallToolResult, any, error) {
@@ -2421,6 +2640,69 @@ func normalizePollScope(value string) (string, error) {
 	}
 }
 
+func normalizeMemoryScope(value string) (string, error) {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", "auto":
+		return "auto", nil
+	case "private":
+		return "private", nil
+	case "shared":
+		return "shared", nil
+	default:
+		return "", fmt.Errorf("invalid scope %q", value)
+	}
+}
+
+func normalizeMemoryVisibility(value string) (string, error) {
+	switch strings.TrimSpace(strings.ToLower(value)) {
+	case "", "private":
+		return "private", nil
+	case "shared":
+		return "shared", nil
+	default:
+		return "", fmt.Errorf("invalid visibility %q", value)
+	}
+}
+
+func privateMemoryNamespace(slug string) string {
+	return "agent/" + strings.TrimSpace(slug)
+}
+
+func normalizeMemoryKey(key string) string {
+	var b strings.Builder
+	lastDash := false
+	for _, r := range strings.TrimSpace(strings.ToLower(key)) {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsNumber(r):
+			b.WriteRune(r)
+			lastDash = false
+		case r == '-' || r == '_' || unicode.IsSpace(r):
+			if b.Len() > 0 && !lastDash {
+				b.WriteByte('-')
+				lastDash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func derivedMemoryKey(explicit string, title string, content string) string {
+	if key := normalizeMemoryKey(explicit); key != "" {
+		return key
+	}
+	if key := normalizeMemoryKey(title); key != "" {
+		return key + "-" + time.Now().UTC().Format("20060102-150405")
+	}
+	words := strings.Fields(content)
+	if len(words) > 6 {
+		words = words[:6]
+	}
+	if key := normalizeMemoryKey(strings.Join(words, " ")); key != "" {
+		return key + "-" + time.Now().UTC().Format("20060102-150405")
+	}
+	return "note-" + time.Now().UTC().Format("20060102-150405")
+}
+
 func applyAgentMessageScope(values url.Values, slug, scope string) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" || slug == "ceo" || isOneOnOneMode() {
@@ -2711,4 +2993,14 @@ func toolError(err error) *mcp.CallToolResult {
 	res := textResult(err.Error())
 	res.IsError = true
 	return res
+}
+
+func truncate(text string, max int) string {
+	if max <= 0 || len(text) <= max {
+		return text
+	}
+	if max <= 1 {
+		return text[:max]
+	}
+	return text[:max-1] + "…"
 }

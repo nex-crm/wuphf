@@ -76,7 +76,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	// prepended to the notification so the original work packet stays intact.
 	stdinPayload := notification
 	memoryCtx, memoryCancel := context.WithTimeout(ctx, 2*time.Second)
-	if brief := fetchMemoryBrief(memoryCtx, notification); brief != "" {
+	if brief := fetchScopedMemoryBrief(memoryCtx, slug, notification, l.broker); brief != "" {
 		stdinPayload = brief + "\n\n" + notification
 	}
 	memoryCancel()

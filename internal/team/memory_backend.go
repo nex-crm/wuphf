@@ -6,7 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
+	"unicode"
 
+	"github.com/nex-crm/wuphf/internal/api"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/gbrain"
 	"github.com/nex-crm/wuphf/internal/nex"
@@ -35,6 +38,24 @@ type memoryBackend interface {
 	Ready() bool
 	MCPServer() (*memoryMCPServer, error)
 	FetchBrief(ctx context.Context, notification string) string
+	QueryShared(ctx context.Context, query string, limit int) ([]ScopedMemoryHit, error)
+	WriteShared(ctx context.Context, note SharedMemoryWrite) (string, error)
+}
+
+type ScopedMemoryHit struct {
+	Scope      string
+	Backend    string
+	Identifier string
+	Title      string
+	Snippet    string
+	OwnerSlug  string
+}
+
+type SharedMemoryWrite struct {
+	Actor   string
+	Key     string
+	Title   string
+	Content string
 }
 
 type noMemoryBackend struct{}
@@ -46,6 +67,12 @@ func (noMemoryBackend) MCPServer() (*memoryMCPServer, error) {
 	return nil, nil
 }
 func (noMemoryBackend) FetchBrief(context.Context, string) string { return "" }
+func (noMemoryBackend) QueryShared(context.Context, string, int) ([]ScopedMemoryHit, error) {
+	return nil, nil
+}
+func (noMemoryBackend) WriteShared(context.Context, SharedMemoryWrite) (string, error) {
+	return "", fmt.Errorf("shared external memory is not active for this run")
+}
 
 type nexMemoryBackend struct{}
 
@@ -89,6 +116,49 @@ func (nexMemoryBackend) FetchBrief(ctx context.Context, notification string) str
 		return ""
 	}
 	return "== NEX CONTEXT ==\n" + strings.TrimSpace(answer) + "\n== END NEX CONTEXT =="
+}
+func (nexMemoryBackend) QueryShared(ctx context.Context, query string, limit int) ([]ScopedMemoryHit, error) {
+	client := api.NewClient(strings.TrimSpace(config.ResolveAPIKey("")))
+	if !client.IsAuthenticated() {
+		return nil, fmt.Errorf("nex is not configured")
+	}
+	type askResponse struct {
+		Answer string `json:"answer"`
+	}
+	resp, err := api.Post[askResponse](client, "/v1/context/ask", map[string]any{
+		"query": strings.TrimSpace(query),
+	}, 0)
+	if err != nil || strings.TrimSpace(resp.Answer) == "" {
+		return nil, err
+	}
+	return []ScopedMemoryHit{{
+		Scope:      "shared",
+		Backend:    config.MemoryBackendNex,
+		Identifier: "nex-context",
+		Title:      "Nex context",
+		Snippet:    strings.TrimSpace(resp.Answer),
+		OwnerSlug:  inferSharedMemoryOwner("", strings.TrimSpace(resp.Answer)),
+	}}, nil
+}
+func (nexMemoryBackend) WriteShared(ctx context.Context, note SharedMemoryWrite) (string, error) {
+	client := api.NewClient(strings.TrimSpace(config.ResolveAPIKey("")))
+	if !client.IsAuthenticated() {
+		return "", fmt.Errorf("nex is not configured")
+	}
+	content := renderNexSharedMemoryContent(note)
+	if _, err := api.Post[map[string]any](client, "/v1/context/text", map[string]any{
+		"content": content,
+	}, 0); err != nil {
+		return "", err
+	}
+	key := strings.TrimSpace(note.Key)
+	if key == "" {
+		key = slugify(firstNonEmpty(note.Title, note.Content))
+	}
+	if key == "" {
+		key = "shared-note"
+	}
+	return key, nil
 }
 
 type gbrainMemoryBackend struct{}
@@ -150,6 +220,59 @@ func (gbrainMemoryBackend) FetchBrief(ctx context.Context, notification string) 
 	}
 	lines = append(lines, "== END GBRAIN CONTEXT ==")
 	return strings.Join(lines, "\n")
+}
+func (gbrainMemoryBackend) QueryShared(ctx context.Context, query string, limit int) ([]ScopedMemoryHit, error) {
+	results, err := gbrain.Query(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	hits := make([]ScopedMemoryHit, 0, len(results))
+	seen := map[string]struct{}{}
+	for _, result := range results {
+		if _, ok := seen[result.Slug]; ok {
+			continue
+		}
+		seen[result.Slug] = struct{}{}
+		title := strings.TrimSpace(result.Title)
+		if title == "" {
+			title = strings.TrimSpace(result.Slug)
+		}
+		snippet := strings.TrimSpace(strings.ReplaceAll(result.ChunkText, "\n", " "))
+		if snippet == "" {
+			snippet = "Relevant context found in the brain."
+		}
+		hits = append(hits, ScopedMemoryHit{
+			Scope:      "shared",
+			Backend:    config.MemoryBackendGBrain,
+			Identifier: strings.TrimSpace(result.Slug),
+			Title:      title,
+			Snippet:    truncate(snippet, 220),
+			OwnerSlug:  inferSharedMemoryOwner(strings.TrimSpace(result.Slug), snippet),
+		})
+		if len(hits) >= limit && limit > 0 {
+			break
+		}
+	}
+	return hits, nil
+}
+func (gbrainMemoryBackend) WriteShared(ctx context.Context, note SharedMemoryWrite) (string, error) {
+	slug := slugify(firstNonEmpty(note.Key, note.Title, note.Content))
+	if slug == "" {
+		slug = "shared-note"
+	}
+	actor := slugify(firstNonEmpty(note.Actor, "wuphf"))
+	slug = fmt.Sprintf("wuphf-shared--%s--%s--%s", actor, slug, time.Now().UTC().Format("20060102-150405"))
+	raw, err := gbrain.Call(ctx, "put_page", map[string]any{
+		"slug":    slug,
+		"content": renderGBrainSharedMemoryPage(slug, note),
+	})
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(raw) == "" {
+		return slug, nil
+	}
+	return slug, nil
 }
 
 func gbrainProviderKeyConfigured() bool {
@@ -262,6 +385,29 @@ func fetchMemoryBrief(ctx context.Context, notification string) string {
 	return activeMemoryBackend().FetchBrief(ctx, notification)
 }
 
+func QuerySharedMemory(ctx context.Context, query string, limit int) ([]ScopedMemoryHit, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+	backend := activeMemoryBackend()
+	if backend.Kind() == config.MemoryBackendNone {
+		return nil, nil
+	}
+	return backend.QueryShared(ctx, query, limit)
+}
+
+func WriteSharedMemory(ctx context.Context, note SharedMemoryWrite) (string, error) {
+	note.Content = strings.TrimSpace(note.Content)
+	if note.Content == "" {
+		return "", fmt.Errorf("content is required")
+	}
+	return activeMemoryBackend().WriteShared(ctx, note)
+}
+
 func resolvedMemoryMCPServer() (*memoryMCPServer, error) {
 	return activeMemoryBackend().MCPServer()
 }
@@ -305,87 +451,204 @@ func gbrainMCPEnvVars() []string {
 func directMemoryPromptBlock() string {
 	switch activeMemoryBackendKind() {
 	case config.MemoryBackendNex:
-		return "Use the Nex context graph when it materially helps:\n- query_context: Look up prior decisions, people, projects, and history before guessing\n- add_context: Store durable conclusions only after you have actually landed them\n\n"
+		return "Memory scopes:\n- team_memory_query: Read your private notes (`scope=private`) or shared org memory backed by Nex (`scope=shared`)\n- team_memory_write: Store private notes by default; only write shared memory after a durable outcome is real\n- team_memory_promote: Copy one of your private notes into shared Nex memory when it becomes canonical\n- If shared memory points at another agent, ask them in the office for fresher working detail instead of guessing\n\n"
 	case config.MemoryBackendGBrain:
-		return "Use GBrain as durable world knowledge when it materially helps:\n- query: Brain-first semantic lookup for people, projects, decisions, and patterns\n- search: Exact term or slug lookup when you already know the entity\n- get_page: Load the full page once a hit looks relevant\n- put_page or add_timeline_entry: Write durable world knowledge only after it actually lands; keep task chatter in the conversation\n\n"
+		return "Memory scopes:\n- team_memory_query: Read your private notes (`scope=private`) or shared org memory backed by GBrain (`scope=shared`)\n- team_memory_write: Store private notes by default; only write shared memory after a durable outcome is real\n- team_memory_promote: Copy one of your private notes into shared GBrain memory when it becomes canonical\n- If shared memory points at another agent, ask them in the office for fresher working detail instead of guessing\n\n"
 	default:
-		return "External memory is not active for this run. Base your work on the conversation and direct human answers only.\n\n"
+		return "Memory scopes:\n- team_memory_query: Your private notes still work with `scope=private`\n- team_memory_write: Store private notes for yourself\n- Shared org memory is not active for this run, so `scope=shared` and team_memory_promote are unavailable\n\n"
 	}
 }
 
 func directMemoryStorageRule() string {
 	switch activeMemoryBackendKind() {
 	case config.MemoryBackendNex:
-		return "7. If Nex is enabled, do not claim something is stored unless add_context actually succeeded.\n"
+		return "7. Keep scratch notes private by default. Only claim shared storage after team_memory_write visibility=shared or team_memory_promote actually succeeded.\n"
 	case config.MemoryBackendGBrain:
-		return "7. If GBrain is enabled, do not claim the brain was updated unless put_page or add_timeline_entry actually succeeded.\n"
+		return "7. Keep scratch notes private by default. Only claim shared storage after team_memory_write visibility=shared or team_memory_promote actually succeeded.\n"
 	default:
-		return "7. Do not pretend anything was stored outside this session.\n"
+		return "7. Do not pretend anything was stored outside your private note scope.\n"
 	}
 }
 
 func leadMemoryPromptBlock() string {
 	switch activeMemoryBackendKind() {
 	case config.MemoryBackendNex:
-		return "Nex memory: query_context before reinventing; add_context only after a decision is actually landed.\n\n"
+		return "Memory scopes: use team_memory_query with scope=shared for org memory backed by Nex, scope=private for your own notes, and team_memory_promote when a private note becomes durable shared knowledge. If shared memory points at another agent, ask them in the office for the freshest working context.\n\n"
 	case config.MemoryBackendGBrain:
-		return "GBrain operating loop: query before reinventing, search when you know the entity, get_page before relying on a hit, and only write durable world knowledge back with put_page or add_timeline_entry once it has landed. Keep task coordination in the office, not in the brain.\n\n"
+		return "Memory scopes: use team_memory_query with scope=shared for org memory backed by GBrain, scope=private for your own notes, and team_memory_promote when a private note becomes durable shared knowledge. If shared memory points at another agent, ask them in the office for the freshest working context. Keep task coordination in the office, not in shared memory.\n\n"
 	default:
-		return "External memory is not active for this run. Work only with the shared office channel and human answers.\n\n"
+		return "Shared org memory is not active for this run. You can still use private notes with team_memory_query/team_memory_write scope=private.\n\n"
 	}
 }
 
 func leadMemoryFirstRule() string {
 	switch activeMemoryBackendKind() {
 	case config.MemoryBackendNex:
-		return "1. On strategy or prior decisions, call query_context early\n"
+		return "1. On strategy or prior decisions, call team_memory_query early. Use scope=shared for org memory and scope=private for your own retained notes.\n"
 	case config.MemoryBackendGBrain:
-		return "1. On strategy, relationships, or prior decisions, start in GBrain: query broadly, then search or get_page to verify the relevant entity page\n"
+		return "1. On strategy, relationships, or prior decisions, start with team_memory_query. Use shared scope for org context and private scope for your own retained notes.\n"
 	default:
-		return "1. Coordinate inside the office channel first and keep the team aligned there\n"
+		return "1. Coordinate inside the office channel first, and use private memory only for your own scratch history.\n"
 	}
 }
 
 func leadMemoryStorageRule() string {
 	switch activeMemoryBackendKind() {
 	case config.MemoryBackendNex:
-		return "8. When you lock a decision, call add_context before claiming it is stored\n"
+		return "8. When you lock a durable decision, promote it into shared memory before claiming it is stored\n"
 	case config.MemoryBackendGBrain:
-		return "8. When you lock a durable decision, update the relevant page or timeline before claiming the brain knows it\n"
+		return "8. When you lock a durable decision, promote it into shared memory before claiming the brain knows it\n"
 	default:
-		return "8. Summarize final decisions clearly in-channel\n"
+		return "8. Summarize final decisions clearly in-channel; shared org memory is unavailable in this run\n"
 	}
 }
 
 func leadMemoryFinalWarning() string {
 	switch activeMemoryBackendKind() {
 	case config.MemoryBackendNex:
-		return "Do not pretend the graph was updated; verify add_context succeeded.\n"
+		return "Do not pretend shared memory was updated; verify team_memory_write visibility=shared or team_memory_promote succeeded.\n"
 	case config.MemoryBackendGBrain:
-		return "Do not pretend the brain was updated; verify put_page or add_timeline_entry succeeded.\n"
+		return "Do not pretend shared memory was updated; verify team_memory_write visibility=shared or team_memory_promote succeeded.\n"
 	default:
-		return "Do not claim you stored anything outside the office.\n"
+		return "Do not claim you stored anything outside your private notes.\n"
 	}
 }
 
 func specialistMemoryPromptBlock() string {
 	switch activeMemoryBackendKind() {
 	case config.MemoryBackendNex:
-		return "Nex memory: query_context before making assumptions; add_context only for durable conclusions.\n\n"
+		return "Memory scopes: use team_memory_query with scope=shared for org memory backed by Nex, scope=private for your own notes, and team_memory_promote when a private note becomes durable shared knowledge. If shared memory points at another agent, ask them in the office for the freshest working context.\n\n"
 	case config.MemoryBackendGBrain:
-		return "GBrain operating loop: query when prior knowledge matters, search when you already know the entity, get_page before leaning on a hit, and only write durable world knowledge back with put_page or add_timeline_entry once the outcome has actually landed.\n\n"
+		return "Memory scopes: use team_memory_query with scope=shared for org memory backed by GBrain, scope=private for your own notes, and team_memory_promote when a private note becomes durable shared knowledge. If shared memory points at another agent, ask them in the office for the freshest working context.\n\n"
 	default:
-		return "External memory is not active for this run. Base your work on the office conversation and direct human answers only.\n\n"
+		return "Shared org memory is not active for this run. You can still use private notes with team_memory_query/team_memory_write scope=private.\n\n"
 	}
 }
 
 func specialistMemoryStorageRule() string {
 	switch activeMemoryBackendKind() {
 	case config.MemoryBackendNex:
-		return "9. Use query_context when prior knowledge matters. Only use add_context for durable conclusions, and don't claim something stored unless add_context actually succeeded.\n\n"
+		return "9. Use team_memory_query when prior knowledge matters. Keep notes private by default, and only promote durable conclusions into shared memory once they are real.\n\n"
 	case config.MemoryBackendGBrain:
-		return "9. Use GBrain when prior knowledge matters. Query first, verify with get_page when needed, and only write durable world knowledge back with put_page or add_timeline_entry after the outcome is real.\n\n"
+		return "9. Use team_memory_query when prior knowledge matters. Keep notes private by default, and only promote durable conclusions into shared memory once they are real.\n\n"
 	default:
-		return "9. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n\n"
+		return "9. Don't fake shared memory. Surface uncertainty in-channel and keep any retained notes private.\n\n"
 	}
+}
+
+func renderNexSharedMemoryContent(note SharedMemoryWrite) string {
+	title := strings.TrimSpace(note.Title)
+	if title == "" {
+		title = firstNonEmpty(strings.TrimSpace(note.Key), "WUPHF shared memory")
+	}
+	actor := strings.TrimSpace(note.Actor)
+	if actor == "" {
+		actor = "wuphf"
+	}
+	return fmt.Sprintf("[WUPHF shared memory]\nTitle: %s\nAuthor: @%s\nRecorded at: %s\n\n%s",
+		title,
+		actor,
+		time.Now().UTC().Format(time.RFC3339),
+		strings.TrimSpace(note.Content),
+	)
+}
+
+func renderGBrainSharedMemoryPage(slug string, note SharedMemoryWrite) string {
+	title := strings.TrimSpace(note.Title)
+	if title == "" {
+		title = strings.TrimSpace(note.Key)
+	}
+	if title == "" {
+		title = "WUPHF shared memory"
+	}
+	actor := strings.TrimSpace(note.Actor)
+	if actor == "" {
+		actor = "wuphf"
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	yamlTitle := strings.ReplaceAll(title, `"`, `\"`)
+	return fmt.Sprintf(`---
+title: "%s"
+type: note
+tags:
+  - wuphf
+  - shared-memory
+  - agent-%s
+slug: %s
+updated_at: %s
+---
+
+# %s
+
+Recorded by @%s on %s.
+
+%s
+	`,
+		yamlTitle,
+		slugify(actor),
+		slug,
+		now,
+		title,
+		actor,
+		now,
+		strings.TrimSpace(note.Content),
+	)
+}
+
+func inferSharedMemoryOwner(identifier string, snippet string) string {
+	if owner := parseGBrainSharedMemoryOwner(identifier); owner != "" {
+		return owner
+	}
+	for _, marker := range []string{"author: @", "recorded by @"} {
+		if owner := parseSharedMemoryOwnerAfterMarker(snippet, marker); owner != "" {
+			return owner
+		}
+	}
+	return ""
+}
+
+func parseGBrainSharedMemoryOwner(identifier string) string {
+	identifier = strings.TrimSpace(identifier)
+	if identifier == "" {
+		return ""
+	}
+	parts := strings.Split(identifier, "--")
+	if len(parts) < 4 {
+		return ""
+	}
+	if strings.TrimSpace(parts[0]) != "wuphf-shared" {
+		return ""
+	}
+	return slugify(parts[1])
+}
+
+func parseSharedMemoryOwnerAfterMarker(text string, marker string) string {
+	text = strings.TrimSpace(text)
+	marker = strings.ToLower(strings.TrimSpace(marker))
+	if text == "" || marker == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	idx := strings.Index(lower, marker)
+	if idx < 0 {
+		return ""
+	}
+	start := idx + len(marker)
+	if start >= len(text) {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range text[start:] {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsNumber(r) || r == '-' || r == '_':
+			b.WriteRune(unicode.ToLower(r))
+		default:
+			value := slugify(b.String())
+			if value != "" {
+				return value
+			}
+			return ""
+		}
+	}
+	return slugify(b.String())
 }

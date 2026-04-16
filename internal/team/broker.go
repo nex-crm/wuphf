@@ -5740,9 +5740,14 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
-		if channel == "" {
-			channel = "general"
+		namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
+		query := strings.TrimSpace(r.URL.Query().Get("query"))
+		keyFilter := strings.TrimSpace(r.URL.Query().Get("key"))
+		limit := 5
+		if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+			if parsed, err := strconv.Atoi(raw); err == nil && parsed > 0 {
+				limit = parsed
+			}
 		}
 		b.mu.Lock()
 		mem := b.sharedMemory
@@ -5751,12 +5756,49 @@ func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
 			mem = make(map[string]map[string]string)
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if namespace != "" {
+			entries := mem[namespace]
+			switch {
+			case keyFilter != "":
+				var payload []brokerMemoryEntry
+				if raw, ok := entries[keyFilter]; ok {
+					payload = append(payload, brokerEntryFromNote(decodePrivateMemoryNote(keyFilter, raw)))
+				}
+				json.NewEncoder(w).Encode(map[string]any{
+					"namespace": namespace,
+					"entries":   payload,
+				})
+				return
+			case query != "":
+				matches := searchPrivateMemory(entries, query, limit)
+				payload := make([]brokerMemoryEntry, 0, len(matches))
+				for _, note := range matches {
+					payload = append(payload, brokerEntryFromNote(note))
+				}
+				json.NewEncoder(w).Encode(map[string]any{
+					"namespace": namespace,
+					"entries":   payload,
+				})
+				return
+			default:
+				matches := searchPrivateMemory(entries, "", len(entries))
+				payload := make([]brokerMemoryEntry, 0, len(matches))
+				for _, note := range matches {
+					payload = append(payload, brokerEntryFromNote(note))
+				}
+				json.NewEncoder(w).Encode(map[string]any{
+					"namespace": namespace,
+					"entries":   payload,
+				})
+				return
+			}
+		}
 		json.NewEncoder(w).Encode(map[string]any{"memory": mem})
 	case http.MethodPost:
 		var body struct {
 			Namespace string `json:"namespace"`
 			Key       string `json:"key"`
-			Value     string `json:"value"`
+			Value     any    `json:"value"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
@@ -5775,7 +5817,20 @@ func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
 		if b.sharedMemory[ns] == nil {
 			b.sharedMemory[ns] = make(map[string]string)
 		}
-		b.sharedMemory[ns][key] = body.Value
+		value := ""
+		switch typed := body.Value.(type) {
+		case string:
+			value = typed
+		default:
+			data, err := json.Marshal(typed)
+			if err != nil {
+				b.mu.Unlock()
+				http.Error(w, "invalid value", http.StatusBadRequest)
+				return
+			}
+			value = string(data)
+		}
+		b.sharedMemory[ns][key] = value
 		if err := b.saveLocked(); err != nil {
 			b.mu.Unlock()
 			http.Error(w, "failed to persist", http.StatusInternalServerError)

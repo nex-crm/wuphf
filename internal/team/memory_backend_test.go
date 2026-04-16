@@ -101,3 +101,10 @@ func TestShouldPollNexNotificationsOnlyWhenNexIsActive(t *testing.T) {
 		t.Fatal("did not expect nex notification polling when gbrain is active")
 	}
 }
+
+func TestInferSharedMemoryOwnerFromGBrainSlug(t *testing.T) {
+	owner := inferSharedMemoryOwner("wuphf-shared--pm--launch-brief--20260416-120000", "")
+	if owner != "pm" {
+		t.Fatalf("expected owner pm from gbrain slug, got %q", owner)
+	}
+}

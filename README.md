@@ -65,6 +65,19 @@ WUPHF can run with three organizational context modes:
 - `gbrain` mounts `gbrain serve` as the office memory layer. It requires an API key during `/init`: `OpenAI` gives you the full path with embeddings and vector search, while `Anthropic` alone is reduced mode.
 - `none` disables the external memory layer entirely.
 
+WUPHF now enforces two memory scopes above those backends:
+
+- `private` memory is per-agent and local to WUPHF. Every agent can query and write its own notes.
+- `shared` memory is workspace-wide and backed by the selected external backend (`nex` or `gbrain`).
+
+Agents use WUPHF-managed memory tools instead of talking to raw backend MCP tools directly. That gives the same scope model across both backends:
+
+- every agent can read shared memory
+- every agent can read and write only its own private memory
+- durable conclusions can be promoted from private memory into shared memory once they are real
+- shared memory can point agents at the teammate who last recorded durable context, so they know who to ask in-channel for fresher working detail
+- private notes that look like durable decisions, preferences, or playbooks get promotion hints, but nothing is promoted automatically
+
 Examples:
 
 ```bash

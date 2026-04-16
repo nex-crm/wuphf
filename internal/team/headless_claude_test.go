@@ -217,68 +217,58 @@ func TestEnsureAgentMCPConfig_NoNexEntryInWrittenFile(t *testing.T) {
 	}
 }
 
-// TestBuildMCPServerMap_NexPresentWhenEnabled verifies that when WUPHF_NO_NEX
-// is unset and a fake nex-mcp binary exists on PATH, the "nex" key appears.
-func TestBuildMCPServerMap_NexPresentWhenEnabled(t *testing.T) {
+// TestBuildMCPServerMap_NexCredentialsFlowThroughOffice verifies that the office
+// MCP server now owns shared-memory access, so Nex credentials flow through the
+// wuphf-office server instead of mounting a raw nex MCP server.
+func TestBuildMCPServerMap_NexCredentialsFlowThroughOffice(t *testing.T) {
 	t.Setenv("WUPHF_NO_NEX", "")
 	t.Setenv("WUPHF_API_KEY", "test-key-12345")
 
-	// Inject a fake nex-mcp binary onto a prepended PATH dir.
-	binDir := t.TempDir()
-	nexBin := filepath.Join(binDir, "nex-mcp")
-	if err := os.WriteFile(nexBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("create fake nex-mcp: %v", err)
-	}
-	origPath := os.Getenv("PATH")
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+origPath)
-
 	l := minimalLauncher(false)
 	servers, err := l.buildMCPServerMap()
 	if err != nil {
 		t.Fatalf("buildMCPServerMap: %v", err)
 	}
-	if _, ok := servers["nex"]; !ok {
-		t.Fatalf("'nex' server must be present when nex-mcp is on PATH and WUPHF_NO_NEX unset, got servers: %v", mapKeys(servers))
-	}
-}
-
-func TestBuildMCPServerMap_GBrainPresentWhenSelected(t *testing.T) {
-	t.Setenv("WUPHF_MEMORY_BACKEND", "gbrain")
-	t.Setenv("WUPHF_OPENAI_API_KEY", "openai-test-key")
-
-	binDir := t.TempDir()
-	gbrainBin := filepath.Join(binDir, "gbrain")
-	if err := os.WriteFile(gbrainBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("create fake gbrain: %v", err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	l := minimalLauncher(false)
-	servers, err := l.buildMCPServerMap()
-	if err != nil {
-		t.Fatalf("buildMCPServerMap: %v", err)
-	}
-	entry, ok := servers["gbrain"]
+	entry, ok := servers["wuphf-office"]
 	if !ok {
-		t.Fatalf("'gbrain' server must be present when GBrain is selected, got servers: %v", mapKeys(servers))
+		t.Fatalf("'wuphf-office' server must be present, got servers: %v", mapKeys(servers))
 	}
 	server, ok := entry.(map[string]any)
 	if !ok {
-		t.Fatalf("expected gbrain entry to be an object, got %T", entry)
-	}
-	if got := server["command"]; got != gbrainBin {
-		t.Fatalf("expected gbrain command %q, got %#v", gbrainBin, got)
-	}
-	args, ok := server["args"].([]string)
-	if !ok || len(args) != 1 || args[0] != "serve" {
-		t.Fatalf("expected gbrain args [serve], got %#v", server["args"])
+		t.Fatalf("expected wuphf-office entry to be an object, got %T", entry)
 	}
 	env, ok := server["env"].(map[string]string)
 	if !ok {
-		t.Fatalf("expected gbrain env map, got %#v", server["env"])
+		t.Fatalf("expected office env map, got %#v", server["env"])
+	}
+	if env["WUPHF_API_KEY"] != "test-key-12345" || env["NEX_API_KEY"] != "test-key-12345" {
+		t.Fatalf("expected Nex credentials on office server, got %#v", env)
+	}
+}
+
+func TestBuildMCPServerMap_GBrainCredentialsFlowThroughOffice(t *testing.T) {
+	t.Setenv("WUPHF_MEMORY_BACKEND", "gbrain")
+	t.Setenv("WUPHF_OPENAI_API_KEY", "openai-test-key")
+
+	l := minimalLauncher(false)
+	servers, err := l.buildMCPServerMap()
+	if err != nil {
+		t.Fatalf("buildMCPServerMap: %v", err)
+	}
+	entry, ok := servers["wuphf-office"]
+	if !ok {
+		t.Fatalf("'wuphf-office' server must be present when GBrain is selected, got servers: %v", mapKeys(servers))
+	}
+	server, ok := entry.(map[string]any)
+	if !ok {
+		t.Fatalf("expected wuphf-office entry to be an object, got %T", entry)
+	}
+	env, ok := server["env"].(map[string]string)
+	if !ok {
+		t.Fatalf("expected office env map, got %#v", server["env"])
 	}
 	if env["OPENAI_API_KEY"] != "openai-test-key" {
-		t.Fatalf("expected OPENAI_API_KEY to be forwarded, got %#v", env)
+		t.Fatalf("expected OPENAI_API_KEY to flow through office env, got %#v", env)
 	}
 }
 

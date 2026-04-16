@@ -371,7 +371,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	cmd.Env = l.buildHeadlessCodexEnv(slug)
 	stdinPayload := notification
 	memoryCtx, memoryCancel := context.WithTimeout(ctx, 2*time.Second)
-	if brief := fetchMemoryBrief(memoryCtx, notification); brief != "" {
+	if brief := fetchScopedMemoryBrief(memoryCtx, slug, notification, l.broker); brief != "" {
 		stdinPayload = brief + "\n\n" + notification
 	}
 	memoryCancel()
@@ -557,10 +557,20 @@ func (l *Launcher) buildCodexOfficeConfigOverrides(slug string) ([]string, error
 	wuphfEnvVars := []string{
 		"WUPHF_AGENT_SLUG",
 		"WUPHF_BROKER_TOKEN",
+		"HOME",
 		"WUPHF_MEMORY_BACKEND",
 	}
 	if config.ResolveNoNex() {
 		wuphfEnvVars = append(wuphfEnvVars, "WUPHF_NO_NEX")
+	}
+	if apiKey := strings.TrimSpace(config.ResolveAPIKey("")); apiKey != "" {
+		wuphfEnvVars = append(wuphfEnvVars, "WUPHF_API_KEY", "NEX_API_KEY")
+	}
+	if apiKey := strings.TrimSpace(config.ResolveOpenAIAPIKey()); apiKey != "" {
+		wuphfEnvVars = append(wuphfEnvVars, "OPENAI_API_KEY")
+	}
+	if apiKey := strings.TrimSpace(config.ResolveAnthropicAPIKey()); apiKey != "" {
+		wuphfEnvVars = append(wuphfEnvVars, "ANTHROPIC_API_KEY")
 	}
 	if l.isOneOnOne() {
 		wuphfEnvVars = append(wuphfEnvVars,
@@ -582,18 +592,6 @@ func (l *Launcher) buildCodexOfficeConfigOverrides(slug string) ([]string, error
 		fmt.Sprintf(`mcp_servers.wuphf-office.command=%s`, tomlQuote(wuphfBinary)),
 		`mcp_servers.wuphf-office.args=["mcp-team"]`,
 		fmt.Sprintf(`mcp_servers.wuphf-office.env_vars=%s`, tomlStringArray(wuphfEnvVars)),
-	}
-
-	if server, err := resolvedMemoryMCPServer(); err != nil {
-		return nil, err
-	} else if server != nil {
-		overrides = append(overrides, fmt.Sprintf(`mcp_servers.%s.command=%s`, server.Name, tomlQuote(server.Command)))
-		if len(server.Args) > 0 {
-			overrides = append(overrides, fmt.Sprintf(`mcp_servers.%s.args=%s`, server.Name, tomlStringArray(server.Args)))
-		}
-		if len(server.EnvVars) > 0 {
-			overrides = append(overrides, fmt.Sprintf(`mcp_servers.%s.env_vars=%s`, server.Name, tomlStringArray(server.EnvVars)))
-		}
 	}
 
 	return overrides, nil
