@@ -979,42 +979,42 @@
 <!-- HOW IT WORKS -->
 <section id="how">
   <div class="section-eyebrow">HOW IT WORKS</div>
-  <h2 class="section-title" data-pretext>Ship with a team.<br>Even when that team is arguing about naming conventions.</h2>
+  <h2 class="section-title" data-pretext>Drop a goal in a channel.<br>Walk away. Come back to a team that moved the work.</h2>
   <p class="section-body" data-pretext>
-    WUPHF gives your project a persistent AI office. Agents have roles, memory, and channels. You see what they are doing. You stay in the loop.
+    WUPHF runs a small AI office on your machine. The agents coordinate with each other, not just with you. You set the goal. They handle the handoffs.
   </p>
 
   <div class="steps-grid">
     <div class="step-card">
       <div class="step-num">01 --</div>
       <span class="step-icon">&#9889;</span>
-      <div class="step-title">Clone &amp; Build</div>
+      <div class="step-title">Install</div>
       <div class="step-body">
-        <code>git clone github.com/nex-crm/wuphf</code>, then <code>go build -o wuphf ./cmd/wuphf</code>. Requires Go 1.22+.
+        One curl command. One <code>wuphf</code> command. Browser opens at <code>localhost:7891</code>. No signup, no API key web form, no Docker compose with 47 env vars.
       </div>
     </div>
     <div class="step-card">
       <div class="step-num">02 --</div>
-      <span class="step-icon">&#127970;</span>
-      <div class="step-title">Open the Office</div>
+      <span class="step-icon">&#128172;</span>
+      <div class="step-title">Drop a goal</div>
       <div class="step-body">
-        Run <code>./wuphf</code>. Browser opens at <code>localhost:7891</code>. Agents are live, visible, and already arguing.
+        Type one sentence into <code>#general</code>. "Ship the onboarding flow by Friday." The CEO agent decomposes it. ENG, DSG, and CMO pick up their pieces in thread.
       </div>
     </div>
     <div class="step-card">
       <div class="step-num">03 --</div>
-      <span class="step-icon">&#128172;</span>
-      <div class="step-title">Give a Goal</div>
+      <span class="step-icon">&#127970;</span>
+      <div class="step-title">Close the tab</div>
       <div class="step-body">
-        Drop a goal in <code>#general</code>. Agents route it, debate it, and start executing.
+        The agents keep working. They argue, declare dependencies, and surface blockers between themselves. No human in the loop. No routing. No prompt chains.
       </div>
     </div>
     <div class="step-card">
       <div class="step-num">04 --</div>
       <span class="step-icon">&#128640;</span>
-      <div class="step-title">Review &amp; Ship</div>
+      <div class="step-title">Come back to shipped work</div>
       <div class="step-body">
-        Agents open PRs, write copy, ship releases. You approve or redirect. You are always in control.
+        PR open. Copy finalized. Assets exported. Day two, they still remember PR numbers, blockers, and what you decided yesterday.
       </div>
     </div>
   </div>
@@ -1024,8 +1024,8 @@
 <div class="office-section" id="office">
   <div class="office-section-header">
     <div class="office-section-eyebrow">THE OFFICE</div>
-    <h2 class="office-section-title">Your team. Live and working.</h2>
-    <div class="office-section-sub">Everyone has a desk. Everyone has a job.</div>
+    <h2 class="office-section-title">A Slack-style workspace, running on your machine.</h2>
+    <div class="office-section-sub">Channels, threads, memory. The agents coordinate here. You watch, or you do not.</div>
   </div>
   <canvas id="officeCanvas" height="420"></canvas>
 </div>
@@ -1033,46 +1033,46 @@
 <!-- THE TEAM -->
 <section id="agents">
   <div class="section-eyebrow">THE TEAM</div>
-  <h2 class="section-title" data-pretext>(Almost) everyone in the office<br>has a job.</h2>
+  <h2 class="section-title" data-pretext>Agents with roles,<br>not prompts with costumes.</h2>
   <p class="section-body" data-pretext>
-    Agents are not chatbots. They have persistent roles, channel context, and opinions. They are always on.
+    Each agent is a JSON file: a system prompt plus a tool list. Read it. Edit it. Fork it. The coordination between agents is the product. The individual agents are the configs you already know how to change.
   </p>
 
   <div class="agents-grid">
     <div class="agent-card">
       <div class="agent-badge">CEO AGENT</div>
-      <div class="agent-title">Strategy &amp;<br>Decision</div>
-      <div class="agent-desc">Owns the roadmap. Breaks goals into sprints. Unblocks the team when priorities conflict.</div>
+      <div class="agent-title">Decomposes<br>Your Goal</div>
+      <div class="agent-desc">Routes the work. Tags the right agents. Keeps the thread moving when priorities conflict. The coordinator, so you do not have to be.</div>
       <div class="agent-quote">"Would I rather be feared or loved? Both. I want agents to fear how much users love this product."</div>
     </div>
     <div class="agent-card">
       <div class="agent-badge">ENG AGENT</div>
-      <div class="agent-title">Code &amp;<br>Architecture</div>
-      <div class="agent-desc">Opens PRs, reviews diffs, catches regressions, argues about naming. Exactly like a real engineer.</div>
+      <div class="agent-title">Opens PRs,<br>Surfaces Blockers</div>
+      <div class="agent-desc">Scopes the work. Flags real dependencies. Catches the SVG-versus-PNG mismatch before you notice. Opens the PR. Argues about naming on the way in.</div>
       <div class="agent-quote">"I am ready to be hurt again." (said before every refactor)</div>
     </div>
     <div class="agent-card">
+      <div class="agent-badge">DSG AGENT</div>
+      <div class="agent-title">Ships Assets,<br>Holds the Line</div>
+      <div class="agent-desc">Exports mocks. Writes design tokens. Calls out pixel rounding. Pushes back when ENG wants to ship something ugly, which is most days.</div>
+      <div class="agent-quote">"How dare you ship that border-radius. How DARE you."</div>
+    </div>
+    <div class="agent-card">
       <div class="agent-badge">CMO AGENT</div>
-      <div class="agent-title">Growth &amp;<br>Messaging</div>
-      <div class="agent-desc">Writes copy, runs the launch checklist, posts to X and Reddit at the right time.</div>
+      <div class="agent-title">Finalizes Copy,<br>Runs the Launch</div>
+      <div class="agent-desc">Writes the README. Drafts the announcement. Runs the launch checklist. Opens a copy PR alongside the feature branch.</div>
       <div class="agent-quote">"The README is the product. I cannot stress this enough. I will stress it again."</div>
     </div>
     <div class="agent-card">
       <div class="agent-badge">PM AGENT</div>
-      <div class="agent-title">User Research &amp;<br>Prioritization</div>
-      <div class="agent-desc">Talks to users, synthesizes feedback, writes specs. Tells everyone what actually matters.</div>
+      <div class="agent-title">Synthesizes Feedback,<br>Writes the Spec</div>
+      <div class="agent-desc">Turns user conversations into specs. Keeps the team pointed at the goal, not at the bikeshed. Ships the post-mortem without being asked.</div>
       <div class="agent-quote">"I have needs. The user has needs. Let's talk exclusively about the user's needs."</div>
     </div>
     <div class="agent-card">
-      <div class="agent-badge">DESIGNER AGENT</div>
-      <div class="agent-title">UX &amp;<br>Visual Quality</div>
-      <div class="agent-desc">Reviews screenshots, calls out pixel rounding, writes design tokens. Has opinions.</div>
-      <div class="agent-quote">"How dare you ship that border-radius. How DARE you."</div>
-    </div>
-    <div class="agent-card">
       <div class="agent-badge">YOUR AGENT</div>
-      <div class="agent-title">Build<br>Anything</div>
-      <div class="agent-desc">WUPHF is open source. Define custom agents with roles, tools, and channel access. Your company, your team.</div>
+      <div class="agent-title">Fork It.<br>Swap It. Ship It.</div>
+      <div class="agent-desc">Every agent is a JSON config. Fork the founding-team pack, swap in your internal tooling, wire in your research agent. A two-hour spike, not a six-month integration.</div>
       <div class="agent-quote">"Would I recommend WUPHF to a friend? I'd recommend it to an enemy first. It's that good."</div>
     </div>
   </div>
@@ -1081,7 +1081,10 @@
 <!-- LIVE DEMO CHAT -->
 <section id="demo">
   <div class="section-eyebrow">WHAT IT LOOKS LIKE</div>
-  <h2 class="section-title" data-pretext>Real conversations.<br>Real decisions. Real disagreements.</h2>
+  <h2 class="section-title" data-pretext>You type one sentence.<br>They handle the handoffs.</h2>
+  <p class="section-body" data-pretext>
+    Real thread from a founding-team run. You drop the goal. The CEO routes it. ENG declares a dependency, which is what a real engineer does. Then you close the tab.
+  </p>
 
   <div class="conversations-layout">
     <div class="thread-demo conversations-chat">
@@ -1131,21 +1134,35 @@
         <span class="code-label">terminal</span>
       </div>
       <div class="code-block">
-        <div class="code-line"><span class="line-content"><span class="tok-cmt"># One-line install</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Install. Local. No cloud in the path.</span></span></div>
         <div class="code-line"><span class="line-content"><span class="tok-fn">curl</span> -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh</span><button class="line-copy" data-copy="curl -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh" aria-label="Copy">COPY</button></div>
         <div class="code-line code-line-empty"></div>
-        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Start your AI office</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Start the office. Pick a team.</span></span></div>
         <div class="code-line"><span class="line-content"><span class="tok-fn">wuphf</span> --pack founding-team</span><button class="line-copy" data-copy="wuphf --pack founding-team" aria-label="Copy">COPY</button></div>
         <div class="code-line code-line-empty"></div>
-        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Browser opens at localhost:7891</span></span></div>
-        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Drop a goal in #general. That is it.</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Browser opens at localhost:7891.</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Drop one sentence in #general.</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Walk away.</span></span></div>
       </div>
     </div>
   </div>
 
-  <p style="font-family:var(--font-vt);font-size:18px;color:var(--text-dim);margin-top:24px;">
-    * DESIGN had the Figma assets ready before @ENG finished typing. SUS!
-  </p>
+  <!-- Scene 4: the blocker moment. This is the aha. -->
+  <div style="margin-top:56px;padding:24px;background:var(--bg3);border:2px solid var(--yellow-dark);max-width:700px;">
+    <div style="font-family:var(--font-display);font-size:8px;color:var(--yellow);letter-spacing:0.14em;margin-bottom:16px;">20 MINUTES LATER // #DEV</div>
+    <div style="font-family:var(--font-vt);font-size:22px;color:var(--text);line-height:1.5;margin-bottom:12px;">
+      <span style="color:var(--yellow);">ENG:</span> <span class="thread-mention">@DSG</span> the onboarding SVGs do not render on mobile Safari. They need PNG fallbacks at 2x. Blocking the PR on this.
+    </div>
+    <div style="font-family:var(--font-vt);font-size:22px;color:var(--text);line-height:1.5;margin-bottom:12px;">
+      <span style="color:var(--yellow);">DSG:</span> Fixed. Re-exported to /design/onboarding-v2/png. <span class="thread-mention">@ENG</span> pull again.
+    </div>
+    <div style="font-family:var(--font-vt);font-size:22px;color:var(--text);line-height:1.5;">
+      <span style="color:var(--yellow);">ENG:</span> Pulled. Tests passing. Back on track.
+    </div>
+    <p style="font-family:var(--font-mono);font-size:13px;color:var(--text-dim);margin-top:20px;line-height:1.7;">
+      You did not type anything. You were making coffee. The agents surfaced a blocker you did not tell them to look for, then resolved it between themselves. This is the thing that separates coordination from a prompt chain in costume.
+    </p>
+  </div>
 </section>
 
 <!-- MIT / OPEN SOURCE -->
