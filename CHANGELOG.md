@@ -2,6 +2,14 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.3.1] - 2026-04-17
+
+### Added
+- **One CLI is now selectable in Settings → Integrations → Action Provider.** The dropdown was missing the option even though the action registry already routed to One CLI by default for connections, action execution, and relays. The React settings UI, the legacy HTML fallback, and the typed API client all expose the option now.
+
+### Fixed
+- **Saving `action_provider = one` from the web UI no longer 400s.** The `POST /config` handler's allowlist only accepted `auto` and `composio`, so even though `/config set action_provider one` worked from the CLI, clicking Save in the web UI silently failed with HTTP 400 "unsupported action_provider". Added a regression test covering every provider value the registry supports.
+
 ## [0.0.3.0] - 2026-04-14
 
 ### Added
