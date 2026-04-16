@@ -1,0 +1,76 @@
+import { useOfficeMembers } from '../../hooks/useMembers'
+import { useAppStore } from '../../stores/app'
+import type { OfficeMember } from '../../api/client'
+
+function classifyActivity(member: OfficeMember | undefined) {
+  if (!member) return { state: 'lurking', label: 'lurking', dotClass: 'lurking' }
+  const status = (member.status || '').toLowerCase()
+  const activity = (member.task || '').toLowerCase()
+
+  if (status === 'active' && /tool|code|write|edit|commit|build|deploy|ship|push|run|test/.test(activity))
+    return { state: 'shipping', label: 'shipping', dotClass: 'shipping' }
+  if (status === 'active' && /think|plan|queue|review|sync|debug|trace|investigat/.test(activity))
+    return { state: 'plotting', label: 'plotting', dotClass: 'plotting' }
+  if (status === 'active')
+    return { state: 'talking', label: 'talking', dotClass: 'active pulse' }
+  return { state: 'lurking', label: 'lurking', dotClass: 'lurking' }
+}
+
+export function AgentList() {
+  const { data: members = [] } = useOfficeMembers()
+  const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug)
+  const currentChannel = useAppStore((s) => s.currentChannel)
+  const channelMeta = useAppStore((s) => s.channelMeta)
+
+  const agents = members.filter((m) => m.slug && m.slug !== 'human')
+
+  if (agents.length === 0) {
+    return (
+      <div className="sidebar-agents">
+        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '4px 8px' }}>
+          No agents online
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="sidebar-agents">
+      {agents.map((agent) => {
+        const ac = classifyActivity(agent)
+        const meta = channelMeta[currentChannel]
+        const isDMActive = meta?.type === 'D' && meta.agentSlug === agent.slug
+
+        return (
+          <button
+            key={agent.slug}
+            className={`sidebar-agent${isDMActive ? ' active' : ''}`}
+            title={`${agent.name} — ${ac.label}`}
+            onClick={() => setActiveAgentSlug(agent.slug)}
+          >
+            <span style={{
+              width: 24,
+              height: 24,
+              borderRadius: 6,
+              background: 'var(--accent-bg)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 12,
+              flexShrink: 0,
+            }}>
+              {agent.emoji || agent.slug.charAt(0).toUpperCase()}
+            </span>
+            <div className="sidebar-agent-wrap">
+              <span className="sidebar-agent-name">{agent.name || agent.slug}</span>
+              {agent.task && (
+                <span className="sidebar-agent-task">{agent.task}</span>
+              )}
+            </div>
+            <span className={`status-dot ${ac.dotClass}`} />
+          </button>
+        )
+      })}
+    </div>
+  )
+}

@@ -1,0 +1,400 @@
+/* ═══════════════════════════════════════════════════════════════
+   WUPHF Onboarding — Wizard & Splash Screen
+   Uses existing design tokens from global.css / theme files.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Form primitives (not yet in global.css) ─── */
+.label {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+/* ─── Wizard Container ─── */
+.wizard-container {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+}
+
+/* ─── Wizard Body ─── */
+.wizard-body {
+  width: 100%;
+  max-width: 640px;
+}
+
+/* ─── Wizard Step ─── */
+.wizard-step {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* ─── Progress Indicator ─── */
+.wizard-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 40px;
+}
+
+.wizard-progress-dot {
+  height: 6px;
+  border-radius: var(--radius-full);
+  transition: width 0.25s, background 0.25s;
+}
+
+.wizard-progress-dot.active {
+  width: 40px;
+  background: var(--accent);
+}
+
+.wizard-progress-dot.inactive {
+  width: 24px;
+  background: var(--border-light);
+}
+
+/* ─── Hero (Step 1) ─── */
+.wizard-hero {
+  text-align: center;
+}
+
+.wizard-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+}
+
+.wizard-headline {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin-bottom: 12px;
+}
+
+.wizard-subhead {
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  max-width: 54ch;
+  margin: 0 auto;
+}
+
+/* ─── Wizard Panels ─── */
+.wizard-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 20px 24px;
+}
+
+.wizard-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 16px;
+}
+
+/* ─── Template Grid (Step 1 blueprints + Step 6 task templates) ─── */
+.template-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.template-card {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+}
+
+.template-card:hover {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.template-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.template-card-emoji {
+  font-size: 20px;
+  margin-bottom: 6px;
+}
+
+.template-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.template-card-desc {
+  font-size: 11px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* ─── Team Tiles (Step 4) ─── */
+.wiz-team-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 640px) {
+  .wiz-team-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wiz-team-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  text-align: left;
+  width: 100%;
+  font-family: var(--font-sans);
+}
+
+.wiz-team-tile:hover {
+  border-color: var(--border-dark);
+}
+
+.wiz-team-tile.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.wiz-team-check {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 1.5px solid var(--border-dark);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.wiz-team-tile.selected .wiz-team-check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.wiz-team-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.wiz-team-role {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.wiz-team-empty {
+  padding: 20px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  text-align: center;
+  grid-column: 1 / -1;
+}
+
+/* ─── Key Rows (Step 5) ─── */
+.key-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.key-row:last-child {
+  border-bottom: none;
+}
+
+.key-label-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.key-label {
+  font-size: 13px;
+  font-weight: 500;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.key-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.key-input-wrap {
+  flex: 1.2;
+  min-width: 0;
+}
+
+/* ─── Runtime Tiles (Step 5) ─── */
+.runtime-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+.runtime-tile {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.runtime-tile:hover {
+  border-color: var(--border-dark);
+}
+
+.runtime-tile.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+/* ─── Task Textarea (Step 6) ─── */
+.task-textarea {
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+}
+
+.task-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.task-skip {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.task-skip:hover {
+  color: var(--text-secondary);
+}
+
+/* ─── Wizard Navigation Row ─── */
+.wizard-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.wizard-nav-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+/* ─── Launch / Splash Screen ─── */
+.launch-screen {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 24px;
+  cursor: pointer;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.launch-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.launch-text {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-size: 24px;
+  color: var(--text);
+}
+
+.launch-logo {
+  font-family: var(--font-logo);
+  font-style: italic;
+  font-size: 64px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--yellow, #ECB22E);
+  margin-bottom: 8px;
+}
+
+.launch-sub {
+  font-size: 14px;
+  color: var(--text-secondary);
+}

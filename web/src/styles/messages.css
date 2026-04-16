@@ -1,0 +1,105 @@
+/* ═══════════════════════════════════════════════════════════════
+   Messages — Bubbles, composer, reactions, typing indicator
+   Ported from index.legacy.html
+   ═══════════════════════════════════════════════════════════════ */
+
+.message { display: flex; gap: 12px; animation: fadeIn 0.3s ease-out; }
+.message-grouped { padding-top: 2px; }
+.message-grouped .message-avatar { visibility: hidden; height: 0; }
+.message-grouped .message-header { display: none; }
+
+.message-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--accent-bg); }
+.message-content { flex: 1; min-width: 0; }
+.message-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.message-author { font-size: 13px; font-weight: 600; }
+.message-time { font-size: 11px; color: var(--text-tertiary); }
+.message-token-badge { display: inline-flex; align-items: center; padding: 1px 6px; border-radius: 999px; background: rgba(18, 100, 163, 0.08); border: 1px solid rgba(18, 100, 163, 0.18); color: var(--accent); font-size: 11px; font-weight: 600; font-family: var(--font-mono); }
+.message-text { font-size: 14px; line-height: 1.6; color: var(--text-secondary); }
+.message-text strong { color: var(--text); font-weight: 600; }
+.message-text code { background: var(--bg-warm); border-radius: 4px; padding: 1px 5px; font-family: var(--font-mono); font-size: 12px; }
+
+/* ─── Date separator ─── */
+.date-separator { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
+.date-separator-line { height: 1px; flex: 1; background: var(--border); }
+.date-separator-text { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; font-weight: 600; }
+
+/* ─── Markdown ─── */
+.msg-h1 { font-size: 18px; font-weight: 700; color: var(--text); margin: 8px 0 4px; }
+.msg-h2 { font-size: 16px; font-weight: 600; color: var(--text); margin: 6px 0 3px; }
+.msg-h3 { font-size: 14px; font-weight: 600; color: var(--text); margin: 4px 0 2px; }
+.msg-blockquote { border-left: 3px solid var(--accent); background: var(--bg-warm); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; padding: 8px 12px; margin: 6px 0; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.msg-blockquote strong { color: var(--accent); font-weight: 700; font-size: 12px; }
+.msg-ul, .msg-ol { margin: 4px 0; padding-left: 24px; }
+.msg-ul li, .msg-ol li { margin: 2px 0; line-height: 1.6; }
+.msg-codeblock { background: var(--bg-warm); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; margin: 6px 0; overflow-x: auto; font-family: var(--font-mono); font-size: 12px; line-height: 1.5; white-space: pre; }
+.msg-hr { border: none; border-top: 1px solid var(--border); margin: 8px 0; }
+.msg-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.msg-link:hover { color: var(--accent-warm); }
+
+/* ─── @mention ─── */
+.mention { background: #FDF1E2; color: #D4700E; padding: 1px 4px; border-radius: 3px; font-weight: 600; }
+
+/* ─── Reactions ─── */
+.message-reactions { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
+.reaction-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-full); border: 1px solid var(--border); background: var(--bg); font-size: 12px; cursor: pointer; transition: all 0.15s; }
+.reaction-pill:hover { background: var(--accent-bg); border-color: var(--accent); }
+.reaction-pill-count { font-size: 11px; color: var(--text-secondary); font-weight: 600; }
+
+/* ─── System messages ─── */
+.message-system { text-align: center; padding: 8px 0; }
+.message-system-inner { display: flex; align-items: center; gap: 12px; padding: 0 20px; }
+.message-system-line { height: 1px; flex: 1; background: var(--border); }
+.message-system-text { font-size: 12px; color: var(--text-tertiary); display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+/* ─── Status messages ─── */
+.message-status { padding: 2px 20px; font-size: 12px; color: var(--text-tertiary); font-style: italic; }
+
+/* ─── Routing/stage cards ─── */
+.message-card-routing { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--bg-warm); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-secondary); }
+.message-card-routing-icon { font-size: 14px; }
+
+/* ─── Skill invocation cards ─── */
+.message-card-skill { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--yellow-bg); border-radius: var(--radius-sm); font-size: 12px; color: var(--yellow); }
+
+/* ─── Human decision/action cards ─── */
+.message-card-human { padding: 8px 12px; border-left: 3px solid var(--accent); background: var(--accent-bg); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.message-card-human.action { border-left-color: var(--green); background: var(--green-bg); }
+.message-card-human-icon { font-size: 11px; font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+.message-card-human.action .message-card-human-icon { color: var(--green); }
+
+/* ─── Automation cards ─── */
+.message-card-auto { padding: 8px 12px; border-left: 3px solid var(--yellow); background: var(--yellow-bg); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.message-card-auto-icon { font-size: 11px; font-weight: 600; color: var(--yellow); margin-bottom: 4px; }
+
+/* ─── Typing indicator ─── */
+.typing-indicator { display: flex; align-items: center; gap: 8px; padding: 0 20px; font-size: 12px; color: var(--text-tertiary); }
+.typing-dots { display: flex; gap: 3px; }
+.typing-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--text-tertiary); animation: typing-bounce 1.4s ease-in-out infinite; }
+.typing-dot:nth-child(2) { animation-delay: 0.16s; }
+.typing-dot:nth-child(3) { animation-delay: 0.32s; }
+
+/* ─── Composer ─── */
+.composer { padding: 12px 20px 16px; border-top: 1px solid var(--border); background: var(--bg-card); }
+.composer-inner { display: flex; align-items: flex-end; gap: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; transition: border-color 0.2s; }
+.composer-inner:focus-within { border-color: var(--accent); }
+.composer-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 14px; color: var(--text); outline: none; resize: none; min-height: 20px; max-height: 120px; line-height: 1.5; }
+.composer-input::placeholder { color: var(--text-tertiary); }
+.composer-send { width: 32px; height: 32px; border: none; background: var(--accent); color: white; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
+.composer-send:hover { background: var(--accent-warm); }
+.composer-send:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* ─── Composer context hint ─── */
+.composer-context-hint { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); font-style: italic; }
+
+/* ─── Reply badge ─── */
+.composer-reply-badge { display: flex; align-items: center; gap: 6px; padding: 4px 12px; font-size: 12px; color: var(--accent); background: var(--accent-bg); border-radius: var(--radius-md) var(--radius-md) 0 0; border: 1px solid var(--border); border-bottom: none; }
+
+/* ─── Channel empty state ─── */
+.channel-empty-state { margin: auto; max-width: 420px; text-align: center; color: var(--text-secondary); padding: 32px 24px; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.channel-empty-state .eyebrow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-tertiary); }
+.channel-empty-state .title { font-family: var(--font-logo); font-style: italic; font-size: 24px; font-weight: 700; color: var(--text); line-height: 1.2; }
+.channel-empty-state .body { font-size: 14px; line-height: 1.5; }
+
+/* ─── Thread toggle ─── */
+.inline-thread-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: 1px solid var(--border); background: var(--bg); font-family: var(--font-sans); padding: 4px 8px; border-radius: 999px; margin-top: 4px; transition: background 0.15s; }
+.inline-thread-toggle:hover { background: var(--accent-bg); }

@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	wuphf "github.com/nex-crm/wuphf"
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
@@ -1500,10 +1501,26 @@ func (b *Broker) ServeWebUI(port int) {
 		fmt.Sprintf("http://127.0.0.1:%d", port),
 	}
 
+	// Resolution order for the web UI assets:
+	//   1. filesystem web/dist/ (local dev after `npm run build`)
+	//   2. filesystem web/ with index.legacy.html fallback (source checkout w/o React build)
+	//   3. embedded FS (single-binary installs via curl | bash)
 	exePath, _ := os.Executable()
 	webDir := filepath.Join(filepath.Dir(exePath), "web")
 	if _, err := os.Stat(webDir); os.IsNotExist(err) {
 		webDir = "web"
+	}
+	var fileServer http.Handler
+	serveLegacyFallback := false
+	if distDir := filepath.Join(webDir, "dist"); dirExists(distDir) {
+		fileServer = http.FileServer(http.Dir(distDir))
+	} else if embeddedFS, ok := wuphf.WebFS(); ok {
+		fileServer = http.FileServer(http.FS(embeddedFS))
+	} else if _, err := os.Stat(filepath.Join(webDir, "index.legacy.html")); err == nil {
+		fileServer = http.FileServer(http.Dir(webDir))
+		serveLegacyFallback = true
+	} else {
+		fileServer = http.FileServer(http.Dir(webDir))
 	}
 	mux := http.NewServeMux()
 	brokerURL := brokeraddr.ResolveBaseURL()
@@ -1521,7 +1538,18 @@ func (b *Broker) ServeWebUI(port int) {
 			"broker_url": brokerURL,
 		})
 	})
-	mux.Handle("/", http.FileServer(http.Dir(webDir)))
+	if serveLegacyFallback {
+		// Rewrite bare / and /index.html to /index.legacy.html so the legacy
+		// vanilla-JS UI loads when the React build output is not present.
+		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+				r.URL.Path = "/index.legacy.html"
+			}
+			fileServer.ServeHTTP(w, r)
+		}))
+	} else {
+		mux.Handle("/", fileServer)
+	}
 	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux)
 }
 
@@ -9358,4 +9386,10 @@ func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
 		b.skills = append(b.skills, sk)
 	}
 	b.saveLocked()
+}
+
+// dirExists returns true if path exists and is a directory.
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
