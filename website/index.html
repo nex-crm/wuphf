@@ -99,7 +99,7 @@
 
   /* ── HERO ─────────────────────────────────────────── */
   .hero {
-    padding-top: 44px;
+    padding-top: 88px;
     min-height: 100vh;
     display: flex;
     flex-direction: column;
@@ -419,7 +419,7 @@
 
   .section-title {
     font-family: var(--font-display);
-    font-size: clamp(18px, 3vw, 28px);
+    font-size: clamp(22px, 3.5vw, 36px);
     color: var(--text);
     line-height: 1.4;
     margin-bottom: 20px;
@@ -579,43 +579,115 @@
   .tok-cmt { color: var(--text-dim); font-style: italic; }
   .tok-fn { color: #61AFEF; }
 
-  /* ── CHAT DEMO ────────────────────────────────────── */
-  .chat-demo {
-    display: flex; flex-direction: column; gap: 12px;
-    max-width: 560px;
+  /* ── THREAD DEMO ──────────────────────────────────── */
+  .thread-demo {
+    display: flex; flex-direction: column;
+    max-width: 560px; gap: 0;
   }
 
-  .chat-msg {
+  .thread-root {
     display: flex; gap: 12px; align-items: flex-start;
-  }
-  .chat-msg.right { flex-direction: row-reverse; }
-
-  .chat-avatar {
-    width: 32px; height: 32px;
+    padding: 16px;
     background: var(--bg3);
     border: 2px solid var(--yellow);
+  }
+
+  .thread-root-avatar {
+    width: 32px; height: 32px;
+    background: var(--yellow);
     display: flex; align-items: center; justify-content: center;
     flex-shrink: 0;
     font-family: var(--font-display);
-    font-size: 8px;
-    color: var(--yellow);
+    font-size: 8px; color: var(--bg);
   }
 
-  .chat-bubble {
+  .thread-root-body { flex: 1; }
+
+  .thread-root-channel {
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--yellow); opacity: 0.7; margin-bottom: 8px;
+  }
+
+  .thread-root-text {
+    font-family: var(--font-vt); font-size: 22px;
+    color: var(--yellow); line-height: 1.4;
+  }
+
+  .thread-root-replies {
+    font-family: var(--font-mono); font-size: 11px;
+    color: var(--text-dim); margin-top: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .thread-root-replies::before {
+    content: ''; width: 2px; height: 14px;
+    background: var(--yellow); display: inline-block;
+  }
+
+  .thread-replies-wrap {
+    display: flex; flex-direction: column; gap: 10px;
+    padding: 12px 12px 12px 20px;
+    border-left: 3px solid var(--yellow-dark);
+    margin-left: 16px;
+  }
+
+  .thread-reply {
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+
+  .thread-reply-avatar {
+    width: 32px; height: 32px;
     background: var(--bg3);
     border: 2px solid var(--yellow-dark);
-    padding: 12px 16px;
-    font-family: var(--font-vt);
-    font-size: 22px;
-    color: var(--text);
-    line-height: 1.4;
-    max-width: 380px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    font-family: var(--font-display); font-size: 8px; color: var(--yellow);
   }
-  .chat-msg.right .chat-bubble {
+  .thread-reply-avatar.you {
+    background: var(--yellow); border-color: var(--yellow); color: var(--bg);
+  }
+
+  .thread-reply-bubble {
+    background: var(--bg3);
+    border: 2px solid var(--yellow-dark);
+    padding: 10px 14px;
+    font-family: var(--font-vt); font-size: 20px;
+    color: var(--text); line-height: 1.4;
+  }
+  .thread-reply.you .thread-reply-bubble {
     background: var(--yellow-dim);
-    border-color: var(--yellow);
-    color: var(--yellow);
+    border-color: var(--yellow); color: var(--yellow);
   }
+
+  /* ── CODE-LINE COPY BUTTONS ───────────────────────── */
+  .code-block {
+    padding: 20px 24px;
+    font-family: var(--font-mono);
+    font-size: 15px;
+    color: var(--text);
+    line-height: 1.8;
+    overflow-x: auto;
+  }
+
+  .code-line {
+    display: flex; align-items: center;
+    justify-content: space-between;
+    min-height: 1.8em; white-space: pre;
+    position: relative;
+  }
+  .code-line-empty { min-height: 0.9em; }
+  .line-content { flex: 1; }
+
+  .line-copy {
+    opacity: 0; background: var(--yellow-dark);
+    border: 1px solid var(--yellow-dark);
+    color: var(--yellow);
+    font-family: var(--font-mono); font-size: 11px;
+    cursor: pointer; padding: 1px 7px;
+    flex-shrink: 0; margin-left: 12px;
+    letter-spacing: 0.04em;
+  }
+  .code-line:hover .line-copy { opacity: 1; }
+  .line-copy:hover { background: var(--yellow); color: var(--bg); border-color: var(--yellow); }
 
   /* ── ISOMETRIC OFFICE SECTION ─────────────────────── */
   .office-section {
@@ -641,7 +713,7 @@
 
   .office-section-title {
     font-family: var(--font-display);
-    font-size: clamp(14px, 2.5vw, 22px);
+    font-size: clamp(18px, 2.5vw, 28px);
     color: var(--text);
     line-height: 1.5;
     margin-bottom: 8px;
@@ -1002,30 +1074,38 @@
   <h2 class="section-title" data-pretext>Real conversations.<br>Real decisions. Real disagreements.</h2>
 
   <div class="conversations-layout">
-    <div class="chat-demo conversations-chat">
-      <div class="chat-msg right">
-        <div class="chat-bubble">Ship the onboarding flow by Friday.</div>
-        <div class="chat-avatar">YOU</div>
+    <div class="thread-demo conversations-chat">
+      <!-- Root message -->
+      <div class="thread-root">
+        <div class="thread-root-avatar">YOU</div>
+        <div class="thread-root-body">
+          <div class="thread-root-channel">▸ #general</div>
+          <div class="thread-root-text">Ship the onboarding flow by Friday.</div>
+          <div class="thread-root-replies">5 replies in thread</div>
+        </div>
       </div>
-      <div class="chat-msg">
-        <div class="chat-avatar">CEO</div>
-        <div class="chat-bubble">Got it. ENG, what's the scope? Design, do we have mocks?</div>
-      </div>
-      <div class="chat-msg">
-        <div class="chat-avatar">ENG</div>
-        <div class="chat-bubble">3 screens. 2 days to build. Need the copy finalized first.</div>
-      </div>
-      <div class="chat-msg">
-        <div class="chat-avatar">CMO</div>
-        <div class="chat-bubble">Copy's done. Opening a PR for the README update at the same time.</div>
-      </div>
-      <div class="chat-msg">
-        <div class="chat-avatar">ENG</div>
-        <div class="chat-bubble">PR #47 open. Waiting for review.</div>
-      </div>
-      <div class="chat-msg right">
-        <div class="chat-bubble">LGTM. Ship it.</div>
-        <div class="chat-avatar">YOU</div>
+      <!-- Thread replies -->
+      <div class="thread-replies-wrap">
+        <div class="thread-reply">
+          <div class="thread-reply-avatar">CEO</div>
+          <div class="thread-reply-bubble">Got it. ENG, what's the scope? Design, do we have mocks?</div>
+        </div>
+        <div class="thread-reply">
+          <div class="thread-reply-avatar">ENG</div>
+          <div class="thread-reply-bubble">3 screens. 2 days to build. Need the copy finalized first.</div>
+        </div>
+        <div class="thread-reply">
+          <div class="thread-reply-avatar">CMO</div>
+          <div class="thread-reply-bubble">Copy's done. Opening a PR for the README update at the same time.</div>
+        </div>
+        <div class="thread-reply">
+          <div class="thread-reply-avatar">ENG</div>
+          <div class="thread-reply-bubble">PR #47 open. Waiting for review.</div>
+        </div>
+        <div class="thread-reply you">
+          <div class="thread-reply-avatar you">YOU</div>
+          <div class="thread-reply-bubble">LGTM. Ship it.</div>
+        </div>
       </div>
     </div>
 
@@ -1036,16 +1116,16 @@
         <span class="code-dot"></span>
         <span class="code-label">terminal</span>
       </div>
-      <pre><span class="tok-cmt"># Requires Go 1.22+</span>
-<span class="tok-fn">git clone</span> https://github.com/nex-crm/wuphf
-<span class="tok-fn">cd</span> wuphf
-<span class="tok-fn">go build</span> -o wuphf ./cmd/wuphf
-
-<span class="tok-cmt"># Pick your agent pack and go</span>
-<span class="tok-fn">./wuphf</span> --pack founding-team
-
-<span class="tok-cmt"># Browser opens at localhost:7891</span>
-<span class="tok-cmt"># Drop a goal in #general. That is it.</span></pre>
+      <div class="code-block">
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># One-line install</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-fn">curl</span> -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh</span><button class="line-copy" data-copy="curl -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh" aria-label="Copy">COPY</button></div>
+        <div class="code-line code-line-empty"></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Start your AI office</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-fn">wuphf</span> --pack founding-team</span><button class="line-copy" data-copy="wuphf --pack founding-team" aria-label="Copy">COPY</button></div>
+        <div class="code-line code-line-empty"></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Browser opens at localhost:7891</span></span></div>
+        <div class="code-line"><span class="line-content"><span class="tok-cmt"># Drop a goal in #general. That is it.</span></span></div>
+      </div>
     </div>
   </div>
 
@@ -1122,6 +1202,19 @@
   window.copyInstall = copyInstall;
 
   document.getElementById('installBlock').addEventListener('click', copyInstall);
+
+  // ── PER-LINE COPY BUTTONS ────────────────────────────────────────────
+  document.querySelectorAll('.line-copy').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var text = btn.dataset.copy || '';
+      navigator.clipboard.writeText(text).then(function() {
+        var orig = btn.textContent;
+        btn.textContent = 'COPIED';
+        setTimeout(function() { btn.textContent = orig; }, 1200);
+      }).catch(function() {});
+    });
+  });
 
   // ── TICKER (DOM-safe) ─────────────────────────────────────────────────
   var quotes = [
