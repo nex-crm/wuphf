@@ -25,7 +25,23 @@ One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all v
 
 ## Get Started
 
-**Prerequisites:** [Go](https://go.dev/dl/) and one agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) by default, or [Codex CLI](https://github.com/openai/codex) when you pass `--provider codex`. [tmux](https://github.com/tmux/tmux/wiki/Installing) is only required for `--tui` mode.
+**Prerequisites:** one agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) by default, or [Codex CLI](https://github.com/openai/codex) when you pass `--provider codex`. [tmux](https://github.com/tmux/tmux/wiki/Installing) is only required for `--tui` mode.
+
+```bash
+npx wuphf
+```
+
+That's it. The browser opens automatically and you're in the office. Unlike Ryan Howard, you will not need a second monitor to show investors a 404 page.
+
+Prefer a global install or curl? Both work:
+
+```bash
+npm install -g wuphf && wuphf
+# or
+curl -fsSL https://raw.githubusercontent.com/nex-crm/wuphf/main/scripts/install.sh | sh
+```
+
+Building from source (requires Go):
 
 ```bash
 git clone https://github.com/nex-crm/wuphf.git
@@ -33,8 +49,6 @@ cd wuphf
 go build -o wuphf ./cmd/wuphf
 ./wuphf
 ```
-
-That's it. The browser opens automatically and you're in the office. Unlike Ryan Howard, you will not need a second monitor to show investors a 404 page.
 
 > **Forking this?** See [FORKING.md](FORKING.md) for running WUPHF without Nex, swapping branding, and adding your own agent packs. For the internals, see [ARCHITECTURE.md](ARCHITECTURE.md).
 

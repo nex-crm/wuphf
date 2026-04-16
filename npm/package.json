@@ -1,0 +1,32 @@
+{
+  "name": "wuphf",
+  "version": "0.0.0",
+  "description": "WUPHF — pixel office CRM that reaches everyone, everywhere, all at once.",
+  "bin": {
+    "wuphf": "bin/wuphf.js"
+  },
+  "files": [
+    "bin/wuphf.js",
+    "scripts/download-binary.js",
+    "scripts/postinstall.js",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "os": ["darwin", "linux"],
+  "cpu": ["x64", "arm64"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nex-crm/wuphf.git"
+  },
+  "homepage": "https://github.com/nex-crm/wuphf",
+  "bugs": {
+    "url": "https://github.com/nex-crm/wuphf/issues"
+  },
+  "license": "MIT",
+  "keywords": ["wuphf", "crm", "cli", "pixel-office", "nex"]
+}
