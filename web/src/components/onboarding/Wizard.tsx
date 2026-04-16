@@ -655,7 +655,7 @@ export function Wizard({ onComplete }: WizardProps) {
     let cancelled = false
     setBlueprintsLoading(true)
 
-    get<{ templates?: BlueprintTemplate[] }>('/onboarding/templates')
+    get<{ templates?: BlueprintTemplate[] }>('/onboarding/blueprints')
       .then((data) => {
         if (cancelled) return
         const tpls = data.templates ?? []

@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/operations"
 )
 
 // RegisterRoutes attaches all onboarding HTTP handlers to mux.
@@ -35,6 +37,7 @@ func RegisterRoutes(mux *http.ServeMux, completeFn func(task string, skipTask bo
 	mux.HandleFunc("/onboarding/prereqs", HandlePrereqs)
 	mux.HandleFunc("/onboarding/validate-key", HandleValidateKey)
 	mux.HandleFunc("/onboarding/templates", makeHandleTemplates(packSlug))
+	mux.HandleFunc("/onboarding/blueprints", HandleBlueprints)
 	mux.HandleFunc("/onboarding/checklist/dismiss", HandleChecklistDismiss)
 	// Pattern must be registered after the more-specific /dismiss route so
 	// that /dismiss is not swallowed by the /{id}/done prefix match.
@@ -387,6 +390,87 @@ func HandleTemplates(w http.ResponseWriter, r *http.Request, packSlug string) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(TemplatesForSelection("", packSlug))
+}
+
+// blueprintSummary is the wizard-facing shape returned by HandleBlueprints.
+// Keep the field names in sync with BlueprintTemplate in
+// web/src/components/onboarding/Wizard.tsx.
+type blueprintSummary struct {
+	ID          string                  `json:"id"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description,omitempty"`
+	Emoji       string                  `json:"emoji,omitempty"`
+	Agents      []blueprintAgentSummary `json:"agents,omitempty"`
+	Tasks       []blueprintTaskSummary  `json:"tasks,omitempty"`
+}
+
+type blueprintAgentSummary struct {
+	Slug    string `json:"slug"`
+	Name    string `json:"name"`
+	Role    string `json:"role,omitempty"`
+	Emoji   string `json:"emoji,omitempty"`
+	Checked bool   `json:"checked"`
+}
+
+type blueprintTaskSummary struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+}
+
+// HandleBlueprints handles GET /onboarding/blueprints.
+// Returns {"templates": [...]} in the shape the Wizard expects for its
+// blueprint picker. An empty list is a valid response (fresh clone without
+// templates/operations/ gets the "From scratch" card only).
+func HandleBlueprints(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	repoRoot := resolveTemplatesRepoRoot("")
+	summaries := []blueprintSummary{}
+	if repoRoot != "" {
+		blueprints, err := operations.ListBlueprints(repoRoot)
+		if err == nil {
+			for _, bp := range blueprints {
+				summaries = append(summaries, summarizeBlueprint(bp))
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"templates": summaries})
+}
+
+func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
+	s := blueprintSummary{
+		ID:          bp.ID,
+		Name:        bp.Name,
+		Description: bp.Description,
+	}
+	for _, a := range bp.Starter.Agents {
+		s.Agents = append(s.Agents, blueprintAgentSummary{
+			Slug:    a.Slug,
+			Name:    a.Name,
+			Role:    a.Role,
+			Emoji:   a.Emoji,
+			Checked: a.Checked,
+		})
+	}
+	for _, t := range bp.Starter.Tasks {
+		title := strings.TrimSpace(t.Title)
+		if title == "" {
+			continue
+		}
+		s.Tasks = append(s.Tasks, blueprintTaskSummary{
+			ID:          onboardingTemplateID(title),
+			Name:        title,
+			Description: strings.TrimSpace(t.Details),
+		})
+	}
+	return s
 }
 
 // HandleChecklistDismiss handles POST /onboarding/checklist/dismiss.
