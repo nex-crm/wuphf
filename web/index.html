@@ -6256,6 +6256,26 @@ function _buildSettingsSections(body, cfg, switchSection) {
   general.appendChild(el('h2', { className: 'settings-section-title' }, 'General'));
   general.appendChild(el('p', { className: 'settings-section-desc' }, 'Core runtime settings. These map to CLI flags and config file entries.'));
 
+  // Warning: provider and memory backend changes need a restart to take effect
+  // on agents that are already running. The config value updates immediately but
+  // spawned tmux sessions and MCP servers keep the values they launched with.
+  var restartBanner = el('div', {
+    style: {
+      display: 'flex', gap: '10px', alignItems: 'flex-start',
+      padding: '10px 14px', marginBottom: '16px',
+      background: 'var(--yellow-bg)', border: '1px solid var(--yellow)',
+      borderRadius: 'var(--radius-md)', fontSize: '12px', lineHeight: '1.5'
+    }
+  });
+  restartBanner.appendChild(el('span', { style: { fontSize: '14px', flexShrink: '0' } }, '\u26A0'));
+  var bannerBody = el('div', null);
+  bannerBody.appendChild(el('strong', null, 'Restart required for LLM Provider and Memory Backend changes. '));
+  bannerBody.appendChild(document.createTextNode('New values save immediately, but running agents keep their launch-time settings. Run '));
+  bannerBody.appendChild(el('code', { style: { fontFamily: 'var(--font-mono)', padding: '1px 4px', background: 'var(--bg-warm)', borderRadius: '3px' } }, 'wuphf shred'));
+  bannerBody.appendChild(document.createTextNode(' then relaunch to apply.'));
+  restartBanner.appendChild(bannerBody);
+  general.appendChild(restartBanner);
+
   var providerSelect = _settingsInput(cfg.llm_provider, {
     select: true,
     options: [{ value: 'claude-code', label: 'Claude Code' }, { value: 'codex', label: 'Codex' }]
