@@ -109,7 +109,7 @@ func TestListEmployeeBlueprintsReturnsTrackedTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list failed: %v", err)
 	}
-	if got, want := len(blueprints), 7; got != want {
+	if got, want := len(blueprints), 3; got != want {
 		t.Fatalf("unexpected employee blueprint count: got %d want %d", got, want)
 	}
 	got := make(map[string]EmployeeBlueprint, len(blueprints))
@@ -123,10 +123,6 @@ func TestListEmployeeBlueprintsReturnsTrackedTemplates(t *testing.T) {
 		"workflow-automation-builder",
 		"bookkeeper-financial-analyst",
 		"discord-server-community-manager",
-		"operator",
-		"planner",
-		"executor",
-		"reviewer",
 	} {
 		if _, ok := got[id]; !ok {
 			t.Fatalf("missing tracked employee blueprint %q", id)

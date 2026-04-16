@@ -135,13 +135,17 @@ func memberSpecFromEmployeeBlueprint(blueprint operations.EmployeeBlueprint, sta
 	name := firstNonEmpty(strings.TrimSpace(starter.Name), strings.TrimSpace(blueprint.Name), humanizeSlug(slug))
 	role := firstNonEmpty(strings.TrimSpace(starter.Role), strings.TrimSpace(blueprint.Role), name)
 	personality := firstNonEmpty(strings.TrimSpace(starter.Personality), strings.TrimSpace(blueprint.Summary), strings.TrimSpace(blueprint.Description))
+	permissionMode := strings.TrimSpace(starter.PermissionMode)
+	if permissionMode == "" {
+		permissionMode = "plan"
+	}
 	return MemberSpec{
 		Slug:           slug,
 		Name:           name,
 		Role:           role,
 		Expertise:      mergeUniqueStrings(normalizeStrings(blueprint.Skills), normalizeStrings(starter.Expertise)),
 		Personality:    personality,
-		PermissionMode: employeePermissionMode(blueprint, starter),
+		PermissionMode: permissionMode,
 		AllowedTools:   normalizeStrings(blueprint.Tools),
 		System:         starter.BuiltIn || slug == lead || slug == "ceo" || slug == "operator",
 	}
@@ -152,13 +156,17 @@ func memberSpecFromStarterAgent(starter operations.StarterAgent, lead string) Me
 	if slug == "" {
 		return MemberSpec{}
 	}
+	permissionMode := strings.TrimSpace(starter.PermissionMode)
+	if permissionMode == "" {
+		permissionMode = "plan"
+	}
 	return MemberSpec{
 		Slug:           slug,
 		Name:           firstNonEmpty(strings.TrimSpace(starter.Name), humanizeSlug(slug)),
 		Role:           firstNonEmpty(strings.TrimSpace(starter.Role), humanizeSlug(slug)),
 		Expertise:      normalizeStrings(starter.Expertise),
 		Personality:    strings.TrimSpace(starter.Personality),
-		PermissionMode: starterPermissionMode(starter),
+		PermissionMode: permissionMode,
 		System:         starter.BuiltIn || slug == lead || slug == "ceo",
 	}
 }
@@ -197,32 +205,6 @@ func buildChannelsFromBlueprint(blueprint operations.Blueprint, members []Member
 		})
 	}
 	return channels
-}
-
-func starterPermissionMode(agent operations.StarterAgent) string {
-	switch strings.ToLower(strings.TrimSpace(agent.Type)) {
-	case "lead", "human":
-		return "plan"
-	default:
-		return "plan"
-	}
-}
-
-func employeePermissionMode(blueprint operations.EmployeeBlueprint, starter operations.StarterAgent) string {
-	switch strings.ToLower(strings.TrimSpace(starter.Type)) {
-	case "lead", "human":
-		return "plan"
-	}
-	role := strings.ToLower(strings.TrimSpace(blueprint.Role))
-	text := strings.ToLower(strings.Join([]string{
-		role,
-		strings.Join(blueprint.Responsibilities, " "),
-		strings.Join(blueprint.AutomatedLoops, " "),
-	}, " "))
-	if strings.Contains(text, "implement") || strings.Contains(text, "build") || strings.Contains(text, "execute") || strings.Contains(text, "ship") {
-		return "auto"
-	}
-	return "plan"
 }
 
 func mergeUniqueStrings(values ...[]string) []string {

@@ -53,17 +53,17 @@ func assertBlueprintFixtureShape(t *testing.T, repoRoot string, bp Blueprint, id
 	if strings.TrimSpace(bp.Objective) == "" {
 		t.Fatalf("expected objective to be populated for %s", id)
 	}
-	if len(bp.EmployeeBlueprints) == 0 {
-		t.Fatalf("expected employee blueprint refs, got %+v", bp)
-	}
 	for _, ref := range bp.EmployeeBlueprints {
 		if _, err := LoadEmployeeBlueprint(repoRoot, ref); err != nil {
 			t.Fatalf("expected employee blueprint %q to load for %s: %v", ref, id, err)
 		}
 	}
 	for _, agent := range bp.Starter.Agents {
+		if strings.TrimSpace(agent.PermissionMode) != "" {
+			continue
+		}
 		if strings.TrimSpace(agent.EmployeeBlueprint) == "" {
-			t.Fatalf("expected starter agent %q to bind an employee blueprint", agent.Slug)
+			t.Fatalf("expected starter agent %q to bind an employee blueprint or set permission_mode", agent.Slug)
 		}
 		if !containsString(bp.EmployeeBlueprints, agent.EmployeeBlueprint) {
 			t.Fatalf("expected starter agent %q binding %q to appear in employee blueprint refs %+v", agent.Slug, agent.EmployeeBlueprint, bp.EmployeeBlueprints)

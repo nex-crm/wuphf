@@ -51,8 +51,8 @@ starter:
 	if err == nil {
 		t.Fatal("expected validation error")
 	}
-	if !strings.Contains(err.Error(), "employee blueprint required") {
-		t.Fatalf("expected employee blueprint binding error, got %v", err)
+	if !strings.Contains(err.Error(), "requires employee_blueprint or permission_mode") {
+		t.Fatalf("expected employee blueprint or permission_mode binding error, got %v", err)
 	}
 }
 

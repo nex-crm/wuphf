@@ -4,10 +4,6 @@ kind: community
 description: Template for a paid community operation that focuses on onboarding, moderation, engagement, and retention.
 objective: Run a paid community with durable onboarding, moderation, engagement, and sponsor loops.
 employee_blueprints:
-  - operator
-  - planner
-  - executor
-  - reviewer
   - discord-server-community-manager
 
 starter:
@@ -19,7 +15,7 @@ starter:
       emoji: "⚙️"
       name: Operator
       role: Owns priorities, approvals, and escalation decisions
-      employee_blueprint: operator
+      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -27,7 +23,7 @@ starter:
       emoji: "🧭"
       name: Planner
       role: Turns community goals into workstreams and milestones
-      employee_blueprint: planner
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -40,6 +36,7 @@ starter:
       name: Community Manager
       role: Owns onboarding, moderation, and engagement assets
       employee_blueprint: discord-server-community-manager
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -51,7 +48,7 @@ starter:
       emoji: "📣"
       name: Growth
       role: Owns sponsors, member growth, and promotion
-      employee_blueprint: executor
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -63,7 +60,7 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns QA, evidence, and approval gates
-      employee_blueprint: reviewer
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:

@@ -4,10 +4,6 @@ kind: product_gtm
 description: Template for a focused CRM product that can be built and taken to market.
 objective: Build a niche CRM, prove the workflow, and run the product and GTM loops together.
 employee_blueprints:
-  - operator
-  - planner
-  - executor
-  - reviewer
   - workflow-automation-builder
 
 starter:
@@ -19,7 +15,7 @@ starter:
       emoji: "⚙️"
       name: Operator
       role: Owns priorities, approvals, and escalation decisions
-      employee_blueprint: operator
+      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -27,7 +23,7 @@ starter:
       emoji: "🧭"
       name: Planner
       role: Turns product and GTM goals into workstreams and milestones
-      employee_blueprint: planner
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -40,6 +36,7 @@ starter:
       name: Builder
       role: Implements product, schema, and workflow assets
       employee_blueprint: workflow-automation-builder
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -51,7 +48,7 @@ starter:
       emoji: "📈"
       name: Growth
       role: Owns outbound, adoption, and feedback loops
-      employee_blueprint: executor
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -63,7 +60,7 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns QA, evidence, and approval gates
-      employee_blueprint: reviewer
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:

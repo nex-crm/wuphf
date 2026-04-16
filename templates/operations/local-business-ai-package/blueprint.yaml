@@ -4,10 +4,6 @@ kind: local_service
 description: Template for an AI package that helps local businesses automate intake, booking, follow-up, and reporting.
 objective: Help local businesses automate intake, booking, follow-up, and reporting with durable evidence and clear approval gates.
 employee_blueprints:
-  - operator
-  - planner
-  - executor
-  - reviewer
   - workflow-automation-builder
 
 starter:
@@ -19,7 +15,7 @@ starter:
       emoji: "⚙️"
       name: Operator
       role: Owns priorities, approvals, and escalation decisions
-      employee_blueprint: operator
+      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -27,7 +23,7 @@ starter:
       emoji: "🧭"
       name: Planner
       role: Turns client goals into workstreams, milestones, and task plans
-      employee_blueprint: planner
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -40,6 +36,7 @@ starter:
       name: Builder
       role: Implements the intake, booking, and reporting assets
       employee_blueprint: workflow-automation-builder
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -51,7 +48,7 @@ starter:
       emoji: "🤝"
       name: Client Success
       role: Owns follow-up, response loops, and account experience
-      employee_blueprint: executor
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -63,7 +60,7 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns QA, evidence, and approval gates
-      employee_blueprint: reviewer
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:
