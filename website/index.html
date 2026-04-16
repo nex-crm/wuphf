@@ -1354,7 +1354,7 @@
     <details class="faq-item">
       <summary class="faq-q">What happens when an agent gets stuck or loops?</summary>
       <div class="faq-a">
-        Every agent run has a timeout and a step budget. When either trips, the agent posts an escalation in thread and hands control back to you. We are still iterating on the failure-mode docs, so the honest answer is: read <code>docs/failure-modes.md</code> in the repo, and if something surprises you, open an issue. This is the work we want feedback on before calling it production-ready.
+        Every agent run has a timeout and a step budget. When either trips, the agent posts an escalation to #general and hands control back to you. You can see the full tool-call trace in the Receipts panel or via <code>wuphf log</code>. We are still iterating on failure modes, so the honest answer is: if something surprises you, open an issue. This is the work we want feedback on before calling it production-ready.
       </div>
     </details>
     <details class="faq-item">
@@ -1366,7 +1366,7 @@
     <details class="faq-item">
       <summary class="faq-q">Are the tool integrations real API calls, or natural-language references?</summary>
       <div class="faq-a">
-        Mixed, and we are upfront about it. GitHub PR opens and repo reads are real API calls via the <code>gh</code> CLI. Figma exports are real. Some third-party references are still natural-language placeholders that you wire up via the agent's tool list. Check <code>packs/founding-team/tools.json</code> for the current integration list.
+        Mixed, and we are upfront about it. GitHub PR opens and repo reads are real API calls via the <code>gh</code> CLI (agents run <code>gh pr create</code> through the bash tool). File reads, grep, and writes are real local filesystem ops. Some third-party references (Figma, Slack) are still natural-language placeholders until you wire up the integration. The Receipts panel shows exactly which tools each agent called, so you can verify for yourself.
       </div>
     </details>
     <details class="faq-item">
@@ -1378,7 +1378,7 @@
     <details class="faq-item">
       <summary class="faq-q">Do I have to use the pixel office and The Office jokes?</summary>
       <div class="faq-a">
-        No. The default pack leans into it because joy is a real feature. There is a <code>--theme plain</code> flag and a <code>--pack minimal</code> option for when you need to demo to a board that does not find Kevin's chili funny. Their loss.
+        No. The default pack leans into it because joy is a real feature. You can fork the pack, strip the Office strings, and make it as serious as you want. The humor is in the config, not the engine. But their loss.
       </div>
     </details>
     <details class="faq-item">
