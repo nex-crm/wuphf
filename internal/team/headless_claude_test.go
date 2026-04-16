@@ -221,7 +221,9 @@ func TestEnsureAgentMCPConfig_NoNexEntryInWrittenFile(t *testing.T) {
 // MCP server now owns shared-memory access, so Nex credentials flow through the
 // wuphf-office server instead of mounting a raw nex MCP server.
 func TestBuildMCPServerMap_NexCredentialsFlowThroughOffice(t *testing.T) {
+	t.Setenv("WUPHF_CONFIG_PATH", filepath.Join(t.TempDir(), "config.json"))
 	t.Setenv("WUPHF_NO_NEX", "")
+	t.Setenv("WUPHF_MEMORY_BACKEND", "nex")
 	t.Setenv("WUPHF_API_KEY", "test-key-12345")
 
 	l := minimalLauncher(false)

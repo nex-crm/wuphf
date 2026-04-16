@@ -335,6 +335,10 @@ func TestDefaultPrepareTaskWorktreeSkipsDuplicateAndMissingCompletedSiblingSourc
 	if err := os.WriteFile(filepath.Join(firstPath, "cmd", "approvalrunner", "main.go"), []byte("package main\n"), 0o644); err != nil {
 		t.Fatalf("write sibling task file: %v", err)
 	}
+	// Stage the file so it appears in `git diff --name-only HEAD` (the primary
+	// overlay detection path) rather than relying solely on `git ls-files --others`
+	// which can be unreliable in CI worktree environments.
+	run(firstPath, "git", "add", "cmd/approvalrunner/main.go")
 
 	state := struct {
 		Tasks []teamTask `json:"tasks"`
