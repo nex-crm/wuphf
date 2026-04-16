@@ -90,6 +90,7 @@ type StarterAgent struct {
 	EmployeeBlueprint string   `json:"employee_blueprint,omitempty" yaml:"employee_blueprint,omitempty"`
 	Checked           bool     `json:"checked,omitempty" yaml:"checked,omitempty"`
 	Type              string   `json:"type,omitempty" yaml:"type,omitempty"`
+	PermissionMode    string   `json:"permission_mode,omitempty" yaml:"permission_mode,omitempty"`
 	BuiltIn           bool     `json:"built_in,omitempty" yaml:"built_in,omitempty"`
 	Expertise         []string `json:"expertise,omitempty" yaml:"expertise,omitempty"`
 	Personality       string   `json:"personality,omitempty" yaml:"personality,omitempty"`

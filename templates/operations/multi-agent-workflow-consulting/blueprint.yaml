@@ -4,10 +4,6 @@ kind: consulting
 description: Template for a consulting operation that designs and implements multi-agent workflows for clients.
 objective: Help clients design, deploy, and maintain agent workflows with explicit approvals and durable evidence.
 employee_blueprints:
-  - operator
-  - planner
-  - executor
-  - reviewer
   - workflow-automation-builder
 
 starter:
@@ -19,7 +15,7 @@ starter:
       emoji: "⚙️"
       name: Operator
       role: Owns priorities, approvals, and escalation decisions
-      employee_blueprint: operator
+      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -27,7 +23,7 @@ starter:
       emoji: "🧭"
       name: Planner
       role: Turns client goals into workstreams, milestones, and task plans
-      employee_blueprint: planner
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -40,6 +36,7 @@ starter:
       name: Workflow Architect
       role: Designs the workflow topology and handoffs
       employee_blueprint: workflow-automation-builder
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -51,7 +48,7 @@ starter:
       emoji: "🛠️"
       name: Builder
       role: Implements the first deliverables and integration assets
-      employee_blueprint: executor
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -63,7 +60,7 @@ starter:
       emoji: "🔎"
       name: Reviewer
       role: Owns QA, evidence, and approval gates
-      employee_blueprint: reviewer
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:

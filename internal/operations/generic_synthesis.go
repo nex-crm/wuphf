@@ -21,7 +21,7 @@ func synthesizeGenericBlueprint(input SynthesisInput) Blueprint {
 		Description:        genericBlueprintDescription(kind, input),
 		Objective:          objective,
 		Starter:            genericStarterPlan(kind, name, objective, input, integrations, capabilities),
-		EmployeeBlueprints: []string{"operator", "planner", "executor", "reviewer", "workflow-automation-builder"},
+		EmployeeBlueprints: []string{},
 		BootstrapConfig:    genericBootstrapConfig(kind, name, objective, input, integrations),
 		MonetizationLadder: genericMonetizationLadder(kind, objective),
 		QueueSeed:          genericQueueSeed(kind, name, objective, input, integrations),
@@ -151,11 +151,12 @@ func genericStarterPlan(kind, name, objective string, input SynthesisInput, inte
 	leadSlug := "operator"
 	channels := genericDefaultChannels(integrations)
 	tasks := genericDefaultTasks(objective, integrations)
+	plannerName, executorName, reviewerName := genericKindAgentNames(kind)
 	agents := []StarterAgent{
-		{Slug: leadSlug, Name: "Operator", Role: "lead", EmployeeBlueprint: "operator", Checked: true, Type: "human", BuiltIn: true, Expertise: []string{"scope-setting", "execution", "approvals"}},
-		{Slug: "planner", Name: "Planner", Role: "planning", EmployeeBlueprint: "planner", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"decomposition", "sequencing", "risks"}},
-		{Slug: "executor", Name: "Executor", Role: "execution", EmployeeBlueprint: "executor", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"delivery", "instrumentation", "evidence"}},
-		{Slug: "reviewer", Name: "Reviewer", Role: "review", EmployeeBlueprint: "reviewer", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"quality", "approval", "handoff"}},
+		{Slug: leadSlug, Name: "Operator", Role: "lead", PermissionMode: "plan", Checked: true, Type: "human", BuiltIn: true, Expertise: []string{"scope-setting", "execution", "approvals"}},
+		{Slug: "planner", Name: plannerName, Role: "planning", PermissionMode: "plan", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"decomposition", "sequencing", "risks"}},
+		{Slug: "executor", Name: executorName, Role: "execution", PermissionMode: "auto", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"delivery", "instrumentation", "evidence"}},
+		{Slug: "reviewer", Name: reviewerName, Role: "review", PermissionMode: "plan", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"quality", "approval", "handoff"}},
 	}
 	for _, integration := range integrations {
 		provider := genericIntegrationKey(integration)
@@ -163,26 +164,26 @@ func genericStarterPlan(kind, name, objective string, input SynthesisInput, inte
 			continue
 		}
 		agents = append(agents, StarterAgent{
-			Slug:              provider,
-			Name:              genericIntegrationLabel(integration),
-			Role:              "integration-owner",
-			EmployeeBlueprint: "workflow-automation-builder",
-			Checked:           integration.Connected,
-			Type:              "integration",
-			BuiltIn:           false,
-			Expertise:         []string{provider, kind, genericIntegrationPurpose(integration, kind)},
+			Slug:           provider,
+			Name:           genericIntegrationLabel(integration),
+			Role:           "integration-owner",
+			PermissionMode: "auto",
+			Checked:        integration.Connected,
+			Type:           "integration",
+			BuiltIn:        false,
+			Expertise:      []string{provider, kind, genericIntegrationPurpose(integration, kind)},
 		})
 	}
 	if len(capabilities) > 0 {
 		agents = append(agents, StarterAgent{
-			Slug:              "capability-scout",
-			Name:              "Capability Scout",
-			Role:              "capability-discovery",
-			EmployeeBlueprint: "planner",
-			Checked:           true,
-			Type:              "assistant",
-			BuiltIn:           true,
-			Expertise:         []string{"runtime-capabilities", "setup", "availability"},
+			Slug:           "capability-scout",
+			Name:           "Capability Scout",
+			Role:           "capability-discovery",
+			PermissionMode: "plan",
+			Checked:        true,
+			Type:           "assistant",
+			BuiltIn:        true,
+			Expertise:      []string{"runtime-capabilities", "setup", "availability"},
 		})
 	}
 	return StarterPlan{
@@ -770,4 +771,23 @@ func genericDedupeStrings(values []string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func genericKindAgentNames(kind string) (planner, executor, reviewer string) {
+	switch kind {
+	case "content":
+		return "Research Lead", "Content Producer", "Analytics Lead"
+	case "gtm":
+		return "Pipeline Lead", "Campaign Builder", "Revenue Analyst"
+	case "product":
+		return "Discovery Lead", "Builder", "QA Lead"
+	case "commerce":
+		return "Catalog Lead", "Fulfillment Builder", "Conversion Analyst"
+	case "support":
+		return "Triage Lead", "Resolution Builder", "Quality Analyst"
+	case "research":
+		return "Research Lead", "Synthesis Builder", "Evidence Analyst"
+	default:
+		return "Planner", "Executor", "Reviewer"
+	}
 }

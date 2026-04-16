@@ -4,10 +4,6 @@ kind: media_business
 description: Template for a repeatable video-led business with human-gated external side effects.
 objective: Build and run a repeatable video operation with durable planning, reusable workflows, integration-backed execution, and explicit human approvals at external side effects.
 employee_blueprints:
-  - operator
-  - planner
-  - executor
-  - reviewer
   - workflow-automation-builder
 
 starter:
@@ -19,7 +15,7 @@ starter:
       emoji: "👔"
       name: CEO
       role: Owns strategy, delegation, and commercial priorities
-      employee_blueprint: operator
+      permission_mode: plan
       checked: true
       type: lead
       built_in: true
@@ -27,7 +23,7 @@ starter:
       emoji: "🔎"
       name: Research Lead
       role: Demand discovery, proof gathering, and topic scoring
-      employee_blueprint: planner
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -40,7 +36,7 @@ starter:
       emoji: "✍️"
       name: Scriptwriter
       role: Hooks, outlines, scripts, and repurposing briefs
-      employee_blueprint: executor
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -54,6 +50,7 @@ starter:
       name: Editor
       role: Production workflow, QA, handoffs, and publish packages
       employee_blueprint: workflow-automation-builder
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -66,7 +63,7 @@ starter:
       emoji: "🎯"
       name: Packaging Lead
       role: Titles, thumbnails, and click-through systems
-      employee_blueprint: executor
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
@@ -79,7 +76,7 @@ starter:
       emoji: "📈"
       name: Growth Ops
       role: Publishing cadence, optimization loops, and analytics hygiene
-      employee_blueprint: reviewer
+      permission_mode: plan
       checked: true
       type: specialist
       expertise:
@@ -92,7 +89,7 @@ starter:
       emoji: "💸"
       name: Monetization Lead
       role: Offers, lead magnets, sponsors, and revenue ops
-      employee_blueprint: executor
+      permission_mode: auto
       checked: true
       type: specialist
       expertise:
