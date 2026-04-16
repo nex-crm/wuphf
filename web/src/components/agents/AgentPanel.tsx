@@ -157,12 +157,16 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
             <span className="agent-panel-info-label">slug</span>
             <span className="agent-panel-info-value">{agent.slug}</span>
           </div>
-          {agent.provider && (
-            <div className="agent-panel-info-row">
-              <span className="agent-panel-info-label">provider</span>
-              <span className="agent-panel-info-value">{agent.provider}</span>
-            </div>
-          )}
+          {(() => {
+            const p = agent.provider
+            const label = typeof p === 'string' ? p : p?.kind
+            return label ? (
+              <div className="agent-panel-info-row">
+                <span className="agent-panel-info-label">provider</span>
+                <span className="agent-panel-info-value">{label}</span>
+              </div>
+            ) : null
+          })()}
           {agent.status && (
             <div className="agent-panel-info-row">
               <span className="agent-panel-info-label">status</span>
