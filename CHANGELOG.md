@@ -2,6 +2,13 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.4.0] - 2026-04-17
+
+### Added
+- **Reset or shred your workspace from Settings.** New "Danger Zone" section in the web Settings with two buttons: `Reset broker state` (narrow, stops the running session and clears broker runtime state, keeps your team + company + tasks) and `Shred workspace` (full wipe, deletes team, company identity, office task receipts, and workflows, then reopens onboarding). Each button lists exactly what gets deleted vs preserved and requires typing `i am sure` before firing. Task worktrees, logs, sessions, LLM caches, and `config.json` are always preserved.
+- **`wuphf reset` and `wuphf shred` CLI subcommands.** `reset` is the narrow knob for "something got wedged, reboot the office without losing work." `shred` is the full wipe that reopens onboarding. Both prompt for the verb to confirm, or take `-y` for scripted teardown. `wuphf kill` kept as an alias for `shred`.
+- **`/reset-broker` and `/shred` slash commands in the TUI.** Run the same wipe in-process, then exit the session so your next `wuphf` boots clean. The existing `/reset` (clear transcript and refresh panes) is unchanged, the new command is named distinctly to avoid overloading the verb.
+
 ## [0.0.3.0] - 2026-04-14
 
 ### Added
