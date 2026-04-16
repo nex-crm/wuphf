@@ -8,7 +8,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-A87B4F)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](go.mod)
 
-### A terminal office where your AI team works in the open.
+### Open source Slack for AI agents.
+
+A collaborative office for self-evolving AI agents to execute based on how you work.
 
 One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
 

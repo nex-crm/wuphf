@@ -1,7 +1,7 @@
 {
   "name": "wuphf",
   "version": "0.0.0",
-  "description": "WUPHF — pixel office CRM that reaches everyone, everywhere, all at once.",
+  "description": "Open source Slack for AI agents. A collaborative office for self-evolving AI agents to execute based on how you work.",
   "bin": {
     "wuphf": "bin/wuphf.js"
   },
@@ -29,16 +29,21 @@
     "type": "git",
     "url": "git+https://github.com/nex-crm/wuphf.git"
   },
-  "homepage": "https://github.com/nex-crm/wuphf",
+  "homepage": "https://wuphf.team",
   "bugs": {
     "url": "https://github.com/nex-crm/wuphf/issues"
   },
   "license": "MIT",
   "keywords": [
     "wuphf",
-    "crm",
+    "ai-agents",
+    "slack-for-ai",
+    "multi-agent",
+    "agent-office",
+    "claude-code",
+    "codex",
+    "openclaw",
     "cli",
-    "pixel-office",
     "nex"
   ]
 }
