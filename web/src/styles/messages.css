@@ -8,7 +8,7 @@
 .message-grouped .message-avatar { visibility: hidden; height: 0; }
 .message-grouped .message-header { display: none; }
 
-.message-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--accent-bg); }
+.message-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; }
 .message-content { flex: 1; min-width: 0; }
 .message-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .message-author { font-size: 13px; font-weight: 600; }

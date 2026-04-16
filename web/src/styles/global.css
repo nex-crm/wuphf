@@ -81,6 +81,19 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .badge-accent { background: var(--accent-bg); color: var(--accent); }
 .badge-yellow { background: var(--yellow-bg); color: var(--yellow); }
 
+/* ─── Pixel avatars ─── */
+/* The canvas buffer is the sprite's native 14x14 grid; CSS scales it up.
+   Without `image-rendering: pixelated` the browser bilinearly smooths the
+   upscale and the sprites lose their pixel-art edges. */
+.pixel-avatar {
+  image-rendering: crisp-edges;
+  image-rendering: pixelated;
+  border-radius: 4px;
+  display: block;
+}
+.pixel-avatar-sidebar { width: 24px; height: 24px; }
+.pixel-avatar-panel { width: 56px; height: 56px; }
+
 /* ─── Status Dot ─── */
 .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.active { background: var(--green); }
