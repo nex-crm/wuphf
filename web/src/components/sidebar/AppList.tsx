@@ -6,7 +6,7 @@ export function AppList() {
   const setCurrentApp = useAppStore((s) => s.setCurrentApp)
 
   return (
-    <div className="sidebar-channels">
+    <div className="sidebar-apps">
       {SIDEBAR_APPS.map((app) => (
         <button
           key={app.id}

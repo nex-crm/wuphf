@@ -164,6 +164,13 @@ html[data-theme="slack"] .sidebar-item-emoji {
 html[data-theme="slack"] .sidebar-agent-name {
   color: inherit !important;
 }
+/* Agent avatar tile — light text on aubergine sidebar needs contrast */
+html[data-theme="slack"] .sidebar-agent-avatar {
+  background: rgba(255,255,255,0.15) !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+  border-radius: 4px !important;
+}
 html[data-theme="slack"] .sidebar-agent-task {
   color: rgba(255,255,255,0.35) !important;
 }

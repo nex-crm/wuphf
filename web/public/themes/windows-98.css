@@ -164,6 +164,13 @@ html[data-theme="windows-98"] .sidebar-agent:hover {
   background: var(--w98-selection) !important;
   color: var(--w98-sel-text) !important;
 }
+/* Agent avatar tile — Win98 blue, sharp corners */
+html[data-theme="windows-98"] .sidebar-agent-avatar {
+  background: #0A246A !important;
+  color: #FFFFFF !important;
+  border-radius: 0 !important;
+  font-weight: 700 !important;
+}
 html[data-theme="windows-98"] .sidebar-item.active {
   background: var(--w98-selection) !important;
   color: var(--w98-sel-text) !important;

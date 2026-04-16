@@ -1,6 +1,6 @@
 import { Component, useEffect, useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { initApi, getHealth } from './api/client'
+import { initApi, get } from './api/client'
 import { useAppStore } from './stores/app'
 import { Shell } from './components/layout/Shell'
 import { MessageFeed } from './components/messages/MessageFeed'
@@ -163,24 +163,28 @@ export default function App() {
     }
   }, [theme])
 
-  // Init API and determine onboarding state
+  // Init API and determine onboarding state.
+  // Source of truth: GET /onboarding/state.onboarded (backed by ~/.wuphf/onboarded.json).
+  // Broker health / default agents must not skip the wizard — the broker seeds 7
+  // default agents on every boot, so a health-based check was making the wizard
+  // permanently unreachable for fresh installs.
   useEffect(() => {
     let cancelled = false
     initApi()
       .then(() => {
         if (cancelled) return
         setBrokerConnected(true)
-        return getHealth()
+        return get<{ onboarded?: boolean }>('/onboarding/state')
       })
-      .then((h) => {
-        if (cancelled || !h) return
-        // If the broker has any agents, skip onboarding
-        if (h.status === 'ok' || h.agents) {
+      .then((s) => {
+        if (cancelled || !s) return
+        if (s.onboarded === true) {
           setOnboardingComplete(true)
         }
       })
       .catch(() => {
-        // Broker unreachable — fall through to wizard
+        // Endpoint unreachable — fall through to wizard. Safer default for
+        // fresh installs where the broker may not have mounted onboarding yet.
       })
       .finally(() => {
         if (!cancelled) setApiReady(true)

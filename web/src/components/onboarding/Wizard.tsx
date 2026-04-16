@@ -43,12 +43,36 @@ const STEP_ORDER: readonly WizardStep[] = [
   'task',
 ] as const
 
-const RUNTIME_OPTIONS = ['Claude Code', 'Cursor', 'Windsurf', 'Other'] as const
+const RUNTIME_OPTIONS = ['Claude Code', 'Codex', 'Cursor', 'Windsurf', 'Other'] as const
 
 const API_KEY_FIELDS = [
   { key: 'ANTHROPIC_API_KEY', label: 'Anthropic', hint: 'Powers Claude-based agents' },
   { key: 'OPENAI_API_KEY', label: 'OpenAI', hint: 'Powers GPT-based agents' },
   { key: 'GOOGLE_API_KEY', label: 'Google', hint: 'Powers Gemini-based agents' },
+] as const
+
+type MemoryBackend = 'nex' | 'gbrain' | 'none'
+
+const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
+  value: MemoryBackend
+  label: string
+  hint: string
+}> = [
+  {
+    value: 'nex',
+    label: 'Nex',
+    hint: 'Hosted memory graph. Ships with free tier. Needs NEX_API_KEY.',
+  },
+  {
+    value: 'gbrain',
+    label: 'GBrain',
+    hint: 'Local graph over Postgres. Needs an LLM key for embeddings.',
+  },
+  {
+    value: 'none',
+    label: 'None',
+    hint: 'Skip shared memory. Agents work with only per-turn context.',
+  },
 ] as const
 
 /* ═══════════════════════════════════════════
@@ -369,6 +393,8 @@ interface SetupStepProps {
   onChangeRuntime: (v: string) => void
   apiKeys: Record<string, string>
   onChangeApiKey: (key: string, value: string) => void
+  memoryBackend: MemoryBackend
+  onChangeMemoryBackend: (value: MemoryBackend) => void
   onNext: () => void
   onBack: () => void
 }
@@ -378,6 +404,8 @@ function SetupStep({
   onChangeRuntime,
   apiKeys,
   onChangeApiKey,
+  memoryBackend,
+  onChangeMemoryBackend,
   onNext,
   onBack,
 }: SetupStepProps) {
@@ -428,6 +456,38 @@ function SetupStep({
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="wizard-panel">
+        <p className="wizard-panel-title">Organizational memory</p>
+        <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '-8px 0 12px 0' }}>
+          Where agents store shared context, relationships, and learnings across
+          sessions. You can change this later in Settings or via{' '}
+          <code>--memory-backend</code>.
+        </p>
+        <div className="runtime-grid">
+          {MEMORY_BACKEND_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              className={`runtime-tile ${memoryBackend === opt.value ? 'selected' : ''}`}
+              onClick={() => onChangeMemoryBackend(opt.value)}
+              type="button"
+              title={opt.hint}
+            >
+              <div style={{ fontWeight: 600 }}>{opt.label}</div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: 'var(--text-tertiary)',
+                  marginTop: 4,
+                  fontWeight: 400,
+                }}
+              >
+                {opt.hint}
+              </div>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="wizard-nav">
@@ -582,6 +642,7 @@ export function Wizard({ onComplete }: WizardProps) {
   // Step 5: setup
   const [runtime, setRuntime] = useState<string>(RUNTIME_OPTIONS[0])
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
+  const [memoryBackend, setMemoryBackend] = useState<MemoryBackend>('nex')
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([])
@@ -681,16 +742,25 @@ export function Wizard({ onComplete }: WizardProps) {
     async (skipTask: boolean) => {
       setSubmitting(true)
       try {
-        // Post the onboarding payload
+        // Persist memory backend selection first so the broker reads it on
+        // next launch. Fire-and-forget — a failure here should not block
+        // completing onboarding.
+        post('/config', { memory_backend: memoryBackend }).catch(() => {})
+
+        // Post the onboarding payload. Body shape is historical; the broker
+        // currently only acts on {task, skip_task} but the extra fields are
+        // forward-compatible.
         await post('/onboarding/complete', {
           company,
           description,
           priority,
           runtime,
+          memory_backend: memoryBackend,
           blueprint: selectedBlueprint,
           agents: agents.filter((a) => a.checked).map((a) => a.slug),
           api_keys: apiKeys,
-          first_task: skipTask ? null : taskText.trim() || null,
+          task: skipTask ? '' : taskText.trim(),
+          skip_task: skipTask,
         })
       } catch {
         // Best-effort — the broker may not support this endpoint yet.
@@ -705,6 +775,7 @@ export function Wizard({ onComplete }: WizardProps) {
       description,
       priority,
       runtime,
+      memoryBackend,
       selectedBlueprint,
       agents,
       apiKeys,
@@ -762,6 +833,8 @@ export function Wizard({ onComplete }: WizardProps) {
             onChangeRuntime={setRuntime}
             apiKeys={apiKeys}
             onChangeApiKey={handleApiKeyChange}
+            memoryBackend={memoryBackend}
+            onChangeMemoryBackend={setMemoryBackend}
             onNext={nextStep}
             onBack={prevStep}
           />

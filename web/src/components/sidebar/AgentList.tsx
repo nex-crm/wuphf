@@ -48,17 +48,7 @@ export function AgentList() {
             title={`${agent.name} — ${ac.label}`}
             onClick={() => setActiveAgentSlug(agent.slug)}
           >
-            <span style={{
-              width: 24,
-              height: 24,
-              borderRadius: 6,
-              background: 'var(--accent-bg)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: 12,
-              flexShrink: 0,
-            }}>
+            <span className="sidebar-agent-avatar">
               {agent.emoji || agent.slug.charAt(0).toUpperCase()}
             </span>
             <div className="sidebar-agent-wrap">

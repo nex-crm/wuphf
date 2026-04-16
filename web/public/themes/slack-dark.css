@@ -128,6 +128,13 @@ html[data-theme="slack-dark"] .sidebar-item.active {
   color: #FFFFFF !important;
   font-weight: 700 !important;
 }
+/* Agent avatar tile — contrast against dark sidebar */
+html[data-theme="slack-dark"] .sidebar-agent-avatar {
+  background: rgba(255,255,255,0.12) !important;
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+  border-radius: 4px !important;
+}
 
 html[data-theme="slack-dark"] .sidebar-item-icon {
   font-size: 16px !important;
