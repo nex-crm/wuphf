@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="slack-dark">
+<html lang="en" data-theme="nex">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -10,8 +10,10 @@
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <!-- System font stack -- no external fonts needed (Slack uses system fonts) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/iconoir-icons/iconoir@main/css/iconoir.css" />
 <link rel="stylesheet" href="themes/slack.css" />
 <link rel="stylesheet" href="themes/slack-dark.css" />
+<link rel="stylesheet" href="themes/nex.css" />
 <link rel="stylesheet" href="themes/windows-98.css" />
 <style>
 /* ═══════════════════════════════════════════════════════════════
@@ -120,7 +122,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .status-dot.pulse { animation: pulse-dot 2s ease-in-out infinite; }
 .status-dot.shipping { background: var(--blue); }
 .status-dot.plotting { background: var(--yellow); }
-.status-dot.lurking { background: #9ca3af; }
+.status-dot.lurking { background: var(--text-tertiary); }
 
 /* ─── Agent task text ─── */
 .sidebar-agent-task { font-size: 10px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px; }
@@ -1143,7 +1145,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .office { display: none; height: 100vh; }
 .office.active { display: flex; }
 
-.sidebar { width: 260px; flex-shrink: 0; background: var(--bg-card); border-right: 1px solid var(--border); display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.sidebar { width: 260px; flex-shrink: 0; background: var(--bg-card); border-right: 1px solid var(--border); display: flex; flex-direction: column; height: 100vh; overflow: hidden; position: relative; }
 .sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 16px 12px; border-bottom: 1px solid var(--border); }
 .sidebar-logo { font-family: var(--font-logo); font-style: italic; font-size: 22px; letter-spacing: -0.01em; }
 .sidebar-btn { width: 28px; height: 28px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-secondary); transition: all 0.15s; }
@@ -1164,7 +1166,25 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .sidebar-agent.active { background: var(--accent-bg); color: var(--text); font-weight: 600; }
 .sidebar-agent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.sidebar-channels { padding: 4px 12px; flex: 1; overflow-y: auto; }
+.sidebar-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-height: 0; }
+.sidebar-channels { padding: 4px 12px; }
+.sidebar-section-separated { margin-top: 4px; border-top: 1px solid var(--border); padding-top: 8px; }
+.sidebar-add-btn { color: var(--text-tertiary) !important; }
+.sidebar-add-btn:hover { color: var(--text-secondary) !important; }
+.sidebar-btn-sm { width: 32px; height: 32px; }
+.sidebar-btn-close { width: 24px; height: 24px; border: none; background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; border-radius: 6px; color: var(--text-tertiary); transition: all 0.15s; }
+.sidebar-btn-close:hover { background: rgba(0,0,0,0.06); color: var(--text); }
+.sidebar-item-team { padding: 8px 12px !important; font-size: 14px !important; gap: 10px !important; margin-top: 6px !important; }
+/* Theme dropdown */
+.theme-dropdown { display: none; position: absolute; top: calc(100% + 4px); right: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 1000; padding: 4px; min-width: 140px; font-family: var(--font-sans); }
+.theme-dropdown.open { display: block; }
+.theme-dropdown-item { display: block; width: 100%; padding: 8px 12px; border: none; background: none; cursor: pointer; font-size: 13px; font-family: var(--font-sans); color: var(--text-secondary); border-radius: 6px; text-align: left; transition: all 0.1s; }
+.theme-dropdown-item:hover { background: rgba(0,0,0,0.04); color: var(--text); }
+.theme-dropdown-item.active { color: var(--accent); font-weight: 600; }
+/* Floating checklist */
+.sidebar-checklist-float { position: absolute; bottom: 0; left: 0; right: 0; z-index: 20; background: rgba(245,245,246,0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--border); padding: 12px 16px; }
+.sidebar-checklist-float-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.sidebar-checklist-float-title { font-size: 12px; font-weight: 600; color: var(--text); text-transform: uppercase; letter-spacing: 0.04em; }
 .sidebar-bottom { padding: 8px; border-top: 1px solid var(--border); display: flex; align-items: center; gap: 4px; }
 
 .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
@@ -2189,53 +2209,65 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
     <aside class="sidebar">
       <div class="sidebar-header">
         <span class="sidebar-logo" id="workspace-logo" onclick="toggleWorkspaceMenu()">WUPHF</span>
-        <button class="sidebar-btn" title="Collapse sidebar" aria-label="Collapse sidebar">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
-        </button>
+        <div style="display:flex;align-items:center;gap:4px;">
+          <div class="theme-dropdown-wrap" style="position:relative;">
+            <button class="sidebar-btn sidebar-btn-sm" title="Switch theme" aria-label="Switch theme" id="theme-dropdown-btn" onclick="toggleThemeDropdown()">
+              <i class="iconoir-half-moon" style="font-size:20px;" id="theme-dropdown-icon"></i>
+            </button>
+            <div class="theme-dropdown" id="theme-dropdown">
+              <button class="theme-dropdown-item" data-theme-val="nex">Nex</button>
+              <button class="theme-dropdown-item" data-theme-val="slack">Slack</button>
+              <button class="theme-dropdown-item" data-theme-val="slack-dark">Slack (Dark)</button>
+              <button class="theme-dropdown-item" data-theme-val="windows-98">Windows 98</button>
+            </div>
+          </div>
+          <button class="sidebar-btn sidebar-btn-sm" title="Collapse sidebar" aria-label="Collapse sidebar">
+            <i class="iconoir-sidebar-collapse" style="font-size:20px;"></i>
+          </button>
+        </div>
       </div>
-      <div class="sidebar-summary" id="sidebar-summary"></div>
-      <div class="sidebar-hint" id="sidebar-hint"></div>
-      <div class="sidebar-section">
-        <p class="sidebar-section-title">Team</p>
-        <button class="sidebar-item active">
-          <svg class="sidebar-item-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          <span>Agents</span>
-          <svg style="margin-left:auto;width:12px;height:12px;transform:rotate(90deg);" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-        </button>
+      <div class="sidebar-scroll" id="sidebar-scroll">
+        <div class="sidebar-summary" id="sidebar-summary"></div>
+        <div class="sidebar-hint" id="sidebar-hint"></div>
+        <div class="sidebar-section sidebar-section-team">
+          <p class="sidebar-section-title">Team</p>
+          <button class="sidebar-item sidebar-item-team active">
+            <i class="iconoir-group" style="font-size:20px;flex-shrink:0;"></i>
+            <span>Agents</span>
+            <i class="iconoir-nav-arrow-down" style="margin-left:auto;font-size:16px;"></i>
+          </button>
+        </div>
+        <div class="sidebar-agents" id="sidebar-agents"></div>
+        <div class="sidebar-section sidebar-section-separated">
+          <p class="sidebar-section-title">Channels</p>
+        </div>
+        <div class="sidebar-channels" id="sidebar-channels"></div>
+        <div class="sidebar-section sidebar-section-separated">
+          <p class="sidebar-section-title">Apps</p>
+        </div>
+        <div class="sidebar-channels" id="sidebar-apps"></div>
       </div>
-      <!-- Getting Started checklist (shown after onboarding, hidden until populated) -->
-      <div id="sidebar-checklist-section" style="display:none;">
-        <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
-          <p class="sidebar-section-title" style="display:flex;align-items:center;justify-content:space-between;">
-            Getting started
-            <button class="checklist-dismiss" title="Dismiss" onclick="dismissChecklist()">&#xd7;</button>
-          </p>
+      <!-- Getting Started checklist — floating at bottom -->
+      <div id="sidebar-checklist-section" class="sidebar-checklist-float" style="display:none;">
+        <div class="sidebar-checklist-float-header">
+          <span class="sidebar-checklist-float-title">Getting started</span>
+          <button class="sidebar-btn-close" title="Dismiss" onclick="dismissChecklist()"><i class="iconoir-xmark" style="font-size:16px;"></i></button>
         </div>
         <div class="sidebar-checklist" id="sidebar-checklist"></div>
       </div>
-      <div class="sidebar-agents" id="sidebar-agents"></div>
-      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
-        <p class="sidebar-section-title">Channels</p>
-      </div>
-      <div class="sidebar-channels" id="sidebar-channels"></div>
-      <div class="sidebar-section" style="margin-top:4px;border-top:1px solid var(--border);padding-top:8px;">
-        <p class="sidebar-section-title">Apps</p>
-      </div>
-      <div class="sidebar-channels" id="sidebar-apps"></div>
       <button class="usage-toggle" id="usage-toggle" onclick="toggleUsagePanel()">
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+        <i class="iconoir-nav-arrow-right" style="font-size:12px;transition:transform 0.2s;" id="usage-toggle-icon"></i>
         Usage
         <span id="usage-total-badge" style="margin-left:auto;font-weight:400;color:var(--accent);"></span>
       </button>
       <div class="usage-panel" id="usage-panel"></div>
-      <div class="sidebar-bottom" style="flex-direction:column;gap:6px;">
-        <label class="sr-only" for="theme-switcher">Switch theme</label>
-        <select id="theme-switcher" aria-label="Switch theme" style="width:100%;padding:4px 6px;font-size:11px;font-family:var(--font-sans);border:1px solid var(--border);border-radius:4px;background:var(--bg-card);color:var(--text);cursor:pointer;">
-          <option value="slack">Slack</option>
-          <option value="slack-dark" selected>Slack (Dark)</option>
-          <option value="windows-98">Windows 98</option>
-        </select>
-      </div>
+      <!-- Hidden select for backwards compat with existing theme JS -->
+      <select id="theme-switcher" style="display:none;">
+        <option value="slack">Slack</option>
+        <option value="nex" selected>Nex</option>
+        <option value="slack-dark">Slack (Dark)</option>
+        <option value="windows-98">Windows 98</option>
+      </select>
     </aside>
 
     <div class="main">
@@ -2245,11 +2277,11 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
           <span class="channel-desc" id="channel-desc">The shared office channel</span>
         </div>
         <div class="channel-actions">
-          <button class="sidebar-btn" title="Search" aria-label="Search">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <button class="sidebar-btn sidebar-btn-sm" title="Search" aria-label="Search">
+            <i class="iconoir-search" style="font-size:20px;"></i>
           </button>
-          <button class="sidebar-btn" title="Requests" aria-label="Requests">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          <button class="sidebar-btn sidebar-btn-sm" title="Requests" aria-label="Requests">
+            <i class="iconoir-bell" style="font-size:20px;"></i>
           </button>
         </div>
       </div>
@@ -5418,8 +5450,7 @@ function renderSidebarAgents() {
     dot.className = 'status-dot ' + ac.dotClass;
     btn.appendChild(avatarEl);
     btn.appendChild(wrap);
-    btn.appendChild(dot);
-    // Thought bubble
+    // Thought bubble — placed between name and dot
     var bubbleText = officeAside(a.slug, ac.state, member ? member.lastMessage || '' : '');
     var prev = _activeBubbles[a.slug];
     if (bubbleText) {
@@ -5431,24 +5462,24 @@ function renderSidebarAgents() {
     } else if (prev) {
       delete _activeBubbles[a.slug];
     }
+    btn.appendChild(dot);
     container.appendChild(btn);
   });
   // New Agent button (#73)
   var newAgentBtn = document.createElement('button');
-  newAgentBtn.className = 'sidebar-agent';
-  newAgentBtn.style.cssText = 'opacity:0.6;font-size:12px;';
+  newAgentBtn.className = 'sidebar-item sidebar-add-btn';
   newAgentBtn.title = 'Create a new agent';
-  var plusIcon = document.createElement('span');
-  plusIcon.style.cssText = 'width:24px;height:24px;display:flex;align-items:center;justify-content:center;border-radius:4px;background:var(--border-light);color:var(--text-tertiary);font-size:16px;font-weight:600;';
-  plusIcon.textContent = '+';
+  var plusIcon = document.createElement('i');
+  plusIcon.className = 'iconoir-plus';
+  plusIcon.style.cssText = 'font-size:16px;';
   var plusLabel = document.createElement('span');
-  plusLabel.className = 'sidebar-agent-name';
   plusLabel.textContent = 'New Agent';
   newAgentBtn.appendChild(plusIcon);
   newAgentBtn.appendChild(plusLabel);
   newAgentBtn.addEventListener('click', function() { openAgentWizard(null); });
   container.appendChild(newAgentBtn);
 }
+
 // --- Apps sidebar (#28) ---
 function renderSidebarApps() {
   var container = document.getElementById('sidebar-apps');
@@ -7065,8 +7096,7 @@ function renderSidebarChannels() {
 
     var hash = document.createElement('span');
     hash.className = 'sidebar-item-icon';
-    hash.style.fontWeight = 'bold';
-    hash.style.fontSize = '14px';
+    hash.style.cssText = 'font-weight:700;font-size:16px;line-height:1;';
     hash.textContent = '#';
     var name = document.createElement('span');
     name.textContent = ch.name;
@@ -7079,12 +7109,10 @@ function renderSidebarChannels() {
   // "New Channel" button
   var addBtn = document.createElement('button');
   addBtn.className = 'sidebar-item sidebar-add-btn';
-  addBtn.style.cssText = 'color:var(--text-secondary);opacity:0.7;font-size:12px;';
   addBtn.addEventListener('click', function() { openChannelWizard(); });
-  var plusIcon = document.createElement('span');
-  plusIcon.className = 'sidebar-item-icon';
-  plusIcon.style.cssText = 'font-weight:bold;font-size:14px;';
-  plusIcon.textContent = '+';
+  var plusIcon = document.createElement('i');
+  plusIcon.className = 'iconoir-plus';
+  plusIcon.style.cssText = 'font-size:16px;';
   var addLabel = document.createElement('span');
   addLabel.textContent = 'New Channel';
   addBtn.appendChild(plusIcon);
@@ -10781,16 +10809,43 @@ function initApp() {
 // ─── Theme Switcher ───
 var themeSwitcher = document.getElementById('theme-switcher');
 if (themeSwitcher) {
-  // Restore saved theme
-  var savedTheme = localStorage.getItem('wuphf-theme') || 'slack-dark';
+  var savedTheme = localStorage.getItem('wuphf-theme') || 'nex';
   document.documentElement.setAttribute('data-theme', savedTheme);
   themeSwitcher.value = savedTheme;
   themeSwitcher.addEventListener('change', function() {
-    var theme = themeSwitcher.value || 'slack-dark';
+    var theme = themeSwitcher.value || 'nex';
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('wuphf-theme', theme);
     showNotice('Theme changed to ' + theme, 'success');
   });
+
+// ─── Theme Dropdown (header icon) ───
+function toggleThemeDropdown() {
+  var dd = document.getElementById('theme-dropdown');
+  if (dd) dd.classList.toggle('open');
+}
+document.addEventListener('click', function(e) {
+  var dd = document.getElementById('theme-dropdown');
+  var btn = document.getElementById('theme-dropdown-btn');
+  if (dd && btn && !btn.contains(e.target) && !dd.contains(e.target)) {
+    dd.classList.remove('open');
+  }
+});
+document.querySelectorAll('.theme-dropdown-item').forEach(function(item) {
+  item.addEventListener('click', function() {
+    var theme = item.getAttribute('data-theme-val');
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('wuphf-theme', theme);
+    if (themeSwitcher) themeSwitcher.value = theme;
+    document.getElementById('theme-dropdown').classList.remove('open');
+    // Update active state
+    document.querySelectorAll('.theme-dropdown-item').forEach(function(i) { i.classList.remove('active'); });
+    item.classList.add('active');
+    showNotice('Theme changed to ' + theme, 'success');
+  });
+  // Set initial active
+  if (item.getAttribute('data-theme-val') === savedTheme) item.classList.add('active');
+});
 }
 
 
