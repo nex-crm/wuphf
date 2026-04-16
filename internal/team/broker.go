@@ -1506,8 +1506,13 @@ func (b *Broker) ServeWebUI(port int) {
 		webDir = "web"
 	}
 	// Prefer web/dist/ (Vite build output) when it exists.
+	// Otherwise serve the legacy vanilla-JS UI from web/ so the app still
+	// works for users who haven't run `npm run build`.
+	serveLegacyFallback := false
 	if distDir := filepath.Join(webDir, "dist"); dirExists(distDir) {
 		webDir = distDir
+	} else if _, err := os.Stat(filepath.Join(webDir, "index.legacy.html")); err == nil {
+		serveLegacyFallback = true
 	}
 	mux := http.NewServeMux()
 	brokerURL := brokeraddr.ResolveBaseURL()
@@ -1525,7 +1530,19 @@ func (b *Broker) ServeWebUI(port int) {
 			"broker_url": brokerURL,
 		})
 	})
-	mux.Handle("/", http.FileServer(http.Dir(webDir)))
+	fileServer := http.FileServer(http.Dir(webDir))
+	if serveLegacyFallback {
+		// Rewrite bare / and /index.html to /index.legacy.html so the legacy
+		// vanilla-JS UI loads when the React build output is not present.
+		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/" || r.URL.Path == "/index.html" {
+				r.URL.Path = "/index.legacy.html"
+			}
+			fileServer.ServeHTTP(w, r)
+		}))
+	} else {
+		mux.Handle("/", fileServer)
+	}
 	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux)
 }
 

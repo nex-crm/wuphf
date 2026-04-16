@@ -21,6 +21,8 @@ import { AgentPanel } from './components/agents/AgentPanel'
 import { SearchModal } from './components/search/SearchModal'
 import { DisconnectBanner } from './components/layout/DisconnectBanner'
 import { SplashScreen } from './components/onboarding/SplashScreen'
+import { ToastContainer } from './components/ui/Toast'
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import './styles/global.css'
 import './styles/layout.css'
 import './styles/messages.css'
@@ -107,6 +109,8 @@ function AppShell() {
     )
   }
 
+  useKeyboardShortcuts()
+
   return (
     <Shell>
       <MainContent />
@@ -163,6 +167,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AppShell />
+      <ToastContainer />
     </QueryClientProvider>
   )
 }
