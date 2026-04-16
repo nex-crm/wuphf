@@ -60,6 +60,14 @@ fi
 cp "${TMPDIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
 chmod +x "${INSTALL_DIR}/${BINARY}"
 
+# macOS: re-apply ad-hoc code signature.
+# goreleaser's linker-embedded signature is invalidated by the cp+chmod sequence
+# on macOS 15+, causing the kernel to SIGKILL the binary with
+# "Code Signature Invalid" / "Taskgated Invalid Signature".
+if [ "$OS" = "darwin" ] && command -v codesign >/dev/null 2>&1; then
+  codesign --force --sign - "${INSTALL_DIR}/${BINARY}" >/dev/null 2>&1 || true
+fi
+
 # Verify
 if "${INSTALL_DIR}/${BINARY}" --version >/dev/null 2>&1; then
   printf "Successfully installed %s to %s/%s\n" "$("${INSTALL_DIR}/${BINARY}" --version 2>&1)" "$INSTALL_DIR" "$BINARY"
