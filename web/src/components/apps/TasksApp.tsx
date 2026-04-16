@@ -2,6 +2,7 @@ import { useCallback, useState, type DragEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getOfficeTasks, post, type Task } from '../../api/client'
 import { formatRelativeTime } from '../../lib/format'
+import { TaskDetailModal } from './TaskDetailModal'
 
 const STATUS_ORDER = ['in_progress', 'open', 'review', 'pending', 'blocked', 'done'] as const
 
@@ -35,6 +36,8 @@ function groupTasks(tasks: Task[]): Record<StatusGroup, Task[]> {
     done: [],
   }
   for (const task of tasks) {
+    const raw = task.status?.toLowerCase().replace(/[\s-]+/g, '_')
+    if (raw === 'canceled' || raw === 'cancelled') continue
     const status = normalizeStatus(task.status)
     groups[status].push(task)
   }
@@ -99,6 +102,7 @@ export function TasksApp() {
   const moveTask = useTaskMove()
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragoverStatus, setDragoverStatus] = useState<StatusGroup | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   if (isLoading) {
     return (
@@ -129,6 +133,7 @@ export function TasksApp() {
   const grouped = groupTasks(tasks)
   const tasksById = new Map(tasks.map((t) => [t.id, t]))
   const isDragging = draggingId !== null
+  const selectedTask = selectedTaskId ? tasksById.get(selectedTaskId) ?? null : null
 
   const handleDragStart = (taskId: string) => (event: DragEvent<HTMLDivElement>) => {
     event.dataTransfer.effectAllowed = 'move'
@@ -204,12 +209,19 @@ export function TasksApp() {
                   isDragging={draggingId === task.id}
                   onDragStart={handleDragStart(task.id)}
                   onDragEnd={handleDragEnd}
+                  onOpen={() => setSelectedTaskId(task.id)}
                 />
               ))}
             </div>
           )
         })}
       </div>
+      {selectedTask && (
+        <TaskDetailModal
+          task={selectedTask}
+          onClose={() => setSelectedTaskId(null)}
+        />
+      )}
     </>
   )
 }
@@ -219,12 +231,20 @@ interface TaskCardProps {
   isDragging: boolean
   onDragStart: (event: DragEvent<HTMLDivElement>) => void
   onDragEnd: (event: DragEvent<HTMLDivElement>) => void
+  onOpen: () => void
 }
 
-function TaskCard({ task, isDragging, onDragStart, onDragEnd }: TaskCardProps) {
+function TaskCard({ task, isDragging, onDragStart, onDragEnd, onOpen }: TaskCardProps) {
   const status = normalizeStatus(task.status)
   const timestamp = task.updated_at ?? task.created_at
   const className = 'app-card task-card' + (isDragging ? ' dragging' : '')
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      onOpen()
+    }
+  }
 
   return (
     <div
@@ -232,7 +252,11 @@ function TaskCard({ task, isDragging, onDragStart, onDragEnd }: TaskCardProps) {
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
-      style={{ marginBottom: 8 }}
+      onClick={onOpen}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
+      style={{ marginBottom: 8, cursor: 'pointer' }}
     >
       <div className="app-card-title">{task.title || 'Untitled'}</div>
       {task.description && (
@@ -244,8 +268,8 @@ function TaskCard({ task, isDragging, onDragStart, onDragEnd }: TaskCardProps) {
         <span className={statusBadgeClass(status)}>
           {status.replace(/_/g, ' ')}
         </span>
-        {task.assigned_to && (
-          <span className="app-card-meta">@{task.assigned_to}</span>
+        {task.owner && (
+          <span className="app-card-meta">@{task.owner}</span>
         )}
         {task.channel && (
           <span className="app-card-meta">#{task.channel}</span>

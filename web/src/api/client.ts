@@ -254,11 +254,56 @@ export interface Task {
   id: string
   title: string
   description?: string
+  details?: string
   status: string
-  assigned_to?: string
+  owner?: string
+  created_by?: string
   channel?: string
+  thread_id?: string
+  task_type?: string
+  pipeline_id?: string
+  pipeline_stage?: string
+  execution_mode?: string
+  review_state?: string
+  source_signal_id?: string
+  source_decision_id?: string
+  worktree_path?: string
+  worktree_branch?: string
+  depends_on?: string[]
+  blocked?: boolean
+  acked_at?: string
+  due_at?: string
+  follow_up_at?: string
+  reminder_at?: string
+  recheck_at?: string
   created_at?: string
   updated_at?: string
+}
+
+export function reassignTask(taskId: string, newOwner: string, channel: string, actor = 'human') {
+  return post<{ task: Task }>('/tasks', {
+    action: 'reassign',
+    id: taskId,
+    owner: newOwner,
+    channel: channel || 'general',
+    created_by: actor,
+  })
+}
+
+export type TaskStatusAction = 'release' | 'review' | 'block' | 'complete' | 'cancel'
+
+export function updateTaskStatus(
+  taskId: string,
+  action: TaskStatusAction,
+  channel: string,
+  actor = 'human',
+) {
+  return post<{ task: Task }>('/tasks', {
+    action,
+    id: taskId,
+    channel: channel || 'general',
+    created_by: actor,
+  })
 }
 
 export function getTasks(channel: string, opts?: { includeDone?: boolean; status?: string; mySlug?: string }) {

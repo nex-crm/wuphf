@@ -1753,6 +1753,240 @@ func TestBrokerTaskLifecycle(t *testing.T) {
 	}
 }
 
+func TestBrokerTaskReassignNotifies(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func(payload map[string]any) teamTask {
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("task post failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("unexpected status %d: %s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Task teamTask `json:"task"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode task response: %v", err)
+		}
+		return result.Task
+	}
+
+	created := post(map[string]any{
+		"action":     "create",
+		"title":      "Ship reassign flow",
+		"created_by": "human",
+		"owner":      "engineering",
+	})
+	if created.Owner != "engineering" {
+		t.Fatalf("expected initial owner engineering, got %+v", created)
+	}
+
+	before := len(b.Messages())
+
+	// Reassign engineering → ops.
+	updated := post(map[string]any{
+		"action":     "reassign",
+		"id":         created.ID,
+		"owner":      "ops",
+		"created_by": "human",
+	})
+	if updated.Owner != "ops" {
+		t.Fatalf("expected owner=ops after reassign, got %q", updated.Owner)
+	}
+	if updated.Status != "in_progress" {
+		t.Fatalf("expected status=in_progress after reassign, got %q", updated.Status)
+	}
+
+	msgs := b.Messages()[before:]
+	if len(msgs) != 3 {
+		for i, m := range msgs {
+			t.Logf("msg[%d] channel=%s from=%s content=%q", i, m.Channel, m.From, m.Content)
+		}
+		t.Fatalf("expected 3 reassign messages (channel + new + prev), got %d", len(msgs))
+	}
+
+	taskChannel := normalizeChannelSlug(updated.Channel)
+	if taskChannel == "" {
+		taskChannel = "general"
+	}
+	newDM := channelDirectSlug("human", "ops")
+	prevDM := channelDirectSlug("human", "engineering")
+
+	seen := map[string]channelMessage{}
+	for _, m := range msgs {
+		seen[m.Channel] = m
+		if m.Kind != "task_reassigned" {
+			t.Fatalf("expected kind=task_reassigned, got %q", m.Kind)
+		}
+		if m.From != "human" {
+			t.Fatalf("expected from=human, got %q", m.From)
+		}
+	}
+	chMsg, ok := seen[taskChannel]
+	if !ok {
+		t.Fatalf("expected channel message in %q; saw %v", taskChannel, keys(seen))
+	}
+	if !containsAll(chMsg.Tagged, []string{"ceo", "ops", "engineering"}) {
+		t.Fatalf("expected channel message tagged ceo+ops+engineering, got %v", chMsg.Tagged)
+	}
+	if !strings.Contains(chMsg.Content, "@engineering") || !strings.Contains(chMsg.Content, "@ops") {
+		t.Fatalf("expected channel content to name both owners, got %q", chMsg.Content)
+	}
+	if _, ok := seen[newDM]; !ok {
+		t.Fatalf("expected DM to new owner in %q; saw %v", newDM, keys(seen))
+	}
+	if _, ok := seen[prevDM]; !ok {
+		t.Fatalf("expected DM to prev owner in %q; saw %v", prevDM, keys(seen))
+	}
+
+	// Re-posting with the same owner should be a no-op on notifications.
+	before2 := len(b.Messages())
+	post(map[string]any{
+		"action":     "reassign",
+		"id":         created.ID,
+		"owner":      "ops",
+		"created_by": "human",
+	})
+	after2 := b.Messages()[before2:]
+	for _, m := range after2 {
+		if m.Kind == "task_reassigned" {
+			t.Fatalf("expected no new task_reassigned messages for same-owner reassign, got %+v", m)
+		}
+	}
+}
+
+func TestBrokerTaskCancelNotifies(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	post := func(payload map[string]any) teamTask {
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, base+"/tasks", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("task post failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			raw, _ := io.ReadAll(resp.Body)
+			t.Fatalf("unexpected status %d: %s", resp.StatusCode, raw)
+		}
+		var result struct {
+			Task teamTask `json:"task"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			t.Fatalf("decode task response: %v", err)
+		}
+		return result.Task
+	}
+
+	created := post(map[string]any{
+		"action":     "create",
+		"title":      "Pilot the new onboarding deck",
+		"created_by": "human",
+		"owner":      "design",
+	})
+	before := len(b.Messages())
+
+	canceled := post(map[string]any{
+		"action":     "cancel",
+		"id":         created.ID,
+		"created_by": "human",
+	})
+	if canceled.Status != "canceled" {
+		t.Fatalf("expected status=canceled, got %q", canceled.Status)
+	}
+	if canceled.FollowUpAt != "" || canceled.ReminderAt != "" || canceled.RecheckAt != "" {
+		t.Fatalf("expected cleared follow-up timestamps on cancel, got %+v", canceled)
+	}
+
+	all := b.Messages()[before:]
+	msgs := make([]channelMessage, 0, len(all))
+	for _, m := range all {
+		if m.Kind == "task_canceled" {
+			msgs = append(msgs, m)
+		}
+	}
+	if len(msgs) != 2 {
+		for i, m := range all {
+			t.Logf("all[%d] channel=%s kind=%s content=%q", i, m.Channel, m.Kind, m.Content)
+		}
+		t.Fatalf("expected 2 task_canceled messages (channel + owner DM), got %d", len(msgs))
+	}
+	taskChannel := normalizeChannelSlug(canceled.Channel)
+	if taskChannel == "" {
+		taskChannel = "general"
+	}
+	ownerDM := channelDirectSlug("human", "design")
+	found := map[string]bool{}
+	for _, m := range msgs {
+		found[m.Channel] = true
+	}
+	if !found[taskChannel] {
+		t.Fatalf("missing channel cancel message in %q", taskChannel)
+	}
+	if !found[ownerDM] {
+		t.Fatalf("missing owner DM cancel message in %q", ownerDM)
+	}
+}
+
+func channelDirectSlug(a, b string) string {
+	if a > b {
+		a, b = b, a
+	}
+	return a + "__" + b
+}
+
+func keys(m map[string]channelMessage) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func containsAll(got, want []string) bool {
+	set := make(map[string]struct{}, len(got))
+	for _, g := range got {
+		set[g] = struct{}{}
+	}
+	for _, w := range want {
+		if _, ok := set[w]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 func TestBrokerOfficeFeatureTaskForGTMCompletesWithoutReviewAndUnblocksDependents(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()

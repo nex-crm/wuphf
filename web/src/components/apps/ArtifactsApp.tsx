@@ -185,7 +185,7 @@ export function ArtifactsApp() {
                   key={task.id}
                   title={task.title || task.id || 'Untitled task'}
                   body={task.description ?? ''}
-                  meta={[task.channel ? `#${task.channel}` : '', task.assigned_to ? `@${task.assigned_to}` : ''].filter(Boolean)}
+                  meta={[task.channel ? `#${task.channel}` : '', task.owner ? `@${task.owner}` : ''].filter(Boolean)}
                   kindLabel={normalizeStatus(task.status).replace(/_/g, ' ')}
                 />
               ))
@@ -244,7 +244,7 @@ export function ArtifactsApp() {
                     key={task.id}
                     title={task.title || task.id || 'Blocked task'}
                     body={task.description ?? 'Blocked lane needs operator attention.'}
-                    meta={[task.channel ? `#${task.channel}` : '', task.assigned_to ? `@${task.assigned_to}` : ''].filter(Boolean)}
+                    meta={[task.channel ? `#${task.channel}` : '', task.owner ? `@${task.owner}` : ''].filter(Boolean)}
                     kindLabel="blocked"
                   />
                 ))}
