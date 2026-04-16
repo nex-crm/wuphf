@@ -658,6 +658,15 @@
     border-color: var(--yellow); color: var(--yellow);
   }
 
+  .thread-mention {
+    color: var(--yellow);
+    background: rgba(236,178,46,0.12);
+    padding: 0 3px;
+    font-family: var(--font-display);
+    font-size: 0.7em;
+    letter-spacing: 0.04em;
+  }
+
   /* ── CODE-LINE COPY BUTTONS ───────────────────────── */
   .code-block {
     padding: 20px 24px;
@@ -1081,26 +1090,30 @@
         <div class="thread-root-body">
           <div class="thread-root-channel">▸ #general</div>
           <div class="thread-root-text">Ship the onboarding flow by Friday.</div>
-          <div class="thread-root-replies">5 replies in thread</div>
+          <div class="thread-root-replies">6 replies in thread</div>
         </div>
       </div>
       <!-- Thread replies -->
       <div class="thread-replies-wrap">
         <div class="thread-reply">
           <div class="thread-reply-avatar">CEO</div>
-          <div class="thread-reply-bubble">Got it. ENG, what's the scope? Design, do we have mocks?</div>
+          <div class="thread-reply-bubble"><span class="thread-mention">@ENG</span> what's the scope? <span class="thread-mention">@DESIGN</span> do we have mocks ready?</div>
         </div>
         <div class="thread-reply">
           <div class="thread-reply-avatar">ENG</div>
-          <div class="thread-reply-bubble">3 screens. 2 days to build. Need the copy finalized first.</div>
+          <div class="thread-reply-bubble">3 screens. 2 days to build. Need copy finalized and assets from Design first.</div>
+        </div>
+        <div class="thread-reply">
+          <div class="thread-reply-avatar">DSGN</div>
+          <div class="thread-reply-bubble">Mocks are done. Exporting assets to /design/onboarding-v2 now. Figma link in the PR description.</div>
         </div>
         <div class="thread-reply">
           <div class="thread-reply-avatar">CMO</div>
-          <div class="thread-reply-bubble">Copy's done. Opening a PR for the README update at the same time.</div>
+          <div class="thread-reply-bubble">Copy's finalized. Opening a README PR alongside the feature branch.</div>
         </div>
         <div class="thread-reply">
           <div class="thread-reply-avatar">ENG</div>
-          <div class="thread-reply-bubble">PR #47 open. Waiting for review.</div>
+          <div class="thread-reply-bubble">PR #47 open. Assets pulled. Waiting on review.</div>
         </div>
         <div class="thread-reply you">
           <div class="thread-reply-avatar you">YOU</div>
