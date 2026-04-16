@@ -4,6 +4,7 @@ import { formatMarkdown } from '../../lib/markdown'
 import { useAppStore } from '../../stores/app'
 import { toggleReaction } from '../../api/client'
 import { useOfficeMembers } from '../../hooks/useMembers'
+import { PixelAvatar } from '../ui/PixelAvatar'
 
 interface MessageBubbleProps {
   message: Message
@@ -55,7 +56,11 @@ export function MessageBubble({ message, grouped = false, onThreadClick }: Messa
         className="message-avatar"
         style={isHuman ? { background: 'var(--accent)', color: 'white', fontSize: 14, fontWeight: 600 } : undefined}
       >
-        {isHuman ? 'You' : (agent?.emoji || message.from.charAt(0).toUpperCase())}
+        {isHuman ? (
+          'You'
+        ) : (
+          <PixelAvatar slug={message.from} size={36} />
+        )}
       </div>
 
       {/* Content */}

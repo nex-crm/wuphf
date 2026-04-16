@@ -1,5 +1,6 @@
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { useAppStore } from '../../stores/app'
+import { PixelAvatar } from '../ui/PixelAvatar'
 import type { OfficeMember } from '../../api/client'
 
 function classifyActivity(member: OfficeMember | undefined) {
@@ -49,7 +50,11 @@ export function AgentList() {
             onClick={() => setActiveAgentSlug(agent.slug)}
           >
             <span className="sidebar-agent-avatar">
-              {agent.emoji || agent.slug.charAt(0).toUpperCase()}
+              <PixelAvatar
+                slug={agent.slug}
+                size={24}
+                className="pixel-avatar-sidebar"
+              />
             </span>
             <div className="sidebar-agent-wrap">
               <span className="sidebar-agent-name">{agent.name || agent.slug}</span>

@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores/app'
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { useAgentStream } from '../../hooks/useAgentStream'
 import { createDM, getAgentLogs } from '../../api/client'
+import { PixelAvatar } from '../ui/PixelAvatar'
 import type { AgentLog, OfficeMember } from '../../api/client'
 
 interface AgentPanelViewProps {
@@ -125,7 +126,11 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       <div className="agent-panel-header">
         <div className="agent-panel-identity">
           <div className="agent-panel-avatar">
-            {agent.emoji || agent.slug.charAt(0).toUpperCase()}
+            <PixelAvatar
+              slug={agent.slug}
+              size={56}
+              className="pixel-avatar-panel"
+            />
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
