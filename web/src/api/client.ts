@@ -156,6 +156,11 @@ export function toggleReaction(msgId: string, emoji: string, channel: string) {
 
 // ── Members ──
 
+export interface ProviderBinding {
+  kind?: string
+  model?: string
+}
+
 export interface OfficeMember {
   slug: string
   name: string
@@ -164,7 +169,7 @@ export interface OfficeMember {
   status?: string
   task?: string
   channel?: string
-  provider?: string
+  provider?: ProviderBinding | string
 }
 
 export function getOfficeMembers() {
