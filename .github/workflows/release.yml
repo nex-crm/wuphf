@@ -4,6 +4,10 @@ on:
   push:
     tags:
       - "v*"
+  # workflow_dispatch lets auto-release.yml trigger this workflow via
+  # `gh workflow run release.yml --ref <tag>`. A push tag event created with
+  # GITHUB_TOKEN does not fire other workflows, but workflow_dispatch does.
+  workflow_dispatch:
 
 permissions:
   contents: write
