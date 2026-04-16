@@ -4,17 +4,28 @@ import { getOfficeTasks, post, type Task } from '../../api/client'
 import { formatRelativeTime } from '../../lib/format'
 import { TaskDetailModal } from './TaskDetailModal'
 
-const STATUS_ORDER = ['in_progress', 'open', 'review', 'pending', 'blocked', 'done'] as const
+const STATUS_ORDER = ['in_progress', 'open', 'review', 'pending', 'blocked', 'done', 'canceled'] as const
 
 type StatusGroup = typeof STATUS_ORDER[number]
 
 const DND_MIME = 'application/x-wuphf-task-id'
 const HUMAN_SLUG = 'human'
 
+const COLUMN_LABEL: Record<StatusGroup, string> = {
+  in_progress: 'in progress',
+  open: 'open',
+  review: 'review',
+  pending: 'pending',
+  blocked: 'blocked',
+  done: 'done',
+  canceled: "won't do",
+}
+
 function normalizeStatus(raw: string): StatusGroup {
   const s = raw.toLowerCase().replace(/[\s-]+/g, '_')
   if (s === 'completed') return 'done'
   if (s === 'in_review') return 'review'
+  if (s === 'cancelled') return 'canceled'
   if ((STATUS_ORDER as readonly string[]).includes(s)) return s as StatusGroup
   return 'open'
 }
@@ -23,6 +34,7 @@ function statusBadgeClass(status: StatusGroup): string {
   if (status === 'done') return 'badge badge-green'
   if (status === 'in_progress' || status === 'review') return 'badge badge-accent'
   if (status === 'blocked') return 'badge badge-yellow'
+  if (status === 'canceled') return 'badge badge-muted'
   return 'badge badge-accent'
 }
 
@@ -34,10 +46,9 @@ function groupTasks(tasks: Task[]): Record<StatusGroup, Task[]> {
     pending: [],
     blocked: [],
     done: [],
+    canceled: [],
   }
   for (const task of tasks) {
-    const raw = task.status?.toLowerCase().replace(/[\s-]+/g, '_')
-    if (raw === 'canceled' || raw === 'cancelled') continue
     const status = normalizeStatus(task.status)
     groups[status].push(task)
   }
@@ -65,6 +76,8 @@ function buildMoveBody(task: Task, toStatus: StatusGroup): Record<string, string
       return { ...base, action: 'complete' }
     case 'blocked':
       return { ...base, action: 'block' }
+    case 'canceled':
+      return { ...base, action: 'cancel' }
     case 'pending':
       // No direct "pending" action in the broker — punted.
       return null
@@ -183,9 +196,13 @@ export function TasksApp() {
       <div className="task-board">
         {STATUS_ORDER.map((status) => {
           const column = grouped[status]
-          // Hide empty pending/blocked columns only when nothing is being dragged.
-          // While dragging, keep all 6 columns visible as drop targets.
-          if (!isDragging && column.length === 0 && (status === 'pending' || status === 'blocked')) {
+          // Hide empty pending/blocked/canceled columns only when nothing is being dragged.
+          // While dragging, keep all columns visible as drop targets.
+          if (
+            !isDragging &&
+            column.length === 0 &&
+            (status === 'pending' || status === 'blocked' || status === 'canceled')
+          ) {
             return null
           }
           const columnClass =
@@ -199,7 +216,7 @@ export function TasksApp() {
               onDrop={handleColumnDrop(status)}
             >
               <div className="task-column-header">
-                <span>{status.replace(/_/g, ' ')}</span>
+                <span>{COLUMN_LABEL[status]}</span>
                 <span className="task-column-count">{column.length}</span>
               </div>
               {column.map((task) => (
@@ -266,7 +283,7 @@ function TaskCard({ task, isDragging, onDragStart, onDragEnd, onOpen }: TaskCard
       )}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         <span className={statusBadgeClass(status)}>
-          {status.replace(/_/g, ' ')}
+          {COLUMN_LABEL[status]}
         </span>
         {task.owner && (
           <span className="app-card-meta">@{task.owner}</span>

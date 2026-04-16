@@ -80,6 +80,7 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .badge-green { background: var(--green-bg); color: var(--green); }
 .badge-accent { background: var(--accent-bg); color: var(--accent); }
 .badge-yellow { background: var(--yellow-bg); color: var(--yellow); }
+.badge-muted { background: var(--bg-warm); color: var(--text-tertiary); text-decoration: line-through; }
 
 /* ─── Pixel avatars ─── */
 /* The canvas buffer is the sprite's native 14x14 grid; CSS scales it up.

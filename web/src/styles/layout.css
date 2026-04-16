@@ -69,7 +69,7 @@
 .app-card-meta { font-size: 11px; color: var(--text-tertiary); }
 
 /* ─── Task board (kanban) ─── */
-.task-board { display: grid; grid-template-columns: repeat(6, minmax(220px, 1fr)); gap: 12px; padding: 20px; align-content: start; overflow-x: auto; }
+.task-board { display: grid; grid-template-columns: repeat(7, minmax(200px, 1fr)); gap: 12px; padding: 20px; align-content: start; overflow-x: auto; }
 .task-column { display: flex; flex-direction: column; gap: 4px; min-height: 120px; padding: 4px; border-radius: var(--radius-md); transition: outline-color 0.15s, background 0.15s; }
 .task-column-header { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding: 0 4px 8px; border-bottom: 2px solid var(--border); display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .task-column-count { font-family: var(--font-mono); font-size: 10px; background: var(--bg); padding: 1px 6px; border-radius: var(--radius-full); }
