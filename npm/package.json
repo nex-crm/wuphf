@@ -17,8 +17,14 @@
   "engines": {
     "node": ">=18"
   },
-  "os": ["darwin", "linux"],
-  "cpu": ["x64", "arm64"],
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/nex-crm/wuphf.git"
@@ -28,5 +34,11 @@
     "url": "https://github.com/nex-crm/wuphf/issues"
   },
   "license": "MIT",
-  "keywords": ["wuphf", "crm", "cli", "pixel-office", "nex"]
+  "keywords": [
+    "wuphf",
+    "crm",
+    "cli",
+    "pixel-office",
+    "nex"
+  ]
 }
