@@ -102,6 +102,23 @@
 .interview-bar-text-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .interview-bar-empty { font-size: 12px; color: var(--text-tertiary); font-style: italic; }
 
+/* ─── Live stream JSON renderer ─── */
+.stream-line { padding: 2px 0; word-break: break-word; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
+.stream-line-raw { white-space: pre-wrap; }
+.stream-line-json { display: block; }
+.sv-key { color: var(--accent); font-weight: 600; margin-right: 6px; }
+.sv-key::after { content: ':'; color: var(--text-tertiary); margin-left: 1px; }
+.sv-str { color: var(--text); white-space: pre-wrap; }
+.sv-num { color: #b08800; }
+.sv-bool { color: #c25a8b; font-weight: 600; }
+.sv-null { color: var(--text-tertiary); font-style: italic; }
+.sv-ts { color: var(--text-tertiary); }
+.sv-array, .sv-obj { display: block; padding-left: 12px; border-left: 1px dashed var(--border); margin: 2px 0 2px 4px; }
+.sv-array-item, .sv-obj-row { display: block; padding: 1px 0; }
+.sv-collapsible { display: inline-block; }
+.sv-toggle { background: none; border: none; padding: 0 4px 0 0; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); cursor: pointer; }
+.sv-toggle:hover { color: var(--text); }
+
 /* ─── Composer ─── */
 .composer { padding: 12px 20px 16px; border-top: 1px solid var(--border); background: var(--bg-card); position: relative; }
 

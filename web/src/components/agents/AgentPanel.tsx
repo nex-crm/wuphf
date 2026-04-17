@@ -5,6 +5,7 @@ import { useAgentStream } from '../../hooks/useAgentStream'
 import { createDM, getAgentLogs } from '../../api/client'
 import { PixelAvatar } from '../ui/PixelAvatar'
 import { showNotice } from '../ui/Toast'
+import { StreamLineView } from '../messages/StreamLineView'
 import type { AgentLog, OfficeMember } from '../../api/client'
 
 interface AgentPanelViewProps {
@@ -35,7 +36,7 @@ function StreamSection({ slug }: { slug: string }) {
           <div className="agent-stream-empty">No output yet</div>
         ) : (
           lines.map((line) => (
-            <div key={line.id} className="agent-stream-line">{line.data}</div>
+            <StreamLineView key={line.id} line={line} compact />
           ))
         )}
       </div>
