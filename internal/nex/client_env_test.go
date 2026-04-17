@@ -1,6 +1,7 @@
 package nex
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -61,7 +62,7 @@ func TestRun_PropagatesNexClientToSubprocess(t *testing.T) {
 	// returns it.
 	writeFakeNexCLI(t, dir, "nex-cli", `printf '%s' "$NEX_CLIENT"`)
 
-	got, err := Run(nil, "whatever")
+	got, err := Run(context.Background(), "whatever")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
