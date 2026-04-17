@@ -355,6 +355,8 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
     case '/recover':
     case '/doctor':
       deps.setCurrentApp('health-check'); return
+    case '/threads':
+      deps.setCurrentApp('threads'); return
     case '/search':
       deps.setSearchOpen(true); return
     case '/focus':

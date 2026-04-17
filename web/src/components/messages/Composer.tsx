@@ -39,6 +39,9 @@ function handleSlashCommand(input: string): boolean {
     case '/doctor':
       store.setCurrentApp('health-check')
       return true
+    case '/threads':
+      store.setCurrentApp('threads')
+      return true
     case '/search':
       store.setSearchOpen(true)
       return true

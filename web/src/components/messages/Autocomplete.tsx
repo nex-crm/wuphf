@@ -36,6 +36,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: '/collab', desc: 'Switch to collaborative mode', icon: '\uD83E\uDD1D' },
   { name: '/pause', desc: 'Pause all agents', icon: '\u23F8' },
   { name: '/resume', desc: 'Resume all agents', icon: '\u25B6' },
+  { name: '/threads', desc: 'See every active thread', icon: '\uD83E\uDDF5' },
 ]
 
 interface AutocompleteProps {

@@ -102,6 +102,21 @@
 .interview-bar-text-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .interview-bar-empty { font-size: 12px; color: var(--text-tertiary); font-style: italic; }
 
+/* ─── Threads view ─── */
+.threads-view { display: flex; flex-direction: column; gap: 12px; padding: 20px; overflow-y: auto; flex: 1; }
+.threads-view-header { display: flex; align-items: baseline; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+.threads-view-title { font-size: 18px; font-weight: 700; color: var(--text); }
+.threads-view-count { font-size: 12px; color: var(--text-tertiary); }
+.threads-view-empty { padding: 60px 20px; text-align: center; color: var(--text-tertiary); font-size: 14px; }
+.threads-view-list { display: flex; flex-direction: column; gap: 8px; }
+.thread-list-item { display: flex; gap: 12px; padding: 12px 14px; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s; text-align: left; font-family: var(--font-sans); color: var(--text); }
+.thread-list-item:hover { border-color: var(--accent); background: var(--accent-bg); }
+.thread-list-item-avatar { flex-shrink: 0; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+.thread-list-item-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.thread-list-item-preview { font-size: 13px; color: var(--text); line-height: 1.5; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.thread-list-item-meta { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text-tertiary); }
+.thread-list-item-replies { color: var(--accent); font-weight: 600; }
+
 /* ─── Live stream JSON renderer ─── */
 .stream-line { padding: 2px 0; word-break: break-word; font-family: var(--font-mono); font-size: 11px; line-height: 1.5; color: var(--text-secondary); }
 .stream-line-raw { white-space: pre-wrap; }

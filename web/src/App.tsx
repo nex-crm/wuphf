@@ -16,6 +16,7 @@ import { ArtifactsApp } from './components/apps/ArtifactsApp'
 import { ReceiptsApp } from './components/apps/ReceiptsApp'
 import { HealthCheckApp } from './components/apps/HealthCheckApp'
 import { SettingsApp } from './components/apps/SettingsApp'
+import { ThreadsApp } from './components/apps/ThreadsApp'
 import { Wizard } from './components/onboarding/Wizard'
 import { AgentPanel } from './components/agents/AgentPanel'
 import { SearchModal } from './components/search/SearchModal'
@@ -104,6 +105,7 @@ function MainContent() {
       receipts: ReceiptsApp,
       'health-check': HealthCheckApp,
       settings: SettingsApp,
+      threads: ThreadsApp,
     }
     const Panel = panels[currentApp]
     return (
