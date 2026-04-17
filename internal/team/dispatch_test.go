@@ -75,6 +75,33 @@ func TestMemberEffectiveProviderKind_DefaultsToClaudeWhenAllEmpty(t *testing.T) 
 	}
 }
 
+func TestShouldUseHeadlessDispatch(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		provider         string
+		webMode          bool
+		paneBackedAgents bool
+		want             bool
+	}{
+		{"tui mode, claude → pane", "claude-code", false, false, false},
+		{"tui mode, codex → headless", "codex", false, false, true},
+		{"web mode, no panes → headless", "claude-code", true, false, true},
+		{"web mode with panes → pane", "claude-code", true, true, false},
+		{"web mode, codex always headless even if panes flag set", "codex", true, true, true},
+	}
+	for _, tt := range tests {
+		l := &Launcher{
+			provider:         tt.provider,
+			webMode:          tt.webMode,
+			paneBackedAgents: tt.paneBackedAgents,
+		}
+		if got := l.shouldUseHeadlessDispatch(); got != tt.want {
+			t.Errorf("%s: shouldUseHeadlessDispatch() = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}
+
 func TestBrokerMemberProviderKind_Lookup(t *testing.T) {
 	b := NewBroker()
 	b.mu.Lock()

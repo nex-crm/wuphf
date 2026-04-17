@@ -73,6 +73,7 @@ type Launcher struct {
 	headlessQueues       map[string][]headlessCodexTurn
 	headlessDeferredLead *headlessCodexTurn
 	webMode              bool
+	paneBackedAgents     bool // web mode may spawn per-agent tmux panes; true when panes are live
 	noOpen               bool
 
 	notifyMu            sync.Mutex
@@ -864,7 +865,7 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		channel = "general"
 	}
 	notification := l.buildTaskExecutionPacket(target.Slug, action, task, content)
-	if l.usesCodexRuntime() || l.webMode {
+	if l.shouldUseHeadlessDispatch() {
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
@@ -2573,11 +2574,22 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		)
 	}
 
-	if l.usesCodexRuntime() || l.webMode {
+	if l.shouldUseHeadlessDispatch() {
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
 	l.sendNotificationToPane(target.PaneTarget, notification)
+}
+
+// shouldUseHeadlessDispatch returns true when notifications must be delivered
+// via a queued headless `claude --print` turn rather than typed into a live
+// interactive pane. Codex runtime always needs headless. Web mode uses headless
+// only when pane-backed agents could not be spawned (tmux missing or failed).
+func (l *Launcher) shouldUseHeadlessDispatch() bool {
+	if l.usesCodexRuntime() {
+		return true
+	}
+	return l.webMode && !l.paneBackedAgents
 }
 
 // sendNotificationToPane delivers a notification to a persistent interactive
@@ -2913,6 +2925,84 @@ func (l *Launcher) spawnOverflowAgents() {
 			"-c", l.cwd,
 			agentCmd,
 		).Run()
+	}
+}
+
+// trySpawnWebAgentPanes attempts to create a detached tmux session with one
+// interactive `claude` pane per agent so message dispatch can type into a live
+// session. This avoids the per-turn `claude --print` path, which under
+// Anthropic's recent policy consumes the separate headless/extra-usage quota.
+//
+// On success, l.paneBackedAgents is set to true and dispatch routes through
+// sendNotificationToPane. On any failure (tmux missing, session create failure,
+// spawn error) the method logs the tradeoff, posts a system message to
+// #general, and leaves paneBackedAgents false so the existing headless path
+// continues to work.
+func (l *Launcher) trySpawnWebAgentPanes() {
+	if l.broker == nil {
+		return
+	}
+	// Codex runtime uses its own headless pipeline; panes don't apply.
+	if l.usesCodexRuntime() {
+		return
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		l.reportPaneFallback("tmux not found on PATH", err)
+		return
+	}
+
+	// Remove any stale session from a previous run. Ignore errors — the common
+	// case is "no such session".
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+
+	// Create a detached session with a placeholder pane 0. Agent panes are
+	// attached as splits afterward so agentPaneTargets() (which starts at
+	// team.1) maps correctly.
+	placeholderCmd := "sh -c 'while :; do sleep 3600; done'"
+	if err := exec.Command("tmux", "-L", tmuxSocketName, "new-session", "-d",
+		"-s", l.sessionName,
+		"-n", "team",
+		"-c", l.cwd,
+		placeholderCmd,
+	).Run(); err != nil {
+		l.reportPaneFallback("tmux new-session failed", err)
+		return
+	}
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+		"mouse", "off",
+	).Run()
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+		"status", "off",
+	).Run()
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
+		"remain-on-exit", "on",
+	).Run()
+
+	if _, err := l.spawnVisibleAgents(); err != nil {
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+		l.reportPaneFallback("spawn visible agents failed", err)
+		return
+	}
+	l.spawnOverflowAgents()
+
+	l.paneBackedAgents = true
+	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (uses subscription quota)\n", l.sessionName)
+}
+
+// reportPaneFallback logs a pane-spawn failure and surfaces the billing
+// tradeoff to the web user via a #general system message.
+func (l *Launcher) reportPaneFallback(summary string, err error) {
+	detail := summary
+	if err != nil {
+		detail = fmt.Sprintf("%s: %v", summary, err)
+	}
+	fmt.Fprintf(os.Stderr, "  Agents:  pane-backed mode unavailable (%s). Falling back to headless `claude --print`, which consumes Anthropic's extra-usage quota. Install tmux to run agents on your normal subscription.\n", detail)
+	if l.broker != nil {
+		l.broker.PostSystemMessage(
+			"general",
+			"Running in headless mode ("+detail+"). Agent turns will draw from the Anthropic extra-usage quota. Install tmux and relaunch to use interactive Claude sessions on your normal subscription.",
+			"runtime",
+		)
 	}
 }
 
@@ -3869,16 +3959,26 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
 	l.broker.ServeWebUI(webPort)
 
-	// Web mode always uses queued headless turns so notifications can push
-	// scoped work directly instead of relying on long-lived agents polling.
+	// Try to spawn interactive Claude sessions in tmux panes so dispatch can
+	// type into a live agent rather than spending `claude --print` quota.
+	// Falls back to the headless path if tmux is missing or pane spawn fails.
+	l.trySpawnWebAgentPanes()
+
+	// Headless context is used for codex runtime, headless fallback, and
+	// per-turn operations that don't fit a long-lived pane session.
 	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
-	l.resumeInFlightWork()
+	if !l.paneBackedAgents {
+		l.resumeInFlightWork()
+	}
 
 	go l.notifyAgentsLoop()
 	go l.notifyTaskActionsLoop()
 	go l.notifyOfficeChangesLoop()
 	go l.pollNexNotificationsLoop()
 	go l.watchdogSchedulerLoop()
+	if l.paneBackedAgents {
+		go l.primeVisibleAgents()
+	}
 
 	webURL := fmt.Sprintf("http://localhost:%d", webPort)
 	fmt.Printf("\n  Web UI:  %s\n", webURL)
