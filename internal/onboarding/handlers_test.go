@@ -3,6 +3,7 @@ package onboarding
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -213,6 +214,106 @@ func TestHandleCompletePostPersistsCompletedState(t *testing.T) {
 		}
 		if !s.Onboarded() {
 			t.Error("state should be onboarded after HandleComplete")
+		}
+	})
+}
+
+// TestHandleCompleteDecodesBlueprintAndAgents verifies that POST
+// /onboarding/complete now decodes the blueprint id and selected agent
+// slugs from the body and threads them into completeFn. Previously these
+// fields were silently dropped, causing every user's team to collapse to
+// the DefaultManifest roster regardless of what they picked in the wizard.
+func TestHandleCompleteDecodesBlueprintAndAgents(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		var gotTask, gotBlueprint string
+		var gotSkipTask bool
+		var gotAgents []string
+		captured := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+			gotTask = task
+			gotSkipTask = skipTask
+			gotBlueprint = blueprintID
+			gotAgents = selectedAgents
+			return nil
+		}
+
+		body := map[string]interface{}{
+			"task":      "Stand up niche CRM",
+			"skip_task": false,
+			"blueprint": "niche-crm",
+			"agents":    []string{"operator", "builder"},
+		}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, captured)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if gotTask != "Stand up niche CRM" {
+			t.Errorf("task: got %q want %q", gotTask, "Stand up niche CRM")
+		}
+		if gotSkipTask {
+			t.Errorf("skipTask: got true want false")
+		}
+		if gotBlueprint != "niche-crm" {
+			t.Errorf("blueprint: got %q want %q", gotBlueprint, "niche-crm")
+		}
+		if len(gotAgents) != 2 || gotAgents[0] != "operator" || gotAgents[1] != "builder" {
+			t.Errorf("agents: got %v want [operator builder]", gotAgents)
+		}
+	})
+}
+
+// TestHandleCompleteBackwardCompatWithLegacyClient verifies that a POST
+// body without the new blueprint/agents fields (e.g. from an older client)
+// is still accepted, with blueprintID empty and selectedAgents nil. The
+// downstream onboardingCompleteFn must treat these as "from scratch".
+func TestHandleCompleteBackwardCompatWithLegacyClient(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		var gotBlueprint string
+		var gotAgents []string
+		captured := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+			gotBlueprint = blueprintID
+			gotAgents = selectedAgents
+			return nil
+		}
+
+		body := map[string]interface{}{"task": "go", "skip_task": false}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, captured)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, body: %s", w.Code, w.Body.String())
+		}
+		if gotBlueprint != "" {
+			t.Errorf("blueprint: got %q want empty", gotBlueprint)
+		}
+		if len(gotAgents) != 0 {
+			t.Errorf("agents: got %v want empty/nil", gotAgents)
+		}
+	})
+}
+
+// TestHandleCompleteReturns500OnCompleteFnError verifies that if
+// completeFn returns an error (e.g. LoadBlueprint failed), the handler
+// returns HTTP 500 so the wizard can surface the error to the user.
+func TestHandleCompleteReturns500OnCompleteFnError(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		failing := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+			return fmt.Errorf("simulated loader failure for %q", blueprintID)
+		}
+
+		body := map[string]interface{}{"task": "go", "skip_task": false, "blueprint": "bogus"}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, failing)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status: got %d want 500\nbody: %s", w.Code, w.Body.String())
 		}
 	})
 }

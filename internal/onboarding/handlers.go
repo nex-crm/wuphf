@@ -3,12 +3,23 @@ package onboarding
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/operations"
 )
+
+// CompleteFunc is the side-effect hook invoked by HandleComplete when the
+// user finishes onboarding. The broker supplies a real implementation that
+// seeds the team from the picked blueprint (or synthesizes one when blueprintID
+// is empty), honors the selectedAgents filter from the wizard, and posts the
+// kickoff task. blueprintID is empty for the "from scratch" path.
+// selectedAgents is nil when no filtering is requested (internal synthesis
+// callers) and may be an empty slice when the wizard user unchecked every
+// agent.
+type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedAgents []string) error
 
 // RegisterRoutes attaches all onboarding HTTP handlers to mux.
 //
@@ -35,7 +46,7 @@ import (
 //	GET  /onboarding/templates
 //	POST /onboarding/checklist/{id}/done
 //	POST /onboarding/checklist/dismiss
-func RegisterRoutes(mux *http.ServeMux, completeFn func(task string, skipTask bool) error, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc) {
+func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc) {
 	if authMiddleware == nil {
 		authMiddleware = func(h http.HandlerFunc) http.HandlerFunc { return h }
 	}
@@ -116,32 +127,37 @@ func HandleProgress(w http.ResponseWriter, r *http.Request) {
 // makeHandleComplete returns a handler for POST /onboarding/complete that
 // closes over completeFn. The broker should supply a non-nil completeFn to
 // seed the team and post the first message.
-func makeHandleComplete(completeFn func(task string, skipTask bool) error) http.HandlerFunc {
+func makeHandleComplete(completeFn CompleteFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		HandleComplete(w, r, completeFn)
 	}
 }
 
 // HandleComplete handles POST /onboarding/complete.
-// Body: {"task": string, "skip_task": bool}.
+// Body: {"task": string, "skip_task": bool, "blueprint": string, "agents": []string}.
+// The blueprint and agents fields are forwarded to completeFn so the broker
+// can seed the team that the wizard actually picked. A legacy client that
+// omits them is treated as "from scratch" (blueprint empty, agents nil).
 //
 // Logic:
 //  1. Load state; if already completed return 200 {"already_completed": true, "redirect": "/"}.
 //  2. If skip_task is false and task is empty, return 400.
 //  3. Call completeFn (when non-nil) — the broker wires side-effects here.
+//     If completeFn returns an error (e.g. LoadBlueprint failed), return 500
+//     with the error message so the wizard can surface it.
 //  4. Mark state as complete and persist it.
 //  5. Return 200 {"ok": true, "redirect": "/"}.
-//
-// TODO: broker wires CompleteFunc here
-func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn func(task string, skipTask bool) error) {
+func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteFunc) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var body struct {
-		Task     string `json:"task"`
-		SkipTask bool   `json:"skip_task"`
+		Task      string   `json:"task"`
+		SkipTask  bool     `json:"skip_task"`
+		Blueprint string   `json:"blueprint"`
+		Agents    []string `json:"agents"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -170,9 +186,13 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn func(task
 		return
 	}
 
-	// TODO: broker wires CompleteFunc here
 	if completeFn != nil {
-		if err := completeFn(body.Task, body.SkipTask); err != nil {
+		if err := completeFn(body.Task, body.SkipTask, strings.TrimSpace(body.Blueprint), body.Agents); err != nil {
+			// Log the full error server-side but return an opaque response to
+			// the client. completeFn may wrap filesystem paths, yaml parse
+			// messages, or other internals that should not leak to HTTP
+			// callers on a locally-bound broker.
+			log.Printf("onboarding: complete failed: %v", err)
 			http.Error(w, "complete failed", http.StatusInternalServerError)
 			return
 		}

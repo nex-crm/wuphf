@@ -16,10 +16,20 @@ import (
 // message tagged to the office lead, and lets the existing launcher trigger
 // the lead's delegate turn.
 //
+// blueprintID and selectedAgents are threaded from the wizard via the POST
+// body. blueprintID is the curated blueprint the user picked (empty for
+// "from scratch"). selectedAgents is the user's agent-toggle state (nil for
+// back-compat clients that don't send it, or internal synthesis callers).
+// Cycle 3 of the plan will consume these to seed the real blueprint team;
+// for now they are captured but not yet used — the seeding path is
+// unchanged from previous behavior.
+//
 // Side effects happen BEFORE the onboarding package writes the completion
 // flag to disk, so a crash between this call returning and the flag write
 // re-enters the wizard — and the dedupe guard below prevents double-posting.
-func (b *Broker) onboardingCompleteFn(task string, skipTask bool) error {
+func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+	_ = blueprintID
+	_ = selectedAgents
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
