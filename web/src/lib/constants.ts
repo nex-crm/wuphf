@@ -11,9 +11,9 @@ export const SIDEBAR_APPS = [
 ] as const
 
 export const ONBOARDING_COPY = {
-  step1_headline: 'Your office, visible and doing real work.',
+  step1_headline: 'Open source Slack for self-evolving AI agents.',
   step1_subhead:
-    'WUPHF gives operators one room where AI specialists can claim real business work, show progress in public, and pull in a human only when judgment is required. Live runs are judged on real outcomes, not proof artifacts or demo theater.',
+    'A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7. Each agent backed by its own knowledge graph.',
   step1_cta: 'Open the office',
   step2_prereqs_title: 'First, make sure you have the tools',
   step2_keys_title: 'Connect your AI providers',
