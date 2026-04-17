@@ -2,6 +2,15 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.5.0] - 2026-04-17
+
+### Added
+- **Won't Do column in the Tasks board.** Canceled tasks now have their own lane next to Done instead of disappearing silently. Drag a card onto it (or use the task detail modal's "Won't do" action) to record that the work was skipped without deleting it. Empty Won't Do / Blocked / Pending columns stay hidden when idle and reappear as drop targets while you are dragging.
+- **Task detail modal with owner reassign and won't-do action.** Click any task card to open a detail view, reassign the owner in place, or mark the work as won't-do without leaving the board.
+
+### Changed
+- **"Blocked" stat on the Office Activity view split into two pills.** The single "Blocked" card used to show `blocked tasks + watchdog alerts` combined so a "2" there could mean anything. Now you see "Blocked lanes" and "Watchdog alerts" as separate counts, and clicking either pill smooth-scrolls down to the "Needs attention" list where you can act on the items. Both are keyboard-activatable (Enter/Space) with an accessible label.
+
 ## [0.0.4.1] - 2026-04-17
 
 ### Added
