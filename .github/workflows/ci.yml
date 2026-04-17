@@ -14,8 +14,8 @@ jobs:
   web:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -26,23 +26,104 @@ jobs:
           npm ci
           npm run typecheck
           npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: web-dist
           path: web/dist
           retention-days: 1
 
-  go:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11.4
+          args: --timeout=5m
+
+  test:
     needs: web
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: web-dist
           path: web/dist
       - run: go test ./...
+
+  build:
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist
       - run: go build -o wuphf ./cmd/wuphf
+      - name: Smoke test binary
+        run: |
+          ./wuphf --version
+          ./wuphf --help-all > /dev/null
+
+  vhs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          # VHS @latest tracks newer Go minors than go.mod pins; use stable so
+          # `go install github.com/charmbracelet/vhs@latest` doesn't get blocked
+          # by GOTOOLCHAIN=local (Go is forward-compatible for the wuphf build).
+          go-version: stable
+      - name: Install VHS
+        run: |
+          go install github.com/charmbracelet/vhs@latest
+      - name: Install ttyd
+        run: |
+          curl -Lo ttyd.x86_64 https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
+          sudo install ttyd.x86_64 /usr/local/bin/ttyd
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Build wuphf
+        run: go build -o wuphf ./cmd/wuphf
+      - name: Run VHS regression checks
+        run: |
+          export PATH="$PWD:$PATH"
+          bash testdata/vhs/check.sh
+      - name: Upload drift artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: vhs-drift
+          path: testdata/vhs/*.actual
+          retention-days: 7
+
+  release-build:
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: release --snapshot --clean --skip=publish

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -249,7 +250,7 @@ func (f InitFlowModel) submitTextInput(value string) (InitFlowModel, tea.Cmd) {
 		}
 		// Shell out to nex-cli register synchronously. The TUI will block
 		// briefly (nex-cli should be fast), then proceed.
-		_, err := nex.Register(nil, value)
+		_, err := nex.Register(context.Background(), value)
 		if err != nil {
 			f.keyError = "Registration failed: " + err.Error()
 			return f, nil

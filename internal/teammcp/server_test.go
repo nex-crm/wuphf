@@ -6,15 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"slices"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/nex-crm/wuphf/internal/team"
 )
 

@@ -132,13 +132,13 @@ type WorkflowCreateResult struct {
 }
 
 type WorkflowExecuteRequest struct {
-	KeyOrPath string         `json:"key_or_path"`
-	Inputs    map[string]any `json:"inputs,omitempty"`
-	DryRun    bool           `json:"dry_run,omitempty"`
-	Verbose   bool           `json:"verbose,omitempty"`
-	Mock      bool           `json:"mock,omitempty"`
-	SkipValidation bool      `json:"skip_validation,omitempty"`
-	AllowBash bool           `json:"allow_bash,omitempty"`
+	KeyOrPath      string         `json:"key_or_path"`
+	Inputs         map[string]any `json:"inputs,omitempty"`
+	DryRun         bool           `json:"dry_run,omitempty"`
+	Verbose        bool           `json:"verbose,omitempty"`
+	Mock           bool           `json:"mock,omitempty"`
+	SkipValidation bool           `json:"skip_validation,omitempty"`
+	AllowBash      bool           `json:"allow_bash,omitempty"`
 }
 
 type WorkflowExecuteResult struct {

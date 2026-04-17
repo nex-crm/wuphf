@@ -117,8 +117,7 @@ func (p PickerModel) updateTextInput(msg tea.KeyMsg) (PickerModel, tea.Cmd) {
 		if msg.Type == tea.KeyRunes {
 			p.textBuf = append(p.textBuf, msg.Runes...)
 		} else {
-			runes := []rune(msg.String())
-			for _, r := range runes {
+			for _, r := range msg.String() {
 				if r >= 32 {
 					p.textBuf = append(p.textBuf, r)
 				}

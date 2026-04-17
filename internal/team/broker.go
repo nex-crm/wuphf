@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -449,12 +450,12 @@ type Broker struct {
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
 	server              *http.Server
-	token               string   // shared secret for authenticating requests
-	addr                string   // actual listen address (useful when port=0)
-	webUIOrigins        []string // allowed CORS origins for web UI (set by ServeWebUI)
-	runtimeProvider     string   // "codex" or "claude" — set by launcher
-	packSlug            string   // active agent pack slug ("founding-team", "revops", ...) — set by launcher
-	blankSlateLaunch    bool     // start without a saved blueprint and synthesize the first operation
+	token               string          // shared secret for authenticating requests
+	addr                string          // actual listen address (useful when port=0)
+	webUIOrigins        []string        // allowed CORS origins for web UI (set by ServeWebUI)
+	runtimeProvider     string          // "codex" or "claude" — set by launcher
+	packSlug            string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
+	blankSlateLaunch    bool            // start without a saved blueprint and synthesize the first operation
 	openclawBridge      *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
 	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
 	generateChannelFn   func(prompt string) (generatedChannelTemplate, error)
@@ -1135,7 +1136,7 @@ func (b *Broker) StartOnPort(port int) error {
 // Stop shuts down the broker.
 func (b *Broker) Stop() {
 	if b.server != nil {
-		b.server.Close()
+		_ = b.server.Close()
 	}
 }
 
@@ -1360,7 +1361,7 @@ func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": b.token})
+	_ = json.NewEncoder(w).Encode(map[string]string{"token": b.token})
 }
 
 func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -1562,7 +1563,11 @@ func (b *Broker) ServeWebUI(port int) {
 	} else {
 		mux.Handle("/", fileServer)
 	}
-	go http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux)
+	go func() {
+		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("broker web UI proxy: listen on :%d: %v", port, err)
+		}
+	}()
 }
 
 func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
@@ -1623,7 +1628,7 @@ func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
 			}
 			return
 		}
-		io.Copy(w, resp.Body)
+		_, _ = io.Copy(w, resp.Body)
 	})
 }
 
@@ -3593,7 +3598,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 	memoryStatus := ResolveMemoryBackendStatus()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":                "ok",
 		"session_mode":          mode,
 		"one_on_one_agent":      agent,
@@ -3610,7 +3615,7 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(buildinfo.Current())
+	_ = json.NewEncoder(w).Encode(buildinfo.Current())
 }
 
 func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
@@ -3618,7 +3623,7 @@ func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		mode, agent := b.SessionModeState()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"session_mode":     mode,
 			"one_on_one_agent": agent,
 		})
@@ -3637,7 +3642,7 @@ func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
 		}
 		mode, agent := b.SessionModeState()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"session_mode":     mode,
 			"one_on_one_agent": agent,
 		})
@@ -3650,7 +3655,7 @@ func (b *Broker) handleFocusMode(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"focus_mode": b.FocusModeEnabled(),
 		})
 	case http.MethodPost:
@@ -3666,7 +3671,7 @@ func (b *Broker) handleFocusMode(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"focus_mode": b.FocusModeEnabled(),
 		})
 	default:
@@ -3681,7 +3686,7 @@ func (b *Broker) handleReset(w http.ResponseWriter, r *http.Request) {
 	}
 	b.Reset()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
@@ -3744,7 +3749,7 @@ func (b *Broker) handleResetDM(w http.ResponseWriter, r *http.Request) {
 	go respawnAgentPane(agent)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true, "removed": removed})
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "removed": removed})
 }
 
 // respawnAgentPane restarts an agent's Claude Code session in its tmux pane.
@@ -3760,12 +3765,12 @@ func respawnAgentPane(slug string) {
 			paneIdx := i + 1 // pane 0 is channel view
 			target := fmt.Sprintf("wuphf-team:team.%d", paneIdx)
 			// Send Ctrl+C to interrupt, then exit to terminate
-			exec.Command("tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
+			_ = exec.Command("tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
 			time.Sleep(500 * time.Millisecond)
-			exec.Command("tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
+			_ = exec.Command("tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
 			time.Sleep(500 * time.Millisecond)
 			// Respawn the pane with a fresh claude session
-			exec.Command("tmux", "-L", "wuphf", "respawn-pane", "-k", "-t", target).Run()
+			_ = exec.Command("tmux", "-L", "wuphf", "respawn-pane", "-k", "-t", target).Run()
 			return
 		}
 	}
@@ -3784,7 +3789,7 @@ func (b *Broker) handleUsage(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(usage)
+	_ = json.NewEncoder(w).Encode(usage)
 }
 
 // RecordPolicy adds a new active policy. Deduplicates by exact rule text.
@@ -3834,7 +3839,7 @@ func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"policies": out})
+		_ = json.NewEncoder(w).Encode(map[string]any{"policies": out})
 
 	case http.MethodPost:
 		var body struct {
@@ -3855,7 +3860,7 @@ func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(p)
+		_ = json.NewEncoder(w).Encode(p)
 
 	case http.MethodDelete:
 		id := strings.TrimPrefix(r.URL.Path, "/policies/")
@@ -3882,7 +3887,7 @@ func (b *Broker) handlePolicies(w http.ResponseWriter, r *http.Request) {
 		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -3899,7 +3904,7 @@ func (b *Broker) handleSignals(w http.ResponseWriter, r *http.Request) {
 	copy(signals, b.signals)
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"signals": signals})
+	_ = json.NewEncoder(w).Encode(map[string]any{"signals": signals})
 }
 
 func (b *Broker) handleDecisions(w http.ResponseWriter, r *http.Request) {
@@ -3912,7 +3917,7 @@ func (b *Broker) handleDecisions(w http.ResponseWriter, r *http.Request) {
 	copy(decisions, b.decisions)
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"decisions": decisions})
+	_ = json.NewEncoder(w).Encode(map[string]any{"decisions": decisions})
 }
 
 func (b *Broker) handleWatchdogs(w http.ResponseWriter, r *http.Request) {
@@ -3925,7 +3930,7 @@ func (b *Broker) handleWatchdogs(w http.ResponseWriter, r *http.Request) {
 	copy(alerts, b.watchdogs)
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"watchdogs": alerts})
+	_ = json.NewEncoder(w).Encode(map[string]any{"watchdogs": alerts})
 }
 
 func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
@@ -3936,7 +3941,7 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 		copy(actions, b.actions)
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"actions": actions})
+		_ = json.NewEncoder(w).Encode(map[string]any{"actions": actions})
 	case http.MethodPost:
 		var body struct {
 			Kind       string   `json:"kind"`
@@ -3970,7 +3975,7 @@ func (b *Broker) handleActions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -4272,7 +4277,7 @@ Input JSON:
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":              true,
 		"package":         pkg,
 		"artifacts":       artifacts,
@@ -4656,11 +4661,11 @@ func (b *Broker) handleStudioRunWorkflow(w http.ResponseWriter, r *http.Request)
 					retryAt, rateLimited := externalWorkflowRetryAfter(err, now)
 					failKind := "external_workflow_failed"
 					failStatus := "failed"
-					failSummary := truncateSummary(fmt.Sprintf("Studio workflow %s failed via %s (%s)", workflowKey, strings.Title(providerLabel), mode), 140)
+					failSummary := truncateSummary(fmt.Sprintf("Studio workflow %s failed via %s (%s)", workflowKey, titleCaser.String(providerLabel), mode), 140)
 					if rateLimited {
 						failKind = "external_workflow_rate_limited"
 						failStatus = "rate_limited"
-						failSummary = truncateSummary(fmt.Sprintf("Studio workflow %s rate-limited via %s (%s)", workflowKey, strings.Title(providerLabel), mode), 140)
+						failSummary = truncateSummary(fmt.Sprintf("Studio workflow %s rate-limited via %s (%s)", workflowKey, titleCaser.String(providerLabel), mode), 140)
 						retryDelay := time.Until(retryAt)
 						if retryDelay < time.Second {
 							retryDelay = time.Second
@@ -4694,7 +4699,7 @@ func (b *Broker) handleStudioRunWorkflow(w http.ResponseWriter, r *http.Request)
 	if status == "" {
 		status = "completed"
 	}
-	summary := truncateSummary(fmt.Sprintf("Studio workflow %s ran via %s (%s)", workflowKey, strings.Title(providerLabel), mode), 140)
+	summary := truncateSummary(fmt.Sprintf("Studio workflow %s ran via %s (%s)", workflowKey, titleCaser.String(providerLabel), mode), 140)
 	if err := b.RecordAction("external_workflow_executed", providerLabel, channel, actor, summary, workflowKey, nil, ""); err != nil {
 		http.Error(w, "failed to record workflow action", http.StatusInternalServerError)
 		return
@@ -4705,7 +4710,7 @@ func (b *Broker) handleStudioRunWorkflow(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":           true,
 		"skill_name":   skillName,
 		"workflow_key": workflowKey,
@@ -4738,7 +4743,7 @@ func (b *Broker) handleScheduler(w http.ResponseWriter, r *http.Request) {
 		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"jobs": jobs})
+		_ = json.NewEncoder(w).Encode(map[string]any{"jobs": jobs})
 	case http.MethodPost:
 		var body schedulerJob
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -4754,7 +4759,7 @@ func (b *Broker) handleScheduler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -4860,7 +4865,7 @@ func (b *Broker) handleBridge(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":          msg.ID,
 		"decision_id": decision.ID,
 		"signal_ids":  signalIDs,
@@ -4873,7 +4878,7 @@ func (b *Broker) handleQueue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(b.QueueSnapshot())
+	_ = json.NewEncoder(w).Encode(b.QueueSnapshot())
 }
 
 func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
@@ -4881,7 +4886,7 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		cfg, _ := config.Load()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"name":        cfg.CompanyName,
 			"description": cfg.CompanyDescription,
 			"goals":       cfg.CompanyGoals,
@@ -4921,7 +4926,7 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -4940,16 +4945,16 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			// Runtime
-			"llm_provider":        config.ResolveLLMProvider(""),
-			"memory_backend":      config.ResolveMemoryBackend(""),
-			"action_provider":     config.ResolveActionProvider(),
-			"team_lead_slug":      cfg.TeamLeadSlug,
+			"llm_provider":          config.ResolveLLMProvider(""),
+			"memory_backend":        config.ResolveMemoryBackend(""),
+			"action_provider":       config.ResolveActionProvider(),
+			"team_lead_slug":        cfg.TeamLeadSlug,
 			"max_concurrent_agents": cfg.MaxConcurrent,
-			"default_format":      config.ResolveFormat(""),
-			"default_timeout":     config.ResolveTimeout(""),
-			"blueprint":           cfg.ActiveBlueprint(),
+			"default_format":        config.ResolveFormat(""),
+			"default_timeout":       config.ResolveTimeout(""),
+			"blueprint":             cfg.ActiveBlueprint(),
 			// Workspace
 			"email":          cfg.Email,
 			"workspace_id":   cfg.WorkspaceID,
@@ -4962,20 +4967,20 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"company_size":        cfg.CompanySize,
 			"company_priority":    cfg.CompanyPriority,
 			// Polling intervals
-			"insights_poll_minutes":   config.ResolveInsightsPollInterval(),
-			"task_follow_up_minutes":  config.ResolveTaskFollowUpInterval(),
-			"task_reminder_minutes":   config.ResolveTaskReminderInterval(),
-			"task_recheck_minutes":    config.ResolveTaskRecheckInterval(),
+			"insights_poll_minutes":  config.ResolveInsightsPollInterval(),
+			"task_follow_up_minutes": config.ResolveTaskFollowUpInterval(),
+			"task_reminder_minutes":  config.ResolveTaskReminderInterval(),
+			"task_recheck_minutes":   config.ResolveTaskRecheckInterval(),
 			// Integrations — secret fields as booleans
-			"api_key_set":        config.ResolveAPIKey("") != "",
-			"openai_key_set":     config.ResolveOpenAIAPIKey() != "",
-			"anthropic_key_set":  config.ResolveAnthropicAPIKey() != "",
-			"gemini_key_set":     config.ResolveGeminiAPIKey() != "",
-			"minimax_key_set":    config.ResolveMinimaxAPIKey() != "",
-			"one_key_set":        config.ResolveOneSecret() != "",
-			"composio_key_set":   config.ResolveComposioAPIKey() != "",
-			"telegram_token_set": config.ResolveTelegramBotToken() != "",
-			"openclaw_token_set": config.ResolveOpenclawToken() != "",
+			"api_key_set":          config.ResolveAPIKey("") != "",
+			"openai_key_set":       config.ResolveOpenAIAPIKey() != "",
+			"anthropic_key_set":    config.ResolveAnthropicAPIKey() != "",
+			"gemini_key_set":       config.ResolveGeminiAPIKey() != "",
+			"minimax_key_set":      config.ResolveMinimaxAPIKey() != "",
+			"one_key_set":          config.ResolveOneSecret() != "",
+			"composio_key_set":     config.ResolveComposioAPIKey() != "",
+			"telegram_token_set":   config.ResolveTelegramBotToken() != "",
+			"openclaw_token_set":   config.ResolveOpenclawToken() != "",
 			"openclaw_gateway_url": config.ResolveOpenclawGatewayURL(),
 			// Config file path (informational)
 			"config_path": config.ConfigPath(),
@@ -5203,7 +5208,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			b.mu.Unlock()
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -5234,14 +5239,14 @@ func (b *Broker) handleNexRegister(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status": "error",
 			"error":  err.Error(),
 		})
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status": "ok",
 		"email":  email,
 		"output": output,
@@ -5256,7 +5261,7 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 		copy(members, b.members)
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"members": members})
+		_ = json.NewEncoder(w).Encode(map[string]any{"members": members})
 	case http.MethodPost:
 		var body struct {
 			Action         string                    `json:"action"`
@@ -5353,7 +5358,7 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"member": member})
+			_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
 		case "update":
 			member := b.findMemberLocked(slug)
 			if member == nil {
@@ -5443,7 +5448,7 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"member": member})
+			_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
 		case "remove":
 			member := b.findMemberLocked(slug)
 			if member == nil {
@@ -5505,7 +5510,7 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_removed", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"ok": true})
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)
 		}
@@ -5541,7 +5546,7 @@ func (b *Broker) handleGenerateMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tmpl)
+	_ = json.NewEncoder(w).Encode(tmpl)
 }
 
 func (b *Broker) handleGenerateChannel(w http.ResponseWriter, r *http.Request) {
@@ -5571,7 +5576,7 @@ func (b *Broker) handleGenerateChannel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tmpl)
+	_ = json.NewEncoder(w).Encode(tmpl)
 }
 
 func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
@@ -5594,7 +5599,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"channels": channels})
+		_ = json.NewEncoder(w).Encode(map[string]any{"channels": channels})
 	case http.MethodPost:
 		var body struct {
 			Action      string          `json:"action"`
@@ -5672,7 +5677,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_created", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"channel": ch})
+			_ = json.NewEncoder(w).Encode(map[string]any{"channel": ch})
 		case "update":
 			if slug == "" {
 				http.Error(w, "slug required", http.StatusBadRequest)
@@ -5716,7 +5721,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"channel": ch})
+			_ = json.NewEncoder(w).Encode(map[string]any{"channel": ch})
 		case "remove":
 			if slug == "" || slug == "general" {
 				http.Error(w, "cannot remove channel", http.StatusBadRequest)
@@ -5762,7 +5767,7 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_removed", Slug: slug})
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"ok": true})
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)
 		}
@@ -5856,7 +5861,7 @@ func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":      ch.ID,
 		"slug":    ch.Slug,
 		"type":    ch.Type,
@@ -5874,7 +5879,7 @@ func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
 		if ch == nil {
 			b.mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": []map[string]any{}})
+			_ = json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": []map[string]any{}})
 			return
 		}
 		memberInfo := make([]map[string]any, 0, len(ch.Members))
@@ -5886,7 +5891,7 @@ func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": memberInfo})
+		_ = json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": memberInfo})
 	case http.MethodPost:
 		var body struct {
 			Channel string `json:"channel"`
@@ -5970,7 +5975,7 @@ func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(state)
+		_ = json.NewEncoder(w).Encode(state)
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -6046,7 +6051,7 @@ func (b *Broker) handleOTLPLogs(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"accepted": len(events)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"accepted": len(events)})
 }
 
 func (b *Broker) handleNexNotifications(w http.ResponseWriter, r *http.Request) {
@@ -6077,7 +6082,7 @@ func (b *Broker) handleNexNotifications(w http.ResponseWriter, r *http.Request) 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":        msg.ID,
 		"duplicate": duplicate,
 	})
@@ -6420,7 +6425,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":    msg.ID,
 		"total": total,
 	})
@@ -6454,7 +6459,7 @@ func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
 				if r.Emoji == body.Emoji && r.From == body.From {
 					b.mu.Unlock()
 					w.Header().Set("Content-Type", "application/json")
-					json.NewEncoder(w).Encode(map[string]any{"ok": true, "duplicate": true})
+					_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "duplicate": true})
 					return
 				}
 			}
@@ -6475,7 +6480,7 @@ func (b *Broker) handleReactions(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 // RecordTelegramGroup saves a group chat ID and title seen by the transport.
@@ -6742,7 +6747,7 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"channel":      channel,
 		"messages":     result,
 		"tagged_count": taggedCount,
@@ -7115,7 +7120,7 @@ func (b *Broker) handleMembers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": list})
+	_ = json.NewEncoder(w).Encode(map[string]any{"channel": channel, "members": list})
 }
 
 func (b *Broker) handleTasks(w http.ResponseWriter, r *http.Request) {
@@ -7217,7 +7222,7 @@ func (b *Broker) handleGetTasks(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"channel": channel, "tasks": result})
+	_ = json.NewEncoder(w).Encode(map[string]any{"channel": channel, "tasks": result})
 }
 
 func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
@@ -7324,7 +7329,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"task": *existing})
+			_ = json.NewEncoder(w).Encode(map[string]any{"task": *existing})
 			return
 		}
 		b.counter++
@@ -7372,7 +7377,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"task": task})
+		_ = json.NewEncoder(w).Encode(map[string]any{"task": task})
 		return
 	}
 
@@ -7520,7 +7525,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"task": *task})
+		_ = json.NewEncoder(w).Encode(map[string]any{"task": *task})
 		return
 	}
 
@@ -7961,7 +7966,7 @@ func (b *Broker) handleTaskPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"tasks": created})
+	_ = json.NewEncoder(w).Encode(map[string]any{"tasks": created})
 }
 
 func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
@@ -7991,7 +7996,7 @@ func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
 				if raw, ok := entries[keyFilter]; ok {
 					payload = append(payload, brokerEntryFromNote(decodePrivateMemoryNote(keyFilter, raw)))
 				}
-				json.NewEncoder(w).Encode(map[string]any{
+				_ = json.NewEncoder(w).Encode(map[string]any{
 					"namespace": namespace,
 					"entries":   payload,
 				})
@@ -8002,7 +8007,7 @@ func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
 				for _, note := range matches {
 					payload = append(payload, brokerEntryFromNote(note))
 				}
-				json.NewEncoder(w).Encode(map[string]any{
+				_ = json.NewEncoder(w).Encode(map[string]any{
 					"namespace": namespace,
 					"entries":   payload,
 				})
@@ -8013,14 +8018,14 @@ func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
 				for _, note := range matches {
 					payload = append(payload, brokerEntryFromNote(note))
 				}
-				json.NewEncoder(w).Encode(map[string]any{
+				_ = json.NewEncoder(w).Encode(map[string]any{
 					"namespace": namespace,
 					"entries":   payload,
 				})
 				return
 			}
 		}
-		json.NewEncoder(w).Encode(map[string]any{"memory": mem})
+		_ = json.NewEncoder(w).Encode(map[string]any{"memory": mem})
 	case http.MethodPost:
 		var body struct {
 			Namespace string `json:"namespace"`
@@ -8065,7 +8070,7 @@ func (b *Broker) handleMemory(w http.ResponseWriter, r *http.Request) {
 		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true, "namespace": ns, "key": key})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "namespace": ns, "key": key})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
@@ -8112,7 +8117,7 @@ func (b *Broker) handleTaskAck(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"task": b.tasks[i]})
+			_ = json.NewEncoder(w).Encode(map[string]any{"task": b.tasks[i]})
 			return
 		}
 	}
@@ -8524,7 +8529,7 @@ func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 	pending := firstBlockingRequest(requests)
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"channel":  channel,
 		"requests": requests,
 		"pending":  pending,
@@ -8614,7 +8619,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"request": req, "id": req.ID})
+		_ = json.NewEncoder(w).Encode(map[string]any{"request": req, "id": req.ID})
 	case "cancel":
 		id := strings.TrimSpace(body.ID)
 		if id == "" {
@@ -8639,7 +8644,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]any{"request": b.requests[i]})
+			_ = json.NewEncoder(w).Encode(map[string]any{"request": b.requests[i]})
 			return
 		}
 		http.Error(w, "request not found", http.StatusNotFound)
@@ -8666,11 +8671,11 @@ func (b *Broker) handleGetRequestAnswer(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	for _, req := range b.requests {
 		if req.ID == id && req.Answered != nil {
-			json.NewEncoder(w).Encode(map[string]any{"answered": req.Answered})
+			_ = json.NewEncoder(w).Encode(map[string]any{"answered": req.Answered})
 			return
 		}
 	}
-	json.NewEncoder(w).Encode(map[string]any{"answered": nil})
+	_ = json.NewEncoder(w).Encode(map[string]any{"answered": nil})
 }
 
 func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request) {
@@ -8784,7 +8789,7 @@ func (b *Broker) handlePostRequestAnswer(w http.ResponseWriter, r *http.Request)
 		b.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		return
 	}
 	b.mu.Unlock()
@@ -8900,10 +8905,10 @@ func (b *Broker) handleGetInterview(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	pending := firstBlockingRequest(b.requests)
 	if pending == nil {
-		json.NewEncoder(w).Encode(map[string]any{"pending": nil})
+		_ = json.NewEncoder(w).Encode(map[string]any{"pending": nil})
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]any{"pending": pending})
+	_ = json.NewEncoder(w).Encode(map[string]any{"pending": pending})
 }
 
 func (b *Broker) handleInterviewAnswer(w http.ResponseWriter, r *http.Request) {
@@ -8992,7 +8997,7 @@ func (b *Broker) handleTelegramGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	b.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"groups": groups})
+	_ = json.NewEncoder(w).Encode(map[string]any{"groups": groups})
 }
 
 func (b *Broker) handleSkills(w http.ResponseWriter, r *http.Request) {
@@ -9066,7 +9071,7 @@ func (b *Broker) handleGetSkills(w http.ResponseWriter, r *http.Request) {
 	b.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"skills": result})
+	_ = json.NewEncoder(w).Encode(map[string]any{"skills": result})
 }
 
 func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
@@ -9178,7 +9183,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"skill": sk})
+	_ = json.NewEncoder(w).Encode(map[string]any{"skill": sk})
 }
 
 func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
@@ -9297,7 +9302,7 @@ func (b *Broker) handlePutSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"skill": *sk})
+	_ = json.NewEncoder(w).Encode(map[string]any{"skill": *sk})
 }
 
 func (b *Broker) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
@@ -9350,7 +9355,7 @@ func (b *Broker) handleDeleteSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"ok": true})
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 }
 
 func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
@@ -9424,7 +9429,7 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"skill": *sk, "channel": channel})
+	_ = json.NewEncoder(w).Encode(map[string]any{"skill": *sk, "channel": channel})
 }
 
 // parseSkillProposalLocked extracts a [SKILL PROPOSAL] block from a message
@@ -9605,7 +9610,9 @@ func (b *Broker) SeedDefaultSkills(specs []agent.PackSkillSpec) {
 		}
 		b.skills = append(b.skills, sk)
 	}
-	b.saveLocked()
+	if err := b.saveLocked(); err != nil {
+		log.Printf("broker: saveLocked after seeding skills: %v", err)
+	}
 }
 
 // dirExists returns true if path exists and is a directory.

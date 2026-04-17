@@ -269,7 +269,7 @@ func openDM(slug string) string {
 	}
 	var out struct {
 		Channel struct{ Slug string } `json:"channel"`
-		Slug    string                 `json:"slug"`
+		Slug    string                `json:"slug"`
 	}
 	_ = json.Unmarshal([]byte(resp), &out)
 	if out.Channel.Slug != "" {

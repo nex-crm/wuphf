@@ -252,7 +252,7 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 		}
 
 		// Clear broker state so next restart picks up the manifest with surfaces
-		os.Remove(filepath.Join(os.Getenv("HOME"), ".wuphf", "team", "broker-state.json"))
+		_ = os.Remove(filepath.Join(os.Getenv("HOME"), ".wuphf", "team", "broker-state.json"))
 
 		return telegramConnectDoneMsg{
 			channelSlug: slug,
@@ -316,7 +316,7 @@ func fetchOpenclawSessions(url, token string) tea.Cmd {
 		if err != nil {
 			return openclawSessionsMsg{err: err}
 		}
-		defer client.Close()
+		defer func() { _ = client.Close() }()
 		rows, err := client.SessionsList(ctx, openclaw.SessionsListFilter{Limit: 50, IncludeLastMessage: true})
 		if err != nil {
 			return openclawSessionsMsg{err: err}

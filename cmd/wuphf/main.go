@@ -103,13 +103,13 @@ func printVisibleFlags(w *os.File) {
 		if len(f.Name) > 1 {
 			prefix = "--"
 		}
-		fmt.Fprintf(w, "  %s%s\n    \t%s", prefix, f.Name, f.Usage)
+		_, _ = fmt.Fprintf(w, "  %s%s\n    \t%s", prefix, f.Name, f.Usage)
 		// Only emit a trailing (default ...) when the usage string hasn't
 		// already mentioned the default itself.
 		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && !strings.Contains(f.Usage, "default") {
-			fmt.Fprintf(w, " (default %q)", f.DefValue)
+			_, _ = fmt.Fprintf(w, " (default %q)", f.DefValue)
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	})
 }
 
@@ -335,7 +335,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 			_ = os.Setenv("WUPHF_ONE_ON_ONE", "1")
 			_ = os.Setenv("WUPHF_ONE_ON_ONE_AGENT", l.OneOnOneAgent())
 		}
-		defer l.Kill()
+		defer func() { _ = l.Kill() }()
 		runChannelView(false, resolveInitialOfficeApp(""), false)
 		return
 	}

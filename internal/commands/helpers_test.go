@@ -27,9 +27,9 @@ func TestTokenize(t *testing.T) {
 
 func TestParseFlags(t *testing.T) {
 	tests := []struct {
-		input        string
-		wantPos      []string
-		wantFlags    map[string]string
+		input     string
+		wantPos   []string
+		wantFlags map[string]string
 	}{
 		{
 			"list --limit 10 --sort name",

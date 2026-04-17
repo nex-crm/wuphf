@@ -5,7 +5,6 @@ import (
 	"time"
 )
 
-
 // countReplies counts replies for a given parentID from the full message list,
 // returning the count and the formatted time of the last reply.
 func countReplies(messages []brokerMessage, parentID string) (count int, lastReplyTime string) {
@@ -65,4 +64,3 @@ func formatShortTime(timestamp string) string {
 	}
 	return t.Format("3:04 PM")
 }
-

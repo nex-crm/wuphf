@@ -72,7 +72,7 @@ func HandleState(w http.ResponseWriter, r *http.Request) {
 		"onboarded":           s.Onboarded(),
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(payload)
+	_ = json.NewEncoder(w).Encode(payload)
 }
 
 // HandleProgress handles POST /onboarding/progress.
@@ -102,7 +102,7 @@ func HandleProgress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // makeHandleComplete returns a handler for POST /onboarding/complete that
@@ -149,7 +149,7 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn func(task
 	// Idempotent: already done.
 	if s.Onboarded() {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"already_completed": true,
 			"redirect":          "/",
 		})
@@ -180,7 +180,7 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn func(task
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	_ = json.NewEncoder(w).Encode(map[string]interface{}{
 		"ok":       true,
 		"redirect": "/",
 	})
@@ -335,7 +335,7 @@ func HandleChecklistDone(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
 // HandlePrereqs handles GET /onboarding/prereqs.
@@ -347,7 +347,7 @@ func HandlePrereqs(w http.ResponseWriter, r *http.Request) {
 	}
 	results := CheckAll()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
+	_ = json.NewEncoder(w).Encode(results)
 }
 
 // HandleValidateKey handles POST /onboarding/validate-key.
@@ -368,7 +368,7 @@ func HandleValidateKey(w http.ResponseWriter, r *http.Request) {
 	}
 	status := validateProviderKey(body.Provider, body.Key)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": status})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 }
 
 // makeHandleTemplates returns a handler for GET /onboarding/templates that
@@ -389,7 +389,7 @@ func HandleTemplates(w http.ResponseWriter, r *http.Request, packSlug string) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(TemplatesForSelection("", packSlug))
+	_ = json.NewEncoder(w).Encode(TemplatesForSelection("", packSlug))
 }
 
 // blueprintSummary is the wizard-facing shape returned by HandleBlueprints.
@@ -441,7 +441,7 @@ func HandleBlueprints(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"templates": summaries})
+	_ = json.NewEncoder(w).Encode(map[string]any{"templates": summaries})
 }
 
 func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
@@ -485,5 +485,5 @@ func HandleChecklistDismiss(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }

@@ -228,7 +228,7 @@ func (o *OneCLI) executeActionViaFlow(ctx context.Context, req ExecuteRequest) (
 	if err != nil {
 		return ExecuteResult{}, fmt.Errorf("create temp flow dir: %w", err)
 	}
-	defer os.RemoveAll(tempRoot)
+	defer func() { _ = os.RemoveAll(tempRoot) }()
 
 	flowKey := fmt.Sprintf("wuphf-auto-action-%d", time.Now().UTC().UnixNano())
 	flowDir := filepath.Join(tempRoot, ".one", "flows", flowKey)
@@ -320,9 +320,9 @@ func buildOneActionFlowDefinition(req ExecuteRequest) map[string]any {
 		},
 		"steps": []map[string]any{
 			{
-				"id":   "execute",
-				"name": "Execute external action",
-				"type": "action",
+				"id":     "execute",
+				"name":   "Execute external action",
+				"type":   "action",
 				"action": actionStep,
 			},
 		},
@@ -677,7 +677,7 @@ func oneCLIUsesFlowWorkspace(args []string) bool {
 
 func (o *OneCLI) ensureConfigured() error {
 	if config.ResolveNoNex() {
-		return errors.New("Nex is disabled for this session (--no-nex), so WUPHF-managed integrations are unavailable")
+		return errors.New("nex is disabled for this session (--no-nex); Nex-managed integrations are unavailable")
 	}
 	return nil
 }

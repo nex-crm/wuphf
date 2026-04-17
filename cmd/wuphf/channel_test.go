@@ -10,6 +10,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
@@ -2098,7 +2099,7 @@ func TestMouseClickJumpLatestClearsUnread(t *testing.T) {
 	mainX := layout.SidebarW + 1
 	headerH, _, _ := m.mainPanelGeometry(layout.MainW, layout.ContentH)
 
-	next, _ := m.Update(tea.MouseMsg{Type: tea.MouseLeft, Button: tea.MouseButtonLeft, X: mainX + 4, Y: headerH})
+	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: mainX + 4, Y: headerH})
 	got := next.(channelModel)
 	if got.scroll != 0 || got.unreadCount != 0 {
 		t.Fatalf("expected jump latest to clear unread and scroll, got scroll=%d unread=%d", got.scroll, got.unreadCount)
@@ -2278,7 +2279,7 @@ func TestRecoveryMouseClickInsertsPromptAndReturnsToMessages(t *testing.T) {
 		t.Fatalf("expected recovery click to draft a prompt, got %+v", action)
 	}
 
-	next, _ := m.Update(tea.MouseMsg{Type: tea.MouseLeft, Button: tea.MouseButtonLeft, X: mainX, Y: headerH + targetRow})
+	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: mainX, Y: headerH + targetRow})
 	got := next.(channelModel)
 	if got.activeApp != officeAppMessages {
 		t.Fatalf("expected recovery click to return to messages, got %q", got.activeApp)
@@ -2350,7 +2351,7 @@ func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
 		t.Fatal("expected collapsed thread summary row")
 	}
 
-	next, _ := m.Update(tea.MouseMsg{Type: tea.MouseLeft, Button: tea.MouseButtonLeft, X: layout.SidebarW + 5, Y: headerH + row})
+	next, _ := m.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: layout.SidebarW + 5, Y: headerH + row})
 	got := next.(channelModel)
 	if !got.threadPanelOpen || got.threadPanelID != "msg-1" {
 		t.Fatalf("expected click to open thread panel for msg-1, got open=%v id=%q", got.threadPanelOpen, got.threadPanelID)

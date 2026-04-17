@@ -74,9 +74,11 @@ func appendWorkflowRun(provider, key string, run any) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	enc := json.NewEncoder(f)
-	return enc.Encode(run)
+	if err := json.NewEncoder(f).Encode(run); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func listWorkflowRuns(provider, key string) (WorkflowRunsResult, error) {
@@ -88,7 +90,7 @@ func listWorkflowRuns(provider, key string) (WorkflowRunsResult, error) {
 		}
 		return WorkflowRunsResult{}, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var runs []json.RawMessage
 	scanner := bufio.NewScanner(f)

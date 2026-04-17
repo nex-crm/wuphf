@@ -79,7 +79,7 @@ var headlessCodexWorkspaceStatusSnapshot = func(path string) string {
 func (l *Launcher) launchHeadlessCodex() error {
 	killStaleBroker()
 	killStaleHeadlessTaskRunners()
-	exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	l.broker = NewBroker()
 	l.broker.packSlug = l.packSlug
@@ -957,7 +957,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		pw.Close()
+		_ = pw.Close()
 		return err
 	}
 	done := make(chan struct{})
@@ -1016,7 +1016,7 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
 		}
 	})
-	pw.Close() // signal scanner goroutine that stream is done
+	_ = pw.Close() // signal scanner goroutine that stream is done (io.PipeWriter.Close always returns nil)
 	if err := cmd.Wait(); err != nil {
 		detail := firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()))
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
@@ -1352,7 +1352,7 @@ func appendHeadlessCodexLog(slug string, line string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(line))
 }
 
@@ -1365,7 +1365,7 @@ func appendHeadlessCodexLatency(slug string, line string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
 }
 

@@ -11,11 +11,12 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/operations"
-	"gopkg.in/yaml.v3"
 )
 
 type operationCompanyProfile struct {
@@ -366,7 +367,7 @@ func (b *Broker) handleOperationBootstrapPackage(w http.ResponseWriter, r *http.
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"package": pkg})
+	_ = json.NewEncoder(w).Encode(map[string]any{"package": pkg})
 }
 
 func loadOperationChannelPackFiles(rootDir string) ([]operationPackFile, error) {
@@ -1127,7 +1128,7 @@ func buildOperationAutomation(blueprint operations.Blueprint, providerName strin
 	if providerName != "" {
 		connectionMode = "Live-capable"
 		connectionStatus = "build_now"
-		connectionFooter = fmt.Sprintf("Connected systems are inspected via %s; keep mutating actions behind approval.", strings.Title(providerName))
+		connectionFooter = fmt.Sprintf("Connected systems are inspected via %s; keep mutating actions behind approval.", titleCaser.String(providerName))
 	}
 	replacements := map[string]string{
 		"connection_mode":     connectionMode,
@@ -1465,7 +1466,7 @@ func operationRuntimeIntegrationsFromConnections(runtimeConnections []action.Con
 		}
 		seen[key] = struct{}{}
 		integrations = append(integrations, operations.RuntimeIntegration{
-			Name:        operationFirstNonEmpty(strings.TrimSpace(conn.Name), strings.Title(integration)),
+			Name:        operationFirstNonEmpty(strings.TrimSpace(conn.Name), titleCaser.String(integration)),
 			Provider:    integration,
 			Status:      strings.TrimSpace(conn.State),
 			Purpose:     fmt.Sprintf("Connected %s account available for workflow planning.", integration),
@@ -1485,7 +1486,7 @@ func operationRuntimeCapabilitiesFromConnections(runtimeConnections []action.Con
 	if providerName != "" {
 		capabilities = append(capabilities, operations.RuntimeCapability{
 			Key:       operationSlug(providerName + "-connections"),
-			Name:      strings.Title(strings.TrimSpace(providerName)) + " connections",
+			Name:      titleCaser.String(strings.TrimSpace(providerName)) + " connections",
 			Category:  "integration",
 			Lifecycle: "active",
 			Detail:    "Discover connected accounts and map them into workflows.",
@@ -1498,7 +1499,7 @@ func operationRuntimeCapabilitiesFromConnections(runtimeConnections []action.Con
 		}
 		capabilities = append(capabilities, operations.RuntimeCapability{
 			Key:       operationSlug(integration),
-			Name:      strings.Title(integration),
+			Name:      titleCaser.String(integration),
 			Category:  "integration",
 			Lifecycle: strings.TrimSpace(conn.State),
 			Detail:    fmt.Sprintf("Use the connected %s account when the workflow needs it.", integration),

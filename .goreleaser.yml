@@ -16,7 +16,7 @@ builds:
       - -s -w
 
 archives:
-  - format: tar.gz
+  - formats: [tar.gz]
     name_template: "wuphf_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 
 checksum:

@@ -19,9 +19,9 @@ type Store struct {
 	counter  int
 
 	// In-memory indexes (maintained on write)
-	byID     map[string]*Channel   // channel UUID → *Channel
-	bySlug   map[string]*Channel   // channel slug → *Channel
-	memberOf map[string][]string   // member slug → []channel IDs
+	byID     map[string]*Channel // channel UUID → *Channel
+	bySlug   map[string]*Channel // channel slug → *Channel
+	memberOf map[string][]string // member slug → []channel IDs
 
 	mu sync.RWMutex
 }

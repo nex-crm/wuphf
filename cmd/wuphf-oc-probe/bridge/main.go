@@ -73,7 +73,9 @@ func main() {
 	if err != nil {
 		die("list: %v", err)
 	}
-	pre.Close()
+	if err := pre.Close(); err != nil {
+		die("pre.Close: %v", err)
+	}
 	var sessKey string
 	if len(rows) == 0 {
 		// sessions.send requires a pre-existing session, so create one.
@@ -81,7 +83,7 @@ func main() {
 		if err != nil {
 			die("create-dial: %v", err)
 		}
-		defer create.Close()
+		defer func() { _ = create.Close() }()
 		raw, err := create.Call(ctx, "sessions.create", map[string]any{"agentId": "main", "label": "wuphf-smoke"})
 		if err != nil {
 			die("sessions.create: %v", err)
@@ -106,11 +108,19 @@ func main() {
 	if err != nil {
 		die("tmp home: %v", err)
 	}
-	defer os.RemoveAll(tmpHome)
-	os.Setenv("HOME", tmpHome)
-	os.MkdirAll(filepath.Join(tmpHome, ".wuphf"), 0o700)
-	os.Setenv("WUPHF_OPENCLAW_IDENTITY_PATH", realIdentityPath)
-	os.Setenv("WUPHF_OPENCLAW_TOKEN", token)
+	defer func() { _ = os.RemoveAll(tmpHome) }()
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		die("setenv HOME: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpHome, ".wuphf"), 0o700); err != nil {
+		die("mkdir .wuphf: %v", err)
+	}
+	if err := os.Setenv("WUPHF_OPENCLAW_IDENTITY_PATH", realIdentityPath); err != nil {
+		die("setenv identity path: %v", err)
+	}
+	if err := os.Setenv("WUPHF_OPENCLAW_TOKEN", token); err != nil {
+		die("setenv token: %v", err)
+	}
 	if err := config.Save(config.Config{
 		OpenclawGatewayURL: "ws://127.0.0.1:18789",
 		OpenclawBridges: []config.OpenclawBridgeBinding{

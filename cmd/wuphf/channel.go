@@ -520,31 +520,31 @@ func buildOneOnOneSlashCommands() []tui.SlashCommand {
 type channelPickerMode string
 
 const (
-	channelPickerNone           channelPickerMode = ""
-	channelPickerInitProvider   channelPickerMode = "init_provider"
-	channelPickerInitBlueprint  channelPickerMode = "init_blueprint"
-	channelPickerInitPack       channelPickerMode = "init_pack" // legacy alias
-	channelPickerProvider       channelPickerMode = "provider"
-	channelPickerIntegrations   channelPickerMode = "integrations"
-	channelPickerRequests       channelPickerMode = "requests"
-	channelPickerTasks          channelPickerMode = "tasks"
-	channelPickerTaskAction     channelPickerMode = "task_action"
-	channelPickerRequestAction  channelPickerMode = "request_action"
-	channelPickerThreads        channelPickerMode = "threads"
-	channelPickerThreadAction   channelPickerMode = "thread_action"
-	channelPickerChannels       channelPickerMode = "channels"
-	channelPickerSwitcher       channelPickerMode = "switcher"
-	channelPickerInsert         channelPickerMode = "insert"
-	channelPickerSearch         channelPickerMode = "search"
-	channelPickerRewind         channelPickerMode = "rewind"
-	channelPickerAgents         channelPickerMode = "agents"
-	channelPickerCalendarAgent  channelPickerMode = "calendar_agent"
-	channelPickerOneOnOneMode   channelPickerMode = "one_on_one_mode"
-	channelPickerOneOnOneAgent  channelPickerMode = "one_on_one_agent"
-	channelPickerTelegramGroup  channelPickerMode = "telegram_group"
-	channelPickerConnect        channelPickerMode = "connect"
-	channelPickerTelegramToken  channelPickerMode = "telegram_token"
-	channelPickerTelegramChatID channelPickerMode = "telegram_chat_id"
+	channelPickerNone            channelPickerMode = ""
+	channelPickerInitProvider    channelPickerMode = "init_provider"
+	channelPickerInitBlueprint   channelPickerMode = "init_blueprint"
+	channelPickerInitPack        channelPickerMode = "init_pack" // legacy alias
+	channelPickerProvider        channelPickerMode = "provider"
+	channelPickerIntegrations    channelPickerMode = "integrations"
+	channelPickerRequests        channelPickerMode = "requests"
+	channelPickerTasks           channelPickerMode = "tasks"
+	channelPickerTaskAction      channelPickerMode = "task_action"
+	channelPickerRequestAction   channelPickerMode = "request_action"
+	channelPickerThreads         channelPickerMode = "threads"
+	channelPickerThreadAction    channelPickerMode = "thread_action"
+	channelPickerChannels        channelPickerMode = "channels"
+	channelPickerSwitcher        channelPickerMode = "switcher"
+	channelPickerInsert          channelPickerMode = "insert"
+	channelPickerSearch          channelPickerMode = "search"
+	channelPickerRewind          channelPickerMode = "rewind"
+	channelPickerAgents          channelPickerMode = "agents"
+	channelPickerCalendarAgent   channelPickerMode = "calendar_agent"
+	channelPickerOneOnOneMode    channelPickerMode = "one_on_one_mode"
+	channelPickerOneOnOneAgent   channelPickerMode = "one_on_one_agent"
+	channelPickerTelegramGroup   channelPickerMode = "telegram_group"
+	channelPickerConnect         channelPickerMode = "connect"
+	channelPickerTelegramToken   channelPickerMode = "telegram_token"
+	channelPickerTelegramChatID  channelPickerMode = "telegram_chat_id"
 	channelPickerOpenclawURL     channelPickerMode = "openclaw-url"
 	channelPickerOpenclawToken   channelPickerMode = "openclaw-token"
 	channelPickerOpenclawSession channelPickerMode = "openclaw-session"
@@ -2540,16 +2540,7 @@ func (m channelModel) View() string {
 	if scroll > 0 {
 		scrollHint = fmt.Sprintf("%d above", scroll)
 	}
-	focusLabel := "main"
-	if m.focus == focusSidebar {
-		focusLabel = "sidebar"
-	} else if m.focus == focusThread {
-		focusLabel = "thread"
-	}
-	statusBar := statusBarStyle(m.width).Render(fmt.Sprintf(
-		" %s %d online │ %d msgs │ focus:%s │ %s │ Ctrl+J newline │ /doctor",
-		"\u25CF", onlineCount, len(m.messages), focusLabel, scrollHint,
-	))
+	var statusBar string
 	if m.pending != nil {
 		statusText := m.interviewStatusLine()
 		if m.pending.ID == m.snoozedInterview {
@@ -2687,7 +2678,7 @@ func (m channelModel) currentHeaderMeta() string {
 		}
 		scopeCount := len(filterMessagesForViewerScope(m.messages, m.oneOnOneAgentSlug(), scopeLabel))
 		parts := []string{
-			fmt.Sprintf("%s lane for %s", strings.Title(scopeLabel), m.oneOnOneAgentName()),
+			fmt.Sprintf("%s lane for %s", titleCaser.String(scopeLabel), m.oneOnOneAgentName()),
 			fmt.Sprintf("%d visible messages", scopeCount),
 		}
 		if workspace.RunningTasks > 0 {
@@ -5565,7 +5556,7 @@ func resetDMSession(agent string, channel string) tea.Cmd {
 		var result struct {
 			Removed int `json:"removed"`
 		}
-		json.NewDecoder(resp.Body).Decode(&result)
+		_ = json.NewDecoder(resp.Body).Decode(&result)
 		return channelResetDMDoneMsg{removed: result.Removed}
 	}
 }
@@ -5781,9 +5772,11 @@ func isWindows() bool { return runtime.GOOS == "windows" }
 // killTeamSession kills the entire wuphf-team tmux session and all agent processes.
 func killTeamSession() {
 	// Kill tmux session (kills all agent processes in all panes/windows)
-	exec.Command("tmux", "-L", "wuphf", "kill-session", "-t", "wuphf-team").Run()
+	_ = exec.Command("tmux", "-L", "wuphf", "kill-session", "-t", "wuphf-team").Run()
 	// Stop the broker
-	http.Get(brokerURL("/health")) // just to check; broker stops with the process
+	if resp, err := http.Get(brokerURL("/health")); err == nil {
+		_ = resp.Body.Close()
+	}
 }
 
 func resolveInitialOfficeApp(name string) officeApp {
@@ -5858,9 +5851,11 @@ func appendChannelCrashLog(details string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = fmt.Fprintf(f, "\n[%s]\n%s\n", time.Now().Format(time.RFC3339), details)
-	return err
+	if _, err := fmt.Fprintf(f, "\n[%s]\n%s\n", time.Now().Format(time.RFC3339), details); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func channelCrashLogPath() string {
