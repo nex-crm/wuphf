@@ -14,6 +14,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/teammcp"
+	"github.com/nex-crm/wuphf/internal/updatecheck"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
@@ -274,6 +275,13 @@ func main() {
 			os.Exit(1)
 		}
 		return
+	}
+
+	// Interactive launch: kick off a background release check for next
+	// startup and print a one-line banner if we already know we're behind.
+	updatecheck.RefreshAsync(context.Background())
+	if banner := updatecheck.Banner(); banner != "" {
+		fmt.Fprintln(os.Stderr, banner)
 	}
 
 	// TUI mode: tmux-based interface
