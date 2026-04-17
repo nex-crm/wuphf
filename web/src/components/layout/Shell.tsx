@@ -2,6 +2,7 @@ import { type ReactNode } from 'react'
 import { Sidebar } from './Sidebar'
 import { ChannelHeader } from './ChannelHeader'
 import { DisconnectBanner } from './DisconnectBanner'
+import { StatusBar } from './StatusBar'
 import { ThreadPanel } from '../messages/ThreadPanel'
 import { AgentPanel } from '../agents/AgentPanel'
 import { SearchModal } from '../search/SearchModal'
@@ -21,6 +22,7 @@ export function Shell({ children }: ShellProps) {
         <DisconnectBanner />
         {!dmMode && <ChannelHeader />}
         {children}
+        <StatusBar />
       </main>
       <ThreadPanel />
       <AgentPanel />

@@ -24,6 +24,14 @@
 .sidebar-add-btn:hover { color: var(--text-secondary); }
 .sidebar-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 600; flex-shrink: 0; }
 
+/* ─── Status bar (footer) ─── */
+.status-bar { display: flex; align-items: center; gap: 12px; padding: 4px 20px; border-top: 1px solid var(--border); background: var(--bg); font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
+.status-bar-item { white-space: nowrap; }
+.status-bar-spacer { flex: 1; }
+.status-bar-conn { display: inline-flex; align-items: center; gap: 4px; }
+.status-bar-conn::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+.status-bar-conn.disconnected::before { background: var(--red); }
+
 .sidebar-agents { padding: 4px 12px; max-height: 40vh; overflow-y: auto; overflow-x: visible; }
 .sidebar-agent { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; margin-left: 12px; border-radius: 6px; font-size: 11px; border: none; background: transparent; cursor: pointer; transition: all 0.15s; color: var(--text-secondary); font-family: var(--font-sans); text-align: left; position: relative; }
 .sidebar-agent:hover { background: rgba(0,0,0,0.04); color: var(--text); }
