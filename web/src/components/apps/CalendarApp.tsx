@@ -75,8 +75,8 @@ export function CalendarApp() {
             }}>
               {groupKey}
             </div>
-            {groups[groupKey].map((job) => (
-              <JobCard key={job.id} job={job} />
+            {groups[groupKey].map((job, idx) => (
+              <JobCard key={job.slug ?? job.id ?? `${groupKey}-${idx}`} job={job} />
             ))}
           </div>
         ))
@@ -96,7 +96,7 @@ function JobCard({ job }: { job: SchedulerJob }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ fontSize: 14 }}>{'\u23F0'}</span>
         <span className="app-card-title" style={{ marginBottom: 0 }}>
-          {job.name || 'Job'}
+          {job.label || job.name || job.slug || 'Job'}
         </span>
         {job.status && (
           <span className={job.status === 'active' ? 'badge badge-green' : 'badge badge-accent'}>

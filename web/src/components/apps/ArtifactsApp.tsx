@@ -49,7 +49,7 @@ interface WatchdogRecord {
 }
 
 interface SchedulerJobRaw {
-  id: string
+  id?: string
   label?: string
   slug?: string
   status?: string
@@ -288,9 +288,9 @@ export function ArtifactsApp() {
             {allJobs.length === 0 ? (
               <EmptyState>No jobs are due right now.</EmptyState>
             ) : (
-              allJobs.slice(0, 6).map((job) => (
+              allJobs.slice(0, 6).map((job, idx) => (
                 <ActivityItem
-                  key={job.id}
+                  key={job.slug ?? job.id ?? `due-${idx}`}
                   title={job.label || job.slug || 'Scheduled job'}
                   body={job.workflow_key || job.skill_name || job.kind || ''}
                   meta={[
