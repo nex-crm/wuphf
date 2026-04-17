@@ -165,7 +165,18 @@ export function ArtifactsApp() {
       {/* Stat grid */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
         <StatCard kicker="Active lanes" value={String(activeTasks.length)} copy="Live tasks currently moving." />
-        <StatCard kicker="Blocked" value={String(blockedTasks.length + allWatchdogs.length)} copy="Lanes and watchdogs needing intervention." />
+        <StatCard
+          kicker="Blocked lanes"
+          value={String(blockedTasks.length)}
+          copy="Tasks needing operator attention."
+          anchorId="blocked-lanes"
+        />
+        <StatCard
+          kicker="Watchdog alerts"
+          value={String(allWatchdogs.length)}
+          copy="Watchdogs firing right now."
+          anchorId="watchdog-alerts"
+        />
         <StatCard kicker="Agents in motion" value={String(liveAgents.length)} copy="Specialists currently shipping or plotting." />
         <StatCard kicker="Recent actions" value={String(allActions.length)} copy="Automation and system actions logged." />
         <StatCard kicker="Due automations" value={String(allJobs.length)} copy="Scheduled jobs that are due now." />
@@ -234,33 +245,46 @@ export function ArtifactsApp() {
 
         {/* Right column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <ActivitySection title="Needs attention" meta={`${blockedTasks.length + allWatchdogs.length} items`}>
-            {blockedTasks.length === 0 && allWatchdogs.length === 0 ? (
-              <EmptyState>No active blockers or watchdog alerts.</EmptyState>
+          <ActivitySection
+            title="Blocked lanes"
+            meta={`${blockedTasks.length} items`}
+            anchorId="blocked-lanes"
+          >
+            {blockedTasks.length === 0 ? (
+              <EmptyState>No blocked lanes right now.</EmptyState>
             ) : (
-              <>
-                {blockedTasks.slice(0, 6).map((task) => (
-                  <ActivityItem
-                    key={task.id}
-                    title={task.title || task.id || 'Blocked task'}
-                    body={task.description ?? 'Blocked lane needs operator attention.'}
-                    meta={[task.channel ? `#${task.channel}` : '', task.owner ? `@${task.owner}` : ''].filter(Boolean)}
-                    kindLabel="blocked"
-                  />
-                ))}
-                {allWatchdogs.slice(0, 6).map((alert, i) => (
-                  <ActivityItem
-                    key={`wd-${i}`}
-                    title={alert.summary || alert.kind || 'Watchdog alert'}
-                    body={alert.target_type ? `${alert.target_type}${alert.target_id ? ' \u00B7 ' + alert.target_id : ''}` : ''}
-                    meta={[
-                      alert.channel ? `#${alert.channel}` : '',
-                      (alert.updated_at || alert.created_at) ? new Date(alert.updated_at || alert.created_at || '').toLocaleString() : '',
-                    ].filter(Boolean)}
-                    kindLabel={alert.kind || 'watchdog'}
-                  />
-                ))}
-              </>
+              blockedTasks.slice(0, 6).map((task) => (
+                <ActivityItem
+                  key={task.id}
+                  title={task.title || task.id || 'Blocked task'}
+                  body={task.description ?? 'Blocked lane needs operator attention.'}
+                  meta={[task.channel ? `#${task.channel}` : '', task.owner ? `@${task.owner}` : ''].filter(Boolean)}
+                  kindLabel="blocked"
+                />
+              ))
+            )}
+          </ActivitySection>
+
+          <ActivitySection
+            title="Watchdog alerts"
+            meta={`${allWatchdogs.length} items`}
+            anchorId="watchdog-alerts"
+          >
+            {allWatchdogs.length === 0 ? (
+              <EmptyState>No watchdog alerts.</EmptyState>
+            ) : (
+              allWatchdogs.slice(0, 6).map((alert, i) => (
+                <ActivityItem
+                  key={`wd-${i}`}
+                  title={alert.summary || alert.kind || 'Watchdog alert'}
+                  body={alert.target_type ? `${alert.target_type}${alert.target_id ? ' \u00B7 ' + alert.target_id : ''}` : ''}
+                  meta={[
+                    alert.channel ? `#${alert.channel}` : '',
+                    (alert.updated_at || alert.created_at) ? new Date(alert.updated_at || alert.created_at || '').toLocaleString() : '',
+                  ].filter(Boolean)}
+                  kindLabel={alert.kind || 'watchdog'}
+                />
+              ))
             )}
           </ActivitySection>
 
@@ -311,9 +335,40 @@ export function ArtifactsApp() {
 
 /* ── Shared sub-components ── */
 
-function StatCard({ kicker, value, copy }: { kicker: string; value: string; copy: string }) {
+interface StatCardProps {
+  kicker: string
+  value: string
+  copy: string
+  anchorId?: string
+}
+
+function StatCard({ kicker, value, copy, anchorId }: StatCardProps) {
+  const clickable = Boolean(anchorId)
+
+  const activate = () => {
+    if (!anchorId) return
+    const target = document.getElementById(anchorId)
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+    if (!clickable) return
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault()
+      activate()
+    }
+  }
+
   return (
-    <div className="app-card" style={{ padding: '12px 14px' }}>
+    <div
+      className="app-card"
+      style={{ padding: '12px 14px', cursor: clickable ? 'pointer' : 'default' }}
+      onClick={clickable ? activate : undefined}
+      onKeyDown={clickable ? handleKeyDown : undefined}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      aria-label={clickable ? `${kicker}: ${value}. Scroll to details.` : undefined}
+    >
       <div style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)' }}>
         {kicker}
       </div>
@@ -323,9 +378,19 @@ function StatCard({ kicker, value, copy }: { kicker: string; value: string; copy
   )
 }
 
-function ActivitySection({ title, meta, children }: { title: string; meta?: string; children: React.ReactNode }) {
+function ActivitySection({
+  title,
+  meta,
+  children,
+  anchorId,
+}: {
+  title: string
+  meta?: string
+  children: React.ReactNode
+  anchorId?: string
+}) {
   return (
-    <section>
+    <section id={anchorId} style={{ scrollMarginTop: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
         <div style={{ fontSize: 14, fontWeight: 600 }}>{title}</div>
         {meta && <div className="app-card-meta">{meta}</div>}
