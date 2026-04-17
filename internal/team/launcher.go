@@ -34,6 +34,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
+	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/setup"
@@ -174,6 +175,18 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 		headlessQueues:      make(map[string][]headlessCodexTurn),
 		notifyLastDelivered: make(map[string]time.Time),
 	}, nil
+}
+
+// isOnboarded reports whether the user has completed the onboarding wizard.
+// Any error loading state is treated as not-onboarded so a corrupt or
+// missing ~/.wuphf/onboarded.json still lets the web UI boot into the
+// wizard rather than failing at preflight.
+func isOnboarded() bool {
+	s, err := onboarding.Load()
+	if err != nil || s == nil {
+		return false
+	}
+	return s.Onboarded()
 }
 
 // Preflight checks that required tools are available.
@@ -3755,7 +3768,20 @@ func (l *Launcher) getAgentName(slug string) string {
 // ═══════════════════════════════════════════════════════════════
 
 // PreflightWeb checks only for claude (no tmux requirement for web mode).
+//
+// When the user has not yet completed onboarding we deliberately skip the
+// runtime-binary check: the whole point of the web-mode onboarding wizard is
+// to pick a runtime. Hard-failing here would make the binary unlaunchable
+// until the user already had the CLI they were trying to pick. A missing
+// runtime is still caught at first-dispatch time with a clear message once
+// onboarding has committed a choice to ~/.wuphf/config.json.
 func (l *Launcher) PreflightWeb() error {
+	if !isOnboarded() {
+		if _, _, note := checkGHCapability(); note != "" {
+			fmt.Fprintf(os.Stderr, "note: %s\n", note)
+		}
+		return nil
+	}
 	if l.usesCodexRuntime() {
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
