@@ -134,6 +134,30 @@
 .sv-toggle { background: none; border: none; padding: 0 4px 0 0; font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); cursor: pointer; }
 .sv-toggle:hover { color: var(--text); }
 
+/* ─── Stream event cards (CC style) ─── */
+.cc-token-line { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); padding: 4px 0; }
+.cc-thinking { font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); font-style: italic; padding: 4px 0; white-space: pre-wrap; line-height: 1.5; }
+.cc-tool-call { border: 1px solid var(--border); border-radius: var(--radius-sm); margin: 6px 0; background: var(--bg); overflow: hidden; }
+.cc-tool-header { display: flex; align-items: center; gap: 6px; width: 100%; padding: 6px 8px; border: none; background: transparent; cursor: pointer; font-family: var(--font-mono); font-size: 11px; color: var(--text); text-align: left; }
+.cc-tool-header:hover { background: var(--bg-warm); }
+.cc-tool-chevron { display: inline-block; transition: transform 0.15s; color: var(--text-tertiary); }
+.cc-tool-chevron.open { transform: rotate(90deg); }
+.cc-tool-name { font-weight: 700; color: var(--accent); }
+.cc-tool-summary { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.cc-tool-body { padding: 6px 10px 8px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.cc-tool-section-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); }
+.cc-tool-result-label { color: var(--green, #2ea845); }
+.cc-tool-result-summary { padding: 0 8px 6px 26px; font-family: var(--font-mono); font-size: 11px; color: var(--green, #2ea845); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cc-tool-result-inline { font-family: var(--font-mono); font-size: 11px; color: var(--text); white-space: pre-wrap; }
+.cc-tool-error { color: var(--red, #e23428); padding: 0 8px 6px 26px; font-family: var(--font-mono); font-size: 11px; }
+.cc-tool-error-text { color: var(--red, #e23428); font-family: var(--font-mono); font-size: 11px; white-space: pre-wrap; }
+
+.stream-card { padding: 6px 8px; margin: 4px 0; border-left: 2px solid var(--border); background: var(--bg); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.stream-card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-family: var(--font-mono); font-size: 10px; }
+.stream-card-phase { text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; color: var(--accent); background: var(--accent-bg); padding: 1px 6px; border-radius: 3px; }
+.stream-card-agent { color: var(--text-tertiary); }
+.stream-card-detail { font-size: 12px; color: var(--text); line-height: 1.5; white-space: pre-wrap; }
+
 /* ─── Composer ─── */
 .composer { padding: 12px 20px 16px; border-top: 1px solid var(--border); background: var(--bg-card); position: relative; }
 
