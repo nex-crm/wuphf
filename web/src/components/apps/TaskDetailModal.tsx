@@ -9,6 +9,7 @@ import {
   type TaskStatusAction,
 } from '../../api/client'
 import { formatRelativeTime } from '../../lib/format'
+import { confirm } from '../ui/ConfirmDialog'
 
 interface TaskDetailModalProps {
   task: Task
@@ -53,7 +54,7 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
     })
   }, [memberData])
 
-  async function handleStatusAction(action: TaskStatusAction) {
+  async function runStatusAction(action: TaskStatusAction) {
     setStatusBusy(action)
     setErrorMsg(null)
     try {
@@ -68,6 +69,20 @@ export function TaskDetailModal({ task, onClose }: TaskDetailModalProps) {
     } finally {
       setStatusBusy(null)
     }
+  }
+
+  function handleStatusAction(action: TaskStatusAction) {
+    if (action === 'cancel') {
+      confirm({
+        title: 'Mark task as won\'t do?',
+        message: `"${task.title || task.id}" will move to the Won't Do column. Owners are notified.`,
+        confirmLabel: "Won't do",
+        danger: true,
+        onConfirm: () => runStatusAction(action),
+      })
+      return
+    }
+    void runStatusAction(action)
   }
 
   async function handleReassign() {

@@ -24,6 +24,7 @@ import { InterviewBar } from './components/messages/InterviewBar'
 import { DisconnectBanner } from './components/layout/DisconnectBanner'
 import { SplashScreen } from './components/onboarding/SplashScreen'
 import { ToastContainer } from './components/ui/Toast'
+import { ConfirmHost } from './components/ui/ConfirmDialog'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import './styles/global.css'
 import './styles/layout.css'
@@ -237,6 +238,7 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         {body}
         <ToastContainer />
+        <ConfirmHost />
       </QueryClientProvider>
     </ErrorBoundary>
   )

@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { postMessage, post } from '../../api/client'
 import { useAppStore } from '../../stores/app'
 import { showNotice } from '../ui/Toast'
+import { confirm } from '../ui/ConfirmDialog'
 import { Autocomplete, applyAutocomplete, type AutocompleteItem } from './Autocomplete'
 
 /** Handle slash commands. Returns true if the input was a command. */
@@ -62,13 +63,20 @@ function handleSlashCommand(input: string): boolean {
         .catch((e: Error) => showNotice('Resume failed: ' + e.message, 'error'))
       return true
     case '/reset':
-      post('/reset', {})
-        .then(() => {
-          store.setLastMessageId(null)
-          store.setCurrentChannel('general')
-          showNotice('Office reset', 'success')
-        })
-        .catch(() => showNotice('Reset failed', 'error'))
+      confirm({
+        title: 'Reset the office?',
+        message: 'Clears channels back to #general and drops in-memory state. Persisted tasks and requests stay on the broker.',
+        confirmLabel: 'Reset',
+        danger: true,
+        onConfirm: () =>
+          post('/reset', {})
+            .then(() => {
+              store.setLastMessageId(null)
+              store.setCurrentChannel('general')
+              showNotice('Office reset', 'success')
+            })
+            .catch((e: Error) => showNotice('Reset failed: ' + e.message, 'error')),
+      })
       return true
     case '/1o1': {
       if (!args) {

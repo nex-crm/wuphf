@@ -64,6 +64,8 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .btn-primary:hover { background: var(--accent-warm); }
 .btn-secondary { background: transparent; color: var(--text-secondary); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
 .btn-ghost { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--border); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
+.btn-danger { background: var(--red, #e23428); color: white; padding: 10px 24px; border-radius: var(--radius-full); font-size: 14px; box-shadow: 0 1px 3px rgba(226,52,40,0.18); }
+.btn-danger:hover { filter: brightness(0.95); }
 .btn-lg { padding: 16px 40px; font-size: 16px; }
 .btn-sm { padding: 6px 12px; font-size: 12px; min-height: 32px; }
 
