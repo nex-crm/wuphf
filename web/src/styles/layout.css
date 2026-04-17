@@ -46,6 +46,15 @@
 .confirm-message { margin: 0 0 18px; font-size: 13px; color: var(--text-secondary); line-height: 1.5; white-space: pre-wrap; }
 .confirm-actions { display: flex; gap: 8px; justify-content: flex-end; }
 
+/* ─── Runtime strip (pills under channel header) ─── */
+.runtime-strip { display: flex; align-items: center; gap: 8px; padding: 6px 20px; border-bottom: 1px solid var(--border); background: var(--bg); font-size: 11px; font-family: var(--font-mono); }
+.runtime-strip:empty { display: none; }
+.runtime-pill { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-weight: 600; font-size: 10px; letter-spacing: 0.03em; }
+.runtime-pill-active { background: rgba(46, 168, 69, 0.12); color: var(--green, #2ea845); }
+.runtime-pill-blocked { background: rgba(226, 52, 40, 0.12); color: var(--red, #e23428); }
+.runtime-pill-needyou { background: rgba(223, 117, 12, 0.15); color: var(--yellow, #df750c); }
+.runtime-pill-idle { background: var(--bg-warm); color: var(--text-tertiary); }
+
 /* ─── Status bar (footer) ─── */
 .status-bar { display: flex; align-items: center; gap: 12px; padding: 4px 20px; border-top: 1px solid var(--border); background: var(--bg); font-family: var(--font-mono); font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
 .status-bar-item { white-space: nowrap; }

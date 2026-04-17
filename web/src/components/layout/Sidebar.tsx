@@ -3,6 +3,7 @@ import { AgentList } from '../sidebar/AgentList'
 import { ChannelList } from '../sidebar/ChannelList'
 import { AppList } from '../sidebar/AppList'
 import { UsagePanel } from '../sidebar/UsagePanel'
+import { WorkspaceSummary } from '../sidebar/WorkspaceSummary'
 import type { Theme } from '../../stores/app'
 
 export function Sidebar() {
@@ -59,6 +60,9 @@ export function Sidebar() {
         <p className="sidebar-section-title">Apps</p>
       </div>
       <AppList />
+
+      {/* Workspace summary */}
+      <WorkspaceSummary />
 
       {/* Usage */}
       <UsagePanel />

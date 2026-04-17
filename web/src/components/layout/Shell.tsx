@@ -3,6 +3,7 @@ import { Sidebar } from './Sidebar'
 import { ChannelHeader } from './ChannelHeader'
 import { DisconnectBanner } from './DisconnectBanner'
 import { StatusBar } from './StatusBar'
+import { RuntimeStrip } from './RuntimeStrip'
 import { ThreadPanel } from '../messages/ThreadPanel'
 import { AgentPanel } from '../agents/AgentPanel'
 import { SearchModal } from '../search/SearchModal'
@@ -21,6 +22,7 @@ export function Shell({ children }: ShellProps) {
       <main className="main">
         <DisconnectBanner />
         {!dmMode && <ChannelHeader />}
+        {!dmMode && <RuntimeStrip />}
         {children}
         <StatusBar />
       </main>
