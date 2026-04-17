@@ -27,6 +27,7 @@ import { ToastContainer } from './components/ui/Toast'
 import { ConfirmHost } from './components/ui/ConfirmDialog'
 import { ProviderSwitcherHost } from './components/ui/ProviderSwitcher'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
+import { useHashRouter } from './hooks/useHashRouter'
 import './styles/global.css'
 import './styles/layout.css'
 import './styles/messages.css'
@@ -149,6 +150,7 @@ export default function App() {
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete)
 
   useKeyboardShortcuts()
+  useHashRouter()
 
   // Load theme CSS when theme changes
   useEffect(() => {
