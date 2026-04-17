@@ -91,7 +91,16 @@
 .interview-empty { font-size: 13px; color: var(--text-tertiary); margin-top: 8px; font-style: italic; }
 
 /* ─── Composer ─── */
-.composer { padding: 12px 20px 16px; border-top: 1px solid var(--border); background: var(--bg-card); }
+.composer { padding: 12px 20px 16px; border-top: 1px solid var(--border); background: var(--bg-card); position: relative; }
+
+/* ─── Autocomplete (slash + @-mention) ─── */
+.autocomplete { position: absolute; bottom: 100%; left: 20px; right: 20px; max-height: 240px; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 -4px 16px rgba(0,0,0,0.12); margin-bottom: 4px; display: none; z-index: 25; }
+.autocomplete.open { display: block; }
+.autocomplete-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; cursor: pointer; font-size: 13px; transition: background 0.1s; width: 100%; border: none; background: transparent; color: var(--text); font-family: var(--font-sans); text-align: left; }
+.autocomplete-item:hover, .autocomplete-item.selected { background: var(--accent-bg); }
+.autocomplete-item-icon { width: 20px; text-align: center; flex-shrink: 0; font-size: 14px; }
+.autocomplete-item-label { font-weight: 600; color: var(--text); }
+.autocomplete-item-desc { font-size: 12px; color: var(--text-tertiary); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
 .composer-inner { display: flex; align-items: flex-end; gap: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; transition: border-color 0.2s; }
 .composer-inner:focus-within { border-color: var(--accent); }
 .composer-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 14px; color: var(--text); outline: none; resize: none; min-height: 20px; max-height: 120px; line-height: 1.5; }
@@ -111,6 +120,9 @@
 .channel-empty-state .eyebrow { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-tertiary); }
 .channel-empty-state .title { font-family: var(--font-logo); font-style: italic; font-size: 24px; font-weight: 700; color: var(--text); line-height: 1.2; }
 .channel-empty-state .body { font-size: 14px; line-height: 1.5; }
+.channel-empty-state .channel-empty-hints { display: flex; flex-direction: column; gap: 8px; font-size: 13px; color: var(--text-secondary); margin-top: 4px; }
+.channel-empty-state .channel-empty-hints code { font-family: var(--font-mono); font-size: 12px; background: var(--bg-card); border: 1px solid var(--border); padding: 1px 6px; border-radius: 4px; color: var(--accent); }
+.channel-empty-state .channel-empty-foot { font-size: 11px; color: var(--text-tertiary); font-style: italic; margin-top: 8px; }
 
 /* ─── Thread toggle ─── */
 .inline-thread-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: 1px solid var(--border); background: var(--bg); font-family: var(--font-sans); padding: 4px 8px; border-radius: 999px; margin-top: 4px; transition: background 0.15s; }

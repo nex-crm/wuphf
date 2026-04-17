@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { postMessage, post } from '../../api/client'
 import { useAppStore } from '../../stores/app'
 import { showNotice } from '../ui/Toast'
+import { Autocomplete, applyAutocomplete, type AutocompleteItem } from './Autocomplete'
 
 /** Handle slash commands. Returns true if the input was a command. */
 function handleSlashCommand(input: string): boolean {
@@ -116,8 +117,23 @@ export function Composer() {
   const currentChannel = useAppStore((s) => s.currentChannel)
   const setCurrentApp = useAppStore((s) => s.setCurrentApp)
   const [text, setText] = useState('')
+  const [caret, setCaret] = useState(0)
+  const [acItems, setAcItems] = useState<AutocompleteItem[]>([])
+  const [acIdx, setAcIdx] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
+
+  const pickAutocomplete = useCallback((item: AutocompleteItem) => {
+    const next = applyAutocomplete(text, caret, item)
+    setText(next.text)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+      setCaret(next.caret)
+    })
+  }, [text, caret])
 
   const sendMutation = useMutation({
     mutationFn: (content: string) => postMessage(content, currentChannel),
@@ -158,11 +174,44 @@ export function Composer() {
   }, [text, sendMutation])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (acItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setAcIdx((i) => (i + 1) % acItems.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setAcIdx((i) => (i - 1 + acItems.length) % acItems.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const pick = acItems[acIdx] ?? acItems[0]
+        if (pick) pickAutocomplete(pick)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setAcItems([])
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
-  }, [handleSend])
+  }, [handleSend, acItems, acIdx, pickAutocomplete])
+
+  const handleAcItems = useCallback((items: AutocompleteItem[]) => {
+    setAcItems(items)
+    setAcIdx((idx) => Math.min(idx, Math.max(items.length - 1, 0)))
+  }, [])
+
+  const syncCaret = useCallback(() => {
+    const el = textareaRef.current
+    if (el) setCaret(el.selectionStart ?? 0)
+  }, [])
 
   const handleInput = useCallback(() => {
     const el = textareaRef.current
@@ -174,14 +223,23 @@ export function Composer() {
 
   return (
     <div className="composer">
+      <Autocomplete
+        value={text}
+        caret={caret}
+        selectedIdx={acIdx}
+        onItems={handleAcItems}
+        onPick={pickAutocomplete}
+      />
       <div className="composer-inner">
         <textarea
           ref={textareaRef}
           className="composer-input"
           placeholder={`Message #${currentChannel}`}
           value={text}
-          onChange={(e) => { setText(e.target.value); handleInput() }}
+          onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart ?? 0); handleInput() }}
           onKeyDown={handleKeyDown}
+          onKeyUp={syncCaret}
+          onClick={syncCaret}
           rows={1}
         />
         <button
