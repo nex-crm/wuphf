@@ -127,3 +127,73 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 	}
 
 }
+
+// TestConfigEndpointAcceptsActionProviders verifies the web UI POST /config
+// validator accepts every action_provider string the registry supports.
+// Regression test for the case where "one" was rejected with 400 even though
+// the registry and CLI (`/config set action_provider one`) both accepted it.
+func TestConfigEndpointAcceptsActionProviders(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+	if err := os.MkdirAll(filepath.Join(tmp, ".wuphf"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	b := NewBroker()
+	b.runtimeProvider = "claude-code"
+	b.token = "test-token"
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer func() {
+		if b.server != nil {
+			_ = b.server.Shutdown(context.Background())
+		}
+	}()
+
+	cases := []struct {
+		name     string
+		value    string
+		wantCode int
+	}{
+		{"auto", "auto", http.StatusOK},
+		{"one", "one", http.StatusOK},
+		{"composio", "composio", http.StatusOK},
+		{"empty", "", http.StatusOK},
+		{"rejects unknown", "perplexity", http.StatusBadRequest},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := `{"action_provider":"` + tc.value + `"}`
+			req, _ := http.NewRequest(http.MethodPost, "http://"+b.addr+"/config", bytes.NewBufferString(payload))
+			req.Header.Set("Authorization", "Bearer test-token")
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("POST /config: %v", err)
+			}
+			raw, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != tc.wantCode {
+				t.Fatalf("POST %s: got status=%d body=%s, want %d", payload, resp.StatusCode, string(raw), tc.wantCode)
+			}
+			if tc.wantCode == http.StatusOK && tc.value != "" {
+				// Verify persisted and echoed back on GET.
+				getReq, _ := http.NewRequest(http.MethodGet, "http://"+b.addr+"/config", nil)
+				getReq.Header.Set("Authorization", "Bearer test-token")
+				getResp, err := http.DefaultClient.Do(getReq)
+				if err != nil {
+					t.Fatalf("GET /config: %v", err)
+				}
+				rawGet, _ := io.ReadAll(getResp.Body)
+				getResp.Body.Close()
+				var cfgResp map[string]any
+				_ = json.Unmarshal(rawGet, &cfgResp)
+				if ap, _ := cfgResp["action_provider"].(string); ap != tc.value {
+					t.Fatalf("expected action_provider=%q on GET, got %q (body=%s)", tc.value, ap, string(rawGet))
+				}
+			}
+		})
+	}
+}

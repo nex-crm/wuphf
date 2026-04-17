@@ -5059,7 +5059,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if body.ActionProvider != nil {
 			ap := strings.TrimSpace(strings.ToLower(*body.ActionProvider))
 			switch ap {
-			case "auto", "composio", "":
+			case "auto", "one", "composio", "":
 				cfg.ActionProvider = ap
 				changed = true
 			default:

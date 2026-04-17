@@ -6430,7 +6430,7 @@ function _buildSettingsSections(body, cfg, switchSection) {
 
   var actionProviderSelect = _settingsInput(cfg.action_provider, {
     select: true,
-    options: [{ value: 'auto', label: 'Auto' }, { value: 'composio', label: 'Composio' }]
+    options: [{ value: 'auto', label: 'Auto' }, { value: 'one', label: 'One CLI' }, { value: 'composio', label: 'Composio' }]
   });
   integrations.appendChild(_settingsField('Action Provider', 'External action routing', actionProviderSelect));
 

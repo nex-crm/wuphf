@@ -515,6 +515,7 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
       <Field label="Action Provider" hint="External action routing">
         <select style={styles.input} value={actionProvider} onChange={(e) => setActionProvider(e.target.value)}>
           <option value="auto">Auto</option>
+          <option value="one">One CLI</option>
           <option value="composio">Composio</option>
         </select>
       </Field>
