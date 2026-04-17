@@ -32,6 +32,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
 const BrokerPort = brokeraddr.DefaultPort
@@ -1095,6 +1096,11 @@ func (b *Broker) StartOnPort(port int) error {
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
 	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug)
+	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
+	// These are disk-only; the caller reloads or re-launches to rebuild state.
+	// Auth-gated via requireAuth because shred permanently deletes state and
+	// must not be reachable without the broker token.
+	workspace.RegisterRoutes(mux, b.requireAuth)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)

@@ -28,6 +28,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/setup"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/tui"
+	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
 type channelMsg struct {
@@ -4653,6 +4654,18 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 
 	switch {
 	case trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q":
+		killTeamSession()
+		return m, tea.Quit
+	case trimmed == "/shred":
+		// Full wipe: runtime + team + company + office + workflows. Next launch
+		// reopens onboarding. Done in-process so the user doesn't have to
+		// remember the CLI verb.
+		res, err := workspace.Shred()
+		if err != nil {
+			m.notice = fmt.Sprintf("shred failed: %v", err)
+			return m, nil
+		}
+		fmt.Fprintf(os.Stderr, "shred: removed %d path(s). Onboarding will reopen on next launch.\n", len(res.Removed))
 		killTeamSession()
 		return m, tea.Quit
 	case trimmed == "/1o1":

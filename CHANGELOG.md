@@ -2,6 +2,13 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.4.0] - 2026-04-17
+
+### Added
+- **Shred your workspace from Settings.** New "Danger Zone" section in the web Settings with a `Shred workspace` button that deletes your team, company identity, office task receipts, and workflows, then reopens onboarding on next launch. The card lists exactly what gets deleted vs preserved, and the confirm modal requires typing `i am sure` before firing. Task worktrees, logs, sessions, LLM caches, and `config.json` are always preserved.
+- **`wuphf shred` CLI subcommand.** Full workspace wipe that reopens onboarding. Prompts for the verb to confirm, or takes `-y` for scripted teardown. `wuphf kill` kept as an alias.
+- **`/shred` slash command in the TUI.** Wipes the workspace in-process, then exits the session so your next `wuphf` boots clean. The existing `/reset` (clear transcript and refresh panes) is unchanged.
+
 ## [0.0.3.0] - 2026-04-14
 
 ### Added
