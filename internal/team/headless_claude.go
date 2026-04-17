@@ -234,9 +234,9 @@ func (l *Launcher) headlessClaudeModel(slug string) string {
 // get a smaller budget since they focus on a single task.
 func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
 	if slug == l.officeLeadSlug() {
-		return "20"
+		return "30"
 	}
-	return "10"
+	return "15"
 }
 
 func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
