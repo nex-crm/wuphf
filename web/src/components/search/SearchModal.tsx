@@ -5,6 +5,7 @@ import { useChannels } from '../../hooks/useChannels'
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { getMessages, post, type Message } from '../../api/client'
 import { showNotice } from '../ui/Toast'
+import { openProviderSwitcher } from '../ui/ProviderSwitcher'
 import { SLASH_COMMANDS } from '../messages/Autocomplete'
 
 interface PaletteItem {
@@ -357,6 +358,8 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
       deps.setCurrentApp('health-check'); return
     case '/threads':
       deps.setCurrentApp('threads'); return
+    case '/provider':
+      openProviderSwitcher(); return
     case '/search':
       deps.setSearchOpen(true); return
     case '/focus':
