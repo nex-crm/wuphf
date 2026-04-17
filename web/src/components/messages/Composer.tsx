@@ -115,7 +115,6 @@ function handleSlashCommand(input: string): boolean {
 
 export function Composer() {
   const currentChannel = useAppStore((s) => s.currentChannel)
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp)
   const [text, setText] = useState('')
   const [caret, setCaret] = useState(0)
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([])
@@ -147,11 +146,11 @@ export function Composer() {
     onError: (err: unknown) => {
       const message = err instanceof Error ? err.message : 'Failed to send message'
       // The broker blocks chat with 409 + "request pending; answer required" when
-      // an agent is waiting on the human. Surface the question instead of a dead
-      // toast that the user has no way to act on.
+      // an agent is waiting on the human. The InterviewBar above the composer
+      // already shows the question, so the user has somewhere to act. Never yank
+      // them away from the textbox they are typing in.
       if (/request pending|answer required/i.test(message)) {
-        showNotice('Answer the pending request to resume chat.', 'error')
-        setCurrentApp('requests')
+        showNotice('Answer the interview above to send messages.', 'info')
         return
       }
       showNotice(message, 'error')
