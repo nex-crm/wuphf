@@ -78,23 +78,42 @@ jobs:
 
   vhs:
     runs-on: ubuntu-latest
+    env:
+      VHS_VERSION: v0.11.0
+      TTYD_VERSION: "1.7.7"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
         with:
-          # VHS @latest tracks newer Go minors than go.mod pins; use stable so
-          # `go install github.com/charmbracelet/vhs@latest` doesn't get blocked
-          # by GOTOOLCHAIN=local (Go is forward-compatible for the wuphf build).
+          # VHS tracks newer Go minors than go.mod pins; use stable so
+          # `go install vhs` isn't blocked by GOTOOLCHAIN=local (Go is
+          # forward-compatible for the wuphf build in this job).
           go-version: stable
+      - name: Cache VHS binary
+        id: cache-vhs
+        uses: actions/cache@v5
+        with:
+          path: ~/go/bin/vhs
+          key: vhs-${{ runner.os }}-${{ env.VHS_VERSION }}
       - name: Install VHS
-        run: |
-          go install github.com/charmbracelet/vhs@latest
+        if: steps.cache-vhs.outputs.cache-hit != 'true'
+        run: go install github.com/charmbracelet/vhs@${{ env.VHS_VERSION }}
+      - name: Cache ttyd download
+        id: cache-ttyd
+        uses: actions/cache@v5
+        with:
+          path: /tmp/ttyd.x86_64
+          key: ttyd-${{ runner.os }}-${{ env.TTYD_VERSION }}
+      - name: Download ttyd
+        if: steps.cache-ttyd.outputs.cache-hit != 'true'
+        run: curl -fLo /tmp/ttyd.x86_64 https://github.com/tsl0922/ttyd/releases/download/${{ env.TTYD_VERSION }}/ttyd.x86_64
       - name: Install ttyd
-        run: |
-          curl -Lo ttyd.x86_64 https://github.com/tsl0922/ttyd/releases/download/1.7.7/ttyd.x86_64
-          sudo install ttyd.x86_64 /usr/local/bin/ttyd
+        run: sudo install /tmp/ttyd.x86_64 /usr/local/bin/ttyd
       - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+        uses: awalsh128/cache-apt-pkgs-action@v1
+        with:
+          packages: ffmpeg
+          version: "1"
       - name: Build wuphf
         run: go build -o wuphf ./cmd/wuphf
       - name: Run VHS regression checks
