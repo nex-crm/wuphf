@@ -483,20 +483,6 @@ export function setMemory(namespace: string, key: string, value: string) {
   return post('/memory', { namespace, key, value })
 }
 
-// ── Studio ──
-
-export function getStudioBootstrapPackage() {
-  return get('/operations/bootstrap-package')
-}
-
-export function generateStudioPackage(payload?: unknown) {
-  return post('/studio/generate-package', payload ?? {})
-}
-
-export function runStudioWorkflow(payload?: unknown) {
-  return post('/studio/run-workflow', payload ?? {})
-}
-
 // ── Config (Settings) ──
 
 export type LLMProvider = 'claude-code' | 'codex'

@@ -6,7 +6,6 @@ import { MessageFeed } from './components/messages/MessageFeed'
 import { Composer } from './components/messages/Composer'
 import { TypingIndicator } from './components/messages/TypingIndicator'
 import { DMView } from './components/messages/DMView'
-import { StudioApp } from './components/apps/StudioApp'
 import { TasksApp } from './components/apps/TasksApp'
 import { RequestsApp } from './components/apps/RequestsApp'
 import { PoliciesApp } from './components/apps/PoliciesApp'
@@ -97,7 +96,6 @@ function MainContent() {
 
   if (currentApp) {
     const panels: Record<string, React.ComponentType> = {
-      studio: StudioApp,
       tasks: TasksApp,
       requests: RequestsApp,
       policies: PoliciesApp,
