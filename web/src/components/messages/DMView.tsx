@@ -4,6 +4,7 @@ import { useAgentStream } from '../../hooks/useAgentStream'
 import { useAppStore } from '../../stores/app'
 import { MessageBubble } from './MessageBubble'
 import { Composer } from './Composer'
+import { InterviewBar } from './InterviewBar'
 
 export function DMView() {
   const currentChannel = useAppStore((s) => s.currentChannel)
@@ -54,6 +55,7 @@ export function DMView() {
               <MessageBubble key={msg.id} message={msg} />
             ))}
           </div>
+          <InterviewBar />
           <Composer />
         </div>
 

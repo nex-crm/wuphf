@@ -20,7 +20,7 @@ import { SettingsApp } from './components/apps/SettingsApp'
 import { Wizard } from './components/onboarding/Wizard'
 import { AgentPanel } from './components/agents/AgentPanel'
 import { SearchModal } from './components/search/SearchModal'
-import { HumanInterviewOverlay } from './components/messages/HumanInterviewOverlay'
+import { InterviewBar } from './components/messages/InterviewBar'
 import { DisconnectBanner } from './components/layout/DisconnectBanner'
 import { SplashScreen } from './components/onboarding/SplashScreen'
 import { ToastContainer } from './components/ui/Toast'
@@ -127,6 +127,7 @@ function MainContent() {
     <>
       <MessageFeed />
       <TypingIndicator />
+      <InterviewBar />
       <Composer />
     </>
   )
@@ -227,7 +228,6 @@ export default function App() {
     body = (
       <Shell>
         <MainContent />
-        <HumanInterviewOverlay />
       </Shell>
     )
   }
