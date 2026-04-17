@@ -28,17 +28,25 @@ case "$ARCH" in
     ;;
 esac
 
-# Resolve latest version tag from GitHub redirect
-VERSION="$(curl -sSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" | rev | cut -d'/' -f1 | rev)"
-if [ -z "$VERSION" ]; then
-  printf "Error: could not determine latest version\n" >&2
-  exit 1
-fi
+# WUPHF_INSTALL_URL_OVERRIDE bypasses GitHub release resolution so CI can run
+# this script end-to-end against a snapshot tarball without a real release.
+URL="${WUPHF_INSTALL_URL_OVERRIDE:-}"
+if [ -n "$URL" ]; then
+  VERSION="${WUPHF_INSTALL_VERSION_OVERRIDE:-snapshot}"
+  ARCHIVE="$(basename "$URL")"
+else
+  # Resolve latest version tag from GitHub redirect
+  VERSION="$(curl -sSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" | rev | cut -d'/' -f1 | rev)"
+  if [ -z "$VERSION" ]; then
+    printf "Error: could not determine latest version\n" >&2
+    exit 1
+  fi
 
-# goreleaser strips the leading 'v' from the tag in archive names
-VERSION_CLEAN="${VERSION#v}"
-ARCHIVE="${BINARY}_${VERSION_CLEAN}_${OS}_${ARCH}.tar.gz"
-URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
+  # goreleaser strips the leading 'v' from the tag in archive names
+  VERSION_CLEAN="${VERSION#v}"
+  ARCHIVE="${BINARY}_${VERSION_CLEAN}_${OS}_${ARCH}.tar.gz"
+  URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
+fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT

@@ -79,8 +79,9 @@ jobs:
   vhs:
     runs-on: ubuntu-latest
     env:
-      VHS_VERSION: v0.11.0
+      VHS_VERSION: "v0.11.0"
       TTYD_VERSION: "1.7.7"
+      TTYD_SHA256: "8a217c968aba172e0dbf3f34447218dc015bc4d5e59bf51db2f2cd12b7be4f55"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -103,16 +104,26 @@ jobs:
         uses: actions/cache@v5
         with:
           path: /tmp/ttyd.x86_64
-          key: ttyd-${{ runner.os }}-${{ env.TTYD_VERSION }}
+          key: ttyd-${{ runner.os }}-${{ env.TTYD_VERSION }}-${{ env.TTYD_SHA256 }}
       - name: Download ttyd
         if: steps.cache-ttyd.outputs.cache-hit != 'true'
         run: curl -fLo /tmp/ttyd.x86_64 https://github.com/tsl0922/ttyd/releases/download/${{ env.TTYD_VERSION }}/ttyd.x86_64
+      - name: Verify ttyd integrity
+        # Verify both on cache-miss (just downloaded) and cache-hit (guard
+        # against restored corruption or a ttyd release re-tag).
+        run: echo "${{ env.TTYD_SHA256 }}  /tmp/ttyd.x86_64" | sha256sum -c -
       - name: Install ttyd
         run: sudo install /tmp/ttyd.x86_64 /usr/local/bin/ttyd
       - name: Install ffmpeg
-        uses: awalsh128/cache-apt-pkgs-action@v1
+        # Pin to full SHA: third-party action runs `sudo apt-get`, so a re-tag
+        # of @v1 would execute with elevated privileges on the runner.
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
         with:
           packages: ffmpeg
+          # NOTE: `version` is a cache-bust token, NOT an ffmpeg version pin.
+          # Bump it to force a fresh apt-get install (e.g., for a security
+          # advisory). `packages: ffmpeg` has no version constraint, so warm
+          # runs reuse whatever .deb the cold run captured.
           version: "1"
       - name: Build wuphf
         run: go build -o wuphf ./cmd/wuphf
@@ -127,6 +138,15 @@ jobs:
           name: vhs-drift
           path: testdata/vhs/*.actual
           retention-days: 7
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run shellcheck
+        run: |
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
 
   release-build:
     runs-on: ubuntu-latest
@@ -146,3 +166,21 @@ jobs:
         with:
           version: latest
           args: release --snapshot --clean --skip=publish
+      - name: Smoke-test install.sh against snapshot
+        # Exercises the full installer code path (download, extract, copy,
+        # chmod, --version probe) against the goreleaser snapshot we just
+        # built. WUPHF_INSTALL_URL_OVERRIDE bypasses the GitHub releases
+        # resolver so we can feed a local file:// tarball.
+        run: |
+          set -euo pipefail
+          tarball="$(ls dist/wuphf_*_linux_amd64.tar.gz | head -1)"
+          if [ -z "$tarball" ]; then
+            echo "no snapshot tarball found in dist/" >&2
+            exit 1
+          fi
+          # install.sh falls back to $HOME/.local/bin if /usr/local/bin isn't
+          # writable — ensure either location is on PATH.
+          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
+          WUPHF_INSTALL_URL_OVERRIDE="file://$PWD/$tarball" bash scripts/install.sh
+          command -v wuphf
+          wuphf --version
