@@ -235,6 +235,8 @@ export interface InterviewOption {
   id: string
   label: string
   description?: string
+  requires_text?: boolean
+  text_hint?: string
 }
 
 export interface AgentRequest {
@@ -264,8 +266,10 @@ export function getRequests(channel: string) {
   })
 }
 
-export function answerRequest(id: string, choiceId: string) {
-  return post('/requests/answer', { id, choice_id: choiceId })
+export function answerRequest(id: string, choiceId: string, customText?: string) {
+  const body: Record<string, string> = { id, choice_id: choiceId }
+  if (customText) body.custom_text = customText
+  return post('/requests/answer', body)
 }
 
 // ── Health ──
