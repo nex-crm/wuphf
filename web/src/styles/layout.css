@@ -110,6 +110,41 @@
 .app-card-title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
 .app-card-meta { font-size: 11px; color: var(--text-tertiary); }
 
+/* ─── Insights (activity panel) ─── */
+.insight-list { display: flex; flex-direction: column; gap: 10px; }
+.insight-empty { font-size: 13px; color: var(--text-tertiary); font-style: italic; padding: 6px 0; }
+.insight-row { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; background: var(--bg-card); border: 1px solid var(--border); border-left-width: 3px; border-radius: var(--radius-sm); }
+.insight-row.insight-critical { border-left-color: var(--red, #e23428); }
+.insight-row.insight-high { border-left-color: var(--yellow, #df750c); }
+.insight-row.insight-medium { border-left-color: var(--accent); }
+.insight-row.insight-low { border-left-color: var(--text-tertiary); }
+.insight-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.insight-badge { font-family: var(--font-mono); font-size: 10px; font-weight: 700; letter-spacing: 0.04em; padding: 1px 4px; border-radius: 3px; }
+.insight-badge-critical { color: #fff; background: var(--red, #e23428); }
+.insight-badge-high { color: #fff; background: var(--yellow, #df750c); }
+.insight-badge-medium { color: #fff; background: var(--accent); }
+.insight-badge-low { color: var(--text); background: var(--bg-warm); }
+.insight-category { font-family: var(--font-mono); font-size: 10px; color: var(--text-tertiary); }
+.insight-title { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+.insight-time { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+.insight-body { font-size: 12px; color: var(--text-secondary); line-height: 1.5; }
+.insight-target { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); }
+.insight-more { font-size: 11px; color: var(--text-tertiary); font-style: italic; padding-left: 10px; }
+
+/* ─── Timeline (activity panel) ─── */
+.timeline { display: flex; flex-direction: column; }
+.timeline-empty { font-size: 13px; color: var(--text-tertiary); font-style: italic; padding: 6px 0; }
+.timeline-row { display: flex; gap: 10px; padding-bottom: 10px; }
+.timeline-rail { display: flex; flex-direction: column; align-items: center; width: 16px; flex-shrink: 0; padding-top: 2px; }
+.timeline-icon { font-size: 12px; color: var(--text-tertiary); line-height: 1; }
+.timeline-row.timeline-decision .timeline-icon { color: var(--accent); }
+.timeline-row.timeline-action .timeline-icon { color: var(--green, #2ea845); }
+.timeline-row.timeline-watchdog .timeline-icon { color: var(--red, #e23428); }
+.timeline-connector { width: 1px; flex: 1; background: var(--border); margin-top: 2px; }
+.timeline-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.timeline-content { font-size: 13px; color: var(--text); line-height: 1.5; }
+.timeline-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 11px; color: var(--text-tertiary); }
+
 /* ─── Task board (kanban) ─── */
 .task-board { display: grid; grid-template-columns: repeat(7, minmax(200px, 1fr)); gap: 12px; padding: 20px; align-content: start; overflow-x: auto; }
 .task-column { display: flex; flex-direction: column; gap: 4px; min-height: 120px; padding: 4px; border-radius: var(--radius-md); transition: outline-color 0.15s, background 0.15s; }
