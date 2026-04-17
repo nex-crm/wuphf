@@ -34,10 +34,13 @@ interface TaskTemplate {
 
 type WizardStep = 'welcome' | 'templates' | 'identity' | 'team' | 'setup' | 'task'
 
+// Step order: company info before blueprint. The blueprint picker is a
+// decision about how the office starts; it makes more sense after the
+// user has anchored who they are than as the very first question.
 const STEP_ORDER: readonly WizardStep[] = [
   'welcome',
-  'templates',
   'identity',
+  'templates',
   'team',
   'setup',
   'task',
@@ -243,7 +246,7 @@ function TemplatesStep({
           Back
         </button>
         <button className="btn btn-primary" onClick={onNext} type="button">
-          Continue
+          Review the team
           <ArrowIcon />
         </button>
       </div>
@@ -329,7 +332,7 @@ function IdentityStep({
           disabled={!canContinue}
           type="button"
         >
-          Review the team
+          Choose a blueprint
           <ArrowIcon />
         </button>
       </div>
@@ -809,7 +812,7 @@ export function Wizard({ onComplete }: WizardProps) {
         <ProgressDots current={step} />
 
         {step === 'welcome' && (
-          <WelcomeStep onNext={() => goTo('templates')} />
+          <WelcomeStep onNext={() => goTo('identity')} />
         )}
 
         {step === 'templates' && (
