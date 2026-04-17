@@ -186,6 +186,21 @@ export function getOfficeMembers() {
   return get<{ members: OfficeMember[] }>('/office-members')
 }
 
+export interface GeneratedAgentTemplate {
+  slug?: string
+  name?: string
+  role?: string
+  emoji?: string
+  expertise?: string[]
+  personality?: string
+  provider?: string
+  model?: string
+}
+
+export function generateAgent(prompt: string) {
+  return post<GeneratedAgentTemplate>('/office-members/generate', { prompt })
+}
+
 export function getMembers(channel: string) {
   return get<{ members: OfficeMember[] }>('/members', {
     channel: channel || 'general',
