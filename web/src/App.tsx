@@ -1,5 +1,4 @@
 import { Component, useEffect, useState, type ReactNode } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { initApi, get } from './api/client'
 import { useAppStore } from './stores/app'
 import { Shell } from './components/layout/Shell'
@@ -30,15 +29,6 @@ import './styles/layout.css'
 import './styles/messages.css'
 import './styles/agents.css'
 import './styles/search.css'
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 2000,
-    },
-  },
-})
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -234,10 +224,8 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        {body}
-        <ToastContainer />
-      </QueryClientProvider>
+      {body}
+      <ToastContainer />
     </ErrorBoundary>
   )
 }

@@ -148,6 +148,93 @@ jobs:
           sudo apt-get install -y shellcheck
           shellcheck scripts/*.sh
 
+  web-e2e:
+    # Playwright smoke against the real web UI. Guards the class of regression
+    # we kept shipping (React render crashes that only surface in a browser
+    # — e.g. "No QueryClient set", Minified React error #31 on first agent
+    # click) by booting wuphf, loading /, and walking the happy path.
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.1.38"
+      - uses: actions/download-artifact@v8
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Build wuphf
+        run: go build -o wuphf ./cmd/wuphf
+      - name: Install e2e deps
+        working-directory: web/e2e
+        run: bun install --frozen-lockfile
+      - name: Cache Playwright browsers
+        id: cache-playwright
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/ms-playwright
+          # Key on the resolved @playwright/test version via bun.lock so a
+          # bump invalidates.
+          key: playwright-${{ runner.os }}-${{ hashFiles('web/e2e/bun.lock') }}
+      - name: Install Playwright chromium
+        working-directory: web/e2e
+        # --with-deps installs the OS-level shared libs chromium needs on
+        # ubuntu-latest even when the cached browser binary is restored.
+        run: bunx playwright install --with-deps chromium
+      - name: Seed onboarding state + start wuphf
+        # Pre-seeding ~/.wuphf/onboarded.json skips the wizard so the test
+        # lands in the real Shell and can exercise the agent-click path that
+        # used to crash with React #31. Redirect stdin to /dev/null so
+        # isPiped() doesn't steal our boot into scanner mode.
+        run: |
+          mkdir -p "$HOME/.wuphf"
+          cat > "$HOME/.wuphf/onboarded.json" <<'JSON'
+          {"version":1,"completed_at":"2026-01-01T00:00:00Z","company_name":"e2e-ci"}
+          JSON
+          ./wuphf --no-open --broker-port 7890 --web-port 7891 --no-nex </dev/null > wuphf.log 2>&1 &
+          echo $! > wuphf.pid
+          # Poll /onboarding/state as the readiness signal (authoritative;
+          # the static index.html can 200 before the broker is fully wired).
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:7891/onboarding/state -o /dev/null; then
+              echo "wuphf ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "wuphf failed to become ready" >&2
+          cat wuphf.log >&2
+          exit 1
+      - name: Run Playwright smoke
+        working-directory: web/e2e
+        env:
+          WUPHF_E2E_BASE_URL: http://localhost:7891
+        run: bunx playwright test
+      - name: Stop wuphf
+        if: always()
+        run: |
+          if [ -f wuphf.pid ]; then
+            kill "$(cat wuphf.pid)" 2>/dev/null || true
+          fi
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: web/e2e/playwright-report
+          retention-days: 7
+      - name: Upload wuphf log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: wuphf-e2e-log
+          path: wuphf.log
+          retention-days: 7
+
   release-build:
     runs-on: ubuntu-latest
     needs: web
