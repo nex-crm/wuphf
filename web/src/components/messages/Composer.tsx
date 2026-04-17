@@ -4,6 +4,7 @@ import { postMessage, post } from '../../api/client'
 import { useAppStore } from '../../stores/app'
 import { showNotice } from '../ui/Toast'
 import { confirm } from '../ui/ConfirmDialog'
+import { openProviderSwitcher } from '../ui/ProviderSwitcher'
 import { Autocomplete, applyAutocomplete, type AutocompleteItem } from './Autocomplete'
 
 /** Handle slash commands. Returns true if the input was a command. */
@@ -41,6 +42,9 @@ function handleSlashCommand(input: string): boolean {
       return true
     case '/threads':
       store.setCurrentApp('threads')
+      return true
+    case '/provider':
+      openProviderSwitcher()
       return true
     case '/search':
       store.setSearchOpen(true)

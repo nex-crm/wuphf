@@ -24,6 +24,22 @@
 .sidebar-add-btn:hover { color: var(--text-secondary); }
 .sidebar-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 6px; border-radius: 9px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 600; flex-shrink: 0; }
 
+/* ─── Provider switcher ─── */
+.provider-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 260; padding: 24px; animation: fadeIn 0.15s ease-out; }
+.provider-panel { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 24px; width: 100%; max-width: 440px; box-shadow: 0 8px 40px rgba(0,0,0,0.18); }
+.provider-title { margin: 0 0 16px; font-size: 17px; font-weight: 700; color: var(--text); }
+.provider-loading { font-size: 13px; color: var(--text-secondary); margin: 0; }
+.provider-options { display: flex; flex-direction: column; gap: 8px; }
+.provider-option { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); cursor: pointer; transition: all 0.15s; font-family: var(--font-sans); text-align: left; width: 100%; color: var(--text); }
+.provider-option:hover { border-color: var(--accent); background: var(--accent-bg); }
+.provider-option.active { border-color: var(--accent); background: var(--accent-bg); cursor: default; }
+.provider-option:disabled { opacity: 0.7; }
+.provider-option-text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.provider-option-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.provider-option-desc { font-size: 11px; color: var(--text-tertiary); }
+.provider-option-check { color: var(--accent); font-size: 16px; }
+.provider-footer { display: flex; justify-content: flex-end; margin-top: 16px; }
+
 /* ─── Confirm dialog ─── */
 .confirm-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 260; padding: 24px; animation: fadeIn 0.15s ease-out; }
 .confirm-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 22px 24px; width: 100%; max-width: 440px; box-shadow: 0 8px 40px rgba(0,0,0,0.18); }

@@ -37,6 +37,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { name: '/pause', desc: 'Pause all agents', icon: '\u23F8' },
   { name: '/resume', desc: 'Resume all agents', icon: '\u25B6' },
   { name: '/threads', desc: 'See every active thread', icon: '\uD83E\uDDF5' },
+  { name: '/provider', desc: 'Switch runtime provider', icon: '\u2699' },
 ]
 
 interface AutocompleteProps {
