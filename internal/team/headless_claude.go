@@ -39,7 +39,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		"--print", "-",
 		"--output-format", "stream-json",
 		"--verbose",
-		"--max-turns", "5",
+		"--max-turns", l.headlessClaudeMaxTurns(slug),
 		"--disable-slash-commands",
 		"--setting-sources", "user",
 		"--append-system-prompt", l.buildPrompt(slug),
@@ -226,6 +226,17 @@ func (l *Launcher) headlessClaudeModel(slug string) string {
 		return "claude-opus-4-6"
 	}
 	return "claude-sonnet-4-6"
+}
+
+// headlessClaudeMaxTurns returns the turn budget for an agent. The CEO routes
+// untagged and DM messages, which typically requires looking up tasks, channel
+// members, and posting an assignment — easily more than 5 turns. Specialists
+// get a smaller budget since they focus on a single task.
+func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
+	if slug == l.officeLeadSlug() {
+		return "20"
+	}
+	return "10"
 }
 
 func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {

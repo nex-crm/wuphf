@@ -239,7 +239,7 @@ func buildClaudeArgs(systemPrompt string, resumeID string) []string {
 		"--print", "-",
 		"--output-format", "stream-json",
 		"--verbose",
-		"--max-turns", "5",
+		"--max-turns", "20",
 		"--disable-slash-commands",
 		"--strict-mcp-config",
 		"--setting-sources", "user",
