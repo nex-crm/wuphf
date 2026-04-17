@@ -70,3 +70,22 @@ func TestRun_PropagatesNexClientToSubprocess(t *testing.T) {
 		t.Fatalf("expected NEX_CLIENT=wuphf/<version>, got %q", got)
 	}
 }
+
+// Companion to the propagation test: when an outer wrapper already set
+// NEX_CLIENT (e.g. `NEX_CLIENT=myapp/1.0 wuphf ...`), Run() must not stomp
+// it on the way through to nex-cli. Unit coverage on appendClientEnv alone
+// wouldn't catch a refactor that ignores the env-override path.
+func TestRun_PreservesExistingNexClientEndToEnd(t *testing.T) {
+	dir := withIsolatedPATH(t)
+	t.Setenv("WUPHF_NO_NEX", "")
+	t.Setenv(NexClientEnvVar, "myapp/1.0")
+	writeFakeNexCLI(t, dir, "nex-cli", `printf '%s' "$NEX_CLIENT"`)
+
+	got, err := Run(context.Background(), "whatever")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got != "myapp/1.0" {
+		t.Fatalf("expected preserved NEX_CLIENT=myapp/1.0, got %q", got)
+	}
+}
