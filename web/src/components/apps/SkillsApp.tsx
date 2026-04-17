@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getSkills, invokeSkill, type Skill } from '../../api/client'
+import { showNotice } from '../ui/Toast'
 
 export function SkillsApp() {
   const { data, isLoading, error } = useQuery({
@@ -55,8 +56,9 @@ function SkillCard({ skill }: { skill: Skill }) {
         setInvokeState('done')
         setTimeout(() => setInvokeState('idle'), 1500)
       })
-      .catch(() => {
+      .catch((e: Error) => {
         setInvokeState('idle')
+        showNotice('Invoke failed: ' + e.message, 'error')
       })
   }, [skill.name])
 

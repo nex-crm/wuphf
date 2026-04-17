@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getRequests, answerRequest, type AgentRequest } from '../../api/client'
 import { useAppStore } from '../../stores/app'
 import { formatRelativeTime } from '../../lib/format'
+import { showNotice } from '../ui/Toast'
 
 export function RequestsApp() {
   const currentChannel = useAppStore((s) => s.currentChannel)
@@ -54,9 +55,11 @@ export function RequestsApp() {
               request={req}
               isPending
               onAnswer={(choiceId) => {
-                answerRequest(req.id, choiceId).then(() => {
-                  queryClient.invalidateQueries({ queryKey: ['requests'] })
-                })
+                answerRequest(req.id, choiceId)
+                  .then(() => {
+                    queryClient.invalidateQueries({ queryKey: ['requests'] })
+                  })
+                  .catch((e: Error) => showNotice('Answer failed: ' + e.message, 'error'))
               }}
             />
           ))}

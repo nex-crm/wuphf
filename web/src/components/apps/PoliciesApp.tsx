@@ -6,6 +6,7 @@ import {
   deletePolicy,
   type Policy,
 } from '../../api/client'
+import { showNotice } from '../ui/Toast'
 
 const SECTIONS = [
   { key: 'human_directed', label: 'Human-directed', icon: '\uD83D\uDC64' },
@@ -31,16 +32,20 @@ export function PoliciesApp() {
   const handleSave = useCallback(() => {
     const trimmed = ruleText.trim()
     if (!trimmed) return
-    createPolicy('human_directed', trimmed).then(() => {
-      setRuleText('')
-      setFormOpen(false)
-      invalidate()
-    })
+    createPolicy('human_directed', trimmed)
+      .then(() => {
+        setRuleText('')
+        setFormOpen(false)
+        invalidate()
+      })
+      .catch((e: Error) => showNotice('Save failed: ' + e.message, 'error'))
   }, [ruleText, invalidate])
 
   const handleDelete = useCallback(
     (id: string) => {
-      deletePolicy(id).then(() => invalidate())
+      deletePolicy(id)
+        .then(() => invalidate())
+        .catch((e: Error) => showNotice('Delete failed: ' + e.message, 'error'))
     },
     [invalidate],
   )

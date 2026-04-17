@@ -20,6 +20,8 @@
 .sidebar-item.active { background: var(--accent-bg); color: var(--text); font-weight: 600; }
 .sidebar-item-icon { width: 14px; height: 14px; flex-shrink: 0; }
 .sidebar-item-emoji { font-size: 14px; flex-shrink: 0; width: 18px; text-align: center; }
+.sidebar-add-btn { color: var(--text-tertiary); }
+.sidebar-add-btn:hover { color: var(--text-secondary); }
 
 .sidebar-agents { padding: 4px 12px; max-height: 40vh; overflow-y: auto; overflow-x: visible; }
 .sidebar-agent { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; margin-left: 12px; border-radius: 6px; font-size: 11px; border: none; background: transparent; cursor: pointer; transition: all 0.15s; color: var(--text-secondary); font-family: var(--font-sans); text-align: left; position: relative; }

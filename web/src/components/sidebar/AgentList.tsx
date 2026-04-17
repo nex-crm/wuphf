@@ -1,6 +1,7 @@
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { useAppStore } from '../../stores/app'
 import { PixelAvatar } from '../ui/PixelAvatar'
+import { AgentWizard, useAgentWizard } from '../agents/AgentWizard'
 import type { OfficeMember } from '../../api/client'
 
 function classifyActivity(member: OfficeMember | undefined) {
@@ -22,50 +23,58 @@ export function AgentList() {
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug)
   const currentChannel = useAppStore((s) => s.currentChannel)
   const channelMeta = useAppStore((s) => s.channelMeta)
+  const wizard = useAgentWizard()
 
   const agents = members.filter((m) => m.slug && m.slug !== 'human')
 
-  if (agents.length === 0) {
-    return (
-      <div className="sidebar-agents">
-        <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '4px 8px' }}>
-          No agents online
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="sidebar-agents">
-      {agents.map((agent) => {
-        const ac = classifyActivity(agent)
-        const meta = channelMeta[currentChannel]
-        const isDMActive = meta?.type === 'D' && meta.agentSlug === agent.slug
+    <>
+      <div className="sidebar-agents">
+        {agents.length === 0 ? (
+          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '4px 8px' }}>
+            No agents online
+          </div>
+        ) : (
+          agents.map((agent) => {
+            const ac = classifyActivity(agent)
+            const meta = channelMeta[currentChannel]
+            const isDMActive = meta?.type === 'D' && meta.agentSlug === agent.slug
 
-        return (
-          <button
-            key={agent.slug}
-            className={`sidebar-agent${isDMActive ? ' active' : ''}`}
-            title={`${agent.name} — ${ac.label}`}
-            onClick={() => setActiveAgentSlug(agent.slug)}
-          >
-            <span className="sidebar-agent-avatar">
-              <PixelAvatar
-                slug={agent.slug}
-                size={24}
-                className="pixel-avatar-sidebar"
-              />
-            </span>
-            <div className="sidebar-agent-wrap">
-              <span className="sidebar-agent-name">{agent.name || agent.slug}</span>
-              {agent.task && (
-                <span className="sidebar-agent-task">{agent.task}</span>
-              )}
-            </div>
-            <span className={`status-dot ${ac.dotClass}`} />
-          </button>
-        )
-      })}
-    </div>
+            return (
+              <button
+                key={agent.slug}
+                className={`sidebar-agent${isDMActive ? ' active' : ''}`}
+                title={`${agent.name} — ${ac.label}`}
+                onClick={() => setActiveAgentSlug(agent.slug)}
+              >
+                <span className="sidebar-agent-avatar">
+                  <PixelAvatar
+                    slug={agent.slug}
+                    size={24}
+                    className="pixel-avatar-sidebar"
+                  />
+                </span>
+                <div className="sidebar-agent-wrap">
+                  <span className="sidebar-agent-name">{agent.name || agent.slug}</span>
+                  {agent.task && (
+                    <span className="sidebar-agent-task">{agent.task}</span>
+                  )}
+                </div>
+                <span className={`status-dot ${ac.dotClass}`} />
+              </button>
+            )
+          })
+        )}
+        <button
+          className="sidebar-item sidebar-add-btn"
+          onClick={wizard.show}
+          title="Create a new agent"
+        >
+          <span style={{ fontSize: 14, width: 18, textAlign: 'center', flexShrink: 0 }}>+</span>
+          <span>New Agent</span>
+        </button>
+      </div>
+      <AgentWizard open={wizard.open} onClose={wizard.hide} />
+    </>
   )
 }

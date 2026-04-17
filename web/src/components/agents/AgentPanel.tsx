@@ -4,6 +4,7 @@ import { useOfficeMembers } from '../../hooks/useMembers'
 import { useAgentStream } from '../../hooks/useAgentStream'
 import { createDM, getAgentLogs } from '../../api/client'
 import { PixelAvatar } from '../ui/PixelAvatar'
+import { showNotice } from '../ui/Toast'
 import type { AgentLog, OfficeMember } from '../../api/client'
 
 interface AgentPanelViewProps {
@@ -111,8 +112,9 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
         ?? `dm-human-${agent.slug}`
       enterDM(agent.slug, channel)
       setActiveAgentSlug(null)
-    } catch {
-      // DM creation failed silently — user stays on panel
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to open DM'
+      showNotice(message, 'error')
     } finally {
       setDmLoading(false)
     }

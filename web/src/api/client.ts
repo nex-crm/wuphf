@@ -56,7 +56,10 @@ export async function get<T = unknown>(
     if (qs) url += '?' + qs
   }
   const r = await fetch(url, { headers: authHeaders() })
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  if (!r.ok) {
+    const text = (await r.text().catch(() => '')).trim()
+    throw new Error(text || `${r.status} ${r.statusText}`)
+  }
   return r.json()
 }
 
@@ -69,7 +72,10 @@ export async function post<T = unknown>(
     headers: authHeaders(),
     body: JSON.stringify(body),
   })
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  if (!r.ok) {
+    const text = (await r.text().catch(() => '')).trim()
+    throw new Error(text || `${r.status} ${r.statusText}`)
+  }
   return r.json()
 }
 
@@ -82,6 +88,10 @@ export async function del<T = unknown>(
     headers: authHeaders(),
     body: JSON.stringify(body),
   })
+  if (!r.ok) {
+    const text = (await r.text().catch(() => '')).trim()
+    throw new Error(text || `${r.status} ${r.statusText}`)
+  }
   return r.json()
 }
 

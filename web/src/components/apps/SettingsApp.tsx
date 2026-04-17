@@ -701,6 +701,10 @@ export function SettingsApp() {
       queryClient.invalidateQueries({ queryKey: ['config'] })
       showNotice('Settings saved.', 'success')
     },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Failed to save settings'
+      showNotice(message, 'error')
+    },
   })
 
   // Reset section state when data changes so form values pick up latest server state

@@ -5,6 +5,7 @@ import { useAppStore } from '../../stores/app'
 import { toggleReaction } from '../../api/client'
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { PixelAvatar } from '../ui/PixelAvatar'
+import { showNotice } from '../ui/Toast'
 
 interface MessageBubbleProps {
   message: Message
@@ -98,7 +99,11 @@ export function MessageBubble({ message, grouped = false, onThreadClick }: Messa
               <button
                 key={r.emoji}
                 className="reaction-pill"
-                onClick={() => toggleReaction(message.id, r.emoji, currentChannel)}
+                onClick={() => {
+                  toggleReaction(message.id, r.emoji, currentChannel).catch((e: Error) =>
+                    showNotice('Reaction failed: ' + e.message, 'error'),
+                  )
+                }}
               >
                 <span>{r.emoji}</span>
                 <span className="reaction-pill-count">{r.count ?? 1}</span>

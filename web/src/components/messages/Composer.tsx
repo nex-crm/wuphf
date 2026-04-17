@@ -53,12 +53,12 @@ function handleSlashCommand(input: string): boolean {
     case '/pause':
       post('/signals', { kind: 'pause', summary: 'Human paused all agents' })
         .then(() => showNotice('All agents paused', 'success'))
-        .catch(() => {})
+        .catch((e: Error) => showNotice('Pause failed: ' + e.message, 'error'))
       return true
     case '/resume':
       post('/signals', { kind: 'resume', summary: 'Human resumed agents' })
         .then(() => showNotice('Agents resumed', 'success'))
-        .catch(() => {})
+        .catch((e: Error) => showNotice('Resume failed: ' + e.message, 'error'))
       return true
     case '/reset':
       post('/reset', {})
@@ -126,6 +126,10 @@ export function Composer() {
         textareaRef.current.style.height = 'auto'
       }
       queryClient.invalidateQueries({ queryKey: ['messages', currentChannel] })
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Failed to send message'
+      showNotice(message, 'error')
     },
   })
 
