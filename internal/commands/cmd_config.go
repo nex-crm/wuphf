@@ -155,11 +155,11 @@ func configSet(ctx *SlashContext, key, value string) error {
 		cfg.CompanySize = value
 	case "company_priority":
 		cfg.CompanyPriority = value
-		default:
-			ctx.AddMessage("system", "Unknown config key: "+key+
-				"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, memory_backend, llm_provider, gemini_api_key, anthropic_api_key, openai_api_key, minimax_api_key, blueprint, template, operation_template, pack (legacy alias), team_lead_slug, dev_url, default_format, company_name, company_description, company_goals, company_size, company_priority")
-			return nil
-		}
+	default:
+		ctx.AddMessage("system", "Unknown config key: "+key+
+			"\nValid keys: api_key, composio_api_key, action_provider, workspace_id, workspace_slug, memory_backend, llm_provider, gemini_api_key, anthropic_api_key, openai_api_key, minimax_api_key, blueprint, template, operation_template, pack (legacy alias), team_lead_slug, dev_url, default_format, company_name, company_description, company_goals, company_size, company_priority")
+		return nil
+	}
 
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("save config: %w", err)

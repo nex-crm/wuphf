@@ -2,13 +2,23 @@ import { useState, useEffect, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getConfig,
+  resetWorkspace,
+  shredWorkspace,
   updateConfig,
   type ConfigSnapshot,
   type ConfigUpdate,
+  type WorkspaceWipeResult,
 } from '../../api/client'
 import { showNotice } from '../ui/Toast'
 
-type SectionId = 'general' | 'company' | 'keys' | 'integrations' | 'intervals' | 'flags'
+type SectionId =
+  | 'general'
+  | 'company'
+  | 'keys'
+  | 'integrations'
+  | 'intervals'
+  | 'flags'
+  | 'danger'
 
 interface Section {
   id: SectionId
@@ -23,6 +33,7 @@ const SECTIONS: Section[] = [
   { id: 'integrations', icon: '\uD83D\uDD0C', name: 'Integrations' },
   { id: 'intervals', icon: '\u23F1', name: 'Polling' },
   { id: 'flags', icon: '\uD83D\uDDA5', name: 'CLI Flags' },
+  { id: 'danger', icon: '\u26A0\uFE0F', name: 'Danger Zone' },
 ]
 
 // ─── Styles ─────────────────────────────────────────────────────────────
@@ -505,6 +516,7 @@ function IntegrationsSection({ cfg, save }: SectionProps) {
       <Field label="Action Provider" hint="External action routing">
         <select style={styles.input} value={actionProvider} onChange={(e) => setActionProvider(e.target.value)}>
           <option value="auto">Auto</option>
+          <option value="one">One CLI</option>
           <option value="composio">Composio</option>
         </select>
       </Field>
@@ -683,6 +695,338 @@ function FlagsSection() {
   )
 }
 
+// ─── Danger Zone ────────────────────────────────────────────────────────
+
+// dangerStyles lives next to the section because it's the only caller and the
+// warning palette shouldn't bleed into the rest of the app's styling surface.
+const dangerStyles = {
+  card: (severity: 'warn' | 'critical') => ({
+    marginBottom: 20,
+    padding: 20,
+    borderRadius: 'var(--radius-md)',
+    border: `1px solid ${severity === 'critical' ? 'var(--red, #e5484d)' : 'var(--yellow, #e5a00d)'}`,
+    background: severity === 'critical' ? 'var(--red-bg, rgba(229,72,77,0.08))' : 'var(--yellow-bg, rgba(229,160,13,0.08))',
+  }),
+  cardTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 15,
+    fontWeight: 700,
+    color: 'var(--text)',
+    marginBottom: 6,
+  } as const,
+  cardSubtitle: {
+    fontSize: 13,
+    color: 'var(--text-secondary)',
+    marginBottom: 14,
+    lineHeight: 1.5,
+  } as const,
+  listLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.06em',
+    color: 'var(--text-tertiary)',
+    marginTop: 8,
+    marginBottom: 4,
+  } as const,
+  list: { margin: 0, paddingLeft: 20, fontSize: 12, lineHeight: 1.7, color: 'var(--text-secondary)' } as const,
+  button: (severity: 'warn' | 'critical') => ({
+    marginTop: 16,
+    padding: '9px 16px',
+    fontSize: 13,
+    fontWeight: 600,
+    border: 'none',
+    borderRadius: 'var(--radius-sm)',
+    cursor: 'pointer' as const,
+    color: '#fff',
+    background: severity === 'critical' ? 'var(--red, #e5484d)' : 'var(--yellow, #e5a00d)',
+    fontFamily: 'var(--font-sans)',
+  }),
+  modalBackdrop: {
+    position: 'fixed' as const,
+    inset: 0,
+    background: 'rgba(0,0,0,0.6)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000,
+  },
+  modalPanel: {
+    width: 'min(520px, calc(100vw - 40px))',
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-md)',
+    padding: 24,
+    boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+  } as const,
+  modalTitle: { fontSize: 17, fontWeight: 700, color: 'var(--text)', marginBottom: 10 } as const,
+  modalBody: { fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.55, marginBottom: 16 } as const,
+  modalInputLabel: {
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.06em',
+    color: 'var(--text-tertiary)',
+    marginBottom: 6,
+    display: 'block',
+  } as const,
+  modalInput: {
+    width: '100%',
+    background: 'var(--bg-warm)',
+    border: '1px solid var(--border)',
+    color: 'var(--text)',
+    borderRadius: 'var(--radius-sm)',
+    height: 38,
+    fontSize: 14,
+    padding: '0 12px',
+    outline: 'none',
+    fontFamily: 'var(--font-mono)',
+  } as const,
+  modalRow: { display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 18 } as const,
+  modalCancel: {
+    padding: '9px 16px',
+    fontSize: 13,
+    fontWeight: 500,
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-sm)',
+    cursor: 'pointer' as const,
+    color: 'var(--text)',
+    background: 'transparent',
+    fontFamily: 'var(--font-sans)',
+  } as const,
+  modalConfirm: (severity: 'warn' | 'critical', enabled: boolean) => ({
+    padding: '9px 16px',
+    fontSize: 13,
+    fontWeight: 600,
+    border: 'none',
+    borderRadius: 'var(--radius-sm)',
+    cursor: enabled ? 'pointer' : ('not-allowed' as const),
+    color: '#fff',
+    background: enabled
+      ? severity === 'critical'
+        ? 'var(--red, #e5484d)'
+        : 'var(--yellow, #e5a00d)'
+      : 'var(--bg-warm)',
+    opacity: enabled ? 1 : 0.6,
+    fontFamily: 'var(--font-sans)',
+  }),
+}
+
+const CONFIRM_PHRASE = 'i can spell responsibility'
+
+interface WipeModalProps {
+  title: string
+  severity: 'warn' | 'critical'
+  intro: ReactNode
+  confirmLabel: string
+  busy: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+// WipeModal gates a destructive action behind a type-the-exact-phrase confirm.
+// The placeholder and the body copy both surface the full phrase so there's no mystery
+// about what to type — we want the friction, not the guesswork.
+function WipeModal({ title, severity, intro, confirmLabel, busy, onConfirm, onCancel }: WipeModalProps) {
+  const [value, setValue] = useState('')
+  const enabled = !busy && value.trim().toLowerCase() === CONFIRM_PHRASE
+
+  return (
+    <div style={dangerStyles.modalBackdrop} onClick={busy ? undefined : onCancel}>
+      <div style={dangerStyles.modalPanel} onClick={(e) => e.stopPropagation()}>
+        <div style={dangerStyles.modalTitle}>{title}</div>
+        <div style={dangerStyles.modalBody}>{intro}</div>
+        <label style={dangerStyles.modalInputLabel}>
+          Type <code>{CONFIRM_PHRASE}</code> to confirm
+        </label>
+        <input
+          type="text"
+          style={dangerStyles.modalInput}
+          placeholder={CONFIRM_PHRASE}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          autoFocus
+          disabled={busy}
+        />
+        <div style={dangerStyles.modalRow}>
+          <button type="button" style={dangerStyles.modalCancel} onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            style={dangerStyles.modalConfirm(severity, enabled)}
+            onClick={enabled ? onConfirm : undefined}
+            disabled={!enabled}
+          >
+            {busy ? 'Working…' : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type DangerAction = 'reset' | 'shred'
+
+function DangerZoneSection() {
+  const [open, setOpen] = useState<DangerAction | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const handleReset = async () => {
+    setBusy(true)
+    try {
+      const result: WorkspaceWipeResult = await resetWorkspace()
+      if (!result.ok) {
+        showNotice(result.error || 'Reset failed', 'error')
+        setBusy(false)
+        return
+      }
+      showNotice('Broker state cleared. Reloading…', 'success')
+      setTimeout(() => window.location.reload(), 400)
+    } catch (err) {
+      showNotice(err instanceof Error ? err.message : 'Reset failed', 'error')
+      setBusy(false)
+    }
+  }
+
+  const handleShred = async () => {
+    setBusy(true)
+    try {
+      const result: WorkspaceWipeResult = await shredWorkspace()
+      if (!result.ok) {
+        showNotice(result.error || 'Shred failed', 'error')
+        setBusy(false)
+        return
+      }
+      showNotice('Workspace shredded. Returning to onboarding…', 'success')
+      setTimeout(() => window.location.reload(), 400)
+    } catch (err) {
+      showNotice(err instanceof Error ? err.message : 'Shred failed', 'error')
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <div style={styles.sectionTitle}>Danger Zone</div>
+      <div style={styles.sectionDesc}>
+        Irreversible operations on this workspace. Read each card carefully — the web UI does not
+        kill the running broker process, so after either action you may need to re-launch
+        <code style={{ margin: '0 4px' }}>wuphf</code> from your terminal for the change to fully
+        take effect.
+      </div>
+
+      {/* RESET — narrow: broker runtime state only */}
+      <div style={dangerStyles.card('warn')}>
+        <div style={dangerStyles.cardTitle}>
+          <span>{'\u{1F501}'}</span>
+          <span>Reset broker state</span>
+        </div>
+        <div style={dangerStyles.cardSubtitle}>
+          Use this when something is stuck — an agent wedged, the queue won't drain, messages stop
+          flowing — and you want a clean restart without losing your team or work.
+        </div>
+        <div style={dangerStyles.listLabel}>Clears</div>
+        <ul style={dangerStyles.list}>
+          <li>Broker runtime state (<code>~/.wuphf/team/broker-state.json</code>)</li>
+          <li>Office PID file and in-memory snapshot</li>
+        </ul>
+        <div style={dangerStyles.listLabel}>Preserved</div>
+        <ul style={dangerStyles.list}>
+          <li>Your team roster, company identity, tasks, workflows</li>
+          <li>All on-disk history (logs, sessions, artifacts)</li>
+          <li>API keys and config</li>
+        </ul>
+        <button
+          type="button"
+          style={dangerStyles.button('warn')}
+          onClick={() => setOpen('reset')}
+          disabled={busy}
+        >
+          Reset broker state…
+        </button>
+      </div>
+
+      {/* SHRED — full wipe */}
+      <div style={dangerStyles.card('critical')}>
+        <div style={dangerStyles.cardTitle}>
+          <span>{'\u{1F4A5}'}</span>
+          <span>Shred workspace</span>
+        </div>
+        <div style={dangerStyles.cardSubtitle}>
+          Full wipe. Deletes your team, company identity, office task receipts, and saved
+          workflows, then reopens the onboarding wizard on the next load. Use this to start
+          completely fresh or to try a different blueprint.
+        </div>
+        <div style={dangerStyles.listLabel}>Deletes</div>
+        <ul style={dangerStyles.list}>
+          <li>
+            Onboarding flag (<code>~/.wuphf/onboarded.json</code>) so the wizard reopens
+          </li>
+          <li>Company identity (<code>~/.wuphf/company.json</code>)</li>
+          <li>Team, office, workflows directories under <code>~/.wuphf/</code></li>
+          <li>Broker runtime state (same as Reset)</li>
+        </ul>
+        <div style={dangerStyles.listLabel}>Preserved</div>
+        <ul style={dangerStyles.list}>
+          <li>
+            <strong>Task worktrees</strong> — uncommitted work on branches stays on disk
+          </li>
+          <li>Conversation logs and session history</li>
+          <li>LLM provider caches (codex-headless, providers/, openclaw/)</li>
+          <li>Your global config (<code>config.json</code>) and API keys</li>
+        </ul>
+        <button
+          type="button"
+          style={dangerStyles.button('critical')}
+          onClick={() => setOpen('shred')}
+          disabled={busy}
+        >
+          Shred workspace…
+        </button>
+      </div>
+
+      {open === 'reset' && (
+        <WipeModal
+          title="Reset broker state?"
+          severity="warn"
+          intro={
+            <>
+              This clears the broker's on-disk runtime state and reboots the office from a clean
+              slate. Your team, company, tasks, and workflows are all kept. If this doesn't
+              unblock things, try <strong>Shred workspace</strong> instead.
+            </>
+          }
+          confirmLabel="Reset broker state"
+          busy={busy}
+          onConfirm={handleReset}
+          onCancel={() => setOpen(null)}
+        />
+      )}
+
+      {open === 'shred' && (
+        <WipeModal
+          title="Shred this workspace?"
+          severity="critical"
+          intro={
+            <>
+              This permanently deletes your team, company identity, office task receipts, and
+              saved workflows. Onboarding will reopen on next load. Task worktrees, logs, and
+              session history are kept. <strong>This cannot be undone.</strong>
+            </>
+          }
+          confirmLabel="Shred workspace"
+          busy={busy}
+          onConfirm={handleShred}
+          onCancel={() => setOpen(null)}
+        />
+      )}
+    </div>
+  )
+}
+
 // ─── Main component ─────────────────────────────────────────────────────
 
 export function SettingsApp() {
@@ -700,6 +1044,10 @@ export function SettingsApp() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['config'] })
       showNotice('Settings saved.', 'success')
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Failed to save settings'
+      showNotice(message, 'error')
     },
   })
 
@@ -746,6 +1094,7 @@ export function SettingsApp() {
         {section === 'integrations' && <IntegrationsSection cfg={data} save={save} />}
         {section === 'intervals' && <IntervalsSection cfg={data} save={save} />}
         {section === 'flags' && <FlagsSection />}
+        {section === 'danger' && <DangerZoneSection />}
       </div>
     </div>
   )

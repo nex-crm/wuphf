@@ -10,12 +10,10 @@
 package team
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -34,6 +32,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
+	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/setup"
@@ -72,6 +71,7 @@ type Launcher struct {
 	headlessQueues       map[string][]headlessCodexTurn
 	headlessDeferredLead *headlessCodexTurn
 	webMode              bool
+	paneBackedAgents     bool // web mode may spawn per-agent tmux panes; true when panes are live
 	noOpen               bool
 
 	notifyMu            sync.Mutex
@@ -176,6 +176,18 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	}, nil
 }
 
+// isOnboarded reports whether the user has completed the onboarding wizard.
+// Any error loading state is treated as not-onboarded so a corrupt or
+// missing ~/.wuphf/onboarded.json still lets the web UI boot into the
+// wizard rather than failing at preflight.
+func isOnboarded() bool {
+	s, err := onboarding.Load()
+	if err != nil || s == nil {
+		return false
+	}
+	return s.Onboarded()
+}
+
 // Preflight checks that required tools are available.
 func (l *Launcher) Preflight() error {
 	if l.usesCodexRuntime() {
@@ -248,7 +260,7 @@ func (l *Launcher) Launch() error {
 	}
 
 	// Kill any existing session
-	exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	// Resolve wuphf binary path for the channel view
 	wuphfBinary, _ := os.Executable()
@@ -281,16 +293,16 @@ func (l *Launcher) Launch() error {
 
 	// Keep tmux mouse off for this session so native terminal selection/copy works.
 	// WUPHF is keyboard-first; we don't want the TUI or tmux to steal mouse events.
-	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"mouse", "off",
 	).Run()
 
 	// Hide tmux's default status bar — our channel TUI has its own.
-	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"status", "off",
 	).Run()
 	// Keep panes visible if a process exits so crashes don't collapse the layout.
-	exec.Command("tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
 		"remain-on-exit", "on",
 	).Run()
 
@@ -301,27 +313,27 @@ func (l *Launcher) Launch() error {
 	l.spawnOverflowAgents()
 
 	// Enable pane borders with labels and visible resize handles.
-	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-status", "top",
 	).Run()
 	// Show agent name in the border; mouse drag is intentionally disabled.
-	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-format", " #{pane_title} ",
 	).Run()
 	// Make inactive border visible but subtle
-	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-style", "fg=colour240",
 	).Run()
 	// Active pane border bright so you know which pane has focus
-	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-active-border-style", "fg=colour45",
 	).Run()
 	// Use line-drawing characters for clear keyboard-focused pane boundaries.
-	exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-lines", "heavy",
 	).Run()
 
-	exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 		"-T", "📢 channel",
 	).Run()
@@ -332,17 +344,17 @@ func (l *Launcher) Launch() error {
 			i++
 		}
 		name := l.getAgentName(slug)
-		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", fmt.Sprintf("%s:team.%d", l.sessionName, i),
 			"-T", fmt.Sprintf("🤖 %s (@%s)", name, slug),
 		).Run()
 	}
 
 	// Focus on the channel pane.
-	exec.Command("tmux", "-L", tmuxSocketName, "select-window",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-window",
 		"-t", l.sessionName+":team",
 	).Run()
-	exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 	).Run()
 
@@ -404,8 +416,8 @@ func recoverPanicTo(site, extra string) {
 	fmt.Fprintf(os.Stderr, "panic in %s: %v\n%s\n%s\n", site, r, extra, buf[:n])
 	if home, err := os.UserHomeDir(); err == nil {
 		if f, ferr := os.OpenFile(filepath.Join(home, ".wuphf", "logs", "panics.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); ferr == nil {
-			fmt.Fprintf(f, "%s panic in %s: %v\n%s\n%s\n\n", time.Now().UTC().Format(time.RFC3339), site, r, extra, buf[:n])
-			f.Close()
+			_, _ = fmt.Fprintf(f, "%s panic in %s: %v\n%s\n%s\n\n", time.Now().UTC().Format(time.RFC3339), site, r, extra, buf[:n])
+			_ = f.Close()
 		}
 	}
 }
@@ -851,7 +863,7 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		channel = "general"
 	}
 	notification := l.buildTaskExecutionPacket(target.Slug, action, task, content)
-	if l.usesCodexRuntime() || l.webMode {
+	if l.shouldUseHeadlessDispatch() {
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
@@ -1114,12 +1126,12 @@ func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
 		deadSince = time.Time{}
 		snapshotWritten = false
 		target := l.sessionName + ":team.0"
-		exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
 			"-t", target,
 			"-c", l.cwd,
 			channelCmd,
 		).Run()
-		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", target,
 			"-T", "📢 channel",
 		).Run()
@@ -1167,9 +1179,11 @@ func (l *Launcher) captureDeadChannelPane(status string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = fmt.Fprintf(f, "\n[%s] status=%s\n%s\n", time.Now().Format(time.RFC3339), status, content)
-	return err
+	if _, err := fmt.Fprintf(f, "\n[%s] status=%s\n%s\n", time.Now().Format(time.RFC3339), status, content); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func channelStderrLogPath() string {
@@ -1211,7 +1225,7 @@ func (l *Launcher) primeVisibleAgents() {
 				continue
 			}
 			if shouldPrimeClaudePane(content) {
-				exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+				_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 					"-t", target.PaneTarget,
 					"Enter",
 				).Run()
@@ -1386,7 +1400,7 @@ func (l *Launcher) processDueTaskJob(job schedulerJob) {
 		return
 	}
 	alertKind := "task_stalled"
-	summary := fmt.Sprintf("Task %s in #%s is still waiting for movement.", task.Title, normalizeChannelSlug(task.Channel))
+	var summary string
 	if strings.TrimSpace(task.Owner) == "" {
 		alertKind = "task_unclaimed"
 		summary = fmt.Sprintf("Task %s in #%s still has no owner.", task.Title, normalizeChannelSlug(task.Channel))
@@ -1494,7 +1508,7 @@ func (l *Launcher) processDueWorkflowJob(job schedulerJob) {
 	now := time.Now().UTC()
 	nextRun, hasNext := nextWorkflowRun(strings.TrimSpace(payload.ScheduleExpr), now)
 	if err != nil {
-		summary := fmt.Sprintf("Scheduled workflow %s failed via %s", workflowKey, strings.Title(provider.Name()))
+		summary := fmt.Sprintf("Scheduled workflow %s failed via %s", workflowKey, titleCaser.String(provider.Name()))
 		_ = l.broker.RecordAction("external_workflow_failed", provider.Name(), channel, "scheduler", summary, workflowKey, nil, "")
 		_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, "failed", now)
 		if hasNext {
@@ -1508,7 +1522,7 @@ func (l *Launcher) processDueWorkflowJob(job schedulerJob) {
 	if status == "" {
 		status = "completed"
 	}
-	summary := fmt.Sprintf("Scheduled workflow %s ran via %s", workflowKey, strings.Title(provider.Name()))
+	summary := fmt.Sprintf("Scheduled workflow %s ran via %s", workflowKey, titleCaser.String(provider.Name()))
 	_ = l.broker.RecordAction("external_workflow_executed", provider.Name(), channel, "scheduler", summary, workflowKey, nil, "")
 	_ = l.broker.UpdateSkillExecutionByWorkflowKey(workflowKey, status, now)
 	if hasNext {
@@ -1778,7 +1792,7 @@ func killStaleBroker() {
 		return
 	}
 	for _, pid := range strings.Fields(strings.TrimSpace(string(out))) {
-		exec.Command("kill", "-9", pid).Run()
+		_ = exec.Command("kill", "-9", pid).Run()
 	}
 	time.Sleep(500 * time.Millisecond)
 }
@@ -1970,7 +1984,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
 		// respawn-pane -k kills the current process and starts a new one
 		// in the same pane — preserving size and position
-		exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
 			"-t", target,
 			"-c", l.cwd,
 			cmd,
@@ -2274,10 +2288,6 @@ func (l *Launcher) relevantTaskForTarget(msg channelMessage, slug string) (teamT
 	if l.broker == nil || slug == "" {
 		return teamTask{}, false
 	}
-	channel := normalizeChannelSlug(msg.Channel)
-	if channel == "" {
-		channel = "general"
-	}
 	threadRoot := strings.TrimSpace(msg.ID)
 	if replyTo := strings.TrimSpace(msg.ReplyTo); replyTo != "" {
 		threadRoot = replyTo
@@ -2562,11 +2572,22 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		)
 	}
 
-	if l.usesCodexRuntime() || l.webMode {
+	if l.shouldUseHeadlessDispatch() {
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
 	l.sendNotificationToPane(target.PaneTarget, notification)
+}
+
+// shouldUseHeadlessDispatch returns true when notifications must be delivered
+// via a queued headless `claude --print` turn rather than typed into a live
+// interactive pane. Codex runtime always needs headless. Web mode uses headless
+// only when pane-backed agents could not be spawned (tmux missing or failed).
+func (l *Launcher) shouldUseHeadlessDispatch() bool {
+	if l.usesCodexRuntime() {
+		return true
+	}
+	return l.webMode && !l.paneBackedAgents
 }
 
 // sendNotificationToPane delivers a notification to a persistent interactive
@@ -2575,13 +2596,13 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 // so accumulated history is not needed and only causes drift over time.
 // --append-system-prompt is a CLI flag and survives /clear intact.
 func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
-	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "/clear", "Enter",
 	).Run()
-	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "-l", notification,
 	).Run()
-	exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "Enter",
 	).Run()
 }
@@ -2698,7 +2719,7 @@ func (l *Launcher) clearAgentPanes() error {
 			continue // skip pane 0 (channel TUI)
 		}
 		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
-		exec.Command("tmux", "-L", tmuxSocketName, "kill-pane", "-t", target).Run()
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-pane", "-t", target).Run()
 	}
 	return nil
 }
@@ -2716,7 +2737,7 @@ func (l *Launcher) clearOverflowAgentWindows() {
 		if !strings.HasPrefix(name, "agent-") {
 			continue
 		}
-		exec.Command("tmux", "-L", tmuxSocketName, "kill-window",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-window",
 			"-t", fmt.Sprintf("%s:%s", l.sessionName, name),
 		).Run()
 	}
@@ -2802,22 +2823,22 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 		).Run(); err != nil {
 			return nil, fmt.Errorf("spawn one-on-one agent: %w", err)
 		}
-		exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
 			"-t", l.sessionName+":team",
 			"main-vertical",
 		).Run()
-		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", l.sessionName+":team.0",
 			"-T", "📢 direct",
 		).Run()
-		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", fmt.Sprintf("%s:team.1", l.sessionName),
 			"-T", fmt.Sprintf("🤖 %s (@%s)", l.getAgentName(slug), slug),
 		).Run()
-		exec.Command("tmux", "-L", tmuxSocketName, "select-window",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-window",
 			"-t", l.sessionName+":team",
 		).Run()
-		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", l.sessionName+":team.0",
 		).Run()
 		return []string{slug}, nil
@@ -2851,7 +2872,7 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	for i := 1; i < len(visible); i++ {
 		agentCmd := l.claudeCommand(visible[i].Slug, l.buildPrompt(visible[i].Slug))
 		// Split from the last agent pane
-		exec.Command("tmux", "-L", tmuxSocketName, "split-window",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "split-window",
 			"-t", l.sessionName+":team.1",
 			"-c", l.cwd,
 			agentCmd,
@@ -2860,21 +2881,21 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 	// Apply tiled layout to agent panes, but keep channel (pane 0) as main-vertical
 	// Use main-vertical first to keep channel on the left
-	exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
 		"-t", l.sessionName+":team",
 		"main-vertical",
 	).Run()
 
 	// Now set pane titles
 	var visibleSlugs []string
-	exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 		"-T", "📢 channel",
 	).Run()
 	for i, a := range visible {
 		paneIdx := i + 1 // pane 0 is channel
 		name := l.getAgentName(a.Slug)
-		exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx),
 			"-T", fmt.Sprintf("🤖 %s (@%s)", name, a.Slug),
 		).Run()
@@ -2882,10 +2903,10 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	}
 
 	// Focus channel pane
-	exec.Command("tmux", "-L", tmuxSocketName, "select-window",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-window",
 		"-t", l.sessionName+":team",
 	).Run()
-	exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 	).Run()
 
@@ -2896,12 +2917,90 @@ func (l *Launcher) spawnOverflowAgents() {
 	for _, member := range l.overflowOfficeMembers() {
 		agentCmd := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
 		windowName := overflowWindowName(member.Slug)
-		exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
 			"-t", l.sessionName,
 			"-n", windowName,
 			"-c", l.cwd,
 			agentCmd,
 		).Run()
+	}
+}
+
+// trySpawnWebAgentPanes attempts to create a detached tmux session with one
+// interactive `claude` pane per agent so message dispatch can type into a live
+// session. This avoids the per-turn `claude --print` path, which under
+// Anthropic's recent policy consumes the separate headless/extra-usage quota.
+//
+// On success, l.paneBackedAgents is set to true and dispatch routes through
+// sendNotificationToPane. On any failure (tmux missing, session create failure,
+// spawn error) the method logs the tradeoff, posts a system message to
+// #general, and leaves paneBackedAgents false so the existing headless path
+// continues to work.
+func (l *Launcher) trySpawnWebAgentPanes() {
+	if l.broker == nil {
+		return
+	}
+	// Codex runtime uses its own headless pipeline; panes don't apply.
+	if l.usesCodexRuntime() {
+		return
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		l.reportPaneFallback("tmux not found on PATH", err)
+		return
+	}
+
+	// Remove any stale session from a previous run. Ignore errors — the common
+	// case is "no such session".
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+
+	// Create a detached session with a placeholder pane 0. Agent panes are
+	// attached as splits afterward so agentPaneTargets() (which starts at
+	// team.1) maps correctly.
+	placeholderCmd := "sh -c 'while :; do sleep 3600; done'"
+	if err := exec.Command("tmux", "-L", tmuxSocketName, "new-session", "-d",
+		"-s", l.sessionName,
+		"-n", "team",
+		"-c", l.cwd,
+		placeholderCmd,
+	).Run(); err != nil {
+		l.reportPaneFallback("tmux new-session failed", err)
+		return
+	}
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+		"mouse", "off",
+	).Run()
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+		"status", "off",
+	).Run()
+	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
+		"remain-on-exit", "on",
+	).Run()
+
+	if _, err := l.spawnVisibleAgents(); err != nil {
+		_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+		l.reportPaneFallback("spawn visible agents failed", err)
+		return
+	}
+	l.spawnOverflowAgents()
+
+	l.paneBackedAgents = true
+	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (uses subscription quota)\n", l.sessionName)
+}
+
+// reportPaneFallback logs a pane-spawn failure and surfaces the billing
+// tradeoff to the web user via a #general system message.
+func (l *Launcher) reportPaneFallback(summary string, err error) {
+	detail := summary
+	if err != nil {
+		detail = fmt.Sprintf("%s: %v", summary, err)
+	}
+	fmt.Fprintf(os.Stderr, "  Agents:  pane-backed mode unavailable (%s). Falling back to headless `claude --print`, which consumes Anthropic's extra-usage quota. Install tmux to run agents on your normal subscription.\n", detail)
+	if l.broker != nil {
+		l.broker.PostSystemMessage(
+			"general",
+			"Running in headless mode ("+detail+"). Agent turns will draw from the Anthropic extra-usage quota. Install tmux and relaunch to use interactive Claude sessions on your normal subscription.",
+			"runtime",
+		)
 	}
 }
 
@@ -3757,7 +3856,20 @@ func (l *Launcher) getAgentName(slug string) string {
 // ═══════════════════════════════════════════════════════════════
 
 // PreflightWeb checks only for claude (no tmux requirement for web mode).
+//
+// When the user has not yet completed onboarding we deliberately skip the
+// runtime-binary check: the whole point of the web-mode onboarding wizard is
+// to pick a runtime. Hard-failing here would make the binary unlaunchable
+// until the user already had the CLI they were trying to pick. A missing
+// runtime is still caught at first-dispatch time with a clear message once
+// onboarding has committed a choice to ~/.wuphf/config.json.
 func (l *Launcher) PreflightWeb() error {
+	if !isOnboarded() {
+		if _, _, note := checkGHCapability(); note != "" {
+			fmt.Fprintf(os.Stderr, "note: %s\n", note)
+		}
+		return nil
+	}
 	if l.usesCodexRuntime() {
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
@@ -3782,7 +3894,7 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		fmt.Println()
 		fmt.Print("  Connect Nex for memory and context? [Y/n] ")
 		var answer string
-		fmt.Scanln(&answer)
+		_, _ = fmt.Scanln(&answer)
 		answer = strings.TrimSpace(strings.ToLower(answer))
 		if answer == "" || answer == "y" || answer == "yes" {
 			fmt.Println()
@@ -3845,16 +3957,31 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
 	l.broker.ServeWebUI(webPort)
 
-	// Web mode always uses queued headless turns so notifications can push
-	// scoped work directly instead of relying on long-lived agents polling.
+	// Try to spawn interactive Claude sessions in tmux panes so dispatch can
+	// type into a live agent rather than spending `claude --print` quota.
+	// Falls back to the headless path if tmux is missing or pane spawn fails.
+	l.trySpawnWebAgentPanes()
+
+	// Headless context is used for codex runtime, headless fallback, and
+	// per-turn operations that don't fit a long-lived pane session.
 	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
-	l.resumeInFlightWork()
+	if !l.paneBackedAgents {
+		l.resumeInFlightWork()
+	}
+
+	// Stream tmux pane output to the web UI's per-agent stream so users see
+	// live Claude TUI activity (thinking, tool calls, responses) during a
+	// pane-backed turn. No-op when paneBackedAgents is false.
+	l.startPaneCaptureLoops(l.headlessCtx)
 
 	go l.notifyAgentsLoop()
 	go l.notifyTaskActionsLoop()
 	go l.notifyOfficeChangesLoop()
 	go l.pollNexNotificationsLoop()
 	go l.watchdogSchedulerLoop()
+	if l.paneBackedAgents {
+		go l.primeVisibleAgents()
+	}
 
 	webURL := fmt.Sprintf("http://localhost:%d", webPort)
 	fmt.Printf("\n  Web UI:  %s\n", webURL)
@@ -3881,90 +4008,6 @@ func openBrowser(url string) {
 		return
 	}
 	_ = cmd.Start()
-}
-
-// spawnBackgroundAgents starts all agents as headless background processes (no tmux).
-// Kept for compatibility with older tooling; LaunchWeb now uses queued headless
-// turns instead so notifications can interrupt stale work immediately.
-func (l *Launcher) spawnBackgroundAgents() {
-	for _, member := range l.visibleOfficeMembers() {
-		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
-		go l.runBackgroundAgent(member.Slug, cmdStr)
-	}
-	for _, member := range l.overflowOfficeMembers() {
-		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
-		go l.runBackgroundAgent(member.Slug, cmdStr)
-	}
-}
-
-// headlessClaudeCommand builds a non-interactive claude command for web mode.
-func (l *Launcher) headlessClaudeCommand(slug, systemPrompt string) string {
-	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
-	agentMCPPath, err := l.ensureAgentMCPConfig(slug)
-	if err != nil {
-		agentMCPPath = l.mcpConfig
-	}
-	mcpConfig := strings.ReplaceAll(agentMCPPath, "'", "'\\''")
-	permFlags := l.resolvePermissionFlags(slug)
-	brokerToken := ""
-	if l.broker != nil {
-		brokerToken = l.broker.Token()
-	}
-	model := l.headlessClaudeModel(slug)
-	initialPrompt := "You are now active in the WUPHF office. Notifications are pushed to you — do NOT poll for messages. Focus entirely on the work described in each pushed notification. Use team_broadcast to post replies. Only use team_poll if a pushed notification explicitly tells you context is missing."
-	return fmt.Sprintf(
-		"WUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_BROKER_BASE_URL=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 claude --model %s --print %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -p '%s'",
-		slug, brokerToken, l.BrokerBaseURL(), config.ResolveNoNex(), model, permFlags, escaped, mcpConfig,
-		strings.ReplaceAll(initialPrompt, "'", "'\\''"),
-	)
-}
-
-// runBackgroundAgent runs a single agent as a headless OS process.
-func (l *Launcher) runBackgroundAgent(slug, cmdStr string) {
-	logDir := filepath.Join(os.TempDir(), "wuphf-agents")
-	os.MkdirAll(logDir, 0o700)
-	logPath := filepath.Join(logDir, slug+".log")
-
-	for {
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[%s] failed to open log %s: %v\n", slug, logPath, err)
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		cmd := exec.Command("bash", "-c", cmdStr)
-		cmd.Dir = l.cwd
-		cmd.Env = append(os.Environ(),
-			fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()),
-			fmt.Sprintf("WUPHF_BROKER_BASE_URL=%s", l.BrokerBaseURL()),
-		)
-		cmd.Stdin = nil
-
-		// Fan-out stdout+stderr to the log file AND the broker's per-agent
-		// stream buffer so the web UI can tail it in real time via SSE.
-		pr, pw := io.Pipe()
-		cmd.Stdout = io.MultiWriter(logFile, pw)
-		cmd.Stderr = io.MultiWriter(logFile, pw)
-
-		stream := l.broker.AgentStream(slug)
-		go func() {
-			scanner := bufio.NewScanner(pr)
-			scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-			for scanner.Scan() {
-				stream.Push(scanner.Text())
-			}
-		}()
-
-		fmt.Fprintf(os.Stderr, "[%s] agent starting (log: %s)\n", slug, logPath)
-		runErr := cmd.Run()
-		pw.Close() // signals scanner goroutine to exit
-		logFile.Close()
-
-		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "[%s] agent exited: %v, restarting in 5s\n", slug, runErr)
-		}
-		time.Sleep(5 * time.Second)
-	}
 }
 
 // postEscalation writes a system message to #general when an agent is stuck

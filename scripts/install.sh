@@ -28,17 +28,31 @@ case "$ARCH" in
     ;;
 esac
 
-# Resolve latest version tag from GitHub redirect
-VERSION="$(curl -sSL -o /dev/null -w '%{url_effective}' "https://github.com/${REPO}/releases/latest" | rev | cut -d'/' -f1 | rev)"
-if [ -z "$VERSION" ]; then
-  printf "Error: could not determine latest version\n" >&2
-  exit 1
-fi
+# Two CI hooks, in order of how much of the install path they exercise:
+#   WUPHF_INSTALL_URL_OVERRIDE   — skip resolution; download a specific tarball.
+#                                  Cheap sanity check against a snapshot build.
+#   WUPHF_INSTALL_REPO_BASE_URL  — override the GitHub base URL only. Still
+#                                  runs the redirect-parsing + archive-name
+#                                  construction that shipped broken in v0.8.1.
+# Prefer the second in CI so the path that actually regressed stays covered.
+REPO_BASE_URL="${WUPHF_INSTALL_REPO_BASE_URL:-https://github.com/${REPO}}"
+URL="${WUPHF_INSTALL_URL_OVERRIDE:-}"
+if [ -n "$URL" ]; then
+  VERSION="${WUPHF_INSTALL_VERSION_OVERRIDE:-snapshot}"
+  ARCHIVE="$(basename "$URL")"
+else
+  # Resolve latest version tag from GitHub redirect
+  VERSION="$(curl -sSL -o /dev/null -w '%{url_effective}' "${REPO_BASE_URL}/releases/latest" | rev | cut -d'/' -f1 | rev)"
+  if [ -z "$VERSION" ]; then
+    printf "Error: could not determine latest version\n" >&2
+    exit 1
+  fi
 
-# goreleaser strips the leading 'v' from the tag in archive names
-VERSION_CLEAN="${VERSION#v}"
-ARCHIVE="${BINARY}_${VERSION_CLEAN}_${OS}_${ARCH}.tar.gz"
-URL="https://github.com/${REPO}/releases/download/${VERSION}/${ARCHIVE}"
+  # goreleaser strips the leading 'v' from the tag in archive names
+  VERSION_CLEAN="${VERSION#v}"
+  ARCHIVE="${BINARY}_${VERSION_CLEAN}_${OS}_${ARCH}.tar.gz"
+  URL="${REPO_BASE_URL}/releases/download/${VERSION}/${ARCHIVE}"
+fi
 
 TMPDIR="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR"' EXIT

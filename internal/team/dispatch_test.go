@@ -11,11 +11,11 @@ func TestNormalizeProviderKind(t *testing.T) {
 	tests := []struct {
 		in, want string
 	}{
-		{"", provider.KindClaudeCode},           // empty → default to claude-code
-		{"claude", provider.KindClaudeCode},     // legacy alias
-		{"Claude", provider.KindClaudeCode},     // case-insensitive
-		{" codex ", provider.KindCodex},         // trim
-		{"CODEX", provider.KindCodex},           // uppercase
+		{"", provider.KindClaudeCode},       // empty → default to claude-code
+		{"claude", provider.KindClaudeCode}, // legacy alias
+		{"Claude", provider.KindClaudeCode}, // case-insensitive
+		{" codex ", provider.KindCodex},     // trim
+		{"CODEX", provider.KindCodex},       // uppercase
 		{"claude-code", provider.KindClaudeCode},
 		{"openclaw", provider.KindOpenclaw},
 		{"gemini", "gemini"}, // unknown passes through so dispatch can error
@@ -72,6 +72,33 @@ func TestMemberEffectiveProviderKind_DefaultsToClaudeWhenAllEmpty(t *testing.T) 
 	// install-default behavior that predated per-agent providers.
 	if got := l.memberEffectiveProviderKind("anybody"); got != provider.KindClaudeCode {
 		t.Fatalf("default fallback should be claude-code, got %q", got)
+	}
+}
+
+func TestShouldUseHeadlessDispatch(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name             string
+		provider         string
+		webMode          bool
+		paneBackedAgents bool
+		want             bool
+	}{
+		{"tui mode, claude → pane", "claude-code", false, false, false},
+		{"tui mode, codex → headless", "codex", false, false, true},
+		{"web mode, no panes → headless", "claude-code", true, false, true},
+		{"web mode with panes → pane", "claude-code", true, true, false},
+		{"web mode, codex always headless even if panes flag set", "codex", true, true, true},
+	}
+	for _, tt := range tests {
+		l := &Launcher{
+			provider:         tt.provider,
+			webMode:          tt.webMode,
+			paneBackedAgents: tt.paneBackedAgents,
+		}
+		if got := l.shouldUseHeadlessDispatch(); got != tt.want {
+			t.Errorf("%s: shouldUseHeadlessDispatch() = %v, want %v", tt.name, got, tt.want)
+		}
 	}
 }
 

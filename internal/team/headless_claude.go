@@ -39,7 +39,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 		"--print", "-",
 		"--output-format", "stream-json",
 		"--verbose",
-		"--max-turns", "5",
+		"--max-turns", l.headlessClaudeMaxTurns(slug),
 		"--disable-slash-commands",
 		"--setting-sources", "user",
 		"--append-system-prompt", l.buildPrompt(slug),
@@ -109,7 +109,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
-		pw.Close()
+		_ = pw.Close()
 		return err
 	}
 	done := make(chan struct{})
@@ -170,7 +170,7 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 			l.updateHeadlessProgress(slug, "error", "error", truncate(event.Detail, 180), metrics)
 		}
 	})
-	pw.Close() // signal scanner goroutine that stream is done
+	_ = pw.Close() // signal scanner goroutine that stream is done (io.PipeWriter.Close always returns nil)
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(firstNonEmpty(result.LastError, strings.TrimSpace(stderr.String()), err.Error()))
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
@@ -228,6 +228,17 @@ func (l *Launcher) headlessClaudeModel(slug string) string {
 	return "claude-sonnet-4-6"
 }
 
+// headlessClaudeMaxTurns returns the turn budget for an agent. The CEO routes
+// untagged and DM messages, which typically requires looking up tasks, channel
+// members, and posting an assignment — easily more than 5 turns. Specialists
+// get a smaller budget since they focus on a single task.
+func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
+	if slug == l.officeLeadSlug() {
+		return "30"
+	}
+	return "15"
+}
+
 func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
 	env := os.Environ()
 	env = append(env,
@@ -272,7 +283,7 @@ func appendHeadlessClaudeLog(slug string, line string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = fmt.Fprintf(f, "[%s] %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(line))
 }
 
@@ -285,6 +296,6 @@ func appendHeadlessClaudeLatency(slug string, line string) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
 }

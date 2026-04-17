@@ -45,6 +45,19 @@ const STEP_ORDER: readonly WizardStep[] = [
 
 const RUNTIME_OPTIONS = ['Claude Code', 'Codex', 'Cursor', 'Windsurf', 'Other'] as const
 
+// Map UI runtime labels to the provider enum the broker validates on POST /config.
+// Labels without a backend equivalent return null and are skipped on persist —
+// the broker keeps its existing default (claude-code) until the user picks a
+// supported runtime. Keeping this local to the wizard so the UI can list
+// aspirational runtimes without lying about what will actually run.
+const RUNTIME_LABEL_TO_PROVIDER: Record<string, 'claude-code' | 'codex' | null> = {
+  'Claude Code': 'claude-code',
+  Codex: 'codex',
+  Cursor: null,
+  Windsurf: null,
+  Other: null,
+}
+
 const API_KEY_FIELDS = [
   { key: 'ANTHROPIC_API_KEY', label: 'Anthropic', hint: 'Powers Claude-based agents' },
   { key: 'OPENAI_API_KEY', label: 'OpenAI', hint: 'Powers GPT-based agents' },
@@ -742,10 +755,15 @@ export function Wizard({ onComplete }: WizardProps) {
     async (skipTask: boolean) => {
       setSubmitting(true)
       try {
-        // Persist memory backend selection first so the broker reads it on
-        // next launch. Fire-and-forget — a failure here should not block
-        // completing onboarding.
+        // Persist memory backend + LLM provider selection first so the broker
+        // reads them on next launch. Fire-and-forget — a failure here should
+        // not block completing onboarding. Unsupported runtime labels (Cursor,
+        // Windsurf, Other) are skipped; only claude-code and codex are wired.
         post('/config', { memory_backend: memoryBackend }).catch(() => {})
+        const llmProvider = RUNTIME_LABEL_TO_PROVIDER[runtime]
+        if (llmProvider) {
+          post('/config', { llm_provider: llmProvider }).catch(() => {})
+        }
 
         // Post the onboarding payload. Body shape is historical; the broker
         // currently only acts on {task, skip_task} but the extra fields are

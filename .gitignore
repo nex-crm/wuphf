@@ -1,6 +1,8 @@
 # Go binary
 /wuphf
 /nex
+/bridge
+/wuphf-oc-probe
 
 # Local artifacts
 /docs/*
@@ -44,3 +46,9 @@ video/public/audio/bg-music-b.mp3
 video/public/audio/bg-music-c.mp3
 video/public/audio/bg-music-d.mp3
 video/public/audio/test-*.mp3
+
+# VHS visual regression artifacts — only .txt goldens are diffed;
+# .gif output and .actual drift files regenerate on every run of
+# testdata/vhs/check.sh and are not tracked in git.
+testdata/vhs/*.gif
+testdata/vhs/*.actual

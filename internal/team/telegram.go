@@ -13,22 +13,22 @@ import (
 )
 
 const (
-	telegramAPIBase    = "https://api.telegram.org"
+	telegramAPIBase     = "https://api.telegram.org"
 	telegramPollTimeout = 30 // seconds for long-poll
 )
 
 // telegramUpdate represents a single update from the Telegram Bot API.
 type telegramUpdate struct {
-	UpdateID int64           `json:"update_id"`
-	Message  *telegramMsg    `json:"message,omitempty"`
+	UpdateID int64        `json:"update_id"`
+	Message  *telegramMsg `json:"message,omitempty"`
 }
 
 type telegramMsg struct {
-	MessageID int64          `json:"message_id"`
-	Chat      telegramChat   `json:"chat"`
-	From      *telegramUser  `json:"from,omitempty"`
-	Text      string         `json:"text"`
-	Date      int64          `json:"date"`
+	MessageID int64         `json:"message_id"`
+	Chat      telegramChat  `json:"chat"`
+	From      *telegramUser `json:"from,omitempty"`
+	Text      string        `json:"text"`
+	Date      int64         `json:"date"`
 }
 
 type telegramChat struct {
@@ -45,9 +45,9 @@ type telegramUser struct {
 }
 
 type telegramAPIResponse struct {
-	OK     bool              `json:"ok"`
-	Result json.RawMessage   `json:"result,omitempty"`
-	Desc   string            `json:"description,omitempty"`
+	OK     bool            `json:"ok"`
+	Result json.RawMessage `json:"result,omitempty"`
+	Desc   string          `json:"description,omitempty"`
 }
 
 // TelegramTransport bridges Telegram chats with the office broker.
@@ -55,17 +55,17 @@ type telegramAPIResponse struct {
 // "telegram" surface. Inbound Telegram messages are posted to the broker;
 // outbound broker messages on surface channels are sent to Telegram.
 type TelegramTransport struct {
-	BotToken  string
-	Broker    *Broker
+	BotToken string
+	Broker   *Broker
 	// ChatMap maps telegram chat_id (as string) -> office channel slug
-	ChatMap   map[string]string
+	ChatMap map[string]string
 	// DMChannel is the office channel slug for direct messages (private chats).
 	// When set, any private message to the bot routes to this channel.
 	DMChannel string
 	// UserMap maps telegram username (lowercase) -> office member slug.
 	// If empty, display names are used verbatim as the "from" field.
-	UserMap   map[string]string
-	client    *http.Client
+	UserMap map[string]string
+	client  *http.Client
 }
 
 // NewTelegramTransport creates a transport from the broker's surface channels.

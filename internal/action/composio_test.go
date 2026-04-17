@@ -242,8 +242,8 @@ func TestComposioRESTWorkflowDigestHappyPath(t *testing.T) {
 				"insight_limit":  "{{ .inputs.insight_limit }}",
 			},
 			{
-				"id":   "email_summary",
-				"type": "template",
+				"id":       "email_summary",
+				"type":     "template",
 				"template": "Email highlights:\n{{- range $m := .steps.fetch_emails.result.data.messages }}\n- {{ $m.sender }} | {{ $m.subject }} | {{ $m.preview.body }}\n{{- end }}",
 			},
 			{
@@ -404,8 +404,8 @@ func TestComposioRESTWorkflowNormalizesHandlebarsEachSyntax(t *testing.T) {
 		"version": composioWorkflowVersion,
 		"steps": []map[string]any{
 			{
-				"id":   "email_summary",
-				"type": "template",
+				"id":       "email_summary",
+				"type":     "template",
 				"template": "Recent emails:\n{{#each steps.fetch_emails.result.data.messages}}\n- {{this.sender}} | {{this.subject}}\n{{/each}}",
 			},
 		},

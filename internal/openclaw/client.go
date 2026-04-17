@@ -73,7 +73,7 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 		lastSeq: make(map[string]int64),
 	}
 	if err := c.doHandshake(dctx); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, err
 	}
 	go c.readLoop()
@@ -117,12 +117,12 @@ type connectChallengeEvent struct {
 }
 
 const (
-	clientIDBackend    = "gateway-client"
-	clientModeBackend  = "backend"
-	connectRole        = "operator"
+	clientIDBackend     = "gateway-client"
+	clientModeBackend   = "backend"
+	connectRole         = "operator"
 	connectDeviceFamily = "wuphf"
-	connectScopeAdmin  = "operator.admin"
-	supportedProtocol  = 3
+	connectScopeAdmin   = "operator.admin"
+	supportedProtocol   = 3
 )
 
 func (c *Client) doHandshake(ctx context.Context) error {

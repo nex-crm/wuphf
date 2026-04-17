@@ -3,6 +3,9 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { postMessage, post } from '../../api/client'
 import { useAppStore } from '../../stores/app'
 import { showNotice } from '../ui/Toast'
+import { confirm } from '../ui/ConfirmDialog'
+import { openProviderSwitcher } from '../ui/ProviderSwitcher'
+import { Autocomplete, applyAutocomplete, type AutocompleteItem } from './Autocomplete'
 
 /** Handle slash commands. Returns true if the input was a command. */
 function handleSlashCommand(input: string): boolean {
@@ -37,6 +40,12 @@ function handleSlashCommand(input: string): boolean {
     case '/doctor':
       store.setCurrentApp('health-check')
       return true
+    case '/threads':
+      store.setCurrentApp('threads')
+      return true
+    case '/provider':
+      openProviderSwitcher()
+      return true
     case '/search':
       store.setSearchOpen(true)
       return true
@@ -53,21 +62,28 @@ function handleSlashCommand(input: string): boolean {
     case '/pause':
       post('/signals', { kind: 'pause', summary: 'Human paused all agents' })
         .then(() => showNotice('All agents paused', 'success'))
-        .catch(() => {})
+        .catch((e: Error) => showNotice('Pause failed: ' + e.message, 'error'))
       return true
     case '/resume':
       post('/signals', { kind: 'resume', summary: 'Human resumed agents' })
         .then(() => showNotice('Agents resumed', 'success'))
-        .catch(() => {})
+        .catch((e: Error) => showNotice('Resume failed: ' + e.message, 'error'))
       return true
     case '/reset':
-      post('/reset', {})
-        .then(() => {
-          store.setLastMessageId(null)
-          store.setCurrentChannel('general')
-          showNotice('Office reset', 'success')
-        })
-        .catch(() => showNotice('Reset failed', 'error'))
+      confirm({
+        title: 'Reset the office?',
+        message: 'Clears channels back to #general and drops in-memory state. Persisted tasks and requests stay on the broker.',
+        confirmLabel: 'Reset',
+        danger: true,
+        onConfirm: () =>
+          post('/reset', {})
+            .then(() => {
+              store.setLastMessageId(null)
+              store.setCurrentChannel('general')
+              showNotice('Office reset', 'success')
+            })
+            .catch((e: Error) => showNotice('Reset failed: ' + e.message, 'error')),
+      })
       return true
     case '/1o1': {
       if (!args) {
@@ -114,9 +130,25 @@ function handleSlashCommand(input: string): boolean {
 
 export function Composer() {
   const currentChannel = useAppStore((s) => s.currentChannel)
+  const setCurrentApp = useAppStore((s) => s.setCurrentApp)
   const [text, setText] = useState('')
+  const [caret, setCaret] = useState(0)
+  const [acItems, setAcItems] = useState<AutocompleteItem[]>([])
+  const [acIdx, setAcIdx] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
+
+  const pickAutocomplete = useCallback((item: AutocompleteItem) => {
+    const next = applyAutocomplete(text, caret, item)
+    setText(next.text)
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(next.caret, next.caret)
+      setCaret(next.caret)
+    })
+  }, [text, caret])
 
   const sendMutation = useMutation({
     mutationFn: (content: string) => postMessage(content, currentChannel),
@@ -126,6 +158,18 @@ export function Composer() {
         textareaRef.current.style.height = 'auto'
       }
       queryClient.invalidateQueries({ queryKey: ['messages', currentChannel] })
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Failed to send message'
+      // The broker blocks chat with 409 + "request pending; answer required" when
+      // an agent is waiting on the human. The InterviewBar above the composer
+      // already shows the question, so the user has somewhere to act. Never yank
+      // them away from the textbox they are typing in.
+      if (/request pending|answer required/i.test(message)) {
+        showNotice('Answer the interview above to send messages.', 'info')
+        return
+      }
+      showNotice(message, 'error')
     },
   })
 
@@ -145,11 +189,44 @@ export function Composer() {
   }, [text, sendMutation])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (acItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setAcIdx((i) => (i + 1) % acItems.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setAcIdx((i) => (i - 1 + acItems.length) % acItems.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        const pick = acItems[acIdx] ?? acItems[0]
+        if (pick) pickAutocomplete(pick)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setAcItems([])
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
-  }, [handleSend])
+  }, [handleSend, acItems, acIdx, pickAutocomplete])
+
+  const handleAcItems = useCallback((items: AutocompleteItem[]) => {
+    setAcItems(items)
+    setAcIdx((idx) => Math.min(idx, Math.max(items.length - 1, 0)))
+  }, [])
+
+  const syncCaret = useCallback(() => {
+    const el = textareaRef.current
+    if (el) setCaret(el.selectionStart ?? 0)
+  }, [])
 
   const handleInput = useCallback(() => {
     const el = textareaRef.current
@@ -161,14 +238,23 @@ export function Composer() {
 
   return (
     <div className="composer">
+      <Autocomplete
+        value={text}
+        caret={caret}
+        selectedIdx={acIdx}
+        onItems={handleAcItems}
+        onPick={pickAutocomplete}
+      />
       <div className="composer-inner">
         <textarea
           ref={textareaRef}
           className="composer-input"
           placeholder={`Message #${currentChannel}`}
           value={text}
-          onChange={(e) => { setText(e.target.value); handleInput() }}
+          onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart ?? 0); handleInput() }}
           onKeyDown={handleKeyDown}
+          onKeyUp={syncCaret}
+          onClick={syncCaret}
           rows={1}
         />
         <button

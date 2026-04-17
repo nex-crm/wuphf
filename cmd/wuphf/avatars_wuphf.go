@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"hash/fnv"
 	"strings"
 )
 
@@ -183,24 +182,6 @@ var spriteCRO = pixelSprite{
 	{0, 0, 0, 1, 1, 0, 0, 0, 0, 5, 5, 5, 0, 0},
 }
 
-// Generic agent — used for dynamically created agents
-var spriteGeneric = pixelSprite{
-	{0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0},
-	{0, 0, 0, 1, 4, 4, 4, 4, 4, 4, 1, 0, 0, 0},
-	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
-	{0, 0, 0, 1, 2, 1, 2, 2, 1, 2, 1, 0, 0, 0},
-	{0, 0, 0, 1, 2, 2, 2, 2, 2, 2, 1, 0, 0, 0},
-	{0, 0, 0, 0, 1, 2, 2, 2, 2, 1, 0, 0, 0, 0},
-	{0, 0, 1, 3, 3, 3, 3, 3, 3, 3, 3, 1, 0, 0},
-	{0, 1, 2, 3, 3, 3, 3, 3, 3, 3, 3, 2, 1, 0},
-	{0, 0, 2, 2, 3, 3, 3, 3, 3, 3, 2, 2, 0, 0},
-	{0, 0, 1, 2, 1, 3, 3, 3, 3, 1, 2, 1, 0, 0},
-	{0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0},
-	{0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 0, 0},
-	{0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0},
-	{0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0},
-}
-
 // spriteForSlug returns the unique sprite for a known role,
 // or a seeded variation of the generic sprite for dynamic agents.
 // frame alternates 0/1 for animation.
@@ -210,33 +191,27 @@ func spriteForSlug(slug string, frame ...int) pixelSprite {
 		f = frame[0] % 2
 	}
 
-	var base pixelSprite
+	var sprite pixelSprite
 	switch slug {
 	case "ceo":
-		base = spriteCEO
+		sprite = cloneSprite(spriteCEO)
 	case "pm":
-		base = spritePM
+		sprite = cloneSprite(spritePM)
 	case "fe":
-		base = spriteFE
+		sprite = cloneSprite(spriteFE)
 	case "be":
-		base = spriteBE
+		sprite = cloneSprite(spriteBE)
 	case "ai":
-		base = spriteAI
+		sprite = cloneSprite(spriteAI)
 	case "designer":
-		base = spriteDesigner
+		sprite = cloneSprite(spriteDesigner)
 	case "cmo":
-		base = spriteCMO
+		sprite = cloneSprite(spriteCMO)
 	case "cro":
-		base = spriteCRO
+		sprite = cloneSprite(spriteCRO)
 	default:
-		base = spriteGeneric
-	}
-
-	sprite := cloneSprite(base)
-
-	if slug != "ceo" && slug != "pm" && slug != "fe" && slug != "be" &&
-		slug != "ai" && slug != "designer" && slug != "cmo" && slug != "cro" {
-		applyHairVariation(sprite, seedHash(slug))
+		// Unknown slug — compose from modular layers so every agent is unique.
+		sprite = proceduralSpriteForSlug(slug)
 	}
 
 	if f == 1 {
@@ -247,14 +222,15 @@ func spriteForSlug(slug string, frame ...int) pixelSprite {
 
 // animateFrame applies micro-animations for frame 1 (frame 0 is the base).
 // Each character has a unique animation that conveys personality:
-//   CEO:      raises coffee cup (arm moves up)
-//   PM:       taps clipboard (hand shifts)
-//   FE:      screen flickers (highlight changes)
-//   BE:      tightens crossed arms
-//   AI:      antenna blinks (accent toggles)
-//   Designer: pencil moves (prop shifts position)
-//   CMO:      megaphone raised higher
-//   CRO:      briefcase swings
+//
+//	CEO:      raises coffee cup (arm moves up)
+//	PM:       taps clipboard (hand shifts)
+//	FE:      screen flickers (highlight changes)
+//	BE:      tightens crossed arms
+//	AI:      antenna blinks (accent toggles)
+//	Designer: pencil moves (prop shifts position)
+//	CMO:      megaphone raised higher
+//	CRO:      briefcase swings
 func animateFrame(sprite pixelSprite, slug string) {
 	if len(sprite) < 14 {
 		return
@@ -343,31 +319,6 @@ func animateFrame(sprite pixelSprite, slug string) {
 	}
 }
 
-func seedHash(s string) int {
-	h := fnv.New32a()
-	h.Write([]byte(s))
-	return int(h.Sum32())
-}
-
-func applyHairVariation(sprite pixelSprite, seed int) {
-	switch seed % 4 {
-	case 0: // short crop
-		sprite[0][6] = pxClear
-		sprite[0][7] = pxClear
-	case 1: // wider hair
-		sprite[1][3] = pxHair
-		sprite[1][10] = pxHair
-	case 2: // tall hair
-		if len(sprite) > 0 && len(sprite[0]) >= 10 {
-			sprite[0][5] = pxHair
-			sprite[0][8] = pxHair
-		}
-	default: // asymmetric
-		sprite[0][5] = pxClear
-		sprite[1][4] = pxHair
-	}
-}
-
 func cloneSprite(src pixelSprite) pixelSprite {
 	out := make(pixelSprite, len(src))
 	for i := range src {
@@ -384,13 +335,18 @@ func parseHexColor(hex string) [3]int {
 		return [3]int{140, 140, 150}
 	}
 	r, g, b := 0, 0, 0
-	fmt.Sscanf(hex[0:2], "%x", &r)
-	fmt.Sscanf(hex[2:4], "%x", &g)
-	fmt.Sscanf(hex[4:6], "%x", &b)
+	_, _ = fmt.Sscanf(hex[0:2], "%x", &r)
+	_, _ = fmt.Sscanf(hex[2:4], "%x", &g)
+	_, _ = fmt.Sscanf(hex[4:6], "%x", &b)
 	return [3]int{r, g, b}
 }
 
 func spritePaletteForSlug(slug string) map[int][3]int {
+	// Unknown slugs get a fully procedural palette (hash picks skin/hair/accent
+	// independently) to match proceduralSpriteForSlug.
+	if isProceduralSlug(slug) {
+		return proceduralPaletteForSlug(slug)
+	}
 	accent := parseHexColor(agentColorMap[slug])
 	if accent == ([3]int{}) {
 		accent = [3]int{88, 166, 255}

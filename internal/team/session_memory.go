@@ -50,9 +50,7 @@ func buildSessionRecovery(sessionMode, directAgent string, tasks []RuntimeTask, 
 		}
 	}
 
-	for _, msg := range recentHighlights(recent) {
-		recovery.Highlights = append(recovery.Highlights, msg)
-	}
+	recovery.Highlights = append(recovery.Highlights, recentHighlights(recent)...)
 
 	return recovery
 }

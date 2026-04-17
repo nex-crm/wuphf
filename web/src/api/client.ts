@@ -56,7 +56,10 @@ export async function get<T = unknown>(
     if (qs) url += '?' + qs
   }
   const r = await fetch(url, { headers: authHeaders() })
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  if (!r.ok) {
+    const text = (await r.text().catch(() => '')).trim()
+    throw new Error(text || `${r.status} ${r.statusText}`)
+  }
   return r.json()
 }
 
@@ -69,7 +72,10 @@ export async function post<T = unknown>(
     headers: authHeaders(),
     body: JSON.stringify(body),
   })
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+  if (!r.ok) {
+    const text = (await r.text().catch(() => '')).trim()
+    throw new Error(text || `${r.status} ${r.statusText}`)
+  }
   return r.json()
 }
 
@@ -82,6 +88,10 @@ export async function del<T = unknown>(
     headers: authHeaders(),
     body: JSON.stringify(body),
   })
+  if (!r.ok) {
+    const text = (await r.text().catch(() => '')).trim()
+    throw new Error(text || `${r.status} ${r.statusText}`)
+  }
   return r.json()
 }
 
@@ -176,6 +186,21 @@ export function getOfficeMembers() {
   return get<{ members: OfficeMember[] }>('/office-members')
 }
 
+export interface GeneratedAgentTemplate {
+  slug?: string
+  name?: string
+  role?: string
+  emoji?: string
+  expertise?: string[]
+  personality?: string
+  provider?: string
+  model?: string
+}
+
+export function generateAgent(prompt: string) {
+  return post<GeneratedAgentTemplate>('/office-members/generate', { prompt })
+}
+
 export function getMembers(channel: string) {
   return get<{ members: OfficeMember[] }>('/members', {
     channel: channel || 'general',
@@ -221,14 +246,32 @@ export function createDM(agentSlug: string) {
 
 // ── Requests ──
 
+export interface InterviewOption {
+  id: string
+  label: string
+  description?: string
+  requires_text?: boolean
+  text_hint?: string
+}
+
 export interface AgentRequest {
   id: string
   from: string
   question: string
-  choices?: { id: string; label: string }[]
+  /** Legacy field name; broker now returns `options`. Kept for compatibility. */
+  choices?: InterviewOption[]
+  options?: InterviewOption[]
   channel?: string
+  title?: string
+  context?: string
+  kind?: string
   timestamp?: string
   status?: string
+  blocking?: boolean
+  required?: boolean
+  recommended_id?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export function getRequests(channel: string) {
@@ -238,8 +281,10 @@ export function getRequests(channel: string) {
   })
 }
 
-export function answerRequest(id: string, choiceId: string) {
-  return post('/requests/answer', { id, choice_id: choiceId })
+export function answerRequest(id: string, choiceId: string, customText?: string) {
+  const body: Record<string, string> = { id, choice_id: choiceId }
+  if (customText) body.custom_text = customText
+  return post('/requests/answer', body)
 }
 
 // ── Health ──
@@ -353,11 +398,15 @@ export function deletePolicy(id: string) {
 // ── Scheduler ──
 
 export interface SchedulerJob {
-  id: string
+  id?: string
+  slug?: string
   name?: string
+  label?: string
+  kind?: string
   cron?: string
   next_run?: string
   last_run?: string
+  due_at?: string
   status?: string
 }
 
@@ -452,7 +501,7 @@ export function runStudioWorkflow(payload?: unknown) {
 
 export type LLMProvider = 'claude-code' | 'codex'
 export type MemoryBackend = 'nex' | 'gbrain' | 'none'
-export type ActionProvider = 'auto' | 'composio' | ''
+export type ActionProvider = 'auto' | 'one' | 'composio' | ''
 
 export interface ConfigSnapshot {
   // Runtime
@@ -533,4 +582,33 @@ export function getConfig() {
 
 export function updateConfig(patch: ConfigUpdate) {
   return post<{ status: string }>('/config', patch)
+}
+
+// ── Workspace wipes (Danger Zone) ──
+
+// WorkspaceWipeResult shape mirrors internal/workspace.Result plus the flags
+// the HTTP handler adds (restart_required, redirect). The UI just needs ok +
+// a reason to reload, but we surface `removed` so users can see what went.
+export interface WorkspaceWipeResult {
+  ok: boolean
+  restart_required?: boolean
+  redirect?: string
+  removed?: string[]
+  errors?: string[]
+  error?: string
+}
+
+// resetWorkspace is the narrow wipe: clears broker runtime state only.
+// Team roster, company identity, tasks, and workflows all survive. Call
+// window.location.reload() after success so the UI picks up the empty
+// broker state.
+export function resetWorkspace() {
+  return post<WorkspaceWipeResult>('/workspace/reset', {})
+}
+
+// shredWorkspace is the full wipe: broker runtime + team + company + office
+// + workflows. Onboarding reopens on the next load. Call window.location
+// .reload() after success.
+export function shredWorkspace() {
+  return post<WorkspaceWipeResult>('/workspace/shred', {})
 }

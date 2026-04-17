@@ -37,11 +37,17 @@ export function MessageFeed() {
     return (
       <div className="messages">
         <div className="channel-empty-state">
-          <span className="eyebrow">#{currentChannel}</span>
-          <span className="title">This is the beginning of #{currentChannel}</span>
+          <span className="eyebrow">quiet before the standup</span>
+          <span className="title">#{currentChannel} is empty. For now.</span>
           <span className="body">
-            Send a message or @mention an agent to get started.
+            This is where your agents will argue, claim tasks, and show progress.
+            Unlike Ryan Howard, they actually ship.
           </span>
+          <div className="channel-empty-hints">
+            <div>Try <code>@ceo what should we build this week?</code></div>
+            <div>Type <code>/</code> for commands, <code>@</code> to mention an agent.</div>
+          </div>
+          <span className="channel-empty-foot">Michael would be proud. Probably.</span>
         </div>
       </div>
     )

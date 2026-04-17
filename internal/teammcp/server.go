@@ -360,8 +360,8 @@ type TeamMemberArgs struct {
 	// install-wide default runtime. Set Provider to pick a specific runtime and
 	// (optionally) model for this agent: one team can mix Claude, Codex, and
 	// OpenClaw agents, each on its own provider.
-	Provider         string `json:"provider,omitempty" jsonschema:"LLM runtime for this agent. One of: claude-code, codex, openclaw. Empty = install default."`
-	Model            string `json:"model,omitempty" jsonschema:"Model name passed to the runtime (e.g. claude-sonnet-4.6, gpt-5.4, openai-codex/gpt-5.4). Free-form; runtime validates."`
+	Provider           string `json:"provider,omitempty" jsonschema:"LLM runtime for this agent. One of: claude-code, codex, openclaw. Empty = install default."`
+	Model              string `json:"model,omitempty" jsonschema:"Model name passed to the runtime (e.g. claude-sonnet-4.6, gpt-5.4, openai-codex/gpt-5.4). Free-form; runtime validates."`
 	OpenclawSessionKey string `json:"openclaw_session_key,omitempty" jsonschema:"Optional: attach to an existing OpenClaw session key (e.g. after WUPHF reinstall). Leave empty to auto-create a new session."`
 	OpenclawAgentID    string `json:"openclaw_agent_id,omitempty" jsonschema:"Optional: OpenClaw agent config name (defaults to 'main')."`
 	MySlug             string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
@@ -2092,7 +2092,7 @@ func handleTeamChannel(ctx context.Context, _ *mcp.CallToolRequest, args TeamCha
 	if err := reconfigureOfficeSessionFn(); err != nil {
 		return toolError(err), nil, nil
 	}
-	return textResult(fmt.Sprintf("%s channel #%s", strings.Title(strings.TrimSpace(args.Action)), channel)), nil, nil
+	return textResult(fmt.Sprintf("%s channel #%s", titleCaser.String(strings.TrimSpace(args.Action)), channel)), nil, nil
 }
 
 func handleTeamChannelMember(ctx context.Context, _ *mcp.CallToolRequest, args TeamChannelMemberArgs) (*mcp.CallToolResult, any, error) {
@@ -2115,7 +2115,7 @@ func handleTeamChannelMember(ctx context.Context, _ *mcp.CallToolRequest, args T
 	if err := reconfigureOfficeSessionFn(); err != nil {
 		return toolError(err), nil, nil
 	}
-	return textResult(fmt.Sprintf("%s @%s in #%s", strings.Title(strings.TrimSpace(args.Action)), member, channel)), nil, nil
+	return textResult(fmt.Sprintf("%s @%s in #%s", titleCaser.String(strings.TrimSpace(args.Action)), member, channel)), nil, nil
 }
 
 func handleTeamBridge(ctx context.Context, _ *mcp.CallToolRequest, args TeamBridgeArgs) (*mcp.CallToolResult, any, error) {

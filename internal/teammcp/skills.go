@@ -57,14 +57,14 @@ func handleTeamSkillRun(ctx context.Context, _ *mcp.CallToolRequest, args TeamSk
 	}
 
 	payload := map[string]any{
-		"ok":          true,
-		"skill_name":  resp.Skill.Name,
-		"title":       resp.Skill.Title,
-		"description": resp.Skill.Description,
-		"trigger":     resp.Skill.Trigger,
-		"usage_count": resp.Skill.UsageCount,
-		"channel":     resp.Skill.Channel,
-		"content":     resp.Skill.Content,
+		"ok":           true,
+		"skill_name":   resp.Skill.Name,
+		"title":        resp.Skill.Title,
+		"description":  resp.Skill.Description,
+		"trigger":      resp.Skill.Trigger,
+		"usage_count":  resp.Skill.UsageCount,
+		"channel":      resp.Skill.Channel,
+		"content":      resp.Skill.Content,
 		"instructions": "Follow the steps in `content` exactly. Do NOT freelance — this skill is the canonical playbook for this request.",
 	}
 	return textResult(prettyObject(payload)), nil, nil

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getOfficeTasks, post, type Task } from '../../api/client'
 import { formatRelativeTime } from '../../lib/format'
 import { TaskDetailModal } from './TaskDetailModal'
+import { showNotice } from '../ui/Toast'
 
 const STATUS_ORDER = ['in_progress', 'open', 'review', 'pending', 'blocked', 'done', 'canceled'] as const
 
@@ -97,6 +98,9 @@ function useTaskMove() {
 
       try {
         await post('/tasks', body)
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Move failed'
+        showNotice(message, 'error')
       } finally {
         await queryClient.invalidateQueries({ queryKey: ['office-tasks'] })
       }

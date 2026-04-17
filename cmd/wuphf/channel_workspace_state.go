@@ -404,9 +404,7 @@ func (m channelModel) buildOfficeIntroLines(contentWidth int) []renderedLine {
 	}
 
 	if state.NeedsYou != nil {
-		for _, line := range state.needsYouLines(contentWidth) {
-			lines = append(lines, line)
-		}
+		lines = append(lines, state.needsYouLines(contentWidth)...)
 	} else {
 		lines = append(lines, renderedLine{Text: ""})
 		lines = append(lines, renderedLine{Text: mutedStyle.Render("  Suggested: /switcher for active work, /recover for context, or tag a teammate in #general. Bears. Beets. Ship it.")})

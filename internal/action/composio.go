@@ -247,8 +247,8 @@ func (c *ComposioREST) ActionKnowledge(ctx context.Context, _ string, actionID s
 		"name":              result.Name,
 		"description":       result.Description,
 		"toolkit":           result.Toolkit.Slug,
-		"input_parameters":  json.RawMessage(result.InputParameters),
-		"output_parameters": json.RawMessage(result.OutputParameters),
+		"input_parameters":  result.InputParameters,
+		"output_parameters": result.OutputParameters,
 	}, "", "  ")
 	return KnowledgeResult{
 		Platform:  strings.TrimSpace(result.Toolkit.Slug),

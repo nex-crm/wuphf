@@ -71,26 +71,26 @@ go build -o wuphf ./cmd/wuphf
 
 `--no-nex` still lets Telegram and any other local integration keep working. To switch back to CEO-routed delegation after launch, use `/focus` inside the office.
 
-## Memory Backends
+## Memory: Notebooks and the Wiki
 
-WUPHF can run with three organizational context modes:
+Every agent gets its own **notebook**. The team shares a **wiki**. When a conclusion in an agent's notebook holds up, it gets promoted to the wiki so the whole office benefits. Both are knowledge graphs under the hood, on Garry Tan's GBrain or Nex.
+
+**The promotion flow:**
+
+1. Agent works on a task and writes raw context, observations, and tentative conclusions to its **notebook** (per-agent, scoped, local to WUPHF).
+2. When something in the notebook looks durable (a recurring playbook, a verified entity fact, a confirmed preference), the agent gets a promotion hint.
+3. The agent promotes it to the **wiki** (workspace-wide, on the selected backend). Now every other agent can query it.
+4. The wiki points other agents at whoever last recorded the context, so they know who to @mention for fresher working detail.
+
+Nothing is promoted automatically. Agents decide what graduates from notebook to wiki.
+
+**Backends for the wiki:**
 
 - `nex` is the default. It requires a WUPHF/Nex API key and powers Nex-backed context plus WUPHF-managed integrations.
-- `gbrain` mounts `gbrain serve` as the office memory layer. It requires an API key during `/init`: `OpenAI` gives you the full path with embeddings and vector search, while `Anthropic` alone is reduced mode.
-- `none` disables the external memory layer entirely.
+- `gbrain` mounts `gbrain serve` as the wiki backend. It requires an API key during `/init`: `OpenAI` gives you the full path with embeddings and vector search, while `Anthropic` alone is reduced mode.
+- `none` disables the external wiki entirely. Notebooks still work locally.
 
-WUPHF now enforces two memory scopes above those backends:
-
-- `private` memory is per-agent and local to WUPHF. Every agent can query and write its own notes.
-- `shared` memory is workspace-wide and backed by the selected external backend (`nex` or `gbrain`).
-
-Agents use WUPHF-managed memory tools instead of talking to raw backend MCP tools directly. That gives the same scope model across both backends:
-
-- every agent can read shared memory
-- every agent can read and write only its own private memory
-- durable conclusions can be promoted from private memory into shared memory once they are real
-- shared memory can point agents at the teammate who last recorded durable context, so they know who to ask in-channel for fresher working detail
-- private notes that look like durable decisions, preferences, or playbooks get promotion hints, but nothing is promoted automatically
+**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. MCP tools are `team_memory_query` and `team_memory_promote`. The notebook/wiki labels are the user-facing nomenclature for everything outside the codebase.
 
 Examples:
 
@@ -168,7 +168,7 @@ Connects SaaS accounts (Gmail, Slack, etc.) through Composio's hosted OAuth flow
 | Live visibility | Stdout streaming |
 | Mid-task steering | DM any agent, no restart |
 | Runtimes | Mix Claude Code, Codex, and OpenClaw in one channel |
-| Memory | Per-agent knowledge graph + shared workspace memory |
+| Memory | Per-agent notebook + shared workspace wiki (knowledge graphs on GBrain or Nex) |
 | Price | Free and open source (MIT, self-hosted, your API keys) |
 
 ## Benchmark

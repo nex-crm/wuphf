@@ -27,8 +27,8 @@ type officeSignal struct {
 // or command) or "auto_detected" (inferred from a recurring working pattern).
 type officePolicy struct {
 	ID        string `json:"id"`
-	Source    string `json:"source"`   // "human_directed" | "auto_detected"
-	Rule      string `json:"rule"`     // plain-English description of the rule
+	Source    string `json:"source"` // "human_directed" | "auto_detected"
+	Rule      string `json:"rule"`   // plain-English description of the rule
 	Active    bool   `json:"active"`
 	CreatedAt string `json:"created_at"`
 }
