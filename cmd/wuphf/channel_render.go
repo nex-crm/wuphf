@@ -840,14 +840,10 @@ func collectCalendarEvents(jobs []channelSchedulerJob, tasks []channelTask, requ
 		if task.Status == "done" {
 			continue
 		}
-		for _, ev := range taskCalendarEvents(task, activeChannel, members) {
-			events = append(events, ev)
-		}
+		events = append(events, taskCalendarEvents(task, activeChannel, members)...)
 	}
 	for _, req := range requests {
-		for _, ev := range requestCalendarEvents(req, activeChannel, members) {
-			events = append(events, ev)
-		}
+		events = append(events, requestCalendarEvents(req, activeChannel, members)...)
 	}
 	sort.SliceStable(events, func(i, j int) bool {
 		if events[i].When.Equal(events[j].When) {

@@ -404,8 +404,8 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		Bold(true)
 	workspaceMetaStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(sidebarMuted))
-	workspaceSummaryStyle := workspaceMetaStyle.Copy()
-	workspaceHintStyle := workspaceMetaStyle.Copy()
+	workspaceSummaryStyle := workspaceMetaStyle
+	workspaceHintStyle := workspaceMetaStyle
 	activeRowStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(lipgloss.Color(sidebarActive)).
@@ -517,9 +517,7 @@ func renderSidebar(channels []channelInfo, members []channelMember, tasks []chan
 		if cl := checklist[0]; !cl.Dismissed {
 			clSection := renderOnboardingChecklist(cl, width)
 			if clSection != "" {
-				for _, clLine := range strings.Split(clSection, "\n") {
-					lines = append(lines, clLine)
-				}
+				lines = append(lines, strings.Split(clSection, "\n")...)
 			}
 		}
 	}

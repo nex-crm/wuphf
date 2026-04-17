@@ -494,7 +494,7 @@ func (s *AgentService) UpdateConfig(slug string, updates ConfigUpdate) error {
 func (s *AgentService) notify() {
 	for _, fn := range s.listeners {
 		func() {
-			defer func() { recover() }()
+			defer func() { _ = recover() }()
 			fn()
 		}()
 	}

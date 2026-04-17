@@ -1,5 +1,4 @@
 import { Component, useEffect, useState, type ReactNode } from 'react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { initApi, get } from './api/client'
 import { useAppStore } from './stores/app'
 import { Shell } from './components/layout/Shell'
@@ -17,27 +16,23 @@ import { ArtifactsApp } from './components/apps/ArtifactsApp'
 import { ReceiptsApp } from './components/apps/ReceiptsApp'
 import { HealthCheckApp } from './components/apps/HealthCheckApp'
 import { SettingsApp } from './components/apps/SettingsApp'
+import { ThreadsApp } from './components/apps/ThreadsApp'
 import { Wizard } from './components/onboarding/Wizard'
 import { AgentPanel } from './components/agents/AgentPanel'
 import { SearchModal } from './components/search/SearchModal'
+import { InterviewBar } from './components/messages/InterviewBar'
 import { DisconnectBanner } from './components/layout/DisconnectBanner'
 import { SplashScreen } from './components/onboarding/SplashScreen'
 import { ToastContainer } from './components/ui/Toast'
+import { ConfirmHost } from './components/ui/ConfirmDialog'
+import { ProviderSwitcherHost } from './components/ui/ProviderSwitcher'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
+import { useHashRouter } from './hooks/useHashRouter'
 import './styles/global.css'
 import './styles/layout.css'
 import './styles/messages.css'
 import './styles/agents.css'
 import './styles/search.css'
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      retry: 1,
-      staleTime: 2000,
-    },
-  },
-})
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -60,12 +55,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   render() {
     if (this.state.error) {
       return (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: '#fee', color: '#900', padding: 20,
-          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          fontSize: 13, overflowY: 'auto', zIndex: 9999,
-        }}>
+        <div
+          data-testid="error-boundary"
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: '#fee', color: '#900', padding: 20,
+            fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+            fontSize: 13, overflowY: 'auto', zIndex: 9999,
+          }}
+        >
           <h2 style={{ margin: '0 0 8px 0', fontSize: 14 }}>
             Something broke in the UI
           </h2>
@@ -109,6 +107,7 @@ function MainContent() {
       receipts: ReceiptsApp,
       'health-check': HealthCheckApp,
       settings: SettingsApp,
+      threads: ThreadsApp,
     }
     const Panel = panels[currentApp]
     return (
@@ -126,6 +125,7 @@ function MainContent() {
     <>
       <MessageFeed />
       <TypingIndicator />
+      <InterviewBar />
       <Composer />
     </>
   )
@@ -150,6 +150,7 @@ export default function App() {
   const setOnboardingComplete = useAppStore((s) => s.setOnboardingComplete)
 
   useKeyboardShortcuts()
+  useHashRouter()
 
   // Load theme CSS when theme changes
   useEffect(() => {
@@ -232,10 +233,10 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <QueryClientProvider client={queryClient}>
-        {body}
-        <ToastContainer />
-      </QueryClientProvider>
+      {body}
+      <ToastContainer />
+      <ConfirmHost />
+      <ProviderSwitcherHost />
     </ErrorBoundary>
   )
 }

@@ -34,7 +34,7 @@ func TestHandleAgentLogs_ListsRecent(t *testing.T) {
 
 	b := newTestBroker(t)
 	b.SetAgentLogRoot(logRoot)
-	srv := httptest.NewServer(http.HandlerFunc(b.requireAuth(b.handleAgentLogs)))
+	srv := httptest.NewServer(b.requireAuth(b.handleAgentLogs))
 	defer srv.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL, nil)
@@ -77,7 +77,7 @@ func TestHandleAgentLogs_ReadsSingleTask(t *testing.T) {
 
 	b := newTestBroker(t)
 	b.SetAgentLogRoot(logRoot)
-	srv := httptest.NewServer(http.HandlerFunc(b.requireAuth(b.handleAgentLogs)))
+	srv := httptest.NewServer(b.requireAuth(b.handleAgentLogs))
 	defer srv.Close()
 
 	req, _ := http.NewRequest(http.MethodGet, srv.URL+"?task=eng-12345", nil)
@@ -106,7 +106,7 @@ func TestHandleAgentLogs_ReadsSingleTask(t *testing.T) {
 func TestHandleAgentLogs_RejectsPathTraversal(t *testing.T) {
 	b := newTestBroker(t)
 	b.SetAgentLogRoot(t.TempDir())
-	srv := httptest.NewServer(http.HandlerFunc(b.requireAuth(b.handleAgentLogs)))
+	srv := httptest.NewServer(b.requireAuth(b.handleAgentLogs))
 	defer srv.Close()
 
 	for _, bad := range []string{"../etc/passwd", "eng/../../../etc/passwd", "a/b"} {

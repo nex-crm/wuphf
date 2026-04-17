@@ -73,7 +73,9 @@ func main() {
 		members[i].sessionKey = out.Key
 		fmt.Printf("created session for %s: %s\n", m.slug, out.Key)
 	}
-	conn.Close()
+	if err := conn.Close(); err != nil {
+		die("conn.Close: %v", err)
+	}
 
 	// Seed a temporary WUPHF HOME so broker state doesn't clash with a real
 	// install. Point identity + token back at the paired daemon.
@@ -81,11 +83,19 @@ func main() {
 	if err != nil {
 		die("tmp home: %v", err)
 	}
-	defer os.RemoveAll(tmpHome)
-	os.Setenv("HOME", tmpHome)
-	os.MkdirAll(filepath.Join(tmpHome, ".wuphf"), 0o700)
-	os.Setenv("WUPHF_OPENCLAW_IDENTITY_PATH", realIdentityPath)
-	os.Setenv("WUPHF_OPENCLAW_TOKEN", token)
+	defer func() { _ = os.RemoveAll(tmpHome) }()
+	if err := os.Setenv("HOME", tmpHome); err != nil {
+		die("setenv HOME: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpHome, ".wuphf"), 0o700); err != nil {
+		die("mkdir .wuphf: %v", err)
+	}
+	if err := os.Setenv("WUPHF_OPENCLAW_IDENTITY_PATH", realIdentityPath); err != nil {
+		die("setenv identity path: %v", err)
+	}
+	if err := os.Setenv("WUPHF_OPENCLAW_TOKEN", token); err != nil {
+		die("setenv token: %v", err)
+	}
 
 	bindings := make([]config.OpenclawBridgeBinding, len(members))
 	for i, m := range members {

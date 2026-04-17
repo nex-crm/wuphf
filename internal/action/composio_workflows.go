@@ -768,7 +768,7 @@ func intInput(v any) int {
 		return int(i)
 	case string:
 		var n int
-		fmt.Sscanf(strings.TrimSpace(t), "%d", &n)
+		_, _ = fmt.Sscanf(strings.TrimSpace(t), "%d", &n)
 		return n
 	default:
 		return 0

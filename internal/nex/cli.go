@@ -15,10 +15,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
@@ -95,6 +97,7 @@ func Run(ctx context.Context, args ...string) (string, error) {
 		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = appendClientEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -131,4 +134,23 @@ func Recall(ctx context.Context, query string) (string, error) {
 		return "", fmt.Errorf("recall: query is required")
 	}
 	return Run(ctx, "recall", query)
+}
+
+// NexClientEnvVar is the env var nex-cli (and downstream Nex services)
+// can read to attribute a call to the client that initiated it. Exposed
+// so server-side tooling doesn't have to guess the name.
+const NexClientEnvVar = "NEX_CLIENT"
+
+// appendClientEnv adds NEX_CLIENT=wuphf/<version> unless it's already
+// set in env. Respecting an existing value lets integrators nest clients
+// (e.g. a wrapper that sets NEX_CLIENT=myapp/wuphf/<version>) without us
+// stomping on it.
+func appendClientEnv(env []string) []string {
+	prefix := NexClientEnvVar + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return env
+		}
+	}
+	return append(env, prefix+"wuphf/"+buildinfo.Current().Version)
 }

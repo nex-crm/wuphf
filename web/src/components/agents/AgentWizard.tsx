@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
-import { post } from '../../api/client'
+import { post, generateAgent } from '../../api/client'
 import { useQueryClient } from '@tanstack/react-query'
 
 type Provider = 'claude' | 'openai' | 'gemini'
+type WizardMode = 'describe' | 'manual'
 
 interface AgentFormData {
   name: string
@@ -42,11 +43,43 @@ interface AgentWizardProps {
 }
 
 export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
+  const [mode, setMode] = useState<WizardMode>('describe')
+  const [prompt, setPrompt] = useState('')
+  const [generating, setGenerating] = useState(false)
   const [form, setForm] = useState<AgentFormData>(INITIAL_FORM)
   const [slugEdited, setSlugEdited] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const queryClient = useQueryClient()
+
+  async function handleGenerate() {
+    const trimmed = prompt.trim()
+    if (!trimmed) {
+      setError('Describe the agent you want first.')
+      return
+    }
+    setGenerating(true)
+    setError(null)
+    try {
+      const tmpl = await generateAgent(trimmed)
+      const generatedSlug = tmpl.slug || ''
+      setForm({
+        name: tmpl.name || '',
+        slug: generatedSlug,
+        role: tmpl.role || '',
+        emoji: tmpl.emoji || '',
+        provider: 'claude',
+        expertise: (tmpl.expertise || []).join(', '),
+      })
+      setSlugEdited(generatedSlug.length > 0)
+      setMode('manual')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Generation failed'
+      setError(message)
+    } finally {
+      setGenerating(false)
+    }
+  }
 
   const updateField = useCallback(
     <K extends keyof AgentFormData>(field: K, value: AgentFormData[K]) => {
@@ -107,6 +140,8 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
     setForm(INITIAL_FORM)
     setSlugEdited(false)
     setError(null)
+    setMode('describe')
+    setPrompt('')
     onClose()
   }
 
@@ -123,6 +158,67 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
       <div className="agent-wizard-modal card">
         <div className="agent-wizard-title">Create agent</div>
 
+        {/* Mode toggle */}
+        <div className="channel-wizard-tabs" style={{ marginBottom: 16 }}>
+          <button
+            type="button"
+            className={`channel-wizard-tab${mode === 'describe' ? ' active' : ''}`}
+            onClick={() => { setMode('describe'); setError(null) }}
+          >
+            Describe
+          </button>
+          <button
+            type="button"
+            className={`channel-wizard-tab${mode === 'manual' ? ' active' : ''}`}
+            onClick={() => { setMode('manual'); setError(null) }}
+          >
+            Manual
+          </button>
+        </div>
+
+        {mode === 'describe' ? (
+          <div className="agent-wizard-form">
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-prompt">
+                Describe the agent you want
+              </label>
+              <textarea
+                id="agent-prompt"
+                className="input"
+                placeholder='e.g. "A DevOps engineer who manages CI/CD and infrastructure"'
+                value={prompt}
+                onChange={(e) => { setPrompt(e.target.value); setError(null) }}
+                rows={3}
+                style={{ minHeight: 80, resize: 'vertical', padding: '10px 12px', lineHeight: 1.5 }}
+                autoFocus
+              />
+              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6, display: 'block' }}>
+                AI will draft a slug, name, role, expertise, and personality. You can edit before creating.
+              </span>
+            </div>
+
+            {error && <div className="agent-wizard-error">{error}</div>}
+
+            <div className="agent-wizard-footer">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={handleCancel}
+                disabled={generating}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={handleGenerate}
+                disabled={generating || !prompt.trim()}
+              >
+                {generating ? 'Generating...' : 'Generate'}
+              </button>
+            </div>
+          </div>
+        ) : (
         <form className="agent-wizard-form" onSubmit={handleSubmit}>
           {/* Name */}
           <div className="agent-wizard-field">
@@ -239,6 +335,7 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
             </button>
           </div>
         </form>
+        )}
       </div>
     </div>
   )

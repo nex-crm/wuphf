@@ -2,8 +2,7 @@ package operations
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -18,8 +17,8 @@ func LoadBlueprint(repoRoot, templateID string) (Blueprint, error) {
 	if templateID == "" {
 		return Blueprint{}, fmt.Errorf("template id required")
 	}
-	path := filepath.Join(repoRoot, "templates", "operations", templateID, "blueprint.yaml")
-	raw, err := os.ReadFile(path)
+	rel := path.Join("templates", "operations", templateID, "blueprint.yaml")
+	raw, err := readTemplateFile(repoRoot, rel)
 	if err != nil {
 		return Blueprint{}, err
 	}
@@ -35,20 +34,13 @@ func LoadBlueprint(repoRoot, templateID string) (Blueprint, error) {
 }
 
 func ListBlueprints(repoRoot string) ([]Blueprint, error) {
-	root := filepath.Join(repoRoot, "templates", "operations")
-	entries, err := os.ReadDir(root)
+	names, err := listTemplateDirs(repoRoot, path.Join("templates", "operations"))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	blueprints := make([]Blueprint, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		blueprint, err := LoadBlueprint(repoRoot, entry.Name())
+	blueprints := make([]Blueprint, 0, len(names))
+	for _, name := range names {
+		blueprint, err := LoadBlueprint(repoRoot, name)
 		if err != nil {
 			return nil, err
 		}

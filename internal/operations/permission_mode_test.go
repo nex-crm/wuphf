@@ -219,7 +219,7 @@ func TestSynthesizedBlueprintPermissionModes(t *testing.T) {
 			},
 		},
 		{
-			name: "empty input fallback",
+			name:  "empty input fallback",
 			input: SynthesisInput{},
 		},
 	}

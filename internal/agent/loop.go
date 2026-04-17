@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,6 +120,18 @@ func (l *AgentLoop) GetState() AgentState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.state
+}
+
+// appendSession writes a session journal entry and logs (rather than drops)
+// any error. Best-effort: we never want a journal-write failure to stop an
+// agent turn, but silently swallowing the error has historically hidden real
+// corruption. Logging preserves "don't crash the loop" while making drift
+// debuggable after the fact.
+func (l *AgentLoop) appendSession(entry SessionEntry) {
+	if _, err := l.sessions.Append(l.state.SessionID, entry); err != nil {
+		log.Printf("agent loop: session append (session=%s type=%s): %v",
+			l.state.SessionID, entry.Type, err)
+	}
 }
 
 // CanProcess reports whether the loop is started and not paused.
@@ -383,7 +396,7 @@ func (l *AgentLoop) buildContext() error {
 		}
 	}
 	if !hasSystem && l.state.Config.Personality != "" {
-		l.sessions.Append(l.state.SessionID, SessionEntry{
+		l.appendSession(SessionEntry{
 			Type:    "system",
 			Content: l.state.Config.Personality,
 		})
@@ -391,7 +404,7 @@ func (l *AgentLoop) buildContext() error {
 
 	// Drain steer messages after the session exists so the first user task is not lost.
 	if msg, ok := l.queues.DrainSteer(slug); ok {
-		l.sessions.Append(l.state.SessionID, SessionEntry{
+		l.appendSession(SessionEntry{
 			Type:    "system",
 			Content: "[STEER] " + msg,
 		})
@@ -402,7 +415,7 @@ func (l *AgentLoop) buildContext() error {
 		l.state.CurrentTask = msg
 		l.state.TaskID = nextTaskID(slug)
 		l.lastCompactionAt = 0
-		l.sessions.Append(l.state.SessionID, SessionEntry{
+		l.appendSession(SessionEntry{
 			Type:    "user",
 			Content: msg,
 		})
@@ -442,12 +455,12 @@ func (l *AgentLoop) injectGossipInsights() {
 		score := ScoreInsight(insight, "", srcCred)
 		switch score.Decision {
 		case "adopt":
-			l.sessions.Append(l.state.SessionID, SessionEntry{
+			l.appendSession(SessionEntry{
 				Type:    "system",
 				Content: fmt.Sprintf("[GOSSIP:ADOPTED] (from %s, score=%.2f) %s", insight.Source, score.Total, insight.Content),
 			})
 		case "test":
-			l.sessions.Append(l.state.SessionID, SessionEntry{
+			l.appendSession(SessionEntry{
 				Type:    "system",
 				Content: fmt.Sprintf("[GOSSIP:TEST] (from %s, score=%.2f) %s", insight.Source, score.Total, insight.Content),
 			})
@@ -548,7 +561,7 @@ done:
 	}
 	// Append assistant text to session.
 	if fullText.Len() > 0 {
-		l.sessions.Append(l.state.SessionID, SessionEntry{
+		l.appendSession(SessionEntry{
 			Type:    "assistant",
 			Content: fullText.String(),
 		})
@@ -573,7 +586,7 @@ func (l *AgentLoop) executeTool() error {
 	tool, ok := l.tools.Get(tc.ToolName)
 	if !ok {
 		errMsg := fmt.Sprintf("unknown tool: %q", tc.ToolName)
-		l.sessions.Append(l.state.SessionID, SessionEntry{
+		l.appendSession(SessionEntry{
 			Type:    "tool_result",
 			Content: errMsg,
 			Metadata: map[string]any{
@@ -588,7 +601,7 @@ func (l *AgentLoop) executeTool() error {
 
 	if valid, errs := l.tools.Validate(tc.ToolName, tc.Params); !valid {
 		errMsg := fmt.Sprintf("invalid params for %q: %s", tc.ToolName, strings.Join(errs, "; "))
-		l.sessions.Append(l.state.SessionID, SessionEntry{
+		l.appendSession(SessionEntry{
 			Type:    "tool_result",
 			Content: errMsg,
 			Metadata: map[string]any{
@@ -602,7 +615,7 @@ func (l *AgentLoop) executeTool() error {
 	}
 
 	// Append tool_call entry.
-	l.sessions.Append(l.state.SessionID, SessionEntry{
+	l.appendSession(SessionEntry{
 		Type:    "tool_call",
 		Content: tc.ToolName,
 		Metadata: map[string]any{
@@ -631,7 +644,7 @@ func (l *AgentLoop) executeTool() error {
 	if err != nil {
 		tc.Error = err.Error()
 		l.emit(EventToolResult, err.Error())
-		l.sessions.Append(l.state.SessionID, SessionEntry{
+		l.appendSession(SessionEntry{
 			Type:    "tool_result",
 			Content: err.Error(),
 			Metadata: map[string]any{
@@ -643,7 +656,7 @@ func (l *AgentLoop) executeTool() error {
 	} else {
 		tc.Result = result
 		l.emit(EventToolResult, result)
-		l.sessions.Append(l.state.SessionID, SessionEntry{
+		l.appendSession(SessionEntry{
 			Type:    "tool_result",
 			Content: result,
 			Metadata: map[string]any{
@@ -677,7 +690,9 @@ func (l *AgentLoop) handleDone() error {
 	// Publish collected insights via gossip.
 	if l.gossipLayer != nil && len(l.collectedInsights) > 0 {
 		for _, insight := range l.collectedInsights {
-			l.gossipLayer.Publish(slug, insight, "")
+			if _, err := l.gossipLayer.Publish(slug, insight, ""); err != nil {
+				log.Printf("agent loop: gossip publish (slug=%s): %v", slug, err)
+			}
 		}
 		l.collectedInsights = nil
 	}
@@ -847,7 +862,7 @@ func (l *AgentLoop) logToolExecution(call ToolCall) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	_, _ = f.Write(append(line, '\n'))
 }

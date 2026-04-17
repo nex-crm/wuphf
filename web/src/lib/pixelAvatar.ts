@@ -1,6 +1,10 @@
 // Pixel-art agent avatars — ported from web/index.legacy.html (feature #25).
 // Each sprite is a 14x14 grid where each cell is an index into a 6-color palette:
 //   0 = transparent, 1 = outline, 2 = skin, 3 = accent, 4 = hair, 5 = prop, 6 = highlight.
+// Hand-designed sprites in SPRITE_DATA cover the named roles; unknown slugs
+// are composed procedurally from modular layers (see proceduralAvatar.ts).
+
+import { buildProceduralSprite, getProceduralAccent } from './proceduralAvatar'
 
 export const SPRITE_DATA: Record<string, number[][]> = {
   ceo: [
@@ -173,7 +177,11 @@ const AGENT_COLORS: Record<string, string> = {
 }
 
 export function getAgentColor(slug: string): string {
-  return AGENT_COLORS[slug] ?? '#58A6FF'
+  const direct = AGENT_COLORS[slug]
+  if (direct) return direct
+  const aliased = SPRITE_SLUG_MAP[slug]
+  if (aliased && AGENT_COLORS[aliased]) return AGENT_COLORS[aliased]
+  return getProceduralAccent(slug)
 }
 
 type Rgb = readonly [number, number, number]
@@ -189,20 +197,31 @@ export function drawPixelAvatar(
   size: number,
 ): void {
   const key = SPRITE_SLUG_MAP[slug] ?? slug
-  const sprite = SPRITE_DATA[key] ?? SPRITE_GENERIC
-  const accentHex = getAgentColor(slug)
+  const hand = SPRITE_DATA[key]
 
-  const ar = parseInt(accentHex.slice(1, 3), 16)
-  const ag = parseInt(accentHex.slice(3, 5), 16)
-  const ab = parseInt(accentHex.slice(5, 7), 16)
+  let sprite: number[][]
+  let palette: Record<number, Rgb>
 
-  const palette: Record<number, Rgb> = {
-    1: [36, 32, 30],
-    2: [235, 215, 190],
-    3: [ar, ag, ab],
-    4: [Math.max(0, ar - 60), Math.max(0, ag - 60), Math.max(0, ab - 60)],
-    5: [180, 170, 155],
-    6: [255, 255, 255],
+  if (hand) {
+    // Hand-designed role sprite — keep original palette treatment.
+    sprite = hand
+    const accentHex = getAgentColor(slug)
+    const ar = parseInt(accentHex.slice(1, 3), 16)
+    const ag = parseInt(accentHex.slice(3, 5), 16)
+    const ab = parseInt(accentHex.slice(5, 7), 16)
+    palette = {
+      1: [36, 32, 30],
+      2: [235, 215, 190],
+      3: [ar, ag, ab],
+      4: [Math.max(0, ar - 60), Math.max(0, ag - 60), Math.max(0, ab - 60)],
+      5: [180, 170, 155],
+      6: [255, 255, 255],
+    }
+  } else {
+    // Unknown slug — build procedurally with a palette keyed off the slug hash.
+    const procedural = buildProceduralSprite(slug)
+    sprite = procedural.grid
+    palette = procedural.palette
   }
 
   const rows = sprite.length

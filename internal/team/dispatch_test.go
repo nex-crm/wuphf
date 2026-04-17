@@ -11,11 +11,11 @@ func TestNormalizeProviderKind(t *testing.T) {
 	tests := []struct {
 		in, want string
 	}{
-		{"", provider.KindClaudeCode},           // empty → default to claude-code
-		{"claude", provider.KindClaudeCode},     // legacy alias
-		{"Claude", provider.KindClaudeCode},     // case-insensitive
-		{" codex ", provider.KindCodex},         // trim
-		{"CODEX", provider.KindCodex},           // uppercase
+		{"", provider.KindClaudeCode},       // empty → default to claude-code
+		{"claude", provider.KindClaudeCode}, // legacy alias
+		{"Claude", provider.KindClaudeCode}, // case-insensitive
+		{" codex ", provider.KindCodex},     // trim
+		{"CODEX", provider.KindCodex},       // uppercase
 		{"claude-code", provider.KindClaudeCode},
 		{"openclaw", provider.KindOpenclaw},
 		{"gemini", "gemini"}, // unknown passes through so dispatch can error

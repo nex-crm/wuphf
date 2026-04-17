@@ -24,8 +24,8 @@ type legacyAgent struct {
 }
 
 type legacyCompany struct {
-	ID     string           `json:"id"`
-	Name   string           `json:"name"`
+	ID     string        `json:"id"`
+	Name   string        `json:"name"`
 	Agents []legacyAgent `json:"agents"`
 }
 
@@ -97,7 +97,7 @@ func runImport(args []string) {
 		fmt.Fprintf(os.Stderr, "  <file.json>       Direct path to a JSON export file\n\n")
 		fs.PrintDefaults()
 	}
-	fs.Parse(args)
+	_ = fs.Parse(args) // ExitOnError
 
 	if *fromPath == "" {
 		fs.Usage()
@@ -172,13 +172,13 @@ func importFromLegacyDB(portOverride int) (importedBrokerState, int, int, error)
 	conn, err := pgx.Connect(ctx, connStr)
 	if err != nil {
 		return importedBrokerState{}, 0, 0, fmt.Errorf(
-			"could not connect to external orchestrator Postgres (localhost:%d): %v\n\n"+
-				"Make sure external orchestrator is running before importing.\n"+
-				"If external orchestrator uses a different port, pass --port <number>.",
+			"could not connect to external orchestrator Postgres (localhost:%d): %w "+
+				"(make sure external orchestrator is running before importing; "+
+				"if it uses a different port, pass --port <number>)",
 			port, err,
 		)
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	// Read companies
 	type dbCompany struct {
@@ -205,12 +205,6 @@ func importFromLegacyDB(portOverride int) (importedBrokerState, int, int, error)
 
 	if len(companies) == 0 {
 		return importedBrokerState{}, 0, 0, fmt.Errorf("no companies found in external orchestrator database")
-	}
-
-	// Collect all company IDs for filtering
-	companyIDs := make([]string, 0, len(companies))
-	for _, c := range companies {
-		companyIDs = append(companyIDs, c.ID)
 	}
 
 	// Read agents

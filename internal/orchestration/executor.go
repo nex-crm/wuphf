@@ -30,10 +30,10 @@ type Executor struct {
 // NewExecutor returns an Executor using the provided configuration.
 func NewExecutor(config OrchestratorConfig) *Executor {
 	return &Executor{
-		config:  config,
-		tasks:   make(map[string]*TaskDefinition),
-		locks:   make(map[string]string),
-		timers:  make(map[string]*time.Timer),
+		config: config,
+		tasks:  make(map[string]*TaskDefinition),
+		locks:  make(map[string]string),
+		timers: make(map[string]*time.Timer),
 	}
 }
 

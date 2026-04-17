@@ -14,6 +14,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/teammcp"
+	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
 const appName = "wuphf"
@@ -47,14 +48,18 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "This writes to ~/.wuphf/config.json. Safe to re-run.")
 	case "shred", "kill":
-		fmt.Fprintln(os.Stderr, "wuphf shred — stop the running team")
+		fmt.Fprintln(os.Stderr, "wuphf shred — burn the whole workspace down")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Kills any running WUPHF session (tmux or web), clears broker state, and")
-		fmt.Fprintln(os.Stderr, "leaves the office dark. Michael will not be happy.")
+		fmt.Fprintln(os.Stderr, "Stops the running session, clears broker state, and deletes the team")
+		fmt.Fprintln(os.Stderr, "roster, company identity, office task receipts, and saved workflows.")
+		fmt.Fprintln(os.Stderr, "Next launch reopens onboarding.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Preserved: logs, sessions, task worktrees, LLM caches, config.json.")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
-		fmt.Fprintln(os.Stderr, "  wuphf shred")
-		fmt.Fprintln(os.Stderr, "  wuphf kill       (alias)")
+		fmt.Fprintln(os.Stderr, "  wuphf shred           Prompts before wiping")
+		fmt.Fprintln(os.Stderr, "  wuphf shred -y        Skip the confirmation")
+		fmt.Fprintln(os.Stderr, "  wuphf kill            (alias)")
 	case "import":
 		fmt.Fprintln(os.Stderr, "wuphf import — pull state from another tool")
 		fmt.Fprintln(os.Stderr, "")
@@ -98,13 +103,13 @@ func printVisibleFlags(w *os.File) {
 		if len(f.Name) > 1 {
 			prefix = "--"
 		}
-		fmt.Fprintf(w, "  %s%s\n    \t%s", prefix, f.Name, f.Usage)
+		_, _ = fmt.Fprintf(w, "  %s%s\n    \t%s", prefix, f.Name, f.Usage)
 		// Only emit a trailing (default ...) when the usage string hasn't
 		// already mentioned the default itself.
 		if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "0" && !strings.Contains(f.Usage, "default") {
-			fmt.Fprintf(w, " (default %q)", f.DefValue)
+			_, _ = fmt.Fprintf(w, " (default %q)", f.DefValue)
 		}
-		fmt.Fprintln(w)
+		_, _ = fmt.Fprintln(w)
 	})
 }
 
@@ -138,7 +143,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
 		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
-		fmt.Fprintf(os.Stderr, "  %s shred        Stop the running team (Michael will not be happy)\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
@@ -224,24 +229,21 @@ func main() {
 			}
 			return
 		case "shred", "kill":
-			l, err := team.NewLauncher(selectedBlueprint)
+			if !confirmDestructive(args[1:], "shred", shredSummary) {
+				fmt.Println("Cancelled. The office lives to serve another day.")
+				return
+			}
+			if err := killRunningSession(selectedBlueprint); err != nil {
+				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				os.Exit(1)
+			}
+			res, err := workspace.Shred()
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
+				fmt.Fprintf(os.Stderr, "error: shred workspace: %v\n", err)
 				os.Exit(1)
 			}
-			if err := l.Kill(); err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				os.Exit(1)
-			}
-			if err := team.CleanupPersistedTaskWorktrees(); err != nil {
-				fmt.Fprintf(os.Stderr, "error: cleanup task worktrees: %v\n", err)
-				os.Exit(1)
-			}
-			if err := team.ClearPersistedBrokerState(); err != nil {
-				fmt.Fprintf(os.Stderr, "error: clear broker state: %v\n", err)
-				os.Exit(1)
-			}
-			fmt.Println("Session shredded. The office is dark. Michael is probably crying in the parking lot.")
+			printWipeResult("Shredded", res)
+			fmt.Println("Next `wuphf` launch will reopen onboarding. Michael would be proud.")
 			return
 		case "init":
 			dispatch("/init", *apiKeyFlag, *format)
@@ -333,7 +335,7 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 			_ = os.Setenv("WUPHF_ONE_ON_ONE", "1")
 			_ = os.Setenv("WUPHF_ONE_ON_ONE_AGENT", l.OneOnOneAgent())
 		}
-		defer l.Kill()
+		defer func() { _ = l.Kill() }()
 		runChannelView(false, resolveInitialOfficeApp(""), false)
 		return
 	}
@@ -452,4 +454,66 @@ func isPiped() bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice == 0
+}
+
+// shredSummary is the human-readable blast-radius blurb printed during the
+// interactive confirm. Stays in sync with the web Settings "Danger Zone"
+// copy by convention — if you update one, update the other so CLI and UI
+// promises match.
+const shredSummary = `This will:
+  • Stop the running WUPHF session
+  • Delete your team, company identity, office task receipts, workflows
+  • Wipe broker runtime state
+  • Reopen onboarding on next launch
+Preserved: logs, sessions, task worktrees, LLM caches, config.json.`
+
+// confirmDestructive gates a destructive subcommand behind a y/N prompt.
+// A "-y" / "--yes" in rest skips the prompt — useful for scripted teardown.
+// Prints the full summary first so the user sees exactly what they're doing
+// before typing.
+func confirmDestructive(rest []string, verb, summary string) bool {
+	for _, a := range rest {
+		if a == "-y" || a == "--yes" || a == "-yes" {
+			return true
+		}
+	}
+	fmt.Fprintln(os.Stderr, summary)
+	fmt.Fprintln(os.Stderr, "")
+	fmt.Fprintf(os.Stderr, "Type `%s` to confirm, anything else to cancel: ", verb)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return false
+	}
+	return strings.TrimSpace(line) == verb
+}
+
+// killRunningSession stops any running tmux or web-mode WUPHF session.
+// Safe to call when nothing is running — Kill is a no-op in that case.
+// Tolerates NewLauncher failing (e.g. invalid blueprint) because we don't
+// want a broken config to block the user from cleaning up.
+func killRunningSession(blueprint string) error {
+	l, err := team.NewLauncher(blueprint)
+	if err != nil {
+		// Launcher couldn't hydrate — likely no running session anyway.
+		// Fall through silently; the workspace wipe will still proceed.
+		return nil
+	}
+	return l.Kill()
+}
+
+// printWipeResult reports what came off disk in a way that's useful for
+// scripting (one path per line) and still readable interactively.
+func printWipeResult(verb string, res workspace.Result) {
+	if len(res.Removed) == 0 {
+		fmt.Printf("%s: nothing to remove (workspace was already clean).\n", verb)
+	} else {
+		fmt.Printf("%s %d path(s):\n", verb, len(res.Removed))
+		for _, p := range res.Removed {
+			fmt.Printf("  - %s\n", p)
+		}
+	}
+	for _, e := range res.Errors {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", e)
+	}
 }

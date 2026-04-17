@@ -13,19 +13,19 @@ import (
 )
 
 type fakeOCClient struct {
-	mu             sync.Mutex
-	sentKeys       []string
-	subscribed     []string
-	unsubscribed   []string
-	createdAgents  []string // agentID values passed to SessionsCreate
-	createdLabels  []string
-	createNextKey  string // key returned by the next SessionsCreate call; auto-incremented if empty
-	createCounter  int
-	createErr      error
-	events         chan openclaw.ClientEvent
-	sendErr        error
-	nextSendErrs   []error // drained FIFO if non-empty
-	closed         bool
+	mu            sync.Mutex
+	sentKeys      []string
+	subscribed    []string
+	unsubscribed  []string
+	createdAgents []string // agentID values passed to SessionsCreate
+	createdLabels []string
+	createNextKey string // key returned by the next SessionsCreate call; auto-incremented if empty
+	createCounter int
+	createErr     error
+	events        chan openclaw.ClientEvent
+	sendErr       error
+	nextSendErrs  []error // drained FIFO if non-empty
+	closed        bool
 }
 
 func newFakeOC() *fakeOCClient {

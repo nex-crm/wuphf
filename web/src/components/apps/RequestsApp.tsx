@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getRequests, answerRequest, type AgentRequest } from '../../api/client'
 import { useAppStore } from '../../stores/app'
 import { formatRelativeTime } from '../../lib/format'
+import { showNotice } from '../ui/Toast'
 
 export function RequestsApp() {
   const currentChannel = useAppStore((s) => s.currentChannel)
@@ -54,9 +55,11 @@ export function RequestsApp() {
               request={req}
               isPending
               onAnswer={(choiceId) => {
-                answerRequest(req.id, choiceId).then(() => {
-                  queryClient.invalidateQueries({ queryKey: ['requests'] })
-                })
+                answerRequest(req.id, choiceId)
+                  .then(() => {
+                    queryClient.invalidateQueries({ queryKey: ['requests'] })
+                  })
+                  .catch((e: Error) => showNotice('Answer failed: ' + e.message, 'error'))
               }}
             />
           ))}
@@ -94,7 +97,9 @@ interface RequestItemProps {
 }
 
 function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
-  const choices = request.choices ?? []
+  // Broker uses `options`; legacy used `choices`. Accept either.
+  const options = request.options ?? request.choices ?? []
+  const ts = request.updated_at ?? request.created_at ?? request.timestamp
 
   return (
     <div className="app-card" style={{ marginBottom: 8 }}>
@@ -105,25 +110,39 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
             {request.status.toUpperCase()}
           </span>
         )}
+        {request.blocking && (
+          <span className="badge badge-yellow" style={{ fontSize: 10 }}>BLOCKING</span>
+        )}
       </div>
+
+      {request.title && request.title !== 'Request' && (
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{request.title}</div>
+      )}
 
       <div style={{ fontSize: 14, marginBottom: 8 }}>{request.question || ''}</div>
 
-      {request.timestamp && (
-        <div className="app-card-meta" style={{ marginBottom: 6 }}>
-          {formatRelativeTime(request.timestamp)}
+      {request.context && (
+        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, whiteSpace: 'pre-wrap' }}>
+          {request.context}
         </div>
       )}
 
-      {isPending && choices.length > 0 && (
+      {ts && (
+        <div className="app-card-meta" style={{ marginBottom: 6 }}>
+          {formatRelativeTime(ts)}
+        </div>
+      )}
+
+      {isPending && options.length > 0 && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {choices.map((choice) => (
+          {options.map((opt) => (
             <button
-              key={choice.id}
-              className="btn btn-ghost btn-sm"
-              onClick={() => onAnswer?.(choice.id)}
+              key={opt.id}
+              className={`btn btn-sm ${opt.id === request.recommended_id ? 'btn-primary' : 'btn-ghost'}`}
+              title={opt.description}
+              onClick={() => onAnswer?.(opt.id)}
             >
-              {choice.label}
+              {opt.label}
             </button>
           ))}
         </div>

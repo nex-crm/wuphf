@@ -11,6 +11,8 @@ import {
   type OfficeMember,
 } from '../../api/client'
 import { formatTokens } from '../../lib/format'
+import { InsightsList, type Insight } from '../activity/InsightsList'
+import { Timeline, type TimelineEvent } from '../activity/Timeline'
 
 /** Minimal action/decision/watchdog shapes from the untyped endpoints. */
 interface ActionRecord {
@@ -49,7 +51,7 @@ interface WatchdogRecord {
 }
 
 interface SchedulerJobRaw {
-  id: string
+  id?: string
   label?: string
   slug?: string
   status?: string
@@ -147,6 +149,48 @@ export function ArtifactsApp() {
   allActions.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
   allDecisions.sort((a, b) => String(b.created_at ?? '').localeCompare(String(a.created_at ?? '')))
 
+  const insights: Insight[] = [
+    ...blockedTasks.map<Insight>((t) => ({
+      priority: 'high',
+      category: 'task',
+      title: t.title || t.id || 'Blocked task',
+      body: t.description,
+      target: [t.channel ? `#${t.channel}` : '', t.owner ? `@${t.owner}` : ''].filter(Boolean).join(' · ') || undefined,
+      time: t.updated_at ? new Date(t.updated_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : undefined,
+    })),
+    ...allWatchdogs.map<Insight>((w) => ({
+      priority: w.kind?.toLowerCase() === 'critical' ? 'critical' : 'high',
+      category: w.kind || 'watchdog',
+      title: w.summary || w.kind || 'Watchdog alert',
+      body: w.target_type ? `${w.target_type}${w.target_id ? ' · ' + w.target_id : ''}` : undefined,
+      target: w.channel ? `#${w.channel}` : undefined,
+      time: (w.updated_at || w.created_at)
+        ? new Date(w.updated_at || w.created_at || '').toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+        : undefined,
+    })),
+  ]
+
+  const timelineEvents: TimelineEvent[] = [
+    ...allDecisions
+      .filter((d) => d.created_at)
+      .map<TimelineEvent>((d) => ({
+        type: d.blocking ? 'watchdog' : 'decision',
+        timestamp: d.created_at || '',
+        actor: d.owner,
+        content: d.summary || d.reason || d.kind || 'Decision',
+        meta: [d.channel ? `#${d.channel}` : '', d.kind || ''].filter(Boolean).join(' · ') || undefined,
+      })),
+    ...allActions
+      .filter((a) => a.created_at)
+      .map<TimelineEvent>((a) => ({
+        type: 'action',
+        timestamp: a.created_at || '',
+        actor: a.actor,
+        content: a.summary || a.name || a.title || 'Action',
+        meta: [a.channel ? `#${a.channel}` : '', a.kind || a.type || ''].filter(Boolean).join(' · ') || undefined,
+      })),
+  ]
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Hero */}
@@ -234,63 +278,29 @@ export function ArtifactsApp() {
 
         {/* Right column */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <ActivitySection title="Needs attention" meta={`${blockedTasks.length + allWatchdogs.length} items`}>
-            {blockedTasks.length === 0 && allWatchdogs.length === 0 ? (
-              <EmptyState>No active blockers or watchdog alerts.</EmptyState>
-            ) : (
-              <>
-                {blockedTasks.slice(0, 6).map((task) => (
-                  <ActivityItem
-                    key={task.id}
-                    title={task.title || task.id || 'Blocked task'}
-                    body={task.description ?? 'Blocked lane needs operator attention.'}
-                    meta={[task.channel ? `#${task.channel}` : '', task.owner ? `@${task.owner}` : ''].filter(Boolean)}
-                    kindLabel="blocked"
-                  />
-                ))}
-                {allWatchdogs.slice(0, 6).map((alert, i) => (
-                  <ActivityItem
-                    key={`wd-${i}`}
-                    title={alert.summary || alert.kind || 'Watchdog alert'}
-                    body={alert.target_type ? `${alert.target_type}${alert.target_id ? ' \u00B7 ' + alert.target_id : ''}` : ''}
-                    meta={[
-                      alert.channel ? `#${alert.channel}` : '',
-                      (alert.updated_at || alert.created_at) ? new Date(alert.updated_at || alert.created_at || '').toLocaleString() : '',
-                    ].filter(Boolean)}
-                    kindLabel={alert.kind || 'watchdog'}
-                  />
-                ))}
-              </>
-            )}
+          <ActivitySection title="Needs attention" meta={`${insights.length} items`}>
+            <InsightsList
+              insights={insights}
+              emptyLabel="No active blockers or watchdog alerts."
+              limit={12}
+            />
           </ActivitySection>
 
-          <ActivitySection title="Recent decisions" meta={`${allDecisions.length} recorded`}>
-            {allDecisions.length === 0 ? (
-              <EmptyState>No decisions recorded yet.</EmptyState>
-            ) : (
-              allDecisions.slice(0, 8).map((decision, i) => (
-                <ActivityItem
-                  key={i}
-                  title={decision.summary || decision.kind || 'Decision'}
-                  body={decision.reason ?? ''}
-                  meta={[
-                    decision.channel ? `#${decision.channel}` : '',
-                    decision.owner ? `@${decision.owner}` : '',
-                    decision.created_at ? new Date(decision.created_at).toLocaleString() : '',
-                  ].filter(Boolean)}
-                  kindLabel={decision.kind || 'decision'}
-                />
-              ))
-            )}
+          <ActivitySection title="Recent activity" meta={`${timelineEvents.length} events`}>
+            <Timeline
+              events={timelineEvents}
+              emptyLabel="No decisions or actions logged yet."
+              limit={14}
+            />
           </ActivitySection>
 
           <ActivitySection title="Due automations" meta={`${allJobs.length} due now`}>
             {allJobs.length === 0 ? (
               <EmptyState>No jobs are due right now.</EmptyState>
             ) : (
-              allJobs.slice(0, 6).map((job) => (
+              allJobs.slice(0, 6).map((job, idx) => (
                 <ActivityItem
-                  key={job.id}
+                  key={job.slug ?? job.id ?? `due-${idx}`}
                   title={job.label || job.slug || 'Scheduled job'}
                   body={job.workflow_key || job.skill_name || job.kind || ''}
                   meta={[

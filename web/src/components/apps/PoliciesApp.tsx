@@ -6,6 +6,8 @@ import {
   deletePolicy,
   type Policy,
 } from '../../api/client'
+import { showNotice } from '../ui/Toast'
+import { confirm } from '../ui/ConfirmDialog'
 
 const SECTIONS = [
   { key: 'human_directed', label: 'Human-directed', icon: '\uD83D\uDC64' },
@@ -31,16 +33,27 @@ export function PoliciesApp() {
   const handleSave = useCallback(() => {
     const trimmed = ruleText.trim()
     if (!trimmed) return
-    createPolicy('human_directed', trimmed).then(() => {
-      setRuleText('')
-      setFormOpen(false)
-      invalidate()
-    })
+    createPolicy('human_directed', trimmed)
+      .then(() => {
+        setRuleText('')
+        setFormOpen(false)
+        invalidate()
+      })
+      .catch((e: Error) => showNotice('Save failed: ' + e.message, 'error'))
   }, [ruleText, invalidate])
 
   const handleDelete = useCallback(
-    (id: string) => {
-      deletePolicy(id).then(() => invalidate())
+    (id: string, rule: string) => {
+      confirm({
+        title: 'Deactivate policy?',
+        message: rule ? `"${rule}"\n\nThis policy will stop applying to new decisions.` : 'This policy will stop applying to new decisions.',
+        confirmLabel: 'Deactivate',
+        danger: true,
+        onConfirm: () =>
+          deletePolicy(id)
+            .then(() => invalidate())
+            .catch((e: Error) => showNotice('Delete failed: ' + e.message, 'error')),
+      })
     },
     [invalidate],
   )
@@ -160,7 +173,7 @@ export function PoliciesApp() {
 
 interface PolicyRowProps {
   policy: Policy
-  onDelete: (id: string) => void
+  onDelete: (id: string, rule: string) => void
 }
 
 function PolicyRow({ policy, onDelete }: PolicyRowProps) {
@@ -185,7 +198,7 @@ function PolicyRow({ policy, onDelete }: PolicyRowProps) {
           flexShrink: 0,
         }}
         title="Deactivate"
-        onClick={() => onDelete(policy.id)}
+        onClick={() => onDelete(policy.id, policy.rule || '')}
       >
         {'\u00D7'}
       </button>

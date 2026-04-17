@@ -62,7 +62,9 @@ func (s *SessionStore) Create(agentSlug string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create session file: %w", err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("close session file: %w", err)
+	}
 	return sessionID, nil
 }
 
@@ -85,10 +87,13 @@ func (s *SessionStore) Append(sessionID string, entry SessionEntry) (SessionEntr
 	if err != nil {
 		return SessionEntry{}, fmt.Errorf("open session file: %w", err)
 	}
-	defer f.Close()
 
 	if _, err := fmt.Fprintf(f, "%s\n", line); err != nil {
+		_ = f.Close()
 		return SessionEntry{}, fmt.Errorf("write entry: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return SessionEntry{}, fmt.Errorf("close session file: %w", err)
 	}
 
 	return entry, nil
@@ -108,7 +113,7 @@ func (s *SessionStore) GetHistory(sessionID string, limit int, fromID string) ([
 		}
 		return nil, fmt.Errorf("open session file: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var entries []SessionEntry
 	scanner := bufio.NewScanner(f)
@@ -158,7 +163,7 @@ func (s *SessionStore) Branch(sessionID, fromEntryID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("open source session: %w", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var toCopy []SessionEntry
 	scanner := bufio.NewScanner(f)
@@ -191,16 +196,20 @@ func (s *SessionStore) Branch(sessionID, fromEntryID string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("create branch file: %w", err)
 	}
-	defer out.Close()
 
 	for _, entry := range toCopy {
 		line, err := json.Marshal(entry)
 		if err != nil {
+			_ = out.Close()
 			return "", fmt.Errorf("marshal branch entry: %w", err)
 		}
 		if _, err := fmt.Fprintf(out, "%s\n", line); err != nil {
+			_ = out.Close()
 			return "", fmt.Errorf("write branch entry: %w", err)
 		}
+	}
+	if err := out.Close(); err != nil {
+		return "", fmt.Errorf("close branch file: %w", err)
 	}
 
 	return newID, nil

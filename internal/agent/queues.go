@@ -4,9 +4,9 @@ import "sync"
 
 // MessageQueues manages per-agent steer and follow-up message queues.
 type MessageQueues struct {
-	mu              sync.Mutex
-	steerQueues     map[string][]string
-	followUpQueues  map[string][]string
+	mu             sync.Mutex
+	steerQueues    map[string][]string
+	followUpQueues map[string][]string
 }
 
 // NewMessageQueues creates an empty MessageQueues.

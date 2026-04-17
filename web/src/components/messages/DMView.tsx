@@ -4,6 +4,8 @@ import { useAgentStream } from '../../hooks/useAgentStream'
 import { useAppStore } from '../../stores/app'
 import { MessageBubble } from './MessageBubble'
 import { Composer } from './Composer'
+import { InterviewBar } from './InterviewBar'
+import { StreamLineView } from './StreamLineView'
 
 export function DMView() {
   const currentChannel = useAppStore((s) => s.currentChannel)
@@ -54,6 +56,7 @@ export function DMView() {
               <MessageBubble key={msg.id} message={msg} />
             ))}
           </div>
+          <InterviewBar />
           <Composer />
         </div>
 
@@ -98,13 +101,7 @@ export function DMView() {
               </div>
             ) : (
               lines.map((line) => (
-                <div key={line.id} style={{ padding: '1px 0', wordBreak: 'break-all' }}>
-                  {line.parsed?.content
-                    ? String(line.parsed.content)
-                    : line.data.length > 200
-                      ? line.data.slice(0, 200) + '...'
-                      : line.data}
-                </div>
+                <StreamLineView key={line.id} line={line} compact />
               ))
             )}
           </div>

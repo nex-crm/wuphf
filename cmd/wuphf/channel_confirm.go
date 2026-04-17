@@ -68,8 +68,7 @@ func confirmationForResetDM(agent, channel string) *channelConfirm {
 func confirmationForSessionSwitch(mode, agent string) *channelConfirm {
 	mode = strings.TrimSpace(mode)
 	agent = strings.TrimSpace(agent)
-	title := "Switch Session Mode"
-	detail := "This changes how the office routes the live session."
+	var title, detail string
 	if team.NormalizeSessionMode(mode) == team.SessionModeOneOnOne {
 		name := displayName(agent)
 		if agent == "" {

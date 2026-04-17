@@ -260,7 +260,7 @@ func readTaskLogArtifact(path string, info fs.FileInfo) (taskLogArtifact, bool) 
 	if err != nil {
 		return taskLogArtifact{}, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 128*1024)
@@ -369,7 +369,7 @@ func readWorkflowRunArtifact(path string, info fs.FileInfo) (workflowRunArtifact
 	if err != nil {
 		return workflowRunArtifact{}, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	buf := make([]byte, 0, 128*1024)

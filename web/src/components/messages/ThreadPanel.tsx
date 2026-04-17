@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useThreadMessages } from '../../hooks/useMessages'
 import { useAppStore } from '../../stores/app'
 import { postMessage } from '../../api/client'
+import { showNotice } from '../ui/Toast'
 import { MessageBubble } from './MessageBubble'
 
 export function ThreadPanel() {
@@ -29,6 +30,10 @@ export function ThreadPanel() {
       setText('')
       queryClient.invalidateQueries({ queryKey: ['thread-messages', currentChannel, activeThreadId] })
       queryClient.invalidateQueries({ queryKey: ['messages', currentChannel] })
+    },
+    onError: (err: unknown) => {
+      const message = err instanceof Error ? err.message : 'Failed to send reply'
+      showNotice(message, 'error')
     },
   })
 
