@@ -181,8 +181,8 @@ func TestDoublePress_SecondPressWithinWindowReturnsTrue(t *testing.T) {
 
 func TestDoublePress_ResetsAfterDoublePress(t *testing.T) {
 	dp := NewDoublePress(time.Second)
-	dp.Press()  // first
-	dp.Press()  // second (detected double)
+	dp.Press() // first
+	dp.Press() // second (detected double)
 	if dp.Press() {
 		t.Error("press after reset should return false (first of new sequence)")
 	}

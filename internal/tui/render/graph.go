@@ -23,16 +23,16 @@ type GraphEdge struct {
 // nodeIcon returns the emoji icon for a given node type.
 func nodeIcon(nodeType string) string {
 	icons := map[string]string{
-		"person":  "\U0001F464", // 👤
-		"company": "\U0001F3E2", // 🏢
-		"deal":    "\U0001F4B0", // 💰
-		"task":    "\u2611",     // ☑
-		"note":    "\U0001F4DD", // 📝
-		"email":   "\u2709",     // ✉
-		"event":   "\U0001F4C5", // 📅
-		"product": "\U0001F4E6", // 📦
-		"project": "\U0001F4CB", // 📋
-		"ticket":  "\U0001F3AB", // 🎫
+		"person":   "\U0001F464", // 👤
+		"company":  "\U0001F3E2", // 🏢
+		"deal":     "\U0001F4B0", // 💰
+		"task":     "\u2611",     // ☑
+		"note":     "\U0001F4DD", // 📝
+		"email":    "\u2709",     // ✉
+		"event":    "\U0001F4C5", // 📅
+		"product":  "\U0001F4E6", // 📦
+		"project":  "\U0001F4CB", // 📋
+		"ticket":   "\U0001F3AB", // 🎫
 		"location": "\U0001F4CD", // 📍
 	}
 	if icon, ok := icons[nodeType]; ok {

@@ -9,13 +9,18 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/calendar"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-var externalActionProvider action.Provider
+var (
+	externalActionProvider action.Provider
+	titleCaser             = cases.Title(language.English)
+)
 
 type TeamActionGuideArgs struct {
 	Topic string `json:"topic,omitempty" jsonschema:"One of: overview, actions, flows, relay, all. Defaults to all."`
@@ -265,14 +270,14 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 		DryRun:          args.DryRun,
 	})
 	if err != nil {
-		_ = brokerRecordAction(ctx, "external_action_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("%s action %s on %s failed", strings.Title(provider.Name()), args.ActionID, args.Platform)), args.ActionID)
+		_ = brokerRecordAction(ctx, "external_action_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("%s action %s on %s failed", titleCaser.String(provider.Name()), args.ActionID, args.Platform)), args.ActionID)
 		return toolError(err), nil, nil
 	}
 	kind := "external_action_executed"
-	summary := fallbackSummary(args.Summary, fmt.Sprintf("Executed %s on %s via %s", args.ActionID, args.Platform, strings.Title(provider.Name())))
+	summary := fallbackSummary(args.Summary, fmt.Sprintf("Executed %s on %s via %s", args.ActionID, args.Platform, titleCaser.String(provider.Name())))
 	if args.DryRun {
 		kind = "external_action_planned"
-		summary = fallbackSummary(args.Summary, fmt.Sprintf("Planned %s on %s via %s", args.ActionID, args.Platform, strings.Title(provider.Name())))
+		summary = fallbackSummary(args.Summary, fmt.Sprintf("Planned %s on %s via %s", args.ActionID, args.Platform, titleCaser.String(provider.Name())))
 	}
 	_ = brokerRecordAction(ctx, kind, provider.Name(), channel, slug, summary, args.ActionID)
 	return textResult(prettyObject(result)), nil, nil
@@ -297,7 +302,7 @@ func handleTeamActionWorkflowCreate(ctx context.Context, _ *mcp.CallToolRequest,
 		Definition: definition,
 	})
 	if err != nil {
-		_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Creating workflow %s via %s failed", args.Key, strings.Title(provider.Name()))), args.Key)
+		_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Creating workflow %s via %s failed", args.Key, titleCaser.String(provider.Name()))), args.Key)
 		return toolError(err), nil, nil
 	}
 	if strings.TrimSpace(result.Key) == "" {
@@ -306,7 +311,7 @@ func handleTeamActionWorkflowCreate(ctx context.Context, _ *mcp.CallToolRequest,
 	if err := upsertWorkflowSkill(ctx, workflowSkillSpec{
 		Name:             fallbackString(args.SkillName, result.Key),
 		Title:            fallbackString(args.SkillTitle, humanizeWorkflowKey(result.Key)),
-		Description:      fallbackString(args.SkillDescription, fmt.Sprintf("Reusable %s workflow for %s.", strings.Title(provider.Name()), humanizeWorkflowKey(result.Key))),
+		Description:      fallbackString(args.SkillDescription, fmt.Sprintf("Reusable %s workflow for %s.", titleCaser.String(provider.Name()), humanizeWorkflowKey(result.Key))),
 		Tags:             append([]string{provider.Name(), "workflow"}, args.SkillTags...),
 		Trigger:          strings.TrimSpace(args.SkillTrigger),
 		WorkflowProvider: provider.Name(),
@@ -315,10 +320,10 @@ func handleTeamActionWorkflowCreate(ctx context.Context, _ *mcp.CallToolRequest,
 		Channel:          channel,
 		CreatedBy:        slug,
 	}); err != nil {
-		_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fmt.Sprintf("Created workflow %s via %s, but failed to mirror it into Skills", result.Key, strings.Title(provider.Name())), result.Key)
+		_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fmt.Sprintf("Created workflow %s via %s, but failed to mirror it into Skills", result.Key, titleCaser.String(provider.Name())), result.Key)
 		return toolError(err), nil, nil
 	}
-	_ = brokerRecordAction(ctx, "external_workflow_created", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Created workflow %s via %s", result.Key, strings.Title(provider.Name()))), result.Key)
+	_ = brokerRecordAction(ctx, "external_workflow_created", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Created workflow %s via %s", result.Key, titleCaser.String(provider.Name()))), result.Key)
 	return textResult(prettyObject(result)), nil, nil
 }
 
@@ -341,14 +346,14 @@ func handleTeamActionWorkflowExecute(ctx context.Context, _ *mcp.CallToolRequest
 		AllowBash: args.AllowBash,
 	})
 	if err != nil {
-		_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Workflow %s via %s failed", args.KeyOrPath, strings.Title(provider.Name()))), args.KeyOrPath)
+		_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Workflow %s via %s failed", args.KeyOrPath, titleCaser.String(provider.Name()))), args.KeyOrPath)
 		return toolError(err), nil, nil
 	}
 	kind := "external_workflow_executed"
-	summary := fallbackSummary(args.Summary, fmt.Sprintf("Executed workflow %s via %s", args.KeyOrPath, strings.Title(provider.Name())))
+	summary := fallbackSummary(args.Summary, fmt.Sprintf("Executed workflow %s via %s", args.KeyOrPath, titleCaser.String(provider.Name())))
 	if args.DryRun {
 		kind = "external_workflow_planned"
-		summary = fallbackSummary(args.Summary, fmt.Sprintf("Planned workflow %s via %s", args.KeyOrPath, strings.Title(provider.Name())))
+		summary = fallbackSummary(args.Summary, fmt.Sprintf("Planned workflow %s via %s", args.KeyOrPath, titleCaser.String(provider.Name())))
 	}
 	_ = brokerRecordAction(ctx, kind, provider.Name(), channel, slug, summary, args.KeyOrPath)
 	_ = touchWorkflowSkill(ctx, args.KeyOrPath, result.Status, time.Now().UTC())
@@ -405,7 +410,7 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 		"payload":       string(payload),
 	}
 	if err := brokerPostJSON(ctx, "/scheduler", job, nil); err != nil {
-		_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fmt.Sprintf("Failed to schedule workflow %s via %s", args.Key, strings.Title(provider.Name())), args.Key)
+		_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fmt.Sprintf("Failed to schedule workflow %s via %s", args.Key, titleCaser.String(provider.Name())), args.Key)
 		return toolError(err), nil, nil
 	}
 	skillName := strings.TrimSpace(args.SkillName)
@@ -415,7 +420,7 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 	_ = upsertWorkflowSkill(ctx, workflowSkillSpec{
 		Name:             skillName,
 		Title:            fallbackString(args.SkillTitle, humanizeWorkflowKey(args.Key)),
-		Description:      fmt.Sprintf("Reusable %s workflow for %s.", strings.Title(provider.Name()), humanizeWorkflowKey(args.Key)),
+		Description:      fmt.Sprintf("Reusable %s workflow for %s.", titleCaser.String(provider.Name()), humanizeWorkflowKey(args.Key)),
 		Tags:             []string{provider.Name(), "workflow", "scheduled"},
 		WorkflowProvider: provider.Name(),
 		WorkflowKey:      strings.TrimSpace(args.Key),
@@ -423,7 +428,7 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 		Channel:          channel,
 		CreatedBy:        slug,
 	})
-	_ = brokerRecordAction(ctx, "external_workflow_scheduled", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Scheduled workflow %s via %s (%s)", args.Key, strings.Title(provider.Name()), args.Schedule)), args.Key)
+	_ = brokerRecordAction(ctx, "external_workflow_scheduled", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Scheduled workflow %s via %s (%s)", args.Key, titleCaser.String(provider.Name()), args.Schedule)), args.Key)
 	result := map[string]any{
 		"ok":           true,
 		"workflow_key": strings.TrimSpace(args.Key),
@@ -437,14 +442,14 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 			Inputs:    args.Inputs,
 		})
 		if execErr != nil {
-			_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fmt.Sprintf("Scheduled workflow %s via %s, but the immediate run failed", args.Key, strings.Title(provider.Name())), args.Key)
+			_ = brokerRecordAction(ctx, "external_workflow_failed", provider.Name(), channel, slug, fmt.Sprintf("Scheduled workflow %s via %s, but the immediate run failed", args.Key, titleCaser.String(provider.Name())), args.Key)
 			result["run_now"] = map[string]any{
 				"ok":    false,
 				"error": execErr.Error(),
 			}
 			return textResult(prettyObject(result)), nil, nil
 		}
-		_ = brokerRecordAction(ctx, "external_workflow_executed", provider.Name(), channel, slug, fmt.Sprintf("Scheduled workflow %s via %s and ran it once immediately", args.Key, strings.Title(provider.Name())), args.Key)
+		_ = brokerRecordAction(ctx, "external_workflow_executed", provider.Name(), channel, slug, fmt.Sprintf("Scheduled workflow %s via %s and ran it once immediately", args.Key, titleCaser.String(provider.Name())), args.Key)
 		_ = touchWorkflowSkill(ctx, args.Key, runResult.Status, time.Now().UTC())
 		result["run_now"] = map[string]any{
 			"ok":     true,
@@ -496,10 +501,10 @@ func handleTeamActionRelayCreate(ctx context.Context, _ *mcp.CallToolRequest, ar
 		CreateWebhook: args.CreateWebhook,
 	})
 	if err != nil {
-		_ = brokerRecordAction(ctx, "external_trigger_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Creating trigger for %s via %s failed", args.ConnectionKey, strings.Title(provider.Name()))), args.ConnectionKey)
+		_ = brokerRecordAction(ctx, "external_trigger_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Creating trigger for %s via %s failed", args.ConnectionKey, titleCaser.String(provider.Name()))), args.ConnectionKey)
 		return toolError(err), nil, nil
 	}
-	_ = brokerRecordAction(ctx, "external_trigger_registered", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Created trigger %s via %s", result.ID, strings.Title(provider.Name()))), result.ID)
+	_ = brokerRecordAction(ctx, "external_trigger_registered", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Created trigger %s via %s", result.ID, titleCaser.String(provider.Name()))), result.ID)
 	return textResult(prettyObject(result)), nil, nil
 }
 
@@ -523,10 +528,10 @@ func handleTeamActionRelayActivate(ctx context.Context, _ *mcp.CallToolRequest, 
 		WebhookSecret: args.WebhookSecret,
 	})
 	if err != nil {
-		_ = brokerRecordAction(ctx, "external_trigger_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Activating trigger %s via %s failed", args.ID, strings.Title(provider.Name()))), args.ID)
+		_ = brokerRecordAction(ctx, "external_trigger_failed", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Activating trigger %s via %s failed", args.ID, titleCaser.String(provider.Name()))), args.ID)
 		return toolError(err), nil, nil
 	}
-	_ = brokerRecordAction(ctx, "external_trigger_registered", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Activated trigger %s via %s", result.ID, strings.Title(provider.Name()))), result.ID)
+	_ = brokerRecordAction(ctx, "external_trigger_registered", provider.Name(), channel, slug, fallbackSummary(args.Summary, fmt.Sprintf("Activated trigger %s via %s", result.ID, titleCaser.String(provider.Name()))), result.ID)
 	return textResult(prettyObject(result)), nil, nil
 }
 
@@ -641,7 +646,7 @@ func touchWorkflowSkill(ctx context.Context, workflowKey, status string, when ti
 }
 
 func workflowSkillContent(spec workflowSkillSpec) string {
-	label := strings.Title(fallbackString(spec.WorkflowProvider, "workflow"))
+	label := titleCaser.String(fallbackString(spec.WorkflowProvider, "workflow"))
 	lines := []string{
 		fmt.Sprintf("WUPHF workflow skill (%s): %s", label, humanizeWorkflowKey(fallbackString(spec.WorkflowKey, spec.Name))),
 		"Use team_action_workflow_execute to run it through WUPHF.",
@@ -679,7 +684,7 @@ func humanizeWorkflowKey(key string) string {
 		return r == '-' || r == '_' || r == ':'
 	})
 	for i := range parts {
-		parts[i] = strings.Title(parts[i])
+		parts[i] = titleCaser.String(parts[i])
 	}
 	return strings.Join(parts, " ")
 }

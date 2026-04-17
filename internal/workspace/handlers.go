@@ -44,10 +44,10 @@ func writeResult(w http.ResponseWriter, res Result, err error, redirect string) 
 		return
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"ok":                true,
-		"restart_required":  true,
-		"redirect":          redirect,
-		"removed":           res.Removed,
-		"errors":            res.Errors,
+		"ok":               true,
+		"restart_required": true,
+		"redirect":         redirect,
+		"removed":          res.Removed,
+		"errors":           res.Errors,
 	})
 }

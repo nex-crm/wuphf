@@ -296,7 +296,7 @@ func mutateChannelMember(channel, action, slug string) tea.Cmd {
 		if err := reconfigureLiveOfficeSession(); err != nil {
 			return channelPostDoneMsg{err: err}
 		}
-		notice := fmt.Sprintf("%s @%s in #%s.", strings.Title(action), normalizeSidebarSlug(slug), normalizeSidebarSlug(channel))
+		notice := fmt.Sprintf("%s @%s in #%s.", titleCaser.String(action), normalizeSidebarSlug(slug), normalizeSidebarSlug(channel))
 		return channelPostDoneMsg{notice: notice}
 	}
 }
@@ -327,7 +327,7 @@ func mutateOfficeMember(action, slug, name string) tea.Cmd {
 		if err := reconfigureLiveOfficeSession(); err != nil {
 			return channelPostDoneMsg{err: err}
 		}
-		notice := fmt.Sprintf("%s @%s.", strings.Title(action), normalizeSidebarSlug(slug))
+		notice := fmt.Sprintf("%s @%s.", titleCaser.String(action), normalizeSidebarSlug(slug))
 		return channelPostDoneMsg{notice: notice}
 	}
 }

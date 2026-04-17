@@ -2,8 +2,7 @@ package operations
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"path"
 	"sort"
 	"strings"
 
@@ -15,8 +14,8 @@ func LoadEmployeeBlueprint(repoRoot, templateID string) (EmployeeBlueprint, erro
 	if templateID == "" {
 		return EmployeeBlueprint{}, fmt.Errorf("template id required")
 	}
-	path := filepath.Join(repoRoot, "templates", "employees", templateID, "blueprint.yaml")
-	raw, err := os.ReadFile(path)
+	rel := path.Join("templates", "employees", templateID, "blueprint.yaml")
+	raw, err := readTemplateFile(repoRoot, rel)
 	if err != nil {
 		return EmployeeBlueprint{}, err
 	}
@@ -32,20 +31,13 @@ func LoadEmployeeBlueprint(repoRoot, templateID string) (EmployeeBlueprint, erro
 }
 
 func ListEmployeeBlueprints(repoRoot string) ([]EmployeeBlueprint, error) {
-	root := filepath.Join(repoRoot, "templates", "employees")
-	entries, err := os.ReadDir(root)
+	names, err := listTemplateDirs(repoRoot, path.Join("templates", "employees"))
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	blueprints := make([]EmployeeBlueprint, 0, len(entries))
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		blueprint, err := LoadEmployeeBlueprint(repoRoot, entry.Name())
+	blueprints := make([]EmployeeBlueprint, 0, len(names))
+	for _, name := range names {
+		blueprint, err := LoadEmployeeBlueprint(repoRoot, name)
 		if err != nil {
 			return nil, err
 		}

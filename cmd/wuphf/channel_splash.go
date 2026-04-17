@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+
 	"github.com/nex-crm/wuphf/internal/company"
 )
 
@@ -46,7 +47,7 @@ type splashModel struct {
 	phase     int
 	shown     int
 	bells     int
-	rushX     int  // PM's X offset during rush-in (starts off-screen)
+	rushX     int // PM's X offset during rush-in (starts off-screen)
 	startAt   time.Time
 	phaseAt   time.Time // when current phase started
 	crashBell bool
@@ -492,7 +493,6 @@ func (m splashModel) renderNameLabel(slug, name string, slotW int) string {
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(agentColor)).Bold(true).Render(label)
 }
-
 
 // ── CEO sprite variants for the collision gag ───────────────────
 

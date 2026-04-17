@@ -168,11 +168,11 @@ func (b *Broker) postBlankSlateKickoffLocked(profile operationCompanyProfile, bl
 	}
 	b.counter++
 	b.appendMessageLocked(channelMessage{
-		ID:      fmt.Sprintf("msg-%d", b.counter),
-		From:    "system",
-		Channel: "general",
-		Kind:    "from_scratch_contract",
-		Content: "Run this as a real business workflow. If a needed specialist, channel, skill, or tooling path is missing, create it and keep going. Local proof packets, review bundles, and other internal substitute artifacts do not count when a live business step is possible.",
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   "general",
+		Kind:      "from_scratch_contract",
+		Content:   "Run this as a real business workflow. If a needed specialist, channel, skill, or tooling path is missing, create it and keep going. Local proof packets, review bundles, and other internal substitute artifacts do not count when a live business step is possible.",
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 	})
 	_ = profile

@@ -82,14 +82,7 @@ func decodePrivateMemoryNote(key string, raw string) privateMemoryNote {
 }
 
 func brokerEntryFromNote(note privateMemoryNote) brokerMemoryEntry {
-	return brokerMemoryEntry{
-		Key:       note.Key,
-		Title:     note.Title,
-		Content:   note.Content,
-		Author:    note.Author,
-		CreatedAt: note.CreatedAt,
-		UpdatedAt: note.UpdatedAt,
-	}
+	return brokerMemoryEntry(note)
 }
 
 func searchPrivateMemory(entries map[string]string, query string, limit int) []privateMemoryNote {

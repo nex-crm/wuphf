@@ -1,5 +1,17 @@
 import { createRoot } from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
+
+// Hoisted out of App() so hooks called *during* App's render (e.g.
+// useKeyboardShortcuts → useQueryClient) find a client. Previously the
+// provider lived inside App's return tree, which meant any useQueryClient
+// call at the top of App threw "No QueryClient set" before the provider
+// got a chance to mount.
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { retry: 1, staleTime: 2000 },
+  },
+})
 
 // Signal boot-done to the index.html fatal-error handler when main.tsx loads.
 declare global {
@@ -30,7 +42,11 @@ try {
   if (!root) {
     throw new Error('#root element not found in DOM')
   }
-  createRoot(root).render(<App />)
+  createRoot(root).render(
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>,
+  )
   // Tell the HTML-level timeout handler that we're alive.
   window.__wuphfBootDone?.()
 } catch (err) {

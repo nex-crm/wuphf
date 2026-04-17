@@ -28,20 +28,20 @@ func RuntimeHomeDir() string {
 
 // Config mirrors ~/.wuphf/config.json.
 type Config struct {
-	APIKey              string `json:"api_key,omitempty"`
-	MemoryBackend       string `json:"memory_backend,omitempty"`
-	OneAPIKey           string `json:"one_api_key,omitempty"`
-	ComposioAPIKey      string `json:"composio_api_key,omitempty"`
-	ActionProvider      string `json:"action_provider,omitempty"`
-	Email               string `json:"email,omitempty"`
-	WorkspaceID         string `json:"workspace_id,omitempty"`
-	WorkspaceSlug       string `json:"workspace_slug,omitempty"`
-	LLMProvider         string `json:"llm_provider,omitempty"`
-	GeminiAPIKey        string `json:"gemini_api_key,omitempty"`
-	AnthropicAPIKey     string `json:"anthropic_api_key,omitempty"`
-	OpenAIAPIKey        string `json:"openai_api_key,omitempty"`
-	MinimaxAPIKey       string `json:"minimax_api_key,omitempty"`
-	Blueprint           string `json:"blueprint,omitempty"`
+	APIKey          string `json:"api_key,omitempty"`
+	MemoryBackend   string `json:"memory_backend,omitempty"`
+	OneAPIKey       string `json:"one_api_key,omitempty"`
+	ComposioAPIKey  string `json:"composio_api_key,omitempty"`
+	ActionProvider  string `json:"action_provider,omitempty"`
+	Email           string `json:"email,omitempty"`
+	WorkspaceID     string `json:"workspace_id,omitempty"`
+	WorkspaceSlug   string `json:"workspace_slug,omitempty"`
+	LLMProvider     string `json:"llm_provider,omitempty"`
+	GeminiAPIKey    string `json:"gemini_api_key,omitempty"`
+	AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
+	OpenAIAPIKey    string `json:"openai_api_key,omitempty"`
+	MinimaxAPIKey   string `json:"minimax_api_key,omitempty"`
+	Blueprint       string `json:"blueprint,omitempty"`
 	// Pack is retained as a legacy alias for the active operation blueprint/template.
 	Pack                string `json:"pack,omitempty"`
 	TeamLeadSlug        string `json:"team_lead_slug,omitempty"`

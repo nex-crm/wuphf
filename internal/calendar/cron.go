@@ -9,11 +9,11 @@ import (
 
 // CronSchedule represents a parsed cron expression that can compute next fire times.
 type CronSchedule struct {
-	Minutes    []int // 0-59
-	Hours      []int // 0-23
+	Minutes     []int // 0-59
+	Hours       []int // 0-23
 	DaysOfMonth []int // 1-31 (empty = any)
-	Months     []int // 1-12 (empty = any)
-	DaysOfWeek []int // 0-6, 0=Sunday (empty = any)
+	Months      []int // 1-12 (empty = any)
+	DaysOfWeek  []int // 0-6, 0=Sunday (empty = any)
 }
 
 // ParseCron parses a cron expression string into a CronSchedule.

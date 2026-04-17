@@ -103,7 +103,7 @@ func composerBorderStyle(width int, focused bool) lipgloss.Style {
 	}
 	return lipgloss.NewStyle().
 		Width(width).
-		MaxWidth(width + 4). // account for border + padding
+		MaxWidth(width+4). // account for border + padding
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(borderColor)).
 		Background(lipgloss.Color("#17161C")).

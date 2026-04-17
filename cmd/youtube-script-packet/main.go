@@ -402,7 +402,7 @@ func buildSection(sceneID string, brief channelBrief, chapter chapterBeat) scrip
 		}
 	case "step_walkthrough":
 		base.Purpose = "Walk the viewer through the workflow in a way they can copy."
-		base.VoiceoverBeat = fmt.Sprintf("Break the system into concrete steps. For each step, show the input, the decision, the output, and the human check that keeps the workflow trustworthy.")
+		base.VoiceoverBeat = "Break the system into concrete steps. For each step, show the input, the decision, the output, and the human check that keeps the workflow trustworthy."
 		base.OnScreenBeats = []string{
 			"One step per screen with minimal labels",
 			"Show inputs, routing logic, and output queue",

@@ -44,7 +44,7 @@ func main() {
 	if err != nil {
 		die("dial: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 	fmt.Println("dialed + handshake ok")
 
 	rows, err := client.SessionsList(ctx, openclaw.SessionsListFilter{Limit: 5, IncludeLastMessage: true})
@@ -90,7 +90,7 @@ func main() {
 	fmt.Printf("sent: runId=%s status=%s messageSeq=%d\n", res.RunID, res.Status, res.MessageSeq)
 
 	time.Sleep(5 * time.Second)
-	client.Close()
+	_ = client.Close()
 	<-done
 	fmt.Println("PASS")
 }

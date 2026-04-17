@@ -43,6 +43,7 @@ export function AgentList() {
             return (
               <button
                 key={agent.slug}
+                data-agent-slug={agent.slug}
                 className={`sidebar-agent${isDMActive ? ' active' : ''}`}
                 title={`${agent.name} — ${ac.label}`}
                 onClick={() => setActiveAgentSlug(agent.slug)}

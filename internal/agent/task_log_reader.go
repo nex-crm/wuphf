@@ -105,7 +105,7 @@ func ReadTaskLog(root, taskID string) ([]TaskLogEntry, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open task log %q: %w", taskID, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	stat, err := f.Stat()
 	if err != nil {
@@ -142,7 +142,7 @@ func summarizeTaskLog(path, taskID string) TaskLogSummary {
 	if err != nil {
 		return s
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)

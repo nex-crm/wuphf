@@ -5,10 +5,10 @@ import "time"
 
 // ScheduleEntry represents a recurring schedule for an agent.
 type ScheduleEntry struct {
-	AgentSlug   string `json:"agent_slug"`
-	CronExpr    string `json:"cron_expr"`
-	Description string `json:"description,omitempty"`
-	Enabled     bool   `json:"enabled"`
+	AgentSlug   string    `json:"agent_slug"`
+	CronExpr    string    `json:"cron_expr"`
+	Description string    `json:"description,omitempty"`
+	Enabled     bool      `json:"enabled"`
 	NextFire    time.Time `json:"next_fire"`
 }
 

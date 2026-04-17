@@ -185,7 +185,7 @@ func (m *channelModel) applyWorkspaceSwitcherSelection(value string) tea.Cmd {
 		app := officeApp(strings.TrimSpace(strings.TrimPrefix(value, "app:")))
 		m.activeApp = app
 		m.syncSidebarCursorToActive()
-		m.notice = "Viewing " + strings.Title(string(app)) + "."
+		m.notice = "Viewing " + titleCaser.String(string(app)) + "."
 		switch app {
 		case officeAppRecovery:
 			return m.pollCurrentState()

@@ -25,7 +25,7 @@ func GroupSlug(members []string) string {
 	sort.Strings(sorted)
 	h := sha1.New()
 	for _, m := range sorted {
-		io.WriteString(h, m)
+		_, _ = io.WriteString(h, m)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }

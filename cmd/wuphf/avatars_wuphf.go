@@ -247,14 +247,15 @@ func spriteForSlug(slug string, frame ...int) pixelSprite {
 
 // animateFrame applies micro-animations for frame 1 (frame 0 is the base).
 // Each character has a unique animation that conveys personality:
-//   CEO:      raises coffee cup (arm moves up)
-//   PM:       taps clipboard (hand shifts)
-//   FE:      screen flickers (highlight changes)
-//   BE:      tightens crossed arms
-//   AI:      antenna blinks (accent toggles)
-//   Designer: pencil moves (prop shifts position)
-//   CMO:      megaphone raised higher
-//   CRO:      briefcase swings
+//
+//	CEO:      raises coffee cup (arm moves up)
+//	PM:       taps clipboard (hand shifts)
+//	FE:      screen flickers (highlight changes)
+//	BE:      tightens crossed arms
+//	AI:      antenna blinks (accent toggles)
+//	Designer: pencil moves (prop shifts position)
+//	CMO:      megaphone raised higher
+//	CRO:      briefcase swings
 func animateFrame(sprite pixelSprite, slug string) {
 	if len(sprite) < 14 {
 		return
@@ -384,9 +385,9 @@ func parseHexColor(hex string) [3]int {
 		return [3]int{140, 140, 150}
 	}
 	r, g, b := 0, 0, 0
-	fmt.Sscanf(hex[0:2], "%x", &r)
-	fmt.Sscanf(hex[2:4], "%x", &g)
-	fmt.Sscanf(hex[4:6], "%x", &b)
+	_, _ = fmt.Sscanf(hex[0:2], "%x", &r)
+	_, _ = fmt.Sscanf(hex[2:4], "%x", &g)
+	_, _ = fmt.Sscanf(hex[4:6], "%x", &b)
 	return [3]int{r, g, b}
 }
 
