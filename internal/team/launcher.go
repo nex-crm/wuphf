@@ -3971,6 +3971,11 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		l.resumeInFlightWork()
 	}
 
+	// Stream tmux pane output to the web UI's per-agent stream so users see
+	// live Claude TUI activity (thinking, tool calls, responses) during a
+	// pane-backed turn. No-op when paneBackedAgents is false.
+	l.startPaneCaptureLoops(l.headlessCtx)
+
 	go l.notifyAgentsLoop()
 	go l.notifyTaskActionsLoop()
 	go l.notifyOfficeChangesLoop()
