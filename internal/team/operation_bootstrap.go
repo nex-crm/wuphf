@@ -353,6 +353,12 @@ func (b *Broker) handleOperationBootstrapPackage(w http.ResponseWriter, r *http.
 	if blueprintID == "" {
 		blueprintID = strings.TrimSpace(r.URL.Query().Get("pack_id"))
 	}
+	if blueprintID == "" {
+		// Manifest's explicit BlueprintRef beats fuzzy-matching company config
+		// fields, which may contain onboarding noise that scores against no real
+		// blueprint and sends us to the synthesis fallback with a garbage slug.
+		blueprintID = currentOperationBlueprintRef()
+	}
 	profile := operationCompanyProfile{
 		BlueprintID: blueprintID,
 		Name:        strings.TrimSpace(cfg.CompanyName),
