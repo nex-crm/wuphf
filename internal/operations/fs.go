@@ -51,9 +51,11 @@ func readTemplateFile(repoRoot, rel string) ([]byte, error) {
 
 // listTemplateDirs returns the subdirectory names of rel (a
 // slash-separated path like "templates/operations"), preferring the
-// filesystem at repoRoot and falling back to the embedded FS. Returns a
-// nil slice when neither location holds the directory — the callers treat
-// that as "no blueprints", consistent with the pre-embed behavior.
+// filesystem at repoRoot and falling back to the embedded FS. Returns
+// (nil, nil) when neither location holds the directory — callers treat
+// that as "no blueprints", consistent with the pre-embed behavior. When
+// the directory exists but contains no subdirectories, returns an empty
+// (non-nil) slice.
 func listTemplateDirs(repoRoot, rel string) ([]string, error) {
 	if repoRoot != "" {
 		root := filepath.Join(repoRoot, rel)

@@ -100,8 +100,11 @@ test.describe('wuphf onboarding wizard smoke', () => {
     // Wait for the template grid (only rendered once blueprint fetch resolves).
     await expect(page.locator('.template-grid')).toBeVisible({ timeout: 10_000 });
 
+    // `not.toHaveCount(1)` would pass for 0 cards too, masking a total
+    // render failure. Wait for at least two cards explicitly — the
+    // pre-embed bug rendered exactly one ("From scratch").
     const cards = page.locator('.template-card');
-    await expect(cards).not.toHaveCount(1, { timeout: 10_000 });
+    await expect(cards.nth(1)).toBeVisible({ timeout: 10_000 });
 
     // "From scratch" is always present; at least one card must have a
     // different name (i.e. a shipped preset was loaded).
