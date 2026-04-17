@@ -115,6 +115,7 @@ function handleSlashCommand(input: string): boolean {
 
 export function Composer() {
   const currentChannel = useAppStore((s) => s.currentChannel)
+  const setCurrentApp = useAppStore((s) => s.setCurrentApp)
   const [text, setText] = useState('')
   const [caret, setCaret] = useState(0)
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([])
