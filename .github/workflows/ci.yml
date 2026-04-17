@@ -207,10 +207,20 @@ jobs:
       # `</dev/null` on both boots prevents isPiped() from yanking wuphf into
       # scanner mode.
       - name: Start wuphf (fresh install) for wizard tests
+        # Run from /tmp — NOT the checkout root. `resolveTemplatesRepoRoot`
+        # walks up from cwd looking for templates/operations/, and would
+        # find it in the checkout, masking the "no repo on disk" path that
+        # `npx wuphf` / `curl | bash` users actually take. Running from
+        # /tmp forces the blueprint loader to go through the embedded FS
+        # wired in templates_embed.go, which is exactly the regression
+        # path the wizard.spec.ts blueprint-picker test guards.
         run: |
           rm -f "$HOME/.wuphf/onboarded.json"
-          ./wuphf --no-open --broker-port 7890 --web-port 7891 --no-nex </dev/null > wuphf-wizard.log 2>&1 &
-          echo $! > wuphf-wizard.pid
+          wuphf_bin="$PWD/wuphf"
+          run_dir="$(mktemp -d)"
+          cd "$run_dir"
+          "$wuphf_bin" --no-open --broker-port 7890 --web-port 7891 --no-nex </dev/null > "$GITHUB_WORKSPACE/wuphf-wizard.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/wuphf-wizard.pid"
           # /onboarding/state is the authoritative readiness signal (the
           # static index.html can 200 before the broker is fully wired).
           for i in $(seq 1 30); do
@@ -221,7 +231,7 @@ jobs:
             sleep 1
           done
           echo "wuphf failed to become ready (wizard)" >&2
-          cat wuphf-wizard.log >&2
+          cat "$GITHUB_WORKSPACE/wuphf-wizard.log" >&2
           exit 1
       - name: Run Playwright wizard smoke
         working-directory: web/e2e

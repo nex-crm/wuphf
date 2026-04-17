@@ -421,22 +421,21 @@ type blueprintTaskSummary struct {
 
 // HandleBlueprints handles GET /onboarding/blueprints.
 // Returns {"templates": [...]} in the shape the Wizard expects for its
-// blueprint picker. An empty list is a valid response (fresh clone without
-// templates/operations/ gets the "From scratch" card only).
+// blueprint picker. Passes "" to ListBlueprints when the filesystem walk
+// finds no repo — the loader falls back to the binary's embedded
+// templates (wired in the root wuphf package's init), so installs without
+// a checkout still see the shipped blueprints.
 func HandleBlueprints(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	repoRoot := resolveTemplatesRepoRoot("")
 	summaries := []blueprintSummary{}
-	if repoRoot != "" {
-		blueprints, err := operations.ListBlueprints(repoRoot)
-		if err == nil {
-			for _, bp := range blueprints {
-				summaries = append(summaries, summarizeBlueprint(bp))
-			}
+	blueprints, err := operations.ListBlueprints(resolveTemplatesRepoRoot(""))
+	if err == nil {
+		for _, bp := range blueprints {
+			summaries = append(summaries, summarizeBlueprint(bp))
 		}
 	}
 

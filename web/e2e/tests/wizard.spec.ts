@@ -77,4 +77,39 @@ test.describe('wuphf onboarding wizard smoke', () => {
       `Uncaught errors advancing wizard:\n  ${errors.join('\n  ')}`,
     ).toHaveLength(0);
   });
+
+  test('blueprint picker shows shipped preset teams (not just "From scratch")', async ({
+    page,
+  }) => {
+    // Regression guard for the bug where blueprint YAMLs were read from
+    // the filesystem only — `npx wuphf` / `curl | bash` users saw the
+    // hardcoded "From scratch" card as their only option.
+    //
+    // With embedded templates wired in (internal/operations fallback FS +
+    // root templates_embed.go), the backend's GET /onboarding/blueprints
+    // MUST return ≥1 preset regardless of cwd. The wizard renders one
+    // `.template-card` per blueprint plus a hardcoded "From scratch"
+    // card — so we expect strictly more than 1 card and at least one
+    // card whose name differs from "From scratch".
+    await page.goto('/');
+    await waitForReactMount(page);
+
+    await expect(page.locator('.wizard-step').first()).toBeVisible({ timeout: 10_000 });
+    await page.locator('.wizard-step button.btn-primary').first().click();
+
+    // Wait for the template grid (only rendered once blueprint fetch resolves).
+    await expect(page.locator('.template-grid')).toBeVisible({ timeout: 10_000 });
+
+    const cards = page.locator('.template-card');
+    await expect(cards).not.toHaveCount(1, { timeout: 10_000 });
+
+    // "From scratch" is always present; at least one card must have a
+    // different name (i.e. a shipped preset was loaded).
+    const names = await page.locator('.template-card-name').allTextContents();
+    const presets = names.filter((n) => n.trim() !== 'From scratch');
+    expect(
+      presets.length,
+      `expected ≥1 preset blueprint card, got names: ${JSON.stringify(names)}`,
+    ).toBeGreaterThan(0);
+  });
 });
