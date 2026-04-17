@@ -51,12 +51,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
   render() {
     if (this.state.error) {
       return (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: '#fee', color: '#900', padding: 20,
-          fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
-          fontSize: 13, overflowY: 'auto', zIndex: 9999,
-        }}>
+        <div
+          data-testid="error-boundary"
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: '#fee', color: '#900', padding: 20,
+            fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif',
+            fontSize: 13, overflowY: 'auto', zIndex: 9999,
+          }}
+        >
           <h2 style={{ margin: '0 0 8px 0', fontSize: 14 }}>
             Something broke in the UI
           </h2>

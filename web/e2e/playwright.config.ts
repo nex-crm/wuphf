@@ -11,7 +11,10 @@ export default defineConfig({
   expect: { timeout: 5_000 },
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // No retries. These are smoke tests for UI crashes — a flaky pass is
+  // exactly the failure mode we're trying to prevent. Investigate flakes,
+  // don't paper over them.
+  retries: 0,
   workers: 1,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
   use: {

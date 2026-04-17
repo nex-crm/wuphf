@@ -4,6 +4,10 @@ import { test, expect, type Page } from '@playwright/test';
 // React render-time crash ("Minified React error #31 — Objects are not valid
 // as a React child") on first agent click. PR #101 fixed the specific bug;
 // this test makes sure the next one gets caught in CI instead of in Slack.
+//
+// Assumes wuphf was started with ~/.wuphf/onboarded.json pre-seeded so the
+// app lands in the Shell (where the React #31 crash lived) rather than the
+// onboarding Wizard. Wizard coverage lives in wizard.spec.ts.
 
 function collectReactErrors(page: Page): () => string[] {
   const errors: string[] = [];
@@ -20,37 +24,33 @@ function collectReactErrors(page: Page): () => string[] {
 }
 
 // Wait for React's first commit: the static #skeleton placeholder is gone
-// (or replaced) and the boot-timeout diagnostic hasn't fired.
+// and React has committed something into #root.
 async function waitForReactMount(page: Page): Promise<void> {
   await page.waitForFunction(
     () => {
       const root = document.getElementById('root');
       if (!root) return false;
-      // Skeleton replaced by React output, OR React has committed *something*
-      // other than the skeleton div.
-      const skeleton = document.getElementById('skeleton');
-      if (skeleton) return false;
+      if (document.getElementById('skeleton')) return false;
       return root.children.length > 0;
     },
     { timeout: 10_000 },
   );
 }
 
-test.describe('wuphf web UI smoke', () => {
+test.describe('wuphf web UI smoke (shell)', () => {
   test('initial page render does not trip the React error boundary', async ({ page }) => {
     const getErrors = collectReactErrors(page);
 
     await page.goto('/');
     await waitForReactMount(page);
 
-    // The error boundary prints this literal string on render failure
-    // (see web/src/App.tsx — ErrorBoundary component). If it's visible, a
-    // render crashed somewhere up the tree.
-    await expect(page.locator('body')).not.toContainText('Something broke in the UI');
-    await expect(page.locator('body')).not.toContainText('Minified React error');
+    // Sidebar appearing is our "React committed and effects ran" signal.
+    // networkidle does NOT work here — wuphf opens a long-lived SSE stream
+    // as soon as the shell mounts, so the page is never idle.
+    await expect(page.locator('button[data-agent-slug]').first()).toBeVisible({ timeout: 10_000 });
 
-    // Drain any lingering async render errors before asserting.
-    await page.waitForTimeout(500);
+    await expect(page.getByTestId('error-boundary')).toHaveCount(0);
+
     const errors = getErrors();
     expect(
       errors,
@@ -58,27 +58,39 @@ test.describe('wuphf web UI smoke', () => {
     ).toHaveLength(0);
   });
 
-  test('navigating into an agent channel does not crash the UI', async ({ page }) => {
+  test('sidebar renders the seeded agents (broker wired)', async ({ page }) => {
+    // Hard assertion: the broker seeds default agents on every boot
+    // (see internal/team — 4+ default roles). Zero agents is NEVER the
+    // happy path; treating it as "skip" lets real regressions through
+    // (seed broken, /api/members failing, useOfficeMembers broken, etc.).
+    await page.goto('/');
+    await waitForReactMount(page);
+
+    const agentButtons = page.locator('button[data-agent-slug]');
+    await expect(agentButtons.first()).toBeVisible({ timeout: 10_000 });
+    expect(await agentButtons.count()).toBeGreaterThan(0);
+  });
+
+  test('clicking an agent does not crash the UI (React #31 guard)', async ({ page }) => {
     // The React #31 crash surfaced on first "click CEO". Reproduce that
-    // navigation path: find any agent entry in the sidebar and click it.
+    // path: click any agent in the sidebar and assert no crash.
     const getErrors = collectReactErrors(page);
 
     await page.goto('/');
     await waitForReactMount(page);
 
-    // Agents are listed in the sidebar (AgentList.tsx renders a button with
-    // data-agent-slug for each). Pack contents vary across environments, so
-    // skip if none are present rather than flake.
     const agentButtons = page.locator('button[data-agent-slug]');
-    const agentCount = await agentButtons.count();
-    test.skip(agentCount === 0, 'no agents rendered in sidebar — onboarding or empty pack');
-
+    await expect(agentButtons.first()).toBeVisible({ timeout: 10_000 });
     await agentButtons.first().click();
 
-    await expect(page.locator('body')).not.toContainText('Something broke in the UI');
-    await expect(page.locator('body')).not.toContainText('Minified React error');
+    // Deterministic post-click signal: clicking a sidebar agent sets
+    // activeAgentSlug in the store, which mounts <AgentPanel> → `.agent-panel`
+    // (see components/agents/AgentPanel.tsx). Waiting on the panel — instead
+    // of networkidle, which never settles due to the live SSE stream — gives
+    // the panel a cycle to render and any errors a cycle to fire.
+    await expect(page.locator('.agent-panel').first()).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('error-boundary')).toHaveCount(0);
 
-    await page.waitForTimeout(500);
     const errors = getErrors();
     expect(
       errors,
