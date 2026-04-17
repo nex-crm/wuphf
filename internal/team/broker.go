@@ -2669,17 +2669,18 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 	}
 }
 
+// ensureDefaultOfficeMembersLocked seeds the DefaultManifest roster ONLY when
+// no members exist. Prior implementation appended any missing default slug to
+// a non-empty roster, which caused ceo/planner/executor/reviewer to leak back
+// into blueprint-seeded teams (e.g. niche-crm) on every Broker.Load(). The
+// function is called from broker init (line 831) and post-load normalization
+// (line 2260) as a true recovery hook: if state was corrupted or never
+// seeded, fall back to defaults.
 func (b *Broker) ensureDefaultOfficeMembersLocked() {
-	if len(b.members) == 0 {
-		b.members = defaultOfficeMembers()
+	if len(b.members) > 0 {
 		return
 	}
-	defaults := defaultOfficeMembers()
-	for _, member := range defaults {
-		if b.findMemberLocked(member.Slug) == nil {
-			b.members = append(b.members, member)
-		}
-	}
+	b.members = defaultOfficeMembers()
 }
 
 func (b *Broker) normalizeLoadedStateLocked() {
