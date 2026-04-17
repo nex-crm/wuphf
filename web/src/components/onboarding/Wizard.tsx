@@ -162,7 +162,7 @@ function WelcomeStep({ onNext }: WelcomeStepProps) {
         <p className="wizard-subhead">{ONBOARDING_COPY.step1_subhead}</p>
       </div>
       <div style={{ display: 'flex', justifyContent: 'center' }}>
-        <button className="btn btn-primary btn-lg" onClick={onNext}>
+        <button className="btn btn-primary" onClick={onNext}>
           {ONBOARDING_COPY.step1_cta}
           <ArrowIcon />
         </button>
@@ -200,6 +200,7 @@ function TemplatesStep({
         <h1 className="wizard-headline">Choose a blueprint</h1>
         <p className="wizard-subhead">
           Blueprints set the team, stages, and workflows this office will run.
+          <br />
           Start from a preset or from scratch.
         </p>
       </div>
@@ -211,17 +212,6 @@ function TemplatesStep({
           </div>
         ) : (
           <div className="template-grid">
-            <button
-              className={`template-card ${selected === null ? 'selected' : ''}`}
-              onClick={() => onSelect(null)}
-              type="button"
-            >
-              <div className="template-card-emoji">&#x1F4DD;</div>
-              <div className="template-card-name">From scratch</div>
-              <div className="template-card-desc">
-                Start with an empty office and add agents manually.
-              </div>
-            </button>
             {templates.map((t) => (
               <button
                 key={t.id}
@@ -229,11 +219,20 @@ function TemplatesStep({
                 onClick={() => onSelect(t.id)}
                 type="button"
               >
-                {t.emoji && <div className="template-card-emoji">{t.emoji}</div>}
                 <div className="template-card-name">{t.name}</div>
                 <div className="template-card-desc">{t.description}</div>
               </button>
             ))}
+            <button
+              className={`template-card template-card-scratch ${selected === null ? 'selected' : ''}`}
+              onClick={() => onSelect(null)}
+              type="button"
+            >
+              <div className="template-card-name">From scratch</div>
+              <div className="template-card-desc">
+                Start with an empty office and add agents manually.
+              </div>
+            </button>
           </div>
         )}
       </div>

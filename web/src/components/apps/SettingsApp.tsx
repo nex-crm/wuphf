@@ -1,5 +1,14 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, type ComponentType, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  Settings as SettingsIcon,
+  Building,
+  Key,
+  Puzzle,
+  Timer,
+  Terminal,
+  WarningTriangle,
+} from 'iconoir-react'
 import {
   getConfig,
   resetWorkspace,
@@ -22,18 +31,43 @@ type SectionId =
 
 interface Section {
   id: SectionId
-  icon: string
+  Icon: ComponentType<{ className?: string }>
   name: string
 }
 
-const SECTIONS: Section[] = [
-  { id: 'general', icon: '\u2699', name: 'General' },
-  { id: 'company', icon: '\uD83C\uDFE2', name: 'Company' },
-  { id: 'keys', icon: '\uD83D\uDD11', name: 'API Keys' },
-  { id: 'integrations', icon: '\uD83D\uDD0C', name: 'Integrations' },
-  { id: 'intervals', icon: '\u23F1', name: 'Polling' },
-  { id: 'flags', icon: '\uD83D\uDDA5', name: 'CLI Flags' },
-  { id: 'danger', icon: '\u26A0\uFE0F', name: 'Danger Zone' },
+interface SectionGroup {
+  label: string
+  items: Section[]
+}
+
+const SECTION_GROUPS: SectionGroup[] = [
+  {
+    label: 'Workspace',
+    items: [
+      { id: 'general', Icon: SettingsIcon, name: 'General' },
+      { id: 'company', Icon: Building, name: 'Company' },
+    ],
+  },
+  {
+    label: 'Credentials',
+    items: [
+      { id: 'keys', Icon: Key, name: 'API Keys' },
+      { id: 'integrations', Icon: Puzzle, name: 'Integrations' },
+    ],
+  },
+  {
+    label: 'System',
+    items: [
+      { id: 'intervals', Icon: Timer, name: 'Polling' },
+      { id: 'flags', Icon: Terminal, name: 'CLI Flags' },
+    ],
+  },
+  {
+    label: 'Advanced',
+    items: [
+      { id: 'danger', Icon: WarningTriangle, name: 'Danger Zone' },
+    ],
+  },
 ]
 
 // ─── Styles ─────────────────────────────────────────────────────────────
@@ -41,36 +75,56 @@ const SECTIONS: Section[] = [
 const styles = {
   shell: {
     display: 'flex',
-    height: '100%',
-    minHeight: 0,
     flex: 1,
-    overflow: 'hidden',
+    minHeight: 0,
+    alignItems: 'flex-start',
   } as const,
   nav: {
-    width: 200,
+    width: 260,
     flexShrink: 0,
-    borderRight: '1px solid var(--border)',
-    padding: '16px 0',
+    padding: '14px 12px',
+    position: 'sticky' as const,
+    top: 0,
+    maxHeight: '100vh',
     overflowY: 'auto' as const,
+    display: 'flex',
+    flexDirection: 'column' as const,
+    gap: 14,
+    background: 'var(--bg-card)',
+  } as const,
+  navGroupLabel: {
+    fontSize: 10,
+    fontWeight: 600,
+    textTransform: 'uppercase' as const,
+    letterSpacing: '0.05em',
+    color: 'var(--text-tertiary)',
+    margin: '0 0 4px 10px',
   } as const,
   navItem: (active: boolean) => ({
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    padding: '7px 16px',
-    fontSize: 13,
-    color: active ? 'var(--accent)' : 'var(--text-secondary)',
+    gap: 10,
+    padding: '8px 10px',
+    fontSize: 12,
+    borderRadius: 6,
+    color: active ? 'var(--text)' : 'var(--text-secondary)',
     cursor: 'pointer',
     border: 'none',
-    background: active ? 'var(--accent-bg)' : 'none',
+    background: active ? 'rgba(0, 0, 0, 0.06)' : 'transparent',
     width: '100%',
     textAlign: 'left' as const,
     fontFamily: 'var(--font-sans)',
     fontWeight: active ? 600 : 400,
+    transition: 'all 0.15s',
   }),
+  navIcon: {
+    width: 16,
+    height: 16,
+    flexShrink: 0,
+    strokeWidth: 2,
+  } as const,
   body: {
     flex: 1,
-    overflowY: 'auto' as const,
     padding: '24px 32px',
     maxWidth: 680,
   } as const,
@@ -83,14 +137,13 @@ const styles = {
     padding: '10px 14px',
     marginBottom: 16,
     background: 'var(--yellow-bg)',
-    border: '1px solid var(--yellow)',
     borderRadius: 'var(--radius-md)',
     fontSize: 12,
     lineHeight: 1.5,
     color: 'var(--text)',
   } as const,
   row: { display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 } as const,
-  rowLabel: { width: 160, flexShrink: 0, paddingTop: 10 } as const,
+  rowLabel: { width: 160, flexShrink: 0, paddingTop: 8 } as const,
   rowLabelName: { fontSize: 13, fontWeight: 500, color: 'var(--text)' } as const,
   rowLabelHint: { fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 } as const,
   rowField: { flex: 1, minWidth: 0 } as const,
@@ -306,20 +359,20 @@ function GeneralSection({ cfg, save }: SectionProps) {
         <div>
           <strong>Restart required for LLM Provider and Memory Backend changes. </strong>
           New values save immediately, but agents already running keep their launch-time settings. Run{' '}
-          <code style={{ fontFamily: 'var(--font-mono)', padding: '1px 4px', background: 'var(--bg-warm)', borderRadius: 3 }}>
+          <code style={{ fontFamily: 'var(--font-mono)', padding: '1px 6px', background: 'var(--warning-200)', color: 'var(--warning-500)', borderRadius: 3 }}>
             wuphf shred
           </code>{' '}
           then relaunch to apply.
         </div>
       </div>
 
+      <div style={styles.groupTitle}>Runtime</div>
       <Field label="LLM Provider" hint="--provider">
         <select style={styles.input} value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}>
           <option value="claude-code">Claude Code</option>
           <option value="codex">Codex</option>
         </select>
       </Field>
-
       <Field label="Memory Backend" hint="--memory-backend">
         <select style={styles.input} value={memory} onChange={(e) => setMemory(e.target.value as typeof memory)}>
           <option value="nex">Nex</option>
@@ -328,10 +381,10 @@ function GeneralSection({ cfg, save }: SectionProps) {
         </select>
       </Field>
 
+      <div style={{ ...styles.groupTitle, marginTop: 24 }}>Agents</div>
       <Field label="Team Lead" hint="Default agent that leads operations">
         <input style={styles.input} placeholder="e.g. ceo" value={teamLead} onChange={(e) => setTeamLead(e.target.value)} />
       </Field>
-
       <Field label="Max Concurrent" hint="Parallel agent limit">
         <input
           style={styles.input}
@@ -343,13 +396,13 @@ function GeneralSection({ cfg, save }: SectionProps) {
         />
       </Field>
 
+      <div style={{ ...styles.groupTitle, marginTop: 24 }}>Defaults</div>
       <Field label="Output Format" hint="--format">
         <select style={styles.input} value={format} onChange={(e) => setFormat(e.target.value)}>
           <option value="text">Text</option>
           <option value="json">JSON</option>
         </select>
       </Field>
-
       <Field label="Timeout (ms)" hint="Default command timeout">
         <input
           style={styles.input}
@@ -361,19 +414,20 @@ function GeneralSection({ cfg, save }: SectionProps) {
         />
       </Field>
 
+      <div style={{ ...styles.groupTitle, marginTop: 24 }}>Identity</div>
       <Field label="Blueprint" hint="--blueprint">
         <input style={styles.input} placeholder="Operation blueprint ID" value={blueprint} onChange={(e) => setBlueprint(e.target.value)} />
       </Field>
-
       <Field label="Email" hint="Identity scope for integrations">
         <input style={styles.input} type="email" placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
       </Field>
-
       <Field label="Dev URL" hint="API base URL override">
         <input style={styles.input} placeholder="https://app.nex.ai" value={devUrl} onChange={(e) => setDevUrl(e.target.value)} />
       </Field>
 
-      <SaveButton label="Save general settings" onSave={onSave} />
+      <div style={{ marginTop: 24 }}>
+        <SaveButton label="Save general settings" onSave={onSave} />
+      </div>
 
       {cfg.config_path && (
         <div style={{ marginTop: 24 }}>
@@ -704,8 +758,7 @@ const dangerStyles = {
     marginBottom: 20,
     padding: 20,
     borderRadius: 'var(--radius-md)',
-    border: `1px solid ${severity === 'critical' ? 'var(--red, #e5484d)' : 'var(--yellow, #e5a00d)'}`,
-    background: severity === 'critical' ? 'var(--red-bg, rgba(229,72,77,0.08))' : 'var(--yellow-bg, rgba(229,160,13,0.08))',
+    background: severity === 'critical' ? 'var(--red-bg)' : 'var(--yellow-bg)',
   }),
   cardTitle: {
     display: 'flex',
@@ -952,7 +1005,6 @@ function DangerZoneSection() {
       {/* SHRED — full wipe */}
       <div style={dangerStyles.card('critical')}>
         <div style={dangerStyles.cardTitle}>
-          <span>{'\u{1F4A5}'}</span>
           <span>Shred workspace</span>
         </div>
         <div style={dangerStyles.cardSubtitle}>
@@ -1080,11 +1132,23 @@ export function SettingsApp() {
   return (
     <div style={styles.shell}>
       <nav style={styles.nav}>
-        {SECTIONS.map((sec) => (
-          <button key={sec.id} style={styles.navItem(sec.id === section)} onClick={() => setSection(sec.id)}>
-            <span style={{ width: 16, textAlign: 'center', flexShrink: 0 }}>{sec.icon}</span>
-            <span>{sec.name}</span>
-          </button>
+        {SECTION_GROUPS.map((group) => (
+          <div key={group.label}>
+            <p style={styles.navGroupLabel}>{group.label}</p>
+            {group.items.map((sec) => {
+              const Icon = sec.Icon
+              return (
+                <button
+                  key={sec.id}
+                  style={styles.navItem(sec.id === section)}
+                  onClick={() => setSection(sec.id)}
+                >
+                  <Icon />
+                  <span>{sec.name}</span>
+                </button>
+              )
+            })}
+          </div>
         ))}
       </nav>
       <div style={styles.body} key={dataKey}>

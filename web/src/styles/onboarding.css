@@ -86,7 +86,6 @@
 
 .wizard-headline {
   font-family: var(--font-logo);
-  font-style: italic;
   font-size: 36px;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -98,7 +97,7 @@
   font-size: 14px;
   line-height: 1.65;
   color: var(--text-secondary);
-  max-width: 54ch;
+  max-width: 64ch;
   margin: 0 auto;
 }
 
@@ -124,6 +123,17 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px;
+  align-items: stretch;
+}
+
+.template-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.template-card-scratch {
+  grid-column: 1 / -1;
 }
 
 .template-card {
@@ -178,7 +188,7 @@
 
 .wiz-team-tile {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   padding: 12px 14px;
   border-radius: var(--radius-md);
@@ -215,6 +225,7 @@
 .wiz-team-tile.selected .wiz-team-check {
   background: var(--accent);
   border-color: var(--accent);
+  color: #fff;
 }
 
 .wiz-team-name {

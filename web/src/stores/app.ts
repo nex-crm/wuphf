@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type Theme = 'nex' | 'slack' | 'slack-dark' | 'windows-98'
+export type Theme = 'nex'
 
 export interface ChannelMeta {
   type: 'O' | 'D' | 'G'
@@ -66,7 +66,8 @@ export const useAppStore = create<AppStore>((set) => ({
   currentChannel: 'general',
   setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
   currentApp: null,
-  setCurrentApp: (app) => set({ currentApp: app }),
+  setCurrentApp: (app) =>
+    set(app ? { currentApp: app, dmMode: false, dmAgentSlug: null } : { currentApp: null }),
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
