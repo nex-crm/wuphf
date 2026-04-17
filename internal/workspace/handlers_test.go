@@ -28,6 +28,39 @@ func decodeBody(t *testing.T, body string) map[string]any {
 	return out
 }
 
+func TestResetHandlerRejectsNonPost(t *testing.T) {
+	withRuntimeHome(t)
+	req := httptest.NewRequest(http.MethodGet, "/workspace/reset", nil)
+	w := httptest.NewRecorder()
+	newMux().ServeHTTP(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestResetHandlerClearsBrokerRuntimeOnly(t *testing.T) {
+	dir := withRuntimeHome(t)
+	paths := seedWorkspace(t, dir)
+
+	req := httptest.NewRequest(http.MethodPost, "/workspace/reset", nil)
+	w := httptest.NewRecorder()
+	newMux().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := decodeBody(t, w.Body.String())
+	if ok, _ := body["ok"].(bool); !ok {
+		t.Fatalf("expected ok=true, got %v", body)
+	}
+	// Reset wipes broker runtime state...
+	assertGone(t, "brokerState", paths["brokerState"])
+	// ...but keeps everything else a Shred would have taken.
+	for _, label := range []string{"onboarded", "company", "officeTasks", "workflow", "session", "worktree"} {
+		assertStays(t, label, paths[label])
+	}
+}
+
 func TestShredHandlerRejectsNonPost(t *testing.T) {
 	withRuntimeHome(t)
 	req := httptest.NewRequest(http.MethodGet, "/workspace/shred", nil)

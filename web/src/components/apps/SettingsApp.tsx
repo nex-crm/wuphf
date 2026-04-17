@@ -2,6 +2,7 @@ import { useState, useEffect, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getConfig,
+  resetWorkspace,
   shredWorkspace,
   updateConfig,
   type ConfigSnapshot,
@@ -813,7 +814,7 @@ const dangerStyles = {
   }),
 }
 
-const CONFIRM_PHRASE = 'i am sure'
+const CONFIRM_PHRASE = 'i can spell responsibility'
 
 interface WipeModalProps {
   title: string
@@ -826,7 +827,7 @@ interface WipeModalProps {
 }
 
 // WipeModal gates a destructive action behind a type-the-exact-phrase confirm.
-// The placeholder and the body copy both say "i am sure" so there's no mystery
+// The placeholder and the body copy both surface the full phrase so there's no mystery
 // about what to type — we want the friction, not the guesswork.
 function WipeModal({ title, severity, intro, confirmLabel, busy, onConfirm, onCancel }: WipeModalProps) {
   const [value, setValue] = useState('')
@@ -867,11 +868,28 @@ function WipeModal({ title, severity, intro, confirmLabel, busy, onConfirm, onCa
   )
 }
 
-type DangerAction = 'shred'
+type DangerAction = 'reset' | 'shred'
 
 function DangerZoneSection() {
   const [open, setOpen] = useState<DangerAction | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const handleReset = async () => {
+    setBusy(true)
+    try {
+      const result: WorkspaceWipeResult = await resetWorkspace()
+      if (!result.ok) {
+        showNotice(result.error || 'Reset failed', 'error')
+        setBusy(false)
+        return
+      }
+      showNotice('Broker state cleared. Reloading…', 'success')
+      setTimeout(() => window.location.reload(), 400)
+    } catch (err) {
+      showNotice(err instanceof Error ? err.message : 'Reset failed', 'error')
+      setBusy(false)
+    }
+  }
 
   const handleShred = async () => {
     setBusy(true)
@@ -894,10 +912,41 @@ function DangerZoneSection() {
     <div>
       <div style={styles.sectionTitle}>Danger Zone</div>
       <div style={styles.sectionDesc}>
-        Irreversible operation on this workspace. The web UI does not kill the running broker
-        process, so after shredding you may need to re-launch
+        Irreversible operations on this workspace. Read each card carefully — the web UI does not
+        kill the running broker process, so after either action you may need to re-launch
         <code style={{ margin: '0 4px' }}>wuphf</code> from your terminal for the change to fully
         take effect.
+      </div>
+
+      {/* RESET — narrow: broker runtime state only */}
+      <div style={dangerStyles.card('warn')}>
+        <div style={dangerStyles.cardTitle}>
+          <span>{'\u{1F501}'}</span>
+          <span>Reset broker state</span>
+        </div>
+        <div style={dangerStyles.cardSubtitle}>
+          Use this when something is stuck — an agent wedged, the queue won't drain, messages stop
+          flowing — and you want a clean restart without losing your team or work.
+        </div>
+        <div style={dangerStyles.listLabel}>Clears</div>
+        <ul style={dangerStyles.list}>
+          <li>Broker runtime state (<code>~/.wuphf/team/broker-state.json</code>)</li>
+          <li>Office PID file and in-memory snapshot</li>
+        </ul>
+        <div style={dangerStyles.listLabel}>Preserved</div>
+        <ul style={dangerStyles.list}>
+          <li>Your team roster, company identity, tasks, workflows</li>
+          <li>All on-disk history (logs, sessions, artifacts)</li>
+          <li>API keys and config</li>
+        </ul>
+        <button
+          type="button"
+          style={dangerStyles.button('warn')}
+          onClick={() => setOpen('reset')}
+          disabled={busy}
+        >
+          Reset broker state…
+        </button>
       </div>
 
       {/* SHRED — full wipe */}
@@ -938,6 +987,24 @@ function DangerZoneSection() {
           Shred workspace…
         </button>
       </div>
+
+      {open === 'reset' && (
+        <WipeModal
+          title="Reset broker state?"
+          severity="warn"
+          intro={
+            <>
+              This clears the broker's on-disk runtime state and reboots the office from a clean
+              slate. Your team, company, tasks, and workflows are all kept. If this doesn't
+              unblock things, try <strong>Shred workspace</strong> instead.
+            </>
+          }
+          confirmLabel="Reset broker state"
+          busy={busy}
+          onConfirm={handleReset}
+          onCancel={() => setOpen(null)}
+        />
+      )}
 
       {open === 'shred' && (
         <WipeModal
