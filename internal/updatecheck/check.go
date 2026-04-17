@@ -37,11 +37,11 @@ import (
 )
 
 const (
-	cacheFileName = "update-check.json"
-	defaultURL    = "https://github.com/nex-crm/wuphf/releases/latest"
-	cacheTTL      = 24 * time.Hour
-	httpTimeout   = 5 * time.Second
-	envDisable    = "WUPHF_NO_UPDATE_CHECK"
+	cacheFileName  = "update-check.json"
+	defaultURL     = "https://github.com/nex-crm/wuphf/releases/latest"
+	cacheTTL       = 24 * time.Hour
+	httpTimeout    = 5 * time.Second
+	envDisable     = "WUPHF_NO_UPDATE_CHECK"
 	envOverrideURL = "WUPHF_UPDATE_CHECK_URL" // tests only
 )
 

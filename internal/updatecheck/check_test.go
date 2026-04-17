@@ -25,8 +25,8 @@ func TestIsNewer(t *testing.T) {
 		{"0.20.1", "0.20.2", false},
 		{"1.0.0", "0.99.99", true},
 		{"0.20.10", "0.20.2", true},      // numeric not lexical
-		{"0.21.0-rc.1", "0.20.2", true},   // pre-release on newer numeric
-		{"0.20.2", "0.20.2-rc.1", false},  // same numeric core; pre-release tail ignored
+		{"0.21.0-rc.1", "0.20.2", true},  // pre-release on newer numeric
+		{"0.20.2", "0.20.2-rc.1", false}, // same numeric core; pre-release tail ignored
 	}
 	for _, tc := range cases {
 		t.Run(tc.candidate+"_vs_"+tc.current, func(t *testing.T) {
