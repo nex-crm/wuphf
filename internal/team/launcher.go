@@ -10,12 +10,10 @@
 package team
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -4005,95 +4003,6 @@ func openBrowser(url string) {
 		return
 	}
 	_ = cmd.Start()
-}
-
-// spawnBackgroundAgents starts all agents as headless background processes (no tmux).
-// Kept for compatibility with older tooling; LaunchWeb now uses queued headless
-// turns instead so notifications can interrupt stale work immediately.
-func (l *Launcher) spawnBackgroundAgents() {
-	for _, member := range l.visibleOfficeMembers() {
-		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
-		go l.runBackgroundAgent(member.Slug, cmdStr)
-	}
-	for _, member := range l.overflowOfficeMembers() {
-		cmdStr := l.headlessClaudeCommand(member.Slug, l.buildPrompt(member.Slug))
-		go l.runBackgroundAgent(member.Slug, cmdStr)
-	}
-}
-
-// headlessClaudeCommand builds a non-interactive claude command for web mode.
-func (l *Launcher) headlessClaudeCommand(slug, systemPrompt string) string {
-	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
-	agentMCPPath, err := l.ensureAgentMCPConfig(slug)
-	if err != nil {
-		agentMCPPath = l.mcpConfig
-	}
-	mcpConfig := strings.ReplaceAll(agentMCPPath, "'", "'\\''")
-	permFlags := l.resolvePermissionFlags(slug)
-	brokerToken := ""
-	if l.broker != nil {
-		brokerToken = l.broker.Token()
-	}
-	model := l.headlessClaudeModel(slug)
-	initialPrompt := "You are now active in the WUPHF office. Notifications are pushed to you — do NOT poll for messages. Focus entirely on the work described in each pushed notification. Use team_broadcast to post replies. Only use team_poll if a pushed notification explicitly tells you context is missing."
-	return fmt.Sprintf(
-		"WUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_BROKER_BASE_URL=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 claude --model %s --print %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -p '%s'",
-		slug, brokerToken, l.BrokerBaseURL(), config.ResolveNoNex(), model, permFlags, escaped, mcpConfig,
-		strings.ReplaceAll(initialPrompt, "'", "'\\''"),
-	)
-}
-
-// runBackgroundAgent runs a single agent as a headless OS process.
-func (l *Launcher) runBackgroundAgent(slug, cmdStr string) {
-	logDir := filepath.Join(os.TempDir(), "wuphf-agents")
-	if err := os.MkdirAll(logDir, 0o700); err != nil {
-		fmt.Fprintf(os.Stderr, "[%s] failed to create log dir %s: %v\n", slug, logDir, err)
-		return
-	}
-	logPath := filepath.Join(logDir, slug+".log")
-
-	for {
-		logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "[%s] failed to open log %s: %v\n", slug, logPath, err)
-			time.Sleep(5 * time.Second)
-			continue
-		}
-		cmd := exec.Command("bash", "-c", cmdStr)
-		cmd.Dir = l.cwd
-		cmd.Env = append(os.Environ(),
-			fmt.Sprintf("WUPHF_BROKER_TOKEN=%s", l.broker.Token()),
-			fmt.Sprintf("WUPHF_BROKER_BASE_URL=%s", l.BrokerBaseURL()),
-		)
-		cmd.Stdin = nil
-
-		// Fan-out stdout+stderr to the log file AND the broker's per-agent
-		// stream buffer so the web UI can tail it in real time via SSE.
-		pr, pw := io.Pipe()
-		cmd.Stdout = io.MultiWriter(logFile, pw)
-		cmd.Stderr = io.MultiWriter(logFile, pw)
-
-		stream := l.broker.AgentStream(slug)
-		go func() {
-			scanner := bufio.NewScanner(pr)
-			scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-			for scanner.Scan() {
-				stream.Push(scanner.Text())
-			}
-		}()
-
-		fmt.Fprintf(os.Stderr, "[%s] agent starting (log: %s)\n", slug, logPath)
-		runErr := cmd.Run()
-		_ = pw.Close() // signals scanner goroutine to exit (io.PipeWriter.Close always returns nil)
-		if closeErr := logFile.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "[%s] log close: %v\n", slug, closeErr)
-		}
-
-		if runErr != nil {
-			fmt.Fprintf(os.Stderr, "[%s] agent exited: %v, restarting in 5s\n", slug, runErr)
-		}
-		time.Sleep(5 * time.Second)
-	}
 }
 
 // postEscalation writes a system message to #general when an agent is stuck
