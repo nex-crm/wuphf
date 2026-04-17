@@ -28,16 +28,6 @@ func decodeBody(t *testing.T, body string) map[string]any {
 	return out
 }
 
-func TestResetHandlerRejectsNonPost(t *testing.T) {
-	withRuntimeHome(t)
-	req := httptest.NewRequest(http.MethodGet, "/workspace/reset", nil)
-	w := httptest.NewRecorder()
-	newMux().ServeHTTP(w, req)
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("expected 405, got %d", w.Code)
-	}
-}
-
 func TestShredHandlerRejectsNonPost(t *testing.T) {
 	withRuntimeHome(t)
 	req := httptest.NewRequest(http.MethodGet, "/workspace/shred", nil)
@@ -46,30 +36,6 @@ func TestShredHandlerRejectsNonPost(t *testing.T) {
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected 405, got %d", w.Code)
 	}
-}
-
-func TestResetHandlerClearsRuntime(t *testing.T) {
-	dir := withRuntimeHome(t)
-	paths := seedWorkspace(t, dir)
-
-	req := httptest.NewRequest(http.MethodPost, "/workspace/reset", nil)
-	w := httptest.NewRecorder()
-	newMux().ServeHTTP(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	body := decodeBody(t, w.Body.String())
-	if ok, _ := body["ok"].(bool); !ok {
-		t.Fatalf("expected ok=true, got %v", body)
-	}
-	if rr, _ := body["restart_required"].(bool); !rr {
-		t.Fatalf("expected restart_required=true, got %v", body)
-	}
-	// Team dir wiped; onboarding state preserved.
-	assertGone(t, "brokerState", paths["brokerState"])
-	assertStays(t, "onboarded", paths["onboarded"])
-	assertStays(t, "company", paths["company"])
 }
 
 func TestShredHandlerWipesWorkspace(t *testing.T) {
@@ -133,14 +99,14 @@ func TestShredHandlerReportsRemovedPaths(t *testing.T) {
 	}
 }
 
-func TestResetHandlerOnEmptyHomeIsOK(t *testing.T) {
+func TestShredHandlerOnEmptyHomeIsOK(t *testing.T) {
 	dir := withRuntimeHome(t)
 	// Ensure the home exists but is completely empty.
 	if err := os.MkdirAll(filepath.Join(dir, ".wuphf"), 0o700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/workspace/reset", nil)
+	req := httptest.NewRequest(http.MethodPost, "/workspace/shred", nil)
 	w := httptest.NewRecorder()
 	newMux().ServeHTTP(w, req)
 

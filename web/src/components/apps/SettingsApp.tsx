@@ -2,7 +2,6 @@ import { useState, useEffect, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   getConfig,
-  resetWorkspace,
   shredWorkspace,
   updateConfig,
   type ConfigSnapshot,
@@ -867,29 +866,11 @@ function WipeModal({ title, severity, intro, confirmLabel, busy, onConfirm, onCa
   )
 }
 
-type DangerAction = 'reset' | 'shred'
+type DangerAction = 'shred'
 
 function DangerZoneSection() {
   const [open, setOpen] = useState<DangerAction | null>(null)
   const [busy, setBusy] = useState(false)
-
-  const handleReset = async () => {
-    setBusy(true)
-    try {
-      const result: WorkspaceWipeResult = await resetWorkspace()
-      if (!result.ok) {
-        showNotice(result.error || 'Reset failed', 'error')
-        setBusy(false)
-        return
-      }
-      showNotice('Broker state cleared. Reloading…', 'success')
-      // Small delay lets the toast render before the page flashes away.
-      setTimeout(() => window.location.reload(), 400)
-    } catch (err) {
-      showNotice(err instanceof Error ? err.message : 'Reset failed', 'error')
-      setBusy(false)
-    }
-  }
 
   const handleShred = async () => {
     setBusy(true)
@@ -912,42 +893,10 @@ function DangerZoneSection() {
     <div>
       <div style={styles.sectionTitle}>Danger Zone</div>
       <div style={styles.sectionDesc}>
-        Irreversible operations on this workspace. Read each card carefully — the web UI does not
-        kill the running broker process, so after either action you may need to re-launch
+        Irreversible operation on this workspace. The web UI does not kill the running broker
+        process, so after shredding you may need to re-launch
         <code style={{ margin: '0 4px' }}>wuphf</code> from your terminal for the change to fully
         take effect.
-      </div>
-
-      {/* RESET — narrow */}
-      <div style={dangerStyles.card('warn')}>
-        <div style={dangerStyles.cardTitle}>
-          <span>{'\u{1F501}'}</span>
-          <span>Reset broker state</span>
-        </div>
-        <div style={dangerStyles.cardSubtitle}>
-          Use this when something is stuck — an agent wedged, the queue won't drain, messages stop
-          flowing — and you want a clean restart without losing your team or work.
-        </div>
-        <div style={dangerStyles.listLabel}>Clears</div>
-        <ul style={dangerStyles.list}>
-          <li>Broker runtime state (<code>~/.wuphf/team/broker-state.json</code>)</li>
-          <li>Office PID file</li>
-          <li>Task-worktree registry entries (the worktrees on disk stay untouched)</li>
-        </ul>
-        <div style={dangerStyles.listLabel}>Preserved</div>
-        <ul style={dangerStyles.list}>
-          <li>Your team roster, company identity, tasks, workflows</li>
-          <li>All on-disk history (logs, sessions, artifacts)</li>
-          <li>API keys and config</li>
-        </ul>
-        <button
-          type="button"
-          style={dangerStyles.button('warn')}
-          onClick={() => setOpen('reset')}
-          disabled={busy}
-        >
-          Reset broker state…
-        </button>
       </div>
 
       {/* SHRED — full wipe */}
@@ -988,24 +937,6 @@ function DangerZoneSection() {
           Shred workspace…
         </button>
       </div>
-
-      {open === 'reset' && (
-        <WipeModal
-          title="Reset broker state?"
-          severity="warn"
-          intro={
-            <>
-              This stops the running broker's on-disk state and returns the office to a clean
-              boot. Your team, company, tasks, and workflows are all kept. If this doesn't
-              unblock things, try <strong>Shred workspace</strong> instead.
-            </>
-          }
-          confirmLabel="Reset broker state"
-          busy={busy}
-          onConfirm={handleReset}
-          onCancel={() => setOpen(null)}
-        />
-      )}
 
       {open === 'shred' && (
         <WipeModal

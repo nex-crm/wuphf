@@ -54,24 +54,23 @@ Supported platforms: macOS and Linux on x64 or arm64. The native binary is lazy-
 | `--unsafe` | Bypass agent permission checks (local dev only) |
 | `--web-port <n>` | Change the web UI port (default 7891) |
 
-## Memory Backends
+## Memory: Notebooks and the Wiki
 
-WUPHF can run with three organizational context modes:
+Every agent gets its own **notebook**. The team shares a **wiki**. When a conclusion in an agent's notebook holds up, it gets promoted to the wiki so the whole office benefits. Both are knowledge graphs under the hood, on Garry Tan's GBrain or Nex.
+
+**Backends for the wiki:**
 
 - `nex` is the default. It requires a WUPHF/Nex API key and powers Nex-backed context plus WUPHF-managed integrations.
-- `gbrain` mounts `gbrain serve` as the office memory layer.
-- `none` disables the external memory layer entirely.
-
-Two memory scopes sit above those backends:
-
-- `private` memory is per-agent and local to WUPHF.
-- `shared` memory is workspace-wide and backed by the selected external backend.
+- `gbrain` mounts `gbrain serve` as the wiki backend.
+- `none` disables the external wiki entirely. Notebooks still work locally.
 
 ```bash
 wuphf --memory-backend nex
 wuphf --memory-backend gbrain
 wuphf --memory-backend none
 ```
+
+Internal naming for code spelunkers: notebook = `private` memory, wiki = `shared` memory.
 
 ## Other Commands
 
@@ -123,7 +122,7 @@ Two action providers ship by default — pick whichever fits your style.
 | Live visibility | Stdout streaming |
 | Mid-task steering | DM any agent, no restart |
 | Runtimes | Mix Claude Code, Codex, and OpenClaw in one channel |
-| Memory | Per-agent knowledge graph + shared workspace memory |
+| Memory | Per-agent notebook + shared workspace wiki (knowledge graphs on GBrain or Nex) |
 | Price | Free and open source (MIT, self-hosted, your API keys) |
 
 ## Benchmark

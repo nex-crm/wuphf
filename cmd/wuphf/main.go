@@ -60,20 +60,6 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "  wuphf shred           Prompts before wiping")
 		fmt.Fprintln(os.Stderr, "  wuphf shred -y        Skip the confirmation")
 		fmt.Fprintln(os.Stderr, "  wuphf kill            (alias)")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "For a narrow restart without wiping the workspace, use `wuphf reset`.")
-	case "reset":
-		fmt.Fprintln(os.Stderr, "wuphf reset — restart a stuck office")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Stops the running session and clears broker runtime state (broker-state.json,")
-		fmt.Fprintln(os.Stderr, "office.pid). Your team, company, tasks, and workflows are preserved — this is")
-		fmt.Fprintln(os.Stderr, "the knob for \"something got wedged, reboot the office without losing work.\"")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Usage:")
-		fmt.Fprintln(os.Stderr, "  wuphf reset           Prompts before resetting")
-		fmt.Fprintln(os.Stderr, "  wuphf reset -y        Skip the confirmation")
-		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "For a full wipe that reopens onboarding, use `wuphf shred`.")
 	case "import":
 		fmt.Fprintln(os.Stderr, "wuphf import — pull state from another tool")
 		fmt.Fprintln(os.Stderr, "")
@@ -157,7 +143,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
 		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
-		fmt.Fprintf(os.Stderr, "  %s reset        Restart a stuck office (keeps your team + work)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
@@ -259,27 +244,6 @@ func main() {
 			}
 			printWipeResult("Shredded", res)
 			fmt.Println("Next `wuphf` launch will reopen onboarding. Michael would be proud.")
-			return
-		case "reset":
-			if !confirmDestructive(args[1:], "reset", resetSummary) {
-				fmt.Println("Cancelled. Nothing changed.")
-				return
-			}
-			if err := killRunningSession(selectedBlueprint); err != nil {
-				fmt.Fprintf(os.Stderr, "error: %v\n", err)
-				os.Exit(1)
-			}
-			res, err := workspace.ClearRuntime()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "error: reset runtime: %v\n", err)
-				os.Exit(1)
-			}
-			if err := team.CleanupPersistedTaskWorktrees(); err != nil {
-				fmt.Fprintf(os.Stderr, "error: cleanup task worktrees: %v\n", err)
-				os.Exit(1)
-			}
-			printWipeResult("Reset", res)
-			fmt.Println("Run `wuphf` to restart the office with your existing team.")
 			return
 		case "init":
 			dispatch("/init", *apiKeyFlag, *format)
@@ -492,22 +456,16 @@ func isPiped() bool {
 	return info.Mode()&os.ModeCharDevice == 0
 }
 
-// shredSummary and resetSummary are the human-readable blast-radius blurbs
-// printed during the interactive confirm. They stay in sync with the web
-// Settings "Danger Zone" copy by convention — if you update one, update
-// the other so CLI and UI promises match.
+// shredSummary is the human-readable blast-radius blurb printed during the
+// interactive confirm. Stays in sync with the web Settings "Danger Zone"
+// copy by convention — if you update one, update the other so CLI and UI
+// promises match.
 const shredSummary = `This will:
   • Stop the running WUPHF session
   • Delete your team, company identity, office task receipts, workflows
   • Wipe broker runtime state
   • Reopen onboarding on next launch
 Preserved: logs, sessions, task worktrees, LLM caches, config.json.`
-
-const resetSummary = `This will:
-  • Stop the running WUPHF session
-  • Clear broker runtime state (broker-state.json, office.pid)
-  • Clean up the task-worktree registry (worktrees themselves stay)
-Preserved: team roster, company, tasks, workflows, all on-disk history.`
 
 // confirmDestructive gates a destructive subcommand behind a y/N prompt.
 // A "-y" / "--yes" in rest skips the prompt — useful for scripted teardown.

@@ -549,13 +549,6 @@ export interface WorkspaceWipeResult {
   error?: string
 }
 
-// resetWorkspace is the narrow wipe: clears broker runtime state only.
-// Team, company, tasks, workflows survive. The user should reload the page
-// after calling this so the UI picks up the empty broker state.
-export function resetWorkspace() {
-  return post<WorkspaceWipeResult>('/workspace/reset', {})
-}
-
 // shredWorkspace is the full wipe: broker runtime + team + company + office
 // + workflows. Onboarding reopens on the next load. Call window.location
 // .reload() after success.

@@ -4656,19 +4656,6 @@ func (m channelModel) runCommand(trimmed, threadTarget string) (tea.Model, tea.C
 	case trimmed == "/quit" || trimmed == "/exit" || trimmed == "/q":
 		killTeamSession()
 		return m, tea.Quit
-	case trimmed == "/reset-broker":
-		// Narrow reset: wipe broker runtime state then kill the session so the
-		// user's next `wuphf` boots clean. Team + company + workflows survive.
-		// Named distinctly from /reset (transcript clear) to avoid overloading
-		// the verb — they target different layers of state.
-		res, err := workspace.ClearRuntime()
-		if err != nil {
-			m.notice = fmt.Sprintf("reset-broker failed: %v", err)
-			return m, nil
-		}
-		fmt.Fprintf(os.Stderr, "reset-broker: cleared %d runtime path(s). Run `wuphf` to restart.\n", len(res.Removed))
-		killTeamSession()
-		return m, tea.Quit
 	case trimmed == "/shred":
 		// Full wipe: runtime + team + company + office + workflows. Next launch
 		// reopens onboarding. Done in-process so the user doesn't have to
