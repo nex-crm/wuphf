@@ -231,14 +231,30 @@ export function createDM(agentSlug: string) {
 
 // ── Requests ──
 
+export interface InterviewOption {
+  id: string
+  label: string
+  description?: string
+}
+
 export interface AgentRequest {
   id: string
   from: string
   question: string
-  choices?: { id: string; label: string }[]
+  /** Legacy field name; broker now returns `options`. Kept for compatibility. */
+  choices?: InterviewOption[]
+  options?: InterviewOption[]
   channel?: string
+  title?: string
+  context?: string
+  kind?: string
   timestamp?: string
   status?: string
+  blocking?: boolean
+  required?: boolean
+  recommended_id?: string
+  created_at?: string
+  updated_at?: string
 }
 
 export function getRequests(channel: string) {
@@ -363,11 +379,15 @@ export function deletePolicy(id: string) {
 // ── Scheduler ──
 
 export interface SchedulerJob {
-  id: string
+  id?: string
+  slug?: string
   name?: string
+  label?: string
+  kind?: string
   cron?: string
   next_run?: string
   last_run?: string
+  due_at?: string
   status?: string
 }
 
