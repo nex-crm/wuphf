@@ -162,3 +162,31 @@ func TestRun_Timeout(t *testing.T) {
 		t.Fatal("Run: expected timeout error")
 	}
 }
+
+// TestRegister_AgainstRealisticNexCLI simulates nex-cli 0.1.7's real
+// behavior: refuse non-interactive invocation unless --cmd/--script is used,
+// and recognize `setup <email>` (not `register`) as the onboarding entry
+// point. This is the exact failure mode described in issue #102 — if the
+// fix regresses, this test breaks.
+func TestRegister_AgainstRealisticNexCLI(t *testing.T) {
+	dir := withIsolatedPATH(t)
+	writeFakeNexCLI(t, dir, "nex-cli", `
+if [ "$1" != "--cmd" ] && [ "$1" != "--script" ]; then
+  echo "Error: nex requires an interactive terminal. Use --cmd or --script for non-interactive mode." >&2
+  exit 1
+fi
+case "$2" in
+  "setup "*) printf 'registered %s\n' "${2#setup }" ;;
+  "register"*) echo "Error: unknown command 'register'" >&2; exit 2 ;;
+  *) echo "Error: unknown command" >&2; exit 2 ;;
+esac
+`)
+	t.Setenv("WUPHF_NO_NEX", "")
+	out, err := Register(context.Background(), "founder@example.com")
+	if err != nil {
+		t.Fatalf("Register: unexpected error against realistic nex-cli: %v", err)
+	}
+	if out != "registered founder@example.com" {
+		t.Fatalf("Register: expected successful setup, got %q", out)
+	}
+}
