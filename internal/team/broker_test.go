@@ -1222,6 +1222,205 @@ func TestBrokerAgentRateLimitExemptsSSEPaths(t *testing.T) {
 	}
 }
 
+// TestIsLoopbackRemote verifies the RemoteAddr-side half of the DNS-rebinding
+// guard. Empty and unparseable addresses must fail closed — otherwise a
+// test-only path, or a listener that exposes synthetic RemoteAddr, would
+// silently open the gate.
+func TestIsLoopbackRemote(t *testing.T) {
+	cases := []struct {
+		name       string
+		remoteAddr string
+		want       bool
+	}{
+		{"ipv4 loopback with port", "127.0.0.1:1234", true},
+		{"ipv6 loopback with port", "[::1]:1234", true},
+		{"localhost hostname", "localhost:4444", true},
+		{"ipv4 loopback high octet", "127.255.255.255:1", true},
+		{"ipv4 non-loopback", "10.0.0.5:1234", false},
+		{"ipv4 external", "203.0.113.9:80", false},
+		{"empty remote addr", "", false},
+		{"malformed", "not-an-address", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.remoteAddr
+			if got := isLoopbackRemote(req); got != tc.want {
+				t.Fatalf("isLoopbackRemote(%q) = %v, want %v", tc.remoteAddr, got, tc.want)
+			}
+		})
+	}
+	if got := isLoopbackRemote(nil); got {
+		t.Fatal("isLoopbackRemote(nil) = true, want false (must fail closed)")
+	}
+}
+
+// TestHostHeaderIsLoopback verifies the Host-side half of the DNS-rebinding
+// guard. An attacker-controlled name that resolves to 127.0.0.1 at request
+// time must be rejected based on the Host header alone.
+func TestHostHeaderIsLoopback(t *testing.T) {
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"localhost:7890", true},
+		{"127.0.0.1:7890", true},
+		{"[::1]:7890", true},
+		{"localhost", true},
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"evil.example.com", false},
+		{"evil.example.com:7890", false},
+		{"rebind.attacker.test:7900", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.host, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Host = tc.host
+			if got := hostHeaderIsLoopback(req); got != tc.want {
+				t.Fatalf("hostHeaderIsLoopback(Host=%q) = %v, want %v", tc.host, got, tc.want)
+			}
+		})
+	}
+	if got := hostHeaderIsLoopback(nil); got {
+		t.Fatal("hostHeaderIsLoopback(nil) = true, want false (must fail closed)")
+	}
+}
+
+// TestWebUIRebindGuard is the integrated test for the guard composed of
+// isLoopbackRemote AND hostHeaderIsLoopback. Both must pass for the request
+// to reach the next handler. Either failing → 403.
+func TestWebUIRebindGuard(t *testing.T) {
+	guarded := webUIRebindGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("reached"))
+	}))
+
+	cases := []struct {
+		name       string
+		remoteAddr string
+		host       string
+		wantStatus int
+	}{
+		{"loopback remote + loopback host", "127.0.0.1:5000", "localhost:7900", http.StatusOK},
+		{"loopback remote + evil host (rebind attempt)", "127.0.0.1:5000", "evil.example.com:7900", http.StatusForbidden},
+		{"non-loopback remote + loopback host", "203.0.113.9:80", "127.0.0.1:7900", http.StatusForbidden},
+		{"non-loopback remote + evil host", "203.0.113.9:80", "evil.example.com:7900", http.StatusForbidden},
+		{"empty remote + loopback host", "", "127.0.0.1:7900", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api-token", nil)
+			req.RemoteAddr = tc.remoteAddr
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+			guarded.ServeHTTP(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status=%d, want %d; body=%q", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestCORSMiddlewareDropsNullOriginWildcard verifies the fix for the CSO
+// finding: Access-Control-Allow-Origin: * was previously returned for empty
+// or "null" Origin headers. A file:// page could open on the operator's
+// laptop and make authenticated cross-origin reads once it had the token.
+// The new contract: no CORS header unless the Origin exactly matches the
+// configured web UI origin.
+func TestCORSMiddlewareDropsNullOriginWildcard(t *testing.T) {
+	b := NewBroker()
+	b.webUIOrigins = []string{"http://localhost:7900", "http://127.0.0.1:7900"}
+	handler := b.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	cases := []struct {
+		name     string
+		origin   string
+		wantACAO string // empty means header must not be set
+	}{
+		{"null origin", "null", ""},
+		{"empty origin", "", ""},
+		{"allowed localhost origin", "http://localhost:7900", "http://localhost:7900"},
+		{"allowed loopback origin", "http://127.0.0.1:7900", "http://127.0.0.1:7900"},
+		{"disallowed origin", "http://evil.example.com", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/health", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			got := rec.Header().Get("Access-Control-Allow-Origin")
+			if got != tc.wantACAO {
+				t.Fatalf("Access-Control-Allow-Origin=%q, want %q", got, tc.wantACAO)
+			}
+		})
+	}
+}
+
+// TestBrokerOnboardingRoutesRequireAuth verifies the CSO auth wrapping — a
+// caller that can reach the broker port but does not hold the token must
+// NOT be able to POST /onboarding/complete (which seeds the team and fires
+// the first CEO turn) or read /onboarding/state.
+func TestBrokerOnboardingRoutesRequireAuth(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := "http://" + b.Addr()
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// Every onboarding route must 401 without a token.
+	for _, path := range []string{
+		"/onboarding/state",
+		"/onboarding/prereqs",
+		"/onboarding/templates",
+		"/onboarding/blueprints",
+	} {
+		resp, err := client.Get(base + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("GET %s without auth: status=%d, want 401", path, resp.StatusCode)
+		}
+	}
+
+	// /onboarding/complete is the big one — seeds the team + posts the first
+	// task. Must reject unauthenticated POSTs before decoding the body.
+	resp, err := client.Post(base+"/onboarding/complete", "application/json",
+		strings.NewReader(`{"task":"pwn","skip_task":false}`))
+	if err != nil {
+		t.Fatalf("POST /onboarding/complete: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("POST /onboarding/complete without auth: status=%d, want 401", resp.StatusCode)
+	}
+
+	// With the token, /onboarding/state returns 200 (sanity check the wrapping
+	// hasn't broken the happy path).
+	req, _ := http.NewRequest(http.MethodGet, base+"/onboarding/state", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /onboarding/state with auth: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /onboarding/state with auth: status=%d, want 200", resp.StatusCode)
+	}
+}
+
 func TestSetProxyClientIPHeaders(t *testing.T) {
 	headers := make(http.Header)
 	setProxyClientIPHeaders(headers, "203.0.113.44:5678")

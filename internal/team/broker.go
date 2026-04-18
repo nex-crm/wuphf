@@ -1208,9 +1208,11 @@ func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
 
 // isLivenessPath reports whether the request path is a pure liveness or
 // version probe that must never be rate-limited (operators need these even
-// when the broker is saturated).
+// when the broker is saturated). /web-token is NOT on this list — it
+// dispenses the broker bearer and an unthrottled enumeration path would be
+// surprising, even though the handler itself is loopback+Host gated.
 func isLivenessPath(path string) bool {
-	return path == "/health" || path == "/version" || path == "/web-token"
+	return path == "/health" || path == "/version"
 }
 
 // isAgentBucketExemptPath reports whether the path is an open SSE stream or
@@ -1498,20 +1500,19 @@ func isLoopbackRemote(r *http.Request) bool {
 	return host == "localhost"
 }
 
-// hostHeaderIsLocalhost reports whether the HTTP Host header is one of the
-// allowed loopback forms on the given port. DNS-rebinding attacks rely on
-// r.Host being an attacker-controlled name like rebind.example.com that only
+// hostHeaderIsLoopback reports whether the HTTP Host header is a loopback
+// hostname (localhost, 127.0.0.1, ::1). DNS-rebinding attacks rely on r.Host
+// being an attacker-controlled name like rebind.example.com that only
 // resolves to 127.0.0.1 at request time; Go's default mux routes by path and
 // ignores Host, so routes that sit on 127.0.0.1 will happily serve responses
 // to the attacker's origin. Validating Host on sensitive handlers closes this.
 //
-// The port argument is reserved for stricter matching (Host must be
-// localhost:<port>) and is currently ignored — we accept any loopback hostname
-// regardless of port because the broker and web UI run on different ports and
-// some dev setups proxy through 80/443. The loopback hostname is the security
-// boundary.
-func hostHeaderIsLocalhost(r *http.Request, port int) bool {
-	_ = port
+// The port component is intentionally not validated — the broker and web UI
+// run on different ports and dev setups may proxy through 80/443. The
+// loopback hostname is the security boundary. Assumes no trusted reverse
+// proxy sits in front of the listener; operators adding one must re-evaluate
+// (r.Host would then reflect the proxy's upstream, not the browser origin).
+func hostHeaderIsLoopback(r *http.Request) bool {
 	if r == nil {
 		return false
 	}
@@ -1519,10 +1520,7 @@ func hostHeaderIsLocalhost(r *http.Request, port int) bool {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		return true
-	}
-	return false
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 // webUIRebindGuard wraps a handler with a DNS-rebinding / cross-origin gate.
@@ -1530,9 +1528,9 @@ func hostHeaderIsLocalhost(r *http.Request, port int) bool {
 // is not a recognized localhost form. Applied on the web UI mux because that
 // mux auto-attaches the broker's Bearer token on forwarded requests; without
 // this gate, a malicious website can use DNS rebinding to ride the token.
-func webUIRebindGuard(port int, next http.Handler) http.Handler {
+func webUIRebindGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !isLoopbackRemote(r) || !hostHeaderIsLocalhost(r, port) {
+		if !isLoopbackRemote(r) || !hostHeaderIsLoopback(r) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -1549,7 +1547,7 @@ func webUIRebindGuard(port int, next http.Handler) http.Handler {
 // on path, so without an explicit Host check the response would flow back
 // to the attacker's origin. Validate both RemoteAddr AND Host here.
 func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
-	if !isLoopbackRemote(r) || !hostHeaderIsLocalhost(r, 0) {
+	if !isLoopbackRemote(r) || !hostHeaderIsLoopback(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -1732,12 +1730,12 @@ func (b *Broker) ServeWebUI(port int) {
 	// Bearer token server-side, so without a Host/RemoteAddr check, a DNS-rebinding
 	// attack against an attacker-controlled hostname that resolves to 127.0.0.1
 	// would ride the token and control the entire office.
-	mux.Handle("/api/", webUIRebindGuard(port, b.webUIProxyHandler(brokerURL, "/api")))
-	mux.Handle("/onboarding/", webUIRebindGuard(port, b.webUIProxyHandler(brokerURL, "")))
+	mux.Handle("/api/", webUIRebindGuard(b.webUIProxyHandler(brokerURL, "/api")))
+	mux.Handle("/onboarding/", webUIRebindGuard(b.webUIProxyHandler(brokerURL, "")))
 	// Token endpoint — no auth needed, but we require a same-origin loopback request.
 	// Otherwise this endpoint leaks the broker bearer to any browser page that
 	// can reach the web UI port via DNS rebinding.
-	mux.Handle("/api-token", webUIRebindGuard(port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/api-token", webUIRebindGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"token":      b.token,

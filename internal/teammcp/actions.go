@@ -19,17 +19,42 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-// readOnlyActionIDTokens marks action IDs that are safe to run without human
-// approval. Matched as a case-insensitive substring against the action_id
-// returned by team_action_search. These are information-gathering operations
-// (searches, list/get/fetch/browse). Any mutating verb — create, update,
-// send, delete, post, publish, execute-as-user, etc. — is NOT on this list
-// and must be gated by the Requests panel when the broker isn't running in
-// --unsafe mode.
-var readOnlyActionIDTokens = []string{
-	"search", "list", "read", "get", "fetch", "browse", "describe",
-	"show", "view", "count", "status", "lookup", "query", "find",
-	"summary", "summarize",
+// readOnlyActionVerbs are unambiguous information-read verbs. Matched as
+// WHOLE TOKENS (splitting action_id on - _ . / space), never as substrings —
+// substring matching is too permissive (e.g. "get" matches inside "budget",
+// "find" inside "findone_and_update", "view" inside "review_delete"). The
+// list is intentionally narrower than the operator might expect: ambiguous
+// nouns like "status", "count", "view", "query", "find", "summary" appear in
+// both read and write action names ("update_status", "post_summary",
+// "findone_and_update") and are excluded so mutating actions can never be
+// misclassified.
+var readOnlyActionVerbs = map[string]struct{}{
+	"search":    {},
+	"list":      {},
+	"read":      {},
+	"get":       {},
+	"fetch":     {},
+	"browse":    {},
+	"describe":  {},
+	"show":      {},
+	"lookup":    {},
+	"summarize": {},
+}
+
+// mutatingActionVerbs are unambiguous state-changing verbs. If ANY of these
+// appears as a whole token in the action_id, the action is never classified
+// read-only — even if a read verb is also present. This guards against
+// composite action names like "GMAIL_LIST_AND_DELETE" or "FIND_AND_UPDATE":
+// a single read verb is not enough; a single mutating verb vetoes.
+var mutatingActionVerbs = map[string]struct{}{
+	"send": {}, "create": {}, "update": {}, "delete": {}, "post": {},
+	"put": {}, "patch": {}, "remove": {}, "insert": {}, "write": {},
+	"clear": {}, "reset": {}, "archive": {}, "star": {}, "unstar": {},
+	"mark": {}, "publish": {}, "add": {}, "move": {}, "invite": {},
+	"accept": {}, "reject": {}, "approve": {}, "cancel": {}, "refund": {},
+	"charge": {}, "pay": {}, "enable": {}, "disable": {}, "revoke": {},
+	"grant": {}, "set": {}, "draft": {}, "schedule": {}, "upload": {},
+	"replace": {}, "transfer": {}, "merge": {}, "split": {},
 }
 
 // actionApprovalTimeout is how long handleTeamActionExecute will wait for a
@@ -39,19 +64,30 @@ const actionApprovalTimeout = 30 * time.Minute
 // actionApprovalPollInterval mirrors the human_interview tool cadence.
 const actionApprovalPollInterval = 1500 * time.Millisecond
 
-// actionIsReadOnly reports whether an action_id looks like an information
-// read that can run without human approval.
+// actionIDSeparator reports whether r is an action_id token boundary.
+func actionIDSeparator(r rune) bool {
+	return r == '-' || r == '_' || r == '.' || r == '/' || r == ' '
+}
+
+// actionIsReadOnly reports whether an action_id is safe to run without human
+// approval. A read-only action has at least one read verb AND no mutating
+// verb appearing as a whole token.
 func actionIsReadOnly(actionID string) bool {
 	id := strings.ToLower(strings.TrimSpace(actionID))
 	if id == "" {
 		return false
 	}
-	for _, token := range readOnlyActionIDTokens {
-		if strings.Contains(id, token) {
-			return true
+	tokens := strings.FieldsFunc(id, actionIDSeparator)
+	hasRead := false
+	for _, tok := range tokens {
+		if _, ok := mutatingActionVerbs[tok]; ok {
+			return false
+		}
+		if _, ok := readOnlyActionVerbs[tok]; ok {
+			hasRead = true
 		}
 	}
-	return false
+	return hasRead
 }
 
 // requireTeamActionApproval gates mutating external-action calls behind a

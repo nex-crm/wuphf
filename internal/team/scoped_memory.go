@@ -285,10 +285,10 @@ func wrapUntrustedMemoryBrief(brief string) string {
 // composeHeadlessStdinPayload builds the stdin payload for a headless agent
 // turn. The operator's notification comes FIRST so it anchors the agent's
 // attention; any retrieved memory brief is appended afterwards, wrapped in a
-// clearly-labeled untrusted-data fence. This reversal is a prompt-injection
-// hardening measure (CSO finding #8): attacker-controlled strings (email
-// bodies, CRM notes) must never be the last thing the model reads before
-// acting, and must never be presented as if they were operator instructions.
+// clearly-labeled untrusted-data fence. Order matters because attacker-
+// controlled strings (email bodies, CRM notes) must never be the last thing
+// the model reads before acting, and must never be presented as if they
+// were operator instructions — that's the prompt-injection vector.
 func composeHeadlessStdinPayload(notification string, brief string) string {
 	notification = strings.TrimSpace(notification)
 	wrapped := wrapUntrustedMemoryBrief(brief)

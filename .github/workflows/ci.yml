@@ -49,9 +49,10 @@ jobs:
       - name: Run govulncheck
         # Catches reachable CVEs in the Go stdlib + modules. Flags us when we
         # fall behind on a Go minor bump without having to wait for a CVE
-        # advisory to make noise.
+        # advisory to make noise. Pinned to an explicit version so a new
+        # govulncheck release cannot flip pass/fail on the same commit.
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
   test:
