@@ -180,6 +180,10 @@ export interface OfficeMember {
   task?: string
   channel?: string
   provider?: ProviderBinding | string
+  /** Broker-provided: serialized as `built_in`. Built-ins (e.g., CEO) cannot be removed. */
+  built_in?: boolean
+  /** Per-channel disabled state when the list is sourced from `/members?channel=…`. */
+  disabled?: boolean
 }
 
 export function getOfficeMembers() {
