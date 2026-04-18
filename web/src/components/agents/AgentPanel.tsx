@@ -5,8 +5,11 @@ import { useOfficeMembers, useChannelMembers } from '../../hooks/useMembers'
 import { useAgentStream } from '../../hooks/useAgentStream'
 import { createDM, getAgentLogs, post } from '../../api/client'
 import { PixelAvatar } from '../ui/PixelAvatar'
+import { HarnessBadge } from '../ui/HarnessBadge'
 import { showNotice } from '../ui/Toast'
 import { confirm } from '../ui/ConfirmDialog'
+import { useDefaultHarness } from '../../hooks/useConfig'
+import { resolveHarness } from '../../lib/harness'
 import { StreamLineView } from '../messages/StreamLineView'
 import type { AgentLog, OfficeMember } from '../../api/client'
 
@@ -110,6 +113,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const [view, setView] = useState<'stream' | 'logs'>('stream')
   const [toggling, setToggling] = useState(false)
   const [removing, setRemoving] = useState(false)
+  const defaultHarness = useDefaultHarness()
 
   // Derive the per-channel enabled state. An agent is "enabled" in the current
   // channel when it appears in /members and is not flagged disabled.
@@ -199,11 +203,16 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       {/* Header */}
       <div className="agent-panel-header">
         <div className="agent-panel-identity">
-          <div className="agent-panel-avatar">
+          <div className="agent-panel-avatar avatar-with-harness">
             <PixelAvatar
               slug={agent.slug}
               size={56}
               className="pixel-avatar-panel"
+            />
+            <HarnessBadge
+              kind={resolveHarness(agent.provider, defaultHarness)}
+              size={18}
+              className="harness-badge-on-avatar"
             />
           </div>
           <div style={{ minWidth: 0, flex: 1 }}>

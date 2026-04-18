@@ -1,8 +1,11 @@
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { useAppStore } from '../../stores/app'
 import { PixelAvatar } from '../ui/PixelAvatar'
+import { HarnessBadge } from '../ui/HarnessBadge'
 import { AgentWizard, useAgentWizard } from '../agents/AgentWizard'
+import { useDefaultHarness } from '../../hooks/useConfig'
 import type { OfficeMember } from '../../api/client'
+import { resolveHarness } from '../../lib/harness'
 
 function classifyActivity(member: OfficeMember | undefined) {
   if (!member) return { state: 'lurking', label: 'lurking', dotClass: 'lurking' }
@@ -24,6 +27,7 @@ export function AgentList() {
   const currentChannel = useAppStore((s) => s.currentChannel)
   const channelMeta = useAppStore((s) => s.channelMeta)
   const wizard = useAgentWizard()
+  const defaultHarness = useDefaultHarness()
 
   const agents = members.filter((m) => m.slug && m.slug !== 'human')
 
@@ -39,6 +43,7 @@ export function AgentList() {
             const ac = classifyActivity(agent)
             const meta = channelMeta[currentChannel]
             const isDMActive = meta?.type === 'D' && meta.agentSlug === agent.slug
+            const harness = resolveHarness(agent.provider, defaultHarness)
 
             return (
               <button
@@ -48,12 +53,13 @@ export function AgentList() {
                 title={`${agent.name} — ${ac.label}`}
                 onClick={() => setActiveAgentSlug(agent.slug)}
               >
-                <span className="sidebar-agent-avatar">
+                <span className="sidebar-agent-avatar avatar-with-harness">
                   <PixelAvatar
                     slug={agent.slug}
                     size={24}
                     className="pixel-avatar-sidebar"
                   />
+                  <HarnessBadge kind={harness} size={10} className="harness-badge-on-avatar" />
                 </span>
                 <div className="sidebar-agent-wrap">
                   <span className="sidebar-agent-name">{agent.name || agent.slug}</span>
