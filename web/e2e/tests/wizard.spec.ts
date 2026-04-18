@@ -33,6 +33,16 @@ async function waitForReactMount(page: Page): Promise<void> {
   );
 }
 
+// The wizard flow is welcome → identity → templates. Fill the two required
+// identity fields so the primary CTA enables and we can advance.
+async function advanceToTemplatesStep(page: Page): Promise<void> {
+  await expect(page.locator('.wizard-step').first()).toBeVisible({ timeout: 10_000 });
+  await page.locator('.wizard-step button.btn-primary').first().click();
+  await page.locator('#wiz-company').fill('Smoke Test Co');
+  await page.locator('#wiz-description').fill('Smoke test description');
+  await page.locator('.wizard-step button.btn-primary').first().click();
+}
+
 test.describe('wuphf onboarding wizard smoke', () => {
   test('fresh install lands on the welcome step without crashing', async ({ page }) => {
     const getErrors = collectReactErrors(page);
@@ -53,20 +63,18 @@ test.describe('wuphf onboarding wizard smoke', () => {
     ).toHaveLength(0);
   });
 
-  test('advancing from welcome → templates step does not crash', async ({ page }) => {
-    // Verifies the wizard state machine actually transitions. The welcome
-    // step has a single primary CTA; clicking it should render the
-    // templates step. Assert via the progress-dot count staying > 0 and
-    // a new `.wizard-panel` (only templates step onward has panels).
+  test('advancing from welcome → identity → templates step does not crash', async ({ page }) => {
+    // Verifies the wizard state machine actually transitions. Flow is:
+    // welcome → identity (company + description required) → templates.
+    // Assert via `.wizard-panel` on the templates step.
     const getErrors = collectReactErrors(page);
 
     await page.goto('/');
     await waitForReactMount(page);
 
-    await expect(page.locator('.wizard-step').first()).toBeVisible({ timeout: 10_000 });
-    await page.locator('.wizard-step button.btn-primary').first().click();
+    await advanceToTemplatesStep(page);
 
-    // Templates step renders `.wizard-panel` (welcome does not).
+    // Templates step renders `.wizard-panel` (welcome + identity have different markers).
     await expect(page.locator('.wizard-panel').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('error-boundary')).toHaveCount(0);
 
@@ -94,8 +102,7 @@ test.describe('wuphf onboarding wizard smoke', () => {
     await page.goto('/');
     await waitForReactMount(page);
 
-    await expect(page.locator('.wizard-step').first()).toBeVisible({ timeout: 10_000 });
-    await page.locator('.wizard-step button.btn-primary').first().click();
+    await advanceToTemplatesStep(page);
 
     // Wait for the template grid (only rendered once blueprint fetch resolves).
     await expect(page.locator('.template-grid')).toBeVisible({ timeout: 10_000 });
