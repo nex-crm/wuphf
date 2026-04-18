@@ -270,7 +270,7 @@ func TestHandleChecklistDismiss(t *testing.T) {
 func TestRegisterRoutesRegistersAllPaths(t *testing.T) {
 	withTempHome(t, func(_ string) {
 		mux := http.NewServeMux()
-		RegisterRoutes(mux, nil, "")
+		RegisterRoutes(mux, nil, "", nil)
 
 		routes := []struct {
 			method string

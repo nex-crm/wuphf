@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -65,6 +66,110 @@ func (stubActionProvider) ListRelayEvents(context.Context, action.RelayEventsOpt
 }
 func (stubActionProvider) GetRelayEvent(context.Context, string) (action.RelayEventDetail, error) {
 	return action.RelayEventDetail{}, nil
+}
+
+// TestActionIsReadOnly pins the behaviour of the approval-gate allow-list.
+// The original implementation used strings.Contains and would classify any
+// action_id that contained a substring from the read-verb list as read-only,
+// which made mutating actions like "budget_update" or "findone_and_update"
+// bypass the gate. The fixed implementation tokenizes on common separators
+// and requires a whole-token match AND no mutating verb elsewhere in the ID.
+//
+// Every "mutation bypass" case in this table corresponds to a real Composio-
+// shaped action name or a near-miss of one. A regression here silently
+// reopens finding #7 of the CSO audit.
+func TestActionIsReadOnly(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+	}{
+		// Read actions — must bypass the approval gate.
+		{"GMAIL_FETCH_MAILS", true},
+		{"GMAIL_SEARCH_EMAILS", true},
+		{"HUBSPOT_GET_CONTACT", true},
+		{"SLACKBOT_LIST_CHANNELS", true},
+		{"GOOGLECALENDAR_EVENTS_LIST", true},
+		{"describe_schema", true},
+		{"browse.docs", true},
+		{"list-contacts", true},
+
+		// Mutating actions — must NOT be classified read-only.
+		{"GMAIL_SEND_EMAIL", false},
+		{"GMAIL_CREATE_DRAFT", false},
+		{"HUBSPOT_UPDATE_CONTACT", false},
+		{"SLACKBOT_SEND_MESSAGE", false},
+		{"GOOGLECALENDAR_CREATE_EVENT", false},
+		{"delete-user", false},
+		{"post.message", false},
+		{"set_status", false},
+
+		// Substring bypasses the old implementation was vulnerable to.
+		{"budget_update", false},         // contains "get" as substring
+		{"findone_and_update", false},    // contains "find" + mutating "update"
+		{"review_delete", false},         // contains "view" + mutating "delete"
+		{"account_create", false},        // contains "count" + mutating "create"
+		{"send_status_update", false},    // contains "status" + mutating "send"/"update"
+		{"POST_SUMMARY", false},          // contains "summary" + mutating "post"
+		{"archive_report", false},        // "archive" is mutating
+		{"GMAIL_LIST_AND_DELETE", false}, // read AND mutate → must gate
+
+		// Empty / unknown / ambiguous — default is GATED (return false).
+		{"", false},
+		{"mystery_action", false},
+		{"do_thing", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			if got := actionIsReadOnly(tc.id); got != tc.want {
+				t.Fatalf("actionIsReadOnly(%q) = %v, want %v", tc.id, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestRequireTeamActionApprovalBypasses exercises the three bypass paths
+// that must never require a human click: DryRun=true, WUPHF_UNSAFE=1, and
+// read-only action_ids. If any of these regress, agents either can't take
+// safe actions (read operations pile up approval requests) or the gate
+// fails open entirely.
+func TestRequireTeamActionApprovalBypasses(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	// Ensure the default bypass state — no WUPHF_UNSAFE unless a subtest sets it.
+	t.Setenv("WUPHF_UNSAFE", "")
+
+	t.Run("DryRun bypasses", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+			Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL", DryRun: true,
+		})
+		if err != nil {
+			t.Fatalf("DryRun must bypass approval, got err=%v", err)
+		}
+	})
+
+	t.Run("WUPHF_UNSAFE bypasses", func(t *testing.T) {
+		t.Setenv("WUPHF_UNSAFE", "1")
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+			Platform: "gmail", ActionID: "GMAIL_SEND_EMAIL", DryRun: false,
+		})
+		if err != nil {
+			t.Fatalf("WUPHF_UNSAFE=1 must bypass approval, got err=%v", err)
+		}
+	})
+
+	t.Run("read-only action_id bypasses", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		err := requireTeamActionApproval(ctx, "ceo", "general", TeamActionExecuteArgs{
+			Platform: "gmail", ActionID: "GMAIL_FETCH_MAILS", DryRun: false,
+		})
+		if err != nil {
+			t.Fatalf("read-only action_id must bypass approval, got err=%v", err)
+		}
+	})
 }
 
 func TestHandleTeamActionExecuteLogsBrokerAction(t *testing.T) {
