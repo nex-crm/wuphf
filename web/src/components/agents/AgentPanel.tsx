@@ -117,12 +117,10 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const channelEntry = channelMembers.find((m) => m.slug === agent.slug)
   const enabled = Boolean(channelEntry) && channelEntry?.disabled !== true
 
-  // Optimistic override so the switch doesn't wait a poll cycle to reflect.
-  const [pendingEnabled, setPendingEnabled] = useState<boolean | null>(null)
-  const displayEnabled = pendingEnabled ?? enabled
-
-  // The broker rejects disable/remove on ceo and on any `built_in` member.
-  const canRemove = !agent.built_in && agent.slug !== 'ceo'
+  // Broker rejects remove on ceo and on any `built_in` member; disable on ceo.
+  // Use `!== true` (not `!agent.built_in`) so an absent field isn't silently
+  // treated as "removable" — we want explicit permission, not optimistic.
+  const canRemove = agent.built_in !== true && agent.slug !== 'ceo'
   const canToggle = agent.slug !== 'ceo'
 
   async function handleOpenDM() {
@@ -144,20 +142,22 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   async function handleToggleEnabled(next: boolean) {
     if (!canToggle || toggling) return
     setToggling(true)
-    setPendingEnabled(next)
     try {
+      // Broker's `enable` action only lifts the Disabled flag — it doesn't
+      // add a non-member. Translate to `add` so flipping the toggle ON does
+      // what the user expects regardless of prior channel membership.
+      const action = next ? (channelEntry ? 'enable' : 'add') : 'disable'
       await post('/channel-members', {
         channel: currentChannel,
         slug: agent.slug,
-        action: next ? 'enable' : 'disable',
+        action,
       })
-      await queryClient.invalidateQueries({ queryKey: ['channel-members', currentChannel] })
+      await queryClient.refetchQueries({ queryKey: ['channel-members', currentChannel] })
       await queryClient.invalidateQueries({ queryKey: ['office-members'] })
       showNotice(`${agent.name || agent.slug} ${next ? 'enabled' : 'disabled'}`, 'success')
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Toggle failed'
       showNotice(message, 'error')
-      setPendingEnabled(null)
     } finally {
       setToggling(false)
     }
@@ -188,20 +188,6 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
       },
     })
   }
-
-  // Clear the optimistic override either when the server agrees, or after a
-  // grace window so the toggle can't get stuck showing a state the server
-  // never confirmed (e.g., enabling an agent that isn't a member of this
-  // channel — the broker's `enable` only lifts the Disabled flag).
-  useEffect(() => {
-    if (pendingEnabled === null) return
-    if (pendingEnabled === enabled) {
-      setPendingEnabled(null)
-      return
-    }
-    const t = setTimeout(() => setPendingEnabled(null), 3000)
-    return () => clearTimeout(t)
-  }, [enabled, pendingEnabled])
 
   const statusClass = agent.status === 'active' ? 'active pulse' : 'lurking'
 
@@ -282,7 +268,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
             <label className="agent-toggle" aria-label={`Toggle ${agent.name || agent.slug} in #${currentChannel}`}>
               <input
                 type="checkbox"
-                checked={displayEnabled}
+                checked={enabled}
                 disabled={toggling}
                 onChange={(e) => handleToggleEnabled(e.target.checked)}
               />
