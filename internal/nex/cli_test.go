@@ -70,15 +70,29 @@ func TestConnected_Happy(t *testing.T) {
 
 func TestRun_ReturnsStdout(t *testing.T) {
 	dir := withIsolatedPATH(t)
-	writeFakeNexCLI(t, dir, "nex-cli", `printf 'recall: %s\n' "$1"`)
+	// Assert nex-cli is invoked as `--cmd "<joined args>"`: $1 is --cmd,
+	// $2 is the joined command string.
+	writeFakeNexCLI(t, dir, "nex-cli", `printf '%s|%s' "$1" "$2"`)
 	t.Setenv("WUPHF_NO_NEX", "")
 	out, err := Run(context.Background(), "recall", "acme")
 	if err != nil {
 		t.Fatalf("Run: unexpected error: %v", err)
 	}
-	if out != "recall: recall" {
-		// the fake echoes the first arg, which is "recall" (subcommand)
+	if out != "--cmd|recall acme" {
 		t.Fatalf("Run: unexpected stdout %q", out)
+	}
+}
+
+func TestRun_QuotesWhitespaceArgs(t *testing.T) {
+	dir := withIsolatedPATH(t)
+	writeFakeNexCLI(t, dir, "nex-cli", `printf '%s' "$2"`)
+	t.Setenv("WUPHF_NO_NEX", "")
+	out, err := Run(context.Background(), "recall", "acme q3 renewal")
+	if err != nil {
+		t.Fatalf("Run: unexpected error: %v", err)
+	}
+	if out != `recall "acme q3 renewal"` {
+		t.Fatalf("Run: expected quoted multi-word arg, got %q", out)
 	}
 }
 
@@ -103,28 +117,29 @@ func TestRun_Disabled(t *testing.T) {
 
 func TestRecall_ShellsOut(t *testing.T) {
 	dir := withIsolatedPATH(t)
-	// Emit the query so we can assert it was forwarded.
+	// $2 is the full --cmd string: subcommand followed by the (quoted) query.
 	writeFakeNexCLI(t, dir, "nex-cli", `printf '%s' "$2"`)
 	t.Setenv("WUPHF_NO_NEX", "")
 	out, err := Recall(context.Background(), "acme q3 renewal")
 	if err != nil {
 		t.Fatalf("Recall: unexpected error: %v", err)
 	}
-	if out != "acme q3 renewal" {
-		t.Fatalf("Recall: expected query echoed back, got %q", out)
+	if out != `recall "acme q3 renewal"` {
+		t.Fatalf("Recall: expected quoted query in --cmd string, got %q", out)
 	}
 }
 
 func TestRegister_PassesEmail(t *testing.T) {
 	dir := withIsolatedPATH(t)
-	writeFakeNexCLI(t, dir, "nex-cli", `printf '%s' "$3"`)
+	// $2 is the --cmd string: `setup <email>` (single token, no quoting).
+	writeFakeNexCLI(t, dir, "nex-cli", `printf '%s' "$2"`)
 	t.Setenv("WUPHF_NO_NEX", "")
 	out, err := Register(context.Background(), "founder@example.com")
 	if err != nil {
 		t.Fatalf("Register: unexpected error: %v", err)
 	}
-	if out != "founder@example.com" {
-		t.Fatalf("Register: expected email forwarded, got %q", out)
+	if out != "setup founder@example.com" {
+		t.Fatalf("Register: expected `setup <email>` --cmd string, got %q", out)
 	}
 }
 

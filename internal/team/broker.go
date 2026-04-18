@@ -5395,7 +5395,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleNexRegister wraps `nex-cli register --email <email>` so the onboarding
+// handleNexRegister wraps `nex-cli --cmd "setup <email>"` so the onboarding
 // wizard can register a Nex identity without the user dropping to the terminal.
 // Body: {"email": "..."}. Returns whatever the CLI prints on success, or the
 // CLI's stderr on failure. Requires nex-cli to be installed and on PATH.

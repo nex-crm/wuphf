@@ -76,10 +76,25 @@ func Connected() bool {
 	return IsInstalled()
 }
 
-// Run executes `nex-cli <args...>` with the given context/timeout and returns
-// stdout (trimmed) on success. A non-zero exit code, missing binary, or
-// context timeout are all returned as errors. The caller is responsible for
-// logging and falling back.
+// quoteArg wraps an argument in double quotes (escaping inner quotes and
+// backslashes) when it contains whitespace or characters the nex-cli REPL
+// parser treats as word separators. Plain tokens pass through untouched.
+func quoteArg(s string) string {
+	if s == "" {
+		return `""`
+	}
+	if !strings.ContainsAny(s, " \t\"'\\") {
+		return s
+	}
+	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
+}
+
+// Run executes `nex-cli --cmd "<args...>"` with the given context/timeout and
+// returns stdout (trimmed) on success. nex-cli refuses to start without a TTY
+// unless --cmd/--script is used, so every shell-out goes through --cmd with
+// the args joined (and quoted where necessary) into a single command string.
+// A non-zero exit code, missing binary, or context timeout are all returned
+// as errors. The caller is responsible for logging and falling back.
 func Run(ctx context.Context, args ...string) (string, error) {
 	if Disabled() {
 		return "", ErrDisabled
@@ -96,33 +111,40 @@ func Run(ctx context.Context, args ...string) (string, error) {
 		ctx, cancel = context.WithTimeout(ctx, DefaultTimeout)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, bin, args...)
+	quoted := make([]string, len(args))
+	for i, a := range args {
+		quoted[i] = quoteArg(a)
+	}
+	cmdStr := strings.Join(quoted, " ")
+	cmd := exec.CommandContext(ctx, bin, "--cmd", cmdStr)
 	cmd.Env = appendClientEnv(os.Environ())
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("nex-cli %s: timeout after %s", strings.Join(args, " "), DefaultTimeout)
+			return "", fmt.Errorf("nex-cli %s: timeout after %s", cmdStr, DefaultTimeout)
 		}
 		trimmed := strings.TrimSpace(stderr.String())
 		if trimmed != "" {
-			return "", fmt.Errorf("nex-cli %s: %s", strings.Join(args, " "), trimmed)
+			return "", fmt.Errorf("nex-cli %s: %s", cmdStr, trimmed)
 		}
-		return "", fmt.Errorf("nex-cli %s: %w", strings.Join(args, " "), err)
+		return "", fmt.Errorf("nex-cli %s: %w", cmdStr, err)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// Register shells out to `nex-cli register --email <email>`. Used by the
-// WUPHF onboarding flow in place of the legacy POST to /api/v1/agents/register
-// on app.nex.ai. Blocks until the command exits (or the default timeout trips).
+// Register shells out to `nex-cli --cmd "setup <email>"`. nex-cli exposes
+// non-interactive registration as the `setup` subcommand (there is no
+// `register`). Used by the WUPHF onboarding flow in place of the legacy
+// POST to /api/v1/agents/register on app.nex.ai. Blocks until the command
+// exits (or the default timeout trips).
 func Register(ctx context.Context, email string) (string, error) {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return "", fmt.Errorf("register: email is required")
 	}
-	return Run(ctx, "register", "--email", email)
+	return Run(ctx, "setup", email)
 }
 
 // Recall shells out to `nex-cli recall <query>` and returns the trimmed
