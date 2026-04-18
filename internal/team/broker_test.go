@@ -41,6 +41,7 @@ func initUsableGitWorktree(t *testing.T, path string) {
 	}
 	cmd := exec.Command("git", "init")
 	cmd.Dir = path
+	cmd.Env = gitCleanEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v: %s", path, err, strings.TrimSpace(string(out)))
 	}
