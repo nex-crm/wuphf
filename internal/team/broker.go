@@ -45,6 +45,18 @@ var brokerTokenFilePath = brokeraddr.DefaultTokenFile
 const defaultRateLimitRequestsPerWindow = 600
 const defaultRateLimitWindow = time.Minute
 
+// Per-agent rate limit. Applies even to authenticated requests that identify
+// themselves via the X-WUPHF-Agent header. The threshold is high enough that
+// well-behaved agents will never trip it, but low enough that a prompt-injected
+// agent stuck in a tool-call loop gets throttled before it burns the budget.
+const defaultAgentRateLimitRequestsPerWindow = 1000
+const defaultAgentRateLimitWindow = time.Minute
+
+// agentRateLimitHeader is the HTTP header the MCP server sets on every outbound
+// broker call so the broker can attribute cost back to the agent. Must match
+// the value set by internal/teammcp/server.go authHeaders().
+const agentRateLimitHeader = "X-WUPHF-Agent"
+
 var brokerStatePath = defaultBrokerStatePath
 
 var studioPackageGenerator = provider.RunCodexOneShot
@@ -464,6 +476,14 @@ type Broker struct {
 	rateLimitWindow     time.Duration
 	rateLimitRequests   int
 	lastRateLimitPrune  time.Time
+
+	// Agent-scoped buckets — applied to authenticated agent traffic even though
+	// the IP-scoped bucket above exempts callers with a valid Bearer token. This
+	// is the containment for a prompt-injected agent that loops on MCP tools.
+	agentRateLimitBuckets    map[string]ipRateLimitBucket
+	agentRateLimitWindow     time.Duration
+	agentRateLimitRequests   int
+	lastAgentRateLimitPrune  time.Time
 	agentLogRoot        string // override for tests; empty means agent.DefaultTaskLogRoot()
 }
 
@@ -825,6 +845,10 @@ func NewBroker() *Broker {
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
 		rateLimitRequests:   defaultRateLimitRequestsPerWindow,
+
+		agentRateLimitBuckets:  make(map[string]ipRateLimitBucket),
+		agentRateLimitWindow:   defaultAgentRateLimitWindow,
+		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
 	}
 	_ = b.loadState()
 	b.mu.Lock()
@@ -1096,7 +1120,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
-	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug)
+	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
 	// These are disk-only; the caller reloads or re-launches to rebuild state.
 	// Auth-gated via requireAuth because shred permanently deletes state and
@@ -1142,25 +1166,76 @@ func (b *Broker) Stop() {
 
 func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Exempt liveness and version checks from rate limiting
-		if r.URL.Path == "/health" || r.URL.Path == "/version" || r.URL.Path == "/web-token" || b.requestHasBrokerAuth(r) {
+		// Exempt liveness and version checks from all rate limiting.
+		if isLivenessPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		retryAfter, limited := b.consumeRateLimit(clientIPFromRequest(r))
-		if limited {
-			seconds := int((retryAfter + time.Second - 1) / time.Second)
-			if seconds < 1 {
-				seconds = 1
+
+		authenticated := b.requestHasBrokerAuth(r)
+
+		// Authenticated callers bypass the IP-scoped bucket (web UI and trusted
+		// tools must not share a bucket with anonymous callers), but authenticated
+		// *agent* traffic is still subject to a separate per-agent bucket below.
+		if !authenticated {
+			retryAfter, limited := b.consumeRateLimit(clientIPFromRequest(r))
+			if limited {
+				writeRateLimitedResponse(w, retryAfter)
+				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", strconv.Itoa(seconds))
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = io.WriteString(w, `{"error":"rate_limited"}`)
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Authenticated — check the per-agent bucket so a prompt-injected agent
+		// cannot loop forever on team_broadcast / team_action_execute. Operator
+		// traffic (web UI) does not set X-WUPHF-Agent and is exempt.
+		agentSlug := strings.TrimSpace(r.Header.Get(agentRateLimitHeader))
+		if agentSlug == "" || isAgentBucketExemptPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		retryAfter, limited := b.consumeAgentRateLimit(agentSlug)
+		if limited {
+			log.Printf("broker: agent %q tripped per-agent rate limit (%d req / %s) on %s — possible runaway loop", agentSlug, b.agentRateLimitRequests, b.agentRateLimitWindow, r.URL.Path)
+			writeRateLimitedResponse(w, retryAfter)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isLivenessPath reports whether the request path is a pure liveness or
+// version probe that must never be rate-limited (operators need these even
+// when the broker is saturated).
+func isLivenessPath(path string) bool {
+	return path == "/health" || path == "/version" || path == "/web-token"
+}
+
+// isAgentBucketExemptPath reports whether the path is an open SSE stream or
+// otherwise doesn't represent a tool-call-shaped loopable request. These
+// connections stay open for a long time rather than spinning on request
+// count, so counting them against the agent bucket would be incorrect.
+func isAgentBucketExemptPath(path string) bool {
+	if path == "/events" {
+		return true
+	}
+	if strings.HasPrefix(path, "/agent-stream/") {
+		return true
+	}
+	return false
+}
+
+func writeRateLimitedResponse(w http.ResponseWriter, retryAfter time.Duration) {
+	seconds := int((retryAfter + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	w.WriteHeader(http.StatusTooManyRequests)
+	_, _ = io.WriteString(w, `{"error":"rate_limited"}`)
 }
 
 func (b *Broker) consumeRateLimit(clientIP string) (time.Duration, bool) {
@@ -1208,6 +1283,62 @@ func (b *Broker) consumeRateLimit(clientIP string) (time.Duration, bool) {
 
 	bucket.timestamps = append(bucket.timestamps, now)
 	b.rateLimitBuckets[key] = bucket
+	return 0, false
+}
+
+// consumeAgentRateLimit counts an authenticated request against the per-agent
+// bucket keyed by the X-WUPHF-Agent header. It mirrors consumeRateLimit but
+// lives in its own bucket so agent traffic cannot starve operator traffic and
+// vice versa.
+func (b *Broker) consumeAgentRateLimit(agentSlug string) (time.Duration, bool) {
+	agentSlug = strings.TrimSpace(agentSlug)
+	if agentSlug == "" {
+		return 0, false
+	}
+
+	limit := b.agentRateLimitRequests
+	if limit <= 0 {
+		limit = defaultAgentRateLimitRequestsPerWindow
+	}
+	window := b.agentRateLimitWindow
+	if window <= 0 {
+		window = defaultAgentRateLimitWindow
+	}
+
+	now := time.Now()
+	cutoff := now.Add(-window)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.agentRateLimitBuckets == nil {
+		b.agentRateLimitBuckets = make(map[string]ipRateLimitBucket)
+	}
+	if b.lastAgentRateLimitPrune.IsZero() || now.Sub(b.lastAgentRateLimitPrune) >= window {
+		for slug, bucket := range b.agentRateLimitBuckets {
+			bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, cutoff)
+			if len(bucket.timestamps) == 0 {
+				delete(b.agentRateLimitBuckets, slug)
+				continue
+			}
+			b.agentRateLimitBuckets[slug] = bucket
+		}
+		b.lastAgentRateLimitPrune = now
+	}
+
+	bucket := b.agentRateLimitBuckets[agentSlug]
+	bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, cutoff)
+	if len(bucket.timestamps) >= limit {
+		retryAfter := bucket.timestamps[0].Add(window).Sub(now)
+		if retryAfter < time.Second {
+			retryAfter = time.Second
+		}
+		b.agentRateLimitBuckets[agentSlug] = bucket
+		return retryAfter, true
+	}
+
+	bucket.timestamps = append(bucket.timestamps, now)
+	b.agentRateLimitBuckets[agentSlug] = bucket
 	return 0, false
 }
 
@@ -1321,27 +1452,23 @@ func (b *Broker) requestHasBrokerAuth(r *http.Request) bool {
 
 // corsMiddleware adds CORS headers only for the web UI origin.
 // If no web UI origins are configured, no CORS headers are set.
+//
+// Requests with empty or "null" Origin are same-origin or non-browser callers
+// (curl, Go tests, CLI tools). They do not need a CORS header to succeed. We
+// intentionally do NOT set Access-Control-Allow-Origin: * for them — that
+// would let a file:// page or sandboxed iframe make authenticated cross-origin
+// reads once it has the Bearer token.
 func (b *Broker) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if len(b.webUIOrigins) > 0 {
-			matched := false
+		if origin != "" && origin != "null" && len(b.webUIOrigins) > 0 {
 			for _, allowed := range b.webUIOrigins {
 				if origin == allowed {
 					w.Header().Set("Access-Control-Allow-Origin", allowed)
-					matched = true
+					w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 					break
 				}
-			}
-			// Allow null/empty origin for localhost requests (headless browsers,
-			// file:// loads, same-machine tools). Still safe because /web-token
-			// restricts to 127.0.0.1 RemoteAddr.
-			if !matched && (origin == "null" || origin == "") {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-			}
-			if w.Header().Get("Access-Control-Allow-Origin") != "" {
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			}
 		}
 		if r.Method == "OPTIONS" {
@@ -1352,11 +1479,77 @@ func (b *Broker) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// isLoopbackRemote reports whether r.RemoteAddr is loopback (127.0.0.0/8, ::1).
+// Returns false if RemoteAddr is empty or unparseable — fail closed.
+func isLoopbackRemote(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
+}
+
+// hostHeaderIsLocalhost reports whether the HTTP Host header is one of the
+// allowed loopback forms on the given port. DNS-rebinding attacks rely on
+// r.Host being an attacker-controlled name like rebind.example.com that only
+// resolves to 127.0.0.1 at request time; Go's default mux routes by path and
+// ignores Host, so routes that sit on 127.0.0.1 will happily serve responses
+// to the attacker's origin. Validating Host on sensitive handlers closes this.
+//
+// The port argument is reserved for stricter matching (Host must be
+// localhost:<port>) and is currently ignored — we accept any loopback hostname
+// regardless of port because the broker and web UI run on different ports and
+// some dev setups proxy through 80/443. The loopback hostname is the security
+// boundary.
+func hostHeaderIsLocalhost(r *http.Request, port int) bool {
+	_ = port
+	if r == nil {
+		return false
+	}
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return true
+	}
+	return false
+}
+
+// webUIRebindGuard wraps a handler with a DNS-rebinding / cross-origin gate.
+// It rejects any request whose RemoteAddr is not loopback or whose Host header
+// is not a recognized localhost form. Applied on the web UI mux because that
+// mux auto-attaches the broker's Bearer token on forwarded requests; without
+// this gate, a malicious website can use DNS rebinding to ride the token.
+func webUIRebindGuard(port int, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackRemote(r) || !hostHeaderIsLocalhost(r, port) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // handleWebToken returns the broker token to localhost clients without requiring auth.
 // This lets the web UI fetch the token to authenticate subsequent API calls.
+//
+// DNS rebinding: even though the listener binds 127.0.0.1, an attacker's
+// DNS record with a short TTL can point rebind.example.com at 127.0.0.1
+// after the browser's origin check passes. Go's default mux routes purely
+// on path, so without an explicit Host check the response would flow back
+// to the attacker's origin. Validate both RemoteAddr AND Host here.
 func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if host != "127.0.0.1" && host != "::1" {
+	if !isLoopbackRemote(r) || !hostHeaderIsLocalhost(r, 0) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -1510,15 +1703,13 @@ func (b *Broker) ServeWebUI(port int) {
 
 	// Resolution order for the web UI assets:
 	//   1. filesystem web/dist/ (local dev after `npm run build`)
-	//   2. filesystem web/ with index.legacy.html fallback (source checkout w/o React build)
-	//   3. embedded FS (single-binary installs via curl | bash)
+	//   2. embedded FS (single-binary installs via curl | bash)
 	exePath, _ := os.Executable()
 	webDir := filepath.Join(filepath.Dir(exePath), "web")
 	if _, err := os.Stat(webDir); os.IsNotExist(err) {
 		webDir = "web"
 	}
 	var fileServer http.Handler
-	serveLegacyFallback := false
 	distDir := filepath.Join(webDir, "dist")
 	distIndex := filepath.Join(distDir, "index.html")
 	if _, err := os.Stat(distIndex); err == nil {
@@ -1527,10 +1718,6 @@ func (b *Broker) ServeWebUI(port int) {
 	} else if embeddedFS, ok := wuphf.WebFS(); ok {
 		// No on-disk build; use embedded assets.
 		fileServer = http.FileServer(http.FS(embeddedFS))
-	} else if _, err := os.Stat(filepath.Join(webDir, "index.legacy.html")); err == nil {
-		// Source checkout without a React build — fall back to the legacy UI.
-		fileServer = http.FileServer(http.Dir(webDir))
-		serveLegacyFallback = true
 	} else {
 		// Nothing available; serve webDir as-is so 404s come from the actual FS.
 		fileServer = http.FileServer(http.Dir(webDir))
@@ -1541,28 +1728,23 @@ func (b *Broker) ServeWebUI(port int) {
 		brokerURL = "http://" + addr
 	}
 	// Same-origin proxy to the broker for app API routes and onboarding wizard routes.
-	mux.Handle("/api/", b.webUIProxyHandler(brokerURL, "/api"))
-	mux.Handle("/onboarding/", b.webUIProxyHandler(brokerURL, ""))
-	// Token endpoint — no auth needed, same origin
-	mux.HandleFunc("/api-token", func(w http.ResponseWriter, r *http.Request) {
+	// Both are wrapped in webUIRebindGuard: the proxy auto-attaches the broker's
+	// Bearer token server-side, so without a Host/RemoteAddr check, a DNS-rebinding
+	// attack against an attacker-controlled hostname that resolves to 127.0.0.1
+	// would ride the token and control the entire office.
+	mux.Handle("/api/", webUIRebindGuard(port, b.webUIProxyHandler(brokerURL, "/api")))
+	mux.Handle("/onboarding/", webUIRebindGuard(port, b.webUIProxyHandler(brokerURL, "")))
+	// Token endpoint — no auth needed, but we require a same-origin loopback request.
+	// Otherwise this endpoint leaks the broker bearer to any browser page that
+	// can reach the web UI port via DNS rebinding.
+	mux.Handle("/api-token", webUIRebindGuard(port, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"token":      b.token,
 			"broker_url": brokerURL,
 		})
-	})
-	if serveLegacyFallback {
-		// Rewrite bare / and /index.html to /index.legacy.html so the legacy
-		// vanilla-JS UI loads when the React build output is not present.
-		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-				r.URL.Path = "/index.legacy.html"
-			}
-			fileServer.ServeHTTP(w, r)
-		}))
-	} else {
-		mux.Handle("/", fileServer)
-	}
+	})))
+	mux.Handle("/", fileServer)
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("broker web UI proxy: listen on :%d: %v", port, err)

@@ -20,6 +20,11 @@ import (
 // return operation-appropriate first-task suggestions and falls back to the
 // generic compatibility templates when no blueprint-specific set exists.
 //
+// authMiddleware wraps each handler. Pass the broker's requireAuth so local
+// processes and cross-origin callers cannot POST /onboarding/complete (which
+// seeds the team and fires the first CEO turn) without the broker token.
+// Pass a nil middleware only in tests — RegisterRoutes substitutes a passthrough.
+//
 // Routes registered:
 //
 //	GET  /onboarding/state
@@ -30,18 +35,21 @@ import (
 //	GET  /onboarding/templates
 //	POST /onboarding/checklist/{id}/done
 //	POST /onboarding/checklist/dismiss
-func RegisterRoutes(mux *http.ServeMux, completeFn func(task string, skipTask bool) error, packSlug string) {
-	mux.HandleFunc("/onboarding/state", HandleState)
-	mux.HandleFunc("/onboarding/progress", HandleProgress)
-	mux.HandleFunc("/onboarding/complete", makeHandleComplete(completeFn))
-	mux.HandleFunc("/onboarding/prereqs", HandlePrereqs)
-	mux.HandleFunc("/onboarding/validate-key", HandleValidateKey)
-	mux.HandleFunc("/onboarding/templates", makeHandleTemplates(packSlug))
-	mux.HandleFunc("/onboarding/blueprints", HandleBlueprints)
-	mux.HandleFunc("/onboarding/checklist/dismiss", HandleChecklistDismiss)
+func RegisterRoutes(mux *http.ServeMux, completeFn func(task string, skipTask bool) error, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc) {
+	if authMiddleware == nil {
+		authMiddleware = func(h http.HandlerFunc) http.HandlerFunc { return h }
+	}
+	mux.HandleFunc("/onboarding/state", authMiddleware(HandleState))
+	mux.HandleFunc("/onboarding/progress", authMiddleware(HandleProgress))
+	mux.HandleFunc("/onboarding/complete", authMiddleware(makeHandleComplete(completeFn)))
+	mux.HandleFunc("/onboarding/prereqs", authMiddleware(HandlePrereqs))
+	mux.HandleFunc("/onboarding/validate-key", authMiddleware(HandleValidateKey))
+	mux.HandleFunc("/onboarding/templates", authMiddleware(makeHandleTemplates(packSlug)))
+	mux.HandleFunc("/onboarding/blueprints", authMiddleware(HandleBlueprints))
+	mux.HandleFunc("/onboarding/checklist/dismiss", authMiddleware(HandleChecklistDismiss))
 	// Pattern must be registered after the more-specific /dismiss route so
 	// that /dismiss is not swallowed by the /{id}/done prefix match.
-	mux.HandleFunc("/onboarding/checklist/", HandleChecklistDone)
+	mux.HandleFunc("/onboarding/checklist/", authMiddleware(HandleChecklistDone))
 }
 
 // HandleState handles GET /onboarding/state.

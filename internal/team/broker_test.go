@@ -1110,6 +1110,117 @@ func TestBrokerIgnoresForwardedClientIPFromNonLoopbackPeer(t *testing.T) {
 	}
 }
 
+// TestBrokerAgentRateLimitTripsOnRunawayLoop verifies that a prompt-injected
+// agent that loops on tool calls eventually gets 429'd even though it holds a
+// valid Bearer token. The IP bucket alone exempts token-holders, so this is
+// the containment for runaway agent cost.
+func TestBrokerAgentRateLimitTripsOnRunawayLoop(t *testing.T) {
+	b := NewBroker()
+	b.agentRateLimitRequests = 5
+	b.agentRateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	doRequest := func(slug string) *http.Response {
+		req := httptest.NewRequest(http.MethodPost, "/actions/execute", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		if slug != "" {
+			req.Header.Set("X-WUPHF-Agent", slug)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+
+	for i := 0; i < 5; i++ {
+		resp := doRequest("ceo")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected request %d within agent budget to succeed, got %d", i+1, resp.StatusCode)
+		}
+	}
+
+	resp := doRequest("ceo")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 6th request to trip per-agent bucket, got %d", resp.StatusCode)
+	}
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter == "" {
+		t.Fatal("expected Retry-After header on rate-limited response")
+	}
+
+	// A different agent slug gets its own bucket.
+	resp = doRequest("engineer")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected distinct agent slug to get its own bucket, got %d", resp.StatusCode)
+	}
+}
+
+// TestBrokerOperatorTrafficBypassesAgentRateLimit verifies the web UI, which
+// authenticates with the broker token but does not identify itself as any
+// particular agent, is not blocked by the per-agent bucket. If this breaks the
+// operator loses access to their office whenever one agent loops.
+func TestBrokerOperatorTrafficBypassesAgentRateLimit(t *testing.T) {
+	b := NewBroker()
+	b.agentRateLimitRequests = 1
+	b.agentRateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	doRequest := func() *http.Response {
+		req := httptest.NewRequest(http.MethodGet, "/messages", nil)
+		req.RemoteAddr = "127.0.0.1:5555"
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		// Deliberately no X-WUPHF-Agent — this is operator traffic.
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+	for i := 0; i < 10; i++ {
+		resp := doRequest()
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected operator request %d to bypass agent limiter, got %d", i+1, resp.StatusCode)
+		}
+	}
+}
+
+// TestBrokerAgentRateLimitExemptsSSEPaths verifies long-lived SSE streams are
+// not counted against the per-agent bucket. They do not represent loopable
+// tool calls — a single subscribe holds the connection open for minutes.
+func TestBrokerAgentRateLimitExemptsSSEPaths(t *testing.T) {
+	b := NewBroker()
+	b.agentRateLimitRequests = 2
+	b.agentRateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	doRequest := func(path string) *http.Response {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = "127.0.0.1:6666"
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("X-WUPHF-Agent", "ceo")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+
+	for i := 0; i < 10; i++ {
+		resp := doRequest("/events")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected /events subscribe %d to bypass agent limiter, got %d", i+1, resp.StatusCode)
+		}
+		resp = doRequest("/agent-stream/ceo")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected /agent-stream subscribe %d to bypass agent limiter, got %d", i+1, resp.StatusCode)
+		}
+	}
+}
+
 func TestSetProxyClientIPHeaders(t *testing.T) {
 	headers := make(http.Header)
 	setProxyClientIPHeaders(headers, "203.0.113.44:5678")

@@ -2248,6 +2248,15 @@ func authHeaders() http.Header {
 	if token != "" {
 		headers.Set("Authorization", "Bearer "+token)
 	}
+	// Identify the agent behind this MCP process so the broker can apply a
+	// per-agent rate limit. A prompt-injected agent that loops on tool calls
+	// will otherwise bypass the IP-scoped limiter because it holds the broker
+	// token. Operator traffic from the web UI never sets this header.
+	if slug := strings.TrimSpace(os.Getenv("WUPHF_AGENT_SLUG")); slug != "" {
+		headers.Set("X-WUPHF-Agent", slug)
+	} else if slug := strings.TrimSpace(os.Getenv("NEX_AGENT_SLUG")); slug != "" {
+		headers.Set("X-WUPHF-Agent", slug)
+	}
 	return headers
 }
 
