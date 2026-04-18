@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -300,10 +301,14 @@ func TestHandleCompleteBackwardCompatWithLegacyClient(t *testing.T) {
 // TestHandleCompleteReturns500OnCompleteFnError verifies that if
 // completeFn returns an error (e.g. LoadBlueprint failed), the handler
 // returns HTTP 500 so the wizard can surface the error to the user.
+// The response body must NOT include the wrapped error detail (which can
+// carry filesystem paths, yaml parse messages, or user-supplied ids);
+// those stay server-side in logs.
 func TestHandleCompleteReturns500OnCompleteFnError(t *testing.T) {
 	withTempHome(t, func(_ string) {
+		const secretDetail = "secret-path-/etc/wuphf/state.yaml"
 		failing := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
-			return fmt.Errorf("simulated loader failure for %q", blueprintID)
+			return fmt.Errorf("%s: simulated loader failure for %q", secretDetail, blueprintID)
 		}
 
 		body := map[string]interface{}{"task": "go", "skip_task": false, "blueprint": "bogus"}
@@ -314,6 +319,39 @@ func TestHandleCompleteReturns500OnCompleteFnError(t *testing.T) {
 
 		if w.Code != http.StatusInternalServerError {
 			t.Fatalf("status: got %d want 500\nbody: %s", w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), secretDetail) {
+			t.Errorf("500 body leaked internal error detail; body: %s", w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "bogus") {
+			t.Errorf("500 body echoed user-supplied blueprint id; body: %s", w.Body.String())
+		}
+	})
+}
+
+// TestHandleCompleteSkipTaskPersistsOnboardedState verifies that
+// skip_task=true still flips the state to onboarded on disk, so a user
+// who opts out of the first-task prompt does not re-enter the wizard on
+// next launch. This was a gap caught in review — the in-memory seeding
+// was verified but disk persistence was not.
+func TestHandleCompleteSkipTaskPersistsOnboardedState(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		body := map[string]interface{}{"task": "", "skip_task": true, "blueprint": "", "agents": nil}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, nil)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d\nbody: %s", w.Code, w.Body.String())
+		}
+
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !s.Onboarded() {
+			t.Error("expected Onboarded()=true after skip_task=true; wizard would reopen on next launch")
 		}
 	})
 }

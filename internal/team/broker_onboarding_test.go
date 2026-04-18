@@ -242,6 +242,49 @@ func TestOnboardingCompleteSkipTaskSeedsNoKickoff(t *testing.T) {
 	}
 }
 
+// REGRESSION: TestOnboardingCompleteSkipTaskPersistsTeam verifies that
+// skip_task=true actually persists the seeded team to disk. The previous
+// rewrite returned nil from postKickoffLocked before saveLocked(), so a
+// user who clicked "skip first task" would lose their entire blueprint
+// team on the next broker restart.
+func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
+	ensureOperationsFallbackFS(t)
+	defer withIsolatedBrokerState(t)()
+
+	b := NewBroker()
+	if err := b.onboardingCompleteFn("", true, "niche-crm", nil); err != nil {
+		t.Fatalf("onboardingCompleteFn: %v", err)
+	}
+
+	// Fresh broker instance re-reads state from disk.
+	reloaded := NewBroker()
+	reloaded.mu.Lock()
+	slugs := make([]string, 0, len(reloaded.members))
+	for _, m := range reloaded.members {
+		slugs = append(slugs, m.Slug)
+	}
+	reloaded.mu.Unlock()
+
+	want := map[string]bool{"operator": true, "planner": true, "builder": true, "growth": true, "reviewer": true}
+	for slug := range want {
+		found := false
+		for _, got := range slugs {
+			if got == slug {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected niche-crm slug %q to persist across restart; got %v", slug, slugs)
+		}
+	}
+	for _, slug := range slugs {
+		if slug == "ceo" || slug == "executor" {
+			t.Errorf("DefaultManifest slug %q leaked into persisted roster %v", slug, slugs)
+		}
+	}
+}
+
 // TestOnboardingCompleteLoadBlueprintErrorReturnsError verifies that a bad
 // blueprint id produces a non-nil error (which HandleComplete surfaces as
 // HTTP 500). No partial state should be seeded.

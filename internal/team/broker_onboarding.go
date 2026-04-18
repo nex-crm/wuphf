@@ -2,6 +2,7 @@ package team
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -33,22 +34,7 @@ import (
 // reached via this path. It remains only as a true-recovery fallback in
 // ensureDefaultOfficeMembersLocked for corrupted/zero-member state.
 func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	task = strings.TrimSpace(task)
-
-	// Dedupe BEFORE any state mutation. If a prior call already posted this
-	// exact task as an onboarding_origin message (crash-recovery scenario),
-	// skip re-seeding and preserve the earlier team.
-	if !skipTask && task != "" {
-		for _, existing := range b.messages {
-			if existing.Channel == "general" && existing.Kind == "onboarding_origin" && existing.Content == task {
-				return b.saveLocked()
-			}
-		}
-	}
-
 	if !skipTask && task == "" {
 		return fmt.Errorf("onboarding: task is required when skip_task=false")
 	}
@@ -56,6 +42,11 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 	blueprintID = strings.TrimSpace(blueprintID)
 	synthesized := blueprintID == ""
 
+	// Resolve the blueprint OUTSIDE the broker lock. LoadBlueprint reads YAML
+	// from disk and runs validation; holding b.mu during that blocks every
+	// other goroutine that needs the broker. Synthesis for the from-scratch
+	// path reads onboarding state (another file) inside
+	// synthesizeBlueprintFromState — also moved out of the critical section.
 	var bp operations.Blueprint
 	if blueprintID != "" {
 		loaded, err := operations.LoadBlueprint(onboarding.ResolveTemplatesRepoRoot(""), blueprintID)
@@ -64,21 +55,40 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 		}
 		bp = loaded
 	} else {
-		bp = b.synthesizeBlueprintFromStateLocked(task)
+		bp = synthesizeBlueprintFromState(task)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Dedupe after we're inside the lock so the messages slice is stable.
+	// If a prior call already posted this exact task as an onboarding_origin
+	// message (crash-recovery scenario), skip re-seeding and preserve the
+	// earlier team.
+	if !skipTask && task != "" {
+		for _, existing := range b.messages {
+			if existing.Channel == "general" && existing.Kind == "onboarding_origin" && existing.Content == task {
+				return b.saveLocked()
+			}
+		}
 	}
 
 	return b.seedFromBlueprintLocked(bp, selectedAgents, task, skipTask, synthesized)
 }
 
-// synthesizeBlueprintFromStateLocked builds a blueprint from whatever the
-// user typed into the wizard (company name, description, size, priority,
-// plus the task text as directive). Mirrors the pre-rewrite
-// seedBlankSlateOperationLocked profile construction.
-func (b *Broker) synthesizeBlueprintFromStateLocked(task string) operations.Blueprint {
+// synthesizeBlueprintFromState builds a blueprint from whatever the user
+// typed into the wizard (company name, description, size, priority, plus
+// the task text as directive). Reads onboarding state from disk, so it
+// must be called OUTSIDE the broker mutex. Unlike the old
+// seedBlankSlateOperationLocked it does not mutate broker state — the
+// caller feeds the returned Blueprint to seedFromBlueprintLocked.
+func synthesizeBlueprintFromState(task string) operations.Blueprint {
 	state, err := onboarding.Load()
 	if err != nil {
-		// Best-effort: fall through with empty profile. SynthesizeBlueprint
-		// tolerates sparse input by producing a generic blueprint.
+		// Best-effort: fall through with empty profile. A Load failure is
+		// logged by the onboarding package; SynthesizeBlueprint tolerates
+		// sparse input by producing a generic blueprint.
+		log.Printf("onboarding: load state for synthesis: %v", err)
 		state = &onboarding.State{}
 	}
 	profile := operationCompanyProfile{
@@ -150,7 +160,11 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 	}
 
 	if skipTask {
-		return nil
+		// seedFromBlueprintLocked mutated b.members/channels/tasks above; we
+		// must persist that even when the user skipped the kickoff task.
+		// Returning early without saveLocked() silently loses the seeded team
+		// on the next broker Load.
+		return b.saveLocked()
 	}
 
 	task = strings.TrimSpace(task)
