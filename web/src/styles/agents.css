@@ -189,6 +189,72 @@
   border-bottom: 1px solid var(--border-light);
 }
 
+.agent-panel-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 20px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+.agent-panel-actions-stack .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ─── Enable toggle row ─── */
+.agent-panel-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.agent-panel-stat-label {
+  color: var(--text-secondary);
+}
+
+.agent-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.agent-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.agent-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--border-dark, var(--border));
+  border-radius: 11px;
+  transition: background 0.2s;
+}
+.agent-toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+.agent-toggle input:checked + .agent-toggle-slider {
+  background: var(--green, #2fb344);
+}
+.agent-toggle input:checked + .agent-toggle-slider::before {
+  transform: translateX(18px);
+}
+.agent-toggle input:disabled + .agent-toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ─── Recent logs ─── */
 .agent-panel-logs {
   flex: 1;

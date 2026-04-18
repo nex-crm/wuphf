@@ -66,6 +66,11 @@ export function ConfirmHost() {
     setRunning(true)
     try {
       await opts.onConfirm()
+    } catch (err) {
+      // Defensive: callers are expected to handle their own errors inside
+      // onConfirm (and show a toast), but if one escapes we at least log
+      // it instead of losing it to the unconditional close() below.
+      console.error('[ConfirmDialog] onConfirm threw:', err)
     } finally {
       close()
     }

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../../stores/app'
-import { useOfficeMembers } from '../../hooks/useMembers'
+import { useOfficeMembers, useChannelMembers } from '../../hooks/useMembers'
 import { useAgentStream } from '../../hooks/useAgentStream'
-import { createDM, getAgentLogs } from '../../api/client'
+import { createDM, getAgentLogs, post } from '../../api/client'
 import { PixelAvatar } from '../ui/PixelAvatar'
 import { showNotice } from '../ui/Toast'
+import { confirm } from '../ui/ConfirmDialog'
 import { StreamLineView } from '../messages/StreamLineView'
 import type { AgentLog, OfficeMember } from '../../api/client'
 
@@ -102,8 +104,24 @@ function LogsSection({ slug }: { slug: string }) {
 function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const enterDM = useAppStore((s) => s.enterDM)
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug)
+  const currentChannel = useAppStore((s) => s.currentChannel)
+  const queryClient = useQueryClient()
   const [dmLoading, setDmLoading] = useState(false)
   const [view, setView] = useState<'stream' | 'logs'>('stream')
+  const [toggling, setToggling] = useState(false)
+  const [removing, setRemoving] = useState(false)
+
+  // Derive the per-channel enabled state. An agent is "enabled" in the current
+  // channel when it appears in /members and is not flagged disabled.
+  const { data: channelMembers = [] } = useChannelMembers(currentChannel)
+  const channelEntry = channelMembers.find((m) => m.slug === agent.slug)
+  const enabled = Boolean(channelEntry) && channelEntry?.disabled !== true
+
+  // Broker rejects remove on ceo and on any `built_in` member; disable on ceo.
+  // Use `!== true` (not `!agent.built_in`) so an absent field isn't silently
+  // treated as "removable" — we want explicit permission, not optimistic.
+  const canRemove = agent.built_in !== true && agent.slug !== 'ceo'
+  const canToggle = agent.slug !== 'ceo'
 
   async function handleOpenDM() {
     setDmLoading(true)
@@ -119,6 +137,56 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
     } finally {
       setDmLoading(false)
     }
+  }
+
+  async function handleToggleEnabled(next: boolean) {
+    if (!canToggle || toggling) return
+    setToggling(true)
+    try {
+      // Broker's `enable` action only lifts the Disabled flag — it doesn't
+      // add a non-member. Translate to `add` so flipping the toggle ON does
+      // what the user expects regardless of prior channel membership.
+      const action = next ? (channelEntry ? 'enable' : 'add') : 'disable'
+      await post('/channel-members', {
+        channel: currentChannel,
+        slug: agent.slug,
+        action,
+      })
+      await queryClient.refetchQueries({ queryKey: ['channel-members', currentChannel] })
+      await queryClient.invalidateQueries({ queryKey: ['office-members'] })
+      showNotice(`${agent.name || agent.slug} ${next ? 'enabled' : 'disabled'}`, 'success')
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Toggle failed'
+      showNotice(message, 'error')
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  function handleRemove() {
+    if (!canRemove) return
+    const label = agent.name || agent.slug
+    confirm({
+      title: 'Remove agent',
+      message: `Remove ${label}? This cannot be undone.`,
+      confirmLabel: 'Remove',
+      danger: true,
+      onConfirm: async () => {
+        setRemoving(true)
+        try {
+          await post('/office-members', { action: 'remove', slug: agent.slug })
+          await queryClient.invalidateQueries({ queryKey: ['office-members'] })
+          await queryClient.invalidateQueries({ queryKey: ['channel-members', currentChannel] })
+          showNotice(`${label} removed`, 'success')
+          onClose()
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : 'Remove failed'
+          showNotice(message, 'error')
+        } finally {
+          setRemoving(false)
+        }
+      },
+    })
   }
 
   const statusClass = agent.status === 'active' ? 'active pulse' : 'lurking'
@@ -190,7 +258,27 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Enable/disable — controls whether this agent participates in #{currentChannel} */}
+      {canToggle && (
+        <div className="agent-panel-section">
+          <div className="agent-panel-stat">
+            <span className="agent-panel-stat-label">
+              Enabled in <strong>#{currentChannel}</strong>
+            </span>
+            <label className="agent-toggle" aria-label={`Toggle ${agent.name || agent.slug} in #${currentChannel}`}>
+              <input
+                type="checkbox"
+                checked={enabled}
+                disabled={toggling}
+                onChange={(e) => handleToggleEnabled(e.target.checked)}
+              />
+              <span className="agent-toggle-slider" />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {/* Primary actions */}
       <div className="agent-panel-actions">
         <button
           className="btn btn-primary btn-sm"
@@ -206,6 +294,20 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           {view === 'logs' ? 'Live stream' : 'View logs'}
         </button>
       </div>
+
+      {/* Destructive — shown only when the broker will accept a remove */}
+      {canRemove && (
+        <div className="agent-panel-actions-stack">
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={handleRemove}
+            disabled={removing}
+            style={{ color: 'var(--red, #dc2626)' }}
+          >
+            {removing ? 'Removing...' : 'Remove agent'}
+          </button>
+        </div>
+      )}
 
       {/* Stream or Logs */}
       {view === 'stream' ? (
