@@ -816,6 +816,73 @@ func TestChannelMembersRejectUnknownOfficeMember(t *testing.T) {
 	}
 }
 
+// TestChannelMembersRejectDisableOrRemoveOfLead verifies that /channel-members
+// refuses to disable or remove a BuiltIn member (lead agent) from any
+// channel. Before this guard was generalized, only the hardcoded "ceo"
+// slug was protected — blueprint teams whose lead is something else (e.g.
+// niche-crm uses "operator") could silently lose their lead from #general.
+func TestChannelMembersRejectDisableOrRemoveOfLead(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.members = []officeMember{
+		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+	}
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"operator", "builder"}, CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now},
+	}
+	b.mu.Unlock()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	for _, action := range []string{"disable", "remove"} {
+		body, _ := json.Marshal(map[string]any{
+			"action":  action,
+			"channel": "general",
+			"slug":    "operator",
+		})
+		req, _ := http.NewRequest(http.MethodPost, base+"/channel-members", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("action=%s: expected 400 (cannot remove/disable lead), got %d", action, resp.StatusCode)
+		}
+	}
+
+	// After the rejected attempts, operator must still be a member of #general.
+	b.mu.Lock()
+	var found bool
+	for _, ch := range b.channels {
+		if ch.Slug == "general" {
+			for _, m := range ch.Members {
+				if m == "operator" {
+					found = true
+					break
+				}
+			}
+			break
+		}
+	}
+	b.mu.Unlock()
+	if !found {
+		t.Fatalf("expected operator to remain in #general after rejected disable/remove")
+	}
+}
+
 func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()

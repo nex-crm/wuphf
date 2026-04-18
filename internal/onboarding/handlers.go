@@ -438,6 +438,11 @@ type blueprintAgentSummary struct {
 	Role    string `json:"role,omitempty"`
 	Emoji   string `json:"emoji,omitempty"`
 	Checked bool   `json:"checked"`
+	// BuiltIn marks the blueprint's lead agent (type: lead or built_in:
+	// true in the yaml). The wizard uses this to prevent the user from
+	// unchecking the lead in the Team step — downstream broker guards
+	// also refuse to disable or remove a BuiltIn member.
+	BuiltIn bool `json:"built_in,omitempty"`
 }
 
 type blueprintTaskSummary struct {
@@ -477,13 +482,19 @@ func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 		Name:        bp.Name,
 		Description: bp.Description,
 	}
+	leadSlug := strings.TrimSpace(bp.Starter.LeadSlug)
 	for _, a := range bp.Starter.Agents {
+		// Mark the lead as BuiltIn so the wizard's Team step can disable
+		// its checkbox. We trust three signals from the blueprint yaml:
+		// explicit built_in, type=lead, or slug matching starter.lead_slug.
+		builtIn := a.BuiltIn || strings.EqualFold(strings.TrimSpace(a.Type), "lead") || (leadSlug != "" && a.Slug == leadSlug)
 		s.Agents = append(s.Agents, blueprintAgentSummary{
 			Slug:    a.Slug,
 			Name:    a.Name,
 			Role:    a.Role,
 			Emoji:   a.Emoji,
 			Checked: a.Checked,
+			BuiltIn: builtIn,
 		})
 	}
 	for _, t := range bp.Starter.Tasks {

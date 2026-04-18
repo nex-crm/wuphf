@@ -117,11 +117,14 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
   const channelEntry = channelMembers.find((m) => m.slug === agent.slug)
   const enabled = Boolean(channelEntry) && channelEntry?.disabled !== true
 
-  // Broker rejects remove on ceo and on any `built_in` member; disable on ceo.
+  // Broker rejects remove / disable for any `built_in` member (lead agent).
   // Use `!== true` (not `!agent.built_in`) so an absent field isn't silently
   // treated as "removable" — we want explicit permission, not optimistic.
-  const canRemove = agent.built_in !== true && agent.slug !== 'ceo'
-  const canToggle = agent.slug !== 'ceo'
+  // Keep the `ceo` literal as legacy fallback for stored rosters that
+  // predate the BuiltIn field getting serialized.
+  const isLead = agent.built_in === true || agent.slug === 'ceo'
+  const canRemove = !isLead
+  const canToggle = !isLead
 
   async function handleOpenDM() {
     setDmLoading(true)

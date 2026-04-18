@@ -200,6 +200,31 @@
   background: var(--accent-bg);
 }
 
+/* Lead agent — locked on. Keep the selected visual but make it obvious
+   the tile is not interactable. */
+.wiz-team-tile.locked {
+  cursor: not-allowed;
+}
+
+.wiz-team-tile.locked:hover {
+  border-color: var(--accent);
+}
+
+.wiz-team-lead-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
 .wiz-team-check {
   width: 20px;
   height: 20px;

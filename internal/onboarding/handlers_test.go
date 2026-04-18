@@ -4,12 +4,45 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/operations"
 )
+
+// withOperationsFallbackFS points the operations loader at the repo's
+// templates/operations tree so HandleBlueprints can find curated yaml
+// files during tests. Without this the package-level init in the root
+// wuphf package (which wires the embed FS) never runs in onboarding
+// tests, and HandleBlueprints returns an empty list.
+func withOperationsFallbackFS(t *testing.T) {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	var repoRoot string
+	for dir := cwd; dir != "/" && dir != ""; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "templates", "operations")); err == nil {
+			repoRoot = dir
+			break
+		}
+	}
+	if repoRoot == "" {
+		t.Skip("templates/operations not reachable from test cwd; skipping")
+	}
+	sub, err := fs.Sub(os.DirFS(repoRoot), ".")
+	if err != nil {
+		t.Fatalf("sub fs: %v", err)
+	}
+	operations.SetFallbackFS(sub)
+}
 
 // TestHandleStateGETReturnsValidJSON verifies that GET /onboarding/state
 // returns HTTP 200 with a valid JSON body that can be decoded into State.
@@ -352,6 +385,67 @@ func TestHandleCompleteSkipTaskPersistsOnboardedState(t *testing.T) {
 		}
 		if !s.Onboarded() {
 			t.Error("expected Onboarded()=true after skip_task=true; wizard would reopen on next launch")
+		}
+	})
+}
+
+// TestHandleBlueprintsMarksLeadBuiltIn verifies that GET /onboarding/blueprints
+// surfaces built_in=true for the blueprint's lead agent. The wizard UI
+// uses this flag to lock the lead's checkbox so it cannot be unchecked
+// on the Team step. Without this, a user could uncheck the lead, the POST
+// body would carry an empty agents list, and the broker would fall back
+// to lead-only — the opposite of what the user asked for, silently.
+func TestHandleBlueprintsMarksLeadBuiltIn(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		withOperationsFallbackFS(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/onboarding/blueprints", nil)
+		w := httptest.NewRecorder()
+		HandleBlueprints(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d\nbody: %s", w.Code, w.Body.String())
+		}
+
+		var resp struct {
+			Templates []struct {
+				ID     string `json:"id"`
+				Agents []struct {
+					Slug    string `json:"slug"`
+					BuiltIn bool   `json:"built_in"`
+				} `json:"agents"`
+			} `json:"templates"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+
+		// niche-crm's blueprint yaml names `operator` as type: lead with
+		// built_in: true. Any shipped blueprint must mark exactly one lead.
+		var found bool
+		for _, tpl := range resp.Templates {
+			if tpl.ID != "niche-crm" {
+				continue
+			}
+			var leadCount int
+			for _, a := range tpl.Agents {
+				if a.BuiltIn {
+					leadCount++
+					if a.Slug != "operator" {
+						t.Errorf("niche-crm lead should be operator, got %q (built_in=true)", a.Slug)
+					}
+				}
+			}
+			if leadCount == 0 {
+				t.Error("niche-crm has no built_in lead agent — wizard would allow unchecking the lead")
+			}
+			if leadCount > 1 {
+				t.Errorf("niche-crm has %d built_in leads; expected exactly 1", leadCount)
+			}
+			found = true
+		}
+		if !found {
+			t.Fatalf("niche-crm not found in response templates: %+v", resp.Templates)
 		}
 	})
 }

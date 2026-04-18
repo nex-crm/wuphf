@@ -6097,14 +6097,20 @@ func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "channel not found", http.StatusNotFound)
 			return
 		}
-		if b.findMemberLocked(member) == nil {
+		memberRecord := b.findMemberLocked(member)
+		if memberRecord == nil {
 			b.mu.Unlock()
 			http.Error(w, "member not found", http.StatusNotFound)
 			return
 		}
-		if member == "ceo" && (action == "remove" || action == "disable") {
+		// Lead agents (BuiltIn) cannot be disabled or removed from any
+		// channel. The blueprint's lead is the tag target for the onboarding
+		// kickoff and the default owner for channel membership; the UI locks
+		// these interactions too. Keeps the "ceo" literal as a legacy guard
+		// for team states that predate the BuiltIn field.
+		if (memberRecord.BuiltIn || member == "ceo") && (action == "remove" || action == "disable") {
 			b.mu.Unlock()
-			http.Error(w, "cannot remove or disable CEO", http.StatusBadRequest)
+			http.Error(w, "cannot remove or disable lead agent", http.StatusBadRequest)
 			return
 		}
 		switch action {
