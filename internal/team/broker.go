@@ -480,11 +480,11 @@ type Broker struct {
 	// Agent-scoped buckets — applied to authenticated agent traffic even though
 	// the IP-scoped bucket above exempts callers with a valid Bearer token. This
 	// is the containment for a prompt-injected agent that loops on MCP tools.
-	agentRateLimitBuckets    map[string]ipRateLimitBucket
-	agentRateLimitWindow     time.Duration
-	agentRateLimitRequests   int
-	lastAgentRateLimitPrune  time.Time
-	agentLogRoot        string // override for tests; empty means agent.DefaultTaskLogRoot()
+	agentRateLimitBuckets   map[string]ipRateLimitBucket
+	agentRateLimitWindow    time.Duration
+	agentRateLimitRequests  int
+	lastAgentRateLimitPrune time.Time
+	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
