@@ -66,6 +66,78 @@ type Backlink struct {
 	AuthorSlug string `json:"author_slug"`
 }
 
+// CatalogEntry is a single article in the /wiki/catalog response.
+// The JSON shape matches web/src/api/wiki.ts WikiCatalogEntry.
+type CatalogEntry struct {
+	Path         string `json:"path"`
+	Title        string `json:"title"`
+	AuthorSlug   string `json:"author_slug"`
+	LastEditedTs string `json:"last_edited_ts"`
+	Group        string `json:"group"`
+}
+
+// BuildCatalog walks team/ and returns every .md article with title + author +
+// last-edit metadata grouped by top-level thematic dir.
+//
+// Shape matches web/src/api/wiki.ts WikiCatalogEntry. Sorted by path for
+// reproducibility; the UI re-sorts by recency within each group.
+func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
+	teamDir := r.TeamDir()
+	var entries []CatalogEntry
+
+	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		rel, err := filepath.Rel(r.Root(), path)
+		if err != nil {
+			return nil
+		}
+		rel = filepath.ToSlash(rel)
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		entry := CatalogEntry{
+			Path:  rel,
+			Title: extractTitle(content, rel),
+			Group: groupFromPath(rel),
+		}
+		if refs, err := r.Log(ctx, rel); err == nil && len(refs) > 0 {
+			entry.AuthorSlug = refs[0].Author
+			entry.LastEditedTs = refs[0].Timestamp.Format("2006-01-02T15:04:05Z07:00")
+		}
+		entries = append(entries, entry)
+		return nil
+	})
+	if walkErr != nil {
+		return nil, fmt.Errorf("wiki: walk team/: %w", walkErr)
+	}
+
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
+	return entries, nil
+}
+
+// groupFromPath returns the first subdir under team/ (e.g. "team/people/x.md"
+// → "people"). Used to group catalog entries in the UI.
+func groupFromPath(relPath string) string {
+	rel := filepath.ToSlash(relPath)
+	rel = strings.TrimPrefix(rel, "team/")
+	idx := strings.Index(rel, "/")
+	if idx <= 0 {
+		return "root"
+	}
+	return rel[:idx]
+}
+
 // wikilinkPattern captures `[[slug|Display]]` and `[[slug]]`.
 // Group 1: slug. Group 2: optional `|Display` (including the pipe).
 // Group 3: display text without the pipe.

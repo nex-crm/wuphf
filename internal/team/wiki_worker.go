@@ -383,6 +383,34 @@ func (b *Broker) handleWikiList(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(bytes)
 }
 
+// handleWikiCatalog returns the full catalog as structured JSON for the UI.
+//
+//	GET /wiki/catalog
+//
+// Response shape matches web/src/api/wiki.ts { articles: WikiCatalogEntry[] }.
+// Distinct from /wiki/list (which returns raw markdown from index/all.md) —
+// agents read the markdown index, the UI reads this JSON.
+func (b *Broker) handleWikiCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil {
+		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		return
+	}
+	entries, err := worker.Repo().BuildCatalog(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if entries == nil {
+		entries = []CatalogEntry{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"articles": entries})
+}
+
 // handleWikiArticle returns the rich article metadata for the UI: content +
 // title + revisions + contributors + backlinks + word count.
 //

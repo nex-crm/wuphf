@@ -53,7 +53,7 @@ export async function fetchArticle(path: string): Promise<WikiArticle> {
 
 export async function fetchCatalog(): Promise<WikiCatalogEntry[]> {
   try {
-    const res = await get<{ articles: WikiCatalogEntry[] }>('/wiki/list')
+    const res = await get<{ articles: WikiCatalogEntry[] }>('/wiki/catalog')
     return Array.isArray(res?.articles) ? res.articles : []
   } catch {
     return MOCK_CATALOG

@@ -1190,6 +1190,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/search", b.requireAuth(b.handleWikiSearch))
 	mux.HandleFunc("/wiki/list", b.requireAuth(b.handleWikiList))
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
+	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
 	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
 	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
