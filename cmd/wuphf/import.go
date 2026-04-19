@@ -163,6 +163,10 @@ func importFromLegacyDB(portOverride int) (importedBrokerState, int, int, error)
 		}
 	}
 
+	// External orchestrator runs an embedded Postgres on localhost with the
+	// default `postgres:postgres` creds — not configurable, not a secret.
+	// Only reached by `wuphf import --from legacy` against a user's local
+	// orchestrator instance. No production code path uses this.
 	// secretlint-disable-next-line @secretlint/secretlint-rule-database-connection-string
 	connStr := fmt.Sprintf("postgres://postgres:postgres@localhost:%d/postgres?sslmode=disable", port)
 	fmt.Printf("Connecting to external orchestrator (localhost:%d)...\n", port)
