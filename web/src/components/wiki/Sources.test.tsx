@@ -37,6 +37,25 @@ describe('<Sources>', () => {
     expect(container.firstChild).toBeNull()
   })
 
+  it('renders a loading placeholder when loading and items are empty', () => {
+    render(<Sources items={[]} loading />)
+    expect(screen.getByRole('heading', { name: 'Sources' })).toBeInTheDocument()
+    expect(screen.getByText(/loading sources/i)).toBeInTheDocument()
+  })
+
+  it('prefers rendered items over the loading placeholder once items arrive', () => {
+    render(
+      <Sources
+        loading
+        items={[
+          { commitSha: 'abcdef1', authorSlug: 'pm', msg: 'Done loading', date: '2026-01-01T00:00:00Z' },
+        ]}
+      />,
+    )
+    expect(screen.getByText('Done loading')).toBeInTheDocument()
+    expect(screen.queryByText(/loading sources/i)).not.toBeInTheDocument()
+  })
+
   it('renders gracefully when dates are malformed', () => {
     render(
       <Sources

@@ -12,9 +12,19 @@ export interface SourceItem {
 
 interface SourcesProps {
   items: SourceItem[]
+  /** When true, shows an inline placeholder while history is fetching. */
+  loading?: boolean
 }
 
-export default function Sources({ items }: SourcesProps) {
+export default function Sources({ items, loading = false }: SourcesProps) {
+  if (loading && items.length === 0) {
+    return (
+      <section className="wk-sources" aria-labelledby="wk-sources-heading">
+        <h2 id="wk-sources-heading">Sources</h2>
+        <p className="wk-sources-loading">loading sources…</p>
+      </section>
+    )
+  }
   if (items.length === 0) return null
   return (
     <section className="wk-sources" aria-labelledby="wk-sources-heading">

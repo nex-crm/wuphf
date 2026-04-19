@@ -437,6 +437,12 @@
   height: 12px;
   border-radius: 2px;
 }
+.wk-sources-loading {
+  font-family: var(--wk-body-serif);
+  font-style: italic;
+  color: var(--wk-text-tertiary);
+  margin: 0;
+}
 
 /* ─── Categories ─── */
 .wk-categories {

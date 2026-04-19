@@ -17,7 +17,14 @@ import TocBox, { type TocEntry } from './TocBox'
 import PageStatsPanel from './PageStatsPanel'
 import CiteThisPagePanel from './CiteThisPagePanel'
 import ReferencedBy from './ReferencedBy'
-import { fetchArticle, type WikiArticle as WikiArticleT, type WikiCatalogEntry } from '../../api/wiki'
+import {
+  fetchArticle,
+  fetchHistory,
+  type WikiArticle as WikiArticleT,
+  type WikiCatalogEntry,
+  type WikiHistoryCommit,
+} from '../../api/wiki'
+import type { SourceItem } from './Sources'
 import { wikiLinkRemarkPlugin } from '../../lib/wikilink'
 
 interface WikiArticleProps {
@@ -31,6 +38,9 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   const [tab, setTab] = useState<HatBarTab>('article')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [historyCommits, setHistoryCommits] = useState<WikiHistoryCommit[] | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [historyError, setHistoryError] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -52,6 +62,41 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
       cancelled = true
     }
   }, [path])
+
+  useEffect(() => {
+    let cancelled = false
+    setHistoryCommits(null)
+    setHistoryLoading(true)
+    setHistoryError(false)
+    fetchHistory(path)
+      .then((res) => {
+        if (cancelled) return
+        setHistoryCommits(res.commits ?? [])
+      })
+      .catch(() => {
+        if (cancelled) return
+        // Graceful degradation: missing history should not block the article read.
+        setHistoryError(true)
+        setHistoryCommits([])
+      })
+      .finally(() => {
+        if (!cancelled) setHistoryLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [path])
+
+  const sourceItems = useMemo<SourceItem[]>(() => {
+    if (!historyCommits) return []
+    return historyCommits.map((c) => ({
+      commitSha: c.sha,
+      authorSlug: c.author_slug,
+      authorName: c.author_slug.toUpperCase(),
+      msg: c.msg,
+      date: c.date,
+    }))
+  }, [historyCommits])
 
   const catalogSlugs = useMemo(() => new Set(catalog.map((c) => c.path)), [catalog])
   const resolver = useMemo(
@@ -180,7 +225,9 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
           items={article.backlinks.map((b) => ({ slug: b.path, display: b.title }))}
           onNavigate={onNavigate}
         />
-        <Sources items={[]} />
+        {historyError ? null : (
+          <Sources items={sourceItems} loading={historyLoading} />
+        )}
         <CategoriesFooter tags={article.categories} />
         <PageFooter
           lastEditedBy={article.last_edited_by.toUpperCase()}
