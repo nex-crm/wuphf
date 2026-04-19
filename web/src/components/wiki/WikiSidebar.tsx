@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { WikiCatalogEntry } from '../../api/wiki'
 import ToolsNav from './ToolsNav'
+import { resolveGroupOrder } from '../../lib/groupOrder'
 
 /** Left-rail thematic dir groups + Tools section + search. */
 
@@ -10,12 +11,14 @@ interface WikiSidebarProps {
   onNavigate: (path: string) => void
 }
 
-const GROUP_ORDER = ['people', 'companies', 'projects', 'playbooks', 'decisions', 'inbox']
-
 export default function WikiSidebar({ catalog, currentPath, onNavigate }: WikiSidebarProps) {
   const [query, setQuery] = useState('')
 
   const grouped = useMemo(() => groupCatalog(catalog, query.trim()), [catalog, query])
+  const groupOrder = useMemo(
+    () => resolveGroupOrder(catalog.map((c) => c.group)),
+    [catalog],
+  )
 
   return (
     <aside className="wk-nav-sidebar">
@@ -26,7 +29,7 @@ export default function WikiSidebar({ catalog, currentPath, onNavigate }: WikiSi
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      {GROUP_ORDER.map((group) => {
+      {groupOrder.map((group) => {
         const items = grouped[group]
         if (!items || items.length === 0) return null
         return (

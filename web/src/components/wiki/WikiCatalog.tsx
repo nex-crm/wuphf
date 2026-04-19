@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import PixelAvatar from './PixelAvatar'
 import type { WikiCatalogEntry } from '../../api/wiki'
 import { formatRelativeTime } from '../../lib/format'
+import { resolveGroupOrder } from '../../lib/groupOrder'
 
 /** `/wiki` landing view: grid of thematic dir groups with recent articles. */
 
@@ -13,8 +14,6 @@ interface WikiCatalogProps {
   agentsCount?: number
 }
 
-const GROUP_ORDER = ['people', 'companies', 'projects', 'playbooks', 'decisions', 'inbox']
-
 export default function WikiCatalog({
   catalog,
   onNavigate,
@@ -23,6 +22,10 @@ export default function WikiCatalog({
   agentsCount,
 }: WikiCatalogProps) {
   const grouped = useMemo(() => groupByGroup(catalog), [catalog])
+  const groupOrder = useMemo(
+    () => resolveGroupOrder(catalog.map((c) => c.group)),
+    [catalog],
+  )
   const stats = useMemo(
     () => [
       `${articlesCount ?? catalog.length} articles`,
@@ -39,7 +42,7 @@ export default function WikiCatalog({
         <div className="wk-catalog-stats">{stats}</div>
       </header>
       <div className="wk-catalog-grid">
-        {GROUP_ORDER.map((group) => {
+        {groupOrder.map((group) => {
           const items = grouped[group]
           if (!items || items.length === 0) return null
           return (
