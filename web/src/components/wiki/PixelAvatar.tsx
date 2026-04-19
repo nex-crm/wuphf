@@ -1,31 +1,38 @@
-import { getAgentColor } from '../../lib/pixelAvatar'
+import { PixelAvatar as CanvasPixelAvatar } from '../ui/PixelAvatar'
 
 /**
- * Lightweight SVG pixel-avatar stub used in the wiki surface.
- * TODO: swap for the canvas-based composeAvatar pipeline once we have a
- *       shared React wrapper over `drawPixelAvatar` (see lib/pixelAvatar.ts).
+ * Wiki-surface pixel avatar — default-export wrapper over the shared canvas
+ * sprite compositor in `components/ui/PixelAvatar`. Keeps the wiki's byline,
+ * backlinks, edit-log entries, Sources list, and catalog cards visually in
+ * sync with agent avatars rendered elsewhere in the app.
  */
 
 interface PixelAvatarProps {
   slug: string
   size?: number
   className?: string
+  title?: string
 }
 
-export default function PixelAvatar({ slug, size = 14, className }: PixelAvatarProps) {
-  const color = getAgentColor(slug)
-  return (
-    <svg
-      className={className ?? 'wk-avatar'}
-      width={size}
-      height={size}
-      viewBox="0 0 7 7"
-      xmlns="http://www.w3.org/2000/svg"
-      aria-label={`${slug} avatar`}
-    >
-      <rect width="7" height="7" fill={color} />
-      <rect x="1" y="1" width="5" height="2" fill="rgba(255,255,255,0.18)" />
-      <rect x="2" y="4" width="3" height="1" fill="rgba(0,0,0,0.25)" />
-    </svg>
+export default function PixelAvatar({
+  slug,
+  size = 14,
+  className = 'wk-avatar',
+  title,
+}: PixelAvatarProps) {
+  // The underlying component is aria-hidden; the wiki uses avatars purely
+  // decorative next to agent slug labels, so no extra role/title is needed.
+  // `title` is accepted for API compatibility with the legacy stub and set
+  // via a wrapping span when provided.
+  const avatar = (
+    <CanvasPixelAvatar slug={slug} size={size} className={className} />
   )
+  if (title) {
+    return (
+      <span className="wk-avatar-wrap" title={title}>
+        {avatar}
+      </span>
+    )
+  }
+  return avatar
 }
