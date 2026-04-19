@@ -18,6 +18,26 @@ type Blueprint struct {
 	ApprovalRules      []ApprovalRule          `json:"approval_rules,omitempty" yaml:"approval_rules,omitempty"`
 	Connections        []ConnectionBlueprint   `json:"connections,omitempty" yaml:"connections,omitempty"`
 	Workflows          []WorkflowTemplate      `json:"workflows,omitempty" yaml:"workflows,omitempty"`
+	WikiSchema         *BlueprintWikiSchema    `json:"wiki_schema,omitempty" yaml:"wiki_schema,omitempty"`
+}
+
+// BlueprintWikiSchema is the optional wiki-materialization directive a
+// blueprint ships. Present on curated blueprints; nil on synthesized
+// "from scratch" runs. The broker feeds this to MaterializeWiki right
+// after the team is seeded so the LLM wiki lands non-empty on first open.
+type BlueprintWikiSchema struct {
+	Dirs      []string                     `json:"dirs,omitempty" yaml:"dirs,omitempty"`
+	Bootstrap []BlueprintWikiBootstrapItem `json:"bootstrap,omitempty" yaml:"bootstrap,omitempty"`
+}
+
+// BlueprintWikiBootstrapItem is a single skeleton article the blueprint
+// seeds on first materialization. Path is relative to the wiki root and
+// must stay under team/. Skeleton is the full markdown body written on
+// create; existing articles are left alone (idempotent on re-run).
+type BlueprintWikiBootstrapItem struct {
+	Path     string `json:"path" yaml:"path"`
+	Title    string `json:"title,omitempty" yaml:"title,omitempty"`
+	Skeleton string `json:"skeleton,omitempty" yaml:"skeleton,omitempty"`
 }
 
 type StarterPlan struct {
