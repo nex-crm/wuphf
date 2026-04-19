@@ -52,6 +52,17 @@ const STEP_ORDER: readonly WizardStep[] = [
 
 const RUNTIME_OPTIONS = ['Claude Code', 'Codex', 'Cursor', 'Windsurf', 'Other'] as const
 
+// Runtimes that authenticate agents through their own CLI login (claude login,
+// codex login, etc.). When one of these is selected, direct API keys are
+// optional — the CLI handles provider auth. Only "Other" falls back to
+// requiring a raw key.
+const RUNTIMES_WITH_OWN_AUTH: ReadonlySet<string> = new Set([
+  'Claude Code',
+  'Codex',
+  'Cursor',
+  'Windsurf',
+])
+
 // Map UI runtime labels to the provider enum the broker validates on POST /config.
 // Labels without a backend equivalent return null and are skipped on persist —
 // the broker keeps its existing default (claude-code) until the user picks a
@@ -443,14 +454,18 @@ function SetupStep({
   onNext,
   onBack,
 }: SetupStepProps) {
+  const runtimeHasOwnAuth = RUNTIMES_WITH_OWN_AUTH.has(runtime)
   const hasAtLeastOneKey = Object.values(apiKeys).some((v) => v.trim().length > 0)
+  const canContinue = runtimeHasOwnAuth || hasAtLeastOneKey
 
   return (
     <div className="wizard-step">
       <div className="wizard-panel">
-        <p className="wizard-panel-title">{ONBOARDING_COPY.step2_prereqs_title}</p>
+        <p className="wizard-panel-title">How should agents run?</p>
         <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '-8px 0 12px 0' }}>
-          The CLI that runs your agents. Pick the one you already use.
+          Pick the CLI you already use. Its login handles provider auth, so you
+          won&apos;t need API keys. Choose <strong>Other</strong> to plug in raw
+          keys instead.
         </p>
         <div className="runtime-grid">
           {RUNTIME_OPTIONS.map((opt) => (
@@ -464,32 +479,43 @@ function SetupStep({
             </button>
           ))}
         </div>
-      </div>
 
-      <div className="wizard-panel">
-        <p className="wizard-panel-title">{ONBOARDING_COPY.step2_keys_title}</p>
-        <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '-8px 0 12px 0' }}>
-          At least one API key is needed so agents can reason. You can add more
-          later.
-        </p>
-        {API_KEY_FIELDS.map((field) => (
-          <div className="key-row" key={field.key}>
-            <div className="key-label-wrap">
-              <span className="key-label">{field.label}</span>
-              <span className="key-hint">{field.hint}</span>
-            </div>
-            <div className="key-input-wrap">
-              <input
-                className="input"
-                type="password"
-                placeholder={field.key}
-                value={apiKeys[field.key] ?? ''}
-                onChange={(e) => onChangeApiKey(field.key, e.target.value)}
-                autoComplete="off"
-              />
-            </div>
+        {!runtimeHasOwnAuth && (
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+            <p
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                margin: '0 0 4px 0',
+                color: 'var(--text-primary)',
+              }}
+            >
+              {ONBOARDING_COPY.step2_keys_title}
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px 0' }}>
+              At least one API key is needed so agents can reason. You can add
+              more later.
+            </p>
+            {API_KEY_FIELDS.map((field) => (
+              <div className="key-row" key={field.key}>
+                <div className="key-label-wrap">
+                  <span className="key-label">{field.label}</span>
+                  <span className="key-hint">{field.hint}</span>
+                </div>
+                <div className="key-input-wrap">
+                  <input
+                    className="input"
+                    type="password"
+                    placeholder={field.key}
+                    value={apiKeys[field.key] ?? ''}
+                    onChange={(e) => onChangeApiKey(field.key, e.target.value)}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
 
       <div className="wizard-panel">
@@ -531,7 +557,7 @@ function SetupStep({
         <button
           className="btn btn-primary"
           onClick={onNext}
-          disabled={!hasAtLeastOneKey}
+          disabled={!canContinue}
           type="button"
         >
           {ONBOARDING_COPY.step2_cta}
