@@ -2,6 +2,7 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -458,6 +459,8 @@ type Broker struct {
 	activity            map[string]agentActivitySnapshot
 	activitySubscribers map[int]chan agentActivitySnapshot
 	officeSubscribers   map[int]chan officeChangeEvent
+	wikiSubscribers     map[int]chan wikiWriteEvent
+	wikiWorker          *WikiWorker
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
@@ -846,6 +849,7 @@ func NewBroker() *Broker {
 		activity:            make(map[string]agentActivitySnapshot),
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
 		officeSubscribers:   make(map[int]chan officeChangeEvent),
+		wikiSubscribers:     make(map[int]chan wikiWriteEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
@@ -998,6 +1002,52 @@ func (b *Broker) publishOfficeChangeLocked(evt officeChangeEvent) {
 	}
 }
 
+// SubscribeWikiEvents returns a channel of wiki commit notifications plus an
+// unsubscribe func. The web UI's SSE loop uses this to push "wiki:write"
+// events to the browser.
+func (b *Broker) SubscribeWikiEvents(buffer int) (<-chan wikiWriteEvent, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan wikiWriteEvent, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.wikiSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.wikiSubscribers[id]; ok {
+			delete(b.wikiSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+// PublishWikiEvent fans out a commit notification to all SSE subscribers.
+// Implements the wikiEventPublisher interface consumed by WikiWorker.
+func (b *Broker) PublishWikiEvent(evt wikiWriteEvent) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, ch := range b.wikiSubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// WikiWorker returns the broker's attached wiki worker, or nil when the
+// active memory backend is not markdown.
+func (b *Broker) WikiWorker() *WikiWorker {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.wikiWorker
+}
+
 func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	slug := normalizeChannelSlug(update.Slug)
 	if slug == "" {
@@ -1069,7 +1119,53 @@ func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
+	b.ensureWikiWorker()
 	return b.StartOnPort(brokeraddr.ResolvePort())
+}
+
+// ensureWikiWorker initializes the markdown-backend wiki worker when the
+// resolved memory backend is "markdown". Runs once. Never crashes the
+// broker on wiki init failure — the worker is advisory; writes simply fail
+// with ErrWorkerStopped until a user runs `wuphf` with git installed.
+func (b *Broker) ensureWikiWorker() {
+	if config.ResolveMemoryBackend("") != config.MemoryBackendMarkdown {
+		return
+	}
+	b.mu.Lock()
+	if b.wikiWorker != nil {
+		b.mu.Unlock()
+		return
+	}
+	b.mu.Unlock()
+
+	repo := NewRepo()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := repo.Init(ctx); err != nil {
+		log.Printf("wiki: init failed, markdown backend unavailable: %v", err)
+		return
+	}
+	// Belt-and-suspenders: recover any dirty tree from a crashed prior run.
+	if err := repo.RecoverDirtyTree(ctx); err != nil {
+		log.Printf("wiki: recover-dirty-tree failed: %v", err)
+	}
+	// Double-fault recovery: if fsck fails, try the backup mirror; otherwise
+	// leave the worker un-initialized so writes fail cleanly.
+	if err := repo.Fsck(ctx); err != nil {
+		log.Printf("wiki: fsck failed (%v); attempting restore from backup", err)
+		if restoreErr := repo.RestoreFromBackup(ctx); restoreErr != nil {
+			log.Printf("wiki: double-fault (repo corrupt + backup missing): %v", restoreErr)
+			return
+		}
+	}
+
+	worker := NewWikiWorker(repo, b)
+	worker.Start(context.Background())
+
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
 }
 
 // StartOnPort launches the broker on the given port. Use 0 for an OS-assigned port.
@@ -1094,6 +1190,12 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/agent-logs", b.requireAuth(b.handleAgentLogs))
 	mux.HandleFunc("/task-plan", b.requireAuth(b.handleTaskPlan))
 	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
+	mux.HandleFunc("/wiki/write", b.requireAuth(b.handleWikiWrite))
+	mux.HandleFunc("/wiki/read", b.requireAuth(b.handleWikiRead))
+	mux.HandleFunc("/wiki/search", b.requireAuth(b.handleWikiSearch))
+	mux.HandleFunc("/wiki/list", b.requireAuth(b.handleWikiList))
+	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
+	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
 	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
 	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
@@ -1585,6 +1687,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeActivity()
 	officeChanges, unsubscribeOffice := b.SubscribeOfficeChanges(64)
 	defer unsubscribeOffice()
+	wikiEvents, unsubscribeWiki := b.SubscribeWikiEvents(64)
+	defer unsubscribeWiki()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1623,6 +1727,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-officeChanges:
 			if !ok || writeEvent("office_changed", evt) != nil {
+				return
+			}
+		case evt, ok := <-wikiEvents:
+			if !ok || writeEvent("wiki:write", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:

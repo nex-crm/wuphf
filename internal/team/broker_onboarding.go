@@ -1,8 +1,11 @@
 package team
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -58,22 +61,61 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 		bp = synthesizeBlueprintFromState(task)
 	}
 
-	b.mu.Lock()
-	defer b.mu.Unlock()
+	seedErr := func() error {
+		b.mu.Lock()
+		defer b.mu.Unlock()
 
-	// Dedupe after we're inside the lock so the messages slice is stable.
-	// If a prior call already posted this exact task as an onboarding_origin
-	// message (crash-recovery scenario), skip re-seeding and preserve the
-	// earlier team.
-	if !skipTask && task != "" {
-		for _, existing := range b.messages {
-			if existing.Channel == "general" && existing.Kind == "onboarding_origin" && existing.Content == task {
-				return b.saveLocked()
+		// Dedupe after we're inside the lock so the messages slice is stable.
+		// If a prior call already posted this exact task as an onboarding_origin
+		// message (crash-recovery scenario), skip re-seeding and preserve the
+		// earlier team.
+		if !skipTask && task != "" {
+			for _, existing := range b.messages {
+				if existing.Channel == "general" && existing.Kind == "onboarding_origin" && existing.Content == task {
+					return b.saveLocked()
+				}
 			}
 		}
+
+		return b.seedFromBlueprintLocked(bp, selectedAgents, task, skipTask, synthesized)
+	}()
+	if seedErr != nil {
+		return seedErr
 	}
 
-	return b.seedFromBlueprintLocked(bp, selectedAgents, task, skipTask, synthesized)
+	// Materialize the blueprint's LLM wiki outside the broker lock. Lane A
+	// owns the git repo at ~/.wuphf/wiki; we just write the skeleton files
+	// and let its commit worker pick them up on the next pass. Wiki
+	// materialization is best-effort: a failure here should NOT fail
+	// onboarding (the user should land on an empty-but-functional wiki
+	// rather than a broken onboarding flow). Log and move on.
+	materializeBlueprintWiki(bp)
+	return nil
+}
+
+// materializeBlueprintWiki resolves ~/.wuphf/wiki and invokes the wiki
+// materializer. Errors are logged, never returned — onboarding succeeds
+// regardless. A blueprint without a WikiSchema (e.g. a synthesized
+// from-scratch blueprint) is silently skipped.
+func materializeBlueprintWiki(bp operations.Blueprint) {
+	if bp.WikiSchema == nil {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		log.Printf("onboarding: resolve home for wiki materialization: %v", err)
+		return
+	}
+	wikiRoot := filepath.Join(home, ".wuphf", "wiki")
+	result, err := operations.MaterializeWiki(context.Background(), wikiRoot, bp.WikiSchema)
+	if err != nil {
+		log.Printf("onboarding: wiki materialize failed (wiki left empty): %v", err)
+		return
+	}
+	if len(result.ArticlesCreated) > 0 || len(result.DirsCreated) > 0 {
+		log.Printf("onboarding: wiki materialized blueprint=%s dirs=%d articles_created=%d articles_skipped=%d",
+			bp.ID, len(result.DirsCreated), len(result.ArticlesCreated), len(result.ArticlesSkipped))
+	}
 }
 
 // synthesizeBlueprintFromState builds a blueprint from whatever the user

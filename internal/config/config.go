@@ -73,9 +73,10 @@ type Config struct {
 }
 
 const (
-	MemoryBackendNone   = "none"
-	MemoryBackendNex    = "nex"
-	MemoryBackendGBrain = "gbrain"
+	MemoryBackendNone     = "none"
+	MemoryBackendNex      = "nex"
+	MemoryBackendGBrain   = "gbrain"
+	MemoryBackendMarkdown = "markdown"
 )
 
 // OpenclawBridgeBinding binds a WUPHF agent session to an OpenClaw bridge slug.
@@ -202,6 +203,8 @@ func NormalizeMemoryBackend(value string) string {
 		return MemoryBackendNex
 	case MemoryBackendGBrain:
 		return MemoryBackendGBrain
+	case MemoryBackendMarkdown:
+		return MemoryBackendMarkdown
 	default:
 		return ""
 	}
@@ -244,6 +247,8 @@ func MemoryBackendLabel(backend string) string {
 		return "Nex"
 	case MemoryBackendGBrain:
 		return "GBrain"
+	case MemoryBackendMarkdown:
+		return "Markdown wiki"
 	default:
 		return "Local-only"
 	}
