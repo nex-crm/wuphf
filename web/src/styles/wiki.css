@@ -781,9 +781,11 @@
 }
 .wk-catalog-card ul { list-style: none; margin: 0; padding: 0; }
 .wk-catalog-card li {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: 16px 1fr auto;
+  grid-template-rows: auto;
+  column-gap: 8px;
+  align-items: baseline;
   padding: 8px 0;
   border-bottom: 1px dashed var(--wk-border-light);
   font-size: 14px;
@@ -794,13 +796,12 @@
   width: 16px;
   height: 16px;
   border-radius: 3px;
-  flex-shrink: 0;
+  align-self: center;
 }
 .wk-catalog-card li .wk-title {
   font-family: var(--wk-body-serif);
   color: var(--wk-text);
   cursor: pointer;
-  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -811,8 +812,14 @@
   font-family: var(--wk-mono);
   font-size: 11px;
   color: var(--wk-text-tertiary);
-  flex-shrink: 0;
+  white-space: nowrap;
 }
+/* Narrow cards: drop the timestamp so the title gets full width. */
+@container wk-cat (max-width: 200px) {
+  .wk-catalog-card li { grid-template-columns: 16px 1fr; }
+  .wk-catalog-card li .wk-when { display: none; }
+}
+.wk-catalog-card { container-type: inline-size; container-name: wk-cat; }
 
 /* ─── Loading / error states ─── */
 .wk-loading,
