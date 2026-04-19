@@ -37,6 +37,13 @@ type Config struct {
 	WorkspaceID     string `json:"workspace_id,omitempty"`
 	WorkspaceSlug   string `json:"workspace_slug,omitempty"`
 	LLMProvider     string `json:"llm_provider,omitempty"`
+	// LLMProviderPriority is an ordered list of provider identifiers (same
+	// vocabulary as LLMProvider — "claude-code", "codex", etc.) that agents
+	// should try in order when picking a runtime. LLMProvider remains the
+	// single-value primary choice; the priority list is consulted by agent
+	// creation and fallback flows. An empty slice means "fall back to
+	// LLMProvider alone", preserving legacy behavior.
+	LLMProviderPriority []string `json:"llm_provider_priority,omitempty"`
 	GeminiAPIKey    string `json:"gemini_api_key,omitempty"`
 	AnthropicAPIKey string `json:"anthropic_api_key,omitempty"`
 	OpenAIAPIKey    string `json:"openai_api_key,omitempty"`

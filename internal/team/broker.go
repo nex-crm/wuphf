@@ -5129,6 +5129,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			// Runtime
 			"llm_provider":          config.ResolveLLMProvider(""),
+			"llm_provider_priority": cfg.LLMProviderPriority,
 			"memory_backend":        config.ResolveMemoryBackend(""),
 			"action_provider":       config.ResolveActionProvider(),
 			"team_lead_slug":        cfg.TeamLeadSlug,
@@ -5168,8 +5169,9 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		})
 	case http.MethodPost:
 		var body struct {
-			LLMProvider     *string `json:"llm_provider,omitempty"`
-			MemoryBackend   *string `json:"memory_backend,omitempty"`
+			LLMProvider         *string   `json:"llm_provider,omitempty"`
+			LLMProviderPriority *[]string `json:"llm_provider_priority,omitempty"`
+			MemoryBackend       *string   `json:"memory_backend,omitempty"`
 			ActionProvider  *string `json:"action_provider,omitempty"`
 			TeamLeadSlug    *string `json:"team_lead_slug,omitempty"`
 			MaxConcurrent   *int    `json:"max_concurrent_agents,omitempty"`
@@ -5216,6 +5218,31 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var providerPriority []string
+		if body.LLMProviderPriority != nil {
+			// Normalize + validate each entry. Unknown entries are rejected so
+			// the stored list only contains provider ids the resolver knows how
+			// to dispatch. Empty list is accepted (means "clear").
+			seen := make(map[string]bool, len(*body.LLMProviderPriority))
+			for _, raw := range *body.LLMProviderPriority {
+				id := strings.TrimSpace(strings.ToLower(raw))
+				if id == "" {
+					continue
+				}
+				switch id {
+				case "claude-code", "codex":
+					// ok
+				default:
+					http.Error(w, "unsupported entry in llm_provider_priority: "+id, http.StatusBadRequest)
+					return
+				}
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				providerPriority = append(providerPriority, id)
+			}
+		}
 		var memory string
 		if body.MemoryBackend != nil {
 			memory = config.NormalizeMemoryBackend(*body.MemoryBackend)
@@ -5231,6 +5258,12 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// Enum/string fields
 		if provider != "" {
 			cfg.LLMProvider = provider
+			changed = true
+		}
+		if body.LLMProviderPriority != nil {
+			// Explicit pointer set means the client wanted to write this field,
+			// even if the final list is empty (which clears the stored order).
+			cfg.LLMProviderPriority = providerPriority
 			changed = true
 		}
 		if memory != "" {
