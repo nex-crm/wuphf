@@ -31,9 +31,11 @@ export default function Wiki({ articlePath, onNavigate }: WikiProps) {
     }
   }, [])
 
+  const view = articlePath ? 'article' : 'catalog'
+
   return (
     <div className="wiki-root" data-testid="wiki-root">
-      <div className="wiki-layout">
+      <div className="wiki-layout" data-view={view}>
         <WikiSidebar
           catalog={catalog}
           currentPath={articlePath}
@@ -46,10 +48,7 @@ export default function Wiki({ articlePath, onNavigate }: WikiProps) {
             onNavigate={(path) => onNavigate(path)}
           />
         ) : (
-          <>
-            <WikiCatalog catalog={catalog} onNavigate={(path) => onNavigate(path)} />
-            <aside className="wk-right-sidebar" aria-hidden="true" />
-          </>
+          <WikiCatalog catalog={catalog} onNavigate={(path) => onNavigate(path)} />
         )}
       </div>
       {!loading && <EditLogFooter onNavigate={(path) => onNavigate(path)} />}

@@ -44,6 +44,10 @@
   grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr) var(--wk-sidebar-right);
   min-height: 100%;
 }
+/* Catalog has no right rail — give the main column all the remaining space. */
+.wiki-layout[data-view="catalog"] {
+  grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr);
+}
 
 /* ─── LEFT NAV ─── */
 .wk-nav-sidebar {
@@ -719,8 +723,11 @@
 /* ─── Catalog (landing) ─── */
 .wk-catalog {
   padding: 40px 64px 120px;
+  /* Fill the grid cell. A prior `margin: 0 auto` was causing the element
+     to auto-shrink to its content width (the header text) inside a grid
+     cell, squeezing the catalog grid below to one-letter wide cards. */
+  width: 100%;
   max-width: 1280px;
-  margin: 0 auto;
 }
 .wk-catalog-header {
   display: flex;
