@@ -40,6 +40,10 @@ export default function WikiCatalog({
       <header className="wk-catalog-header">
         <h1 className="wk-catalog-title">Team Wiki</h1>
         <div className="wk-catalog-stats">{stats}</div>
+        <div className="wk-catalog-clone">
+          Your wiki lives on your disk.{' '}
+          <code>git clone ~/.wuphf/wiki</code>
+        </div>
       </header>
       <div className="wk-catalog-grid">
         {groupOrder.map((group) => {

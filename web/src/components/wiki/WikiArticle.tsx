@@ -20,6 +20,7 @@ import ReferencedBy from './ReferencedBy'
 import {
   fetchArticle,
   fetchHistory,
+  subscribeEditLog,
   type WikiArticle as WikiArticleT,
   type WikiCatalogEntry,
   type WikiHistoryCommit,
@@ -42,6 +43,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   const [historyCommits, setHistoryCommits] = useState<WikiHistoryCommit[] | null>(null)
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState(false)
+  const [liveAgent, setLiveAgent] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -85,6 +87,21 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
       })
     return () => {
       cancelled = true
+    }
+  }, [path])
+
+  useEffect(() => {
+    setLiveAgent(null)
+    let clearTimer: ReturnType<typeof setTimeout> | null = null
+    const unsubscribe = subscribeEditLog((entry) => {
+      if (entry.article_path !== path) return
+      setLiveAgent(entry.who)
+      if (clearTimer) clearTimeout(clearTimer)
+      clearTimer = setTimeout(() => setLiveAgent(null), 10_000)
+    })
+    return () => {
+      if (clearTimer) clearTimeout(clearTimer)
+      unsubscribe()
     }
   }, [path])
 
@@ -133,13 +150,15 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   return (
     <>
       <main className="wk-article-col">
-        <ArticleStatusBanner
-          message={`${formatAgentName(article.last_edited_by)} is editing this article right now.`}
-          liveAgent={article.last_edited_by}
-          revisions={article.revisions}
-          contributors={article.contributors.length}
-          wordCount={article.word_count}
-        />
+        {liveAgent && (
+          <ArticleStatusBanner
+            message={`${formatAgentName(liveAgent)} is editing this article right now.`}
+            liveAgent={liveAgent}
+            revisions={article.revisions}
+            contributors={article.contributors.length}
+            wordCount={article.word_count}
+          />
+        )}
         <HatBar
           active={tab}
           onChange={setTab}

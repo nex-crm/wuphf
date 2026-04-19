@@ -10,12 +10,11 @@ const CATALOG: WikiCatalogEntry[] = [
 ]
 
 describe('<WikiSidebar>', () => {
-  it('renders grouped articles with a Tools section', () => {
+  it('renders grouped articles', () => {
     render(<WikiSidebar catalog={CATALOG} onNavigate={() => {}} />)
     expect(screen.getByText('people')).toBeInTheDocument()
     expect(screen.getByText('playbooks')).toBeInTheDocument()
     expect(screen.getByText('Nazz')).toBeInTheDocument()
-    expect(screen.getByText('Tools')).toBeInTheDocument()
   })
 
   it('marks the current article', () => {

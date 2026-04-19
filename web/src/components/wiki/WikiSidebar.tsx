@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
 import type { WikiCatalogEntry } from '../../api/wiki'
-import ToolsNav from './ToolsNav'
 import { resolveGroupOrder } from '../../lib/groupOrder'
 
 /** Left-rail thematic dir groups + Tools section + search. */
@@ -53,7 +52,6 @@ export default function WikiSidebar({ catalog, currentPath, onNavigate }: WikiSi
           </div>
         )
       })}
-      <ToolsNav />
     </aside>
   )
 }
