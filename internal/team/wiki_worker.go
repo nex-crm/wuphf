@@ -383,6 +383,35 @@ func (b *Broker) handleWikiList(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(bytes)
 }
 
+// handleWikiArticle returns the rich article metadata for the UI: content +
+// title + revisions + contributors + backlinks + word count.
+//
+//	GET /wiki/article?path=team/people/nazz.md
+//
+// Response shape matches web/src/api/wiki.ts WikiArticle.
+func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil {
+		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		return
+	}
+	relPath := strings.TrimSpace(r.URL.Query().Get("path"))
+	if err := validateArticlePath(relPath); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	meta, err := worker.Repo().BuildArticle(r.Context(), relPath)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, meta)
+}
+
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
