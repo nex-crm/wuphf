@@ -5,6 +5,7 @@ type Route =
   | { view: 'channel'; channel: string }
   | { view: 'dm'; agent: string }
   | { view: 'app'; app: string }
+  | { view: 'wiki'; articlePath: string | null }
 
 function parseHash(hash: string): Route {
   const cleaned = hash.replace(/^#\/?/, '')
@@ -21,6 +22,10 @@ function parseHash(hash: string): Route {
   if (parts[0] === 'threads') {
     return { view: 'app', app: 'threads' }
   }
+  if (parts[0] === 'wiki') {
+    const rest = parts.slice(1).map(decodeURIComponent).join('/')
+    return { view: 'wiki', articlePath: rest || null }
+  }
   return { view: 'channel', channel: 'general' }
 }
 
@@ -29,7 +34,13 @@ function stateToHash(state: {
   currentChannel: string
   dmMode: boolean
   dmAgentSlug: string | null
+  wikiPath: string | null
 }): string {
+  if (state.currentApp === 'wiki') {
+    return state.wikiPath
+      ? `#/wiki/${state.wikiPath.split('/').map(encodeURIComponent).join('/')}`
+      : '#/wiki'
+  }
   if (state.dmMode && state.dmAgentSlug) {
     return `#/dm/${encodeURIComponent(state.dmAgentSlug)}`
   }
@@ -59,6 +70,8 @@ export function useHashRouter() {
   const enterDM = useAppStore((s) => s.enterDM)
   const exitDM = useAppStore((s) => s.exitDM)
   const setLastMessageId = useAppStore((s) => s.setLastMessageId)
+  const wikiPath = useAppStore((s) => s.wikiPath)
+  const setWikiPath = useAppStore((s) => s.setWikiPath)
 
   // Avoid ping-ponging: skip the next hashchange or store-sync when we
   // were the one that caused it.
@@ -81,6 +94,10 @@ export function useHashRouter() {
       } else if (route.view === 'app') {
         exitDM()
         setCurrentApp(route.app)
+      } else if (route.view === 'wiki') {
+        exitDM()
+        setWikiPath(route.articlePath)
+        setCurrentApp('wiki')
       } else {
         exitDM()
         setCurrentApp(null)
@@ -100,12 +117,12 @@ export function useHashRouter() {
       ignoreNextStoreSync.current = false
       return
     }
-    const next = stateToHash({ currentApp, currentChannel, dmMode, dmAgentSlug })
+    const next = stateToHash({ currentApp, currentChannel, dmMode, dmAgentSlug, wikiPath })
     if (next !== window.location.hash) {
       ignoreNextHashChange.current = true
       // Use replaceState for the initial sync so we don't spam history,
       // then push afterwards.
       window.history.replaceState(null, '', next)
     }
-  }, [currentApp, currentChannel, dmMode, dmAgentSlug])
+  }, [currentApp, currentChannel, dmMode, dmAgentSlug, wikiPath])
 }
