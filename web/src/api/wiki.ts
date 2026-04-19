@@ -45,7 +45,7 @@ export interface WikiEditLogEntry {
 
 export async function fetchArticle(path: string): Promise<WikiArticle> {
   try {
-    return await get<WikiArticle>(`/wiki/article/${encodeURI(path)}`)
+    return await get<WikiArticle>(`/wiki/article?path=${encodeURIComponent(path)}`)
   } catch {
     return mockArticle(path)
   }
