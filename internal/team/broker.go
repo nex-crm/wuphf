@@ -461,6 +461,11 @@ type Broker struct {
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
+	// configMu serializes handleConfig POST reads/writes so concurrent
+	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
+	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
+	// produce a truncated/overlaid file.
+	configMu sync.Mutex
 	server              *http.Server
 	token               string          // shared secret for authenticating requests
 	addr                string          // actual listen address (useful when port=0)
@@ -5168,6 +5173,10 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"config_path": config.ConfigPath(),
 		})
 	case http.MethodPost:
+		// Serialize POST reads/writes; config.Save is not atomic against
+		// concurrent writers and two parallel calls can corrupt the file.
+		b.configMu.Lock()
+		defer b.configMu.Unlock()
 		var body struct {
 			LLMProvider         *string   `json:"llm_provider,omitempty"`
 			LLMProviderPriority *[]string `json:"llm_provider_priority,omitempty"`

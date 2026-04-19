@@ -997,15 +997,17 @@ export function Wizard({ onComplete }: WizardProps) {
           .filter((p): p is 'claude-code' | 'codex' => p != null)
 
         // Persist memory backend + LLM provider choice + priority fallback
-        // list so the broker reads them on next launch. Fire-and-forget —
-        // failures here should not block completing onboarding.
-        post('/config', { memory_backend: memoryBackend }).catch(() => {})
-        if (providerPriority.length > 0) {
-          post('/config', {
-            llm_provider: providerPriority[0],
-            llm_provider_priority: providerPriority,
-          }).catch(() => {})
+        // list so the broker reads them on next launch. Send as a single
+        // POST — the broker's handleConfig does a non-atomic read-mutate-
+        // write, so two parallel calls race and corrupt config.json.
+        const configPayload: Record<string, unknown> = {
+          memory_backend: memoryBackend,
         }
+        if (providerPriority.length > 0) {
+          configPayload.llm_provider = providerPriority[0]
+          configPayload.llm_provider_priority = providerPriority
+        }
+        post('/config', configPayload).catch(() => {})
 
         // Primary runtime label for the onboarding payload (best-effort;
         // the broker only acts on {task, skip_task} today, but the extra
