@@ -401,6 +401,28 @@ type TeamMemoryPromoteArgs struct {
 	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG."`
 }
 
+// TeamWikiWriteArgs is the contract for the team_wiki_write MCP tool.
+type TeamWikiWriteArgs struct {
+	MySlug      string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
+	ArticlePath string `json:"article_path" jsonschema:"Path within wiki root, e.g. team/people/nazz.md"`
+	Mode        string `json:"mode" jsonschema:"One of: create | replace | append_section"`
+	Content     string `json:"content" jsonschema:"Full article content (create/replace) or new section text (append_section)"`
+	CommitMsg   string `json:"commit_message" jsonschema:"Why this change — becomes the git commit message"`
+}
+
+// TeamWikiReadArgs is the contract for team_wiki_read.
+type TeamWikiReadArgs struct {
+	ArticlePath string `json:"article_path" jsonschema:"Path within wiki root"`
+}
+
+// TeamWikiSearchArgs is the contract for team_wiki_search.
+type TeamWikiSearchArgs struct {
+	Pattern string `json:"pattern" jsonschema:"Literal substring to search (not regex)"`
+}
+
+// TeamWikiListArgs is intentionally empty — team_wiki_list takes no args.
+type TeamWikiListArgs struct{}
+
 type TeamTaskAckArgs struct {
 	ID      string `json:"id" jsonschema:"Task ID to acknowledge"`
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
@@ -419,6 +441,48 @@ func Run(ctx context.Context) error {
 
 	configureServerTools(server, resolveSlugOptional(""), strings.TrimSpace(os.Getenv("WUPHF_CHANNEL")), isOneOnOneMode())
 	return server.Run(ctx, &mcp.StdioTransport{})
+}
+
+// registerSharedMemoryTools registers the active shared-memory / wiki tool
+// set on the server. Markdown-backend installs expose team_wiki_* tools;
+// nex/gbrain installs expose the legacy team_memory_* tools; `none` skips
+// them entirely. Both tool sets NEVER coexist — agents see exactly one.
+func registerSharedMemoryTools(server *mcp.Server) {
+	switch strings.TrimSpace(os.Getenv("WUPHF_MEMORY_BACKEND")) {
+	case "markdown":
+		mcp.AddTool(server, officeWriteTool(
+			"team_wiki_write",
+			"Write a markdown article to the team wiki git repo. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article.",
+		), handleTeamWikiWrite)
+		mcp.AddTool(server, readOnlyTool(
+			"team_wiki_read",
+			"Read an article from the team wiki. Call this when the index lists an article relevant to your task.",
+		), handleTeamWikiRead)
+		mcp.AddTool(server, readOnlyTool(
+			"team_wiki_search",
+			"Literal substring search across the team wiki. Use for lookups the index does not surface.",
+		), handleTeamWikiSearch)
+		mcp.AddTool(server, readOnlyTool(
+			"team_wiki_list",
+			"Return the auto-regenerated catalog (index/all.md) of every article in the team wiki.",
+		), handleTeamWikiList)
+	case "none":
+		// Nothing — user explicitly disabled shared memory.
+	default:
+		// nex / gbrain (default): legacy tool set unchanged.
+		mcp.AddTool(server, readOnlyTool(
+			"team_memory_query",
+			"Query your private notes and, when configured, shared organizational memory. Results may suggest which teammate to ask for fresher working context.",
+		), handleTeamMemoryQuery)
+		mcp.AddTool(server, officeWriteTool(
+			"team_memory_write",
+			"Store a private note by default, or write directly to shared durable memory when the result is real. Durable private notes may be flagged as promotion candidates.",
+		), handleTeamMemoryWrite)
+		mcp.AddTool(server, officeWriteTool(
+			"team_memory_promote",
+			"Promote one of your private notes into shared durable memory after it becomes canonical.",
+		), handleTeamMemoryPromote)
+	}
 }
 
 func configureServerTools(server *mcp.Server, slug string, channel string, oneOnOne bool) {
@@ -443,20 +507,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Send a direct human-facing note into the chat when you need to present completion, recommend a decision, or tell the human what they should do next.",
 		), handleHumanMessage)
 
-		mcp.AddTool(server, readOnlyTool(
-			"team_memory_query",
-			"Query your private notes and, when configured, shared organizational memory. Results may suggest which teammate to ask for fresher working context.",
-		), handleTeamMemoryQuery)
-
-		mcp.AddTool(server, officeWriteTool(
-			"team_memory_write",
-			"Store a private note by default, or write directly to shared durable memory when the result is real. Durable private notes may be flagged as promotion candidates.",
-		), handleTeamMemoryWrite)
-
-		mcp.AddTool(server, officeWriteTool(
-			"team_memory_promote",
-			"Promote one of your private notes into shared durable memory after it becomes canonical.",
-		), handleTeamMemoryPromote)
+		registerSharedMemoryTools(server)
 
 		mcp.AddTool(server, readOnlyTool(
 			"team_runtime_state",
@@ -491,18 +542,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"human_interview",
 			"Ask the human a blocking decision question.",
 		), handleHumanInterview)
-		mcp.AddTool(server, readOnlyTool(
-			"team_memory_query",
-			"Query your private notes and, when configured, shared organizational memory. Results may suggest which teammate to ask for fresher working context.",
-		), handleTeamMemoryQuery)
-		mcp.AddTool(server, officeWriteTool(
-			"team_memory_write",
-			"Store a private note by default, or write directly to shared durable memory when the result is real. Durable private notes may be flagged as promotion candidates.",
-		), handleTeamMemoryWrite)
-		mcp.AddTool(server, officeWriteTool(
-			"team_memory_promote",
-			"Promote one of your private notes into shared durable memory after it becomes canonical.",
-		), handleTeamMemoryPromote)
+		registerSharedMemoryTools(server)
 		mcp.AddTool(server, officeWriteTool(
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
@@ -599,20 +639,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
 	), handleTeamPlan)
 
-	mcp.AddTool(server, readOnlyTool(
-		"team_memory_query",
-		"Query your private notes and, when configured, shared organizational memory. Results may suggest which teammate to ask for fresher working context.",
-	), handleTeamMemoryQuery)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_memory_write",
-		"Store a private note by default, or write directly to shared durable memory when the result is real. Durable private notes may be flagged as promotion candidates.",
-	), handleTeamMemoryWrite)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_memory_promote",
-		"Promote one of your private notes into shared durable memory after it becomes canonical.",
-	), handleTeamMemoryPromote)
+	registerSharedMemoryTools(server)
 
 	mcp.AddTool(server, readOnlyTool(
 		"team_requests",
@@ -1743,6 +1770,91 @@ func handleTeamMemoryPromote(ctx context.Context, _ *mcp.CallToolRequest, args T
 	return textResult(fmt.Sprintf("Promoted private note %s into shared memory as %s.", entry.Key, strings.TrimSpace(identifier))), nil, nil
 }
 
+// handleTeamWikiWrite posts the article to the broker's wiki worker queue.
+// Queue saturation surfaces as a tool error so the agent sees it and retries
+// on the next turn — no hidden retries.
+func handleTeamWikiWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiWriteArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	path := strings.TrimSpace(args.ArticlePath)
+	if path == "" {
+		return toolError(fmt.Errorf("article_path is required")), nil, nil
+	}
+	mode := strings.TrimSpace(args.Mode)
+	if mode == "" {
+		mode = "create"
+	}
+	switch mode {
+	case "create", "replace", "append_section":
+	default:
+		return toolError(fmt.Errorf("mode must be one of create | replace | append_section; got %q", mode)), nil, nil
+	}
+	if strings.TrimSpace(args.Content) == "" {
+		return toolError(fmt.Errorf("content is required")), nil, nil
+	}
+	var result struct {
+		Path         string `json:"path"`
+		CommitSHA    string `json:"commit_sha"`
+		BytesWritten int    `json:"bytes_written"`
+	}
+	err = brokerPostJSON(ctx, "/wiki/write", map[string]any{
+		"slug":           slug,
+		"path":           path,
+		"mode":           mode,
+		"content":        args.Content,
+		"commit_message": args.CommitMsg,
+	}, &result)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"path":          result.Path,
+		"commit_sha":    result.CommitSHA,
+		"bytes_written": result.BytesWritten,
+	})
+	return textResult(string(payload)), nil, nil
+}
+
+// handleTeamWikiRead returns the raw article bytes.
+func handleTeamWikiRead(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiReadArgs) (*mcp.CallToolResult, any, error) {
+	path := strings.TrimSpace(args.ArticlePath)
+	if path == "" {
+		return toolError(fmt.Errorf("article_path is required")), nil, nil
+	}
+	bytes, err := brokerGetRaw(ctx, "/wiki/read?path="+url.QueryEscape(path))
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(string(bytes)), nil, nil
+}
+
+// handleTeamWikiSearch runs a literal substring search.
+func handleTeamWikiSearch(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiSearchArgs) (*mcp.CallToolResult, any, error) {
+	pattern := strings.TrimSpace(args.Pattern)
+	if pattern == "" {
+		return toolError(fmt.Errorf("pattern is required")), nil, nil
+	}
+	var result struct {
+		Hits []map[string]any `json:"hits"`
+	}
+	if err := brokerGetJSON(ctx, "/wiki/search?pattern="+url.QueryEscape(pattern), &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	payload, _ := json.Marshal(result.Hits)
+	return textResult(string(payload)), nil, nil
+}
+
+// handleTeamWikiList returns the auto-regenerated catalog at index/all.md.
+func handleTeamWikiList(ctx context.Context, _ *mcp.CallToolRequest, _ TeamWikiListArgs) (*mcp.CallToolResult, any, error) {
+	bytes, err := brokerGetRaw(ctx, "/wiki/list")
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(string(bytes)), nil, nil
+}
+
 func handleTeamTaskAck(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAckArgs) (*mcp.CallToolResult, any, error) {
 	mySlug, err := resolveSlug(args.MySlug)
 	if err != nil {
@@ -2835,6 +2947,26 @@ func brokerGetJSON(ctx context.Context, path string, out any) error {
 		return nil
 	}
 	return json.NewDecoder(res.Body).Decode(out)
+}
+
+// brokerGetRaw is like brokerGetJSON but returns the raw response body for
+// endpoints that serve text/plain (the wiki read / list endpoints).
+func brokerGetRaw(ctx context.Context, path string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerBaseURL()+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header = authHeaders()
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(res.Body, 4*1024*1024))
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, fmt.Errorf("broker GET %s failed: %s %s", path, res.Status, strings.TrimSpace(string(body)))
+	}
+	return body, nil
 }
 
 func brokerPostJSON(ctx context.Context, path string, body any, out any) error {
