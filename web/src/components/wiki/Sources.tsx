@@ -1,4 +1,5 @@
 import PixelAvatar from './PixelAvatar'
+import { formatAgentName } from '../../lib/agentName'
 
 /** Numbered references — each entry is one git commit that informed the article. */
 
@@ -35,7 +36,7 @@ export default function Sources({ items, loading = false }: SourcesProps) {
             <span className="wk-commit-msg">{item.msg}</span>
             <span className="wk-agent">
               <PixelAvatar slug={item.authorSlug} size={12} />
-              {item.authorName || item.authorSlug.toUpperCase()}
+              {item.authorName || formatAgentName(item.authorSlug)}
               {' • '}
               <a href={`#/wiki/commit/${item.commitSha}`}>{item.commitSha.slice(0, 7)}</a>
               {' • '}

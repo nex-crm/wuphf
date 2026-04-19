@@ -1,4 +1,5 @@
 import PixelAvatar from './PixelAvatar'
+import { formatAgentName } from '../../lib/agentName'
 
 /** Right-rail backlinks: articles that link TO this article. */
 
@@ -34,7 +35,7 @@ export default function ReferencedBy({ backlinks, onNavigate }: ReferencedByProp
           >
             <PixelAvatar slug={b.author_slug} size={16} />
             {b.title}
-            <span className="wk-path">{b.author_slug.toUpperCase()}</span>
+            <span className="wk-path">{formatAgentName(b.author_slug)}</span>
           </a>
         ))}
       </div>

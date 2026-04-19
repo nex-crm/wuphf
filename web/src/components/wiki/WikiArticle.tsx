@@ -26,6 +26,7 @@ import {
 } from '../../api/wiki'
 import type { SourceItem } from './Sources'
 import { wikiLinkRemarkPlugin } from '../../lib/wikilink'
+import { formatAgentName } from '../../lib/agentName'
 
 interface WikiArticleProps {
   path: string
@@ -92,7 +93,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
     return historyCommits.map((c) => ({
       commitSha: c.sha,
       authorSlug: c.author_slug,
-      authorName: c.author_slug.toUpperCase(),
+      authorName: formatAgentName(c.author_slug),
       msg: c.msg,
       date: c.date,
     }))
@@ -123,7 +124,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   const byline = (
     <Byline
       authorSlug={article.last_edited_by}
-      authorName={article.last_edited_by.toUpperCase()}
+      authorName={formatAgentName(article.last_edited_by)}
       lastEditedTs={article.last_edited_ts}
       revisions={article.revisions}
     />
@@ -133,7 +134,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
     <>
       <main className="wk-article-col">
         <ArticleStatusBanner
-          message={`${article.last_edited_by.toUpperCase()} is editing this article right now.`}
+          message={`${formatAgentName(article.last_edited_by)} is editing this article right now.`}
           liveAgent={article.last_edited_by}
           revisions={article.revisions}
           contributors={article.contributors.length}
@@ -230,7 +231,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
         )}
         <CategoriesFooter tags={article.categories} />
         <PageFooter
-          lastEditedBy={article.last_edited_by.toUpperCase()}
+          lastEditedBy={formatAgentName(article.last_edited_by)}
           lastEditedTs={article.last_edited_ts}
           articlePath={article.path}
         />
