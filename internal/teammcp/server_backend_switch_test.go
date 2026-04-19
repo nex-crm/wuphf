@@ -75,8 +75,8 @@ func TestConfigureServerToolsBackendMatrix(t *testing.T) {
 			commonPresent: []string{"team_broadcast", "team_poll"},
 		},
 		{
-			name:    "none/office",
-			backend: "none",
+			name:     "none/office",
+			backend:  "none",
 			mustHave: []string{},
 			mustNotHave: []string{
 				"team_memory_query",
