@@ -465,22 +465,22 @@ type Broker struct {
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
 	// produce a truncated/overlaid file.
-	configMu sync.Mutex
-	server              *http.Server
-	token               string          // shared secret for authenticating requests
-	addr                string          // actual listen address (useful when port=0)
-	webUIOrigins        []string        // allowed CORS origins for web UI (set by ServeWebUI)
-	runtimeProvider     string          // "codex" or "claude" — set by launcher
-	packSlug            string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
-	blankSlateLaunch    bool            // start without a saved blueprint and synthesize the first operation
-	openclawBridge      *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
-	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
-	generateChannelFn   func(prompt string) (generatedChannelTemplate, error)
-	policies            []officePolicy // active office operating rules
-	rateLimitBuckets    map[string]ipRateLimitBucket
-	rateLimitWindow     time.Duration
-	rateLimitRequests   int
-	lastRateLimitPrune  time.Time
+	configMu           sync.Mutex
+	server             *http.Server
+	token              string          // shared secret for authenticating requests
+	addr               string          // actual listen address (useful when port=0)
+	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
+	runtimeProvider    string          // "codex" or "claude" — set by launcher
+	packSlug           string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
+	blankSlateLaunch   bool            // start without a saved blueprint and synthesize the first operation
+	openclawBridge     *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
+	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
+	policies           []officePolicy // active office operating rules
+	rateLimitBuckets   map[string]ipRateLimitBucket
+	rateLimitWindow    time.Duration
+	rateLimitRequests  int
+	lastRateLimitPrune time.Time
 
 	// Agent-scoped buckets — applied to authenticated agent traffic even though
 	// the IP-scoped bucket above exempts callers with a valid Bearer token. This
@@ -5181,23 +5181,23 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			LLMProvider         *string   `json:"llm_provider,omitempty"`
 			LLMProviderPriority *[]string `json:"llm_provider_priority,omitempty"`
 			MemoryBackend       *string   `json:"memory_backend,omitempty"`
-			ActionProvider  *string `json:"action_provider,omitempty"`
-			TeamLeadSlug    *string `json:"team_lead_slug,omitempty"`
-			MaxConcurrent   *int    `json:"max_concurrent_agents,omitempty"`
-			DefaultFormat   *string `json:"default_format,omitempty"`
-			DefaultTimeout  *int    `json:"default_timeout,omitempty"`
-			Blueprint       *string `json:"blueprint,omitempty"`
-			Email           *string `json:"email,omitempty"`
-			DevURL          *string `json:"dev_url,omitempty"`
-			CompanyName     *string `json:"company_name,omitempty"`
-			CompanyDesc     *string `json:"company_description,omitempty"`
-			CompanyGoals    *string `json:"company_goals,omitempty"`
-			CompanySize     *string `json:"company_size,omitempty"`
-			CompanyPriority *string `json:"company_priority,omitempty"`
-			InsightsPoll    *int    `json:"insights_poll_minutes,omitempty"`
-			TaskFollowUp    *int    `json:"task_follow_up_minutes,omitempty"`
-			TaskReminder    *int    `json:"task_reminder_minutes,omitempty"`
-			TaskRecheck     *int    `json:"task_recheck_minutes,omitempty"`
+			ActionProvider      *string   `json:"action_provider,omitempty"`
+			TeamLeadSlug        *string   `json:"team_lead_slug,omitempty"`
+			MaxConcurrent       *int      `json:"max_concurrent_agents,omitempty"`
+			DefaultFormat       *string   `json:"default_format,omitempty"`
+			DefaultTimeout      *int      `json:"default_timeout,omitempty"`
+			Blueprint           *string   `json:"blueprint,omitempty"`
+			Email               *string   `json:"email,omitempty"`
+			DevURL              *string   `json:"dev_url,omitempty"`
+			CompanyName         *string   `json:"company_name,omitempty"`
+			CompanyDesc         *string   `json:"company_description,omitempty"`
+			CompanyGoals        *string   `json:"company_goals,omitempty"`
+			CompanySize         *string   `json:"company_size,omitempty"`
+			CompanyPriority     *string   `json:"company_priority,omitempty"`
+			InsightsPoll        *int      `json:"insights_poll_minutes,omitempty"`
+			TaskFollowUp        *int      `json:"task_follow_up_minutes,omitempty"`
+			TaskReminder        *int      `json:"task_reminder_minutes,omitempty"`
+			TaskRecheck         *int      `json:"task_recheck_minutes,omitempty"`
 			// Secret fields
 			APIKey          *string `json:"api_key,omitempty"`
 			OpenAIAPIKey    *string `json:"openai_api_key,omitempty"`
