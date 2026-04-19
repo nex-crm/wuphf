@@ -163,6 +163,7 @@ func importFromLegacyDB(portOverride int) (importedBrokerState, int, int, error)
 		}
 	}
 
+	// secretlint-disable-next-line @secretlint/secretlint-rule-database-connection-string
 	connStr := fmt.Sprintf("postgres://postgres:postgres@localhost:%d/postgres?sslmode=disable", port)
 	fmt.Printf("Connecting to external orchestrator (localhost:%d)...\n", port)
 
