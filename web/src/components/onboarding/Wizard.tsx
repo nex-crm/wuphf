@@ -71,13 +71,18 @@ const API_KEY_FIELDS = [
   { key: 'GOOGLE_API_KEY', label: 'Google', hint: 'Powers Gemini-based agents' },
 ] as const
 
-type MemoryBackend = 'nex' | 'gbrain' | 'none'
+type MemoryBackend = 'markdown' | 'nex' | 'gbrain' | 'none'
 
 const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
   value: MemoryBackend
   label: string
   hint: string
 }> = [
+  {
+    value: 'markdown',
+    label: 'Markdown (default)',
+    hint: 'Git-native team wiki in ~/.wuphf/wiki. File-over-app, `git clone`-able. No API key needed.',
+  },
   {
     value: 'nex',
     label: 'Nex',
