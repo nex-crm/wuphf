@@ -431,3 +431,47 @@ workflows:
       proof: Reporting evidence persisted successfully.
       inputs:
         operation_name: Local Business AI Package
+
+wiki_schema:
+  dirs:
+    - team/clients/
+    - team/deployment/
+    - team/playbooks/
+    - team/decisions/
+  bootstrap:
+    - path: team/clients/intake.md
+      title: "Local business intake"
+      skeleton: |
+        # Local business intake
+
+        _(One page per client gets forked off this template as the team signs a deployment. Capture the real-world context that never makes it into the CRM: parking, who has the keys, when the owner is reachable, which staff will actually touch the AI.)_
+
+        ## Essentials
+        - Business type and footprint
+        - Primary owner / decision maker
+        - Who uses it day-to-day
+        - What "working" looks like for them in plain English
+    - path: team/deployment/kiosk-setup.md
+      title: "Kiosk and on-site deployment"
+      skeleton: |
+        # Kiosk and on-site deployment
+
+        _(Hardware choices, network quirks, authentication patterns for storefront setups. Add a new subsection every time a deployment teaches us something non-obvious.)_
+    - path: team/deployment/remote-setup.md
+      title: "Remote and BYOD deployment"
+      skeleton: |
+        # Remote and BYOD deployment
+
+        _(For clients whose staff use their own phones or laptops. Access control patterns, offline fallback, data boundaries.)_
+    - path: team/playbooks/first-week.md
+      title: "First week playbook"
+      skeleton: |
+        # First week playbook
+
+        _(The first 7 days after go-live are where most local businesses decide if the AI package is worth keeping. Document the call cadence, the "it's not doing X" triage tree, and the wins worth amplifying.)_
+    - path: team/decisions/common-pitfalls.md
+      title: "Common pitfalls log"
+      skeleton: |
+        # Common pitfalls log
+
+        _(Every deployment has failure modes. Record them here, dated, with the fix. Future onboardings search this page first.)_
