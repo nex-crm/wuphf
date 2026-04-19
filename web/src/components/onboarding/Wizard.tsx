@@ -50,30 +50,31 @@ const STEP_ORDER: readonly WizardStep[] = [
   'task',
 ] as const
 
-const RUNTIME_OPTIONS = ['Claude Code', 'Codex', 'Cursor', 'Windsurf', 'Other'] as const
+// Each runtime has a display label, the binary name the broker's prereqs
+// check looks for, a canonical install page to link to when missing, and
+// — for the runtimes the broker can actually dispatch agents to — the
+// provider id the broker expects on POST /config.
+interface RuntimeSpec {
+  label: string
+  binary: string
+  installUrl: string
+  provider: 'claude-code' | 'codex' | null
+}
 
-// Runtimes that authenticate agents through their own CLI login (claude login,
-// codex login, etc.). When one of these is selected, direct API keys are
-// optional — the CLI handles provider auth. Only "Other" falls back to
-// requiring a raw key.
-const RUNTIMES_WITH_OWN_AUTH: ReadonlySet<string> = new Set([
-  'Claude Code',
-  'Codex',
-  'Cursor',
-  'Windsurf',
-])
+const RUNTIMES: readonly RuntimeSpec[] = [
+  { label: 'Claude Code', binary: 'claude', installUrl: 'https://claude.ai/code', provider: 'claude-code' },
+  { label: 'Codex', binary: 'codex', installUrl: 'https://github.com/openai/codex', provider: 'codex' },
+  { label: 'Cursor', binary: 'cursor', installUrl: 'https://cursor.com/', provider: null },
+  { label: 'Windsurf', binary: 'windsurf', installUrl: 'https://codeium.com/windsurf', provider: null },
+] as const
 
-// Map UI runtime labels to the provider enum the broker validates on POST /config.
-// Labels without a backend equivalent return null and are skipped on persist —
-// the broker keeps its existing default (claude-code) until the user picks a
-// supported runtime. Keeping this local to the wizard so the UI can list
-// aspirational runtimes without lying about what will actually run.
-const RUNTIME_LABEL_TO_PROVIDER: Record<string, 'claude-code' | 'codex' | null> = {
-  'Claude Code': 'claude-code',
-  Codex: 'codex',
-  Cursor: null,
-  Windsurf: null,
-  Other: null,
+interface PrereqResult {
+  name: string
+  required: boolean
+  found: boolean
+  ok?: boolean
+  version?: string
+  install_url?: string
 }
 
 const API_KEY_FIELDS = [
@@ -439,8 +440,11 @@ function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
 /* ─── Step 5: Setup ─── */
 
 interface SetupStepProps {
-  runtime: string
-  onChangeRuntime: (v: string) => void
+  prereqs: PrereqResult[]
+  prereqsLoading: boolean
+  runtimePriority: string[]
+  onToggleRuntime: (label: string) => void
+  onReorderRuntime: (label: string, direction: -1 | 1) => void
   apiKeys: Record<string, string>
   onChangeApiKey: (key: string, value: string) => void
   memoryBackend: MemoryBackend
@@ -449,9 +453,16 @@ interface SetupStepProps {
   onBack: () => void
 }
 
+function detectedBinary(prereqs: PrereqResult[], binary: string): PrereqResult | undefined {
+  return prereqs.find((p) => p.name === binary)
+}
+
 function SetupStep({
-  runtime,
-  onChangeRuntime,
+  prereqs,
+  prereqsLoading,
+  runtimePriority,
+  onToggleRuntime,
+  onReorderRuntime,
   apiKeys,
   onChangeApiKey,
   memoryBackend,
@@ -459,68 +470,178 @@ function SetupStep({
   onNext,
   onBack,
 }: SetupStepProps) {
-  const runtimeHasOwnAuth = RUNTIMES_WITH_OWN_AUTH.has(runtime)
+  // A runtime is usable only when its binary is actually present on PATH.
+  // "Selected and installed" drives whether we can continue without keys.
+  const hasInstalledSelection = runtimePriority.some((label) => {
+    const spec = RUNTIMES.find((r) => r.label === label)
+    if (!spec) return false
+    const detection = detectedBinary(prereqs, spec.binary)
+    return Boolean(detection?.found)
+  })
   const hasAtLeastOneKey = Object.values(apiKeys).some((v) => v.trim().length > 0)
-  const canContinue = runtimeHasOwnAuth || hasAtLeastOneKey
+  const canContinue = hasInstalledSelection || hasAtLeastOneKey
 
   return (
     <div className="wizard-step">
       <div className="wizard-panel">
         <p className="wizard-panel-title">How should agents run?</p>
         <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '-8px 0 12px 0' }}>
-          Pick the CLI you already use. Its login handles provider auth, so you
-          won&apos;t need API keys. Choose <strong>Other</strong> to plug in raw
-          keys instead.
+          Pick the CLIs you have installed. Each CLI&apos;s login handles its
+          own provider auth, so no API keys are needed. Select multiple to set
+          a fallback order — if the first one fails, agents fall through to
+          the next.
         </p>
-        <div className="runtime-grid">
-          {RUNTIME_OPTIONS.map((opt) => (
-            <button
-              key={opt}
-              className={`runtime-tile ${runtime === opt ? 'selected' : ''}`}
-              onClick={() => onChangeRuntime(opt)}
-              type="button"
-            >
-              {opt}
-            </button>
-          ))}
-        </div>
 
-        {!runtimeHasOwnAuth && (
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-            <p
-              style={{
-                fontSize: 13,
-                fontWeight: 600,
-                margin: '0 0 4px 0',
-                color: 'var(--text-primary)',
-              }}
-            >
-              {ONBOARDING_COPY.step2_keys_title}
+        {prereqsLoading ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '8px 0' }}>
+            Checking which CLIs are installed&hellip;
+          </div>
+        ) : (
+          <div className="runtime-grid">
+            {RUNTIMES.map((spec) => {
+              const detection = detectedBinary(prereqs, spec.binary)
+              const installed = Boolean(detection?.found)
+              const priorityIdx = runtimePriority.indexOf(spec.label)
+              const selected = priorityIdx >= 0
+              const classes = [
+                'runtime-tile',
+                selected ? 'selected' : '',
+                installed ? '' : 'disabled',
+              ]
+                .filter(Boolean)
+                .join(' ')
+              return (
+                <button
+                  key={spec.label}
+                  className={classes}
+                  onClick={() => {
+                    if (!installed) return
+                    onToggleRuntime(spec.label)
+                  }}
+                  type="button"
+                  disabled={!installed}
+                  aria-disabled={!installed}
+                  aria-pressed={selected}
+                  title={
+                    installed
+                      ? detection?.version
+                        ? `${spec.label} — ${detection.version}`
+                        : spec.label
+                      : `${spec.label} — not installed`
+                  }
+                >
+                  {selected && (
+                    <span className="runtime-priority-badge" aria-label={`Priority ${priorityIdx + 1}`}>
+                      {priorityIdx + 1}
+                    </span>
+                  )}
+                  <div className="runtime-tile-head">
+                    <span
+                      className={`runtime-tile-status ${installed ? 'installed' : ''}`}
+                      aria-hidden="true"
+                    />
+                    {spec.label}
+                  </div>
+                  <div className="runtime-tile-meta">
+                    {installed ? (
+                      detection?.version ? detection.version : 'Installed'
+                    ) : (
+                      <>
+                        Not installed{' · '}
+                        <a
+                          className="runtime-tile-install-link"
+                          href={spec.installUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          install
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {runtimePriority.length > 1 && (
+          <div className="runtime-priority-controls">
+            <p className="runtime-priority-title">Fallback order</p>
+            <p className="runtime-priority-hint">
+              Agents try these in order. Use the arrows to reorder.
             </p>
-            <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px 0' }}>
-              At least one API key is needed so agents can reason. You can add
-              more later.
-            </p>
-            {API_KEY_FIELDS.map((field) => (
-              <div className="key-row" key={field.key}>
-                <div className="key-label-wrap">
-                  <span className="key-label">{field.label}</span>
-                  <span className="key-hint">{field.hint}</span>
-                </div>
-                <div className="key-input-wrap">
-                  <input
-                    className="input"
-                    type="password"
-                    placeholder={field.key}
-                    value={apiKeys[field.key] ?? ''}
-                    onChange={(e) => onChangeApiKey(field.key, e.target.value)}
-                    autoComplete="off"
-                  />
-                </div>
+            {runtimePriority.map((label, idx) => (
+              <div key={label} className="runtime-priority-row">
+                <span className="runtime-priority-row-rank">#{idx + 1}</span>
+                <span className="runtime-priority-row-label">{label}</span>
+                <button
+                  type="button"
+                  className="runtime-priority-btn"
+                  onClick={() => onReorderRuntime(label, -1)}
+                  disabled={idx === 0}
+                  aria-label={`Move ${label} up`}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="runtime-priority-btn"
+                  onClick={() => onReorderRuntime(label, 1)}
+                  disabled={idx === runtimePriority.length - 1}
+                  aria-label={`Move ${label} down`}
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  className="runtime-priority-btn"
+                  onClick={() => onToggleRuntime(label)}
+                  aria-label={`Remove ${label}`}
+                >
+                  ✕
+                </button>
               </div>
             ))}
           </div>
         )}
+
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+          <p
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              margin: '0 0 4px 0',
+              color: 'var(--text-primary)',
+            }}
+          >
+            API keys {hasInstalledSelection ? '(optional fallback)' : '(required)'}
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px 0' }}>
+            {hasInstalledSelection
+              ? 'Only used if every selected CLI fails. Leave blank to rely on the CLI login.'
+              : 'No installed CLI selected. Add at least one key so agents can reason.'}
+          </p>
+          {API_KEY_FIELDS.map((field) => (
+            <div className="key-row" key={field.key}>
+              <div className="key-label-wrap">
+                <span className="key-label">{field.label}</span>
+                <span className="key-hint">{field.hint}</span>
+              </div>
+              <div className="key-input-wrap">
+                <input
+                  className="input"
+                  type="password"
+                  placeholder={field.key}
+                  value={apiKeys[field.key] ?? ''}
+                  onChange={(e) => onChangeApiKey(field.key, e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="wizard-panel">
@@ -705,7 +826,13 @@ export function Wizard({ onComplete }: WizardProps) {
   const [agents, setAgents] = useState<BlueprintAgent[]>([])
 
   // Step 5: setup
-  const [runtime, setRuntime] = useState<string>(RUNTIME_OPTIONS[0])
+  const [prereqs, setPrereqs] = useState<PrereqResult[]>([])
+  const [prereqsLoading, setPrereqsLoading] = useState(true)
+  // Ordered list of runtime labels (matches RUNTIMES[].label). Position in
+  // the array is the fallback priority. Initially empty — we auto-populate
+  // with the first installed CLI once prereqs land so the happy path still
+  // works with zero clicks.
+  const [runtimePriority, setRuntimePriority] = useState<string[]>([])
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [memoryBackend, setMemoryBackend] = useState<MemoryBackend>('nex')
 
@@ -748,6 +875,60 @@ export function Wizard({ onComplete }: WizardProps) {
     return () => {
       cancelled = true
     }
+  }, [])
+
+  // Fetch prereqs on mount so the runtime picker shows which CLIs are
+  // actually installed. Auto-select the first detected runtime so users
+  // with a single CLI installed don't have to click.
+  useEffect(() => {
+    let cancelled = false
+    setPrereqsLoading(true)
+
+    get<{ prereqs?: PrereqResult[] } | PrereqResult[]>('/onboarding/prereqs')
+      .then((data) => {
+        if (cancelled) return
+        const list = Array.isArray(data) ? data : data.prereqs ?? []
+        setPrereqs(list)
+        setRuntimePriority((current) => {
+          if (current.length > 0) return current
+          const firstInstalled = RUNTIMES.find((spec) => {
+            const det = list.find((p) => p.name === spec.binary)
+            return Boolean(det?.found)
+          })
+          return firstInstalled ? [firstInstalled.label] : []
+        })
+      })
+      .catch(() => {
+        // Broker may not expose the endpoint yet; leave prereqs empty and
+        // the user can still add API keys to proceed.
+      })
+      .finally(() => {
+        if (!cancelled) setPrereqsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const toggleRuntime = useCallback((label: string) => {
+    setRuntimePriority((prev) => {
+      if (prev.includes(label)) return prev.filter((l) => l !== label)
+      return [...prev, label]
+    })
+  }, [])
+
+  const reorderRuntime = useCallback((label: string, direction: -1 | 1) => {
+    setRuntimePriority((prev) => {
+      const idx = prev.indexOf(label)
+      if (idx < 0) return prev
+      const next = idx + direction
+      if (next < 0 || next >= prev.length) return prev
+      const out = [...prev]
+      const [item] = out.splice(idx, 1)
+      out.splice(next, 0, item)
+      return out
+    })
   }, [])
 
   // When a blueprint is selected, populate agents
@@ -811,24 +992,39 @@ export function Wizard({ onComplete }: WizardProps) {
     async (skipTask: boolean) => {
       setSubmitting(true)
       try {
-        // Persist memory backend + LLM provider selection first so the broker
-        // reads them on next launch. Fire-and-forget — a failure here should
-        // not block completing onboarding. Unsupported runtime labels (Cursor,
-        // Windsurf, Other) are skipped; only claude-code and codex are wired.
-        post('/config', { memory_backend: memoryBackend }).catch(() => {})
-        const llmProvider = RUNTIME_LABEL_TO_PROVIDER[runtime]
-        if (llmProvider) {
-          post('/config', { llm_provider: llmProvider }).catch(() => {})
-        }
+        // Translate UI labels to the provider ids the broker validates. Only
+        // labels that map to a supported provider ("claude-code", "codex")
+        // are persisted — aspirational runtimes (Cursor, Windsurf) are shown
+        // in the UI but can't yet be dispatched, so we drop them from the
+        // priority list we send to the server.
+        const providerPriority = runtimePriority
+          .map((label) => RUNTIMES.find((r) => r.label === label)?.provider)
+          .filter((p): p is 'claude-code' | 'codex' => p != null)
 
-        // Post the onboarding payload. Body shape is historical; the broker
-        // currently only acts on {task, skip_task} but the extra fields are
-        // forward-compatible.
+        // Persist memory backend + LLM provider choice + priority fallback
+        // list so the broker reads them on next launch. Send as a single
+        // POST — the broker's handleConfig does a non-atomic read-mutate-
+        // write, so two parallel calls race and corrupt config.json.
+        const configPayload: Record<string, unknown> = {
+          memory_backend: memoryBackend,
+        }
+        if (providerPriority.length > 0) {
+          configPayload.llm_provider = providerPriority[0]
+          configPayload.llm_provider_priority = providerPriority
+        }
+        post('/config', configPayload).catch(() => {})
+
+        // Primary runtime label for the onboarding payload (best-effort;
+        // the broker only acts on {task, skip_task} today, but the extra
+        // fields are forward-compatible).
+        const primaryRuntime = runtimePriority[0] ?? ''
+
         await post('/onboarding/complete', {
           company,
           description,
           priority,
-          runtime,
+          runtime: primaryRuntime,
+          runtime_priority: runtimePriority,
           memory_backend: memoryBackend,
           blueprint: selectedBlueprint,
           agents: agents.filter((a) => a.checked).map((a) => a.slug),
@@ -848,7 +1044,7 @@ export function Wizard({ onComplete }: WizardProps) {
       company,
       description,
       priority,
-      runtime,
+      runtimePriority,
       memoryBackend,
       selectedBlueprint,
       agents,
@@ -903,8 +1099,11 @@ export function Wizard({ onComplete }: WizardProps) {
 
         {step === 'setup' && (
           <SetupStep
-            runtime={runtime}
-            onChangeRuntime={setRuntime}
+            prereqs={prereqs}
+            prereqsLoading={prereqsLoading}
+            runtimePriority={runtimePriority}
+            onToggleRuntime={toggleRuntime}
+            onReorderRuntime={reorderRuntime}
             apiKeys={apiKeys}
             onChangeApiKey={handleApiKeyChange}
             memoryBackend={memoryBackend}

@@ -464,21 +464,26 @@ type Broker struct {
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
-	server              *http.Server
-	token               string          // shared secret for authenticating requests
-	addr                string          // actual listen address (useful when port=0)
-	webUIOrigins        []string        // allowed CORS origins for web UI (set by ServeWebUI)
-	runtimeProvider     string          // "codex" or "claude" — set by launcher
-	packSlug            string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
-	blankSlateLaunch    bool            // start without a saved blueprint and synthesize the first operation
-	openclawBridge      *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
-	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
-	generateChannelFn   func(prompt string) (generatedChannelTemplate, error)
-	policies            []officePolicy // active office operating rules
-	rateLimitBuckets    map[string]ipRateLimitBucket
-	rateLimitWindow     time.Duration
-	rateLimitRequests   int
-	lastRateLimitPrune  time.Time
+	// configMu serializes handleConfig POST reads/writes so concurrent
+	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
+	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
+	// produce a truncated/overlaid file.
+	configMu           sync.Mutex
+	server             *http.Server
+	token              string          // shared secret for authenticating requests
+	addr               string          // actual listen address (useful when port=0)
+	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
+	runtimeProvider    string          // "codex" or "claude" — set by launcher
+	packSlug           string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
+	blankSlateLaunch   bool            // start without a saved blueprint and synthesize the first operation
+	openclawBridge     *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
+	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
+	policies           []officePolicy // active office operating rules
+	rateLimitBuckets   map[string]ipRateLimitBucket
+	rateLimitWindow    time.Duration
+	rateLimitRequests  int
+	lastRateLimitPrune time.Time
 
 	// Agent-scoped buckets — applied to authenticated agent traffic even though
 	// the IP-scoped bucket above exempts callers with a valid Bearer token. This
@@ -5237,6 +5242,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			// Runtime
 			"llm_provider":          config.ResolveLLMProvider(""),
+			"llm_provider_priority": cfg.LLMProviderPriority,
 			"memory_backend":        config.ResolveMemoryBackend(""),
 			"action_provider":       config.ResolveActionProvider(),
 			"team_lead_slug":        cfg.TeamLeadSlug,
@@ -5275,26 +5281,31 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"config_path": config.ConfigPath(),
 		})
 	case http.MethodPost:
+		// Serialize POST reads/writes; config.Save is not atomic against
+		// concurrent writers and two parallel calls can corrupt the file.
+		b.configMu.Lock()
+		defer b.configMu.Unlock()
 		var body struct {
-			LLMProvider     *string `json:"llm_provider,omitempty"`
-			MemoryBackend   *string `json:"memory_backend,omitempty"`
-			ActionProvider  *string `json:"action_provider,omitempty"`
-			TeamLeadSlug    *string `json:"team_lead_slug,omitempty"`
-			MaxConcurrent   *int    `json:"max_concurrent_agents,omitempty"`
-			DefaultFormat   *string `json:"default_format,omitempty"`
-			DefaultTimeout  *int    `json:"default_timeout,omitempty"`
-			Blueprint       *string `json:"blueprint,omitempty"`
-			Email           *string `json:"email,omitempty"`
-			DevURL          *string `json:"dev_url,omitempty"`
-			CompanyName     *string `json:"company_name,omitempty"`
-			CompanyDesc     *string `json:"company_description,omitempty"`
-			CompanyGoals    *string `json:"company_goals,omitempty"`
-			CompanySize     *string `json:"company_size,omitempty"`
-			CompanyPriority *string `json:"company_priority,omitempty"`
-			InsightsPoll    *int    `json:"insights_poll_minutes,omitempty"`
-			TaskFollowUp    *int    `json:"task_follow_up_minutes,omitempty"`
-			TaskReminder    *int    `json:"task_reminder_minutes,omitempty"`
-			TaskRecheck     *int    `json:"task_recheck_minutes,omitempty"`
+			LLMProvider         *string   `json:"llm_provider,omitempty"`
+			LLMProviderPriority *[]string `json:"llm_provider_priority,omitempty"`
+			MemoryBackend       *string   `json:"memory_backend,omitempty"`
+			ActionProvider      *string   `json:"action_provider,omitempty"`
+			TeamLeadSlug        *string   `json:"team_lead_slug,omitempty"`
+			MaxConcurrent       *int      `json:"max_concurrent_agents,omitempty"`
+			DefaultFormat       *string   `json:"default_format,omitempty"`
+			DefaultTimeout      *int      `json:"default_timeout,omitempty"`
+			Blueprint           *string   `json:"blueprint,omitempty"`
+			Email               *string   `json:"email,omitempty"`
+			DevURL              *string   `json:"dev_url,omitempty"`
+			CompanyName         *string   `json:"company_name,omitempty"`
+			CompanyDesc         *string   `json:"company_description,omitempty"`
+			CompanyGoals        *string   `json:"company_goals,omitempty"`
+			CompanySize         *string   `json:"company_size,omitempty"`
+			CompanyPriority     *string   `json:"company_priority,omitempty"`
+			InsightsPoll        *int      `json:"insights_poll_minutes,omitempty"`
+			TaskFollowUp        *int      `json:"task_follow_up_minutes,omitempty"`
+			TaskReminder        *int      `json:"task_reminder_minutes,omitempty"`
+			TaskRecheck         *int      `json:"task_recheck_minutes,omitempty"`
 			// Secret fields
 			APIKey          *string `json:"api_key,omitempty"`
 			OpenAIAPIKey    *string `json:"openai_api_key,omitempty"`
@@ -5324,6 +5335,31 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var providerPriority []string
+		if body.LLMProviderPriority != nil {
+			// Normalize + validate each entry. Unknown entries are rejected so
+			// the stored list only contains provider ids the resolver knows how
+			// to dispatch. Empty list is accepted (means "clear").
+			seen := make(map[string]bool, len(*body.LLMProviderPriority))
+			for _, raw := range *body.LLMProviderPriority {
+				id := strings.TrimSpace(strings.ToLower(raw))
+				if id == "" {
+					continue
+				}
+				switch id {
+				case "claude-code", "codex":
+					// ok
+				default:
+					http.Error(w, "unsupported entry in llm_provider_priority: "+id, http.StatusBadRequest)
+					return
+				}
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				providerPriority = append(providerPriority, id)
+			}
+		}
 		var memory string
 		if body.MemoryBackend != nil {
 			memory = config.NormalizeMemoryBackend(*body.MemoryBackend)
@@ -5339,6 +5375,12 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// Enum/string fields
 		if provider != "" {
 			cfg.LLMProvider = provider
+			changed = true
+		}
+		if body.LLMProviderPriority != nil {
+			// Explicit pointer set means the client wanted to write this field,
+			// even if the final list is empty (which clears the stored order).
+			cfg.LLMProviderPriority = providerPriority
 			changed = true
 		}
 		if memory != "" {

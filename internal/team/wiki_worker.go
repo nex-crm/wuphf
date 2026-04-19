@@ -268,9 +268,10 @@ func (w *WikiWorker) Repo() *Repo {
 //	{ "slug":..., "path":..., "content":..., "mode":..., "commit_message":... }
 //
 // Response: 200 { "path":..., "commit_sha":..., "bytes_written":... }
-//           429 { "error":"wiki queue saturated, retry on next turn" }
-//           500 { "error":"..." }
-//           503 { "error":"..." } when worker is not running
+//
+//	429 { "error":"wiki queue saturated, retry on next turn" }
+//	500 { "error":"..." }
+//	503 { "error":"..." } when worker is not running
 func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
