@@ -19,10 +19,10 @@ export const ONBOARDING_COPY = {
   step2_prereqs_title: 'First, make sure you have the tools',
   step2_keys_title: 'Connect your AI providers',
   step2_cta: 'Ready',
-  step3_title: 'What should this office do first?',
-  step3_placeholder: 'What should the office invent and start operating?',
-  step3_skip: 'Open the office without a first task',
-  step3_cta: 'Start the first loop',
+  step3_title: 'What should the team work on first?',
+  step3_placeholder: 'e.g. Sign our first three pilot customers in the next two weeks.',
+  step3_skip: 'Skip for now',
+  step3_cta: 'Get started',
 } as const
 
 export const DISCONNECT_THRESHOLD = 3

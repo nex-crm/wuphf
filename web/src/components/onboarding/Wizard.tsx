@@ -77,6 +77,64 @@ interface PrereqResult {
   install_url?: string
 }
 
+// Display overrides for blueprints. Backend names/descriptions are long-form
+// ("Bookkeeping and Invoicing Service", "Template for a bookkeeping operation
+// that handles recurring books..."). For the onboarding picker we want short,
+// scannable copy and visible categorization. Overrides are keyed by blueprint
+// id (see templates/operations/*/blueprint.yaml). If a blueprint isn't in the
+// map we fall back to the backend name + description, so new blueprints still
+// render without frontend changes.
+type BlueprintCategoryKey = 'services' | 'media' | 'product'
+
+interface BlueprintDisplay {
+  category: BlueprintCategoryKey
+  shortDescription: string
+  icon: string
+}
+
+const BLUEPRINT_CATEGORIES: ReadonlyArray<{
+  key: BlueprintCategoryKey
+  label: string
+  hint: string
+}> = [
+  { key: 'services', label: 'Services', hint: 'Client work, done by your office' },
+  { key: 'media', label: 'Media & Community', hint: 'Content or community as the business' },
+  { key: 'product', label: 'Products', hint: 'Software you build and sell' },
+] as const
+
+const BLUEPRINT_DISPLAY: Record<string, BlueprintDisplay> = {
+  'bookkeeping-invoicing-service': {
+    category: 'services',
+    shortDescription: 'Books · invoices · monthly close',
+    icon: '📊',
+  },
+  'local-business-ai-package': {
+    category: 'services',
+    shortDescription: 'Intake · booking · follow-up',
+    icon: '🏪',
+  },
+  'multi-agent-workflow-consulting': {
+    category: 'services',
+    shortDescription: 'Client engagements · workflow delivery',
+    icon: '💼',
+  },
+  'niche-crm': {
+    category: 'product',
+    shortDescription: 'Build & launch a focused CRM',
+    icon: '🎯',
+  },
+  'paid-discord-community': {
+    category: 'media',
+    shortDescription: 'Moderation · onboarding · engagement',
+    icon: '💬',
+  },
+  'youtube-factory': {
+    category: 'media',
+    shortDescription: 'Script · film · publish · analyze',
+    icon: '📹',
+  },
+}
+
 const API_KEY_FIELDS = [
   { key: 'ANTHROPIC_API_KEY', label: 'Anthropic', hint: 'Powers Claude-based agents' },
   { key: 'OPENAI_API_KEY', label: 'OpenAI', hint: 'Powers GPT-based agents' },
@@ -214,53 +272,99 @@ function TemplatesStep({
   onNext,
   onBack,
 }: TemplatesStepProps) {
+  // Group templates by display category. Unknown blueprint ids (not in the
+  // frontend catalog) land in a catch-all "Other" bucket so new backend
+  // templates still render, just without the short-description and icon
+  // treatment.
+  const grouped = new Map<BlueprintCategoryKey | 'other', BlueprintTemplate[]>()
+  for (const t of templates) {
+    const display = BLUEPRINT_DISPLAY[t.id]
+    const key: BlueprintCategoryKey | 'other' = display?.category ?? 'other'
+    const list = grouped.get(key) ?? []
+    list.push(t)
+    grouped.set(key, list)
+  }
+
+  const renderTile = (t: BlueprintTemplate) => {
+    const display = BLUEPRINT_DISPLAY[t.id]
+    const icon = display?.icon ?? t.emoji
+    const desc = display?.shortDescription ?? t.description
+    return (
+      <button
+        key={t.id}
+        className={`template-card ${selected === t.id ? 'selected' : ''}`}
+        onClick={() => onSelect(t.id)}
+        type="button"
+      >
+        {icon && <div className="template-card-emoji">{icon}</div>}
+        <div className="template-card-name">{t.name}</div>
+        <div className="template-card-desc">{desc}</div>
+      </button>
+    )
+  }
+
   return (
     <div className="wizard-step">
       <div className="wizard-hero">
         <div className="wizard-eyebrow">
           <span className="status-dot active pulse" />
-          Pick the operating model the office starts with
+          Start with a preset, or build from scratch
         </div>
-        <h1 className="wizard-headline">Choose a blueprint</h1>
+        <h1 className="wizard-headline">What should your office run?</h1>
         <p className="wizard-subhead">
-          Blueprints set the team, stages, and workflows this office will run.
-          Start from a preset or from scratch.
+          Pick the shape of work. We&apos;ll assemble the team, channels, and
+          first tasks around it. You can change anything later.
         </p>
       </div>
 
-      <div className="wizard-panel">
-        {loading ? (
+      {loading ? (
+        <div className="wizard-panel">
           <div style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center', padding: 20 }}>
             Loading blueprints&hellip;
           </div>
-        ) : (
-          <div className="template-grid">
+        </div>
+      ) : (
+        <>
+          {BLUEPRINT_CATEGORIES.map((cat) => {
+            const items = grouped.get(cat.key) ?? []
+            if (items.length === 0) return null
+            return (
+              <div key={cat.key} className="wizard-panel template-group">
+                <div className="template-group-head">
+                  <p className="template-group-label">{cat.label}</p>
+                  <p className="template-group-hint">{cat.hint}</p>
+                </div>
+                <div className="template-grid">{items.map(renderTile)}</div>
+              </div>
+            )
+          })}
+
+          {(grouped.get('other') ?? []).length > 0 && (
+            <div className="wizard-panel template-group">
+              <div className="template-group-head">
+                <p className="template-group-label">Other</p>
+              </div>
+              <div className="template-grid">
+                {(grouped.get('other') ?? []).map(renderTile)}
+              </div>
+            </div>
+          )}
+
+          <div className="template-from-scratch">
             <button
-              className={`template-card ${selected === null ? 'selected' : ''}`}
+              className={`template-from-scratch-btn ${selected === null ? 'selected' : ''}`}
               onClick={() => onSelect(null)}
               type="button"
             >
-              <div className="template-card-emoji">&#x1F4DD;</div>
-              <div className="template-card-name">From scratch</div>
-              <div className="template-card-desc">
-                Start with an empty office and add agents manually.
-              </div>
+              <span className="template-from-scratch-icon">+</span>
+              Start from scratch
+              <span className="template-from-scratch-sub">
+                Empty office, add agents manually
+              </span>
             </button>
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                className={`template-card ${selected === t.id ? 'selected' : ''}`}
-                onClick={() => onSelect(t.id)}
-                type="button"
-              >
-                {t.emoji && <div className="template-card-emoji">{t.emoji}</div>}
-                <div className="template-card-name">{t.name}</div>
-                <div className="template-card-desc">{t.description}</div>
-              </button>
-            ))}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
@@ -721,55 +825,58 @@ function TaskStep({
 }: TaskStepProps) {
   return (
     <div className="wizard-step">
-      <div>
-        <h2
-          style={{
-            fontSize: 18,
-            fontWeight: 700,
-            textAlign: 'left',
-            marginBottom: 4,
-          }}
-        >
+      <div className="wizard-hero">
+        <h1 className="wizard-headline" style={{ fontSize: 28 }}>
           {ONBOARDING_COPY.step3_title}
-        </h2>
+        </h1>
+        {taskTemplates.length > 0 && (
+          <p className="wizard-subhead">
+            Type your own first task, or pick from the blueprint&apos;s
+            suggested sequence below.
+          </p>
+        )}
       </div>
 
-      {taskTemplates.length > 0 && (
-        <div className="template-grid">
-          {taskTemplates.map((t) => (
-            <button
-              key={t.id}
-              className={`template-card ${selectedTaskTemplate === t.id ? 'selected' : ''}`}
-              onClick={() => {
-                onSelectTaskTemplate(selectedTaskTemplate === t.id ? null : t.id)
-                if (t.prompt) onChangeTaskText(t.prompt)
-              }}
-              type="button"
-            >
-              {t.emoji && <div className="template-card-emoji">{t.emoji}</div>}
-              <div className="template-card-name">{t.name}</div>
-              <div className="template-card-desc">{t.description}</div>
-            </button>
-          ))}
-        </div>
-      )}
-
       <div>
-        <label
-          className="label"
-          htmlFor="wiz-task-input"
-          style={{ marginBottom: 8, display: 'block' }}
-        >
-          Or describe the first real business loop
-        </label>
         <textarea
-          className="task-textarea"
+          className="task-textarea task-textarea-primary"
           id="wiz-task-input"
           placeholder={ONBOARDING_COPY.step3_placeholder}
           value={taskText}
           onChange={(e) => onChangeTaskText(e.target.value)}
+          autoFocus
         />
       </div>
+
+      {taskTemplates.length > 0 && (
+        <div className="task-suggestions">
+          <p className="task-suggestions-label">
+            Suggested sequence for this blueprint
+          </p>
+          <div className="task-suggestions-list">
+            {taskTemplates.map((t, idx) => {
+              const isSelected = selectedTaskTemplate === t.id
+              return (
+                <button
+                  key={t.id}
+                  className={`task-suggestion ${isSelected ? 'selected' : ''}`}
+                  onClick={() => {
+                    const nextId = isSelected ? null : t.id
+                    onSelectTaskTemplate(nextId)
+                    if (nextId) {
+                      onChangeTaskText(t.prompt ?? t.name)
+                    }
+                  }}
+                  type="button"
+                >
+                  <span className="task-suggestion-num">{idx + 1}</span>
+                  <span className="task-suggestion-name">{t.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
@@ -852,18 +959,6 @@ export function Wizard({ onComplete }: WizardProps) {
         if (cancelled) return
         const tpls = data.templates ?? []
         setBlueprints(tpls)
-
-        // Also extract task templates if present
-        const tasks: TaskTemplate[] = []
-        for (const t of tpls) {
-          if ((t as unknown as Record<string, unknown>).tasks) {
-            const arr = (t as unknown as Record<string, TaskTemplate[]>).tasks
-            tasks.push(...arr)
-          }
-        }
-        if (tasks.length > 0) {
-          setTaskTemplates(tasks)
-        }
       })
       .catch(() => {
         // Endpoint may not exist yet; continue with empty list
@@ -931,10 +1026,14 @@ export function Wizard({ onComplete }: WizardProps) {
     })
   }, [])
 
-  // When a blueprint is selected, populate agents
+  // When a blueprint is selected, populate agents AND first tasks from that
+  // blueprint only. Previously we flattened tasks across every blueprint, so
+  // the task step showed ~26 tiles of unrelated work — including tasks from
+  // blueprints the user never picked.
   useEffect(() => {
     if (selectedBlueprint === null) {
       setAgents([])
+      setTaskTemplates([])
       return
     }
     const bp = blueprints.find((b) => b.id === selectedBlueprint)
@@ -948,6 +1047,17 @@ export function Wizard({ onComplete }: WizardProps) {
     } else {
       setAgents([])
     }
+    const bpTasks = (bp as unknown as { tasks?: TaskTemplate[] } | undefined)?.tasks
+    setTaskTemplates(Array.isArray(bpTasks) ? bpTasks : [])
+    // Clear any task-template selection and suggestion-derived text when the
+    // blueprint changes. Without this, switching from (say) Consulting to
+    // YouTube Factory leaves "Turn the directive..." stuck in the textarea —
+    // nonsensical in the new context. User-typed custom text is preserved,
+    // since selectedTaskTemplate is null for that path.
+    setSelectedTaskTemplate((prevSel) => {
+      if (prevSel != null) setTaskText('')
+      return null
+    })
   }, [selectedBlueprint, blueprints])
 
   // Navigation helpers
