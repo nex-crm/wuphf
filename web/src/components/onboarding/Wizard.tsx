@@ -22,6 +22,10 @@ interface BlueprintAgent {
   role: string
   emoji?: string
   checked?: boolean
+  // built_in marks the lead agent — always included, never removable.
+  // The backend also refuses to disable or remove a BuiltIn member, so
+  // even if someone bypassed this UI, the broker would reject the write.
+  built_in?: boolean
 }
 
 interface TaskTemplate {
@@ -34,28 +38,101 @@ interface TaskTemplate {
 
 type WizardStep = 'welcome' | 'templates' | 'identity' | 'team' | 'setup' | 'task'
 
+// Step order: company info before blueprint. The blueprint picker is a
+// decision about how the office starts; it makes more sense after the
+// user has anchored who they are than as the very first question.
 const STEP_ORDER: readonly WizardStep[] = [
   'welcome',
-  'templates',
   'identity',
+  'templates',
   'team',
   'setup',
   'task',
 ] as const
 
-const RUNTIME_OPTIONS = ['Claude Code', 'Codex', 'Cursor', 'Windsurf', 'Other'] as const
+// Each runtime has a display label, the binary name the broker's prereqs
+// check looks for, a canonical install page to link to when missing, and
+// — for the runtimes the broker can actually dispatch agents to — the
+// provider id the broker expects on POST /config.
+interface RuntimeSpec {
+  label: string
+  binary: string
+  installUrl: string
+  provider: 'claude-code' | 'codex' | null
+}
 
-// Map UI runtime labels to the provider enum the broker validates on POST /config.
-// Labels without a backend equivalent return null and are skipped on persist —
-// the broker keeps its existing default (claude-code) until the user picks a
-// supported runtime. Keeping this local to the wizard so the UI can list
-// aspirational runtimes without lying about what will actually run.
-const RUNTIME_LABEL_TO_PROVIDER: Record<string, 'claude-code' | 'codex' | null> = {
-  'Claude Code': 'claude-code',
-  Codex: 'codex',
-  Cursor: null,
-  Windsurf: null,
-  Other: null,
+const RUNTIMES: readonly RuntimeSpec[] = [
+  { label: 'Claude Code', binary: 'claude', installUrl: 'https://claude.ai/code', provider: 'claude-code' },
+  { label: 'Codex', binary: 'codex', installUrl: 'https://github.com/openai/codex', provider: 'codex' },
+  { label: 'Cursor', binary: 'cursor', installUrl: 'https://cursor.com/', provider: null },
+  { label: 'Windsurf', binary: 'windsurf', installUrl: 'https://codeium.com/windsurf', provider: null },
+] as const
+
+interface PrereqResult {
+  name: string
+  required: boolean
+  found: boolean
+  ok?: boolean
+  version?: string
+  install_url?: string
+}
+
+// Display overrides for blueprints. Backend names/descriptions are long-form
+// ("Bookkeeping and Invoicing Service", "Template for a bookkeeping operation
+// that handles recurring books..."). For the onboarding picker we want short,
+// scannable copy and visible categorization. Overrides are keyed by blueprint
+// id (see templates/operations/*/blueprint.yaml). If a blueprint isn't in the
+// map we fall back to the backend name + description, so new blueprints still
+// render without frontend changes.
+type BlueprintCategoryKey = 'services' | 'media' | 'product'
+
+interface BlueprintDisplay {
+  category: BlueprintCategoryKey
+  shortDescription: string
+  icon: string
+}
+
+const BLUEPRINT_CATEGORIES: ReadonlyArray<{
+  key: BlueprintCategoryKey
+  label: string
+  hint: string
+}> = [
+  { key: 'services', label: 'Services', hint: 'Client work, done by your office' },
+  { key: 'media', label: 'Media & Community', hint: 'Content or community as the business' },
+  { key: 'product', label: 'Products', hint: 'Software you build and sell' },
+] as const
+
+const BLUEPRINT_DISPLAY: Record<string, BlueprintDisplay> = {
+  'bookkeeping-invoicing-service': {
+    category: 'services',
+    shortDescription: 'Books · invoices · monthly close',
+    icon: '📊',
+  },
+  'local-business-ai-package': {
+    category: 'services',
+    shortDescription: 'Intake · booking · follow-up',
+    icon: '🏪',
+  },
+  'multi-agent-workflow-consulting': {
+    category: 'services',
+    shortDescription: 'Client engagements · workflow delivery',
+    icon: '💼',
+  },
+  'niche-crm': {
+    category: 'product',
+    shortDescription: 'Build & launch a focused CRM',
+    icon: '🎯',
+  },
+  'paid-discord-community': {
+    category: 'media',
+    shortDescription: 'Moderation · onboarding · engagement',
+    icon: '💬',
+  },
+  'youtube-factory': {
+    category: 'media',
+    shortDescription: 'Script · film · publish · analyze',
+    icon: '📹',
+  },
 }
 
 const API_KEY_FIELDS = [
@@ -64,13 +141,18 @@ const API_KEY_FIELDS = [
   { key: 'GOOGLE_API_KEY', label: 'Google', hint: 'Powers Gemini-based agents' },
 ] as const
 
-type MemoryBackend = 'nex' | 'gbrain' | 'none'
+type MemoryBackend = 'markdown' | 'nex' | 'gbrain' | 'none'
 
 const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
   value: MemoryBackend
   label: string
   hint: string
 }> = [
+  {
+    value: 'markdown',
+    label: 'Markdown (default)',
+    hint: 'Git-native team wiki in ~/.wuphf/wiki. File-over-app, `git clone`-able. No API key needed.',
+  },
   {
     value: 'nex',
     label: 'Nex',
@@ -190,60 +272,106 @@ function TemplatesStep({
   onNext,
   onBack,
 }: TemplatesStepProps) {
+  // Group templates by display category. Unknown blueprint ids (not in the
+  // frontend catalog) land in a catch-all "Other" bucket so new backend
+  // templates still render, just without the short-description and icon
+  // treatment.
+  const grouped = new Map<BlueprintCategoryKey | 'other', BlueprintTemplate[]>()
+  for (const t of templates) {
+    const display = BLUEPRINT_DISPLAY[t.id]
+    const key: BlueprintCategoryKey | 'other' = display?.category ?? 'other'
+    const list = grouped.get(key) ?? []
+    list.push(t)
+    grouped.set(key, list)
+  }
+
+  const renderTile = (t: BlueprintTemplate) => {
+    const display = BLUEPRINT_DISPLAY[t.id]
+    const icon = display?.icon ?? t.emoji
+    const desc = display?.shortDescription ?? t.description
+    return (
+      <button
+        key={t.id}
+        className={`template-card ${selected === t.id ? 'selected' : ''}`}
+        onClick={() => onSelect(t.id)}
+        type="button"
+      >
+        {icon && <div className="template-card-emoji">{icon}</div>}
+        <div className="template-card-name">{t.name}</div>
+        <div className="template-card-desc">{desc}</div>
+      </button>
+    )
+  }
+
   return (
     <div className="wizard-step">
       <div className="wizard-hero">
         <div className="wizard-eyebrow">
           <span className="status-dot active pulse" />
-          Pick the operating model the office starts with
+          Start with a preset, or build from scratch
         </div>
-        <h1 className="wizard-headline">Choose a blueprint</h1>
+        <h1 className="wizard-headline">What should your office run?</h1>
         <p className="wizard-subhead">
-          Blueprints set the team, stages, and workflows this office will run.
-          Start from a preset or from scratch.
+          Pick the shape of work. We&apos;ll assemble the team, channels, and
+          first tasks around it. You can change anything later.
         </p>
       </div>
 
-      <div className="wizard-panel">
-        {loading ? (
+      {loading ? (
+        <div className="wizard-panel">
           <div style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center', padding: 20 }}>
             Loading blueprints&hellip;
           </div>
-        ) : (
-          <div className="template-grid">
+        </div>
+      ) : (
+        <>
+          {BLUEPRINT_CATEGORIES.map((cat) => {
+            const items = grouped.get(cat.key) ?? []
+            if (items.length === 0) return null
+            return (
+              <div key={cat.key} className="wizard-panel template-group">
+                <div className="template-group-head">
+                  <p className="template-group-label">{cat.label}</p>
+                  <p className="template-group-hint">{cat.hint}</p>
+                </div>
+                <div className="template-grid">{items.map(renderTile)}</div>
+              </div>
+            )
+          })}
+
+          {(grouped.get('other') ?? []).length > 0 && (
+            <div className="wizard-panel template-group">
+              <div className="template-group-head">
+                <p className="template-group-label">Other</p>
+              </div>
+              <div className="template-grid">
+                {(grouped.get('other') ?? []).map(renderTile)}
+              </div>
+            </div>
+          )}
+
+          <div className="template-from-scratch">
             <button
-              className={`template-card ${selected === null ? 'selected' : ''}`}
+              className={`template-from-scratch-btn ${selected === null ? 'selected' : ''}`}
               onClick={() => onSelect(null)}
               type="button"
             >
-              <div className="template-card-emoji">&#x1F4DD;</div>
-              <div className="template-card-name">From scratch</div>
-              <div className="template-card-desc">
-                Start with an empty office and add agents manually.
-              </div>
+              <span className="template-from-scratch-icon">+</span>
+              Start from scratch
+              <span className="template-from-scratch-sub">
+                Empty office, add agents manually
+              </span>
             </button>
-            {templates.map((t) => (
-              <button
-                key={t.id}
-                className={`template-card ${selected === t.id ? 'selected' : ''}`}
-                onClick={() => onSelect(t.id)}
-                type="button"
-              >
-                {t.emoji && <div className="template-card-emoji">{t.emoji}</div>}
-                <div className="template-card-name">{t.name}</div>
-                <div className="template-card-desc">{t.description}</div>
-              </button>
-            ))}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
           Back
         </button>
         <button className="btn btn-primary" onClick={onNext} type="button">
-          Continue
+          Review the team
           <ArrowIcon />
         </button>
       </div>
@@ -329,7 +457,7 @@ function IdentityStep({
           disabled={!canContinue}
           type="button"
         >
-          Review the team
+          Choose a blueprint
           <ArrowIcon />
         </button>
       </div>
@@ -363,25 +491,39 @@ function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
           </div>
         ) : (
           <div className="wiz-team-grid">
-            {agents.map((a) => (
-              <button
-                key={a.slug}
-                className={`wiz-team-tile ${a.checked ? 'selected' : ''}`}
-                onClick={() => onToggle(a.slug)}
-                type="button"
-              >
-                <div className="wiz-team-check">
-                  {a.checked && <CheckIcon />}
-                </div>
-                <div>
-                  {a.emoji && (
-                    <span style={{ marginRight: 6 }}>{a.emoji}</span>
-                  )}
-                  <span className="wiz-team-name">{a.name}</span>
-                  {a.role && <div className="wiz-team-role">{a.role}</div>}
-                </div>
-              </button>
-            ))}
+            {agents.map((a) => {
+              // Lead agent is always included and cannot be unchecked here.
+              // The backend also refuses to remove or disable any BuiltIn
+              // member, so this is UI belt + server-side braces.
+              const locked = a.built_in === true
+              return (
+                <button
+                  key={a.slug}
+                  className={`wiz-team-tile ${a.checked ? 'selected' : ''} ${locked ? 'locked' : ''}`}
+                  onClick={() => !locked && onToggle(a.slug)}
+                  type="button"
+                  disabled={locked}
+                  aria-disabled={locked}
+                  title={locked ? 'Lead agent — always included' : undefined}
+                >
+                  <div className="wiz-team-check">
+                    {a.checked && <CheckIcon />}
+                  </div>
+                  <div>
+                    {a.emoji && (
+                      <span style={{ marginRight: 6 }}>{a.emoji}</span>
+                    )}
+                    <span className="wiz-team-name">{a.name}</span>
+                    {locked && (
+                      <span className="wiz-team-lead-badge" aria-label="Lead">
+                        Lead
+                      </span>
+                    )}
+                    {a.role && <div className="wiz-team-role">{a.role}</div>}
+                  </div>
+                </button>
+              )
+            })}
           </div>
         )}
       </div>
@@ -402,8 +544,11 @@ function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
 /* ─── Step 5: Setup ─── */
 
 interface SetupStepProps {
-  runtime: string
-  onChangeRuntime: (v: string) => void
+  prereqs: PrereqResult[]
+  prereqsLoading: boolean
+  runtimePriority: string[]
+  onToggleRuntime: (label: string) => void
+  onReorderRuntime: (label: string, direction: -1 | 1) => void
   apiKeys: Record<string, string>
   onChangeApiKey: (key: string, value: string) => void
   memoryBackend: MemoryBackend
@@ -412,9 +557,16 @@ interface SetupStepProps {
   onBack: () => void
 }
 
+function detectedBinary(prereqs: PrereqResult[], binary: string): PrereqResult | undefined {
+  return prereqs.find((p) => p.name === binary)
+}
+
 function SetupStep({
-  runtime,
-  onChangeRuntime,
+  prereqs,
+  prereqsLoading,
+  runtimePriority,
+  onToggleRuntime,
+  onReorderRuntime,
   apiKeys,
   onChangeApiKey,
   memoryBackend,
@@ -422,53 +574,178 @@ function SetupStep({
   onNext,
   onBack,
 }: SetupStepProps) {
+  // A runtime is usable only when its binary is actually present on PATH.
+  // "Selected and installed" drives whether we can continue without keys.
+  const hasInstalledSelection = runtimePriority.some((label) => {
+    const spec = RUNTIMES.find((r) => r.label === label)
+    if (!spec) return false
+    const detection = detectedBinary(prereqs, spec.binary)
+    return Boolean(detection?.found)
+  })
   const hasAtLeastOneKey = Object.values(apiKeys).some((v) => v.trim().length > 0)
+  const canContinue = hasInstalledSelection || hasAtLeastOneKey
 
   return (
     <div className="wizard-step">
       <div className="wizard-panel">
-        <p className="wizard-panel-title">{ONBOARDING_COPY.step2_prereqs_title}</p>
+        <p className="wizard-panel-title">How should agents run?</p>
         <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '-8px 0 12px 0' }}>
-          The CLI that runs your agents. Pick the one you already use.
+          Pick the CLIs you have installed. Each CLI&apos;s login handles its
+          own provider auth, so no API keys are needed. Select multiple to set
+          a fallback order — if the first one fails, agents fall through to
+          the next.
         </p>
-        <div className="runtime-grid">
-          {RUNTIME_OPTIONS.map((opt) => (
-            <button
-              key={opt}
-              className={`runtime-tile ${runtime === opt ? 'selected' : ''}`}
-              onClick={() => onChangeRuntime(opt)}
-              type="button"
-            >
-              {opt}
-            </button>
+
+        {prereqsLoading ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '8px 0' }}>
+            Checking which CLIs are installed&hellip;
+          </div>
+        ) : (
+          <div className="runtime-grid">
+            {RUNTIMES.map((spec) => {
+              const detection = detectedBinary(prereqs, spec.binary)
+              const installed = Boolean(detection?.found)
+              const priorityIdx = runtimePriority.indexOf(spec.label)
+              const selected = priorityIdx >= 0
+              const classes = [
+                'runtime-tile',
+                selected ? 'selected' : '',
+                installed ? '' : 'disabled',
+              ]
+                .filter(Boolean)
+                .join(' ')
+              return (
+                <button
+                  key={spec.label}
+                  className={classes}
+                  onClick={() => {
+                    if (!installed) return
+                    onToggleRuntime(spec.label)
+                  }}
+                  type="button"
+                  disabled={!installed}
+                  aria-disabled={!installed}
+                  aria-pressed={selected}
+                  title={
+                    installed
+                      ? detection?.version
+                        ? `${spec.label} — ${detection.version}`
+                        : spec.label
+                      : `${spec.label} — not installed`
+                  }
+                >
+                  {selected && (
+                    <span className="runtime-priority-badge" aria-label={`Priority ${priorityIdx + 1}`}>
+                      {priorityIdx + 1}
+                    </span>
+                  )}
+                  <div className="runtime-tile-head">
+                    <span
+                      className={`runtime-tile-status ${installed ? 'installed' : ''}`}
+                      aria-hidden="true"
+                    />
+                    {spec.label}
+                  </div>
+                  <div className="runtime-tile-meta">
+                    {installed ? (
+                      detection?.version ? detection.version : 'Installed'
+                    ) : (
+                      <>
+                        Not installed{' · '}
+                        <a
+                          className="runtime-tile-install-link"
+                          href={spec.installUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          install
+                        </a>
+                      </>
+                    )}
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        {runtimePriority.length > 1 && (
+          <div className="runtime-priority-controls">
+            <p className="runtime-priority-title">Fallback order</p>
+            <p className="runtime-priority-hint">
+              Agents try these in order. Use the arrows to reorder.
+            </p>
+            {runtimePriority.map((label, idx) => (
+              <div key={label} className="runtime-priority-row">
+                <span className="runtime-priority-row-rank">#{idx + 1}</span>
+                <span className="runtime-priority-row-label">{label}</span>
+                <button
+                  type="button"
+                  className="runtime-priority-btn"
+                  onClick={() => onReorderRuntime(label, -1)}
+                  disabled={idx === 0}
+                  aria-label={`Move ${label} up`}
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  className="runtime-priority-btn"
+                  onClick={() => onReorderRuntime(label, 1)}
+                  disabled={idx === runtimePriority.length - 1}
+                  aria-label={`Move ${label} down`}
+                >
+                  ↓
+                </button>
+                <button
+                  type="button"
+                  className="runtime-priority-btn"
+                  onClick={() => onToggleRuntime(label)}
+                  aria-label={`Remove ${label}`}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+          <p
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              margin: '0 0 4px 0',
+              color: 'var(--text-primary)',
+            }}
+          >
+            API keys {hasInstalledSelection ? '(optional fallback)' : '(required)'}
+          </p>
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '0 0 12px 0' }}>
+            {hasInstalledSelection
+              ? 'Only used if every selected CLI fails. Leave blank to rely on the CLI login.'
+              : 'No installed CLI selected. Add at least one key so agents can reason.'}
+          </p>
+          {API_KEY_FIELDS.map((field) => (
+            <div className="key-row" key={field.key}>
+              <div className="key-label-wrap">
+                <span className="key-label">{field.label}</span>
+                <span className="key-hint">{field.hint}</span>
+              </div>
+              <div className="key-input-wrap">
+                <input
+                  className="input"
+                  type="password"
+                  placeholder={field.key}
+                  value={apiKeys[field.key] ?? ''}
+                  onChange={(e) => onChangeApiKey(field.key, e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
           ))}
         </div>
-      </div>
-
-      <div className="wizard-panel">
-        <p className="wizard-panel-title">{ONBOARDING_COPY.step2_keys_title}</p>
-        <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '-8px 0 12px 0' }}>
-          At least one API key is needed so agents can reason. You can add more
-          later.
-        </p>
-        {API_KEY_FIELDS.map((field) => (
-          <div className="key-row" key={field.key}>
-            <div className="key-label-wrap">
-              <span className="key-label">{field.label}</span>
-              <span className="key-hint">{field.hint}</span>
-            </div>
-            <div className="key-input-wrap">
-              <input
-                className="input"
-                type="password"
-                placeholder={field.key}
-                value={apiKeys[field.key] ?? ''}
-                onChange={(e) => onChangeApiKey(field.key, e.target.value)}
-                autoComplete="off"
-              />
-            </div>
-          </div>
-        ))}
       </div>
 
       <div className="wizard-panel">
@@ -510,7 +787,7 @@ function SetupStep({
         <button
           className="btn btn-primary"
           onClick={onNext}
-          disabled={!hasAtLeastOneKey}
+          disabled={!canContinue}
           type="button"
         >
           {ONBOARDING_COPY.step2_cta}
@@ -548,55 +825,58 @@ function TaskStep({
 }: TaskStepProps) {
   return (
     <div className="wizard-step">
-      <div>
-        <h2
-          style={{
-            fontSize: 18,
-            fontWeight: 700,
-            textAlign: 'left',
-            marginBottom: 4,
-          }}
-        >
+      <div className="wizard-hero">
+        <h1 className="wizard-headline" style={{ fontSize: 28 }}>
           {ONBOARDING_COPY.step3_title}
-        </h2>
+        </h1>
+        {taskTemplates.length > 0 && (
+          <p className="wizard-subhead">
+            Type your own first task, or pick from the blueprint&apos;s
+            suggested sequence below.
+          </p>
+        )}
       </div>
 
-      {taskTemplates.length > 0 && (
-        <div className="template-grid">
-          {taskTemplates.map((t) => (
-            <button
-              key={t.id}
-              className={`template-card ${selectedTaskTemplate === t.id ? 'selected' : ''}`}
-              onClick={() => {
-                onSelectTaskTemplate(selectedTaskTemplate === t.id ? null : t.id)
-                if (t.prompt) onChangeTaskText(t.prompt)
-              }}
-              type="button"
-            >
-              {t.emoji && <div className="template-card-emoji">{t.emoji}</div>}
-              <div className="template-card-name">{t.name}</div>
-              <div className="template-card-desc">{t.description}</div>
-            </button>
-          ))}
-        </div>
-      )}
-
       <div>
-        <label
-          className="label"
-          htmlFor="wiz-task-input"
-          style={{ marginBottom: 8, display: 'block' }}
-        >
-          Or describe the first real business loop
-        </label>
         <textarea
-          className="task-textarea"
+          className="task-textarea task-textarea-primary"
           id="wiz-task-input"
           placeholder={ONBOARDING_COPY.step3_placeholder}
           value={taskText}
           onChange={(e) => onChangeTaskText(e.target.value)}
+          autoFocus
         />
       </div>
+
+      {taskTemplates.length > 0 && (
+        <div className="task-suggestions">
+          <p className="task-suggestions-label">
+            Suggested sequence for this blueprint
+          </p>
+          <div className="task-suggestions-list">
+            {taskTemplates.map((t, idx) => {
+              const isSelected = selectedTaskTemplate === t.id
+              return (
+                <button
+                  key={t.id}
+                  className={`task-suggestion ${isSelected ? 'selected' : ''}`}
+                  onClick={() => {
+                    const nextId = isSelected ? null : t.id
+                    onSelectTaskTemplate(nextId)
+                    if (nextId) {
+                      onChangeTaskText(t.prompt ?? t.name)
+                    }
+                  }}
+                  type="button"
+                >
+                  <span className="task-suggestion-num">{idx + 1}</span>
+                  <span className="task-suggestion-name">{t.name}</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
@@ -653,7 +933,13 @@ export function Wizard({ onComplete }: WizardProps) {
   const [agents, setAgents] = useState<BlueprintAgent[]>([])
 
   // Step 5: setup
-  const [runtime, setRuntime] = useState<string>(RUNTIME_OPTIONS[0])
+  const [prereqs, setPrereqs] = useState<PrereqResult[]>([])
+  const [prereqsLoading, setPrereqsLoading] = useState(true)
+  // Ordered list of runtime labels (matches RUNTIMES[].label). Position in
+  // the array is the fallback priority. Initially empty — we auto-populate
+  // with the first installed CLI once prereqs land so the happy path still
+  // works with zero clicks.
+  const [runtimePriority, setRuntimePriority] = useState<string[]>([])
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [memoryBackend, setMemoryBackend] = useState<MemoryBackend>('nex')
 
@@ -673,18 +959,6 @@ export function Wizard({ onComplete }: WizardProps) {
         if (cancelled) return
         const tpls = data.templates ?? []
         setBlueprints(tpls)
-
-        // Also extract task templates if present
-        const tasks: TaskTemplate[] = []
-        for (const t of tpls) {
-          if ((t as unknown as Record<string, unknown>).tasks) {
-            const arr = (t as unknown as Record<string, TaskTemplate[]>).tasks
-            tasks.push(...arr)
-          }
-        }
-        if (tasks.length > 0) {
-          setTaskTemplates(tasks)
-        }
       })
       .catch(() => {
         // Endpoint may not exist yet; continue with empty list
@@ -698,10 +972,68 @@ export function Wizard({ onComplete }: WizardProps) {
     }
   }, [])
 
-  // When a blueprint is selected, populate agents
+  // Fetch prereqs on mount so the runtime picker shows which CLIs are
+  // actually installed. Auto-select the first detected runtime so users
+  // with a single CLI installed don't have to click.
+  useEffect(() => {
+    let cancelled = false
+    setPrereqsLoading(true)
+
+    get<{ prereqs?: PrereqResult[] } | PrereqResult[]>('/onboarding/prereqs')
+      .then((data) => {
+        if (cancelled) return
+        const list = Array.isArray(data) ? data : data.prereqs ?? []
+        setPrereqs(list)
+        setRuntimePriority((current) => {
+          if (current.length > 0) return current
+          const firstInstalled = RUNTIMES.find((spec) => {
+            const det = list.find((p) => p.name === spec.binary)
+            return Boolean(det?.found)
+          })
+          return firstInstalled ? [firstInstalled.label] : []
+        })
+      })
+      .catch(() => {
+        // Broker may not expose the endpoint yet; leave prereqs empty and
+        // the user can still add API keys to proceed.
+      })
+      .finally(() => {
+        if (!cancelled) setPrereqsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const toggleRuntime = useCallback((label: string) => {
+    setRuntimePriority((prev) => {
+      if (prev.includes(label)) return prev.filter((l) => l !== label)
+      return [...prev, label]
+    })
+  }, [])
+
+  const reorderRuntime = useCallback((label: string, direction: -1 | 1) => {
+    setRuntimePriority((prev) => {
+      const idx = prev.indexOf(label)
+      if (idx < 0) return prev
+      const next = idx + direction
+      if (next < 0 || next >= prev.length) return prev
+      const out = [...prev]
+      const [item] = out.splice(idx, 1)
+      out.splice(next, 0, item)
+      return out
+    })
+  }, [])
+
+  // When a blueprint is selected, populate agents AND first tasks from that
+  // blueprint only. Previously we flattened tasks across every blueprint, so
+  // the task step showed ~26 tiles of unrelated work — including tasks from
+  // blueprints the user never picked.
   useEffect(() => {
     if (selectedBlueprint === null) {
       setAgents([])
+      setTaskTemplates([])
       return
     }
     const bp = blueprints.find((b) => b.id === selectedBlueprint)
@@ -715,6 +1047,17 @@ export function Wizard({ onComplete }: WizardProps) {
     } else {
       setAgents([])
     }
+    const bpTasks = (bp as unknown as { tasks?: TaskTemplate[] } | undefined)?.tasks
+    setTaskTemplates(Array.isArray(bpTasks) ? bpTasks : [])
+    // Clear any task-template selection and suggestion-derived text when the
+    // blueprint changes. Without this, switching from (say) Consulting to
+    // YouTube Factory leaves "Turn the directive..." stuck in the textarea —
+    // nonsensical in the new context. User-typed custom text is preserved,
+    // since selectedTaskTemplate is null for that path.
+    setSelectedTaskTemplate((prevSel) => {
+      if (prevSel != null) setTaskText('')
+      return null
+    })
   }, [selectedBlueprint, blueprints])
 
   // Navigation helpers
@@ -736,12 +1079,16 @@ export function Wizard({ onComplete }: WizardProps) {
     }
   }, [step])
 
-  // Toggle agent selection
+  // Toggle agent selection. The lead agent (built_in) is locked: TeamStep
+  // disables its button, and this guard prevents any programmatic path
+  // (keyboard, devtools, future bulk toggle) from unchecking it.
   const toggleAgent = useCallback((slug: string) => {
     setAgents((prev) =>
-      prev.map((a) =>
-        a.slug === slug ? { ...a, checked: !a.checked } : a,
-      ),
+      prev.map((a) => {
+        if (a.slug !== slug) return a
+        if (a.built_in === true) return a
+        return { ...a, checked: !a.checked }
+      }),
     )
   }, [])
 
@@ -755,24 +1102,39 @@ export function Wizard({ onComplete }: WizardProps) {
     async (skipTask: boolean) => {
       setSubmitting(true)
       try {
-        // Persist memory backend + LLM provider selection first so the broker
-        // reads them on next launch. Fire-and-forget — a failure here should
-        // not block completing onboarding. Unsupported runtime labels (Cursor,
-        // Windsurf, Other) are skipped; only claude-code and codex are wired.
-        post('/config', { memory_backend: memoryBackend }).catch(() => {})
-        const llmProvider = RUNTIME_LABEL_TO_PROVIDER[runtime]
-        if (llmProvider) {
-          post('/config', { llm_provider: llmProvider }).catch(() => {})
-        }
+        // Translate UI labels to the provider ids the broker validates. Only
+        // labels that map to a supported provider ("claude-code", "codex")
+        // are persisted — aspirational runtimes (Cursor, Windsurf) are shown
+        // in the UI but can't yet be dispatched, so we drop them from the
+        // priority list we send to the server.
+        const providerPriority = runtimePriority
+          .map((label) => RUNTIMES.find((r) => r.label === label)?.provider)
+          .filter((p): p is 'claude-code' | 'codex' => p != null)
 
-        // Post the onboarding payload. Body shape is historical; the broker
-        // currently only acts on {task, skip_task} but the extra fields are
-        // forward-compatible.
+        // Persist memory backend + LLM provider choice + priority fallback
+        // list so the broker reads them on next launch. Send as a single
+        // POST — the broker's handleConfig does a non-atomic read-mutate-
+        // write, so two parallel calls race and corrupt config.json.
+        const configPayload: Record<string, unknown> = {
+          memory_backend: memoryBackend,
+        }
+        if (providerPriority.length > 0) {
+          configPayload.llm_provider = providerPriority[0]
+          configPayload.llm_provider_priority = providerPriority
+        }
+        post('/config', configPayload).catch(() => {})
+
+        // Primary runtime label for the onboarding payload (best-effort;
+        // the broker only acts on {task, skip_task} today, but the extra
+        // fields are forward-compatible).
+        const primaryRuntime = runtimePriority[0] ?? ''
+
         await post('/onboarding/complete', {
           company,
           description,
           priority,
-          runtime,
+          runtime: primaryRuntime,
+          runtime_priority: runtimePriority,
           memory_backend: memoryBackend,
           blueprint: selectedBlueprint,
           agents: agents.filter((a) => a.checked).map((a) => a.slug),
@@ -792,7 +1154,7 @@ export function Wizard({ onComplete }: WizardProps) {
       company,
       description,
       priority,
-      runtime,
+      runtimePriority,
       memoryBackend,
       selectedBlueprint,
       agents,
@@ -809,7 +1171,7 @@ export function Wizard({ onComplete }: WizardProps) {
         <ProgressDots current={step} />
 
         {step === 'welcome' && (
-          <WelcomeStep onNext={() => goTo('templates')} />
+          <WelcomeStep onNext={() => goTo('identity')} />
         )}
 
         {step === 'templates' && (
@@ -847,8 +1209,11 @@ export function Wizard({ onComplete }: WizardProps) {
 
         {step === 'setup' && (
           <SetupStep
-            runtime={runtime}
-            onChangeRuntime={setRuntime}
+            prereqs={prereqs}
+            prereqsLoading={prereqsLoading}
+            runtimePriority={runtimePriority}
+            onToggleRuntime={toggleRuntime}
+            onReorderRuntime={reorderRuntime}
             apiKeys={apiKeys}
             onChangeApiKey={handleApiKeyChange}
             memoryBackend={memoryBackend}

@@ -310,6 +310,10 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 
 	if unsafe {
 		l.SetUnsafe(true)
+		// Propagate the flag to child MCP processes so they can skip the
+		// per-action human approval gate. The broker and teammcp servers read
+		// this env var directly; the flag is deliberately local-only.
+		_ = os.Setenv("WUPHF_UNSAFE", "1")
 		fmt.Fprintf(os.Stderr, "\n\u26a0\ufe0f  UNSAFE MODE: All agents have unrestricted permissions.\n")
 		fmt.Fprintf(os.Stderr, "   Prison Mike would be proud. Use for local dev only.\n\n")
 	}
@@ -371,6 +375,8 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	}
 	if unsafe {
 		l.SetUnsafe(true)
+		// Propagate so child MCP processes skip the per-action approval gate.
+		_ = os.Setenv("WUPHF_UNSAFE", "1")
 	}
 	if opusCEO {
 		l.SetOpusCEO(true)

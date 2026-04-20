@@ -119,7 +119,90 @@
   margin-bottom: 16px;
 }
 
-/* ─── Template Grid (Step 1 blueprints + Step 6 task templates) ─── */
+/* ─── Template Groups (blueprint picker) ─── */
+.template-group {
+  padding: 16px 20px 18px;
+}
+
+.template-group + .template-group {
+  margin-top: 12px;
+}
+
+.template-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.template-group-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.template-group-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  margin: 0;
+}
+
+/* From-scratch escape hatch — separated from grouped presets */
+.template-from-scratch {
+  margin-top: 4px;
+  display: flex;
+  justify-content: center;
+}
+
+.template-from-scratch-btn {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px dashed var(--border-dark);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+.template-from-scratch-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.template-from-scratch-btn.selected {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  color: var(--text-primary);
+}
+
+.template-from-scratch-icon {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-tertiary);
+}
+
+.template-from-scratch-btn.selected .template-from-scratch-icon {
+  color: var(--accent);
+}
+
+.template-from-scratch-sub {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+/* ─── Template Grid (tiles inside a blueprint group + step 6 suggestions) ─── */
 .template-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -198,6 +281,31 @@
 .wiz-team-tile.selected {
   border-color: var(--accent);
   background: var(--accent-bg);
+}
+
+/* Lead agent — locked on. Keep the selected visual but make it obvious
+   the tile is not interactable. */
+.wiz-team-tile.locked {
+  cursor: not-allowed;
+}
+
+.wiz-team-tile.locked:hover {
+  border-color: var(--accent);
+}
+
+.wiz-team-lead-badge {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  vertical-align: middle;
 }
 
 .wiz-team-check {
@@ -291,6 +399,7 @@
   text-align: center;
   font-size: 13px;
   font-weight: 500;
+  position: relative;
 }
 
 .runtime-tile:hover {
@@ -300,6 +409,132 @@
 .runtime-tile.selected {
   border-color: var(--accent);
   background: var(--accent-bg);
+}
+
+.runtime-tile.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.runtime-tile.disabled:hover {
+  border-color: var(--border);
+}
+
+.runtime-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.runtime-tile-status {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-tertiary);
+  flex: 0 0 auto;
+}
+
+.runtime-tile-status.installed {
+  background: #10b981;
+}
+
+.runtime-tile-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+  line-height: 1.3;
+}
+
+.runtime-tile-install-link {
+  color: var(--accent);
+  text-decoration: underline;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.runtime-priority-badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.runtime-priority-controls {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.runtime-priority-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px 0;
+}
+
+.runtime-priority-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 10px 0;
+}
+
+.runtime-priority-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  margin-bottom: 6px;
+}
+
+.runtime-priority-row-label {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.runtime-priority-row-rank {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-weight: 600;
+  min-width: 20px;
+}
+
+.runtime-priority-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.runtime-priority-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.runtime-priority-btn:not(:disabled):hover {
+  border-color: var(--border-dark);
+  color: var(--text-primary);
 }
 
 /* ─── Task Textarea (Step 6) ─── */
@@ -316,6 +551,87 @@
   line-height: 1.5;
   resize: vertical;
   box-sizing: border-box;
+}
+
+/* Primary task textarea (step 6) — promoted to top of the screen, given more
+   height and a larger hit area so it reads as the main input, not a fallback. */
+.task-textarea-primary {
+  min-height: 120px;
+  padding: 14px 16px;
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+/* ─── Task Suggestions (step 6) ─── */
+.task-suggestions {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px 18px;
+}
+
+.task-suggestions-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+}
+
+.task-suggestions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--font-sans);
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.task-suggestion:hover {
+  border-color: var(--accent);
+}
+
+.task-suggestion.selected {
+  border-color: var(--accent);
+  background: var(--accent-bg);
+}
+
+.task-suggestion-num {
+  flex: 0 0 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--border-light);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.task-suggestion.selected .task-suggestion-num {
+  background: var(--accent);
+  color: #fff;
+}
+
+.task-suggestion-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
 }
 
 .task-textarea:focus {

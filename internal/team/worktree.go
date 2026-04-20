@@ -156,6 +156,7 @@ func cleanupTaskWorktreeAtRepoRoot(repoRoot, path, branch string) error {
 
 func gitRepoRoot() (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	cmd.Env = gitCleanEnv()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -164,6 +165,29 @@ func gitRepoRoot() (string, error) {
 		return "", fmt.Errorf("resolve repo root: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// gitCleanEnv returns os.Environ() minus the GIT_* variables that pin git to a
+// specific repo, index, or worktree. Callers set cmd.Dir explicitly, so
+// inheriting GIT_DIR/GIT_WORK_TREE from a parent (e.g. when wuphf runs inside
+// a `git push` hook or a nested git operation) would silently redirect every
+// subprocess to the outer repo and break worktree setup.
+func gitCleanEnv() []string {
+	env := os.Environ()
+	filtered := env[:0]
+	for _, kv := range env {
+		switch {
+		case strings.HasPrefix(kv, "GIT_DIR="),
+			strings.HasPrefix(kv, "GIT_WORK_TREE="),
+			strings.HasPrefix(kv, "GIT_INDEX_FILE="),
+			strings.HasPrefix(kv, "GIT_OBJECT_DIRECTORY="),
+			strings.HasPrefix(kv, "GIT_COMMON_DIR="),
+			strings.HasPrefix(kv, "GIT_NAMESPACE="):
+			continue
+		}
+		filtered = append(filtered, kv)
+	}
+	return filtered
 }
 
 func defaultTaskWorktreeRootDir(repoRoot string) string {
@@ -181,6 +205,7 @@ func defaultTaskWorktreeRootDir(repoRoot string) string {
 func runGit(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = gitCleanEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -192,6 +217,7 @@ func runGit(dir string, args ...string) error {
 func runGitOutput(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
+	cmd.Env = gitCleanEnv()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -357,6 +383,7 @@ func copyWorkspacePath(src, dst string, info os.FileInfo) error {
 func gitRefExists(dir, ref string) bool {
 	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", ref)
 	cmd.Dir = dir
+	cmd.Env = gitCleanEnv()
 	return cmd.Run() == nil
 }
 

@@ -5,7 +5,10 @@ import { useAppStore } from '../../stores/app'
 import { toggleReaction } from '../../api/client'
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { PixelAvatar } from '../ui/PixelAvatar'
+import { HarnessBadge } from '../ui/HarnessBadge'
 import { showNotice } from '../ui/Toast'
+import { useDefaultHarness } from '../../hooks/useConfig'
+import { resolveHarness } from '../../lib/harness'
 
 interface MessageBubbleProps {
   message: Message
@@ -18,6 +21,8 @@ export function MessageBubble({ message, grouped = false, onThreadClick }: Messa
   const { data: members = [] } = useOfficeMembers()
   const isHuman = message.from === 'you' || message.from === 'human'
   const agent = members.find((m) => m.slug === message.from)
+  const defaultHarness = useDefaultHarness()
+  const harness = !isHuman ? resolveHarness(agent?.provider, defaultHarness) : null
 
   // Status messages — compact
   if (message.content?.startsWith('[STATUS]')) {
@@ -54,13 +59,18 @@ export function MessageBubble({ message, grouped = false, onThreadClick }: Messa
     >
       {/* Avatar */}
       <div
-        className="message-avatar"
+        className={`message-avatar${isHuman ? '' : ' avatar-with-harness'}`}
         style={isHuman ? { background: 'var(--accent)', color: 'white', fontSize: 14, fontWeight: 600 } : undefined}
       >
         {isHuman ? (
           'You'
         ) : (
-          <PixelAvatar slug={message.from} size={36} />
+          <>
+            <PixelAvatar slug={message.from} size={36} />
+            {harness && (
+              <HarnessBadge kind={harness} size={14} className="harness-badge-on-avatar" />
+            )}
+          </>
         )}
       </div>
 

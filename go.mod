@@ -1,6 +1,6 @@
 module github.com/nex-crm/wuphf
 
-go 1.25.0
+go 1.25.9
 
 require (
 	github.com/charmbracelet/bubbletea v1.3.10

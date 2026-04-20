@@ -2,6 +2,35 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [Unreleased] — `feat/llm-wiki`
+
+### Added — LLM Wiki (Karpathy-pattern team memory)
+
+- **Git-native team wiki at `~/.wuphf/wiki/`.** Every article is a real markdown file in a local git repo. Each agent commits under its own git identity (per-commit `-c user.name=...` flags — never touches your global git config). Your team's memory is explicit, yours, file-over-app, and portable. `cat` it, `git log` it, `git clone` it anywhere.
+- **`--memory-backend markdown` as the new default for fresh installs.** Existing Nex/GBrain users keep their current backend via `.wuphf/config.yaml` — no forced migration. `--memory-backend` now accepts `markdown | nex | gbrain | none`, and the MCP tool surface switches accordingly: markdown exposes `team_wiki_*` tools, the knowledge-graph backends keep the existing `team_memory_*` tools. The two never coexist on one server instance.
+- **Serialized-write worker with fail-fast backpressure.** All writes flow through a single goroutine-owned queue (buffered 64, 10s per-write timeout). On saturation the MCP tool returns `wiki queue saturated, retry on next turn` — no hidden retries, no silent blocking. Covered by an IRON regression matrix that verifies exact tool-registration per backend.
+- **Crash recovery on startup.** If the wiki repo has uncommitted changes from a prior crashed write, startup auto-commits them with a `wuphf-recovery` author. No data loss, full trace in `git log`.
+- **Backup mirror + double-fault recovery.** Every commit kicks off a debounced async copy to `~/.wuphf/wiki.bak/`. If the repo corrupts and the backup is healthy, startup restores automatically. If both are corrupt, WUPHF falls back to `--memory-backend none` with a banner rather than crashing.
+- **Graceful fallback when git is unavailable.** Detected at startup; WUPHF disables the wiki backend and shows a banner telling you to install git. Never crashes.
+- **Transactional blueprint materialization.** Each of the 6 shipped blueprints (`bookkeeping-invoicing-service`, `local-business-ai-package`, `multi-agent-workflow-consulting`, `niche-crm`, `paid-discord-community`, `youtube-factory`) declares a domain-specific `wiki_schema:` with thematic directories and skeleton articles. On blueprint pickup during onboarding, those land in your wiki via temp-dir-then-rename — either all skeletons land or none do. Idempotent: re-picking a blueprint never overwrites existing articles.
+- **Wikipedia-style UI at `/wiki`.** Reading-first editorial layout: Fraunces display headings, Source Serif 4 body at 18px/1.72, warm-paper `#FAF8F2` palette. Full Wikipedia information architecture — Article/Talk/History hat-bar, infobox with dark title band, italic strapline ("From Team Wiki, your team's encyclopedia"), hatnote cross-refs, numbered nested TOC with `[hide]`, Page Stats / Cite This Page / Referenced By panels, Categories chip footer, Wikipedia-style page footer with "View git history / Cite / Download as markdown / Clone wiki locally" actions, fixed-bottom live edit-log footer pulsing on every `wiki:write` SSE event. Agent pixel avatars on every byline — ties the wiki visually to the rest of the WUPHF app. See `DESIGN-WIKI.md` for the full spec.
+- **18 React components under `web/src/components/wiki/`** with 90%+ test coverage via Vitest + React Testing Library (net-new frontend test infrastructure, also usable by every future feature). `react-markdown` + `remark-gfm` + `remark-wiki-link` + `rehype-slug` + `rehype-autolink-headings` render article content. `dompurify` sanitizes. SSE live-update on `wiki:write` invalidates the affected article's TanStack Query cache in real time.
+- **Wikilink parser** with shared Go ⇄ TypeScript test fixture at `web/tests/fixtures/wikilinks.json` — both parsers consume the same canonical grammar cases. Syntax: `[[slug]]` → `team/slug.md`, `[[slug|Display]]` → renders "Display" but links to slug. Broken wikilinks (target doesn't exist) render red with a trailing marker; healthy ones render with a dashed-blue underline that solidifies on hover.
+- **`GET /wiki/article?path=...` rich endpoint** returns article content + extracted title (first H1) + revision count + contributors + backlinks (reverse index via tree walk) + word count. Matches `web/src/api/wiki.ts WikiArticle`. Agents read via MCP (`team_wiki_read` — raw markdown); UI reads via the rich endpoint.
+
+### Architecture notes
+
+- **Three design systems, one repo.** `DESIGN.md` covers the pixel-office marketing site (dark, Press Start 2P). `web/src/styles/global.css` covers the general Slack-inspired web app. `DESIGN-WIKI.md` covers the `/wiki` surface (editorial-reference, warm paper, Fraunces + Source Serif 4). Each scope has non-interchangeable rules.
+- **Per-agent wikis are deferred to v1.1.** v1 ships team wiki only. Per-agent `agents/{slug}/` introduces a private-on-filesystem access model that isn't load-bearing for the demo moment.
+- **LLM merge-resolver is deferred to v1.1.** v1 uses serialized writes — no concurrent commits can conflict. Merge-resolver only worth building once the serialized-write path shows measurable pain at real-world load.
+- **Nex compounding intelligence layer (entity briefs, playbook compilation, skill generation) is deferred to v1.1.** These sit additively on top of the markdown files and are disableable — the file-over-app guarantee is preserved forever.
+
+### Internal
+
+- New Go packages touched: `internal/team/wiki_git.go`, `wiki_worker.go`, `wiki_article.go`, `wiki_e2e_test.go` + tests; `internal/operations/wiki_materialize.go` + tests; additions to `internal/teammcp/server.go`, `internal/team/broker.go`, `internal/team/broker_onboarding.go`, `internal/config/config.go`. New env var `WUPHF_MEMORY_BACKEND` drives the tool-surface switch (matches the existing `WUPHF_CHANNEL` / `WUPHF_AGENT_SLUG` propagation pattern from broker to MCP subprocess).
+- 33+ new Go tests at 81.6% coverage on wiki files (`wiki_git.go` · `wiki_worker.go` · `wiki_article.go`). 80 new web tests at 90% coverage on `web/src/components/wiki/` and `web/src/lib/`. Cross-lane integration tests in `internal/team/wiki_e2e_test.go` exercise the full HTTP stack.
+- Full-repo `go test ./...` green across all 25 packages. `go test -race ./internal/team/... -run TestE2EWiki` clean.
+
 ## [0.0.5.0] - 2026-04-17
 
 ### Added
