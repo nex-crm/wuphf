@@ -16,6 +16,8 @@ import {
   Search,
   BookStack,
   Activity,
+  Journal,
+  Eye,
 } from 'iconoir-react'
 import { useAppStore } from '../../stores/app'
 import { SIDEBAR_APPS } from '../../lib/constants'
@@ -28,6 +30,8 @@ import { formatUSD, formatTokens } from '../../lib/format'
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
+  notebooks: Journal,
+  reviews: Eye,
   tasks: CheckCircle,
   requests: ClipboardCheck,
   policies: Shield,

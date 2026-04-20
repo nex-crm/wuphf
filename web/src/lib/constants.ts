@@ -1,5 +1,7 @@
 export const SIDEBAR_APPS = [
   { id: 'wiki', icon: '\uD83D\uDCD6', name: 'Wiki' },
+  { id: 'notebooks', icon: '\uD83D\uDCD3', name: 'Notebooks' },
+  { id: 'reviews', icon: '\uD83D\uDD8B', name: 'Reviews' },
   { id: 'tasks', icon: '\u2705', name: 'Tasks' },
   { id: 'requests', icon: '\uD83D\uDCCB', name: 'Requests' },
   { id: 'policies', icon: '\uD83D\uDEE1', name: 'Policies' },

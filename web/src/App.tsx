@@ -17,6 +17,8 @@ import { HealthCheckApp } from './components/apps/HealthCheckApp'
 import { SettingsApp } from './components/apps/SettingsApp'
 import { ThreadsApp } from './components/apps/ThreadsApp'
 import Wiki from './components/wiki/Wiki'
+import Notebook from './components/notebook/Notebook'
+import ReviewQueueKanban from './components/review/ReviewQueueKanban'
 import { Wizard } from './components/onboarding/Wizard'
 import { AgentPanel } from './components/agents/AgentPanel'
 import { SearchModal } from './components/search/SearchModal'
@@ -95,6 +97,9 @@ function MainContent() {
   const wikiPath = useAppStore((s) => s.wikiPath)
   const setWikiPath = useAppStore((s) => s.setWikiPath)
   const setCurrentApp = useAppStore((s) => s.setCurrentApp)
+  const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug)
+  const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug)
+  const setNotebookRoute = useAppStore((s) => s.setNotebookRoute)
 
   if (!currentApp && isDMChannel(currentChannel, channelMeta)) {
     return <DMView />
@@ -114,6 +119,26 @@ function MainContent() {
         }}
       />
     )
+  }
+
+  if (currentApp === 'notebooks') {
+    return (
+      <Notebook
+        agentSlug={notebookAgentSlug}
+        entrySlug={notebookEntrySlug}
+        onOpenCatalog={() => setNotebookRoute(null, null)}
+        onOpenAgent={(slug) => setNotebookRoute(slug, null)}
+        onOpenEntry={(slug, entry) => setNotebookRoute(slug, entry)}
+        onNavigateWiki={(path) => {
+          setCurrentApp('wiki')
+          setWikiPath(path || null)
+        }}
+      />
+    )
+  }
+
+  if (currentApp === 'reviews') {
+    return <ReviewQueueKanban />
   }
 
   if (currentApp) {

@@ -82,6 +82,11 @@ export interface AppStore {
   // Wiki
   wikiPath: string | null
   setWikiPath: (path: string | null) => void
+
+  // Notebooks
+  notebookAgentSlug: string | null
+  notebookEntrySlug: string | null
+  setNotebookRoute: (agentSlug: string | null, entrySlug: string | null) => void
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
@@ -148,4 +153,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   wikiPath: null,
   setWikiPath: (path) => set({ wikiPath: path }),
+
+  notebookAgentSlug: null,
+  notebookEntrySlug: null,
+  setNotebookRoute: (agentSlug, entrySlug) =>
+    set({ notebookAgentSlug: agentSlug, notebookEntrySlug: entrySlug }),
 }))
