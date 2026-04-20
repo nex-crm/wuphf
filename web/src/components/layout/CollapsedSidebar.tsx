@@ -16,8 +16,6 @@ import {
   Search,
   BookStack,
   Activity,
-  Journal,
-  Eye,
 } from 'iconoir-react'
 import { useAppStore } from '../../stores/app'
 import { SIDEBAR_APPS } from '../../lib/constants'
@@ -30,8 +28,6 @@ import { formatUSD, formatTokens } from '../../lib/format'
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
-  notebooks: Journal,
-  reviews: Eye,
   tasks: CheckCircle,
   requests: ClipboardCheck,
   policies: Shield,
@@ -144,11 +140,17 @@ export function CollapsedSidebar() {
       <div className="sidebar-rail-apps">
         {SIDEBAR_APPS.filter((a) => a.id !== 'settings').map((app) => {
           const Icon = APP_ICONS[app.id]
+          // Wiki entry lights up for the wiki, notebooks, and reviews surfaces
+          // since those three share the Wiki app shell via tabs.
+          const isActive =
+            app.id === 'wiki'
+              ? currentApp === 'wiki' || currentApp === 'notebooks' || currentApp === 'reviews'
+              : currentApp === app.id
           return (
             <button
               key={app.id}
               type="button"
-              className={`sidebar-icon-btn${currentApp === app.id ? ' active' : ''}`}
+              className={`sidebar-icon-btn${isActive ? ' active' : ''}`}
               aria-label={app.name}
               onClick={() => setCurrentApp(app.id)}
               onMouseEnter={(e) => showHint(e, app.name)}

@@ -17,6 +17,8 @@ import { HealthCheckApp } from './components/apps/HealthCheckApp'
 import { SettingsApp } from './components/apps/SettingsApp'
 import { ThreadsApp } from './components/apps/ThreadsApp'
 import Wiki from './components/wiki/Wiki'
+import WikiTabs from './components/wiki/WikiTabs'
+import type { WikiTab } from './components/wiki/WikiTabs'
 import Notebook from './components/notebook/Notebook'
 import ReviewQueueKanban from './components/review/ReviewQueueKanban'
 import { Wizard } from './components/onboarding/Wizard'
@@ -36,6 +38,7 @@ import './styles/layout.css'
 import './styles/messages.css'
 import './styles/agents.css'
 import './styles/search.css'
+import './styles/wiki-shell.css'
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -105,40 +108,54 @@ function MainContent() {
     return <DMView />
   }
 
-  if (currentApp === 'wiki') {
-    return (
-      <Wiki
-        articlePath={wikiPath}
-        onNavigate={(path) => {
-          if (path === null) {
-            setCurrentApp(null)
-            setWikiPath(null)
-          } else {
-            setWikiPath(path || null)
-          }
-        }}
-      />
-    )
-  }
+  // Wiki, Notebooks, and Reviews share one app shell with a tab bar on top.
+  // The surfaces underneath keep their own design systems (.wiki-surface vs
+  // .notebook-surface) but the parent chrome is unified.
+  if (currentApp === 'wiki' || currentApp === 'notebooks' || currentApp === 'reviews') {
+    const handleTabChange = (tab: WikiTab) => {
+      if (tab === 'wiki') {
+        setCurrentApp('wiki')
+      } else if (tab === 'notebooks') {
+        setNotebookRoute(null, null)
+        setCurrentApp('notebooks')
+      } else {
+        setCurrentApp('reviews')
+      }
+    }
 
-  if (currentApp === 'notebooks') {
     return (
-      <Notebook
-        agentSlug={notebookAgentSlug}
-        entrySlug={notebookEntrySlug}
-        onOpenCatalog={() => setNotebookRoute(null, null)}
-        onOpenAgent={(slug) => setNotebookRoute(slug, null)}
-        onOpenEntry={(slug, entry) => setNotebookRoute(slug, entry)}
-        onNavigateWiki={(path) => {
-          setCurrentApp('wiki')
-          setWikiPath(path || null)
-        }}
-      />
+      <div className="wiki-shell">
+        <WikiTabs current={currentApp} onSelect={handleTabChange} />
+        <div className="wiki-shell-body">
+          {currentApp === 'wiki' && (
+            <Wiki
+              articlePath={wikiPath}
+              onNavigate={(path) => {
+                if (path === null) {
+                  setWikiPath(null)
+                } else {
+                  setWikiPath(path || null)
+                }
+              }}
+            />
+          )}
+          {currentApp === 'notebooks' && (
+            <Notebook
+              agentSlug={notebookAgentSlug}
+              entrySlug={notebookEntrySlug}
+              onOpenCatalog={() => setNotebookRoute(null, null)}
+              onOpenAgent={(slug) => setNotebookRoute(slug, null)}
+              onOpenEntry={(slug, entry) => setNotebookRoute(slug, entry)}
+              onNavigateWiki={(path) => {
+                setCurrentApp('wiki')
+                setWikiPath(path || null)
+              }}
+            />
+          )}
+          {currentApp === 'reviews' && <ReviewQueueKanban />}
+        </div>
+      </div>
     )
-  }
-
-  if (currentApp === 'reviews') {
-    return <ReviewQueueKanban />
   }
 
   if (currentApp) {
