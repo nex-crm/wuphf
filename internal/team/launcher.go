@@ -2815,13 +2815,18 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
 		firstCmd := l.claudeCommand(slug, l.buildPrompt(slug))
-		if err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
 			"-t", l.sessionName+":team",
 			"-p", "65",
 			"-c", l.cwd,
 			firstCmd,
-		).Run(); err != nil {
-			return nil, fmt.Errorf("spawn one-on-one agent: %w", err)
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			if detail == "" {
+				return nil, fmt.Errorf("spawn one-on-one agent: %w", err)
+			}
+			return nil, fmt.Errorf("spawn one-on-one agent: %w (tmux: %s)", err, detail)
 		}
 		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
 			"-t", l.sessionName+":team",
@@ -2859,13 +2864,18 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 		return nil, nil
 	}
 	firstCmd := l.claudeCommand(visible[0].Slug, l.buildPrompt(visible[0].Slug))
-	if err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
+	out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
 		"-t", l.sessionName+":team",
 		"-p", "65",
 		"-c", l.cwd,
 		firstCmd,
-	).Run(); err != nil {
-		return nil, fmt.Errorf("spawn first agent: %w", err)
+	).CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			return nil, fmt.Errorf("spawn first agent: %w", err)
+		}
+		return nil, fmt.Errorf("spawn first agent: %w (tmux: %s)", err, detail)
 	}
 
 	// Remaining agents: split from agent area, then use "tiled" layout
