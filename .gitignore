@@ -52,3 +52,6 @@ video/public/audio/test-*.mp3
 # testdata/vhs/check.sh and are not tracked in git.
 testdata/vhs/*.gif
 testdata/vhs/*.actual
+
+# Web test coverage output
+web/coverage/

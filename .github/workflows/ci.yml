@@ -39,10 +39,21 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v9
+      # Pin to full SHA: third-party action, runs on pull_request from forks
+      # and can read any GITHUB_TOKEN the workflow exposes. A @v9 re-tag
+      # would execute with CI privileges.
+      - uses: golangci/golangci-lint-action@0a35821d5c230e903fcfe077583637dea1b27b47 # v9.0.0
         with:
           version: v2.11.4
           args: --timeout=5m
+      - name: Run govulncheck
+        # Catches reachable CVEs in the Go stdlib + modules. Flags us when we
+        # fall behind on a Go minor bump without having to wait for a CVE
+        # advisory to make noise. Pinned to an explicit version so a new
+        # govulncheck release cannot flip pass/fail on the same commit.
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          govulncheck ./...
 
   test:
     needs: web
@@ -160,7 +171,10 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: oven-sh/setup-bun@v2
+      # Pin to full SHA: third-party action, runs on every PR. A @v2 re-tag
+      # would exec with CI privileges — see the awalsh128 pin above for the
+      # same pattern.
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
         with:
           bun-version: "1.1.38"
       - uses: actions/download-artifact@v8

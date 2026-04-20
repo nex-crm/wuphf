@@ -215,6 +215,17 @@ func main() {
 
 	// Handle subcommands
 	args := flag.Args()
+
+	// Warn if another wuphf binary is on PATH and may shadow this one. Interactive
+	// only — scripted and stdio-subprocess entrypoints keep their output clean.
+	firstSub := ""
+	if len(args) > 0 {
+		firstSub = args[0]
+	}
+	if shouldWarnShadow(*showVersion, *channelView, *cmd != "", isPiped(), firstSub) {
+		warnPathShadow(os.Stderr)
+	}
+
 	if len(args) > 0 {
 		sub := args[0]
 		if subcommandWantsHelp(args[1:]) {
@@ -310,6 +321,10 @@ func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO
 
 	if unsafe {
 		l.SetUnsafe(true)
+		// Propagate the flag to child MCP processes so they can skip the
+		// per-action human approval gate. The broker and teammcp servers read
+		// this env var directly; the flag is deliberately local-only.
+		_ = os.Setenv("WUPHF_UNSAFE", "1")
 		fmt.Fprintf(os.Stderr, "\n\u26a0\ufe0f  UNSAFE MODE: All agents have unrestricted permissions.\n")
 		fmt.Fprintf(os.Stderr, "   Prison Mike would be proud. Use for local dev only.\n\n")
 	}
@@ -371,6 +386,8 @@ func runWeb(args []string, packSlug string, unsafe bool, webPort int, opusCEO bo
 	}
 	if unsafe {
 		l.SetUnsafe(true)
+		// Propagate so child MCP processes skip the per-action approval gate.
+		_ = os.Setenv("WUPHF_UNSAFE", "1")
 	}
 	if opusCEO {
 		l.SetOpusCEO(true)

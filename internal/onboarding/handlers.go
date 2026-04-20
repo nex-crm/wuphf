@@ -3,12 +3,23 @@ package onboarding
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/operations"
 )
+
+// CompleteFunc is the side-effect hook invoked by HandleComplete when the
+// user finishes onboarding. The broker supplies a real implementation that
+// seeds the team from the picked blueprint (or synthesizes one when blueprintID
+// is empty), honors the selectedAgents filter from the wizard, and posts the
+// kickoff task. blueprintID is empty for the "from scratch" path.
+// selectedAgents is nil when no filtering is requested (internal synthesis
+// callers) and may be an empty slice when the wizard user unchecked every
+// agent.
+type CompleteFunc func(task string, skipTask bool, blueprintID string, selectedAgents []string) error
 
 // RegisterRoutes attaches all onboarding HTTP handlers to mux.
 //
@@ -20,6 +31,11 @@ import (
 // return operation-appropriate first-task suggestions and falls back to the
 // generic compatibility templates when no blueprint-specific set exists.
 //
+// authMiddleware wraps each handler. Pass the broker's requireAuth so local
+// processes and cross-origin callers cannot POST /onboarding/complete (which
+// seeds the team and fires the first CEO turn) without the broker token.
+// Pass a nil middleware only in tests — RegisterRoutes substitutes a passthrough.
+//
 // Routes registered:
 //
 //	GET  /onboarding/state
@@ -30,18 +46,21 @@ import (
 //	GET  /onboarding/templates
 //	POST /onboarding/checklist/{id}/done
 //	POST /onboarding/checklist/dismiss
-func RegisterRoutes(mux *http.ServeMux, completeFn func(task string, skipTask bool) error, packSlug string) {
-	mux.HandleFunc("/onboarding/state", HandleState)
-	mux.HandleFunc("/onboarding/progress", HandleProgress)
-	mux.HandleFunc("/onboarding/complete", makeHandleComplete(completeFn))
-	mux.HandleFunc("/onboarding/prereqs", HandlePrereqs)
-	mux.HandleFunc("/onboarding/validate-key", HandleValidateKey)
-	mux.HandleFunc("/onboarding/templates", makeHandleTemplates(packSlug))
-	mux.HandleFunc("/onboarding/blueprints", HandleBlueprints)
-	mux.HandleFunc("/onboarding/checklist/dismiss", HandleChecklistDismiss)
+func RegisterRoutes(mux *http.ServeMux, completeFn CompleteFunc, packSlug string, authMiddleware func(http.HandlerFunc) http.HandlerFunc) {
+	if authMiddleware == nil {
+		authMiddleware = func(h http.HandlerFunc) http.HandlerFunc { return h }
+	}
+	mux.HandleFunc("/onboarding/state", authMiddleware(HandleState))
+	mux.HandleFunc("/onboarding/progress", authMiddleware(HandleProgress))
+	mux.HandleFunc("/onboarding/complete", authMiddleware(makeHandleComplete(completeFn)))
+	mux.HandleFunc("/onboarding/prereqs", authMiddleware(HandlePrereqs))
+	mux.HandleFunc("/onboarding/validate-key", authMiddleware(HandleValidateKey))
+	mux.HandleFunc("/onboarding/templates", authMiddleware(makeHandleTemplates(packSlug)))
+	mux.HandleFunc("/onboarding/blueprints", authMiddleware(HandleBlueprints))
+	mux.HandleFunc("/onboarding/checklist/dismiss", authMiddleware(HandleChecklistDismiss))
 	// Pattern must be registered after the more-specific /dismiss route so
 	// that /dismiss is not swallowed by the /{id}/done prefix match.
-	mux.HandleFunc("/onboarding/checklist/", HandleChecklistDone)
+	mux.HandleFunc("/onboarding/checklist/", authMiddleware(HandleChecklistDone))
 }
 
 // HandleState handles GET /onboarding/state.
@@ -108,32 +127,37 @@ func HandleProgress(w http.ResponseWriter, r *http.Request) {
 // makeHandleComplete returns a handler for POST /onboarding/complete that
 // closes over completeFn. The broker should supply a non-nil completeFn to
 // seed the team and post the first message.
-func makeHandleComplete(completeFn func(task string, skipTask bool) error) http.HandlerFunc {
+func makeHandleComplete(completeFn CompleteFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		HandleComplete(w, r, completeFn)
 	}
 }
 
 // HandleComplete handles POST /onboarding/complete.
-// Body: {"task": string, "skip_task": bool}.
+// Body: {"task": string, "skip_task": bool, "blueprint": string, "agents": []string}.
+// The blueprint and agents fields are forwarded to completeFn so the broker
+// can seed the team that the wizard actually picked. A legacy client that
+// omits them is treated as "from scratch" (blueprint empty, agents nil).
 //
 // Logic:
 //  1. Load state; if already completed return 200 {"already_completed": true, "redirect": "/"}.
 //  2. If skip_task is false and task is empty, return 400.
 //  3. Call completeFn (when non-nil) — the broker wires side-effects here.
+//     If completeFn returns an error (e.g. LoadBlueprint failed), return 500
+//     with the error message so the wizard can surface it.
 //  4. Mark state as complete and persist it.
 //  5. Return 200 {"ok": true, "redirect": "/"}.
-//
-// TODO: broker wires CompleteFunc here
-func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn func(task string, skipTask bool) error) {
+func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn CompleteFunc) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	var body struct {
-		Task     string `json:"task"`
-		SkipTask bool   `json:"skip_task"`
+		Task      string   `json:"task"`
+		SkipTask  bool     `json:"skip_task"`
+		Blueprint string   `json:"blueprint"`
+		Agents    []string `json:"agents"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -162,9 +186,13 @@ func HandleComplete(w http.ResponseWriter, r *http.Request, completeFn func(task
 		return
 	}
 
-	// TODO: broker wires CompleteFunc here
 	if completeFn != nil {
-		if err := completeFn(body.Task, body.SkipTask); err != nil {
+		if err := completeFn(body.Task, body.SkipTask, strings.TrimSpace(body.Blueprint), body.Agents); err != nil {
+			// Log the full error server-side but return an opaque response to
+			// the client. completeFn may wrap filesystem paths, yaml parse
+			// messages, or other internals that should not leak to HTTP
+			// callers on a locally-bound broker.
+			log.Printf("onboarding: complete failed: %v", err)
 			http.Error(w, "complete failed", http.StatusInternalServerError)
 			return
 		}
@@ -410,6 +438,11 @@ type blueprintAgentSummary struct {
 	Role    string `json:"role,omitempty"`
 	Emoji   string `json:"emoji,omitempty"`
 	Checked bool   `json:"checked"`
+	// BuiltIn marks the blueprint's lead agent (type: lead or built_in:
+	// true in the yaml). The wizard uses this to prevent the user from
+	// unchecking the lead in the Team step — downstream broker guards
+	// also refuse to disable or remove a BuiltIn member.
+	BuiltIn bool `json:"built_in,omitempty"`
 }
 
 type blueprintTaskSummary struct {
@@ -449,13 +482,19 @@ func summarizeBlueprint(bp operations.Blueprint) blueprintSummary {
 		Name:        bp.Name,
 		Description: bp.Description,
 	}
+	leadSlug := strings.TrimSpace(bp.Starter.LeadSlug)
 	for _, a := range bp.Starter.Agents {
+		// Mark the lead as BuiltIn so the wizard's Team step can disable
+		// its checkbox. We trust three signals from the blueprint yaml:
+		// explicit built_in, type=lead, or slug matching starter.lead_slug.
+		builtIn := a.BuiltIn || strings.EqualFold(strings.TrimSpace(a.Type), "lead") || (leadSlug != "" && a.Slug == leadSlug)
 		s.Agents = append(s.Agents, blueprintAgentSummary{
 			Slug:    a.Slug,
 			Name:    a.Name,
 			Role:    a.Role,
 			Emoji:   a.Emoji,
 			Checked: a.Checked,
+			BuiltIn: builtIn,
 		})
 	}
 	for _, t := range bp.Starter.Tasks {

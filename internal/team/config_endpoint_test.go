@@ -55,8 +55,8 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 	if p, _ := h1["provider"].(string); p != "claude-code" {
 		t.Fatalf("expected provider=claude-code before POST, got %q", p)
 	}
-	if backend, _ := h1["memory_backend"].(string); backend != config.MemoryBackendNex {
-		t.Fatalf("expected memory_backend=%q before POST, got %q", config.MemoryBackendNex, backend)
+	if backend, _ := h1["memory_backend"].(string); backend != config.MemoryBackendMarkdown {
+		t.Fatalf("expected memory_backend=%q before POST, got %q", config.MemoryBackendMarkdown, backend)
 	}
 
 	// POST /config with codex — simulates the wizard tile click
@@ -102,8 +102,8 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 	if p, _ := cfgResp["llm_provider"].(string); p != "codex" {
 		t.Fatalf("expected /config llm_provider=codex after POST, got %q (body=%s)", p, string(rawConfig))
 	}
-	if backend, _ := cfgResp["memory_backend"].(string); backend != config.MemoryBackendNex {
-		t.Fatalf("expected /config memory_backend=%q, got %q", config.MemoryBackendNex, backend)
+	if backend, _ := cfgResp["memory_backend"].(string); backend != config.MemoryBackendMarkdown {
+		t.Fatalf("expected /config memory_backend=%q, got %q", config.MemoryBackendMarkdown, backend)
 	}
 
 	// Verify persisted to disk

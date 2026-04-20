@@ -620,3 +620,48 @@ workflows:
         dimensions: day
         metrics: views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage,impressions,impressionClickThroughRate,estimatedRevenue
         export_target: scorecard_stub
+
+wiki_schema:
+  dirs:
+    - team/videos/
+    - team/playbooks/
+    - team/channel-decisions/
+    - team/scripts/
+    - team/audience-research/
+  bootstrap:
+    - path: team/playbooks/video-pipeline.md
+      title: "Video production pipeline"
+      skeleton: |
+        # Video production pipeline
+
+        _(From idea to published — every stage: ideation, script, record, edit, thumbnail, publish, post-mortem. Where videos get stuck, and what unblocks them.)_
+    - path: team/playbooks/thumbnail.md
+      title: "Thumbnail playbook"
+      skeleton: |
+        # Thumbnail playbook
+
+        _(What has moved CTR on this channel, what has flopped. Face or no face, color palette, text length, emotion bias. Add a dated entry after every analytics review.)_
+    - path: team/scripts/hook-library.md
+      title: "Hook library"
+      skeleton: |
+        # Hook library
+
+        _(First-5-second openers that earn the watch. Group by format (tutorial, commentary, case study). Note the retention numbers whenever you can.)_
+    - path: team/channel-decisions/growth-log.md
+      title: "Channel growth decision log"
+      skeleton: |
+        # Channel growth decision log
+
+        _(Big-lever decisions: format pivots, niche shifts, upload cadence changes, thumbnail system overhauls. What we tried, what the analytics showed, what we kept.)_
+    - path: team/audience-research/personas.md
+      title: "Audience personas"
+      skeleton: |
+        # Audience personas
+
+        _(Who actually watches — not the demographic report, the psychographic one. What problems bring them to the channel, what keeps them subscribed, what makes them leave.)_
+    - path: team/videos/backlog.md
+      title: "Video backlog"
+      skeleton: |
+        # Video backlog
+
+        _(Unprocessed ideas. Periodically the team promotes the best ones into scripts/ or archives the rest. Do not let this page calcify.)_

@@ -1292,6 +1292,11 @@ func TestNewChannelModelAutoStartsInitWithoutAPIKey(t *testing.T) {
 	origHome := os.Getenv("HOME")
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_API_KEY", "")
+	// Pin the Nex backend explicitly — this test is asserting Nex-specific
+	// behaviour ("no API key → init flow fires to ask for one"). Since the
+	// shipping default is now markdown (no API key needed), the init flow
+	// would not auto-start without this pin.
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendNex)
 	defer os.Setenv("HOME", origHome)
 
 	m := newChannelModel(false)

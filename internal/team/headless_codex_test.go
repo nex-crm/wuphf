@@ -281,6 +281,7 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForCodingAgents(t *testing.T) {
 	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
 	t.Setenv("HEADLESS_CODEX_RECORD_FILE", recordFile)
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("PWD", repoRoot)
 	t.Setenv("OLDPWD", "/tmp/previous")
 	t.Setenv("CODEX_THREAD_ID", "thread-from-controller")
@@ -403,6 +404,7 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForLocalWorktreeBuilder(t *test
 	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
 	t.Setenv("HEADLESS_CODEX_RECORD_FILE", recordFile)
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("PWD", repoRoot)
 
 	broker := NewBroker()
@@ -480,6 +482,7 @@ func TestRunHeadlessCodexTurnPassesScopedChannelEnv(t *testing.T) {
 	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
 	t.Setenv("HEADLESS_CODEX_RECORD_FILE", recordFile)
 	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("WUPHF_CHANNEL", "general")
 
 	l := &Launcher{
@@ -2096,5 +2099,102 @@ func waitForProcessedTurn(t *testing.T, ch <-chan processedTurn) processedTurn {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for processed turn")
 		return processedTurn{}
+	}
+}
+
+func TestPreflightHeadlessCodexAuthFailsAndPostsSystemMessage(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	if err := config.Save(config.Config{}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	broker := NewBroker()
+	l := &Launcher{broker: broker}
+
+	err := l.preflightHeadlessCodexAuth("operator", "general")
+	if err == nil {
+		t.Fatal("expected preflight to fail with no auth available")
+	}
+	if !strings.Contains(err.Error(), "codex auth missing") {
+		t.Fatalf("expected 'codex auth missing' in error, got %v", err)
+	}
+
+	// The channel should now contain a system message naming the agent and
+	// the remediation the user needs to take. Without this the user sees
+	// nothing but "Routing..." forever.
+	messages := broker.ChannelMessages("general")
+	if len(messages) == 0 {
+		t.Fatal("expected a system message in general, got none")
+	}
+	found := false
+	for _, m := range messages {
+		if m.From == "system" && strings.Contains(m.Content, "@operator") && strings.Contains(m.Content, "codex login") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected a system message mentioning @operator and 'codex login'; got %#v", messages)
+	}
+}
+
+func TestPreflightHeadlessCodexAuthPassesWhenOpenAIKeySet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "sk-test-key")
+	if err := config.Save(config.Config{}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	l := &Launcher{broker: NewBroker()}
+	if err := l.preflightHeadlessCodexAuth("operator", "general"); err != nil {
+		t.Fatalf("expected preflight to pass with OPENAI_API_KEY set, got %v", err)
+	}
+}
+
+func TestPreflightHeadlessCodexAuthPassesWhenAuthJSONPresent(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("WUPHF_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	if err := config.Save(config.Config{}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	// Seed auth.json at the source path prepareHeadlessCodexHome reads from
+	// (~/.codex/auth.json). It will copy it into the isolated runtime home.
+	srcDir := filepath.Join(home, ".codex")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(srcDir, "auth.json"), []byte(`{"auth_mode":"chatgpt"}`), 0o600); err != nil {
+		t.Fatalf("write auth.json: %v", err)
+	}
+
+	l := &Launcher{broker: NewBroker()}
+	if err := l.preflightHeadlessCodexAuth("operator", "general"); err != nil {
+		t.Fatalf("expected preflight to pass when auth.json exists, got %v", err)
+	}
+}
+
+func TestIsCodexAuthError(t *testing.T) {
+	cases := []struct {
+		in   string
+		want bool
+	}{
+		{"", false},
+		{"exit status 1", false},
+		{"unexpected status 401 Unauthorized", true},
+		{"401 Unauthorized", true},
+		{"Missing bearer or basic authentication", true},
+		{"random network error", false},
+	}
+	for _, c := range cases {
+		if got := isCodexAuthError(c.in); got != c.want {
+			t.Errorf("isCodexAuthError(%q) = %v, want %v", c.in, got, c.want)
+		}
 	}
 }

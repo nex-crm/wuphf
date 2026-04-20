@@ -94,4 +94,15 @@ jobs:
         run: sleep 45
 
       - name: npx wuphf --version
-        run: npx --yes "wuphf@$VERSION" --version
+        run: |
+          # The binary's self-reported version must match the tag. Without
+          # this check, a goreleaser misconfiguration (missing -X ldflag on
+          # buildinfo.Version) silently ships the hardcoded fallback and no
+          # amount of `npx wuphf@latest` gets users the real release.
+          OUT=$(npx --yes "wuphf@$VERSION" --version)
+          echo "$OUT"
+          echo "$OUT" | grep -E -q " v${VERSION}(\s|$)" || {
+            echo "::error::binary self-reported version did not match tag $VERSION"
+            echo "output was: $OUT"
+            exit 1
+          }

@@ -431,3 +431,42 @@ workflows:
       proof: Retention evidence persisted successfully.
       inputs:
         operation_name: Paid Discord Community
+
+wiki_schema:
+  dirs:
+    - team/members/
+    - team/content/
+    - team/moderation/
+    - team/playbooks/
+    - team/events/
+  bootstrap:
+    - path: team/playbooks/welcome-flow.md
+      title: "New member welcome flow"
+      skeleton: |
+        # New member welcome flow
+
+        _(What happens in the first 72 hours after someone pays. DM sequence, channel tour, first prompt to contribute. Document the version that is actually running, not the version we wish we were running.)_
+    - path: team/content/calendar.md
+      title: "Content calendar"
+      skeleton: |
+        # Content calendar
+
+        _(Weekly and monthly recurring posts, themed days, AMA slots. Who is on point for each. Keep this up to date — a stale calendar is a dead community.)_
+    - path: team/moderation/rules.md
+      title: "Moderation rules and tone"
+      skeleton: |
+        # Moderation rules and tone
+
+        _(The actual rules we enforce — not just the pinned post. Edge cases, warning ladders, when to DM vs kick, how we treat disagreements between mods.)_
+    - path: team/events/recurring.md
+      title: "Recurring events"
+      skeleton: |
+        # Recurring events
+
+        _(Office hours, community calls, show-and-tell. Cadence, host rotation, prep checklist, what we do when attendance is low.)_
+    - path: team/members/whales.md
+      title: "High-signal members"
+      skeleton: |
+        # High-signal members
+
+        _(Members who consistently elevate the community — contributors, regulars, mentors. We invest in them, learn from them, and pull them into events. Keep notes respectful; this page is not public.)_

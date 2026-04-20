@@ -73,14 +73,18 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	cmd.Env = env
 
 	// Enrich the notification with Nex entity context. Use a 2s deadline so a
-	// slow or unreachable memory backend never holds up the agent turn. The brief is
-	// prepended to the notification so the original work packet stays intact.
-	stdinPayload := notification
+	// slow or unreachable memory backend never holds up the agent turn.
+	//
+	// The memory brief can contain attacker-controlled data (email bodies, CRM
+	// notes, calendar entries, etc.), so it is appended AFTER the operator's
+	// notification and wrapped in an explicitly untrusted fence. Putting
+	// attacker data before the operator's instructions is a known prompt-
+	// injection vector; last-message anchoring is where the agent's attention
+	// lands, so the operator's notification stays first.
 	memoryCtx, memoryCancel := context.WithTimeout(ctx, 2*time.Second)
-	if brief := fetchScopedMemoryBrief(memoryCtx, slug, notification, l.broker); brief != "" {
-		stdinPayload = brief + "\n\n" + notification
-	}
+	brief := fetchScopedMemoryBrief(memoryCtx, slug, notification, l.broker)
 	memoryCancel()
+	stdinPayload := composeHeadlessStdinPayload(notification, brief)
 	cmd.Stdin = strings.NewReader(stdinPayload)
 
 	stdout, err := cmd.StdoutPipe()

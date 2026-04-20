@@ -1,0 +1,10 @@
+[
+  {"input": "[[slug]]",            "expected": {"slug": "slug", "display": "slug"}},
+  {"input": "[[slug|Display]]",    "expected": {"slug": "slug", "display": "Display"}},
+  {"input": "[[people/nazz]]",     "expected": {"slug": "people/nazz", "display": "people/nazz"}},
+  {"input": "[[people/nazz|Nazz]]","expected": {"slug": "people/nazz", "display": "Nazz"}},
+  {"input": "[[ ]]",               "expected": null},
+  {"input": "[[a|b|c]]",           "expected": null},
+  {"input": "[[../../etc]]",       "expected": null},
+  {"input": "[[/absolute]]",       "expected": null}
+]

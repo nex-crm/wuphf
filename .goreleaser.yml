@@ -13,7 +13,14 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
+      # Inject the release version (and build timestamp) so `wuphf --version`
+      # reports the actual release instead of the hardcoded 0.1.0 fallback in
+      # internal/buildinfo. goreleaser exposes {{.Version}} without a leading v
+      # and {{.Date}} as RFC3339 — both match what buildinfo.Current() returns
+      # to users.
       - -s -w
+      - -X github.com/nex-crm/wuphf/internal/buildinfo.Version={{.Version}}
+      - -X github.com/nex-crm/wuphf/internal/buildinfo.BuildTimestamp={{.Date}}
 
 archives:
   - formats: [tar.gz]

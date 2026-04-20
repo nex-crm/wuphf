@@ -57,6 +57,10 @@ export interface AppStore {
   // Onboarding
   onboardingComplete: boolean
   setOnboardingComplete: (v: boolean) => void
+
+  // Wiki
+  wikiPath: string | null
+  setWikiPath: (path: string | null) => void
 }
 
 export const useAppStore = create<AppStore>((set) => ({
@@ -64,9 +68,9 @@ export const useAppStore = create<AppStore>((set) => ({
   setBrokerConnected: (v) => set({ brokerConnected: v }),
 
   currentChannel: 'general',
-  setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
+  setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null, dmMode: false, dmAgentSlug: null }),
   currentApp: null,
-  setCurrentApp: (app) => set({ currentApp: app }),
+  setCurrentApp: (app) => set({ currentApp: app, dmMode: false, dmAgentSlug: null }),
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
@@ -100,4 +104,7 @@ export const useAppStore = create<AppStore>((set) => ({
 
   onboardingComplete: false,
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),
+
+  wikiPath: null,
+  setWikiPath: (path) => set({ wikiPath: path }),
 }))

@@ -3,11 +3,46 @@ package onboarding
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/operations"
 )
+
+// withOperationsFallbackFS points the operations loader at the repo's
+// templates/operations tree so HandleBlueprints can find curated yaml
+// files during tests. Without this the package-level init in the root
+// wuphf package (which wires the embed FS) never runs in onboarding
+// tests, and HandleBlueprints returns an empty list.
+func withOperationsFallbackFS(t *testing.T) {
+	t.Helper()
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	var repoRoot string
+	for dir := cwd; dir != "/" && dir != ""; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(filepath.Join(dir, "templates", "operations")); err == nil {
+			repoRoot = dir
+			break
+		}
+	}
+	if repoRoot == "" {
+		t.Skip("templates/operations not reachable from test cwd; skipping")
+	}
+	sub, err := fs.Sub(os.DirFS(repoRoot), ".")
+	if err != nil {
+		t.Fatalf("sub fs: %v", err)
+	}
+	operations.SetFallbackFS(sub)
+}
 
 // TestHandleStateGETReturnsValidJSON verifies that GET /onboarding/state
 // returns HTTP 200 with a valid JSON body that can be decoded into State.
@@ -217,6 +252,204 @@ func TestHandleCompletePostPersistsCompletedState(t *testing.T) {
 	})
 }
 
+// TestHandleCompleteDecodesBlueprintAndAgents verifies that POST
+// /onboarding/complete now decodes the blueprint id and selected agent
+// slugs from the body and threads them into completeFn. Previously these
+// fields were silently dropped, causing every user's team to collapse to
+// the DefaultManifest roster regardless of what they picked in the wizard.
+func TestHandleCompleteDecodesBlueprintAndAgents(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		var gotTask, gotBlueprint string
+		var gotSkipTask bool
+		var gotAgents []string
+		captured := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+			gotTask = task
+			gotSkipTask = skipTask
+			gotBlueprint = blueprintID
+			gotAgents = selectedAgents
+			return nil
+		}
+
+		body := map[string]interface{}{
+			"task":      "Stand up niche CRM",
+			"skip_task": false,
+			"blueprint": "niche-crm",
+			"agents":    []string{"operator", "builder"},
+		}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, captured)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, want %d\nbody: %s", w.Code, http.StatusOK, w.Body.String())
+		}
+		if gotTask != "Stand up niche CRM" {
+			t.Errorf("task: got %q want %q", gotTask, "Stand up niche CRM")
+		}
+		if gotSkipTask {
+			t.Errorf("skipTask: got true want false")
+		}
+		if gotBlueprint != "niche-crm" {
+			t.Errorf("blueprint: got %q want %q", gotBlueprint, "niche-crm")
+		}
+		if len(gotAgents) != 2 || gotAgents[0] != "operator" || gotAgents[1] != "builder" {
+			t.Errorf("agents: got %v want [operator builder]", gotAgents)
+		}
+	})
+}
+
+// TestHandleCompleteBackwardCompatWithLegacyClient verifies that a POST
+// body without the new blueprint/agents fields (e.g. from an older client)
+// is still accepted, with blueprintID empty and selectedAgents nil. The
+// downstream onboardingCompleteFn must treat these as "from scratch".
+func TestHandleCompleteBackwardCompatWithLegacyClient(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		var gotBlueprint string
+		var gotAgents []string
+		captured := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+			gotBlueprint = blueprintID
+			gotAgents = selectedAgents
+			return nil
+		}
+
+		body := map[string]interface{}{"task": "go", "skip_task": false}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, captured)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d, body: %s", w.Code, w.Body.String())
+		}
+		if gotBlueprint != "" {
+			t.Errorf("blueprint: got %q want empty", gotBlueprint)
+		}
+		if len(gotAgents) != 0 {
+			t.Errorf("agents: got %v want empty/nil", gotAgents)
+		}
+	})
+}
+
+// TestHandleCompleteReturns500OnCompleteFnError verifies that if
+// completeFn returns an error (e.g. LoadBlueprint failed), the handler
+// returns HTTP 500 so the wizard can surface the error to the user.
+// The response body must NOT include the wrapped error detail (which can
+// carry filesystem paths, yaml parse messages, or user-supplied ids);
+// those stay server-side in logs.
+func TestHandleCompleteReturns500OnCompleteFnError(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		const secretDetail = "secret-path-/etc/wuphf/state.yaml"
+		failing := func(task string, skipTask bool, blueprintID string, selectedAgents []string) error {
+			return fmt.Errorf("%s: simulated loader failure for %q", secretDetail, blueprintID)
+		}
+
+		body := map[string]interface{}{"task": "go", "skip_task": false, "blueprint": "bogus"}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, failing)
+
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("status: got %d want 500\nbody: %s", w.Code, w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), secretDetail) {
+			t.Errorf("500 body leaked internal error detail; body: %s", w.Body.String())
+		}
+		if strings.Contains(w.Body.String(), "bogus") {
+			t.Errorf("500 body echoed user-supplied blueprint id; body: %s", w.Body.String())
+		}
+	})
+}
+
+// TestHandleCompleteSkipTaskPersistsOnboardedState verifies that
+// skip_task=true still flips the state to onboarded on disk, so a user
+// who opts out of the first-task prompt does not re-enter the wizard on
+// next launch. This was a gap caught in review — the in-memory seeding
+// was verified but disk persistence was not.
+func TestHandleCompleteSkipTaskPersistsOnboardedState(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		body := map[string]interface{}{"task": "", "skip_task": true, "blueprint": "", "agents": nil}
+		data, _ := json.Marshal(body)
+		req := httptest.NewRequest(http.MethodPost, "/onboarding/complete", bytes.NewReader(data))
+		w := httptest.NewRecorder()
+		HandleComplete(w, req, nil)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d\nbody: %s", w.Code, w.Body.String())
+		}
+
+		s, err := Load()
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if !s.Onboarded() {
+			t.Error("expected Onboarded()=true after skip_task=true; wizard would reopen on next launch")
+		}
+	})
+}
+
+// TestHandleBlueprintsMarksLeadBuiltIn verifies that GET /onboarding/blueprints
+// surfaces built_in=true for the blueprint's lead agent. The wizard UI
+// uses this flag to lock the lead's checkbox so it cannot be unchecked
+// on the Team step. Without this, a user could uncheck the lead, the POST
+// body would carry an empty agents list, and the broker would fall back
+// to lead-only — the opposite of what the user asked for, silently.
+func TestHandleBlueprintsMarksLeadBuiltIn(t *testing.T) {
+	withTempHome(t, func(_ string) {
+		withOperationsFallbackFS(t)
+
+		req := httptest.NewRequest(http.MethodGet, "/onboarding/blueprints", nil)
+		w := httptest.NewRecorder()
+		HandleBlueprints(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("status: got %d\nbody: %s", w.Code, w.Body.String())
+		}
+
+		var resp struct {
+			Templates []struct {
+				ID     string `json:"id"`
+				Agents []struct {
+					Slug    string `json:"slug"`
+					BuiltIn bool   `json:"built_in"`
+				} `json:"agents"`
+			} `json:"templates"`
+		}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+
+		// niche-crm's blueprint yaml names `operator` as type: lead with
+		// built_in: true. Any shipped blueprint must mark exactly one lead.
+		var found bool
+		for _, tpl := range resp.Templates {
+			if tpl.ID != "niche-crm" {
+				continue
+			}
+			var leadCount int
+			for _, a := range tpl.Agents {
+				if a.BuiltIn {
+					leadCount++
+					if a.Slug != "operator" {
+						t.Errorf("niche-crm lead should be operator, got %q (built_in=true)", a.Slug)
+					}
+				}
+			}
+			if leadCount == 0 {
+				t.Error("niche-crm has no built_in lead agent — wizard would allow unchecking the lead")
+			}
+			if leadCount > 1 {
+				t.Errorf("niche-crm has %d built_in leads; expected exactly 1", leadCount)
+			}
+			found = true
+		}
+		if !found {
+			t.Fatalf("niche-crm not found in response templates: %+v", resp.Templates)
+		}
+	})
+}
+
 // TestHandleChecklistDoneMarksItem verifies that POST /onboarding/checklist/{id}/done
 // marks the item and persists it.
 func TestHandleChecklistDoneMarksItem(t *testing.T) {
@@ -270,7 +503,7 @@ func TestHandleChecklistDismiss(t *testing.T) {
 func TestRegisterRoutesRegistersAllPaths(t *testing.T) {
 	withTempHome(t, func(_ string) {
 		mux := http.NewServeMux()
-		RegisterRoutes(mux, nil, "")
+		RegisterRoutes(mux, nil, "", nil)
 
 		routes := []struct {
 			method string

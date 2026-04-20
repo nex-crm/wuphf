@@ -33,6 +33,16 @@ async function waitForReactMount(page: Page): Promise<void> {
   );
 }
 
+// The wizard flow is welcome → identity → templates. Fill the two required
+// identity fields so the primary CTA enables and we can advance.
+async function advanceToTemplatesStep(page: Page): Promise<void> {
+  await expect(page.locator('.wizard-step').first()).toBeVisible({ timeout: 10_000 });
+  await page.locator('.wizard-step button.btn-primary').first().click();
+  await page.locator('#wiz-company').fill('Smoke Test Co');
+  await page.locator('#wiz-description').fill('Smoke test description');
+  await page.locator('.wizard-step button.btn-primary').first().click();
+}
+
 test.describe('wuphf onboarding wizard smoke', () => {
   test('fresh install lands on the welcome step without crashing', async ({ page }) => {
     const getErrors = collectReactErrors(page);
@@ -53,20 +63,18 @@ test.describe('wuphf onboarding wizard smoke', () => {
     ).toHaveLength(0);
   });
 
-  test('advancing from welcome → templates step does not crash', async ({ page }) => {
-    // Verifies the wizard state machine actually transitions. The welcome
-    // step has a single primary CTA; clicking it should render the
-    // templates step. Assert via the progress-dot count staying > 0 and
-    // a new `.wizard-panel` (only templates step onward has panels).
+  test('advancing from welcome → identity → templates step does not crash', async ({ page }) => {
+    // Verifies the wizard state machine actually transitions. Flow is:
+    // welcome → identity (company + description required) → templates.
+    // Assert via `.wizard-panel` on the templates step.
     const getErrors = collectReactErrors(page);
 
     await page.goto('/');
     await waitForReactMount(page);
 
-    await expect(page.locator('.wizard-step').first()).toBeVisible({ timeout: 10_000 });
-    await page.locator('.wizard-step button.btn-primary').first().click();
+    await advanceToTemplatesStep(page);
 
-    // Templates step renders `.wizard-panel` (welcome does not).
+    // Templates step renders `.wizard-panel` (welcome + identity have different markers).
     await expect(page.locator('.wizard-panel').first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByTestId('error-boundary')).toHaveCount(0);
 
@@ -94,25 +102,24 @@ test.describe('wuphf onboarding wizard smoke', () => {
     await page.goto('/');
     await waitForReactMount(page);
 
-    await expect(page.locator('.wizard-step').first()).toBeVisible({ timeout: 10_000 });
-    await page.locator('.wizard-step button.btn-primary').first().click();
+    await advanceToTemplatesStep(page);
 
-    // Wait for the template grid (only rendered once blueprint fetch resolves).
-    await expect(page.locator('.template-grid')).toBeVisible({ timeout: 10_000 });
-
-    // `not.toHaveCount(1)` would pass for 0 cards too, masking a total
-    // render failure. Wait for at least two cards explicitly — the
-    // pre-embed bug rendered exactly one ("From scratch").
+    // Wait for at least one template grid (the blueprint picker now
+    // renders one grid per category group — Services, Media & Community,
+    // Products — so `.template-grid` is not unique). We rely on
+    // `.template-card` instead as the unit of a rendered blueprint.
     const cards = page.locator('.template-card');
-    await expect(cards.nth(1)).toBeVisible({ timeout: 10_000 });
+    await expect(cards.first()).toBeVisible({ timeout: 10_000 });
 
-    // "From scratch" is always present; at least one card must have a
-    // different name (i.e. a shipped preset was loaded).
-    const names = await page.locator('.template-card-name').allTextContents();
-    const presets = names.filter((n) => n.trim() !== 'From scratch');
+    // The pre-embed bug rendered exactly zero preset cards — only the
+    // separate "Start from scratch" button (which is NOT a .template-card
+    // in the grouped layout). So requiring ≥1 card is the regression
+    // guard: if embedded templates fail to load, the grouped layout
+    // would still render the from-scratch button but produce zero cards.
+    const count = await cards.count();
     expect(
-      presets.length,
-      `expected ≥1 preset blueprint card, got names: ${JSON.stringify(names)}`,
+      count,
+      'expected ≥1 preset blueprint card — embedded templates may have failed to load',
     ).toBeGreaterThan(0);
   });
 });
