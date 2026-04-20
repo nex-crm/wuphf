@@ -8,9 +8,16 @@ interface WikiSidebarProps {
   catalog: WikiCatalogEntry[]
   currentPath?: string | null
   onNavigate: (path: string) => void
+  /** Optional audit-log opener — rendered as a footer link when provided. */
+  onNavigateAudit?: () => void
 }
 
-export default function WikiSidebar({ catalog, currentPath, onNavigate }: WikiSidebarProps) {
+export default function WikiSidebar({
+  catalog,
+  currentPath,
+  onNavigate,
+  onNavigateAudit,
+}: WikiSidebarProps) {
   const [query, setQuery] = useState('')
 
   const grouped = useMemo(() => groupCatalog(catalog, query.trim()), [catalog, query])
@@ -52,6 +59,20 @@ export default function WikiSidebar({ catalog, currentPath, onNavigate }: WikiSi
           </div>
         )
       })}
+      {onNavigateAudit && (
+        <div className="wk-sidebar-audit">
+          <button
+            type="button"
+            className="wk-sidebar-audit-link"
+            onClick={(e) => {
+              e.preventDefault()
+              onNavigateAudit()
+            }}
+          >
+            View audit log →
+          </button>
+        </div>
+      )}
     </aside>
   )
 }

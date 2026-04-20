@@ -84,20 +84,31 @@ func (b *Broker) onboardingCompleteFn(task string, skipTask bool, blueprintID st
 	}
 
 	// Materialize the blueprint's LLM wiki outside the broker lock. Lane A
-	// owns the git repo at ~/.wuphf/wiki; we just write the skeleton files
-	// and let its commit worker pick them up on the next pass. Wiki
-	// materialization is best-effort: a failure here should NOT fail
-	// onboarding (the user should land on an empty-but-functional wiki
+	// owns the git repo at ~/.wuphf/wiki; we write the skeleton files, commit
+	// them under the reserved `wuphf-bootstrap` author, then regenerate the
+	// index. Wiki materialization is best-effort: a failure here should NOT
+	// fail onboarding (the user should land on an empty-but-functional wiki
 	// rather than a broken onboarding flow). Log and move on.
-	materializeBlueprintWiki(bp)
+	b.materializeBlueprintWiki(bp)
 	return nil
 }
 
-// materializeBlueprintWiki resolves ~/.wuphf/wiki and invokes the wiki
-// materializer. Errors are logged, never returned — onboarding succeeds
-// regardless. A blueprint without a WikiSchema (e.g. a synthesized
-// from-scratch blueprint) is silently skipped.
-func materializeBlueprintWiki(bp operations.Blueprint) {
+// materializeBlueprintWiki resolves ~/.wuphf/wiki, runs the skeleton
+// materializer, commits any newly-written skeletons as `wuphf-bootstrap`,
+// then regenerates the index so a fresh install has both the files AND the
+// audit trail from day 1.
+//
+// Errors are logged, never returned — onboarding succeeds regardless. A
+// blueprint without a WikiSchema (e.g. a synthesized from-scratch
+// blueprint) is silently skipped.
+//
+// Important: this runs OUTSIDE the broker lock (see caller), and uses the
+// wiki worker's Repo for the commit so we go through the same
+// per-commit-identity plumbing as regular agent writes. If the worker is
+// not yet live (memory backend != markdown), we log and return — the
+// skeletons stay on disk untracked and will be folded into the next
+// RecoverDirtyTree pass. That's not ideal but it's the honest fallback.
+func (b *Broker) materializeBlueprintWiki(bp operations.Blueprint) {
 	if bp.WikiSchema == nil {
 		return
 	}
@@ -115,6 +126,35 @@ func materializeBlueprintWiki(bp operations.Blueprint) {
 	if len(result.ArticlesCreated) > 0 || len(result.DirsCreated) > 0 {
 		log.Printf("onboarding: wiki materialized blueprint=%s dirs=%d articles_created=%d articles_skipped=%d",
 			bp.ID, len(result.DirsCreated), len(result.ArticlesCreated), len(result.ArticlesSkipped))
+	}
+	// Nothing to commit if only existing articles were observed.
+	if len(result.ArticlesCreated) == 0 && len(result.DirsCreated) == 0 {
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil || worker.Repo() == nil {
+		// Non-markdown backend — skeletons stay on disk, will surface via
+		// RecoverDirtyTree on the next markdown-backend launch.
+		return
+	}
+	repo := worker.Repo()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	// Regenerate the index FIRST so CommitBootstrap picks up index/all.md in
+	// the same commit as the skeletons. Leaving it untracked would cause
+	// RecoverDirtyTree on the next launch to fold it into a `wuphf-recovery`
+	// commit, which misattributes a derived artefact.
+	if err := repo.IndexRegen(ctx); err != nil {
+		log.Printf("onboarding: wiki index regen failed (continuing): %v", err)
+	}
+	bootstrapMsg := fmt.Sprintf("wuphf: materialize %s blueprint skeletons", bp.ID)
+	sha, err := repo.CommitBootstrap(ctx, bootstrapMsg)
+	if err != nil {
+		log.Printf("onboarding: wiki commit-bootstrap failed: %v", err)
+		return
+	}
+	if sha != "" {
+		log.Printf("onboarding: wiki bootstrap committed %s (blueprint=%s)", sha, bp.ID)
 	}
 }
 

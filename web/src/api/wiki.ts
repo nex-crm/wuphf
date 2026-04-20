@@ -60,6 +60,28 @@ export async function fetchCatalog(): Promise<WikiCatalogEntry[]> {
   }
 }
 
+export interface WikiAuditEntry {
+  sha: string
+  author_slug: string
+  timestamp: string
+  message: string
+  paths: string[]
+}
+
+export async function fetchAuditLog(
+  params: { limit?: number; since?: string } = {},
+): Promise<{ entries: WikiAuditEntry[]; total: number }> {
+  const qs = new URLSearchParams()
+  if (typeof params.limit === 'number') qs.set('limit', String(params.limit))
+  if (params.since) qs.set('since', params.since)
+  const url = qs.toString() ? `/wiki/audit?${qs.toString()}` : '/wiki/audit'
+  try {
+    return await get<{ entries: WikiAuditEntry[]; total: number }>(url)
+  } catch {
+    return { entries: [], total: 0 }
+  }
+}
+
 export async function fetchHistory(
   path: string,
 ): Promise<{ commits: WikiHistoryCommit[] }> {

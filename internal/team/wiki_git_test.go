@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newTestRepo(t *testing.T) *Repo {
@@ -317,5 +318,168 @@ func TestRepoRecoverDirtyTreeCleanIsNoop(t *testing.T) {
 	// Nothing dirty — should succeed and not create a new commit
 	if err := repo.RecoverDirtyTree(ctx); err != nil {
 		t.Fatalf("recover: %v", err)
+	}
+}
+
+func TestRepoCommitBootstrapAttributesToBootstrapAuthor(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// Simulate MaterializeWiki: drop two skeleton files under team/ without
+	// going through Commit(). CommitBootstrap should pick them up and
+	// attribute them to wuphf-bootstrap (NOT wuphf-recovery, NOT system).
+	if err := os.MkdirAll(filepath.Join(repo.Root(), "team", "playbooks"), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	skeletons := map[string]string{
+		"team/playbooks/renewal.md":        "# Renewal\n",
+		"team/decisions/wiki-as-default.md": "# Decision\n",
+	}
+	for rel, body := range skeletons {
+		full := filepath.Join(repo.Root(), filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+
+	sha, err := repo.CommitBootstrap(ctx, "wuphf: materialize test blueprint")
+	if err != nil {
+		t.Fatalf("CommitBootstrap: %v", err)
+	}
+	if sha == "" {
+		t.Fatal("expected non-empty sha")
+	}
+
+	// The most recent commit for each skeleton must be authored by wuphf-bootstrap.
+	for rel := range skeletons {
+		refs, err := repo.Log(ctx, rel)
+		if err != nil {
+			t.Fatalf("log %s: %v", rel, err)
+		}
+		if len(refs) == 0 {
+			t.Fatalf("%s: expected a commit in log", rel)
+		}
+		if refs[0].Author != "wuphf-bootstrap" {
+			t.Fatalf("%s: expected wuphf-bootstrap author, got %q", rel, refs[0].Author)
+		}
+		if !strings.Contains(refs[0].Message, "materialize test blueprint") {
+			t.Fatalf("%s: expected commit message to carry the caller's msg, got %q", rel, refs[0].Message)
+		}
+	}
+}
+
+func TestRepoCommitBootstrapIsNoopOnCleanTree(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// Fresh init → tree is clean → no bootstrap commit should be created.
+	sha, err := repo.CommitBootstrap(ctx, "should not commit")
+	if err != nil {
+		t.Fatalf("CommitBootstrap clean: %v", err)
+	}
+	if sha != "" {
+		t.Fatalf("expected empty sha on clean tree, got %q", sha)
+	}
+}
+
+func TestRepoAuditLogCoversAllAuthors(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// One skeleton → bootstrap commit.
+	full := filepath.Join(repo.Root(), "team", "playbooks", "renewal.md")
+	if err := os.MkdirAll(filepath.Dir(full), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(full, []byte("# Renewal\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := repo.CommitBootstrap(ctx, "materialize"); err != nil {
+		t.Fatalf("CommitBootstrap: %v", err)
+	}
+	// Two agent commits.
+	if _, _, err := repo.Commit(ctx, "operator", "team/people/sarah.md", "# Sarah\n", "create", "sarah"); err != nil {
+		t.Fatalf("Commit sarah: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "planner", "team/playbooks/renewal.md", "# Renewal v2\n", "replace", "update renewal"); err != nil {
+		t.Fatalf("Commit renewal: %v", err)
+	}
+
+	entries, err := repo.AuditLog(ctx, time.Time{}, 0)
+	if err != nil {
+		t.Fatalf("AuditLog: %v", err)
+	}
+	// Expect at least 4 commits: init + bootstrap + sarah + renewal.
+	if len(entries) < 4 {
+		t.Fatalf("expected >=4 entries, got %d: %+v", len(entries), entries)
+	}
+	authors := map[string]bool{}
+	for _, e := range entries {
+		authors[e.Author] = true
+	}
+	for _, want := range []string{"system", "wuphf-bootstrap", "operator", "planner"} {
+		if !authors[want] {
+			t.Errorf("expected author %q in audit log, got authors=%v", want, authors)
+		}
+	}
+	// Newest-first ordering — first entry should be the most recent commit.
+	if entries[0].Author != "planner" {
+		t.Errorf("expected newest-first ordering with planner at top, got %q", entries[0].Author)
+	}
+	// Paths populated for at least the content commits.
+	for _, e := range entries {
+		if e.Author == "planner" && len(e.Paths) == 0 {
+			t.Errorf("expected paths to populate for planner commit, got empty")
+		}
+	}
+}
+
+func TestRepoAuditLogSinceFilter(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "operator", "team/people/a.md", "# A\n", "create", "a"); err != nil {
+		t.Fatalf("Commit a: %v", err)
+	}
+	// since=far-future: should return nothing
+	future := time.Now().Add(24 * time.Hour)
+	entries, err := repo.AuditLog(ctx, future, 0)
+	if err != nil {
+		t.Fatalf("AuditLog: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("expected 0 entries with far-future since, got %d", len(entries))
+	}
+}
+
+func TestRepoAuditLogLimitCaps(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		path := "team/people/" + string(rune('a'+i)) + ".md"
+		if _, _, err := repo.Commit(ctx, "operator", path, "# X\n", "create", "p"); err != nil {
+			t.Fatalf("Commit %d: %v", i, err)
+		}
+	}
+	entries, err := repo.AuditLog(ctx, time.Time{}, 2)
+	if err != nil {
+		t.Fatalf("AuditLog: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 entries with limit=2, got %d", len(entries))
 	}
 }

@@ -860,3 +860,256 @@
   font-size: 14px;
 }
 .wk-error { color: var(--wk-wikilink-broken); }
+
+/* ─── Audit log view (#/wiki/_audit) ─── */
+.wk-audit {
+  max-width: 1180px;
+  padding: 40px 48px 80px;
+}
+.wk-audit-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--wk-border);
+}
+.wk-audit-title {
+  font-family: var(--wk-display);
+  font-size: 40px;
+  font-weight: 500;
+  font-variation-settings: "opsz" 100;
+  color: var(--wk-text);
+  margin: 0 0 6px;
+}
+.wk-audit-strapline {
+  font-family: var(--wk-body);
+  font-style: italic;
+  color: var(--wk-text-muted);
+  font-size: 15px;
+  margin: 0;
+  max-width: 620px;
+  line-height: 1.5;
+}
+.wk-audit-stats {
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  white-space: nowrap;
+  padding-top: 6px;
+}
+.wk-audit-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
+  align-items: flex-end;
+  margin-bottom: 20px;
+}
+.wk-audit-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.wk-audit-filter input,
+.wk-audit-filter select {
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  color: var(--wk-text);
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: 2px;
+  padding: 6px 10px;
+  min-width: 160px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.wk-audit-filter input[type="search"] {
+  min-width: 320px;
+}
+.wk-audit-filter input:focus,
+.wk-audit-filter select:focus {
+  outline: 2px solid var(--wk-accent);
+  outline-offset: 1px;
+}
+.wk-audit-export {
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-text);
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: 2px;
+  padding: 7px 14px;
+  cursor: pointer;
+  align-self: flex-end;
+}
+.wk-audit-export:hover:not(:disabled) {
+  background: var(--wk-surface-alt);
+  border-color: var(--wk-text-muted);
+}
+.wk-audit-export:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.wk-audit-empty {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--wk-text-muted);
+  font-family: var(--wk-body);
+  font-size: 15px;
+  font-style: italic;
+}
+
+.wk-audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--wk-body);
+  font-size: 14px;
+  color: var(--wk-text);
+}
+.wk-audit-table thead th {
+  text-align: left;
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--wk-text-muted);
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--wk-border);
+  background: transparent;
+}
+.wk-audit-table tbody td {
+  padding: 10px 12px;
+  vertical-align: top;
+  border-bottom: 1px solid var(--wk-border);
+}
+.wk-audit-row:hover td {
+  background: var(--wk-surface-alt);
+}
+.wk-audit-row.is-bootstrap td,
+.wk-audit-row.is-recovery td,
+.wk-audit-row.is-system td {
+  background: color-mix(in oklab, var(--wk-surface-alt) 60%, transparent);
+}
+.wk-audit-when {
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  white-space: nowrap;
+  width: 140px;
+}
+.wk-audit-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-weight: 500;
+  width: 220px;
+}
+.wk-audit-tag {
+  display: inline-block;
+  font-family: var(--wk-chrome);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--wk-text-muted);
+  background: var(--wk-surface-alt);
+  border: 1px solid var(--wk-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  margin-left: 4px;
+}
+.wk-audit-row.is-bootstrap .wk-audit-tag { color: var(--wk-accent-ink); border-color: var(--wk-accent); }
+.wk-audit-msg {
+  font-family: var(--wk-body);
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--wk-text);
+  min-width: 260px;
+}
+.wk-audit-paths {
+  min-width: 260px;
+}
+.wk-audit-paths ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wk-audit-paths a {
+  font-family: var(--wk-mono);
+  font-size: 12.5px;
+  color: var(--wk-wikilink);
+  text-decoration: underline dashed;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+.wk-audit-paths a:hover {
+  text-decoration-style: solid;
+}
+.wk-audit-paths span {
+  font-family: var(--wk-mono);
+  font-size: 12.5px;
+  color: var(--wk-text-muted);
+}
+.wk-audit-paths-empty {
+  color: var(--wk-text-muted);
+  font-family: var(--wk-mono);
+  font-size: 12px;
+}
+.wk-audit-sha {
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  white-space: nowrap;
+  width: 80px;
+}
+
+/* ─── Sidebar audit link ─── */
+.wk-sidebar-audit {
+  margin-top: auto;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--wk-border);
+}
+.wk-sidebar-audit-link {
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  color: var(--wk-text-muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.wk-sidebar-audit-link:hover {
+  color: var(--wk-wikilink);
+}
+.wk-nav-sidebar {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Catalog header audit link */
+.wk-catalog-audit-link {
+  font-family: inherit;
+  color: var(--wk-wikilink);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+}
+.wk-catalog-audit-link:hover {
+  text-decoration-style: solid;
+}
