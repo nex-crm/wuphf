@@ -8839,13 +8839,19 @@ func (b *Broker) handleRequests(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
-	if channel == "" {
+	scope := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scope")))
+	// scope=all returns requests across every channel the viewer can access. The
+	// broker's blocking check (handlePostMessage, PostMessage) is global, so the
+	// web UI's overlay/interview bar need the same cross-channel view to render
+	// what's actually blocking the human.
+	allChannels := scope == "all" || scope == "global"
+	if !allChannels && channel == "" {
 		channel = "general"
 	}
 	viewerSlug := strings.TrimSpace(r.URL.Query().Get("viewer_slug"))
 	includeResolved := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_resolved")), "true")
 	b.mu.Lock()
-	if !b.canAccessChannelLocked(viewerSlug, channel) {
+	if !allChannels && !b.canAccessChannelLocked(viewerSlug, channel) {
 		b.mu.Unlock()
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
@@ -8856,7 +8862,11 @@ func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 		if reqChannel == "" {
 			reqChannel = "general"
 		}
-		if reqChannel != channel {
+		if allChannels {
+			if !b.canAccessChannelLocked(viewerSlug, reqChannel) {
+				continue
+			}
+		} else if reqChannel != channel {
 			continue
 		}
 		if !includeResolved && !requestIsActive(req) {
@@ -8869,6 +8879,7 @@ func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"channel":  channel,
+		"scope":    scope,
 		"requests": requests,
 		"pending":  pending,
 	})

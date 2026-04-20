@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useMessages } from '../../hooks/useMessages'
 import { useAgentStream } from '../../hooks/useAgentStream'
-import { useAppStore } from '../../stores/app'
+import { useAppStore, isDMChannel } from '../../stores/app'
 import { MessageBubble } from './MessageBubble'
 import { Composer } from './Composer'
 import { InterviewBar } from './InterviewBar'
@@ -9,7 +9,9 @@ import { StreamLineView } from './StreamLineView'
 
 export function DMView() {
   const currentChannel = useAppStore((s) => s.currentChannel)
-  const dmAgentSlug = useAppStore((s) => s.dmAgentSlug)
+  const channelMeta = useAppStore((s) => s.channelMeta)
+  const dm = isDMChannel(currentChannel, channelMeta)
+  const dmAgentSlug = dm?.agentSlug ?? null
   const { data: messages = [] } = useMessages(currentChannel)
   const { lines, connected } = useAgentStream(dmAgentSlug)
   const messagesRef = useRef<HTMLDivElement>(null)

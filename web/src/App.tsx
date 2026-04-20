@@ -1,6 +1,6 @@
 import { Component, useEffect, useState, type ReactNode } from 'react'
 import { initApi, get } from './api/client'
-import { useAppStore } from './stores/app'
+import { useAppStore, isDMChannel } from './stores/app'
 import { Shell } from './components/layout/Shell'
 import { MessageFeed } from './components/messages/MessageFeed'
 import { Composer } from './components/messages/Composer'
@@ -89,12 +89,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 
 function MainContent() {
   const currentApp = useAppStore((s) => s.currentApp)
-  const dmMode = useAppStore((s) => s.dmMode)
+  const currentChannel = useAppStore((s) => s.currentChannel)
+  const channelMeta = useAppStore((s) => s.channelMeta)
   const wikiPath = useAppStore((s) => s.wikiPath)
   const setWikiPath = useAppStore((s) => s.setWikiPath)
   const setCurrentApp = useAppStore((s) => s.setCurrentApp)
 
-  if (dmMode) {
+  if (!currentApp && isDMChannel(currentChannel, channelMeta)) {
     return <DMView />
   }
 
