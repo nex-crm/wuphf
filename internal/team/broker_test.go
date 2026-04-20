@@ -4412,6 +4412,94 @@ func TestBrokerRequestsLifecycle(t *testing.T) {
 	}
 }
 
+// Regression: the broker rejects new messages with 409 whenever ANY blocking
+// request is pending (handlePostMessage uses firstBlockingRequest across all
+// channels), so GET /requests must expose a "scope=all" view. Without it, the
+// web UI only sees per-channel requests and can't render a blocker that lives
+// in another channel — leaving the human stuck: can't send, can't see why.
+func TestBrokerGetRequestsScopeAllSeesCrossChannelBlocker(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	ensureTestMemberAccess(b, "general", "ceo", "CEO")
+	ensureTestMemberAccess(b, "backend", "ceo", "CEO")
+	ensureTestMemberAccess(b, "backend", "human", "Human")
+	ensureTestMemberAccess(b, "general", "human", "Human")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	createBody, _ := json.Marshal(map[string]any{
+		"kind":     "approval",
+		"from":     "ceo",
+		"channel":  "backend",
+		"title":    "Deploy approval",
+		"question": "Ship the backend migration?",
+		"blocking": true,
+		"required": true,
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create cross-channel request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 creating backend request, got %d", resp.StatusCode)
+	}
+
+	// Per-channel view (#general) must NOT see the #backend blocker — this is
+	// the pre-fix behavior the UI was relying on and is still correct.
+	req, _ = http.NewRequest(http.MethodGet, base+"/requests?channel=general&viewer_slug=human", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("per-channel listing failed: %v", err)
+	}
+	var perChannel struct {
+		Requests []humanInterview `json:"requests"`
+		Pending  *humanInterview  `json:"pending"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&perChannel); err != nil {
+		t.Fatalf("decode per-channel response: %v", err)
+	}
+	resp.Body.Close()
+	if len(perChannel.Requests) != 0 || perChannel.Pending != nil {
+		t.Fatalf("expected #general view to hide #backend request, got %+v", perChannel)
+	}
+
+	// scope=all must include the cross-channel blocker so the overlay can show
+	// what's preventing the human from chatting anywhere.
+	req, _ = http.NewRequest(http.MethodGet, base+"/requests?scope=all&viewer_slug=human", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("scope=all listing failed: %v", err)
+	}
+	var global struct {
+		Requests []humanInterview `json:"requests"`
+		Pending  *humanInterview  `json:"pending"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&global); err != nil {
+		t.Fatalf("decode scope=all response: %v", err)
+	}
+	resp.Body.Close()
+	if len(global.Requests) != 1 {
+		t.Fatalf("expected 1 blocker across channels, got %d: %+v", len(global.Requests), global.Requests)
+	}
+	if global.Pending == nil || global.Pending.Channel != "backend" {
+		t.Fatalf("expected pending blocker from #backend, got %+v", global.Pending)
+	}
+}
+
 func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
