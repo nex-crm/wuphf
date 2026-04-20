@@ -39,13 +39,42 @@ import (
 )
 
 const (
-	SessionName                     = "wuphf-team"
-	tmuxSocketName                  = "wuphf"
 	defaultNotificationPollInterval = 15 * time.Minute
 	channelRespawnDelay             = 8 * time.Second
 	ceoHeadStartDelay               = 250 * time.Millisecond
 	blankSlateLaunchSlug            = "__blank_slate__"
+
+	// baseSessionName and baseTmuxSocketName are the default, un-suffixed
+	// identifiers used when the broker runs on the default port (prod).
+	// The exported SessionName and tmuxSocketName include a per-port suffix
+	// when a non-default broker port is configured, so concurrent prod, dev,
+	// and worktree launches cannot collide on a shared tmux socket or
+	// session name. See nameWithPortSuffix for the suffixing rule.
+	baseSessionName    = "wuphf-team"
+	baseTmuxSocketName = "wuphf"
 )
+
+// SessionName and tmuxSocketName are derived at package init from the
+// broker port resolved via brokeraddr. On the default port they keep their
+// historical values ("wuphf-team", "wuphf"); on any non-default port they
+// gain a "-<port>" suffix. This isolation is what prevents the
+// "spawn first agent: exit status 1" race seen when two WUPHF instances
+// tried to share a single tmux socket + session name.
+var (
+	SessionName    = nameWithPortSuffix(baseSessionName)
+	tmuxSocketName = nameWithPortSuffix(baseTmuxSocketName)
+)
+
+func nameWithPortSuffix(base string) string {
+	return nameWithPortSuffixForPort(base, brokeraddr.ResolvePort())
+}
+
+func nameWithPortSuffixForPort(base string, port int) string {
+	if port <= 0 || port == brokeraddr.DefaultPort {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, port)
+}
 
 // Launcher sets up and manages the multi-agent team.
 type Launcher struct {
