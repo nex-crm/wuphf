@@ -1,4 +1,5 @@
 import { useOfficeMembers } from '../../hooks/useMembers'
+import { useOverflow } from '../../hooks/useOverflow'
 import { useAppStore } from '../../stores/app'
 import { PixelAvatar } from '../ui/PixelAvatar'
 import { HarnessBadge } from '../ui/HarnessBadge'
@@ -27,13 +28,15 @@ export function AgentList() {
   const currentChannel = useAppStore((s) => s.currentChannel)
   const channelMeta = useAppStore((s) => s.channelMeta)
   const wizard = useAgentWizard()
+  const overflowRef = useOverflow<HTMLDivElement>()
   const defaultHarness = useDefaultHarness()
 
   const agents = members.filter((m) => m.slug && m.slug !== 'human')
 
   return (
     <>
-      <div className="sidebar-agents">
+      <div className="sidebar-scroll-wrap is-agents">
+      <div className="sidebar-agents" ref={overflowRef}>
         {agents.length === 0 ? (
           <div style={{ fontSize: 11, color: 'var(--text-tertiary)', padding: '4px 8px' }}>
             No agents online
@@ -77,9 +80,10 @@ export function AgentList() {
           onClick={wizard.show}
           title="Create a new agent"
         >
-          <span style={{ fontSize: 14, width: 18, textAlign: 'center', flexShrink: 0 }}>+</span>
+          <span style={{ width: 18, textAlign: 'center', flexShrink: 0 }}>+</span>
           <span>New Agent</span>
         </button>
+      </div>
       </div>
       <AgentWizard open={wizard.open} onClose={wizard.hide} />
     </>

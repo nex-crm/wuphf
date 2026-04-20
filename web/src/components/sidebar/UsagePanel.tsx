@@ -25,7 +25,7 @@ export function UsagePanel() {
           <path d="m9 18 6-6-6-6" />
         </svg>
         Usage
-        <span style={{ marginLeft: 'auto', fontWeight: 400, color: 'var(--accent)' }}>
+        <span style={{ marginLeft: 'auto', fontWeight: 400 }}>
           {formatUSD(totalCost)}
         </span>
       </button>

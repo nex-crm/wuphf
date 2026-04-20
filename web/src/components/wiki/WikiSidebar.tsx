@@ -35,30 +35,32 @@ export default function WikiSidebar({
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      {groupOrder.map((group) => {
-        const items = grouped[group]
-        if (!items || items.length === 0) return null
-        return (
-          <div key={group}>
-            <h3>{group}</h3>
-            <ul>
-              {items.map((item) => (
-                <li key={item.path} className={currentPath === item.path ? 'current' : ''}>
-                  <a
-                    href={`#/wiki/${encodeURI(item.path)}`}
-                    onClick={(e) => {
-                      e.preventDefault()
-                      onNavigate(item.path)
-                    }}
-                  >
-                    {item.title}
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )
-      })}
+      <div className="wk-nav-sidebar-scroll">
+        {groupOrder.map((group) => {
+          const items = grouped[group]
+          if (!items || items.length === 0) return null
+          return (
+            <div key={group}>
+              <h3>{group}</h3>
+              <ul>
+                {items.map((item) => (
+                  <li key={item.path} className={currentPath === item.path ? 'current' : ''}>
+                    <a
+                      href={`#/wiki/${encodeURI(item.path)}`}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        onNavigate(item.path)
+                      }}
+                    >
+                      {item.title}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )
+        })}
+      </div>
       {onNavigateAudit && (
         <div className="wk-sidebar-audit">
           <button

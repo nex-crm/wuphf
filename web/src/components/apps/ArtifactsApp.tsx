@@ -405,7 +405,7 @@ function ActivityItem({ title, body, meta, kindLabel }: { title: string; body: s
   return (
     <div className="app-card" style={{ marginBottom: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-        <span className="badge badge-accent" style={{ fontSize: 10 }}>{kindLabel}</span>
+        <span className="badge badge-accent">{kindLabel}</span>
         <span className="app-card-title" style={{ marginBottom: 0 }}>{title}</span>
       </div>
       {body && <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>{body}</div>}

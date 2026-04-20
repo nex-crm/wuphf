@@ -60,7 +60,7 @@ export function MessageBubble({ message, grouped = false, onThreadClick }: Messa
       {/* Avatar */}
       <div
         className={`message-avatar${isHuman ? '' : ' avatar-with-harness'}`}
-        style={isHuman ? { background: 'var(--accent)', color: 'white', fontSize: 14, fontWeight: 600 } : undefined}
+        style={isHuman ? { background: 'var(--bg-warm)', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600 } : undefined}
       >
         {isHuman ? (
           'You'
@@ -82,7 +82,7 @@ export function MessageBubble({ message, grouped = false, onThreadClick }: Messa
             {isHuman ? 'You' : (agent?.name || message.from)}
           </span>
           {isHuman ? (
-            <span className="badge badge-yellow">human</span>
+            <span className="badge badge-neutral">human</span>
           ) : agent?.role ? (
             <span className="badge badge-green">{agent.role}</span>
           ) : null}

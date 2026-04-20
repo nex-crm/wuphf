@@ -183,7 +183,7 @@ function PolicyRow({ policy, onDelete }: PolicyRowProps) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 500, fontSize: 13 }}>{policy.rule}</div>
         <div className="app-card-meta">
-          <span className="badge badge-green" style={{ fontSize: 10 }}>ACTIVE</span>
+          <span className="badge badge-green">ACTIVE</span>
         </div>
       </div>
       <button

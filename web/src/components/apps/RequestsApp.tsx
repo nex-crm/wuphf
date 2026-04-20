@@ -106,12 +106,12 @@ function RequestItem({ request, isPending, onAnswer }: RequestItemProps) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ fontWeight: 600, fontSize: 13 }}>{request.from || 'Unknown'}</span>
         {request.status && (
-          <span className="badge badge-accent" style={{ fontSize: 10 }}>
+          <span className="badge badge-accent">
             {request.status.toUpperCase()}
           </span>
         )}
         {request.blocking && (
-          <span className="badge badge-yellow" style={{ fontSize: 10 }}>BLOCKING</span>
+          <span className="badge badge-yellow">BLOCKING</span>
         )}
       </div>
 

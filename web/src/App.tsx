@@ -1,4 +1,4 @@
-import { Component, useEffect, useState, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { initApi, get } from './api/client'
 import { useAppStore, isDMChannel } from './stores/app'
 import { Shell } from './components/layout/Shell'
@@ -28,6 +28,7 @@ import { ConfirmHost } from './components/ui/ConfirmDialog'
 import { ProviderSwitcherHost } from './components/ui/ProviderSwitcher'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useHashRouter } from './hooks/useHashRouter'
+import './styles/shadcn.css'
 import './styles/global.css'
 import './styles/layout.css'
 import './styles/messages.css'
@@ -116,7 +117,7 @@ function MainContent() {
   }
 
   if (currentApp) {
-    const panels: Record<string, React.ComponentType> = {
+    const panels: Record<string, ComponentType> = {
       tasks: TasksApp,
       requests: RequestsApp,
       policies: PoliciesApp,
