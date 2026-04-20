@@ -285,6 +285,16 @@ export function getRequests(channel: string) {
   })
 }
 
+// Cross-channel view. The broker's blocking check is global, so the web UI's
+// global overlay + inline interview bar need every blocking request the human
+// can answer, not just the ones in the current channel.
+export function getAllRequests() {
+  return get<{ requests: AgentRequest[] }>('/requests', {
+    scope: 'all',
+    viewer_slug: 'human',
+  })
+}
+
 export function answerRequest(id: string, choiceId: string, customText?: string) {
   const body: Record<string, string> = { id, choice_id: choiceId }
   if (customText) body.custom_text = customText
