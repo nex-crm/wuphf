@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import type { ComponentType } from 'react'
 import { useOverflow } from '../../hooks/useOverflow'
 import {
   Play,
@@ -17,7 +18,7 @@ import { SIDEBAR_APPS } from '../../lib/constants'
 import { useAppStore } from '../../stores/app'
 import { getRequests } from '../../api/client'
 
-const APP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
   tasks: CheckCircle,
@@ -49,31 +50,31 @@ export function AppList() {
 
   return (
     <div className="sidebar-scroll-wrap is-apps">
-    <div className="sidebar-apps" ref={overflowRef}>
-      {SIDEBAR_APPS.filter((app) => app.id !== 'settings').map((app) => {
-        const badge = app.id === 'requests' && pendingCount > 0 ? pendingCount : null
-        const Icon = APP_ICONS[app.id]
-        return (
-          <button
-            key={app.id}
-            className={`sidebar-item${currentApp === app.id ? ' active' : ''}`}
-            onClick={() => setCurrentApp(app.id)}
-          >
-            {Icon ? (
-              <Icon className="sidebar-item-icon" />
-            ) : (
-              <span className="sidebar-item-emoji">{app.icon}</span>
-            )}
-            <span style={{ flex: 1 }}>{app.name}</span>
-            {badge !== null && (
-              <span className="sidebar-badge" aria-label={`${badge} pending`}>
-                {badge}
-              </span>
-            )}
-          </button>
-        )
-      })}
-    </div>
+      <div className="sidebar-apps" ref={overflowRef}>
+        {SIDEBAR_APPS.filter((app) => app.id !== 'settings').map((app) => {
+          const badge = app.id === 'requests' && pendingCount > 0 ? pendingCount : null
+          const Icon = APP_ICONS[app.id]
+          return (
+            <button
+              key={app.id}
+              className={`sidebar-item${currentApp === app.id ? ' active' : ''}`}
+              onClick={() => setCurrentApp(app.id)}
+            >
+              {Icon ? (
+                <Icon className="sidebar-item-icon" />
+              ) : (
+                <span className="sidebar-item-emoji">{app.icon}</span>
+              )}
+              <span style={{ flex: 1 }}>{app.name}</span>
+              {badge !== null && (
+                <span className="sidebar-badge" aria-label={`${badge} pending`}>
+                  {badge}
+                </span>
+              )}
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }

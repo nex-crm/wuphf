@@ -73,7 +73,13 @@ export const useAppStore = create<AppStore>((set) => ({
   setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
   currentApp: null,
   setCurrentApp: (app) =>
-    set(app ? { currentApp: app, dmMode: false, dmAgentSlug: null } : { currentApp: null }),
+    set((s) =>
+      app
+        ? s.dmMode
+          ? { currentApp: app, dmMode: false, dmAgentSlug: null, currentChannel: 'general' }
+          : { currentApp: app }
+        : { currentApp: null },
+    ),
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>

@@ -4,7 +4,7 @@
 
 /* ═══════════════════════════════════════════════════════════════
    shadcn/ui theme mapped onto NEX design tokens.
-   HSL values derived from web/themes/nex.css so that shadcn
+   HSL values derived from web/public/themes/nex.css so that shadcn
    primitives share the same visual language as the rest of the
    app. Scoped to [data-theme="nex"] to coexist with other themes.
    ═══════════════════════════════════════════════════════════════ */
@@ -45,29 +45,6 @@
     --input: 240 5% 92%;
     --ring: 200 94% 46%;
 
-    --radius: 8px;
-  }
-
-  html[data-theme='slack-dark'] {
-    --background: 240 10% 8%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 10%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 10%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 200 94% 46%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 240 6% 16%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 6% 16%;
-    --muted-foreground: 220 3% 70%;
-    --accent: 200 94% 46%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 4 76% 52%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 240 6% 20%;
-    --input: 240 6% 20%;
-    --ring: 200 94% 46%;
     --radius: 8px;
   }
 }

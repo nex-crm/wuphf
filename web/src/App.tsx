@@ -1,4 +1,4 @@
-import { Component, useEffect, useState, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { initApi, get } from './api/client'
 import { useAppStore } from './stores/app'
 import { Shell } from './components/layout/Shell'
@@ -116,7 +116,7 @@ function MainContent() {
   }
 
   if (currentApp) {
-    const panels: Record<string, React.ComponentType> = {
+    const panels: Record<string, ComponentType> = {
       tasks: TasksApp,
       requests: RequestsApp,
       policies: PoliciesApp,

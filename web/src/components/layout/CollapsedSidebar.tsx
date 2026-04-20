@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ComponentType, type MouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
   Settings as SettingsIcon,
@@ -25,7 +25,7 @@ import { ChannelList } from '../sidebar/ChannelList'
 import { getUsage } from '../../api/client'
 import { formatUSD, formatTokens } from '../../lib/format'
 
-const APP_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
   tasks: CheckCircle,
@@ -60,7 +60,7 @@ export function CollapsedSidebar() {
     if (closeTimer.current) window.clearTimeout(closeTimer.current)
     closeTimer.current = window.setTimeout(() => setPopover(null), 120)
   }
-  function showHint(e: React.MouseEvent<HTMLElement>, label: string) {
+  function showHint(e: MouseEvent<HTMLElement>, label: string) {
     const r = e.currentTarget.getBoundingClientRect()
     setHint({ label, y: r.top + r.height / 2 })
   }
@@ -72,6 +72,15 @@ export function CollapsedSidebar() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current) {
+        window.clearTimeout(closeTimer.current)
+        closeTimer.current = null
+      }
+    }
   }, [])
 
   return (
@@ -104,8 +113,12 @@ export function CollapsedSidebar() {
           type="button"
           className={`sidebar-icon-btn${popover === 'team' ? ' is-open' : ''}`}
           aria-label="Team"
+          aria-haspopup="dialog"
+          aria-expanded={popover === 'team'}
           onMouseEnter={() => openPopover('team')}
           onMouseLeave={scheduleClose}
+          onFocus={() => openPopover('team')}
+          onBlur={scheduleClose}
         >
           <Group />
         </button>
@@ -113,8 +126,12 @@ export function CollapsedSidebar() {
           type="button"
           className={`sidebar-icon-btn${popover === 'channels' ? ' is-open' : ''}`}
           aria-label="Channels"
+          aria-haspopup="dialog"
+          aria-expanded={popover === 'channels'}
           onMouseEnter={() => openPopover('channels')}
           onMouseLeave={scheduleClose}
+          onFocus={() => openPopover('channels')}
+          onBlur={scheduleClose}
         >
           <ChatBubble />
         </button>
@@ -179,18 +196,28 @@ function formatCompactUSD(v: number): string {
 }
 
 function UsageRail({ onEnter, onLeave, active }: { onEnter: () => void; onLeave: () => void; active: boolean }) {
-  const { data: usage } = useQuery({ queryKey: ['usage'], queryFn: () => getUsage() })
+  const { data: usage } = useQuery({
+    queryKey: ['usage'],
+    queryFn: () => getUsage(),
+    refetchInterval: 30_000,
+  })
   const totalCost = usage?.total?.cost_usd ?? 0
   return (
-    <div
+    <button
+      type="button"
       className={`sidebar-rail-bottom${active ? ' is-open' : ''}`}
+      aria-label={`Usage ${formatUSD(totalCost)}`}
+      aria-haspopup="dialog"
+      aria-expanded={active}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
+      onFocus={onEnter}
+      onBlur={onLeave}
       title={`Usage ${formatUSD(totalCost)}`}
     >
       <Activity className="sidebar-rail-usage-icon" />
       <span className="sidebar-rail-usage-value">{formatCompactUSD(totalCost)}</span>
-    </div>
+    </button>
   )
 }
 

@@ -2,7 +2,6 @@ import animate from 'tailwindcss-animate'
 
 /** @type {import('tailwindcss').Config} */
 export default {
-  darkMode: ['class', '[data-theme="slack-dark"]'],
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     container: {

@@ -1,4 +1,4 @@
-import { useState, useEffect, type ComponentType, type ReactNode } from 'react'
+import { useState, useEffect, type ComponentType, type CSSProperties, type ReactNode } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Settings as SettingsIcon,
@@ -32,7 +32,7 @@ type SectionId =
 
 interface Section {
   id: SectionId
-  Icon: ComponentType<{ className?: string }>
+  Icon: ComponentType<{ className?: string; style?: CSSProperties }>
   name: string
 }
 
@@ -1006,6 +1006,7 @@ function DangerZoneSection() {
       {/* SHRED — full wipe */}
       <div style={dangerStyles.card('critical')}>
         <div style={dangerStyles.cardTitle}>
+          <WarningTriangle width={16} height={16} />
           <span>Shred workspace</span>
         </div>
         <div style={dangerStyles.cardSubtitle}>
@@ -1144,7 +1145,7 @@ export function SettingsApp() {
                   style={styles.navItem(sec.id === section)}
                   onClick={() => setSection(sec.id)}
                 >
-                  <Icon />
+                  <Icon style={styles.navIcon} />
                   <span>{sec.name}</span>
                 </button>
               )
