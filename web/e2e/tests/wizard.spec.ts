@@ -104,22 +104,22 @@ test.describe('wuphf onboarding wizard smoke', () => {
 
     await advanceToTemplatesStep(page);
 
-    // Wait for the template grid (only rendered once blueprint fetch resolves).
-    await expect(page.locator('.template-grid')).toBeVisible({ timeout: 10_000 });
-
-    // `not.toHaveCount(1)` would pass for 0 cards too, masking a total
-    // render failure. Wait for at least two cards explicitly — the
-    // pre-embed bug rendered exactly one ("From scratch").
+    // Wait for at least one template grid (the blueprint picker now
+    // renders one grid per category group — Services, Media & Community,
+    // Products — so `.template-grid` is not unique). We rely on
+    // `.template-card` instead as the unit of a rendered blueprint.
     const cards = page.locator('.template-card');
-    await expect(cards.nth(1)).toBeVisible({ timeout: 10_000 });
+    await expect(cards.first()).toBeVisible({ timeout: 10_000 });
 
-    // "From scratch" is always present; at least one card must have a
-    // different name (i.e. a shipped preset was loaded).
-    const names = await page.locator('.template-card-name').allTextContents();
-    const presets = names.filter((n) => n.trim() !== 'From scratch');
+    // The pre-embed bug rendered exactly zero preset cards — only the
+    // separate "Start from scratch" button (which is NOT a .template-card
+    // in the grouped layout). So requiring ≥1 card is the regression
+    // guard: if embedded templates fail to load, the grouped layout
+    // would still render the from-scratch button but produce zero cards.
+    const count = await cards.count();
     expect(
-      presets.length,
-      `expected ≥1 preset blueprint card, got names: ${JSON.stringify(names)}`,
+      count,
+      'expected ≥1 preset blueprint card — embedded templates may have failed to load',
     ).toBeGreaterThan(0);
   });
 });
