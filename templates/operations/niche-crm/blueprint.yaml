@@ -3,6 +3,11 @@ name: Niche CRM
 kind: product_gtm
 description: Template for a focused CRM product that can be built and taken to market.
 objective: Build a niche CRM, prove the workflow, and run the product and GTM loops together.
+default_reviewer: operator
+reviewer_paths:
+  "team/product/**": builder
+  "team/customers/**": growth
+  "team/reviews/**": reviewer
 employee_blueprints:
   - workflow-automation-builder
 

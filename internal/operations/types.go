@@ -19,6 +19,17 @@ type Blueprint struct {
 	Connections        []ConnectionBlueprint   `json:"connections,omitempty" yaml:"connections,omitempty"`
 	Workflows          []WorkflowTemplate      `json:"workflows,omitempty" yaml:"workflows,omitempty"`
 	WikiSchema         *BlueprintWikiSchema    `json:"wiki_schema,omitempty" yaml:"wiki_schema,omitempty"`
+
+	// DefaultReviewer is the agent slug that approves promotions by default.
+	// The sentinel value "human-only" disables agent approval entirely and
+	// forces a human click in the web UI. Falls back to "ceo" if empty.
+	DefaultReviewer string `json:"default_reviewer,omitempty" yaml:"default_reviewer,omitempty"`
+
+	// ReviewerPaths maps glob patterns (relative to the wiki root) to agent
+	// slugs. First match wins; iteration follows declaration order. Falls
+	// through to DefaultReviewer on no match. Supported glob syntax: "*"
+	// for a single path segment wildcard, "**" for recursive segments.
+	ReviewerPaths ReviewerPathMap `json:"reviewer_paths,omitempty" yaml:"reviewer_paths,omitempty"`
 }
 
 // BlueprintWikiSchema is the optional wiki-materialization directive a
