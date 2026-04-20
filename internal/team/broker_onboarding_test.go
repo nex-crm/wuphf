@@ -389,3 +389,45 @@ func TestSeedFromBlueprintNilAgentsKeepsFullRoster(t *testing.T) {
 }
 
 var _ = fmt.Sprintf
+
+// REGRESSION: channel templates containing {{command_slug}} must be rendered,
+// not leaked through as literal channel slugs/names when onboarding seeds the
+// blank-slate office from a blueprint.
+func TestBlankSlateOfficeChannelsFromBlueprint_RendersCommandSlug(t *testing.T) {
+	blueprint := operations.Blueprint{
+		Name: "Acme Co",
+		Starter: operations.StarterPlan{
+			Channels: []operations.StarterChannel{
+				{
+					Slug:        "{{command_slug}}",
+					Name:        "{{command_slug}}",
+					Description: "Control room for the {{brand_name}} operation.",
+					Members:     []string{"planner"},
+				},
+			},
+		},
+	}
+	members := []officeMember{{Slug: "planner", Name: "Planner"}}
+
+	channels := blankSlateOfficeChannelsFromBlueprint(blueprint, members)
+
+	var found bool
+	for _, ch := range channels {
+		if ch.Slug == "general" {
+			continue
+		}
+		if strings.Contains(ch.Slug, "{{") || strings.Contains(ch.Slug, "}}") {
+			t.Fatalf("channel slug leaked template literal: %q", ch.Slug)
+		}
+		if strings.Contains(ch.Name, "{{") || strings.Contains(ch.Name, "}}") {
+			t.Fatalf("channel name leaked template literal: %q", ch.Name)
+		}
+		if strings.Contains(ch.Description, "{{") || strings.Contains(ch.Description, "}}") {
+			t.Fatalf("channel description leaked template literal: %q", ch.Description)
+		}
+		found = true
+	}
+	if !found {
+		t.Fatalf("expected a non-general channel rendered from the blueprint, got %+v", channels)
+	}
+}

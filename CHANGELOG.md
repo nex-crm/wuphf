@@ -31,6 +31,11 @@ All notable changes to WUPHF will be documented in this file.
 - 33+ new Go tests at 81.6% coverage on wiki files (`wiki_git.go` · `wiki_worker.go` · `wiki_article.go`). 80 new web tests at 90% coverage on `web/src/components/wiki/` and `web/src/lib/`. Cross-lane integration tests in `internal/team/wiki_e2e_test.go` exercise the full HTTP stack.
 - Full-repo `go test ./...` green across all 25 packages. `go test -race ./internal/team/... -run TestE2EWiki` clean.
 
+## [0.0.5.1] - 2026-04-20
+
+### Fixed
+- **Blueprint channel names no longer leak `{{command_slug}}` as literal text.** Onboarding blank-slate seeding now renders the `{{command_slug}}` template variable alongside `{{brand_name}}` and `{{brand_slug}}`, matching the sibling code paths in `internal/company/blueprints.go` and `internal/team/operation_bootstrap.go`. Default channels created from blueprint starter packs show a real command-room slug (e.g., `acme-co-command`) instead of `{{command-slug}}`.
+
 ## [0.0.5.0] - 2026-04-17
 
 ### Added

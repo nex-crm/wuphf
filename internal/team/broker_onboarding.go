@@ -398,9 +398,15 @@ func agentSelectionFilter(selectedAgents []string, leadSlug string) func(string)
 }
 
 func blankSlateOfficeChannelsFromBlueprint(blueprint operations.Blueprint, members []officeMember) []teamChannel {
+	brandName := operationFirstNonEmpty(blueprint.Name, "New operation")
+	commandSlug := operationSlug(brandName + " command")
+	if commandSlug == "" {
+		commandSlug = "command"
+	}
 	replacements := map[string]string{
-		"brand_name": operationFirstNonEmpty(blueprint.Name, "New operation"),
-		"brand_slug": operationSlug(operationFirstNonEmpty(blueprint.Name, "new-operation")),
+		"brand_name":   brandName,
+		"brand_slug":   operationSlug(operationFirstNonEmpty(blueprint.Name, "new-operation")),
+		"command_slug": commandSlug,
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	lead := officeLeadSlugFromMembers(members)
