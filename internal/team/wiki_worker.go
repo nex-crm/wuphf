@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -196,17 +197,14 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	writeCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
 	defer cancel()
 
+	// Commit owns the full atomic unit: write article bytes, regenerate the
+	// catalog, stage both, commit together. That keeps the working tree
+	// clean and the index commit attributable to the same author as the
+	// article edit. No post-commit IndexRegen here.
 	sha, n, err := w.repo.Commit(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
 	if err != nil {
 		req.ReplyCh <- wikiWriteResult{Err: err}
 		return
-	}
-	// Regenerate the catalog. A regen failure is non-fatal for the caller —
-	// the article commit already landed. Log it loudly so the next run can
-	// repair things if needed. TODO(telemetry): emit regen duration and
-	// warn when p95 > 300ms once the observability hook exists.
-	if err := w.repo.IndexRegen(writeCtx); err != nil {
-		log.Printf("wiki: index regen failed after commit %s: %v", sha, err)
 	}
 	req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
 
@@ -439,6 +437,94 @@ func (b *Broker) handleWikiArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, meta)
+}
+
+// handleWikiAudit returns the cross-article commit log for audit / compliance.
+// Unlike /wiki/history/<path> which scopes to one article, this feed covers
+// the whole wiki and includes bootstrap + recovery + system commits so the
+// lineage is complete.
+//
+//	GET /wiki/audit
+//	GET /wiki/audit?limit=50
+//	GET /wiki/audit?since=2026-04-01T00:00:00Z
+//
+// Response:
+//
+//	{
+//	  "entries": [
+//	    {
+//	      "sha": "...", "author_slug": "...", "timestamp": "...",
+//	      "message": "...", "paths": ["team/..."]
+//	    },
+//	    ...
+//	  ],
+//	  "total": N
+//	}
+func (b *Broker) handleWikiAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil {
+		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		return
+	}
+	// Parse limit (optional, 0 = all). Default cap keeps a runaway caller
+	// from dragging in 100k commits; explicit `limit=0` opts out of the cap.
+	const defaultLimit = 500
+	limit := defaultLimit
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be a non-negative integer"})
+			return
+		}
+		limit = v
+	}
+	var since time.Time
+	if raw := strings.TrimSpace(r.URL.Query().Get("since")); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "since must be RFC3339 (e.g. 2026-04-01T00:00:00Z)"})
+			return
+		}
+		since = t
+	}
+	entries, err := worker.Repo().AuditLog(r.Context(), since, limit)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	// Re-shape to snake_case for the JSON API — same convention as
+	// /wiki/catalog and /wiki/article. `paths` never serialised as null:
+	// absent paths (rare, but possible for a signed-only commit) get an
+	// empty array so consumers don't have to null-guard.
+	type wireEntry struct {
+		SHA        string   `json:"sha"`
+		AuthorSlug string   `json:"author_slug"`
+		Timestamp  string   `json:"timestamp"`
+		Message    string   `json:"message"`
+		Paths      []string `json:"paths"`
+	}
+	wire := make([]wireEntry, 0, len(entries))
+	for _, e := range entries {
+		paths := e.Paths
+		if paths == nil {
+			paths = []string{}
+		}
+		wire = append(wire, wireEntry{
+			SHA:        e.SHA,
+			AuthorSlug: e.Author,
+			Timestamp:  e.Timestamp.UTC().Format(time.RFC3339),
+			Message:    e.Message,
+			Paths:      paths,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"entries": wire,
+		"total":   len(wire),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

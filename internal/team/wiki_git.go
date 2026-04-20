@@ -271,9 +271,36 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 		bytesWritten = len(content)
 	}
 
+	// Regenerate the catalog BEFORE committing so index/all.md lands in the
+	// same commit as the article. Without this, the index is repeatedly
+	// modified-but-uncommitted and every `git status` sees it as dirty —
+	// eventually RecoverDirtyTree folds it into a misattributed
+	// `wuphf-recovery` commit. Inline regen keeps the working tree clean.
+	if err := r.regenerateIndexLocked(); err != nil {
+		return "", 0, fmt.Errorf("wiki: index regen: %w", err)
+	}
+
 	relForGit := filepath.ToSlash(relPath)
-	if out, err := r.runGitLocked(ctx, slug, "add", "--", relForGit); err != nil {
+	if out, err := r.runGitLocked(ctx, slug, "add", "--", relForGit, "index/all.md"); err != nil {
 		return "", 0, fmt.Errorf("wiki: git add %s: %w: %s", relPath, err, out)
+	}
+
+	// If the content is byte-identical to what's already committed (e.g. an
+	// agent retrying with the exact same body), `git add` stages nothing new
+	// and `git commit` would fail with "nothing to commit." Detect that and
+	// return a no-op success — the caller's contract is "make the content
+	// current," which it already is. We return the current HEAD so downstream
+	// code (SSE event, response body) stays well-formed.
+	cachedDiff, err := r.runGitLocked(ctx, slug, "diff", "--cached", "--name-only")
+	if err != nil {
+		return "", 0, fmt.Errorf("wiki: git diff --cached: %w", err)
+	}
+	if strings.TrimSpace(cachedDiff) == "" {
+		headSha, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+		if err != nil {
+			return "", 0, fmt.Errorf("wiki: resolve HEAD sha: %w", err)
+		}
+		return strings.TrimSpace(headSha), bytesWritten, nil
 	}
 
 	commitMsg := strings.TrimSpace(message)
@@ -288,6 +315,53 @@ func (r *Repo) Commit(ctx context.Context, slug, relPath, content, mode, message
 		return "", 0, fmt.Errorf("wiki: resolve HEAD sha: %w", err)
 	}
 	return strings.TrimSpace(sha), bytesWritten, nil
+}
+
+// CommitBootstrap stages every untracked / modified path under team/ and
+// commits the whole pile as author `wuphf-bootstrap`. It is idempotent: if
+// nothing is dirty, it returns ("", nil) without creating an empty commit.
+//
+// This is the handshake between the blueprint materializer (which only
+// writes files to disk) and git. Without it, the freshly-seeded skeletons
+// are untracked — on a later crash they get folded into a `wuphf-recovery`
+// commit, which is misleading in an audit view. With it, the first commit
+// for every skeleton article is attributable to the bootstrap step, not to
+// some later recovery pass or to an agent that happened to edit the file.
+//
+// The author slug `wuphf-bootstrap` is deliberate: it is visually distinct
+// from both the per-agent slugs (operator/planner/…) and the two reserved
+// system slugs (`system`, `wuphf-recovery`). Audit views can filter or
+// colour it differently from real human / agent edits.
+func (r *Repo) CommitBootstrap(ctx context.Context, message string) (string, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// If nothing is dirty there's nothing to commit. This is the common
+	// case when the user re-picks the same blueprint — MaterializeWiki
+	// preserved existing articles, so the worktree is already clean.
+	status, err := r.runGitLocked(ctx, "system", "status", "--porcelain")
+	if err != nil {
+		return "", fmt.Errorf("wiki: git status: %w", err)
+	}
+	if strings.TrimSpace(status) == "" {
+		return "", nil
+	}
+
+	if out, err := r.runGitLocked(ctx, "wuphf-bootstrap", "add", "-A"); err != nil {
+		return "", fmt.Errorf("wiki: git add -A (bootstrap): %w: %s", err, out)
+	}
+	commitMsg := strings.TrimSpace(message)
+	if commitMsg == "" {
+		commitMsg = "wuphf: materialize blueprint skeletons"
+	}
+	if out, err := r.runGitLocked(ctx, "wuphf-bootstrap", "commit", "-q", "-m", commitMsg); err != nil {
+		return "", fmt.Errorf("wiki: git commit (bootstrap): %w: %s", err, out)
+	}
+	sha, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("wiki: resolve HEAD sha: %w", err)
+	}
+	return strings.TrimSpace(sha), nil
 }
 
 // Log returns the commit history for a single article, most-recent first.
@@ -328,6 +402,95 @@ func (r *Repo) Log(ctx context.Context, relPath string) ([]CommitRef, error) {
 	return refs, nil
 }
 
+// AuditEntry is a single cross-article commit surfaced by AuditLog. Unlike
+// CommitRef (which powers per-article history), this carries the list of
+// files touched by the commit so reviewers can reconstruct the full diff
+// surface without running a second `git show`.
+type AuditEntry struct {
+	SHA       string
+	Author    string
+	Timestamp time.Time
+	Message   string
+	// Paths are the git pathspecs modified in this commit, forward-slashed.
+	// Merge commits and commits that only touched index/ will appear with
+	// whatever git log --name-only reports; callers can filter as needed.
+	Paths []string
+}
+
+// AuditLog returns every commit in the wiki repo, most-recent first. This
+// is the cross-article audit trail — per-article history lives in Log().
+// Two intentional design choices:
+//
+//  1. We always include the full author slug, timestamp, and file list so
+//     downstream audit tooling (CSV export, compliance review, SOC2
+//     artefact generation, etc.) can work without re-shelling to git.
+//  2. Bootstrap (`wuphf-bootstrap`), recovery (`wuphf-recovery`), and
+//     system (`system`) authors are surfaced alongside agent slugs. Audit
+//     tools can filter them out by author, but the default feed is the
+//     complete lineage — hiding bootstrap would create a false impression
+//     that articles "appeared" at first-agent-write time.
+//
+// limit <= 0 returns everything. since.IsZero() returns everything regardless
+// of age; otherwise only commits strictly newer than `since` are returned.
+func (r *Repo) AuditLog(ctx context.Context, since time.Time, limit int) ([]AuditEntry, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	args := []string{
+		"log",
+		"--format=%h%x1f%an%x1f%aI%x1f%s",
+		"--name-only",
+		"--no-merges",
+	}
+	if !since.IsZero() {
+		args = append(args, "--since="+since.UTC().Format(time.RFC3339))
+	}
+	if limit > 0 {
+		args = append(args, fmt.Sprintf("--max-count=%d", limit))
+	}
+	out, err := r.runGitLocked(ctx, "system", args...)
+	if err != nil {
+		return nil, fmt.Errorf("wiki: audit log: %w", err)
+	}
+	return parseAuditLog(out), nil
+}
+
+// parseAuditLog splits the output of `git log --format=... --name-only`
+// into AuditEntry records. Exposed for test-side coverage.
+func parseAuditLog(raw string) []AuditEntry {
+	var out []AuditEntry
+	var cur *AuditEntry
+	for _, rawLine := range strings.Split(raw, "\n") {
+		line := strings.TrimRight(rawLine, "\r")
+		if line == "" {
+			// Blank line terminates the paths block for the current commit.
+			// Do NOT reset cur here — another header may follow immediately.
+			continue
+		}
+		// Header lines contain our unit separator 0x1f; path lines do not.
+		if strings.Contains(line, "\x1f") {
+			parts := strings.Split(line, "\x1f")
+			if len(parts) != 4 {
+				continue
+			}
+			ts, _ := time.Parse(time.RFC3339, parts[2])
+			entry := AuditEntry{
+				SHA:       parts[0],
+				Author:    parts[1],
+				Timestamp: ts,
+				Message:   parts[3],
+			}
+			out = append(out, entry)
+			cur = &out[len(out)-1]
+			continue
+		}
+		if cur != nil {
+			cur.Paths = append(cur.Paths, filepath.ToSlash(line))
+		}
+	}
+	return out
+}
+
 // Fsck runs git fsck and returns ErrRepoCorrupt if the repo is unreadable.
 func (r *Repo) Fsck(ctx context.Context) error {
 	r.mu.Lock()
@@ -347,6 +510,13 @@ func (r *Repo) Fsck(ctx context.Context) error {
 func (r *Repo) IndexRegen(ctx context.Context) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.regenerateIndexLocked()
+}
+
+// regenerateIndexLocked is the mutex-free body of IndexRegen. Called by
+// Commit which already holds r.mu so we can't re-enter. Kept in sync with
+// IndexRegen — the only difference is the lock wrap.
+func (r *Repo) regenerateIndexLocked() error {
 	teamDir := filepath.Join(r.root, "team")
 	if _, err := os.Stat(teamDir); err != nil {
 		return fmt.Errorf("wiki: team dir missing: %w", err)
@@ -704,6 +874,14 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	defer func() { _ = in.Close() }()
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
+	}
+	// Git stores loose objects with mode 0o444 (read-only). On the second
+	// backup pass, os.OpenFile(dst, O_CREATE|O_WRONLY|O_TRUNC) fails with
+	// "permission denied" because the file exists and is not writable.
+	// Remove it first so we always get a fresh write. os.Remove with
+	// IsNotExist-check because the common case is a brand-new dst.
+	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("wiki: remove stale %s: %w", dst, err)
 	}
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {

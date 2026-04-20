@@ -57,14 +57,28 @@ print(json.dumps({
   "content": sys.argv[5],
 }))
 ' "$slug" "$path" "$mode" "$msg" "$content")
-  local response
-  response=$(curl -fsS -X POST "$BROKER/wiki/write" \
+  local response http_code
+  response=$(curl -sS -w '\nHTTP=%{http_code}' -X POST "$BROKER/wiki/write" \
     -H "Authorization: Bearer $TOKEN" \
     -H "Content-Type: application/json" \
-    -d "$payload" 2>&1) || { fail "write failed: $response"; return 1; }
-  local sha
-  sha=$(printf '%s' "$response" | "$PY" -c "import sys,json;print(json.load(sys.stdin).get('commit_sha',''))" 2>/dev/null || true)
-  ok "committed ${sha}"
+    -d "$payload" 2>&1)
+  http_code=$(printf '%s' "$response" | awk -F'=' '/^HTTP=/{print $2}' | tail -1)
+  response=$(printf '%s' "$response" | sed '/^HTTP=/d')
+  case "$http_code" in
+    2*)
+      local sha
+      sha=$(printf '%s' "$response" | "$PY" -c "import sys,json;print(json.load(sys.stdin).get('commit_sha',''))" 2>/dev/null || true)
+      ok "committed ${sha}"
+      ;;
+    *)
+      local detail
+      detail=$(printf '%s' "$response" | "$PY" -c "import sys,json;print(json.load(sys.stdin).get('error',''))" 2>/dev/null || true)
+      if [ -z "$detail" ]; then detail="$response"; fi
+      fail "write failed (HTTP ${http_code}): ${detail}"
+      sleep "$DELAY"
+      return 1
+      ;;
+  esac
   sleep "$DELAY"
 }
 

@@ -9,6 +9,7 @@ import { resolveGroupOrder } from '../../lib/groupOrder'
 interface WikiCatalogProps {
   catalog: WikiCatalogEntry[]
   onNavigate: (path: string) => void
+  onOpenAudit?: () => void
   articlesCount?: number
   commitsCount?: number
   agentsCount?: number
@@ -17,6 +18,7 @@ interface WikiCatalogProps {
 export default function WikiCatalog({
   catalog,
   onNavigate,
+  onOpenAudit,
   articlesCount,
   commitsCount,
   agentsCount,
@@ -43,6 +45,21 @@ export default function WikiCatalog({
         <div className="wk-catalog-clone">
           Your wiki lives on your disk.{' '}
           <code>git clone ~/.wuphf/wiki</code>
+          {onOpenAudit && (
+            <>
+              {' · '}
+              <button
+                type="button"
+                className="wk-catalog-audit-link"
+                onClick={(e) => {
+                  e.preventDefault()
+                  onOpenAudit()
+                }}
+              >
+                Audit log
+              </button>
+            </>
+          )}
         </div>
       </header>
       <div className="wk-catalog-grid">

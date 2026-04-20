@@ -445,6 +445,110 @@ func TestWikiWorkerPublicAccessors(t *testing.T) {
 	}
 }
 
+func TestBrokerWikiAuditReturnsFullLineage(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	// Seed a bootstrap commit and one agent commit so the audit log has
+	// three distinct authors (system, wuphf-bootstrap, operator).
+	stub := filepath.Join(root, "team", "playbooks", "renewal.md")
+	if err := os.MkdirAll(filepath.Dir(stub), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(stub, []byte("# Renewal\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if _, err := repo.CommitBootstrap(ctx, "materialize"); err != nil {
+		t.Fatalf("CommitBootstrap: %v", err)
+	}
+	if _, _, err := repo.Commit(ctx, "operator", "team/people/nazz.md", "# Nazz\n", "create", "nazz"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	b := NewBroker()
+	worker := NewWikiWorker(repo, b)
+	workerCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.Start(workerCtx)
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/wiki/audit", b.handleWikiAudit)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	res, err := http.Get(srv.URL + "/wiki/audit")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", res.StatusCode)
+	}
+	var body struct {
+		Entries []struct {
+			SHA        string   `json:"sha"`
+			AuthorSlug string   `json:"author_slug"`
+			Timestamp  string   `json:"timestamp"`
+			Message    string   `json:"message"`
+			Paths      []string `json:"paths"`
+		} `json:"entries"`
+		Total int `json:"total"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Total < 3 {
+		t.Fatalf("expected total >= 3, got %d: %+v", body.Total, body.Entries)
+	}
+	seen := map[string]bool{}
+	for _, e := range body.Entries {
+		seen[e.AuthorSlug] = true
+		if e.Paths == nil {
+			t.Errorf("entry %s: paths should be [] not nil for JSON stability", e.SHA)
+		}
+	}
+	for _, want := range []string{"system", "wuphf-bootstrap", "operator"} {
+		if !seen[want] {
+			t.Errorf("expected author %q in audit feed, got %v", want, seen)
+		}
+	}
+}
+
+func TestBrokerWikiAuditRejectsBadSince(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	b := NewBroker()
+	worker := NewWikiWorker(repo, b)
+	workerCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	worker.Start(workerCtx)
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
+	mux := http.NewServeMux()
+	mux.HandleFunc("/wiki/audit", b.handleWikiAudit)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	res, err := http.Get(srv.URL + "/wiki/audit?since=not-a-timestamp")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", res.StatusCode)
+	}
+}
+
 func TestWikiPublishViaBroker(t *testing.T) {
 	b := NewBroker()
 	ch, unsubscribe := b.SubscribeWikiEvents(4)

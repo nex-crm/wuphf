@@ -3,8 +3,13 @@ import { fetchCatalog, type WikiCatalogEntry } from '../../api/wiki'
 import WikiSidebar from './WikiSidebar'
 import WikiCatalog from './WikiCatalog'
 import WikiArticle from './WikiArticle'
+import WikiAudit from './WikiAudit'
 import EditLogFooter from './EditLogFooter'
 import '../../styles/wiki.css'
+
+// Reserved pseudo-path for the audit view. Never collides with a real
+// article because real articles must live under `team/` and end in `.md`.
+const AUDIT_PATH = '_audit'
 
 interface WikiProps {
   /** When set, renders the article view for this path; otherwise renders the catalog. */
@@ -31,24 +36,32 @@ export default function Wiki({ articlePath, onNavigate }: WikiProps) {
     }
   }, [])
 
-  const view = articlePath ? 'article' : 'catalog'
+  const isAudit = articlePath === AUDIT_PATH
+  const view = isAudit ? 'audit' : articlePath ? 'article' : 'catalog'
 
   return (
     <div className="wiki-root" data-testid="wiki-root">
       <div className="wiki-layout" data-view={view}>
         <WikiSidebar
           catalog={catalog}
-          currentPath={articlePath}
+          currentPath={isAudit ? null : articlePath}
           onNavigate={(path) => onNavigate(path)}
+          onNavigateAudit={() => onNavigate(AUDIT_PATH)}
         />
-        {articlePath ? (
+        {isAudit ? (
+          <WikiAudit onNavigate={(path) => onNavigate(path)} />
+        ) : articlePath ? (
           <WikiArticle
             path={articlePath}
             catalog={catalog}
             onNavigate={(path) => onNavigate(path)}
           />
         ) : (
-          <WikiCatalog catalog={catalog} onNavigate={(path) => onNavigate(path)} />
+          <WikiCatalog
+            catalog={catalog}
+            onNavigate={(path) => onNavigate(path)}
+            onOpenAudit={() => onNavigate(AUDIT_PATH)}
+          />
         )}
       </div>
       {!loading && <EditLogFooter onNavigate={(path) => onNavigate(path)} />}
