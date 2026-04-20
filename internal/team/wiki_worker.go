@@ -78,7 +78,11 @@ type wikiWriteRequest struct {
 	Content   string
 	Mode      string
 	CommitMsg string
-	ReplyCh   chan wikiWriteResult
+	// IsNotebook routes the request to Repo.CommitNotebook instead of
+	// Repo.Commit. Same serialization primitive; different target subtree
+	// and no team-wiki index regen. See notebook_worker.go.
+	IsNotebook bool
+	ReplyCh    chan wikiWriteResult
 }
 
 // wikiWriteResult is the worker's reply for a single request.
@@ -99,6 +103,7 @@ type wikiEventPublisher interface {
 type noopPublisher struct{}
 
 func (noopPublisher) PublishWikiEvent(wikiWriteEvent) {}
+func (noopPublisher) PublishNotebookEvent(notebookWriteEvent) {}
 
 // WikiWorker owns the single goroutine that drains the write request queue.
 type WikiWorker struct {
@@ -197,24 +202,46 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	writeCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
 	defer cancel()
 
-	// Commit owns the full atomic unit: write article bytes, regenerate the
-	// catalog, stage both, commit together. That keeps the working tree
-	// clean and the index commit attributable to the same author as the
-	// article edit. No post-commit IndexRegen here.
-	sha, n, err := w.repo.Commit(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
+	var (
+		sha string
+		n   int
+		err error
+	)
+	if req.IsNotebook {
+		// Notebook writes do NOT regen the team wiki index. Commit target is
+		// agents/{slug}/notebook/... — scoped to the author.
+		sha, n, err = w.repo.CommitNotebook(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
+	} else {
+		// Wiki Commit owns the full atomic unit: write article bytes, regen
+		// the catalog, stage both, commit together. That keeps the working
+		// tree clean and the index commit attributable to the same author as
+		// the article edit. No post-commit IndexRegen here.
+		sha, n, err = w.repo.Commit(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
+	}
 	if err != nil {
 		req.ReplyCh <- wikiWriteResult{Err: err}
 		return
 	}
 	req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
 
-	evt := wikiWriteEvent{
-		Path:       req.Path,
-		CommitSHA:  sha,
-		AuthorSlug: req.Slug,
-		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+	ts := time.Now().UTC().Format(time.RFC3339)
+	if req.IsNotebook {
+		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
+			nbPub.PublishNotebookEvent(notebookWriteEvent{
+				Slug:      req.Slug,
+				Path:      req.Path,
+				CommitSHA: sha,
+				Timestamp: ts,
+			})
+		}
+	} else {
+		w.publisher.PublishWikiEvent(wikiWriteEvent{
+			Path:       req.Path,
+			CommitSHA:  sha,
+			AuthorSlug: req.Slug,
+			Timestamp:  ts,
+		})
 	}
-	w.publisher.PublishWikiEvent(evt)
 
 	w.maybeScheduleBackup(ctx)
 }
