@@ -2,6 +2,13 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.5.2] - 2026-04-20
+
+### Fixed
+
+- **Pane spawn no longer races across concurrent WUPHF instances.** Two launches on the same machine used to share a hardcoded tmux socket (`wuphf`) and session name (`wuphf-team`). When a second launch ran `kill-session` between the first launch's `new-session` and `split-window`, tmux tore down the whole server and the first launch's split-window exited 1 with "no server running on /private/tmp/tmux-*/wuphf". That race is what pushed prod into the headless fallback message "Running in headless mode (spawn visible agents failed: spawn first agent: exit status 1). Install tmux and relaunch to use interactive Claude sessions on your normal subscription." even though tmux was installed and healthy. The socket and session names now carry a `-<port>` suffix on any non-default broker port — dev (7899), worktree launches, CI, or any custom `--broker-port` — so prod on the default port still uses the original `wuphf` / `wuphf-team` and concurrent instances can't trample each other. Backward compatible: default-port installs keep historical names.
+- **Pane spawn failures now carry the real tmux error.** `spawnVisibleAgents` used `.Run()` which threw away tmux's stderr, so the #general system message was limited to "exit status 1" with no hint of cause. Both split-window calls now use `CombinedOutput()` and append `(tmux: <stderr>)` to the wrapped error — e.g. `spawn first agent: exit status 1 (tmux: no server running on /private/tmp/tmux-501/wuphf)` — so the next failure diagnoses itself from the fallback message alone.
+
 ## [Unreleased] — `feat/llm-wiki`
 
 ### Added — LLM Wiki (Karpathy-pattern team memory)
