@@ -461,6 +461,7 @@ type Broker struct {
 	officeSubscribers   map[int]chan officeChangeEvent
 	wikiSubscribers     map[int]chan wikiWriteEvent
 	wikiWorker          *WikiWorker
+	scanTracker         *scanStatusTracker
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
@@ -1197,6 +1198,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
+	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
+	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
 	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
 	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
