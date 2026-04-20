@@ -334,7 +334,7 @@ func TestRepoCommitBootstrapAttributesToBootstrapAuthor(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 	skeletons := map[string]string{
-		"team/playbooks/renewal.md":        "# Renewal\n",
+		"team/playbooks/renewal.md":         "# Renewal\n",
 		"team/decisions/wiki-as-default.md": "# Decision\n",
 	}
 	for rel, body := range skeletons {
