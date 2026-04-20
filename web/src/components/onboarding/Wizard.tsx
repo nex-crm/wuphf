@@ -941,7 +941,11 @@ export function Wizard({ onComplete }: WizardProps) {
   // works with zero clicks.
   const [runtimePriority, setRuntimePriority] = useState<string[]>([])
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
-  const [memoryBackend, setMemoryBackend] = useState<MemoryBackend>('nex')
+  // Matches MEMORY_BACKEND_OPTIONS[0] (the "Markdown (default)" tile) and the
+  // server-side `config.ResolveMemoryBackend` default. Shipping 'nex' here
+  // contradicted the label and meant a user who clicked through got a
+  // different backend than the one marked default.
+  const [memoryBackend, setMemoryBackend] = useState<MemoryBackend>('markdown')
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([])

@@ -322,6 +322,14 @@ func ResolveMemoryBackendStatus() MemoryBackendStatus {
 		status.ActiveKind = config.MemoryBackendNex
 		status.ActiveLabel = config.MemoryBackendLabel(config.MemoryBackendNex)
 		status.Detail = "Nex-backed organizational context is configured."
+	case config.MemoryBackendMarkdown:
+		// Markdown is the file-over-app default: a git repo under
+		// ~/.wuphf/wiki. No API keys, no external service. Always "ready"
+		// as long as `git` is on PATH — and if it isn't, Repo.Init surfaces
+		// ErrGitUnavailable at launch, so we don't need to guard here.
+		status.ActiveKind = config.MemoryBackendMarkdown
+		status.ActiveLabel = config.MemoryBackendLabel(config.MemoryBackendMarkdown)
+		status.Detail = "Markdown-backed team wiki at ~/.wuphf/wiki is configured. Every edit commits to git with per-agent authorship."
 	case config.MemoryBackendGBrain:
 		if !gbrainProviderKeyConfigured() {
 			status.Detail = "GBrain backend selected, but no provider key is configured. OpenAI is required for embeddings and vector search; Anthropic alone only enables reduced-mode retrieval."

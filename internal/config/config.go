@@ -214,11 +214,14 @@ func NormalizeMemoryBackend(value string) string {
 // Resolution: flag/env override > config file > default.
 //
 // Defaults:
-//   - `nex` when Nex is allowed for the run
-//   - `none` when --no-nex is set and no alternate backend was selected
+//   - `markdown` (git-native team wiki at ~/.wuphf/wiki) — the advertised
+//     "file-over-app, git-clone-able" default. Zero config, zero API keys.
+//   - `none` when --no-nex is set and the user hasn't picked a non-Nex
+//     backend in the wizard (preserved for backwards compat with the old
+//     semantics where --no-nex was a hard off-switch).
 //
 // `--no-nex` always disables the Nex backend itself, but does not prevent an
-// alternate backend like GBrain from being selected.
+// alternate backend like GBrain or Markdown from being selected.
 func ResolveMemoryBackend(flagValue string) string {
 	backend := NormalizeMemoryBackend(flagValue)
 	if backend == "" {
@@ -229,10 +232,7 @@ func ResolveMemoryBackend(flagValue string) string {
 		backend = NormalizeMemoryBackend(cfg.MemoryBackend)
 	}
 	if backend == "" {
-		if ResolveNoNex() {
-			return MemoryBackendNone
-		}
-		return MemoryBackendNex
+		return MemoryBackendMarkdown
 	}
 	if backend == MemoryBackendNex && ResolveNoNex() {
 		return MemoryBackendNone
