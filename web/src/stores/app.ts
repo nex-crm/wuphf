@@ -9,6 +9,27 @@ export interface ChannelMeta {
   agentSlug?: string
 }
 
+const DM_SLUG_PREFIX = 'dm-human-'
+
+/**
+ * Resolve a channel slug into DM info, or null if not a DM.
+ *
+ * Prefers explicit channelMeta (written by enterDM), falls back to the
+ * server's `dm-human-<agent>` naming convention so deep-links and page
+ * reloads still classify DMs correctly before metadata is hydrated.
+ */
+export function isDMChannel(
+  slug: string,
+  meta: Record<string, ChannelMeta>,
+): { agentSlug: string } | null {
+  const m = meta[slug]
+  if (m?.type === 'D' && m.agentSlug) return { agentSlug: m.agentSlug }
+  if (slug.startsWith(DM_SLUG_PREFIX)) {
+    return { agentSlug: slug.slice(DM_SLUG_PREFIX.length) }
+  }
+  return null
+}
+
 export interface AppStore {
   // Connection
   brokerConnected: boolean
@@ -36,11 +57,9 @@ export interface AppStore {
   activeThreadId: string | null
   setActiveThreadId: (id: string | null) => void
 
-  // DM mode
-  dmMode: boolean
-  dmAgentSlug: string | null
-  enterDM: (slug: string, channel: string) => void
-  exitDM: () => void
+  // DM entry: opens the given DM channel and records {type: 'D', agentSlug}
+  // in channelMeta so downstream views can resolve the paired agent.
+  enterDM: (agentSlug: string, channelSlug: string) => void
 
   // Message polling state
   lastMessageId: string | null
@@ -68,9 +87,9 @@ export const useAppStore = create<AppStore>((set) => ({
   setBrokerConnected: (v) => set({ brokerConnected: v }),
 
   currentChannel: 'general',
-  setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null, dmMode: false, dmAgentSlug: null }),
+  setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
   currentApp: null,
-  setCurrentApp: (app) => set({ currentApp: app, dmMode: false, dmAgentSlug: null }),
+  setCurrentApp: (app) => set({ currentApp: app }),
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
@@ -88,10 +107,15 @@ export const useAppStore = create<AppStore>((set) => ({
   activeThreadId: null,
   setActiveThreadId: (id) => set({ activeThreadId: id }),
 
-  dmMode: false,
-  dmAgentSlug: null,
-  enterDM: (slug, channel) => set({ dmMode: true, dmAgentSlug: slug, currentChannel: channel, currentApp: null }),
-  exitDM: () => set({ dmMode: false, dmAgentSlug: null, currentChannel: 'general' }),
+  enterDM: (agentSlug, channelSlug) =>
+    set((s) => ({
+      currentChannel: channelSlug,
+      currentApp: null,
+      channelMeta: {
+        ...s.channelMeta,
+        [channelSlug]: { ...s.channelMeta[channelSlug], type: 'D', agentSlug },
+      },
+    })),
 
   lastMessageId: null,
   setLastMessageId: (id) => set({ lastMessageId: id }),

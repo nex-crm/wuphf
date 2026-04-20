@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useAppStore } from '../../stores/app'
+import { useAppStore, isDMChannel } from '../../stores/app'
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { getHealth } from '../../api/client'
 
@@ -16,10 +16,10 @@ interface HealthSnapshot {
 export function StatusBar() {
   const currentChannel = useAppStore((s) => s.currentChannel)
   const currentApp = useAppStore((s) => s.currentApp)
-  const dmMode = useAppStore((s) => s.dmMode)
-  const dmAgentSlug = useAppStore((s) => s.dmAgentSlug)
+  const channelMeta = useAppStore((s) => s.channelMeta)
   const brokerConnected = useAppStore((s) => s.brokerConnected)
   const { data: members = [] } = useOfficeMembers()
+  const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null
 
   const { data: health } = useQuery<HealthSnapshot>({
     queryKey: ['health'],
@@ -34,10 +34,10 @@ export function StatusBar() {
 
   const channelLabel = currentApp
     ? currentApp
-    : dmMode && dmAgentSlug
-      ? `@${dmAgentSlug}`
+    : dm
+      ? `@${dm.agentSlug}`
       : `# ${currentChannel}`
-  const modeLabel = dmMode ? '1:1' : 'office'
+  const modeLabel = dm ? '1:1' : 'office'
   const provider = health?.provider
 
   return (
