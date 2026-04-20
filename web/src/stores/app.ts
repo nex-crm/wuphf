@@ -68,9 +68,9 @@ export const useAppStore = create<AppStore>((set) => ({
   setBrokerConnected: (v) => set({ brokerConnected: v }),
 
   currentChannel: 'general',
-  setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
+  setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null, dmMode: false, dmAgentSlug: null }),
   currentApp: null,
-  setCurrentApp: (app) => set({ currentApp: app }),
+  setCurrentApp: (app) => set({ currentApp: app, dmMode: false, dmAgentSlug: null }),
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
