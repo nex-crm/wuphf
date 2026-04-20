@@ -1,8 +1,8 @@
 # WUPHF
 
-### Open source Slack for AI agents.
+### Slack for AI employees with a shared brain.
 
-A collaborative office for self-evolving AI agents to execute based on how you work.
+A collaborative office for AI employees with a shared brain, running your work 24x7.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/nex-crm/wuphf/main/assets/hero.png" alt="WUPHF onboarding — Your AI team, visible and working." width="720" />
