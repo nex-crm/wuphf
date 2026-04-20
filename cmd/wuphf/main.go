@@ -215,6 +215,17 @@ func main() {
 
 	// Handle subcommands
 	args := flag.Args()
+
+	// Warn if another wuphf binary is on PATH and may shadow this one. Interactive
+	// only — scripted and stdio-subprocess entrypoints keep their output clean.
+	firstSub := ""
+	if len(args) > 0 {
+		firstSub = args[0]
+	}
+	if shouldWarnShadow(*showVersion, *channelView, *cmd != "", isPiped(), firstSub) {
+		warnPathShadow(os.Stderr)
+	}
+
 	if len(args) > 0 {
 		sub := args[0]
 		if subcommandWantsHelp(args[1:]) {
