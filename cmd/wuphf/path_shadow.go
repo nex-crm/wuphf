@@ -66,12 +66,12 @@ func warnPathShadow(w io.Writer) {
 	if len(shadows) == 0 {
 		return
 	}
-	fmt.Fprintln(w, "wuphf: warning: other wuphf binaries are on PATH and may shadow this one:")
+	_, _ = fmt.Fprintln(w, "wuphf: warning: other wuphf binaries are on PATH and may shadow this one:")
 	for _, s := range shadows {
-		fmt.Fprintf(w, "  %s\n", s)
+		_, _ = fmt.Fprintf(w, "  %s\n", s)
 	}
-	fmt.Fprintf(w, "  running: %s\n", self)
-	fmt.Fprintln(w, "  If `which wuphf` picks a different path, upgrades to this binary will have no effect until the other copy is removed.")
+	_, _ = fmt.Fprintf(w, "  running: %s\n", self)
+	_, _ = fmt.Fprintln(w, "  If `which wuphf` picks a different path, upgrades to this binary will have no effect until the other copy is removed.")
 }
 
 // shouldWarnShadow gates the warning so it fires only on interactive launches.
