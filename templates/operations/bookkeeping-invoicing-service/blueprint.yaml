@@ -3,6 +3,11 @@ name: Bookkeeping and Invoicing Service
 kind: finance
 description: Template for a bookkeeping operation that handles recurring books, invoicing, and evidence-backed review.
 objective: Help clients keep books clean, invoices current, and approvals explicit with durable evidence.
+default_reviewer: operator
+reviewer_paths:
+  "team/books/**": bookkeeper
+  "team/invoices/**": invoicing
+  "team/reviews/**": reviewer
 employee_blueprints:
   - bookkeeper-financial-analyst
 
