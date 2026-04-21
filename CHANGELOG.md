@@ -2,6 +2,16 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.6.0] - 2026-04-21
+
+### Fixed
+
+- **Agents boot into real tmux panes again — no more silent drop to the extra-usage quota.** Pane-backed spawn was failing on every launch with `tmux: command too long` because the launch command embedded the full 5-10 KB system prompt as a single shell argument, exceeding tmux's internal command-parse buffer. The prompt now goes to `$TMPDIR/wuphf-prompt-<slug>.txt` and the launcher passes `--append-system-prompt-file` to `claude`, keeping the tmux command under 4 KB. A regression test pins the length bound so future prompt growth cannot repeat the bug. Interactive panes also mean no more parallel `claude --print` subprocess storm at launch, which removes the CPU-starvation path that was making the web UI appear to boot-timeout on first launch.
+- **Pane-spawn failure now tells you what actually broke.** The fallback message used to say "Install tmux to run agents on your normal subscription" whether tmux was missing OR tmux was installed but rejected the command. If you hit the second case, the advice was wrong and misleading. The launcher now distinguishes the two cases: missing → install it; rejected → file a bug with the detail.
+- **Broker tokens and system prompts no longer linger in `$TMPDIR` after the session ends.** `Launcher.Kill()` now removes per-agent `wuphf-mcp-*.json` and `wuphf-prompt-*.txt` files for every known office member on shutdown.
+- **`npx wuphf` no longer falsely warns about itself.** The PATH shadow detector treated the npm package's `wuphf.js` launcher as a separate binary shadowing the native `wuphf`, even though both ship in the same `node_modules/wuphf/bin` directory. Sibling files in the running binary's own directory are now recognized as one install, not a shadow. Real shadows (a hand-built copy in `~/.local/bin`, a stale homebrew install) still surface.
+- **Boot-error diagnostics survive the 10-second watchdog.** If the web UI threw a specific error during bootstrap (`Uncaught error: X`, `React failed to mount`), the 10s watchdog used to destructively replace that overlay with a generic "Boot timeout" message, erasing the actionable signal. First overlay now wins, and the generic watchdog no longer fires once any fatal is already on screen. When it does fire, the detail now includes `document.readyState`, `location.hash`, and which `/assets/index-*` bundles actually finished downloading — so a real boot-timeout can be debugged instead of guessed at.
+
 ## [0.0.5.3] - 2026-04-21
 
 ### Fixed

@@ -53,6 +53,10 @@ try {
   const message = err instanceof Error ? err.message : String(err)
   const stack = err instanceof Error && err.stack ? err.stack : ''
   showFatalError('React failed to mount', message + '\n\n' + stack)
+  // Suppress the 10s watchdog in index.html — its generic "Boot timeout"
+  // overlay would otherwise fire on top of this specific error and hide
+  // the actionable signal.
+  window.__wuphfBootDone?.()
   // Also log so `$B console` picks it up
   // eslint-disable-next-line no-console
   console.error('[WUPHF boot]', err)

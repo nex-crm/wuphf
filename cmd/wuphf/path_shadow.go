@@ -12,6 +12,12 @@ import (
 // selfExec. Paths are returned in PATH order and de-duplicated by real path
 // (so a symlink pointing at the running binary is correctly ignored).
 //
+// Candidates that resolve to a sibling file in the same directory as the
+// running binary are ignored too — this is the npm install layout, where
+// the PATH entry symlinks at `wuphf.js` (a launcher) but the native binary
+// is `wuphf` in the same node_modules/wuphf/bin dir. They are one install,
+// not a shadow.
+//
 // Extracted for tests — os.Executable() and os.Getenv() are injected by the
 // caller so unit tests can drive deterministic PATH layouts.
 func detectPathShadows(selfExec, pathEnv string) []string {
@@ -22,6 +28,7 @@ func detectPathShadows(selfExec, pathEnv string) []string {
 	if err != nil {
 		selfReal = selfExec
 	}
+	selfRealDir := filepath.Dir(selfReal)
 	exe := "wuphf"
 	if runtime.GOOS == "windows" {
 		exe = "wuphf.exe"
@@ -45,6 +52,13 @@ func detectPathShadows(selfExec, pathEnv string) []string {
 			real = cand
 		}
 		if seen[real] {
+			continue
+		}
+		// Sibling file in the running binary's own directory — same install,
+		// not a shadow. Covers the npm layout (wuphf + wuphf.js in the same
+		// node_modules bin dir).
+		if filepath.Dir(real) == selfRealDir {
+			seen[real] = true
 			continue
 		}
 		seen[real] = true
