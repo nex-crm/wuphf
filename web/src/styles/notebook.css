@@ -37,7 +37,13 @@
   color: var(--nb-text);
   font-family: var(--nb-body-serif);
   line-height: 1.6;
-  min-height: 100%;
+  /* Fill the tab panel exactly and own the scroll for every notebook view.
+     Without this the nb-layout `min-height: 100vh` makes content taller than
+     `.wiki-shell-body`, which clips with overflow:hidden — leaving the image
+     uploader, drop zone, and footer unreachable. */
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
   /* Horizontal ruled-paper rhythm (28px) — matches body line-height so text
      sits ON the ruling, not crossed by it. */
   background-image:
@@ -114,7 +120,9 @@
 .notebook-surface .nb-layout {
   display: grid;
   grid-template-columns: var(--nb-sidebar-width) minmax(0, 1fr);
-  min-height: calc(100vh - var(--nb-appbar-h));
+  /* Let content size itself naturally; `.notebook-surface` is the scroller.
+     Using `100vh` here overflowed the shell and clipped the bottom. */
+  min-height: 100%;
 }
 
 /* ── Author shelf (left sidebar) ─────────────────────────────── */
