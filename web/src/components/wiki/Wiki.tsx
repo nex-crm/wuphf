@@ -1,5 +1,11 @@
 import { useEffect, useState } from 'react'
-import { fetchCatalog, type WikiCatalogEntry } from '../../api/wiki'
+import {
+  fetchCatalog,
+  fetchSections,
+  subscribeSectionsUpdated,
+  type DiscoveredSection,
+  type WikiCatalogEntry,
+} from '../../api/wiki'
 import WikiSidebar from './WikiSidebar'
 import WikiCatalog from './WikiCatalog'
 import WikiArticle from './WikiArticle'
@@ -20,13 +26,18 @@ interface WikiProps {
 /** Three-column wiki shell: left sidebar · main (catalog or article) · right rail (article only). */
 export default function Wiki({ articlePath, onNavigate }: WikiProps) {
   const [catalog, setCatalog] = useState<WikiCatalogEntry[]>([])
+  const [sections, setSections] = useState<DiscoveredSection[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
-    fetchCatalog()
-      .then((c) => {
-        if (!cancelled) setCatalog(c)
+    // Parallel fetch: catalog and sections are independent so we pay one
+    // round-trip of latency, not two.
+    Promise.all([fetchCatalog(), fetchSections()])
+      .then(([c, s]) => {
+        if (cancelled) return
+        setCatalog(c)
+        setSections(s)
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -34,6 +45,17 @@ export default function Wiki({ articlePath, onNavigate }: WikiProps) {
     return () => {
       cancelled = true
     }
+  }, [])
+
+  // Live-update sections when the broker emits wiki:sections_updated.
+  // The event payload carries the full list so no refetch is needed.
+  useEffect(() => {
+    const unsubscribe = subscribeSectionsUpdated((event) => {
+      if (Array.isArray(event.sections)) {
+        setSections(event.sections)
+      }
+    })
+    return () => unsubscribe()
   }, [])
 
   const isAudit = articlePath === AUDIT_PATH
@@ -44,6 +66,7 @@ export default function Wiki({ articlePath, onNavigate }: WikiProps) {
       <div className="wiki-layout" data-view={view}>
         <WikiSidebar
           catalog={catalog}
+          sections={sections}
           currentPath={isAudit ? null : articlePath}
           onNavigate={(path) => onNavigate(path)}
           onNavigateAudit={() => onNavigate(AUDIT_PATH)}

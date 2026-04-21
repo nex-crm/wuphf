@@ -114,6 +114,14 @@ type wikiEventPublisher interface {
 	PublishWikiEvent(evt wikiWriteEvent)
 }
 
+// wikiSectionsNotifier is the optional hook the worker pokes on every
+// successful wiki write so the sections cache can debounce + recompute.
+// Kept as its own interface so wiki_worker.go doesn't take a hard
+// dependency on the sections cache (which lives in wiki_sections.go).
+type wikiSectionsNotifier interface {
+	EnqueueSectionsRefresh()
+}
+
 // noopPublisher is used when the worker runs without a broker attached
 // (tests, or --memory-backend markdown without a broker yet).
 type noopPublisher struct{}
@@ -319,6 +327,12 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 			AuthorSlug: req.Slug,
 			Timestamp:  ts,
 		})
+		// Poke the sections cache so it debounces + recomputes. Only
+		// fired on team wiki writes — notebook + entity-fact writes
+		// never change the sidebar IA.
+		if notifier, ok := w.publisher.(wikiSectionsNotifier); ok {
+			notifier.EnqueueSectionsRefresh()
+		}
 	}
 
 	w.maybeScheduleBackup(ctx)
