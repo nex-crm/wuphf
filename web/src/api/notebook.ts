@@ -122,11 +122,11 @@ function useMocks(): boolean {
 
 export async function fetchCatalog(): Promise<NotebookCatalogSummary> {
   if (!useMocks()) {
-    try {
-      return await get<NotebookCatalogSummary>('/notebooks/catalog')
-    } catch {
-      // fall through to mocks
-    }
+    // Real backend: propagate errors so the empty-state / error-state UI
+    // surfaces real problems instead of masking them with mock fixtures.
+    // Swapping to mocks silently was hiding a missing /notebook/catalog
+    // endpoint for weeks in internal demos.
+    return await get<NotebookCatalogSummary>('/notebook/catalog')
   }
   const agents = MOCK_AGENTS
   const total_entries = agents.reduce((sum, a) => sum + a.total, 0)
@@ -145,13 +145,25 @@ export async function fetchAgentEntries(
   agentSlug: string,
 ): Promise<{ agent: NotebookAgentSummary | null; entries: NotebookEntry[] }> {
   if (!useMocks()) {
-    try {
-      return await get<{ agent: NotebookAgentSummary | null; entries: NotebookEntry[] }>(
-        `/notebooks/${encodeURIComponent(agentSlug)}`,
-      )
-    } catch {
-      // fall through to mocks
-    }
+    // Backend exposes list-by-slug; synthesize the agent header client-side
+    // from the catalog so one route missing doesn't blank the page.
+    const raw = await get<{ entries: Array<{ path: string; title: string; modified: string; size_bytes: number }> }>(
+      `/notebook/list?slug=${encodeURIComponent(agentSlug)}`,
+    )
+    const catalog = await get<NotebookCatalogSummary>('/notebook/catalog').catch(() => null)
+    const agent = catalog?.agents.find((a) => a.agent_slug === agentSlug) ?? null
+    const entries: NotebookEntry[] = (raw.entries ?? []).map((e) => ({
+      agent_slug: agentSlug,
+      entry_slug: e.path.replace(/^.*\//, '').replace(/\.md$/, ''),
+      title: e.title,
+      last_edited_ts: e.modified,
+      revisions: 1,
+      body_md: '',
+      status: 'draft',
+      file_path: e.path,
+      reviewer_slug: '',
+    }))
+    return { agent, entries }
   }
   const agent = MOCK_AGENTS.find((a) => a.agent_slug === agentSlug) ?? null
   return { agent, entries: mockAgentEntries(agentSlug) }
@@ -162,12 +174,29 @@ export async function fetchEntry(
   entrySlug: string,
 ): Promise<NotebookEntry | null> {
   if (!useMocks()) {
-    try {
-      return await get<NotebookEntry>(
-        `/notebooks/${encodeURIComponent(agentSlug)}/${encodeURIComponent(entrySlug)}`,
-      )
-    } catch {
-      // fall through to mocks
+    // Backend doesn't expose a single-entry endpoint yet, but the list +
+    // read pair is enough for now: list gives the metadata, read returns
+    // body bytes. Throw on genuine errors instead of falling through to
+    // mocks (same silent-fallback fix as fetchCatalog).
+    const path = `agents/${agentSlug}/notebook/${entrySlug}.md`
+    const body = await get<{ content: string; commit_sha: string }>(
+      `/notebook/read?slug=${encodeURIComponent(agentSlug)}&path=${encodeURIComponent(path)}`,
+    )
+    // Fetch list so we can fill title + last_edited_ts for the header.
+    const list = await get<{ entries: Array<{ path: string; title: string; modified: string }> }>(
+      `/notebook/list?slug=${encodeURIComponent(agentSlug)}`,
+    ).catch(() => ({ entries: [] as Array<{ path: string; title: string; modified: string }> }))
+    const meta = list.entries.find((e) => e.path === path)
+    return {
+      agent_slug: agentSlug,
+      entry_slug: entrySlug,
+      title: meta?.title ?? entrySlug,
+      last_edited_ts: meta?.modified ?? new Date().toISOString(),
+      revisions: 1,
+      body_md: body?.content ?? '',
+      status: 'draft',
+      file_path: path,
+      reviewer_slug: '',
     }
   }
   return mockEntry(agentSlug, entrySlug)
@@ -177,23 +206,17 @@ export async function fetchEntry(
 
 export async function fetchReviews(): Promise<ReviewItem[]> {
   if (!useMocks()) {
-    try {
-      const res = await get<{ reviews: ReviewItem[] }>('/review/list?scope=all')
-      return Array.isArray(res?.reviews) ? res.reviews : []
-    } catch {
-      // fall through to mocks
-    }
+    // Propagate errors — silent fallback to mocks was masking a real-backend
+    // bug where /review/list was 503 because the ReviewLog never initialized.
+    const res = await get<{ reviews: ReviewItem[] }>('/review/list?scope=all')
+    return Array.isArray(res?.reviews) ? res.reviews : []
   }
   return MOCK_REVIEWS
 }
 
 export async function fetchReview(id: string): Promise<ReviewItem | null> {
   if (!useMocks()) {
-    try {
-      return await get<ReviewItem>(`/review/${encodeURIComponent(id)}`)
-    } catch {
-      // fall through to mocks
-    }
+    return await get<ReviewItem>(`/review/${encodeURIComponent(id)}`)
   }
   return mockReview(id)
 }

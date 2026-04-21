@@ -163,6 +163,39 @@ func (w *WikiWorker) NotebookList(slug string) ([]NotebookEntry, error) {
 	return out, nil
 }
 
+// AgentsWithNotebooks walks the wiki repo and returns the slugs of every
+// agent that has at least a `agents/{slug}/notebook/` directory. Used by the
+// bookshelf catalog so the UI does not need to pre-enumerate the roster.
+// Order is lexicographic for stable rendering.
+func (w *WikiWorker) AgentsWithNotebooks() ([]string, error) {
+	root := filepath.Join(w.repo.Root(), "agents")
+	w.repo.mu.Lock()
+	defer w.repo.mu.Unlock()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("notebook: read agents dir: %w", err)
+	}
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		slug := e.Name()
+		if validateNotebookSlug(slug) != nil {
+			continue
+		}
+		nbDir := filepath.Join(root, slug, "notebook")
+		if info, statErr := os.Stat(nbDir); statErr == nil && info.IsDir() {
+			out = append(out, slug)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 // NotebookRead returns raw entry bytes for any agent's notebook. Cross-agent
 // reads are intentional: notebooks are private-by-convention, not by access
 // control.
