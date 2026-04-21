@@ -5,6 +5,8 @@ import rehypeSlug from 'rehype-slug'
 import rehypeAutolinkHeadings from 'rehype-autolink-headings'
 import type { PluggableList } from 'unified'
 import ArticleStatusBanner from './ArticleStatusBanner'
+import EntityBriefBar from './EntityBriefBar'
+import FactsOnFile from './FactsOnFile'
 import HatBar, { type HatBarTab } from './HatBar'
 import ArticleTitle from './ArticleTitle'
 import Byline from './Byline'
@@ -28,6 +30,18 @@ import {
 import type { SourceItem } from './Sources'
 import { wikiLinkRemarkPlugin } from '../../lib/wikilink'
 import { formatAgentName } from '../../lib/agentName'
+import type { EntityKind } from '../../api/entity'
+
+// Real backend paths look like `team/people/nazz.md`. Mock/dev paths may
+// drop the `team/` prefix or the `.md` suffix. Accept both so the entity
+// surface lights up in demos without forcing every caller to normalize.
+const ENTITY_PATH_RE = /^(?:team\/)?(people|companies|customers)\/([a-z0-9][a-z0-9-]*)(?:\.md)?$/
+
+function detectEntity(path: string): { kind: EntityKind; slug: string } | null {
+  const m = path.match(ENTITY_PATH_RE)
+  if (!m) return null
+  return { kind: m[1] as EntityKind, slug: m[2] }
+}
 
 interface WikiArticleProps {
   path: string
@@ -44,6 +58,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   const [historyLoading, setHistoryLoading] = useState(true)
   const [historyError, setHistoryError] = useState(false)
   const [liveAgent, setLiveAgent] = useState<string | null>(null)
+  const [refreshNonce, setRefreshNonce] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -64,7 +79,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
     return () => {
       cancelled = true
     }
-  }, [path])
+  }, [path, refreshNonce])
 
   useEffect(() => {
     let cancelled = false
@@ -88,7 +103,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
     return () => {
       cancelled = true
     }
-  }, [path])
+  }, [path, refreshNonce])
 
   useEffect(() => {
     setLiveAgent(null)
@@ -136,6 +151,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   if (!article) return <div className="wk-error">Article not found.</div>
 
   const toc = buildTocFromMarkdown(article.content)
+  const entity = detectEntity(article.path)
   const breadcrumbSegments = article.path.split('/').filter(Boolean)
   const context = breadcrumbSegments[0] || ''
   const byline = (
@@ -157,6 +173,13 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
             revisions={article.revisions}
             contributors={article.contributors.length}
             wordCount={article.word_count}
+          />
+        )}
+        {entity && (
+          <EntityBriefBar
+            kind={entity.kind}
+            slug={entity.slug}
+            onSynthesized={() => setRefreshNonce((n) => n + 1)}
           />
         )}
         <HatBar
@@ -240,6 +263,9 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
           <div className="wk-loading">
             History view streams from <code>git log</code>. Wiring pending Lane A.
           </div>
+        )}
+        {entity && tab === 'article' && (
+          <FactsOnFile kind={entity.kind} slug={entity.slug} />
         )}
         <SeeAlso
           items={article.backlinks.map((b) => ({ slug: b.path, display: b.title }))}
