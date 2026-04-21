@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -286,13 +285,14 @@ func (s *EntitySynthesizer) runJob(ctx context.Context, job SynthesisJob) {
 		s.mu.Lock()
 		delete(s.inflight, key)
 		needsFollowup := s.queued[key]
+		// CRITICAL: drop the queued flag before the follow-up goroutine
+		// calls EnqueueSynthesis — otherwise it sees queued=true and
+		// silently coalesces its own call, leaving the queue empty.
+		delete(s.queued, key)
 		running := s.running
 		s.mu.Unlock()
-		// A fact landed during this run. Enqueue a follow-up IF the
-		// synthesizer is still running — Stop() may have raced with the
-		// append, and we don't want to block on a closed channel.
 		if needsFollowup && running {
-			// Use a background context for the re-schedule — the caller's
+			// Use a background goroutine for the re-schedule — the caller's
 			// context has already returned. The follow-up will run on the
 			// next drain iteration.
 			go func() {
@@ -318,25 +318,26 @@ func (s *EntitySynthesizer) runJob(ctx context.Context, job SynthesisJob) {
 func (s *EntitySynthesizer) synthesize(ctx context.Context, job SynthesisJob) error {
 	relBrief := briefPath(job.Kind, job.Slug)
 	existingBrief, hadBrief := s.readBrief(relBrief)
-	lastSHA, _, _ := parseSynthesisFrontmatter(existingBrief)
+	_, _, lastFactCount := parseSynthesisFrontmatter(existingBrief)
 
 	facts, err := s.factLog.List(job.Kind, job.Slug)
 	if err != nil {
 		return fmt.Errorf("list facts: %w", err)
 	}
-	// Facts since last synthesis.
-	newFacts := facts
-	if lastSHA != "" {
-		if ts, tsErr := s.factLog.commitTimestamp(ctx, lastSHA); tsErr == nil {
-			newFacts = facts[:0:0]
-			for _, f := range facts {
-				if f.CreatedAt.After(ts) {
-					newFacts = append(newFacts, f)
-				}
-			}
-		}
+	// Use fact-count bookkeeping (not sha/timestamp) to determine what's
+	// new. Commit timestamps have second-precision and fact appends can
+	// overlap with brief commits; fact_count_at_synthesis is monotonic and
+	// robust to those races. facts is in newest-first order; "new" means
+	// the first (len(facts) - lastFactCount) entries.
+	newCount := len(facts) - lastFactCount
+	if newCount < 0 {
+		newCount = 0
 	}
-	if len(newFacts) == 0 && hadBrief {
+	newFacts := facts
+	if newCount < len(facts) {
+		newFacts = facts[:newCount]
+	}
+	if newCount == 0 && hadBrief {
 		return ErrSynthesisNoNewFacts
 	}
 	if len(facts) == 0 && !hadBrief {
@@ -457,173 +458,4 @@ func renderFactsForPrompt(facts []Fact) string {
 	return b.String()
 }
 
-// --- frontmatter helpers ---------------------------------------------------
-
-// synthesisFrontmatterPattern captures the 3 keys we own. Other keys
-// (title:, tags:, ...) are preserved untouched.
-var (
-	lastSHAKey = "last_synthesized_sha"
-	lastTSKey  = "last_synthesized_ts"
-	factCntKey = "fact_count_at_synthesis"
-)
-
-var frontmatterKeyLine = regexp.MustCompile(`(?m)^([a-zA-Z0-9_]+):\s*(.*)$`)
-
-// parseSynthesisFrontmatter extracts the synthesis keys from the existing
-// brief. Missing keys yield zero values.
-func parseSynthesisFrontmatter(brief string) (sha string, ts time.Time, factCount int) {
-	if !strings.HasPrefix(brief, "---\n") {
-		return "", time.Time{}, 0
-	}
-	rest := brief[len("---\n"):]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return "", time.Time{}, 0
-	}
-	block := rest[:end]
-	for _, line := range strings.Split(block, "\n") {
-		m := frontmatterKeyLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		key := m[1]
-		val := strings.TrimSpace(m[2])
-		switch key {
-		case lastSHAKey:
-			sha = val
-		case lastTSKey:
-			if parsed, err := time.Parse(time.RFC3339, val); err == nil {
-				ts = parsed
-			}
-		case factCntKey:
-			factCount = parseInt(val)
-		}
-	}
-	return sha, ts, factCount
-}
-
-// applySynthesisFrontmatter merges the three synthesis keys onto the LLM
-// output. When the output already has a frontmatter block we update those
-// keys in-place; otherwise we prepend a fresh block that also preserves
-// any non-synthesis keys from the prior brief.
-func applySynthesisFrontmatter(body, headSHA string, ts time.Time, factCount int, prior string) string {
-	tsStr := ts.UTC().Format(time.RFC3339)
-	ours := map[string]string{
-		lastSHAKey: headSHA,
-		lastTSKey:  tsStr,
-		factCntKey: fmt.Sprintf("%d", factCount),
-	}
-
-	preserved := preservedFrontmatterKeys(prior)
-
-	hasFrontmatter := strings.HasPrefix(body, "---\n")
-	if !hasFrontmatter {
-		var b strings.Builder
-		b.WriteString("---\n")
-		for _, key := range orderedFrontmatterKeys() {
-			if v, ok := ours[key]; ok {
-				b.WriteString(key)
-				b.WriteString(": ")
-				b.WriteString(v)
-				b.WriteString("\n")
-			}
-		}
-		for _, kv := range preserved {
-			// Skip keys we already wrote ourselves.
-			if _, mine := ours[kv.key]; mine {
-				continue
-			}
-			b.WriteString(kv.key)
-			b.WriteString(": ")
-			b.WriteString(kv.val)
-			b.WriteString("\n")
-		}
-		b.WriteString("---\n\n")
-		b.WriteString(body)
-		return b.String()
-	}
-
-	// Body HAS frontmatter. Rewrite only our keys + append missing ones.
-	rest := body[len("---\n"):]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		// Malformed — fall back to prepend path.
-		return applySynthesisFrontmatter(stripFrontmatter(body), headSHA, ts, factCount, prior)
-	}
-	block := rest[:end]
-	tail := rest[end+len("\n---"):]
-	lines := strings.Split(block, "\n")
-	seen := map[string]bool{}
-	for i, line := range lines {
-		m := frontmatterKeyLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		key := m[1]
-		if v, ok := ours[key]; ok {
-			lines[i] = key + ": " + v
-			seen[key] = true
-		}
-	}
-	for _, key := range orderedFrontmatterKeys() {
-		if !seen[key] {
-			lines = append(lines, key+": "+ours[key])
-		}
-	}
-	var b strings.Builder
-	b.WriteString("---\n")
-	b.WriteString(strings.Join(lines, "\n"))
-	b.WriteString("\n---")
-	b.WriteString(tail)
-	return b.String()
-}
-
-// orderedFrontmatterKeys returns the synthesis keys in a deterministic
-// order so commits don't churn on reorderings.
-func orderedFrontmatterKeys() []string {
-	return []string{lastSHAKey, lastTSKey, factCntKey}
-}
-
-type frontmatterKV struct {
-	key string
-	val string
-}
-
-// preservedFrontmatterKeys lifts non-synthesis keys from a prior brief so
-// we don't lose custom frontmatter when we rewrite from scratch.
-func preservedFrontmatterKeys(prior string) []frontmatterKV {
-	if !strings.HasPrefix(prior, "---\n") {
-		return nil
-	}
-	rest := prior[len("---\n"):]
-	end := strings.Index(rest, "\n---")
-	if end < 0 {
-		return nil
-	}
-	block := rest[:end]
-	var out []frontmatterKV
-	for _, line := range strings.Split(block, "\n") {
-		m := frontmatterKeyLine.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		key := m[1]
-		switch key {
-		case lastSHAKey, lastTSKey, factCntKey:
-			continue
-		}
-		out = append(out, frontmatterKV{key: key, val: strings.TrimSpace(m[2])})
-	}
-	return out
-}
-
-func parseInt(s string) int {
-	n := 0
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return 0
-		}
-		n = n*10 + int(r-'0')
-	}
-	return n
-}
+// Frontmatter helpers live in entity_frontmatter.go.

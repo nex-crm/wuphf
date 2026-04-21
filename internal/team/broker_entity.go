@@ -226,14 +226,22 @@ func (b *Broker) handleEntityFact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read back the current brief frontmatter to compute "facts since sha".
+	// Read back the current brief frontmatter to compute how many facts
+	// have landed since the last synthesis. Prefer the explicit
+	// fact_count_at_synthesis over sha-based comparison (second-precision
+	// commit timestamps race with fact appends).
 	briefRel := briefPath(kind, slug)
 	briefBytes, _ := readArticle(b.WikiWorker().Repo(), briefRel)
-	lastSHA, _, priorCount := parseSynthesisFrontmatter(string(briefBytes))
+	_, _, priorCount := parseSynthesisFrontmatter(string(briefBytes))
 
-	totalFacts, _ := factLog.CountSinceSHA(r.Context(), kind, slug, lastSHA)
+	allFacts, _ := factLog.List(kind, slug)
+	totalFacts := len(allFacts)
+	newSinceSynth := totalFacts - priorCount
+	if newSinceSynth < 0 {
+		newSinceSynth = 0
+	}
 	threshold := synth.Threshold()
-	thresholdCrossed := totalFacts >= threshold
+	thresholdCrossed := newSinceSynth >= threshold
 
 	// If either new facts since last synth crosses threshold OR there's
 	// never been a synthesis (priorCount == 0 && we have >=threshold facts),
@@ -244,8 +252,6 @@ func (b *Broker) handleEntityFact(w http.ResponseWriter, r *http.Request) {
 			// Every other error is a bug — log and move on.
 		}
 	}
-	_ = priorCount
-
 	b.PublishEntityFactRecorded(EntityFactRecordedEvent{
 		Kind:             kind,
 		Slug:             slug,

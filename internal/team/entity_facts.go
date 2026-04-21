@@ -278,9 +278,14 @@ func (l *FactLog) CountSinceSHA(ctx context.Context, kind EntityKind, slug, sha 
 	if err != nil {
 		return len(facts), nil
 	}
+	// Commit timestamps are second-precision; fact CreatedAt carries
+	// sub-second precision. Compare at second resolution so a fact
+	// created in the same second as the referenced commit is NOT
+	// counted as "new."
+	refSec := ts.UTC().Unix()
 	n := 0
 	for _, f := range facts {
-		if f.CreatedAt.After(ts) {
+		if f.CreatedAt.UTC().Unix() > refSec {
 			n++
 		}
 	}
