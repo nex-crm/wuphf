@@ -1135,6 +1135,7 @@ func (b *Broker) Start() error {
 	b.ensureWikiWorker()
 	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
+	b.ensurePlaybookExecutionLog()
 	b.startReviewExpiryLoop(context.Background())
 	return b.StartOnPort(brokeraddr.ResolvePort())
 }
@@ -1225,6 +1226,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/entity/brief/synthesize", b.requireAuth(b.handleEntityBriefSynthesize))
 	mux.HandleFunc("/entity/facts", b.requireAuth(b.handleEntityFactsList))
 	mux.HandleFunc("/entity/briefs", b.requireAuth(b.handleEntityBriefsList))
+	mux.HandleFunc("/playbook/list", b.requireAuth(b.handlePlaybookList))
+	mux.HandleFunc("/playbook/compile", b.requireAuth(b.handlePlaybookCompile))
+	mux.HandleFunc("/playbook/execution", b.requireAuth(b.handlePlaybookExecution))
+	mux.HandleFunc("/playbook/executions", b.requireAuth(b.handlePlaybookExecutionsList))
 	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
 	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
@@ -1732,6 +1737,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeEntity()
 	factEvents, unsubscribeFacts := b.SubscribeEntityFactEvents(64)
 	defer unsubscribeFacts()
+	playbookEvents, unsubscribePlaybook := b.SubscribePlaybookExecutionEvents(64)
+	defer unsubscribePlaybook()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1786,6 +1793,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-factEvents:
 			if !ok || writeEvent("entity:fact_recorded", evt) != nil {
+				return
+			}
+		case evt, ok := <-playbookEvents:
+			if !ok || writeEvent("playbook:execution_recorded", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:

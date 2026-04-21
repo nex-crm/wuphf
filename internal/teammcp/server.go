@@ -472,6 +472,10 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// Entity brief tools (v1.2) — fact log + broker-level synthesis.
 		// Same backend gate: entity briefs live in the wiki subtree.
 		registerEntityTools(server)
+		// Playbook compilation tools (v1.3) — compile team/playbooks/*.md
+		// into invokable skills + record execution outcomes. Same markdown
+		// substrate, so the backend gate is unchanged.
+		registerPlaybookTools(server)
 	case "none":
 		// Nothing — user explicitly disabled shared memory.
 	default:

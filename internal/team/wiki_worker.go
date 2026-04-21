@@ -34,6 +34,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -86,6 +88,17 @@ type wikiWriteRequest struct {
 	// the v1.2 append-only fact log at team/entities/{kind}-{slug}.facts.jsonl
 	// — same serialization primitive, non-.md extension, no index regen.
 	IsEntityFact bool
+	// IsPlaybookCompile routes to Repo.CommitPlaybookSkill — writes the
+	// compiled SKILL.md under team/playbooks/.compiled/{slug}/ without
+	// regenerating the catalog. v1.3 compounding-intelligence compiler.
+	IsPlaybookCompile bool
+	// IsPlaybookExecution routes to Repo.CommitPlaybookExecution — appends
+	// to team/playbooks/{slug}.executions.jsonl. Same append-only semantics
+	// as entity facts.
+	IsPlaybookExecution bool
+	// PlaybookSlug carries the source slug so the post-write hook can
+	// enqueue a follow-up recompile without re-parsing the path.
+	PlaybookSlug string
 	ReplyCh      chan wikiWriteResult
 }
 
@@ -108,6 +121,8 @@ type noopPublisher struct{}
 
 func (noopPublisher) PublishWikiEvent(wikiWriteEvent)         {}
 func (noopPublisher) PublishNotebookEvent(notebookWriteEvent) {}
+func (noopPublisher) PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent) {
+}
 
 // WikiWorker owns the single goroutine that drains the write request queue.
 type WikiWorker struct {
@@ -119,6 +134,11 @@ type WikiWorker struct {
 	mu            sync.Mutex // guards lastBackupAt
 	lastBackupAt  time.Time
 	backupPending atomic.Bool
+
+	// sideGoroutines tracks async helpers (e.g. auto-recompile) spawned
+	// from the drain loop so Stop() can wait for them before closing the
+	// request channel.
+	sideGoroutines sync.WaitGroup
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
@@ -145,10 +165,16 @@ func (w *WikiWorker) Start(ctx context.Context) {
 
 // Stop is a test helper that closes the request channel so the drain loop
 // returns. Production code should cancel the context passed to Start instead.
+//
+// Ordering matters: mark as stopped → wait for any in-flight side
+// goroutines (e.g. auto-recompile helpers that take the queue) → close
+// the channel. Without the wait, a recompile goroutine can attempt to
+// send on a closed channel and panic.
 func (w *WikiWorker) Stop() {
 	if !w.running.Swap(false) {
 		return
 	}
+	w.sideGoroutines.Wait()
 	close(w.requests)
 }
 
@@ -213,6 +239,10 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	)
 	if req.IsEntityFact {
 		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsPlaybookCompile {
+		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsPlaybookExecution {
+		sha, n, err = w.repo.CommitPlaybookExecution(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsNotebook {
 		// Notebook writes do NOT regen the team wiki index. Commit target is
 		// agents/{slug}/notebook/... — scoped to the author.
@@ -235,6 +265,21 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	case req.IsEntityFact:
 		// Entity fact writes have their own SSE event (entity:fact_recorded)
 		// published by the broker handler, not by the worker. No-op here.
+	case req.IsPlaybookCompile:
+		// Compile writes are internal — no SSE event. The trigger (the
+		// source-article commit) already published wiki:write; emitting a
+		// second event for the compiled skill would double-count in the
+		// feed for callers that don't care about the hidden directory.
+	case req.IsPlaybookExecution:
+		if pbPub, ok := w.publisher.(playbookEventPublisher); ok {
+			pbPub.PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent{
+				Slug:       req.PlaybookSlug,
+				Path:       req.Path,
+				CommitSHA:  sha,
+				RecordedBy: req.Slug,
+				Timestamp:  ts,
+			})
+		}
 	case req.IsNotebook:
 		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
 			nbPub.PublishNotebookEvent(notebookWriteEvent{
@@ -251,6 +296,25 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 			AuthorSlug: req.Slug,
 			Timestamp:  ts,
 		})
+		// Auto-recompile trigger: a standard wiki write to team/playbooks/{slug}.md
+		// should kick off a compile. We do it in a side goroutine so the
+		// current request's drain slot is released before the recompile job
+		// tries to enter the queue — the queue is single-reader, so doing
+		// it inline would deadlock on a full buffer.
+		if slug, ok := PlaybookSlugFromPath(req.Path); ok {
+			w.sideGoroutines.Add(1)
+			go func(slug, authorSlug string) {
+				defer w.sideGoroutines.Done()
+				if !w.running.Load() {
+					return
+				}
+				bgCtx, cancel := context.WithTimeout(context.Background(), wikiWriteTimeout*2)
+				defer cancel()
+				if _, _, err := w.EnqueuePlaybookCompile(bgCtx, slug, authorSlug); err != nil {
+					log.Printf("playbook: auto-recompile %s failed: %v", slug, err)
+				}
+			}(slug, req.Slug)
+		}
 	}
 
 	w.maybeScheduleBackup(ctx)
@@ -325,6 +389,106 @@ func (w *WikiWorker) EnqueueEntityFact(ctx context.Context, slug, path, content,
 // which do not need the serialized write queue.
 func (w *WikiWorker) Repo() *Repo {
 	return w.repo
+}
+
+// EnqueuePlaybookCompile runs CompilePlaybook against the current on-disk
+// source and submits the output to the queue as a compiled-skill write.
+// The commit is attributed to the archivist identity regardless of who
+// authored the source edit — the compilation is a machine artifact.
+func (w *WikiWorker) EnqueuePlaybookCompile(ctx context.Context, slug, _ string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	sourcePath := playbookSourceRel(slug)
+	relSkill, err := CompilePlaybook(w.repo, sourcePath)
+	if err != nil {
+		return "", 0, err
+	}
+	fullSkill := filepath.Join(w.repo.Root(), filepath.FromSlash(relSkill))
+	// Read what CompilePlaybook just wrote; the queue submission must carry
+	// the full file bytes because CommitPlaybookSkill rewrites the file from
+	// content (mirrors entity-fact append).
+	skillBytes, rerr := os.ReadFile(fullSkill)
+	if rerr != nil {
+		return "", 0, fmt.Errorf("playbook: read compiled skill back: %w", rerr)
+	}
+	req := wikiWriteRequest{
+		Slug:              ArchivistAuthor,
+		Path:              relSkill,
+		Content:           string(skillBytes),
+		Mode:              "replace",
+		CommitMsg:         fmt.Sprintf("archivist: compile playbook %s", slug),
+		IsPlaybookCompile: true,
+		PlaybookSlug:      slug,
+		ReplyCh:           make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("playbook: compile write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueuePlaybookExecution submits an execution-log append to the shared
+// queue. Used by ExecutionLog.Append; mirrors EnqueueEntityFact shape.
+func (w *WikiWorker) EnqueuePlaybookExecution(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	// Extract the playbook slug from the jsonl path so the SSE event can
+	// carry it without a second parse on the subscriber side.
+	pbSlug := executionPlaybookSlug(path)
+	req := wikiWriteRequest{
+		Slug:                slug,
+		Path:                path,
+		Content:             content,
+		Mode:                "replace",
+		CommitMsg:           commitMsg,
+		IsPlaybookExecution: true,
+		PlaybookSlug:        pbSlug,
+		ReplyCh:             make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("playbook: execution write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// playbookSourceRel resolves the source-article path for a slug.
+func playbookSourceRel(slug string) string {
+	return "team/playbooks/" + slug + ".md"
+}
+
+// executionPlaybookSlug extracts the slug from a jsonl log path. Returns
+// "" when the shape is wrong — the caller uses that only for the SSE event
+// payload, so a blank slug is not load-bearing.
+func executionPlaybookSlug(path string) string {
+	if !executionLogPathPattern.MatchString(path) {
+		return ""
+	}
+	base := filepath.Base(path)
+	const suffix = ".executions.jsonl"
+	if strings.HasSuffix(base, suffix) {
+		return strings.TrimSuffix(base, suffix)
+	}
+	return ""
 }
 
 // handleWikiWrite is the broker HTTP endpoint the MCP subprocess posts to

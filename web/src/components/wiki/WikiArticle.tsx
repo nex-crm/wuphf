@@ -7,6 +7,8 @@ import type { PluggableList } from 'unified'
 import ArticleStatusBanner from './ArticleStatusBanner'
 import EntityBriefBar from './EntityBriefBar'
 import FactsOnFile from './FactsOnFile'
+import PlaybookExecutionLog from './PlaybookExecutionLog'
+import PlaybookSkillBadge from './PlaybookSkillBadge'
 import HatBar, { type HatBarTab } from './HatBar'
 import ArticleTitle from './ArticleTitle'
 import Byline from './Byline'
@@ -31,6 +33,7 @@ import type { SourceItem } from './Sources'
 import { wikiLinkRemarkPlugin } from '../../lib/wikilink'
 import { formatAgentName } from '../../lib/agentName'
 import type { EntityKind } from '../../api/entity'
+import { detectPlaybook } from '../../api/playbook'
 
 // Real backend paths look like `team/people/nazz.md`. Mock/dev paths may
 // drop the `team/` prefix or the `.md` suffix. Accept both so the entity
@@ -152,6 +155,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
 
   const toc = buildTocFromMarkdown(article.content)
   const entity = detectEntity(article.path)
+  const playbook = detectPlaybook(article.path)
   const breadcrumbSegments = article.path.split('/').filter(Boolean)
   const context = breadcrumbSegments[0] || ''
   const byline = (
@@ -182,6 +186,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
             onSynthesized={() => setRefreshNonce((n) => n + 1)}
           />
         )}
+        {playbook && <PlaybookSkillBadge slug={playbook.slug} />}
         <HatBar
           active={tab}
           onChange={setTab}
@@ -266,6 +271,9 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
         )}
         {entity && tab === 'article' && (
           <FactsOnFile kind={entity.kind} slug={entity.slug} />
+        )}
+        {playbook && tab === 'article' && (
+          <PlaybookExecutionLog slug={playbook.slug} />
         )}
         <SeeAlso
           items={article.backlinks.map((b) => ({ slug: b.path, display: b.title }))}
