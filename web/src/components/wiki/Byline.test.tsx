@@ -45,6 +45,20 @@ describe('<Byline>', () => {
     expect(screen.getByText('PM')).toBeInTheDocument()
   })
 
+  it('renders a distinct "Human" pill when the last editor is the human', () => {
+    render(
+      <Byline
+        authorSlug="human"
+        authorName="Human"
+        lastEditedTs={new Date().toISOString()}
+      />,
+    )
+    const pill = screen.getByTestId('wk-human-byline')
+    expect(pill).toBeInTheDocument()
+    expect(pill).toHaveTextContent('Human')
+    expect(pill.className).toMatch(/wk-human-pill/)
+  })
+
   it('renders started without startedBy', () => {
     render(
       <Byline

@@ -51,6 +51,11 @@ type ArticleMeta struct {
 	Content      string     `json:"content"`
 	LastEditedBy string     `json:"last_edited_by"`
 	LastEditedTs string     `json:"last_edited_ts"`
+	// CommitSHA is the short SHA of the most recent commit touching this
+	// article. The editor sends it back as expected_sha on save so the
+	// broker can detect conflicting writes that landed after the editor
+	// opened. Empty when the article has no commit history yet.
+	CommitSHA    string     `json:"commit_sha"`
 	Revisions    int        `json:"revisions"`
 	Contributors []string   `json:"contributors"`
 	Backlinks    []Backlink `json:"backlinks"`
@@ -171,6 +176,7 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath string) (ArticleMeta, e
 		meta.Revisions = len(refs)
 		meta.LastEditedBy = refs[0].Author
 		meta.LastEditedTs = refs[0].Timestamp.Format("2006-01-02T15:04:05Z07:00")
+		meta.CommitSHA = refs[0].SHA
 		meta.Contributors = uniqueAuthors(refs)
 	}
 

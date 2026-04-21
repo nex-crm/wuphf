@@ -122,6 +122,62 @@ describe('wiki api client', () => {
     }
   })
 
+  it('writeHumanArticle posts the expected payload and returns the ok envelope', async () => {
+    const spy = vi
+      .spyOn(client, 'post')
+      .mockResolvedValue({ path: 'team/people/x.md', commit_sha: 'abc1234', bytes_written: 10 })
+
+    const result = await api.writeHumanArticle({
+      path: 'team/people/x.md',
+      content: 'body',
+      commitMessage: 'human: fix typo',
+      expectedSha: 'deadbee',
+    })
+
+    expect(spy).toHaveBeenCalledWith('/wiki/write-human', {
+      path: 'team/people/x.md',
+      content: 'body',
+      commit_message: 'human: fix typo',
+      expected_sha: 'deadbee',
+    })
+    expect(result).toEqual({ path: 'team/people/x.md', commit_sha: 'abc1234', bytes_written: 10 })
+  })
+
+  it('writeHumanArticle parses a 409 body into a WriteHumanConflict', async () => {
+    const conflictBody = JSON.stringify({
+      error: 'wiki: article changed since it was opened',
+      current_sha: 'newsha9',
+      current_content: '# new content',
+    })
+    // The shared post() helper rethrows as Error(text). Simulate that.
+    vi.spyOn(client, 'post').mockRejectedValue(new Error(conflictBody))
+
+    const result = await api.writeHumanArticle({
+      path: 'team/people/x.md',
+      content: 'my edit',
+      commitMessage: 'human: stale',
+      expectedSha: 'oldsha1',
+    })
+
+    expect('conflict' in result && result.conflict).toBe(true)
+    if ('conflict' in result) {
+      expect(result.current_sha).toBe('newsha9')
+      expect(result.current_content).toBe('# new content')
+    }
+  })
+
+  it('writeHumanArticle rethrows unrecognized errors', async () => {
+    vi.spyOn(client, 'post').mockRejectedValue(new Error('500 Internal Server Error'))
+    await expect(
+      api.writeHumanArticle({
+        path: 'team/people/x.md',
+        content: 'x',
+        commitMessage: 'human: nope',
+        expectedSha: 'abc',
+      }),
+    ).rejects.toThrow(/500/)
+  })
+
   it('subscribeEditLog returns an unsubscribe function even when SSE is unavailable', () => {
     // No EventSource in happy-dom by default — the client should not throw.
     const originalEventSource = (globalThis as { EventSource?: unknown }).EventSource

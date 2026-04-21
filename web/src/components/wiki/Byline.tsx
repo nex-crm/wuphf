@@ -20,11 +20,22 @@ export default function Byline({
   startedBy,
   revisions,
 }: BylineProps) {
+  // Human edits get a distinct pill so readers can tell machine edits
+  // from hand edits at a glance. Matches the agent pixel-avatar motif
+  // without rendering an avatar (`human` has no generated sprite).
+  const isHuman = authorSlug === 'human'
   return (
     <div className="wk-byline">
       <PixelAvatar slug={authorSlug} size={22} />
       <span>
-        Last edited by <span className="wk-name">{authorName}</span>
+        Last edited by{' '}
+        {isHuman ? (
+          <span className="wk-name wk-human-pill" data-testid="wk-human-byline">
+            Human
+          </span>
+        ) : (
+          <span className="wk-name">{authorName}</span>
+        )}
       </span>
       <span className="wk-ts" data-testid="wk-ts">
         {formatBylineTime(lastEditedTs)}

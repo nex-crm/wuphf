@@ -24,6 +24,13 @@ describe('<HatBar>', () => {
     expect(onChange).not.toHaveBeenCalled()
   })
 
+  it('fires onChange when the Edit source tab is clicked', () => {
+    const onChange = vi.fn()
+    render(<HatBar active="article" onChange={onChange} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Edit source' }))
+    expect(onChange).toHaveBeenCalledWith('edit')
+  })
+
   it('renders right-rail context when provided', () => {
     render(<HatBar active="article" rightRail={['Cincinnati, OH', 'Mid-market Logistics']} />)
     expect(screen.getByText(/Cincinnati, OH/)).toBeInTheDocument()

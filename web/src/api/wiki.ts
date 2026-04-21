@@ -4,7 +4,7 @@
  * so the UI renders during development.
  */
 
-import { get, sseURL } from './client'
+import { get, post, sseURL } from './client'
 
 export interface WikiArticle {
   path: string
@@ -12,11 +12,89 @@ export interface WikiArticle {
   content: string
   last_edited_by: string
   last_edited_ts: string
+  /**
+   * Short SHA of the most recent commit touching this article. Sent back
+   * as `expected_sha` when the editor saves so the broker can detect
+   * concurrent writes that landed after the editor opened. Empty for
+   * brand-new articles that have no commit history yet.
+   */
+  commit_sha?: string
   revisions: number
   contributors: string[]
   backlinks: { path: string; title: string; author_slug: string }[]
   word_count: number
   categories: string[]
+}
+
+/**
+ * Result envelope for a successful human wiki write.
+ */
+export interface WriteHumanOk {
+  path: string
+  commit_sha: string
+  bytes_written: number
+}
+
+/**
+ * 409 Conflict payload: returned when another write landed between the
+ * editor opening and the save. Carries the current article bytes so the
+ * editor can prompt reload without a second fetch.
+ */
+export interface WriteHumanConflict {
+  conflict: true
+  error: string
+  current_sha: string
+  current_content: string
+}
+
+export type WriteHumanResult = WriteHumanOk | WriteHumanConflict
+
+/**
+ * Submit a human-authored wiki write. The caller must pass the SHA of
+ * the article version they opened (or '' for a new article); the broker
+ * rejects the write with 409 when HEAD has moved past that SHA.
+ *
+ * Agents never hit this endpoint — it is HTTP-only, not exposed via MCP.
+ */
+export async function writeHumanArticle(params: {
+  path: string
+  content: string
+  commitMessage: string
+  expectedSha: string
+}): Promise<WriteHumanResult> {
+  try {
+    const res = await post<WriteHumanOk>('/wiki/write-human', {
+      path: params.path,
+      content: params.content,
+      commit_message: params.commitMessage,
+      expected_sha: params.expectedSha,
+    })
+    return res
+  } catch (err: unknown) {
+    // The shared post() helper surfaces non-2xx as Error(text). For 409
+    // the body is a JSON envelope — try to parse it out.
+    const message = err instanceof Error ? err.message : String(err)
+    const parsed = tryParseConflict(message)
+    if (parsed) return parsed
+    throw err
+  }
+}
+
+function tryParseConflict(text: string): WriteHumanConflict | null {
+  try {
+    const data = JSON.parse(text) as Partial<WriteHumanConflict> & { error?: string; current_sha?: string; current_content?: string }
+    if (typeof data.current_sha === 'string' && typeof data.current_content === 'string') {
+      return {
+        conflict: true,
+        error: data.error ?? 'conflict',
+        current_sha: data.current_sha,
+        current_content: data.current_content,
+      }
+    }
+  } catch {
+    // not a JSON body; fall through
+  }
+  return null
 }
 
 export interface WikiCatalogEntry {
