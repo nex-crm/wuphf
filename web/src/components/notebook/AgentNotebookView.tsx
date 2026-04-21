@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import AuthorShelfSidebar from './AuthorShelfSidebar'
 import NotebookEntryView from './NotebookEntry'
-import NotebookImageDrop from './NotebookImageDrop'
 import {
   fetchAgentEntries,
   type NotebookAgentSummary,
@@ -120,19 +119,15 @@ export default function AgentNotebookView({
         onSelect={(slug) => onSelectEntry(slug)}
       />
       {activeEntry ? (
-        <div className="nb-article-with-drop">
-          <NotebookEntryView
-            entry={activeEntry}
-            onNavigateCatalog={onNavigateCatalog}
-            onNavigateAgent={() => onSelectEntry(null)}
-            onNavigateWiki={onNavigateWiki}
-          />
-          <NotebookImageDrop agentSlug={agentSlug} />
-        </div>
+        <NotebookEntryView
+          entry={activeEntry}
+          onNavigateCatalog={onNavigateCatalog}
+          onNavigateAgent={() => onSelectEntry(null)}
+          onNavigateWiki={onNavigateWiki}
+        />
       ) : (
         <div className="nb-empty-prompt">
           <p>No entries yet — {agent.name} has not written anything.</p>
-          <NotebookImageDrop agentSlug={agentSlug} />
         </div>
       )}
     </div>

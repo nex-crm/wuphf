@@ -81,6 +81,25 @@ export interface BriefSynthesizedEvent {
   synthesized_ts: string
 }
 
+export type GraphDirection = 'out' | 'in' | 'both'
+
+export interface GraphEdge {
+  from_kind: EntityKind
+  from_slug: string
+  to_kind: EntityKind
+  to_slug: string
+  first_seen_fact_id: string
+  last_seen_ts: string
+  occurrence_count: number
+}
+
+export interface GraphQueryResponse {
+  kind: EntityKind
+  slug: string
+  direction: GraphDirection
+  edges: GraphEdge[]
+}
+
 // ── HTTP ─────────────────────────────────────────────────────────
 
 /** `GET /entity/facts?kind=&slug=` — newest-first. */
@@ -117,6 +136,28 @@ export function requestBriefSynthesis(
   req: SynthesizeRequest,
 ): Promise<SynthesizeResponse> {
   return post<SynthesizeResponse>('/entity/brief/synthesize', req)
+}
+
+/**
+ * `GET /entity/graph?kind=&slug=&direction=` — returns coalesced edges
+ * touching the given entity. `direction` defaults to `'out'` (who this
+ * entity mentions).
+ */
+export async function fetchEntityGraph(
+  kind: EntityKind,
+  slug: string,
+  direction: GraphDirection = 'out',
+): Promise<GraphEdge[]> {
+  const q = new URLSearchParams({ kind, slug, direction })
+  const res = await get<GraphQueryResponse | { edges?: GraphEdge[] }>(
+    `/entity/graph?${q.toString()}`,
+  )
+  if (!res) return []
+  if (Array.isArray((res as GraphQueryResponse).edges)) {
+    return (res as GraphQueryResponse).edges
+  }
+  const maybe = (res as { edges?: GraphEdge[] }).edges
+  return Array.isArray(maybe) ? maybe : []
 }
 
 // ── SSE ──────────────────────────────────────────────────────────

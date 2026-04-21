@@ -562,6 +562,65 @@ func TestScannerHasRootMatchesSubpaths(t *testing.T) {
 	}
 }
 
+// Integration: a fixture root containing a pem file + secrets.env
+// alongside innocent markdown. Only the markdown should survive to the
+// ingested set — the secret-bearing files must be skipped wholesale.
+//
+// We deliberately keep the test in scanner_test.go (not patterns_test.go)
+// so the full Scan flow is exercised end to end.
+func TestScannerScanFixtureOnlyIngestsInnocentMarkdown(t *testing.T) {
+	// Extend the default allowlist so .pem and .env are discovered by
+	// the walker. Without this, the extension allowlist alone would
+	// silently filter them out and we'd claim a win we didn't earn.
+	t.Setenv("WUPHF_SCAN_EXTENSIONS", "md,pem,env")
+
+	pemBody := "-----BEGIN OPENSSH PRIVATE KEY-----\n" +
+		strings.Repeat("AAAAB3NzaC1yc2EAAAADAQABAAABAQ", 4) + "\n" +
+		"-----END OPENSSH PRIVATE KEY-----\n"
+	envBody := strings.Join([]string{
+		"OPENAI_API_KEY=sk-" + strings.Repeat("a", 40),
+		"ANTHROPIC_API_KEY=sk-ant-" + strings.Repeat("b", 40),
+		"STRIPE_SECRET=sk_live_" + strings.Repeat("c", 40),
+		"GITHUB_TOKEN=ghp_" + strings.Repeat("d", 36),
+		"DATABASE_URL=postgres://u:hunter2@db/app",
+	}, "\n")
+	innocent := "# Onboarding\n\nWelcome to the team. Read the runbook and say hi in #general.\n"
+
+	root := setupRoot(t, map[string]string{
+		"id_rsa.pem":  pemBody,
+		"secrets.env": envBody,
+		"welcome.md":  innocent,
+	})
+	wiki := t.TempDir()
+	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
+	det, err := NewMtimeChangeDetector()
+	if err != nil {
+		t.Fatalf("detector: %v", err)
+	}
+	commit := func(_ context.Context, _, _ string) (string, error) { return "sha", nil }
+	res, _, err := Scan(context.Background(), ScanOptions{Root: root, Confirm: true}, det, wiki, commit)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if res.Ingested != 1 {
+		t.Fatalf("expected exactly one file ingested (welcome.md), got %+v", res)
+	}
+	if res.Skipped < 2 {
+		t.Fatalf("expected at least two skipped (pem + env), got %+v", res)
+	}
+	// Confirm the ingested file is the innocent markdown by filename.
+	if len(res.IngestedPath) != 1 || !strings.Contains(res.IngestedPath[0], "welcome.md") {
+		t.Fatalf("expected welcome.md in IngestedPath, got %+v", res.IngestedPath)
+	}
+	body, err := os.ReadFile(res.IngestedPath[0])
+	if err != nil {
+		t.Fatalf("read ingested: %v", err)
+	}
+	if strings.Contains(string(body), "BEGIN OPENSSH") || strings.Contains(string(body), "sk_live_") {
+		t.Fatalf("ingested file leaked secret content: %q", body)
+	}
+}
+
 // Verify the mtime-based detector treats a touched file as changed.
 func TestScannerMtimeDetectsModification(t *testing.T) {
 	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())

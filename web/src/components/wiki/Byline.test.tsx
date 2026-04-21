@@ -45,6 +45,49 @@ describe('<Byline>', () => {
     expect(screen.getByText('PM')).toBeInTheDocument()
   })
 
+  it('renders a distinct "Human" pill when the last editor is the human', () => {
+    render(
+      <Byline
+        authorSlug="human"
+        authorName="Human"
+        lastEditedTs={new Date().toISOString()}
+      />,
+    )
+    const pill = screen.getByTestId('wk-human-byline')
+    expect(pill).toBeInTheDocument()
+    expect(pill).toHaveTextContent('Human')
+    expect(pill.className).toMatch(/wk-human-pill/)
+  })
+
+  it('renders the human display name when the slug matches a registered human', () => {
+    render(
+      <Byline
+        authorSlug="sarah-chen"
+        authorName="Sarah-Chen"
+        lastEditedTs={new Date().toISOString()}
+        humans={[
+          { name: 'Sarah Chen', email: 'sarah.chen@acme.com', slug: 'sarah-chen' },
+        ]}
+      />,
+    )
+    const pill = screen.getByTestId('wk-human-byline')
+    expect(pill).toBeInTheDocument()
+    expect(pill).toHaveTextContent('Sarah Chen')
+    expect(pill.className).toMatch(/wk-human-pill/)
+  })
+
+  it('falls back to the generic "Human" pill for the legacy human slug', () => {
+    render(
+      <Byline
+        authorSlug="human"
+        authorName="Human"
+        lastEditedTs={new Date().toISOString()}
+        humans={[]}
+      />,
+    )
+    expect(screen.getByTestId('wk-human-byline')).toHaveTextContent('Human')
+  })
+
   it('renders started without startedBy', () => {
     render(
       <Byline

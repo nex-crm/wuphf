@@ -141,6 +141,74 @@ func TestHandleEntityBriefSynthesize_HappyPath(t *testing.T) {
 	}
 }
 
+func TestEntityGraphQueryRegistered(t *testing.T) {
+	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
+	names := listRegisteredTools(t, "general", false)
+	if !slices.Contains(names, "entity_graph_query") {
+		t.Fatalf("entity_graph_query missing; got %v", names)
+	}
+}
+
+func TestHandleEntityGraphQuery_HappyPath(t *testing.T) {
+	var seenQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seenQuery = r.URL.RawQuery
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"kind":      "people",
+			"slug":      "sarah",
+			"direction": "out",
+			"edges": []map[string]any{
+				{
+					"from_kind":          "people",
+					"from_slug":          "sarah",
+					"to_kind":            "companies",
+					"to_slug":            "acme",
+					"first_seen_fact_id": "abc",
+					"last_seen_ts":       "2026-04-21T00:00:00Z",
+					"occurrence_count":   1,
+				},
+			},
+		})
+	}))
+	defer srv.Close()
+	withBrokerURL(t, srv.URL)
+	t.Setenv("WUPHF_AGENT_SLUG", "pm")
+
+	res, _, err := handleEntityGraphQuery(context.Background(), nil, TeamEntityGraphQueryArgs{
+		EntityKind: "people",
+		EntitySlug: "sarah",
+		Direction:  "out",
+	})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("tool error: %s", toolErrorText(res))
+	}
+	if !strings.Contains(seenQuery, "kind=people") || !strings.Contains(seenQuery, "slug=sarah") || !strings.Contains(seenQuery, "direction=out") {
+		t.Errorf("unexpected query string: %q", seenQuery)
+	}
+	out := toolErrorText(res)
+	if !strings.Contains(out, "acme") {
+		t.Errorf("missing to_slug in output: %s", out)
+	}
+}
+
+func TestHandleEntityGraphQuery_Validation(t *testing.T) {
+	t.Setenv("WUPHF_AGENT_SLUG", "pm")
+	cases := []TeamEntityGraphQueryArgs{
+		{EntitySlug: "x"},      // missing kind
+		{EntityKind: "people"}, // missing slug
+		{EntityKind: "people", EntitySlug: "x", Direction: "?"}, // bad direction
+	}
+	for i, args := range cases {
+		res, _, _ := handleEntityGraphQuery(context.Background(), nil, args)
+		if !isToolError(res) {
+			t.Fatalf("case %d expected tool error; got %s", i, toolErrorText(res))
+		}
+	}
+}
+
 func TestHandleEntityBriefSynthesize_Validation(t *testing.T) {
 	t.Setenv("WUPHF_AGENT_SLUG", "pm")
 	cases := []TeamEntityBriefSynthesizeArgs{

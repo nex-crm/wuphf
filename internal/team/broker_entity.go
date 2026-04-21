@@ -118,6 +118,21 @@ func (b *Broker) FactLog() *FactLog {
 	return b.factLog
 }
 
+// EntityGraph returns the active cross-entity graph or nil.
+func (b *Broker) EntityGraph() *EntityGraph {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.entityGraph
+}
+
+// SetEntityGraph wires a graph from tests. Must be called after the wiki
+// worker is attached (graph writes ride the worker queue).
+func (b *Broker) SetEntityGraph(graph *EntityGraph) {
+	b.mu.Lock()
+	b.entityGraph = graph
+	b.mu.Unlock()
+}
+
 // ensureEntitySynthesizer initializes the fact log + synthesizer when the
 // wiki worker is online. Idempotent.
 func (b *Broker) ensureEntitySynthesizer() {
@@ -133,15 +148,18 @@ func (b *Broker) ensureEntitySynthesizer() {
 	}
 
 	factLog := NewFactLog(worker)
+	graph := NewEntityGraph(worker)
 	cfg := SynthesizerConfig{
 		Threshold: resolveThresholdFromEnv(),
 		Timeout:   resolveTimeoutFromEnv(),
+		Graph:     graph,
 	}
 	synth := NewEntitySynthesizer(worker, factLog, b, cfg)
 	synth.Start(context.Background())
 
 	b.mu.Lock()
 	b.factLog = factLog
+	b.entityGraph = graph
 	b.entitySynthesizer = synth
 	b.mu.Unlock()
 }
@@ -225,6 +243,15 @@ func (b *Broker) handleEntityFact(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+
+	// Cross-entity graph extraction rides on every successful fact append.
+	// Failures here are logged but never block the fact_recorded response —
+	// the graph is additive intelligence, not a constraint on the fact log.
+	if graph := b.EntityGraph(); graph != nil {
+		if _, gerr := graph.RecordFactRefs(r.Context(), fact); gerr != nil {
+			log.Printf("entity graph: record refs for %s/%s fact %s: %v", kind, slug, fact.ID, gerr)
+		}
 	}
 
 	// Read back the current brief frontmatter to compute how many facts
@@ -452,4 +479,50 @@ func briefTitleFrom(body, fallback string) string {
 		return h
 	}
 	return fallback
+}
+
+// handleEntityGraph is GET /entity/graph?kind=&slug=&direction={in,out,both}.
+// Returns the coalesced edges touching the requested entity in the chosen
+// direction. Defaults to direction=out.
+func (b *Broker) handleEntityGraph(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	graph := b.EntityGraph()
+	if graph == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "entity-graph backend is not active"})
+		return
+	}
+	kind := EntityKind(strings.TrimSpace(r.URL.Query().Get("kind")))
+	slug := strings.TrimSpace(r.URL.Query().Get("slug"))
+	if err := validateListInputs(kind, slug); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	dirRaw := strings.TrimSpace(r.URL.Query().Get("direction"))
+	direction := Direction(dirRaw)
+	switch direction {
+	case "", DirectionOut, DirectionIn, DirectionBoth:
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "direction must be one of out|in|both"})
+		return
+	}
+	if direction == "" {
+		direction = DirectionOut
+	}
+	edges, err := graph.Query(kind, slug, direction)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	if edges == nil {
+		edges = []CoalescedEdge{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"kind":      kind,
+		"slug":      slug,
+		"direction": direction,
+		"edges":     edges,
+	})
 }

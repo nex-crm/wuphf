@@ -88,6 +88,11 @@ type wikiWriteRequest struct {
 	// the v1.2 append-only fact log at team/entities/{kind}-{slug}.facts.jsonl
 	// — same serialization primitive, non-.md extension, no index regen.
 	IsEntityFact bool
+	// IsEntityGraph routes the request to Repo.CommitEntityGraph. Used for
+	// the cross-entity adjacency log at team/entities/.graph.jsonl.
+	// Same serialization primitive as IsEntityFact — non-.md extension,
+	// no wiki-index regen, no backlinks recompute.
+	IsEntityGraph bool
 	// IsPlaybookCompile routes to Repo.CommitPlaybookSkill — writes the
 	// compiled SKILL.md under team/playbooks/.compiled/{slug}/ without
 	// regenerating the catalog. v1.3 compounding-intelligence compiler.
@@ -99,19 +104,19 @@ type wikiWriteRequest struct {
 	// PlaybookSlug carries the source slug so the post-write hook can
 	// enqueue a follow-up recompile without re-parsing the path.
 	PlaybookSlug string
-	// IsImageAsset routes the request to Repo.CommitImageAsset. Used for the
-	// v1.3 image upload pipeline. Payload travels via ImagePayload +
-	// ThumbRelPath + ThumbBytes rather than the text Content field because
-	// image bytes are not valid UTF-8 and must not be lossy-converted.
-	IsImageAsset bool
-	ImagePayload []byte
-	ThumbRelPath string
-	ThumbBytes   []byte
-	// IsImageAlt routes the request to Repo.CommitImageAltText. Alt text is
-	// a separate commit so the vision LLM round-trip does not block the
-	// upload response path.
-	IsImageAlt bool
-	ReplyCh    chan wikiWriteResult
+	// IsHuman routes the request to Repo.CommitHuman — optimistic
+	// concurrency via expected_sha, per-human git identity. Wikipedia-
+	// style Edit source flow. v1.5: identity is resolved from the
+	// HumanIdentityRegistry rather than being hard-coded.
+	IsHuman bool
+	// ExpectedSHA is consulted by the human write path. Empty means the
+	// caller expects the article not to exist yet (new-article flow).
+	ExpectedSHA string
+	// HumanIdentity carries the per-human git identity used when
+	// IsHuman is true. Zero value falls back to the synthetic
+	// `human <human@wuphf.local>` author.
+	HumanIdentity HumanIdentity
+	ReplyCh       chan wikiWriteResult
 }
 
 // wikiWriteResult is the worker's reply for a single request.
@@ -139,39 +144,9 @@ type wikiSectionsNotifier interface {
 // (tests, or --memory-backend markdown without a broker yet).
 type noopPublisher struct{}
 
-func (noopPublisher) PublishWikiEvent(wikiWriteEvent)             {}
-func (noopPublisher) PublishNotebookEvent(notebookWriteEvent)     {}
-func (noopPublisher) PublishImageUploaded(imageUploadedEvent)     {}
-func (noopPublisher) PublishImageAltUpdated(imageAltUpdatedEvent) {}
+func (noopPublisher) PublishWikiEvent(wikiWriteEvent)         {}
+func (noopPublisher) PublishNotebookEvent(notebookWriteEvent) {}
 func (noopPublisher) PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent) {
-}
-
-// imageUploadedEvent is the SSE payload emitted after a successful upload.
-// ThumbPath is empty for SVGs and for raster sources already narrower than
-// the thumbnail width.
-type imageUploadedEvent struct {
-	Path       string `json:"path"`
-	ThumbPath  string `json:"thumb_path,omitempty"`
-	CommitSHA  string `json:"commit_sha"`
-	AuthorSlug string `json:"author_slug"`
-	Timestamp  string `json:"timestamp"`
-}
-
-// imageAltUpdatedEvent is emitted after the vision agent writes a sidecar.
-// Wire name "wiki:image_alt_updated".
-type imageAltUpdatedEvent struct {
-	AltPath    string `json:"alt_path"`
-	CommitSHA  string `json:"commit_sha"`
-	AuthorSlug string `json:"author_slug"`
-	Timestamp  string `json:"timestamp"`
-}
-
-// imageEventPublisher is the extension the worker needs to emit image-
-// scoped SSE events. Broker satisfies this alongside the wiki/notebook
-// variants.
-type imageEventPublisher interface {
-	PublishImageUploaded(evt imageUploadedEvent)
-	PublishImageAltUpdated(evt imageAltUpdatedEvent)
 }
 
 // WikiWorker owns the single goroutine that drains the write request queue.
@@ -287,12 +262,17 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		n   int
 		err error
 	)
-	if req.IsEntityFact {
+	if req.IsHuman {
+		// Human edits use optimistic concurrency (expected_sha) and the
+		// per-human identity resolved from the registry — req.Slug is
+		// ignored on this branch to prevent a caller from forging
+		// attribution. Zero-value HumanIdentity falls back to the
+		// synthetic `human` author inside CommitHuman.
+		sha, n, err = w.repo.CommitHuman(writeCtx, req.Path, req.Content, req.ExpectedSHA, req.CommitMsg, req.HumanIdentity)
+	} else if req.IsEntityFact {
 		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
-	} else if req.IsImageAsset {
-		sha, n, err = w.repo.CommitImageAsset(writeCtx, req.Slug, req.Path, req.ImagePayload, req.ThumbRelPath, req.ThumbBytes, req.CommitMsg)
-	} else if req.IsImageAlt {
-		sha, n, err = w.repo.CommitImageAltText(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsEntityGraph {
+		sha, n, err = w.repo.CommitEntityGraph(writeCtx, req.Slug, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookCompile {
 		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookExecution {
@@ -309,7 +289,11 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.Commit(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
 	}
 	if err != nil {
-		req.ReplyCh <- wikiWriteResult{Err: err}
+		// On ErrWikiSHAMismatch the human path returns the current HEAD
+		// SHA alongside the error so callers can surface 409 bodies
+		// without a second round trip. For all other errors `sha` is
+		// empty and carrying it is a harmless no-op.
+		req.ReplyCh <- wikiWriteResult{SHA: sha, Err: err}
 		return
 	}
 	req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
@@ -319,28 +303,10 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	case req.IsEntityFact:
 		// Entity fact writes have their own SSE event (entity:fact_recorded)
 		// published by the broker handler, not by the worker. No-op here.
-	case req.IsImageAsset:
-		if imgPub, ok := w.publisher.(imageEventPublisher); ok {
-			imgPub.PublishImageUploaded(imageUploadedEvent{
-				Path:       req.Path,
-				ThumbPath:  req.ThumbRelPath,
-				CommitSHA:  sha,
-				AuthorSlug: req.Slug,
-				Timestamp:  ts,
-			})
-		}
-	case req.IsImageAlt:
-		// Alt-text updates piggyback on the image event stream so the UI
-		// can re-fetch the brief without a second listener. Payload type
-		// is distinct so clients can tell them apart.
-		if imgPub, ok := w.publisher.(imageEventPublisher); ok {
-			imgPub.PublishImageAltUpdated(imageAltUpdatedEvent{
-				AltPath:    req.Path,
-				CommitSHA:  sha,
-				AuthorSlug: req.Slug,
-				Timestamp:  ts,
-			})
-		}
+	case req.IsEntityGraph:
+		// Graph log appends are internal bookkeeping triggered by fact
+		// writes — no dedicated SSE event. Subscribers that care hear
+		// entity:fact_recorded + refetch the graph read API.
 	case req.IsPlaybookCompile:
 		// Compile writes are internal — no SSE event. The trigger (the
 		// source-article commit) already published wiki:write; emitting a
@@ -436,6 +402,60 @@ func (w *WikiWorker) QueueLength() int {
 	return len(w.requests)
 }
 
+// EnqueueHuman submits a human-authored wiki write to the shared single-
+// writer queue with the legacy fallback identity. Retained for backward
+// compatibility with tests and call sites that predate v1.5's
+// per-human identity registry; prefer EnqueueHumanAs for new code.
+func (w *WikiWorker) EnqueueHuman(ctx context.Context, path, content, commitMsg, expectedSHA string) (string, int, error) {
+	return w.EnqueueHumanAs(ctx, HumanIdentity{}, path, content, commitMsg, expectedSHA)
+}
+
+// EnqueueHumanAs submits a human-authored wiki write to the shared
+// single-writer queue, stamping the commit with the supplied identity.
+// A zero-value identity falls back to the synthetic `human` author so
+// single-user installs keep working.
+//
+// The HTTP handler is already gated by the broker bearer token, so the
+// worker trusts the identity it is given — this is belt-and-braces
+// between two authenticated layers, not an anti-spoofing boundary.
+//
+// Returns ErrWikiSHAMismatch wrapped with the current HEAD SHA (in the
+// SHA return slot) when expected_sha does not match; callers pass that
+// back to the client so the 409 prompt can reload the latest content.
+func (w *WikiWorker) EnqueueHumanAs(ctx context.Context, id HumanIdentity, path, content, commitMsg, expectedSHA string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	slug := strings.TrimSpace(id.Slug)
+	if slug == "" {
+		slug = HumanAuthor
+	}
+	req := wikiWriteRequest{
+		Slug:          slug,
+		Path:          path,
+		Content:       content,
+		Mode:          "replace",
+		CommitMsg:     commitMsg,
+		IsHuman:       true,
+		ExpectedSHA:   expectedSHA,
+		HumanIdentity: id,
+		ReplyCh:       make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: human write timed out after %s", wikiWriteTimeout)
+	}
+}
+
 // EnqueueEntityFact submits a fact-log append to the shared wiki queue.
 // The path must be team/entities/{kind}-{slug}.facts.jsonl and is routed
 // to Repo.CommitEntityFact (which does NOT regen the wiki index).
@@ -467,80 +487,43 @@ func (w *WikiWorker) EnqueueEntityFact(ctx context.Context, slug, path, content,
 	}
 }
 
+// EnqueueEntityGraph submits a full rewrite of the cross-entity adjacency
+// log at team/entities/.graph.jsonl. Same single-writer queue as the fact
+// log; routed to Repo.CommitEntityGraph (which does NOT regen the wiki
+// index or backlinks). Caller (EntityGraph) owns append-merge semantics —
+// the worker just replaces the bytes.
+func (w *WikiWorker) EnqueueEntityGraph(ctx context.Context, slug, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:          slug,
+		Path:          EntityGraphPath,
+		Content:       content,
+		Mode:          "replace",
+		CommitMsg:     commitMsg,
+		IsEntityGraph: true,
+		ReplyCh:       make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: entity-graph write timed out after %s", wikiWriteTimeout)
+	}
+}
+
 // Repo returns the underlying wiki repo — used by read-side broker handlers
 // which do not need the serialized write queue.
 func (w *WikiWorker) Repo() *Repo {
 	return w.repo
-}
-
-// EnqueueImageAsset submits an image upload to the shared wiki queue. The
-// caller has already sanitized the asset path and generated the thumbnail.
-// Returns the commit SHA and the asset byte count.
-func (w *WikiWorker) EnqueueImageAsset(
-	ctx context.Context,
-	slug, assetRelPath string,
-	payload []byte,
-	thumbRelPath string,
-	thumbBytes []byte,
-	commitMsg string,
-) (string, int, error) {
-	if !w.running.Load() {
-		return "", 0, ErrWorkerStopped
-	}
-	req := wikiWriteRequest{
-		Slug:         slug,
-		Path:         assetRelPath,
-		Mode:         "replace",
-		CommitMsg:    commitMsg,
-		IsImageAsset: true,
-		ImagePayload: payload,
-		ThumbRelPath: thumbRelPath,
-		ThumbBytes:   thumbBytes,
-		ReplyCh:      make(chan wikiWriteResult, 1),
-	}
-	select {
-	case w.requests <- req:
-	default:
-		return "", 0, ErrQueueSaturated
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
-	defer cancel()
-	select {
-	case result := <-req.ReplyCh:
-		return result.SHA, result.BytesWritten, result.Err
-	case <-waitCtx.Done():
-		return "", 0, fmt.Errorf("wiki: image upload timed out after %s", wikiWriteTimeout)
-	}
-}
-
-// EnqueueImageAlt submits an alt-text sidecar commit to the shared queue.
-// Author slug is usually "archivist" (vision agent), but any slug works.
-func (w *WikiWorker) EnqueueImageAlt(ctx context.Context, slug, altRelPath, altText, commitMsg string) (string, int, error) {
-	if !w.running.Load() {
-		return "", 0, ErrWorkerStopped
-	}
-	req := wikiWriteRequest{
-		Slug:       slug,
-		Path:       altRelPath,
-		Content:    altText,
-		Mode:       "replace",
-		CommitMsg:  commitMsg,
-		IsImageAlt: true,
-		ReplyCh:    make(chan wikiWriteResult, 1),
-	}
-	select {
-	case w.requests <- req:
-	default:
-		return "", 0, ErrQueueSaturated
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
-	defer cancel()
-	select {
-	case result := <-req.ReplyCh:
-		return result.SHA, result.BytesWritten, result.Err
-	case <-waitCtx.Done():
-		return "", 0, fmt.Errorf("wiki: image alt commit timed out after %s", wikiWriteTimeout)
-	}
 }
 
 // EnqueuePlaybookCompile runs CompilePlaybook against the current on-disk

@@ -4,7 +4,7 @@
  * so the UI renders during development.
  */
 
-import { get, sseURL } from './client'
+import { get, post, sseURL } from './client'
 
 export interface WikiArticle {
   path: string
@@ -12,11 +12,89 @@ export interface WikiArticle {
   content: string
   last_edited_by: string
   last_edited_ts: string
+  /**
+   * Short SHA of the most recent commit touching this article. Sent back
+   * as `expected_sha` when the editor saves so the broker can detect
+   * concurrent writes that landed after the editor opened. Empty for
+   * brand-new articles that have no commit history yet.
+   */
+  commit_sha?: string
   revisions: number
   contributors: string[]
   backlinks: { path: string; title: string; author_slug: string }[]
   word_count: number
   categories: string[]
+}
+
+/**
+ * Result envelope for a successful human wiki write.
+ */
+export interface WriteHumanOk {
+  path: string
+  commit_sha: string
+  bytes_written: number
+}
+
+/**
+ * 409 Conflict payload: returned when another write landed between the
+ * editor opening and the save. Carries the current article bytes so the
+ * editor can prompt reload without a second fetch.
+ */
+export interface WriteHumanConflict {
+  conflict: true
+  error: string
+  current_sha: string
+  current_content: string
+}
+
+export type WriteHumanResult = WriteHumanOk | WriteHumanConflict
+
+/**
+ * Submit a human-authored wiki write. The caller must pass the SHA of
+ * the article version they opened (or '' for a new article); the broker
+ * rejects the write with 409 when HEAD has moved past that SHA.
+ *
+ * Agents never hit this endpoint — it is HTTP-only, not exposed via MCP.
+ */
+export async function writeHumanArticle(params: {
+  path: string
+  content: string
+  commitMessage: string
+  expectedSha: string
+}): Promise<WriteHumanResult> {
+  try {
+    const res = await post<WriteHumanOk>('/wiki/write-human', {
+      path: params.path,
+      content: params.content,
+      commit_message: params.commitMessage,
+      expected_sha: params.expectedSha,
+    })
+    return res
+  } catch (err: unknown) {
+    // The shared post() helper surfaces non-2xx as Error(text). For 409
+    // the body is a JSON envelope — try to parse it out.
+    const message = err instanceof Error ? err.message : String(err)
+    const parsed = tryParseConflict(message)
+    if (parsed) return parsed
+    throw err
+  }
+}
+
+function tryParseConflict(text: string): WriteHumanConflict | null {
+  try {
+    const data = JSON.parse(text) as Partial<WriteHumanConflict> & { error?: string; current_sha?: string; current_content?: string }
+    if (typeof data.current_sha === 'string' && typeof data.current_content === 'string') {
+      return {
+        conflict: true,
+        error: data.error ?? 'conflict',
+        current_sha: data.current_sha,
+        current_content: data.current_content,
+      }
+    }
+  } catch {
+    // not a JSON body; fall through
+  }
+  return null
 }
 
 export interface WikiCatalogEntry {
@@ -137,6 +215,32 @@ export function subscribeSectionsUpdated(
   }
 }
 
+/**
+ * Registered human identity surfaced by the broker at GET /humans. The
+ * server grows this list as it observes new commits, so team installs
+ * with multiple humans all show up without any client configuration.
+ */
+export interface HumanIdentity {
+  name: string
+  email: string
+  slug: string
+}
+
+/**
+ * GET /humans — returns identities observed or probed server-side. The
+ * byline component uses this to turn a commit author slug into the
+ * human's real display name. Returns [] on any error so the UI falls
+ * back to the slug-derived label without blanking.
+ */
+export async function fetchHumans(): Promise<HumanIdentity[]> {
+  try {
+    const res = await get<{ humans: HumanIdentity[] }>('/humans')
+    return Array.isArray(res?.humans) ? res.humans : []
+  } catch {
+    return []
+  }
+}
+
 export async function fetchCatalog(): Promise<WikiCatalogEntry[]> {
   try {
     const res = await get<{ articles: WikiCatalogEntry[] }>('/wiki/catalog')
@@ -209,9 +313,25 @@ export function subscribeEditLog(
       if (closed) return
       try {
         const data = JSON.parse(ev.data) as Record<string, unknown>
-        // Broker ships the full wikiWriteEvent envelope as the data
-        // payload; the edit-log UI only needs the entry fields.
-        const entry = (data.entry ?? data) as WikiEditLogEntry
+        // Broker ships `{path, commit_sha, author_slug, timestamp}` on
+        // wiki:write. The edit-log UI's WikiEditLogEntry contract uses
+        // `who`/`action`/`article_path`/`article_title`, so normalize
+        // here rather than leaving undefined fields that crash
+        // downstream consumers (e.g. EditLogFooter's
+        // entry.who.toLowerCase()).
+        const raw = (data.entry ?? data) as Record<string, unknown>
+        const path = String(raw.article_path ?? raw.path ?? '')
+        const entry: WikiEditLogEntry = {
+          who: String(raw.who ?? raw.author_slug ?? 'unknown'),
+          action:
+            (raw.action as WikiEditLogEntry['action']) ?? 'edited',
+          article_path: path,
+          article_title:
+            (raw.article_title as string) ??
+            (path.split('/').pop() ?? path).replace(/\.md$/, ''),
+          timestamp: String(raw.timestamp ?? new Date().toISOString()),
+          commit_sha: String(raw.commit_sha ?? ''),
+        }
         handler(entry)
       } catch {
         // ignore malformed events

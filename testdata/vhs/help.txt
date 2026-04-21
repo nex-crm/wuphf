@@ -8,6 +8,7 @@ Usage:
   wuphf shred        Burn the workspace down and reopen onboarding
   wuphf import --from legacy  Import from a running external orchestrator (auto-detect)
   wuphf log          Show what your agents actually did (task receipts)
+  wuphf memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki
   wuphf --cmd <cmd>  Run a command non-interactively
 
 Flags:
@@ -45,4 +46,3 @@ Flags:
         Launch with tmux TUI instead of the web UI
   --unsafe
         Bypass all agent permission checks (use for local dev only)
-  --version

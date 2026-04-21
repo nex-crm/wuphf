@@ -730,9 +730,9 @@ html[data-theme="nex"] .composer-send:hover:not(:disabled) {
   color: #fff;
 }
 html[data-theme="nex"] .composer-send:disabled {
-  background: transparent;
+  background: var(--bg-warm);
   color: var(--text-tertiary);
-  opacity: 0.35;
+  opacity: 0.55;
 }
 
 /* ═══════════════════════════════════════

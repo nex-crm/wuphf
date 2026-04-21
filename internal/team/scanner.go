@@ -210,15 +210,21 @@ func Scan(
 			result.Skipped++
 			continue
 		}
-		redacted, matches := redactSecrets(string(raw))
-		if matches > maxRedactionsPerFile {
-			fmt.Fprintf(os.Stderr, "scanner: %s skipped — probable secrets file (%d matches)\n", f.AbsolutePath, matches)
+		redaction := redactSecretsDetailed(string(raw))
+		matches := redaction.Matches()
+		if redaction.Poisoned || matches > maxRedactionsPerFile {
+			fmt.Fprintf(
+				os.Stderr,
+				"scanner: %s skipped — probable secrets file (%d matches; %s)\n",
+				f.AbsolutePath, matches, formatRedactionReasons(redaction.Reasons),
+			)
 			result.Skipped++
 			continue
 		}
 		if matches > 0 {
 			result.Redacted++
 		}
+		redacted := redaction.Content
 		dest := filepath.Join(targetDir, safeFilename(f.RelativePath))
 		writeOps = append(writeOps, scanWriteOp{
 			absSource: f.AbsolutePath,

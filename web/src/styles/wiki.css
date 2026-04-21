@@ -1180,7 +1180,7 @@
   opacity: 0.7;
 }
 .wk-section-new {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 9px;
   font-weight: 500;
   text-transform: uppercase;
@@ -1236,6 +1236,238 @@
 }
 .wk-catalog-audit-link:hover {
   text-decoration-style: solid;
+}
+
+/* ─── New-article button + Edit source editor (v1.3 human-editable wiki) ─── */
+.wk-catalog-new-link {
+  font-family: inherit;
+  color: var(--wk-wikilink);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+}
+.wk-catalog-new-link:hover { text-decoration-style: solid; }
+
+.wk-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+.wk-editor-label {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  margin-top: 4px;
+}
+.wk-editor-textarea {
+  width: 100%;
+  min-height: 480px;
+  padding: 12px 14px;
+  font-family: var(--wk-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--wk-text);
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.wk-editor-textarea:focus {
+  outline: 2px solid var(--wk-wikilink);
+  outline-offset: -2px;
+}
+.wk-editor-commit {
+  width: 100%;
+  padding: 8px 10px;
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  color: var(--wk-text);
+  box-sizing: border-box;
+}
+.wk-editor-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.wk-editor-save,
+.wk-editor-cancel {
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  padding: 8px 18px;
+  border: 1px solid var(--wk-border);
+  cursor: pointer;
+}
+.wk-editor-save {
+  background: var(--wk-wikilink);
+  color: #fff;
+  border-color: var(--wk-wikilink);
+}
+.wk-editor-save[disabled],
+.wk-editor-cancel[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.wk-editor-cancel { background: var(--wk-paper); color: var(--wk-text); }
+.wk-editor-help {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  margin: 0;
+}
+.wk-editor-banner {
+  padding: 10px 14px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper-dark);
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+}
+.wk-editor-banner--conflict {
+  border-left: 3px solid var(--wk-amber);
+  background: var(--wk-amber-banner);
+}
+.wk-editor-banner--error {
+  border-left: 3px solid var(--wk-wikilink-broken);
+}
+.wk-editor-banner-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+.wk-editor-banner-actions button {
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  padding: 6px 12px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  cursor: pointer;
+}
+.wk-editor-banner--draft {
+  border-left: 3px solid var(--wk-amber);
+  background: var(--wk-amber-banner);
+}
+.wk-editor-panes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wk-editor--with-preview .wk-editor-panes {
+  flex-direction: row;
+  gap: 14px;
+  align-items: stretch;
+}
+.wk-editor-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.wk-editor--with-preview .wk-editor-pane {
+  flex: 1 1 50%;
+}
+.wk-editor-pane--preview {
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  padding: 12px 14px;
+  overflow: auto;
+  min-height: 480px;
+}
+.wk-editor-preview-body {
+  font-family: var(--wk-serif, var(--wk-chrome));
+  color: var(--wk-text);
+  line-height: 1.6;
+}
+.wk-editor-preview-toggle {
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  padding: 8px 14px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  color: var(--wk-text);
+  cursor: pointer;
+  margin-left: auto;
+}
+.wk-editor-preview-toggle.is-on {
+  background: var(--wk-amber-banner);
+  border-color: var(--wk-amber);
+}
+.wk-editor-mobile-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--wk-border);
+}
+.wk-editor-mobile-tab {
+  flex: 1;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--wk-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.wk-editor-mobile-tab.is-active {
+  color: var(--wk-text);
+  border-bottom-color: var(--wk-wikilink);
+}
+@media (max-width: 767px) {
+  .wk-editor--with-preview .wk-editor-panes {
+    flex-direction: column;
+  }
+  .wk-editor--with-preview .wk-editor-pane {
+    flex: 1 1 auto;
+  }
+}
+
+.wk-human-pill {
+  display: inline-block;
+  padding: 0 6px;
+  font-family: var(--wk-chrome);
+  border: 1px solid var(--wk-amber);
+  background: var(--wk-amber-banner);
+  color: var(--wk-text);
+  font-weight: 600;
+}
+
+.wk-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.wk-modal {
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  width: min(480px, 92vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wk-modal h2 {
+  margin: 0 0 6px;
+  font-family: var(--wk-display);
+  font-size: 22px;
+}
+.wk-modal select {
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  color: var(--wk-text);
 }
 
 /* ─── Entity briefs (v1.2) ─── */
@@ -1375,6 +1607,59 @@
   text-decoration: underline dashed;
   text-underline-offset: 2px;
 }
+
+/* ─── Cross-entity related panel ─── */
+.wk-related-panel {
+  margin: 24px 0;
+  font-family: var(--wk-body-serif);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--wk-text);
+}
+.wk-related-panel h2 {
+  font-family: var(--wk-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+  color: var(--wk-text-muted);
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 6px;
+}
+.wk-related-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-related-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--wk-border-light);
+}
+.wk-related-item:last-child { border-bottom: none; }
+.wk-related-link {
+  color: var(--wk-wikilink);
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+  font-family: var(--wk-mono);
+}
+.wk-related-count {
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-text-tertiary);
+}
+.wk-related-empty,
+.wk-related-loading,
+.wk-related-error {
+  font-family: var(--wk-body-serif);
+  font-style: italic;
+  color: var(--wk-text-tertiary);
+  margin: 0;
+}
+.wk-related-error { color: var(--wk-wikilink-broken); font-style: normal; }
 
 /* ─── Playbook compilation (v1.3) ─── */
 .wk-playbook-badge {
@@ -1539,104 +1824,70 @@
   text-decoration: underline dashed;
   text-underline-offset: 2px;
 }
+
 /* ────────────────────────────────────────────────────────────
- * v1.3 Image support — uploader + embed
+ * v1.3 compounding-intelligence synthesis footer — status badge
+ * + Re-synthesize button. Lives inside PlaybookExecutionLog.
  * Motion stays on transform/opacity (see ~/.claude/rules/web/performance.md).
  * ──────────────────────────────────────────────────────────── */
 
-.image-uploader {
-  border: 1.5px dashed var(--wk-rule, #c9c2b0);
-  border-radius: 4px;
-  padding: 20px;
-  background: var(--wk-surface-2, #f6f2e6);
-  transition: border-color var(--duration-fast, 150ms) ease,
-              background var(--duration-fast, 150ms) ease;
-  font-family: var(--wk-chrome, system-ui);
+.wk-playbook-synthesis {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--wk-rule, rgba(0, 0, 0, 0.15));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
-.image-uploader--compact {
-  padding: 12px;
-}
-.image-uploader--drag {
-  border-color: var(--wk-wikilink, #1264A3);
-  background: var(--wk-surface-3, #fbf7ea);
-}
-.image-uploader__drop {
+.wk-playbook-synthesis__status {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  min-height: 80px;
-  background: transparent;
-  border: none;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-}
-.image-uploader__drop-label {
-  font-weight: 600;
-  font-size: 14px;
-}
-.image-uploader__drop-hint {
-  font-size: 12px;
-  color: var(--wk-text-muted, #6f6b60);
-}
-.image-uploader__preview {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-}
-.image-uploader__thumb {
-  width: 120px;
-  height: 90px;
-  object-fit: cover;
-  border-radius: 4px;
-  flex: none;
-}
-.image-uploader__meta {
-  flex: 1;
+  gap: 2px;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
-.image-uploader__name {
-  font-size: 13px;
-  font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.image-uploader__bar {
-  height: 4px;
-  background: var(--wk-rule, #c9c2b0);
-  border-radius: 2px;
-  overflow: hidden;
-}
-.image-uploader__bar-fill {
-  display: block;
-  height: 100%;
-  background: var(--wk-wikilink, #1264A3);
-  transform-origin: left;
-  transition: width var(--duration-fast, 150ms) linear;
-}
-.image-uploader__ok {
-  color: #2b7a3f;
+.wk-playbook-synthesis__badge {
+  font-family: var(--wk-chrome);
   font-size: 12px;
+  color: var(--wk-body-muted, rgba(0, 0, 0, 0.6));
 }
-.image-uploader__err {
-  color: #C94A4A;
+.wk-playbook-synthesis__pending {
+  font-family: var(--wk-mono);
+  font-size: 11px;
+  color: #b0821c;
+}
+.wk-playbook-synthesis__button {
+  font-family: var(--wk-chrome);
   font-size: 12px;
-}
-.image-uploader__reset {
-  background: transparent;
-  border: 1px solid var(--wk-rule, #c9c2b0);
   padding: 4px 10px;
-  border-radius: 3px;
-  font: inherit;
+  border: 1px solid var(--wk-rule, rgba(0, 0, 0, 0.25));
+  background: transparent;
+  color: var(--wk-body, #111);
   cursor: pointer;
+  border-radius: 2px;
+  transition: background 150ms ease, opacity 150ms ease;
 }
+.wk-playbook-synthesis__button:hover:not([disabled]) {
+  background: rgba(0, 0, 0, 0.04);
+}
+.wk-playbook-synthesis__button[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+.wk-playbook-synthesis[data-state='success'] .wk-playbook-synthesis__button {
+  color: #2a7d2a;
+  border-color: #2a7d2a;
+}
+.wk-playbook-synthesis[data-state='error'] .wk-playbook-synthesis__button {
+  color: #c94a4a;
+  border-color: #c94a4a;
+}
+/* ────────────────────────────────────────────────────────────
+ * v1.3 Image embeds — agents embed via standard markdown
+ * `![alt](https://...)`; renderer routes through ImageEmbed.
+ * Motion stays on transform/opacity (see ~/.claude/rules/web/performance.md).
+ * ──────────────────────────────────────────────────────────── */
 
 .image-embed {
   margin: 1.5rem 0;
@@ -1680,9 +1931,6 @@
 @media (prefers-reduced-motion: reduce) {
   .image-embed__lightbox {
     animation: none;
-  }
-  .image-uploader__bar-fill {
-    transition: none;
   }
 }
 @keyframes image-embed-fade {

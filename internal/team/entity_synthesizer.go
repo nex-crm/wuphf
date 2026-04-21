@@ -63,7 +63,17 @@ const MaxBriefSize = 32 * 1024
 // SynthesisPromptSystem is the exact system prompt the worker sends. Wording
 // locked by project_entity_briefs_v1_2.md — do not edit without updating
 // the memo.
-const SynthesisPromptSystem = `You maintain entity briefs in a team wiki. Given an existing brief and new facts, produce an updated markdown brief that incorporates the facts. Never invent facts. Preserve the canonical structure (sections, ordering). Mark contradictions explicitly with **Contradiction:** inline callouts rather than resolving them. Output ONLY the updated markdown, no explanation.`
+//
+// The trailing "## Related" section is managed deterministically by the
+// synthesizer from the cross-entity graph log — never invent related-entity
+// bullets. If the LLM output contains a "## Related" section, it is stripped
+// before the authoritative one is appended.
+const SynthesisPromptSystem = `You maintain entity briefs in a team wiki. Given an existing brief and new facts, produce an updated markdown brief that incorporates the facts. Never invent facts. Preserve the canonical structure (sections, ordering). Mark contradictions explicitly with **Contradiction:** inline callouts rather than resolving them. Do not write a "## Related" section — that block is managed automatically from the cross-entity graph. Output ONLY the updated markdown, no explanation.`
+
+// MaxRelatedEntries bounds the number of "## Related" bullets rendered in a
+// synthesized brief. Ten was the v1 ceiling in the roadmap — enough for a
+// glance, not enough to dominate a narrow article.
+const MaxRelatedEntries = 10
 
 // ErrSynthesisQueueSaturated is returned by EnqueueSynthesis when the
 // buffered channel is full. Callers surface this as a retry-later.
@@ -122,6 +132,12 @@ type SynthesizerConfig struct {
 	// LLMCall is the pluggable shell-out used by tests. Production code
 	// leaves this nil and the worker falls back to provider.RunConfiguredOneShot.
 	LLMCall func(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+
+	// Graph, when non-nil, gives the synthesizer read access to the cross-
+	// entity graph so a trailing "## Related" section can be appended
+	// deterministically after the LLM returns. Passing nil disables the
+	// section — existing briefs stay unchanged.
+	Graph *EntityGraph
 }
 
 // EntitySynthesizer is the broker-level synthesis worker.
@@ -385,6 +401,14 @@ func (s *EntitySynthesizer) synthesize(ctx context.Context, job SynthesisJob) er
 		log.Printf("entity synth: resolve HEAD failed: %v", headErr)
 	}
 
+	// Append the authoritative "## Related" section built from the graph log.
+	// Strip any LLM-generated Related block first so the auto-managed one is
+	// the single source of truth.
+	output = stripRelatedSection(output)
+	if related := s.renderRelatedSection(job.Kind, job.Slug); related != "" {
+		output = strings.TrimRight(output, "\n") + "\n\n" + related
+	}
+
 	now := time.Now().UTC()
 	factCount := len(facts)
 	newBody := applySynthesisFrontmatter(output, headSHA, now, factCount, existingBrief)
@@ -456,6 +480,56 @@ func renderFactsForPrompt(facts []Fact) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// renderRelatedSection builds the "## Related" markdown section from the
+// cross-entity graph, newest-first, capped at MaxRelatedEntries. Returns
+// "" when the graph is unavailable or the entity has no out-edges.
+func (s *EntitySynthesizer) renderRelatedSection(kind EntityKind, slug string) string {
+	if s == nil || s.cfg.Graph == nil {
+		return ""
+	}
+	edges, err := s.cfg.Graph.Query(kind, slug, DirectionOut)
+	if err != nil {
+		log.Printf("entity synth: render Related %s/%s: %v", kind, slug, err)
+		return ""
+	}
+	if len(edges) == 0 {
+		return ""
+	}
+	if len(edges) > MaxRelatedEntries {
+		edges = edges[:MaxRelatedEntries]
+	}
+	var b strings.Builder
+	b.WriteString("## Related\n\n")
+	for _, e := range edges {
+		b.WriteString("- [[")
+		b.WriteString(string(e.ToKind))
+		b.WriteString("/")
+		b.WriteString(e.ToSlug)
+		b.WriteString("]]\n")
+	}
+	return b.String()
+}
+
+// stripRelatedSection removes a trailing "## Related" heading and its
+// contents from body. Case-insensitive match on the heading line. Returns
+// the input unchanged when no Related section is present.
+func stripRelatedSection(body string) string {
+	lines := strings.Split(body, "\n")
+	cutIdx := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.EqualFold(trimmed, "## Related") {
+			cutIdx = i
+			break
+		}
+	}
+	if cutIdx < 0 {
+		return body
+	}
+	// Drop from the heading to EOF — the Related section is always trailing.
+	return strings.TrimRight(strings.Join(lines[:cutIdx], "\n"), "\n")
 }
 
 // Frontmatter helpers live in entity_frontmatter.go.
