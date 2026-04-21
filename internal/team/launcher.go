@@ -105,6 +105,12 @@ type Launcher struct {
 	paneBackedAgents     bool // web mode may spawn per-agent tmux panes; true when panes are live
 	noOpen               bool
 
+	// failedPaneSlugs records agents whose tmux pane/window creation failed.
+	// agentPaneTargets() omits them so the pane-capture loops don't spin on
+	// missing targets (which produces "stopped after 5 failures" spam). These
+	// agents fall back to the headless dispatch path automatically.
+	failedPaneSlugs map[string]string
+
 	notifyMu            sync.Mutex
 	notifyLastDelivered map[string]time.Time
 }
@@ -1741,7 +1747,7 @@ func (l *Launcher) visibleOfficeMembers() []officeMember {
 		member := l.officeMemberBySlug(l.oneOnOneAgent())
 		return []officeMember{member}
 	}
-	ordered := l.officeAgentOrder()
+	ordered := l.paneEligibleOfficeMembers()
 	if len(ordered) <= maxVisibleOfficeAgents {
 		return ordered
 	}
@@ -1752,11 +1758,27 @@ func (l *Launcher) overflowOfficeMembers() []officeMember {
 	if l.isOneOnOne() {
 		return nil
 	}
-	ordered := l.officeAgentOrder()
+	ordered := l.paneEligibleOfficeMembers()
 	if len(ordered) <= maxVisibleOfficeAgents {
 		return nil
 	}
 	return ordered[maxVisibleOfficeAgents:]
+}
+
+// paneEligibleOfficeMembers returns officeAgentOrder() minus agents that
+// should never get a tmux/claude pane (e.g. codex-bound agents, which use
+// their own headless pipeline). Filtering upstream keeps visible/overflow
+// slot indices in sync with agentPaneTargets().
+func (l *Launcher) paneEligibleOfficeMembers() []officeMember {
+	ordered := l.officeAgentOrder()
+	filtered := make([]officeMember, 0, len(ordered))
+	for _, m := range ordered {
+		if l.memberEffectiveProviderKind(m.Slug) == provider.KindCodex {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	return filtered
 }
 
 func overflowWindowName(slug string) string {
@@ -1767,7 +1789,7 @@ func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 	targets := make(map[string]notificationTarget)
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
-		if slug != "" {
+		if slug != "" && !l.skipPaneForSlug(slug) {
 			targets[slug] = notificationTarget{
 				Slug:       slug,
 				PaneTarget: fmt.Sprintf("%s:team.1", l.sessionName),
@@ -1776,18 +1798,42 @@ func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 		return targets
 	}
 	for i, member := range l.visibleOfficeMembers() {
+		if l.skipPaneForSlug(member.Slug) {
+			continue
+		}
 		targets[member.Slug] = notificationTarget{
 			Slug:       member.Slug,
 			PaneTarget: fmt.Sprintf("%s:team.%d", l.sessionName, i+1),
 		}
 	}
 	for _, member := range l.overflowOfficeMembers() {
+		if l.skipPaneForSlug(member.Slug) {
+			continue
+		}
 		targets[member.Slug] = notificationTarget{
 			Slug:       member.Slug,
 			PaneTarget: fmt.Sprintf("%s:%s.0", l.sessionName, overflowWindowName(member.Slug)),
 		}
 	}
 	return targets
+}
+
+// skipPaneForSlug returns true when the given slug should not have a tmux
+// pane target registered — either because pane spawn failed earlier, or
+// because the agent is bound to the codex runtime and uses its own headless
+// pipeline. In either case, dispatch falls back to the headless path.
+func (l *Launcher) skipPaneForSlug(slug string) bool {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return true
+	}
+	if _, bad := l.failedPaneSlugs[slug]; bad {
+		return true
+	}
+	if l.memberEffectiveProviderKind(slug) == provider.KindCodex {
+		return true
+	}
+	return false
 }
 
 func (l *Launcher) isOneOnOne() bool {
@@ -2964,18 +3010,34 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 		return nil, fmt.Errorf("spawn first agent: %w (tmux: %s)", err, detail)
 	}
 
-	// Remaining agents: split from agent area, then use "tiled" layout
+	// Remaining agents: split from agent area, then use "tiled" layout. First
+	// agent (pane 1) is mandatory — a failure there aborts the whole launch.
+	// Subsequent splits can fail individually (e.g. terminal too small to
+	// accommodate another tile); record the failure and fall those agents
+	// back to headless dispatch so the capture loop doesn't hunt ghost panes.
 	for i := 1; i < len(visible); i++ {
 		agentCmd, err := l.claudeCommand(visible[i].Slug, l.buildPrompt(visible[i].Slug))
 		if err != nil {
-			return nil, fmt.Errorf("spawn agent %s: %w", visible[i].Slug, err)
+			l.recordPaneSpawnFailure(visible[i].Slug, fmt.Sprintf("claudeCommand: %v", err))
+			continue
 		}
-		// Split from the last agent pane
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "split-window",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window",
 			"-t", l.sessionName+":team.1",
 			"-c", l.cwd,
 			agentCmd,
-		).Run()
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			reason := err.Error()
+			if detail != "" {
+				reason = fmt.Sprintf("%s (tmux: %s)", reason, detail)
+			}
+			fmt.Fprintf(os.Stderr,
+				"  Agents:  visible pane for %s failed to spawn; falling back to headless (%s)\n",
+				visible[i].Slug, reason,
+			)
+			l.recordPaneSpawnFailure(visible[i].Slug, reason)
+		}
 	}
 
 	// Apply tiled layout to agent panes, but keep channel (pane 0) as main-vertical
@@ -3014,19 +3076,52 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 func (l *Launcher) spawnOverflowAgents() {
 	for _, member := range l.overflowOfficeMembers() {
+		// Codex-bound agents use the headless codex pipeline; they don't need
+		// a claude pane. Creating one would launch `claude` with the wrong
+		// model and quota semantics.
+		if l.memberEffectiveProviderKind(member.Slug) == provider.KindCodex {
+			continue
+		}
 		agentCmd, err := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "spawn overflow agent %s: %v\n", member.Slug, err)
+			l.recordPaneSpawnFailure(member.Slug, fmt.Sprintf("claudeCommand: %v", err))
 			continue
 		}
 		windowName := overflowWindowName(member.Slug)
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
 			"-t", l.sessionName,
 			"-n", windowName,
 			"-c", l.cwd,
 			agentCmd,
-		).Run()
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			reason := err.Error()
+			if detail != "" {
+				reason = fmt.Sprintf("%s (tmux: %s)", reason, detail)
+			}
+			fmt.Fprintf(os.Stderr,
+				"  Agents:  overflow pane for %s failed to spawn; falling back to headless for this agent (%s)\n",
+				member.Slug, reason,
+			)
+			l.recordPaneSpawnFailure(member.Slug, reason)
+		}
 	}
+}
+
+// recordPaneSpawnFailure marks a slug so agentPaneTargets() omits it and the
+// pane-capture loops never try to read from a non-existent target. The agent
+// still receives messages via the headless dispatch fallback.
+func (l *Launcher) recordPaneSpawnFailure(slug, reason string) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return
+	}
+	if l.failedPaneSlugs == nil {
+		l.failedPaneSlugs = make(map[string]string)
+	}
+	l.failedPaneSlugs[slug] = reason
 }
 
 // trySpawnWebAgentPanes attempts to create a detached tmux session with one

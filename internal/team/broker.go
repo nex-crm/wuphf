@@ -1272,6 +1272,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
+	mux.HandleFunc("/agent-tool-event", b.requireAuth(b.handleAgentToolEvent))
 	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
@@ -1834,6 +1835,81 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// handleAgentToolEvent appends a tool-call log line to the agent's stream so
+// the per-agent activity panel shows which MCP tool was invoked with what
+// arguments. Without this, the stream only shows raw pane-captured stdout —
+// useless for agents whose work happens entirely through MCP tool calls.
+//
+// Body: {"slug":"ceo","phase":"call|result|error","tool":"team_broadcast","args":"...","result":"...","error":"..."}
+// Phase is informational; all fields but slug are optional.
+func (b *Broker) handleAgentToolEvent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Slug    string `json:"slug"`
+		Phase   string `json:"phase,omitempty"`
+		Tool    string `json:"tool,omitempty"`
+		Args    string `json:"args,omitempty"`
+		Result  string `json:"result,omitempty"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	slug := strings.TrimSpace(body.Slug)
+	if slug == "" {
+		http.Error(w, "missing slug", http.StatusBadRequest)
+		return
+	}
+	stream := b.AgentStream(slug)
+	if stream == nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	line := formatAgentToolEvent(body.Phase, body.Tool, body.Args, body.Result, body.Error)
+	if line != "" {
+		stream.Push(line)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// formatAgentToolEvent renders a compact one-line audit record for the
+// per-agent stream. Truncates noisy fields so a long result doesn't blow the
+// stream buffer.
+func formatAgentToolEvent(phase, tool, args, result, errStr string) string {
+	const maxField = 240
+	truncate := func(s string) string {
+		s = strings.TrimSpace(s)
+		s = strings.ReplaceAll(s, "\n", " ")
+		if len(s) > maxField {
+			return s[:maxField] + "…"
+		}
+		return s
+	}
+	tool = strings.TrimSpace(tool)
+	phase = strings.TrimSpace(phase)
+	if phase == "" {
+		phase = "tool"
+	}
+	if tool == "" {
+		return ""
+	}
+	parts := []string{fmt.Sprintf("[%s] %s", phase, tool)}
+	if args != "" {
+		parts = append(parts, "args="+truncate(args))
+	}
+	if result != "" {
+		parts = append(parts, "result="+truncate(result))
+	}
+	if errStr != "" {
+		parts = append(parts, "error="+truncate(errStr))
+	}
+	return strings.Join(parts, " ")
 }
 
 // handleAgentStream serves a per-agent stdout SSE stream.
