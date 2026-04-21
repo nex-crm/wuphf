@@ -14,10 +14,10 @@ import (
 
 func TestShannonEntropyRangeSanity(t *testing.T) {
 	cases := []struct {
-		name    string
-		input   string
-		wantLo  float64
-		wantHi  float64
+		name   string
+		input  string
+		wantLo float64
+		wantHi float64
 	}{
 		{"empty", "", 0, 0},
 		{"single-char-repeat", strings.Repeat("a", 100), 0, 0.01},
