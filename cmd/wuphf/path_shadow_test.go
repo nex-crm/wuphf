@@ -132,6 +132,45 @@ func TestWarnPathShadowNoopWhenNoShadows(t *testing.T) {
 	}
 }
 
+// TestDetectPathShadowsIgnoresNpmSiblingLauncher pins the npm install layout:
+// the package installs both a native `wuphf` binary and a `wuphf.js` launcher
+// into the same node_modules/wuphf/bin dir. npm then creates a symlink from
+// PATH (e.g. /opt/homebrew/bin/wuphf) pointing at the .js launcher, which in
+// turn execs the native binary.
+//
+// The effect: from outside, it LOOKS like two wuphf executables on disk. In
+// reality they are a launcher + native binary from the same install. The old
+// EvalSymlinks-based detector warned about this every time.
+func TestDetectPathShadowsIgnoresNpmSiblingLauncher(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX symlink semantics")
+	}
+	root := t.TempDir()
+
+	npmBin := filepath.Join(root, "lib", "node_modules", "wuphf", "bin")
+	if err := os.MkdirAll(npmBin, 0o755); err != nil {
+		t.Fatalf("mkdir npmBin: %v", err)
+	}
+	native := filepath.Join(npmBin, "wuphf")
+	writeExec(t, native)
+	jsLauncher := filepath.Join(npmBin, "wuphf.js")
+	writeExec(t, jsLauncher)
+
+	pathDir := filepath.Join(root, "bin")
+	if err := os.MkdirAll(pathDir, 0o755); err != nil {
+		t.Fatalf("mkdir pathDir: %v", err)
+	}
+	pathEntry := filepath.Join(pathDir, "wuphf")
+	if err := os.Symlink(jsLauncher, pathEntry); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	got := detectPathShadows(native, pathDir)
+	if len(got) != 0 {
+		t.Fatalf("npm sibling .js launcher is not a shadow; got %v", got)
+	}
+}
+
 func TestShouldWarnShadow(t *testing.T) {
 	cases := []struct {
 		name                                        string
