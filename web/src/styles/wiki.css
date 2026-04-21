@@ -1510,4 +1510,173 @@
   cursor: pointer;
   text-decoration: underline dashed;
   text-underline-offset: 2px;
+/* ────────────────────────────────────────────────────────────
+ * v1.3 Image support — uploader + embed
+ * Motion stays on transform/opacity (see ~/.claude/rules/web/performance.md).
+ * ──────────────────────────────────────────────────────────── */
+
+.image-uploader {
+  border: 1.5px dashed var(--wk-rule, #c9c2b0);
+  border-radius: 4px;
+  padding: 20px;
+  background: var(--wk-surface-2, #f6f2e6);
+  transition: border-color var(--duration-fast, 150ms) ease,
+              background var(--duration-fast, 150ms) ease;
+  font-family: var(--wk-chrome, system-ui);
+}
+.image-uploader--compact {
+  padding: 12px;
+}
+.image-uploader--drag {
+  border-color: var(--wk-wikilink, #1264A3);
+  background: var(--wk-surface-3, #fbf7ea);
+}
+.image-uploader__drop {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 80px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.image-uploader__drop-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+.image-uploader__drop-hint {
+  font-size: 12px;
+  color: var(--wk-text-muted, #6f6b60);
+}
+.image-uploader__preview {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.image-uploader__thumb {
+  width: 120px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+}
+.image-uploader__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.image-uploader__name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-uploader__bar {
+  height: 4px;
+  background: var(--wk-rule, #c9c2b0);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.image-uploader__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--wk-wikilink, #1264A3);
+  transform-origin: left;
+  transition: width var(--duration-fast, 150ms) linear;
+}
+.image-uploader__ok {
+  color: #2b7a3f;
+  font-size: 12px;
+}
+.image-uploader__err {
+  color: #C94A4A;
+  font-size: 12px;
+}
+.image-uploader__reset {
+  background: transparent;
+  border: 1px solid var(--wk-rule, #c9c2b0);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.image-embed {
+  margin: 1.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.image-embed__trigger {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  display: block;
+}
+.image-embed__img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 3px;
+  display: block;
+}
+.image-embed__caption {
+  font-size: 13px;
+  color: var(--wk-text-muted, #6f6b60);
+  font-family: var(--wk-chrome, system-ui);
+}
+.image-embed__inline {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+}
+.image-embed__lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: image-embed-fade var(--duration-normal, 300ms) ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .image-embed__lightbox {
+    animation: none;
+  }
+  .image-uploader__bar-fill {
+    transition: none;
+  }
+}
+@keyframes image-embed-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.image-embed__full {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+}
+.image-embed__close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

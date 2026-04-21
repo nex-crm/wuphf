@@ -465,6 +465,8 @@ type Broker struct {
 	entitySubscribers       map[int]chan EntityBriefSynthesizedEvent
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
+	imageSubscribers        map[int]chan imageUploadedEvent
+	imageAltSubscribers     map[int]chan imageAltUpdatedEvent
 	wikiWorker              *WikiWorker
 	wikiSectionsCache       *wikiSectionsCache
 	reviewLog               *ReviewLog
@@ -865,6 +867,8 @@ func NewBroker() *Broker {
 		reviewSubscribers:   make(map[int]chan ReviewStateChangeEvent),
 		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
 		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
+		imageSubscribers:    make(map[int]chan imageUploadedEvent),
+		imageAltSubscribers: make(map[int]chan imageAltUpdatedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
@@ -1218,6 +1222,13 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
+	mux.HandleFunc("/wiki/images", b.requireAuth(b.handleWikiImageUpload))
+	mux.HandleFunc("/wiki/images/describe", b.requireAuth(b.handleWikiImageDescribe))
+	mux.HandleFunc("/wiki/images/alt", b.requireAuth(b.handleWikiImageAltGet))
+	// /wiki/assets/ is a path-prefix route; served without auth so <img
+	// src="/wiki/assets/..."> works from the web UI without token shuffling.
+	// Bytes are content-addressed + CSP-locked, so public GETs are safe.
+	mux.HandleFunc("/wiki/assets/", b.handleWikiAssetServe)
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
@@ -1743,6 +1754,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeFacts()
 	sectionsEvents, unsubscribeSections := b.SubscribeWikiSectionsUpdated(16)
 	defer unsubscribeSections()
+	imageEvents, unsubscribeImages := b.SubscribeImageEvents(64)
+	defer unsubscribeImages()
+	imageAltEvents, unsubscribeImageAlts := b.SubscribeImageAltEvents(64)
+	defer unsubscribeImageAlts()
 	playbookEvents, unsubscribePlaybook := b.SubscribePlaybookExecutionEvents(64)
 	defer unsubscribePlaybook()
 
@@ -1803,6 +1818,14 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-sectionsEvents:
 			if !ok || writeEvent(wikiSectionsEventName, evt) != nil {
+				return
+			}
+		case evt, ok := <-imageEvents:
+			if !ok || writeEvent("wiki:image_uploaded", evt) != nil {
+				return
+			}
+		case evt, ok := <-imageAltEvents:
+			if !ok || writeEvent("wiki:image_alt_updated", evt) != nil {
 				return
 			}
 		case evt, ok := <-playbookEvents:

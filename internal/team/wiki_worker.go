@@ -99,7 +99,19 @@ type wikiWriteRequest struct {
 	// PlaybookSlug carries the source slug so the post-write hook can
 	// enqueue a follow-up recompile without re-parsing the path.
 	PlaybookSlug string
-	ReplyCh      chan wikiWriteResult
+	// IsImageAsset routes the request to Repo.CommitImageAsset. Used for the
+	// v1.3 image upload pipeline. Payload travels via ImagePayload +
+	// ThumbRelPath + ThumbBytes rather than the text Content field because
+	// image bytes are not valid UTF-8 and must not be lossy-converted.
+	IsImageAsset bool
+	ImagePayload []byte
+	ThumbRelPath string
+	ThumbBytes   []byte
+	// IsImageAlt routes the request to Repo.CommitImageAltText. Alt text is
+	// a separate commit so the vision LLM round-trip does not block the
+	// upload response path.
+	IsImageAlt bool
+	ReplyCh    chan wikiWriteResult
 }
 
 // wikiWriteResult is the worker's reply for a single request.
@@ -127,9 +139,39 @@ type wikiSectionsNotifier interface {
 // (tests, or --memory-backend markdown without a broker yet).
 type noopPublisher struct{}
 
-func (noopPublisher) PublishWikiEvent(wikiWriteEvent)         {}
-func (noopPublisher) PublishNotebookEvent(notebookWriteEvent) {}
+func (noopPublisher) PublishWikiEvent(wikiWriteEvent)             {}
+func (noopPublisher) PublishNotebookEvent(notebookWriteEvent)     {}
+func (noopPublisher) PublishImageUploaded(imageUploadedEvent)     {}
+func (noopPublisher) PublishImageAltUpdated(imageAltUpdatedEvent) {}
 func (noopPublisher) PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent) {
+}
+
+// imageUploadedEvent is the SSE payload emitted after a successful upload.
+// ThumbPath is empty for SVGs and for raster sources already narrower than
+// the thumbnail width.
+type imageUploadedEvent struct {
+	Path       string `json:"path"`
+	ThumbPath  string `json:"thumb_path,omitempty"`
+	CommitSHA  string `json:"commit_sha"`
+	AuthorSlug string `json:"author_slug"`
+	Timestamp  string `json:"timestamp"`
+}
+
+// imageAltUpdatedEvent is emitted after the vision agent writes a sidecar.
+// Wire name "wiki:image_alt_updated".
+type imageAltUpdatedEvent struct {
+	AltPath    string `json:"alt_path"`
+	CommitSHA  string `json:"commit_sha"`
+	AuthorSlug string `json:"author_slug"`
+	Timestamp  string `json:"timestamp"`
+}
+
+// imageEventPublisher is the extension the worker needs to emit image-
+// scoped SSE events. Broker satisfies this alongside the wiki/notebook
+// variants.
+type imageEventPublisher interface {
+	PublishImageUploaded(evt imageUploadedEvent)
+	PublishImageAltUpdated(evt imageAltUpdatedEvent)
 }
 
 // WikiWorker owns the single goroutine that drains the write request queue.
@@ -247,6 +289,10 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	)
 	if req.IsEntityFact {
 		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsImageAsset {
+		sha, n, err = w.repo.CommitImageAsset(writeCtx, req.Slug, req.Path, req.ImagePayload, req.ThumbRelPath, req.ThumbBytes, req.CommitMsg)
+	} else if req.IsImageAlt {
+		sha, n, err = w.repo.CommitImageAltText(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookCompile {
 		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookExecution {
@@ -273,6 +319,28 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	case req.IsEntityFact:
 		// Entity fact writes have their own SSE event (entity:fact_recorded)
 		// published by the broker handler, not by the worker. No-op here.
+	case req.IsImageAsset:
+		if imgPub, ok := w.publisher.(imageEventPublisher); ok {
+			imgPub.PublishImageUploaded(imageUploadedEvent{
+				Path:       req.Path,
+				ThumbPath:  req.ThumbRelPath,
+				CommitSHA:  sha,
+				AuthorSlug: req.Slug,
+				Timestamp:  ts,
+			})
+		}
+	case req.IsImageAlt:
+		// Alt-text updates piggyback on the image event stream so the UI
+		// can re-fetch the brief without a second listener. Payload type
+		// is distinct so clients can tell them apart.
+		if imgPub, ok := w.publisher.(imageEventPublisher); ok {
+			imgPub.PublishImageAltUpdated(imageAltUpdatedEvent{
+				AltPath:    req.Path,
+				CommitSHA:  sha,
+				AuthorSlug: req.Slug,
+				Timestamp:  ts,
+			})
+		}
 	case req.IsPlaybookCompile:
 		// Compile writes are internal — no SSE event. The trigger (the
 		// source-article commit) already published wiki:write; emitting a
@@ -403,6 +471,76 @@ func (w *WikiWorker) EnqueueEntityFact(ctx context.Context, slug, path, content,
 // which do not need the serialized write queue.
 func (w *WikiWorker) Repo() *Repo {
 	return w.repo
+}
+
+// EnqueueImageAsset submits an image upload to the shared wiki queue. The
+// caller has already sanitized the asset path and generated the thumbnail.
+// Returns the commit SHA and the asset byte count.
+func (w *WikiWorker) EnqueueImageAsset(
+	ctx context.Context,
+	slug, assetRelPath string,
+	payload []byte,
+	thumbRelPath string,
+	thumbBytes []byte,
+	commitMsg string,
+) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:         slug,
+		Path:         assetRelPath,
+		Mode:         "replace",
+		CommitMsg:    commitMsg,
+		IsImageAsset: true,
+		ImagePayload: payload,
+		ThumbRelPath: thumbRelPath,
+		ThumbBytes:   thumbBytes,
+		ReplyCh:      make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: image upload timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueueImageAlt submits an alt-text sidecar commit to the shared queue.
+// Author slug is usually "archivist" (vision agent), but any slug works.
+func (w *WikiWorker) EnqueueImageAlt(ctx context.Context, slug, altRelPath, altText, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:       slug,
+		Path:       altRelPath,
+		Content:    altText,
+		Mode:       "replace",
+		CommitMsg:  commitMsg,
+		IsImageAlt: true,
+		ReplyCh:    make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: image alt commit timed out after %s", wikiWriteTimeout)
+	}
 }
 
 // EnqueuePlaybookCompile runs CompilePlaybook against the current on-disk

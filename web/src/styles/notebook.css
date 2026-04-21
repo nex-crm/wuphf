@@ -961,3 +961,37 @@
 @media (prefers-reduced-motion: reduce) {
   .notebook-surface .nb-promote-btn { transition: none; }
 }
+
+/* v1.3 Image support — notebook drop */
+.nb-image-drop {
+  margin-top: 2rem;
+  padding: 16px;
+  border-top: 1px solid var(--nb-rule, rgba(0, 0, 0, 0.08));
+}
+.nb-image-drop__label {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--nb-text-muted, rgba(0, 0, 0, 0.6));
+}
+.nb-image-drop__toast {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.nb-image-drop__toast--ok {
+  background: rgba(43, 122, 63, 0.1);
+  color: #2b7a3f;
+  border: 1px solid rgba(43, 122, 63, 0.25);
+}
+.nb-image-drop__toast--err {
+  background: rgba(201, 74, 74, 0.08);
+  color: #C94A4A;
+  border: 1px solid rgba(201, 74, 74, 0.25);
+}
+.nb-article-with-drop {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
