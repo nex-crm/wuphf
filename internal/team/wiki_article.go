@@ -46,11 +46,11 @@ import (
 // ArticleMeta is the rich view sent to the UI for an article.
 // The JSON shape matches web/src/api/wiki.ts WikiArticle.
 type ArticleMeta struct {
-	Path         string     `json:"path"`
-	Title        string     `json:"title"`
-	Content      string     `json:"content"`
-	LastEditedBy string     `json:"last_edited_by"`
-	LastEditedTs string     `json:"last_edited_ts"`
+	Path         string `json:"path"`
+	Title        string `json:"title"`
+	Content      string `json:"content"`
+	LastEditedBy string `json:"last_edited_by"`
+	LastEditedTs string `json:"last_edited_ts"`
 	// CommitSHA is the short SHA of the most recent commit touching this
 	// article. The editor sends it back as expected_sha on save so the
 	// broker can detect conflicting writes that landed after the editor
