@@ -26,7 +26,9 @@ import ReferencedBy from './ReferencedBy'
 import {
   fetchArticle,
   fetchHistory,
+  fetchHumans,
   subscribeEditLog,
+  type HumanIdentity,
   type WikiArticle as WikiArticleT,
   type WikiCatalogEntry,
   type WikiHistoryCommit,
@@ -64,6 +66,25 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   const [historyError, setHistoryError] = useState(false)
   const [liveAgent, setLiveAgent] = useState<string | null>(null)
   const [refreshNonce, setRefreshNonce] = useState(0)
+  const [humans, setHumans] = useState<HumanIdentity[]>([])
+
+  // Fetch the human registry once per mount. The list is small (a handful
+  // of team members) and changes rarely, so we skip refetching on every
+  // path change. Failure falls through to an empty list — Byline gracefully
+  // shows the agent path when no human identity matches.
+  useEffect(() => {
+    let cancelled = false
+    fetchHumans()
+      .then((list) => {
+        if (!cancelled) setHumans(list)
+      })
+      .catch(() => {
+        if (!cancelled) setHumans([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -166,6 +187,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
       authorName={formatAgentName(article.last_edited_by)}
       lastEditedTs={article.last_edited_ts}
       revisions={article.revisions}
+      humans={humans}
     />
   )
 
