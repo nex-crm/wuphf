@@ -1125,6 +1125,75 @@
   color: var(--wk-wikilink);
 }
 
+/* ─── v1.3 dynamic sections ─── */
+.wk-section-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.wk-section-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+.wk-section-discovered {
+  cursor: pointer;
+}
+.wk-section-discovered:hover .wk-section-title {
+  color: var(--wk-text);
+}
+.wk-section-marker {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--wk-text-tertiary);
+  opacity: 0.7;
+}
+.wk-section-new {
+  font-family: var(--wk-mono);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--wk-amber-bg);
+  color: var(--wk-amber-ink, var(--wk-text));
+}
+.wk-section-empty {
+  padding: 4px 10px;
+  color: var(--wk-text-tertiary);
+  font-size: 11px;
+  font-family: var(--wk-chrome);
+}
+.wk-section-banner {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  background: var(--wk-amber-bg);
+  border-left: 3px solid var(--wk-amber);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--wk-chrome);
+  color: var(--wk-text);
+  line-height: 1.4;
+}
+.wk-section-banner-body { flex: 1; }
+.wk-section-banner-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--wk-text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.wk-section-banner-dismiss:hover { color: var(--wk-text); }
+
 /* Catalog header audit link */
 .wk-catalog-audit-link {
   font-family: inherit;
