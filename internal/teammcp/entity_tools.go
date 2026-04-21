@@ -120,4 +120,3 @@ func handleEntityBriefSynthesize(ctx context.Context, _ *mcp.CallToolRequest, ar
 	payload, _ := json.Marshal(result)
 	return textResult(string(payload)), nil, nil
 }
-

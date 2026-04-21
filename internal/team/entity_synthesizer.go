@@ -90,11 +90,11 @@ type SynthesisJob struct {
 // EntityBriefSynthesizedEvent is the SSE payload broadcast after every
 // successful synthesis commit.
 type EntityBriefSynthesizedEvent struct {
-	Kind           EntityKind `json:"kind"`
-	Slug           EntitySlug `json:"slug"`
-	CommitSHA      string     `json:"commit_sha"`
-	FactCount      int        `json:"fact_count"`
-	SynthesizedTS  string     `json:"synthesized_ts"`
+	Kind          EntityKind `json:"kind"`
+	Slug          EntitySlug `json:"slug"`
+	CommitSHA     string     `json:"commit_sha"`
+	FactCount     int        `json:"fact_count"`
+	SynthesizedTS string     `json:"synthesized_ts"`
 }
 
 // EntitySlug is a typed alias. Helps readers of the SSE JSON schema; string

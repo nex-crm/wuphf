@@ -154,4 +154,3 @@ func TestHandleEntityBriefSynthesize_Validation(t *testing.T) {
 		}
 	}
 }
-

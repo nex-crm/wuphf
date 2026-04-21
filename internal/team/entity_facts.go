@@ -65,13 +65,13 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
 // Fact is one atomic observation recorded by an agent.
 type Fact struct {
-	ID         string    `json:"id"`
+	ID         string     `json:"id"`
 	Kind       EntityKind `json:"kind"`
-	Slug       string    `json:"slug"`
-	Text       string    `json:"text"`
-	SourcePath string    `json:"source_path,omitempty"`
-	RecordedBy string    `json:"recorded_by"`
-	CreatedAt  time.Time `json:"created_at"`
+	Slug       string     `json:"slug"`
+	Text       string     `json:"text"`
+	SourcePath string     `json:"source_path,omitempty"`
+	RecordedBy string     `json:"recorded_by"`
+	CreatedAt  time.Time  `json:"created_at"`
 }
 
 // FactLog is the append-only log rooted in a wiki repo. It is safe to share

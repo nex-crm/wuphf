@@ -13,9 +13,9 @@ import (
 
 // entityPublisherStub captures SSE events for assertions.
 type entityPublisherStub struct {
-	mu       sync.Mutex
-	briefs   []EntityBriefSynthesizedEvent
-	facts    []EntityFactRecordedEvent
+	mu     sync.Mutex
+	briefs []EntityBriefSynthesizedEvent
+	facts  []EntityFactRecordedEvent
 }
 
 func (p *entityPublisherStub) PublishEntityBriefSynthesized(evt EntityBriefSynthesizedEvent) {

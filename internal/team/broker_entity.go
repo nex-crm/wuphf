@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -249,7 +250,9 @@ func (b *Broker) handleEntityFact(w http.ResponseWriter, r *http.Request) {
 	if thresholdCrossed {
 		if _, enqueueErr := synth.EnqueueSynthesis(kind, slug, ArchivistAuthor); enqueueErr != nil && !errors.Is(enqueueErr, ErrSynthesisQueueSaturated) {
 			// Coalesced requests return (0, nil); saturation is a soft error.
-			// Every other error is a bug — log and move on.
+			// Every other error is a bug — log so ops can see it without
+			// failing the caller's fact-record request.
+			log.Printf("entity: enqueue synthesis after threshold cross for %s/%s: %v", kind, slug, enqueueErr)
 		}
 	}
 	b.PublishEntityFactRecorded(EntityFactRecordedEvent{
