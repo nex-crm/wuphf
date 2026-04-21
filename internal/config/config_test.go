@@ -149,22 +149,30 @@ func TestResolveAPIKeyConfigFile(t *testing.T) {
 	})
 }
 
-func TestResolveMemoryBackendDefaultsToNex(t *testing.T) {
+func TestResolveMemoryBackendDefaultsToMarkdown(t *testing.T) {
+	// Empty config + no env override resolves to the git-native markdown
+	// wiki. This matches the onboarding wizard's "Markdown (default)" tile
+	// and the CLAUDE.md project statement that markdown is the shipping
+	// default.
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_NO_NEX", "")
 		t.Setenv("WUPHF_MEMORY_BACKEND", "")
-		if got := ResolveMemoryBackend(""); got != MemoryBackendNex {
-			t.Fatalf("expected default memory backend nex, got %q", got)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
+			t.Fatalf("expected default memory backend markdown, got %q", got)
 		}
 	})
 }
 
-func TestResolveMemoryBackendDefaultsToNoneWhenNoNex(t *testing.T) {
+func TestResolveMemoryBackendDefaultsToMarkdownWhenNoNex(t *testing.T) {
+	// --no-nex says "don't reach for Nex." Markdown doesn't reach for Nex,
+	// so it's a valid and strictly better default than silent 'none' —
+	// previous behaviour left the user with no shared memory at all when
+	// they simply asked to skip Nex.
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_NO_NEX", "1")
 		t.Setenv("WUPHF_MEMORY_BACKEND", "")
-		if got := ResolveMemoryBackend(""); got != MemoryBackendNone {
-			t.Fatalf("expected no-nex default to resolve to none, got %q", got)
+		if got := ResolveMemoryBackend(""); got != MemoryBackendMarkdown {
+			t.Fatalf("expected --no-nex default to resolve to markdown, got %q", got)
 		}
 	})
 }

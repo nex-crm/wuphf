@@ -15,7 +15,7 @@ var webBundle embed.FS
 // WebFS returns the embedded web/dist filesystem with the "web/dist" prefix
 // stripped, so callers can serve it as the web root. Returns ok=false if
 // the embed is empty (dev build without `npm run build`), in which case
-// callers should fall back to a filesystem lookup or the legacy UI.
+// callers should fall back to a filesystem lookup.
 func WebFS() (fs.FS, bool) {
 	sub, err := fs.Sub(webBundle, "web/dist")
 	if err != nil {

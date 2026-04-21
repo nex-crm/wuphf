@@ -22,5 +22,5 @@
     },
     "baseUrl": "."
   },
-  "include": ["src"]
+  "include": ["src", "tests"]
 }

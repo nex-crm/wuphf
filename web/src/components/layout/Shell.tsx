@@ -7,22 +7,25 @@ import { RuntimeStrip } from './RuntimeStrip'
 import { ThreadPanel } from '../messages/ThreadPanel'
 import { AgentPanel } from '../agents/AgentPanel'
 import { SearchModal } from '../search/SearchModal'
-import { useAppStore } from '../../stores/app'
+import { useAppStore, isDMChannel } from '../../stores/app'
 
 interface ShellProps {
   children: ReactNode
 }
 
 export function Shell({ children }: ShellProps) {
-  const dmMode = useAppStore((s) => s.dmMode)
+  const currentChannel = useAppStore((s) => s.currentChannel)
+  const currentApp = useAppStore((s) => s.currentApp)
+  const channelMeta = useAppStore((s) => s.channelMeta)
+  const inDM = !currentApp && !!isDMChannel(currentChannel, channelMeta)
 
   return (
     <div className="office">
       <Sidebar />
       <main className="main">
         <DisconnectBanner />
-        {!dmMode && <ChannelHeader />}
-        {!dmMode && <RuntimeStrip />}
+        {!inDM && <ChannelHeader />}
+        {!inDM && <RuntimeStrip />}
         {children}
         <StatusBar />
       </main>

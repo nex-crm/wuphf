@@ -2,6 +2,7 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -44,6 +45,18 @@ var brokerTokenFilePath = brokeraddr.DefaultTokenFile
 
 const defaultRateLimitRequestsPerWindow = 600
 const defaultRateLimitWindow = time.Minute
+
+// Per-agent rate limit. Applies even to authenticated requests that identify
+// themselves via the X-WUPHF-Agent header. The threshold is high enough that
+// well-behaved agents will never trip it, but low enough that a prompt-injected
+// agent stuck in a tool-call loop gets throttled before it burns the budget.
+const defaultAgentRateLimitRequestsPerWindow = 1000
+const defaultAgentRateLimitWindow = time.Minute
+
+// agentRateLimitHeader is the HTTP header the MCP server sets on every outbound
+// broker call so the broker can attribute cost back to the agent. Must match
+// the value set by internal/teammcp/server.go authHeaders().
+const agentRateLimitHeader = "X-WUPHF-Agent"
 
 var brokerStatePath = defaultBrokerStatePath
 
@@ -446,25 +459,40 @@ type Broker struct {
 	activity            map[string]agentActivitySnapshot
 	activitySubscribers map[int]chan agentActivitySnapshot
 	officeSubscribers   map[int]chan officeChangeEvent
+	wikiSubscribers     map[int]chan wikiWriteEvent
+	wikiWorker          *WikiWorker
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
-	server              *http.Server
-	token               string          // shared secret for authenticating requests
-	addr                string          // actual listen address (useful when port=0)
-	webUIOrigins        []string        // allowed CORS origins for web UI (set by ServeWebUI)
-	runtimeProvider     string          // "codex" or "claude" — set by launcher
-	packSlug            string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
-	blankSlateLaunch    bool            // start without a saved blueprint and synthesize the first operation
-	openclawBridge      *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
-	generateMemberFn    func(prompt string) (generatedMemberTemplate, error)
-	generateChannelFn   func(prompt string) (generatedChannelTemplate, error)
-	policies            []officePolicy // active office operating rules
-	rateLimitBuckets    map[string]ipRateLimitBucket
-	rateLimitWindow     time.Duration
-	rateLimitRequests   int
-	lastRateLimitPrune  time.Time
-	agentLogRoot        string // override for tests; empty means agent.DefaultTaskLogRoot()
+	// configMu serializes handleConfig POST reads/writes so concurrent
+	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
+	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
+	// produce a truncated/overlaid file.
+	configMu           sync.Mutex
+	server             *http.Server
+	token              string          // shared secret for authenticating requests
+	addr               string          // actual listen address (useful when port=0)
+	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
+	runtimeProvider    string          // "codex" or "claude" — set by launcher
+	packSlug           string          // active agent pack slug ("founding-team", "revops", ...) — set by launcher
+	blankSlateLaunch   bool            // start without a saved blueprint and synthesize the first operation
+	openclawBridge     *OpenclawBridge // nil until the bridge attaches itself; used by handleOfficeMembers for live add/remove
+	generateMemberFn   func(prompt string) (generatedMemberTemplate, error)
+	generateChannelFn  func(prompt string) (generatedChannelTemplate, error)
+	policies           []officePolicy // active office operating rules
+	rateLimitBuckets   map[string]ipRateLimitBucket
+	rateLimitWindow    time.Duration
+	rateLimitRequests  int
+	lastRateLimitPrune time.Time
+
+	// Agent-scoped buckets — applied to authenticated agent traffic even though
+	// the IP-scoped bucket above exempts callers with a valid Bearer token. This
+	// is the containment for a prompt-injected agent that loops on MCP tools.
+	agentRateLimitBuckets   map[string]ipRateLimitBucket
+	agentRateLimitWindow    time.Duration
+	agentRateLimitRequests  int
+	lastAgentRateLimitPrune time.Time
+	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -821,10 +849,15 @@ func NewBroker() *Broker {
 		activity:            make(map[string]agentActivitySnapshot),
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
 		officeSubscribers:   make(map[int]chan officeChangeEvent),
+		wikiSubscribers:     make(map[int]chan wikiWriteEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
 		rateLimitRequests:   defaultRateLimitRequestsPerWindow,
+
+		agentRateLimitBuckets:  make(map[string]ipRateLimitBucket),
+		agentRateLimitWindow:   defaultAgentRateLimitWindow,
+		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
 	}
 	_ = b.loadState()
 	b.mu.Lock()
@@ -969,6 +1002,52 @@ func (b *Broker) publishOfficeChangeLocked(evt officeChangeEvent) {
 	}
 }
 
+// SubscribeWikiEvents returns a channel of wiki commit notifications plus an
+// unsubscribe func. The web UI's SSE loop uses this to push "wiki:write"
+// events to the browser.
+func (b *Broker) SubscribeWikiEvents(buffer int) (<-chan wikiWriteEvent, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan wikiWriteEvent, buffer)
+
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.wikiSubscribers[id] = ch
+	b.mu.Unlock()
+
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.wikiSubscribers[id]; ok {
+			delete(b.wikiSubscribers, id)
+			close(existing)
+		}
+		b.mu.Unlock()
+	}
+}
+
+// PublishWikiEvent fans out a commit notification to all SSE subscribers.
+// Implements the wikiEventPublisher interface consumed by WikiWorker.
+func (b *Broker) PublishWikiEvent(evt wikiWriteEvent) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, ch := range b.wikiSubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// WikiWorker returns the broker's attached wiki worker, or nil when the
+// active memory backend is not markdown.
+func (b *Broker) WikiWorker() *WikiWorker {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.wikiWorker
+}
+
 func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	slug := normalizeChannelSlug(update.Slug)
 	if slug == "" {
@@ -1040,7 +1119,53 @@ func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
+	b.ensureWikiWorker()
 	return b.StartOnPort(brokeraddr.ResolvePort())
+}
+
+// ensureWikiWorker initializes the markdown-backend wiki worker when the
+// resolved memory backend is "markdown". Runs once. Never crashes the
+// broker on wiki init failure — the worker is advisory; writes simply fail
+// with ErrWorkerStopped until a user runs `wuphf` with git installed.
+func (b *Broker) ensureWikiWorker() {
+	if config.ResolveMemoryBackend("") != config.MemoryBackendMarkdown {
+		return
+	}
+	b.mu.Lock()
+	if b.wikiWorker != nil {
+		b.mu.Unlock()
+		return
+	}
+	b.mu.Unlock()
+
+	repo := NewRepo()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := repo.Init(ctx); err != nil {
+		log.Printf("wiki: init failed, markdown backend unavailable: %v", err)
+		return
+	}
+	// Belt-and-suspenders: recover any dirty tree from a crashed prior run.
+	if err := repo.RecoverDirtyTree(ctx); err != nil {
+		log.Printf("wiki: recover-dirty-tree failed: %v", err)
+	}
+	// Double-fault recovery: if fsck fails, try the backup mirror; otherwise
+	// leave the worker un-initialized so writes fail cleanly.
+	if err := repo.Fsck(ctx); err != nil {
+		log.Printf("wiki: fsck failed (%v); attempting restore from backup", err)
+		if restoreErr := repo.RestoreFromBackup(ctx); restoreErr != nil {
+			log.Printf("wiki: double-fault (repo corrupt + backup missing): %v", restoreErr)
+			return
+		}
+	}
+
+	worker := NewWikiWorker(repo, b)
+	worker.Start(context.Background())
+
+	b.mu.Lock()
+	b.wikiWorker = worker
+	b.mu.Unlock()
 }
 
 // StartOnPort launches the broker on the given port. Use 0 for an OS-assigned port.
@@ -1065,6 +1190,13 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/agent-logs", b.requireAuth(b.handleAgentLogs))
 	mux.HandleFunc("/task-plan", b.requireAuth(b.handleTaskPlan))
 	mux.HandleFunc("/memory", b.requireAuth(b.handleMemory))
+	mux.HandleFunc("/wiki/write", b.requireAuth(b.handleWikiWrite))
+	mux.HandleFunc("/wiki/read", b.requireAuth(b.handleWikiRead))
+	mux.HandleFunc("/wiki/search", b.requireAuth(b.handleWikiSearch))
+	mux.HandleFunc("/wiki/list", b.requireAuth(b.handleWikiList))
+	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
+	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
+	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
 	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
 	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
@@ -1096,7 +1228,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
-	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug)
+	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
 	// These are disk-only; the caller reloads or re-launches to rebuild state.
 	// Auth-gated via requireAuth because shred permanently deletes state and
@@ -1142,25 +1274,78 @@ func (b *Broker) Stop() {
 
 func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Exempt liveness and version checks from rate limiting
-		if r.URL.Path == "/health" || r.URL.Path == "/version" || r.URL.Path == "/web-token" || b.requestHasBrokerAuth(r) {
+		// Exempt liveness and version checks from all rate limiting.
+		if isLivenessPath(r.URL.Path) {
 			next.ServeHTTP(w, r)
 			return
 		}
-		retryAfter, limited := b.consumeRateLimit(clientIPFromRequest(r))
-		if limited {
-			seconds := int((retryAfter + time.Second - 1) / time.Second)
-			if seconds < 1 {
-				seconds = 1
+
+		authenticated := b.requestHasBrokerAuth(r)
+
+		// Authenticated callers bypass the IP-scoped bucket (web UI and trusted
+		// tools must not share a bucket with anonymous callers), but authenticated
+		// *agent* traffic is still subject to a separate per-agent bucket below.
+		if !authenticated {
+			retryAfter, limited := b.consumeRateLimit(clientIPFromRequest(r))
+			if limited {
+				writeRateLimitedResponse(w, retryAfter)
+				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			w.Header().Set("Retry-After", strconv.Itoa(seconds))
-			w.WriteHeader(http.StatusTooManyRequests)
-			_, _ = io.WriteString(w, `{"error":"rate_limited"}`)
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Authenticated — check the per-agent bucket so a prompt-injected agent
+		// cannot loop forever on team_broadcast / team_action_execute. Operator
+		// traffic (web UI) does not set X-WUPHF-Agent and is exempt.
+		agentSlug := strings.TrimSpace(r.Header.Get(agentRateLimitHeader))
+		if agentSlug == "" || isAgentBucketExemptPath(r.URL.Path) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		retryAfter, limited := b.consumeAgentRateLimit(agentSlug)
+		if limited {
+			log.Printf("broker: agent %q tripped per-agent rate limit (%d req / %s) on %s — possible runaway loop", agentSlug, b.agentRateLimitRequests, b.agentRateLimitWindow, r.URL.Path)
+			writeRateLimitedResponse(w, retryAfter)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// isLivenessPath reports whether the request path is a pure liveness or
+// version probe that must never be rate-limited (operators need these even
+// when the broker is saturated). /web-token is NOT on this list — it
+// dispenses the broker bearer and an unthrottled enumeration path would be
+// surprising, even though the handler itself is loopback+Host gated.
+func isLivenessPath(path string) bool {
+	return path == "/health" || path == "/version"
+}
+
+// isAgentBucketExemptPath reports whether the path is an open SSE stream or
+// otherwise doesn't represent a tool-call-shaped loopable request. These
+// connections stay open for a long time rather than spinning on request
+// count, so counting them against the agent bucket would be incorrect.
+func isAgentBucketExemptPath(path string) bool {
+	if path == "/events" {
+		return true
+	}
+	if strings.HasPrefix(path, "/agent-stream/") {
+		return true
+	}
+	return false
+}
+
+func writeRateLimitedResponse(w http.ResponseWriter, retryAfter time.Duration) {
+	seconds := int((retryAfter + time.Second - 1) / time.Second)
+	if seconds < 1 {
+		seconds = 1
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", strconv.Itoa(seconds))
+	w.WriteHeader(http.StatusTooManyRequests)
+	_, _ = io.WriteString(w, `{"error":"rate_limited"}`)
 }
 
 func (b *Broker) consumeRateLimit(clientIP string) (time.Duration, bool) {
@@ -1208,6 +1393,62 @@ func (b *Broker) consumeRateLimit(clientIP string) (time.Duration, bool) {
 
 	bucket.timestamps = append(bucket.timestamps, now)
 	b.rateLimitBuckets[key] = bucket
+	return 0, false
+}
+
+// consumeAgentRateLimit counts an authenticated request against the per-agent
+// bucket keyed by the X-WUPHF-Agent header. It mirrors consumeRateLimit but
+// lives in its own bucket so agent traffic cannot starve operator traffic and
+// vice versa.
+func (b *Broker) consumeAgentRateLimit(agentSlug string) (time.Duration, bool) {
+	agentSlug = strings.TrimSpace(agentSlug)
+	if agentSlug == "" {
+		return 0, false
+	}
+
+	limit := b.agentRateLimitRequests
+	if limit <= 0 {
+		limit = defaultAgentRateLimitRequestsPerWindow
+	}
+	window := b.agentRateLimitWindow
+	if window <= 0 {
+		window = defaultAgentRateLimitWindow
+	}
+
+	now := time.Now()
+	cutoff := now.Add(-window)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.agentRateLimitBuckets == nil {
+		b.agentRateLimitBuckets = make(map[string]ipRateLimitBucket)
+	}
+	if b.lastAgentRateLimitPrune.IsZero() || now.Sub(b.lastAgentRateLimitPrune) >= window {
+		for slug, bucket := range b.agentRateLimitBuckets {
+			bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, cutoff)
+			if len(bucket.timestamps) == 0 {
+				delete(b.agentRateLimitBuckets, slug)
+				continue
+			}
+			b.agentRateLimitBuckets[slug] = bucket
+		}
+		b.lastAgentRateLimitPrune = now
+	}
+
+	bucket := b.agentRateLimitBuckets[agentSlug]
+	bucket.timestamps = pruneRateLimitEntries(bucket.timestamps, cutoff)
+	if len(bucket.timestamps) >= limit {
+		retryAfter := bucket.timestamps[0].Add(window).Sub(now)
+		if retryAfter < time.Second {
+			retryAfter = time.Second
+		}
+		b.agentRateLimitBuckets[agentSlug] = bucket
+		return retryAfter, true
+	}
+
+	bucket.timestamps = append(bucket.timestamps, now)
+	b.agentRateLimitBuckets[agentSlug] = bucket
 	return 0, false
 }
 
@@ -1321,27 +1562,23 @@ func (b *Broker) requestHasBrokerAuth(r *http.Request) bool {
 
 // corsMiddleware adds CORS headers only for the web UI origin.
 // If no web UI origins are configured, no CORS headers are set.
+//
+// Requests with empty or "null" Origin are same-origin or non-browser callers
+// (curl, Go tests, CLI tools). They do not need a CORS header to succeed. We
+// intentionally do NOT set Access-Control-Allow-Origin: * for them — that
+// would let a file:// page or sandboxed iframe make authenticated cross-origin
+// reads once it has the Bearer token.
 func (b *Broker) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
-		if len(b.webUIOrigins) > 0 {
-			matched := false
+		if origin != "" && origin != "null" && len(b.webUIOrigins) > 0 {
 			for _, allowed := range b.webUIOrigins {
 				if origin == allowed {
 					w.Header().Set("Access-Control-Allow-Origin", allowed)
-					matched = true
+					w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 					break
 				}
-			}
-			// Allow null/empty origin for localhost requests (headless browsers,
-			// file:// loads, same-machine tools). Still safe because /web-token
-			// restricts to 127.0.0.1 RemoteAddr.
-			if !matched && (origin == "null" || origin == "") {
-				w.Header().Set("Access-Control-Allow-Origin", "*")
-			}
-			if w.Header().Get("Access-Control-Allow-Origin") != "" {
-				w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
-				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			}
 		}
 		if r.Method == "OPTIONS" {
@@ -1352,11 +1589,73 @@ func (b *Broker) corsMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// isLoopbackRemote reports whether r.RemoteAddr is loopback (127.0.0.0/8, ::1).
+// Returns false if RemoteAddr is empty or unparseable — fail closed.
+func isLoopbackRemote(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if host == "" {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	return host == "localhost"
+}
+
+// hostHeaderIsLoopback reports whether the HTTP Host header is a loopback
+// hostname (localhost, 127.0.0.1, ::1). DNS-rebinding attacks rely on r.Host
+// being an attacker-controlled name like rebind.example.com that only
+// resolves to 127.0.0.1 at request time; Go's default mux routes by path and
+// ignores Host, so routes that sit on 127.0.0.1 will happily serve responses
+// to the attacker's origin. Validating Host on sensitive handlers closes this.
+//
+// The port component is intentionally not validated — the broker and web UI
+// run on different ports and dev setups may proxy through 80/443. The
+// loopback hostname is the security boundary. Assumes no trusted reverse
+// proxy sits in front of the listener; operators adding one must re-evaluate
+// (r.Host would then reflect the proxy's upstream, not the browser origin).
+func hostHeaderIsLoopback(r *http.Request) bool {
+	if r == nil {
+		return false
+	}
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
+}
+
+// webUIRebindGuard wraps a handler with a DNS-rebinding / cross-origin gate.
+// It rejects any request whose RemoteAddr is not loopback or whose Host header
+// is not a recognized localhost form. Applied on the web UI mux because that
+// mux auto-attaches the broker's Bearer token on forwarded requests; without
+// this gate, a malicious website can use DNS rebinding to ride the token.
+func webUIRebindGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackRemote(r) || !hostHeaderIsLoopback(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // handleWebToken returns the broker token to localhost clients without requiring auth.
 // This lets the web UI fetch the token to authenticate subsequent API calls.
+//
+// DNS rebinding: even though the listener binds 127.0.0.1, an attacker's
+// DNS record with a short TTL can point rebind.example.com at 127.0.0.1
+// after the browser's origin check passes. Go's default mux routes purely
+// on path, so without an explicit Host check the response would flow back
+// to the attacker's origin. Validate both RemoteAddr AND Host here.
 func (b *Broker) handleWebToken(w http.ResponseWriter, r *http.Request) {
-	host, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if host != "127.0.0.1" && host != "::1" {
+	if !isLoopbackRemote(r) || !hostHeaderIsLoopback(r) {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
@@ -1389,6 +1688,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeActivity()
 	officeChanges, unsubscribeOffice := b.SubscribeOfficeChanges(64)
 	defer unsubscribeOffice()
+	wikiEvents, unsubscribeWiki := b.SubscribeWikiEvents(64)
+	defer unsubscribeWiki()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1427,6 +1728,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-officeChanges:
 			if !ok || writeEvent("office_changed", evt) != nil {
+				return
+			}
+		case evt, ok := <-wikiEvents:
+			if !ok || writeEvent("wiki:write", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:
@@ -1510,15 +1815,13 @@ func (b *Broker) ServeWebUI(port int) {
 
 	// Resolution order for the web UI assets:
 	//   1. filesystem web/dist/ (local dev after `npm run build`)
-	//   2. filesystem web/ with index.legacy.html fallback (source checkout w/o React build)
-	//   3. embedded FS (single-binary installs via curl | bash)
+	//   2. embedded FS (single-binary installs via curl | bash)
 	exePath, _ := os.Executable()
 	webDir := filepath.Join(filepath.Dir(exePath), "web")
 	if _, err := os.Stat(webDir); os.IsNotExist(err) {
 		webDir = "web"
 	}
 	var fileServer http.Handler
-	serveLegacyFallback := false
 	distDir := filepath.Join(webDir, "dist")
 	distIndex := filepath.Join(distDir, "index.html")
 	if _, err := os.Stat(distIndex); err == nil {
@@ -1527,10 +1830,6 @@ func (b *Broker) ServeWebUI(port int) {
 	} else if embeddedFS, ok := wuphf.WebFS(); ok {
 		// No on-disk build; use embedded assets.
 		fileServer = http.FileServer(http.FS(embeddedFS))
-	} else if _, err := os.Stat(filepath.Join(webDir, "index.legacy.html")); err == nil {
-		// Source checkout without a React build — fall back to the legacy UI.
-		fileServer = http.FileServer(http.Dir(webDir))
-		serveLegacyFallback = true
 	} else {
 		// Nothing available; serve webDir as-is so 404s come from the actual FS.
 		fileServer = http.FileServer(http.Dir(webDir))
@@ -1541,28 +1840,23 @@ func (b *Broker) ServeWebUI(port int) {
 		brokerURL = "http://" + addr
 	}
 	// Same-origin proxy to the broker for app API routes and onboarding wizard routes.
-	mux.Handle("/api/", b.webUIProxyHandler(brokerURL, "/api"))
-	mux.Handle("/onboarding/", b.webUIProxyHandler(brokerURL, ""))
-	// Token endpoint — no auth needed, same origin
-	mux.HandleFunc("/api-token", func(w http.ResponseWriter, r *http.Request) {
+	// Both are wrapped in webUIRebindGuard: the proxy auto-attaches the broker's
+	// Bearer token server-side, so without a Host/RemoteAddr check, a DNS-rebinding
+	// attack against an attacker-controlled hostname that resolves to 127.0.0.1
+	// would ride the token and control the entire office.
+	mux.Handle("/api/", webUIRebindGuard(b.webUIProxyHandler(brokerURL, "/api")))
+	mux.Handle("/onboarding/", webUIRebindGuard(b.webUIProxyHandler(brokerURL, "")))
+	// Token endpoint — no auth needed, but we require a same-origin loopback request.
+	// Otherwise this endpoint leaks the broker bearer to any browser page that
+	// can reach the web UI port via DNS rebinding.
+	mux.Handle("/api-token", webUIRebindGuard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]string{
 			"token":      b.token,
 			"broker_url": brokerURL,
 		})
-	})
-	if serveLegacyFallback {
-		// Rewrite bare / and /index.html to /index.legacy.html so the legacy
-		// vanilla-JS UI loads when the React build output is not present.
-		mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-				r.URL.Path = "/index.legacy.html"
-			}
-			fileServer.ServeHTTP(w, r)
-		}))
-	} else {
-		mux.Handle("/", fileServer)
-	}
+	})))
+	mux.Handle("/", fileServer)
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("broker web UI proxy: listen on :%d: %v", port, err)
@@ -2489,17 +2783,18 @@ func (b *Broker) ensureDefaultChannelsLocked() {
 	}
 }
 
+// ensureDefaultOfficeMembersLocked seeds the DefaultManifest roster ONLY when
+// no members exist. Prior implementation appended any missing default slug to
+// a non-empty roster, which caused ceo/planner/executor/reviewer to leak back
+// into blueprint-seeded teams (e.g. niche-crm) on every Broker.Load(). The
+// function is called from broker init (line 831) and post-load normalization
+// (line 2260) as a true recovery hook: if state was corrupted or never
+// seeded, fall back to defaults.
 func (b *Broker) ensureDefaultOfficeMembersLocked() {
-	if len(b.members) == 0 {
-		b.members = defaultOfficeMembers()
+	if len(b.members) > 0 {
 		return
 	}
-	defaults := defaultOfficeMembers()
-	for _, member := range defaults {
-		if b.findMemberLocked(member.Slug) == nil {
-			b.members = append(b.members, member)
-		}
-	}
+	b.members = defaultOfficeMembers()
 }
 
 func (b *Broker) normalizeLoadedStateLocked() {
@@ -4948,6 +5243,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			// Runtime
 			"llm_provider":          config.ResolveLLMProvider(""),
+			"llm_provider_priority": cfg.LLMProviderPriority,
 			"memory_backend":        config.ResolveMemoryBackend(""),
 			"action_provider":       config.ResolveActionProvider(),
 			"team_lead_slug":        cfg.TeamLeadSlug,
@@ -4986,26 +5282,31 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			"config_path": config.ConfigPath(),
 		})
 	case http.MethodPost:
+		// Serialize POST reads/writes; config.Save is not atomic against
+		// concurrent writers and two parallel calls can corrupt the file.
+		b.configMu.Lock()
+		defer b.configMu.Unlock()
 		var body struct {
-			LLMProvider     *string `json:"llm_provider,omitempty"`
-			MemoryBackend   *string `json:"memory_backend,omitempty"`
-			ActionProvider  *string `json:"action_provider,omitempty"`
-			TeamLeadSlug    *string `json:"team_lead_slug,omitempty"`
-			MaxConcurrent   *int    `json:"max_concurrent_agents,omitempty"`
-			DefaultFormat   *string `json:"default_format,omitempty"`
-			DefaultTimeout  *int    `json:"default_timeout,omitempty"`
-			Blueprint       *string `json:"blueprint,omitempty"`
-			Email           *string `json:"email,omitempty"`
-			DevURL          *string `json:"dev_url,omitempty"`
-			CompanyName     *string `json:"company_name,omitempty"`
-			CompanyDesc     *string `json:"company_description,omitempty"`
-			CompanyGoals    *string `json:"company_goals,omitempty"`
-			CompanySize     *string `json:"company_size,omitempty"`
-			CompanyPriority *string `json:"company_priority,omitempty"`
-			InsightsPoll    *int    `json:"insights_poll_minutes,omitempty"`
-			TaskFollowUp    *int    `json:"task_follow_up_minutes,omitempty"`
-			TaskReminder    *int    `json:"task_reminder_minutes,omitempty"`
-			TaskRecheck     *int    `json:"task_recheck_minutes,omitempty"`
+			LLMProvider         *string   `json:"llm_provider,omitempty"`
+			LLMProviderPriority *[]string `json:"llm_provider_priority,omitempty"`
+			MemoryBackend       *string   `json:"memory_backend,omitempty"`
+			ActionProvider      *string   `json:"action_provider,omitempty"`
+			TeamLeadSlug        *string   `json:"team_lead_slug,omitempty"`
+			MaxConcurrent       *int      `json:"max_concurrent_agents,omitempty"`
+			DefaultFormat       *string   `json:"default_format,omitempty"`
+			DefaultTimeout      *int      `json:"default_timeout,omitempty"`
+			Blueprint           *string   `json:"blueprint,omitempty"`
+			Email               *string   `json:"email,omitempty"`
+			DevURL              *string   `json:"dev_url,omitempty"`
+			CompanyName         *string   `json:"company_name,omitempty"`
+			CompanyDesc         *string   `json:"company_description,omitempty"`
+			CompanyGoals        *string   `json:"company_goals,omitempty"`
+			CompanySize         *string   `json:"company_size,omitempty"`
+			CompanyPriority     *string   `json:"company_priority,omitempty"`
+			InsightsPoll        *int      `json:"insights_poll_minutes,omitempty"`
+			TaskFollowUp        *int      `json:"task_follow_up_minutes,omitempty"`
+			TaskReminder        *int      `json:"task_reminder_minutes,omitempty"`
+			TaskRecheck         *int      `json:"task_recheck_minutes,omitempty"`
 			// Secret fields
 			APIKey          *string `json:"api_key,omitempty"`
 			OpenAIAPIKey    *string `json:"openai_api_key,omitempty"`
@@ -5035,6 +5336,31 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		var providerPriority []string
+		if body.LLMProviderPriority != nil {
+			// Normalize + validate each entry. Unknown entries are rejected so
+			// the stored list only contains provider ids the resolver knows how
+			// to dispatch. Empty list is accepted (means "clear").
+			seen := make(map[string]bool, len(*body.LLMProviderPriority))
+			for _, raw := range *body.LLMProviderPriority {
+				id := strings.TrimSpace(strings.ToLower(raw))
+				if id == "" {
+					continue
+				}
+				switch id {
+				case "claude-code", "codex":
+					// ok
+				default:
+					http.Error(w, "unsupported entry in llm_provider_priority: "+id, http.StatusBadRequest)
+					return
+				}
+				if seen[id] {
+					continue
+				}
+				seen[id] = true
+				providerPriority = append(providerPriority, id)
+			}
+		}
 		var memory string
 		if body.MemoryBackend != nil {
 			memory = config.NormalizeMemoryBackend(*body.MemoryBackend)
@@ -5050,6 +5376,12 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// Enum/string fields
 		if provider != "" {
 			cfg.LLMProvider = provider
+			changed = true
+		}
+		if body.LLMProviderPriority != nil {
+			// Explicit pointer set means the client wanted to write this field,
+			// even if the final list is empty (which clears the stored order).
+			cfg.LLMProviderPriority = providerPriority
 			changed = true
 		}
 		if memory != "" {
@@ -5214,7 +5546,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleNexRegister wraps `nex-cli register --email <email>` so the onboarding
+// handleNexRegister wraps `nex-cli --cmd "setup <email>"` so the onboarding
 // wizard can register a Nex identity without the user dropping to the terminal.
 // Body: {"email": "..."}. Returns whatever the CLI prints on success, or the
 // CLI's stderr on failure. Requires nex-cli to be installed and on PATH.
@@ -5916,14 +6248,20 @@ func (b *Broker) handleChannelMembers(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "channel not found", http.StatusNotFound)
 			return
 		}
-		if b.findMemberLocked(member) == nil {
+		memberRecord := b.findMemberLocked(member)
+		if memberRecord == nil {
 			b.mu.Unlock()
 			http.Error(w, "member not found", http.StatusNotFound)
 			return
 		}
-		if member == "ceo" && (action == "remove" || action == "disable") {
+		// Lead agents (BuiltIn) cannot be disabled or removed from any
+		// channel. The blueprint's lead is the tag target for the onboarding
+		// kickoff and the default owner for channel membership; the UI locks
+		// these interactions too. Keeps the "ceo" literal as a legacy guard
+		// for team states that predate the BuiltIn field.
+		if (memberRecord.BuiltIn || member == "ceo") && (action == "remove" || action == "disable") {
 			b.mu.Unlock()
-			http.Error(w, "cannot remove or disable CEO", http.StatusBadRequest)
+			http.Error(w, "cannot remove or disable lead agent", http.StatusBadRequest)
 			return
 		}
 		switch action {
@@ -8501,13 +8839,19 @@ func (b *Broker) handleRequests(w http.ResponseWriter, r *http.Request) {
 
 func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 	channel := normalizeChannelSlug(r.URL.Query().Get("channel"))
-	if channel == "" {
+	scope := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("scope")))
+	// scope=all returns requests across every channel the viewer can access. The
+	// broker's blocking check (handlePostMessage, PostMessage) is global, so the
+	// web UI's overlay/interview bar need the same cross-channel view to render
+	// what's actually blocking the human.
+	allChannels := scope == "all" || scope == "global"
+	if !allChannels && channel == "" {
 		channel = "general"
 	}
 	viewerSlug := strings.TrimSpace(r.URL.Query().Get("viewer_slug"))
 	includeResolved := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_resolved")), "true")
 	b.mu.Lock()
-	if !b.canAccessChannelLocked(viewerSlug, channel) {
+	if !allChannels && !b.canAccessChannelLocked(viewerSlug, channel) {
 		b.mu.Unlock()
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
@@ -8518,7 +8862,11 @@ func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 		if reqChannel == "" {
 			reqChannel = "general"
 		}
-		if reqChannel != channel {
+		if allChannels {
+			if !b.canAccessChannelLocked(viewerSlug, reqChannel) {
+				continue
+			}
+		} else if reqChannel != channel {
 			continue
 		}
 		if !includeResolved && !requestIsActive(req) {
@@ -8531,6 +8879,7 @@ func (b *Broker) handleGetRequests(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"channel":  channel,
+		"scope":    scope,
 		"requests": requests,
 		"pending":  pending,
 	})

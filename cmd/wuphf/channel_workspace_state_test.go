@@ -6,7 +6,12 @@ import (
 )
 
 func TestBuildOfficeIntroLinesUsesWorkspaceState(t *testing.T) {
+	// Pin memory backend to none — this test asserts the "local-only
+	// runtime" card. Under the new default, --no-nex alone lands on the
+	// markdown wiki (not local-only), so we opt in to local-only
+	// explicitly.
 	t.Setenv("WUPHF_NO_NEX", "1")
+	t.Setenv("WUPHF_MEMORY_BACKEND", "none")
 	m := newChannelModel(false)
 	m.brokerConnected = true
 	m.members = []channelMember{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "Product Manager"}}
@@ -77,7 +82,10 @@ func TestCurrentHeaderMetaUsesWorkspaceStateForOfficeMessages(t *testing.T) {
 }
 
 func TestCurrentWorkspaceUIStatePromotesDoctorWarningsIntoReadiness(t *testing.T) {
+	// Same pin as TestBuildOfficeIntroLinesUsesWorkspaceState — the
+	// readiness card asserted here is the "Local-only" variant.
 	t.Setenv("WUPHF_NO_NEX", "1")
+	t.Setenv("WUPHF_MEMORY_BACKEND", "none")
 	m := newChannelModel(false)
 	m.brokerConnected = true
 	m.activeChannel = "general"

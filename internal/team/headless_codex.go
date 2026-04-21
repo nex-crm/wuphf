@@ -876,6 +876,9 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	if l == nil || l.broker == nil {
 		return fmt.Errorf("broker is not running")
 	}
+	if err := l.preflightHeadlessCodexAuth(slug, firstNonEmpty(channel...)); err != nil {
+		return err
+	}
 
 	workspaceDir := strings.TrimSpace(l.cwd)
 	if worktreeDir := l.headlessTaskWorkspaceDir(slug); worktreeDir != "" {
@@ -924,8 +927,10 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	if workspaceDir != strings.TrimSpace(l.cwd) {
 		cmd.Env = append(cmd.Env, "WUPHF_WORKTREE_PATH="+workspaceDir)
 	}
-	cmd.Stdin = strings.NewReader(buildHeadlessCodexPrompt(l.buildPrompt(slug), notification))
+	stdinText := buildHeadlessCodexPrompt(l.buildPrompt(slug), notification)
+	cmd.Stdin = strings.NewReader(stdinText)
 	configureHeadlessProcess(cmd)
+	dumpHeadlessCodexInvocation(slug, workspaceDir, args, cmd.Env, stdinText)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -1030,6 +1035,16 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 			))
 			appendHeadlessCodexLog(slug, "stderr: "+detail)
 			l.updateHeadlessProgress(slug, "error", "error", truncate(detail, 180), metrics)
+			if isCodexAuthError(detail) && l.broker != nil {
+				target := firstNonEmpty(channel...)
+				if strings.TrimSpace(target) == "" {
+					target = "general"
+				}
+				l.broker.PostSystemMessage(target,
+					fmt.Sprintf("@%s hit an auth error talking to the model (%s). Run `codex login` on this machine, or set OPENAI_API_KEY, then retry.", slug, truncate(detail, 180)),
+					"error",
+				)
+			}
 			return fmt.Errorf("%w: %s", err, detail)
 		}
 		appendHeadlessCodexLatency(slug, fmt.Sprintf("status=error total_ms=%d first_event_ms=%d first_text_ms=%d first_tool_ms=%d detail=%q",
@@ -1193,29 +1208,48 @@ func prepareHeadlessCodexHome() string {
 		sourceHome = normalizeHeadlessWorkspaceDir(headlessCodexHomeDir())
 	}
 	if sourceHome != "" && sourceHome != runtimeHome {
-		copyHeadlessCodexHomeFile(sourceHome, runtimeHome, "auth.json", 0o600)
+		if err := copyHeadlessCodexHomeFile(sourceHome, runtimeHome, "auth.json", 0o600); err != nil {
+			// Auth is load-bearing — without it codex dies with 401 after a 5s
+			// reconnect dance and nothing surfaces to the user. Log loudly.
+			// runHeadlessCodexTurn does the user-visible preflight; this log is
+			// the trail we want when debugging why that preflight fired.
+			appendHeadlessCodexLog("_setup", fmt.Sprintf(
+				"auth-copy-failed: source=%s dest=%s err=%v (run `codex login` or set OPENAI_API_KEY)",
+				filepath.Join(sourceHome, "auth.json"),
+				filepath.Join(runtimeHome, "auth.json"),
+				err,
+			))
+		}
 	}
 	if userHome := strings.TrimSpace(headlessCodexGlobalHomeDir()); userHome != "" {
-		copyHeadlessCodexHomeFile(userHome, runtimeHome, filepath.Join(".one", "config.json"), 0o600)
-		copyHeadlessCodexHomeFile(userHome, runtimeHome, filepath.Join(".one", "update-check.json"), 0o600)
+		// Best-effort — these are optional overlays, silent on miss is fine.
+		_ = copyHeadlessCodexHomeFile(userHome, runtimeHome, filepath.Join(".one", "config.json"), 0o600)
+		_ = copyHeadlessCodexHomeFile(userHome, runtimeHome, filepath.Join(".one", "update-check.json"), 0o600)
 	}
 	return runtimeHome
 }
 
-func copyHeadlessCodexHomeFile(sourceHome string, runtimeHome string, rel string, mode os.FileMode) {
+// copyHeadlessCodexHomeFile copies rel from sourceHome into runtimeHome. Returns
+// an error when the source exists but the copy failed, or when the source is
+// missing. A wholly-empty path or rel is a no-op (nil). Callers that care about
+// visibility (auth.json) check the error; best-effort overlays ignore it.
+func copyHeadlessCodexHomeFile(sourceHome string, runtimeHome string, rel string, mode os.FileMode) error {
 	if strings.TrimSpace(sourceHome) == "" || strings.TrimSpace(runtimeHome) == "" || strings.TrimSpace(rel) == "" {
-		return
+		return nil
 	}
 	sourcePath := filepath.Join(sourceHome, filepath.FromSlash(rel))
 	data, err := os.ReadFile(sourcePath)
 	if err != nil {
-		return
+		return fmt.Errorf("read %s: %w", sourcePath, err)
 	}
 	destPath := filepath.Join(runtimeHome, filepath.FromSlash(rel))
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return
+		return fmt.Errorf("mkdir %s: %w", filepath.Dir(destPath), err)
 	}
-	_ = os.WriteFile(destPath, data, mode)
+	if err := os.WriteFile(destPath, data, mode); err != nil {
+		return fmt.Errorf("write %s: %w", destPath, err)
+	}
+	return nil
 }
 
 func normalizeHeadlessWorkspaceDir(path string) string {
@@ -1367,6 +1401,109 @@ func appendHeadlessCodexLatency(slug string, line string) {
 	}
 	defer func() { _ = f.Close() }()
 	_, _ = fmt.Fprintf(f, "[%s] agent=%s %s\n", time.Now().Format(time.RFC3339), strings.TrimSpace(slug), strings.TrimSpace(line))
+}
+
+// preflightHeadlessCodexAuth verifies codex has a way to authenticate before we
+// spawn the process. Without this check, codex dies with a 401 after retrying
+// for ~10s and WUPHF's error log reads "exit status 1: exit status 1" — totally
+// undebuggable from the UI. We check the two valid auth paths: a copied
+// auth.json in the isolated CODEX_HOME (ChatGPT plan or API-key file), or an
+// OPENAI_API_KEY in the env we're about to hand codex. If neither, fail fast
+// with a message the user will actually see in the channel.
+func (l *Launcher) preflightHeadlessCodexAuth(slug string, channel string) error {
+	// Check the source codex creds that WUPHF will later copy into the isolated
+	// CODEX_HOME. If the source is missing AND there's no OPENAI_API_KEY to fall
+	// back on, fail fast so the user sees a clear message rather than a silent
+	// 5-second 401 loop.
+	sourceHome := strings.TrimSpace(headlessCodexGlobalHomeDir())
+	authPath := filepath.Join(sourceHome, ".codex", "auth.json")
+	if sourceHome != "" {
+		if _, err := os.Stat(authPath); err == nil {
+			return nil
+		}
+	}
+	// Also accept a previously-copied auth.json in the isolated runtime home —
+	// codex would still work even if the source was since removed.
+	isolatedAuth := filepath.Join(headlessCodexHomeDir(), "auth.json")
+	if _, err := os.Stat(isolatedAuth); err == nil {
+		return nil
+	}
+	if strings.TrimSpace(config.ResolveOpenAIAPIKey()) != "" {
+		return nil
+	}
+	reason := fmt.Sprintf(
+		"Codex cannot authenticate — no `auth.json` at %s and no OPENAI_API_KEY in env. Run `codex login` on this machine, or set OPENAI_API_KEY, then retry.",
+		authPath,
+	)
+	appendHeadlessCodexLog(slug, "preflight: "+reason)
+	if l != nil && l.broker != nil {
+		target := channel
+		if strings.TrimSpace(target) == "" {
+			target = "general"
+		}
+		l.broker.PostSystemMessage(target,
+			fmt.Sprintf("@%s can't run: %s", slug, reason),
+			"error",
+		)
+	}
+	return fmt.Errorf("codex auth missing: %s", reason)
+}
+
+// dumpHeadlessCodexInvocation writes the exact codex argv + env + stdin to a
+// shell script in $WUPHF_DEBUG_CODEX_DUMP when that env var is set. Off by
+// default. Used to reproduce a failing turn outside WUPHF in a few seconds.
+func dumpHeadlessCodexInvocation(slug, workspaceDir string, args []string, env []string, stdinText string) {
+	dumpDir := strings.TrimSpace(os.Getenv("WUPHF_DEBUG_CODEX_DUMP"))
+	if dumpDir == "" {
+		return
+	}
+	if err := os.MkdirAll(dumpDir, 0o700); err != nil {
+		return
+	}
+	ts := time.Now().Format("20060102-150405.000")
+	stub := filepath.Join(dumpDir, fmt.Sprintf("codex-%s-%s", slug, ts))
+	if err := os.WriteFile(stub+".stdin", []byte(stdinText), 0o600); err != nil {
+		return
+	}
+	var sh strings.Builder
+	sh.WriteString("#!/bin/bash\n")
+	fmt.Fprintf(&sh, "# Reproduces the exact codex invocation WUPHF builds for agent=%s\n", slug)
+	sh.WriteString("set -e\n")
+	fmt.Fprintf(&sh, "cd %q\n", workspaceDir)
+	for _, kv := range env {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			fmt.Fprintf(&sh, "export %s=%q\n", kv[:i], kv[i+1:])
+		}
+	}
+	sh.WriteString("codex")
+	for _, a := range args {
+		fmt.Fprintf(&sh, " %q", a)
+	}
+	fmt.Fprintf(&sh, " < %q\n", stub+".stdin")
+	if err := os.WriteFile(stub+".sh", []byte(sh.String()), 0o700); err != nil {
+		return
+	}
+	appendHeadlessCodexLog(slug, "debug-dump: wrote "+stub+".sh")
+}
+
+// isCodexAuthError reports whether the failure detail looks like an auth issue
+// (expired OAuth, bad key, missing bearer). Used to surface a clear message to
+// the channel instead of the raw "exit status 1: exit status 1" noise.
+func isCodexAuthError(detail string) bool {
+	d := strings.ToLower(detail)
+	if d == "" {
+		return false
+	}
+	if strings.Contains(d, "401") {
+		return true
+	}
+	if strings.Contains(d, "unauthorized") {
+		return true
+	}
+	if strings.Contains(d, "missing bearer") {
+		return true
+	}
+	return false
 }
 
 func durationMillis(start, mark time.Time) int64 {

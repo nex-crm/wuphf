@@ -1,4 +1,5 @@
 import { useChannels } from '../../hooks/useChannels'
+import { useOverflow } from '../../hooks/useOverflow'
 import { useAppStore } from '../../stores/app'
 import { ChannelWizard, useChannelWizard } from '../channels/ChannelWizard'
 
@@ -8,10 +9,12 @@ export function ChannelList() {
   const setCurrentChannel = useAppStore((s) => s.setCurrentChannel)
   const currentApp = useAppStore((s) => s.currentApp)
   const wizard = useChannelWizard()
+  const overflowRef = useOverflow<HTMLDivElement>()
 
   return (
     <>
-      <div className="sidebar-channels">
+      <div className="sidebar-scroll-wrap is-channels">
+      <div className="sidebar-channels" ref={overflowRef}>
         {channels.map((ch) => {
           const isActive = currentChannel === ch.slug && !currentApp
           return (
@@ -20,7 +23,7 @@ export function ChannelList() {
               className={`sidebar-item${isActive ? ' active' : ''}`}
               onClick={() => setCurrentChannel(ch.slug)}
             >
-              <span style={{ fontSize: 13, color: 'var(--text-tertiary)', width: 18, textAlign: 'center', flexShrink: 0 }}>
+              <span style={{ color: 'currentColor', width: 18, textAlign: 'center', flexShrink: 0 }}>
                 #
               </span>
               <span>{ch.name || ch.slug}</span>
@@ -32,9 +35,10 @@ export function ChannelList() {
           onClick={wizard.show}
           title="Create a new channel"
         >
-          <span style={{ fontSize: 14, width: 18, textAlign: 'center', flexShrink: 0 }}>+</span>
+          <span style={{ width: 18, textAlign: 'center', flexShrink: 0, display: 'inline-block' }}>+</span>
           <span>New Channel</span>
         </button>
+      </div>
       </div>
       <ChannelWizard open={wizard.open} onClose={wizard.hide} />
     </>

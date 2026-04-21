@@ -1081,7 +1081,12 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 		"Current focus: Approve release from @ceo.",
 		"working_directory ",
 		"Runtime capabilities:",
-		"Memory backend [info]: Nex is disabled for this run, so the office is operating without an external memory backend.",
+		// With --no-nex + no explicit memory-backend, we now fall through to
+		// the markdown wiki (no external deps) instead of silently running
+		// with no memory backend at all. The capability label follows the
+		// active-backend naming convention (`<Backend> memory`) and the
+		// detail describes where the wiki lives.
+		"Markdown wiki memory [ready]: Markdown-backed team wiki at ~/.wuphf/wiki is configured.",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q in %q", want, text)

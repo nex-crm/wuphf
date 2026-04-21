@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useMessages } from '../../hooks/useMessages'
 import { useAgentStream } from '../../hooks/useAgentStream'
-import { useAppStore } from '../../stores/app'
+import { useAppStore, isDMChannel } from '../../stores/app'
 import { MessageBubble } from './MessageBubble'
 import { Composer } from './Composer'
 import { InterviewBar } from './InterviewBar'
@@ -9,8 +9,9 @@ import { StreamLineView } from './StreamLineView'
 
 export function DMView() {
   const currentChannel = useAppStore((s) => s.currentChannel)
-  const dmAgentSlug = useAppStore((s) => s.dmAgentSlug)
-  const exitDM = useAppStore((s) => s.exitDM)
+  const channelMeta = useAppStore((s) => s.channelMeta)
+  const dm = isDMChannel(currentChannel, channelMeta)
+  const dmAgentSlug = dm?.agentSlug ?? null
   const { data: messages = [] } = useMessages(currentChannel)
   const { lines, connected } = useAgentStream(dmAgentSlug)
   const messagesRef = useRef<HTMLDivElement>(null)
@@ -32,18 +33,6 @@ export function DMView() {
 
   return (
     <>
-      {/* DM banner */}
-      <div className="dm-banner active">
-        <span>1:1 session with {dmAgentSlug}</span>
-        <button className="dm-back-btn" onClick={exitDM}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5" />
-            <path d="m12 19-7-7 7-7" />
-          </svg>
-          Back to office
-        </button>
-      </div>
-
       {/* Split layout: messages left, live stream right */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Left: Messages + Composer */}

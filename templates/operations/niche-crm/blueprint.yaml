@@ -431,3 +431,42 @@ workflows:
       proof: Release evidence persisted successfully.
       inputs:
         operation_name: Niche CRM
+
+wiki_schema:
+  dirs:
+    - team/customers/
+    - team/playbooks/
+    - team/product/
+    - team/decisions/
+    - team/inbox/
+  bootstrap:
+    - path: team/customers/onboarding.md
+      title: "Customer onboarding playbook"
+      skeleton: |
+        # Customer onboarding
+
+        _(The first 14 days after a customer installs the CRM. Document the calls we make, the data we load for them, and the "aha" moments we try to engineer. Per-customer notes branch off this page.)_
+    - path: team/playbooks/renewal.md
+      title: "Renewal and retention playbook"
+      skeleton: |
+        # Renewal and retention
+
+        _(How we catch churn risk 60 days out, what we say when we see it, and what actually saves a renewal. Document the wins and the losses.)_
+    - path: team/product/roadmap-rationale.md
+      title: "Roadmap rationale"
+      skeleton: |
+        # Roadmap rationale
+
+        _(Not the public roadmap — the reasoning behind it. What we are choosing NOT to build and why. Revisit quarterly.)_
+    - path: team/decisions/product-log.md
+      title: "Product decisions log"
+      skeleton: |
+        # Product decisions log
+
+        _(One dated entry per non-trivial product decision: what we decided, what options we rejected, what would make us revisit. Keep entries short; link to longer docs if needed.)_
+    - path: team/inbox/raw-feedback.md
+      title: "Raw customer feedback"
+      skeleton: |
+        # Raw customer feedback
+
+        _(Unprocessed quotes from calls, support threads, and surveys. Periodically the team reviews this page and promotes patterns up to product/ or playbooks/.)_

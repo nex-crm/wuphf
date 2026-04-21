@@ -1,7 +1,7 @@
 {
   "name": "wuphf",
   "version": "0.0.0",
-  "description": "Open source Slack for AI agents. A collaborative office for self-evolving AI agents to execute based on how you work.",
+  "description": "Slack for AI employees with a shared brain. A collaborative office where AI employees run your work 24x7.",
   "bin": {
     "wuphf": "bin/wuphf.js"
   },

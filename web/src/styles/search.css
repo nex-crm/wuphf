@@ -250,10 +250,10 @@
   font-size: 14px;
 }
 
-.channel-wizard-textarea {
-  height: auto !important;
+.channel-wizard-field .channel-wizard-textarea {
+  height: auto;
   min-height: 80px;
-  padding: 10px 14px !important;
+  padding: 10px 14px;
   resize: vertical;
   line-height: 1.5;
 }
@@ -309,10 +309,10 @@
   gap: 6px;
 }
 
-.disconnect-banner-retry {
-  background: var(--red) !important;
-  color: white !important;
-  border-radius: var(--radius-full) !important;
+.btn.disconnect-banner-retry {
+  background: var(--red);
+  color: white;
+  border-radius: var(--radius-full);
   font-size: 12px;
   padding: 4px 12px;
 }

@@ -1,6 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { getRequests, type AgentRequest } from '../api/client'
-import { useAppStore } from '../stores/app'
+import { getAllRequests, type AgentRequest } from '../api/client'
 
 export interface RequestsState {
   all: AgentRequest[]
@@ -10,11 +9,15 @@ export interface RequestsState {
 
 const REQUEST_REFETCH_MS = 5_000
 
+// Global view of requests across every channel the human can access. The
+// broker rejects new messages with 409 whenever ANY blocking request is
+// pending, so the overlay + inline interview bar must reflect that same
+// cross-channel state — otherwise the human sees "nothing blocking" here
+// while sending stays blocked by a request in a channel they aren't viewing.
 export function useRequests(): RequestsState {
-  const currentChannel = useAppStore((s) => s.currentChannel)
   const { data } = useQuery({
-    queryKey: ['requests', currentChannel],
-    queryFn: () => getRequests(currentChannel),
+    queryKey: ['requests', 'all'],
+    queryFn: () => getAllRequests(),
     refetchInterval: REQUEST_REFETCH_MS,
   })
 

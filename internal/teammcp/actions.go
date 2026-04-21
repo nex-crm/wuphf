@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -16,6 +18,179 @@ import (
 	"github.com/nex-crm/wuphf/internal/calendar"
 	"github.com/nex-crm/wuphf/internal/team"
 )
+
+// readOnlyActionVerbs are unambiguous information-read verbs. Matched as
+// WHOLE TOKENS (splitting action_id on - _ . / space), never as substrings —
+// substring matching is too permissive (e.g. "get" matches inside "budget",
+// "find" inside "findone_and_update", "view" inside "review_delete"). The
+// list is intentionally narrower than the operator might expect: ambiguous
+// nouns like "status", "count", "view", "query", "find", "summary" appear in
+// both read and write action names ("update_status", "post_summary",
+// "findone_and_update") and are excluded so mutating actions can never be
+// misclassified.
+var readOnlyActionVerbs = map[string]struct{}{
+	"search":    {},
+	"list":      {},
+	"read":      {},
+	"get":       {},
+	"fetch":     {},
+	"browse":    {},
+	"describe":  {},
+	"show":      {},
+	"lookup":    {},
+	"summarize": {},
+}
+
+// mutatingActionVerbs are unambiguous state-changing verbs. If ANY of these
+// appears as a whole token in the action_id, the action is never classified
+// read-only — even if a read verb is also present. This guards against
+// composite action names like "GMAIL_LIST_AND_DELETE" or "FIND_AND_UPDATE":
+// a single read verb is not enough; a single mutating verb vetoes.
+var mutatingActionVerbs = map[string]struct{}{
+	"send": {}, "create": {}, "update": {}, "delete": {}, "post": {},
+	"put": {}, "patch": {}, "remove": {}, "insert": {}, "write": {},
+	"clear": {}, "reset": {}, "archive": {}, "star": {}, "unstar": {},
+	"mark": {}, "publish": {}, "add": {}, "move": {}, "invite": {},
+	"accept": {}, "reject": {}, "approve": {}, "cancel": {}, "refund": {},
+	"charge": {}, "pay": {}, "enable": {}, "disable": {}, "revoke": {},
+	"grant": {}, "set": {}, "draft": {}, "schedule": {}, "upload": {},
+	"replace": {}, "transfer": {}, "merge": {}, "split": {},
+}
+
+// actionApprovalTimeout is how long handleTeamActionExecute will wait for a
+// human decision on a pending approval request before giving up.
+const actionApprovalTimeout = 30 * time.Minute
+
+// actionApprovalPollInterval mirrors the human_interview tool cadence.
+const actionApprovalPollInterval = 1500 * time.Millisecond
+
+// actionIDSeparator reports whether r is an action_id token boundary.
+func actionIDSeparator(r rune) bool {
+	return r == '-' || r == '_' || r == '.' || r == '/' || r == ' '
+}
+
+// actionIsReadOnly reports whether an action_id is safe to run without human
+// approval. A read-only action has at least one read verb AND no mutating
+// verb appearing as a whole token.
+func actionIsReadOnly(actionID string) bool {
+	id := strings.ToLower(strings.TrimSpace(actionID))
+	if id == "" {
+		return false
+	}
+	tokens := strings.FieldsFunc(id, actionIDSeparator)
+	hasRead := false
+	for _, tok := range tokens {
+		if _, ok := mutatingActionVerbs[tok]; ok {
+			return false
+		}
+		if _, ok := readOnlyActionVerbs[tok]; ok {
+			hasRead = true
+		}
+	}
+	return hasRead
+}
+
+// requireTeamActionApproval gates mutating external-action calls behind a
+// human approval request. Returns nil when the call may proceed, an error
+// describing the rejection otherwise. The approval contract:
+//
+//  1. DryRun calls never gate — they only build the request, not send it.
+//  2. WUPHF_UNSAFE=1 bypasses the gate. The --unsafe launch flag sets this.
+//  3. Read-only action IDs (search/list/get/etc.) bypass the gate.
+//  4. Otherwise a blocking "approval" request is created in the Requests
+//     panel; the handler polls until the human answers. An "approve"/
+//     "approve_with_note" choice returns nil. Any other choice (reject,
+//     reject_with_steer, needs_more_info) returns an error. Timeout after
+//     actionApprovalTimeout returns an error.
+//
+// The point: a prompt-injected agent cannot send email, write to a CRM, or
+// post a Slack message without the human explicitly clicking approve.
+func requireTeamActionApproval(ctx context.Context, slug, channel string, args TeamActionExecuteArgs) error {
+	if args.DryRun {
+		return nil
+	}
+	if os.Getenv("WUPHF_UNSAFE") == "1" {
+		return nil
+	}
+	if actionIsReadOnly(args.ActionID) {
+		return nil
+	}
+
+	platform := strings.TrimSpace(args.Platform)
+	if platform == "" {
+		platform = "unknown"
+	}
+	actionID := strings.TrimSpace(args.ActionID)
+	if actionID == "" {
+		actionID = "unknown"
+	}
+
+	title := fmt.Sprintf("Approve %s action: %s", platform, actionID)
+	question := fmt.Sprintf("@%s wants to execute %s on %s. Approve?", slug, actionID, platform)
+	contextBlob := fmt.Sprintf("platform: %s\naction_id: %s\nconnection_key: %s\nfrom: @%s\nchannel: %s\ndry_run: false",
+		platform, actionID, strings.TrimSpace(args.ConnectionKey), slug, channel)
+	if summary := strings.TrimSpace(args.Summary); summary != "" {
+		contextBlob += "\nsummary: " + summary
+	}
+
+	options, recommendedID := normalizeHumanRequestOptions("approval", "", nil)
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	if err := brokerPostJSON(ctx, "/requests", map[string]any{
+		"kind":           "approval",
+		"channel":        channel,
+		"from":           slug,
+		"title":          title,
+		"question":       question,
+		"context":        contextBlob,
+		"options":        options,
+		"recommended_id": recommendedID,
+		"blocking":       true,
+		"required":       true,
+	}, &created); err != nil {
+		return fmt.Errorf("create approval request: %w", err)
+	}
+	if strings.TrimSpace(created.ID) == "" {
+		return fmt.Errorf("approval request did not return an ID")
+	}
+
+	timeout := time.After(actionApprovalTimeout)
+	ticker := time.NewTicker(actionApprovalPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-timeout:
+			return fmt.Errorf("timed out waiting for human approval of %s on %s", actionID, platform)
+		case <-ticker.C:
+			var result brokerInterviewAnswerResponse
+			path := "/interview/answer?id=" + url.QueryEscape(created.ID)
+			if err := brokerGetJSON(ctx, path, &result); err != nil {
+				return fmt.Errorf("poll approval: %w", err)
+			}
+			if result.Answered == nil {
+				continue
+			}
+			choice := strings.ToLower(strings.TrimSpace(result.Answered.ChoiceID))
+			switch choice {
+			case "approve", "approve_with_note", "confirm_proceed":
+				return nil
+			}
+			reason := strings.TrimSpace(result.Answered.CustomText)
+			if reason == "" {
+				reason = strings.TrimSpace(result.Answered.ChoiceText)
+			}
+			if reason == "" {
+				reason = choice
+			}
+			return fmt.Errorf("human rejected %s on %s: %s", actionID, platform, reason)
+		}
+	}
+}
 
 var (
 	externalActionProvider action.Provider
@@ -253,6 +428,16 @@ func handleTeamActionExecute(ctx context.Context, _ *mcp.CallToolRequest, args T
 		return toolError(err), nil, nil
 	}
 	channel := resolveConversationChannel(ctx, slug, args.Channel)
+
+	// Human-in-the-loop gate. Mutating external actions — sending email,
+	// posting to Slack, writing a CRM row, etc. — require explicit human
+	// approval unless --unsafe was passed or the action is a read-only
+	// lookup. A prompt-injected agent must not be able to trigger real
+	// side-effects silently.
+	if err := requireTeamActionApproval(ctx, slug, channel, args); err != nil {
+		return toolError(err), nil, nil
+	}
+
 	provider, err := selectedActionProvider(action.CapabilityActionExecute)
 	if err != nil {
 		return toolError(err), nil, nil

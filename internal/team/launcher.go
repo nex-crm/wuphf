@@ -39,13 +39,42 @@ import (
 )
 
 const (
-	SessionName                     = "wuphf-team"
-	tmuxSocketName                  = "wuphf"
 	defaultNotificationPollInterval = 15 * time.Minute
 	channelRespawnDelay             = 8 * time.Second
 	ceoHeadStartDelay               = 250 * time.Millisecond
 	blankSlateLaunchSlug            = "__blank_slate__"
+
+	// baseSessionName and baseTmuxSocketName are the default, un-suffixed
+	// identifiers used when the broker runs on the default port (prod).
+	// The exported SessionName and tmuxSocketName include a per-port suffix
+	// when a non-default broker port is configured, so concurrent prod, dev,
+	// and worktree launches cannot collide on a shared tmux socket or
+	// session name. See nameWithPortSuffix for the suffixing rule.
+	baseSessionName    = "wuphf-team"
+	baseTmuxSocketName = "wuphf"
 )
+
+// SessionName and tmuxSocketName are derived at package init from the
+// broker port resolved via brokeraddr. On the default port they keep their
+// historical values ("wuphf-team", "wuphf"); on any non-default port they
+// gain a "-<port>" suffix. This isolation is what prevents the
+// "spawn first agent: exit status 1" race seen when two WUPHF instances
+// tried to share a single tmux socket + session name.
+var (
+	SessionName    = nameWithPortSuffix(baseSessionName)
+	tmuxSocketName = nameWithPortSuffix(baseTmuxSocketName)
+)
+
+func nameWithPortSuffix(base string) string {
+	return nameWithPortSuffixForPort(base, brokeraddr.ResolvePort())
+}
+
+func nameWithPortSuffixForPort(base string, port int) string {
+	if port <= 0 || port == brokeraddr.DefaultPort {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, port)
+}
 
 // Launcher sets up and manages the multi-agent team.
 type Launcher struct {
@@ -2815,13 +2844,18 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
 		firstCmd := l.claudeCommand(slug, l.buildPrompt(slug))
-		if err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
 			"-t", l.sessionName+":team",
 			"-p", "65",
 			"-c", l.cwd,
 			firstCmd,
-		).Run(); err != nil {
-			return nil, fmt.Errorf("spawn one-on-one agent: %w", err)
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			if detail == "" {
+				return nil, fmt.Errorf("spawn one-on-one agent: %w", err)
+			}
+			return nil, fmt.Errorf("spawn one-on-one agent: %w (tmux: %s)", err, detail)
 		}
 		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
 			"-t", l.sessionName+":team",
@@ -2859,13 +2893,18 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 		return nil, nil
 	}
 	firstCmd := l.claudeCommand(visible[0].Slug, l.buildPrompt(visible[0].Slug))
-	if err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
+	out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
 		"-t", l.sessionName+":team",
 		"-p", "65",
 		"-c", l.cwd,
 		firstCmd,
-	).Run(); err != nil {
-		return nil, fmt.Errorf("spawn first agent: %w", err)
+	).CombinedOutput()
+	if err != nil {
+		detail := strings.TrimSpace(string(out))
+		if detail == "" {
+			return nil, fmt.Errorf("spawn first agent: %w", err)
+		}
+		return nil, fmt.Errorf("spawn first agent: %w (tmux: %s)", err, detail)
 	}
 
 	// Remaining agents: split from agent area, then use "tiled" layout

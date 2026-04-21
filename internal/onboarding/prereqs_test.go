@@ -34,12 +34,12 @@ func TestCheckOneNonexistentBinary(t *testing.T) {
 	}
 }
 
-func TestCheckAllReturnsFourItems(t *testing.T) {
+func TestCheckAllReturnsSixItems(t *testing.T) {
 	results := CheckAll()
-	if len(results) != 4 {
-		t.Fatalf("CheckAll: got %d results, want 4", len(results))
+	if len(results) != 6 {
+		t.Fatalf("CheckAll: got %d results, want 6", len(results))
 	}
-	names := []string{"node", "git", "claude", "codex"}
+	names := []string{"node", "git", "claude", "codex", "cursor", "windsurf"}
 	for i, r := range results {
 		if r.Name != names[i] {
 			t.Errorf("CheckAll[%d].Name: got %q, want %q", i, r.Name, names[i])
@@ -49,12 +49,14 @@ func TestCheckAllReturnsFourItems(t *testing.T) {
 
 func TestCheckAllRequiredFlags(t *testing.T) {
 	// node and git are required (infrastructure).
-	// claude and codex are optional — the user picks a runtime CLI.
+	// claude, codex, cursor, windsurf are optional — the user picks runtime CLIs.
 	wantRequired := map[string]bool{
-		"node":   true,
-		"git":    true,
-		"claude": false,
-		"codex":  false,
+		"node":     true,
+		"git":      true,
+		"claude":   false,
+		"codex":    false,
+		"cursor":   false,
+		"windsurf": false,
 	}
 	for _, r := range CheckAll() {
 		want, ok := wantRequired[r.Name]
@@ -69,10 +71,12 @@ func TestCheckAllRequiredFlags(t *testing.T) {
 
 func TestCheckAllInstallURLs(t *testing.T) {
 	wantURLs := map[string]string{
-		"node":   "https://nodejs.org",
-		"git":    "https://git-scm.com",
-		"claude": "https://claude.ai/code",
-		"codex":  "https://github.com/openai/codex",
+		"node":     "https://nodejs.org",
+		"git":      "https://git-scm.com",
+		"claude":   "https://claude.ai/code",
+		"codex":    "https://github.com/openai/codex",
+		"cursor":   "https://cursor.com/",
+		"windsurf": "https://codeium.com/windsurf",
 	}
 	for _, r := range CheckAll() {
 		want, ok := wantURLs[r.Name]

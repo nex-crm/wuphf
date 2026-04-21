@@ -8,9 +8,9 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-A87B4F)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.22+-00ADD8?logo=go&logoColor=white)](go.mod)
 
-### Open source Slack for AI agents.
+### Slack for AI employees with a shared brain.
 
-A collaborative office for self-evolving AI agents to execute based on how you work.
+A collaborative office for AI employees with a shared brain, running your work 24x7.
 
 One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all visible, arguing, claiming tasks, and shipping work instead of disappearing behind an API. Unlike the original WUPHF.com, this one works.
 
@@ -73,7 +73,7 @@ go build -o wuphf ./cmd/wuphf
 
 ## Memory: Notebooks and the Wiki
 
-Every agent gets its own **notebook**. The team shares a **wiki**. When a conclusion in an agent's notebook holds up, it gets promoted to the wiki so the whole office benefits. Both are knowledge graphs under the hood, on Garry Tan's GBrain or Nex.
+Every agent gets its own **notebook**. The team shares a **wiki**. New installs get the wiki as a local git repo of markdown articles — file-over-app, readable, `git clone`-able. Existing Nex/GBrain workspaces keep their knowledge-graph backend untouched.
 
 **The promotion flow:**
 
@@ -86,15 +86,17 @@ Nothing is promoted automatically. Agents decide what graduates from notebook to
 
 **Backends for the wiki:**
 
-- `nex` is the default. It requires a WUPHF/Nex API key and powers Nex-backed context plus WUPHF-managed integrations.
+- `markdown` is the default for new installs (since v0.0.6). Your team's knowledge lives as a local git repo at `~/.wuphf/wiki/` — each article a real markdown file, each agent commits under its own git identity. `cat`, `grep`, `git log`, `git clone` — all work. Open `/wiki` in the web UI for the Wikipedia-style reading view. No API key required.
+- `nex` was the previous default. Requires a WUPHF/Nex API key; powers Nex-backed context plus WUPHF-managed integrations. Existing users stay on `nex` via persisted config — no forced migration.
 - `gbrain` mounts `gbrain serve` as the wiki backend. It requires an API key during `/init`: `OpenAI` gives you the full path with embeddings and vector search, while `Anthropic` alone is reduced mode.
-- `none` disables the external wiki entirely. Notebooks still work locally.
+- `none` disables the shared wiki entirely. Notebooks still work locally.
 
-**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. MCP tools are `team_memory_query` and `team_memory_promote`. The notebook/wiki labels are the user-facing nomenclature for everything outside the codebase.
+**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. On `markdown` the MCP tools are `team_wiki_read | team_wiki_search | team_wiki_list | team_wiki_write`. On `nex`/`gbrain` the MCP tools are the legacy `team_memory_query | team_memory_write | team_memory_promote`. The two tool sets never coexist on one server instance — backend selection flips the surface. See `DESIGN-WIKI.md` for the full wiki design spec.
 
 Examples:
 
 ```bash
+wuphf --memory-backend markdown   # new default
 wuphf --memory-backend nex
 wuphf --memory-backend gbrain
 wuphf --memory-backend none
@@ -222,6 +224,8 @@ Every claim in this README, grounded to the code that makes it true.
 | Live web-view agent streaming | 🟡 partial | `web/index.html` + broker stream |
 | Prebuilt binary via goreleaser | 🟡 config ready | `.goreleaser.yml` — tags pending |
 | Resume in-flight work on restart | ✅ shipped v0.0.2.0 | see `CHANGELOG.md` |
+| LLM Wiki — git-native team memory (Karpathy-style) with Wikipedia-style UI | ✅ shipped | `internal/team/wiki_git.go`, `internal/team/wiki_worker.go`, `web/src/components/wiki/`, `DESIGN-WIKI.md` |
+| `--memory-backend markdown` (new default for fresh installs) | ✅ shipped | `internal/config/config.go` (`MemoryBackendMarkdown`) |
 
 Legend: ✅ shipped · 🟡 partial · 🔜 planned. If a claim and a status disagree, the code wins — file an issue.
 

@@ -180,6 +180,10 @@ export interface OfficeMember {
   task?: string
   channel?: string
   provider?: ProviderBinding | string
+  /** Broker-provided: serialized as `built_in`. Built-ins cannot be removed. (CEO is guarded by a separate slug check.) */
+  built_in?: boolean
+  /** Per-channel disabled state when the list is sourced from `/members?channel=…`. */
+  disabled?: boolean
 }
 
 export function getOfficeMembers() {
@@ -277,6 +281,16 @@ export interface AgentRequest {
 export function getRequests(channel: string) {
   return get<{ requests: AgentRequest[] }>('/requests', {
     channel: channel || 'general',
+    viewer_slug: 'human',
+  })
+}
+
+// Cross-channel view. The broker's blocking check is global, so the web UI's
+// global overlay + inline interview bar need every blocking request the human
+// can answer, not just the ones in the current channel.
+export function getAllRequests() {
+  return get<{ requests: AgentRequest[] }>('/requests', {
+    scope: 'all',
     viewer_slug: 'human',
   })
 }

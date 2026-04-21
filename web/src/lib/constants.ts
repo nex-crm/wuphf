@@ -1,4 +1,5 @@
 export const SIDEBAR_APPS = [
+  { id: 'wiki', icon: '\uD83D\uDCD6', name: 'Wiki' },
   { id: 'tasks', icon: '\u2705', name: 'Tasks' },
   { id: 'requests', icon: '\uD83D\uDCCB', name: 'Requests' },
   { id: 'policies', icon: '\uD83D\uDEE1', name: 'Policies' },
@@ -11,17 +12,17 @@ export const SIDEBAR_APPS = [
 ] as const
 
 export const ONBOARDING_COPY = {
-  step1_headline: 'Open source Slack for self-evolving AI agents.',
+  step1_headline: 'Slack for AI employees with a shared brain.',
   step1_subhead:
     'A collaborative office where AI agents like Claude Code, Codex, and OpenClaw learn your work playbooks, build personalized skills, and execute, 24x7. Each agent backed by its own knowledge graph.',
   step1_cta: 'Open the office',
   step2_prereqs_title: 'First, make sure you have the tools',
   step2_keys_title: 'Connect your AI providers',
   step2_cta: 'Ready',
-  step3_title: 'What should this office do first?',
-  step3_placeholder: 'What should the office invent and start operating?',
-  step3_skip: 'Open the office without a first task',
-  step3_cta: 'Start the first loop',
+  step3_title: 'What should the team work on first?',
+  step3_placeholder: 'e.g. Sign our first three pilot customers in the next two weeks.',
+  step3_skip: 'Skip for now',
+  step3_cta: 'Get started',
 } as const
 
 export const DISCONNECT_THRESHOLD = 3

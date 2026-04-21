@@ -41,6 +41,7 @@ func initUsableGitWorktree(t *testing.T, path string) {
 	}
 	cmd := exec.Command("git", "init")
 	cmd.Dir = path
+	cmd.Env = gitCleanEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v: %s", path, err, strings.TrimSpace(string(out)))
 	}
@@ -815,6 +816,73 @@ func TestChannelMembersRejectUnknownOfficeMember(t *testing.T) {
 	}
 }
 
+// TestChannelMembersRejectDisableOrRemoveOfLead verifies that /channel-members
+// refuses to disable or remove a BuiltIn member (lead agent) from any
+// channel. Before this guard was generalized, only the hardcoded "ceo"
+// slug was protected — blueprint teams whose lead is something else (e.g.
+// niche-crm uses "operator") could silently lose their lead from #general.
+func TestChannelMembersRejectDisableOrRemoveOfLead(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.members = []officeMember{
+		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+	}
+	b.channels = []teamChannel{
+		{Slug: "general", Name: "general", Members: []string{"operator", "builder"}, CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now},
+	}
+	b.mu.Unlock()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	for _, action := range []string{"disable", "remove"} {
+		body, _ := json.Marshal(map[string]any{
+			"action":  action,
+			"channel": "general",
+			"slug":    "operator",
+		})
+		req, _ := http.NewRequest(http.MethodPost, base+"/channel-members", bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("action=%s: expected 400 (cannot remove/disable lead), got %d", action, resp.StatusCode)
+		}
+	}
+
+	// After the rejected attempts, operator must still be a member of #general.
+	b.mu.Lock()
+	var found bool
+	for _, ch := range b.channels {
+		if ch.Slug == "general" {
+			for _, m := range ch.Members {
+				if m == "operator" {
+					found = true
+					break
+				}
+			}
+			break
+		}
+	}
+	b.mu.Unlock()
+	if !found {
+		t.Fatalf("expected operator to remain in #general after rejected disable/remove")
+	}
+}
+
 func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -1107,6 +1175,316 @@ func TestBrokerIgnoresForwardedClientIPFromNonLoopbackPeer(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("expected non-loopback peer to be bucketed by remote addr, got %d", resp.StatusCode)
+	}
+}
+
+// TestBrokerAgentRateLimitTripsOnRunawayLoop verifies that a prompt-injected
+// agent that loops on tool calls eventually gets 429'd even though it holds a
+// valid Bearer token. The IP bucket alone exempts token-holders, so this is
+// the containment for runaway agent cost.
+func TestBrokerAgentRateLimitTripsOnRunawayLoop(t *testing.T) {
+	b := NewBroker()
+	b.agentRateLimitRequests = 5
+	b.agentRateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	doRequest := func(slug string) *http.Response {
+		req := httptest.NewRequest(http.MethodPost, "/actions/execute", nil)
+		req.RemoteAddr = "127.0.0.1:1234"
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		if slug != "" {
+			req.Header.Set("X-WUPHF-Agent", slug)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+
+	for i := 0; i < 5; i++ {
+		resp := doRequest("ceo")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected request %d within agent budget to succeed, got %d", i+1, resp.StatusCode)
+		}
+	}
+
+	resp := doRequest("ceo")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected 6th request to trip per-agent bucket, got %d", resp.StatusCode)
+	}
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter == "" {
+		t.Fatal("expected Retry-After header on rate-limited response")
+	}
+
+	// A different agent slug gets its own bucket.
+	resp = doRequest("engineer")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected distinct agent slug to get its own bucket, got %d", resp.StatusCode)
+	}
+}
+
+// TestBrokerOperatorTrafficBypassesAgentRateLimit verifies the web UI, which
+// authenticates with the broker token but does not identify itself as any
+// particular agent, is not blocked by the per-agent bucket. If this breaks the
+// operator loses access to their office whenever one agent loops.
+func TestBrokerOperatorTrafficBypassesAgentRateLimit(t *testing.T) {
+	b := NewBroker()
+	b.agentRateLimitRequests = 1
+	b.agentRateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	doRequest := func() *http.Response {
+		req := httptest.NewRequest(http.MethodGet, "/messages", nil)
+		req.RemoteAddr = "127.0.0.1:5555"
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		// Deliberately no X-WUPHF-Agent — this is operator traffic.
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+	for i := 0; i < 10; i++ {
+		resp := doRequest()
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected operator request %d to bypass agent limiter, got %d", i+1, resp.StatusCode)
+		}
+	}
+}
+
+// TestBrokerAgentRateLimitExemptsSSEPaths verifies long-lived SSE streams are
+// not counted against the per-agent bucket. They do not represent loopable
+// tool calls — a single subscribe holds the connection open for minutes.
+func TestBrokerAgentRateLimitExemptsSSEPaths(t *testing.T) {
+	b := NewBroker()
+	b.agentRateLimitRequests = 2
+	b.agentRateLimitWindow = time.Second
+	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	doRequest := func(path string) *http.Response {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.RemoteAddr = "127.0.0.1:6666"
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("X-WUPHF-Agent", "ceo")
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Result()
+	}
+
+	for i := 0; i < 10; i++ {
+		resp := doRequest("/events")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected /events subscribe %d to bypass agent limiter, got %d", i+1, resp.StatusCode)
+		}
+		resp = doRequest("/agent-stream/ceo")
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("expected /agent-stream subscribe %d to bypass agent limiter, got %d", i+1, resp.StatusCode)
+		}
+	}
+}
+
+// TestIsLoopbackRemote verifies the RemoteAddr-side half of the DNS-rebinding
+// guard. Empty and unparseable addresses must fail closed — otherwise a
+// test-only path, or a listener that exposes synthetic RemoteAddr, would
+// silently open the gate.
+func TestIsLoopbackRemote(t *testing.T) {
+	cases := []struct {
+		name       string
+		remoteAddr string
+		want       bool
+	}{
+		{"ipv4 loopback with port", "127.0.0.1:1234", true},
+		{"ipv6 loopback with port", "[::1]:1234", true},
+		{"localhost hostname", "localhost:4444", true},
+		{"ipv4 loopback high octet", "127.255.255.255:1", true},
+		{"ipv4 non-loopback", "10.0.0.5:1234", false},
+		{"ipv4 external", "203.0.113.9:80", false},
+		{"empty remote addr", "", false},
+		{"malformed", "not-an-address", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.remoteAddr
+			if got := isLoopbackRemote(req); got != tc.want {
+				t.Fatalf("isLoopbackRemote(%q) = %v, want %v", tc.remoteAddr, got, tc.want)
+			}
+		})
+	}
+	if got := isLoopbackRemote(nil); got {
+		t.Fatal("isLoopbackRemote(nil) = true, want false (must fail closed)")
+	}
+}
+
+// TestHostHeaderIsLoopback verifies the Host-side half of the DNS-rebinding
+// guard. An attacker-controlled name that resolves to 127.0.0.1 at request
+// time must be rejected based on the Host header alone.
+func TestHostHeaderIsLoopback(t *testing.T) {
+	cases := []struct {
+		host string
+		want bool
+	}{
+		{"localhost:7890", true},
+		{"127.0.0.1:7890", true},
+		{"[::1]:7890", true},
+		{"localhost", true},
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"evil.example.com", false},
+		{"evil.example.com:7890", false},
+		{"rebind.attacker.test:7900", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.host, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Host = tc.host
+			if got := hostHeaderIsLoopback(req); got != tc.want {
+				t.Fatalf("hostHeaderIsLoopback(Host=%q) = %v, want %v", tc.host, got, tc.want)
+			}
+		})
+	}
+	if got := hostHeaderIsLoopback(nil); got {
+		t.Fatal("hostHeaderIsLoopback(nil) = true, want false (must fail closed)")
+	}
+}
+
+// TestWebUIRebindGuard is the integrated test for the guard composed of
+// isLoopbackRemote AND hostHeaderIsLoopback. Both must pass for the request
+// to reach the next handler. Either failing → 403.
+func TestWebUIRebindGuard(t *testing.T) {
+	guarded := webUIRebindGuard(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("reached"))
+	}))
+
+	cases := []struct {
+		name       string
+		remoteAddr string
+		host       string
+		wantStatus int
+	}{
+		{"loopback remote + loopback host", "127.0.0.1:5000", "localhost:7900", http.StatusOK},
+		{"loopback remote + evil host (rebind attempt)", "127.0.0.1:5000", "evil.example.com:7900", http.StatusForbidden},
+		{"non-loopback remote + loopback host", "203.0.113.9:80", "127.0.0.1:7900", http.StatusForbidden},
+		{"non-loopback remote + evil host", "203.0.113.9:80", "evil.example.com:7900", http.StatusForbidden},
+		{"empty remote + loopback host", "", "127.0.0.1:7900", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api-token", nil)
+			req.RemoteAddr = tc.remoteAddr
+			req.Host = tc.host
+			rec := httptest.NewRecorder()
+			guarded.ServeHTTP(rec, req)
+			if rec.Code != tc.wantStatus {
+				t.Fatalf("status=%d, want %d; body=%q", rec.Code, tc.wantStatus, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestCORSMiddlewareDropsNullOriginWildcard verifies the fix for the CSO
+// finding: Access-Control-Allow-Origin: * was previously returned for empty
+// or "null" Origin headers. A file:// page could open on the operator's
+// laptop and make authenticated cross-origin reads once it had the token.
+// The new contract: no CORS header unless the Origin exactly matches the
+// configured web UI origin.
+func TestCORSMiddlewareDropsNullOriginWildcard(t *testing.T) {
+	b := NewBroker()
+	b.webUIOrigins = []string{"http://localhost:7900", "http://127.0.0.1:7900"}
+	handler := b.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	cases := []struct {
+		name     string
+		origin   string
+		wantACAO string // empty means header must not be set
+	}{
+		{"null origin", "null", ""},
+		{"empty origin", "", ""},
+		{"allowed localhost origin", "http://localhost:7900", "http://localhost:7900"},
+		{"allowed loopback origin", "http://127.0.0.1:7900", "http://127.0.0.1:7900"},
+		{"disallowed origin", "http://evil.example.com", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/health", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			got := rec.Header().Get("Access-Control-Allow-Origin")
+			if got != tc.wantACAO {
+				t.Fatalf("Access-Control-Allow-Origin=%q, want %q", got, tc.wantACAO)
+			}
+		})
+	}
+}
+
+// TestBrokerOnboardingRoutesRequireAuth verifies the CSO auth wrapping — a
+// caller that can reach the broker port but does not hold the token must
+// NOT be able to POST /onboarding/complete (which seeds the team and fires
+// the first CEO turn) or read /onboarding/state.
+func TestBrokerOnboardingRoutesRequireAuth(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := "http://" + b.Addr()
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// Every onboarding route must 401 without a token.
+	for _, path := range []string{
+		"/onboarding/state",
+		"/onboarding/prereqs",
+		"/onboarding/templates",
+		"/onboarding/blueprints",
+	} {
+		resp, err := client.Get(base + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v", path, err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("GET %s without auth: status=%d, want 401", path, resp.StatusCode)
+		}
+	}
+
+	// /onboarding/complete is the big one — seeds the team + posts the first
+	// task. Must reject unauthenticated POSTs before decoding the body.
+	resp, err := client.Post(base+"/onboarding/complete", "application/json",
+		strings.NewReader(`{"task":"pwn","skip_task":false}`))
+	if err != nil {
+		t.Fatalf("POST /onboarding/complete: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("POST /onboarding/complete without auth: status=%d, want 401", resp.StatusCode)
+	}
+
+	// With the token, /onboarding/state returns 200 (sanity check the wrapping
+	// hasn't broken the happy path).
+	req, _ := http.NewRequest(http.MethodGet, base+"/onboarding/state", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("GET /onboarding/state with auth: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /onboarding/state with auth: status=%d, want 200", resp.StatusCode)
 	}
 }
 
@@ -4034,6 +4412,94 @@ func TestBrokerRequestsLifecycle(t *testing.T) {
 	}
 }
 
+// Regression: the broker rejects new messages with 409 whenever ANY blocking
+// request is pending (handlePostMessage uses firstBlockingRequest across all
+// channels), so GET /requests must expose a "scope=all" view. Without it, the
+// web UI only sees per-channel requests and can't render a blocker that lives
+// in another channel — leaving the human stuck: can't send, can't see why.
+func TestBrokerGetRequestsScopeAllSeesCrossChannelBlocker(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	ensureTestMemberAccess(b, "general", "ceo", "CEO")
+	ensureTestMemberAccess(b, "backend", "ceo", "CEO")
+	ensureTestMemberAccess(b, "backend", "human", "Human")
+	ensureTestMemberAccess(b, "general", "human", "Human")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	createBody, _ := json.Marshal(map[string]any{
+		"kind":     "approval",
+		"from":     "ceo",
+		"channel":  "backend",
+		"title":    "Deploy approval",
+		"question": "Ship the backend migration?",
+		"blocking": true,
+		"required": true,
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/requests", bytes.NewReader(createBody))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create cross-channel request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 creating backend request, got %d", resp.StatusCode)
+	}
+
+	// Per-channel view (#general) must NOT see the #backend blocker — this is
+	// the pre-fix behavior the UI was relying on and is still correct.
+	req, _ = http.NewRequest(http.MethodGet, base+"/requests?channel=general&viewer_slug=human", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("per-channel listing failed: %v", err)
+	}
+	var perChannel struct {
+		Requests []humanInterview `json:"requests"`
+		Pending  *humanInterview  `json:"pending"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&perChannel); err != nil {
+		t.Fatalf("decode per-channel response: %v", err)
+	}
+	resp.Body.Close()
+	if len(perChannel.Requests) != 0 || perChannel.Pending != nil {
+		t.Fatalf("expected #general view to hide #backend request, got %+v", perChannel)
+	}
+
+	// scope=all must include the cross-channel blocker so the overlay can show
+	// what's preventing the human from chatting anywhere.
+	req, _ = http.NewRequest(http.MethodGet, base+"/requests?scope=all&viewer_slug=human", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("scope=all listing failed: %v", err)
+	}
+	var global struct {
+		Requests []humanInterview `json:"requests"`
+		Pending  *humanInterview  `json:"pending"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&global); err != nil {
+		t.Fatalf("decode scope=all response: %v", err)
+	}
+	resp.Body.Close()
+	if len(global.Requests) != 1 {
+		t.Fatalf("expected 1 blocker across channels, got %d: %+v", len(global.Requests), global.Requests)
+	}
+	if global.Pending == nil || global.Pending.Channel != "backend" {
+		t.Fatalf("expected pending blocker from #backend, got %+v", global.Pending)
+	}
+}
+
 func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -5691,5 +6157,111 @@ func TestHeadlessQueue_NoTimerDrivenWakeup(t *testing.T) {
 	}
 	if len(l.headlessWorkers) != 0 {
 		t.Fatalf("expected no workers started without an explicit enqueue, got %v", l.headlessWorkers)
+	}
+}
+
+// ensureDefaultOfficeMembersLocked must seed the full default manifest ONLY
+// when there are no existing members. Its prior behavior (append-any-missing-
+// default) was the source of the load-path leak: blueprint-seeded teams saw
+// ceo/planner/executor/reviewer re-appended on every broker Load.
+func TestEnsureDefaultOfficeMembersSeedsWhenEmpty(t *testing.T) {
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = nil
+	b.ensureDefaultOfficeMembersLocked()
+	got := len(b.members)
+	b.mu.Unlock()
+	if got == 0 {
+		t.Fatalf("expected defaults to be seeded when members empty, got 0")
+	}
+	defaults := defaultOfficeMembers()
+	if len(defaults) != got {
+		t.Fatalf("expected exactly the default roster (len=%d), got len=%d", len(defaults), got)
+	}
+}
+
+// REGRESSION: if a blueprint has seeded members (e.g. operator/planner/builder/
+// growth/reviewer for niche-crm), ensureDefaultOfficeMembersLocked must NOT
+// append ceo/planner/executor/reviewer on top.
+func TestEnsureDefaultOfficeMembersNoOpWhenNonEmpty(t *testing.T) {
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true},
+		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto"},
+	}
+	b.ensureDefaultOfficeMembersLocked()
+	got := make([]string, 0, len(b.members))
+	for _, m := range b.members {
+		got = append(got, m.Slug)
+	}
+	b.mu.Unlock()
+
+	want := []string{"operator", "builder"}
+	if len(got) != len(want) {
+		t.Fatalf("expected roster unchanged %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected roster unchanged %v, got %v", want, got)
+		}
+	}
+	for _, m := range got {
+		if m == "ceo" || m == "planner" || m == "executor" || m == "reviewer" {
+			t.Fatalf("default slug %q appended into blueprint roster; roster=%v", m, got)
+		}
+	}
+}
+
+// REGRESSION: simulate a fully-seeded blueprint team, save to disk, load into
+// a fresh broker, confirm the team survives unchanged. This is the load-path
+// leak the design doc calls out — prior append-behavior in
+// ensureDefaultOfficeMembersLocked (called from Broker.Load() at broker.go:2260)
+// silently re-added ceo/planner/executor/reviewer.
+func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	now := time.Now().UTC().Format(time.RFC3339)
+	b.members = []officeMember{
+		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true, CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "planner", Name: "Planner", Role: "Planner", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "builder", Name: "Builder", Role: "Builder", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "growth", Name: "Growth", Role: "Growth", PermissionMode: "auto", CreatedBy: "wuphf", CreatedAt: now},
+		{Slug: "reviewer", Name: "Reviewer", Role: "Reviewer", PermissionMode: "plan", CreatedBy: "wuphf", CreatedAt: now},
+	}
+	// Seed a task so saveLocked doesn't short-circuit on default state.
+	b.tasks = []teamTask{{ID: "niche-crm-1", Channel: "general", Title: "Choose the niche", Status: "open", CreatedBy: "wuphf", CreatedAt: now, UpdatedAt: now}}
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("saveLocked failed: %v", err)
+	}
+	b.mu.Unlock()
+
+	reloaded := NewBroker()
+	reloaded.mu.Lock()
+	slugs := make([]string, 0, len(reloaded.members))
+	for _, m := range reloaded.members {
+		slugs = append(slugs, m.Slug)
+	}
+	reloaded.mu.Unlock()
+
+	want := []string{"operator", "planner", "builder", "growth", "reviewer"}
+	if len(slugs) != len(want) {
+		t.Fatalf("expected blueprint roster %v to survive reload, got %v", want, slugs)
+	}
+	for i := range want {
+		if slugs[i] != want[i] {
+			t.Fatalf("expected blueprint roster %v to survive reload, got %v", want, slugs)
+		}
+	}
+	for _, s := range slugs {
+		if s == "ceo" || s == "executor" {
+			t.Fatalf("default slug %q leaked into reloaded roster: %v", s, slugs)
+		}
 	}
 }

@@ -355,9 +355,17 @@ func (m onboardingModel) handleSetupKey(msg tea.KeyMsg) (onboardingModel, tea.Cm
 			m.err = "Required tools missing. Install them or press 'c' to continue anyway."
 			return m, nil
 		}
+		// If a runtime CLI (claude, codex, cursor, windsurf) is installed, its
+		// login handles provider auth — no raw API key is needed. Skip the
+		// Anthropic key check entirely in that case.
+		if hasInstalledRuntimeCLI(m.prereqs) {
+			m.err = ""
+			m.step = stepTask
+			return m, nil
+		}
 		key := strings.TrimSpace(m.anthropicKey.Value())
 		if key == "" {
-			m.err = "Anthropic API key is required."
+			m.err = "Anthropic API key is required (or install a runtime CLI like Claude Code or Codex)."
 			return m, nil
 		}
 		// If key not yet validated, validate now.
@@ -554,7 +562,14 @@ func (m onboardingModel) viewSetup(w, h int) string {
 	lines = append(lines, accentStyle.Render("  Provider keys"))
 	lines = append(lines, mutedStyle.Render("  "+strings.Repeat("\u2500", maxInt(10, w/2-4))))
 
-	lines = append(lines, labelStyle.Render("  Anthropic (required)"))
+	cliAuthActive := hasInstalledRuntimeCLI(m.prereqs)
+	if cliAuthActive {
+		lines = append(lines, mutedStyle.Render("  A runtime CLI is installed. Its login handles provider auth —"))
+		lines = append(lines, mutedStyle.Render("  keys below are optional and only used as a fallback."))
+		lines = append(lines, labelStyle.Render("  Anthropic (optional)"))
+	} else {
+		lines = append(lines, labelStyle.Render("  Anthropic (required)"))
+	}
 
 	keyStatusStr := ""
 	switch m.keyStatus {
@@ -585,6 +600,8 @@ func (m onboardingModel) viewSetup(w, h int) string {
 	readyMsg := ""
 	if !m.prereqsOk && !m.continueUnverified && len(m.prereqs) > 0 {
 		readyMsg = failStyle.Render("  Required tools missing — press c to continue anyway")
+	} else if cliAuthActive {
+		readyMsg = okStyle.Render("  Ready — Enter to continue (CLI login handles auth)")
 	} else if m.keyStatus == "valid" || m.keyStatus == "unverified" || m.continueUnverified {
 		readyMsg = okStyle.Render("  Ready — Enter to continue")
 	}
@@ -661,6 +678,22 @@ func allRequiredPrereqsOk(prereqs []prereqResult) bool {
 		}
 	}
 	return true
+}
+
+// hasInstalledRuntimeCLI reports whether at least one runtime CLI (claude,
+// codex, cursor, windsurf) was detected on PATH. When true, the CLI handles
+// provider auth via its own login and the user does not need to paste a raw
+// API key.
+func hasInstalledRuntimeCLI(prereqs []prereqResult) bool {
+	for _, p := range prereqs {
+		switch p.Name {
+		case "claude", "codex", "cursor", "windsurf":
+			if p.Found {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ── Commands (HTTP calls) ────────────────────────────────────────

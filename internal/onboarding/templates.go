@@ -134,6 +134,14 @@ func onboardingTemplateID(value string) string {
 	return strings.Trim(b.String(), "-")
 }
 
+// ResolveTemplatesRepoRoot walks up from repoRoot (or cwd if empty) until
+// it finds a templates/operations directory, returning the containing
+// path. Used by the broker to load curated blueprints when the user
+// finishes onboarding.
+func ResolveTemplatesRepoRoot(repoRoot string) string {
+	return resolveTemplatesRepoRoot(repoRoot)
+}
+
 func resolveTemplatesRepoRoot(repoRoot string) string {
 	repoRoot = strings.TrimSpace(repoRoot)
 	if repoRoot == "" {

@@ -7,29 +7,92 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
+  /* Nex.System Figma ramps — mirrored here so first paint matches theme */
+  --neutral-950: #1e1f1f;
+  --neutral-900: #28292a;
+  --neutral-800: #323334;
+  --neutral-700: #434647;
+  --neutral-600: #575a5c;
+  --neutral-500: #686c6e;
+  --neutral-400: #85898b;
+  --neutral-300: #aeb1b2;
+  --neutral-200: #cfd1d2;
+  --neutral-100: #e9eaeb;
+  --neutral-50:  #f2f2f3;
+  --neutral-10:  #f8f8f9;
+
+  --tertiary-500: #612a92;
+  --tertiary-400: #9f4dbf;
+  --tertiary-300: #cf72d9;
+  --tertiary-200: #ffb3e6;
+  --tertiary-100: #ffebfc;
+
+  --olive-500: #3f4224;
+  --olive-400: #969640;
+  --olive-300: #d4db18;
+  --olive-200: #eef679;
+  --olive-100: #f8ffdb;
+
+  --cyan-500: #069de4;
+  --cyan-400: #00ccff;
+  --cyan-300: #46f7fd;
+  --cyan-200: #a3fcff;
+  --cyan-100: #e5feff;
+
+  --success-500: #0d5935;
+  --success-400: #03a04c;
+  --success-300: #35da79;
+  --success-200: #a3ebbb;
+  --success-100: #e9fbef;
+
+  --error-500: #8c1727;
+  --error-400: #d1261a;
+  --error-300: #ff9a8f;
+  --error-200: #ffe4e0;
+  --error-100: #ffeeeb;
+
+  --warning-500: #994200;
+  --warning-400: #ce6b09;
+  --warning-300: #ffb647;
+  --warning-200: #f7deab;
+  --warning-100: #fbf5dc;
+
+  /* Overlays */
+  --overlay-soft:         rgba(0, 0, 0, 0.04);
+  --overlay:              rgba(0, 0, 0, 0.08);
+  --overlay-strong:       rgba(0, 0, 0, 0.16);
+  --scrim:                rgba(0, 0, 0, 0.5);
+  --overlay-white-soft:   rgba(255, 255, 255, 0.08);
+  --overlay-white:        rgba(255, 255, 255, 0.16);
+  --overlay-white-strong: rgba(255, 255, 255, 0.45);
+
+  /* Semantic aliases */
   --bg:             #FFFFFF;
-  --bg-warm:        #F8F8F8;
+  --bg-warm:        var(--neutral-50);
+  --bg-subtle:      var(--neutral-10);
   --bg-card:        #FFFFFF;
-  --text:           #1D1C1D;
-  --text-secondary: #616061;
-  --text-tertiary:  #868686;
-  --accent:         #1264A3;
-  --accent-warm:    #0B4C8C;
-  --accent-bg:      #E8F5FE;
-  --border:         #E8E8E8;
-  --border-light:   #F0F0F0;
-  --border-dark:    #DDDDDD;
-  --green:          #007A5A;
-  --green-bg:       #E3F9E5;
-  --red:            #E01E5A;
-  --red-bg:         #FDE8EE;
-  --yellow:         #ECB22E;
-  --yellow-bg:      #FEF9E7;
-  --blue:           #1264A3;
-  --blue-bg:        #E8F5FE;
-  --discord:        #5865F2;
-  --discord-bg:     #ECEAFD;
-  --discord-border: #D8D4F7;
+  --text:           var(--neutral-900);
+  --text-secondary: var(--neutral-500);
+  --text-tertiary:  var(--neutral-400);
+  --text-disabled:  var(--neutral-300);
+  --accent:         var(--tertiary-400);
+  --accent-warm:    var(--tertiary-500);
+  --accent-bg:      var(--tertiary-100);
+  --border:         var(--neutral-100);
+  --border-light:   var(--neutral-50);
+  --border-dark:    var(--neutral-200);
+  --border-strong:  var(--neutral-300);
+  --green:          var(--success-400);
+  --green-dark:     var(--success-500);
+  --green-bg:       var(--success-100);
+  --red:            var(--error-400);
+  --red-dark:       var(--error-500);
+  --red-bg:         var(--error-100);
+  --yellow:         var(--warning-400);
+  --yellow-dark:    var(--warning-500);
+  --yellow-bg:      var(--warning-100);
+  --blue:           var(--cyan-500);
+  --blue-bg:        var(--cyan-100);
   --font-sans:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
   --font-serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
   --font-logo:  -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
@@ -58,9 +121,9 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
   border: none; cursor: pointer; transition: all 0.2s; text-decoration: none;
   min-height: 44px;
 }
-.btn:hover { transform: translateY(-1px); }
-.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none !important; }
-.btn-primary { background: var(--accent); color: white; padding: 10px 24px; border-radius: var(--radius-full); font-size: 14px; box-shadow: 0 1px 3px rgba(139,94,60,0.15); }
+.btn:not(.btn-sm):not(:disabled):hover { transform: translateY(-1px); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-primary { background: var(--accent); color: white; padding: 10px 24px; border-radius: var(--radius-full); font-size: 14px; box-shadow: 0 1px 3px rgba(159, 77, 191, 0.18); }
 .btn-primary:hover { background: var(--accent-warm); }
 .btn-secondary { background: transparent; color: var(--text-secondary); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
 .btn-ghost { background: var(--accent-bg); color: var(--accent); border: 1px solid var(--border); padding: 10px 20px; border-radius: var(--radius-full); font-size: 14px; }
@@ -78,9 +141,10 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .input::placeholder { color: var(--text-tertiary); }
 
 /* ─── Badges ─── */
-.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: var(--radius-full); font-size: 11px; font-weight: 500; font-family: var(--font-mono); text-transform: uppercase; letter-spacing: 0.05em; }
+.badge { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 3px; font-size: 11px; font-weight: 500; font-family: var(--font-sans); letter-spacing: 0; line-height: 1; }
 .badge-green { background: var(--green-bg); color: var(--green); }
-.badge-accent { background: var(--accent-bg); color: var(--accent); }
+.badge-accent { background: var(--olive-200); color: var(--olive-500); }
+.badge-neutral { background: var(--neutral-100); color: var(--neutral-600); }
 .badge-yellow { background: var(--yellow-bg); color: var(--yellow); }
 .badge-muted { background: var(--bg-warm); color: var(--text-tertiary); text-decoration: line-through; }
 
@@ -97,18 +161,39 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .pixel-avatar-sidebar { width: 24px; height: 24px; }
 .pixel-avatar-panel { width: 56px; height: 56px; }
 
+/* ─── Harness badge (overlaid on agent avatars) ─── */
+.avatar-with-harness { position: relative; }
+.harness-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.5px var(--bg-card, #fff);
+  line-height: 0;
+  flex-shrink: 0;
+}
+.harness-badge svg { display: block; }
+.harness-badge-on-avatar {
+  position: absolute;
+  right: -3px;
+  bottom: -3px;
+  pointer-events: none;
+}
+
 /* ─── Status Dot ─── */
 .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .status-dot.active { background: var(--green); }
 .status-dot.pulse { animation: pulse-dot 2s ease-in-out infinite; }
 .status-dot.shipping { background: var(--blue); }
 .status-dot.plotting { background: var(--yellow); }
-.status-dot.lurking { background: #9ca3af; }
+.status-dot.lurking { background: #9ca3af; width: 4px; height: 4px; }
 
 /* ─── Scrollbar ─── */
-::-webkit-scrollbar { width: 6px; }
+* { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+:hover::-webkit-scrollbar-thumb { background: var(--border); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }
 
 /* ─── SR-only ─── */

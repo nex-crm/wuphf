@@ -28,9 +28,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
+  height: var(--top-panel-h);
+  box-sizing: border-box;
+  padding: 0 20px;
   border-bottom: 1px solid var(--border);
   gap: 12px;
+  flex-shrink: 0;
 }
 
 .agent-panel-identity {
@@ -44,12 +47,25 @@
 .agent-panel-avatar {
   width: 36px;
   height: 36px;
+  padding: 0;
+  box-sizing: border-box;
   border-radius: 8px;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
+  font-size: 16px;
   flex-shrink: 0;
+}
+.agent-panel-avatar .pixel-avatar,
+.agent-panel-avatar .pixel-avatar-panel { width: 100%; height: 100%; }
+.agent-panel-role {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+  line-height: 1.2;
 }
 
 .agent-panel-name {
@@ -153,6 +169,8 @@
   border-radius: var(--radius-sm);
   padding: 8px 12px;
 }
+.agent-stream-log,
+.agent-stream-log * { font-weight: 400; }
 
 .agent-stream-line {
   color: var(--text-secondary);
@@ -187,6 +205,72 @@
   gap: 8px;
   padding: 16px 20px;
   border-bottom: 1px solid var(--border-light);
+}
+
+.agent-panel-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 20px 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+.agent-panel-actions-stack .btn {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ─── Enable toggle row ─── */
+.agent-panel-stat {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+}
+.agent-panel-stat-label {
+  color: var(--text-secondary);
+}
+
+.agent-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.agent-toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.agent-toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--border-dark, var(--border));
+  border-radius: 11px;
+  transition: background 0.2s;
+}
+.agent-toggle-slider::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s;
+}
+.agent-toggle input:checked + .agent-toggle-slider {
+  background: var(--accent);
+}
+.agent-toggle input:checked + .agent-toggle-slider::before {
+  transform: translateX(18px);
+}
+.agent-toggle input:disabled + .agent-toggle-slider {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* ─── Recent logs ─── */

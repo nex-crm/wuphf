@@ -438,3 +438,46 @@ workflows:
       proof: Handoff evidence persisted successfully.
       inputs:
         operation_name: Multi-Agent Workflow Consulting
+
+wiki_schema:
+  dirs:
+    - team/clients/
+    - team/playbooks/
+    - team/case-studies/
+    - team/decisions/
+    - team/methodology/
+  bootstrap:
+    - path: team/playbooks/discovery.md
+      title: "Discovery playbook"
+      skeleton: |
+        # Discovery playbook
+
+        _(How we run the first two weeks with a new consulting client. Capture the questions that keep surfacing, the artifacts we produce, and the signal-to-noise from each source.)_
+
+        ## Questions we always ask
+        ## Questions we wish we had asked sooner
+        ## Artifacts produced during discovery
+    - path: team/playbooks/architecture-patterns.md
+      title: "Workflow architecture patterns"
+      skeleton: |
+        # Workflow architecture patterns
+
+        _(The re-usable multi-agent shapes we have seen work. One named pattern per section — when to reach for it, when to avoid it, what to watch for in production.)_
+    - path: team/methodology/how-we-scope.md
+      title: "How we scope engagements"
+      skeleton: |
+        # How we scope engagements
+
+        _(Rates, deliverables, what's a fixed-scope project vs. a retainer, how we price integration risk. Keep it honest.)_
+    - path: team/case-studies/template.md
+      title: "Case study template"
+      skeleton: |
+        # Case study template
+
+        _(Copy this page when an engagement closes. Fields: client, problem, agent shape, integrations, what worked, what did not, revised estimate vs actual, reusable assets left behind.)_
+    - path: team/decisions/design-principles.md
+      title: "Our workflow design principles"
+      skeleton: |
+        # Our workflow design principles
+
+        _(The non-negotiables we carry from client to client. Add a dated entry the first time a project forces us to re-examine one.)_

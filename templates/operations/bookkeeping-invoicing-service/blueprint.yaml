@@ -431,3 +431,69 @@ workflows:
       proof: Close evidence persisted successfully.
       inputs:
         operation_name: Bookkeeping and Invoicing Service
+
+wiki_schema:
+  dirs:
+    - team/clients/
+    - team/playbooks/
+    - team/decisions/
+    - team/pricing/
+    - team/taxes/
+  bootstrap:
+    - path: team/clients/intake.md
+      title: "Client intake checklist"
+      skeleton: |
+        # Client intake checklist
+
+        _(Fill in as the team onboards each bookkeeping client. Capture: entity type, bank feeds, prior-year books, access to receipts, default invoicing cadence, who signs off on adjustments.)_
+
+        ## Open questions before books are opened
+        - [ ] Legal entity name, EIN, fiscal year
+        - [ ] Accounting method (cash vs accrual)
+        - [ ] Existing tools (QuickBooks, Xero, Wave, spreadsheets)
+        - [ ] Bank and card feeds we need read access to
+        - [ ] Who approves journal entries and tax-adjusting moves
+
+        ## Red flags we have learned to watch for
+        _(Add an entry every time a surprise shows up after onboarding is "done".)_
+    - path: team/playbooks/monthly-close.md
+      title: "Monthly close playbook"
+      skeleton: |
+        # Monthly close playbook
+
+        _(The recurring month-end loop: reconcile, adjust, review, report. Document the real steps — including the parts that are not in the SOP yet.)_
+
+        1. Reconcile every bank and card feed against statements.
+        2. Flag uncategorized transactions for the client.
+        3. Post recurring journal entries.
+        4. Produce the month-end packet (P&L, balance sheet, AR aging).
+        5. Review with the client and log any follow-ups.
+    - path: team/playbooks/invoicing-cadence.md
+      title: "Invoicing cadence"
+      skeleton: |
+        # Invoicing cadence
+
+        _(How we bill clients of the bookkeeping service, and how we help clients bill their own customers. Two sub-sections — keep them separate.)_
+
+        ## Our billing
+        ## Client-side billing
+
+        Document the dunning rules once we have them.
+    - path: team/taxes/quarterly-filing.md
+      title: "Quarterly tax filing checklist"
+      skeleton: |
+        # Quarterly tax filing checklist
+
+        _(Estimated payments, sales tax, payroll tax. Per-jurisdiction notes go in sub-pages as they accumulate.)_
+    - path: team/decisions/adjustment-authority.md
+      title: "Who can approve adjustments"
+      skeleton: |
+        # Who can approve adjustments
+
+        _(Decision log for authority rules: which categories of journal entries need human review, which can the agents post, what triggers a client-facing question. Add a dated entry every time the rule changes.)_
+    - path: team/pricing/engagement-tiers.md
+      title: "Engagement tiers and scope"
+      skeleton: |
+        # Engagement tiers and scope
+
+        _(What's included at each pricing tier, where scope creep shows up, how we price add-ons. Keep this honest — the actual rates, not the marketing page.)_

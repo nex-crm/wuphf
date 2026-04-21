@@ -1,6 +1,6 @@
-import { Component, useEffect, useState, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { initApi, get } from './api/client'
-import { useAppStore } from './stores/app'
+import { useAppStore, isDMChannel } from './stores/app'
 import { Shell } from './components/layout/Shell'
 import { MessageFeed } from './components/messages/MessageFeed'
 import { Composer } from './components/messages/Composer'
@@ -16,6 +16,7 @@ import { ReceiptsApp } from './components/apps/ReceiptsApp'
 import { HealthCheckApp } from './components/apps/HealthCheckApp'
 import { SettingsApp } from './components/apps/SettingsApp'
 import { ThreadsApp } from './components/apps/ThreadsApp'
+import Wiki from './components/wiki/Wiki'
 import { Wizard } from './components/onboarding/Wizard'
 import { AgentPanel } from './components/agents/AgentPanel'
 import { SearchModal } from './components/search/SearchModal'
@@ -27,6 +28,7 @@ import { ConfirmHost } from './components/ui/ConfirmDialog'
 import { ProviderSwitcherHost } from './components/ui/ProviderSwitcher'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useHashRouter } from './hooks/useHashRouter'
+import './styles/shadcn.css'
 import './styles/global.css'
 import './styles/layout.css'
 import './styles/messages.css'
@@ -88,14 +90,34 @@ class ErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryStat
 
 function MainContent() {
   const currentApp = useAppStore((s) => s.currentApp)
-  const dmMode = useAppStore((s) => s.dmMode)
+  const currentChannel = useAppStore((s) => s.currentChannel)
+  const channelMeta = useAppStore((s) => s.channelMeta)
+  const wikiPath = useAppStore((s) => s.wikiPath)
+  const setWikiPath = useAppStore((s) => s.setWikiPath)
+  const setCurrentApp = useAppStore((s) => s.setCurrentApp)
 
-  if (dmMode) {
+  if (!currentApp && isDMChannel(currentChannel, channelMeta)) {
     return <DMView />
   }
 
+  if (currentApp === 'wiki') {
+    return (
+      <Wiki
+        articlePath={wikiPath}
+        onNavigate={(path) => {
+          if (path === null) {
+            setCurrentApp(null)
+            setWikiPath(null)
+          } else {
+            setWikiPath(path || null)
+          }
+        }}
+      />
+    )
+  }
+
   if (currentApp) {
-    const panels: Record<string, React.ComponentType> = {
+    const panels: Record<string, ComponentType> = {
       tasks: TasksApp,
       requests: RequestsApp,
       policies: PoliciesApp,
