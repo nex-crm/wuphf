@@ -118,10 +118,10 @@ type wikiEventPublisher interface {
 // (tests, or --memory-backend markdown without a broker yet).
 type noopPublisher struct{}
 
-func (noopPublisher) PublishWikiEvent(wikiWriteEvent)                   {}
-func (noopPublisher) PublishNotebookEvent(notebookWriteEvent)           {}
-func (noopPublisher) PublishImageUploaded(imageUploadedEvent)           {}
-func (noopPublisher) PublishImageAltUpdated(imageAltUpdatedEvent)       {}
+func (noopPublisher) PublishWikiEvent(wikiWriteEvent)             {}
+func (noopPublisher) PublishNotebookEvent(notebookWriteEvent)     {}
+func (noopPublisher) PublishImageUploaded(imageUploadedEvent)     {}
+func (noopPublisher) PublishImageAltUpdated(imageAltUpdatedEvent) {}
 
 // imageUploadedEvent is the SSE payload emitted after a successful upload.
 // ThumbPath is empty for SVGs and for raster sources already narrower than

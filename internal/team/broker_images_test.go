@@ -347,11 +347,11 @@ func TestRequestVisionAltText_WritesSidecar(t *testing.T) {
 
 func TestCleanVisionOutput(t *testing.T) {
 	cases := map[string]string{
-		`"A diagram of the system."`:                          "A diagram of the system.",
-		"Alt text: The login screen.":                         "The login screen.",
-		"  multiline\nsecond line\nthird":                     "multiline",
-		`'A single-quoted answer'`:                            "A single-quoted answer",
-		"Plain text answer":                                   "Plain text answer",
+		`"A diagram of the system."`:      "A diagram of the system.",
+		"Alt text: The login screen.":     "The login screen.",
+		"  multiline\nsecond line\nthird": "multiline",
+		`'A single-quoted answer'`:        "A single-quoted answer",
+		"Plain text answer":               "Plain text answer",
 	}
 	for in, want := range cases {
 		got := cleanVisionOutput(in)
