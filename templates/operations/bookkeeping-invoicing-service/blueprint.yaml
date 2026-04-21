@@ -7,13 +7,13 @@ employee_blueprints:
   - bookkeeper-financial-analyst
 
 starter:
-  lead_slug: operator
+  lead_slug: ceo
   general_channel_description: "Command deck for the {{brand_name}} bookkeeping operation."
   kickoff_prompt: "Stand up the {{brand_name}} bookkeeping operation end to end. Use the starter lanes, turn the objective into a repeatable finance system, create the first client-ready artifacts, and keep account-sensitive changes behind human approval."
   agents:
-    - slug: operator
+    - slug: ceo
       emoji: "⚙️"
-      name: Operator
+      name: CEO
       role: Owns priorities, approvals, and escalation decisions
       permission_mode: plan
       checked: true
