@@ -1,0 +1,963 @@
+/* Notebook surface — scoped to `.notebook-surface`.
+ * Per DESIGN-NOTEBOOK.md: physical-notebook metaphor with tan ruled paper,
+ * Caveat handwritten display, IBM Plex Serif body, rotated DRAFT stamp.
+ * ALL rules must live inside `.notebook-surface` so notebook tokens never
+ * leak into the wiki (and vice versa).
+ */
+
+.notebook-surface {
+  /* Design tokens — copied verbatim from the approved variant-A mock. */
+  --nb-paper:         #F1EADB;
+  --nb-paper-dark:    #E9DFC9;
+  --nb-rule:          #E6DEC6;
+  --nb-surface:       #FAF5E8;
+  --nb-text:          #2A2721;
+  --nb-text-muted:    #5B5547;
+  --nb-text-tertiary: #8A8373;
+  --nb-border:        #D9CEB5;
+  --nb-border-light:  #E6DEC6;
+  --nb-ink-blue:      #274472;
+  --nb-stamp-red:     #B43A2F;
+  --nb-amber:         #C78A1F;
+  --nb-amber-bg:      rgba(199, 138, 31, 0.10);
+  --nb-amber-hover:   #B07C1B;
+  --nb-green-approve: #6A8B52;
+  --nb-green-bg:      rgba(106, 139, 82, 0.10);
+
+  --nb-display:       'Caveat', 'Comic Sans MS', cursive;
+  --nb-body-serif:    'IBM Plex Serif', Georgia, serif;
+  --nb-chrome:        -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  --nb-mono:          'Geist Mono', SFMono-Regular, Menlo, monospace;
+
+  --nb-sidebar-width: 260px;
+  --nb-article-max:   780px;
+  --nb-appbar-h:      46px;
+
+  background: var(--nb-paper);
+  color: var(--nb-text);
+  font-family: var(--nb-body-serif);
+  line-height: 1.6;
+  min-height: 100%;
+  /* Horizontal ruled-paper rhythm (28px) — matches body line-height so text
+     sits ON the ruling, not crossed by it. */
+  background-image:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent 27px,
+      var(--nb-rule) 27px,
+      var(--nb-rule) 28px
+    );
+}
+
+/* Links — fountain-pen blue, dashed underline to distinguish from wiki. */
+.notebook-surface a {
+  color: var(--nb-ink-blue);
+  text-decoration: underline dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.notebook-surface a:hover { text-decoration-style: solid; }
+
+/* Focus rings per DESIGN-NOTEBOOK.md accessibility spec. */
+.notebook-surface :focus-visible {
+  outline: 2px solid var(--nb-ink-blue);
+  outline-offset: 3px;
+  border-radius: 2px;
+}
+
+.notebook-surface ::selection {
+  background: var(--nb-amber-bg);
+}
+
+/* Skip link — screen-reader / keyboard users. */
+.notebook-surface .nb-skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--nb-surface);
+  color: var(--nb-text);
+  padding: 8px 14px;
+  font-family: var(--nb-chrome);
+  font-size: 13px;
+  z-index: 100;
+}
+.notebook-surface .nb-skip-link:focus {
+  left: 12px;
+  top: 12px;
+}
+
+/* ── App bar (top chrome strip) ──────────────────────────────── */
+.notebook-surface .nb-appbar {
+  background: var(--nb-surface);
+  border-bottom: 1px solid var(--nb-border);
+  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-family: var(--nb-chrome);
+  font-size: 13px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  min-height: var(--nb-appbar-h);
+}
+.notebook-surface .nb-appbar-title { font-weight: 600; color: var(--nb-text); }
+.notebook-surface .nb-appbar-meta {
+  margin-left: auto;
+  font-family: var(--nb-mono);
+  font-size: 12px;
+  color: var(--nb-text-muted);
+}
+
+/* ── Two-column layout ───────────────────────────────────────── */
+.notebook-surface .nb-layout {
+  display: grid;
+  grid-template-columns: var(--nb-sidebar-width) minmax(0, 1fr);
+  min-height: calc(100vh - var(--nb-appbar-h));
+}
+
+/* ── Author shelf (left sidebar) ─────────────────────────────── */
+.notebook-surface .nb-shelf {
+  background: var(--nb-surface);
+  border-right: 1px dashed var(--nb-border);
+  padding: 24px 16px 80px;
+  font-family: var(--nb-chrome);
+  font-size: 13px;
+  background-image: none;
+}
+.notebook-surface .nb-shelf-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px 16px;
+  border-bottom: 1px dashed var(--nb-border);
+  margin-bottom: 12px;
+}
+.notebook-surface .nb-shelf-head h2 {
+  font-family: var(--nb-display);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--nb-text);
+  line-height: 1.1;
+}
+.notebook-surface .nb-shelf-head .nb-shelf-role {
+  font-size: 11px;
+  color: var(--nb-text-muted);
+  font-family: var(--nb-chrome);
+}
+
+.notebook-surface .nb-shelf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.notebook-surface .nb-shelf-list .nb-date-head {
+  font-family: var(--nb-display);
+  font-size: 17px;
+  color: var(--nb-text-muted);
+  padding: 12px 8px 4px;
+  font-weight: 500;
+  pointer-events: none;
+}
+.notebook-surface .nb-shelf-item {
+  padding: 8px 8px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  min-height: 44px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  background: transparent;
+  border-top: 0;
+  border-right: 0;
+  border-bottom: 0;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+.notebook-surface .nb-shelf-item:hover { background: rgba(217, 206, 181, 0.25); }
+.notebook-surface .nb-shelf-item.is-current {
+  border-left-color: var(--nb-amber);
+  background: var(--nb-amber-bg);
+}
+.notebook-surface .nb-shelf-item .nb-shelf-t {
+  font-family: var(--nb-body-serif);
+  font-size: 13px;
+  color: var(--nb-text);
+  line-height: 1.4;
+  display: block;
+}
+.notebook-surface .nb-shelf-item.is-current .nb-shelf-t { font-weight: 500; }
+.notebook-surface .nb-shelf-item .nb-shelf-meta {
+  color: var(--nb-text-tertiary);
+  font-family: var(--nb-mono);
+  font-size: 10px;
+  margin-top: 2px;
+}
+.notebook-surface .nb-shelf-item .nb-promoted {
+  color: var(--nb-green-approve);
+  font-family: var(--nb-mono);
+  font-size: 10px;
+  font-weight: 500;
+}
+.notebook-surface .nb-shelf-item .nb-status-draft {
+  color: var(--nb-stamp-red);
+  font-family: var(--nb-mono);
+  font-size: 10px;
+  font-weight: 500;
+}
+.notebook-surface .nb-shelf-empty {
+  padding: 24px 8px;
+  color: var(--nb-text-tertiary);
+  font-family: var(--nb-body-serif);
+  font-style: italic;
+  font-size: 13px;
+}
+
+/* ── Article column ──────────────────────────────────────────── */
+.notebook-surface .nb-article {
+  padding: 36px 72px 120px;
+  max-width: var(--nb-article-max);
+  position: relative;
+}
+
+/* Breadcrumb */
+.notebook-surface .nb-crumb {
+  font-family: var(--nb-chrome);
+  font-size: 12px;
+  color: var(--nb-text-muted);
+  margin-bottom: 8px;
+}
+.notebook-surface .nb-crumb a { color: var(--nb-text-muted); text-decoration-style: dotted; }
+.notebook-surface .nb-crumb strong { color: var(--nb-text); font-weight: 500; }
+
+/* Rotated red DRAFT stamp (absolute, does NOT repeat on scroll). */
+.notebook-surface .nb-draft-stamp {
+  position: absolute;
+  top: 48px;
+  right: 52px;
+  font-family: var(--nb-display);
+  font-size: 48px;
+  font-weight: 700;
+  color: var(--nb-stamp-red);
+  border: 4px solid var(--nb-stamp-red);
+  padding: 6px 18px 2px;
+  transform: rotate(-9deg);
+  letter-spacing: 0.05em;
+  opacity: 0.72;
+  pointer-events: none;
+  background: rgba(180, 58, 47, 0.04);
+}
+
+/* Entry header */
+.notebook-surface .nb-entry-title {
+  font-family: var(--nb-display);
+  font-size: 48px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--nb-text);
+  margin-top: 8px;
+}
+.notebook-surface .nb-entry-subtitle {
+  font-family: var(--nb-body-serif);
+  font-style: italic;
+  font-size: 17px;
+  color: var(--nb-text-muted);
+  margin-top: 4px;
+}
+
+/* Sticky byline strip */
+.notebook-surface .nb-byline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 16px 0 28px;
+  font-family: var(--nb-chrome);
+  font-size: 12px;
+  color: var(--nb-text-muted);
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--nb-border);
+  position: sticky;
+  top: calc(var(--nb-appbar-h) + 0px);
+  background: var(--nb-paper);
+  z-index: 5;
+}
+.notebook-surface .nb-byline strong { color: var(--nb-text); font-weight: 500; }
+.notebook-surface .nb-byline .nb-byline-meta {
+  margin-left: auto;
+  font-family: var(--nb-mono);
+  font-size: 11px;
+  color: var(--nb-text-tertiary);
+}
+.notebook-surface .nb-draft-pill {
+  font-family: var(--nb-chrome);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--nb-stamp-red);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+.notebook-surface .nb-promoted-pill {
+  font-family: var(--nb-chrome);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--nb-green-approve);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+.notebook-surface .nb-review-pill {
+  font-family: var(--nb-chrome);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  background: var(--nb-amber);
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+/* ── Body markdown ───────────────────────────────────────────── */
+.notebook-surface .nb-body { position: relative; }
+.notebook-surface .nb-body h2 {
+  /* Plex Serif at 30px per DESIGN-NOTEBOOK Typography — NOT Caveat here
+     (the mock deliberately diverges; spec wins). */
+  font-family: var(--nb-body-serif);
+  font-size: 30px;
+  font-style: italic;
+  font-weight: 500;
+  color: var(--nb-ink-blue);
+  margin: 28px 0 10px;
+  border-bottom: 1px solid var(--nb-border);
+  padding-bottom: 4px;
+}
+.notebook-surface .nb-body h3 {
+  font-family: var(--nb-body-serif);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--nb-text);
+  margin: 20px 0 6px;
+}
+.notebook-surface .nb-body p {
+  font-family: var(--nb-body-serif);
+  font-size: 17px;
+  line-height: 1.72;
+  margin: 12px 0;
+  color: var(--nb-text);
+}
+.notebook-surface .nb-body ul,
+.notebook-surface .nb-body ol {
+  margin: 10px 0 14px 24px;
+  padding: 0;
+}
+.notebook-surface .nb-body li {
+  font-size: 17px;
+  line-height: 1.72;
+  margin: 4px 0;
+  font-family: var(--nb-body-serif);
+}
+.notebook-surface .nb-body li::marker { color: var(--nb-text-tertiary); }
+.notebook-surface .nb-body blockquote {
+  /* GFM blockquotes rendered as right-gutter marginalia on desktop, inline
+     callout on mobile (see media query). */
+  margin: 16px 0 16px 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--nb-amber);
+  font-family: var(--nb-display);
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--nb-ink-blue);
+  background: transparent;
+}
+.notebook-surface .nb-body code {
+  font-family: var(--nb-mono);
+  font-size: 0.9em;
+  background: var(--nb-paper-dark);
+  padding: 1px 4px;
+  border-radius: 2px;
+}
+.notebook-surface .nb-body pre {
+  font-family: var(--nb-mono);
+  font-size: 13px;
+  background: var(--nb-paper-dark);
+  padding: 12px 14px;
+  border-radius: 2px;
+  overflow-x: auto;
+}
+.notebook-surface .nb-body pre code { background: transparent; padding: 0; }
+.notebook-surface .nb-body input[type="checkbox"] { margin-right: 6px; }
+.notebook-surface .nb-body del { color: var(--nb-text-tertiary); }
+
+/* Wikilinks — dashed underline, ink-blue. Broken wikilinks red. */
+.notebook-surface a.nb-wikilink {
+  color: var(--nb-ink-blue);
+  text-decoration: underline dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.notebook-surface a.nb-wikilink.is-broken { color: var(--nb-stamp-red); }
+
+/* Marginalia — right-gutter Q/NEXT callouts (desktop). */
+.notebook-surface .nb-margin {
+  font-family: var(--nb-display);
+  font-size: 17px;
+  color: var(--nb-ink-blue);
+  line-height: 1.35;
+  padding: 8px 10px;
+  border-left: 2px solid var(--nb-amber);
+  transform: rotate(-1deg);
+  margin: 14px 0;
+}
+.notebook-surface .nb-margin .nb-margin-tag {
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+/* Promoted-back inline callout */
+.notebook-surface .nb-promoted-back {
+  margin: 24px 0;
+  padding: 14px 18px;
+  background: var(--nb-green-bg);
+  border-left: 3px solid var(--nb-green-approve);
+  font-family: var(--nb-chrome);
+  font-size: 13px;
+  color: var(--nb-text);
+}
+.notebook-surface .nb-promoted-back .nb-promoted-icon {
+  font-family: var(--nb-mono);
+  color: var(--nb-green-approve);
+  font-weight: 600;
+  margin-right: 6px;
+}
+.notebook-surface .nb-promoted-back a { color: var(--nb-ink-blue); }
+
+/* Inline review thread (stub until Lane C). */
+.notebook-surface .nb-review {
+  margin: 40px 0 20px;
+  padding: 16px 20px;
+  background: var(--nb-surface);
+  border: 1px solid var(--nb-border);
+  border-radius: 2px;
+  font-family: var(--nb-chrome);
+  font-size: 13px;
+  color: var(--nb-text);
+}
+.notebook-surface .nb-review h3 {
+  font-family: var(--nb-display);
+  font-size: 20px;
+  font-weight: 500;
+  margin: 0 0 12px;
+  color: var(--nb-text);
+}
+.notebook-surface .nb-review-empty {
+  color: var(--nb-text-muted);
+  font-style: italic;
+}
+.notebook-surface .nb-review-comment {
+  padding: 10px 0;
+  border-top: 1px dashed var(--nb-border);
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+.notebook-surface .nb-review-comment:first-of-type { border-top: 0; }
+.notebook-surface .nb-review-comment .nb-comment-body {
+  font-family: var(--nb-body-serif);
+  font-size: 15px;
+  line-height: 1.55;
+  color: var(--nb-text);
+  margin: 2px 0 0;
+}
+.notebook-surface .nb-review-comment .nb-comment-author {
+  font-weight: 500;
+  color: var(--nb-text);
+}
+.notebook-surface .nb-review-comment .nb-comment-ts {
+  font-family: var(--nb-mono);
+  font-size: 11px;
+  color: var(--nb-text-tertiary);
+  margin-left: 8px;
+}
+
+/* Actions footer (Promote button + Discard link). */
+.notebook-surface .nb-actions {
+  margin: 48px 0 20px;
+  padding: 24px 0;
+  border-top: 2px dashed var(--nb-border);
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.notebook-surface .nb-promote-btn {
+  font-family: var(--nb-chrome);
+  font-size: 14px;
+  font-weight: 500;
+  background: var(--nb-amber);
+  color: #fff;
+  border: 2px solid var(--nb-amber);
+  padding: 10px 20px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  border-radius: 3px;
+  min-height: 44px;
+  transition: background-color 150ms ease-out, border-color 150ms ease-out;
+}
+.notebook-surface .nb-promote-btn:hover { background: var(--nb-amber-hover); border-color: var(--nb-amber-hover); }
+.notebook-surface .nb-promote-btn:disabled,
+.notebook-surface .nb-promote-btn.is-pending {
+  background: var(--nb-amber-bg);
+  color: var(--nb-amber);
+  border-color: var(--nb-amber);
+  cursor: not-allowed;
+}
+.notebook-surface .nb-discard-link {
+  font-family: var(--nb-chrome);
+  font-size: 13px;
+  color: var(--nb-text-muted);
+  text-decoration: underline;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  padding: 4px 2px;
+}
+
+/* Posterity line (bottom italic file-path footer). */
+.notebook-surface .nb-posterity {
+  font-family: var(--nb-body-serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--nb-text-tertiary);
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--nb-border);
+}
+.notebook-surface .nb-posterity code,
+.notebook-surface .nb-posterity .nb-posterity-path {
+  font-family: var(--nb-mono);
+  font-size: 12px;
+  font-style: normal;
+  color: var(--nb-text-muted);
+}
+
+/* ── Bookshelf catalog (/notebooks landing) ──────────────────── */
+.notebook-surface .nb-catalog {
+  padding: 36px 40px 80px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+.notebook-surface .nb-catalog-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 28px;
+  flex-wrap: wrap;
+}
+.notebook-surface .nb-catalog-title {
+  font-family: var(--nb-display);
+  font-size: 36px;
+  font-weight: 600;
+  color: var(--nb-text);
+  line-height: 1;
+}
+.notebook-surface .nb-catalog-meta {
+  margin-left: auto;
+  font-family: var(--nb-mono);
+  font-size: 12px;
+  color: var(--nb-text-muted);
+}
+.notebook-surface .nb-shelf-row {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  gap: 24px;
+  padding: 20px 0;
+  border-bottom: 1px dashed var(--nb-border-light);
+  align-items: start;
+}
+.notebook-surface .nb-shelf-row:first-of-type { border-top: 1px dashed var(--nb-border-light); }
+.notebook-surface .nb-shelf-row-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.notebook-surface .nb-shelf-row-name {
+  font-family: var(--nb-display);
+  font-size: 24px;
+  font-weight: 600;
+  color: var(--nb-text);
+  line-height: 1.1;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.notebook-surface .nb-shelf-row-role {
+  font-family: var(--nb-chrome);
+  font-size: 11px;
+  color: var(--nb-text-muted);
+}
+.notebook-surface .nb-shelf-row-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 10px;
+}
+.notebook-surface .nb-shelf-card {
+  background: var(--nb-surface);
+  border: 1px solid var(--nb-border-light);
+  border-radius: 3px;
+  padding: 10px 12px;
+  font-family: var(--nb-body-serif);
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--nb-text);
+  cursor: pointer;
+  text-align: left;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 6px;
+}
+.notebook-surface .nb-shelf-card:hover { background: var(--nb-paper-dark); }
+.notebook-surface .nb-shelf-card .nb-shelf-card-t {
+  font-weight: 500;
+  color: var(--nb-text);
+}
+.notebook-surface .nb-shelf-card .nb-shelf-card-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-family: var(--nb-mono);
+  font-size: 10px;
+  color: var(--nb-text-tertiary);
+}
+.notebook-surface .nb-shelf-card-badge-draft { color: var(--nb-stamp-red); font-weight: 600; }
+.notebook-surface .nb-shelf-card-badge-promoted { color: var(--nb-green-approve); font-weight: 600; }
+.notebook-surface .nb-shelf-card-badge-review { color: var(--nb-amber); font-weight: 600; }
+.notebook-surface .nb-shelf-row-stats {
+  font-family: var(--nb-mono);
+  font-size: 11px;
+  color: var(--nb-text-muted);
+  margin-top: 8px;
+}
+.notebook-surface .nb-shelf-row-empty {
+  color: var(--nb-text-tertiary);
+  font-family: var(--nb-body-serif);
+  font-style: italic;
+  font-size: 13px;
+}
+
+/* Avatars — reuse pixel-art canvas convention. */
+.notebook-surface canvas {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+}
+
+/* ── Reviews Kanban ──────────────────────────────────────────── */
+.notebook-surface .nb-review-queue {
+  padding: 28px 32px 80px;
+}
+.notebook-surface .nb-review-queue-header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+.notebook-surface .nb-review-queue-title {
+  font-family: var(--nb-display);
+  font-size: 36px;
+  font-weight: 600;
+  color: var(--nb-text);
+  line-height: 1;
+}
+.notebook-surface .nb-review-queue-meta {
+  margin-left: auto;
+  font-family: var(--nb-mono);
+  font-size: 12px;
+  color: var(--nb-text-muted);
+}
+.notebook-surface .nb-review-columns {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(220px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+.notebook-surface .nb-review-col {
+  background: var(--nb-surface);
+  border: 1px solid var(--nb-border-light);
+  border-radius: 3px;
+  padding: 14px 12px 18px;
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.notebook-surface .nb-review-col-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed var(--nb-border);
+}
+.notebook-surface .nb-review-col-head h3 {
+  font-family: var(--nb-display);
+  font-size: 20px;
+  font-weight: 500;
+  color: var(--nb-text);
+}
+.notebook-surface .nb-review-col-count {
+  font-family: var(--nb-mono);
+  font-size: 11px;
+  color: var(--nb-text-muted);
+  margin-left: auto;
+  background: var(--nb-paper-dark);
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+.notebook-surface .nb-review-card {
+  background: var(--nb-paper);
+  border: 1px solid var(--nb-border-light);
+  border-radius: 2px;
+  padding: 10px 12px;
+  font-family: var(--nb-chrome);
+  font-size: 12px;
+  color: var(--nb-text);
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notebook-surface .nb-review-card:hover { background: var(--nb-paper-dark); }
+.notebook-surface .nb-review-card.is-active { outline: 2px solid var(--nb-ink-blue); outline-offset: -2px; }
+.notebook-surface .nb-review-card-title {
+  font-family: var(--nb-body-serif);
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--nb-text);
+  line-height: 1.3;
+}
+.notebook-surface .nb-review-card-excerpt {
+  font-family: var(--nb-body-serif);
+  font-size: 12px;
+  color: var(--nb-text-muted);
+  line-height: 1.4;
+  /* 3-line clamp per spec. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.notebook-surface .nb-review-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.notebook-surface .nb-review-card-path {
+  font-family: var(--nb-mono);
+  font-size: 11px;
+  color: var(--nb-text-tertiary);
+}
+.notebook-surface .nb-review-card-avatars {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.notebook-surface .nb-review-col-empty {
+  color: var(--nb-text-tertiary);
+  font-family: var(--nb-body-serif);
+  font-style: italic;
+  font-size: 12px;
+  padding: 12px 4px;
+}
+
+/* Review detail drawer */
+.notebook-surface .nb-review-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(42, 39, 33, 0.25);
+  z-index: 100;
+}
+.notebook-surface .nb-review-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(520px, 100%);
+  background: var(--nb-surface);
+  border-left: 1px solid var(--nb-border);
+  box-shadow: -4px 0 16px rgba(42, 39, 33, 0.08);
+  z-index: 101;
+  padding: 20px 24px 28px;
+  overflow-y: auto;
+  font-family: var(--nb-chrome);
+}
+.notebook-surface .nb-review-drawer h2 {
+  font-family: var(--nb-display);
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--nb-text);
+  margin-bottom: 6px;
+}
+.notebook-surface .nb-review-drawer-path {
+  font-family: var(--nb-mono);
+  font-size: 11px;
+  color: var(--nb-text-muted);
+  margin-bottom: 18px;
+}
+.notebook-surface .nb-review-drawer-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  background: transparent;
+  border: 0;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--nb-text-muted);
+  padding: 4px 8px;
+}
+.notebook-surface .nb-review-drawer-actions {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px dashed var(--nb-border);
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.notebook-surface .nb-review-drawer-approve {
+  background: var(--nb-green-approve);
+  color: #fff;
+  border: 2px solid var(--nb-green-approve);
+  border-radius: 2px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 44px;
+}
+.notebook-surface .nb-review-drawer-reject {
+  background: transparent;
+  color: var(--nb-stamp-red);
+  border: 2px solid var(--nb-stamp-red);
+  border-radius: 2px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+/* ── Loading / error / empty states ─────────────────────────── */
+.notebook-surface .nb-loading,
+.notebook-surface .nb-error {
+  padding: 40px 24px;
+  font-family: var(--nb-body-serif);
+  font-size: 15px;
+  color: var(--nb-text-muted);
+}
+.notebook-surface .nb-error { color: var(--nb-stamp-red); }
+.notebook-surface .nb-skeleton {
+  display: block;
+  background: var(--nb-paper-dark);
+  border-radius: 2px;
+  height: 16px;
+  margin: 10px 0;
+}
+.notebook-surface .nb-retry-btn {
+  margin-top: 8px;
+  background: var(--nb-surface);
+  border: 1px solid var(--nb-border);
+  border-radius: 2px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-family: var(--nb-chrome);
+  cursor: pointer;
+}
+
+.notebook-surface .nb-empty-prompt {
+  padding: 48px 40px;
+  font-family: var(--nb-display);
+  font-size: 28px;
+  color: var(--nb-text-muted);
+  text-align: center;
+  line-height: 1.3;
+}
+
+/* ── Responsive ──────────────────────────────────────────────── */
+@media (max-width: 1279px) {
+  .notebook-surface .nb-layout {
+    grid-template-columns: 1fr;
+  }
+  .notebook-surface .nb-shelf {
+    border-right: 0;
+    border-bottom: 1px dashed var(--nb-border);
+    padding: 16px 20px;
+  }
+  .notebook-surface .nb-shelf-list {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+  }
+  .notebook-surface .nb-shelf-list .nb-date-head { display: none; }
+  .notebook-surface .nb-shelf-item {
+    flex: 0 0 220px;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+  }
+  .notebook-surface .nb-shelf-item.is-current {
+    border-bottom-color: var(--nb-amber);
+    border-left-color: transparent;
+  }
+  .notebook-surface .nb-article { padding: 24px 32px 80px; }
+  /* Marginalia collapses to inline callout on tablet + mobile. */
+  .notebook-surface .nb-margin {
+    transform: none;
+    margin: 18px 0;
+  }
+  .notebook-surface .nb-review-columns {
+    grid-template-columns: repeat(3, minmax(220px, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .notebook-surface .nb-entry-title { font-size: 36px; }
+  .notebook-surface .nb-draft-stamp {
+    top: 12px; right: 12px;
+    font-size: 22px;
+    padding: 3px 8px 1px;
+    opacity: 0.5;
+    border-width: 2px;
+  }
+  .notebook-surface .nb-article { padding: 20px 16px 60px; }
+  .notebook-surface .nb-review-columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 374px) {
+  .notebook-surface .nb-entry-title { font-size: 28px; }
+  .notebook-surface .nb-draft-stamp { display: none; }
+  .notebook-surface .nb-margin { display: none; }
+}
+
+/* Respect reduced motion — instant transitions, no pulse. */
+@media (prefers-reduced-motion: reduce) {
+  .notebook-surface .nb-promote-btn { transition: none; }
+}

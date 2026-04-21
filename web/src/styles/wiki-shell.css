@@ -1,0 +1,86 @@
+/* ─── Wiki app shell ────────────────────────────────────────────────
+ *
+ * Wraps all three wiki-surface views (canonical wiki, per-agent notebooks,
+ * review queue) with a shared tab bar. Lives above the per-surface design
+ * systems so it never picks up .wiki-surface or .notebook-surface tokens.
+ *
+ * Tab bar uses the WUPHF app chrome (system-ui, existing --text tokens) so
+ * it reads as app scaffolding, not as content of either surface.
+ */
+
+.wiki-shell {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.wiki-shell > .wiki-shell-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.wiki-tabs {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 20px;
+  height: 42px;
+  background: var(--surface, #ffffff);
+  border-bottom: 1px solid var(--border, #e8e8e8);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  flex-shrink: 0;
+}
+
+.wiki-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 14px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted, #616061);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.wiki-tab:hover {
+  color: var(--text, #1d1c1d);
+}
+
+.wiki-tab:focus-visible {
+  outline: 2px solid var(--accent, #1264a3);
+  outline-offset: -2px;
+}
+
+.wiki-tab.is-active {
+  color: var(--text, #1d1c1d);
+  border-bottom-color: var(--accent, #1264a3);
+}
+
+.wiki-tab-label {
+  letter-spacing: 0.005em;
+}
+
+.wiki-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  background: #C78A1F; /* shared with notebook amber so reviews read as notebook-derived */
+  color: #ffffff;
+  font-family: 'Geist Mono', 'SFMono-Regular', Menlo, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  border-radius: 9px;
+}

@@ -17,6 +17,11 @@ import {
 import { SIDEBAR_APPS } from '../../lib/constants'
 import { useAppStore } from '../../stores/app'
 import { getRequests } from '../../api/client'
+import { fetchReviews } from '../../api/notebook'
+
+// Notebooks and reviews render inside the Wiki app shell via tabs, so the
+// 'Wiki' sidebar entry lights up for any of those three currentApp values.
+const WIKI_SURFACE_APPS = new Set(['wiki', 'notebooks', 'reviews'])
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
@@ -43,21 +48,38 @@ export function AppList() {
     refetchInterval: 5_000,
   })
 
+  const { data: reviewsData } = useQuery({
+    queryKey: ['reviews-badge'],
+    queryFn: fetchReviews,
+    refetchInterval: 15_000,
+  })
+
   const pendingCount = (requestsData?.requests ?? []).filter(
     (r) => !r.status || r.status === 'open' || r.status === 'pending',
   ).length
+
+  const pendingReviewsCount = (reviewsData ?? []).filter(
+    (r) => r.state === 'pending' || r.state === 'in-review' || r.state === 'changes-requested',
+  ).length
+
   const overflowRef = useOverflow<HTMLDivElement>()
 
   return (
     <div className="sidebar-scroll-wrap is-apps">
       <div className="sidebar-apps" ref={overflowRef}>
         {SIDEBAR_APPS.filter((app) => app.id !== 'settings').map((app) => {
-          const badge = app.id === 'requests' && pendingCount > 0 ? pendingCount : null
+          let badge: number | null = null
+          if (app.id === 'requests' && pendingCount > 0) badge = pendingCount
+          if (app.id === 'wiki' && pendingReviewsCount > 0) badge = pendingReviewsCount
           const Icon = APP_ICONS[app.id]
+          const isActive =
+            app.id === 'wiki'
+              ? WIKI_SURFACE_APPS.has(currentApp ?? '')
+              : currentApp === app.id
           return (
             <button
               key={app.id}
-              className={`sidebar-item${currentApp === app.id ? ' active' : ''}`}
+              className={`sidebar-item${isActive ? ' active' : ''}`}
               onClick={() => setCurrentApp(app.id)}
             >
               {Icon ? (
