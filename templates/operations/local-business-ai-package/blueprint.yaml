@@ -7,13 +7,13 @@ employee_blueprints:
   - workflow-automation-builder
 
 starter:
-  lead_slug: operator
+  lead_slug: ceo
   general_channel_description: "Command deck for the {{brand_name}} local operations package."
   kickoff_prompt: "Stand up the {{brand_name}} local business operation end to end. Use the starter lanes, turn the objective into a repeatable service system, create the first client-ready artifacts, and keep customer-facing changes behind human approval."
   agents:
-    - slug: operator
+    - slug: ceo
       emoji: "⚙️"
-      name: Operator
+      name: CEO
       role: Owns priorities, approvals, and escalation decisions
       permission_mode: plan
       checked: true
