@@ -158,41 +158,78 @@ func (b *Broker) materializeBlueprintWiki(bp operations.Blueprint) {
 	}
 }
 
-// synthesizeBlueprintFromState builds a blueprint from whatever the user
-// typed into the wizard (company name, description, size, priority, plus
-// the task text as directive). Reads onboarding state from disk, so it
-// must be called OUTSIDE the broker mutex. Unlike the old
-// seedBlankSlateOperationLocked it does not mutate broker state — the
-// caller feeds the returned Blueprint to seedFromBlueprintLocked.
+// synthesizeBlueprintFromState builds a blueprint for the "From scratch"
+// wizard path. Reads onboarding state from disk, so it must be called
+// OUTSIDE the broker mutex. Unlike the old seedBlankSlateOperationLocked
+// it does not mutate broker state — the caller feeds the returned
+// Blueprint to seedFromBlueprintLocked.
+//
+// The starter roster is a fixed 5-agent founding team (CEO lead plus GTM
+// Lead, Founding Engineer, Product Manager, Designer) rather than the
+// generic operator/planner/executor/reviewer shape. This is the product
+// default for a brand-new WUPHF office: it covers the four functions a
+// real early-stage team needs (strategy, revenue, build, design) with a
+// named CEO as the human-facing lead. Users can still uncheck agents in
+// the wizard's Team step; unchecked ones are dropped via the filter.
 func synthesizeBlueprintFromState(task string) operations.Blueprint {
 	state, err := onboarding.Load()
 	if err != nil {
 		// Best-effort: fall through with empty profile. A Load failure is
-		// logged by the onboarding package; SynthesizeBlueprint tolerates
-		// sparse input by producing a generic blueprint.
+		// logged by the onboarding package; we still produce a blueprint
+		// so the wizard can complete.
 		log.Printf("onboarding: load state for synthesis: %v", err)
 		state = &onboarding.State{}
 	}
-	profile := operationCompanyProfile{
-		Name:        strings.TrimSpace(state.CompanyName),
-		Description: onboardingPartialString(state.Partial, "welcome", "desc"),
-		Goals:       strings.TrimSpace(task),
-		Size:        onboardingPartialString(state.Partial, "welcome", "size"),
-		Priority:    onboardingPartialString(state.Partial, "welcome", "priority"),
+	name := strings.TrimSpace(state.CompanyName)
+	desc := onboardingPartialString(state.Partial, "welcome", "desc")
+	return scratchFoundingTeamBlueprint(name, desc, strings.TrimSpace(task))
+}
+
+// scratchFoundingTeamBlueprint returns the fixed "From scratch" starter
+// roster: CEO (lead), GTM Lead, Founding Engineer, Product Manager,
+// Designer. Extracted so tests can assert the shape without rebuilding
+// onboarding state.
+func scratchFoundingTeamBlueprint(companyName, description, directive string) operations.Blueprint {
+	displayName := companyName
+	if displayName == "" {
+		displayName = "Your company"
 	}
-	return operations.SynthesizeBlueprint(operations.SynthesisInput{
-		Directive: profile.Goals,
-		Profile: operations.CompanyProfile{
-			Name:        profile.Name,
-			Description: profile.Description,
-			Audience:    profile.Size,
-			Offer:       profile.Goals,
+	agents := []operations.StarterAgent{
+		{Slug: "ceo", Name: "CEO", Role: "lead", PermissionMode: "plan", Checked: true, Type: "assistant", BuiltIn: true, Expertise: []string{"strategy", "prioritization", "delegation"}, Personality: "Sets direction, breaks directives into specialist assignments, and owns the outcome."},
+		{Slug: "gtm-lead", Name: "GTM Lead", Role: "go-to-market", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"positioning", "sales", "marketing", "growth"}, Personality: "Turns the product into pipeline — messaging, outbound, launches, and early revenue."},
+		{Slug: "founding-engineer", Name: "Founding Engineer", Role: "engineering", PermissionMode: "auto", Checked: true, Type: "assistant", Expertise: []string{"full-stack", "architecture", "infrastructure", "shipping"}, Personality: "Full-stack engineer who ships end-to-end and makes pragmatic architectural calls."},
+		{Slug: "pm", Name: "Product Manager", Role: "product", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"roadmap", "user-stories", "requirements", "specs"}, Personality: "Translates business goals into specs the engineering and design functions can execute against."},
+		{Slug: "designer", Name: "Designer", Role: "design", PermissionMode: "plan", Checked: true, Type: "assistant", Expertise: []string{"UI-UX-design", "branding", "prototyping"}, Personality: "Owns the look, feel, and flow — from first sketch to shipped interface."},
+	}
+	channels := []operations.StarterChannel{
+		{Slug: "general", Name: "general", Description: "Primary coordination channel.", Members: []string{"ceo", "gtm-lead", "founding-engineer", "pm", "designer"}},
+		{Slug: "product", Name: "product", Description: "Roadmap, specs, and design reviews.", Members: []string{"ceo", "pm", "designer", "founding-engineer"}},
+		{Slug: "gtm", Name: "gtm", Description: "Positioning, pipeline, and launches.", Members: []string{"ceo", "gtm-lead", "pm"}},
+	}
+	var tasks []operations.StarterTask
+	if directive != "" {
+		tasks = []operations.StarterTask{{
+			Channel: "general",
+			Owner:   "ceo",
+			Title:   "Kick off the directive",
+			Details: directive,
+		}}
+	}
+	return operations.Blueprint{
+		ID:          "from-scratch",
+		Name:        displayName,
+		Kind:        "general",
+		Description: description,
+		Objective:   directive,
+		Starter: operations.StarterPlan{
+			LeadSlug:                  "ceo",
+			GeneralChannelDescription: "Primary coordination channel.",
+			KickoffPrompt:             directive,
+			Agents:                    agents,
+			Channels:                  channels,
+			Tasks:                     tasks,
 		},
-		Description: profile.Description,
-		Goals:       profile.Goals,
-		Size:        profile.Size,
-		Priority:    profile.Priority,
-	})
+	}
 }
 
 // seedFromBlueprintLocked is the single seed path used by both picked-

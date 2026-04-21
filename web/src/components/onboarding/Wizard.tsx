@@ -77,6 +77,19 @@ interface PrereqResult {
   install_url?: string
 }
 
+// "Start from scratch" starter roster. Mirrors scratchFoundingTeamBlueprint
+// in internal/team/broker_onboarding.go — the broker seeds these exact slugs
+// when the wizard POSTs blueprint:null. Kept in sync manually; backend is the
+// source of truth, this is just the Team-step preview so users don't see an
+// empty roster before confirming.
+const SCRATCH_FOUNDING_TEAM: readonly BlueprintAgent[] = [
+  { slug: 'ceo', name: 'CEO', role: 'lead', checked: true, built_in: true },
+  { slug: 'gtm-lead', name: 'GTM Lead', role: 'go-to-market', checked: true },
+  { slug: 'founding-engineer', name: 'Founding Engineer', role: 'engineering', checked: true },
+  { slug: 'pm', name: 'Product Manager', role: 'product', checked: true },
+  { slug: 'designer', name: 'Designer', role: 'design', checked: true },
+]
+
 // Display overrides for blueprints. Backend names/descriptions are long-form
 // ("Bookkeeping and Invoicing Service", "Template for a bookkeeping operation
 // that handles recurring books..."). For the onboarding picker we want short,
@@ -359,7 +372,7 @@ function TemplatesStep({
               <span className="template-from-scratch-icon">+</span>
               Start from scratch
               <span className="template-from-scratch-sub">
-                Empty office, add agents manually
+                5-person founding team: CEO, GTM Lead, Founding Engineer, PM, Designer
               </span>
             </button>
           </div>
@@ -1036,7 +1049,10 @@ export function Wizard({ onComplete }: WizardProps) {
   // blueprints the user never picked.
   useEffect(() => {
     if (selectedBlueprint === null) {
-      setAgents([])
+      // "Start from scratch" — preview the same 5-agent founding team the
+      // broker seeds via scratchFoundingTeamBlueprint. Keep the slugs and
+      // built_in flag in sync with internal/team/broker_onboarding.go.
+      setAgents(SCRATCH_FOUNDING_TEAM.map((a) => ({ ...a })))
       setTaskTemplates([])
       return
     }
