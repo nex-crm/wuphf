@@ -311,9 +311,9 @@ func sectionTitleFromSlug(slug string) string {
 // powers the /wiki/sections endpoint and the SSE fan-out. One cache per
 // broker; lives as long as the broker.
 type wikiSectionsCache struct {
-	worker     *WikiWorker
-	blueprint  func() *operations.Blueprint
-	publisher  wikiSectionsPublisher
+	worker    *WikiWorker
+	blueprint func() *operations.Blueprint
+	publisher wikiSectionsPublisher
 
 	mu       sync.RWMutex
 	sections []DiscoveredSection
