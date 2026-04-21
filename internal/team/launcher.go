@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -78,19 +79,20 @@ func nameWithPortSuffixForPort(base string, port int) string {
 
 // Launcher sets up and manages the multi-agent team.
 type Launcher struct {
-	packSlug         string
-	pack             *agent.PackDefinition
-	blankSlateLaunch bool
-	sessionName      string
-	cwd              string
-	broker           *Broker
-	mcpConfig        string
-	unsafe           bool
-	opusCEO          bool
-	focusMode        bool
-	sessionMode      string
-	oneOnOne         string
-	provider         string
+	packSlug           string
+	pack               *agent.PackDefinition
+	operationBlueprint *operations.Blueprint
+	blankSlateLaunch   bool
+	sessionName        string
+	cwd                string
+	broker             *Broker
+	mcpConfig          string
+	unsafe             bool
+	opusCEO            bool
+	focusMode          bool
+	sessionMode        string
+	oneOnOne           string
+	provider           string
 
 	headlessMu           sync.Mutex
 	headlessCtx          context.Context
@@ -158,9 +160,12 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	}
 
 	operationTemplateExists := false
+	var loadedBlueprint *operations.Blueprint
 	if strings.TrimSpace(packSlug) != "" {
-		if _, err := operations.LoadBlueprint(repoRoot, packSlug); err == nil {
+		if loaded, err := operations.LoadBlueprint(repoRoot, packSlug); err == nil {
 			operationTemplateExists = true
+			bp := loaded
+			loadedBlueprint = &bp
 		}
 	}
 	var pack *agent.PackDefinition
@@ -192,6 +197,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	return &Launcher{
 		packSlug:            packSlug,
 		pack:                pack,
+		operationBlueprint:  loadedBlueprint,
 		blankSlateLaunch:    blankSlateLaunch,
 		sessionName:         SessionName,
 		cwd:                 cwd,
@@ -273,6 +279,16 @@ func (l *Launcher) Launch() error {
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch
+	// Wire the notebook-promotion reviewer resolver from the active
+	// blueprint. Without this, every promotion falls back to "ceo"
+	// regardless of blueprint reviewer_paths. Safe on nil (packs-only
+	// launches or blank-slate runs).
+	if l.operationBlueprint != nil {
+		bp := l.operationBlueprint
+		l.broker.SetReviewerResolver(func(wikiPath string) string {
+			return bp.ResolveReviewer(wikiPath)
+		})
+	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
@@ -491,10 +507,35 @@ func (l *Launcher) notifyOfficeChangesLoop() {
 	defer unsubscribe()
 
 	for evt := range changes {
+		// office_reseeded fires after onboarding rewrites the whole roster
+		// (blueprint selection). The interactive claude panes were spawned
+		// from the earlier default team and now point at slugs that are no
+		// longer registered agents — messages typed into them go into a
+		// dead shell. Respawn them against the new roster, outside the
+		// interview guard so it can't be blocked by a half-complete wizard.
+		if evt.Kind == "office_reseeded" {
+			l.respawnPanesAfterReseed()
+			continue
+		}
 		if l.broker.HasPendingInterview() {
 			continue
 		}
 		l.deliverOfficeChangeNotification(evt)
+	}
+}
+
+// respawnPanesAfterReseed restarts the interactive agent panes so they match
+// the newly-seeded roster from onboarding. Best-effort: the codex runtime has
+// no interactive panes, and reconfigureVisibleAgents handles an uninitialised
+// paneBackedAgents state by no-op'ing. Errors are logged but do not propagate
+// — failing to respawn leaves the previous panes running (degraded, but the
+// headless path can still deliver).
+func (l *Launcher) respawnPanesAfterReseed() {
+	if l == nil || l.usesCodexRuntime() || !l.paneBackedAgents {
+		return
+	}
+	if err := l.reconfigureVisibleAgents(); err != nil {
+		log.Printf("office_reseeded: respawn panes failed: %v", err)
 	}
 }
 
@@ -3974,6 +4015,16 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch
+	// Wire the notebook-promotion reviewer resolver from the active
+	// blueprint. Without this, every promotion falls back to "ceo"
+	// regardless of blueprint reviewer_paths. Safe on nil (packs-only
+	// launches or blank-slate runs).
+	if l.operationBlueprint != nil {
+		bp := l.operationBlueprint
+		l.broker.SetReviewerResolver(func(wikiPath string) string {
+			return bp.ResolveReviewer(wikiPath)
+		})
+	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}

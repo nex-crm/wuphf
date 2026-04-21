@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-export type Theme = 'nex' | 'slack' | 'slack-dark' | 'windows-98'
+export type Theme = 'nex'
 
 export interface ChannelMeta {
   type: 'O' | 'D' | 'G'
@@ -52,6 +52,8 @@ export interface AppStore {
   // Sidebar
   sidebarAgentsOpen: boolean
   toggleSidebarAgents: () => void
+  sidebarCollapsed: boolean
+  toggleSidebarCollapsed: () => void
 
   // Thread panel
   activeThreadId: string | null
@@ -80,20 +82,38 @@ export interface AppStore {
   // Wiki
   wikiPath: string | null
   setWikiPath: (path: string | null) => void
+
+  // Notebooks
+  notebookAgentSlug: string | null
+  notebookEntrySlug: string | null
+  setNotebookRoute: (agentSlug: string | null, entrySlug: string | null) => void
 }
 
-export const useAppStore = create<AppStore>((set) => ({
+export const useAppStore = create<AppStore>((set, get) => ({
   brokerConnected: false,
   setBrokerConnected: (v) => set({ brokerConnected: v }),
 
   currentChannel: 'general',
   setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
   currentApp: null,
-  setCurrentApp: (app) => set({ currentApp: app }),
+  setCurrentApp: (app) => {
+    if (!app) {
+      set({ currentApp: null })
+      return
+    }
+
+    const { currentChannel, channelMeta } = get()
+    if (isDMChannel(currentChannel, channelMeta)) {
+      set({ currentApp: app, currentChannel: 'general' })
+      return
+    }
+
+    set({ currentApp: app })
+  },
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
-    set((s) => ({ channelMeta: { ...s.channelMeta, [slug]: meta } })),
+    set({ channelMeta: { ...get().channelMeta, [slug]: meta } }),
 
   theme: 'nex',
   setTheme: (t) => {
@@ -102,7 +122,9 @@ export const useAppStore = create<AppStore>((set) => ({
   },
 
   sidebarAgentsOpen: true,
-  toggleSidebarAgents: () => set((s) => ({ sidebarAgentsOpen: !s.sidebarAgentsOpen })),
+  toggleSidebarAgents: () => set({ sidebarAgentsOpen: !get().sidebarAgentsOpen }),
+  sidebarCollapsed: false,
+  toggleSidebarCollapsed: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
 
   activeThreadId: null,
   setActiveThreadId: (id) => set({ activeThreadId: id }),
@@ -131,4 +153,9 @@ export const useAppStore = create<AppStore>((set) => ({
 
   wikiPath: null,
   setWikiPath: (path) => set({ wikiPath: path }),
+
+  notebookAgentSlug: null,
+  notebookEntrySlug: null,
+  setNotebookRoute: (agentSlug, entrySlug) =>
+    set({ notebookAgentSlug: agentSlug, notebookEntrySlug: entrySlug }),
 }))

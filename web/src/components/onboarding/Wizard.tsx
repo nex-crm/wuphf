@@ -244,7 +244,7 @@ function WelcomeStep({ onNext }: WelcomeStepProps) {
         <p className="wizard-subhead">{ONBOARDING_COPY.step1_subhead}</p>
       </div>
       <div style={{ display: 'flex', justifyContent: 'center' }}>
-        <button className="btn btn-primary btn-lg" onClick={onNext}>
+        <button className="btn btn-primary" onClick={onNext}>
           {ONBOARDING_COPY.step1_cta}
           <ArrowIcon />
         </button>
@@ -717,7 +717,7 @@ function SetupStep({
               fontSize: 13,
               fontWeight: 600,
               margin: '0 0 4px 0',
-              color: 'var(--text-primary)',
+              color: 'var(--text)',
             }}
           >
             API keys {hasInstalledSelection ? '(optional fallback)' : '(required)'}

@@ -86,7 +86,6 @@
 
 .wizard-headline {
   font-family: var(--font-logo);
-  font-style: italic;
   font-size: 36px;
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -98,7 +97,7 @@
   font-size: 14px;
   line-height: 1.65;
   color: var(--text-secondary);
-  max-width: 54ch;
+  max-width: 64ch;
   margin: 0 auto;
 }
 
@@ -141,7 +140,7 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-primary);
+  color: var(--text);
   margin: 0;
 }
 
@@ -176,14 +175,14 @@
 
 .template-from-scratch-btn:hover {
   border-color: var(--accent);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .template-from-scratch-btn.selected {
   border-style: solid;
   border-color: var(--accent);
   background: var(--accent-bg);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .template-from-scratch-icon {
@@ -207,6 +206,17 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px;
+  align-items: stretch;
+}
+
+.template-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+}
+
+.template-card-scratch {
+  grid-column: 1 / -1;
 }
 
 .template-card {
@@ -261,7 +271,7 @@
 
 .wiz-team-tile {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   padding: 12px 14px;
   border-radius: var(--radius-md);
@@ -323,6 +333,7 @@
 .wiz-team-tile.selected .wiz-team-check {
   background: var(--accent);
   border-color: var(--accent);
+  color: #fff;
 }
 
 .wiz-team-name {
@@ -482,7 +493,7 @@
 .runtime-priority-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-primary);
+  color: var(--text);
   margin: 0 0 4px 0;
 }
 
@@ -534,7 +545,7 @@
 
 .runtime-priority-btn:not(:disabled):hover {
   border-color: var(--border-dark);
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 /* ─── Task Textarea (Step 6) ─── */
@@ -630,7 +641,7 @@
 .task-suggestion-name {
   font-size: 14px;
   font-weight: 500;
-  color: var(--text-primary);
+  color: var(--text);
   line-height: 1.4;
 }
 

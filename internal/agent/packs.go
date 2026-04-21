@@ -87,9 +87,9 @@ var legacyPacks = []PackDefinition{
 		Slug:        "coding-team",
 		Name:        "Coding Team",
 		Description: "High-velocity software development team",
-		LeadSlug:    "tech-lead",
+		LeadSlug:    "ceo",
 		Agents: []AgentConfig{
-			{Slug: "tech-lead", Name: "Tech Lead", Expertise: []string{"architecture", "code-review", "technical-decisions", "planning"}, Personality: "Senior engineer who makes sound architectural decisions and coordinates the team"},
+			{Slug: "ceo", Name: "CEO", Expertise: []string{"architecture", "code-review", "technical-decisions", "planning"}, Personality: "Senior technical leader who makes sound architectural decisions and coordinates the team"},
 			{Slug: "fe", Name: "Frontend Engineer", Expertise: []string{"frontend", "React", "CSS", "components", "accessibility"}, Personality: "Frontend specialist focused on clean, accessible implementations"},
 			{Slug: "be", Name: "Backend Engineer", Expertise: []string{"backend", "APIs", "databases", "DevOps", "infrastructure"}, Personality: "Backend engineer focused on reliable, scalable systems"},
 			{Slug: "qa", Name: "QA Engineer", Expertise: []string{"testing", "automation", "quality", "edge-cases", "CI-CD"}, Personality: "Quality-focused engineer who catches issues before they reach production"},
@@ -99,9 +99,9 @@ var legacyPacks = []PackDefinition{
 		Slug:        "lead-gen-agency",
 		Name:        "Lead Gen Agency",
 		Description: "Quiet outbound systems and automated GTM",
-		LeadSlug:    "ae",
+		LeadSlug:    "ceo",
 		Agents: []AgentConfig{
-			{Slug: "ae", Name: "Account Executive", Expertise: []string{"prospecting", "outreach", "pipeline", "closing", "negotiation"}, Personality: "Seasoned closer who builds relationships and converts opportunities"},
+			{Slug: "ceo", Name: "CEO", Expertise: []string{"prospecting", "outreach", "pipeline", "closing", "negotiation", "revenue-leadership"}, Personality: "Seasoned closer who builds relationships, converts opportunities, and sets the outbound strategy"},
 			{Slug: "sdr", Name: "SDR", Expertise: []string{"cold-outreach", "qualification", "booking-meetings", "sequences"}, Personality: "Persistent SDR who opens doors and qualifies opportunities"},
 			{Slug: "research", Name: "Research Analyst", Expertise: []string{"market-research", "competitive-analysis", "ICP-profiling", "trends"}, Personality: "Analytical researcher who surfaces actionable intelligence"},
 			{Slug: "content", Name: "Content Strategist", Expertise: []string{"SEO", "copywriting", "nurture-sequences", "thought-leadership"}, Personality: "Strategic writer who creates content that drives engagement"},

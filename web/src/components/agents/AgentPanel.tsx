@@ -206,7 +206,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           <div className="agent-panel-avatar avatar-with-harness">
             <PixelAvatar
               slug={agent.slug}
-              size={56}
+              size={36}
               className="pixel-avatar-panel"
             />
             <HarnessBadge
@@ -215,15 +215,13 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
               className="harness-badge-on-avatar"
             />
           </div>
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <span className="agent-panel-name">{agent.name || agent.slug}</span>
-              <span className={`status-dot ${statusClass}`} />
+              <span className={`status-dot ${statusClass}`} style={{ marginLeft: -2 }} />
             </div>
             {agent.role && (
-              <span className="badge badge-accent" style={{ marginTop: 2 }}>
-                {agent.role}
-              </span>
+              <span className="agent-panel-role">{agent.role}</span>
             )}
           </div>
         </div>
@@ -233,7 +231,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           aria-label="Close agent panel"
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
         </button>
       </div>
@@ -314,7 +312,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
             className="btn btn-ghost btn-sm"
             onClick={handleRemove}
             disabled={removing}
-            style={{ color: 'var(--red, #dc2626)' }}
+            style={{ color: 'var(--red)' }}
           >
             {removing ? 'Removing...' : 'Remove agent'}
           </button>

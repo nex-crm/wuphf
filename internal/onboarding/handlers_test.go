@@ -420,7 +420,7 @@ func TestHandleBlueprintsMarksLeadBuiltIn(t *testing.T) {
 			t.Fatalf("decode: %v", err)
 		}
 
-		// niche-crm's blueprint yaml names `operator` as type: lead with
+		// niche-crm's blueprint yaml names `ceo` as type: lead with
 		// built_in: true. Any shipped blueprint must mark exactly one lead.
 		var found bool
 		for _, tpl := range resp.Templates {
@@ -431,8 +431,8 @@ func TestHandleBlueprintsMarksLeadBuiltIn(t *testing.T) {
 			for _, a := range tpl.Agents {
 				if a.BuiltIn {
 					leadCount++
-					if a.Slug != "operator" {
-						t.Errorf("niche-crm lead should be operator, got %q (built_in=true)", a.Slug)
+					if a.Slug != "ceo" {
+						t.Errorf("niche-crm lead should be ceo, got %q (built_in=true)", a.Slug)
 					}
 				}
 			}

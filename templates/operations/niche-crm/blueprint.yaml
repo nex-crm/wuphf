@@ -3,17 +3,22 @@ name: Niche CRM
 kind: product_gtm
 description: Template for a focused CRM product that can be built and taken to market.
 objective: Build a niche CRM, prove the workflow, and run the product and GTM loops together.
+default_reviewer: ceo
+reviewer_paths:
+  "team/product/**": builder
+  "team/customers/**": growth
+  "team/reviews/**": reviewer
 employee_blueprints:
   - workflow-automation-builder
 
 starter:
-  lead_slug: operator
+  lead_slug: ceo
   general_channel_description: "Command deck for the {{brand_name}} CRM operation."
   kickoff_prompt: "Stand up the {{brand_name}} CRM operation end to end. Use the starter lanes, turn the objective into a repeatable delivery system, create the first product artifacts, and keep outbound and account changes behind human approval."
   agents:
-    - slug: operator
+    - slug: ceo
       emoji: "⚙️"
-      name: Operator
+      name: CEO
       role: Owns priorities, approvals, and escalation decisions
       permission_mode: plan
       checked: true

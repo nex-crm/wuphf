@@ -1,27 +1,27 @@
-/* Wiki surface — scoped to .wiki-root. Independent from app chrome.
- * Source of truth: DESIGN-WIKI.md + preview-v3-full-wikipedia-ia.html.
- * Paper-warm editorial palette, Wikipedia IA, modern typography.
+/* Wiki surface — scoped to .wiki-root.
+ * Aligned to the Nex design system: cyan accent, neutral palette.
+ * Keeps Wikipedia IA + editorial serif hierarchy for articles only.
  */
 .wiki-root {
-  --wk-paper:           #FAF8F2;
-  --wk-paper-dark:      #F5F1E6;
-  --wk-surface:         #FFFFFF;
-  --wk-text:            #1D1C1D;
-  --wk-text-muted:      #616061;
-  --wk-text-tertiary:   #8A8680;
-  --wk-border:          #E8E4D8;
-  --wk-border-light:    #F0ECE0;
-  --wk-border-strong:   #B8B0A0;
-  --wk-wikilink:        #1264A3;
-  --wk-wikilink-broken: #C94A4A;
-  --wk-amber:           #ECB22E;
-  --wk-amber-bg:        rgba(236, 178, 46, 0.15);
-  --wk-amber-banner:    #FDF6DC;
-  --wk-code-bg:         #F5F1E6;
-  --wk-display:    'Fraunces', ui-serif, Georgia, serif;
+  --wk-paper:           var(--bg);
+  --wk-paper-dark:      var(--bg-warm);
+  --wk-surface:         var(--bg-card);
+  --wk-text:            var(--text);
+  --wk-text-muted:      var(--text-secondary);
+  --wk-text-tertiary:   var(--text-tertiary);
+  --wk-border:          var(--border);
+  --wk-border-light:    var(--border-light);
+  --wk-border-strong:   var(--border-dark);
+  --wk-wikilink:        var(--olive-500);
+  --wk-wikilink-broken: var(--red);
+  --wk-amber:           var(--olive-500);
+  --wk-amber-bg:        var(--olive-200);
+  --wk-amber-banner:    var(--olive-100);
+  --wk-code-bg:         var(--bg-warm);
+  --wk-display:    var(--font-sans);
   --wk-body-serif: 'Source Serif 4', ui-serif, Georgia, serif;
-  --wk-chrome:     -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
-  --wk-mono:       'Geist Mono', 'SFMono-Regular', Menlo, monospace;
+  --wk-chrome:     var(--font-sans);
+  --wk-mono:       var(--font-mono);
   --wk-sidebar-left: 240px;
   --wk-sidebar-right: 280px;
   --wk-article-max: 640px;
@@ -30,10 +30,11 @@
   line-height: 1.6;
   font-family: var(--wk-chrome);
   -webkit-font-smoothing: antialiased;
-  padding-bottom: 60px;
-  min-height: 100%;
+  height: 100%;
   width: 100%;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .wiki-root * { box-sizing: border-box; }
 .wiki-root a { color: var(--wk-wikilink); text-decoration: none; }
@@ -42,8 +43,13 @@
 .wiki-layout {
   display: grid;
   grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr) var(--wk-sidebar-right);
-  min-height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
 }
+.wiki-layout > .wk-catalog,
+.wiki-layout > .wk-article-col,
+.wiki-layout > .wk-toc-col { min-height: 0; overflow-y: auto; }
 /* Catalog has no right rail — give the main column all the remaining space. */
 .wiki-layout[data-view="catalog"] {
   grid-template-columns: var(--wk-sidebar-left) minmax(0, 1fr);
@@ -51,31 +57,48 @@
 
 /* ─── LEFT NAV ─── */
 .wk-nav-sidebar {
+  display: flex;
+  flex-direction: column;
   background: var(--wk-surface);
   border-right: 1px solid var(--wk-border);
-  padding: 24px 16px 80px;
+  padding: 20px 12px 0;
   font-family: var(--wk-chrome);
   font-size: 13px;
-  overflow-y: auto;
+  overflow: hidden;
+  min-height: 0;
 }
+.wk-nav-sidebar-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 16px 0 16px;
+  scrollbar-width: none;
+}
+.wk-nav-sidebar-scroll::-webkit-scrollbar { width: 0; height: 0; }
+.wk-nav-sidebar-scroll > div { display: flex; flex-direction: column; gap: 2px; }
 .wk-nav-sidebar h3 {
   font-family: var(--wk-chrome);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: var(--wk-text-tertiary);
-  margin: 20px 8px 6px;
+  color: var(--neutral-300);
+  margin: 0 0 4px;
+  padding: 0 10px;
 }
-.wk-nav-sidebar h3:first-of-type { margin-top: 0; }
-.wk-nav-sidebar ul { list-style: none; margin: 0; padding: 0; }
+.wk-nav-sidebar ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
 .wk-nav-sidebar li a {
-  display: block;
-  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
   color: var(--wk-text-muted);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: var(--wk-chrome);
   font-size: 13px;
+  line-height: 1.3;
   cursor: pointer;
 }
 .wk-nav-sidebar li a:hover { background: var(--wk-paper-dark); color: var(--wk-text); }
@@ -87,14 +110,17 @@
 .wk-nav-sidebar .search {
   width: 100%;
   border: 1px solid var(--wk-border);
-  border-radius: 4px;
-  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
   font-size: 12px;
   font-family: var(--wk-chrome);
-  margin-bottom: 20px;
+  margin: 0;
   background: var(--wk-paper);
+  outline: none;
+  transition: border-color 0.15s;
 }
-.wk-nav-sidebar .tools-sep { border: 0; border-top: 1px solid var(--wk-border); margin: 28px 0 0; }
+.wk-nav-sidebar .search:focus { border-color: var(--wk-wikilink); }
+.wk-nav-sidebar .tools-sep { border: 0; border-top: 1px solid var(--wk-border); margin: 8px 0 0; }
 .wk-nav-sidebar .tools li a::before {
   content: '→ ';
   color: var(--wk-text-tertiary);
@@ -663,10 +689,7 @@
 
 /* ─── Edit-log footer ─── */
 .wk-edit-log {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  flex-shrink: 0;
   background: var(--wk-surface);
   border-top: 1px solid var(--wk-border);
   padding: 10px 20px;
@@ -678,8 +701,13 @@
   gap: 24px;
   overflow-x: auto;
   white-space: nowrap;
-  z-index: 5;
+  scrollbar-width: thin;
+  scrollbar-color: var(--wk-border-strong) transparent;
 }
+.wk-edit-log::-webkit-scrollbar { height: 6px; width: 6px; }
+.wk-edit-log::-webkit-scrollbar-track { background: transparent; }
+.wk-edit-log::-webkit-scrollbar-thumb { background: var(--wk-border-strong); border-radius: 3px; }
+.wk-edit-log::-webkit-scrollbar-thumb:hover { background: var(--wk-text-tertiary); }
 .wk-edit-log .wk-label {
   font-weight: 600;
   color: var(--wk-text-tertiary);
@@ -1076,13 +1104,16 @@
 
 /* ─── Sidebar audit link ─── */
 .wk-sidebar-audit {
-  margin-top: auto;
-  padding: 16px 0 0;
+  flex-shrink: 0;
+  margin-left: -12px;
+  margin-right: -12px;
+  padding: 12px 22px;
+  background: var(--wk-surface);
   border-top: 1px solid var(--wk-border);
 }
 .wk-sidebar-audit-link {
   font-family: var(--wk-chrome);
-  font-size: 13px;
+  font-size: 12px;
   color: var(--wk-text-muted);
   background: transparent;
   border: none;
@@ -1093,10 +1124,75 @@
 .wk-sidebar-audit-link:hover {
   color: var(--wk-wikilink);
 }
-.wk-nav-sidebar {
+
+/* ─── v1.3 dynamic sections ─── */
+.wk-section-group {
   display: flex;
   flex-direction: column;
+  gap: 2px;
 }
+.wk-section-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+}
+.wk-section-discovered {
+  cursor: pointer;
+}
+.wk-section-discovered:hover .wk-section-title {
+  color: var(--wk-text);
+}
+.wk-section-marker {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--wk-text-tertiary);
+  opacity: 0.7;
+}
+.wk-section-new {
+  font-family: var(--wk-mono);
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--wk-amber-bg);
+  color: var(--wk-amber-ink, var(--wk-text));
+}
+.wk-section-empty {
+  padding: 4px 10px;
+  color: var(--wk-text-tertiary);
+  font-size: 11px;
+  font-family: var(--wk-chrome);
+}
+.wk-section-banner {
+  margin: 6px 0 8px;
+  padding: 8px 10px;
+  background: var(--wk-amber-bg);
+  border-left: 3px solid var(--wk-amber);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 11px;
+  font-family: var(--wk-chrome);
+  color: var(--wk-text);
+  line-height: 1.4;
+}
+.wk-section-banner-body { flex: 1; }
+.wk-section-banner-dismiss {
+  background: transparent;
+  border: none;
+  color: var(--wk-text-tertiary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.wk-section-banner-dismiss:hover { color: var(--wk-text); }
 
 /* Catalog header audit link */
 .wk-catalog-audit-link {
@@ -1112,4 +1208,476 @@
 }
 .wk-catalog-audit-link:hover {
   text-decoration-style: solid;
+}
+
+/* ─── Entity briefs (v1.2) ─── */
+.wk-entity-brief-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper-dark);
+}
+.wk-entity-brief-bar--pending {
+  border-left: 3px solid var(--wk-amber);
+  background: var(--wk-amber-banner);
+  color: var(--wk-text);
+}
+.wk-entity-brief-bar--clean {
+  color: var(--wk-text-muted);
+}
+.wk-entity-brief-bar__label { flex: 1 1 auto; }
+.wk-entity-brief-bar__label strong {
+  font-weight: 600;
+  color: var(--wk-text);
+}
+.wk-entity-brief-bar__action {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 4px 10px;
+  background: var(--wk-text);
+  color: var(--wk-paper);
+  border: 1px solid var(--wk-text);
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+.wk-entity-brief-bar__action:hover:not(:disabled) {
+  background: var(--wk-amber);
+  border-color: var(--wk-amber);
+  color: var(--wk-text);
+}
+.wk-entity-brief-bar__action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.wk-entity-brief-bar__error {
+  color: var(--wk-wikilink-broken);
+  font-size: 12px;
+  flex: 1 1 100%;
+}
+
+.wk-facts-list {
+  margin: 32px 0 24px;
+  font-family: var(--wk-body-serif);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--wk-text);
+}
+.wk-facts-list h2 {
+  font-family: var(--wk-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0 0 12px;
+  color: var(--wk-text-muted);
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 6px;
+}
+.wk-facts-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-facts-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--wk-border-light);
+}
+.wk-facts-item:last-child { border-bottom: none; }
+.wk-facts-item .wk-avatar {
+  image-rendering: pixelated;
+  width: 14px;
+  height: 14px;
+  border-radius: 2px;
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.wk-facts-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wk-facts-text {
+  display: block;
+  font-family: var(--wk-body-serif);
+  color: var(--wk-text);
+}
+.wk-facts-meta {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-text-tertiary);
+}
+.wk-facts-meta time {
+  font-family: var(--wk-mono);
+}
+.wk-facts-source {
+  color: var(--wk-wikilink);
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+}
+.wk-facts-empty,
+.wk-facts-loading,
+.wk-facts-error {
+  font-family: var(--wk-body-serif);
+  font-style: italic;
+  color: var(--wk-text-tertiary);
+  margin: 0;
+}
+.wk-facts-error { color: var(--wk-wikilink-broken); font-style: normal; }
+.wk-facts-showall {
+  margin-top: 10px;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-wikilink);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+}
+
+/* ─── Playbook compilation (v1.3) ─── */
+.wk-playbook-badge {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper-dark);
+}
+.wk-playbook-badge--compiled {
+  border-left: 3px solid var(--wk-wikilink);
+}
+.wk-playbook-badge--pending {
+  border-left: 3px solid var(--wk-amber);
+  color: var(--wk-text-muted);
+  font-style: italic;
+}
+.wk-playbook-badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wk-wikilink);
+  flex-shrink: 0;
+}
+.wk-playbook-badge--pending .wk-playbook-badge__dot {
+  background: var(--wk-amber);
+}
+.wk-playbook-badge__label {
+  flex: 1 1 auto;
+}
+.wk-playbook-badge__path {
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  padding: 1px 6px;
+  background: var(--wk-code-bg);
+  border: 1px solid var(--wk-border-light);
+}
+.wk-playbook-badge__meta {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-text-tertiary);
+}
+
+.wk-playbook-executions {
+  margin: 32px 0 24px;
+  font-family: var(--wk-body-serif);
+}
+.wk-playbook-executions__toggle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--wk-border);
+  padding: 0 0 6px;
+  margin: 0 0 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.wk-playbook-executions__toggle h2 {
+  font-family: var(--wk-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--wk-text-muted);
+}
+.wk-playbook-executions__count {
+  font-family: var(--wk-mono);
+  font-weight: 400;
+  color: var(--wk-text-tertiary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.wk-playbook-executions__chev {
+  font-family: var(--wk-mono);
+  color: var(--wk-text-tertiary);
+}
+.wk-playbook-executions__empty,
+.wk-playbook-executions__loading {
+  font-style: italic;
+  color: var(--wk-text-tertiary);
+}
+.wk-playbook-executions__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-playbook-execution {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--wk-border-light);
+}
+.wk-playbook-execution:last-child { border-bottom: none; }
+.wk-playbook-execution__pill {
+  font-family: var(--wk-chrome);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid var(--wk-border);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.wk-playbook-execution__pill--success {
+  color: var(--wk-text);
+  background: var(--wk-paper);
+  border-color: var(--wk-wikilink);
+}
+.wk-playbook-execution__pill--partial {
+  color: var(--wk-text);
+  background: var(--wk-amber-banner);
+  border-color: var(--wk-amber);
+}
+.wk-playbook-execution__pill--aborted {
+  color: var(--wk-wikilink-broken);
+  background: var(--wk-paper);
+  border-color: var(--wk-wikilink-broken);
+}
+.wk-playbook-execution__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wk-playbook-execution__summary {
+  margin: 0;
+  font-family: var(--wk-body-serif);
+  color: var(--wk-text);
+}
+.wk-playbook-execution__notes {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--wk-text-muted);
+}
+.wk-playbook-execution__meta {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-text-tertiary);
+}
+.wk-playbook-execution__meta time { font-family: var(--wk-mono); }
+.wk-playbook-executions__more {
+  margin-top: 10px;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-wikilink);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+}
+/* ────────────────────────────────────────────────────────────
+ * v1.3 Image support — uploader + embed
+ * Motion stays on transform/opacity (see ~/.claude/rules/web/performance.md).
+ * ──────────────────────────────────────────────────────────── */
+
+.image-uploader {
+  border: 1.5px dashed var(--wk-rule, #c9c2b0);
+  border-radius: 4px;
+  padding: 20px;
+  background: var(--wk-surface-2, #f6f2e6);
+  transition: border-color var(--duration-fast, 150ms) ease,
+              background var(--duration-fast, 150ms) ease;
+  font-family: var(--wk-chrome, system-ui);
+}
+.image-uploader--compact {
+  padding: 12px;
+}
+.image-uploader--drag {
+  border-color: var(--wk-wikilink, #1264A3);
+  background: var(--wk-surface-3, #fbf7ea);
+}
+.image-uploader__drop {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 80px;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.image-uploader__drop-label {
+  font-weight: 600;
+  font-size: 14px;
+}
+.image-uploader__drop-hint {
+  font-size: 12px;
+  color: var(--wk-text-muted, #6f6b60);
+}
+.image-uploader__preview {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.image-uploader__thumb {
+  width: 120px;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+}
+.image-uploader__meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.image-uploader__name {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-uploader__bar {
+  height: 4px;
+  background: var(--wk-rule, #c9c2b0);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.image-uploader__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--wk-wikilink, #1264A3);
+  transform-origin: left;
+  transition: width var(--duration-fast, 150ms) linear;
+}
+.image-uploader__ok {
+  color: #2b7a3f;
+  font-size: 12px;
+}
+.image-uploader__err {
+  color: #C94A4A;
+  font-size: 12px;
+}
+.image-uploader__reset {
+  background: transparent;
+  border: 1px solid var(--wk-rule, #c9c2b0);
+  padding: 4px 10px;
+  border-radius: 3px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.image-embed {
+  margin: 1.5rem 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.image-embed__trigger {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: zoom-in;
+  display: block;
+}
+.image-embed__img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 3px;
+  display: block;
+}
+.image-embed__caption {
+  font-size: 13px;
+  color: var(--wk-text-muted, #6f6b60);
+  font-family: var(--wk-chrome, system-ui);
+}
+.image-embed__inline {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+}
+.image-embed__lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: image-embed-fade var(--duration-normal, 300ms) ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .image-embed__lightbox {
+    animation: none;
+  }
+  .image-uploader__bar-fill {
+    transition: none;
+  }
+}
+@keyframes image-embed-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.image-embed__full {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+}
+.image-embed__close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 24px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }

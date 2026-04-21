@@ -1,6 +1,7 @@
 package team
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -2639,6 +2640,51 @@ func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T
 	}
 	if notifications[0].Task.ID != "task-4" {
 		t.Fatalf("expected task-4 notification, got %q", notifications[0].Task.ID)
+	}
+}
+
+// TestAllOperationBlueprintsUseCEOLead enforces the product invariant that
+// every shipped operation blueprint declares CEO as its lead_slug. Non-ceo
+// leads (e.g. "operator") silently break routing and UI affordances because
+// the rest of the system assumes "ceo" is always a registered member that
+// receives focus-mode messages.
+func TestAllOperationBlueprintsUseCEOLead(t *testing.T) {
+	root, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoRoot := root
+	for {
+		if _, err := os.Stat(filepath.Join(repoRoot, "templates", "operations")); err == nil {
+			break
+		}
+		parent := filepath.Dir(repoRoot)
+		if parent == repoRoot {
+			t.Skip("templates/operations not found from test working dir")
+			return
+		}
+		repoRoot = parent
+	}
+	opsDir := filepath.Join(repoRoot, "templates", "operations")
+	entries, err := os.ReadDir(opsDir)
+	if err != nil {
+		t.Fatalf("read operations dir: %v", err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		path := filepath.Join(opsDir, entry.Name(), "blueprint.yaml")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		if !bytes.Contains(data, []byte("lead_slug:")) {
+			continue
+		}
+		if !bytes.Contains(data, []byte("lead_slug: ceo")) {
+			t.Errorf("blueprint %s must declare lead_slug: ceo", entry.Name())
+		}
 	}
 }
 

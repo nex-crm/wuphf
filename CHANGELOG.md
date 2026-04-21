@@ -2,6 +2,12 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.5.3] - 2026-04-21
+
+### Fixed
+
+- **Messages in #general now reach your team lead instead of silently disappearing.** Five operation blueprints (`niche-crm`, `local-business-ai-package`, `bookkeeping-invoicing-service`, `multi-agent-workflow-consulting`, `paid-discord-community`) and two legacy packs (`coding-team`, `lead-gen-agency`) declared a non-ceo `lead_slug` (`operator`, `tech-lead`, `ae`). Broker code hardcodes `"ceo"` for channel-member injection, focus-mode routing, and the one-on-one default, so human messages dispatched to `@ceo` — an agent that never existed in those blueprints — and got dropped with no trace. The lead slug is now `ceo` everywhere, and `TestAllOperationBlueprintsUseCEOLead` guards against regression. Fresh onboards route correctly. Existing installs that still have `operator` registered in `~/.wuphf/state.yaml` need a reset; a migration for in-place upgrades lands in a follow-up.
+
 ## [0.0.5.2] - 2026-04-20
 
 ### Fixed

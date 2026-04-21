@@ -3,17 +3,22 @@ name: Paid Discord Community
 kind: community
 description: Template for a paid community operation that focuses on onboarding, moderation, engagement, and retention.
 objective: Run a paid community with durable onboarding, moderation, engagement, and sponsor loops.
+default_reviewer: ceo
+reviewer_paths:
+  "team/community/**": community-manager
+  "team/growth/**": growth
+  "team/reviews/**": reviewer
 employee_blueprints:
   - discord-server-community-manager
 
 starter:
-  lead_slug: operator
+  lead_slug: ceo
   general_channel_description: "Command deck for the {{brand_name}} community operation."
   kickoff_prompt: "Stand up the {{brand_name}} community operation end to end. Use the starter lanes, turn the objective into a repeatable community system, create the first member-ready artifacts, and keep community-facing changes behind human approval."
   agents:
-    - slug: operator
+    - slug: ceo
       emoji: "⚙️"
-      name: Operator
+      name: CEO
       role: Owns priorities, approvals, and escalation decisions
       permission_mode: plan
       checked: true

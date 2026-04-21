@@ -8,7 +8,8 @@
 .message-grouped .message-avatar { visibility: hidden; height: 0; }
 .message-grouped .message-header { display: none; }
 
-.message-avatar { width: 36px; height: 36px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; }
+.message-avatar { width: 36px; height: 36px; padding: 7px; box-sizing: border-box; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--bg-warm); }
+.message-avatar .pixel-avatar { width: 100%; height: 100%; }
 .message-content { flex: 1; min-width: 0; }
 .message-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .message-author { font-size: 13px; font-weight: 600; }
@@ -19,9 +20,20 @@
 .message-text code { background: var(--bg-warm); border-radius: 4px; padding: 1px 5px; font-family: var(--font-mono); font-size: 12px; }
 
 /* ─── Date separator ─── */
-.date-separator { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
-.date-separator-line { height: 1px; flex: 1; background: var(--border); }
-.date-separator-text { font-size: 12px; color: var(--text-tertiary); white-space: nowrap; font-weight: 600; }
+.date-separator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: sticky;
+  top: -8px;
+  z-index: 5;
+  background: var(--bg);
+  padding: 6px 24px;
+  margin: 0 -24px;
+  box-sizing: border-box;
+}
+.date-separator-line { display: none; }
+.date-separator-text { font-size: 11px; color: var(--text-tertiary); white-space: nowrap; font-weight: 600; background: var(--bg-warm); padding: 2px 10px; border-radius: 999px; }
 
 /* ─── Markdown ─── */
 .msg-h1 { font-size: 18px; font-weight: 700; color: var(--text); margin: 8px 0 4px; }
@@ -37,7 +49,7 @@
 .msg-link:hover { color: var(--accent-warm); }
 
 /* ─── @mention ─── */
-.mention { background: #FDF1E2; color: #D4700E; padding: 1px 4px; border-radius: 3px; font-weight: 600; }
+.mention { display: inline-block; background: #FDF1E2; color: #D4700E; padding: 0 5px; border-radius: 3px; font-weight: 600; font-size: 0.9em; line-height: 1.4; vertical-align: baseline; }
 
 /* ─── Reactions ─── */
 .message-reactions { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
@@ -169,13 +181,28 @@
 .autocomplete-item-icon { width: 20px; text-align: center; flex-shrink: 0; font-size: 14px; }
 .autocomplete-item-label { font-weight: 600; color: var(--text); }
 .autocomplete-item-desc { font-size: 12px; color: var(--text-tertiary); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
-.composer-inner { display: flex; align-items: flex-end; gap: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; transition: border-color 0.2s; }
+.composer-inner { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 8px 8px 16px; transition: border-color 0.2s; }
 .composer-inner:focus-within { border-color: var(--accent); }
-.composer-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 14px; color: var(--text); outline: none; resize: none; min-height: 20px; max-height: 120px; line-height: 1.5; }
+.composer-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 14px; color: var(--text); outline: none; resize: none; min-height: 28px; max-height: 120px; line-height: 1.5; padding: 4px 0; align-self: center; }
 .composer-input::placeholder { color: var(--text-tertiary); }
-.composer-send { width: 32px; height: 32px; border: none; background: var(--accent); color: white; border-radius: 8px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: all 0.15s; }
-.composer-send:hover { background: var(--accent-warm); }
-.composer-send:disabled { opacity: 0.3; cursor: not-allowed; }
+.composer-send {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--cyan-400);
+  color: #0b3a44;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  transition: background 0.15s, opacity 0.15s;
+}
+.composer-send:hover:not(:disabled) { background: var(--cyan-500); color: #fff; }
+.composer-send:disabled { background: var(--neutral-200); color: var(--neutral-400); cursor: not-allowed; }
 
 /* ─── Composer context hint ─── */
 .composer-context-hint { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); font-style: italic; }

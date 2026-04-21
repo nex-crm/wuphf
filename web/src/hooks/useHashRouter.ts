@@ -6,6 +6,8 @@ type Route =
   | { view: 'dm'; agent: string }
   | { view: 'app'; app: string }
   | { view: 'wiki'; articlePath: string | null }
+  | { view: 'notebooks'; agentSlug: string | null; entrySlug: string | null }
+  | { view: 'reviews' }
 
 function parseHash(hash: string): Route {
   const cleaned = hash.replace(/^#\/?/, '')
@@ -26,6 +28,14 @@ function parseHash(hash: string): Route {
     const rest = parts.slice(1).map(decodeURIComponent).join('/')
     return { view: 'wiki', articlePath: rest || null }
   }
+  if (parts[0] === 'notebooks') {
+    const agent = parts[1] ? decodeURIComponent(parts[1]) : null
+    const entry = parts[2] ? decodeURIComponent(parts[2]) : null
+    return { view: 'notebooks', agentSlug: agent, entrySlug: entry }
+  }
+  if (parts[0] === 'reviews') {
+    return { view: 'reviews' }
+  }
   return { view: 'channel', channel: 'general' }
 }
 
@@ -34,11 +44,24 @@ function stateToHash(state: {
   currentChannel: string
   channelMeta: Record<string, ChannelMeta>
   wikiPath: string | null
+  notebookAgentSlug: string | null
+  notebookEntrySlug: string | null
 }): string {
   if (state.currentApp === 'wiki') {
     return state.wikiPath
       ? `#/wiki/${state.wikiPath.split('/').map(encodeURIComponent).join('/')}`
       : '#/wiki'
+  }
+  if (state.currentApp === 'notebooks') {
+    const parts: string[] = ['notebooks']
+    if (state.notebookAgentSlug) parts.push(encodeURIComponent(state.notebookAgentSlug))
+    if (state.notebookAgentSlug && state.notebookEntrySlug) {
+      parts.push(encodeURIComponent(state.notebookEntrySlug))
+    }
+    return `#/${parts.join('/')}`
+  }
+  if (state.currentApp === 'reviews') {
+    return '#/reviews'
   }
   if (state.currentApp) {
     return `#/apps/${encodeURIComponent(state.currentApp)}`
@@ -53,10 +76,12 @@ function stateToHash(state: {
 /**
  * Two-way sync between the Zustand app store and the location hash.
  *
- *   #/channels/<slug> ↔ currentChannel=<slug>, currentApp=null
- *   #/dm/<agent>      ↔ currentChannel=dm-human-<agent>, channelMeta marked type 'D'
- *   #/apps/<id>       ↔ currentApp=<id>
- *   #/wiki[/<path>]   ↔ currentApp='wiki', wikiPath=<path>
+ *   #/channels/<slug>            ↔ currentChannel=<slug>, currentApp=null
+ *   #/dm/<agent>                 ↔ currentChannel=dm-human-<agent>, channelMeta marked type 'D'
+ *   #/apps/<id>                  ↔ currentApp=<id>
+ *   #/wiki[/<path>]              ↔ currentApp='wiki', wikiPath=<path>
+ *   #/notebooks[/<agent>[/<e>]]  ↔ currentApp='notebooks', notebookAgentSlug, notebookEntrySlug
+ *   #/reviews                    ↔ currentApp='reviews'
  *
  * Lets the user bookmark any screen and share URLs. Silent fallback to
  * the channel view if the hash is malformed.
@@ -71,6 +96,9 @@ export function useHashRouter() {
   const setLastMessageId = useAppStore((s) => s.setLastMessageId)
   const wikiPath = useAppStore((s) => s.wikiPath)
   const setWikiPath = useAppStore((s) => s.setWikiPath)
+  const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug)
+  const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug)
+  const setNotebookRoute = useAppStore((s) => s.setNotebookRoute)
 
   // Avoid ping-ponging: skip the next hashchange or store-sync when we
   // were the one that caused it.
@@ -94,6 +122,11 @@ export function useHashRouter() {
       } else if (route.view === 'wiki') {
         setWikiPath(route.articlePath)
         setCurrentApp('wiki')
+      } else if (route.view === 'notebooks') {
+        setNotebookRoute(route.agentSlug, route.entrySlug)
+        setCurrentApp('notebooks')
+      } else if (route.view === 'reviews') {
+        setCurrentApp('reviews')
       } else {
         setCurrentApp(null)
         setCurrentChannel(route.channel)
@@ -104,7 +137,7 @@ export function useHashRouter() {
     applyHash()
     window.addEventListener('hashchange', applyHash)
     return () => window.removeEventListener('hashchange', applyHash)
-  }, [enterDM, setCurrentApp, setCurrentChannel, setLastMessageId, setWikiPath])
+  }, [enterDM, setCurrentApp, setCurrentChannel, setLastMessageId, setWikiPath, setNotebookRoute])
 
   // Push store changes back into the hash
   useEffect(() => {
@@ -112,12 +145,19 @@ export function useHashRouter() {
       ignoreNextStoreSync.current = false
       return
     }
-    const next = stateToHash({ currentApp, currentChannel, channelMeta, wikiPath })
+    const next = stateToHash({
+      currentApp,
+      currentChannel,
+      channelMeta,
+      wikiPath,
+      notebookAgentSlug,
+      notebookEntrySlug,
+    })
     if (next !== window.location.hash) {
       ignoreNextHashChange.current = true
       // Use replaceState for the initial sync so we don't spam history,
       // then push afterwards.
       window.history.replaceState(null, '', next)
     }
-  }, [currentApp, currentChannel, channelMeta, wikiPath])
+  }, [currentApp, currentChannel, channelMeta, wikiPath, notebookAgentSlug, notebookEntrySlug])
 }

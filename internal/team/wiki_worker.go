@@ -34,6 +34,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -78,7 +80,38 @@ type wikiWriteRequest struct {
 	Content   string
 	Mode      string
 	CommitMsg string
-	ReplyCh   chan wikiWriteResult
+	// IsNotebook routes the request to Repo.CommitNotebook instead of
+	// Repo.Commit. Same serialization primitive; different target subtree
+	// and no team-wiki index regen. See notebook_worker.go.
+	IsNotebook bool
+	// IsEntityFact routes the request to Repo.CommitEntityFact. Used for
+	// the v1.2 append-only fact log at team/entities/{kind}-{slug}.facts.jsonl
+	// — same serialization primitive, non-.md extension, no index regen.
+	IsEntityFact bool
+	// IsPlaybookCompile routes to Repo.CommitPlaybookSkill — writes the
+	// compiled SKILL.md under team/playbooks/.compiled/{slug}/ without
+	// regenerating the catalog. v1.3 compounding-intelligence compiler.
+	IsPlaybookCompile bool
+	// IsPlaybookExecution routes to Repo.CommitPlaybookExecution — appends
+	// to team/playbooks/{slug}.executions.jsonl. Same append-only semantics
+	// as entity facts.
+	IsPlaybookExecution bool
+	// PlaybookSlug carries the source slug so the post-write hook can
+	// enqueue a follow-up recompile without re-parsing the path.
+	PlaybookSlug string
+	// IsImageAsset routes the request to Repo.CommitImageAsset. Used for the
+	// v1.3 image upload pipeline. Payload travels via ImagePayload +
+	// ThumbRelPath + ThumbBytes rather than the text Content field because
+	// image bytes are not valid UTF-8 and must not be lossy-converted.
+	IsImageAsset bool
+	ImagePayload []byte
+	ThumbRelPath string
+	ThumbBytes   []byte
+	// IsImageAlt routes the request to Repo.CommitImageAltText. Alt text is
+	// a separate commit so the vision LLM round-trip does not block the
+	// upload response path.
+	IsImageAlt bool
+	ReplyCh    chan wikiWriteResult
 }
 
 // wikiWriteResult is the worker's reply for a single request.
@@ -94,11 +127,52 @@ type wikiEventPublisher interface {
 	PublishWikiEvent(evt wikiWriteEvent)
 }
 
+// wikiSectionsNotifier is the optional hook the worker pokes on every
+// successful wiki write so the sections cache can debounce + recompute.
+// Kept as its own interface so wiki_worker.go doesn't take a hard
+// dependency on the sections cache (which lives in wiki_sections.go).
+type wikiSectionsNotifier interface {
+	EnqueueSectionsRefresh()
+}
+
 // noopPublisher is used when the worker runs without a broker attached
 // (tests, or --memory-backend markdown without a broker yet).
 type noopPublisher struct{}
 
-func (noopPublisher) PublishWikiEvent(wikiWriteEvent) {}
+func (noopPublisher) PublishWikiEvent(wikiWriteEvent)             {}
+func (noopPublisher) PublishNotebookEvent(notebookWriteEvent)     {}
+func (noopPublisher) PublishImageUploaded(imageUploadedEvent)     {}
+func (noopPublisher) PublishImageAltUpdated(imageAltUpdatedEvent) {}
+func (noopPublisher) PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent) {
+}
+
+// imageUploadedEvent is the SSE payload emitted after a successful upload.
+// ThumbPath is empty for SVGs and for raster sources already narrower than
+// the thumbnail width.
+type imageUploadedEvent struct {
+	Path       string `json:"path"`
+	ThumbPath  string `json:"thumb_path,omitempty"`
+	CommitSHA  string `json:"commit_sha"`
+	AuthorSlug string `json:"author_slug"`
+	Timestamp  string `json:"timestamp"`
+}
+
+// imageAltUpdatedEvent is emitted after the vision agent writes a sidecar.
+// Wire name "wiki:image_alt_updated".
+type imageAltUpdatedEvent struct {
+	AltPath    string `json:"alt_path"`
+	CommitSHA  string `json:"commit_sha"`
+	AuthorSlug string `json:"author_slug"`
+	Timestamp  string `json:"timestamp"`
+}
+
+// imageEventPublisher is the extension the worker needs to emit image-
+// scoped SSE events. Broker satisfies this alongside the wiki/notebook
+// variants.
+type imageEventPublisher interface {
+	PublishImageUploaded(evt imageUploadedEvent)
+	PublishImageAltUpdated(evt imageAltUpdatedEvent)
+}
 
 // WikiWorker owns the single goroutine that drains the write request queue.
 type WikiWorker struct {
@@ -110,6 +184,11 @@ type WikiWorker struct {
 	mu            sync.Mutex // guards lastBackupAt
 	lastBackupAt  time.Time
 	backupPending atomic.Bool
+
+	// sideGoroutines tracks async helpers (e.g. auto-recompile) spawned
+	// from the drain loop so Stop() can wait for them before closing the
+	// request channel.
+	sideGoroutines sync.WaitGroup
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
@@ -136,10 +215,16 @@ func (w *WikiWorker) Start(ctx context.Context) {
 
 // Stop is a test helper that closes the request channel so the drain loop
 // returns. Production code should cancel the context passed to Start instead.
+//
+// Ordering matters: mark as stopped → wait for any in-flight side
+// goroutines (e.g. auto-recompile helpers that take the queue) → close
+// the channel. Without the wait, a recompile goroutine can attempt to
+// send on a closed channel and panic.
 func (w *WikiWorker) Stop() {
 	if !w.running.Swap(false) {
 		return
 	}
+	w.sideGoroutines.Wait()
 	close(w.requests)
 }
 
@@ -197,24 +282,122 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	writeCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
 	defer cancel()
 
-	// Commit owns the full atomic unit: write article bytes, regenerate the
-	// catalog, stage both, commit together. That keeps the working tree
-	// clean and the index commit attributable to the same author as the
-	// article edit. No post-commit IndexRegen here.
-	sha, n, err := w.repo.Commit(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
+	var (
+		sha string
+		n   int
+		err error
+	)
+	if req.IsEntityFact {
+		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsImageAsset {
+		sha, n, err = w.repo.CommitImageAsset(writeCtx, req.Slug, req.Path, req.ImagePayload, req.ThumbRelPath, req.ThumbBytes, req.CommitMsg)
+	} else if req.IsImageAlt {
+		sha, n, err = w.repo.CommitImageAltText(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsPlaybookCompile {
+		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsPlaybookExecution {
+		sha, n, err = w.repo.CommitPlaybookExecution(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsNotebook {
+		// Notebook writes do NOT regen the team wiki index. Commit target is
+		// agents/{slug}/notebook/... — scoped to the author.
+		sha, n, err = w.repo.CommitNotebook(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
+	} else {
+		// Wiki Commit owns the full atomic unit: write article bytes, regen
+		// the catalog, stage both, commit together. That keeps the working
+		// tree clean and the index commit attributable to the same author as
+		// the article edit. No post-commit IndexRegen here.
+		sha, n, err = w.repo.Commit(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
+	}
 	if err != nil {
 		req.ReplyCh <- wikiWriteResult{Err: err}
 		return
 	}
 	req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
 
-	evt := wikiWriteEvent{
-		Path:       req.Path,
-		CommitSHA:  sha,
-		AuthorSlug: req.Slug,
-		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+	ts := time.Now().UTC().Format(time.RFC3339)
+	switch {
+	case req.IsEntityFact:
+		// Entity fact writes have their own SSE event (entity:fact_recorded)
+		// published by the broker handler, not by the worker. No-op here.
+	case req.IsImageAsset:
+		if imgPub, ok := w.publisher.(imageEventPublisher); ok {
+			imgPub.PublishImageUploaded(imageUploadedEvent{
+				Path:       req.Path,
+				ThumbPath:  req.ThumbRelPath,
+				CommitSHA:  sha,
+				AuthorSlug: req.Slug,
+				Timestamp:  ts,
+			})
+		}
+	case req.IsImageAlt:
+		// Alt-text updates piggyback on the image event stream so the UI
+		// can re-fetch the brief without a second listener. Payload type
+		// is distinct so clients can tell them apart.
+		if imgPub, ok := w.publisher.(imageEventPublisher); ok {
+			imgPub.PublishImageAltUpdated(imageAltUpdatedEvent{
+				AltPath:    req.Path,
+				CommitSHA:  sha,
+				AuthorSlug: req.Slug,
+				Timestamp:  ts,
+			})
+		}
+	case req.IsPlaybookCompile:
+		// Compile writes are internal — no SSE event. The trigger (the
+		// source-article commit) already published wiki:write; emitting a
+		// second event for the compiled skill would double-count in the
+		// feed for callers that don't care about the hidden directory.
+	case req.IsPlaybookExecution:
+		if pbPub, ok := w.publisher.(playbookEventPublisher); ok {
+			pbPub.PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedEvent{
+				Slug:       req.PlaybookSlug,
+				Path:       req.Path,
+				CommitSHA:  sha,
+				RecordedBy: req.Slug,
+				Timestamp:  ts,
+			})
+		}
+	case req.IsNotebook:
+		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
+			nbPub.PublishNotebookEvent(notebookWriteEvent{
+				Slug:      req.Slug,
+				Path:      req.Path,
+				CommitSHA: sha,
+				Timestamp: ts,
+			})
+		}
+	default:
+		w.publisher.PublishWikiEvent(wikiWriteEvent{
+			Path:       req.Path,
+			CommitSHA:  sha,
+			AuthorSlug: req.Slug,
+			Timestamp:  ts,
+		})
+		// Poke the sections cache so it debounces + recomputes. Only
+		// fired on team wiki writes — notebook + entity-fact writes
+		// never change the sidebar IA.
+		if notifier, ok := w.publisher.(wikiSectionsNotifier); ok {
+			notifier.EnqueueSectionsRefresh()
+		}
+		// Auto-recompile trigger: a standard wiki write to team/playbooks/{slug}.md
+		// should kick off a compile. We do it in a side goroutine so the
+		// current request's drain slot is released before the recompile job
+		// tries to enter the queue — the queue is single-reader, so doing
+		// it inline would deadlock on a full buffer.
+		if slug, ok := PlaybookSlugFromPath(req.Path); ok {
+			w.sideGoroutines.Add(1)
+			go func(slug, authorSlug string) {
+				defer w.sideGoroutines.Done()
+				if !w.running.Load() {
+					return
+				}
+				bgCtx, cancel := context.WithTimeout(context.Background(), wikiWriteTimeout*2)
+				defer cancel()
+				if _, _, err := w.EnqueuePlaybookCompile(bgCtx, slug, authorSlug); err != nil {
+					log.Printf("playbook: auto-recompile %s failed: %v", slug, err)
+				}
+			}(slug, req.Slug)
+		}
 	}
-	w.publisher.PublishWikiEvent(evt)
 
 	w.maybeScheduleBackup(ctx)
 }
@@ -253,10 +436,211 @@ func (w *WikiWorker) QueueLength() int {
 	return len(w.requests)
 }
 
+// EnqueueEntityFact submits a fact-log append to the shared wiki queue.
+// The path must be team/entities/{kind}-{slug}.facts.jsonl and is routed
+// to Repo.CommitEntityFact (which does NOT regen the wiki index).
+func (w *WikiWorker) EnqueueEntityFact(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:         slug,
+		Path:         path,
+		Content:      content,
+		Mode:         "replace",
+		CommitMsg:    commitMsg,
+		IsEntityFact: true,
+		ReplyCh:      make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: entity-fact write timed out after %s", wikiWriteTimeout)
+	}
+}
+
 // Repo returns the underlying wiki repo — used by read-side broker handlers
 // which do not need the serialized write queue.
 func (w *WikiWorker) Repo() *Repo {
 	return w.repo
+}
+
+// EnqueueImageAsset submits an image upload to the shared wiki queue. The
+// caller has already sanitized the asset path and generated the thumbnail.
+// Returns the commit SHA and the asset byte count.
+func (w *WikiWorker) EnqueueImageAsset(
+	ctx context.Context,
+	slug, assetRelPath string,
+	payload []byte,
+	thumbRelPath string,
+	thumbBytes []byte,
+	commitMsg string,
+) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:         slug,
+		Path:         assetRelPath,
+		Mode:         "replace",
+		CommitMsg:    commitMsg,
+		IsImageAsset: true,
+		ImagePayload: payload,
+		ThumbRelPath: thumbRelPath,
+		ThumbBytes:   thumbBytes,
+		ReplyCh:      make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: image upload timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueueImageAlt submits an alt-text sidecar commit to the shared queue.
+// Author slug is usually "archivist" (vision agent), but any slug works.
+func (w *WikiWorker) EnqueueImageAlt(ctx context.Context, slug, altRelPath, altText, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:       slug,
+		Path:       altRelPath,
+		Content:    altText,
+		Mode:       "replace",
+		CommitMsg:  commitMsg,
+		IsImageAlt: true,
+		ReplyCh:    make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: image alt commit timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueuePlaybookCompile runs CompilePlaybook against the current on-disk
+// source and submits the output to the queue as a compiled-skill write.
+// The commit is attributed to the archivist identity regardless of who
+// authored the source edit — the compilation is a machine artifact.
+func (w *WikiWorker) EnqueuePlaybookCompile(ctx context.Context, slug, _ string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	sourcePath := playbookSourceRel(slug)
+	relSkill, err := CompilePlaybook(w.repo, sourcePath)
+	if err != nil {
+		return "", 0, err
+	}
+	fullSkill := filepath.Join(w.repo.Root(), filepath.FromSlash(relSkill))
+	// Read what CompilePlaybook just wrote; the queue submission must carry
+	// the full file bytes because CommitPlaybookSkill rewrites the file from
+	// content (mirrors entity-fact append).
+	skillBytes, rerr := os.ReadFile(fullSkill)
+	if rerr != nil {
+		return "", 0, fmt.Errorf("playbook: read compiled skill back: %w", rerr)
+	}
+	req := wikiWriteRequest{
+		Slug:              ArchivistAuthor,
+		Path:              relSkill,
+		Content:           string(skillBytes),
+		Mode:              "replace",
+		CommitMsg:         fmt.Sprintf("archivist: compile playbook %s", slug),
+		IsPlaybookCompile: true,
+		PlaybookSlug:      slug,
+		ReplyCh:           make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("playbook: compile write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueuePlaybookExecution submits an execution-log append to the shared
+// queue. Used by ExecutionLog.Append; mirrors EnqueueEntityFact shape.
+func (w *WikiWorker) EnqueuePlaybookExecution(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	// Extract the playbook slug from the jsonl path so the SSE event can
+	// carry it without a second parse on the subscriber side.
+	pbSlug := executionPlaybookSlug(path)
+	req := wikiWriteRequest{
+		Slug:                slug,
+		Path:                path,
+		Content:             content,
+		Mode:                "replace",
+		CommitMsg:           commitMsg,
+		IsPlaybookExecution: true,
+		PlaybookSlug:        pbSlug,
+		ReplyCh:             make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("playbook: execution write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// playbookSourceRel resolves the source-article path for a slug.
+func playbookSourceRel(slug string) string {
+	return "team/playbooks/" + slug + ".md"
+}
+
+// executionPlaybookSlug extracts the slug from a jsonl log path. Returns
+// "" when the shape is wrong — the caller uses that only for the SSE event
+// payload, so a blank slug is not load-bearing.
+func executionPlaybookSlug(path string) string {
+	if !executionLogPathPattern.MatchString(path) {
+		return ""
+	}
+	base := filepath.Base(path)
+	const suffix = ".executions.jsonl"
+	if strings.HasSuffix(base, suffix) {
+		return strings.TrimSuffix(base, suffix)
+	}
+	return ""
 }
 
 // handleWikiWrite is the broker HTTP endpoint the MCP subprocess posts to

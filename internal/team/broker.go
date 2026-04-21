@@ -428,42 +428,55 @@ type ipRateLimitBucket struct {
 // Broker is a lightweight HTTP message broker for the team channel.
 // All agent MCP instances connect to this shared broker.
 type Broker struct {
-	channelStore        *channel.Store
-	messages            []channelMessage
-	members             []officeMember
-	memberIndex         map[string]int // slug → index into members; guarded by mu
-	channels            []teamChannel
-	sessionMode         string
-	oneOnOneAgent       string
-	focusMode           bool
-	tasks               []teamTask
-	requests            []humanInterview
-	actions             []officeActionLog
-	signals             []officeSignalRecord
-	decisions           []officeDecisionRecord
-	watchdogs           []watchdogAlert
-	scheduler           []schedulerJob
-	skills              []teamSkill
-	sharedMemory        map[string]map[string]string // namespace → key → value
-	lastTaggedAt        map[string]time.Time         // when each agent was last @mentioned
-	lastPaneSnapshot    map[string]string            // last captured pane content per agent (for change detection)
-	seenTelegramGroups  map[int64]string             // chat_id -> title, populated by transport
-	counter             int
-	notificationSince   string
-	insightsSince       string
-	pendingInterview    *humanInterview
-	usage               teamUsageState
-	externalDelivered   map[string]struct{} // message IDs already queued for external delivery
-	messageSubscribers  map[int]chan channelMessage
-	actionSubscribers   map[int]chan officeActionLog
-	activity            map[string]agentActivitySnapshot
-	activitySubscribers map[int]chan agentActivitySnapshot
-	officeSubscribers   map[int]chan officeChangeEvent
-	wikiSubscribers     map[int]chan wikiWriteEvent
-	wikiWorker          *WikiWorker
-	nextSubscriberID    int
-	agentStreams        map[string]*agentStreamBuffer
-	mu                  sync.Mutex
+	channelStore            *channel.Store
+	messages                []channelMessage
+	members                 []officeMember
+	memberIndex             map[string]int // slug → index into members; guarded by mu
+	channels                []teamChannel
+	sessionMode             string
+	oneOnOneAgent           string
+	focusMode               bool
+	tasks                   []teamTask
+	requests                []humanInterview
+	actions                 []officeActionLog
+	signals                 []officeSignalRecord
+	decisions               []officeDecisionRecord
+	watchdogs               []watchdogAlert
+	scheduler               []schedulerJob
+	skills                  []teamSkill
+	sharedMemory            map[string]map[string]string // namespace → key → value
+	lastTaggedAt            map[string]time.Time         // when each agent was last @mentioned
+	lastPaneSnapshot        map[string]string            // last captured pane content per agent (for change detection)
+	seenTelegramGroups      map[int64]string             // chat_id -> title, populated by transport
+	counter                 int
+	notificationSince       string
+	insightsSince           string
+	pendingInterview        *humanInterview
+	usage                   teamUsageState
+	externalDelivered       map[string]struct{} // message IDs already queued for external delivery
+	messageSubscribers      map[int]chan channelMessage
+	actionSubscribers       map[int]chan officeActionLog
+	activity                map[string]agentActivitySnapshot
+	activitySubscribers     map[int]chan agentActivitySnapshot
+	officeSubscribers       map[int]chan officeChangeEvent
+	wikiSubscribers         map[int]chan wikiWriteEvent
+	notebookSubscribers     map[int]chan notebookWriteEvent
+	reviewSubscribers       map[int]chan ReviewStateChangeEvent
+	entitySubscribers       map[int]chan EntityBriefSynthesizedEvent
+	factSubscribers         map[int]chan EntityFactRecordedEvent
+	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
+	imageSubscribers        map[int]chan imageUploadedEvent
+	imageAltSubscribers     map[int]chan imageAltUpdatedEvent
+	wikiWorker              *WikiWorker
+	wikiSectionsCache       *wikiSectionsCache
+	reviewLog               *ReviewLog
+	reviewResolver          ReviewerResolver
+	factLog                 *FactLog
+	entitySynthesizer       *EntitySynthesizer
+	scanTracker             *scanStatusTracker
+	nextSubscriberID        int
+	agentStreams            map[string]*agentStreamBuffer
+	mu                      sync.Mutex
 	// configMu serializes handleConfig POST reads/writes so concurrent
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
@@ -850,6 +863,12 @@ func NewBroker() *Broker {
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
 		officeSubscribers:   make(map[int]chan officeChangeEvent),
 		wikiSubscribers:     make(map[int]chan wikiWriteEvent),
+		notebookSubscribers: make(map[int]chan notebookWriteEvent),
+		reviewSubscribers:   make(map[int]chan ReviewStateChangeEvent),
+		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
+		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
+		imageSubscribers:    make(map[int]chan imageUploadedEvent),
+		imageAltSubscribers: make(map[int]chan imageAltUpdatedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
@@ -967,7 +986,7 @@ func (b *Broker) SubscribeActivity(buffer int) (<-chan agentActivitySnapshot, fu
 }
 
 type officeChangeEvent struct {
-	Kind string `json:"kind"` // "member_created", "member_removed", "channel_created", "channel_removed"
+	Kind string `json:"kind"` // "member_created", "member_removed", "channel_created", "channel_removed", "channel_updated", "office_reseeded"
 	Slug string `json:"slug"`
 }
 
@@ -1120,6 +1139,11 @@ func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	b.ensureWikiSectionsCache()
+	b.ensureReviewLog()
+	b.ensureEntitySynthesizer()
+	b.ensurePlaybookExecutionLog()
+	b.startReviewExpiryLoop(context.Background())
 	return b.StartOnPort(brokeraddr.ResolvePort())
 }
 
@@ -1197,6 +1221,32 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
+	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
+	mux.HandleFunc("/wiki/images", b.requireAuth(b.handleWikiImageUpload))
+	mux.HandleFunc("/wiki/images/describe", b.requireAuth(b.handleWikiImageDescribe))
+	mux.HandleFunc("/wiki/images/alt", b.requireAuth(b.handleWikiImageAltGet))
+	// /wiki/assets/ is a path-prefix route; served without auth so <img
+	// src="/wiki/assets/..."> works from the web UI without token shuffling.
+	// Bytes are content-addressed + CSP-locked, so public GETs are safe.
+	mux.HandleFunc("/wiki/assets/", b.handleWikiAssetServe)
+	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
+	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
+	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
+	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
+	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
+	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
+	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
+	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
+	mux.HandleFunc("/entity/fact", b.requireAuth(b.handleEntityFact))
+	mux.HandleFunc("/entity/brief/synthesize", b.requireAuth(b.handleEntityBriefSynthesize))
+	mux.HandleFunc("/entity/facts", b.requireAuth(b.handleEntityFactsList))
+	mux.HandleFunc("/entity/briefs", b.requireAuth(b.handleEntityBriefsList))
+	mux.HandleFunc("/playbook/list", b.requireAuth(b.handlePlaybookList))
+	mux.HandleFunc("/playbook/compile", b.requireAuth(b.handlePlaybookCompile))
+	mux.HandleFunc("/playbook/execution", b.requireAuth(b.handlePlaybookExecution))
+	mux.HandleFunc("/playbook/executions", b.requireAuth(b.handlePlaybookExecutionsList))
+	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
+	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
 	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
 	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
@@ -1269,6 +1319,12 @@ func (b *Broker) StartOnPort(port int) error {
 func (b *Broker) Stop() {
 	if b.server != nil {
 		_ = b.server.Close()
+	}
+	b.mu.Lock()
+	synth := b.entitySynthesizer
+	b.mu.Unlock()
+	if synth != nil {
+		synth.Stop()
 	}
 }
 
@@ -1690,6 +1746,20 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeOffice()
 	wikiEvents, unsubscribeWiki := b.SubscribeWikiEvents(64)
 	defer unsubscribeWiki()
+	notebookEvents, unsubscribeNotebook := b.SubscribeNotebookEvents(64)
+	defer unsubscribeNotebook()
+	entityEvents, unsubscribeEntity := b.SubscribeEntityBriefEvents(64)
+	defer unsubscribeEntity()
+	factEvents, unsubscribeFacts := b.SubscribeEntityFactEvents(64)
+	defer unsubscribeFacts()
+	sectionsEvents, unsubscribeSections := b.SubscribeWikiSectionsUpdated(16)
+	defer unsubscribeSections()
+	imageEvents, unsubscribeImages := b.SubscribeImageEvents(64)
+	defer unsubscribeImages()
+	imageAltEvents, unsubscribeImageAlts := b.SubscribeImageAltEvents(64)
+	defer unsubscribeImageAlts()
+	playbookEvents, unsubscribePlaybook := b.SubscribePlaybookExecutionEvents(64)
+	defer unsubscribePlaybook()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1732,6 +1802,34 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-wikiEvents:
 			if !ok || writeEvent("wiki:write", evt) != nil {
+				return
+			}
+		case evt, ok := <-notebookEvents:
+			if !ok || writeEvent("notebook:write", evt) != nil {
+				return
+			}
+		case evt, ok := <-entityEvents:
+			if !ok || writeEvent("entity:brief_synthesized", evt) != nil {
+				return
+			}
+		case evt, ok := <-factEvents:
+			if !ok || writeEvent("entity:fact_recorded", evt) != nil {
+				return
+			}
+		case evt, ok := <-sectionsEvents:
+			if !ok || writeEvent(wikiSectionsEventName, evt) != nil {
+				return
+			}
+		case evt, ok := <-imageEvents:
+			if !ok || writeEvent("wiki:image_uploaded", evt) != nil {
+				return
+			}
+		case evt, ok := <-imageAltEvents:
+			if !ok || writeEvent("wiki:image_alt_updated", evt) != nil {
+				return
+			}
+		case evt, ok := <-playbookEvents:
+			if !ok || writeEvent("playbook:execution_recorded", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:

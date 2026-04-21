@@ -1,4 +1,4 @@
-import { Component, useEffect, useState, type ReactNode } from 'react'
+import { Component, useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { initApi, get } from './api/client'
 import { useAppStore, isDMChannel } from './stores/app'
 import { Shell } from './components/layout/Shell'
@@ -17,6 +17,10 @@ import { HealthCheckApp } from './components/apps/HealthCheckApp'
 import { SettingsApp } from './components/apps/SettingsApp'
 import { ThreadsApp } from './components/apps/ThreadsApp'
 import Wiki from './components/wiki/Wiki'
+import WikiTabs from './components/wiki/WikiTabs'
+import type { WikiTab } from './components/wiki/WikiTabs'
+import Notebook from './components/notebook/Notebook'
+import ReviewQueueKanban from './components/review/ReviewQueueKanban'
 import { Wizard } from './components/onboarding/Wizard'
 import { AgentPanel } from './components/agents/AgentPanel'
 import { SearchModal } from './components/search/SearchModal'
@@ -28,11 +32,13 @@ import { ConfirmHost } from './components/ui/ConfirmDialog'
 import { ProviderSwitcherHost } from './components/ui/ProviderSwitcher'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useHashRouter } from './hooks/useHashRouter'
+import './styles/shadcn.css'
 import './styles/global.css'
 import './styles/layout.css'
 import './styles/messages.css'
 import './styles/agents.css'
 import './styles/search.css'
+import './styles/wiki-shell.css'
 
 // ── Error boundary ─────────────────────────────────────────────
 
@@ -94,29 +100,66 @@ function MainContent() {
   const wikiPath = useAppStore((s) => s.wikiPath)
   const setWikiPath = useAppStore((s) => s.setWikiPath)
   const setCurrentApp = useAppStore((s) => s.setCurrentApp)
+  const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug)
+  const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug)
+  const setNotebookRoute = useAppStore((s) => s.setNotebookRoute)
 
   if (!currentApp && isDMChannel(currentChannel, channelMeta)) {
     return <DMView />
   }
 
-  if (currentApp === 'wiki') {
+  // Wiki, Notebooks, and Reviews share one app shell with a tab bar on top.
+  // The surfaces underneath keep their own design systems (.wiki-surface vs
+  // .notebook-surface) but the parent chrome is unified.
+  if (currentApp === 'wiki' || currentApp === 'notebooks' || currentApp === 'reviews') {
+    const handleTabChange = (tab: WikiTab) => {
+      if (tab === 'wiki') {
+        setCurrentApp('wiki')
+      } else if (tab === 'notebooks') {
+        setNotebookRoute(null, null)
+        setCurrentApp('notebooks')
+      } else {
+        setCurrentApp('reviews')
+      }
+    }
+
     return (
-      <Wiki
-        articlePath={wikiPath}
-        onNavigate={(path) => {
-          if (path === null) {
-            setCurrentApp(null)
-            setWikiPath(null)
-          } else {
-            setWikiPath(path || null)
-          }
-        }}
-      />
+      <div className="wiki-shell">
+        <WikiTabs current={currentApp} onSelect={handleTabChange} />
+        <div className="wiki-shell-body">
+          {currentApp === 'wiki' && (
+            <Wiki
+              articlePath={wikiPath}
+              onNavigate={(path) => {
+                if (path === null) {
+                  setWikiPath(null)
+                } else {
+                  setWikiPath(path || null)
+                }
+              }}
+            />
+          )}
+          {currentApp === 'notebooks' && (
+            <Notebook
+              agentSlug={notebookAgentSlug}
+              entrySlug={notebookEntrySlug}
+              onOpenCatalog={() => setNotebookRoute(null, null)}
+              onOpenAgent={(slug) => setNotebookRoute(slug, null)}
+              onOpenEntry={(slug, entry) => setNotebookRoute(slug, entry)}
+              onNavigateWiki={(path) => {
+                setCurrentApp('wiki')
+                setWikiPath(path || null)
+              }}
+            />
+          )}
+          {currentApp === 'reviews' && <ReviewQueueKanban />}
+        </div>
+      </div>
     )
   }
 
   if (currentApp) {
-    const panels: Record<string, React.ComponentType> = {
+    const panels: Record<string, ComponentType> = {
       tasks: TasksApp,
       requests: RequestsApp,
       policies: PoliciesApp,
