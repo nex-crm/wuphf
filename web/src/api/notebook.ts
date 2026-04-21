@@ -178,7 +178,7 @@ export async function fetchEntry(
 export async function fetchReviews(): Promise<ReviewItem[]> {
   if (!useMocks()) {
     try {
-      const res = await get<{ reviews: ReviewItem[] }>('/reviews')
+      const res = await get<{ reviews: ReviewItem[] }>('/review/list?scope=all')
       return Array.isArray(res?.reviews) ? res.reviews : []
     } catch {
       // fall through to mocks
@@ -190,7 +190,7 @@ export async function fetchReviews(): Promise<ReviewItem[]> {
 export async function fetchReview(id: string): Promise<ReviewItem | null> {
   if (!useMocks()) {
     try {
-      return await get<ReviewItem>(`/reviews/${encodeURIComponent(id)}`)
+      return await get<ReviewItem>(`/review/${encodeURIComponent(id)}`)
     } catch {
       // fall through to mocks
     }
@@ -198,19 +198,37 @@ export async function fetchReview(id: string): Promise<ReviewItem | null> {
   return mockReview(id)
 }
 
-// ── Mutations (stubbed — Lane C). ────────────────────────────────
+// ── Mutations (Lane C: /review/*, /notebook/promote). ────────────
 
 export async function promoteEntry(
   agentSlug: string,
   entrySlug: string,
-  opts: { proposed_wiki_path?: string; reviewer_slug?: string } = {},
+  opts: { proposed_wiki_path?: string; reviewer_slug?: string; rationale?: string } = {},
 ): Promise<ReviewItem | null> {
   if (!useMocks()) {
     try {
-      return await post<ReviewItem>(
-        `/notebooks/${encodeURIComponent(agentSlug)}/${encodeURIComponent(entrySlug)}/promote`,
-        opts,
-      )
+      // Backend returns { promotion_id, reviewer_slug, state, human_only }.
+      // Fetch the full ReviewItem shape via the detail endpoint so UI gets
+      // the populated comment thread + timestamps in one call flow.
+      const target =
+        opts.proposed_wiki_path ??
+        `team/drafts/${agentSlug}-${entrySlug}.md`
+      const submitted = await post<{
+        promotion_id: string
+        reviewer_slug: string
+        state: ReviewState
+        human_only: boolean
+      }>('/notebook/promote', {
+        my_slug: agentSlug,
+        source_path: `agents/${agentSlug}/notebook/${entrySlug}.md`,
+        target_wiki_path: target,
+        rationale: opts.rationale ?? '',
+        reviewer_slug: opts.reviewer_slug,
+      })
+      if (submitted?.promotion_id) {
+        const full = await fetchReview(submitted.promotion_id)
+        if (full) return full
+      }
     } catch {
       // fall through — caller handles UI state
     }
@@ -237,12 +255,33 @@ export async function promoteEntry(
 export async function updateReviewState(
   id: string,
   state: ReviewState,
+  opts: { actor_slug?: string; rationale?: string } = {},
 ): Promise<ReviewItem | null> {
   if (!useMocks()) {
-    try {
-      return await post<ReviewItem>(`/reviews/${encodeURIComponent(id)}/state`, { state })
-    } catch {
-      // fall through
+    // Backend exposes state-specific verbs, not a generic /state POST.
+    // actor_slug empty = human action (web UI); non-empty = agent slug.
+    const verbMap: Record<ReviewState, string | null> = {
+      approved: 'approve',
+      'changes-requested': 'request-changes',
+      // 'rejected' is author-initiated withdraw; send via /reject.
+      // TypeScript's ReviewState union doesn't include 'rejected' today, but
+      // keep this fallthrough so the type widens cleanly when it does.
+      pending: null,
+      'in-review': 'resubmit',
+      archived: null,
+    }
+    const verb = verbMap[state]
+    if (verb) {
+      try {
+        await post<unknown>(`/review/${encodeURIComponent(id)}/${verb}`, {
+          actor_slug: opts.actor_slug ?? '',
+          rationale: opts.rationale ?? '',
+        })
+        const full = await fetchReview(id)
+        if (full) return full
+      } catch {
+        // fall through
+      }
     }
   }
   // Mock: mutate in-memory fixture so re-fetch reflects the change this
@@ -261,10 +300,12 @@ export async function postReviewComment(
 ): Promise<ReviewItem | null> {
   if (!useMocks()) {
     try {
-      return await post<ReviewItem>(`/reviews/${encodeURIComponent(id)}/comment`, {
-        body_md,
-        author_slug,
+      await post<unknown>(`/review/${encodeURIComponent(id)}/comment`, {
+        actor_slug: author_slug,
+        body: body_md,
       })
+      const full = await fetchReview(id)
+      if (full) return full
     } catch {
       // fall through
     }
