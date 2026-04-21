@@ -348,43 +348,57 @@ export async function postReviewComment(
 // ── SSE ──────────────────────────────────────────────────────────
 
 /**
- * Subscribe to broker notebook/review events.
+ * Subscribe to broker notebook + review events on the shared `/events`
+ * SSE stream. Returns an unsubscribe function that tears down the
+ * underlying EventSource.
  *
- * Event payloads:
- *   { type: 'notebook:write', agent_slug, entry_slug, who, timestamp }
- *   { type: 'review:state_change', review_id, state, who, timestamp }
+ * Previously this subscribed to `/notebooks/stream` — a path that never
+ * existed on the broker. Live notebook and review updates were dead in
+ * production. Matches `api/entity.ts`: broker emits named events
+ * (`event: notebook:write\ndata: ...`, `event: review:state_change\ndata: ...`)
+ * so we use `addEventListener` not `onmessage`.
  *
- * Returns an unsubscribe function. Failure is silent — the UI remains
- * interactive from TanStack Query cache.
+ * Event payloads (as emitted by broker.handleEvents):
+ *   notebook:write       — `{ slug, path, commit_sha, ts, ... }`
+ *   review:state_change  — `{ id, old_state, new_state, actor_slug, timestamp }`
+ *
+ * Handler normalizes both into the NotebookEvent discriminated union so
+ * downstream components can switch on `type`.
  */
 export function subscribeNotebookEvents(
   handler: (ev: NotebookEvent) => void,
 ): () => void {
   let closed = false
   let source: EventSource | null = null
+  const listeners: Array<[string, EventListener]> = []
 
   try {
-    source = new EventSource(sseURL('/notebooks/stream'))
-    source.onmessage = (ev) => {
+    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource
+    if (!ES) return () => { closed = true }
+    source = new ES(sseURL('/events'))
+
+    const onNotebook = (ev: MessageEvent) => {
       if (closed) return
       try {
         const data = JSON.parse(ev.data) as Record<string, unknown>
-        if (
-          data &&
-          (data.type === 'notebook:write' || data.type === 'review:state_change')
-        ) {
-          handler(data as unknown as NotebookEvent)
-        }
+        handler({ type: 'notebook:write', ...data } as unknown as NotebookEvent)
       } catch {
         // ignore malformed events
       }
     }
-    source.onerror = () => {
-      if (source) {
-        source.close()
-        source = null
+    const onReview = (ev: MessageEvent) => {
+      if (closed) return
+      try {
+        const data = JSON.parse(ev.data) as Record<string, unknown>
+        handler({ type: 'review:state_change', ...data } as unknown as NotebookEvent)
+      } catch {
+        // ignore malformed events
       }
     }
+    source.addEventListener('notebook:write', onNotebook as EventListener)
+    source.addEventListener('review:state_change', onReview as EventListener)
+    listeners.push(['notebook:write', onNotebook as EventListener])
+    listeners.push(['review:state_change', onReview as EventListener])
   } catch {
     source = null
   }
@@ -392,6 +406,7 @@ export function subscribeNotebookEvents(
   return () => {
     closed = true
     if (source) {
+      for (const [name, fn] of listeners) source.removeEventListener(name, fn)
       source.close()
       source = null
     }

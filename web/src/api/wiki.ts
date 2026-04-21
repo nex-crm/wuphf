@@ -98,41 +98,49 @@ export async function fetchHistory(
 }
 
 /**
- * Subscribe to broker SSE stream filtered for `wiki:write` events.
- * Returns an unsubscribe function. Falls back to a synthetic replay of
- * the mock edit log if the stream is unavailable.
+ * Subscribe to the shared broker `/events` SSE stream filtered to
+ * `wiki:write` events. Returns an unsubscribe function that tears down
+ * the underlying EventSource.
+ *
+ * Previously this subscribed to `/wiki/stream` — a path that never
+ * existed on the broker. Every call 404'd silently and live edit-log
+ * updates were dead in production. Matches the `api/entity.ts` pattern:
+ * broker emits named SSE events (`event: wiki:write\ndata: ...`) so we
+ * use `addEventListener('wiki:write', ...)` not `onmessage`.
  */
 export function subscribeEditLog(
   handler: (entry: WikiEditLogEntry) => void,
 ): () => void {
   let closed = false
   let source: EventSource | null = null
+  let onWrite: ((ev: MessageEvent) => void) | null = null
 
   try {
-    source = new EventSource(sseURL('/wiki/stream'))
-    source.onmessage = (ev) => {
+    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource
+    if (!ES) return () => { closed = true }
+    source = new ES(sseURL('/events'))
+    onWrite = (ev: MessageEvent) => {
       if (closed) return
       try {
         const data = JSON.parse(ev.data) as Record<string, unknown>
-        if (data && data.type === 'wiki:write') {
-          handler(data.entry as WikiEditLogEntry)
-        }
+        // Broker ships the full wikiWriteEvent envelope as the data
+        // payload; the edit-log UI only needs the entry fields.
+        const entry = (data.entry ?? data) as WikiEditLogEntry
+        handler(entry)
       } catch {
         // ignore malformed events
       }
     }
-    source.onerror = () => {
-      if (source) {
-        source.close()
-        source = null
-      }
-    }
+    source.addEventListener('wiki:write', onWrite as EventListener)
   } catch {
     source = null
   }
 
   return () => {
     closed = true
+    if (source && onWrite) {
+      source.removeEventListener('wiki:write', onWrite as EventListener)
+    }
     if (source) {
       source.close()
       source = null
