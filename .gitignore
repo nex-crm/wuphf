@@ -55,3 +55,7 @@ testdata/vhs/*.actual
 
 # Web test coverage output
 web/coverage/
+
+# Dev build artifacts
+wuphf-dev
+
