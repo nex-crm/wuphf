@@ -250,4 +250,3 @@ func TestLauncherShutdown_CleansAgentTempFiles(t *testing.T) {
 		}
 	}
 }
-
