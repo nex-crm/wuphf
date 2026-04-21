@@ -455,6 +455,8 @@ type Broker struct {
 	usage                   teamUsageState
 	externalDelivered       map[string]struct{} // message IDs already queued for external delivery
 	messageSubscribers      map[int]chan channelMessage
+	messageRemovedSubs      map[int]chan messageRemovedEvent
+	pendingRoutingBanners   map[string]routingBannerEntry
 	actionSubscribers       map[int]chan officeActionLog
 	activity                map[string]agentActivitySnapshot
 	activitySubscribers     map[int]chan agentActivitySnapshot
@@ -858,6 +860,7 @@ func NewBroker() *Broker {
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
 		messageSubscribers:  make(map[int]chan channelMessage),
+		messageRemovedSubs:  make(map[int]chan messageRemovedEvent),
 		actionSubscribers:   make(map[int]chan officeActionLog),
 		activity:            make(map[string]agentActivitySnapshot),
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
@@ -888,6 +891,7 @@ func NewBroker() *Broker {
 func (b *Broker) appendMessageLocked(msg channelMessage) {
 	b.messages = append(b.messages, msg)
 	b.publishMessageLocked(msg)
+	b.clearRoutingBannerForReplyLocked(msg)
 }
 
 func (b *Broker) publishMessageLocked(msg channelMessage) {
@@ -896,6 +900,47 @@ func (b *Broker) publishMessageLocked(msg channelMessage) {
 		case ch <- msg:
 		default:
 		}
+	}
+}
+
+type messageRemovedEvent struct {
+	Channel string `json:"channel"`
+	ID      string `json:"id"`
+}
+
+func (b *Broker) publishMessageRemovedLocked(channel, id string) {
+	evt := messageRemovedEvent{Channel: normalizeChannelSlug(channel), ID: id}
+	for _, ch := range b.messageRemovedSubs {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// SubscribeMessageRemoved returns a channel that receives message-removed
+// events (used for ephemeral banners like routing hints that disappear
+// once their target agent replies).
+func (b *Broker) SubscribeMessageRemoved(buffer int) (<-chan messageRemovedEvent, func()) {
+	if buffer <= 0 {
+		buffer = 1
+	}
+	ch := make(chan messageRemovedEvent, buffer)
+	b.mu.Lock()
+	if b.messageRemovedSubs == nil {
+		b.messageRemovedSubs = make(map[int]chan messageRemovedEvent)
+	}
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.messageRemovedSubs[id] = ch
+	b.mu.Unlock()
+	return ch, func() {
+		b.mu.Lock()
+		if existing, ok := b.messageRemovedSubs[id]; ok {
+			delete(b.messageRemovedSubs, id)
+			close(existing)
+		}
+		b.mu.Unlock()
 	}
 }
 
@@ -1740,6 +1785,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	messages, unsubscribeMessages := b.SubscribeMessages(256)
 	defer unsubscribeMessages()
+	messagesRemoved, unsubscribeMessagesRemoved := b.SubscribeMessageRemoved(64)
+	defer unsubscribeMessagesRemoved()
 	actions, unsubscribeActions := b.SubscribeActions(256)
 	defer unsubscribeActions()
 	activity, unsubscribeActivity := b.SubscribeActivity(256)
@@ -1786,6 +1833,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case msg, ok := <-messages:
 			if !ok || writeEvent("message", map[string]any{"message": msg}) != nil {
+				return
+			}
+		case evt, ok := <-messagesRemoved:
+			if !ok || writeEvent("message_removed", evt) != nil {
 				return
 			}
 		case action, ok := <-actions:
@@ -7016,10 +7067,8 @@ func (b *Broker) SeenTelegramGroups() map[int64]string {
 
 // PostSystemMessage posts a lightweight system message that shows progress without blocking.
 // MarkRoutingTargets records implicit-routing recipients as "typing" so the
-// UI's typing indicator can display them without a persisted system message.
-// Replaces the old "Routing to @X..." broker post — that message was
-// permanent clutter in the channel; this drives the same signal through
-// lastTaggedAt, which already auto-clears when the agent replies.
+// UI's typing indicator highlights them. Called alongside PostRoutingBanner
+// so users see both "Routing to @X..." and the per-agent typing pulse.
 func (b *Broker) MarkRoutingTargets(slugs []string) {
 	if len(slugs) == 0 {
 		return
@@ -7037,6 +7086,102 @@ func (b *Broker) MarkRoutingTargets(slugs []string) {
 		}
 		b.lastTaggedAt[slug] = now
 	}
+}
+
+// PostRoutingBanner posts a "Routing to @X..." system message and registers
+// it to be auto-deleted once any of the target agents replies in the same
+// channel. Returns the posted message ID so callers can track it.
+func (b *Broker) PostRoutingBanner(channel string, targetSlugs []string) string {
+	if len(targetSlugs) == 0 {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	names := make([]string, 0, len(targetSlugs))
+	for _, s := range targetSlugs {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			continue
+		}
+		names = append(names, "@"+s)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	b.counter++
+	msg := channelMessage{
+		ID:        fmt.Sprintf("msg-%d", b.counter),
+		From:      "system",
+		Channel:   channel,
+		Kind:      "routing",
+		Content:   fmt.Sprintf("Routing to %s...", strings.Join(names, ", ")),
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}
+	b.appendMessageLocked(msg)
+	if b.pendingRoutingBanners == nil {
+		b.pendingRoutingBanners = make(map[string]routingBannerEntry)
+	}
+	for _, slug := range targetSlugs {
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			continue
+		}
+		b.pendingRoutingBanners[routingBannerKey(channel, slug)] = routingBannerEntry{
+			MessageID: msg.ID,
+			Channel:   channel,
+			CreatedAt: time.Now(),
+		}
+	}
+	return msg.ID
+}
+
+// clearRoutingBannerForReplyLocked removes any pending routing banner that
+// was awaiting this agent's reply. Called from the message-append path so
+// the banner vanishes the moment the target posts anything in the channel.
+// Must be called with b.mu held.
+func (b *Broker) clearRoutingBannerForReplyLocked(msg channelMessage) {
+	if len(b.pendingRoutingBanners) == 0 {
+		return
+	}
+	if msg.From == "" || msg.From == "system" || msg.From == "you" || msg.From == "human" {
+		return
+	}
+	key := routingBannerKey(msg.Channel, msg.From)
+	entry, ok := b.pendingRoutingBanners[key]
+	if !ok {
+		return
+	}
+	// Drop every pending mapping that points at this banner (another target
+	// could still be expected for the same banner; removing the banner
+	// invalidates all of them).
+	for k, e := range b.pendingRoutingBanners {
+		if e.MessageID == entry.MessageID {
+			delete(b.pendingRoutingBanners, k)
+		}
+	}
+	next := b.messages[:0]
+	for _, existing := range b.messages {
+		if existing.ID == entry.MessageID && existing.Kind == "routing" {
+			b.publishMessageRemovedLocked(existing.Channel, existing.ID)
+			continue
+		}
+		next = append(next, existing)
+	}
+	b.messages = next
+}
+
+func routingBannerKey(channel, slug string) string {
+	return normalizeChannelSlug(channel) + "|" + strings.TrimSpace(slug)
+}
+
+type routingBannerEntry struct {
+	MessageID string
+	Channel   string
+	CreatedAt time.Time
 }
 
 func (b *Broker) PostSystemMessage(channel, content, kind string) {
