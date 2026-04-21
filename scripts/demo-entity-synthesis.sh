@@ -146,6 +146,7 @@ info "Polling /entity/briefs every 2 s (timeout ${SYNTH_TIMEOUT}s)"
 info "The broker shells out to your LLM CLI — this takes a few seconds"
 
 deadline=$(( $(date +%s) + SYNTH_TIMEOUT ))
+synth_start=$(date +%s)
 synthesized=false
 last_ts=""
 
@@ -171,14 +172,15 @@ print('null')
   pending=$("$PY" -c "import json,sys; print(json.loads(sys.argv[1])['pending_delta'])" "$row")
   ts=$("$PY" -c "import json,sys; print(json.loads(sys.argv[1]).get('last_synthesized_ts',''))" "$row")
 
+  elapsed=$(( $(date +%s) - synth_start ))
   if [[ -n "$ts" && "$ts" != "$last_ts" ]]; then
     synthesized=true
     last_ts="$ts"
     sha=$("$PY" -c "import json,sys; print(json.loads(sys.argv[1]).get('last_synthesized_sha',''))" "$row")
-    ok "synthesis committed  sha=${sha}  ts=${ts}  pending=${pending}"
+    ok "[synthesizing] ${ENTITY_KIND}/${ENTITY_SLUG} — ${FACT_COUNT} facts → done → sha=${sha} (${elapsed}s)"
     break
   fi
-  info "pending_delta=${pending}  waiting …"
+  info "[synthesizing] ${ENTITY_KIND}/${ENTITY_SLUG} — ${FACT_COUNT} facts … (${elapsed}s elapsed)"
 done
 
 if [[ "$synthesized" == "false" ]]; then
