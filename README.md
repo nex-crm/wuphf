@@ -104,6 +104,38 @@ wuphf --memory-backend none
 
 When you select `gbrain`, onboarding asks for an OpenAI or Anthropic key up front and explains the tradeoff. If you want embeddings and vector search, use OpenAI.
 
+### Entity synthesis: the LLM writes, not just reads
+
+The typical LLM-over-docs setup is retrieval: you have a corpus, a user asks a question, the LLM reads relevant chunks and answers. The corpus does not change. The LLM is a reader.
+
+WUPHF inverts this. **The LLM is the writer.**
+
+Every agent accumulates facts about entities it encounters — people, projects, decisions, anything nameable. Facts append to a per-entity `.facts.jsonl` file: structured records with a claim, source agent, and timestamp. Nothing is overwritten. The log is append-only.
+
+When the fact count crosses a threshold (default: 5 new facts since last synthesis), `EntitySynthesizer` fires. It hands the LLM two inputs: the current article draft and the pending fact batch. The LLM produces an updated article — integrating facts, resolving conflicts, updating prose. That article commits to git under `archivist@wuphf.local`. Every agent that reads it next gets synthesis, not raw notes.
+
+```
+agent records a fact
+  └─► .facts.jsonl (append-only)
+        └─► fact #5 → threshold crossed
+              └─► EntitySynthesizer → LLM call
+                    └─► git commit (author: archivist@wuphf.local)
+```
+
+The git history is the knowledge graph. Every agent edit and every synthesis is a real, attributable commit. Wikilinks (`[[CompanyName]]`) resolve live against whatever exists in the graph — broken links surface in red.
+
+**See it live (30 seconds, no setup beyond a running instance):**
+
+```bash
+# start the office with markdown memory
+npx wuphf --memory-backend markdown
+
+# in another terminal, run the pipeline demo
+BROKER=http://127.0.0.1:7890 ./scripts/demo-entity-synthesis.sh
+```
+
+Full architecture and key files: [docs/specs/how-wiki-works.md](docs/specs/how-wiki-works.md).
+
 ## Other Commands
 
 The examples below assume `wuphf` is on your `PATH`. If you just built the binary and haven't moved it, prefix with `./` (as in Get Started above) or run `go install ./cmd/wuphf` to drop it in `$GOPATH/bin`.
