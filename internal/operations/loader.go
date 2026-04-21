@@ -220,7 +220,17 @@ func validateReviewerConfig(blueprint Blueprint) error {
 
 	if value := strings.TrimSpace(blueprint.DefaultReviewer); value != "" {
 		if !validReviewer(value) {
-			return fmt.Errorf("blueprint %s default_reviewer %q does not match any agent slug or %q (file: %s)", blueprint.ID, value, ReviewerHumanOnly, file)
+			// Include the slugs we actually saw in the error so CI-only
+			// failures become debuggable without attaching a debugger.
+			// CI env (Linux amd64 on ubuntu-latest) has shown this fire
+			// despite the YAML declaring all slugs; the diff lists what
+			// the loader sees right before rejection.
+			seen := make([]string, 0, len(agentSlugs))
+			for k := range agentSlugs {
+				seen = append(seen, k)
+			}
+			sort.Strings(seen)
+			return fmt.Errorf("blueprint %s default_reviewer %q does not match any agent slug or %q (file: %s; saw slugs: %v, agents_count=%d)", blueprint.ID, value, ReviewerHumanOnly, file, seen, len(blueprint.Starter.Agents))
 		}
 	}
 
