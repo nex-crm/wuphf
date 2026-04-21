@@ -1,6 +1,6 @@
-/** Wikipedia-style tabs at the top of the article (Article / Talk / History / Raw). */
+/** Wikipedia-style tabs at the top of the article (Article / Talk / Edit / History / Raw). */
 
-export type HatBarTab = 'article' | 'talk' | 'history' | 'raw'
+export type HatBarTab = 'article' | 'talk' | 'edit' | 'history' | 'raw'
 
 interface HatBarProps {
   active: HatBarTab
@@ -12,11 +12,12 @@ interface HatBarProps {
 const LABELS: Record<HatBarTab, string> = {
   article: 'Article',
   talk: 'Talk',
+  edit: 'Edit source',
   history: 'History',
   raw: 'Raw markdown',
 }
 
-const ORDER: HatBarTab[] = ['article', 'talk', 'history', 'raw']
+const ORDER: HatBarTab[] = ['article', 'talk', 'edit', 'history', 'raw']
 
 export default function HatBar({ active, onChange, rightRail, disabledTabs = ['talk'] }: HatBarProps) {
   return (

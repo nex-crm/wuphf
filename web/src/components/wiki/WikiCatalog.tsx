@@ -1,8 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import PixelAvatar from './PixelAvatar'
 import type { WikiCatalogEntry } from '../../api/wiki'
 import { formatRelativeTime } from '../../lib/format'
 import { resolveGroupOrder } from '../../lib/groupOrder'
+import NewArticleModal from './NewArticleModal'
 
 /** `/wiki` landing view: grid of thematic dir groups with recent articles. */
 
@@ -23,6 +24,7 @@ export default function WikiCatalog({
   commitsCount,
   agentsCount,
 }: WikiCatalogProps) {
+  const [showNew, setShowNew] = useState(false)
   const grouped = useMemo(() => groupByGroup(catalog), [catalog])
   const groupOrder = useMemo(
     () => resolveGroupOrder(catalog.map((c) => c.group)),
@@ -45,6 +47,15 @@ export default function WikiCatalog({
         <div className="wk-catalog-clone">
           Your wiki lives on your disk.{' '}
           <code>git clone ~/.wuphf/wiki</code>
+          {' · '}
+          <button
+            type="button"
+            className="wk-catalog-new-link"
+            data-testid="wk-catalog-new"
+            onClick={() => setShowNew(true)}
+          >
+            + New article
+          </button>
           {onOpenAudit && (
             <>
               {' · '}
@@ -62,6 +73,16 @@ export default function WikiCatalog({
           )}
         </div>
       </header>
+      {showNew && (
+        <NewArticleModal
+          catalog={catalog}
+          onCancel={() => setShowNew(false)}
+          onCreated={(path) => {
+            setShowNew(false)
+            onNavigate(path)
+          }}
+        />
+      )}
       <div className="wk-catalog-grid">
         {groupOrder.map((group) => {
           const items = grouped[group]

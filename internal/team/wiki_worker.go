@@ -99,7 +99,14 @@ type wikiWriteRequest struct {
 	// PlaybookSlug carries the source slug so the post-write hook can
 	// enqueue a follow-up recompile without re-parsing the path.
 	PlaybookSlug string
-	ReplyCh      chan wikiWriteResult
+	// IsHuman routes the request to Repo.CommitHuman — optimistic
+	// concurrency via expected_sha, fixed `human` git identity. Wikipedia-
+	// style Edit source flow for the founder.
+	IsHuman bool
+	// ExpectedSHA is consulted by the human write path. Empty means the
+	// caller expects the article not to exist yet (new-article flow).
+	ExpectedSHA string
+	ReplyCh     chan wikiWriteResult
 }
 
 // wikiWriteResult is the worker's reply for a single request.
@@ -245,7 +252,12 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		n   int
 		err error
 	)
-	if req.IsEntityFact {
+	if req.IsHuman {
+		// Human edits use optimistic concurrency (expected_sha) and a
+		// fixed `human` author identity — req.Slug is ignored on this
+		// branch to prevent a caller from forging attribution.
+		sha, n, err = w.repo.CommitHuman(writeCtx, req.Path, req.Content, req.ExpectedSHA, req.CommitMsg)
+	} else if req.IsEntityFact {
 		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookCompile {
 		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
@@ -263,7 +275,11 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.Commit(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
 	}
 	if err != nil {
-		req.ReplyCh <- wikiWriteResult{Err: err}
+		// On ErrWikiSHAMismatch the human path returns the current HEAD
+		// SHA alongside the error so callers can surface 409 bodies
+		// without a second round trip. For all other errors `sha` is
+		// empty and carrying it is a harmless no-op.
+		req.ReplyCh <- wikiWriteResult{SHA: sha, Err: err}
 		return
 	}
 	req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
@@ -366,6 +382,42 @@ func (w *WikiWorker) maybeScheduleBackup(ctx context.Context) {
 // diagnostics and tests.
 func (w *WikiWorker) QueueLength() int {
 	return len(w.requests)
+}
+
+// EnqueueHuman submits a human-authored wiki write to the shared single-
+// writer queue. Identity is forced to HumanAuthor so the caller cannot
+// spoof attribution (the HTTP handler is already gated by the broker
+// bearer token, but belt-and-braces on the worker is cheap). Returns
+// ErrWikiSHAMismatch wrapped with the current HEAD SHA (in the SHA
+// return slot) when expected_sha does not match; callers pass that back
+// to the client so the 409 prompt can reload the latest content.
+func (w *WikiWorker) EnqueueHuman(ctx context.Context, path, content, commitMsg, expectedSHA string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:        HumanAuthor,
+		Path:        path,
+		Content:     content,
+		Mode:        "replace",
+		CommitMsg:   commitMsg,
+		IsHuman:     true,
+		ExpectedSHA: expectedSHA,
+		ReplyCh:     make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: human write timed out after %s", wikiWriteTimeout)
+	}
 }
 
 // EnqueueEntityFact submits a fact-log append to the shared wiki queue.
@@ -539,6 +591,91 @@ func (b *Broker) handleWikiWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	sha, n, err := worker.Enqueue(r.Context(), body.Slug, body.Path, body.Content, body.Mode, body.CommitMessage)
 	if err != nil {
+		if errors.Is(err, ErrQueueSaturated) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":          body.Path,
+		"commit_sha":    sha,
+		"bytes_written": n,
+	})
+}
+
+// handleWikiWriteHuman is the broker HTTP endpoint the web UI posts to
+// when the founder saves a human wiki edit. Shape:
+//
+//	POST /wiki/write-human
+//	{
+//	  "path": "team/people/nazz.md",
+//	  "content": "...",
+//	  "commit_message": "human: fix typo",
+//	  "expected_sha": "abc123"
+//	}
+//
+// expected_sha MUST be the article's current SHA as last seen by the
+// client. When HEAD has moved, the handler returns 409 with the current
+// SHA and the current article bytes so the editor can prompt re-apply.
+//
+// Agents never reach this endpoint — it is HTTP-only (not exposed via
+// MCP) and gated by the existing broker bearer token (held by the web
+// UI). The payload's attribution cannot be forged: the worker forces
+// the commit author to HumanAuthor on this path.
+//
+// Responses:
+//
+//	200 { "path":..., "commit_sha":..., "bytes_written":... }
+//	400 { "error":"..." } on malformed JSON / bad path / empty content
+//	409 { "error":"...", "current_sha":..., "current_content":"..." }
+//	429 { "error":"wiki queue saturated, retry on next turn" }
+//	500 { "error":"..." }
+//	503 { "error":"wiki backend is not active" }
+func (b *Broker) handleWikiWriteHuman(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil {
+		http.Error(w, `{"error":"wiki backend is not active"}`, http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		Path          string `json:"path"`
+		Content       string `json:"content"`
+		CommitMessage string `json:"commit_message"`
+		ExpectedSHA   string `json:"expected_sha"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	// Pre-validate inputs BEFORE enqueueing so a rejection never touches
+	// the working tree. Mirrors reviewApprove's CanApprove pre-check.
+	if err := validateArticlePath(body.Path); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(body.Content) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "content is required"})
+		return
+	}
+	sha, n, err := worker.EnqueueHuman(r.Context(), body.Path, body.Content, body.CommitMessage, body.ExpectedSHA)
+	if err != nil {
+		if errors.Is(err, ErrWikiSHAMismatch) {
+			// Return the current article bytes so the editor can show a
+			// three-pane reload prompt without a second round trip.
+			current, _ := readArticle(worker.Repo(), body.Path)
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":           err.Error(),
+				"current_sha":     sha,
+				"current_content": string(current),
+			})
+			return
+		}
 		if errors.Is(err, ErrQueueSaturated) {
 			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
 			return

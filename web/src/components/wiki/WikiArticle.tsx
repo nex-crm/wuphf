@@ -13,6 +13,7 @@ import PlaybookSkillBadge from './PlaybookSkillBadge'
 import HatBar, { type HatBarTab } from './HatBar'
 import ArticleTitle from './ArticleTitle'
 import Byline from './Byline'
+import WikiEditor from './WikiEditor'
 import Hatnote from './Hatnote'
 import SeeAlso from './SeeAlso'
 import Sources from './Sources'
@@ -257,6 +258,22 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
               {article.content}
             </ReactMarkdown>
           </div>
+        )}
+        {tab === 'edit' && (
+          <WikiEditor
+            path={article.path}
+            initialContent={article.content}
+            expectedSha={article.commit_sha ?? ''}
+            onSaved={(newSha) => {
+              // Refetch after every save — covers both happy path and
+              // the conflict-then-reload path (which passes the server's
+              // current_sha back as newSha).
+              void newSha
+              setRefreshNonce((n) => n + 1)
+              setTab('article')
+            }}
+            onCancel={() => setTab('article')}
+          />
         )}
         {tab === 'raw' && (
           <pre

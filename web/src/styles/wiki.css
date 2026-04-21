@@ -1210,6 +1210,161 @@
   text-decoration-style: solid;
 }
 
+/* ─── New-article button + Edit source editor (v1.3 human-editable wiki) ─── */
+.wk-catalog-new-link {
+  font-family: inherit;
+  color: var(--wk-wikilink);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: inherit;
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+}
+.wk-catalog-new-link:hover { text-decoration-style: solid; }
+
+.wk-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 12px 0;
+}
+.wk-editor-label {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  margin-top: 4px;
+}
+.wk-editor-textarea {
+  width: 100%;
+  min-height: 480px;
+  padding: 12px 14px;
+  font-family: var(--wk-mono);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--wk-text);
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  resize: vertical;
+  box-sizing: border-box;
+}
+.wk-editor-textarea:focus {
+  outline: 2px solid var(--wk-wikilink);
+  outline-offset: -2px;
+}
+.wk-editor-commit {
+  width: 100%;
+  padding: 8px 10px;
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  color: var(--wk-text);
+  box-sizing: border-box;
+}
+.wk-editor-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+.wk-editor-save,
+.wk-editor-cancel {
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  padding: 8px 18px;
+  border: 1px solid var(--wk-border);
+  cursor: pointer;
+}
+.wk-editor-save {
+  background: var(--wk-wikilink);
+  color: #fff;
+  border-color: var(--wk-wikilink);
+}
+.wk-editor-save[disabled],
+.wk-editor-cancel[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.wk-editor-cancel { background: var(--wk-paper); color: var(--wk-text); }
+.wk-editor-help {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-text-muted);
+  margin: 0;
+}
+.wk-editor-banner {
+  padding: 10px 14px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper-dark);
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+}
+.wk-editor-banner--conflict {
+  border-left: 3px solid var(--wk-amber);
+  background: var(--wk-amber-banner);
+}
+.wk-editor-banner--error {
+  border-left: 3px solid var(--wk-wikilink-broken);
+}
+.wk-editor-banner-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+.wk-editor-banner-actions button {
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  padding: 6px 12px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  cursor: pointer;
+}
+
+.wk-human-pill {
+  display: inline-block;
+  padding: 0 6px;
+  font-family: var(--wk-chrome);
+  border: 1px solid var(--wk-amber);
+  background: var(--wk-amber-banner);
+  color: var(--wk-text);
+  font-weight: 600;
+}
+
+.wk-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+.wk-modal {
+  background: var(--wk-paper);
+  border: 1px solid var(--wk-border);
+  width: min(480px, 92vw);
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 24px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.wk-modal h2 {
+  margin: 0 0 6px;
+  font-family: var(--wk-display);
+  font-size: 22px;
+}
+.wk-modal select {
+  font-family: var(--wk-chrome);
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper);
+  color: var(--wk-text);
+}
+
 /* ─── Entity briefs (v1.2) ─── */
 .wk-entity-brief-bar {
   display: flex;
