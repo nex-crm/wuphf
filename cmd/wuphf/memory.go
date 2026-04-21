@@ -106,13 +106,13 @@ func runMemoryMigrate(args []string) {
 
 	if *dryRun {
 		printPlanTable(summary.Plans)
-		fmt.Fprintf(os.Stdout, "\nDry run complete. %d would create, %d would skip, %d would collision-rename.\n",
+		_, _ = fmt.Fprintf(os.Stdout, "\nDry run complete. %d would create, %d would skip, %d would collision-rename.\n",
 			countAction(summary.Plans, "create"),
 			summary.Skipped,
 			summary.Collisions)
 		return
 	}
-	fmt.Fprintf(os.Stdout, "Migrated from %s: %d written, %d skipped (identical), %d collision-renamed.\n",
+	_, _ = fmt.Fprintf(os.Stdout, "Migrated from %s: %d written, %d skipped (identical), %d collision-renamed.\n",
 		source, summary.Written, summary.Skipped, summary.Collisions)
 }
 
@@ -171,13 +171,13 @@ func openWikiWriter() (migration.WikiWriter, func(), error) {
 // output scannable when slugs are long; stdout so it's easy to diff.
 func printPlanTable(plans []migration.Plan) {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "ACTION\tPATH\tSIZE\tAUTHOR\tSOURCE")
+	_, _ = fmt.Fprintln(tw, "ACTION\tPATH\tSIZE\tAUTHOR\tSOURCE")
 	for _, p := range plans {
 		path := p.Path
 		if p.Action == "collision-rename" && p.CollisionWith != "" {
 			path = path + " (was: " + p.CollisionWith + ")"
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n", p.Action, path, p.Bytes, p.Author, p.Source)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%s\n", p.Action, path, p.Bytes, p.Author, p.Source)
 	}
 	_ = tw.Flush()
 }

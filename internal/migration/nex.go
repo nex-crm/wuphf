@@ -41,11 +41,11 @@ const nexPageSize = 100
 // NexAdapter adapts the legacy Nex HTTP records API onto the
 // migration.Adapter interface.
 type NexAdapter struct {
-	client     *api.Client
-	types      []string
-	fetchPage  func(ctx context.Context, objectType string, limit, offset int) ([]map[string]any, error)
-	pageSize   int
-	stopOnErr  bool
+	client    *api.Client
+	types     []string
+	fetchPage func(ctx context.Context, objectType string, limit, offset int) ([]map[string]any, error)
+	pageSize  int
+	stopOnErr bool
 }
 
 // NexOption configures a NexAdapter at construction.
@@ -178,7 +178,7 @@ func (a *NexAdapter) Iter(ctx context.Context) (<-chan MigrationRecord, error) {
 				if a.stopOnErr {
 					return
 				}
-				fmt.Printf("warning: %v\n", err)
+				_, _ = fmt.Printf("warning: %v\n", err)
 			}
 		}
 	}()

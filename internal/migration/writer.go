@@ -134,7 +134,7 @@ func (m *Migrator) Run(ctx context.Context, adapter Adapter, opts RunOptions) (S
 		processed++
 		plan, err := m.planRecord(rec)
 		if err != nil {
-			fmt.Fprintf(m.Stderr, "warning: skip %s/%s: %v\n", rec.Kind, rec.Slug, err)
+			_, _ = fmt.Fprintf(m.Stderr, "warning: skip %s/%s: %v\n", rec.Kind, rec.Slug, err)
 			continue
 		}
 		summary.Plans = append(summary.Plans, plan)
@@ -150,7 +150,7 @@ func (m *Migrator) Run(ctx context.Context, adapter Adapter, opts RunOptions) (S
 		}
 		commitMsg := fmt.Sprintf("migrate: import %s/%s from %s", rec.Kind, rec.Slug, rec.Source)
 		if _, _, werr := m.writer.Enqueue(ctx, MigrateAuthor, plan.Path, renderArticle(rec, m.now()), "create", commitMsg); werr != nil {
-			fmt.Fprintf(m.Stderr, "warning: write %s: %v\n", plan.Path, werr)
+			_, _ = fmt.Fprintf(m.Stderr, "warning: write %s: %v\n", plan.Path, werr)
 			continue
 		}
 		summary.Written++
