@@ -1757,7 +1757,7 @@ func (l *Launcher) visibleOfficeMembers() []officeMember {
 		member := l.officeMemberBySlug(l.oneOnOneAgent())
 		return []officeMember{member}
 	}
-	ordered := l.paneEligibleOfficeMembers()
+	ordered := l.officeAgentOrder()
 	if len(ordered) <= maxVisibleOfficeAgents {
 		return ordered
 	}
@@ -1768,27 +1768,11 @@ func (l *Launcher) overflowOfficeMembers() []officeMember {
 	if l.isOneOnOne() {
 		return nil
 	}
-	ordered := l.paneEligibleOfficeMembers()
+	ordered := l.officeAgentOrder()
 	if len(ordered) <= maxVisibleOfficeAgents {
 		return nil
 	}
 	return ordered[maxVisibleOfficeAgents:]
-}
-
-// paneEligibleOfficeMembers returns officeAgentOrder() minus agents that
-// should never get a tmux/claude pane (e.g. codex-bound agents, which use
-// their own headless pipeline). Filtering upstream keeps visible/overflow
-// slot indices in sync with agentPaneTargets().
-func (l *Launcher) paneEligibleOfficeMembers() []officeMember {
-	ordered := l.officeAgentOrder()
-	filtered := make([]officeMember, 0, len(ordered))
-	for _, m := range ordered {
-		if l.memberEffectiveProviderKind(m.Slug) == provider.KindCodex {
-			continue
-		}
-		filtered = append(filtered, m)
-	}
-	return filtered
 }
 
 func overflowWindowName(slug string) string {
@@ -1799,51 +1783,48 @@ func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 	targets := make(map[string]notificationTarget)
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
-		if slug != "" && !l.skipPaneForSlug(slug) {
+		if slug != "" {
 			targets[slug] = notificationTarget{
 				Slug:       slug,
-				PaneTarget: fmt.Sprintf("%s:team.1", l.sessionName),
+				PaneTarget: l.resolvePaneTarget(slug, fmt.Sprintf("%s:team.1", l.sessionName)),
 			}
 		}
 		return targets
 	}
 	for i, member := range l.visibleOfficeMembers() {
-		if l.skipPaneForSlug(member.Slug) {
-			continue
-		}
 		targets[member.Slug] = notificationTarget{
 			Slug:       member.Slug,
-			PaneTarget: fmt.Sprintf("%s:team.%d", l.sessionName, i+1),
+			PaneTarget: l.resolvePaneTarget(member.Slug, fmt.Sprintf("%s:team.%d", l.sessionName, i+1)),
 		}
 	}
 	for _, member := range l.overflowOfficeMembers() {
-		if l.skipPaneForSlug(member.Slug) {
-			continue
-		}
 		targets[member.Slug] = notificationTarget{
 			Slug:       member.Slug,
-			PaneTarget: fmt.Sprintf("%s:%s.0", l.sessionName, overflowWindowName(member.Slug)),
+			PaneTarget: l.resolvePaneTarget(member.Slug, fmt.Sprintf("%s:%s.0", l.sessionName, overflowWindowName(member.Slug))),
 		}
 	}
 	return targets
 }
 
-// skipPaneForSlug returns true when the given slug should not have a tmux
-// pane target registered — either because pane spawn failed earlier, or
-// because the agent is bound to the codex runtime and uses its own headless
-// pipeline. In either case, dispatch falls back to the headless path.
-func (l *Launcher) skipPaneForSlug(slug string) bool {
+// resolvePaneTarget returns the tmux pane target for a slug, or "" when the
+// slug has no live pane — either because its spawn failed earlier, or
+// because it's bound to codex and uses the headless pipeline. An empty
+// PaneTarget tells the pane-capture loop to skip polling (see
+// startPaneCaptureLoops) while still leaving the slug in the notification
+// target map so non-pane dispatch (e.g. wakeLeadAfterSpecialist in the
+// codex runtime) can find the target by slug.
+func (l *Launcher) resolvePaneTarget(slug, fallback string) string {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
-		return true
+		return ""
 	}
 	if _, bad := l.failedPaneSlugs[slug]; bad {
-		return true
+		return ""
 	}
 	if l.memberEffectiveProviderKind(slug) == provider.KindCodex {
-		return true
+		return ""
 	}
-	return false
+	return fallback
 }
 
 func (l *Launcher) isOneOnOne() bool {

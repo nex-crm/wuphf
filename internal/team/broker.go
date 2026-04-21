@@ -899,7 +899,6 @@ func (b *Broker) publishMessageLocked(msg channelMessage) {
 	}
 }
 
-
 func (b *Broker) publishActionLocked(action officeActionLog) {
 	for _, ch := range b.actionSubscribers {
 		select {
@@ -1851,12 +1850,12 @@ func (b *Broker) handleAgentToolEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Slug    string `json:"slug"`
-		Phase   string `json:"phase,omitempty"`
-		Tool    string `json:"tool,omitempty"`
-		Args    string `json:"args,omitempty"`
-		Result  string `json:"result,omitempty"`
-		Error   string `json:"error,omitempty"`
+		Slug   string `json:"slug"`
+		Phase  string `json:"phase,omitempty"`
+		Tool   string `json:"tool,omitempty"`
+		Args   string `json:"args,omitempty"`
+		Result string `json:"result,omitempty"`
+		Error  string `json:"error,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -7046,10 +7045,11 @@ func (b *Broker) SeenTelegramGroups() map[int64]string {
 	return out
 }
 
-// PostSystemMessage posts a lightweight system message that shows progress without blocking.
 // MarkRoutingTargets records implicit-routing recipients as "typing" so the
-// UI's typing indicator highlights them. Called alongside PostRoutingBanner
-// so users see both "Routing to @X..." and the per-agent typing pulse.
+// web TypingIndicator can render "X is thinking..." above the composer
+// without inserting a persisted "Routing to @X..." chat message. The entry
+// auto-clears on the next POST /messages from the agent (see the delete
+// in handlePostMessage), so the indicator is naturally ephemeral.
 func (b *Broker) MarkRoutingTargets(slugs []string) {
 	if len(slugs) == 0 {
 		return
