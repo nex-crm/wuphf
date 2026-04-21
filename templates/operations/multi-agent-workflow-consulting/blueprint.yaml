@@ -3,7 +3,7 @@ name: Multi-Agent Workflow Consulting
 kind: consulting
 description: Template for a consulting operation that designs and implements multi-agent workflows for clients.
 objective: Help clients design, deploy, and maintain agent workflows with explicit approvals and durable evidence.
-default_reviewer: operator
+default_reviewer: ceo
 reviewer_paths:
   "team/systems/**": workflow-architect
   "team/delivery/**": builder

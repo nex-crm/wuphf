@@ -52,8 +52,8 @@ func TestResolveReviewerNicheCRM(t *testing.T) {
 		{"team/customers/acme-co.md", "growth"},
 		{"team/product/roadmap.md", "builder"},
 		{"team/reviews/q4-retro.md", "reviewer"},
-		{"team/random/other.md", "operator"},
-		{"", "operator"},
+		{"team/random/other.md", "ceo"},
+		{"", "ceo"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.path, func(t *testing.T) {
