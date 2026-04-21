@@ -536,10 +536,20 @@ func (l *Launcher) notifyOfficeChangesLoop() {
 // paneBackedAgents state by no-op'ing. Errors are logged but do not propagate
 // — failing to respawn leaves the previous panes running (degraded, but the
 // headless path can still deliver).
+//
+// We re-read the configured provider first because the install-wide
+// provider may have changed since the launcher was constructed (user
+// switched to Codex in Settings). reconfigureVisibleAgents tears down the
+// tmux session if we're now on codex.
 func (l *Launcher) respawnPanesAfterReseed() {
-	if l == nil || l.usesCodexRuntime() || !l.paneBackedAgents {
+	if l == nil {
 		return
 	}
+	l.provider = config.ResolveLLMProvider("")
+	// If we're on codex, still let reconfigureVisibleAgents run so it can
+	// kill any stale claude tmux session from a previous provider choice.
+	// And if we were codex and switched to claude-code, allow pane spawn
+	// to bootstrap for the first time by not short-circuiting here.
 	if err := l.reconfigureVisibleAgents(); err != nil {
 		log.Printf("office_reseeded: respawn panes failed: %v", err)
 	}
@@ -673,24 +683,21 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	l.notifyMu.Unlock()
 	immediate = filtered
 
-	// Post a "Routing to @X..." banner when a human writes into a public
-	// channel without tagging anyone. The banner is useful context — people
-	// want to know which agent is being routed to — but it's ephemeral: the
-	// broker auto-deletes it the moment any targeted agent replies (via
-	// clearRoutingBannerForReplyLocked). Also mark the targets as tagged so
-	// the TypingIndicator shows "X is thinking..." alongside the banner.
-	// DMs and 1:1 mode suppress both signals.
+	// When a human posts an untagged message in a public channel, mark the
+	// implicit routing targets as "typing" so the existing TypingIndicator
+	// renders "X is thinking..." as ephemeral system text above the chat.
+	// This replaces the older "Routing to @X..." persisted system message
+	// — that was a stored chat message the user had to scroll past forever
+	// even after the agent replied. The typing indicator is pure UI state
+	// driven off lastTaggedAt; it auto-clears the moment the agent posts
+	// (delete in handleMessages / PostMessage paths), so nothing to
+	// garbage-collect. DMs and 1:1 mode suppress the signal.
 	isDM, _ := l.isChannelDM(normalizeChannelSlug(msg.Channel))
 	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && !isDM && len(msg.Tagged) == 0 {
-		channel := msg.Channel
-		if channel == "" {
-			channel = "general"
-		}
 		slugs := make([]string, 0, len(immediate))
 		for _, t := range immediate {
 			slugs = append(slugs, t.Slug)
 		}
-		l.broker.PostRoutingBanner(channel, slugs)
 		l.broker.MarkRoutingTargets(slugs)
 	}
 

@@ -455,8 +455,6 @@ type Broker struct {
 	usage                   teamUsageState
 	externalDelivered       map[string]struct{} // message IDs already queued for external delivery
 	messageSubscribers      map[int]chan channelMessage
-	messageRemovedSubs      map[int]chan messageRemovedEvent
-	pendingRoutingBanners   map[string]routingBannerEntry
 	actionSubscribers       map[int]chan officeActionLog
 	activity                map[string]agentActivitySnapshot
 	activitySubscribers     map[int]chan agentActivitySnapshot
@@ -860,7 +858,6 @@ func NewBroker() *Broker {
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
 		messageSubscribers:  make(map[int]chan channelMessage),
-		messageRemovedSubs:  make(map[int]chan messageRemovedEvent),
 		actionSubscribers:   make(map[int]chan officeActionLog),
 		activity:            make(map[string]agentActivitySnapshot),
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
@@ -891,7 +888,6 @@ func NewBroker() *Broker {
 func (b *Broker) appendMessageLocked(msg channelMessage) {
 	b.messages = append(b.messages, msg)
 	b.publishMessageLocked(msg)
-	b.clearRoutingBannerForReplyLocked(msg)
 }
 
 func (b *Broker) publishMessageLocked(msg channelMessage) {
@@ -903,46 +899,6 @@ func (b *Broker) publishMessageLocked(msg channelMessage) {
 	}
 }
 
-type messageRemovedEvent struct {
-	Channel string `json:"channel"`
-	ID      string `json:"id"`
-}
-
-func (b *Broker) publishMessageRemovedLocked(channel, id string) {
-	evt := messageRemovedEvent{Channel: normalizeChannelSlug(channel), ID: id}
-	for _, ch := range b.messageRemovedSubs {
-		select {
-		case ch <- evt:
-		default:
-		}
-	}
-}
-
-// SubscribeMessageRemoved returns a channel that receives message-removed
-// events (used for ephemeral banners like routing hints that disappear
-// once their target agent replies).
-func (b *Broker) SubscribeMessageRemoved(buffer int) (<-chan messageRemovedEvent, func()) {
-	if buffer <= 0 {
-		buffer = 1
-	}
-	ch := make(chan messageRemovedEvent, buffer)
-	b.mu.Lock()
-	if b.messageRemovedSubs == nil {
-		b.messageRemovedSubs = make(map[int]chan messageRemovedEvent)
-	}
-	id := b.nextSubscriberID
-	b.nextSubscriberID++
-	b.messageRemovedSubs[id] = ch
-	b.mu.Unlock()
-	return ch, func() {
-		b.mu.Lock()
-		if existing, ok := b.messageRemovedSubs[id]; ok {
-			delete(b.messageRemovedSubs, id)
-			close(existing)
-		}
-		b.mu.Unlock()
-	}
-}
 
 func (b *Broker) publishActionLocked(action officeActionLog) {
 	for _, ch := range b.actionSubscribers {
@@ -1785,8 +1741,6 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 	messages, unsubscribeMessages := b.SubscribeMessages(256)
 	defer unsubscribeMessages()
-	messagesRemoved, unsubscribeMessagesRemoved := b.SubscribeMessageRemoved(64)
-	defer unsubscribeMessagesRemoved()
 	actions, unsubscribeActions := b.SubscribeActions(256)
 	defer unsubscribeActions()
 	activity, unsubscribeActivity := b.SubscribeActivity(256)
@@ -1833,10 +1787,6 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		case msg, ok := <-messages:
 			if !ok || writeEvent("message", map[string]any{"message": msg}) != nil {
-				return
-			}
-		case evt, ok := <-messagesRemoved:
-			if !ok || writeEvent("message_removed", evt) != nil {
 				return
 			}
 		case action, ok := <-actions:
@@ -5756,7 +5706,16 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// reflected immediately without requiring a broker restart.
 		if provider != "" {
 			b.mu.Lock()
+			providerChanged := b.runtimeProvider != provider
 			b.runtimeProvider = provider
+			if providerChanged {
+				// Tell the launcher to respawn panes (if claude-code) or
+				// tear them down (if codex). Without this, a user who
+				// switches provider in Settings keeps seeing stale claude
+				// panes while dispatch routes through codex — the textbook
+				// "I picked Codex, why is Claude still running" symptom.
+				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "office_reseeded"})
+			}
 			b.mu.Unlock()
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -5811,9 +5770,31 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 		b.mu.Lock()
 		members := make([]officeMember, len(b.members))
 		copy(members, b.members)
+		// Surface "active" status for agents tagged within the last 60s that
+		// haven't yet replied. The web TypingIndicator reads this to render
+		// "X is thinking..." as ephemeral system text while a message is
+		// being routed. Without this field the indicator never shows —
+		// `status` was on the TS type but the backend never populated it.
+		taggedAt := b.lastTaggedAt
 		b.mu.Unlock()
+
+		type officeMemberView struct {
+			officeMember
+			Status string `json:"status,omitempty"`
+		}
+		views := make([]officeMemberView, len(members))
+		cutoff := time.Now().Add(-60 * time.Second)
+		for i, m := range members {
+			v := officeMemberView{officeMember: m}
+			if taggedAt != nil {
+				if t, ok := taggedAt[m.Slug]; ok && t.After(cutoff) {
+					v.Status = "active"
+				}
+			}
+			views[i] = v
+		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"members": members})
+		_ = json.NewEncoder(w).Encode(map[string]any{"members": views})
 	case http.MethodPost:
 		var body struct {
 			Action         string                    `json:"action"`
@@ -7086,102 +7067,6 @@ func (b *Broker) MarkRoutingTargets(slugs []string) {
 		}
 		b.lastTaggedAt[slug] = now
 	}
-}
-
-// PostRoutingBanner posts a "Routing to @X..." system message and registers
-// it to be auto-deleted once any of the target agents replies in the same
-// channel. Returns the posted message ID so callers can track it.
-func (b *Broker) PostRoutingBanner(channel string, targetSlugs []string) string {
-	if len(targetSlugs) == 0 {
-		return ""
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	channel = normalizeChannelSlug(channel)
-	if channel == "" {
-		channel = "general"
-	}
-	names := make([]string, 0, len(targetSlugs))
-	for _, s := range targetSlugs {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		names = append(names, "@"+s)
-	}
-	if len(names) == 0 {
-		return ""
-	}
-	b.counter++
-	msg := channelMessage{
-		ID:        fmt.Sprintf("msg-%d", b.counter),
-		From:      "system",
-		Channel:   channel,
-		Kind:      "routing",
-		Content:   fmt.Sprintf("Routing to %s...", strings.Join(names, ", ")),
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-	}
-	b.appendMessageLocked(msg)
-	if b.pendingRoutingBanners == nil {
-		b.pendingRoutingBanners = make(map[string]routingBannerEntry)
-	}
-	for _, slug := range targetSlugs {
-		slug = strings.TrimSpace(slug)
-		if slug == "" {
-			continue
-		}
-		b.pendingRoutingBanners[routingBannerKey(channel, slug)] = routingBannerEntry{
-			MessageID: msg.ID,
-			Channel:   channel,
-			CreatedAt: time.Now(),
-		}
-	}
-	return msg.ID
-}
-
-// clearRoutingBannerForReplyLocked removes any pending routing banner that
-// was awaiting this agent's reply. Called from the message-append path so
-// the banner vanishes the moment the target posts anything in the channel.
-// Must be called with b.mu held.
-func (b *Broker) clearRoutingBannerForReplyLocked(msg channelMessage) {
-	if len(b.pendingRoutingBanners) == 0 {
-		return
-	}
-	if msg.From == "" || msg.From == "system" || msg.From == "you" || msg.From == "human" {
-		return
-	}
-	key := routingBannerKey(msg.Channel, msg.From)
-	entry, ok := b.pendingRoutingBanners[key]
-	if !ok {
-		return
-	}
-	// Drop every pending mapping that points at this banner (another target
-	// could still be expected for the same banner; removing the banner
-	// invalidates all of them).
-	for k, e := range b.pendingRoutingBanners {
-		if e.MessageID == entry.MessageID {
-			delete(b.pendingRoutingBanners, k)
-		}
-	}
-	next := b.messages[:0]
-	for _, existing := range b.messages {
-		if existing.ID == entry.MessageID && existing.Kind == "routing" {
-			b.publishMessageRemovedLocked(existing.Channel, existing.ID)
-			continue
-		}
-		next = append(next, existing)
-	}
-	b.messages = next
-}
-
-func routingBannerKey(channel, slug string) string {
-	return normalizeChannelSlug(channel) + "|" + strings.TrimSpace(slug)
-}
-
-type routingBannerEntry struct {
-	MessageID string
-	Channel   string
-	CreatedAt time.Time
 }
 
 func (b *Broker) PostSystemMessage(channel, content, kind string) {
