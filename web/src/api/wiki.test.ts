@@ -81,6 +81,47 @@ describe('wiki api client', () => {
     expect(result.contributors.length).toBeGreaterThan(0)
   })
 
+  it('fetchSections returns the server response when the endpoint succeeds', async () => {
+    const sections: api.DiscoveredSection[] = [
+      {
+        slug: 'people',
+        title: 'People',
+        article_paths: ['team/people/a.md'],
+        article_count: 1,
+        first_seen_ts: new Date().toISOString(),
+        last_update_ts: new Date().toISOString(),
+        from_schema: true,
+      },
+    ]
+    vi.spyOn(client, 'get').mockResolvedValue({ sections })
+    const result = await api.fetchSections()
+    expect(result).toEqual(sections)
+  })
+
+  it('fetchSections returns an empty array on network error', async () => {
+    vi.spyOn(client, 'get').mockRejectedValue(new Error('boom'))
+    const result = await api.fetchSections()
+    expect(result).toEqual([])
+  })
+
+  it('fetchSections tolerates a null payload', async () => {
+    vi.spyOn(client, 'get').mockResolvedValue({ sections: null })
+    const result = await api.fetchSections()
+    expect(result).toEqual([])
+  })
+
+  it('subscribeSectionsUpdated returns an unsubscribe function even when SSE is unavailable', () => {
+    const originalEventSource = (globalThis as { EventSource?: unknown }).EventSource
+    ;(globalThis as { EventSource?: unknown }).EventSource = undefined
+    try {
+      const unsub = api.subscribeSectionsUpdated(() => {})
+      expect(typeof unsub).toBe('function')
+      unsub()
+    } finally {
+      ;(globalThis as { EventSource?: unknown }).EventSource = originalEventSource
+    }
+  })
+
   it('subscribeEditLog returns an unsubscribe function even when SSE is unavailable', () => {
     // No EventSource in happy-dom by default — the client should not throw.
     const originalEventSource = (globalThis as { EventSource?: unknown }).EventSource

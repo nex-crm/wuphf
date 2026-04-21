@@ -428,51 +428,53 @@ type ipRateLimitBucket struct {
 // Broker is a lightweight HTTP message broker for the team channel.
 // All agent MCP instances connect to this shared broker.
 type Broker struct {
-	channelStore        *channel.Store
-	messages            []channelMessage
-	members             []officeMember
-	memberIndex         map[string]int // slug → index into members; guarded by mu
-	channels            []teamChannel
-	sessionMode         string
-	oneOnOneAgent       string
-	focusMode           bool
-	tasks               []teamTask
-	requests            []humanInterview
-	actions             []officeActionLog
-	signals             []officeSignalRecord
-	decisions           []officeDecisionRecord
-	watchdogs           []watchdogAlert
-	scheduler           []schedulerJob
-	skills              []teamSkill
-	sharedMemory        map[string]map[string]string // namespace → key → value
-	lastTaggedAt        map[string]time.Time         // when each agent was last @mentioned
-	lastPaneSnapshot    map[string]string            // last captured pane content per agent (for change detection)
-	seenTelegramGroups  map[int64]string             // chat_id -> title, populated by transport
-	counter             int
-	notificationSince   string
-	insightsSince       string
-	pendingInterview    *humanInterview
-	usage               teamUsageState
-	externalDelivered   map[string]struct{} // message IDs already queued for external delivery
-	messageSubscribers  map[int]chan channelMessage
-	actionSubscribers   map[int]chan officeActionLog
-	activity            map[string]agentActivitySnapshot
-	activitySubscribers map[int]chan agentActivitySnapshot
-	officeSubscribers   map[int]chan officeChangeEvent
-	wikiSubscribers     map[int]chan wikiWriteEvent
-	notebookSubscribers map[int]chan notebookWriteEvent
-	reviewSubscribers   map[int]chan ReviewStateChangeEvent
-	entitySubscribers   map[int]chan EntityBriefSynthesizedEvent
-	factSubscribers     map[int]chan EntityFactRecordedEvent
-	wikiWorker          *WikiWorker
-	reviewLog           *ReviewLog
-	reviewResolver      ReviewerResolver
-	factLog             *FactLog
-	entitySynthesizer   *EntitySynthesizer
-	scanTracker         *scanStatusTracker
-	nextSubscriberID    int
-	agentStreams        map[string]*agentStreamBuffer
-	mu                  sync.Mutex
+	channelStore            *channel.Store
+	messages                []channelMessage
+	members                 []officeMember
+	memberIndex             map[string]int // slug → index into members; guarded by mu
+	channels                []teamChannel
+	sessionMode             string
+	oneOnOneAgent           string
+	focusMode               bool
+	tasks                   []teamTask
+	requests                []humanInterview
+	actions                 []officeActionLog
+	signals                 []officeSignalRecord
+	decisions               []officeDecisionRecord
+	watchdogs               []watchdogAlert
+	scheduler               []schedulerJob
+	skills                  []teamSkill
+	sharedMemory            map[string]map[string]string // namespace → key → value
+	lastTaggedAt            map[string]time.Time         // when each agent was last @mentioned
+	lastPaneSnapshot        map[string]string            // last captured pane content per agent (for change detection)
+	seenTelegramGroups      map[int64]string             // chat_id -> title, populated by transport
+	counter                 int
+	notificationSince       string
+	insightsSince           string
+	pendingInterview        *humanInterview
+	usage                   teamUsageState
+	externalDelivered       map[string]struct{} // message IDs already queued for external delivery
+	messageSubscribers      map[int]chan channelMessage
+	actionSubscribers       map[int]chan officeActionLog
+	activity                map[string]agentActivitySnapshot
+	activitySubscribers     map[int]chan agentActivitySnapshot
+	officeSubscribers       map[int]chan officeChangeEvent
+	wikiSubscribers         map[int]chan wikiWriteEvent
+	notebookSubscribers     map[int]chan notebookWriteEvent
+	reviewSubscribers       map[int]chan ReviewStateChangeEvent
+	entitySubscribers       map[int]chan EntityBriefSynthesizedEvent
+	factSubscribers         map[int]chan EntityFactRecordedEvent
+	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
+	wikiWorker              *WikiWorker
+	wikiSectionsCache       *wikiSectionsCache
+	reviewLog               *ReviewLog
+	reviewResolver          ReviewerResolver
+	factLog                 *FactLog
+	entitySynthesizer       *EntitySynthesizer
+	scanTracker             *scanStatusTracker
+	nextSubscriberID        int
+	agentStreams            map[string]*agentStreamBuffer
+	mu                      sync.Mutex
 	// configMu serializes handleConfig POST reads/writes so concurrent
 	// /config calls don't corrupt ~/.wuphf/config.json. config.Save uses
 	// os.WriteFile (O_TRUNC) without locking, so two parallel POSTs can
@@ -1133,6 +1135,7 @@ func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	b.ensureWikiSectionsCache()
 	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
 	b.ensurePlaybookExecutionLog()
@@ -1214,6 +1217,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
+	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
@@ -1737,6 +1741,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeEntity()
 	factEvents, unsubscribeFacts := b.SubscribeEntityFactEvents(64)
 	defer unsubscribeFacts()
+	sectionsEvents, unsubscribeSections := b.SubscribeWikiSectionsUpdated(16)
+	defer unsubscribeSections()
 	playbookEvents, unsubscribePlaybook := b.SubscribePlaybookExecutionEvents(64)
 	defer unsubscribePlaybook()
 
@@ -1793,6 +1799,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-factEvents:
 			if !ok || writeEvent("entity:fact_recorded", evt) != nil {
+				return
+			}
+		case evt, ok := <-sectionsEvents:
+			if !ok || writeEvent(wikiSectionsEventName, evt) != nil {
 				return
 			}
 		case evt, ok := <-playbookEvents:

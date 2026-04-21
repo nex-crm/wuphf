@@ -27,6 +27,30 @@ export interface WikiCatalogEntry {
   group: string
 }
 
+/**
+ * Dynamic section discovered from actual wiki content + the blueprint's
+ * declared wiki_schema. Maps 1:1 to Go's `team.DiscoveredSection`.
+ *
+ * A section is "from_schema" when the active blueprint declared it in
+ * wiki_schema.dirs. Otherwise it emerged organically from articles the
+ * team wrote. Both shapes ship in the same list so the sidebar can
+ * distinguish them visually.
+ */
+export interface DiscoveredSection {
+  slug: string
+  title: string
+  article_paths: string[]
+  article_count: number
+  first_seen_ts: string
+  last_update_ts: string
+  from_schema: boolean
+}
+
+export interface WikiSectionsUpdatedEvent {
+  sections: DiscoveredSection[]
+  timestamp: string
+}
+
 export interface WikiHistoryCommit {
   sha: string
   author_slug: string
@@ -48,6 +72,68 @@ export async function fetchArticle(path: string): Promise<WikiArticle> {
     return await get<WikiArticle>(`/wiki/article?path=${encodeURIComponent(path)}`)
   } catch {
     return mockArticle(path)
+  }
+}
+
+/**
+ * GET /wiki/sections — the v1.3 dynamic-section IA. Returns blueprint-
+ * declared sections (in blueprint order) followed by discovered
+ * sections (alphabetical). Empty array on backend error so the sidebar
+ * can fall back to the catalog-derived group set without blanking.
+ */
+export async function fetchSections(): Promise<DiscoveredSection[]> {
+  try {
+    const res = await get<{ sections: DiscoveredSection[] }>('/wiki/sections')
+    return Array.isArray(res?.sections) ? res.sections : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Subscribe to the shared broker `/events` SSE stream filtered to
+ * `wiki:sections_updated` events. Returns an unsubscribe function.
+ *
+ * Named event pattern matches subscribeEditLog + subscribeEntityEvents.
+ * Do NOT switch to onmessage — the broker only emits named events and
+ * the default handler never fires for named payloads.
+ */
+export function subscribeSectionsUpdated(
+  handler: (event: WikiSectionsUpdatedEvent) => void,
+): () => void {
+  let closed = false
+  let source: EventSource | null = null
+  let onEvent: ((ev: MessageEvent) => void) | null = null
+
+  try {
+    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource
+    if (!ES) return () => { closed = true }
+    source = new ES(sseURL('/events'))
+    onEvent = (ev: MessageEvent) => {
+      if (closed) return
+      try {
+        const data = JSON.parse(ev.data) as WikiSectionsUpdatedEvent
+        if (data && Array.isArray(data.sections)) {
+          handler(data)
+        }
+      } catch {
+        // ignore malformed events
+      }
+    }
+    source.addEventListener('wiki:sections_updated', onEvent as EventListener)
+  } catch {
+    source = null
+  }
+
+  return () => {
+    closed = true
+    if (source && onEvent) {
+      source.removeEventListener('wiki:sections_updated', onEvent as EventListener)
+    }
+    if (source) {
+      source.close()
+      source = null
+    }
   }
 }
 
