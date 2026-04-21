@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -491,10 +492,35 @@ func (l *Launcher) notifyOfficeChangesLoop() {
 	defer unsubscribe()
 
 	for evt := range changes {
+		// office_reseeded fires after onboarding rewrites the whole roster
+		// (blueprint selection). The interactive claude panes were spawned
+		// from the earlier default team and now point at slugs that are no
+		// longer registered agents — messages typed into them go into a
+		// dead shell. Respawn them against the new roster, outside the
+		// interview guard so it can't be blocked by a half-complete wizard.
+		if evt.Kind == "office_reseeded" {
+			l.respawnPanesAfterReseed()
+			continue
+		}
 		if l.broker.HasPendingInterview() {
 			continue
 		}
 		l.deliverOfficeChangeNotification(evt)
+	}
+}
+
+// respawnPanesAfterReseed restarts the interactive agent panes so they match
+// the newly-seeded roster from onboarding. Best-effort: the codex runtime has
+// no interactive panes, and reconfigureVisibleAgents handles an uninitialised
+// paneBackedAgents state by no-op'ing. Errors are logged but do not propagate
+// — failing to respawn leaves the previous panes running (degraded, but the
+// headless path can still deliver).
+func (l *Launcher) respawnPanesAfterReseed() {
+	if l == nil || l.usesCodexRuntime() || !l.paneBackedAgents {
+		return
+	}
+	if err := l.reconfigureVisibleAgents(); err != nil {
+		log.Printf("office_reseeded: respawn panes failed: %v", err)
 	}
 }
 

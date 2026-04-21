@@ -967,7 +967,7 @@ func (b *Broker) SubscribeActivity(buffer int) (<-chan agentActivitySnapshot, fu
 }
 
 type officeChangeEvent struct {
-	Kind string `json:"kind"` // "member_created", "member_removed", "channel_created", "channel_removed"
+	Kind string `json:"kind"` // "member_created", "member_removed", "channel_created", "channel_removed", "channel_updated", "office_reseeded"
 	Slug string `json:"slug"`
 }
 

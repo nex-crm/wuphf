@@ -436,3 +436,44 @@ func TestBlankSlateOfficeChannelsFromBlueprint_RendersCommandSlug(t *testing.T) 
 		t.Fatalf("expected a non-general channel rendered from the blueprint, got %+v", channels)
 	}
 }
+
+// TestOnboardingCompleteEmitsOfficeReseededEvent pins the contract the
+// launcher relies on: after the wizard picks a blueprint and the broker
+// rewrites b.members wholesale, a single "office_reseeded" event must fire so
+// the launcher knows to respawn the interactive claude panes. Without this
+// signal the panes are still bound to the default team (ceo/planner/
+// executor/reviewer) and messages sent to the new roster never reach a live
+// claude process — the symptom the user reported during the ui test.
+func TestOnboardingCompleteEmitsOfficeReseededEvent(t *testing.T) {
+	ensureOperationsFallbackFS(t)
+	defer withIsolatedBrokerState(t)()
+
+	b := NewBroker()
+	events, unsubscribe := b.SubscribeOfficeChanges(32)
+	defer unsubscribe()
+
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
+		t.Fatalf("onboardingCompleteFn: %v", err)
+	}
+
+	// Drain events and look for the reseed signal. Other per-member events
+	// are NOT emitted by this path (seedFromBlueprintLocked rewrites members
+	// directly), so office_reseeded is the only way the launcher learns.
+	sawReseed := false
+	for {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				t.Fatalf("subscriber closed before office_reseeded fired")
+			}
+			if evt.Kind == "office_reseeded" {
+				sawReseed = true
+			}
+		default:
+			if !sawReseed {
+				t.Fatalf("expected office_reseeded event after seed; none fired")
+			}
+			return
+		}
+	}
+}

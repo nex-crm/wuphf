@@ -220,7 +220,16 @@ func (b *Broker) seedFromBlueprintLocked(bp operations.Blueprint, selectedAgents
 	b.messages = nil
 	b.counter = 0
 	b.lastTaggedAt = make(map[string]time.Time)
-	return b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized)
+	if err := b.postKickoffLocked(bp, selectedAgents, task, skipTask, synthesized); err != nil {
+		return err
+	}
+	// Signal subscribers (the launcher) that the office roster was replaced
+	// wholesale. Individual member_created events aren't emitted by this path
+	// — seedFromBlueprintLocked rewrites b.members directly — so without this
+	// the launcher never learns the interactive tmux panes are out of sync
+	// with the new team. Subscribers should treat this as "respawn panes".
+	b.publishOfficeChangeLocked(officeChangeEvent{Kind: "office_reseeded"})
+	return nil
 }
 
 func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []string, task string, skipTask bool, synthesized bool) error {
@@ -256,7 +265,10 @@ func (b *Broker) postKickoffLocked(bp operations.Blueprint, selectedAgents []str
 
 	lead := officeLeadSlugFromMembers(b.members)
 	if lead == "" {
-		lead = "operator"
+		// Every shipped blueprint declares ceo as lead (guarded by
+		// TestAllOperationBlueprintsUseCEOLead). The fallback here only fires
+		// for malformed/synthesized blueprints with no identifiable lead.
+		lead = "ceo"
 	}
 
 	b.counter++
