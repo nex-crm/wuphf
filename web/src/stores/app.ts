@@ -156,6 +156,6 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   notebookAgentSlug: null,
   notebookEntrySlug: null,
-  setNotebookRoute: (agentSlug, entrySlug) =>
+  setNotebookRoute: (agentSlug: string | null, entrySlug: string | null) =>
     set({ notebookAgentSlug: agentSlug, notebookEntrySlug: entrySlug }),
 }))

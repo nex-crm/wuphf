@@ -452,7 +452,7 @@ func registerSharedMemoryTools(server *mcp.Server) {
 	case "markdown":
 		mcp.AddTool(server, officeWriteTool(
 			"team_wiki_write",
-			"Write a markdown article to the team wiki git repo. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article.",
+			"Write a markdown article to the team wiki git repo. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article. Images are supported via standard markdown: embed a remote URL with `![alt text](https://example.com/diagram.png)` and the wiki renderer will show it inline. Use images you found on the web while researching the article; do not upload bytes — only reference URLs.",
 		), handleTeamWikiWrite)
 		mcp.AddTool(server, readOnlyTool(
 			"team_wiki_read",
@@ -472,9 +472,6 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// Entity brief tools (v1.2) — fact log + broker-level synthesis.
 		// Same backend gate: entity briefs live in the wiki subtree.
 		registerEntityTools(server)
-		// Image tools (v1.3) — vision alt-text synthesis. Upload itself is
-		// HTTP-only from the web UI; agents describe but cannot attach.
-		registerImageTools(server)
 		// Playbook compilation tools (v1.3) — compile team/playbooks/*.md
 		// into invokable skills + record execution outcomes. Same markdown
 		// substrate, so the backend gate is unchanged.
