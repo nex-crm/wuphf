@@ -585,4 +585,3 @@ func (b *Broker) handlePlaybookSynthesisStatus(w http.ResponseWriter, r *http.Re
 		"threshold":                       threshold,
 	})
 }
-

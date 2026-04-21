@@ -590,9 +590,7 @@ func splitFrontmatterAndBody(source string) (string, string) {
 	tail := rest[closing:]
 	// Skip the immediate newline after the closing --- so the body starts on
 	// a clean line, but preserve leading blank lines beyond that.
-	if strings.HasPrefix(tail, "\n") {
-		tail = tail[1:]
-	}
+	tail = strings.TrimPrefix(tail, "\n")
 	fm := "---\n" + rest[:closing] + "\n"
 	return fm, tail
 }
