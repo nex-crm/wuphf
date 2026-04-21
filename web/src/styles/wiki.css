@@ -1503,6 +1503,59 @@
   text-underline-offset: 2px;
 }
 
+/* ─── Cross-entity related panel ─── */
+.wk-related-panel {
+  margin: 24px 0;
+  font-family: var(--wk-body-serif);
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--wk-text);
+}
+.wk-related-panel h2 {
+  font-family: var(--wk-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0 0 10px;
+  color: var(--wk-text-muted);
+  border-bottom: 1px solid var(--wk-border);
+  padding-bottom: 6px;
+}
+.wk-related-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-related-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--wk-border-light);
+}
+.wk-related-item:last-child { border-bottom: none; }
+.wk-related-link {
+  color: var(--wk-wikilink);
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+  font-family: var(--wk-mono);
+}
+.wk-related-count {
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-text-tertiary);
+}
+.wk-related-empty,
+.wk-related-loading,
+.wk-related-error {
+  font-family: var(--wk-body-serif);
+  font-style: italic;
+  color: var(--wk-text-tertiary);
+  margin: 0;
+}
+.wk-related-error { color: var(--wk-wikilink-broken); font-style: normal; }
+
 /* ─── Playbook compilation (v1.3) ─── */
 .wk-playbook-badge {
   display: flex;

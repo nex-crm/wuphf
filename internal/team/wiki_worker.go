@@ -88,6 +88,11 @@ type wikiWriteRequest struct {
 	// the v1.2 append-only fact log at team/entities/{kind}-{slug}.facts.jsonl
 	// — same serialization primitive, non-.md extension, no index regen.
 	IsEntityFact bool
+	// IsEntityGraph routes the request to Repo.CommitEntityGraph. Used for
+	// the cross-entity adjacency log at team/entities/.graph.jsonl.
+	// Same serialization primitive as IsEntityFact — non-.md extension,
+	// no wiki-index regen, no backlinks recompute.
+	IsEntityGraph bool
 	// IsPlaybookCompile routes to Repo.CommitPlaybookSkill — writes the
 	// compiled SKILL.md under team/playbooks/.compiled/{slug}/ without
 	// regenerating the catalog. v1.3 compounding-intelligence compiler.
@@ -259,6 +264,8 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.CommitHuman(writeCtx, req.Path, req.Content, req.ExpectedSHA, req.CommitMsg)
 	} else if req.IsEntityFact {
 		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsEntityGraph {
+		sha, n, err = w.repo.CommitEntityGraph(writeCtx, req.Slug, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookCompile {
 		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookExecution {
@@ -289,6 +296,10 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	case req.IsEntityFact:
 		// Entity fact writes have their own SSE event (entity:fact_recorded)
 		// published by the broker handler, not by the worker. No-op here.
+	case req.IsEntityGraph:
+		// Graph log appends are internal bookkeeping triggered by fact
+		// writes — no dedicated SSE event. Subscribers that care hear
+		// entity:fact_recorded + refetch the graph read API.
 	case req.IsPlaybookCompile:
 		// Compile writes are internal — no SSE event. The trigger (the
 		// source-article commit) already published wiki:write; emitting a
@@ -448,6 +459,39 @@ func (w *WikiWorker) EnqueueEntityFact(ctx context.Context, slug, path, content,
 		return result.SHA, result.BytesWritten, result.Err
 	case <-waitCtx.Done():
 		return "", 0, fmt.Errorf("wiki: entity-fact write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueueEntityGraph submits a full rewrite of the cross-entity adjacency
+// log at team/entities/.graph.jsonl. Same single-writer queue as the fact
+// log; routed to Repo.CommitEntityGraph (which does NOT regen the wiki
+// index or backlinks). Caller (EntityGraph) owns append-merge semantics —
+// the worker just replaces the bytes.
+func (w *WikiWorker) EnqueueEntityGraph(ctx context.Context, slug, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:          slug,
+		Path:          EntityGraphPath,
+		Content:       content,
+		Mode:          "replace",
+		CommitMsg:     commitMsg,
+		IsEntityGraph: true,
+		ReplyCh:       make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: entity-graph write timed out after %s", wikiWriteTimeout)
 	}
 }
 

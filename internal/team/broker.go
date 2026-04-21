@@ -470,6 +470,7 @@ type Broker struct {
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
 	factLog                 *FactLog
+	entityGraph             *EntityGraph
 	entitySynthesizer       *EntitySynthesizer
 	playbookSynthesizer     *PlaybookSynthesizer
 	scanTracker             *scanStatusTracker
@@ -1233,6 +1234,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/entity/brief/synthesize", b.requireAuth(b.handleEntityBriefSynthesize))
 	mux.HandleFunc("/entity/facts", b.requireAuth(b.handleEntityFactsList))
 	mux.HandleFunc("/entity/briefs", b.requireAuth(b.handleEntityBriefsList))
+	mux.HandleFunc("/entity/graph", b.requireAuth(b.handleEntityGraph))
 	mux.HandleFunc("/playbook/list", b.requireAuth(b.handlePlaybookList))
 	mux.HandleFunc("/playbook/compile", b.requireAuth(b.handlePlaybookCompile))
 	mux.HandleFunc("/playbook/execution", b.requireAuth(b.handlePlaybookExecution))
