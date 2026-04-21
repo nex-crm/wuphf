@@ -7015,6 +7015,30 @@ func (b *Broker) SeenTelegramGroups() map[int64]string {
 }
 
 // PostSystemMessage posts a lightweight system message that shows progress without blocking.
+// MarkRoutingTargets records implicit-routing recipients as "typing" so the
+// UI's typing indicator can display them without a persisted system message.
+// Replaces the old "Routing to @X..." broker post — that message was
+// permanent clutter in the channel; this drives the same signal through
+// lastTaggedAt, which already auto-clears when the agent replies.
+func (b *Broker) MarkRoutingTargets(slugs []string) {
+	if len(slugs) == 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.lastTaggedAt == nil {
+		b.lastTaggedAt = make(map[string]time.Time)
+	}
+	now := time.Now()
+	for _, slug := range slugs {
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			continue
+		}
+		b.lastTaggedAt[slug] = now
+	}
+}
+
 func (b *Broker) PostSystemMessage(channel, content, kind string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

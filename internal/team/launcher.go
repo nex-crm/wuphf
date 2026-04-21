@@ -673,22 +673,21 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	l.notifyMu.Unlock()
 	immediate = filtered
 
-	// Broadcast stage update only for untagged messages in public channels.
-	// Never in DMs — DMs are private 1:1 conversations, no routing noise.
+	// Mark implicit-routing targets as "typing" so the UI's TypingIndicator
+	// shows "X is thinking..." while the agent composes its reply. Previously
+	// we posted a persisted "Routing to @X..." system message here, which
+	// stayed in the channel forever even after the agent replied. Driving
+	// the signal through lastTaggedAt reuses the existing auto-clear (the
+	// entry is deleted when the agent posts), so the indicator is naturally
+	// ephemeral. DMs and 1:1 mode skip this — same suppression rules as
+	// before.
 	isDM, _ := l.isChannelDM(normalizeChannelSlug(msg.Channel))
 	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && !isDM && len(msg.Tagged) == 0 {
-		names := make([]string, 0, len(immediate))
+		slugs := make([]string, 0, len(immediate))
 		for _, t := range immediate {
-			names = append(names, "@"+t.Slug)
+			slugs = append(slugs, t.Slug)
 		}
-		channel := msg.Channel
-		if channel == "" {
-			channel = "general"
-		}
-		l.broker.PostSystemMessage(channel,
-			fmt.Sprintf("Routing to %s...", strings.Join(names, ", ")),
-			"routing",
-		)
+		l.broker.MarkRoutingTargets(slugs)
 	}
 
 	for _, target := range immediate {
