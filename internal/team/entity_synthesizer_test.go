@@ -60,7 +60,7 @@ func newSynthFixture(t *testing.T, llmStub func(ctx context.Context, sys, user s
 	return synth, factLog, worker, pub, func() {
 		synth.Stop()
 		cancel()
-		worker.Stop()
+		<-worker.Done()
 	}
 }
 

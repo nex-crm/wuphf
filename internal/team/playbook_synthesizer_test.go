@@ -59,7 +59,7 @@ func newPlaybookSynthFixture(
 	teardown := func() {
 		synth.Stop()
 		cancel()
-		worker.Stop()
+		<-worker.Done()
 	}
 	return synth, execLog, worker, pub, teardown
 }
