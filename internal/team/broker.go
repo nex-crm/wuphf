@@ -461,7 +461,10 @@ type Broker struct {
 	officeSubscribers   map[int]chan officeChangeEvent
 	wikiSubscribers     map[int]chan wikiWriteEvent
 	notebookSubscribers map[int]chan notebookWriteEvent
+	reviewSubscribers   map[int]chan ReviewStateChangeEvent
 	wikiWorker          *WikiWorker
+	reviewLog           *ReviewLog
+	reviewResolver      ReviewerResolver
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
@@ -852,6 +855,7 @@ func NewBroker() *Broker {
 		officeSubscribers:   make(map[int]chan officeChangeEvent),
 		wikiSubscribers:     make(map[int]chan wikiWriteEvent),
 		notebookSubscribers: make(map[int]chan notebookWriteEvent),
+		reviewSubscribers:   make(map[int]chan ReviewStateChangeEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
@@ -1122,6 +1126,8 @@ func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	b.ensureReviewLog()
+	b.startReviewExpiryLoop(context.Background())
 	return b.StartOnPort(brokeraddr.ResolvePort())
 }
 
@@ -1203,6 +1209,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
 	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
+	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
+	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
+	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
 	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
 	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
