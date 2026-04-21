@@ -1511,6 +1511,65 @@
   text-decoration: underline dashed;
   text-underline-offset: 2px;
 }
+
+/* ────────────────────────────────────────────────────────────
+ * v1.3 compounding-intelligence synthesis footer — status badge
+ * + Re-synthesize button. Lives inside PlaybookExecutionLog.
+ * Motion stays on transform/opacity (see ~/.claude/rules/web/performance.md).
+ * ──────────────────────────────────────────────────────────── */
+
+.wk-playbook-synthesis {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--wk-rule, rgba(0, 0, 0, 0.15));
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.wk-playbook-synthesis__status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.wk-playbook-synthesis__badge {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-body-muted, rgba(0, 0, 0, 0.6));
+}
+.wk-playbook-synthesis__pending {
+  font-family: var(--wk-mono);
+  font-size: 11px;
+  color: #b0821c;
+}
+.wk-playbook-synthesis__button {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--wk-rule, rgba(0, 0, 0, 0.25));
+  background: transparent;
+  color: var(--wk-body, #111);
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 150ms ease, opacity 150ms ease;
+}
+.wk-playbook-synthesis__button:hover:not([disabled]) {
+  background: rgba(0, 0, 0, 0.04);
+}
+.wk-playbook-synthesis__button[disabled] {
+  opacity: 0.6;
+  cursor: progress;
+}
+.wk-playbook-synthesis[data-state='success'] .wk-playbook-synthesis__button {
+  color: #2a7d2a;
+  border-color: #2a7d2a;
+}
+.wk-playbook-synthesis[data-state='error'] .wk-playbook-synthesis__button {
+  color: #c94a4a;
+  border-color: #c94a4a;
+}
 /* ────────────────────────────────────────────────────────────
  * v1.3 Image embeds — agents embed via standard markdown
  * `![alt](https://...)`; renderer routes through ImageEmbed.

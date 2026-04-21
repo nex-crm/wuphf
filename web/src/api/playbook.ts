@@ -10,7 +10,7 @@
  * message.
  */
 
-import { get, sseURL } from './client'
+import { get, post, sseURL } from './client'
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -45,6 +45,30 @@ export interface PlaybookExecutionRecordedEvent {
   timestamp: string
 }
 
+export interface PlaybookSynthesizedEvent {
+  slug: string
+  commit_sha: string
+  execution_count: number
+  synthesized_ts: string
+  source_path: string
+  triggered_by_user: boolean
+}
+
+export interface PlaybookSynthesisStatus {
+  slug: string
+  source_path: string
+  execution_count: number
+  last_synthesized_ts: string
+  last_synthesized_sha: string
+  executions_since_last_synthesis: number
+  threshold: number
+}
+
+export interface PlaybookSynthesizeResponse {
+  synthesis_id: number
+  queued_at: string
+}
+
 // ── HTTP ─────────────────────────────────────────────────────────
 
 /** `GET /playbook/list` — every source playbook + its compiled skill status. */
@@ -57,6 +81,32 @@ export async function fetchPlaybooks(): Promise<PlaybookSummary[]> {
     return Array.isArray(res?.playbooks) ? res.playbooks : []
   } catch {
     return []
+  }
+}
+
+/** `POST /playbook/synthesize` — force on-demand synthesis for one slug. */
+export async function synthesizeNow(
+  slug: string,
+): Promise<PlaybookSynthesizeResponse | null> {
+  try {
+    return await post<PlaybookSynthesizeResponse>('/playbook/synthesize', {
+      slug,
+    })
+  } catch {
+    return null
+  }
+}
+
+/** `GET /playbook/synthesis-status?slug=` — last synthesis sha + timestamp. */
+export async function fetchSynthesisStatus(
+  slug: string,
+): Promise<PlaybookSynthesisStatus | null> {
+  try {
+    return await get<PlaybookSynthesisStatus>(
+      `/playbook/synthesis-status?slug=${encodeURIComponent(slug)}`,
+    )
+  } catch {
+    return null
   }
 }
 
@@ -123,6 +173,56 @@ export function subscribePlaybookEvents(
     if (source) {
       source.removeEventListener(
         'playbook:execution_recorded',
+        handler as EventListener,
+      )
+      source.close()
+      source = null
+    }
+  }
+}
+
+/**
+ * Subscribe to `playbook:synthesized` events filtered to one slug.
+ * Returns an unsubscribe function. Synthesis events fire when the broker's
+ * compounding-intelligence loop commits a new "What we've learned" section
+ * back into the playbook source.
+ */
+export function subscribePlaybookSynthesizedEvents(
+  slug: string,
+  onSynthesized: (ev: PlaybookSynthesizedEvent) => void,
+): () => void {
+  let closed = false
+  let source: EventSource | null = null
+
+  const handler = (ev: MessageEvent) => {
+    if (closed) return
+    try {
+      const data = JSON.parse(ev.data) as PlaybookSynthesizedEvent
+      if (data && data.slug === slug) {
+        onSynthesized(data)
+      }
+    } catch {
+      // ignore malformed events
+    }
+  }
+
+  try {
+    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource
+    if (!ES) return () => {}
+    source = new ES(sseURL('/events'))
+    source.addEventListener('playbook:synthesized', handler as EventListener)
+    source.onerror = () => {
+      // Keep open; EventSource auto-reconnects.
+    }
+  } catch {
+    source = null
+  }
+
+  return () => {
+    closed = true
+    if (source) {
+      source.removeEventListener(
+        'playbook:synthesized',
         handler as EventListener,
       )
       source.close()
