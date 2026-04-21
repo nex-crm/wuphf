@@ -215,6 +215,32 @@ export function subscribeSectionsUpdated(
   }
 }
 
+/**
+ * Registered human identity surfaced by the broker at GET /humans. The
+ * server grows this list as it observes new commits, so team installs
+ * with multiple humans all show up without any client configuration.
+ */
+export interface HumanIdentity {
+  name: string
+  email: string
+  slug: string
+}
+
+/**
+ * GET /humans — returns identities observed or probed server-side. The
+ * byline component uses this to turn a commit author slug into the
+ * human's real display name. Returns [] on any error so the UI falls
+ * back to the slug-derived label without blanking.
+ */
+export async function fetchHumans(): Promise<HumanIdentity[]> {
+  try {
+    const res = await get<{ humans: HumanIdentity[] }>('/humans')
+    return Array.isArray(res?.humans) ? res.humans : []
+  } catch {
+    return []
+  }
+}
+
 export async function fetchCatalog(): Promise<WikiCatalogEntry[]> {
   try {
     const res = await get<{ articles: WikiCatalogEntry[] }>('/wiki/catalog')

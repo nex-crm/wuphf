@@ -1,5 +1,6 @@
 import PixelAvatar from './PixelAvatar'
 import { formatRelativeTime } from '../../lib/format'
+import type { HumanIdentity } from '../../api/wiki'
 
 /** Article byline: pixel avatar + last-edited-by + amber ts pulse + started date. */
 
@@ -10,6 +11,14 @@ interface BylineProps {
   startedDate?: string
   startedBy?: string
   revisions?: number
+  /**
+   * Registered human identities from GET /humans. When the author slug
+   * matches a registered human, the byline renders that human's display
+   * name instead of the generic "Human" pill. Optional so callers that
+   * don't care about human attribution (or haven't fetched the registry
+   * yet) stay backwards-compatible.
+   */
+  humans?: HumanIdentity[]
 }
 
 export default function Byline({
@@ -19,11 +28,16 @@ export default function Byline({
   startedDate,
   startedBy,
   revisions,
+  humans,
 }: BylineProps) {
-  // Human edits get a distinct pill so readers can tell machine edits
-  // from hand edits at a glance. Matches the agent pixel-avatar motif
-  // without rendering an avatar (`human` has no generated sprite).
-  const isHuman = authorSlug === 'human'
+  // v1.4 legacy: `human` was the single synthetic author for every human
+  // edit. v1.5 replaces that with per-human identities from GET /humans.
+  // Both paths take a distinct "human pill" style so readers can tell
+  // machine edits from hand edits at a glance.
+  const registeredHuman = humans?.find((h) => h.slug === authorSlug)
+  const isLegacyHuman = authorSlug === 'human'
+  const isHuman = Boolean(registeredHuman) || isLegacyHuman
+  const humanLabel = registeredHuman?.name ?? 'Human'
   return (
     <div className="wk-byline">
       <PixelAvatar slug={authorSlug} size={22} />
@@ -31,7 +45,7 @@ export default function Byline({
         Last edited by{' '}
         {isHuman ? (
           <span className="wk-name wk-human-pill" data-testid="wk-human-byline">
-            Human
+            {humanLabel}
           </span>
         ) : (
           <span className="wk-name">{authorName}</span>

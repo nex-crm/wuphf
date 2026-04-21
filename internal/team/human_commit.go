@@ -31,11 +31,18 @@ import (
 	"strings"
 )
 
-// HumanAuthor is the synthetic commit author slug for every human edit.
-// Yields `Human <human@wuphf.local>` via runGitLocked's identity derivation.
-// Distinct from every agent slug and from the other synthetic identities
-// (archivist, wuphf-bootstrap, wuphf-recovery, system) so audit views can
-// colour human edits distinctly.
+// HumanAuthor is the synthetic commit author slug used when no richer
+// human identity has been registered (no `git config --global user.name`
+// / `user.email` on this machine). Yields `human <human@wuphf.local>`
+// via runGitLocked's identity derivation. Distinct from every agent slug
+// and from the other synthetic identities (archivist, wuphf-bootstrap,
+// wuphf-recovery, system) so audit views can colour human edits
+// distinctly.
+//
+// v1.5: when the broker has probed a real git identity, the slug on
+// disk becomes the user's derived slug (see deriveSlug in
+// human_identity.go) and commits land with their real name + email.
+// `HumanAuthor` remains the fallback.
 const HumanAuthor = "human"
 
 // ErrWikiSHAMismatch is returned by CommitHuman when the caller's
@@ -44,16 +51,30 @@ const HumanAuthor = "human"
 // so the client can show the re-load prompt without a second round trip.
 var ErrWikiSHAMismatch = errors.New("wiki: article changed since it was opened")
 
-// CommitHuman writes content to relPath as the synthetic human author,
-// enforcing an expected-SHA pre-check. Returns the new short SHA, bytes
-// written, and an error; ErrWikiSHAMismatch means the caller should
-// re-load and re-apply their edits. Mode is inferred from mustExist: a
-// fresh article (expectedSHA == "") uses "create", an edit uses "replace".
+// CommitHuman writes content to relPath with the caller-supplied human
+// identity, enforcing an expected-SHA pre-check. When identity has its
+// zero value, the fallback `human <human@wuphf.local>` identity is used
+// so the legacy single-user attribution path still works.
+//
+// Returns the new short SHA, bytes written, and an error;
+// ErrWikiSHAMismatch means the caller should re-load and re-apply their
+// edits. Mode is inferred from mustExist: a fresh article (expectedSHA
+// == "") uses "create", an edit uses "replace".
 //
 // Mirrors Repo.Commit in all other respects: same validateArticlePath
 // guard, same working-tree atomicity, same regenerateIndexLocked pass
 // so the index lands in the same commit as the article edit.
-func (r *Repo) CommitHuman(ctx context.Context, relPath, content, expectedSHA, message string) (string, int, error) {
+func (r *Repo) CommitHuman(ctx context.Context, relPath, content, expectedSHA, message string, identity HumanIdentity) (string, int, error) {
+	// Resolve the effective identity before touching the filesystem so
+	// every downstream call site sees the same author.
+	name := strings.TrimSpace(identity.Name)
+	email := strings.TrimSpace(identity.Email)
+	slug := strings.TrimSpace(identity.Slug)
+	if name == "" || email == "" || slug == "" {
+		name = FallbackHumanIdentity.Name
+		email = FallbackHumanIdentity.Email
+		slug = FallbackHumanIdentity.Slug
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -109,12 +130,15 @@ func (r *Repo) CommitHuman(ctx context.Context, relPath, content, expectedSHA, m
 	}
 
 	relForGit := filepath.ToSlash(relPath)
-	if out, err := r.runGitLocked(ctx, HumanAuthor, "add", "--", relForGit, "index/all.md"); err != nil {
+	// Staging/diff/rev-parse only care about the identity for advisory
+	// reflog entries — use the derived slug so per-human attribution is
+	// consistent across every git sub-call in the commit.
+	if out, err := r.runGitLockedAs(ctx, name, email, "add", "--", relForGit, "index/all.md"); err != nil {
 		return "", 0, fmt.Errorf("wiki: git add %s: %w: %s", relPath, err, out)
 	}
 
 	// Byte-identical re-write short-circuits to current HEAD; mirrors Repo.Commit.
-	cachedDiff, err := r.runGitLocked(ctx, HumanAuthor, "diff", "--cached", "--name-only")
+	cachedDiff, err := r.runGitLockedAs(ctx, name, email, "diff", "--cached", "--name-only")
 	if err != nil {
 		return "", 0, fmt.Errorf("wiki: git diff --cached: %w", err)
 	}
@@ -135,10 +159,11 @@ func (r *Repo) CommitHuman(ctx context.Context, relPath, content, expectedSHA, m
 		// make the provenance obvious even at a glance.
 		commitMsg = "human: " + commitMsg
 	}
-	if out, err := r.runGitLocked(ctx, HumanAuthor, "commit", "-q", "-m", commitMsg); err != nil {
+	if out, err := r.runGitLockedAs(ctx, name, email, "commit", "-q", "-m", commitMsg); err != nil {
 		return "", 0, fmt.Errorf("wiki: git commit: %w: %s", err, out)
 	}
-	sha, err := r.runGitLocked(ctx, HumanAuthor, "rev-parse", "--short", "HEAD")
+	_ = slug // slug is retained for future author_slug plumbing in the reply envelope.
+	sha, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
 	if err != nil {
 		return "", 0, fmt.Errorf("wiki: resolve HEAD sha: %w", err)
 	}

@@ -67,6 +67,14 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "  wuphf import --from legacy           Auto-detect a running external orchestrator")
 		fmt.Fprintln(os.Stderr, "  wuphf import --from <directory>      Directory with state.json")
 		fmt.Fprintln(os.Stderr, "  wuphf import --from <file.json>      Direct path to an export")
+	case "memory":
+		fmt.Fprintln(os.Stderr, "wuphf memory — manage the team wiki and legacy memory backends")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf memory migrate --from nex           Import Nex memory into ~/.wuphf/wiki/team/")
+		fmt.Fprintln(os.Stderr, "  wuphf memory migrate --from gbrain        Import GBrain pages into the wiki")
+		fmt.Fprintln(os.Stderr, "  wuphf memory migrate --from <backend> --dry-run  Preview without committing")
+		fmt.Fprintln(os.Stderr, "  wuphf memory migrate --from <backend> --limit N  Cap the number imported")
 	case "log":
 		fmt.Fprintln(os.Stderr, "wuphf log — show agent task receipts")
 		fmt.Fprintln(os.Stderr, "")
@@ -146,6 +154,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s --cmd <cmd>  Run a command non-interactively\n", appName)
 		fmt.Fprintf(os.Stderr, "\nFlags:\n")
 		printVisibleFlags(os.Stderr)
@@ -264,6 +273,9 @@ func main() {
 			return
 		case "log":
 			runLogCmd(args[1:])
+			return
+		case "memory":
+			runMemory(args[1:])
 			return
 		}
 	}

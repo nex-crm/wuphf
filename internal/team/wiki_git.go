@@ -674,9 +674,27 @@ func (r *Repo) runGitLocked(ctx context.Context, slug string, args ...string) (s
 	if slug == "" {
 		slug = "wuphf"
 	}
+	return r.runGitLockedAs(ctx, slug, slug+"@wuphf.local", args...)
+}
+
+// runGitLockedAs runs `git` with an explicit author name + email. Used
+// for human wiki edits where we want the user's real git identity on
+// the commit (e.g. `Sarah Chen <sarah@acme.com>`) instead of the
+// synthetic slug@wuphf.local pattern used for agents.
+//
+// Caller must hold r.mu.
+func (r *Repo) runGitLockedAs(ctx context.Context, name, email string, args ...string) (string, error) {
+	name = strings.TrimSpace(name)
+	email = strings.TrimSpace(email)
+	if name == "" {
+		name = "wuphf"
+	}
+	if email == "" {
+		email = "wuphf@wuphf.local"
+	}
 	identity := []string{
-		"-c", "user.name=" + slug,
-		"-c", "user.email=" + slug + "@wuphf.local",
+		"-c", "user.name=" + name,
+		"-c", "user.email=" + email,
 		"-c", "advice.defaultBranchName=false",
 		"-c", "init.defaultBranch=main",
 		"-c", "commit.gpgsign=false",

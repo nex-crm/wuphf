@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeSlug from 'rehype-slug'
-import rehypeAutolinkHeadings from 'rehype-autolink-headings'
 import type { PluggableList } from 'unified'
 import ArticleStatusBanner from './ArticleStatusBanner'
 import EntityBriefBar from './EntityBriefBar'
 import FactsOnFile from './FactsOnFile'
 import EntityRelatedPanel from './EntityRelatedPanel'
-import ImageEmbed from './ImageEmbed'
 import PlaybookExecutionLog from './PlaybookExecutionLog'
 import PlaybookSkillBadge from './PlaybookSkillBadge'
 import HatBar, { type HatBarTab } from './HatBar'
@@ -27,13 +23,19 @@ import ReferencedBy from './ReferencedBy'
 import {
   fetchArticle,
   fetchHistory,
+  fetchHumans,
   subscribeEditLog,
+  type HumanIdentity,
   type WikiArticle as WikiArticleT,
   type WikiCatalogEntry,
   type WikiHistoryCommit,
 } from '../../api/wiki'
 import type { SourceItem } from './Sources'
-import { wikiLinkRemarkPlugin } from '../../lib/wikilink'
+import {
+  buildMarkdownComponents,
+  buildRehypePlugins,
+  buildRemarkPlugins,
+} from '../../lib/wikiMarkdownConfig'
 import { formatAgentName } from '../../lib/agentName'
 import type { EntityKind } from '../../api/entity'
 import { detectPlaybook } from '../../api/playbook'
@@ -65,6 +67,25 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   const [historyError, setHistoryError] = useState(false)
   const [liveAgent, setLiveAgent] = useState<string | null>(null)
   const [refreshNonce, setRefreshNonce] = useState(0)
+  const [humans, setHumans] = useState<HumanIdentity[]>([])
+
+  // Fetch the human registry once per mount. The list is small (a handful
+  // of team members) and changes rarely, so we skip refetching on every
+  // path change. Failure falls through to an empty list — Byline gracefully
+  // shows the agent path when no human identity matches.
+  useEffect(() => {
+    let cancelled = false
+    fetchHumans()
+      .then((list) => {
+        if (!cancelled) setHumans(list)
+      })
+      .catch(() => {
+        if (!cancelled) setHumans([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -144,12 +165,13 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   )
 
   const remarkPlugins: PluggableList = useMemo(
-    () => [remarkGfm, wikiLinkRemarkPlugin(resolver)],
+    () => buildRemarkPlugins(resolver),
     [resolver],
   )
-  const rehypePlugins: PluggableList = useMemo(
-    () => [rehypeSlug, [rehypeAutolinkHeadings, { behavior: 'wrap' }]],
-    [],
+  const rehypePlugins: PluggableList = useMemo(() => buildRehypePlugins(), [])
+  const markdownComponents = useMemo(
+    () => buildMarkdownComponents({ resolver, onNavigate }),
+    [resolver, onNavigate],
   )
 
   if (loading) return <div className="wk-loading">Loading article…</div>
@@ -167,6 +189,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
       authorName={formatAgentName(article.last_edited_by)}
       lastEditedTs={article.last_edited_ts}
       revisions={article.revisions}
+      humans={humans}
     />
   )
 
@@ -226,35 +249,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
             <ReactMarkdown
               remarkPlugins={remarkPlugins}
               rehypePlugins={rehypePlugins}
-              components={{
-                a: ({ node, ...props }) => {
-                  const isWikilink = (props as Record<string, unknown>)['data-wikilink'] === 'true'
-                  if (isWikilink) {
-                    const slug = (props as Record<string, unknown>)['data-slug'] as string | undefined
-                    return (
-                      <a
-                        {...props}
-                        onClick={(e) => {
-                          if (slug) {
-                            e.preventDefault()
-                            onNavigate(slug)
-                          }
-                        }}
-                      />
-                    )
-                  }
-                  return <a {...props} />
-                },
-                // Agents embed images as standard markdown (`![alt](https://...)`).
-                // Route them through ImageEmbed so editorial articles get
-                // lazy-loading, lightbox, and no-referrer leaks to the source host.
-                img: ({ src, alt, width, height }) => {
-                  if (!src) return null
-                  const w = typeof width === 'string' ? parseInt(width, 10) || undefined : width
-                  const h = typeof height === 'string' ? parseInt(height, 10) || undefined : height
-                  return <ImageEmbed src={String(src)} alt={alt} width={w} height={h} />
-                },
-              }}
+              components={markdownComponents}
             >
               {article.content}
             </ReactMarkdown>
@@ -265,6 +260,8 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
             path={article.path}
             initialContent={article.content}
             expectedSha={article.commit_sha ?? ''}
+            serverLastEditedTs={article.last_edited_ts}
+            catalog={catalog}
             onSaved={(newSha) => {
               // Refetch after every save — covers both happy path and
               // the conflict-then-reload path (which passes the server's
