@@ -3,6 +3,7 @@ package operations
 import (
 	"fmt"
 	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -69,7 +70,22 @@ func normalizeBlueprint(templateID string, blueprint Blueprint) Blueprint {
 	blueprint.EmployeeBlueprints = normalizeTemplateIDs(blueprint.EmployeeBlueprints)
 	blueprint.Starter = normalizeStarterPlan(blueprint.Starter)
 	blueprint.EmployeeBlueprints = appendUniqueTemplateIDs(blueprint.EmployeeBlueprints, starterEmployeeBlueprintIDs(blueprint.Starter.Agents)...)
+	blueprint.DefaultReviewer = strings.TrimSpace(blueprint.DefaultReviewer)
+	blueprint.ReviewerPaths = normalizeReviewerPaths(blueprint.ReviewerPaths)
 	return blueprint
+}
+
+func normalizeReviewerPaths(rules ReviewerPathMap) ReviewerPathMap {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make(ReviewerPathMap, 0, len(rules))
+	for _, rule := range rules {
+		rule.Pattern = strings.TrimSpace(rule.Pattern)
+		rule.Reviewer = strings.TrimSpace(rule.Reviewer)
+		out = append(out, rule)
+	}
+	return out
 }
 
 func normalizeStarterPlan(plan StarterPlan) StarterPlan {
@@ -173,7 +189,71 @@ func validateBlueprint(repoRoot string, blueprint Blueprint) error {
 			return fmt.Errorf("operation blueprint %q employee blueprint %q: %w", blueprint.ID, ref, err)
 		}
 	}
+	if err := validateReviewerConfig(blueprint); err != nil {
+		return err
+	}
 	return nil
+}
+
+// validateReviewerConfig enforces that every reviewer slug referenced by
+// DefaultReviewer or ReviewerPaths either matches a starter agent slug on
+// the blueprint or is the sentinel "human-only". Invalid glob patterns in
+// ReviewerPaths keys are also rejected here so misconfigurations surface
+// at load time instead of at promotion time.
+func validateReviewerConfig(blueprint Blueprint) error {
+	file := blueprintYAMLPath(blueprint.ID)
+	agentSlugs := make(map[string]struct{}, len(blueprint.Starter.Agents))
+	for _, agent := range blueprint.Starter.Agents {
+		slug := strings.TrimSpace(agent.Slug)
+		if slug == "" {
+			continue
+		}
+		agentSlugs[slug] = struct{}{}
+	}
+	validReviewer := func(value string) bool {
+		if value == ReviewerHumanOnly {
+			return true
+		}
+		_, ok := agentSlugs[value]
+		return ok
+	}
+
+	if value := strings.TrimSpace(blueprint.DefaultReviewer); value != "" {
+		if !validReviewer(value) {
+			return fmt.Errorf("blueprint %s default_reviewer %q does not match any agent slug or %q (file: %s)", blueprint.ID, value, ReviewerHumanOnly, file)
+		}
+	}
+
+	for _, rule := range blueprint.ReviewerPaths {
+		pattern := strings.TrimSpace(rule.Pattern)
+		reviewer := strings.TrimSpace(rule.Reviewer)
+		if pattern == "" {
+			return fmt.Errorf("blueprint %s reviewer_paths contains an empty pattern (file: %s)", blueprint.ID, file)
+		}
+		if _, err := filepath.Match(stripDoubleStar(pattern), ""); err != nil {
+			return fmt.Errorf("blueprint %s reviewer_paths pattern %q is not a valid glob: %v (file: %s)", blueprint.ID, pattern, err, file)
+		}
+		if reviewer == "" {
+			return fmt.Errorf("blueprint %s reviewer_paths %q has empty reviewer value (file: %s)", blueprint.ID, pattern, file)
+		}
+		if !validReviewer(reviewer) {
+			return fmt.Errorf("blueprint %s reviewer_paths %q reviewer %q does not match any agent slug or %q (file: %s)", blueprint.ID, pattern, reviewer, ReviewerHumanOnly, file)
+		}
+	}
+	return nil
+}
+
+// stripDoubleStar maps our "**" (recursive) syntax to "*" so we can reuse
+// filepath.Match for cheap syntactic validation. filepath.Match does not
+// understand "**" natively, so we would otherwise reject valid patterns.
+func stripDoubleStar(pattern string) string {
+	return strings.ReplaceAll(pattern, "**", "*")
+}
+
+// blueprintYAMLPath returns the repo-relative path to the blueprint YAML
+// so validation errors can tell the user which file to edit.
+func blueprintYAMLPath(id string) string {
+	return path.Join("templates", "operations", id, "blueprint.yaml")
 }
 
 func normalizeTemplateIDs(values []string) []string {

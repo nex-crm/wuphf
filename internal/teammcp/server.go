@@ -466,6 +466,9 @@ func registerSharedMemoryTools(server *mcp.Server) {
 			"team_wiki_list",
 			"Return the auto-regenerated catalog (index/all.md) of every article in the team wiki.",
 		), handleTeamWikiList)
+		// Notebook tools ride on the same markdown backend. Registered here
+		// so they share the WUPHF_MEMORY_BACKEND gate with team_wiki_*.
+		registerNotebookTools(server)
 	case "none":
 		// Nothing — user explicitly disabled shared memory.
 	default:

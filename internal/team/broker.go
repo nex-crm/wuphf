@@ -460,7 +460,12 @@ type Broker struct {
 	activitySubscribers map[int]chan agentActivitySnapshot
 	officeSubscribers   map[int]chan officeChangeEvent
 	wikiSubscribers     map[int]chan wikiWriteEvent
+	notebookSubscribers map[int]chan notebookWriteEvent
+	reviewSubscribers   map[int]chan ReviewStateChangeEvent
 	wikiWorker          *WikiWorker
+	reviewLog           *ReviewLog
+	reviewResolver      ReviewerResolver
+	scanTracker         *scanStatusTracker
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
 	mu                  sync.Mutex
@@ -850,6 +855,8 @@ func NewBroker() *Broker {
 		activitySubscribers: make(map[int]chan agentActivitySnapshot),
 		officeSubscribers:   make(map[int]chan officeChangeEvent),
 		wikiSubscribers:     make(map[int]chan wikiWriteEvent),
+		notebookSubscribers: make(map[int]chan notebookWriteEvent),
+		reviewSubscribers:   make(map[int]chan ReviewStateChangeEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
@@ -1120,6 +1127,8 @@ func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	b.ensureReviewLog()
+	b.startReviewExpiryLoop(context.Background())
 	return b.StartOnPort(brokeraddr.ResolvePort())
 }
 
@@ -1197,6 +1206,16 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
+	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
+	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
+	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
+	mux.HandleFunc("/notebook/catalog", b.requireAuth(b.handleNotebookCatalog))
+	mux.HandleFunc("/notebook/search", b.requireAuth(b.handleNotebookSearch))
+	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
+	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
+	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
+	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
+	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
 	mux.HandleFunc("/studio/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
 	mux.HandleFunc("/operations/bootstrap-package", b.requireAuth(b.handleOperationBootstrapPackage))
@@ -1690,6 +1709,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeOffice()
 	wikiEvents, unsubscribeWiki := b.SubscribeWikiEvents(64)
 	defer unsubscribeWiki()
+	notebookEvents, unsubscribeNotebook := b.SubscribeNotebookEvents(64)
+	defer unsubscribeNotebook()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1732,6 +1753,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-wikiEvents:
 			if !ok || writeEvent("wiki:write", evt) != nil {
+				return
+			}
+		case evt, ok := <-notebookEvents:
+			if !ok || writeEvent("notebook:write", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:

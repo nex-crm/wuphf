@@ -3,6 +3,14 @@ name: YouTube Factory
 kind: media_business
 description: Template for a repeatable video-led business with human-gated external side effects.
 objective: Build and run a repeatable video operation with durable planning, reusable workflows, integration-backed execution, and explicit human approvals at external side effects.
+default_reviewer: ceo
+reviewer_paths:
+  "team/research/**": research-lead
+  "team/scripts/**": scriptwriter
+  "team/production/**": editor
+  "team/packaging/**": packaging-lead
+  "team/growth/**": growth-ops
+  "team/revenue/**": monetization
 employee_blueprints:
   - workflow-automation-builder
 

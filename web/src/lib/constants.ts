@@ -1,3 +1,7 @@
+// Wiki unifies three surfaces behind one sidebar entry: the canonical
+// team wiki, per-agent notebooks (drafts), and the promotion review queue.
+// Each surface gets its own tab inside the Wiki app; notebooks/reviews
+// have no top-level sidebar entries of their own.
 export const SIDEBAR_APPS = [
   { id: 'wiki', icon: '\uD83D\uDCD6', name: 'Wiki' },
   { id: 'tasks', icon: '\u2705', name: 'Tasks' },

@@ -79,19 +79,20 @@ func nameWithPortSuffixForPort(base string, port int) string {
 
 // Launcher sets up and manages the multi-agent team.
 type Launcher struct {
-	packSlug         string
-	pack             *agent.PackDefinition
-	blankSlateLaunch bool
-	sessionName      string
-	cwd              string
-	broker           *Broker
-	mcpConfig        string
-	unsafe           bool
-	opusCEO          bool
-	focusMode        bool
-	sessionMode      string
-	oneOnOne         string
-	provider         string
+	packSlug           string
+	pack               *agent.PackDefinition
+	operationBlueprint *operations.Blueprint
+	blankSlateLaunch   bool
+	sessionName        string
+	cwd                string
+	broker             *Broker
+	mcpConfig          string
+	unsafe             bool
+	opusCEO            bool
+	focusMode          bool
+	sessionMode        string
+	oneOnOne           string
+	provider           string
 
 	headlessMu           sync.Mutex
 	headlessCtx          context.Context
@@ -159,9 +160,12 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	}
 
 	operationTemplateExists := false
+	var loadedBlueprint *operations.Blueprint
 	if strings.TrimSpace(packSlug) != "" {
-		if _, err := operations.LoadBlueprint(repoRoot, packSlug); err == nil {
+		if loaded, err := operations.LoadBlueprint(repoRoot, packSlug); err == nil {
 			operationTemplateExists = true
+			bp := loaded
+			loadedBlueprint = &bp
 		}
 	}
 	var pack *agent.PackDefinition
@@ -193,6 +197,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 	return &Launcher{
 		packSlug:            packSlug,
 		pack:                pack,
+		operationBlueprint:  loadedBlueprint,
 		blankSlateLaunch:    blankSlateLaunch,
 		sessionName:         SessionName,
 		cwd:                 cwd,
@@ -274,6 +279,16 @@ func (l *Launcher) Launch() error {
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch
+	// Wire the notebook-promotion reviewer resolver from the active
+	// blueprint. Without this, every promotion falls back to "ceo"
+	// regardless of blueprint reviewer_paths. Safe on nil (packs-only
+	// launches or blank-slate runs).
+	if l.operationBlueprint != nil {
+		bp := l.operationBlueprint
+		l.broker.SetReviewerResolver(func(wikiPath string) string {
+			return bp.ResolveReviewer(wikiPath)
+		})
+	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
@@ -4000,6 +4015,16 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	l.broker.runtimeProvider = l.provider
 	l.broker.packSlug = l.packSlug
 	l.broker.blankSlateLaunch = l.blankSlateLaunch
+	// Wire the notebook-promotion reviewer resolver from the active
+	// blueprint. Without this, every promotion falls back to "ceo"
+	// regardless of blueprint reviewer_paths. Safe on nil (packs-only
+	// launches or blank-slate runs).
+	if l.operationBlueprint != nil {
+		bp := l.operationBlueprint
+		l.broker.SetReviewerResolver(func(wikiPath string) string {
+			return bp.ResolveReviewer(wikiPath)
+		})
+	}
 	if err := l.broker.SetSessionMode(l.sessionMode, l.oneOnOne); err != nil {
 		return fmt.Errorf("set session mode: %w", err)
 	}
