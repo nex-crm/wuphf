@@ -7,6 +7,7 @@ import type { PluggableList } from 'unified'
 import ArticleStatusBanner from './ArticleStatusBanner'
 import EntityBriefBar from './EntityBriefBar'
 import FactsOnFile from './FactsOnFile'
+import ImageEmbed from './ImageEmbed'
 import PlaybookExecutionLog from './PlaybookExecutionLog'
 import PlaybookSkillBadge from './PlaybookSkillBadge'
 import HatBar, { type HatBarTab } from './HatBar'
@@ -241,6 +242,15 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
                     )
                   }
                   return <a {...props} />
+                },
+                // Agents embed images as standard markdown (`![alt](https://...)`).
+                // Route them through ImageEmbed so editorial articles get
+                // lazy-loading, lightbox, and no-referrer leaks to the source host.
+                img: ({ src, alt, width, height }) => {
+                  if (!src) return null
+                  const w = typeof width === 'string' ? parseInt(width, 10) || undefined : width
+                  const h = typeof height === 'string' ? parseInt(height, 10) || undefined : height
+                  return <ImageEmbed src={String(src)} alt={alt} width={w} height={h} />
                 },
               }}
             >
