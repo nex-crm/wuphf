@@ -1,90 +1,42 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { assetURL, fetchAlt } from '../../api/images'
-
-// ── Types ────────────────────────────────────────────────────────
 
 export interface ImageEmbedProps {
-  /**
-   * Wiki-relative path like `team/assets/202604/abcdef123456-diagram.png`.
-   * Components that receive this from markdown rendering should NOT prefix
-   * `/wiki/assets/`; ImageEmbed handles URL resolution.
-   */
-  assetPath: string
-  /**
-   * Optional pre-resolved alt text. When absent, ImageEmbed fetches from
-   * the sidecar endpoint. Supplying it explicitly skips the fetch and
-   * avoids a flash of alt-less rendering.
-   */
+  /** Absolute URL the agent embedded in markdown. */
+  src: string
   alt?: string
-  /** Optional sibling thumbnail; falls back to the full-size source when empty. */
-  thumbPath?: string
-  /** Intrinsic dimensions for CLS-free rendering. */
   width?: number
   height?: number
   /**
    * When true, render inside an article body — applies the editorial
-   * figure styling and enables the lightbox. The notebook preview in a
-   * compose form sets this to false because it's not interactive.
+   * figure styling and enables the lightbox. Inline previews (e.g. in
+   * compose forms) should pass false to get a plain <img>.
    */
   editorial?: boolean
 }
 
-// ── Component ────────────────────────────────────────────────────
-
 export function ImageEmbed({
-  assetPath,
-  alt: providedAlt,
-  thumbPath,
+  src,
+  alt = '',
   width,
   height,
   editorial = true,
 }: ImageEmbedProps) {
-  const [alt, setAlt] = useState<string>(providedAlt ?? '')
   const [open, setOpen] = useState(false)
   const closeButtonRef = useRef<HTMLButtonElement | null>(null)
 
-  // Lazily fetch alt-text when it wasn't supplied and the asset is rendered
-  // in editorial mode (where a11y matters most). The fetch is a no-op if
-  // the sidecar doesn't exist yet.
-  useEffect(() => {
-    if (providedAlt !== undefined) {
-      setAlt(providedAlt)
-      return
-    }
-    let cancelled = false
-    fetchAlt(assetPath)
-      .then((a) => {
-        if (!cancelled) setAlt(a)
-      })
-      .catch(() => {
-        if (!cancelled) setAlt('')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [assetPath, providedAlt])
-
-  // Lightbox keyboard — Esc closes.
   useEffect(() => {
     if (!open) return
     const handler = (ev: KeyboardEvent) => {
       if (ev.key === 'Escape') setOpen(false)
     }
     window.addEventListener('keydown', handler)
-    // Move focus to the close button so screen readers announce the dialog
-    // and keyboard users can dismiss immediately.
     closeButtonRef.current?.focus()
     return () => window.removeEventListener('keydown', handler)
   }, [open])
 
-  const src = thumbPath ? assetURL(thumbPath) : assetURL(assetPath)
-  const fullSrc = assetURL(assetPath)
-
   const onImgClick = useCallback(
     (ev: React.MouseEvent) => {
       if (!editorial) return
-      // Let assistive-tech users open via Enter / Space too via the wrapping
-      // button — the <img> click fires here only for pointer users.
       ev.preventDefault()
       setOpen(true)
     },
@@ -100,6 +52,7 @@ export function ImageEmbed({
         height={height}
         loading="lazy"
         decoding="async"
+        referrerPolicy="no-referrer"
         className="image-embed__inline"
       />
     )
@@ -121,6 +74,7 @@ export function ImageEmbed({
             height={height}
             loading="lazy"
             decoding="async"
+            referrerPolicy="no-referrer"
             onClick={onImgClick}
             className="image-embed__img"
           />
@@ -148,8 +102,9 @@ export function ImageEmbed({
             ×
           </button>
           <img
-            src={fullSrc}
+            src={src}
             alt={alt}
+            referrerPolicy="no-referrer"
             className="image-embed__full"
             onClick={(e) => e.stopPropagation()}
           />

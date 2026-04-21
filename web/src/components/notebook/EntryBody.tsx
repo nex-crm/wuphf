@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { PluggableList } from 'unified'
 import { wikiLinkRemarkPlugin } from '../../lib/wikilink'
+import ImageEmbed from '../wiki/ImageEmbed'
 
 /**
  * Notebook markdown renderer. Reuses the wiki's remark-gfm + remark-wiki-link
@@ -53,6 +54,12 @@ export default function EntryBody({
               )
             }
             return <a {...props} />
+          },
+          img: ({ src, alt, width, height }) => {
+            if (!src) return null
+            const w = typeof width === 'string' ? parseInt(width, 10) || undefined : width
+            const h = typeof height === 'string' ? parseInt(height, 10) || undefined : height
+            return <ImageEmbed src={String(src)} alt={alt} width={w} height={h} editorial={false} />
           },
           blockquote: ({ node, children, ...props }) => {
             // Desktop CSS renders blockquotes as right-gutter marginalia
