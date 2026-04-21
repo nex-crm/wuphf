@@ -1348,6 +1348,169 @@
   text-underline-offset: 2px;
 }
 
+/* ─── Playbook compilation (v1.3) ─── */
+.wk-playbook-badge {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid var(--wk-border);
+  background: var(--wk-paper-dark);
+}
+.wk-playbook-badge--compiled {
+  border-left: 3px solid var(--wk-wikilink);
+}
+.wk-playbook-badge--pending {
+  border-left: 3px solid var(--wk-amber);
+  color: var(--wk-text-muted);
+  font-style: italic;
+}
+.wk-playbook-badge__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wk-wikilink);
+  flex-shrink: 0;
+}
+.wk-playbook-badge--pending .wk-playbook-badge__dot {
+  background: var(--wk-amber);
+}
+.wk-playbook-badge__label {
+  flex: 1 1 auto;
+}
+.wk-playbook-badge__path {
+  font-family: var(--wk-mono);
+  font-size: 12px;
+  padding: 1px 6px;
+  background: var(--wk-code-bg);
+  border: 1px solid var(--wk-border-light);
+}
+.wk-playbook-badge__meta {
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-text-tertiary);
+}
+
+.wk-playbook-executions {
+  margin: 32px 0 24px;
+  font-family: var(--wk-body-serif);
+}
+.wk-playbook-executions__toggle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--wk-border);
+  padding: 0 0 6px;
+  margin: 0 0 12px;
+  cursor: pointer;
+  text-align: left;
+}
+.wk-playbook-executions__toggle h2 {
+  font-family: var(--wk-display);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--wk-text-muted);
+}
+.wk-playbook-executions__count {
+  font-family: var(--wk-mono);
+  font-weight: 400;
+  color: var(--wk-text-tertiary);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.wk-playbook-executions__chev {
+  font-family: var(--wk-mono);
+  color: var(--wk-text-tertiary);
+}
+.wk-playbook-executions__empty,
+.wk-playbook-executions__loading {
+  font-style: italic;
+  color: var(--wk-text-tertiary);
+}
+.wk-playbook-executions__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wk-playbook-execution {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px dashed var(--wk-border-light);
+}
+.wk-playbook-execution:last-child { border-bottom: none; }
+.wk-playbook-execution__pill {
+  font-family: var(--wk-chrome);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid var(--wk-border);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.wk-playbook-execution__pill--success {
+  color: var(--wk-text);
+  background: var(--wk-paper);
+  border-color: var(--wk-wikilink);
+}
+.wk-playbook-execution__pill--partial {
+  color: var(--wk-text);
+  background: var(--wk-amber-banner);
+  border-color: var(--wk-amber);
+}
+.wk-playbook-execution__pill--aborted {
+  color: var(--wk-wikilink-broken);
+  background: var(--wk-paper);
+  border-color: var(--wk-wikilink-broken);
+}
+.wk-playbook-execution__body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.wk-playbook-execution__summary {
+  margin: 0;
+  font-family: var(--wk-body-serif);
+  color: var(--wk-text);
+}
+.wk-playbook-execution__notes {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--wk-text-muted);
+}
+.wk-playbook-execution__meta {
+  display: block;
+  margin-top: 4px;
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-text-tertiary);
+}
+.wk-playbook-execution__meta time { font-family: var(--wk-mono); }
+.wk-playbook-executions__more {
+  margin-top: 10px;
+  font-family: var(--wk-chrome);
+  font-size: 12px;
+  color: var(--wk-wikilink);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline dashed;
+  text-underline-offset: 2px;
+}
 /* ────────────────────────────────────────────────────────────
  * v1.3 Image support — uploader + embed
  * Motion stays on transform/opacity (see ~/.claude/rules/web/performance.md).

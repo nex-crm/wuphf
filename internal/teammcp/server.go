@@ -475,6 +475,10 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// Image tools (v1.3) — vision alt-text synthesis. Upload itself is
 		// HTTP-only from the web UI; agents describe but cannot attach.
 		registerImageTools(server)
+		// Playbook compilation tools (v1.3) — compile team/playbooks/*.md
+		// into invokable skills + record execution outcomes. Same markdown
+		// substrate, so the backend gate is unchanged.
+		registerPlaybookTools(server)
 	case "none":
 		// Nothing — user explicitly disabled shared memory.
 	default:

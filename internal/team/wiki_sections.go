@@ -123,6 +123,12 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 			return nil
 		}
 		if d.IsDir() {
+			// Hide compiler-output subtrees (e.g. playbooks/.compiled/**)
+			// so machine-generated SKILL.md files never appear as their
+			// own section entries or inflate counts.
+			if strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".md") {
