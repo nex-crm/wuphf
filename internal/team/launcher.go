@@ -1940,7 +1940,9 @@ func (l *Launcher) Attach() error {
 	return cmd.Run()
 }
 
-// Kill destroys the tmux session, all agent processes, and the broker.
+// Kill destroys the tmux session, all agent processes, and the broker. Also
+// removes per-agent temp files (MCP config + system prompt) so the broker
+// token and prompt content do not linger in $TMPDIR.
 func (l *Launcher) Kill() error {
 	if l.headlessCancel != nil {
 		l.headlessCancel()
@@ -1948,6 +1950,10 @@ func (l *Launcher) Kill() error {
 	if l.broker != nil {
 		l.broker.Stop()
 	}
+	// Clean temp files before tearing down tmux so the claude processes are
+	// still alive to release any open handles (harmless, but principle of
+	// least surprise).
+	l.cleanupAgentTempFiles()
 	if l.usesCodexRuntime() {
 		if err := killPersistedOfficeProcess(); err != nil {
 			return err
@@ -2049,7 +2055,11 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 			continue
 		}
 		slug := visibleMembers[slugIdx].Slug
-		cmd := l.claudeCommand(slug, l.buildPrompt(slug))
+		cmd, err := l.claudeCommand(slug, l.buildPrompt(slug))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "respawn pane for %s: %v\n", slug, err)
+			continue
+		}
 
 		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
 		// respawn-pane -k kills the current process and starts a new one
@@ -2884,7 +2894,10 @@ func shouldPrimeClaudePane(content string) bool {
 func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
-		firstCmd := l.claudeCommand(slug, l.buildPrompt(slug))
+		firstCmd, err := l.claudeCommand(slug, l.buildPrompt(slug))
+		if err != nil {
+			return nil, err
+		}
 		out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
 			"-t", l.sessionName+":team",
 			"-p", "65",
@@ -2933,7 +2946,10 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	if len(visible) == 0 {
 		return nil, nil
 	}
-	firstCmd := l.claudeCommand(visible[0].Slug, l.buildPrompt(visible[0].Slug))
+	firstCmd, err := l.claudeCommand(visible[0].Slug, l.buildPrompt(visible[0].Slug))
+	if err != nil {
+		return nil, err
+	}
 	out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
 		"-t", l.sessionName+":team",
 		"-p", "65",
@@ -2950,7 +2966,10 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 	// Remaining agents: split from agent area, then use "tiled" layout
 	for i := 1; i < len(visible); i++ {
-		agentCmd := l.claudeCommand(visible[i].Slug, l.buildPrompt(visible[i].Slug))
+		agentCmd, err := l.claudeCommand(visible[i].Slug, l.buildPrompt(visible[i].Slug))
+		if err != nil {
+			return nil, fmt.Errorf("spawn agent %s: %w", visible[i].Slug, err)
+		}
 		// Split from the last agent pane
 		_ = exec.Command("tmux", "-L", tmuxSocketName, "split-window",
 			"-t", l.sessionName+":team.1",
@@ -2995,7 +3014,11 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 func (l *Launcher) spawnOverflowAgents() {
 	for _, member := range l.overflowOfficeMembers() {
-		agentCmd := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		agentCmd, err := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "spawn overflow agent %s: %v\n", member.Slug, err)
+			continue
+		}
 		windowName := overflowWindowName(member.Slug)
 		_ = exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
 			"-t", l.sessionName,
@@ -3025,7 +3048,7 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 		return
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
-		l.reportPaneFallback("tmux not found on PATH", err)
+		l.reportPaneFallback(false, "tmux not found on PATH", err)
 		return
 	}
 
@@ -3043,7 +3066,7 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 		"-c", l.cwd,
 		placeholderCmd,
 	).Run(); err != nil {
-		l.reportPaneFallback("tmux new-session failed", err)
+		l.reportPaneFallback(true, "tmux new-session failed", err)
 		return
 	}
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
@@ -3058,7 +3081,7 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 
 	if _, err := l.spawnVisibleAgents(); err != nil {
 		_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
-		l.reportPaneFallback("spawn visible agents failed", err)
+		l.reportPaneFallback(true, "spawn visible agents failed", err)
 		return
 	}
 	l.spawnOverflowAgents()
@@ -3067,20 +3090,56 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (uses subscription quota)\n", l.sessionName)
 }
 
+// paneFallbackMessages renders the two user-facing messages for a pane-spawn
+// fallback (stderr banner + broker #general post). The remediation advice
+// depends on whether tmux is installed:
+//
+//   - tmuxInstalled=false → tell the user to install tmux (the old default,
+//     and still the right answer for most systems)
+//   - tmuxInstalled=true  → tmux rejected the command; telling the user to
+//     "install tmux" is actively wrong. Ask them to file a bug.
+//
+// Pure function so it can be unit-tested without touching os.Stderr or the
+// broker. Keep in sync with reportPaneFallback below.
+func paneFallbackMessages(tmuxInstalled bool, detail string) (stderrMsg, brokerMsg string) {
+	const headlessBlurb = "Falling back to headless `claude --print`, which consumes Anthropic's extra-usage quota."
+	const brokerBlurb = "Running in headless mode (%s). Agent turns will draw from the Anthropic extra-usage quota."
+	if !tmuxInstalled {
+		stderrMsg = fmt.Sprintf(
+			"  Agents:  pane-backed mode unavailable (%s). %s Install tmux to run agents on your normal subscription.\n",
+			detail, headlessBlurb,
+		)
+		brokerMsg = fmt.Sprintf(
+			brokerBlurb+" Install tmux and relaunch to use interactive Claude sessions on your normal subscription.",
+			detail,
+		)
+		return
+	}
+	stderrMsg = fmt.Sprintf(
+		"  Agents:  pane-backed mode unavailable (%s). %s tmux IS installed but rejected the launch command; please file a bug with the detail above at https://github.com/nex-crm/wuphf/issues.\n",
+		detail, headlessBlurb,
+	)
+	brokerMsg = fmt.Sprintf(
+		brokerBlurb+" tmux is installed but rejected the launch command; please file a bug so we can fix the regression.",
+		detail,
+	)
+	return
+}
+
 // reportPaneFallback logs a pane-spawn failure and surfaces the billing
-// tradeoff to the web user via a #general system message.
-func (l *Launcher) reportPaneFallback(summary string, err error) {
+// tradeoff to the web user via a #general system message. Pass
+// tmuxInstalled=false only when the failure was "tmux not on PATH"; any
+// other failure implies tmux IS installed and rejected our command, which
+// needs different remediation advice.
+func (l *Launcher) reportPaneFallback(tmuxInstalled bool, summary string, err error) {
 	detail := summary
 	if err != nil {
 		detail = fmt.Sprintf("%s: %v", summary, err)
 	}
-	fmt.Fprintf(os.Stderr, "  Agents:  pane-backed mode unavailable (%s). Falling back to headless `claude --print`, which consumes Anthropic's extra-usage quota. Install tmux to run agents on your normal subscription.\n", detail)
+	stderrMsg, brokerMsg := paneFallbackMessages(tmuxInstalled, detail)
+	fmt.Fprint(os.Stderr, stderrMsg)
 	if l.broker != nil {
-		l.broker.PostSystemMessage(
-			"general",
-			"Running in headless mode ("+detail+"). Agent turns will draw from the Anthropic extra-usage quota. Install tmux and relaunch to use interactive Claude sessions on your normal subscription.",
-			"runtime",
-		)
+		l.broker.PostSystemMessage("general", brokerMsg, "runtime")
 	}
 }
 
@@ -3337,15 +3396,33 @@ func (l *Launcher) buildPrompt(slug string) string {
 
 // claudeCommand builds the shell command string for spawning a claude session.
 // Sets WUPHF_AGENT_SLUG so the MCP knows which agent this session serves.
-func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
-	escaped := strings.ReplaceAll(systemPrompt, "'", "'\\''")
-	agentMCP := l.mcpConfig
-	if path, err := l.ensureAgentMCPConfig(slug); err == nil {
-		agentMCP = path
+// claudeCommand returns the shell command that launches an interactive
+// `claude` session for the given agent. The command is passed as a single
+// argument to tmux split-window; if it grows past tmux's internal
+// command-parse buffer, tmux rejects it with "command too long" before the
+// shell ever runs. Keep the command bounded — put the bulky system prompt in
+// a file and pass --append-system-prompt-file <path> instead of inlining.
+//
+// Returns an error if the per-agent temp files (MCP config or prompt) cannot
+// be written; callers should fall back to the headless path so agents do not
+// silently launch with a missing system prompt.
+func (l *Launcher) claudeCommand(slug, systemPrompt string) (string, error) {
+	agentMCP, err := l.ensureAgentMCPConfig(slug)
+	if err != nil {
+		if l.mcpConfig == "" {
+			return "", fmt.Errorf("claudeCommand(%s): write agent MCP config: %w", slug, err)
+		}
+		agentMCP = l.mcpConfig
 	}
 	mcpConfig := strings.ReplaceAll(agentMCP, "'", "'\\''")
-	name := strings.ReplaceAll(l.getAgentName(slug), "'", "'\\''")
 
+	promptPath, err := l.writeAgentPromptFile(slug, systemPrompt)
+	if err != nil {
+		return "", fmt.Errorf("claudeCommand(%s): write prompt file: %w", slug, err)
+	}
+	promptPathQuoted := strings.ReplaceAll(promptPath, "'", "'\\''")
+
+	name := strings.ReplaceAll(l.getAgentName(slug), "'", "'\\''")
 	permFlags := l.resolvePermissionFlags(slug)
 
 	brokerToken := ""
@@ -3372,7 +3449,7 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 	model := l.headlessClaudeModel(slug)
 
 	return fmt.Sprintf(
-		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_BROKER_BASE_URL=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=%s/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
+		"%s%s%sWUPHF_AGENT_SLUG=%s WUPHF_BROKER_TOKEN=%s WUPHF_BROKER_BASE_URL=%s WUPHF_NO_NEX=%t ANTHROPIC_PROMPT_CACHING=1 CLAUDE_CODE_ENABLE_TELEMETRY=1 OTEL_METRICS_EXPORTER=none OTEL_LOGS_EXPORTER=otlp OTEL_EXPORTER_OTLP_LOGS_PROTOCOL=http/json OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=%s/v1/logs OTEL_EXPORTER_OTLP_HEADERS='Authorization=Bearer %s' OTEL_RESOURCE_ATTRIBUTES='agent.slug=%s,wuphf.channel=office' claude --model %s %s --append-system-prompt-file '%s' --mcp-config '%s' --strict-mcp-config -n '%s'",
 		oneOnOneEnv,
 		oneSecretEnv,
 		oneIdentityEnv,
@@ -3385,10 +3462,41 @@ func (l *Launcher) claudeCommand(slug, systemPrompt string) string {
 		slug,
 		model,
 		permFlags,
-		escaped,
+		promptPathQuoted,
 		mcpConfig,
 		name,
-	)
+	), nil
+}
+
+// writeAgentPromptFile persists the per-agent system prompt to a stable
+// per-slug temp file so it can be passed to `claude --append-system-prompt-file`
+// without bloating the tmux command.
+//
+// File naming mirrors ensureAgentMCPConfig (wuphf-mcp-<slug>.json) so both
+// artifacts are easy to clean up together. Perms are 0o600 because the prompt
+// can contain team-internal instructions and tool lists.
+func (l *Launcher) writeAgentPromptFile(slug, prompt string) (string, error) {
+	path := filepath.Join(os.TempDir(), "wuphf-prompt-"+slug+".txt")
+	if err := os.WriteFile(path, []byte(prompt), 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// cleanupAgentTempFiles removes the per-agent MCP config + system prompt
+// temp files for every known office member. Safe to call multiple times and
+// idempotent — missing files are ignored. Called from Shutdown so the broker
+// token + prompt content do not linger in $TMPDIR after the session ends.
+func (l *Launcher) cleanupAgentTempFiles() {
+	tmp := os.TempDir()
+	for _, m := range l.officeMembersSnapshot() {
+		for _, path := range []string{
+			filepath.Join(tmp, "wuphf-mcp-"+m.Slug+".json"),
+			filepath.Join(tmp, "wuphf-prompt-"+m.Slug+".txt"),
+		} {
+			_ = os.Remove(path)
+		}
+	}
 }
 
 // resolvePermissionFlags returns the Claude Code permission flags for an agent.
