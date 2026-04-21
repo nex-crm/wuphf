@@ -49,7 +49,11 @@ func newStartedWorker(t *testing.T) (*WikiWorker, *Repo, *recordingPublisher, co
 	worker.Start(ctx)
 	return worker, repo, pub, func() {
 		cancel()
-		worker.Stop()
+		// Wait for drain (and its side goroutines — auto-recompile and
+		// backup mirror) to fully exit before the test returns, so
+		// t.TempDir() cleanup does not race in-flight writes into
+		// wiki.bak/ or the main wiki repo.
+		<-worker.Done()
 	}
 }
 

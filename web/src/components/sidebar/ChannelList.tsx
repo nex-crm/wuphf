@@ -2,6 +2,7 @@ import { useChannels } from '../../hooks/useChannels'
 import { useOverflow } from '../../hooks/useOverflow'
 import { useAppStore } from '../../stores/app'
 import { ChannelWizard, useChannelWizard } from '../channels/ChannelWizard'
+import { SidebarItemLabel } from './SidebarItemLabel'
 
 export function ChannelList() {
   const { data: channels = [] } = useChannels()
@@ -26,7 +27,7 @@ export function ChannelList() {
               <span style={{ color: 'currentColor', width: 18, textAlign: 'center', flexShrink: 0 }}>
                 #
               </span>
-              <span>{ch.name || ch.slug}</span>
+              <SidebarItemLabel>{ch.name || ch.slug}</SidebarItemLabel>
             </button>
           )
         })}

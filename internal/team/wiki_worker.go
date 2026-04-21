@@ -160,10 +160,16 @@ type WikiWorker struct {
 	lastBackupAt  time.Time
 	backupPending atomic.Bool
 
-	// sideGoroutines tracks async helpers (e.g. auto-recompile) spawned
-	// from the drain loop so Stop() can wait for them before closing the
-	// request channel.
+	// sideGoroutines tracks async helpers (e.g. auto-recompile, backup
+	// mirror) spawned from the drain loop so Stop() and WaitForIdle() can
+	// block until they finish — essential for tests on Linux where
+	// t.TempDir() cleanup otherwise races in-flight repo writes.
 	sideGoroutines sync.WaitGroup
+
+	// drainDone closes when the drain goroutine has fully exited (including
+	// its own sideGoroutines.Wait). Tests register `t.Cleanup(func() {
+	// cancel(); <-worker.Done() })` so tempdir removal is deterministic.
+	drainDone chan struct{}
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
@@ -176,6 +182,7 @@ func NewWikiWorker(repo *Repo, publisher wikiEventPublisher) *WikiWorker {
 		repo:      repo,
 		publisher: publisher,
 		requests:  make(chan wikiWriteRequest, wikiRequestBuffer),
+		drainDone: make(chan struct{}),
 	}
 }
 
@@ -235,7 +242,13 @@ func (w *WikiWorker) Enqueue(ctx context.Context, slug, path, content, mode, com
 
 // drain is the single worker goroutine. It runs exactly one request at a time.
 func (w *WikiWorker) drain(ctx context.Context) {
+	defer close(w.drainDone)
 	defer w.running.Store(false)
+	// Wait for detached helpers (auto-recompile, backup mirror) before the
+	// drain goroutine returns so test harnesses that cancel the context see
+	// a quiesced worker — otherwise background writes to the repo can race
+	// t.TempDir() cleanup.
+	defer w.sideGoroutines.Wait()
 	for {
 		select {
 		case <-ctx.Done():
@@ -296,7 +309,15 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		req.ReplyCh <- wikiWriteResult{SHA: sha, Err: err}
 		return
 	}
-	req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
+	// Reply is sent at the end of process() so every sideGoroutines.Add(1)
+	// from the event fan-out below has landed before the caller unblocks.
+	// Tests that call WaitForIdle() right after Enqueue can then see a
+	// consistent WaitGroup counter — without this ordering, the backup
+	// mirror goroutine could still be spawning while t.TempDir() cleanup
+	// races it.
+	defer func() {
+		req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
+	}()
 
 	ts := time.Now().UTC().Format(time.RFC3339)
 	switch {
@@ -405,6 +426,27 @@ func (w *WikiWorker) maybeScheduleBackup(ctx context.Context) {
 // diagnostics and tests.
 func (w *WikiWorker) QueueLength() int {
 	return len(w.requests)
+}
+
+// WaitForIdle blocks until every detached side goroutine spawned by the
+// worker (auto-recompile, backup mirror) has finished. Tests register this
+// via t.Cleanup so t.TempDir() RemoveAll does not race in-flight background
+// writes into wiki.bak/ — the symptom is "directory not empty" or
+// "no such file or directory" cleanup errors on Linux CI.
+//
+// Safe to call after ctx cancellation: the side-goroutine WaitGroup is
+// independent of drain lifecycle.
+func (w *WikiWorker) WaitForIdle() {
+	w.sideGoroutines.Wait()
+}
+
+// Done returns a channel that closes when the drain goroutine has fully
+// exited — including its wait on side goroutines. Tests that started the
+// worker with a cancellable context should `<-worker.Done()` after the
+// cancel so drain's in-flight repo writes settle before t.TempDir()
+// removal.
+func (w *WikiWorker) Done() <-chan struct{} {
+	return w.drainDone
 }
 
 // EnqueueHuman submits a human-authored wiki write to the shared single-

@@ -94,18 +94,35 @@ function JobCard({ job }: { job: SchedulerJob }) {
   return (
     <div className="app-card" style={{ marginBottom: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 14 }}>{'\u23F0'}</span>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          style={{ color: 'var(--text-secondary)', flexShrink: 0 }}
+        >
+          <circle cx="12" cy="12" r="9" />
+          <polyline points="12 7 12 12 15 14" />
+        </svg>
         <span className="app-card-title" style={{ marginBottom: 0 }}>
           {job.label || job.name || job.slug || 'Job'}
         </span>
         {job.status && (
-          <span className={job.status === 'active' ? 'badge badge-green' : 'badge badge-accent'}>
+          <span className={job.status === 'active' ? 'badge badge-green' : 'badge badge-neutral'}>
             {job.status.toUpperCase()}
           </span>
         )}
       </div>
       {job.next_run && (
-        <div className="app-card-meta" style={{ marginBottom: 2 }}>
+        <div
+          className="app-card-meta"
+          style={{ marginBottom: 4, fontSize: 13, color: 'var(--text-secondary)' }}
+        >
           {formatRelativeTime(job.next_run)}
         </div>
       )}

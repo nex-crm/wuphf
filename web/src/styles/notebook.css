@@ -5,11 +5,21 @@
  * leak into the wiki (and vice versa).
  */
 
+.notebook-surface::-webkit-scrollbar { width: 10px; height: 10px; }
+.notebook-surface::-webkit-scrollbar-track { background: transparent; }
+.notebook-surface::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.notebook-surface::-webkit-scrollbar-thumb:hover { background-color: rgba(0, 0, 0, 0.4); background-clip: padding-box; }
+
 .notebook-surface {
   /* Design tokens — copied verbatim from the approved variant-A mock. */
-  --nb-paper:         #F1EADB;
+  --nb-paper:         #FAFFE5;
   --nb-paper-dark:    #E9DFC9;
-  --nb-rule:          #E6DEC6;
+  --nb-rule:          rgba(150, 150, 64, 0.07);
   --nb-surface:       #FAF5E8;
   --nb-text:          #2A2721;
   --nb-text-muted:    #5B5547;
@@ -24,7 +34,7 @@
   --nb-green-approve: #6A8B52;
   --nb-green-bg:      rgba(106, 139, 82, 0.10);
 
-  --nb-display:       'Caveat', 'Comic Sans MS', cursive;
+  --nb-display:       'Covered By Your Grace', 'Comic Sans MS', cursive;
   --nb-body-serif:    'IBM Plex Serif', Georgia, serif;
   --nb-chrome:        -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
   --nb-mono:          'Geist Mono', SFMono-Regular, Menlo, monospace;
@@ -33,27 +43,27 @@
   --nb-article-max:   780px;
   --nb-appbar-h:      46px;
 
-  background: var(--nb-paper);
-  color: var(--nb-text);
-  font-family: var(--nb-body-serif);
-  line-height: 1.6;
-  /* Fill the tab panel exactly and own the scroll for every notebook view.
-     Without this the nb-layout `min-height: 100vh` makes content taller than
-     `.wiki-shell-body`, which clips with overflow:hidden — leaving the image
-     uploader, drop zone, and footer unreachable. */
-  height: 100%;
-  min-height: 0;
-  overflow-y: auto;
-  /* Horizontal ruled-paper rhythm (28px) — matches body line-height so text
-     sits ON the ruling, not crossed by it. */
+  background-color: var(--nb-paper);
   background-image:
     repeating-linear-gradient(
       to bottom,
       transparent 0,
-      transparent 27px,
-      var(--nb-rule) 27px,
-      var(--nb-rule) 28px
-    );
+      transparent 15px,
+      var(--nb-rule) 15px,
+      var(--nb-rule) 16px
+    ),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.16 0 0 0 0 0.14 0 0 0 0 0.11 0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-repeat: repeat, repeat;
+  color: var(--nb-text);
+  font-family: var(--nb-body-serif);
+  line-height: 1.6;
+  height: calc(100% - 8px);
+  margin: 0 8px 8px;
+  border-radius: 16px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* Links — fountain-pen blue, dashed underline to distinguish from wiki. */
@@ -120,27 +130,43 @@
 .notebook-surface .nb-layout {
   display: grid;
   grid-template-columns: var(--nb-sidebar-width) minmax(0, 1fr);
-  /* Let content size itself naturally; `.notebook-surface` is the scroller.
-     Using `100vh` here overflowed the shell and clipped the bottom. */
-  min-height: 100%;
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
 }
 
 /* ── Author shelf (left sidebar) ─────────────────────────────── */
 .notebook-surface .nb-shelf {
-  background: var(--nb-surface);
-  border-right: 1px dashed var(--nb-border);
+  background-color: var(--olive-100, #f8ffdb);
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.16 0 0 0 0 0.14 0 0 0 0 0.11 0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-repeat: repeat;
+  border-right: 1px solid rgba(0, 0, 0, 0.10);
+  box-shadow: 16px 0 24px -24px rgba(0, 0, 0, 0.15);
   padding: 24px 16px 80px;
   font-family: var(--nb-chrome);
   font-size: 13px;
-  background-image: none;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  z-index: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
 }
+.notebook-surface .nb-shelf::-webkit-scrollbar { width: 8px; }
+.notebook-surface .nb-shelf::-webkit-scrollbar-track { background: transparent; }
+.notebook-surface .nb-shelf::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+}
+.notebook-surface .nb-shelf::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.35); }
 .notebook-surface .nb-shelf-head {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 8px 16px;
-  border-bottom: 1px dashed var(--nb-border);
-  margin-bottom: 12px;
+  gap: 12px;
+  padding: 0 4px 16px;
 }
 .notebook-surface .nb-shelf-head h2 {
   font-family: var(--nb-display);
@@ -148,73 +174,115 @@
   font-weight: 600;
   color: var(--nb-text);
   line-height: 1.1;
+  margin: 0;
 }
 .notebook-surface .nb-shelf-head .nb-shelf-role {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 11px;
-  color: var(--nb-text-muted);
-  font-family: var(--nb-chrome);
+  color: rgba(42, 39, 33, 0.55);
+  margin-top: 2px;
 }
 
 .notebook-surface .nb-shelf-list {
   list-style: none;
   margin: 0;
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 .notebook-surface .nb-shelf-list .nb-date-head {
-  font-family: var(--nb-display);
-  font-size: 17px;
-  color: var(--nb-text-muted);
-  padding: 12px 8px 4px;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 11px;
+  color: rgba(42, 39, 33, 0.55);
+  padding: 14px 6px 4px;
   font-weight: 500;
+  letter-spacing: 0.02em;
   pointer-events: none;
 }
 .notebook-surface .nb-shelf-item {
-  padding: 8px 8px;
-  border-left: 2px solid transparent;
+  padding: 8px 10px;
+  border-radius: 6px;
   cursor: pointer;
   min-height: 44px;
   display: flex;
   flex-direction: column;
   justify-content: center;
   background: transparent;
-  border-top: 0;
-  border-right: 0;
-  border-bottom: 0;
+  border: 0;
   width: 100%;
   text-align: left;
   font: inherit;
   color: inherit;
+  transition: background 120ms ease;
 }
-.notebook-surface .nb-shelf-item:hover { background: rgba(217, 206, 181, 0.25); }
+.notebook-surface .nb-shelf-item:hover { background: rgba(42, 39, 33, 0.04); }
 .notebook-surface .nb-shelf-item.is-current {
-  border-left-color: var(--nb-amber);
-  background: var(--nb-amber-bg);
+  background: rgba(42, 39, 33, 0.06);
 }
 .notebook-surface .nb-shelf-item .nb-shelf-t {
   font-family: var(--nb-body-serif);
-  font-size: 13px;
+  font-size: 14px;
   color: var(--nb-text);
-  line-height: 1.4;
-  display: block;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
-.notebook-surface .nb-shelf-item.is-current .nb-shelf-t { font-weight: 500; }
+.notebook-surface .nb-shelf-item.is-current .nb-shelf-t { font-weight: 600; }
 .notebook-surface .nb-shelf-item .nb-shelf-meta {
-  color: var(--nb-text-tertiary);
-  font-family: var(--nb-mono);
-  font-size: 10px;
-  margin-top: 2px;
+  color: rgba(42, 39, 33, 0.55);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 11px;
+  margin-top: 4px;
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  text-transform: lowercase;
+}
+.notebook-surface .nb-shelf-item .nb-shelf-meta::first-letter {
+  text-transform: uppercase;
 }
 .notebook-surface .nb-shelf-item .nb-promoted {
-  color: var(--nb-green-approve);
-  font-family: var(--nb-mono);
-  font-size: 10px;
-  font-weight: 500;
+  color: var(--green, #03a04c);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: none;
 }
 .notebook-surface .nb-shelf-item .nb-status-draft {
-  color: var(--nb-stamp-red);
-  font-family: var(--nb-mono);
-  font-size: 10px;
-  font-weight: 500;
+  color: #6B6B6B;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+.notebook-surface .nb-shelf-item .nb-status-draft::first-letter {
+  text-transform: uppercase;
+}
+.notebook-surface .nb-shelf-item .nb-status-review {
+  color: #B8860B;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+.notebook-surface .nb-shelf-item .nb-status-review::first-letter {
+  text-transform: uppercase;
+}
+.notebook-surface .nb-shelf-item .nb-status-changes {
+  color: #B43A2F;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+.notebook-surface .nb-shelf-item .nb-status-changes::first-letter {
+  text-transform: uppercase;
 }
 .notebook-surface .nb-shelf-empty {
   padding: 24px 8px;
@@ -226,8 +294,11 @@
 
 /* ── Article column ──────────────────────────────────────────── */
 .notebook-surface .nb-article {
-  padding: 36px 72px 120px;
+  padding: 32px 72px 48px;
   max-width: var(--nb-article-max);
+  margin-left: auto;
+  margin-right: auto;
+  width: 100%;
   position: relative;
 }
 
@@ -246,17 +317,18 @@
   position: absolute;
   top: 48px;
   right: 52px;
-  font-family: var(--nb-display);
-  font-size: 48px;
-  font-weight: 700;
-  color: var(--nb-stamp-red);
-  border: 4px solid var(--nb-stamp-red);
-  padding: 6px 18px 2px;
+  width: 180px;
+  height: 80px;
   transform: rotate(-9deg);
-  letter-spacing: 0.05em;
-  opacity: 0.72;
+  opacity: 0.85;
   pointer-events: none;
-  background: rgba(180, 58, 47, 0.04);
+  background: url("/draft-stamp.png") center / contain no-repeat;
+  font-size: 0;
+  color: transparent;
+  text-indent: -9999px;
+  overflow: hidden;
+  border: none;
+  padding: 0;
 }
 
 /* Entry header */
@@ -267,14 +339,13 @@
   line-height: 1.1;
   letter-spacing: -0.01em;
   color: var(--nb-text);
-  margin-top: 8px;
+  margin-top: 16px;
 }
 .notebook-surface .nb-entry-subtitle {
-  font-family: var(--nb-body-serif);
-  font-style: italic;
-  font-size: 17px;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
   color: var(--nb-text-muted);
-  margin-top: 4px;
+  margin-top: 6px;
 }
 
 /* Sticky byline strip */
@@ -283,32 +354,33 @@
   align-items: center;
   gap: 10px;
   margin: 16px 0 28px;
-  font-family: var(--nb-chrome);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 12px;
   color: var(--nb-text-muted);
-  padding: 10px 0;
-  border-bottom: 1px dashed var(--nb-border);
-  position: sticky;
-  top: calc(var(--nb-appbar-h) + 0px);
-  background: var(--nb-paper);
-  z-index: 5;
+  padding: 10px 0 14px;
+  border-bottom: 0;
+  background: transparent;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 6' preserveAspectRatio='none'><path d='M0 3.1 L 7 2.8 L 14 3.3 L 22 2.9 L 31 3.2 L 38 2.7 L 46 3.4 L 54 3.0 L 63 2.8 L 71 3.3 L 79 2.9 L 88 3.2 L 96 2.6 L 105 3.1 L 113 3.4 L 121 2.8 L 130 3.2 L 138 2.9 L 147 3.3 L 155 2.7 L 163 3.0 L 172 3.4 L 180 2.8 L 189 3.1 L 197 3.3 L 205 2.7 L 214 3.2 L 222 2.9 L 231 3.4 L 239 2.8 L 247 3.1 L 256 2.7 L 264 3.3 L 273 3.0 L 281 2.8 L 289 3.2 L 298 3.4 L 306 2.9 L 315 3.0 L 323 3.3 L 331 2.7 L 340 3.2 L 348 2.9 L 357 3.1 L 365 3.4 L 373 2.8 L 382 3.0 L 390 3.3 L 400 2.9' fill='none' stroke='%232A2721' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 100% 6px;
+  background-position: bottom left;
 }
 .notebook-surface .nb-byline strong { color: var(--nb-text); font-weight: 500; }
 .notebook-surface .nb-byline .nb-byline-meta {
   margin-left: auto;
-  font-family: var(--nb-mono);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 11px;
   color: var(--nb-text-tertiary);
 }
 .notebook-surface .nb-draft-pill {
-  font-family: var(--nb-chrome);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  background: var(--nb-stamp-red);
-  color: #fff;
+  background: rgba(42, 39, 33, 0.08);
+  color: var(--nb-text-muted);
   padding: 2px 6px;
-  border-radius: 2px;
+  border-radius: 3px;
   font-weight: 600;
 }
 .notebook-surface .nb-promoted-pill {
@@ -343,10 +415,14 @@
   font-size: 30px;
   font-style: italic;
   font-weight: 500;
-  color: var(--nb-ink-blue);
+  color: var(--nb-text);
   margin: 28px 0 10px;
-  border-bottom: 1px solid var(--nb-border);
-  padding-bottom: 4px;
+  border-bottom: 0;
+  padding-bottom: 10px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 6' preserveAspectRatio='none'><path d='M0 3.1 L 7 2.8 L 14 3.3 L 22 2.9 L 31 3.2 L 38 2.7 L 46 3.4 L 54 3.0 L 63 2.8 L 71 3.3 L 79 2.9 L 88 3.2 L 96 2.6 L 105 3.1 L 113 3.4 L 121 2.8 L 130 3.2 L 138 2.9 L 147 3.3 L 155 2.7 L 163 3.0 L 172 3.4 L 180 2.8 L 189 3.1 L 197 3.3 L 205 2.7 L 214 3.2 L 222 2.9 L 231 3.4 L 239 2.8 L 247 3.1 L 256 2.7 L 264 3.3 L 273 3.0 L 281 2.8 L 289 3.2 L 298 3.4 L 306 2.9 L 315 3.0 L 323 3.3 L 331 2.7 L 340 3.2 L 348 2.9 L 357 3.1 L 365 3.4 L 373 2.8 L 382 3.0 L 390 3.3 L 400 2.9' fill='none' stroke='%232A2721' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 100% 6px;
+  background-position: bottom left;
 }
 .notebook-surface .nb-body h3 {
   font-family: var(--nb-body-serif);
@@ -366,7 +442,12 @@
 .notebook-surface .nb-body ol {
   margin: 10px 0 14px 24px;
   padding: 0;
+  list-style-position: outside;
 }
+.notebook-surface .nb-body ul { list-style-type: disc; }
+.notebook-surface .nb-body ol { list-style-type: decimal; }
+.notebook-surface .nb-body ul.contains-task-list { list-style: none; padding-left: 0; margin-left: 0; }
+.notebook-surface .nb-body ul.contains-task-list li.task-list-item { list-style: none; }
 .notebook-surface .nb-body li {
   font-size: 17px;
   line-height: 1.72;
@@ -402,7 +483,11 @@
   overflow-x: auto;
 }
 .notebook-surface .nb-body pre code { background: transparent; padding: 0; }
-.notebook-surface .nb-body input[type="checkbox"] { margin-right: 6px; }
+.notebook-surface .nb-body input[type="checkbox"] {
+  margin-right: 6px;
+  accent-color: var(--nb-green-approve);
+  opacity: 1;
+}
 .notebook-surface .nb-body del { color: var(--nb-text-tertiary); }
 
 /* Wikilinks — dashed underline, ink-blue. Broken wikilinks red. */
@@ -434,8 +519,9 @@
 .notebook-surface .nb-promoted-back {
   margin: 24px 0;
   padding: 14px 18px;
-  background: var(--nb-green-bg);
+  background: rgba(43, 122, 63, 0.08);
   border-left: 3px solid var(--nb-green-approve);
+  border-radius: 4px;
   font-family: var(--nb-chrome);
   font-size: 13px;
   color: var(--nb-text);
@@ -500,36 +586,49 @@
 /* Actions footer (Promote button + Discard link). */
 .notebook-surface .nb-actions {
   margin: 48px 0 20px;
-  padding: 24px 0;
-  border-top: 2px dashed var(--nb-border);
+  padding: 28px 0 24px;
+  border-top: 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 6' preserveAspectRatio='none'><path d='M0 3.1 L 7 2.8 L 14 3.3 L 22 2.9 L 31 3.2 L 38 2.7 L 46 3.4 L 54 3.0 L 63 2.8 L 71 3.3 L 79 2.9 L 88 3.2 L 96 2.6 L 105 3.1 L 113 3.4 L 121 2.8 L 130 3.2 L 138 2.9 L 147 3.3 L 155 2.7 L 163 3.0 L 172 3.4 L 180 2.8 L 189 3.1 L 197 3.3 L 205 2.7 L 214 3.2 L 222 2.9 L 231 3.4 L 239 2.8 L 247 3.1 L 256 2.7 L 264 3.3 L 273 3.0 L 281 2.8 L 289 3.2 L 298 3.4 L 306 2.9 L 315 3.0 L 323 3.3 L 331 2.7 L 340 3.2 L 348 2.9 L 357 3.1 L 365 3.4 L 373 2.8 L 382 3.0 L 390 3.3 L 400 2.9' fill='none' stroke='%232A2721' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-size: 100% 6px;
+  background-position: top left;
   display: flex;
   gap: 16px;
   align-items: center;
   flex-wrap: wrap;
 }
 .notebook-surface .nb-promote-btn {
-  font-family: var(--nb-chrome);
-  font-size: 14px;
-  font-weight: 500;
-  background: var(--nb-amber);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  background: var(--accent, #9f4dbf);
   color: #fff;
-  border: 2px solid var(--nb-amber);
-  padding: 10px 20px;
+  border: 1px solid var(--accent, #9f4dbf);
+  padding: 0 16px;
+  height: 44px;
+  min-height: 44px;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   text-decoration: none;
-  border-radius: 3px;
-  min-height: 44px;
-  transition: background-color 150ms ease-out, border-color 150ms ease-out;
+  border-radius: 8px;
+  transition: background-color 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out;
 }
-.notebook-surface .nb-promote-btn:hover { background: var(--nb-amber-hover); border-color: var(--nb-amber-hover); }
+.notebook-surface .nb-promote-btn:hover {
+  background: var(--accent-warm, #8a3fa8);
+  border-color: var(--accent-warm, #8a3fa8);
+}
+.notebook-surface .nb-promote-btn:focus-visible {
+  outline: 2px solid var(--accent, #9f4dbf);
+  outline-offset: 2px;
+}
 .notebook-surface .nb-promote-btn:disabled,
 .notebook-surface .nb-promote-btn.is-pending {
-  background: var(--nb-amber-bg);
-  color: var(--nb-amber);
-  border-color: var(--nb-amber);
+  background: rgba(159, 77, 191, 0.12);
+  color: var(--accent, #9f4dbf);
+  border-color: rgba(159, 77, 191, 0.35);
   cursor: not-allowed;
 }
 .notebook-surface .nb-discard-link {
@@ -545,17 +644,19 @@
 
 /* Posterity line (bottom italic file-path footer). */
 .notebook-surface .nb-posterity {
-  font-family: var(--nb-body-serif);
-  font-style: italic;
-  font-size: 13px;
-  color: var(--nb-text-tertiary);
-  margin-top: 28px;
-  padding-top: 18px;
-  border-top: 1px dashed var(--nb-border);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-style: normal;
+  font-size: 12px;
+  color: var(--nb-text-muted);
+  margin-top: 12px;
+  padding-top: 0;
+  border-top: 0;
+  background-image: none;
 }
+.notebook-surface .nb-posterity strong { color: var(--nb-text); font-weight: 600; }
 .notebook-surface .nb-posterity code,
 .notebook-surface .nb-posterity .nb-posterity-path {
-  font-family: var(--nb-mono);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 12px;
   font-style: normal;
   color: var(--nb-text-muted);
@@ -563,9 +664,9 @@
 
 /* ── Bookshelf catalog (/notebooks landing) ──────────────────── */
 .notebook-surface .nb-catalog {
-  padding: 36px 40px 80px;
+  padding: 0;
   max-width: 1100px;
-  margin: 0 auto;
+  margin: 32px auto;
 }
 .notebook-surface .nb-catalog-header {
   display: flex;
@@ -583,22 +684,26 @@
 }
 .notebook-surface .nb-catalog-meta {
   margin-left: auto;
-  font-family: var(--nb-mono);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 12px;
-  color: var(--nb-text-muted);
+  color: var(--nb-text);
+  opacity: 0.55;
 }
 .notebook-surface .nb-shelf-row {
   display: grid;
   grid-template-columns: minmax(200px, 260px) 1fr;
-  gap: 24px;
-  padding: 20px 0;
-  border-bottom: 1px dashed var(--nb-border-light);
+  gap: 32px;
+  padding: 20px 0 28px;
   align-items: start;
+  background-repeat: no-repeat;
+  background-position: left bottom;
+  background-size: 100% 6px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 6' preserveAspectRatio='none'><path d='M0 3.1 L 7 2.8 L 14 3.3 L 22 2.9 L 31 3.2 L 38 2.7 L 46 3.4 L 54 3.0 L 63 2.8 L 71 3.3 L 79 2.9 L 88 3.2 L 96 2.6 L 105 3.1 L 113 3.4 L 121 2.8 L 130 3.2 L 138 2.9 L 147 3.3 L 155 2.7 L 163 3.0 L 172 3.4 L 180 2.8 L 189 3.1 L 197 3.3 L 205 2.7 L 214 3.2 L 222 2.9 L 231 3.4 L 239 2.8 L 247 3.1 L 256 2.7 L 264 3.3 L 273 3.0 L 281 2.8 L 289 3.2 L 298 3.4 L 306 2.9 L 315 3.0 L 323 3.3 L 331 2.7 L 340 3.2 L 348 2.9 L 357 3.1 L 365 3.4 L 373 2.8 L 382 3.0 L 390 3.3 L 400 2.9' fill='none' stroke='%232A2721' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
-.notebook-surface .nb-shelf-row:first-of-type { border-top: 1px dashed var(--nb-border-light); }
+.notebook-surface .nb-shelf-row:last-of-type { background-image: none; }
 .notebook-surface .nb-shelf-row-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
 }
 .notebook-surface .nb-shelf-row-name {
@@ -624,10 +729,12 @@
   gap: 10px;
 }
 .notebook-surface .nb-shelf-card {
-  background: var(--nb-surface);
-  border: 1px solid var(--nb-border-light);
-  border-radius: 3px;
-  padding: 10px 12px;
+  background: #ffffff;
+  border: none;
+  outline: 0.5px solid rgba(0, 0, 0, 0.10);
+  outline-offset: -0.5px;
+  border-radius: 8px;
+  padding: 12px 14px;
   font-family: var(--nb-body-serif);
   font-size: 13px;
   line-height: 1.35;
@@ -639,8 +746,20 @@
   flex-direction: column;
   justify-content: space-between;
   gap: 6px;
+  box-shadow:
+    0 1px 1px rgba(42, 39, 33, 0.04),
+    0 1px 2px rgba(42, 39, 33, 0.04);
+  transition: background 90ms ease, box-shadow 90ms ease, outline-color 90ms ease;
+  position: relative;
+  overflow: hidden;
 }
-.notebook-surface .nb-shelf-card:hover { background: var(--nb-paper-dark); }
+.notebook-surface .nb-shelf-card:hover {
+  background: #FAFAFA;
+  outline-color: rgba(0, 0, 0, 0.22);
+  box-shadow:
+    0 1px 2px rgba(42, 39, 33, 0.06),
+    0 2px 4px rgba(42, 39, 33, 0.04);
+}
 .notebook-surface .nb-shelf-card .nb-shelf-card-t {
   font-weight: 500;
   color: var(--nb-text);
@@ -649,18 +768,34 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  font-family: var(--nb-mono);
-  font-size: 10px;
-  color: var(--nb-text-tertiary);
-}
-.notebook-surface .nb-shelf-card-badge-draft { color: var(--nb-stamp-red); font-weight: 600; }
-.notebook-surface .nb-shelf-card-badge-promoted { color: var(--nb-green-approve); font-weight: 600; }
-.notebook-surface .nb-shelf-card-badge-review { color: var(--nb-amber); font-weight: 600; }
-.notebook-surface .nb-shelf-row-stats {
-  font-family: var(--nb-mono);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 11px;
-  color: var(--nb-text-muted);
-  margin-top: 8px;
+  color: rgba(42, 39, 33, 0.55);
+}
+.notebook-surface .nb-shelf-card .nb-shelf-card-meta > span:not([class]) {
+  color: rgba(42, 39, 33, 0.55);
+  text-transform: capitalize;
+}
+.notebook-surface .nb-shelf-card-badge-draft,
+.notebook-surface .nb-shelf-card-badge-promoted,
+.notebook-surface .nb-shelf-card-badge-review {
+  font-weight: 600;
+  text-transform: lowercase;
+}
+.notebook-surface .nb-shelf-card-badge-draft::first-letter,
+.notebook-surface .nb-shelf-card-badge-promoted::first-letter,
+.notebook-surface .nb-shelf-card-badge-review::first-letter {
+  text-transform: uppercase;
+}
+.notebook-surface .nb-shelf-card-badge-draft { color: #6B6B6B; }
+.notebook-surface .nb-shelf-card-badge-promoted { color: var(--green, #03a04c); }
+.notebook-surface .nb-shelf-card-badge-review { color: var(--nb-amber); }
+.notebook-surface .nb-shelf-row-stats {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 11px;
+  color: var(--nb-text);
+  opacity: 0.55;
+  margin-top: 4px;
 }
 .notebook-surface .nb-shelf-row-empty {
   color: var(--nb-text-tertiary);
@@ -678,14 +813,20 @@
 
 /* ── Reviews Kanban ──────────────────────────────────────────── */
 .notebook-surface .nb-review-queue {
-  padding: 28px 32px 80px;
+  padding: 32px 0;
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .notebook-surface .nb-review-queue-header {
   display: flex;
   align-items: baseline;
   gap: 16px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   flex-wrap: wrap;
+  padding: 0 32px;
 }
 .notebook-surface .nb-review-queue-title {
   font-family: var(--nb-display);
@@ -696,21 +837,36 @@
 }
 .notebook-surface .nb-review-queue-meta {
   margin-left: auto;
-  font-family: var(--nb-mono);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 12px;
-  color: var(--nb-text-muted);
+  color: var(--nb-text);
+  opacity: 0.55;
 }
 .notebook-surface .nb-review-columns {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(220px, 1fr));
-  gap: 18px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 24px;
   align-items: start;
+  margin-top: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 32px 14px;
+  flex: 1;
+  min-height: 0;
 }
 .notebook-surface .nb-review-col {
-  background: var(--nb-surface);
-  border: 1px solid var(--nb-border-light);
-  border-radius: 3px;
-  padding: 14px 12px 18px;
+  flex: 1 1 240px;
+  min-width: 240px;
+  max-width: 320px;
+}
+.notebook-surface .nb-review-col:has(.nb-review-col-empty) {
+  display: none;
+}
+.notebook-surface .nb-review-col {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
   min-height: 240px;
   display: flex;
   flex-direction: column;
@@ -718,31 +874,48 @@
 }
 .notebook-surface .nb-review-col-head {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px dashed var(--nb-border);
+  padding-bottom: 10px;
+  margin-bottom: 8px;
+  border-bottom: none;
+  background-repeat: no-repeat;
+  background-position: left bottom;
+  background-size: 100% 6px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 6' preserveAspectRatio='none'><path d='M0 3.1 L 7 2.8 L 14 3.3 L 22 2.9 L 31 3.2 L 38 2.7 L 46 3.4 L 54 3.0 L 63 2.8 L 71 3.3 L 79 2.9 L 88 3.2 L 96 2.6 L 105 3.1 L 113 3.4 L 121 2.8 L 130 3.2 L 138 2.9 L 147 3.3 L 155 2.7 L 163 3.0 L 172 3.4 L 180 2.8 L 189 3.1 L 197 3.3 L 205 2.7 L 214 3.2 L 222 2.9 L 231 3.4 L 239 2.8 L 247 3.1 L 256 2.7 L 264 3.3 L 273 3.0 L 281 2.8 L 289 3.2 L 298 3.4 L 306 2.9 L 315 3.0 L 323 3.3 L 331 2.7 L 340 3.2 L 348 2.9 L 357 3.1 L 365 3.4 L 373 2.8 L 382 3.0 L 390 3.3 L 400 2.9' fill='none' stroke='%232A2721' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 .notebook-surface .nb-review-col-head h3 {
   font-family: var(--nb-display);
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 500;
   color: var(--nb-text);
+  line-height: 1;
 }
 .notebook-surface .nb-review-col-count {
-  font-family: var(--nb-mono);
-  font-size: 11px;
-  color: var(--nb-text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: transparent;
+  border: 1px solid var(--nb-text);
+  color: var(--nb-text);
+  font-family: var(--nb-chrome);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
   margin-left: auto;
-  background: var(--nb-paper-dark);
-  padding: 2px 6px;
-  border-radius: 2px;
+  flex-shrink: 0;
 }
 .notebook-surface .nb-review-card {
-  background: var(--nb-paper);
-  border: 1px solid var(--nb-border-light);
-  border-radius: 2px;
-  padding: 10px 12px;
+  background: #EEF679;
+  border: none;
+  outline: 0.5px solid rgba(0, 0, 0, 0.10);
+  outline-offset: -0.5px;
+  border-radius: 8px;
+  padding: 12px 14px;
   font-family: var(--nb-chrome);
   font-size: 12px;
   color: var(--nb-text);
@@ -751,8 +924,21 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  box-shadow:
+    0 1px 1px rgba(42, 39, 33, 0.04),
+    0 1px 2px rgba(42, 39, 33, 0.04);
+  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  position: relative;
+  overflow: hidden;
 }
-.notebook-surface .nb-review-card:hover { background: var(--nb-paper-dark); }
+.notebook-surface .nb-review-card:hover {
+  background: #F5FB95;
+  transform: translateY(-2px);
+  box-shadow:
+    0 1px 1px rgba(42, 39, 33, 0.05),
+    0 3px 6px rgba(42, 39, 33, 0.06),
+    0 8px 14px rgba(42, 39, 33, 0.05);
+}
 .notebook-surface .nb-review-card.is-active { outline: 2px solid var(--nb-ink-blue); outline-offset: -2px; }
 .notebook-surface .nb-review-card-title {
   font-family: var(--nb-body-serif);
@@ -764,7 +950,8 @@
 .notebook-surface .nb-review-card-excerpt {
   font-family: var(--nb-body-serif);
   font-size: 12px;
-  color: var(--nb-text-muted);
+  color: var(--nb-text);
+  opacity: 0.7;
   line-height: 1.4;
   /* 3-line clamp per spec. */
   display: -webkit-box;
@@ -779,9 +966,10 @@
   flex-wrap: wrap;
 }
 .notebook-surface .nb-review-card-path {
-  font-family: var(--nb-mono);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: 11px;
-  color: var(--nb-text-tertiary);
+  color: var(--nb-text);
+  opacity: 0.55;
 }
 .notebook-surface .nb-review-card-avatars {
   display: flex;
@@ -789,19 +977,29 @@
   align-items: center;
 }
 .notebook-surface .nb-review-col-empty {
-  color: var(--nb-text-tertiary);
-  font-family: var(--nb-body-serif);
-  font-style: italic;
+  color: var(--nb-text);
+  opacity: 0.45;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-style: normal;
   font-size: 12px;
   padding: 12px 4px;
 }
 
 /* Review detail drawer */
+@keyframes nb-drawer-backdrop-in {
+  from { background: rgba(0, 0, 0, 0); }
+  to   { background: rgba(0, 0, 0, 0.32); }
+}
+@keyframes nb-drawer-slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
 .notebook-surface .nb-review-drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(42, 39, 33, 0.25);
+  background: rgba(0, 0, 0, 0.32);
   z-index: 100;
+  animation: nb-drawer-backdrop-in 220ms ease-out;
 }
 .notebook-surface .nb-review-drawer {
   position: fixed;
@@ -809,67 +1007,140 @@
   right: 0;
   bottom: 0;
   width: min(520px, 100%);
-  background: var(--nb-surface);
-  border-left: 1px solid var(--nb-border);
-  box-shadow: -4px 0 16px rgba(42, 39, 33, 0.08);
+  background: var(--surface, #ffffff);
+  border-left: 0;
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
   z-index: 101;
   padding: 20px 24px 28px;
   overflow-y: auto;
-  font-family: var(--nb-chrome);
+  animation: nb-drawer-slide-in 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  font-family: -apple-system, BlinkMacSystemFont, Inter, 'Segoe UI', Roboto, sans-serif;
+  color: var(--text, #1d1c1d);
+  font-size: 13px;
+  line-height: 1.5;
 }
 .notebook-surface .nb-review-drawer h2 {
-  font-family: var(--nb-display);
-  font-size: 28px;
+  font-family: inherit;
+  font-size: 18px;
   font-weight: 600;
-  color: var(--nb-text);
-  margin-bottom: 6px;
+  color: var(--text, #1d1c1d);
+  margin: 0 0 6px;
+  letter-spacing: -0.01em;
 }
 .notebook-surface .nb-review-drawer-path {
-  font-family: var(--nb-mono);
-  font-size: 11px;
-  color: var(--nb-text-muted);
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-muted, #616061);
   margin-bottom: 18px;
 }
 .notebook-surface .nb-review-drawer-close {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: 0;
+  border-radius: 6px;
+  font-family: inherit;
   font-size: 20px;
+  line-height: 1;
+  font-weight: 400;
   cursor: pointer;
-  color: var(--nb-text-muted);
-  padding: 4px 8px;
+  color: var(--text-muted, #616061);
+  padding: 0 0 2px;
+  transition: background 120ms ease, color 120ms ease;
+}
+.notebook-surface .nb-review-drawer-close:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text, #1d1c1d);
+}
+.notebook-surface .nb-review-drawer-close:focus-visible {
+  outline: 2px solid var(--accent, #9f4dbf);
+  outline-offset: 1px;
+}
+.notebook-surface .nb-review-drawer .nb-review {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text, #1d1c1d);
+}
+.notebook-surface .nb-review-drawer .nb-review h3 {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted, #616061);
+  margin: 0 0 12px;
+}
+.notebook-surface .nb-review-drawer .nb-review-comment {
+  padding: 12px 0;
+  border-top: 1px solid var(--border, rgba(29, 28, 29, 0.08));
+}
+.notebook-surface .nb-review-drawer .nb-review-comment .nb-comment-body {
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #1d1c1d);
+  margin: 2px 0 0;
+}
+.notebook-surface .nb-review-drawer .nb-review-comment .nb-comment-author {
+  font-weight: 600;
+  color: var(--text, #1d1c1d);
+}
+.notebook-surface .nb-review-drawer .nb-review-comment .nb-comment-ts {
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text-muted, #616061);
+  margin-left: 8px;
+  font-weight: 400;
 }
 .notebook-surface .nb-review-drawer-actions {
-  margin-top: 24px;
-  padding-top: 18px;
-  border-top: 1px dashed var(--nb-border);
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border, rgba(29, 28, 29, 0.08));
   display: flex;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
 .notebook-surface .nb-review-drawer-approve {
-  background: var(--nb-green-approve);
+  background: var(--accent, #9f4dbf);
   color: #fff;
-  border: 2px solid var(--nb-green-approve);
-  border-radius: 2px;
-  padding: 8px 16px;
+  border: 1px solid var(--accent, #9f4dbf);
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  min-height: 44px;
+  min-height: 32px;
+}
+.notebook-surface .nb-review-drawer-approve:hover {
+  background: var(--accent-warm, #612a92);
+  border-color: var(--accent-warm, #612a92);
 }
 .notebook-surface .nb-review-drawer-reject {
-  background: transparent;
-  color: var(--nb-stamp-red);
-  border: 2px solid var(--nb-stamp-red);
-  border-radius: 2px;
-  padding: 8px 16px;
+  background: var(--surface, #ffffff);
+  color: var(--text, #1d1c1d);
+  border: 1px solid var(--border, rgba(29, 28, 29, 0.12));
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-family: inherit;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  min-height: 44px;
+  min-height: 32px;
+}
+.notebook-surface .nb-review-drawer-reject:hover {
+  background: rgba(0, 0, 0, 0.03);
 }
 
 /* ── Loading / error / empty states ─────────────────────────── */
@@ -910,6 +1181,18 @@
 
 /* ── Responsive ──────────────────────────────────────────────── */
 @media (max-width: 1279px) {
+  /* Marginalia collapses to inline callout on tablet + mobile. */
+  .notebook-surface .nb-margin {
+    transform: none;
+    margin: 18px 0;
+  }
+  .notebook-surface .nb-review-col {
+    flex: 1 1 220px;
+    min-width: 220px;
+  }
+}
+
+@media (max-width: 819px) {
   .notebook-surface .nb-layout {
     grid-template-columns: 1fr;
   }
@@ -920,27 +1203,31 @@
   }
   .notebook-surface .nb-shelf-list {
     display: flex;
-    gap: 10px;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 8px;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(42, 39, 33, 0.25) transparent;
+  }
+  .notebook-surface .nb-shelf-list::-webkit-scrollbar {
+    height: 6px;
+  }
+  .notebook-surface .nb-shelf-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .notebook-surface .nb-shelf-list::-webkit-scrollbar-thumb {
+    background: rgba(42, 39, 33, 0.25);
+    border-radius: 3px;
+  }
+  .notebook-surface .nb-shelf-list::-webkit-scrollbar-thumb:hover {
+    background: rgba(42, 39, 33, 0.4);
   }
   .notebook-surface .nb-shelf-list .nb-date-head { display: none; }
   .notebook-surface .nb-shelf-item {
-    flex: 0 0 220px;
-    border-left: 0;
-    border-bottom: 2px solid transparent;
-  }
-  .notebook-surface .nb-shelf-item.is-current {
-    border-bottom-color: var(--nb-amber);
-    border-left-color: transparent;
-  }
-  .notebook-surface .nb-article { padding: 24px 32px 80px; }
-  /* Marginalia collapses to inline callout on tablet + mobile. */
-  .notebook-surface .nb-margin {
-    transform: none;
-    margin: 18px 0;
-  }
-  .notebook-surface .nb-review-columns {
-    grid-template-columns: repeat(3, minmax(220px, 1fr));
+    flex: 0 0 auto;
+    min-width: 180px;
   }
 }
 
@@ -953,9 +1240,14 @@
     opacity: 0.5;
     border-width: 2px;
   }
-  .notebook-surface .nb-article { padding: 20px 16px 60px; }
   .notebook-surface .nb-review-columns {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+    overflow-x: visible;
+  }
+  .notebook-surface .nb-review-col {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
   }
 }
 
@@ -972,15 +1264,33 @@
 
 /* v1.3 Image support — notebook drop */
 .nb-image-drop {
-  margin-top: 2rem;
-  padding: 16px;
-  border-top: 1px solid var(--nb-rule, rgba(0, 0, 0, 0.08));
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--nb-article-max);
+  margin: 0 auto 48px;
+  padding: 0 72px;
+  border-top: 0;
 }
 .nb-image-drop__label {
   font-size: 13px;
   font-weight: 600;
   margin-bottom: 8px;
   color: var(--nb-text-muted, rgba(0, 0, 0, 0.6));
+}
+.nb-image-drop .image-uploader {
+  background: transparent;
+  border-color: rgba(42, 39, 33, 0.2);
+}
+.nb-image-drop .image-uploader--drag {
+  background: rgba(42, 39, 33, 0.04);
+  border-color: var(--nb-ink-blue);
+}
+.nb-image-drop .image-uploader__drop-label {
+  font-family: var(--nb-chrome);
+  color: var(--nb-text);
+}
+.nb-image-drop .image-uploader__drop-hint {
+  color: var(--nb-text-muted);
 }
 .nb-image-drop__toast {
   margin-top: 10px;
@@ -1002,4 +1312,11 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+  background: transparent;
 }

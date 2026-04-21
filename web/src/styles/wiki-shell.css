@@ -30,9 +30,13 @@
   padding: 0 20px;
   height: 42px;
   background: var(--surface, #ffffff);
-  border-bottom: 1px solid var(--border, #e8e8e8);
+  border-bottom: 1px solid var(--border, rgba(29, 28, 29, 0.08));
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
   flex-shrink: 0;
+}
+
+.wiki-shell:has(.notebook-surface) .wiki-tabs {
+  border-bottom: none;
 }
 
 .wiki-tab {
@@ -76,7 +80,7 @@
   min-width: 18px;
   height: 18px;
   padding: 0 6px;
-  background: #C78A1F; /* shared with notebook amber so reviews read as notebook-derived */
+  background: var(--purple, #9f4dbf);
   color: #ffffff;
   font-family: 'Geist Mono', 'SFMono-Regular', Menlo, monospace;
   font-size: 11px;

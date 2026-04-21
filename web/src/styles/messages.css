@@ -8,7 +8,7 @@
 .message-grouped .message-avatar { visibility: hidden; height: 0; }
 .message-grouped .message-header { display: none; }
 
-.message-avatar { width: 36px; height: 36px; padding: 7px; box-sizing: border-box; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--bg-warm); }
+.message-avatar { width: 36px; height: 36px; padding: 6px; box-sizing: border-box; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--bg-warm); }
 .message-avatar .pixel-avatar { width: 100%; height: 100%; }
 .message-content { flex: 1; min-width: 0; }
 .message-header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
@@ -91,7 +91,7 @@
 .typing-dot:nth-child(3) { animation-delay: 0.32s; }
 
 /* ─── Interview bar (inline above composer, mirrors TUI) ─── */
-.interview-bar { border-top: 1px solid var(--border); background: var(--bg-card); padding: 10px 20px 12px; display: flex; flex-direction: column; gap: 8px; }
+.interview-bar { border-top: 1px solid var(--border); background: var(--bg-card); padding: 12px 24px 24px; display: flex; flex-direction: column; gap: 10px; }
 .interview-bar-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .interview-bar-from { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
 .interview-bar-channel { font-size: 12px; color: var(--text-tertiary); }
@@ -100,13 +100,20 @@
 .interview-bar-icon-btn { width: 22px; height: 22px; border: 1px solid var(--border); background: var(--bg); border-radius: 4px; cursor: pointer; color: var(--text-secondary); font-size: 14px; line-height: 1; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .interview-bar-icon-btn:hover { background: var(--bg-card); color: var(--text); }
 .interview-bar-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.interview-bar-close { margin-left: auto; width: 24px; height: 24px; border: none; background: transparent; cursor: pointer; color: var(--text-secondary); font-size: 18px; line-height: 1; padding: 0; border-radius: 4px; }
+.interview-bar-close { margin-left: auto; width: 32px; height: 32px; border: none; background: transparent; cursor: pointer; color: var(--text-secondary); line-height: 1; padding: 0; border-radius: 6px; display: inline-flex; align-items: center; justify-content: center; }
 .interview-bar-close:hover { background: var(--bg); color: var(--text); }
-.interview-bar-body { display: flex; flex-direction: column; gap: 4px; }
-.interview-bar-title { font-size: 13px; font-weight: 600; color: var(--text); }
-.interview-bar-question { font-size: 13px; color: var(--text); line-height: 1.5; }
-.interview-bar-context { font-size: 12px; color: var(--text-secondary); line-height: 1.5; white-space: pre-wrap; padding: 8px 10px; background: var(--bg); border-radius: var(--radius-sm); border-left: 2px solid var(--border); }
-.interview-bar-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.interview-bar-body { display: flex; flex-direction: column; gap: 6px; }
+.interview-bar-title { font-size: 10px; font-weight: 600; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.06em; }
+.interview-bar-question { font-size: 15px; font-weight: 600; color: var(--text); line-height: 1.4; }
+.interview-bar-context { font-size: 12px; color: var(--text-secondary); line-height: 1.5; white-space: pre-wrap; padding: 6px 10px; background: var(--bg); border-radius: var(--radius-sm); border-left: 2px solid var(--border); }
+.interview-bar-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.interview-bar-actions .btn { justify-content: flex-start; align-items: flex-start; text-align: left; white-space: normal; min-height: 36px; gap: 8px; padding-left: 8px; padding-top: 8px; padding-bottom: 8px; }
+.interview-bar-opt-num { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 4px; background: var(--overlay-soft, rgba(0,0,0,0.06)); color: var(--text-tertiary); font-family: var(--font-mono); font-size: 10px; font-weight: 600; flex-shrink: 0; }
+.interview-bar-actions .btn-primary .interview-bar-opt-num { background: rgba(255,255,255,0.18); color: rgba(255,255,255,0.9); }
+.interview-bar-opt-label { flex: 1; min-width: 0; }
+html[data-theme] .interview-bar-actions .btn-primary,
+html[data-theme] .interview-bar-actions .btn-primary:hover { background: var(--text); color: var(--bg-card); border-color: var(--text); }
+@media (max-width: 640px) { .interview-bar-actions { grid-template-columns: 1fr; } }
 .interview-bar-text-hint { font-size: 10px; color: var(--text-tertiary); font-weight: 400; margin-left: 4px; }
 .interview-bar-text { display: flex; flex-direction: column; gap: 6px; }
 .interview-bar-textarea { width: 100%; min-height: 60px; max-height: 200px; resize: vertical; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: var(--font-sans); font-size: 13px; color: var(--text); background: var(--bg); outline: none; line-height: 1.5; }
@@ -171,7 +178,7 @@
 .stream-card-detail { font-size: 12px; color: var(--text); line-height: 1.5; white-space: pre-wrap; }
 
 /* ─── Composer ─── */
-.composer { padding: 12px 20px 16px; border-top: 1px solid var(--border); background: var(--bg-card); position: relative; }
+.composer { padding: 12px 24px 16px; border-top: 1px solid var(--border); background: var(--bg-card); position: relative; }
 
 /* ─── Autocomplete (slash + @-mention) ─── */
 .autocomplete { position: absolute; bottom: 100%; left: 20px; right: 20px; max-height: 240px; overflow-y: auto; background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 -4px 16px rgba(0,0,0,0.12); margin-bottom: 4px; display: none; z-index: 25; }
@@ -202,7 +209,7 @@
   transition: background 0.15s, opacity 0.15s;
 }
 .composer-send:hover:not(:disabled) { background: var(--cyan-500); color: #fff; }
-.composer-send:disabled { background: var(--neutral-200); color: var(--neutral-400); cursor: not-allowed; }
+.composer-send:disabled { background: transparent; color: var(--text-tertiary); opacity: 0.5; cursor: not-allowed; }
 
 /* ─── Composer context hint ─── */
 .composer-context-hint { padding: 4px 12px; font-size: 11px; color: var(--text-tertiary); font-style: italic; }

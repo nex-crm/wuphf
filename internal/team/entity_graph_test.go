@@ -251,14 +251,47 @@ func TestStripRelatedSection(t *testing.T) {
 	}{
 		{"no section", "# Title\n\nBody.\n", "# Title\n\nBody.\n"},
 		{
-			"with section",
+			// Legacy pre-sentinel briefs: shape-match the bullet-only tail.
+			"legacy trailing section — stripped",
 			"# Title\n\nBody.\n\n## Related\n\n- [[companies/acme]]\n",
 			"# Title\n\nBody.",
 		},
 		{
-			"case-insensitive",
+			"case-insensitive legacy",
 			"# X\n\nBody\n\n## related\n- a\n",
 			"# X\n\nBody",
+		},
+		{
+			// Sentinel-wrapped block (the shape the current renderer emits)
+			// is the strict path — strip regardless of surrounding content.
+			"sentinel-wrapped section — stripped",
+			"# Title\n\nBody.\n\n<!-- wuphf:related:start -->\n## Related\n\n- [[companies/acme]]\n<!-- wuphf:related:end -->\n",
+			"# Title\n\nBody.",
+		},
+		{
+			// A pathological LLM response that emits "## Related" inside a
+			// code fence must not trigger the fallback path. With sentinels
+			// absent AND the true last heading being the in-fence one, the
+			// fallback sees "## Next steps" as the last real heading and
+			// correctly leaves the body alone.
+			"## Related inside fenced code block — preserved",
+			"# X\n\n## Intro\n\nBody.\n\n```\n## Related\nnot a real section\n```\n\n## Next steps\n\nMore.\n",
+			"# X\n\n## Intro\n\nBody.\n\n```\n## Related\nnot a real section\n```\n\n## Next steps\n\nMore.\n",
+		},
+		{
+			// The critical regression case: "## Related" appears mid-document
+			// with prose under it (not bullet items). Must NOT be stripped —
+			// it doesn't match the managed-section shape.
+			"mid-document Related with prose — preserved",
+			"# X\n\n## Related\n\nSarah works on many related projects including the onboarding flow.\n\n## Contact\n\nEmail: s@x.com\n",
+			"# X\n\n## Related\n\nSarah works on many related projects including the onboarding flow.\n\n## Contact\n\nEmail: s@x.com\n",
+		},
+		{
+			// Last heading is "## Related" with only bullets under it: this
+			// IS the managed shape, so fallback strips.
+			"fallback: last heading is Related with only bullets",
+			"# X\n\n## Notes\n\nThings.\n\n## Related\n\n- [[companies/acme]]\n",
+			"# X\n\n## Notes\n\nThings.",
 		},
 	}
 	for _, tc := range cases {
@@ -297,7 +330,11 @@ func TestRenderRelatedSection_AppendsFromGraph(t *testing.T) {
 	if out == "" {
 		t.Fatal("expected Related section, got empty")
 	}
-	if want := "## Related\n\n- [[companies/acme]]\n"; out != want {
+	// Output is wrapped in the wuphf:related sentinels so stripRelatedSection
+	// can remove the managed block on the next synthesis pass without
+	// shape-matching heuristics.
+	want := relatedSentinelStart + "\n## Related\n\n- [[companies/acme]]\n" + relatedSentinelEnd + "\n"
+	if out != want {
 		t.Errorf("got %q; want %q", out, want)
 	}
 }

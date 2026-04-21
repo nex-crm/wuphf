@@ -47,10 +47,10 @@ function groupByDay(entries: NotebookEntrySummary[]): Group[] {
 }
 
 function statusTag(status: NotebookEntrySummary['status']): { label: string; className: string } | null {
-  if (status === 'promoted') return { label: '→ promoted', className: 'nb-promoted' }
+  if (status === 'promoted') return { label: '→ Promoted', className: 'nb-promoted' }
   if (status === 'draft') return { label: 'DRAFT', className: 'nb-status-draft' }
-  if (status === 'in-review') return { label: 'in review', className: 'nb-status-draft' }
-  if (status === 'changes-requested') return { label: 'changes req.', className: 'nb-status-draft' }
+  if (status === 'in-review') return { label: 'in review', className: 'nb-status-review' }
+  if (status === 'changes-requested') return { label: 'changes req.', className: 'nb-status-changes' }
   return null
 }
 

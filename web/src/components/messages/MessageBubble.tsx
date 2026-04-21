@@ -66,7 +66,7 @@ export function MessageBubble({ message, grouped = false, onThreadClick }: Messa
           'You'
         ) : (
           <>
-            <PixelAvatar slug={message.from} size={36} />
+            <PixelAvatar slug={message.from} size={24} />
             {harness && (
               <HarnessBadge kind={harness} size={14} className="harness-badge-on-avatar" />
             )}

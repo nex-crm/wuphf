@@ -26,12 +26,11 @@
 
 .agent-panel-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  height: var(--top-panel-h);
   box-sizing: border-box;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--border);
+  padding: 16px 20px 8px;
+  border-bottom: none;
   gap: 12px;
   flex-shrink: 0;
 }
@@ -60,12 +59,10 @@
 .agent-panel-avatar .pixel-avatar,
 .agent-panel-avatar .pixel-avatar-panel { width: 100%; height: 100%; }
 .agent-panel-role {
-  font-size: 10px;
+  font-size: 12px;
   color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 500;
-  line-height: 1.2;
+  font-weight: 400;
+  line-height: 1.4;
 }
 
 .agent-panel-name {
@@ -78,8 +75,8 @@
 }
 
 .agent-panel-close {
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
   border: none;
   background: transparent;
   cursor: pointer;

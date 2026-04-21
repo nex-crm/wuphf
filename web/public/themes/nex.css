@@ -730,9 +730,9 @@ html[data-theme="nex"] .composer-send:hover:not(:disabled) {
   color: #fff;
 }
 html[data-theme="nex"] .composer-send:disabled {
-  background: var(--neutral-200);
-  color: var(--neutral-400);
-  opacity: 1;
+  background: var(--bg-warm);
+  color: var(--text-tertiary);
+  opacity: 0.55;
 }
 
 /* ═══════════════════════════════════════
@@ -771,13 +771,15 @@ html[data-theme="nex"] .agent-panel {
 }
 html[data-theme="nex"] .agent-panel-header {
   background: var(--bg);
-  border-bottom: 1px solid var(--border);
-  padding: 14px 24px;
+  border-bottom: none;
+  padding: 16px 24px 8px;
 }
 html[data-theme="nex"] .agent-panel-header span {
   font-family: var(--font-sans);
-  font-weight: 700;
-  color: var(--text);
+}
+html[data-theme="nex"] .agent-panel-role {
+  font-weight: 400;
+  color: var(--text-tertiary);
 }
 html[data-theme="nex"] .agent-panel-avatar {
   border-radius: var(--radius-md);

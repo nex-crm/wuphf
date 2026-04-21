@@ -510,8 +510,11 @@ func (s *EntitySynthesizer) renderRelatedSection(kind EntityKind, slug string) s
 	if len(edges) > MaxRelatedEntries {
 		edges = edges[:MaxRelatedEntries]
 	}
+	// Wrap in sentinels so the next synthesis can strip the managed block
+	// deterministically, regardless of what the LLM writes around it.
 	var b strings.Builder
-	b.WriteString("## Related\n\n")
+	b.WriteString(relatedSentinelStart)
+	b.WriteString("\n## Related\n\n")
 	for _, e := range edges {
 		b.WriteString("- [[")
 		b.WriteString(string(e.ToKind))
@@ -519,27 +522,78 @@ func (s *EntitySynthesizer) renderRelatedSection(kind EntityKind, slug string) s
 		b.WriteString(e.ToSlug)
 		b.WriteString("]]\n")
 	}
+	b.WriteString(relatedSentinelEnd)
+	b.WriteString("\n")
 	return b.String()
 }
 
-// stripRelatedSection removes a trailing "## Related" heading and its
-// contents from body. Case-insensitive match on the heading line. Returns
-// the input unchanged when no Related section is present.
+// relatedSentinelStart / relatedSentinelEnd wrap the managed "## Related"
+// block written by renderRelatedSection. Stripping is anchored to these
+// HTML comments rather than to the heading text itself, so a pathological
+// LLM response that emits a literal "## Related" heading — inline, mid-
+// document, inside a code fence, or in prose discussing a "Related"
+// project — cannot trick the stripper into truncating the brief body.
+//
+// The legacy case (pre-sentinel section emitted by earlier renderer or
+// injected directly by a model ignoring instructions) is handled by the
+// fallback path: strip only when "## Related" is the very LAST non-empty
+// heading block in the document AND all following non-empty lines look
+// like bullet items. That narrow shape matches what the renderer always
+// produced and avoids catching arbitrary prose.
+const (
+	relatedSentinelStart = "<!-- wuphf:related:start -->"
+	relatedSentinelEnd   = "<!-- wuphf:related:end -->"
+)
+
+// stripRelatedSection removes the managed "## Related" section from body.
+// Two-level match: strict sentinel block first, narrow fallback second.
+// Returns the input unchanged when no qualifying section is present.
 func stripRelatedSection(body string) string {
-	lines := strings.Split(body, "\n")
-	cutIdx := -1
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.EqualFold(trimmed, "## Related") {
-			cutIdx = i
-			break
+	// Strict path — sentinel-wrapped section.
+	if start := strings.Index(body, relatedSentinelStart); start >= 0 {
+		after := body[start+len(relatedSentinelStart):]
+		end := strings.Index(after, relatedSentinelEnd)
+		if end >= 0 {
+			tail := after[end+len(relatedSentinelEnd):]
+			return strings.TrimRight(body[:start]+tail, "\n")
 		}
 	}
-	if cutIdx < 0 {
+	// Fallback — pre-sentinel briefs or LLM-injected sections. Only strip
+	// when "## Related" is the last top-level heading AND everything after
+	// it is bullet markers or blank lines (the shape renderRelatedSection
+	// always produced). Any prose after the heading disqualifies the match.
+	lines := strings.Split(body, "\n")
+	inFence := false
+	lastHeading := -1
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "## ") {
+			lastHeading = i
+		}
+	}
+	if lastHeading < 0 {
 		return body
 	}
-	// Drop from the heading to EOF — the Related section is always trailing.
-	return strings.TrimRight(strings.Join(lines[:cutIdx], "\n"), "\n")
+	if !strings.EqualFold(strings.TrimSpace(lines[lastHeading]), "## Related") {
+		return body
+	}
+	for _, line := range lines[lastHeading+1:] {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if !(strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") || strings.HasPrefix(trimmed, "+ ")) {
+			return body
+		}
+	}
+	return strings.TrimRight(strings.Join(lines[:lastHeading], "\n"), "\n")
 }
 
 // Frontmatter helpers live in entity_frontmatter.go.

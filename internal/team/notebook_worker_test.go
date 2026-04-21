@@ -55,7 +55,7 @@ func newStartedNotebookWorker(t *testing.T) (*WikiWorker, *Repo, *recordingNoteb
 	worker.Start(ctx)
 	return worker, repo, pub, func() {
 		cancel()
-		worker.Stop()
+		<-worker.Done()
 	}
 }
 

@@ -214,9 +214,12 @@ func (g *EntityGraph) RecordFactRefs(ctx context.Context, fact Fact) ([]EntityRe
 		return nil, nil
 	}
 
+	// Build the new file contents under the lock — a concurrent RecordFactRefs
+	// must see this write as atomic for the read-then-append contract to hold.
+	// Release the lock BEFORE enqueuing, so a read path that takes g.mu in the
+	// future (or a full write queue) can never deadlock waiting on a worker
+	// that is waiting on us.
 	g.mu.Lock()
-	defer g.mu.Unlock()
-
 	existing := g.readExistingLocked()
 	var buf strings.Builder
 	buf.Write(existing)
@@ -234,14 +237,17 @@ func (g *EntityGraph) RecordFactRefs(ctx context.Context, fact Fact) ([]EntityRe
 		}
 		line, err := json.Marshal(edge)
 		if err != nil {
+			g.mu.Unlock()
 			return nil, fmt.Errorf("entity graph: marshal: %w", err)
 		}
 		buf.Write(line)
 		buf.WriteString("\n")
 	}
+	content := buf.String()
+	g.mu.Unlock()
 
 	msg := fmt.Sprintf("graph: %s/%s → %d ref(s)", fact.Kind, fact.Slug, len(refs))
-	if _, _, err := g.worker.EnqueueEntityGraph(ctx, ArchivistAuthor, buf.String(), msg); err != nil {
+	if _, _, err := g.worker.EnqueueEntityGraph(ctx, ArchivistAuthor, content, msg); err != nil {
 		return refs, fmt.Errorf("entity graph: enqueue: %w", err)
 	}
 	return refs, nil
@@ -295,7 +301,11 @@ func (g *EntityGraph) readAll() ([]EntityEdge, error) {
 		edges = append(edges, edge)
 	}
 	if err := scanner.Err(); err != nil {
-		log.Printf("entity graph: scanner error after line %d: %v", lineNo, err)
+		// Returning the partial slice here would let Coalesce/Query silently
+		// hand back stale results after a truncated/disk-error read. Surface
+		// the error so callers can distinguish "no edges match" from
+		// "scan aborted halfway."
+		return nil, fmt.Errorf("entity graph: scan aborted after line %d: %w", lineNo, err)
 	}
 	return edges, nil
 }

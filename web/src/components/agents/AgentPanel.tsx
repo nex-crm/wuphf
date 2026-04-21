@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { Xmark } from 'iconoir-react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../../stores/app'
 import { useOfficeMembers, useChannelMembers } from '../../hooks/useMembers'
@@ -230,9 +231,7 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
           onClick={onClose}
           aria-label="Close agent panel"
         >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-          </svg>
+          <Xmark width={20} height={20} />
         </button>
       </div>
 
@@ -332,7 +331,36 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 export function AgentPanel() {
   const activeAgentSlug = useAppStore((s) => s.activeAgentSlug)
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug)
+  const currentChannel = useAppStore((s) => s.currentChannel)
+  const currentApp = useAppStore((s) => s.currentApp)
   const { data: members = [] } = useOfficeMembers()
+  const panelRef = useRef<HTMLDivElement>(null)
+
+  const close = () => setActiveAgentSlug(null)
+
+  // Close when user navigates to a different sidebar section.
+  useEffect(() => {
+    if (activeAgentSlug) close()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentChannel, currentApp])
+
+  // Close on outside click — ignore clicks on sidebar agent items that would
+  // just re-open the panel, and ignore clicks inside the panel itself.
+  useEffect(() => {
+    if (!activeAgentSlug) return
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node | null
+      const panel = panelRef.current
+      if (!panel || !target) return
+      if (panel.contains(target)) return
+      const el = target as HTMLElement
+      if (el.closest && el.closest('[data-agent-slug]')) return
+      close()
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeAgentSlug])
 
   if (!activeAgentSlug) return null
 
@@ -340,9 +368,8 @@ export function AgentPanel() {
   if (!agent) return null
 
   return (
-    <AgentPanelView
-      agent={agent}
-      onClose={() => setActiveAgentSlug(null)}
-    />
+    <div ref={panelRef} style={{ display: 'contents' }}>
+      <AgentPanelView agent={agent} onClose={close} />
+    </div>
   )
 }

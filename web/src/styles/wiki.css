@@ -361,6 +361,28 @@
   font-size: 0.88em;
 }
 
+.wk-article-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0 0 18px;
+  font-size: 14px;
+  font-family: var(--wk-chrome, inherit);
+}
+.wk-article-body table th,
+.wk-article-body table td {
+  padding: 8px 12px;
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid var(--wk-border, rgba(0,0,0,0.08));
+}
+.wk-article-body table th {
+  font-weight: 600;
+  color: var(--wk-text, inherit);
+  border-bottom: 1px solid var(--wk-text, rgba(0,0,0,0.35));
+  background: transparent;
+}
+.wk-article-body table tbody tr:hover { background: rgba(0,0,0,0.02); }
+
 /* ─── Infobox ─── */
 .wk-infobox {
   float: right;
@@ -892,33 +914,36 @@
 /* ─── Audit log view (#/wiki/_audit) ─── */
 .wk-audit {
   max-width: 1180px;
-  padding: 40px 48px 80px;
+  padding: 20px 32px 60px;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 .wk-audit-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-bottom: 24px;
-  padding-bottom: 14px;
+  margin-bottom: 16px;
+  padding-bottom: 10px;
   border-bottom: 1px solid var(--wk-border);
 }
 .wk-audit-title {
   font-family: var(--wk-display);
-  font-size: 40px;
+  font-size: 24px;
   font-weight: 500;
   font-variation-settings: "opsz" 100;
   color: var(--wk-text);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 .wk-audit-strapline {
   font-family: var(--wk-body);
   font-style: italic;
   color: var(--wk-text-muted);
-  font-size: 15px;
+  font-size: 13px;
   margin: 0;
   max-width: 620px;
-  line-height: 1.5;
+  line-height: 1.45;
 }
 .wk-audit-stats {
   font-family: var(--wk-mono);
@@ -947,18 +972,18 @@
 .wk-audit-filter input,
 .wk-audit-filter select {
   font-family: var(--wk-chrome);
-  font-size: 14px;
+  font-size: 13px;
   color: var(--wk-text);
   background: var(--wk-surface);
   border: 1px solid var(--wk-border);
   border-radius: 2px;
-  padding: 6px 10px;
-  min-width: 160px;
+  padding: 5px 8px;
+  min-width: 140px;
   text-transform: none;
   letter-spacing: normal;
 }
 .wk-audit-filter input[type="search"] {
-  min-width: 320px;
+  min-width: 220px;
 }
 .wk-audit-filter input:focus,
 .wk-audit-filter select:focus {
@@ -1013,9 +1038,11 @@
   background: transparent;
 }
 .wk-audit-table tbody td {
-  padding: 10px 12px;
-  vertical-align: top;
+  padding: 6px 10px;
+  vertical-align: middle;
   border-bottom: 1px solid var(--wk-border);
+  font-size: 13px;
+  line-height: 1.4;
 }
 .wk-audit-row:hover td {
   background: var(--wk-surface-alt);
@@ -1057,21 +1084,22 @@
 .wk-audit-row.is-bootstrap .wk-audit-tag { color: var(--wk-accent-ink); border-color: var(--wk-accent); }
 .wk-audit-msg {
   font-family: var(--wk-body);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 13px;
+  line-height: 1.4;
   color: var(--wk-text);
-  min-width: 260px;
+  min-width: 220px;
 }
 .wk-audit-paths {
-  min-width: 260px;
+  min-width: 200px;
 }
 .wk-audit-paths ul {
   margin: 0;
   padding: 0;
   list-style: none;
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 4px 10px;
 }
 .wk-audit-paths a {
   font-family: var(--wk-mono);
@@ -1152,15 +1180,15 @@
   opacity: 0.7;
 }
 .wk-section-new {
-  font-family: var(--wk-mono);
+  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   font-size: 9px;
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.06em;
   padding: 1px 5px;
   border-radius: 3px;
-  background: var(--wk-amber-bg);
-  color: var(--wk-amber-ink, var(--wk-text));
+  background: #CFF5F5;
+  color: #0F5C5C;
 }
 .wk-section-empty {
   padding: 4px 10px;

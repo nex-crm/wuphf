@@ -74,4 +74,68 @@ describe('<EntityRelatedPanel>', () => {
     render(<EntityRelatedPanel kind="people" slug="sarah" />)
     await waitFor(() => expect(screen.getByText('boom')).toBeInTheDocument())
   })
+
+  // The panel's whole value proposition is real-time updates when agents
+  // record facts. This test captures the fact_recorded callback and fires
+  // it, then asserts the panel re-queries the graph API and re-renders
+  // with the new edge. Without this, the SSE wiring is structurally
+  // present but behaviorally unverified.
+  it('re-fetches the graph on entity:fact_recorded for this entity', async () => {
+    let capturedOnFact: (() => void) | null = null
+    let capturedKind: unknown = null
+    let capturedSlug: unknown = null
+    vi.spyOn(api, 'subscribeEntityEvents').mockImplementation(
+      (kind, slug, onFact) => {
+        capturedKind = kind
+        capturedSlug = slug
+        capturedOnFact = onFact as () => void
+        return () => {}
+      },
+    )
+
+    const initial: api.GraphEdge[] = [
+      {
+        from_kind: 'people',
+        from_slug: 'sarah',
+        to_kind: 'companies',
+        to_slug: 'acme',
+        first_seen_fact_id: 'f1',
+        last_seen_ts: '2026-04-20T00:00:00Z',
+        occurrence_count: 1,
+      },
+    ]
+    const updated: api.GraphEdge[] = [
+      ...initial,
+      {
+        from_kind: 'people',
+        from_slug: 'sarah',
+        to_kind: 'customers',
+        to_slug: 'globex',
+        first_seen_fact_id: 'f2',
+        last_seen_ts: '2026-04-21T00:00:00Z',
+        occurrence_count: 1,
+      },
+    ]
+    const fetchSpy = vi
+      .spyOn(api, 'fetchEntityGraph')
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(updated)
+
+    render(<EntityRelatedPanel kind="people" slug="sarah" />)
+    await screen.findByText('companies/acme')
+    expect(screen.queryByText('customers/globex')).toBeNull()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    // Confirm the subscriber was scoped to this entity's kind+slug, so the
+    // broker-side filter will only hand us events for sarah/people.
+    expect(capturedKind).toBe('people')
+    expect(capturedSlug).toBe('sarah')
+
+    // Fire the fact_recorded callback as the SSE layer would.
+    expect(capturedOnFact).not.toBeNull()
+    capturedOnFact!()
+
+    await screen.findByText('customers/globex')
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
 })

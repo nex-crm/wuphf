@@ -35,7 +35,7 @@ func newFactLogFixture(t *testing.T) (*FactLog, *WikiWorker, func()) {
 	log := NewFactLog(worker)
 	return log, worker, func() {
 		cancel()
-		worker.Stop()
+		<-worker.Done()
 	}
 }
 

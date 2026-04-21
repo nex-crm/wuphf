@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { NavArrowLeft, NavArrowRight, Xmark } from 'iconoir-react'
 import { answerRequest, post, type AgentRequest, type InterviewOption } from '../../api/client'
 import { useRequests } from '../../hooks/useRequests'
 import { showNotice } from '../ui/Toast'
@@ -52,7 +53,12 @@ export function InterviewBar() {
 
   if (!current) return null
 
-  const options = current.options ?? current.choices ?? []
+  const rawOptions = current.options ?? current.choices ?? []
+  const options = [...rawOptions].sort((a, b) => {
+    const ar = a.id === current.recommended_id ? 0 : 1
+    const br = b.id === current.recommended_id ? 0 : 1
+    return ar - br
+  })
 
   const submit = async (option: InterviewOption, text?: string) => {
     if (submitting) return
@@ -119,7 +125,7 @@ export function InterviewBar() {
             aria-label="Previous request"
             title="Previous"
           >
-            ‹
+            <NavArrowLeft width={16} height={16} />
           </button>
           <button
             type="button"
@@ -129,7 +135,7 @@ export function InterviewBar() {
             aria-label="Next request"
             title="Next"
           >
-            ›
+            <NavArrowRight width={16} height={16} />
           </button>
         </div>
         <button
@@ -139,7 +145,7 @@ export function InterviewBar() {
           aria-label="Skip and pause office"
           title="Skip — pause office"
         >
-          ×
+          <Xmark width={20} height={20} />
         </button>
       </div>
 
@@ -147,7 +153,9 @@ export function InterviewBar() {
         {current.title && current.title !== 'Request' && (
           <div className="interview-bar-title">{current.title}</div>
         )}
-        <div className="interview-bar-question">{current.question}</div>
+        <div className="interview-bar-question">
+          {(current.question || '').replace(/\*\*/g, '').replace(/^\s*\d+\.\s*/, '')}
+        </div>
         {current.context && (
           <div className="interview-bar-context">{current.context}</div>
         )}
@@ -194,7 +202,7 @@ export function InterviewBar() {
         </div>
       ) : options.length > 0 ? (
         <div className="interview-bar-actions">
-          {options.map((opt) => (
+          {options.map((opt, i) => (
             <button
               key={opt.id}
               type="button"
@@ -203,7 +211,8 @@ export function InterviewBar() {
               disabled={submitting}
               title={opt.description}
             >
-              {opt.label}
+              <span className="interview-bar-opt-num">{i + 1}</span>
+              <span className="interview-bar-opt-label">{opt.label}</span>
               {opt.requires_text && <span className="interview-bar-text-hint"> · type</span>}
             </button>
           ))}
