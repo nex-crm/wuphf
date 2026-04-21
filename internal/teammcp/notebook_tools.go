@@ -51,6 +51,18 @@ type TeamNotebookSearchArgs struct {
 	Pattern    string `json:"pattern" jsonschema:"Literal substring to search (not regex)."`
 }
 
+// TeamNotebookPromoteArgs is the contract for notebook_promote. Used to
+// submit a draft notebook entry for reviewer approval + promotion to the
+// canonical team wiki. Does NOT delete the source — the notebook entry is
+// preserved with a back-link frontmatter block once approved.
+type TeamNotebookPromoteArgs struct {
+	MySlug         string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
+	SourcePath     string `json:"source_path" jsonschema:"Notebook source path — MUST be agents/{my_slug}/notebook/{filename}.md"`
+	TargetWikiPath string `json:"target_wiki_path" jsonschema:"Proposed wiki path — MUST start with team/ and end in .md (e.g. team/playbooks/q2-launch.md)"`
+	Rationale      string `json:"rationale" jsonschema:"Why this entry is ready for promotion — the reviewer sees this as the commit message rationale."`
+	ReviewerSlug   string `json:"reviewer_slug,omitempty" jsonschema:"Optional reviewer override. When omitted, the blueprint's reviewer_paths decides."`
+}
+
 // registerNotebookTools attaches the 4 notebook tools to the MCP server.
 // Caller (configureServerTools, markdown branch) is responsible for gating on
 // WUPHF_MEMORY_BACKEND; this function does not re-check the env.
@@ -71,6 +83,10 @@ func registerNotebookTools(server *mcp.Server) {
 		"notebook_search",
 		"Literal substring search scoped to one agent's notebook subtree. Pattern is matched as a substring (not a regex).",
 	), handleTeamNotebookSearch)
+	mcp.AddTool(server, officeWriteTool(
+		"notebook_promote",
+		"Submit a notebook entry for reviewer approval + promotion to the team wiki. Copy-not-move: once approved the source entry is retained with a back-link frontmatter block. Target path must start with team/ and end in .md.",
+	), handleTeamNotebookPromote)
 }
 
 func handleTeamNotebookWrite(ctx context.Context, _ *mcp.CallToolRequest, args TeamNotebookWriteArgs) (*mcp.CallToolResult, any, error) {
@@ -160,6 +176,56 @@ func handleTeamNotebookList(ctx context.Context, _ *mcp.CallToolRequest, args Te
 		result.Entries = []map[string]any{}
 	}
 	payload, _ := json.Marshal(result.Entries)
+	return textResult(string(payload)), nil, nil
+}
+
+func handleTeamNotebookPromote(ctx context.Context, _ *mcp.CallToolRequest, args TeamNotebookPromoteArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	sourcePath := strings.TrimSpace(args.SourcePath)
+	if sourcePath == "" {
+		return toolError(fmt.Errorf("source_path is required")), nil, nil
+	}
+	expectedSourcePrefix := "agents/" + slug + "/notebook/"
+	if !strings.HasPrefix(sourcePath, expectedSourcePrefix) {
+		return toolError(fmt.Errorf("source_path %q must start with %s", sourcePath, expectedSourcePrefix)), nil, nil
+	}
+	if !strings.HasSuffix(strings.ToLower(sourcePath), ".md") {
+		return toolError(fmt.Errorf("source_path must end in .md; got %q", sourcePath)), nil, nil
+	}
+	targetPath := strings.TrimSpace(args.TargetWikiPath)
+	if targetPath == "" {
+		return toolError(fmt.Errorf("target_wiki_path is required")), nil, nil
+	}
+	if !strings.HasPrefix(targetPath, "team/") {
+		return toolError(fmt.Errorf("target_wiki_path %q must start with team/", targetPath)), nil, nil
+	}
+	if !strings.HasSuffix(strings.ToLower(targetPath), ".md") {
+		return toolError(fmt.Errorf("target_wiki_path must end in .md; got %q", targetPath)), nil, nil
+	}
+	if strings.TrimSpace(args.Rationale) == "" {
+		return toolError(fmt.Errorf("rationale is required")), nil, nil
+	}
+
+	var result struct {
+		PromotionID  string `json:"promotion_id"`
+		ReviewerSlug string `json:"reviewer_slug"`
+		State        string `json:"state"`
+		HumanOnly    bool   `json:"human_only"`
+	}
+	err = brokerPostJSON(ctx, "/notebook/promote", map[string]any{
+		"my_slug":          slug,
+		"source_path":      sourcePath,
+		"target_wiki_path": targetPath,
+		"rationale":        args.Rationale,
+		"reviewer_slug":    strings.TrimSpace(args.ReviewerSlug),
+	}, &result)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	payload, _ := json.Marshal(result)
 	return textResult(string(payload)), nil, nil
 }
 

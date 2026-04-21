@@ -13,7 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// TestNotebookToolsRegisteredOnlyInMarkdownBackend locks in the gate: the 4
+// TestNotebookToolsRegisteredOnlyInMarkdownBackend locks in the gate: the 5
 // notebook_* tools appear iff WUPHF_MEMORY_BACKEND=markdown. Other backends
 // (nex, gbrain, none) must not expose them — matches wiki parity.
 func TestNotebookToolsRegisteredOnlyInMarkdownBackend(t *testing.T) {
@@ -22,6 +22,7 @@ func TestNotebookToolsRegisteredOnlyInMarkdownBackend(t *testing.T) {
 		"notebook_read",
 		"notebook_list",
 		"notebook_search",
+		"notebook_promote",
 	}
 	cases := []struct {
 		name     string
@@ -54,7 +55,7 @@ func TestNotebookToolsRegisteredOnlyInMarkdownBackend(t *testing.T) {
 func TestNotebookToolsRegisteredInOneOnOne(t *testing.T) {
 	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
 	names := listRegisteredTools(t, "dm-ceo", true)
-	for _, want := range []string{"notebook_write", "notebook_read", "notebook_list", "notebook_search"} {
+	for _, want := range []string{"notebook_write", "notebook_read", "notebook_list", "notebook_search", "notebook_promote"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("expected %q registered in 1:1; got %v", want, names)
 		}
@@ -324,6 +325,74 @@ func TestHandleTeamNotebookSearchEncoding(t *testing.T) {
 	})
 	if strings.Contains(auth.lastRaw, "$(whoami)") {
 		t.Fatalf("pattern not URL-encoded: %q", auth.lastRaw)
+	}
+}
+
+func TestHandleTeamNotebookPromote_Happy(t *testing.T) {
+	srv, auth := stubBroker(t, func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"promotion_id":  "rvw-123-0001",
+			"reviewer_slug": "ceo",
+			"state":         "pending",
+			"human_only":    false,
+		})
+	})
+	defer srv.Close()
+	withBrokerURL(t, srv.URL)
+	t.Setenv("WUPHF_AGENT_SLUG", "pm")
+
+	res, _, err := handleTeamNotebookPromote(context.Background(), nil, TeamNotebookPromoteArgs{
+		SourcePath:     "agents/pm/notebook/retro.md",
+		TargetWikiPath: "team/playbooks/retro.md",
+		Rationale:      "canonical",
+	})
+	if err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+	if isToolError(res) {
+		t.Fatalf("tool error: %s", toolErrorText(res))
+	}
+	if !strings.Contains(auth.lastPath, "/notebook/promote") {
+		t.Fatalf("broker hit wrong path: %s", auth.lastPath)
+	}
+	if !strings.Contains(auth.lastBody, "\"my_slug\":\"pm\"") {
+		t.Fatalf("expected my_slug in body: %s", auth.lastBody)
+	}
+	if !strings.Contains(auth.lastBody, "\"target_wiki_path\":\"team/playbooks/retro.md\"") {
+		t.Fatalf("expected target path in body: %s", auth.lastBody)
+	}
+}
+
+func TestHandleTeamNotebookPromote_Validations(t *testing.T) {
+	t.Setenv("WUPHF_AGENT_SLUG", "pm")
+	cases := []struct {
+		name string
+		args TeamNotebookPromoteArgs
+	}{
+		{"missing source", TeamNotebookPromoteArgs{TargetWikiPath: "team/x.md", Rationale: "r"}},
+		{"source not under caller", TeamNotebookPromoteArgs{
+			SourcePath: "agents/other/notebook/x.md", TargetWikiPath: "team/x.md", Rationale: "r",
+		}},
+		{"source no .md", TeamNotebookPromoteArgs{
+			SourcePath: "agents/pm/notebook/x", TargetWikiPath: "team/x.md", Rationale: "r",
+		}},
+		{"target not team/", TeamNotebookPromoteArgs{
+			SourcePath: "agents/pm/notebook/x.md", TargetWikiPath: "wrong/x.md", Rationale: "r",
+		}},
+		{"target no .md", TeamNotebookPromoteArgs{
+			SourcePath: "agents/pm/notebook/x.md", TargetWikiPath: "team/x", Rationale: "r",
+		}},
+		{"missing rationale", TeamNotebookPromoteArgs{
+			SourcePath: "agents/pm/notebook/x.md", TargetWikiPath: "team/x.md",
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, _, _ := handleTeamNotebookPromote(context.Background(), nil, tc.args)
+			if !isToolError(res) {
+				t.Fatalf("expected tool error for %s", tc.name)
+			}
+		})
 	}
 }
 
