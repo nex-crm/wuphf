@@ -464,7 +464,9 @@ type Broker struct {
 	reviewSubscribers   map[int]chan ReviewStateChangeEvent
 	entitySubscribers   map[int]chan EntityBriefSynthesizedEvent
 	factSubscribers     map[int]chan EntityFactRecordedEvent
+	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker          *WikiWorker
+	wikiSectionsCache   *wikiSectionsCache
 	reviewLog           *ReviewLog
 	reviewResolver      ReviewerResolver
 	factLog             *FactLog
@@ -1133,6 +1135,7 @@ func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 // Start launches the broker on the configured localhost port.
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
+	b.ensureWikiSectionsCache()
 	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
 	b.startReviewExpiryLoop(context.Background())
@@ -1213,6 +1216,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
+	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
@@ -1732,6 +1736,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeEntity()
 	factEvents, unsubscribeFacts := b.SubscribeEntityFactEvents(64)
 	defer unsubscribeFacts()
+	sectionsEvents, unsubscribeSections := b.SubscribeWikiSectionsUpdated(16)
+	defer unsubscribeSections()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1786,6 +1792,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-factEvents:
 			if !ok || writeEvent("entity:fact_recorded", evt) != nil {
+				return
+			}
+		case evt, ok := <-sectionsEvents:
+			if !ok || writeEvent(wikiSectionsEventName, evt) != nil {
 				return
 			}
 		case <-heartbeat.C:
