@@ -6,7 +6,7 @@ import (
 )
 
 func TestPlaybookToolsRegisteredOnlyInMarkdownBackend(t *testing.T) {
-	toolNames := []string{"playbook_list", "playbook_compile", "playbook_execution_record"}
+	toolNames := []string{"playbook_list", "playbook_compile", "playbook_execution_record", "playbook_synthesize_now"}
 	cases := []struct {
 		backend  string
 		mustHave bool
@@ -37,7 +37,7 @@ func TestPlaybookToolsRegisteredOnlyInMarkdownBackend(t *testing.T) {
 func TestPlaybookToolsRegisteredInOneOnOne(t *testing.T) {
 	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
 	names := listRegisteredTools(t, "dm-ceo", true)
-	for _, want := range []string{"playbook_list", "playbook_compile", "playbook_execution_record"} {
+	for _, want := range []string{"playbook_list", "playbook_compile", "playbook_execution_record", "playbook_synthesize_now"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("1:1 mode missing tool %q", want)
 		}

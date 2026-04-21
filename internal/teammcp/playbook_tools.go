@@ -30,6 +30,12 @@ type TeamPlaybookCompileArgs struct {
 	Slug   string `json:"slug" jsonschema:"Kebab-case playbook slug matching team/playbooks/{slug}.md."`
 }
 
+// TeamPlaybookSynthesizeNowArgs is the contract for playbook_synthesize_now.
+type TeamPlaybookSynthesizeNowArgs struct {
+	MySlug string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
+	Slug   string `json:"slug" jsonschema:"Kebab-case playbook slug matching team/playbooks/{slug}.md."`
+}
+
 // TeamPlaybookExecutionRecordArgs is the contract for playbook_execution_record.
 type TeamPlaybookExecutionRecordArgs struct {
 	MySlug  string `json:"my_slug,omitempty" jsonschema:"Your agent slug. Defaults to WUPHF_AGENT_SLUG env."`
@@ -55,6 +61,10 @@ func registerPlaybookTools(server *mcp.Server) {
 		"playbook_execution_record",
 		"Record the outcome of a playbook run. Any agent that invokes a compiled playbook skill is expected to call this when the run finishes (success, partial, or aborted). The log is append-only — wrong outcomes are corrected by adding a new entry, never by editing.",
 	), handlePlaybookExecutionRecord)
+	mcp.AddTool(server, officeWriteTool(
+		"playbook_synthesize_now",
+		"Force the broker to synthesize the latest execution outcomes back into a playbook's 'What we've learned' section RIGHT NOW, bypassing the threshold. Call this after you just logged a particularly useful outcome (or a hard-won failure) that the next runner should see immediately. Normally synthesis happens automatically after N executions; this tool short-circuits that for urgent lessons.",
+	), handlePlaybookSynthesizeNow)
 }
 
 func handlePlaybookListTool(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlaybookListArgs) (*mcp.CallToolResult, any, error) {
@@ -85,6 +95,30 @@ func handlePlaybookCompileTool(ctx context.Context, _ *mcp.CallToolRequest, args
 		CommitSHA string `json:"commit_sha"`
 	}
 	if err := brokerPostJSON(ctx, "/playbook/compile", map[string]any{"slug": slug}, &result); err != nil {
+		return toolError(err), nil, nil
+	}
+	payload, _ := json.Marshal(result)
+	return textResult(string(payload)), nil, nil
+}
+
+func handlePlaybookSynthesizeNow(ctx context.Context, _ *mcp.CallToolRequest, args TeamPlaybookSynthesizeNowArgs) (*mcp.CallToolResult, any, error) {
+	slug, err := resolveSlug(args.MySlug)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	playbookSlug := strings.TrimSpace(args.Slug)
+	if playbookSlug == "" {
+		return toolError(fmt.Errorf("slug is required")), nil, nil
+	}
+	body := map[string]any{
+		"slug":       playbookSlug,
+		"actor_slug": slug,
+	}
+	var result struct {
+		SynthesisID uint64 `json:"synthesis_id"`
+		QueuedAt    string `json:"queued_at"`
+	}
+	if err := brokerPostJSON(ctx, "/playbook/synthesize", body, &result); err != nil {
 		return toolError(err), nil, nil
 	}
 	payload, _ := json.Marshal(result)

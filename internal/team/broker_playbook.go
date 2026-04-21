@@ -15,14 +15,19 @@ package team
 //	playbook:execution_recorded      — { slug, path, commit_sha, recorded_by, timestamp }
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // playbookSubscribersMu guards lazy init of the subscriber map. We do NOT
@@ -37,6 +42,7 @@ import (
 var (
 	playbookSubscribersMu        sync.Mutex
 	playbookSubscribersByBroker  = map[*Broker]map[int]chan PlaybookExecutionRecordedEvent{}
+	playbookSynthSubsByBroker    = map[*Broker]map[int]chan PlaybookSynthesizedEvent{}
 	playbookExecutionLogByBroker = map[*Broker]*ExecutionLog{}
 )
 
@@ -289,6 +295,14 @@ func (b *Broker) handlePlaybookExecution(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	all, _ := log.List(slug)
+
+	// Close the loop: notify the synthesizer so it can debounce + enqueue a
+	// synthesis when the threshold is crossed. Non-blocking; any errors are
+	// already logged inside OnExecutionRecorded.
+	if synth := b.PlaybookSynthesizer(); synth != nil {
+		synth.OnExecutionRecorded(slug)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"execution_id":    entry.ID,
 		"execution_count": len(all),
@@ -322,3 +336,253 @@ func (b *Broker) handlePlaybookExecutionsList(w http.ResponseWriter, r *http.Req
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"executions": entries})
 }
+
+// ── Playbook synthesizer wiring ──────────────────────────────────────────
+//
+// The compounding-intelligence loop — executions accumulate, a broker-level
+// LLM synthesis worker periodically updates the "What we've learned"
+// section of the source playbook, and the existing auto-recompile hook
+// regenerates the SKILL.md so the next agent starts smarter.
+//
+// Kept in this file (not a new file) so the merge-surface with the parallel
+// editable-wiki branch stays additive. The synthesizer itself lives in
+// playbook_synthesizer.go.
+
+// PlaybookSynthesizer returns the active synthesizer or nil before Start
+// has wired it.
+func (b *Broker) PlaybookSynthesizer() *PlaybookSynthesizer {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.playbookSynthesizer
+}
+
+// SetPlaybookSynthesizer wires a synthesizer from tests. Must be called
+// after ensurePlaybookExecutionLog would have run.
+func (b *Broker) SetPlaybookSynthesizer(synth *PlaybookSynthesizer) {
+	b.mu.Lock()
+	b.playbookSynthesizer = synth
+	b.mu.Unlock()
+}
+
+// ensurePlaybookSynthesizer initializes the playbook synthesizer once the
+// execution log is online. Idempotent.
+func (b *Broker) ensurePlaybookSynthesizer() {
+	b.mu.Lock()
+	if b.playbookSynthesizer != nil {
+		b.mu.Unlock()
+		return
+	}
+	worker := b.wikiWorker
+	b.mu.Unlock()
+	if worker == nil {
+		return
+	}
+	execLog := b.PlaybookExecutionLog()
+	if execLog == nil {
+		return
+	}
+	cfg := PlaybookSynthesizerConfig{
+		Threshold: resolvePlaybookSynthThresholdFromEnv(),
+		Timeout:   resolvePlaybookSynthTimeoutFromEnv(),
+	}
+	synth := NewPlaybookSynthesizer(worker, execLog, b, cfg)
+	synth.Start(context.Background())
+	b.mu.Lock()
+	b.playbookSynthesizer = synth
+	b.mu.Unlock()
+}
+
+func resolvePlaybookSynthThresholdFromEnv() int {
+	raw := strings.TrimSpace(os.Getenv("WUPHF_PLAYBOOK_SYNTHESIS_THRESHOLD"))
+	if raw == "" {
+		return DefaultPlaybookSynthesisThreshold
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return DefaultPlaybookSynthesisThreshold
+	}
+	return n
+}
+
+func resolvePlaybookSynthTimeoutFromEnv() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("WUPHF_PLAYBOOK_SYNTHESIS_TIMEOUT"))
+	if raw == "" {
+		return DefaultPlaybookSynthesisTimeout
+	}
+	secs, err := strconv.Atoi(raw)
+	if err != nil || secs <= 0 {
+		return DefaultPlaybookSynthesisTimeout
+	}
+	return time.Duration(secs) * time.Second
+}
+
+// SubscribePlaybookSynthesizedEvents returns a channel of playbook-synthesis
+// events plus an unsubscribe func. Mirrors SubscribePlaybookExecutionEvents.
+func (b *Broker) SubscribePlaybookSynthesizedEvents(buffer int) (<-chan PlaybookSynthesizedEvent, func()) {
+	if buffer <= 0 {
+		buffer = 64
+	}
+	playbookSubscribersMu.Lock()
+	defer playbookSubscribersMu.Unlock()
+	subs := playbookSynthSubsByBroker[b]
+	if subs == nil {
+		subs = make(map[int]chan PlaybookSynthesizedEvent)
+		playbookSynthSubsByBroker[b] = subs
+	}
+	b.mu.Lock()
+	id := b.nextSubscriberID
+	b.nextSubscriberID++
+	b.mu.Unlock()
+	ch := make(chan PlaybookSynthesizedEvent, buffer)
+	subs[id] = ch
+	return ch, func() {
+		playbookSubscribersMu.Lock()
+		defer playbookSubscribersMu.Unlock()
+		if subs := playbookSynthSubsByBroker[b]; subs != nil {
+			if existing, ok := subs[id]; ok {
+				delete(subs, id)
+				close(existing)
+			}
+		}
+	}
+}
+
+// PublishPlaybookSynthesized fans out a synthesis event. Implements the
+// playbookSynthEventPublisher interface consumed by PlaybookSynthesizer.
+func (b *Broker) PublishPlaybookSynthesized(evt PlaybookSynthesizedEvent) {
+	playbookSubscribersMu.Lock()
+	defer playbookSubscribersMu.Unlock()
+	for _, ch := range playbookSynthSubsByBroker[b] {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// handlePlaybookSynthesize is POST /playbook/synthesize.
+//
+//	body: { "slug": "churn-prevention", "actor_slug"?: "..." }
+//	resp: { "synthesis_id", "queued_at" }
+//
+// On-demand trigger for humans or agents who just landed a particularly
+// useful outcome. Always goes through the debounce/coalesce path, so
+// repeated clicks don't stack work.
+func (b *Broker) handlePlaybookSynthesize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	b.ensurePlaybookExecutionLog()
+	b.ensurePlaybookSynthesizer()
+	synth := b.PlaybookSynthesizer()
+	if synth == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "playbook synthesizer is not active"})
+		return
+	}
+	var body struct {
+		Slug      string `json:"slug"`
+		ActorSlug string `json:"actor_slug"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	slug := strings.TrimSpace(body.Slug)
+	if !slugPattern.MatchString(slug) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("slug must match ^[a-z0-9][a-z0-9-]*$; got %q", slug)})
+		return
+	}
+	actor := strings.TrimSpace(body.ActorSlug)
+	if actor == "" {
+		actor = strings.TrimSpace(r.Header.Get(agentRateLimitHeader))
+	}
+	if actor == "" {
+		actor = "human"
+	}
+	id, err := synth.SynthesizeNow(r.Context(), slug, actor)
+	if err != nil {
+		if errors.Is(err, ErrPlaybookSynthQueueSaturated) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, ErrPlaybookSynthesizerStopped) {
+			writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+			return
+		}
+		log.Printf("playbook synth: on-demand enqueue for %s by %s: %v", slug, actor, err)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"synthesis_id": id,
+		"queued_at":    time.Now().UTC().Format(time.RFC3339),
+	})
+}
+
+// handlePlaybookSynthesisStatus is GET /playbook/synthesis-status?slug=.
+//
+//	resp: {
+//	  "slug": "...",
+//	  "execution_count": 7,
+//	  "last_synthesized_ts": "2026-04-21T10:00:00Z",
+//	  "last_synthesized_sha": "abc1234",
+//	  "executions_since_last_synthesis": 2,
+//	  "threshold": 3,
+//	  "source_path": "team/playbooks/churn-prevention.md"
+//	}
+//
+// Powers the "Last synthesis: 2h ago · 7 executions" badge in the web UI.
+// Pulled from the frontmatter the synthesizer stamps on every commit, so
+// the status is always consistent with the source of truth on disk.
+func (b *Broker) handlePlaybookSynthesisStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	if worker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "wiki backend is not active"})
+		return
+	}
+	slug := strings.TrimSpace(r.URL.Query().Get("slug"))
+	if !slugPattern.MatchString(slug) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("slug must match ^[a-z0-9][a-z0-9-]*$; got %q", slug)})
+		return
+	}
+	sourceRel := playbookSourceRel(slug)
+	bytes, err := readArticle(worker.Repo(), sourceRel)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": fmt.Sprintf("source playbook %s does not exist", sourceRel)})
+		return
+	}
+	sha, ts, lastCount := parseSynthesisFrontmatter(string(bytes))
+	tsStr := ""
+	if !ts.IsZero() {
+		tsStr = ts.UTC().Format(time.RFC3339)
+	}
+	execCount := 0
+	if execLog := b.PlaybookExecutionLog(); execLog != nil {
+		if entries, err := execLog.List(slug); err == nil {
+			execCount = len(entries)
+		}
+	}
+	since := execCount - lastCount
+	if since < 0 {
+		since = 0
+	}
+	threshold := DefaultPlaybookSynthesisThreshold
+	if synth := b.PlaybookSynthesizer(); synth != nil {
+		threshold = synth.Threshold()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"slug":                            slug,
+		"source_path":                     sourceRel,
+		"execution_count":                 execCount,
+		"last_synthesized_ts":             tsStr,
+		"last_synthesized_sha":            sha,
+		"executions_since_last_synthesis": since,
+		"threshold":                       threshold,
+	})
+}
+

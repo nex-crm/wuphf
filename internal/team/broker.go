@@ -471,6 +471,7 @@ type Broker struct {
 	reviewResolver          ReviewerResolver
 	factLog                 *FactLog
 	entitySynthesizer       *EntitySynthesizer
+	playbookSynthesizer     *PlaybookSynthesizer
 	scanTracker             *scanStatusTracker
 	nextSubscriberID        int
 	agentStreams            map[string]*agentStreamBuffer
@@ -1139,6 +1140,7 @@ func (b *Broker) Start() error {
 	b.ensureReviewLog()
 	b.ensureEntitySynthesizer()
 	b.ensurePlaybookExecutionLog()
+	b.ensurePlaybookSynthesizer()
 	b.startReviewExpiryLoop(context.Background())
 	return b.StartOnPort(brokeraddr.ResolvePort())
 }
@@ -1234,6 +1236,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/playbook/compile", b.requireAuth(b.handlePlaybookCompile))
 	mux.HandleFunc("/playbook/execution", b.requireAuth(b.handlePlaybookExecution))
 	mux.HandleFunc("/playbook/executions", b.requireAuth(b.handlePlaybookExecutionsList))
+	mux.HandleFunc("/playbook/synthesize", b.requireAuth(b.handlePlaybookSynthesize))
+	mux.HandleFunc("/playbook/synthesis-status", b.requireAuth(b.handlePlaybookSynthesisStatus))
 	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
 	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
@@ -1311,9 +1315,13 @@ func (b *Broker) Stop() {
 	}
 	b.mu.Lock()
 	synth := b.entitySynthesizer
+	pbSynth := b.playbookSynthesizer
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
+	}
+	if pbSynth != nil {
+		pbSynth.Stop()
 	}
 }
 
@@ -1745,6 +1753,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeSections()
 	playbookEvents, unsubscribePlaybook := b.SubscribePlaybookExecutionEvents(64)
 	defer unsubscribePlaybook()
+	playbookSynthEvents, unsubscribePlaybookSynth := b.SubscribePlaybookSynthesizedEvents(64)
+	defer unsubscribePlaybookSynth()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1807,6 +1817,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-playbookEvents:
 			if !ok || writeEvent("playbook:execution_recorded", evt) != nil {
+				return
+			}
+		case evt, ok := <-playbookSynthEvents:
+			if !ok || writeEvent("playbook:synthesized", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:
