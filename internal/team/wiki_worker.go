@@ -82,7 +82,11 @@ type wikiWriteRequest struct {
 	// Repo.Commit. Same serialization primitive; different target subtree
 	// and no team-wiki index regen. See notebook_worker.go.
 	IsNotebook bool
-	ReplyCh    chan wikiWriteResult
+	// IsEntityFact routes the request to Repo.CommitEntityFact. Used for
+	// the v1.2 append-only fact log at team/entities/{kind}-{slug}.facts.jsonl
+	// — same serialization primitive, non-.md extension, no index regen.
+	IsEntityFact bool
+	ReplyCh      chan wikiWriteResult
 }
 
 // wikiWriteResult is the worker's reply for a single request.
@@ -207,7 +211,9 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		n   int
 		err error
 	)
-	if req.IsNotebook {
+	if req.IsEntityFact {
+		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsNotebook {
 		// Notebook writes do NOT regen the team wiki index. Commit target is
 		// agents/{slug}/notebook/... — scoped to the author.
 		sha, n, err = w.repo.CommitNotebook(writeCtx, req.Slug, req.Path, req.Content, req.Mode, req.CommitMsg)
@@ -225,7 +231,11 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	req.ReplyCh <- wikiWriteResult{SHA: sha, BytesWritten: n}
 
 	ts := time.Now().UTC().Format(time.RFC3339)
-	if req.IsNotebook {
+	switch {
+	case req.IsEntityFact:
+		// Entity fact writes have their own SSE event (entity:fact_recorded)
+		// published by the broker handler, not by the worker. No-op here.
+	case req.IsNotebook:
 		if nbPub, ok := w.publisher.(notebookEventPublisher); ok {
 			nbPub.PublishNotebookEvent(notebookWriteEvent{
 				Slug:      req.Slug,
@@ -234,7 +244,7 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 				Timestamp: ts,
 			})
 		}
-	} else {
+	default:
 		w.publisher.PublishWikiEvent(wikiWriteEvent{
 			Path:       req.Path,
 			CommitSHA:  sha,
@@ -278,6 +288,37 @@ func (w *WikiWorker) maybeScheduleBackup(ctx context.Context) {
 // diagnostics and tests.
 func (w *WikiWorker) QueueLength() int {
 	return len(w.requests)
+}
+
+// EnqueueEntityFact submits a fact-log append to the shared wiki queue.
+// The path must be team/entities/{kind}-{slug}.facts.jsonl and is routed
+// to Repo.CommitEntityFact (which does NOT regen the wiki index).
+func (w *WikiWorker) EnqueueEntityFact(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:         slug,
+		Path:         path,
+		Content:      content,
+		Mode:         "replace",
+		CommitMsg:    commitMsg,
+		IsEntityFact: true,
+		ReplyCh:      make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: entity-fact write timed out after %s", wikiWriteTimeout)
+	}
 }
 
 // Repo returns the underlying wiki repo — used by read-side broker handlers

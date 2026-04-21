@@ -462,9 +462,13 @@ type Broker struct {
 	wikiSubscribers     map[int]chan wikiWriteEvent
 	notebookSubscribers map[int]chan notebookWriteEvent
 	reviewSubscribers   map[int]chan ReviewStateChangeEvent
+	entitySubscribers   map[int]chan EntityBriefSynthesizedEvent
+	factSubscribers     map[int]chan EntityFactRecordedEvent
 	wikiWorker          *WikiWorker
 	reviewLog           *ReviewLog
 	reviewResolver      ReviewerResolver
+	factLog             *FactLog
+	entitySynthesizer   *EntitySynthesizer
 	scanTracker         *scanStatusTracker
 	nextSubscriberID    int
 	agentStreams        map[string]*agentStreamBuffer
@@ -857,6 +861,8 @@ func NewBroker() *Broker {
 		wikiSubscribers:     make(map[int]chan wikiWriteEvent),
 		notebookSubscribers: make(map[int]chan notebookWriteEvent),
 		reviewSubscribers:   make(map[int]chan ReviewStateChangeEvent),
+		entitySubscribers:   make(map[int]chan EntityBriefSynthesizedEvent),
+		factSubscribers:     make(map[int]chan EntityFactRecordedEvent),
 		agentStreams:        make(map[string]*agentStreamBuffer),
 		rateLimitBuckets:    make(map[string]ipRateLimitBucket),
 		rateLimitWindow:     defaultRateLimitWindow,
@@ -1128,6 +1134,7 @@ func (b *Broker) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 func (b *Broker) Start() error {
 	b.ensureWikiWorker()
 	b.ensureReviewLog()
+	b.ensureEntitySynthesizer()
 	b.startReviewExpiryLoop(context.Background())
 	return b.StartOnPort(brokeraddr.ResolvePort())
 }
@@ -1214,6 +1221,10 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/notebook/promote", b.requireAuth(b.handleNotebookPromote))
 	mux.HandleFunc("/review/list", b.requireAuth(b.handleReviewList))
 	mux.HandleFunc("/review/", b.requireAuth(b.handleReviewSubpath))
+	mux.HandleFunc("/entity/fact", b.requireAuth(b.handleEntityFact))
+	mux.HandleFunc("/entity/brief/synthesize", b.requireAuth(b.handleEntityBriefSynthesize))
+	mux.HandleFunc("/entity/facts", b.requireAuth(b.handleEntityFactsList))
+	mux.HandleFunc("/entity/briefs", b.requireAuth(b.handleEntityBriefsList))
 	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
 	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
@@ -1288,6 +1299,12 @@ func (b *Broker) StartOnPort(port int) error {
 func (b *Broker) Stop() {
 	if b.server != nil {
 		_ = b.server.Close()
+	}
+	b.mu.Lock()
+	synth := b.entitySynthesizer
+	b.mu.Unlock()
+	if synth != nil {
+		synth.Stop()
 	}
 }
 
@@ -1711,6 +1728,10 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribeWiki()
 	notebookEvents, unsubscribeNotebook := b.SubscribeNotebookEvents(64)
 	defer unsubscribeNotebook()
+	entityEvents, unsubscribeEntity := b.SubscribeEntityBriefEvents(64)
+	defer unsubscribeEntity()
+	factEvents, unsubscribeFacts := b.SubscribeEntityFactEvents(64)
+	defer unsubscribeFacts()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1757,6 +1778,14 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-notebookEvents:
 			if !ok || writeEvent("notebook:write", evt) != nil {
+				return
+			}
+		case evt, ok := <-entityEvents:
+			if !ok || writeEvent("entity:brief_synthesized", evt) != nil {
+				return
+			}
+		case evt, ok := <-factEvents:
+			if !ok || writeEvent("entity:fact_recorded", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:

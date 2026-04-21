@@ -176,7 +176,7 @@ func (l *FactLog) Append(ctx context.Context, kind EntityKind, slug, text, sourc
 	buf = append(buf, '\n')
 
 	msg := fmt.Sprintf("fact: %s/%s — %s", kind, slug, firstLine(text))
-	if _, _, err := l.worker.Enqueue(ctx, recordedBy, relPath, string(buf), "replace", msg); err != nil {
+	if _, _, err := l.worker.EnqueueEntityFact(ctx, recordedBy, relPath, string(buf), msg); err != nil {
 		return Fact{}, fmt.Errorf("entity facts: enqueue: %w", err)
 	}
 	return fact, nil
