@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -126,6 +127,50 @@ func TestEntityGraphEndpoint_ValidatesDirection(t *testing.T) {
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400; got %d", res.StatusCode)
+	}
+}
+
+// Regression for the post-review contract: if the graph hook errors
+// inside handleEntityFact, the fact write itself must still return 200.
+// The graph is additive intelligence — never a constraint on the fact log.
+func TestHandleEntityFact_GraphRecordFailureDoesNotBreakFactWrite(t *testing.T) {
+	srv, b, teardown := newEntityGraphTestServer(t)
+	defer teardown()
+
+	// Inject a failing graph recorder for the duration of this test.
+	original := graphRecordFactRefs
+	graphRecordFactRefs = func(_ context.Context, _ *EntityGraph, _ Fact) ([]EntityRef, error) {
+		return nil, errors.New("injected: graph record failure")
+	}
+	t.Cleanup(func() { graphRecordFactRefs = original })
+
+	payload, _ := json.Marshal(map[string]any{
+		"entity_kind": "people",
+		"entity_slug": "sarah",
+		"fact":        "Works at [[companies/acme]] as PM.",
+		"recorded_by": "pm",
+	})
+	req, _ := authReq(http.MethodPost, srv.URL+"/entity/fact", bytes.NewReader(payload), b.Token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post fact: %v", err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	_ = res.Body.Close()
+
+	// Fact write succeeded despite the graph hook failing.
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("fact write must still return 200 when graph hook errors; got %d body=%s",
+			res.StatusCode, body)
+	}
+	var envelope struct {
+		FactID string `json:"fact_id"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		t.Fatalf("decode: %v; body=%s", err, body)
+	}
+	if envelope.FactID == "" {
+		t.Errorf("fact payload missing fact_id: %s", body)
 	}
 }
 

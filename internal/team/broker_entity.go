@@ -30,6 +30,14 @@ import (
 	"time"
 )
 
+// graphRecordFactRefs is the test seam for the cross-entity graph hook in
+// handleEntityFact. Production code calls graph.RecordFactRefs; tests
+// override this var to inject errors and verify the
+// "graph failure keeps fact write intact" contract.
+var graphRecordFactRefs = func(ctx context.Context, graph *EntityGraph, fact Fact) ([]EntityRef, error) {
+	return graph.RecordFactRefs(ctx, fact)
+}
+
 // SubscribeEntityBriefEvents returns a channel of brief-synthesized events
 // plus an unsubscribe func.
 func (b *Broker) SubscribeEntityBriefEvents(buffer int) (<-chan EntityBriefSynthesizedEvent, func()) {
@@ -248,8 +256,11 @@ func (b *Broker) handleEntityFact(w http.ResponseWriter, r *http.Request) {
 	// Cross-entity graph extraction rides on every successful fact append.
 	// Failures here are logged but never block the fact_recorded response —
 	// the graph is additive intelligence, not a constraint on the fact log.
+	// Indirected through graphRecordFactRefs so tests can verify the
+	// "graph failure keeps fact write intact" contract by injecting an
+	// error-returning stub.
 	if graph := b.EntityGraph(); graph != nil {
-		if _, gerr := graph.RecordFactRefs(r.Context(), fact); gerr != nil {
+		if _, gerr := graphRecordFactRefs(r.Context(), graph, fact); gerr != nil {
 			log.Printf("entity graph: record refs for %s/%s fact %s: %v", kind, slug, fact.ID, gerr)
 		}
 	}
