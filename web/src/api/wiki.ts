@@ -287,9 +287,25 @@ export function subscribeEditLog(
       if (closed) return
       try {
         const data = JSON.parse(ev.data) as Record<string, unknown>
-        // Broker ships the full wikiWriteEvent envelope as the data
-        // payload; the edit-log UI only needs the entry fields.
-        const entry = (data.entry ?? data) as WikiEditLogEntry
+        // Broker ships `{path, commit_sha, author_slug, timestamp}` on
+        // wiki:write. The edit-log UI's WikiEditLogEntry contract uses
+        // `who`/`action`/`article_path`/`article_title`, so normalize
+        // here rather than leaving undefined fields that crash
+        // downstream consumers (e.g. EditLogFooter's
+        // entry.who.toLowerCase()).
+        const raw = (data.entry ?? data) as Record<string, unknown>
+        const path = String(raw.article_path ?? raw.path ?? '')
+        const entry: WikiEditLogEntry = {
+          who: String(raw.who ?? raw.author_slug ?? 'unknown'),
+          action:
+            (raw.action as WikiEditLogEntry['action']) ?? 'edited',
+          article_path: path,
+          article_title:
+            (raw.article_title as string) ??
+            (path.split('/').pop() ?? path).replace(/\.md$/, ''),
+          timestamp: String(raw.timestamp ?? new Date().toISOString()),
+          commit_sha: String(raw.commit_sha ?? ''),
+        }
         handler(entry)
       } catch {
         // ignore malformed events
