@@ -55,8 +55,8 @@ func TestCodingTeamPack(t *testing.T) {
 	if p == nil {
 		t.Fatal("coding-team pack not found")
 	}
-	if p.LeadSlug != "tech-lead" {
-		t.Errorf("expected lead 'tech-lead', got '%s'", p.LeadSlug)
+	if p.LeadSlug != "ceo" {
+		t.Errorf("expected lead 'ceo', got '%s'", p.LeadSlug)
 	}
 	if len(p.Agents) != 4 {
 		t.Errorf("expected 4 agents, got %d", len(p.Agents))
@@ -68,8 +68,8 @@ func TestLeadGenAgencyPack(t *testing.T) {
 	if p == nil {
 		t.Fatal("lead-gen-agency pack not found")
 	}
-	if p.LeadSlug != "ae" {
-		t.Errorf("expected lead 'ae', got '%s'", p.LeadSlug)
+	if p.LeadSlug != "ceo" {
+		t.Errorf("expected lead 'ceo', got '%s'", p.LeadSlug)
 	}
 	if len(p.Agents) != 4 {
 		t.Errorf("expected 4 agents, got %d", len(p.Agents))

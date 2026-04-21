@@ -70,7 +70,7 @@ func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 	}
 
 	want := map[string]bool{
-		"operator": true, "planner": true, "builder": true,
+		"ceo": true, "planner": true, "builder": true,
 		"growth": true, "reviewer": true,
 	}
 	got := map[string]bool{}
@@ -85,8 +85,11 @@ func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 			t.Errorf("expected niche-crm slug %q in roster; got %v", slug, got)
 		}
 	}
+	// DefaultManifest is ceo/planner/executor/reviewer. ceo overlaps with the
+	// blueprint's legitimate lead, so executor is the distinguishing leak
+	// signal.
 	for slug := range got {
-		if slug == "ceo" || slug == "executor" {
+		if slug == "executor" {
 			t.Errorf("DefaultManifest slug %q leaked into blueprint roster; got %v", slug, got)
 		}
 	}
@@ -100,20 +103,20 @@ func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 		}
 	}
 	b.mu.Unlock()
-	if lead != "operator" {
-		t.Errorf("expected BuiltIn lead to be operator (blueprint's lead_slug), got %q", lead)
+	if lead != "ceo" {
+		t.Errorf("expected BuiltIn lead to be ceo (blueprint's lead_slug), got %q", lead)
 	}
 }
 
 // TestOnboardingCompleteHonorsAgentFilter verifies the wizard's per-agent
-// toggle state: agents=[operator, builder] should seed only those two,
+// toggle state: agents=[ceo, builder] should seed only those two,
 // dropping the blueprint's other specialists.
 func TestOnboardingCompleteHonorsAgentFilter(t *testing.T) {
 	ensureOperationsFallbackFS(t)
 	defer withIsolatedBrokerState(t)()
 
 	b := NewBroker()
-	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", []string{"operator", "builder"}); err != nil {
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", []string{"ceo", "builder"}); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
@@ -124,20 +127,20 @@ func TestOnboardingCompleteHonorsAgentFilter(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	hasOperator := false
+	hasCEO := false
 	hasBuilder := false
 	for _, s := range slugs {
 		switch s {
-		case "operator":
-			hasOperator = true
+		case "ceo":
+			hasCEO = true
 		case "builder":
 			hasBuilder = true
 		case "planner", "growth", "reviewer":
 			t.Errorf("unselected slug %q leaked into roster; got %v", s, slugs)
 		}
 	}
-	if !hasOperator {
-		t.Errorf("expected operator (selected) in roster; got %v", slugs)
+	if !hasCEO {
+		t.Errorf("expected ceo (selected) in roster; got %v", slugs)
 	}
 	if !hasBuilder {
 		t.Errorf("expected builder (selected) in roster; got %v", slugs)
@@ -174,8 +177,8 @@ func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	if memberCount != 1 {
 		t.Fatalf("expected lead-only roster (1 member), got %d", memberCount)
 	}
-	if leadSlug != "operator" {
-		t.Errorf("expected lead slug operator, got %q", leadSlug)
+	if leadSlug != "ceo" {
+		t.Errorf("expected lead slug ceo, got %q", leadSlug)
 	}
 	if !foundSystemMsg {
 		t.Errorf("expected system message explaining lead-only fallback; messages seen")
@@ -265,7 +268,7 @@ func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
 	}
 	reloaded.mu.Unlock()
 
-	want := map[string]bool{"operator": true, "planner": true, "builder": true, "growth": true, "reviewer": true}
+	want := map[string]bool{"ceo": true, "planner": true, "builder": true, "growth": true, "reviewer": true}
 	for slug := range want {
 		found := false
 		for _, got := range slugs {
@@ -278,8 +281,10 @@ func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
 			t.Errorf("expected niche-crm slug %q to persist across restart; got %v", slug, slugs)
 		}
 	}
+	// DefaultManifest is ceo/planner/executor/reviewer; executor is the
+	// distinguishing leak signal now that ceo is a legitimate blueprint lead.
 	for _, slug := range slugs {
-		if slug == "ceo" || slug == "executor" {
+		if slug == "executor" {
 			t.Errorf("DefaultManifest slug %q leaked into persisted roster %v", slug, slugs)
 		}
 	}
@@ -381,7 +386,7 @@ func TestSeedFromBlueprintNilAgentsKeepsFullRoster(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	for _, slug := range []string{"operator", "planner", "builder", "growth", "reviewer"} {
+	for _, slug := range []string{"ceo", "planner", "builder", "growth", "reviewer"} {
 		if !seen[slug] {
 			t.Errorf("nil agents filter should keep all blueprint agents; missing %q (roster: %v)", slug, seen)
 		}
@@ -429,5 +434,46 @@ func TestBlankSlateOfficeChannelsFromBlueprint_RendersCommandSlug(t *testing.T) 
 	}
 	if !found {
 		t.Fatalf("expected a non-general channel rendered from the blueprint, got %+v", channels)
+	}
+}
+
+// TestOnboardingCompleteEmitsOfficeReseededEvent pins the contract the
+// launcher relies on: after the wizard picks a blueprint and the broker
+// rewrites b.members wholesale, a single "office_reseeded" event must fire so
+// the launcher knows to respawn the interactive claude panes. Without this
+// signal the panes are still bound to the default team (ceo/planner/
+// executor/reviewer) and messages sent to the new roster never reach a live
+// claude process — the symptom the user reported during the ui test.
+func TestOnboardingCompleteEmitsOfficeReseededEvent(t *testing.T) {
+	ensureOperationsFallbackFS(t)
+	defer withIsolatedBrokerState(t)()
+
+	b := NewBroker()
+	events, unsubscribe := b.SubscribeOfficeChanges(32)
+	defer unsubscribe()
+
+	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
+		t.Fatalf("onboardingCompleteFn: %v", err)
+	}
+
+	// Drain events and look for the reseed signal. Other per-member events
+	// are NOT emitted by this path (seedFromBlueprintLocked rewrites members
+	// directly), so office_reseeded is the only way the launcher learns.
+	sawReseed := false
+	for {
+		select {
+		case evt, ok := <-events:
+			if !ok {
+				t.Fatalf("subscriber closed before office_reseeded fired")
+			}
+			if evt.Kind == "office_reseeded" {
+				sawReseed = true
+			}
+		default:
+			if !sawReseed {
+				t.Fatalf("expected office_reseeded event after seed; none fired")
+			}
+			return
+		}
 	}
 }
