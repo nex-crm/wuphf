@@ -1117,7 +1117,7 @@
       <div class="install-block active" id="installBlock" data-tab="npx">
         <div class="install-line">
           <span class="install-prompt">$</span>
-          <span class="install-cmd">npx wuphf</span>
+          <span class="install-cmd">npx wuphf@latest</span>
           <span class="install-copy" id="copyLabel">COPY</span>
         </div>
       </div>
@@ -1186,7 +1186,7 @@
       <span class="step-icon">&#9889;</span>
       <div class="step-title">Install</div>
       <div class="step-body">
-        One <code>npx wuphf</code>. Browser opens at <code>localhost:7891</code>. No signup, no API key web form, no Docker compose with 47 env vars.
+        One <code>npx wuphf@latest</code>. Browser opens at <code>localhost:7891</code>. No signup, no API key web form, no Docker compose with 47 env vars.
       </div>
     </div>
     <div class="step-card">
@@ -1331,7 +1331,7 @@
       </div>
       <div class="code-block">
         <div class="code-line"><span class="line-content"><span class="tok-cmt"># Option 1: run it</span></span></div>
-        <div class="code-line"><span class="line-content"><span class="tok-fn">npx</span> wuphf</span><button class="line-copy" data-copy="npx wuphf" aria-label="Copy">COPY</button></div>
+        <div class="code-line"><span class="line-content"><span class="tok-fn">npx</span> wuphf@latest</span><button class="line-copy" data-copy="npx wuphf@latest" aria-label="Copy">COPY</button></div>
         <div class="code-line code-line-empty"></div>
         <div class="code-line"><span class="line-content"><span class="tok-cmt"># Option 2: clone and build from source</span></span></div>
         <div class="code-line"><span class="line-content"><span class="tok-fn">git</span> clone https://github.com/nex-crm/wuphf.git && cd wuphf</span><button class="line-copy" data-copy="git clone https://github.com/nex-crm/wuphf.git && cd wuphf" aria-label="Copy">COPY</button></div>
@@ -1517,7 +1517,7 @@
 
   function copyInstall() {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText('npx wuphf').catch(function() {});
+      navigator.clipboard.writeText('npx wuphf@latest').catch(function() {});
     }
     var label = document.getElementById('copyLabel');
     if (label) flashCopy(label);
