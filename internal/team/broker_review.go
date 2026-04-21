@@ -339,6 +339,15 @@ func (b *Broker) reviewApprove(w http.ResponseWriter, r *http.Request, id string
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
 	}
+	// Authorize the actor BEFORE doing the atomic wiki commit. Without this
+	// pre-check any authenticated agent could force a wiki write by POSTing
+	// /review/{id}/approve with their own slug — ApplyPromotion would
+	// succeed then Approve would reject with ErrWrongReviewer, leaving
+	// the wiki dirty and the state machine inconsistent.
+	if authErr := rl.CanApprove(id, body.ActorSlug); authErr != nil {
+		writeJSON(w, reviewStatusForError(authErr), map[string]string{"error": authErr.Error()})
+		return
+	}
 	// Executing the atomic promote commit happens BEFORE recording the
 	// state transition so the state machine's approved state always
 	// coincides with a real commit on disk. If the commit fails, the

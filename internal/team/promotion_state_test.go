@@ -179,6 +179,61 @@ func TestApprove_AlreadyApprovedIsConflict(t *testing.T) {
 	}
 }
 
+// TestCanApprove_BlocksWrongReviewerBeforeStateMutation locks the TOCTOU fix
+// where reviewApprove used to call Repo.ApplyPromotion before validating the
+// actor was the assigned reviewer, letting any authenticated agent force a
+// wiki commit with a bogus actor_slug.
+func TestCanApprove_BlocksWrongReviewerBeforeStateMutation(t *testing.T) {
+	rl := newTestReviewLog(t, func(string) string { return "ceo" }, time.Now)
+	p, _ := rl.SubmitPromotion(baseSubmit())
+
+	// Wrong slug: must return ErrWrongReviewer without mutating state.
+	if err := rl.CanApprove(p.ID, "pm"); !errors.Is(err, ErrWrongReviewer) {
+		t.Fatalf("wrong slug: expected ErrWrongReviewer, got %v", err)
+	}
+	got, getErr := rl.Get(p.ID)
+	if getErr != nil {
+		t.Fatalf("Get after CanApprove: %v", getErr)
+	}
+	if got.State == PromotionApproved {
+		t.Fatal("CanApprove must NOT mutate state — promotion is now approved")
+	}
+	// Correct slug: nil.
+	if err := rl.CanApprove(p.ID, "ceo"); err != nil {
+		t.Fatalf("correct slug: expected nil, got %v", err)
+	}
+	// Empty slug (human): nil.
+	if err := rl.CanApprove(p.ID, ""); err != nil {
+		t.Fatalf("human slug: expected nil, got %v", err)
+	}
+	// Unknown ID: ErrPromotionNotFound.
+	if err := rl.CanApprove("does-not-exist", "ceo"); !errors.Is(err, ErrPromotionNotFound) {
+		t.Fatalf("unknown id: expected ErrPromotionNotFound, got %v", err)
+	}
+}
+
+func TestCanApprove_HumanOnlyBlocksAgent(t *testing.T) {
+	rl := newTestReviewLog(t, func(string) string { return "human-only" }, time.Now)
+	p, _ := rl.SubmitPromotion(baseSubmit())
+	if err := rl.CanApprove(p.ID, "ceo"); !errors.Is(err, ErrHumanOnlyReviewRequired) {
+		t.Fatalf("agent on human-only: expected ErrHumanOnlyReviewRequired, got %v", err)
+	}
+	if err := rl.CanApprove(p.ID, ""); err != nil {
+		t.Fatalf("human on human-only: expected nil, got %v", err)
+	}
+}
+
+func TestCanApprove_AlreadyApprovedIsConflict(t *testing.T) {
+	rl := newTestReviewLog(t, func(string) string { return "ceo" }, time.Now)
+	p, _ := rl.SubmitPromotion(baseSubmit())
+	if _, _, err := rl.Approve(p.ID, "ceo", "", "sha1"); err != nil {
+		t.Fatalf("first approve: %v", err)
+	}
+	if err := rl.CanApprove(p.ID, "ceo"); !errors.Is(err, ErrPromotionAlreadyApproved) {
+		t.Fatalf("expected ErrPromotionAlreadyApproved, got %v", err)
+	}
+}
+
 func TestRequestChangesAndResubmitLoop(t *testing.T) {
 	rl := newTestReviewLog(t, func(string) string { return "ceo" }, time.Now)
 	p, _ := rl.SubmitPromotion(baseSubmit())

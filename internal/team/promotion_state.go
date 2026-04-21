@@ -284,6 +284,34 @@ func (l *ReviewLog) SubmitPromotion(req SubmitPromotionRequest) (*Promotion, err
 	return cloneProm(p), nil
 }
 
+// CanApprove returns nil if actorSlug is authorized to approve the promotion,
+// or the same error Approve would return. Runs the reviewer-validation check
+// WITHOUT mutating state so callers can guard expensive side-effects (like
+// the atomic wiki commit in Repo.ApplyPromotion) on authorization first.
+//
+// Closes a TOCTOU gap: reviewApprove used to call ApplyPromotion before
+// Approve validated the actor, so a wrong-slug POST would land a wiki commit
+// then fail the state transition. CanApprove runs under ReviewLog.mu so the
+// check is consistent with the state Approve will see when called next.
+func (l *ReviewLog) CanApprove(promotionID, actorSlug string) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	p, ok := l.promotions[promotionID]
+	if !ok {
+		return ErrPromotionNotFound
+	}
+	if p.State == PromotionApproved {
+		return ErrPromotionAlreadyApproved
+	}
+	if p.HumanOnly && strings.TrimSpace(actorSlug) != "" {
+		return ErrHumanOnlyReviewRequired
+	}
+	if strings.TrimSpace(actorSlug) != "" && actorSlug != p.ReviewerSlug {
+		return ErrWrongReviewer
+	}
+	return nil
+}
+
 // Approve transitions in-review → approved. The caller is the one that
 // already executed the atomic promote commit — we record the commit SHA
 // on the promotion. Humans bypass the reviewer check by passing an empty
