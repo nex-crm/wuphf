@@ -197,8 +197,8 @@ func TestHandleEntityGraphQuery_HappyPath(t *testing.T) {
 func TestHandleEntityGraphQuery_Validation(t *testing.T) {
 	t.Setenv("WUPHF_AGENT_SLUG", "pm")
 	cases := []TeamEntityGraphQueryArgs{
-		{EntitySlug: "x"},                                       // missing kind
-		{EntityKind: "people"},                                  // missing slug
+		{EntitySlug: "x"},      // missing kind
+		{EntityKind: "people"}, // missing slug
 		{EntityKind: "people", EntitySlug: "x", Direction: "?"}, // bad direction
 	}
 	for i, args := range cases {
