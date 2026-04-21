@@ -1510,6 +1510,7 @@
   cursor: pointer;
   text-decoration: underline dashed;
   text-underline-offset: 2px;
+}
 /* ────────────────────────────────────────────────────────────
  * v1.3 Image support — uploader + embed
  * Motion stays on transform/opacity (see ~/.claude/rules/web/performance.md).
