@@ -381,7 +381,12 @@ func (w *WikiWorker) maybeScheduleBackup(ctx context.Context) {
 	if !w.backupPending.CompareAndSwap(false, true) {
 		return
 	}
+	// Track on sideGoroutines so Stop() waits for the backup copy to finish.
+	// Without this, the copy can outlive the test's TempDir and race the
+	// filesystem cleanup, producing flaky "directory not empty" errors.
+	w.sideGoroutines.Add(1)
 	go func() {
+		defer w.sideGoroutines.Done()
 		defer w.backupPending.Store(false)
 		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

@@ -310,11 +310,21 @@ func (s *EntitySynthesizer) runJob(ctx context.Context, job SynthesisJob) {
 		if needsFollowup && running {
 			// Use a background goroutine for the re-schedule — the caller's
 			// context has already returned. The follow-up will run on the
-			// next drain iteration.
+			// next drain iteration. Tracked on s.wg so Stop() waits for it
+			// before returning, otherwise the goroutine can outlive the
+			// test's TempDir and race against filesystem cleanup.
+			s.wg.Add(1)
 			go func() {
+				defer s.wg.Done()
 				// Small delay so bursts of facts get coalesced further
 				// instead of tail-biting the follow-up immediately.
-				time.Sleep(10 * time.Millisecond)
+				// Exit early if Stop fires during the sleep so we don't
+				// wedge shutdown on a 10ms sleep per orphan.
+				select {
+				case <-time.After(10 * time.Millisecond):
+				case <-s.stopCh:
+					return
+				}
 				_, _ = s.EnqueueSynthesis(job.Kind, job.Slug, ArchivistAuthor)
 			}()
 		}

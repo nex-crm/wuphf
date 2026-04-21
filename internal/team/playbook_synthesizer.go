@@ -339,8 +339,16 @@ func (s *PlaybookSynthesizer) runJob(ctx context.Context, job PlaybookSynthesisJ
 		running := s.running
 		s.mu.Unlock()
 		if needsFollowup && running {
+			// Track on s.wg so Stop() waits; otherwise the orphan goroutine
+			// can outlive the test's TempDir and race filesystem cleanup.
+			s.wg.Add(1)
 			go func() {
-				time.Sleep(10 * time.Millisecond)
+				defer s.wg.Done()
+				select {
+				case <-time.After(10 * time.Millisecond):
+				case <-s.stopCh:
+					return
+				}
 				_, _ = s.EnqueueSynthesis(job.Slug, ArchivistAuthor, false)
 			}()
 		}
