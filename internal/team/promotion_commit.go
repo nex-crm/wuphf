@@ -172,7 +172,7 @@ func upsertPromotionFrontmatter(body string, f frontmatterFields) string {
 	}
 	// Existing frontmatter: replace just the promotion keys, preserve the
 	// rest. We walk until the closing --- and rewrite matching lines.
-	lines := strings.SplitN(body, "\n", -1)
+	lines := strings.Split(body, "\n")
 	if len(lines) < 2 {
 		return fmBlock + "\n" + body
 	}

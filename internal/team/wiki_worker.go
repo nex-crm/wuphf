@@ -102,7 +102,7 @@ type wikiEventPublisher interface {
 // (tests, or --memory-backend markdown without a broker yet).
 type noopPublisher struct{}
 
-func (noopPublisher) PublishWikiEvent(wikiWriteEvent) {}
+func (noopPublisher) PublishWikiEvent(wikiWriteEvent)         {}
 func (noopPublisher) PublishNotebookEvent(notebookWriteEvent) {}
 
 // WikiWorker owns the single goroutine that drains the write request queue.

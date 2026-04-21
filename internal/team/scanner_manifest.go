@@ -23,19 +23,19 @@ import (
 
 // ScanManifestEntry mirrors the TS FileManifestEntry shape 1:1.
 type ScanManifestEntry struct {
-	Mtime       int64  `json:"mtime"`        // nanoseconds since epoch
-	Size        int64  `json:"size"`
-	IngestedAt  int64  `json:"ingestedAt"`   // milliseconds since epoch
-	Context     string `json:"context"`
+	Mtime      int64  `json:"mtime"` // nanoseconds since epoch
+	Size       int64  `json:"size"`
+	IngestedAt int64  `json:"ingestedAt"` // milliseconds since epoch
+	Context    string `json:"context"`
 }
 
 // ScanManifest is the persistent state tracking ingested files. Version 1
 // matches the TS layout; future migrations should bump and handle both.
 type ScanManifest struct {
-	mu          sync.Mutex
-	Version     int                          `json:"version"`
-	LastScanAt  int64                        `json:"lastScanAt,omitempty"`
-	Files       map[string]ScanManifestEntry `json:"files"`
+	mu         sync.Mutex
+	Version    int                          `json:"version"`
+	LastScanAt int64                        `json:"lastScanAt,omitempty"`
+	Files      map[string]ScanManifestEntry `json:"files"`
 }
 
 const scanManifestVersion = 1

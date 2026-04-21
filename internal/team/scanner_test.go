@@ -112,10 +112,10 @@ func TestScannerWalkDirRespectsExtensionAllowlist(t *testing.T) {
 
 func TestScannerWalkDirEnforcesDepthCap(t *testing.T) {
 	root := setupRoot(t, map[string]string{
-		"depth0.md":                     "a",
-		"one/depth1.md":                 "b",
-		"one/two/depth2.md":             "c",
-		"one/two/three/depth3.md":       "d",
+		"depth0.md":                    "a",
+		"one/depth1.md":                "b",
+		"one/two/depth2.md":            "c",
+		"one/two/three/depth3.md":      "d",
 		"one/two/three/four/depth4.md": "e",
 	})
 	got := WalkDir(root, root, WalkOptions{
@@ -235,10 +235,10 @@ func TestScannerRedactsSecrets(t *testing.T) {
 
 func TestScannerSlugifyRoot(t *testing.T) {
 	cases := map[string]string{
-		"/Users/nazz/Documents/notes":       "users-nazz-documents-notes",
-		"/tmp/Some Dir With Spaces":         "tmp-some-dir-with-spaces",
-		"/":                                 "root",
-		"/ABC/def":                          "abc-def",
+		"/Users/nazz/Documents/notes": "users-nazz-documents-notes",
+		"/tmp/Some Dir With Spaces":   "tmp-some-dir-with-spaces",
+		"/":                           "root",
+		"/ABC/def":                    "abc-def",
 	}
 	for in, want := range cases {
 		got := slugifyRoot(in)
@@ -299,8 +299,8 @@ func TestScannerScanHumanConfirmationGate(t *testing.T) {
 
 func TestScannerScanConfirmsAndIngests(t *testing.T) {
 	root := setupRoot(t, map[string]string{
-		"note.md":        "content one",
-		"sub/other.md":   "content two",
+		"note.md":      "content one",
+		"sub/other.md": "content two",
 	})
 	wiki := t.TempDir()
 	t.Setenv("WUPHF_RUNTIME_HOME", t.TempDir())
@@ -539,10 +539,10 @@ func TestScannerScanRootMustBeDirectory(t *testing.T) {
 
 func TestScannerSafeFilename(t *testing.T) {
 	cases := map[string]string{
-		"a.md":           "a.md",
-		"sub/b.md":       "sub__b.md",
-		"a/b/c.txt":      "a__b__c.txt.md",
-		"notes.org":      "notes.org.md",
+		"a.md":      "a.md",
+		"sub/b.md":  "sub__b.md",
+		"a/b/c.txt": "a__b__c.txt.md",
+		"notes.org": "notes.org.md",
 	}
 	for in, want := range cases {
 		if got := safeFilename(in); got != want {

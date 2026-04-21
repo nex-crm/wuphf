@@ -163,10 +163,10 @@ func TestUpsertPromotionFrontmatter_UpdatesExistingKeys(t *testing.T) {
 
 func TestStripFrontmatter(t *testing.T) {
 	cases := map[string]string{
-		"# hi\n":                                 "# hi\n",
-		"---\nfoo: 1\n---\n# body\n":             "# body\n",
-		"---\nfoo: 1\n---\n\n# body\n":           "# body\n",
-		"no frontmatter here": "no frontmatter here",
+		"# hi\n":                       "# hi\n",
+		"---\nfoo: 1\n---\n# body\n":   "# body\n",
+		"---\nfoo: 1\n---\n\n# body\n": "# body\n",
+		"no frontmatter here":          "no frontmatter here",
 	}
 	for in, want := range cases {
 		if got := stripFrontmatter(in); got != want {

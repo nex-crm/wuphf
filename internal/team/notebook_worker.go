@@ -390,7 +390,7 @@ func validateNotebookWritePath(slug, relPath string) error {
 	clean := filepath.ToSlash(filepath.Clean(relPath))
 	prefix := "agents/" + slug + "/notebook/"
 	if !strings.HasPrefix(clean, prefix) {
-		return fmt.Errorf("%w: got path %q, expected %s...", ErrNotebookPathNotAuthorOwned, relPath, prefix)
+		return fmt.Errorf("%w: got path %q, expected prefix %q", ErrNotebookPathNotAuthorOwned, relPath, prefix)
 	}
 	rest := strings.TrimPrefix(clean, prefix)
 	if rest == "" || strings.Contains(rest, "/") {

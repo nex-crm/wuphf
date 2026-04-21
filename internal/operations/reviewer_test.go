@@ -362,7 +362,7 @@ func keysOf(m map[string]struct{}) []string {
 func minimalEmployeeBlueprint(id string) string {
 	return `
 id: ` + id + `
-name: ` + strings.Title(id) + `
+name: ` + titleCase(id) + `
 kind: employee
 summary: Test employee blueprint.
 role: testing
@@ -379,4 +379,18 @@ tools:
 expected_results:
   - Thing done.
 `
+}
+
+// titleCase ASCII-uppercases the first letter of each hyphen-delimited word.
+// Small local helper — strings.Title is deprecated since Go 1.18 and
+// golang.org/x/text/cases would add a dependency just for a test fixture.
+func titleCase(s string) string {
+	parts := strings.Split(s, "-")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		parts[i] = strings.ToUpper(p[:1]) + p[1:]
+	}
+	return strings.Join(parts, "-")
 }

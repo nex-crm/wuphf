@@ -86,12 +86,12 @@ type Launcher struct {
 	cwd                string
 	broker             *Broker
 	mcpConfig          string
-	unsafe           bool
-	opusCEO          bool
-	focusMode        bool
-	sessionMode      string
-	oneOnOne         string
-	provider         string
+	unsafe             bool
+	opusCEO            bool
+	focusMode          bool
+	sessionMode        string
+	oneOnOne           string
+	provider           string
 
 	headlessMu           sync.Mutex
 	headlessCtx          context.Context
