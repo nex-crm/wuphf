@@ -1915,6 +1915,10 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
 
+	oldWakeLead := headlessWakeLeadFn
+	headlessWakeLeadFn = func(_ *Launcher, _ string) {}
+	defer func() { headlessWakeLeadFn = oldWakeLead }()
+
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
