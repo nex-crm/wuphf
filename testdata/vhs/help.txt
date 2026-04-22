@@ -1,2 +1,48 @@
 > /tmp/wuphf-vhs --help
 WUPHF v0.0.6.6 — the terminal office Ryan Howard always wanted.
+
+Usage:
+  wuphf              Launch multi-agent team (web UI on :7891)
+  wuphf --tui        Launch with tmux TUI instead
+  wuphf init         Install the latest CLI and save setup defaults
+  wuphf shred        Burn the workspace down and reopen onboarding
+  wuphf import --from legacy  Import from a running external orchestrator (auto-detect)
+  wuphf log          Show what your agents actually did (task receipts)
+  wuphf memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki
+  wuphf --cmd <cmd>  Run a command non-interactively
+
+Flags:
+  --1o1
+        Launch a direct 1:1 session with a single agent (default ceo)
+  --api-key
+        API key for authentication
+  --blueprint
+        Operation blueprint ID for this run
+  --broker-port
+        Port for the local broker (default 7890)
+  --cmd
+        Run a command non-interactively
+  --collab
+        Start in collaborative mode (all agents see all messages)
+  --format
+        Output format (text, json) (default "text")
+  --from-scratch
+        Start without a saved blueprint and synthesize the first operation from the directive
+  --memory-backend
+        Memory backend for organizational context (nex, gbrain, none)
+  --no-nex
+        Disable Nex completely for this run
+  --no-open
+        Don't open browser automatically on launch
+  --opus-ceo
+        Upgrade CEO agent from Sonnet to Opus
+  --pack
+        Operation blueprint ID (legacy pack alias supported)
+  --provider
+        LLM provider override for this run (claude-code, codex)
+  --threads-collapsed
+        Start with threads collapsed (default: expanded)
+  --tui
+        Launch with tmux TUI instead of the web UI
+  --unsafe
+        Bypass all agent permission checks (use for local dev only)
