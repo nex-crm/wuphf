@@ -490,6 +490,7 @@ type Broker struct {
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
+	wikiIndex               *WikiIndex
 	wikiSectionsCache       *wikiSectionsCache
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
@@ -1090,6 +1091,15 @@ func (b *Broker) WikiWorker() *WikiWorker {
 	return b.wikiWorker
 }
 
+// WikiIndex returns the broker's derived wiki index, or nil when the active
+// memory backend is not markdown. HTTP handlers use this to run search queries
+// against the structured fact store without going through the write worker.
+func (b *Broker) WikiIndex() *WikiIndex {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.wikiIndex
+}
+
 func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	slug := normalizeChannelSlug(update.Slug)
 	if slug == "" {
@@ -1208,12 +1218,30 @@ func (b *Broker) ensureWikiWorker() {
 		}
 	}
 
-	worker := NewWikiWorker(repo, b)
+	idx := NewWikiIndex(repo.Root())
+
+	worker := NewWikiWorkerWithIndex(repo, b, idx)
 	worker.Start(context.Background())
 
 	b.mu.Lock()
 	b.wikiWorker = worker
+	b.wikiIndex = idx
 	b.mu.Unlock()
+
+	// Boot reconcile: walk the full wiki tree and populate the index from
+	// existing markdown + jsonl. Runs async so it does not delay broker
+	// startup. The per-commit ReconcilePath calls keep the index live once
+	// the reconcile finishes. If reconcile fails the index is empty but
+	// readable — it will self-heal on the next ReconcilePath call.
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := idx.ReconcileFromMarkdown(bgCtx); err != nil {
+			log.Printf("wiki_index: boot reconcile failed: %v", err)
+		} else {
+			log.Printf("wiki_index: boot reconcile complete")
+		}
+	}()
 }
 
 // StartOnPort launches the broker on the given port. Use 0 for an OS-assigned port.

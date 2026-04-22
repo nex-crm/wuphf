@@ -636,3 +636,107 @@ func indexOf(s, substr string) int {
 	}
 	return -1
 }
+
+// TestWikiWorkerWithIndex_FactReconciled verifies that after a successful
+// entity-fact commit the WikiIndex reflects the new fact once WaitForIdle
+// returns — proving that ReconcilePath is called in the side goroutine.
+func TestWikiWorkerWithIndex_FactReconciled(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	idx := NewWikiIndex(root)
+	pub := &recordingPublisher{}
+	worker := NewWikiWorkerWithIndex(repo, pub, idx)
+	ctx, cancel := context.WithCancel(context.Background())
+	worker.Start(ctx)
+	defer func() {
+		cancel()
+		<-worker.Done()
+		idx.Close()
+	}()
+
+	// Build a TypedFact and marshal it as a single jsonl line.
+	fact := TypedFact{
+		ID:         "deadbeef00000001",
+		EntitySlug: "sarah-jones",
+		Type:       "status",
+		Text:       "Sarah Jones joined as VP of Engineering.",
+		Confidence: 0.9,
+		CreatedAt:  time.Now().UTC(),
+		CreatedBy:  "archivist",
+	}
+	factBytes, err := json.Marshal(fact)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	content := string(factBytes) + "\n"
+
+	// Use the entity-fact path shape that both CommitEntityFact and
+	// ReconcilePath (factLogLegacyV12 regex) recognise.
+	factPath := "team/entities/people-sarah-jones.facts.jsonl"
+
+	sha, n, err := worker.EnqueueEntityFact(context.Background(), "archivist", factPath, content, "archivist: record sarah jones vp eng")
+	if err != nil {
+		t.Fatalf("EnqueueEntityFact: %v", err)
+	}
+	if sha == "" || n == 0 {
+		t.Fatalf("expected non-empty sha and bytes written, got sha=%q n=%d", sha, n)
+	}
+
+	// Block until all side goroutines (including the reconcile) finish.
+	worker.WaitForIdle()
+
+	// The fact must now be visible in the index.
+	got, ok, err := idx.GetFact(context.Background(), "deadbeef00000001")
+	if err != nil {
+		t.Fatalf("GetFact: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected fact to be indexed after WaitForIdle, but GetFact returned ok=false")
+	}
+	if got.EntitySlug != "sarah-jones" {
+		t.Errorf("indexed fact entity_slug = %q, want %q", got.EntitySlug, "sarah-jones")
+	}
+	if got.Text != "Sarah Jones joined as VP of Engineering." {
+		t.Errorf("indexed fact text = %q, want %q", got.Text, "Sarah Jones joined as VP of Engineering.")
+	}
+}
+
+// TestWikiWorkerNilIndex_NoPanic verifies that a worker constructed without
+// an index (NewWikiWorker) processes commits without panicking and returns a
+// valid SHA.
+func TestWikiWorkerNilIndex_NoPanic(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "wiki")
+	backup := filepath.Join(t.TempDir(), "wiki.bak")
+	repo := NewRepoAt(root, backup)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	// Nil index — NewWikiWorker path.
+	worker := NewWikiWorker(repo, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	worker.Start(ctx)
+	defer func() {
+		cancel()
+		<-worker.Done()
+	}()
+
+	sha, n, err := worker.Enqueue(context.Background(), "ceo", "team/people/test.md",
+		"# Test\n\nContent.\n", "create", "add test article")
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	if sha == "" {
+		t.Fatal("expected non-empty sha")
+	}
+	if n == 0 {
+		t.Fatal("expected non-zero bytes written")
+	}
+	// Block until side goroutines finish (backup mirror etc.).
+	worker.WaitForIdle()
+}

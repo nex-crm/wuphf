@@ -153,6 +153,7 @@ func (noopPublisher) PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedE
 type WikiWorker struct {
 	repo      *Repo
 	publisher wikiEventPublisher
+	index     *WikiIndex // optional derived cache; nil means no-op
 	requests  chan wikiWriteRequest
 
 	running       atomic.Bool
@@ -173,7 +174,9 @@ type WikiWorker struct {
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
-// when nil, events are dropped silently.
+// when nil, events are dropped silently. The worker's index is nil — no
+// derived-cache updates occur. Use NewWikiWorkerWithIndex when an index is
+// available (production path).
 func NewWikiWorker(repo *Repo, publisher wikiEventPublisher) *WikiWorker {
 	if publisher == nil {
 		publisher = noopPublisher{}
@@ -184,6 +187,17 @@ func NewWikiWorker(repo *Repo, publisher wikiEventPublisher) *WikiWorker {
 		requests:  make(chan wikiWriteRequest, wikiRequestBuffer),
 		drainDone: make(chan struct{}),
 	}
+}
+
+// NewWikiWorkerWithIndex is the production constructor. It behaves identically
+// to NewWikiWorker but additionally wires up a WikiIndex so that after every
+// successful commit the worker reconciles the affected path into the derived
+// cache (SQLite+bleve in prod, in-memory for tests). The index update runs in
+// a side goroutine tracked by sideGoroutines — WaitForIdle() covers it.
+func NewWikiWorkerWithIndex(repo *Repo, publisher wikiEventPublisher, index *WikiIndex) *WikiWorker {
+	w := NewWikiWorker(repo, publisher)
+	w.index = index
+	return w
 }
 
 // Start launches the drain goroutine. Returns immediately. The worker stops
@@ -387,6 +401,29 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	}
 
 	w.maybeScheduleBackup(ctx)
+	w.maybeReconcileIndex(writeCtx, req.Path)
+}
+
+// maybeReconcileIndex updates the derived WikiIndex for the committed path.
+// It is a no-op when no index is wired (w.index == nil), so existing tests
+// that construct workers without an index are unaffected.
+//
+// The update runs in a tracked side goroutine so it never blocks the commit
+// reply to the caller. On error the failure is logged but does NOT propagate
+// — markdown is the source of truth; the index is a rebuildable cache (§7.4).
+func (w *WikiWorker) maybeReconcileIndex(ctx context.Context, relPath string) {
+	if w.index == nil {
+		return
+	}
+	w.sideGoroutines.Add(1)
+	go func() {
+		defer w.sideGoroutines.Done()
+		bgCtx, cancel := context.WithTimeout(context.Background(), wikiWriteTimeout)
+		defer cancel()
+		if err := w.index.ReconcilePath(bgCtx, relPath); err != nil {
+			log.Printf("wiki_index: reconcile %s failed: %v", relPath, err)
+		}
+	}()
 }
 
 // maybeScheduleBackup kicks off a debounced backup mirror. The copy runs in
