@@ -1242,6 +1242,12 @@ func (b *Broker) ensureWikiWorker() {
 			log.Printf("wiki_index: boot reconcile complete")
 		}
 	}()
+
+	// Daily lint cron. The schedule is controlled by WUPHF_LINT_CRON (default
+	// "09:00" local time). Empty string disables the cron (useful in tests).
+	// The goroutine is cancelled by the background context when the broker
+	// shuts down.
+	b.startLintCron(context.Background(), idx, worker)
 }
 
 // StartOnPort launches the broker on the given port. Use 0 for an OS-assigned port.
