@@ -725,3 +725,147 @@
   font-size: 14px;
   color: var(--text-secondary);
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   Wizard parity — Nex signup, conditional GBrain keys, readiness
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Inline "don't have a Nex account?" trigger on Identity step ─── */
+.wiz-nex-trigger {
+  text-align: center;
+}
+
+.wiz-nex-trigger-link {
+  background: none;
+  border: none;
+  color: var(--accent, #1264A3);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 8px 0;
+  text-decoration: underline;
+}
+
+.wiz-nex-trigger-link:hover {
+  color: var(--accent-hover, var(--accent));
+}
+
+/* ─── Expanded Nex signup panel ─── */
+.wiz-nex-signup {
+  border: 1px solid var(--border);
+}
+
+.wiz-nex-ok {
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: var(--text);
+  padding: 12px;
+  border-radius: var(--radius-md, 6px);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ─── Conditional GBrain keys (inside Setup step's memory panel) ─── */
+.wiz-backend-keys {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.wiz-backend-keys-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  color: var(--text);
+}
+
+.wiz-backend-keys-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+}
+
+/* ─── Readiness summary (final step) ─── */
+.readiness-panel {
+  padding: 8px 0;
+}
+
+.readiness-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.readiness-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-light, var(--border));
+}
+
+.readiness-item:last-child {
+  border-bottom: none;
+}
+
+.readiness-glyph,
+.readiness-glyph-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.readiness-glyph.ready,
+.readiness-glyph-inline.ready {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+}
+
+.readiness-glyph.next,
+.readiness-glyph-inline.next {
+  background: rgba(234, 179, 8, 0.15);
+  color: #ca8a04;
+}
+
+.readiness-glyph.missing,
+.readiness-glyph-inline.missing {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+}
+
+.readiness-glyph {
+  margin-top: 2px;
+}
+
+.readiness-glyph-inline {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  vertical-align: -3px;
+  margin: 0 2px;
+}
+
+.readiness-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.readiness-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.readiness-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}

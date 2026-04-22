@@ -36,11 +36,14 @@ interface TaskTemplate {
   prompt?: string
 }
 
-type WizardStep = 'welcome' | 'templates' | 'identity' | 'team' | 'setup' | 'task'
+type WizardStep = 'welcome' | 'templates' | 'identity' | 'team' | 'setup' | 'task' | 'ready'
 
 // Step order: company info before blueprint. The blueprint picker is a
 // decision about how the office starts; it makes more sense after the
 // user has anchored who they are than as the very first question.
+// `ready` is the final-step readiness summary matching the TUI's InitDone
+// phase (see internal/tui/init_flow.go readinessChecks()) — shows the user
+// exactly what's configured before we submit.
 const STEP_ORDER: readonly WizardStep[] = [
   'welcome',
   'identity',
@@ -48,6 +51,7 @@ const STEP_ORDER: readonly WizardStep[] = [
   'team',
   'setup',
   'task',
+  'ready',
 ] as const
 
 // Each runtime has a display label, the binary name the broker's prereqs
@@ -394,13 +398,27 @@ function TemplatesStep({
 
 /* ─── Step 3: Identity ─── */
 
+// NexSignupStatus tracks the state of the optional in-wizard Nex
+// registration sub-flow. 'hidden' means the user hasn't opened the
+// affordance yet; 'open' means they're entering their email; 'submitting'
+// is the in-flight POST to /nex/register; 'ok' shows a green "sent, check
+// your inbox" hint; 'fallback' flips to the external-link version when
+// nex-cli is not installed (the broker responds 502 with ErrNotInstalled).
+type NexSignupStatus = 'hidden' | 'open' | 'submitting' | 'ok' | 'fallback'
+
 interface IdentityStepProps {
   company: string
   description: string
   priority: string
+  nexEmail: string
+  nexSignupStatus: NexSignupStatus
+  nexSignupError: string
   onChangeCompany: (v: string) => void
   onChangeDescription: (v: string) => void
   onChangePriority: (v: string) => void
+  onChangeNexEmail: (v: string) => void
+  onSubmitNexSignup: () => void
+  onOpenNexSignup: () => void
   onNext: () => void
   onBack: () => void
 }
@@ -409,9 +427,15 @@ function IdentityStep({
   company,
   description,
   priority,
+  nexEmail,
+  nexSignupStatus,
+  nexSignupError,
   onChangeCompany,
   onChangeDescription,
   onChangePriority,
+  onChangeNexEmail,
+  onSubmitNexSignup,
+  onOpenNexSignup,
   onNext,
   onBack,
 }: IdentityStepProps) {
@@ -460,6 +484,26 @@ function IdentityStep({
         </div>
       </div>
 
+      {nexSignupStatus === 'hidden' ? (
+        <div className="wiz-nex-trigger">
+          <button
+            type="button"
+            className="wiz-nex-trigger-link"
+            onClick={onOpenNexSignup}
+          >
+            Don&apos;t have a Nex account? Sign up here.
+          </button>
+        </div>
+      ) : (
+        <NexSignupPanel
+          email={nexEmail}
+          status={nexSignupStatus}
+          error={nexSignupError}
+          onChangeEmail={onChangeNexEmail}
+          onSubmit={onSubmitNexSignup}
+        />
+      )}
+
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
           Back
@@ -474,6 +518,90 @@ function IdentityStep({
           <ArrowIcon />
         </button>
       </div>
+    </div>
+  )
+}
+
+/* ─── Nex signup affordance (rendered inside IdentityStep) ─── */
+
+interface NexSignupPanelProps {
+  email: string
+  status: NexSignupStatus
+  error: string
+  onChangeEmail: (v: string) => void
+  onSubmit: () => void
+}
+
+// NexSignupPanel is the optional "don't have a Nex account yet?"
+// affordance. It's compact by default (one-line link) so users with a key
+// already aren't distracted. The primary path calls /nex/register on the
+// broker, which shells out to `nex-cli setup <email>`. If nex-cli isn't
+// installed, the broker returns 502 with ErrNotInstalled and we flip to
+// the external-link fallback (open nex.ai/register + paste key on Setup
+// step). Matches the TUI's InitNexRegister phase in init_flow.go.
+function NexSignupPanel({
+  email,
+  status,
+  error,
+  onChangeEmail,
+  onSubmit,
+}: NexSignupPanelProps) {
+  return (
+    <div className="wizard-panel wiz-nex-signup">
+      <p className="wizard-panel-title">Sign up for Nex (optional)</p>
+      <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '-8px 0 12px 0' }}>
+        {status === 'fallback'
+          ? 'nex-cli is not installed on this machine. Register in your browser, then paste the key on the Setup step.'
+          : 'Register an email to get a free Nex API key. Powers shared memory, entity briefs, and integrations. You can also paste an existing key on the Setup step.'}
+      </p>
+
+      {status === 'fallback' ? (
+        <a
+          className="btn btn-secondary"
+          href="https://nex.ai/register"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Open nex.ai/register
+          <ArrowIcon />
+        </a>
+      ) : status === 'ok' ? (
+        <p className="wiz-nex-ok" role="status">
+          Check your inbox at {email} for the Nex API key, then paste it on the
+          Setup step.
+        </p>
+      ) : (
+        <div className="form-group" style={{ margin: 0 }}>
+          <label className="label" htmlFor="wiz-nex-email">
+            Email
+          </label>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              className="input"
+              id="wiz-nex-email"
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => onChangeEmail(e.target.value)}
+              disabled={status === 'submitting'}
+              style={{ flex: 1 }}
+            />
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={onSubmit}
+              disabled={status === 'submitting' || email.trim().length === 0}
+            >
+              {status === 'submitting' ? 'Registering...' : 'Register'}
+            </button>
+          </div>
+          {error && (
+            <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }} role="alert">
+              {error}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -566,6 +694,12 @@ interface SetupStepProps {
   onChangeApiKey: (key: string, value: string) => void
   memoryBackend: MemoryBackend
   onChangeMemoryBackend: (value: MemoryBackend) => void
+  nexApiKey: string
+  onChangeNexApiKey: (v: string) => void
+  gbrainOpenAIKey: string
+  onChangeGBrainOpenAIKey: (v: string) => void
+  gbrainAnthropicKey: string
+  onChangeGBrainAnthropicKey: (v: string) => void
   onNext: () => void
   onBack: () => void
 }
@@ -584,6 +718,12 @@ function SetupStep({
   onChangeApiKey,
   memoryBackend,
   onChangeMemoryBackend,
+  nexApiKey,
+  onChangeNexApiKey,
+  gbrainOpenAIKey,
+  onChangeGBrainOpenAIKey,
+  gbrainAnthropicKey,
+  onChangeGBrainAnthropicKey,
   onNext,
   onBack,
 }: SetupStepProps) {
@@ -596,7 +736,12 @@ function SetupStep({
     return Boolean(detection?.found)
   })
   const hasAtLeastOneKey = Object.values(apiKeys).some((v) => v.trim().length > 0)
-  const canContinue = hasInstalledSelection || hasAtLeastOneKey
+  // GBrain requires an OpenAI key to function — the TUI gates on this in
+  // InitGBrainOpenAIKey (see internal/tui/init_flow.go:215). Mirror the
+  // gate here so the wizard doesn't let users commit an unusable config.
+  const gbrainSelected = memoryBackend === 'gbrain'
+  const gbrainOpenAIMissing = gbrainSelected && gbrainOpenAIKey.trim().length === 0
+  const canContinue = (hasInstalledSelection || hasAtLeastOneKey) && !gbrainOpenAIMissing
 
   return (
     <div className="wizard-step">
@@ -791,6 +936,80 @@ function SetupStep({
             </button>
           ))}
         </div>
+
+        {gbrainSelected && (
+          <div className="wiz-backend-keys">
+            <p className="wiz-backend-keys-title">GBrain keys</p>
+            <p className="wiz-backend-keys-hint">
+              GBrain uses OpenAI for embeddings (required) and optionally
+              Anthropic for reasoning.
+            </p>
+            <div className="form-group">
+              <label className="label" htmlFor="wiz-gbrain-openai">
+                OpenAI API key{' '}
+                <span style={{ color: 'var(--red)' }}>*</span>
+              </label>
+              <input
+                className="input"
+                id="wiz-gbrain-openai"
+                type="password"
+                placeholder="sk-..."
+                value={gbrainOpenAIKey}
+                onChange={(e) => onChangeGBrainOpenAIKey(e.target.value)}
+                autoComplete="off"
+              />
+              {gbrainOpenAIMissing && (
+                <p style={{ color: 'var(--red)', fontSize: 11, marginTop: 4 }}>
+                  Required: GBrain can&apos;t create embeddings without an OpenAI
+                  key.
+                </p>
+              )}
+            </div>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="label" htmlFor="wiz-gbrain-anthropic">
+                Anthropic API key{' '}
+                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+                  (optional)
+                </span>
+              </label>
+              <input
+                className="input"
+                id="wiz-gbrain-anthropic"
+                type="password"
+                placeholder="sk-ant-..."
+                value={gbrainAnthropicKey}
+                onChange={(e) => onChangeGBrainAnthropicKey(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="wizard-panel">
+        <p className="wizard-panel-title">Nex API key</p>
+        <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '-8px 0 12px 0' }}>
+          Unlocks hosted memory, entity briefs, and managed integrations. You
+          can skip this and paste later from Settings. Don&apos;t have one?
+          Sign up on the Identity step above.
+        </p>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="label" htmlFor="wiz-nex-api-key">
+            Nex API key{' '}
+            <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>
+              (optional, paste if you have one)
+            </span>
+          </label>
+          <input
+            className="input"
+            id="wiz-nex-api-key"
+            type="password"
+            placeholder="nex-..."
+            value={nexApiKey}
+            onChange={(e) => onChangeNexApiKey(e.target.value)}
+            autoComplete="off"
+          />
+        </div>
       </div>
 
       <div className="wizard-nav">
@@ -819,10 +1038,8 @@ interface TaskStepProps {
   onSelectTaskTemplate: (id: string | null) => void
   taskText: string
   onChangeTaskText: (v: string) => void
-  onSkip: () => void
-  onSubmit: () => void
+  onNext: () => void
   onBack: () => void
-  submitting: boolean
 }
 
 function TaskStep({
@@ -831,10 +1048,8 @@ function TaskStep({
   onSelectTaskTemplate,
   taskText,
   onChangeTaskText,
-  onSkip,
-  onSubmit,
+  onNext,
   onBack,
-  submitting,
 }: TaskStepProps) {
   return (
     <div className="wizard-step">
@@ -895,6 +1110,91 @@ function TaskStep({
         <button className="btn btn-ghost" onClick={onBack} type="button">
           Back
         </button>
+        <button className="btn btn-primary" onClick={onNext} type="button">
+          Review setup
+          <ArrowIcon />
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Step 7: Readiness Summary ─── */
+
+// ReadinessStatus mirrors the TUI's three-state readiness color mapping
+// (see internal/tui/init_flow.go readinessStatusColor): 'ready' = green
+// check, 'next' = blue warning (follow-up needed), 'missing' = red.
+type ReadinessStatus = 'ready' | 'next' | 'missing'
+
+interface ReadinessCheck {
+  label: string
+  status: ReadinessStatus
+  detail: string
+}
+
+interface ReadyStepProps {
+  checks: ReadinessCheck[]
+  taskText: string
+  submitting: boolean
+  onSkip: () => void
+  onSubmit: () => void
+  onBack: () => void
+}
+
+// ReadyStep is the six-item final review matching the TUI's InitDone
+// readinessChecks() view. It's honest: a missing Nex key is not papered
+// over, and GBrain+no-OpenAI-key would show a red "missing" row (though
+// the Setup step blocks continuing in that case, so users shouldn't get
+// here with it).
+function ReadyStep({
+  checks,
+  taskText,
+  submitting,
+  onSkip,
+  onSubmit,
+  onBack,
+}: ReadyStepProps) {
+  return (
+    <div className="wizard-step">
+      <div className="wizard-hero">
+        <h1 className="wizard-headline" style={{ fontSize: 28 }}>
+          You&apos;re set
+        </h1>
+        <p className="wizard-subhead">
+          Here&apos;s what&apos;s configured. Anything with a{' '}
+          <span className="readiness-glyph-inline missing">!</span> or{' '}
+          <span className="readiness-glyph-inline next">—</span> can be fixed
+          later from Settings.
+        </p>
+      </div>
+
+      <div className="wizard-panel readiness-panel">
+        <ul className="readiness-list">
+          {checks.map((check) => (
+            <li key={check.label} className="readiness-item">
+              <span
+                className={`readiness-glyph ${check.status}`}
+                aria-hidden="true"
+              >
+                {check.status === 'ready'
+                  ? '✓'
+                  : check.status === 'next'
+                    ? '—'
+                    : '!'}
+              </span>
+              <div className="readiness-body">
+                <div className="readiness-label">{check.label}</div>
+                <div className="readiness-detail">{check.detail}</div>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="wizard-nav">
+        <button className="btn btn-ghost" onClick={onBack} type="button">
+          Back
+        </button>
         <div className="wizard-nav-right">
           <button
             className="task-skip"
@@ -941,6 +1241,13 @@ export function Wizard({ onComplete }: WizardProps) {
   const [company, setCompany] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState('')
+  // Optional in-wizard Nex registration. Mirrors the TUI's InitNexRegister
+  // phase — we POST /nex/register which shells out to `nex-cli setup <email>`.
+  // If nex-cli isn't installed we flip to `fallback` (external link to
+  // nex.ai/register, key pasted on the Setup step).
+  const [nexEmail, setNexEmail] = useState('')
+  const [nexSignupStatus, setNexSignupStatus] = useState<NexSignupStatus>('hidden')
+  const [nexSignupError, setNexSignupError] = useState('')
 
   // Step 4: team
   const [agents, setAgents] = useState<BlueprintAgent[]>([])
@@ -959,6 +1266,16 @@ export function Wizard({ onComplete }: WizardProps) {
   // contradicted the label and meant a user who clicked through got a
   // different backend than the one marked default.
   const [memoryBackend, setMemoryBackend] = useState<MemoryBackend>('markdown')
+  // Nex API key (maps to `api_key` on /config). Parity with TUI's InitAPIKey
+  // phase. Kept separate from `apiKeys` because the latter is the per-runtime
+  // fallback set (Anthropic/OpenAI/Google) while this one unlocks hosted
+  // memory and managed integrations. Empty = skipped, not an error.
+  const [nexApiKey, setNexApiKey] = useState('')
+  // GBrain-specific key inputs. Only rendered when memoryBackend === 'gbrain'.
+  // Mirrors the TUI's InitGBrainOpenAIKey (required) + InitGBrainAnthropKey
+  // (optional) phases.
+  const [gbrainOpenAIKey, setGbrainOpenAIKey] = useState('')
+  const [gbrainAnthropicKey, setGbrainAnthropicKey] = useState('')
 
   // Step 6: first task
   const [taskTemplates, setTaskTemplates] = useState<TaskTemplate[]>([])
@@ -1117,6 +1434,163 @@ export function Wizard({ onComplete }: WizardProps) {
     setApiKeys((prev) => ({ ...prev, [key]: value }))
   }, [])
 
+  // Open the in-wizard Nex signup affordance. A separate handler (not just
+  // `setNexSignupStatus('open')` inline) keeps the error/email state reset in
+  // one place — reopening after a failed attempt shouldn't leak the old error.
+  const openNexSignup = useCallback(() => {
+    setNexSignupError('')
+    setNexSignupStatus('open')
+  }, [])
+
+  // Submit the email to /nex/register. On success: mark status 'ok' so the
+  // UI tells the user to check their inbox. On ErrNotInstalled (502 from the
+  // broker when nex-cli isn't on PATH): flip to 'fallback' — the user gets an
+  // external link to nex.ai/register and pastes the key on the Setup step.
+  // Any other error: surface the message and let the user retry.
+  const submitNexSignup = useCallback(async () => {
+    const email = nexEmail.trim()
+    if (email.length === 0) return
+    setNexSignupStatus('submitting')
+    setNexSignupError('')
+    try {
+      await post<{ status: string; output?: string }>('/nex/register', { email })
+      setNexSignupStatus('ok')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Registration failed'
+      // nex.Register returns ErrNotInstalled (broker wraps as 502) when
+      // nex-cli isn't on PATH. Detect and flip to the external-link flow.
+      if (msg.toLowerCase().includes('not installed') || msg.includes('502')) {
+        setNexSignupStatus('fallback')
+        return
+      }
+      setNexSignupStatus('open')
+      setNexSignupError(msg)
+    }
+  }, [nexEmail])
+
+  // Compute readiness checks. Runs at render time for the 'ready' step — no
+  // useMemo because the surface is small (6 checks) and recomputation only
+  // happens when one of these inputs changes. Matches the TUI's six-item
+  // list in init_flow.go readinessChecks().
+  const readinessChecks: ReadinessCheck[] = (() => {
+    const checks: ReadinessCheck[] = []
+
+    // 1. Nex API key
+    const hasNexKey = nexApiKey.trim().length > 0
+    checks.push({
+      label: 'Nex API key',
+      status: hasNexKey ? 'ready' : 'next',
+      detail: hasNexKey
+        ? 'Configured. Hosted memory and integrations unlocked.'
+        : 'Skipped. Paste a key later from Settings to enable hosted memory.',
+    })
+
+    // 2. Tmux / web session. The web app doesn't need tmux — that's the
+    // TUI's office runtime. Surface it as a positive "web session" rather
+    // than flagging a missing dependency.
+    checks.push({
+      label: 'Session runtime',
+      status: 'ready',
+      detail: 'Web session. No tmux required in the browser.',
+    })
+
+    // 3. LLM runtime — whatever CLI the user picked as primary, if installed.
+    const primaryLabel = runtimePriority[0]
+    const primarySpec = primaryLabel
+      ? RUNTIMES.find((r) => r.label === primaryLabel)
+      : undefined
+    const primaryDetection = primarySpec
+      ? detectedBinary(prereqs, primarySpec.binary)
+      : undefined
+    if (primarySpec && primaryDetection?.found) {
+      checks.push({
+        label: 'LLM runtime',
+        status: 'ready',
+        detail: primaryDetection.version
+          ? `${primarySpec.label} — ${primaryDetection.version}`
+          : `${primarySpec.label} installed`,
+      })
+    } else if (primarySpec) {
+      checks.push({
+        label: 'LLM runtime',
+        status: 'next',
+        detail: `${primarySpec.label} selected but not installed. Install before agents can reason.`,
+      })
+    } else {
+      // No runtime picked — check if any API key is set so the user has a path.
+      const hasAnyKey = Object.values(apiKeys).some((v) => v.trim().length > 0)
+      checks.push({
+        label: 'LLM runtime',
+        status: hasAnyKey ? 'ready' : 'missing',
+        detail: hasAnyKey
+          ? 'Provider API key will drive agent runs.'
+          : 'Pick a CLI or add a provider key on the Setup step.',
+      })
+    }
+
+    // 4. Memory backend
+    const memoryLabel = MEMORY_BACKEND_OPTIONS.find((o) => o.value === memoryBackend)?.label
+      ?? memoryBackend
+    let memoryStatus: ReadinessStatus = 'ready'
+    let memoryDetail = memoryLabel
+    if (memoryBackend === 'gbrain') {
+      if (gbrainOpenAIKey.trim().length === 0) {
+        memoryStatus = 'missing'
+        memoryDetail = 'GBrain selected but OpenAI key is missing.'
+      } else {
+        memoryDetail = 'GBrain with OpenAI embeddings.'
+      }
+    } else if (memoryBackend === 'nex') {
+      if (!hasNexKey) {
+        memoryStatus = 'next'
+        memoryDetail = 'Nex selected — add a Nex API key to enable hosted memory.'
+      } else {
+        memoryDetail = 'Hosted memory via Nex.'
+      }
+    } else if (memoryBackend === 'markdown') {
+      memoryDetail = 'Git-native team wiki in ~/.wuphf/wiki.'
+    } else {
+      memoryStatus = 'next'
+      memoryDetail = 'No shared memory — agents only see per-turn context.'
+    }
+    checks.push({
+      label: 'Memory backend',
+      status: memoryStatus,
+      detail: memoryDetail,
+    })
+
+    // 5. Blueprint
+    if (selectedBlueprint === null) {
+      checks.push({
+        label: 'Blueprint',
+        status: 'ready',
+        detail: 'Start from scratch (5-person founding team).',
+      })
+    } else {
+      const bp = blueprints.find((b) => b.id === selectedBlueprint)
+      checks.push({
+        label: 'Blueprint',
+        status: 'ready',
+        detail: bp?.name ?? selectedBlueprint,
+      })
+    }
+
+    // 6. Integrations count
+    const keyCount = Object.values(apiKeys).filter((v) => v.trim().length > 0).length
+      + (gbrainOpenAIKey.trim().length > 0 ? 1 : 0)
+      + (gbrainAnthropicKey.trim().length > 0 ? 1 : 0)
+    checks.push({
+      label: 'Integrations',
+      status: keyCount > 0 ? 'ready' : 'next',
+      detail:
+        keyCount > 0
+          ? `${keyCount} provider key${keyCount === 1 ? '' : 's'} configured.`
+          : 'None configured. Add providers later from Settings.',
+    })
+
+    return checks
+  })()
+
   // Complete onboarding
   const finishOnboarding = useCallback(
     async (skipTask: boolean) => {
@@ -1132,15 +1606,53 @@ export function Wizard({ onComplete }: WizardProps) {
           .filter((p): p is 'claude-code' | 'codex' => p != null)
 
         // Persist memory backend + LLM provider choice + priority fallback
-        // list so the broker reads them on next launch. Send as a single
-        // POST — the broker's handleConfig does a non-atomic read-mutate-
-        // write, so two parallel calls race and corrupt config.json.
+        // list + API keys so the broker reads them on next launch. Send as a
+        // single POST — the broker's handleConfig does a non-atomic read-
+        // mutate-write, so two parallel calls race and corrupt config.json.
+        // Keys go through this path (not /onboarding/complete) because the
+        // broker's /config endpoint is the canonical persistence surface
+        // for config.APIKey, OpenAIAPIKey, AnthropicAPIKey, etc.
         const configPayload: Record<string, unknown> = {
           memory_backend: memoryBackend,
         }
         if (providerPriority.length > 0) {
           configPayload.llm_provider = providerPriority[0]
           configPayload.llm_provider_priority = providerPriority
+        }
+        // Nex API key (optional — empty string not sent so we don't clobber
+        // an existing value with a blank one).
+        const trimmedNex = nexApiKey.trim()
+        if (trimmedNex.length > 0) {
+          configPayload.api_key = trimmedNex
+        }
+        // GBrain-conditional keys. Only forwarded when GBrain is the active
+        // backend; other backends don't need these and sending would
+        // overwrite any user-configured values on GET.
+        if (memoryBackend === 'gbrain') {
+          const trimmedOAI = gbrainOpenAIKey.trim()
+          if (trimmedOAI.length > 0) {
+            configPayload.openai_api_key = trimmedOAI
+          }
+          const trimmedAnthropic = gbrainAnthropicKey.trim()
+          if (trimmedAnthropic.length > 0) {
+            configPayload.anthropic_api_key = trimmedAnthropic
+          }
+        }
+        // Generic per-provider API keys from the fallback grid. Legacy
+        // env-var-style keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_API_KEY)
+        // mapped to the broker's config field names. Google key has no
+        // /config field yet — drop it silently rather than fail.
+        const genericAnthropic = (apiKeys['ANTHROPIC_API_KEY'] ?? '').trim()
+        if (genericAnthropic.length > 0 && memoryBackend !== 'gbrain') {
+          configPayload.anthropic_api_key = genericAnthropic
+        }
+        const genericOpenAI = (apiKeys['OPENAI_API_KEY'] ?? '').trim()
+        if (genericOpenAI.length > 0 && memoryBackend !== 'gbrain') {
+          configPayload.openai_api_key = genericOpenAI
+        }
+        const genericGemini = (apiKeys['GOOGLE_API_KEY'] ?? '').trim()
+        if (genericGemini.length > 0) {
+          configPayload.gemini_api_key = genericGemini
         }
         post('/config', configPayload).catch(() => {})
 
@@ -1179,6 +1691,9 @@ export function Wizard({ onComplete }: WizardProps) {
       selectedBlueprint,
       agents,
       apiKeys,
+      nexApiKey,
+      gbrainOpenAIKey,
+      gbrainAnthropicKey,
       taskText,
       setOnboardingComplete,
       onComplete,
@@ -1210,9 +1725,15 @@ export function Wizard({ onComplete }: WizardProps) {
             company={company}
             description={description}
             priority={priority}
+            nexEmail={nexEmail}
+            nexSignupStatus={nexSignupStatus}
+            nexSignupError={nexSignupError}
             onChangeCompany={setCompany}
             onChangeDescription={setDescription}
             onChangePriority={setPriority}
+            onChangeNexEmail={setNexEmail}
+            onSubmitNexSignup={submitNexSignup}
+            onOpenNexSignup={openNexSignup}
             onNext={nextStep}
             onBack={prevStep}
           />
@@ -1238,6 +1759,12 @@ export function Wizard({ onComplete }: WizardProps) {
             onChangeApiKey={handleApiKeyChange}
             memoryBackend={memoryBackend}
             onChangeMemoryBackend={setMemoryBackend}
+            nexApiKey={nexApiKey}
+            onChangeNexApiKey={setNexApiKey}
+            gbrainOpenAIKey={gbrainOpenAIKey}
+            onChangeGBrainOpenAIKey={setGbrainOpenAIKey}
+            gbrainAnthropicKey={gbrainAnthropicKey}
+            onChangeGBrainAnthropicKey={setGbrainAnthropicKey}
             onNext={nextStep}
             onBack={prevStep}
           />
@@ -1250,10 +1777,19 @@ export function Wizard({ onComplete }: WizardProps) {
             onSelectTaskTemplate={setSelectedTaskTemplate}
             taskText={taskText}
             onChangeTaskText={setTaskText}
+            onNext={nextStep}
+            onBack={prevStep}
+          />
+        )}
+
+        {step === 'ready' && (
+          <ReadyStep
+            checks={readinessChecks}
+            taskText={taskText}
+            submitting={submitting}
             onSkip={() => finishOnboarding(true)}
             onSubmit={() => finishOnboarding(false)}
             onBack={prevStep}
-            submitting={submitting}
           />
         )}
       </div>
