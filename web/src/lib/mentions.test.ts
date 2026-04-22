@@ -62,6 +62,14 @@ describe('parseMentions', () => {
     ])
   })
 
+  it('does not append a stray empty text token after a trailing mention', () => {
+    // Regression guard: earlier iterations of the parser left a trailing
+    // empty-string text token when the mention sat at end-of-input.
+    // Renderers then produced a zero-width text node which messed with
+    // whitespace adjacency in the composer overlay.
+    expect(parseMentions('@pm', agents)).toEqual([{ kind: 'mention', value: 'pm' }])
+  })
+
   it('is case-insensitive on the slug lookup', () => {
     const tokens = parseMentions('@pm @PM', ['pm'])
     // The pattern itself only matches lowercase a-z plus digits and hyphens,

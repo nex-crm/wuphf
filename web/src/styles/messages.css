@@ -281,8 +281,8 @@ html[data-theme] .interview-bar-actions .btn-primary:hover { background: var(--t
   line-height: 1.5;
   padding: 4px 0;
   min-height: 28px;
+  max-height: 120px;
   white-space: pre-wrap;
-  word-wrap: break-word;
   overflow-wrap: break-word;
   letter-spacing: inherit;
 }
@@ -291,6 +291,7 @@ html[data-theme] .interview-bar-actions .btn-primary:hover { background: var(--t
   inset: 0;
   pointer-events: none;
   user-select: none;
+  overflow-y: hidden;
 }
 .composer-input {
   position: relative;

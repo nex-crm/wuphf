@@ -259,6 +259,7 @@ export function Composer() {
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([])
   const [acIdx, setAcIdx] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const mirrorRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const { data: cfg } = useQuery({
     queryKey: ['config'],
@@ -490,6 +491,16 @@ export function Composer() {
     }
   }, [])
 
+  // Keep the mirror overlay scroll-locked to the textarea. Once content
+  // overflows the 120px cap, the textarea scrolls internally; the mirror
+  // has no scroll constraint of its own, so without this the chips would
+  // drift out of alignment with the visible text rows.
+  const syncScroll = useCallback(() => {
+    const src = textareaRef.current
+    const dst = mirrorRef.current
+    if (src && dst) dst.scrollTop = src.scrollTop
+  }, [])
+
   return (
     <div className="composer">
       <Autocomplete
@@ -507,7 +518,7 @@ export function Composer() {
               and a visible caret so the user still sees and edits the raw
               string — only the chips are styled. aria-hidden because the
               textarea is the interactive source of truth. */}
-          <div className="composer-mirror" aria-hidden="true">
+          <div ref={mirrorRef} className="composer-mirror" aria-hidden="true">
             {renderMentionTokens(mentionTokens)}
             {/* Trailing newline so the mirror height matches a textarea
                 that ends on a blank line (otherwise the chip layout
@@ -523,6 +534,7 @@ export function Composer() {
               setText(e.target.value)
               setCaret(e.target.selectionStart ?? 0)
               handleInput()
+              syncScroll()
               // Any manual edit cancels history recall.
               if (historyRef.current.index !== -1) {
                 resetRecall()
@@ -531,6 +543,7 @@ export function Composer() {
             onKeyDown={handleKeyDown}
             onKeyUp={syncCaret}
             onClick={syncCaret}
+            onScroll={syncScroll}
             rows={1}
           />
         </div>
