@@ -38,7 +38,7 @@ type Config struct {
 	WorkspaceSlug  string `json:"workspace_slug,omitempty"`
 	LLMProvider    string `json:"llm_provider,omitempty"`
 	// LLMProviderPriority is an ordered list of provider identifiers (same
-	// vocabulary as LLMProvider — "claude-code", "codex", etc.) that agents
+	// vocabulary as LLMProvider — "claude-code", "codex", "opencode", etc.) that agents
 	// should try in order when picking a runtime. LLMProvider remains the
 	// single-value primary choice; the priority list is consulted by agent
 	// creation and fallback flows. An empty slice means "fall back to
@@ -277,6 +277,8 @@ func normalizeLLMProvider(value string) string {
 		return "claude-code"
 	case "codex":
 		return "codex"
+	case "opencode":
+		return "opencode"
 	default:
 		return ""
 	}
@@ -353,6 +355,21 @@ func codexModelFromFile(path string) string {
 		}
 	}
 	return strings.TrimSpace(value)
+}
+
+// ResolveOpencodeModel returns the effective Opencode model for the current
+// run. Resolution: WUPHF_OPENCODE_MODEL env > OPENCODE_MODEL env > empty (Opencode
+// picks its configured default). Unlike Codex, Opencode has no on-disk config
+// file layout WUPHF needs to inspect — users configure their Opencode
+// ~/.config/opencode settings directly.
+func ResolveOpencodeModel(cwd string) string {
+	if v := strings.TrimSpace(os.Getenv("WUPHF_OPENCODE_MODEL")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(os.Getenv("OPENCODE_MODEL")); v != "" {
+		return v
+	}
+	return ""
 }
 
 // ResolveAPIKey resolves the API key via: flag > WUPHF_API_KEY env > NEX_API_KEY env > config file.

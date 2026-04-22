@@ -21,8 +21,15 @@ var (
 	headlessCodexCommandContext = exec.CommandContext
 	headlessCodexExecutablePath = os.Executable
 	headlessCodexRunTurn        = func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
-		if l != nil && l.memberEffectiveProviderKind(slug) != provider.KindCodex {
-			return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
+		if l != nil {
+			switch l.memberEffectiveProviderKind(slug) {
+			case provider.KindCodex:
+				return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
+			case provider.KindOpencode:
+				return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
+			default:
+				return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
+			}
 		}
 		return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
 	}

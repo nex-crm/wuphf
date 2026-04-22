@@ -16,6 +16,7 @@ func TestValidateKind(t *testing.T) {
 		{"empty_allowed", "", false},
 		{"claude_code", "claude-code", false},
 		{"codex", "codex", false},
+		{"opencode", "opencode", false},
 		{"openclaw", "openclaw", false},
 		{"unknown", "gemini", true},
 		{"typo", "claud-code", true},

@@ -107,6 +107,16 @@ func TestProviderOptionsIncludeCodex(t *testing.T) {
 	t.Fatal("expected codex provider option")
 }
 
+func TestProviderOptionsIncludeOpencode(t *testing.T) {
+	options := ProviderOptions()
+	for _, opt := range options {
+		if opt.Value == "opencode" {
+			return
+		}
+	}
+	t.Fatal("expected opencode provider option")
+}
+
 func TestProviderOptionsOnlyExposeClaudeAndCodex(t *testing.T) {
 	options := ProviderOptions()
 	values := make([]string, 0, len(options))

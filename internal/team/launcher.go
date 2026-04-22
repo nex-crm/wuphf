@@ -232,6 +232,12 @@ func isOnboarded() bool {
 // Preflight checks that required tools are available.
 func (l *Launcher) Preflight() error {
 	if l.usesCodexRuntime() {
+		if l.usesOpencodeRuntime() {
+			if _, err := exec.LookPath("opencode"); err != nil {
+				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
+			}
+			return nil
+		}
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
 		}
@@ -1767,7 +1773,7 @@ func (l *Launcher) paneEligibleOfficeMembers() []officeMember {
 	ordered := l.officeAgentOrder()
 	filtered := make([]officeMember, 0, len(ordered))
 	for _, m := range ordered {
-		if l.memberEffectiveProviderKind(m.Slug) == provider.KindCodex {
+		if l.memberUsesHeadlessOneShotRuntime(m.Slug) {
 			continue
 		}
 		filtered = append(filtered, m)
@@ -1847,7 +1853,7 @@ func (l *Launcher) shouldUseHeadlessDispatchForSlug(slug string) bool {
 	if l.shouldUseHeadlessDispatch() {
 		return true
 	}
-	if l.memberEffectiveProviderKind(slug) == provider.KindCodex {
+	if l.memberUsesHeadlessOneShotRuntime(slug) {
 		return true
 	}
 	if _, failed := l.failedPaneSlugs[strings.TrimSpace(slug)]; failed {
@@ -1878,7 +1884,7 @@ func (l *Launcher) skipPaneForSlug(slug string) bool {
 	if _, bad := l.failedPaneSlugs[slug]; bad {
 		return true
 	}
-	if l.memberEffectiveProviderKind(slug) == provider.KindCodex {
+	if l.memberUsesHeadlessOneShotRuntime(slug) {
 		return true
 	}
 	return false
@@ -1900,8 +1906,20 @@ func (l *Launcher) oneOnOneAgent() string {
 	return NormalizeOneOnOneAgent(l.oneOnOne)
 }
 
+// usesCodexRuntime reports whether the active install-wide provider uses the
+// headless one-shot runtime (shared by Codex and Opencode — both skip the
+// tmux/claude pane infrastructure and drive a fresh CLI per turn through the
+// broker queue in headless_codex.go).
 func (l *Launcher) usesCodexRuntime() bool {
-	return strings.EqualFold(strings.TrimSpace(l.provider), "codex")
+	p := strings.TrimSpace(strings.ToLower(l.provider))
+	return p == "codex" || p == "opencode"
+}
+
+// usesOpencodeRuntime reports whether the install-wide provider is Opencode
+// specifically. Used only where the per-turn CLI invocation differs from Codex
+// (binary name, args, prompt layout).
+func (l *Launcher) usesOpencodeRuntime() bool {
+	return strings.EqualFold(strings.TrimSpace(l.provider), "opencode")
 }
 
 // memberEffectiveProviderKind returns the provider kind that should run the
@@ -1917,6 +1935,15 @@ func (l *Launcher) memberEffectiveProviderKind(slug string) string {
 	return normalizeProviderKind(l.provider)
 }
 
+// memberUsesHeadlessOneShotRuntime reports whether the given agent is bound to
+// a runtime that drives a fresh CLI per turn (Codex, Opencode). Such agents
+// skip the tmux/claude pane infrastructure in favor of the broker-driven queue
+// in headless_codex.go.
+func (l *Launcher) memberUsesHeadlessOneShotRuntime(slug string) bool {
+	kind := l.memberEffectiveProviderKind(slug)
+	return kind == provider.KindCodex || kind == provider.KindOpencode
+}
+
 // normalizeProviderKind trims and canonicalizes provider kinds while
 // preserving unknown values so dispatch code can surface explicit errors.
 func normalizeProviderKind(raw string) string {
@@ -1926,6 +1953,8 @@ func normalizeProviderKind(raw string) string {
 		return provider.KindClaudeCode
 	case "codex":
 		return provider.KindCodex
+	case "opencode":
+		return provider.KindOpencode
 	case "claude-code", "openclaw":
 		return k
 	default:
@@ -3150,10 +3179,10 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 func (l *Launcher) spawnOverflowAgents() {
 	for _, member := range l.overflowOfficeMembers() {
-		// Codex-bound agents use the headless codex pipeline; they don't need
-		// a claude pane. Creating one would launch `claude` with the wrong
-		// model and quota semantics.
-		if l.memberEffectiveProviderKind(member.Slug) == provider.KindCodex {
+		// Codex/Opencode-bound agents use the headless one-shot pipeline; they
+		// don't need a claude pane. Creating one would launch `claude` with
+		// the wrong model and quota semantics.
+		if l.memberUsesHeadlessOneShotRuntime(member.Slug) {
 			continue
 		}
 		agentCmd, err := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
@@ -4272,6 +4301,12 @@ func (l *Launcher) PreflightWeb() error {
 		return nil
 	}
 	if l.usesCodexRuntime() {
+		if l.usesOpencodeRuntime() {
+			if _, err := exec.LookPath("opencode"); err != nil {
+				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
+			}
+			return nil
+		}
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
 		}

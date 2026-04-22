@@ -439,6 +439,39 @@ func TestResolveLLMProviderNormalizesUnsupportedConfig(t *testing.T) {
 	})
 }
 
+func TestResolveLLMProviderAcceptsOpencode(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		t.Setenv("WUPHF_LLM_PROVIDER", "opencode")
+		if got := ResolveLLMProvider(""); got != "opencode" {
+			t.Fatalf("expected opencode env override, got %q", got)
+		}
+	})
+}
+
+func TestResolveLLMProviderOpencodeFromConfig(t *testing.T) {
+	withTempConfig(t, func(_ string) {
+		_ = Save(Config{LLMProvider: "opencode"})
+		if got := ResolveLLMProvider(""); got != "opencode" {
+			t.Fatalf("expected opencode from config, got %q", got)
+		}
+	})
+}
+
+func TestResolveOpencodeModelEnvOverride(t *testing.T) {
+	t.Setenv("WUPHF_OPENCODE_MODEL", "qwen3.6:35b-a3b")
+	if got := ResolveOpencodeModel(""); got != "qwen3.6:35b-a3b" {
+		t.Fatalf("expected WUPHF_OPENCODE_MODEL override, got %q", got)
+	}
+}
+
+func TestResolveOpencodeModelFallsBackToOpencodeEnv(t *testing.T) {
+	t.Setenv("WUPHF_OPENCODE_MODEL", "")
+	t.Setenv("OPENCODE_MODEL", "llama3.3")
+	if got := ResolveOpencodeModel(""); got != "llama3.3" {
+		t.Fatalf("expected OPENCODE_MODEL fallback, got %q", got)
+	}
+}
+
 func TestResolveCodexModelUsesEnvOverride(t *testing.T) {
 	withTempConfig(t, func(_ string) {
 		t.Setenv("WUPHF_CODEX_MODEL", "gpt-5.4")
