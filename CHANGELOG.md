@@ -2,6 +2,14 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.6.3] - 2026-04-22
+
+### Fixed
+
+- **Web UI no longer thrashes with `Maximum update depth exceeded` on every render.** `useCommands` returned a freshly-built array on every call, so the Autocomplete effect watching `commands + items` re-fired on every Composer render, calling `onItems(items)` which re-set `acItems`, which re-rendered Composer. The hook now memoizes the derived array against the underlying query data, giving stable referential identity across renders.
+- **Dead tmux panes no longer silently break the live-output stream forever.** When an office reseed (or an agent crash, or an overflow-pane recreation) invalidates a pane target, the capture loop used to log "stopped after 5 failures" and exit permanently. It now sleeps 30s, re-resolves the current pane target from the launcher, and resumes — so long-running sessions recover from pane churn without a restart.
+- **Headless codex queue no longer spins in a stale-cancel livelock.** Prod logs showed dozens of `stale-turn: cancelling active turn after 0s` lines per session because an enqueue could preempt an active turn that had just started. Cancellation now requires both the configured staleness threshold AND a 2-second minimum turn age, floors out tight cancel loops without blocking legitimate preemption.
+
 ## [0.0.6.2] - 2026-04-22
 
 ### Fixed
