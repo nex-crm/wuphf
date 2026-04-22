@@ -104,6 +104,14 @@ type wikiWriteRequest struct {
 	// PlaybookSlug carries the source slug so the post-write hook can
 	// enqueue a follow-up recompile without re-parsing the path.
 	PlaybookSlug string
+	// IsLintReport routes to Repo.CommitLintReport — writes the daily lint
+	// report to wiki/.lint/report-YYYY-MM-DD.md. Same serialization as entity
+	// facts; no team-wiki index regen, no backlinks recompute.
+	IsLintReport bool
+	// IsFactLog routes to Repo.CommitFactLog — mutates a fact record in
+	// wiki/facts/**/*.jsonl or team/entities/*.facts.jsonl (used by lint
+	// ResolveContradiction to update supersedes/valid_until/contradicts_with).
+	IsFactLog bool
 	// IsHuman routes the request to Repo.CommitHuman — optimistic
 	// concurrency via expected_sha, per-human git identity. Wikipedia-
 	// style Edit source flow. v1.5: identity is resolved from the
@@ -304,6 +312,10 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookExecution {
 		sha, n, err = w.repo.CommitPlaybookExecution(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsLintReport {
+		sha, n, err = w.repo.CommitLintReport(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsFactLog {
+		sha, n, err = w.repo.CommitFactLog(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsNotebook {
 		// Notebook writes do NOT regen the team wiki index. Commit target is
 		// agents/{slug}/notebook/... — scoped to the author.
@@ -982,4 +994,66 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// EnqueueLintReport submits a lint report write to the shared wiki queue.
+// The path must be wiki/.lint/report-YYYY-MM-DD.md and is routed to
+// Repo.CommitLintReport (which does NOT regen the team-wiki index).
+func (w *WikiWorker) EnqueueLintReport(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:         slug,
+		Path:         path,
+		Content:      content,
+		Mode:         "replace",
+		CommitMsg:    commitMsg,
+		IsLintReport: true,
+		ReplyCh:      make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: lint report write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueueFactLog submits a fact-log mutation to the shared wiki queue.
+// The path must be wiki/facts/**/*.jsonl or team/entities/*.facts.jsonl.
+// Used by lint ResolveContradiction to update supersedes/valid_until/contradicts_with.
+func (w *WikiWorker) EnqueueFactLog(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:      slug,
+		Path:      path,
+		Content:   content,
+		Mode:      "replace",
+		CommitMsg: commitMsg,
+		IsFactLog: true,
+		ReplyCh:   make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: fact log write timed out after %s", wikiWriteTimeout)
+	}
 }
