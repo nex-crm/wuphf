@@ -145,12 +145,48 @@ export interface WikiEditLogEntry {
   commit_sha: string
 }
 
+/**
+ * Candidate wiki paths for a given hash slug. Wikilinks in briefs use
+ * a bare slug (e.g. `[[nazz]]`), which routes to URL `#/wiki/nazz`. The
+ * broker's `/wiki/article` endpoint requires a full `team/{group}/{slug}.md`
+ * path, so the client resolves bare slugs by trying each standard group
+ * directory in order before giving up.
+ *
+ * Full paths (`team/…`) and any input already containing a slash are
+ * passed through unchanged (with a `.md` suffix added if missing). Bare
+ * slugs fan out across the standard groups in priority order. The 404s
+ * on misses are cheap and there's no coherence risk — the first match
+ * wins.
+ */
+function candidatePaths(pathOrSlug: string): string[] {
+  const trimmed = pathOrSlug.trim().replace(/^\/+/, '').replace(/\/+$/, '')
+  if (!trimmed) return []
+  const withExt = trimmed.endsWith('.md') ? trimmed : `${trimmed}.md`
+  if (trimmed.startsWith('team/')) return [withExt]
+  if (trimmed.includes('/')) return [`team/${withExt}`]
+  const slug = withExt
+  return [
+    `team/people/${slug}`,
+    `team/companies/${slug}`,
+    `team/playbooks/${slug}`,
+    `team/decisions/${slug}`,
+    `team/projects/${slug}`,
+    `team/${slug}`,
+  ]
+}
+
 export async function fetchArticle(path: string): Promise<WikiArticle> {
-  try {
-    return await get<WikiArticle>(`/wiki/article?path=${encodeURIComponent(path)}`)
-  } catch {
-    return mockArticle(path)
+  const tried: string[] = []
+  for (const candidate of candidatePaths(path)) {
+    tried.push(candidate)
+    try {
+      return await get<WikiArticle>(`/wiki/article?path=${encodeURIComponent(candidate)}`)
+    } catch {
+      // Try next candidate. Real 404s and bare-slug misses look identical
+      // from the client — fall through and mock at the end.
+    }
   }
+  return mockArticle(tried[tried.length - 1] ?? path)
 }
 
 /**
@@ -402,7 +438,12 @@ export const MOCK_CATALOG: WikiCatalogEntry[] = [
 ]
 
 export function mockArticle(path: string): WikiArticle {
-  if (path === 'people/customer-x' || path === '' || path === 'customer-x') {
+  if (
+    path === 'people/customer-x' ||
+    path === '' ||
+    path === 'customer-x' ||
+    path === 'team/people/customer-x.md'
+  ) {
     return {
       path: 'people/customer-x',
       title: 'Customer X',

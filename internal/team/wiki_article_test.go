@@ -2,9 +2,11 @@ package team
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 )
 
@@ -238,6 +240,60 @@ func TestBuildArticle_RejectsBadPath(t *testing.T) {
 		if _, err := repo.BuildArticle(context.Background(), p); err == nil {
 			t.Errorf("BuildArticle(%q): want error, got nil", p)
 		}
+	}
+}
+
+// BuildCatalog must not surface raw ingested source material under
+// team/inbox/. That directory is the scanner's dump target — files
+// there are source material, not curated wiki content, and the UI
+// would drown in them on any real scan.
+func TestBuildCatalog_ExcludesInbox(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	root := t.TempDir()
+	backup := filepath.Join(t.TempDir(), "bak")
+	repo := NewRepoAt(root, backup)
+	ctx := context.Background()
+	if err := repo.Init(ctx); err != nil {
+		t.Fatalf("Init: %v", err)
+	}
+
+	// Curated brief — must appear in the catalog.
+	if _, _, err := repo.Commit(ctx, "ceo", "team/people/nazz.md", "# Nazz\n\nFounder.\n", "create", "add nazz"); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	// Simulate a scanner-written inbox file. The scanner writes these
+	// directly to disk (bypassing Commit) under team/inbox/raw/...; any
+	// equivalent on-disk path under team/inbox/ must be skipped.
+	inboxDir := filepath.Join(root, "team", "inbox", "raw", "some-source")
+	if err := os.MkdirAll(inboxDir, 0o700); err != nil {
+		t.Fatalf("mkdir inbox: %v", err)
+	}
+	inboxFile := filepath.Join(inboxDir, "episode.md")
+	if err := os.WriteFile(inboxFile, []byte("# Episode\n\nraw transcript.\n"), 0o600); err != nil {
+		t.Fatalf("write inbox file: %v", err)
+	}
+
+	entries, err := repo.BuildCatalog(ctx)
+	if err != nil {
+		t.Fatalf("BuildCatalog: %v", err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Path, "team/inbox/") {
+			t.Errorf("catalog contained inbox entry %q; inbox should be excluded", e.Path)
+		}
+	}
+	var sawBrief bool
+	for _, e := range entries {
+		if e.Path == "team/people/nazz.md" {
+			sawBrief = true
+			break
+		}
+	}
+	if !sawBrief {
+		t.Error("expected team/people/nazz.md in catalog, not found")
 	}
 }
 

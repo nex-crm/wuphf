@@ -35,6 +35,55 @@ describe('wiki api client', () => {
     expect(result.title).toBe('Customer X')
   })
 
+  it('fetchArticle resolves a bare slug by trying the standard group dirs', async () => {
+    const article: api.WikiArticle = {
+      path: 'team/companies/stripe.md',
+      title: 'Stripe',
+      content: 'Payments infra',
+      last_edited_by: 'archivist',
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ['archivist'],
+      backlinks: [],
+      word_count: 2,
+      categories: [],
+    }
+    const spy = vi.spyOn(client, 'get')
+      // First candidate (team/people/stripe.md) misses.
+      .mockRejectedValueOnce(new Error('404'))
+      // Second candidate (team/companies/stripe.md) hits.
+      .mockResolvedValueOnce(article)
+    const result = await api.fetchArticle('stripe')
+    expect(result).toEqual(article)
+    expect(spy).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining(encodeURIComponent('team/people/stripe.md')),
+    )
+    expect(spy).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining(encodeURIComponent('team/companies/stripe.md')),
+    )
+  })
+
+  it('fetchArticle passes through a full team/ path without fanning out', async () => {
+    const article: api.WikiArticle = {
+      path: 'team/playbooks/pricing.md',
+      title: 'Pricing',
+      content: '',
+      last_edited_by: 'cro',
+      last_edited_ts: new Date().toISOString(),
+      revisions: 1,
+      contributors: ['cro'],
+      backlinks: [],
+      word_count: 0,
+      categories: [],
+    }
+    const spy = vi.spyOn(client, 'get').mockResolvedValue(article)
+    const result = await api.fetchArticle('team/playbooks/pricing.md')
+    expect(result).toEqual(article)
+    expect(spy).toHaveBeenCalledTimes(1)
+  })
+
   it('fetchCatalog returns entries array on success', async () => {
     const entries: api.WikiCatalogEntry[] = [
       { path: 'a', title: 'A', author_slug: 'pm', last_edited_ts: new Date().toISOString(), group: 'people' },

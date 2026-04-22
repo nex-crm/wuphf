@@ -95,6 +95,15 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 			return nil
 		}
 		if d.IsDir() {
+			// team/inbox/ holds raw ingested source material (scanner dumps),
+			// not curated wiki content. Excluding it here keeps the catalog
+			// and UI focused on synthesized briefs/playbooks/decisions; the
+			// raw files are still reachable by direct path via /wiki/read
+			// for agents that want to cite them.
+			rel, relErr := filepath.Rel(r.Root(), path)
+			if relErr == nil && filepath.ToSlash(rel) == "team/inbox" {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".md") {
