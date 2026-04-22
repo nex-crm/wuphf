@@ -44,6 +44,9 @@ func RegisterAllCommands(r *Registry) {
 	r.Register(SlashCommand{Name: "clear", Description: "Clear messages", WebSupported: true, Execute: cmdClear})
 	r.Register(SlashCommand{Name: "quit", Description: "Exit WUPHF", Execute: cmdQuit})
 
+	// Wiki intelligence
+	r.Register(SlashCommand{Name: "lint", Description: "Run wiki lint — checks contradictions, orphans, stale claims, cross-refs", WebSupported: true})
+
 	// Web-only surfaces. No TUI Execute handler yet; the web composer owns the
 	// behaviour (navigate to a view, post to /signals, etc). Listed here so
 	// GET /commands — the single source of truth for the web autocomplete —

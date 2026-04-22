@@ -555,6 +555,16 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// into invokable skills + record execution outcomes. Same markdown
 		// substrate, so the backend gate is unchanged.
 		registerPlaybookTools(server)
+		// Lint tools (Slice 1 wiki intelligence) — daily health check +
+		// contradiction resolution. Same markdown substrate.
+		mcp.AddTool(server, readOnlyTool(
+			"run_lint",
+			"Run the wiki lint check. Flags contradictions (critical), orphans (warning), stale claims (warning), missing cross-refs (info), and dedup review (info). Returns LintReport JSON with findings and resolve actions.",
+		), handleRunLint)
+		mcp.AddTool(server, officeWriteTool(
+			"resolve_contradiction",
+			"Resolve a contradiction finding from a prior run_lint call. winner must be A (first fact wins), B (second fact wins), or Both (acknowledge both as valid).",
+		), handleResolveContradiction)
 	case "none":
 		// Nothing — user explicitly disabled shared memory.
 	default:
@@ -3334,4 +3344,54 @@ func truncate(text string, max int) string {
 		return text[:max]
 	}
 	return text[:max-1] + "…"
+}
+
+// ── Lint tools ────────────────────────────────────────────────────────────────
+
+// RunLintArgs is intentionally empty — run_lint takes no input parameters.
+type RunLintArgs struct{}
+
+// ResolveContradictionArgs is the contract for resolve_contradiction.
+type ResolveContradictionArgs struct {
+	ReportDate string `json:"report_date" jsonschema:"YYYY-MM-DD date of the lint report to resolve from"`
+	FindingIdx int    `json:"finding_idx" jsonschema:"0-based index into the findings array returned by run_lint"`
+	Winner     string `json:"winner"      jsonschema:"A | B | Both — which fact wins; Both acknowledges both as valid"`
+}
+
+// handleRunLint calls POST /wiki/lint/run on the broker and returns the
+// full LintReport JSON.
+func handleRunLint(ctx context.Context, _ *mcp.CallToolRequest, _ RunLintArgs) (*mcp.CallToolResult, any, error) {
+	var report any
+	if err := brokerPostJSON(ctx, "/wiki/lint/run", nil, &report); err != nil {
+		return toolError(err), nil, nil
+	}
+	payload, _ := json.Marshal(report)
+	return textResult(string(payload)), nil, nil
+}
+
+// handleResolveContradiction calls POST /wiki/lint/resolve on the broker.
+func handleResolveContradiction(ctx context.Context, _ *mcp.CallToolRequest, args ResolveContradictionArgs) (*mcp.CallToolResult, any, error) {
+	reportDate := strings.TrimSpace(args.ReportDate)
+	if reportDate == "" {
+		return toolError(fmt.Errorf("report_date is required")), nil, nil
+	}
+	winner := strings.TrimSpace(args.Winner)
+	if winner != "A" && winner != "B" && winner != "Both" {
+		return toolError(fmt.Errorf("winner must be A, B, or Both; got %q", winner)), nil, nil
+	}
+
+	var resp map[string]string
+	body := map[string]any{
+		"report_date": reportDate,
+		"finding_idx": args.FindingIdx,
+		"winner":      winner,
+	}
+	if err := brokerPostJSON(ctx, "/wiki/lint/resolve", body, &resp); err != nil {
+		return toolError(err), nil, nil
+	}
+	msg := resp["message"]
+	if msg == "" {
+		msg = fmt.Sprintf("Resolved finding %d from report %s as winner=%s", args.FindingIdx, reportDate, winner)
+	}
+	return textResult(msg), nil, nil
 }
