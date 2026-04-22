@@ -128,7 +128,9 @@
 }
 
 /* ─── CENTER article column ─── */
-.wk-article-col { padding: 0 64px 120px; }
+/* position: relative creates the positioning context for .pam-wrap (see
+ * styles/pam.css) — Pam's desk hangs off the top-right of the column. */
+.wk-article-col { padding: 0 64px 120px; position: relative; }
 
 /* ─── Status banner ─── */
 .wk-status-banner {

@@ -135,6 +135,26 @@ export const SPRITE_DATA: Record<string, number[][]> = {
     [0,0,0,0,1,0,0,0,0,5,1,5,0,0],
     [0,0,0,1,1,0,0,0,0,5,5,5,0,0],
   ],
+  // Pam — the wiki archivist. Fluffy Pam-from-The-Office hair (wider than the
+  // head outline), pastel cardigan over a white blouse collar. Hands visible
+  // so the separately-rendered desk (see Pam.tsx) can overlap her torso
+  // naturally without clipping the arms.
+  pam: [
+    [0,0,4,4,4,4,4,4,4,4,4,4,0,0],
+    [0,4,4,4,4,4,4,4,4,4,4,4,4,0],
+    [0,4,1,4,4,4,4,4,4,4,4,1,4,0],
+    [0,0,1,2,2,2,2,2,2,2,2,1,0,0],
+    [0,0,1,2,1,2,2,2,2,1,2,1,0,0],
+    [0,0,1,2,2,2,2,2,2,2,2,1,0,0],
+    [0,0,0,1,2,2,1,1,2,2,1,0,0,0],
+    [0,0,1,3,3,3,6,6,3,3,3,1,0,0],
+    [0,1,2,3,3,3,6,6,3,3,3,2,1,0],
+    [0,0,2,3,3,3,3,3,3,3,3,2,0,0],
+    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
+    [0,0,1,2,1,0,0,0,0,1,2,1,0,0],
+    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
+    [0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+  ],
 }
 
 export const SPRITE_GENERIC: number[][] = [
@@ -174,6 +194,7 @@ const AGENT_COLORS: Record<string, string> = {
   designer: '#F778BA',
   cmo: '#FFA657',
   cro: '#79C0FF',
+  pam: '#F4B6C2',
 }
 
 export function getAgentColor(slug: string): string {

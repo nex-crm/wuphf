@@ -1,0 +1,198 @@
+/* ─── Pam the Archivist ───
+ *
+ * Pam sits on top of the wiki article column in the upper-right. The desk
+ * is the visual anchor: a wider rectangle that she peeks out from behind,
+ * so she reads as a receptionist perched above the page. The wrapper uses
+ * `position: absolute` inside the article column (the column is the
+ * positioning context; see .wk-article-col). Idle animations fire
+ * occasionally via CSS animation-iteration-count so she's alive but not
+ * distracting.
+ */
+
+.pam-wrap {
+  position: absolute;
+  top: -36px;           /* lift her above the article's top edge */
+  right: 16px;
+  z-index: 40;          /* above article content; below global overlays */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 96px;
+  user-select: none;
+  pointer-events: none; /* only the button + menu receive clicks */
+}
+
+.pam-button {
+  pointer-events: auto;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  line-height: 0;
+  animation: pam-idle-sway 8s ease-in-out infinite;
+}
+
+.pam-button:focus-visible {
+  outline: 2px solid var(--wk-amber);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.pam-button[data-busy='true'] {
+  animation: pam-busy-bob 1.2s ease-in-out infinite;
+}
+
+/* The avatar canvas sits on top; the desk is drawn as a CSS pixel-art
+ * block behind her torso (margin-top negative so they overlap). */
+.pam-avatar {
+  display: block;
+  image-rendering: pixelated;
+}
+
+.pam-desk {
+  pointer-events: auto;
+  margin-top: -18px;
+  width: 92px;
+  height: 22px;
+  background:
+    /* Top edge — lighter highlight */
+    linear-gradient(to bottom, #c6a37a 0 2px, transparent 2px),
+    /* Main desk surface — warm wood */
+    linear-gradient(to bottom, #a57f52 0%, #8b6635 100%);
+  border: 2px solid #3a2710;
+  border-radius: 2px 2px 0 0;
+  box-shadow:
+    inset 0 2px 0 rgba(255, 255, 255, 0.12),
+    0 4px 0 rgba(0, 0, 0, 0.08);
+  position: relative;
+}
+
+/* Two small pixel-art "objects" on the desk — a name plaque + a paper stack. */
+.pam-desk::before {
+  content: '';
+  position: absolute;
+  left: 10px;
+  top: 6px;
+  width: 22px;
+  height: 8px;
+  background: #f4e8c8;
+  border: 1px solid #3a2710;
+}
+
+.pam-desk::after {
+  content: '';
+  position: absolute;
+  right: 12px;
+  top: 4px;
+  width: 14px;
+  height: 10px;
+  background: #ffffff;
+  border: 1px solid #3a2710;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* ─── Menu ─── */
+.pam-menu {
+  pointer-events: auto;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 8px;
+  min-width: 220px;
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  padding: 6px;
+  font-family: var(--wk-chrome);
+  font-size: 13px;
+  z-index: 50;
+}
+
+.pam-menu-header {
+  padding: 6px 10px 8px;
+  color: var(--wk-text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--wk-border-light);
+  margin-bottom: 4px;
+}
+
+.pam-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--wk-text);
+  font: inherit;
+}
+
+.pam-menu-item:hover,
+.pam-menu-item:focus-visible {
+  background: var(--wk-amber-bg);
+  outline: none;
+}
+
+.pam-menu-item[disabled] {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.pam-menu-empty {
+  padding: 8px 10px;
+  color: var(--wk-text-tertiary);
+}
+
+/* ─── Status line ─── */
+.pam-status {
+  pointer-events: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  padding: 4px 8px;
+  background: var(--wk-amber-banner);
+  border: 1px solid var(--wk-amber);
+  border-radius: 4px;
+  font-family: var(--wk-chrome);
+  font-size: 11px;
+  color: var(--wk-text);
+  white-space: normal;
+  word-break: break-word;
+  max-width: 280px;
+}
+
+/* When the menu is open the status line is visually covered but must stay
+ * in the DOM so screen readers still announce running/done/failed state
+ * changes via its aria-live="status" role. */
+.pam-status.is-behind-menu {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ─── Idle + busy animations ───
+ * Sway is a gentle 1deg rotation roughly every 8 seconds. Blink is a quick
+ * vertical squash so Pam feels alive without motion-sickness risk. Busy-bob
+ * fires while an action is in flight so the user sees feedback. */
+@keyframes pam-idle-sway {
+  0%, 42%, 58%, 100% { transform: rotate(0deg); }
+  48% { transform: rotate(-1.5deg); }
+  52% { transform: rotate(1.5deg); }
+}
+
+@keyframes pam-busy-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-2px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pam-button,
+  .pam-button[data-busy='true'] {
+    animation: none;
+  }
+}
