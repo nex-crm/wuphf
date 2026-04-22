@@ -43,7 +43,7 @@
 .kbd-inverse {
   background: rgba(255, 255, 255, 0.22);
   border-color: rgba(255, 255, 255, 0.28);
-  color: currentColor;
+  color: currentcolor;
   border-bottom-width: 1px;
 }
 
@@ -118,10 +118,10 @@
   background: transparent;
   /* Inherit the sidebar item's color so the badge reads correctly on both
      the dark sidebar (white-ish text) and the active row (dark text on
-     light surface). `currentColor` keeps the pill visually tied to its row
+     light surface). `currentcolor` keeps the pill visually tied to its row
      without requiring theme-specific overrides. */
-  color: currentColor;
-  border-color: currentColor;
+  color: currentcolor;
+  border-color: currentcolor;
 }
 .sidebar-item.active .sidebar-shortcut .kbd {
   /* Softer than pure white so the channel name stays the loudest element
