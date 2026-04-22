@@ -2,6 +2,12 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.7.1] - 2026-04-23
+
+### Fixed
+
+- **Rapid `@agent` tags now coalesce into one reply instead of cutting claude off mid-turn.** The previous per-slug queue served bursts serially but the 3-second minimum gap between sends was shorter than a typical claude turn (~30s), so the second `/clear` still wiped the first reply mid-generation. The queue now tracks a 60-second coalesce window per slug: if a new notification arrives while claude's previous turn is still in flight, the new prompt is MERGED into the pending next dispatch instead of triggering a fresh `/clear`. Claude sees one combined prompt with every question separated by a divider and answers them together. Single tags still dispatch immediately — coalesce only engages when there's a live turn to protect.
+
 ## [0.0.7.0] - 2026-04-22
 
 ### Added

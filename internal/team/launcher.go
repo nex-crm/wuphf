@@ -122,6 +122,11 @@ type Launcher struct {
 	paneDispatchMu      sync.Mutex
 	paneDispatchQueues  map[string][]paneDispatchTurn
 	paneDispatchWorkers map[string]bool
+	// paneDispatchLastSentAt records when each slug most recently had a
+	// `/clear` + type cycle dispatched. The coalesce logic in
+	// queuePaneNotification uses this to decide whether to merge a new
+	// notification with a pending one or to start a fresh dispatch.
+	paneDispatchLastSentAt map[string]time.Time
 }
 
 // paneDispatchTurn is one queued notification to type into a tmux pane.
@@ -2873,24 +2878,31 @@ func (l *Launcher) shouldUseHeadlessDispatch() bool {
 }
 
 // Minimum gap between two consecutive pane `/clear` + type cycles for the
-// same agent. Without this, two rapid @-tags to the same specialist would
-// wipe claude's in-flight input before it had a chance to submit, and the
-// second notification either got silently dropped into an in-progress
-// generation or fused into the same turn (user-observed: PM answered one
-// of two rapid questions and ignored the other). 3s is long enough for
-// claude's TUI to return to prompt-ready in the common case; further
-// smoothing lives in the per-slug queue that drains at this cadence.
+// same agent. Serves as a safety floor against truly back-to-back sends
+// (sub-second bursts) that could race tmux's input buffer. Not a substitute
+// for the coalesce logic below — claude turns typically take 20-60s, which
+// is much larger than any reasonable fixed gap.
 //
-// Declared as var rather than const so tests can shorten it — the
-// serialisation contract is what's load-bearing, not the literal duration.
+// Declared as var rather than const so tests can shorten it.
 var paneDispatchMinGap = 3 * time.Second
 
+// paneDispatchCoalesceWindow: if a new notification arrives this soon after
+// the previous send, treat claude's current turn as still in flight and
+// MERGE the new content into the next dispatch instead of triggering a
+// fresh `/clear`. Mid-turn clears were wiping claude's in-progress output
+// and dropping one of two rapid @-tags entirely.
+//
+// 60s covers the p95 claude turn duration (including MCP tool calls) in
+// the observed workload. Multiple bursts in the window get concatenated
+// so claude eventually sees one prompt containing every question, answers
+// them together, and never loses one to a mid-turn clear.
+var paneDispatchCoalesceWindow = 60 * time.Second
+
 // queuePaneNotification enqueues a notification for a pane-backed agent
-// and ensures there is one worker draining its queue. Replaces the old
-// direct-send path so rapid-fire notifications no longer clobber each
-// other mid-turn — previously every `/clear` came in on whatever tmux
-// typing order it won, which allowed a second message's `/clear` to wipe
-// claude's unsubmitted input from the first.
+// and ensures there is one worker draining its queue. Rapid successive
+// tags for the same slug coalesce into a single dispatch if they arrive
+// inside paneDispatchCoalesceWindow — this is the defence against
+// mid-turn `/clear` wiping claude's in-progress output.
 func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) {
 	slug = strings.TrimSpace(slug)
 	paneTarget = strings.TrimSpace(paneTarget)
@@ -2904,6 +2916,48 @@ func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) 
 	if l.paneDispatchWorkers == nil {
 		l.paneDispatchWorkers = make(map[string]bool)
 	}
+	if l.paneDispatchLastSentAt == nil {
+		l.paneDispatchLastSentAt = make(map[string]time.Time)
+	}
+	// Coalesce path: if a pending turn already exists OR the last send was
+	// within the coalesce window, merge rather than enqueue a separate
+	// dispatch. Merging into the head-of-queue pending item is the cleanest
+	// because the worker picks up the merged content on its next iteration.
+	inflight := false
+	if last, ok := l.paneDispatchLastSentAt[slug]; ok && time.Since(last) < paneDispatchCoalesceWindow {
+		inflight = true
+	}
+	queue := l.paneDispatchQueues[slug]
+	if (inflight || len(queue) > 0) && len(queue) > 0 {
+		// Combine with the pending turn. Claude will see both prompts
+		// separated by a visible divider and typically answers both.
+		last := &l.paneDispatchQueues[slug][len(queue)-1]
+		last.Notification = last.Notification + "\n\n---\n\n" + notification
+		last.EnqueuedAt = time.Now()
+		l.paneDispatchMu.Unlock()
+		return
+	}
+	if inflight && len(queue) == 0 {
+		// No pending turn yet but claude is mid-flight from a recent send.
+		// Create a single pending turn that will absorb further bursts
+		// through the branch above. The worker's pre-send wait will let
+		// claude's current turn finish before /clear fires.
+		l.paneDispatchQueues[slug] = []paneDispatchTurn{{
+			PaneTarget:   paneTarget,
+			Notification: notification,
+			EnqueuedAt:   time.Now(),
+		}}
+		startWorker := !l.paneDispatchWorkers[slug]
+		if startWorker {
+			l.paneDispatchWorkers[slug] = true
+		}
+		l.paneDispatchMu.Unlock()
+		if startWorker {
+			go l.runPaneDispatchQueue(slug)
+		}
+		return
+	}
+	// Cold path: no recent activity, no queue. Dispatch immediately.
 	l.paneDispatchQueues[slug] = append(l.paneDispatchQueues[slug], paneDispatchTurn{
 		PaneTarget:   paneTarget,
 		Notification: notification,
@@ -2922,9 +2976,19 @@ func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) 
 // runPaneDispatchQueue is the single worker per agent slug that drains
 // pane-dispatch notifications serially with a minimum gap between
 // `/clear` cycles. Exits when the queue is empty.
+//
+// Per-iteration flow:
+//  1. Peek head of queue.
+//  2. Wait out min-gap (floor) + coalesce window (lets claude's current turn
+//     land). During the wait, concurrent queuePaneNotification calls MAY
+//     merge new content into the head's Notification field — the peek is
+//     re-read after the wait so the pop sees the merged string.
+//  3. Pop + send.
+//  4. Record the send time so the next enqueue sees "claude in flight".
 func (l *Launcher) runPaneDispatchQueue(slug string) {
 	var lastSentAt time.Time
 	for {
+		// Step 1: peek (not pop).
 		l.paneDispatchMu.Lock()
 		queue := l.paneDispatchQueues[slug]
 		if len(queue) == 0 {
@@ -2936,6 +3000,34 @@ func (l *Launcher) runPaneDispatchQueue(slug string) {
 			l.paneDispatchMu.Unlock()
 			return
 		}
+		globalLastSentAt := l.paneDispatchLastSentAt[slug]
+		l.paneDispatchMu.Unlock()
+
+		// Step 2a: min-gap floor against sub-second bursts.
+		if !lastSentAt.IsZero() {
+			wait := paneDispatchMinGap - time.Since(lastSentAt)
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+		}
+		// Step 2b: coalesce window — wait for claude's in-flight turn to
+		// land before /clear fires again. New notifications arriving
+		// during this wait are merged into the head by queuePaneNotification.
+		if !globalLastSentAt.IsZero() {
+			wait := paneDispatchCoalesceWindow - time.Since(globalLastSentAt)
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+		}
+
+		// Step 3: pop (re-read head to pick up any merged content).
+		l.paneDispatchMu.Lock()
+		queue = l.paneDispatchQueues[slug]
+		if len(queue) == 0 {
+			// Defensive: external actor emptied the queue during our wait.
+			l.paneDispatchMu.Unlock()
+			continue
+		}
 		turn := queue[0]
 		if len(queue) == 1 {
 			delete(l.paneDispatchQueues, slug)
@@ -2944,17 +3036,13 @@ func (l *Launcher) runPaneDispatchQueue(slug string) {
 		}
 		l.paneDispatchMu.Unlock()
 
-		// Honour the minimum gap. Skipped on the first turn (lastSentAt
-		// zero) so normal dispatch stays instant; only applies when a
-		// previous send happened within paneDispatchMinGap.
-		if !lastSentAt.IsZero() {
-			wait := paneDispatchMinGap - time.Since(lastSentAt)
-			if wait > 0 {
-				time.Sleep(wait)
-			}
-		}
 		launcherSendNotificationToPane(l, turn.PaneTarget, turn.Notification)
+
+		// Step 4: record send time for the next enqueue's coalesce check.
 		lastSentAt = time.Now()
+		l.paneDispatchMu.Lock()
+		l.paneDispatchLastSentAt[slug] = lastSentAt
+		l.paneDispatchMu.Unlock()
 	}
 }
 
