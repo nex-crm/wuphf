@@ -59,6 +59,12 @@ export interface AppStore {
   activeThreadId: string | null
   setActiveThreadId: (id: string | null) => void
 
+  // Per-thread collapsed state in the main feed. The key is the parent
+  // message id. Default is expanded (entry absent or false); toggling
+  // stores `true` so the inline replies hide.
+  collapsedThreads: Record<string, boolean>
+  toggleThreadCollapsed: (parentId: string) => void
+
   // DM entry: opens the given DM channel and records {type: 'D', agentSlug}
   // in channelMeta so downstream views can resolve the paired agent.
   enterDM: (agentSlug: string, channelSlug: string) => void
@@ -128,6 +134,15 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   activeThreadId: null,
   setActiveThreadId: (id) => set({ activeThreadId: id }),
+
+  collapsedThreads: {},
+  toggleThreadCollapsed: (parentId) =>
+    set((s) => ({
+      collapsedThreads: {
+        ...s.collapsedThreads,
+        [parentId]: !s.collapsedThreads[parentId],
+      },
+    })),
 
   enterDM: (agentSlug, channelSlug) =>
     set((s) => ({

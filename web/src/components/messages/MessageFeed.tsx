@@ -27,8 +27,16 @@ type FeedElement =
 export function MessageFeed() {
   const currentChannel = useAppStore((s) => s.currentChannel)
   const setActiveThreadId = useAppStore((s) => s.setActiveThreadId)
+  const collapsedThreads = useAppStore((s) => s.collapsedThreads)
+  const toggleThreadCollapsed = useAppStore((s) => s.toggleThreadCollapsed)
   const containerRef = useRef<HTMLDivElement>(null)
   const prevLengthRef = useRef(0)
+
+  const copyMessageLink = (id: string) => {
+    const url = new URL(window.location.href)
+    url.hash = `#msg-${id}`
+    navigator.clipboard?.writeText(url.toString()).catch(() => {})
+  }
 
   const { data: messages = [], isLoading } = useMessages(currentChannel)
 
@@ -149,25 +157,56 @@ export function MessageFeed() {
           )
         }
         const hasReplies = el.replies.length > 0
+        const parentId = el.parent.message.id
+        const isCollapsed = hasReplies && (collapsedThreads[parentId] ?? false)
         return (
           <div
             key={el.key}
-            className={`thread-group${hasReplies ? ' thread-group-has-replies' : ''}`}
+            className={`thread-group${hasReplies ? ' thread-group-has-replies' : ''}${isCollapsed ? ' thread-group-collapsed' : ''}`}
           >
             <MessageBubble
               message={el.parent.message}
               grouped={el.parent.grouped}
-              onThreadClick={(id) => setActiveThreadId(id)}
+              replyCount={el.replies.length}
+              onOpenThread={(id) => setActiveThreadId(id)}
+              onCopyLink={copyMessageLink}
             />
             {hasReplies && (
-              <div className="thread-replies">
+              <button
+                type="button"
+                className="thread-collapse-toggle"
+                onClick={() => toggleThreadCollapsed(parentId)}
+                aria-expanded={!isCollapsed}
+                aria-controls={`thread-${parentId}-replies`}
+              >
+                <svg
+                  className="thread-collapse-chevron"
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d={isCollapsed ? 'm9 18 6-6-6-6' : 'm6 9 6 6 6-6'} />
+                </svg>
+                {isCollapsed
+                  ? `Show ${el.replies.length} ${el.replies.length === 1 ? 'reply' : 'replies'}`
+                  : 'Hide thread'}
+              </button>
+            )}
+            {hasReplies && !isCollapsed && (
+              <div className="thread-replies" id={`thread-${parentId}-replies`}>
                 {el.replies.map((r) => (
                   <MessageBubble
                     key={r.message.id}
                     message={r.message}
                     grouped={r.grouped}
                     isReply
-                    onThreadClick={(id) => setActiveThreadId(id)}
+                    onOpenThread={(id) => setActiveThreadId(id)}
+                    onCopyLink={copyMessageLink}
                   />
                 ))}
               </div>

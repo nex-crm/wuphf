@@ -311,3 +311,68 @@ html[data-theme] .interview-bar-actions .btn-primary:hover { background: var(--t
 /* ─── Thread toggle ─── */
 .inline-thread-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--accent); cursor: pointer; border: 1px solid var(--border); background: var(--bg); font-family: var(--font-sans); padding: 4px 8px; border-radius: 999px; margin-top: 4px; transition: background 0.15s; }
 .inline-thread-toggle:hover { background: var(--accent-bg); }
+
+/* ─── Hover actions toolbar on every message bubble ───
+   Appears on hover at the top-right of the message. Slack-style affordance
+   for thread/quote/link actions. Positioned absolutely so it doesn't
+   reflow the message layout. */
+.message { position: relative; }
+.message-hover-actions {
+  position: absolute;
+  top: -12px;
+  right: 16px;
+  display: none;
+  gap: 2px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  z-index: 2;
+}
+.message:hover > .message-hover-actions,
+.message:focus-within > .message-hover-actions { display: inline-flex; }
+.message-hover-btn {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.12s, color 0.12s;
+}
+.message-hover-btn:hover { background: var(--bg-warm); color: var(--text); }
+.message-hover-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* ─── Thread collapse/expand toggle ───
+   Renders between the parent and the reply stack. Behaves like a
+   disclosure triangle — chevron rotates to indicate state, the whole
+   button is clickable and keyboard-accessible. */
+.thread-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 2px 44px;
+  padding: 3px 10px 3px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  align-self: flex-start;
+}
+.thread-collapse-toggle:hover {
+  background: var(--bg-warm);
+  border-color: var(--border);
+  color: var(--text);
+}
+.thread-collapse-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.thread-collapse-chevron { transition: transform 0.15s ease; }
+.thread-group-collapsed .thread-collapse-toggle { color: var(--accent); }
