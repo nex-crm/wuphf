@@ -170,15 +170,7 @@ func TestAutoPromote_SystemAndSyntheticSendersSkipped(t *testing.T) {
 // If either the broker fix (auto-promote) or the launcher fix (routing, PR
 // #218) regresses, this test catches it.
 func TestAutoPromote_EndToEnd_HumanTagsPM_DispatchesToPM(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
-	b.mu.Lock()
-	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
-	b.mu.Unlock()
+	b := newBrokerWithPM(t)
 
 	l := newHeadlessLauncherForTest()
 	l.broker = b
@@ -215,17 +207,26 @@ func TestAutoPromote_EndToEnd_HumanTagsPM_DispatchesToPM(t *testing.T) {
 	// Now dispatch: the launcher should wake PM (not CEO absorbing it).
 	l.deliverMessageNotification(msg)
 
+	// Wait for at least one dispatch, then non-blocking drain. Avoids paying
+	// the full deadline on every green-path run.
 	var slugs []string
-	deadline := time.After(500 * time.Millisecond)
-collect:
+	select {
+	case turn := <-processed:
+		if idx := strings.Index(turn, "|"); idx > 0 {
+			slugs = append(slugs, turn[:idx])
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatalf("stage 2: no dispatch within 500ms after @pm message")
+	}
+drain:
 	for {
 		select {
 		case turn := <-processed:
 			if idx := strings.Index(turn, "|"); idx > 0 {
 				slugs = append(slugs, turn[:idx])
 			}
-		case <-deadline:
-			break collect
+		default:
+			break drain
 		}
 	}
 
@@ -259,9 +260,10 @@ func TestRespawnPanesAfterReseed_TmuxNoServerClassifiedAsMissing(t *testing.T) {
 		{"generic exec fail without tmux prefix", "exec: binary unreadable", false},
 	}
 	for _, c := range cases {
-		got := isMissingTmuxSession(c.errMsg)
-		if got != c.silence {
-			t.Errorf("%s: isMissingTmuxSession(%q) = %v, want %v", c.name, c.errMsg, got, c.silence)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			if got := isMissingTmuxSession(c.errMsg); got != c.silence {
+				t.Errorf("isMissingTmuxSession(%q) = %v, want %v", c.errMsg, got, c.silence)
+			}
+		})
 	}
 }

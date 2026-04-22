@@ -2261,8 +2261,11 @@ func (b *Broker) DisabledMembers(channel string) []string {
 // humans (empty / "you" / "human") and any registered agent slug are allowed;
 // synthetic senders ("system", "nex", bridges, automation kinds) are not. A
 // denylist would silently let every future synthetic identity leak through.
+// Sender is normalized first so case drift ("PM", "Human") matches the
+// allowlist the same way channel access does.
 // Caller must hold b.mu.
 func (b *Broker) senderMayAutoPromoteLocked(from string) bool {
+	from = normalizeActorSlug(from)
 	switch from {
 	case "", "you", "human":
 		return true
@@ -7091,9 +7094,10 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// synthetic senders — is excluded by default so automation posts do not
 	// accidentally wake agents on every @-reference they quote.
 	tagged := uniqueSlugs(body.Tagged)
-	if b.senderMayAutoPromoteLocked(body.From) {
+	sender := normalizeActorSlug(body.From)
+	if b.senderMayAutoPromoteLocked(sender) {
 		for _, slug := range extractMentionedSlugs(body.Content) {
-			if slug == body.From {
+			if slug == sender {
 				continue
 			}
 			if b.findMemberLocked(slug) == nil {
