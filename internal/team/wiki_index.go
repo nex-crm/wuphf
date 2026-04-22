@@ -392,6 +392,7 @@ func (w *WikiIndex) ListEdgesForEntity(ctx context.Context, slug string) ([]Inde
 //   - team/entities/{kind}-{slug}.facts.jsonl  (v1.2 legacy)
 //   - team/{kind}/{slug}.md               (entity brief)
 //   - graph.log                           (typed edges)
+//   - wiki/.lint/report-YYYY-MM-DD.md     (lint report; §3 Layer-2)
 func (w *WikiIndex) ReconcilePath(ctx context.Context, relPath string) error {
 	abs := filepath.Join(w.root, filepath.FromSlash(relPath))
 	switch {
@@ -399,6 +400,8 @@ func (w *WikiIndex) ReconcilePath(ctx context.Context, relPath string) error {
 		return w.reconcileFactLog(ctx, abs, relPath)
 	case isEntityBriefPath(relPath):
 		return w.reconcileEntityBrief(ctx, abs, relPath)
+	case isLintReportPath(relPath):
+		return w.reconcileLintReport(ctx, abs, relPath)
 	case relPath == "graph.log":
 		return w.reconcileGraphLog(ctx, abs)
 	default:
@@ -437,6 +440,11 @@ func (w *WikiIndex) ReconcileFromMarkdown(ctx context.Context) error {
 		}
 	}
 
+	lintDir := filepath.Join(w.root, "wiki", ".lint")
+	if err := walkLintReports(ctx, lintDir, w); err != nil {
+		return fmt.Errorf("wiki_index: reconcile lint reports: %w", err)
+	}
+
 	w.mu.Lock()
 	w.lastBuild = time.Now()
 	w.mu.Unlock()
@@ -462,6 +470,7 @@ var (
 	factLogNewSchema = regexp.MustCompile(`^wiki/facts/[^/]+/[^/]+\.jsonl$`)
 	factLogLegacyV12 = regexp.MustCompile(`^team/entities/[a-z]+-[a-z0-9][a-z0-9-]*\.facts\.jsonl$`)
 	entityBriefPath  = regexp.MustCompile(`^team/[^/]+/[^/]+\.md$`)
+	lintReportPath   = regexp.MustCompile(`^wiki/\.lint/report-\d{4}-\d{2}-\d{2}\.md$`)
 )
 
 func isFactLogPath(relPath string) bool {
@@ -472,6 +481,11 @@ func isFactLogPath(relPath string) bool {
 func isEntityBriefPath(relPath string) bool {
 	rel := filepath.ToSlash(relPath)
 	return entityBriefPath.MatchString(rel)
+}
+
+func isLintReportPath(relPath string) bool {
+	rel := filepath.ToSlash(relPath)
+	return lintReportPath.MatchString(rel)
 }
 
 // --- reconcile bodies ----------------------------------------------------
@@ -601,6 +615,37 @@ func (w *WikiIndex) reconcileGraphLog(ctx context.Context, abs string) error {
 	return nil
 }
 
+// reconcileLintReport indexes a lint report at wiki/.lint/report-YYYY-MM-DD.md as
+// a single TypedFact so BM25 search can find lint observations. The synthetic
+// fact ID is lint_YYYY_MM_DD. EntitySlug is "_lint", Type is "observation".
+// Structured-store rows stay empty; only the text index is populated.
+func (w *WikiIndex) reconcileLintReport(ctx context.Context, abs, relPath string) error {
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("wiki_index: read lint report %s: %w", relPath, err)
+	}
+	// Extract YYYY-MM-DD from filename: wiki/.lint/report-YYYY-MM-DD.md
+	base := filepath.Base(abs)
+	date := strings.TrimSuffix(strings.TrimPrefix(base, "report-"), ".md")
+	syntheticID := "lint_" + strings.ReplaceAll(date, "-", "_")
+	f := TypedFact{
+		ID:         syntheticID,
+		EntitySlug: "_lint",
+		Type:       "observation",
+		Text:       string(data),
+		SourcePath: relPath,
+		CreatedAt:  time.Now().UTC(),
+		CreatedBy:  "lint-indexer",
+	}
+	if err := w.text.Index(ctx, f); err != nil {
+		return fmt.Errorf("wiki_index: text index lint report %s: %w", syntheticID, err)
+	}
+	return nil
+}
+
 // --- walkers --------------------------------------------------------------
 
 func walkFactLogs(ctx context.Context, dir string, w *WikiIndex) error {
@@ -650,6 +695,31 @@ func walkEntityBriefs(ctx context.Context, dir string, w *WikiIndex) error {
 			return relErr
 		}
 		return w.reconcileEntityBrief(ctx, path, filepath.ToSlash(rel))
+	})
+}
+
+func walkLintReports(ctx context.Context, dir string, w *WikiIndex) error {
+	if _, err := os.Stat(dir); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+		rel, relErr := filepath.Rel(w.root, path)
+		if relErr != nil {
+			return relErr
+		}
+		return w.reconcileLintReport(ctx, path, filepath.ToSlash(rel))
 	})
 }
 

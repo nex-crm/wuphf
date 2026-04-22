@@ -468,3 +468,44 @@ func TestFrontmatterList_InlineBracket(t *testing.T) {
 		t.Errorf("frontmatterList inline = %v, want [Sarah J., sjones]", got)
 	}
 }
+
+// TestWikiIndex_LintReportIndexed verifies that lint reports at
+// wiki/.lint/report-YYYY-MM-DD.md are indexed and findable via BM25 search
+// (L18 fix).
+func TestWikiIndex_LintReportIndexed(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	lintDir := filepath.Join(root, "wiki", ".lint")
+	if err := os.MkdirAll(lintDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	reportBody := "# Lint Report 2026-04-22\n\nContradiction found in sarah-jones role.\n"
+	if err := os.WriteFile(filepath.Join(lintDir, "report-2026-04-22.md"), []byte(reportBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := NewWikiIndex(root)
+	defer idx.Close()
+	if err := idx.ReconcileFromMarkdown(ctx); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	hits, err := idx.Search(ctx, "contradiction", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("Search(contradiction) returned no hits; lint report not indexed")
+	}
+	found := false
+	for _, h := range hits {
+		if h.FactID == "lint_2026_04_22" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("hit list = %+v; want a hit with FactID lint_2026_04_22", hits)
+	}
+}
