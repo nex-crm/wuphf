@@ -6,6 +6,7 @@ type Route =
   | { view: 'dm'; agent: string }
   | { view: 'app'; app: string }
   | { view: 'wiki'; articlePath: string | null }
+  | { view: 'wiki-lookup'; query: string }
   | { view: 'notebooks'; agentSlug: string | null; entrySlug: string | null }
   | { view: 'reviews' }
 
@@ -23,6 +24,11 @@ function parseHash(hash: string): Route {
   }
   if (parts[0] === 'threads') {
     return { view: 'app', app: 'threads' }
+  }
+  if (parts[0] === 'wiki' && parts[1] === 'lookup') {
+    const params = new URLSearchParams(window.location.search.slice(1) || cleaned.split('?')[1] || '')
+    const q = params.get('q') || ''
+    return { view: 'wiki-lookup', query: decodeURIComponent(q) }
   }
   if (parts[0] === 'wiki') {
     const rest = parts.slice(1).map(decodeURIComponent).join('/')
@@ -44,9 +50,15 @@ function stateToHash(state: {
   currentChannel: string
   channelMeta: Record<string, ChannelMeta>
   wikiPath: string | null
+  wikiLookupQuery: string | null
   notebookAgentSlug: string | null
   notebookEntrySlug: string | null
 }): string {
+  if (state.currentApp === 'wiki-lookup') {
+    return state.wikiLookupQuery
+      ? `#/wiki/lookup?q=${encodeURIComponent(state.wikiLookupQuery)}`
+      : '#/wiki/lookup'
+  }
   if (state.currentApp === 'wiki') {
     return state.wikiPath
       ? `#/wiki/${state.wikiPath.split('/').map(encodeURIComponent).join('/')}`
@@ -96,6 +108,8 @@ export function useHashRouter() {
   const setLastMessageId = useAppStore((s) => s.setLastMessageId)
   const wikiPath = useAppStore((s) => s.wikiPath)
   const setWikiPath = useAppStore((s) => s.setWikiPath)
+  const wikiLookupQuery = useAppStore((s) => s.wikiLookupQuery)
+  const setWikiLookupQuery = useAppStore((s) => s.setWikiLookupQuery)
   const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug)
   const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug)
   const setNotebookRoute = useAppStore((s) => s.setNotebookRoute)
@@ -118,6 +132,9 @@ export function useHashRouter() {
         enterDM(route.agent, directChannelSlug(route.agent))
       } else if (route.view === 'app') {
         setCurrentApp(route.app)
+      } else if (route.view === 'wiki-lookup') {
+        setWikiLookupQuery(route.query)
+        setCurrentApp('wiki-lookup')
       } else if (route.view === 'wiki') {
         setWikiPath(route.articlePath)
         setCurrentApp('wiki')
@@ -136,7 +153,7 @@ export function useHashRouter() {
     applyHash()
     window.addEventListener('hashchange', applyHash)
     return () => window.removeEventListener('hashchange', applyHash)
-  }, [enterDM, setCurrentApp, setCurrentChannel, setLastMessageId, setWikiPath, setNotebookRoute])
+  }, [enterDM, setCurrentApp, setCurrentChannel, setLastMessageId, setWikiPath, setWikiLookupQuery, setNotebookRoute])
 
   // Push store changes back into the hash
   useEffect(() => {
@@ -149,6 +166,7 @@ export function useHashRouter() {
       currentChannel,
       channelMeta,
       wikiPath,
+      wikiLookupQuery,
       notebookAgentSlug,
       notebookEntrySlug,
     })
@@ -158,5 +176,5 @@ export function useHashRouter() {
       // then push afterwards.
       window.history.replaceState(null, '', next)
     }
-  }, [currentApp, currentChannel, channelMeta, wikiPath, notebookAgentSlug, notebookEntrySlug])
+  }, [currentApp, currentChannel, channelMeta, wikiPath, wikiLookupQuery, notebookAgentSlug, notebookEntrySlug])
 }
