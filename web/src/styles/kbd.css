@@ -126,27 +126,36 @@
   border-color: currentColor;
 }
 .sidebar-item.active .sidebar-shortcut .kbd {
-  background: rgba(255, 255, 255, 0.95);
+  /* Softer than pure white so the channel name stays the loudest element
+     on the row. Semi-transparent surface reads as "pill, not flag". */
+  background: rgba(255, 255, 255, 0.7);
   color: var(--text);
   border-color: transparent;
 }
 
-/* Status-bar "? for shortcuts" pill. Clickable — opens help modal. */
+/* Status-bar "? for shortcuts" pill. Clickable — opens help modal.
+   Touch target expanded to the full 36px status-bar height via vertical
+   padding + negative margin so the button remains visually flush with
+   sibling status items but has a 32px+ hit area (desktop-mouse target). */
 .status-bar-shortcut {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   background: none;
   border: none;
-  padding: 0;
+  padding: 8px 6px;
+  margin: -8px 0;
+  border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-tertiary);
   cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
 .status-bar-shortcut:hover,
 .status-bar-shortcut:focus-visible {
   color: var(--text);
+  background: var(--accent-bg, rgba(0, 0, 0, 0.04));
   outline: none;
 }
 .status-bar-shortcut .kbd {

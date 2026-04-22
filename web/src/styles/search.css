@@ -156,7 +156,7 @@
 .cmd-palette-item-desc { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cmd-palette-item-meta { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); flex-shrink: 0; }
 .cmd-palette-footer { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); }
-.cmd-palette-footer kbd { font-family: var(--font-mono); font-size: 10px; padding: 1px 5px; background: var(--bg); border: 1px solid var(--border); border-radius: 3px; margin-right: 4px; color: var(--text-secondary); }
+.cmd-palette-footer .kbd { margin-right: 4px; }
 
 /* ═══════════════════════════════════════════════════════════════
    Channel Wizard
