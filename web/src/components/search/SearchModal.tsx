@@ -4,13 +4,15 @@ import { useAppStore } from '../../stores/app'
 import { useChannels } from '../../hooks/useChannels'
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { getMessages, post, type Message } from '../../api/client'
+import { searchWiki, type WikiSearchHit } from '../../api/wiki'
+import { searchNotebook, type NotebookSearchHit } from '../../api/notebook'
 import { showNotice } from '../ui/Toast'
 import { openProviderSwitcher } from '../ui/ProviderSwitcher'
 import { SLASH_COMMANDS } from '../messages/Autocomplete'
 
 interface PaletteItem {
   id: string
-  group: 'Channels' | 'Agents' | 'Commands' | 'Messages'
+  group: 'Channels' | 'Agents' | 'Commands' | 'Messages' | 'Wiki' | 'Notebooks'
   icon: string
   label: string
   desc?: string
@@ -31,7 +33,6 @@ function formatTime(ts: string): string {
   }
 }
 
-/** Split text into alternating plain/highlighted segments using React elements. */
 function highlightMatch(text: string, query: string): ReactNode {
   if (!query) return text
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -44,10 +45,23 @@ function highlightMatch(text: string, query: string): ReactNode {
   })
 }
 
-/**
- * Cmd+K command palette. Searches across channels, agents, slash commands,
- * and recent messages. Mirrors the legacy IIFE behavior.
- */
+function prettyWikiPath(path: string): string {
+  return path.replace(/^team\//, '').replace(/\.md$/, '')
+}
+
+function parseNotebookPath(path: string): { agent: string; entry: string } | null {
+  // `agents/<slug>/<entry>.md` — split and validate the shape without regex
+  // capture groups that trip up some static analyzers.
+  if (!path.startsWith('agents/') || !path.endsWith('.md')) return null
+  const stripped = path.slice('agents/'.length, -3)
+  const firstSlash = stripped.indexOf('/')
+  if (firstSlash <= 0 || firstSlash === stripped.length - 1) return null
+  const agent = stripped.slice(0, firstSlash)
+  const entry = stripped.slice(firstSlash + 1)
+  if (entry.includes('/')) return null
+  return { agent, entry }
+}
+
 export function SearchModal() {
   const searchOpen = useAppStore((s) => s.searchOpen)
   const setSearchOpen = useAppStore((s) => s.setSearchOpen)
@@ -56,75 +70,114 @@ export function SearchModal() {
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug)
   const enterDM = useAppStore((s) => s.enterDM)
   const setLastMessageId = useAppStore((s) => s.setLastMessageId)
+  const setWikiPath = useAppStore((s) => s.setWikiPath)
+  const setNotebookRoute = useAppStore((s) => s.setNotebookRoute)
+  const composerSearchInitialQuery = useAppStore((s) => s.composerSearchInitialQuery)
+  const setComposerSearchInitialQuery = useAppStore((s) => s.setComposerSearchInitialQuery)
   const { data: channels = [] } = useChannels()
   const { data: members = [] } = useOfficeMembers()
 
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
   const [messageHits, setMessageHits] = useState<MessageHit[]>([])
+  const [wikiHits, setWikiHits] = useState<WikiSearchHit[]>([])
+  const [notebookHits, setNotebookHits] = useState<NotebookSearchHit[]>([])
   const [searching, setSearching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const close = useCallback(() => setSearchOpen(false), [setSearchOpen])
 
-  // Focus input when modal opens; reset state when closing
-  useEffect(() => {
-    if (searchOpen) {
-      const t = setTimeout(() => inputRef.current?.focus(), 50)
-      return () => clearTimeout(t)
-    }
-    setQuery('')
-    setMessageHits([])
-    setSelectedIdx(0)
-  }, [searchOpen])
-
-  // Debounced message search
-  const runMessageSearch = useCallback(
-    async (q: string) => {
-      const trimmed = q.trim().toLowerCase()
-      if (trimmed.length < 2 || channels.length === 0) {
+  const runSearch = useCallback(
+    async (raw: string) => {
+      const trimmed = raw.trim()
+      const needle = trimmed.toLowerCase()
+      if (needle.length < 2 || channels.length === 0) {
         setMessageHits([])
+        setWikiHits([])
+        setNotebookHits([])
         return
       }
       setSearching(true)
       try {
-        const fetches = channels.map(async (ch) => {
-          try {
-            const { messages } = await getMessages(ch.slug, null, 100)
-            return messages
-              .filter((m) => m.content?.toLowerCase().includes(trimmed))
-              .map((m): MessageHit => ({ ...m, matchedChannel: ch.slug }))
-          } catch {
-            return [] as MessageHit[]
-          }
-        })
-        const grouped = await Promise.all(fetches)
-        const flat = grouped
-          .flat()
-          .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-          .slice(0, 8)
-        setMessageHits(flat)
+        const messagesP = Promise.all(
+          channels.map(async (ch) => {
+            try {
+              const { messages } = await getMessages(ch.slug, null, 100)
+              return messages
+                .filter((m) => m.content?.toLowerCase().includes(needle))
+                .map((m): MessageHit => ({ ...m, matchedChannel: ch.slug }))
+            } catch {
+              return [] as MessageHit[]
+            }
+          }),
+        ).then((grouped) =>
+          grouped
+            .flat()
+            .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+            .slice(0, 8),
+        )
+
+        const wikiP = searchWiki(trimmed).then((hits) => hits.slice(0, 8))
+
+        const agentSlugs = members
+          .map((m) => m.slug)
+          .filter(
+            (s): s is string =>
+              typeof s === 'string' && s !== 'human' && s !== 'you' && s !== 'system',
+          )
+        const notebookP = Promise.all(
+          agentSlugs.map((slug) =>
+            searchNotebook(slug, trimmed).catch(() => [] as NotebookSearchHit[]),
+          ),
+        ).then((grouped) => grouped.flat().slice(0, 8))
+
+        const [msg, wiki, nb] = await Promise.all([messagesP, wikiP, notebookP])
+        setMessageHits(msg)
+        setWikiHits(wiki)
+        setNotebookHits(nb)
       } finally {
         setSearching(false)
       }
     },
-    [channels],
+    [channels, members],
   )
 
-  function handleQueryChange(value: string) {
-    setQuery(value)
-    setSelectedIdx(0)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => runMessageSearch(value), 250)
-  }
+  const handleQueryChange = useCallback(
+    (value: string) => {
+      setQuery(value)
+      setSelectedIdx(0)
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => runSearch(value), 250)
+    },
+    [runSearch],
+  )
 
-  // Build the flat list of items in display order
+  useEffect(() => {
+    if (searchOpen) {
+      const t = setTimeout(() => inputRef.current?.focus(), 50)
+      if (composerSearchInitialQuery) {
+        handleQueryChange(composerSearchInitialQuery)
+        setComposerSearchInitialQuery('')
+      }
+      return () => clearTimeout(t)
+    }
+    setQuery('')
+    setMessageHits([])
+    setWikiHits([])
+    setNotebookHits([])
+    setSelectedIdx(0)
+  }, [
+    searchOpen,
+    composerSearchInitialQuery,
+    handleQueryChange,
+    setComposerSearchInitialQuery,
+  ])
+
   const items = useMemo<PaletteItem[]>(() => {
     const q = query.trim().toLowerCase()
     const list: PaletteItem[] = []
 
-    // Channels
     for (const ch of channels) {
       const hay = `${ch.slug} ${ch.name ?? ''} ${ch.description ?? ''}`.toLowerCase()
       if (q && !hay.includes(q.replace(/^#/, ''))) continue
@@ -144,7 +197,6 @@ export function SearchModal() {
       })
     }
 
-    // Agents
     for (const m of members) {
       if (!m.slug || m.slug === 'human' || m.slug === 'you' || m.slug === 'system') continue
       const hay = `${m.slug} ${m.name ?? ''} ${m.role ?? ''}`.toLowerCase()
@@ -152,7 +204,7 @@ export function SearchModal() {
       list.push({
         id: 'ag:' + m.slug,
         group: 'Agents',
-        icon: m.emoji || '\uD83E\uDD16',
+        icon: m.emoji || '🤖',
         label: m.name || m.slug,
         desc: m.role,
         meta: '@' + m.slug,
@@ -163,7 +215,6 @@ export function SearchModal() {
       })
     }
 
-    // Slash commands
     for (const c of SLASH_COMMANDS) {
       const hay = `${c.name} ${c.desc}`.toLowerCase()
       if (q && !hay.includes(q.replace(/^\//, ''))) continue
@@ -174,7 +225,6 @@ export function SearchModal() {
         label: c.name,
         desc: c.desc,
         run: () => {
-          // Map command to its action via the same dispatcher the composer uses
           dispatchPaletteCommand(c.name, {
             setCurrentApp,
             setCurrentChannel,
@@ -187,14 +237,13 @@ export function SearchModal() {
       })
     }
 
-    // Message hits (only when there's a query)
     if (q.length >= 2) {
       for (const hit of messageHits) {
         const snippet = hit.content.length > 100 ? hit.content.slice(0, 100) + '...' : hit.content
         list.push({
           id: 'msg:' + hit.id + ':' + hit.matchedChannel,
           group: 'Messages',
-          icon: '\uD83D\uDCAC',
+          icon: '💬',
           label: `${hit.from}: ${snippet}`,
           desc: '#' + hit.matchedChannel + ' · ' + formatTime(hit.timestamp),
           run: () => {
@@ -205,17 +254,67 @@ export function SearchModal() {
           },
         })
       }
+
+      for (const hit of wikiHits) {
+        list.push({
+          id: 'wiki:' + hit.path + ':' + hit.line,
+          group: 'Wiki',
+          icon: '📖',
+          label: prettyWikiPath(hit.path),
+          desc: hit.snippet.trim().slice(0, 120),
+          meta: 'L' + hit.line,
+          run: () => {
+            setCurrentApp('wiki')
+            setWikiPath(hit.path)
+            close()
+          },
+        })
+      }
+
+      for (const hit of notebookHits) {
+        const parsed = parseNotebookPath(hit.path)
+        const label = parsed ? `${parsed.agent} · ${parsed.entry}` : hit.path
+        list.push({
+          id: 'nb:' + hit.path + ':' + hit.line,
+          group: 'Notebooks',
+          icon: '📓',
+          label,
+          desc: hit.snippet.trim().slice(0, 120),
+          meta: 'L' + hit.line,
+          run: () => {
+            setCurrentApp('notebooks')
+            if (parsed) {
+              setNotebookRoute(parsed.agent, parsed.entry)
+            }
+            close()
+          },
+        })
+      }
     }
 
     return list
-  }, [query, channels, members, messageHits, setCurrentApp, setCurrentChannel, setActiveAgentSlug, setLastMessageId, setSearchOpen, enterDM, close])
+  }, [
+    query,
+    channels,
+    members,
+    messageHits,
+    wikiHits,
+    notebookHits,
+    setCurrentApp,
+    setCurrentChannel,
+    setActiveAgentSlug,
+    setLastMessageId,
+    setSearchOpen,
+    setWikiPath,
+    setNotebookRoute,
+    enterDM,
+    close,
+  ])
 
-  // Clamp selection
   useEffect(() => {
     setSelectedIdx((idx) => Math.min(idx, Math.max(items.length - 1, 0)))
   }, [items.length])
 
-  // Keyboard handling
   useEffect(() => {
     if (!searchOpen) return
     function handleKeyDown(e: KeyboardEvent) {
@@ -244,7 +343,6 @@ export function SearchModal() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [searchOpen, items, selectedIdx, close])
 
-  // Group items for rendering, preserving the flat index for selection
   const grouped = useMemo(() => {
     const out: { group: PaletteItem['group']; items: { item: PaletteItem; flatIdx: number }[] }[] = []
     items.forEach((item, idx) => {
@@ -276,7 +374,7 @@ export function SearchModal() {
             ref={inputRef}
             className="search-input"
             type="text"
-            placeholder="Search channels, agents, commands, messages..."
+            placeholder="Search channels, agents, commands, messages, wiki, notebooks..."
             value={query}
             onChange={(e) => handleQueryChange(e.target.value)}
           />
@@ -303,10 +401,16 @@ export function SearchModal() {
                     <span className="cmd-palette-item-icon">{item.icon}</span>
                     <span className="cmd-palette-item-text">
                       <span className="cmd-palette-item-label">
-                        {item.group === 'Messages' ? highlightMatch(item.label, query.trim()) : item.label}
+                        {item.group === 'Messages' || item.group === 'Wiki' || item.group === 'Notebooks'
+                          ? highlightMatch(item.label, query.trim())
+                          : item.label}
                       </span>
                       {item.desc && (
-                        <span className="cmd-palette-item-desc">{item.desc}</span>
+                        <span className="cmd-palette-item-desc">
+                          {item.group === 'Wiki' || item.group === 'Notebooks'
+                            ? highlightMatch(item.desc, query.trim())
+                            : item.desc}
+                        </span>
                       )}
                     </span>
                     {item.meta && <span className="cmd-palette-item-meta">{item.meta}</span>}
@@ -341,8 +445,14 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
       showNotice('Messages cleared', 'info')
       return
     case '/help':
-      showNotice('Use the palette: type to filter, ↑↓ to move, Enter to open.', 'info')
+      useAppStore.getState().setComposerHelpOpen(true)
       return
+    case '/ask':
+    case '/remember':
+      showNotice(`${name} requires arguments — type it in the composer.`, 'info')
+      return
+    case '/search':
+      deps.setSearchOpen(true); return
     case '/requests':
       deps.setCurrentApp('requests'); return
     case '/policies':
@@ -360,8 +470,6 @@ function dispatchPaletteCommand(name: string, deps: CommandDeps) {
       deps.setCurrentApp('threads'); return
     case '/provider':
       openProviderSwitcher(); return
-    case '/search':
-      deps.setSearchOpen(true); return
     case '/focus':
       post('/focus-mode', { focus_mode: true })
         .then(() => showNotice('Switched to delegation mode', 'success'))

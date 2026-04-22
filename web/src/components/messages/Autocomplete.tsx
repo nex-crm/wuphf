@@ -19,10 +19,12 @@ export interface SlashCommand {
 }
 
 export const SLASH_COMMANDS: SlashCommand[] = [
+  { name: '/ask', desc: 'Ask the team lead', icon: '\uD83D\uDCAC' },
+  { name: '/search', desc: 'Search messages + KB', icon: '\uD83D\uDD0E' },
+  { name: '/remember', desc: 'Store a fact in memory', icon: '\uD83E\uDDE0' },
+  { name: '/help', desc: 'Show all commands + keys', icon: '\u2753' },
   { name: '/clear', desc: 'Clear messages', icon: '\uD83E\uDDF9' },
-  { name: '/help', desc: 'Show all commands', icon: '\u2753' },
   { name: '/reset', desc: 'Reset the office', icon: '\uD83D\uDD04' },
-  { name: '/search', desc: 'Search messages', icon: '\uD83D\uDD0E' },
   { name: '/tasks', desc: 'Open task board', icon: '\uD83D\uDCCB' },
   { name: '/requests', desc: 'Open requests', icon: '\uD83D\uDD14' },
   { name: '/recover', desc: 'Health Check view', icon: '\uD83D\uDD01' },

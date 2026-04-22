@@ -7,6 +7,7 @@ import { RuntimeStrip } from './RuntimeStrip'
 import { ThreadPanel } from '../messages/ThreadPanel'
 import { AgentPanel } from '../agents/AgentPanel'
 import { SearchModal } from '../search/SearchModal'
+import { HelpModalHost } from '../ui/HelpModal'
 import { useAppStore, isDMChannel } from '../../stores/app'
 
 interface ShellProps {
@@ -32,6 +33,7 @@ export function Shell({ children }: ShellProps) {
       <ThreadPanel />
       <AgentPanel />
       <SearchModal />
+      <HelpModalHost />
     </div>
   )
 }

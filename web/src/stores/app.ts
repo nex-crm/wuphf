@@ -101,6 +101,16 @@ export interface AppStore {
   // Search
   searchOpen: boolean
   setSearchOpen: (v: boolean) => void
+  /**
+   * Query to prefill in the SearchModal on next open. Set by the composer
+   * `/search <query>` command and cleared by the modal when consumed.
+   */
+  composerSearchInitialQuery: string
+  setComposerSearchInitialQuery: (q: string) => void
+
+  // Help modal — /help slash command surface
+  composerHelpOpen: boolean
+  setComposerHelpOpen: (v: boolean) => void
 
   // Onboarding
   onboardingComplete: boolean
@@ -183,6 +193,11 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
+  composerSearchInitialQuery: '',
+  setComposerSearchInitialQuery: (q) => set({ composerSearchInitialQuery: q }),
+
+  composerHelpOpen: false,
+  setComposerHelpOpen: (v) => set({ composerHelpOpen: v }),
 
   onboardingComplete: false,
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),

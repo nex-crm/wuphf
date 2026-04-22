@@ -250,6 +250,34 @@ export async function fetchCatalog(): Promise<WikiCatalogEntry[]> {
   }
 }
 
+/**
+ * One hit from `/wiki/search` — mirrors Go's `team.WikiSearchHit`.
+ * The broker returns literal substring hits (no regex), capped at 100.
+ */
+export interface WikiSearchHit {
+  path: string
+  line: number
+  snippet: string
+}
+
+/**
+ * GET /wiki/search?pattern=... — literal substring search across team/**.md.
+ * Returns [] on any error so the SearchModal can render empty state without
+ * blowing up.
+ */
+export async function searchWiki(pattern: string): Promise<WikiSearchHit[]> {
+  const trimmed = pattern.trim()
+  if (!trimmed) return []
+  try {
+    const res = await get<{ hits: WikiSearchHit[] }>(
+      `/wiki/search?pattern=${encodeURIComponent(trimmed)}`,
+    )
+    return Array.isArray(res?.hits) ? res.hits : []
+  } catch {
+    return []
+  }
+}
+
 export interface WikiAuditEntry {
   sha: string
   author_slug: string

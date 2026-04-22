@@ -110,6 +110,40 @@ export interface NotebookEvent {
   timestamp?: string
 }
 
+/**
+ * One hit from `/notebook/search`. The broker reuses the wiki hit shape,
+ * and we tag it with the agent slug the caller searched so the UI can
+ * render `<agent> · <entry>` without re-parsing the path.
+ */
+export interface NotebookSearchHit {
+  path: string
+  line: number
+  snippet: string
+  agent_slug: string
+}
+
+/**
+ * GET /notebook/search?slug=&q=... — literal substring search inside one
+ * agent's notebook. Returns [] on any error so the SearchModal can fall
+ * back to empty state without breaking.
+ */
+export async function searchNotebook(
+  agentSlug: string,
+  pattern: string,
+): Promise<NotebookSearchHit[]> {
+  const trimmed = pattern.trim()
+  if (!trimmed || !agentSlug) return []
+  try {
+    const res = await get<{ hits: Array<{ path: string; line: number; snippet: string }> }>(
+      `/notebook/search?slug=${encodeURIComponent(agentSlug)}&q=${encodeURIComponent(trimmed)}`,
+    )
+    const hits = Array.isArray(res?.hits) ? res.hits : []
+    return hits.map((h) => ({ ...h, agent_slug: agentSlug }))
+  } catch {
+    return []
+  }
+}
+
 // ── Env toggle ───────────────────────────────────────────────────
 
 function useMocks(): boolean {
