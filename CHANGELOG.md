@@ -2,6 +2,13 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.6.2] - 2026-04-22
+
+### Fixed
+
+- **Typing `@pm` in a human message now tags PM.** The web composer does not always commit typed `@slug` text into an explicit tag chip, so the POST body arrived with `tagged: []`. Routing then treated the message as untagged and woke CEO instead. The broker now auto-promotes `@slug` body mentions to `tagged` for every sender (not only agents), provided the slug matches a registered agent. Conversational `@` references to non-agents stay untouched.
+- **`office_reseeded: respawn panes failed: tmux: no server running` no longer logs as an error.** Web/headless mode never has a tmux server; attaching to it is expected to fail and the headless dispatch path handles delivery. The no-session error class is now silenced there, so the console stops surfacing a recurring error for a normal code path. Real failures (permission denied, corrupt state) keep logging.
+
 ## [0.0.6.1] - 2026-04-22
 
 ### Fixed
