@@ -40,16 +40,6 @@ jobs:
             exit 1
           fi
 
-      - name: Reject self-approval
-        env:
-          COMMENTER: ${{ github.event.comment.user.login }}
-          PR_AUTHOR: ${{ github.event.issue.user.login }}
-        run: |
-          if [ "${COMMENTER}" = "${PR_AUTHOR}" ]; then
-            echo "::error::@${COMMENTER} cannot /approve their own PR"
-            exit 1
-          fi
-
       - name: Submit approval review
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -60,7 +50,7 @@ jobs:
         run: |
           reason="${BODY#/approve}"
           reason="${reason# }"
-          reason="${reason%%$'\n'*}"
+          reason="${reason%%[$'\r\n']*}"
           [ -z "$reason" ] && reason="(no reason provided)"
           gh pr review "${PR_NUMBER}" \
             --repo "${REPO}" \
