@@ -75,7 +75,7 @@ func (b *Broker) startLintCron(ctx context.Context, idx *WikiIndex, worker *Wiki
 // Never panics — errors are logged and the cron continues.
 func (b *Broker) runLintCronOnce(ctx context.Context, idx *WikiIndex, worker *WikiWorker) {
 	log.Printf("wiki lint cron: running daily lint")
-	prov := &brokerQueryProvider{}
+	prov := &brokerLintProvider{}
 	l := NewLint(idx, worker, prov)
 
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)

@@ -13,18 +13,18 @@ import (
 // spySignalIndex is an in-memory SignalIndex implementation for tests.
 type spySignalIndex struct {
 	mu      sync.Mutex
-	bySlug  map[string]IndexEntity // key = slug
-	byEmail map[string]IndexEntity // key = normalised email
+	bySlug  map[string]resolverEntity // key = slug
+	byEmail map[string]resolverEntity // key = normalised email
 }
 
 func newSpyIndex() *spySignalIndex {
 	return &spySignalIndex{
-		bySlug:  make(map[string]IndexEntity),
-		byEmail: make(map[string]IndexEntity),
+		bySlug:  make(map[string]resolverEntity),
+		byEmail: make(map[string]resolverEntity),
 	}
 }
 
-func (s *spySignalIndex) add(e IndexEntity) {
+func (s *spySignalIndex) add(e resolverEntity) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.bySlug[e.Slug] = e
@@ -33,29 +33,29 @@ func (s *spySignalIndex) add(e IndexEntity) {
 	}
 }
 
-func (s *spySignalIndex) EntityBySlug(_ context.Context, slug string) (IndexEntity, bool, error) {
+func (s *spySignalIndex) EntityBySlug(_ context.Context, slug string) (resolverEntity, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.bySlug[slug]
 	return e, ok, nil
 }
 
-func (s *spySignalIndex) EntityByEmail(_ context.Context, email string) (IndexEntity, bool, error) {
+func (s *spySignalIndex) EntityByEmail(_ context.Context, email string) (resolverEntity, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	e, ok := s.byEmail[email]
 	return e, ok, nil
 }
 
-func (s *spySignalIndex) EntityByDomain(_ context.Context, _ string) ([]IndexEntity, error) {
+func (s *spySignalIndex) EntityByDomain(_ context.Context, _ string) ([]resolverEntity, error) {
 	return nil, nil
 }
 
-func (s *spySignalIndex) EntityByName(_ context.Context, name string) ([]IndexEntity, error) {
+func (s *spySignalIndex) EntityByName(_ context.Context, name string) ([]resolverEntity, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	normQuery := normalizeNameForMatch(name)
-	var out []IndexEntity
+	var out []resolverEntity
 	for _, e := range s.bySlug {
 		if strings.Contains(normalizeNameForMatch(e.Name), normQuery) || normalizeNameForMatch(e.Name) == normQuery {
 			out = append(out, e)
@@ -68,7 +68,7 @@ func (s *spySignalIndex) EntityByName(_ context.Context, name string) ([]IndexEn
 
 func TestResolveEntity_ExistingSlugHonored(t *testing.T) {
 	idx := newSpyIndex()
-	idx.add(IndexEntity{Slug: "sarah-jones", Kind: EntityKindPeople, Name: "Sarah Jones"})
+	idx.add(resolverEntity{Slug: "sarah-jones", Kind: EntityKindPeople, Name: "Sarah Jones"})
 
 	p := ProposedEntity{
 		Kind:         EntityKindPeople,
@@ -94,7 +94,7 @@ func TestResolveEntity_ExistingSlugHonored(t *testing.T) {
 func TestResolveEntity_HallucinatedExistingSlug_FallsThrough(t *testing.T) {
 	idx := newSpyIndex()
 	// Index has "sarah-jones" but NOT "sarah-j".
-	idx.add(IndexEntity{Slug: "sarah-jones", Kind: EntityKindPeople, Name: "Sarah Jones", Email: "sarah@example.com"})
+	idx.add(resolverEntity{Slug: "sarah-jones", Kind: EntityKindPeople, Name: "Sarah Jones", Email: "sarah@example.com"})
 
 	p := ProposedEntity{
 		Kind:         EntityKindPeople,
@@ -117,7 +117,7 @@ func TestResolveEntity_HallucinatedExistingSlug_FallsThrough(t *testing.T) {
 
 func TestResolveEntity_EmailMatchOverridesProposedSlug(t *testing.T) {
 	idx := newSpyIndex()
-	idx.add(IndexEntity{Slug: "michael-chen", Kind: EntityKindPeople, Name: "Michael Chen", Email: "michael@corp.com"})
+	idx.add(resolverEntity{Slug: "michael-chen", Kind: EntityKindPeople, Name: "Michael Chen", Email: "michael@corp.com"})
 
 	p := ProposedEntity{
 		Kind:         EntityKindPeople,
@@ -138,7 +138,7 @@ func TestResolveEntity_EmailMatchOverridesProposedSlug(t *testing.T) {
 
 func TestResolveEntity_FuzzyNameSingleMatch(t *testing.T) {
 	idx := newSpyIndex()
-	idx.add(IndexEntity{Slug: "sarah-jones", Kind: EntityKindPeople, Name: "Sarah Jones"})
+	idx.add(resolverEntity{Slug: "sarah-jones", Kind: EntityKindPeople, Name: "Sarah Jones"})
 
 	p := ProposedEntity{
 		Kind:         EntityKindPeople,
@@ -160,8 +160,8 @@ func TestResolveEntity_FuzzyNameSingleMatch(t *testing.T) {
 func TestResolveEntity_FuzzyNameAmbiguous_NoEntityCreated(t *testing.T) {
 	idx := newSpyIndex()
 	// Two entries with identical names — ambiguous.
-	idx.add(IndexEntity{Slug: "sarah-jones-a", Kind: EntityKindPeople, Name: "Sarah Jones"})
-	idx.add(IndexEntity{Slug: "sarah-jones-b", Kind: EntityKindPeople, Name: "Sarah Jones"})
+	idx.add(resolverEntity{Slug: "sarah-jones-a", Kind: EntityKindPeople, Name: "Sarah Jones"})
+	idx.add(resolverEntity{Slug: "sarah-jones-b", Kind: EntityKindPeople, Name: "Sarah Jones"})
 
 	p := ProposedEntity{
 		Kind:         EntityKindPeople,
@@ -211,7 +211,7 @@ func TestResolveEntity_GhostEntityCreated(t *testing.T) {
 func TestResolveEntity_SlugCollisionSuffix(t *testing.T) {
 	idx := newSpyIndex()
 	// "sarah-jones" already taken.
-	idx.add(IndexEntity{Slug: "sarah-jones", Kind: EntityKindPeople, Name: "Someone Else"})
+	idx.add(resolverEntity{Slug: "sarah-jones", Kind: EntityKindPeople, Name: "Someone Else"})
 
 	p := ProposedEntity{
 		Kind:         EntityKindPeople,
@@ -309,9 +309,9 @@ func TestJaroWinkler_KnownValues(t *testing.T) {
 		{"abc", "xyz", 0.0},
 	}
 	for _, tc := range cases {
-		score := jaroWinkler(tc.a, tc.b)
+		score := JaroWinkler(tc.a, tc.b)
 		if score < tc.wantMin {
-			t.Errorf("jaroWinkler(%q, %q) = %.4f; want >= %.4f", tc.a, tc.b, score, tc.wantMin)
+			t.Errorf("JaroWinkler(%q, %q) = %.4f; want >= %.4f", tc.a, tc.b, score, tc.wantMin)
 		}
 	}
 }
@@ -341,17 +341,17 @@ func TestEntityResolverGate_SpyStore_SingleUpsertCall(t *testing.T) {
 	// and counts. Use a closure struct.
 	var slugCallCount atomic.Int64
 	wrapped := signalIndexFunc{
-		entityBySlug: func(ctx context.Context, slug string) (IndexEntity, bool, error) {
+		entityBySlug: func(ctx context.Context, slug string) (resolverEntity, bool, error) {
 			slugCallCount.Add(1)
 			return base.EntityBySlug(ctx, slug)
 		},
-		entityByEmail: func(ctx context.Context, email string) (IndexEntity, bool, error) {
+		entityByEmail: func(ctx context.Context, email string) (resolverEntity, bool, error) {
 			return base.EntityByEmail(ctx, email)
 		},
-		entityByDomain: func(ctx context.Context, domain string) ([]IndexEntity, error) {
+		entityByDomain: func(ctx context.Context, domain string) ([]resolverEntity, error) {
 			return base.EntityByDomain(ctx, domain)
 		},
-		entityByName: func(ctx context.Context, name string) ([]IndexEntity, error) {
+		entityByName: func(ctx context.Context, name string) ([]resolverEntity, error) {
 			return base.EntityByName(ctx, name)
 		},
 	}
@@ -403,21 +403,21 @@ func TestEntityResolverGate_SpyStore_SingleUpsertCall(t *testing.T) {
 
 // signalIndexFunc is a test helper implementing SignalIndex via function fields.
 type signalIndexFunc struct {
-	entityBySlug   func(ctx context.Context, slug string) (IndexEntity, bool, error)
-	entityByEmail  func(ctx context.Context, email string) (IndexEntity, bool, error)
-	entityByDomain func(ctx context.Context, domain string) ([]IndexEntity, error)
-	entityByName   func(ctx context.Context, name string) ([]IndexEntity, error)
+	entityBySlug   func(ctx context.Context, slug string) (resolverEntity, bool, error)
+	entityByEmail  func(ctx context.Context, email string) (resolverEntity, bool, error)
+	entityByDomain func(ctx context.Context, domain string) ([]resolverEntity, error)
+	entityByName   func(ctx context.Context, name string) ([]resolverEntity, error)
 }
 
-func (f signalIndexFunc) EntityBySlug(ctx context.Context, slug string) (IndexEntity, bool, error) {
+func (f signalIndexFunc) EntityBySlug(ctx context.Context, slug string) (resolverEntity, bool, error) {
 	return f.entityBySlug(ctx, slug)
 }
-func (f signalIndexFunc) EntityByEmail(ctx context.Context, email string) (IndexEntity, bool, error) {
+func (f signalIndexFunc) EntityByEmail(ctx context.Context, email string) (resolverEntity, bool, error) {
 	return f.entityByEmail(ctx, email)
 }
-func (f signalIndexFunc) EntityByDomain(ctx context.Context, domain string) ([]IndexEntity, error) {
+func (f signalIndexFunc) EntityByDomain(ctx context.Context, domain string) ([]resolverEntity, error) {
 	return f.entityByDomain(ctx, domain)
 }
-func (f signalIndexFunc) EntityByName(ctx context.Context, name string) ([]IndexEntity, error) {
+func (f signalIndexFunc) EntityByName(ctx context.Context, name string) ([]resolverEntity, error) {
 	return f.entityByName(ctx, name)
 }

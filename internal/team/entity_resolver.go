@@ -18,25 +18,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"math"
 	"strings"
 	"sync"
 	"unicode"
 )
 
 // ── Public types ──────────────────────────────────────────────────────────────
-
-// Signals carries the structured signals the LLM extractor found for a
-// proposed entity. All fields are optional; the resolver uses whichever
-// are non-empty to identify an existing record.
-type Signals struct {
-	// Email is the normalised (lowercase) email address, if known.
-	Email string
-	// PersonName is the display name of the person or company.
-	PersonName string
-	// Domain is the web domain (companies / customers), e.g. "acme.com".
-	Domain string
-}
 
 // ProposedEntity is the resolver's input: everything the LLM extraction
 // pipeline produced for one entity mention.
@@ -69,8 +56,9 @@ type ResolvedEntity struct {
 	GhostEntity bool
 }
 
-// IndexEntity is the minimal shape the resolver needs from the signal index.
-type IndexEntity struct {
+// resolverEntity is the minimal shape the resolver needs from the signal index.
+// It is distinct from IndexEntity (wiki_index.go) which is the index storage type.
+type resolverEntity struct {
 	Slug  string
 	Kind  EntityKind
 	Name  string
@@ -82,14 +70,14 @@ type IndexEntity struct {
 type SignalIndex interface {
 	// EntityBySlug looks up a single entity by its canonical slug within the
 	// given kind. Returns (zero, false, nil) when not found.
-	EntityBySlug(ctx context.Context, slug string) (IndexEntity, bool, error)
+	EntityBySlug(ctx context.Context, slug string) (resolverEntity, bool, error)
 	// EntityByEmail returns the entity with this normalised email, if any.
-	EntityByEmail(ctx context.Context, email string) (IndexEntity, bool, error)
+	EntityByEmail(ctx context.Context, email string) (resolverEntity, bool, error)
 	// EntityByDomain returns all entities associated with this web domain.
-	EntityByDomain(ctx context.Context, domain string) ([]IndexEntity, error)
+	EntityByDomain(ctx context.Context, domain string) ([]resolverEntity, error)
 	// EntityByName returns all entities whose names are partial or full matches
 	// for the query string. The resolver applies its own fuzzy filter on top.
-	EntityByName(ctx context.Context, name string) ([]IndexEntity, error)
+	EntityByName(ctx context.Context, name string) ([]resolverEntity, error)
 }
 
 // ── Resolver ──────────────────────────────────────────────────────────────────
@@ -152,13 +140,13 @@ func ResolveEntity(ctx context.Context, idx SignalIndex, p ProposedEntity) (Reso
 		// Filter to the same kind and apply the JaroWinkler threshold.
 		const jwThreshold = 0.9
 		normQuery := normalizeNameForMatch(p.Signals.PersonName)
-		var hits []IndexEntity
+		var hits []resolverEntity
 		for _, c := range candidates {
 			if c.Kind != p.Kind {
 				continue
 			}
 			normCandidate := normalizeNameForMatch(c.Name)
-			if jaroWinkler(normQuery, normCandidate) >= jwThreshold {
+			if JaroWinkler(normQuery, normCandidate) >= jwThreshold {
 				hits = append(hits, c)
 			}
 		}
@@ -324,95 +312,4 @@ func normalizeNameForMatch(s string) string {
 	return strings.TrimSpace(b.String())
 }
 
-// ── JaroWinkler — inline implementation (~40 LOC) ─────────────────────────────
-//
-// TODO: replace with a package import once the wiki_index test coverage
-// milestone lands (see WIKI-SCHEMA.md §10.1).
-//
-// Reference: Winkler (1990) "String Comparator Metrics and Enhanced Decision
-// Rules in the Fellegi-Sunter Model of Record Linkage."
 
-// jaroWinkler returns the Jaro-Winkler similarity in [0, 1]. Both strings
-// must be Unicode normalised before calling (use normalizeNameForMatch).
-func jaroWinkler(s, t string) float64 {
-	jaro := jaroSimilarity(s, t)
-	if jaro == 0 {
-		return 0
-	}
-	// Prefix up to 4 matching chars at the start.
-	const maxPrefix = 4
-	const p = 0.1 // scaling factor (Winkler constant)
-	l := 0
-	rs := []rune(s)
-	rt := []rune(t)
-	maxL := len(rs)
-	if len(rt) < maxL {
-		maxL = len(rt)
-	}
-	if maxL > maxPrefix {
-		maxL = maxPrefix
-	}
-	for i := 0; i < maxL; i++ {
-		if rs[i] != rt[i] {
-			break
-		}
-		l++
-	}
-	return jaro + float64(l)*p*(1-jaro)
-}
-
-func jaroSimilarity(s, t string) float64 {
-	rs := []rune(s)
-	rt := []rune(t)
-	if len(rs) == 0 && len(rt) == 0 {
-		return 1
-	}
-	if len(rs) == 0 || len(rt) == 0 {
-		return 0
-	}
-	matchDist := int(math.Max(float64(len(rs)), float64(len(rt)))/2) - 1
-	if matchDist < 0 {
-		matchDist = 0
-	}
-	sMatched := make([]bool, len(rs))
-	tMatched := make([]bool, len(rt))
-	matches := 0
-	for i, r := range rs {
-		lo := i - matchDist
-		if lo < 0 {
-			lo = 0
-		}
-		hi := i + matchDist + 1
-		if hi > len(rt) {
-			hi = len(rt)
-		}
-		for j := lo; j < hi; j++ {
-			if tMatched[j] || rt[j] != r {
-				continue
-			}
-			sMatched[i] = true
-			tMatched[j] = true
-			matches++
-			break
-		}
-	}
-	if matches == 0 {
-		return 0
-	}
-	transpositions := 0
-	k := 0
-	for i, m := range sMatched {
-		if !m {
-			continue
-		}
-		for !tMatched[k] {
-			k++
-		}
-		if rs[i] != rt[k] {
-			transpositions++
-		}
-		k++
-	}
-	m := float64(matches)
-	return (m/float64(len(rs)) + m/float64(len(rt)) + (m-float64(transpositions)/2)/m) / 3
-}

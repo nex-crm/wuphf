@@ -22,10 +22,10 @@ import (
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
-// brokerQueryProvider wraps provider.RunConfiguredOneShot as a QueryProvider.
-type brokerQueryProvider struct{}
+// brokerLintProvider wraps provider.RunConfiguredOneShot as a QueryProvider.
+type brokerLintProvider struct{}
 
-func (p *brokerQueryProvider) Query(_ context.Context, systemPrompt, userPrompt string) (string, error) {
+func (p *brokerLintProvider) Query(_ context.Context, systemPrompt, userPrompt string) (string, error) {
 	return provider.RunConfiguredOneShot(systemPrompt, userPrompt, "")
 }
 
@@ -45,7 +45,7 @@ func (b *Broker) handleLintRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	idx := b.WikiIndex()
-	prov := &brokerQueryProvider{}
+	prov := &brokerLintProvider{}
 	l := NewLint(idx, worker, prov)
 
 	report, err := l.Run(r.Context())
@@ -113,7 +113,7 @@ func (b *Broker) handleLintResolve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	idx := b.WikiIndex()
-	prov := &brokerQueryProvider{}
+	prov := &brokerLintProvider{}
 	l := NewLint(idx, worker, prov)
 
 	// Resolve under the caller's identity. If no identity in the registry
@@ -194,7 +194,7 @@ func (b *Broker) handleLintRunChat(channel string) {
 	}
 
 	idx := b.WikiIndex()
-	prov := &brokerQueryProvider{}
+	prov := &brokerLintProvider{}
 	l := NewLint(idx, worker, prov)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

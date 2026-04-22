@@ -30,10 +30,10 @@ import (
 	"time"
 )
 
-// QueryProvider is the narrow interface the lint runner needs for LLM
+// LintProvider is the narrow interface the lint runner needs for LLM
 // judgment calls. Production code wires in a closure over
 // provider.RunConfiguredOneShot; tests substitute a deterministic fake.
-type QueryProvider interface {
+type LintProvider interface {
 	// Query sends systemPrompt + userPrompt to the configured LLM and
 	// returns the raw response string or an error.
 	Query(ctx context.Context, systemPrompt, userPrompt string) (string, error)
@@ -69,12 +69,12 @@ type LintReport struct {
 type Lint struct {
 	index    *WikiIndex
 	worker   *WikiWorker
-	provider QueryProvider
+	provider LintProvider
 	now      func() time.Time
 }
 
 // NewLint constructs a Lint runner. All three arguments are required.
-func NewLint(idx *WikiIndex, worker *WikiWorker, prov QueryProvider) *Lint {
+func NewLint(idx *WikiIndex, worker *WikiWorker, prov LintProvider) *Lint {
 	return &Lint{
 		index:    idx,
 		worker:   worker,
