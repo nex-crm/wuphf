@@ -85,6 +85,12 @@ jobs:
         with:
           name: web-dist
           path: web/dist
+      # `go vet` runs separately from `go test` so a vet failure surfaces with
+      # its own red x instead of being mixed into the test output. golangci-lint
+      # in the lint job runs vet too, but only what its govet linter enables;
+      # an explicit standalone vet step protects against config drift.
+      - name: Vet
+        run: go vet ./...
       # internal/team and internal/teammcp have known test-isolation issues
       # (WUPHF_RUNTIME_HOME, shared wiki path, worktree registration against
       # the invoking repo) tracked in the test-isolation memo. They run
