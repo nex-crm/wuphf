@@ -1066,7 +1066,9 @@ interface TaskStepProps {
   taskText: string
   onChangeTaskText: (v: string) => void
   onNext: () => void
+  onSkip: () => void
   onBack: () => void
+  submitting: boolean
 }
 
 function TaskStep({
@@ -1076,7 +1078,9 @@ function TaskStep({
   taskText,
   onChangeTaskText,
   onNext,
+  onSkip,
   onBack,
+  submitting,
 }: TaskStepProps) {
   return (
     <div className="wizard-step">
@@ -1142,11 +1146,21 @@ function TaskStep({
         <button className="btn btn-ghost" onClick={onBack} type="button">
           Back
         </button>
-        <button className="btn btn-primary" onClick={onNext} type="button">
-          Review setup
-          <ArrowIcon />
-          <EnterHint label={`${MOD_KEY} Enter`} />
-        </button>
+        <div className="wizard-nav-right">
+          <button
+            className="task-skip"
+            onClick={onSkip}
+            disabled={submitting}
+            type="button"
+          >
+            {ONBOARDING_COPY.step3_skip}
+          </button>
+          <button className="btn btn-primary" onClick={onNext} type="button">
+            Review setup
+            <ArrowIcon />
+            <EnterHint label={`${MOD_KEY} Enter`} />
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -1230,17 +1244,9 @@ function ReadyStep({
         </button>
         <div className="wizard-nav-right">
           <button
-            className="task-skip"
-            onClick={onSkip}
-            disabled={submitting}
-            type="button"
-          >
-            {ONBOARDING_COPY.step3_skip}
-          </button>
-          <button
             className="btn btn-primary"
-            onClick={onSubmit}
-            disabled={submitting || taskText.trim().length === 0}
+            onClick={taskText.trim().length === 0 ? onSkip : onSubmit}
+            disabled={submitting}
             type="button"
           >
             {submitting ? 'Starting...' : ONBOARDING_COPY.step3_cta}
@@ -1920,7 +1926,13 @@ export function Wizard({ onComplete }: WizardProps) {
             taskText={taskText}
             onChangeTaskText={setTaskText}
             onNext={nextStep}
+            onSkip={() => {
+              setTaskText('')
+              setSelectedTaskTemplate(null)
+              nextStep()
+            }}
             onBack={prevStep}
+            submitting={submitting}
           />
         )}
 
