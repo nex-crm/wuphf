@@ -213,8 +213,8 @@ func buildOpencodePrompt(systemPrompt, prompt string) string {
 // <system>/</system> tag so the prompt wrapper buildOpencodePrompt adds cannot
 // be terminated from within user content.
 func escapeOpencodeSystemWrapper(s string) string {
-	s = strings.ReplaceAll(s, "</system>", "</​system>")
-	s = strings.ReplaceAll(s, "<system>", "<​system>")
+	s = strings.ReplaceAll(s, "</system>", "</\u200bsystem>")
+	s = strings.ReplaceAll(s, "<system>", "<\u200bsystem>")
 	return s
 }
 

@@ -282,8 +282,8 @@ func buildHeadlessOpencodePrompt(systemPrompt string, prompt string) string {
 // <system>/</system> tokens inside user-provided content so the wrapper the
 // prompt builder adds cannot be terminated or reopened from within.
 func escapeHeadlessOpencodeSystemWrapper(s string) string {
-	s = strings.ReplaceAll(s, "</system>", "</​system>")
-	s = strings.ReplaceAll(s, "<system>", "<​system>")
+	s = strings.ReplaceAll(s, "</system>", "</\u200bsystem>")
+	s = strings.ReplaceAll(s, "<system>", "<\u200bsystem>")
 	return s
 }
 
