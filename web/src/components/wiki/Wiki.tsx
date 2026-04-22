@@ -10,12 +10,15 @@ import WikiSidebar from './WikiSidebar'
 import WikiCatalog from './WikiCatalog'
 import WikiArticle from './WikiArticle'
 import WikiAudit from './WikiAudit'
+import WikiLint from './WikiLint'
 import EditLogFooter from './EditLogFooter'
 import '../../styles/wiki.css'
 
 // Reserved pseudo-path for the audit view. Never collides with a real
 // article because real articles must live under `team/` and end in `.md`.
 const AUDIT_PATH = '_audit'
+// Reserved pseudo-path for the lint view.
+const LINT_PATH = '_lint'
 
 interface WikiProps {
   /** When set, renders the article view for this path; otherwise renders the catalog. */
@@ -59,7 +62,8 @@ export default function Wiki({ articlePath, onNavigate }: WikiProps) {
   }, [])
 
   const isAudit = articlePath === AUDIT_PATH
-  const view = isAudit ? 'audit' : articlePath ? 'article' : 'catalog'
+  const isLint = articlePath === LINT_PATH
+  const view = isAudit ? 'audit' : isLint ? 'lint' : articlePath ? 'article' : 'catalog'
 
   return (
     <div className="wiki-root" data-testid="wiki-root">
@@ -67,12 +71,15 @@ export default function Wiki({ articlePath, onNavigate }: WikiProps) {
         <WikiSidebar
           catalog={catalog}
           sections={sections}
-          currentPath={isAudit ? null : articlePath}
+          currentPath={isAudit || isLint ? null : articlePath}
           onNavigate={(path) => onNavigate(path)}
           onNavigateAudit={() => onNavigate(AUDIT_PATH)}
+          onNavigateLint={() => onNavigate(LINT_PATH)}
         />
         {isAudit ? (
           <WikiAudit onNavigate={(path) => onNavigate(path)} />
+        ) : isLint ? (
+          <WikiLint onNavigate={(path) => onNavigate(path)} />
         ) : articlePath ? (
           <WikiArticle
             path={articlePath}

@@ -18,6 +18,8 @@ interface WikiSidebarProps {
   onNavigate: (path: string) => void
   /** Optional audit-log opener — rendered as a footer link when provided. */
   onNavigateAudit?: () => void
+  /** Optional lint opener — rendered as a footer link when provided. */
+  onNavigateLint?: () => void
 }
 
 // Sections first seen within this window render a "new" indicator. 7 days
@@ -31,6 +33,7 @@ export default function WikiSidebar({
   currentPath,
   onNavigate,
   onNavigateAudit,
+  onNavigateLint,
 }: WikiSidebarProps) {
   const [query, setQuery] = useState('')
   const [bannerSlug, setBannerSlug] = useState<string | null>(null)
@@ -134,6 +137,20 @@ export default function WikiSidebar({
             }}
           >
             View audit log →
+          </button>
+        </div>
+      )}
+      {onNavigateLint && (
+        <div className="wk-sidebar-audit">
+          <button
+            type="button"
+            className="wk-sidebar-audit-link"
+            onClick={(e) => {
+              e.preventDefault()
+              onNavigateLint()
+            }}
+          >
+            Wiki lint →
           </button>
         </div>
       )}
