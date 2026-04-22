@@ -1,4 +1,4 @@
 > /tmp/wuphf-vhs --version
-wuphf v0.0.6.3
+wuphf v0.0.7.0
 >
 
