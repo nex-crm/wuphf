@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import { post, generateAgent } from '../../api/client'
 import { useQueryClient } from '@tanstack/react-query'
 
-type Provider = 'inherit' | 'claude-code' | 'codex'
+type Provider = 'inherit' | 'claude-code' | 'codex' | 'opencode'
 type WizardMode = 'describe' | 'manual'
 
 interface AgentFormData {
@@ -27,6 +27,7 @@ const PROVIDERS: { value: Provider; label: string }[] = [
   { value: 'inherit', label: 'Default runtime' },
   { value: 'codex', label: 'Codex' },
   { value: 'claude-code', label: 'Claude Code' },
+  { value: 'opencode', label: 'Opencode' },
 ]
 
 function slugify(name: string): string {

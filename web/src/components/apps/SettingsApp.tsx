@@ -372,6 +372,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
         <select style={styles.input} value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}>
           <option value="claude-code">Claude Code</option>
           <option value="codex">Codex</option>
+          <option value="opencode">Opencode</option>
         </select>
       </Field>
       <Field label="Memory Backend" hint="--memory-backend">
@@ -661,7 +662,7 @@ function IntervalsSection({ cfg, save }: SectionProps) {
 }
 
 const CLI_FLAGS: [string, string][] = [
-  ['--provider <name>', 'LLM provider (claude-code, codex)'],
+  ['--provider <name>', 'LLM provider (claude-code, codex, opencode)'],
   ['--memory-backend <name>', 'Memory backend (nex, gbrain, none)'],
   ['--blueprint <id>', 'Operation blueprint for this run'],
   ['--tui', 'Launch tmux TUI instead of web UI'],
