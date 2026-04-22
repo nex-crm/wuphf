@@ -1,17 +1,91 @@
-import { useRef, useState, useCallback } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { createDM, postMessage, post } from '../../api/client'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { createDM, getConfig, postMessage, post, setMemory } from '../../api/client'
 import { directChannelSlug, useAppStore } from '../../stores/app'
+import { useOfficeMembers } from '../../hooks/useMembers'
 import { showNotice } from '../ui/Toast'
 import { confirm } from '../ui/ConfirmDialog'
 import { openProviderSwitcher } from '../ui/ProviderSwitcher'
 import { Autocomplete, applyAutocomplete, type AutocompleteItem } from './Autocomplete'
 
-/** Handle slash commands. Returns true if the input was a command. */
-function handleSlashCommand(input: string): boolean {
+/** How many sent messages to keep in per-channel history. */
+const COMPOSER_HISTORY_LIMIT = 20
+
+/** sessionStorage key shape: `wuphf:composer-history:<channel>`. */
+function historyKey(channel: string): string {
+  return `wuphf:composer-history:${channel || 'general'}`
+}
+
+function readHistory(channel: string): string[] {
+  try {
+    const raw = sessionStorage.getItem(historyKey(channel))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((v): v is string => typeof v === 'string' && v.length > 0)
+  } catch {
+    return []
+  }
+}
+
+function writeHistory(channel: string, entries: string[]): void {
+  try {
+    sessionStorage.setItem(historyKey(channel), JSON.stringify(entries))
+  } catch {
+    // sessionStorage disabled / quota exceeded — silently drop history rather
+    // than blowing up the send flow. The user still sees their message land.
+  }
+}
+
+/**
+ * Append a sent message to the per-channel history, trimming to the most
+ * recent COMPOSER_HISTORY_LIMIT entries. Skips duplicates of the latest
+ * entry so rapid resends do not pollute recall.
+ */
+function pushHistory(channel: string, message: string): void {
+  const trimmed = message.trim()
+  if (!trimmed) return
+  const current = readHistory(channel)
+  if (current.length > 0 && current[current.length - 1] === trimmed) return
+  const next = [...current, trimmed].slice(-COMPOSER_HISTORY_LIMIT)
+  writeHistory(channel, next)
+}
+
+/** Routing prefix for `/ask`: mirrors TUI cmdAsk which always goes to the lead. */
+function askPrefix(leadSlug: string | undefined): string {
+  const slug = (leadSlug || 'ceo').trim().toLowerCase() || 'ceo'
+  return `@${slug} `
+}
+
+/** Pick the team-lead slug: configured first, else first built-in agent, else 'ceo'. */
+function resolveLeadSlug(
+  configured: string | undefined,
+  members: { slug?: string; built_in?: boolean }[],
+): string {
+  const explicit = (configured ?? '').trim().toLowerCase()
+  if (explicit) return explicit
+  const builtin = members.find((m) => m.built_in && m.slug && m.slug !== 'human' && m.slug !== 'you')
+  if (builtin?.slug) return builtin.slug
+  return 'ceo'
+}
+
+interface SlashHandlers {
+  /** Team lead slug used for `/ask` routing. */
+  leadSlug: string | undefined
+  /** Send the given text as a normal message (bypasses slash parsing). */
+  sendAsMessage: (text: string) => void
+}
+
+/**
+ * Handle slash commands. Returns true if the input was consumed as a command.
+ *
+ * Some commands (e.g. `/ask`) rewrite the input and invoke sendAsMessage so
+ * the broker sees a normal user message with the right @mention routing.
+ */
+function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
   const parts = input.split(/\s+/)
   const cmd = parts[0].toLowerCase()
-  const args = parts.slice(1).join(' ')
+  const args = parts.slice(1).join(' ').trim()
   const store = useAppStore.getState()
 
   switch (cmd) {
@@ -19,7 +93,7 @@ function handleSlashCommand(input: string): boolean {
       showNotice('Messages cleared', 'info')
       return true
     case '/help':
-      showNotice('Commands: /clear /help /focus /collab /requests /tasks /policies /skills /calendar /search /1o1 /task /cancel /pause /resume /reset /recover', 'info')
+      store.setComposerHelpOpen(true)
       return true
     case '/requests':
       store.setCurrentApp('requests')
@@ -47,8 +121,38 @@ function handleSlashCommand(input: string): boolean {
       openProviderSwitcher()
       return true
     case '/search':
+      store.setComposerSearchInitialQuery(args)
       store.setSearchOpen(true)
       return true
+    case '/ask': {
+      if (!args) {
+        showNotice('Usage: /ask <question>', 'info')
+        return true
+      }
+      // TUI's cmdAsk always routes to the team lead. Mirror that by
+      // prefixing an @mention so the broker's routing picks up the lead.
+      handlers.sendAsMessage(askPrefix(handlers.leadSlug) + args)
+      return true
+    }
+    case '/remember': {
+      if (!args) {
+        showNotice('Usage: /remember <fact>', 'info')
+        return true
+      }
+      // Broker /memory requires namespace + key + value. Use a stable
+      // human-owned namespace and a short timestamp key so repeated
+      // /remember calls do not collide.
+      const key = `note-${Date.now().toString(36)}`
+      setMemory('human-notes', key, args)
+        .then(() =>
+          showNotice(
+            'Stored in memory: ' + (args.length > 40 ? args.slice(0, 40) + '…' : args),
+            'success',
+          ),
+        )
+        .catch((e: Error) => showNotice('Remember failed: ' + e.message, 'error'))
+      return true
+    }
     case '/focus':
       post('/focus-mode', { focus_mode: true })
         .then(() => showNotice('Switched to delegation mode', 'success'))
@@ -128,15 +232,53 @@ function handleSlashCommand(input: string): boolean {
   }
 }
 
+/**
+ * History recall state. `draftStash` holds whatever the operator had typed
+ * before the first Ctrl+P so we can restore it when they walk forward past
+ * the end of history.
+ */
+interface HistoryState {
+  /** -1 when live, else index into the cached history array. */
+  index: number
+  /** Draft text to restore when stepping past the end. */
+  draftStash: string | null
+  /** Snapshot taken at recall start; kept so mid-recall writes don't churn it. */
+  entries: string[]
+}
+
+function emptyHistoryState(): HistoryState {
+  return { index: -1, draftStash: null, entries: [] }
+}
+
 export function Composer() {
   const currentChannel = useAppStore((s) => s.currentChannel)
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp)
   const [text, setText] = useState('')
   const [caret, setCaret] = useState(0)
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([])
   const [acIdx, setAcIdx] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const queryClient = useQueryClient()
+  const { data: cfg } = useQuery({
+    queryKey: ['config'],
+    queryFn: getConfig,
+    staleTime: 60_000,
+  })
+  const { data: members = [] } = useOfficeMembers()
+  const leadSlug = useMemo(
+    () => resolveLeadSlug(cfg?.team_lead_slug, members),
+    [cfg?.team_lead_slug, members],
+  )
+
+  const historyRef = useRef<HistoryState>(emptyHistoryState())
+
+  // Reset recall when switching channels so Ctrl+P replays *this* channel.
+  useEffect(() => {
+    historyRef.current = emptyHistoryState()
+  }, [currentChannel])
+
+  const resetRecall = useCallback(() => {
+    historyRef.current = emptyHistoryState()
+  }, [])
 
   const pickAutocomplete = useCallback((item: AutocompleteItem) => {
     const next = applyAutocomplete(text, caret, item)
@@ -153,10 +295,6 @@ export function Composer() {
   const sendMutation = useMutation({
     mutationFn: (content: string) => postMessage(content, currentChannel),
     onSuccess: () => {
-      setText('')
-      if (textareaRef.current) {
-        textareaRef.current.style.height = 'auto'
-      }
       queryClient.invalidateQueries({ queryKey: ['messages', currentChannel] })
     },
     onError: (err: unknown) => {
@@ -173,22 +311,92 @@ export function Composer() {
     },
   })
 
+  /**
+   * Clear the composer, shrink the textarea, and cancel any pending recall.
+   * Called after every successful send or consumed command.
+   */
+  const resetComposer = useCallback(() => {
+    setText('')
+    resetRecall()
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
+  }, [resetRecall])
+
   const handleSend = useCallback(() => {
     const trimmed = text.trim()
     if (!trimmed || sendMutation.isPending) return
 
     // Handle slash commands
     if (trimmed.startsWith('/')) {
-      if (handleSlashCommand(trimmed)) {
-        setText('')
+      const consumed = handleSlashCommand(trimmed, {
+        leadSlug,
+        sendAsMessage: (rewritten) => {
+          sendMutation.mutate(rewritten)
+        },
+      })
+      if (consumed) {
+        // Persist the *raw* command to history so Ctrl+P replays `/ask foo`,
+        // not the rewritten `@ceo foo`. Matches user expectation.
+        pushHistory(currentChannel, trimmed)
+        resetComposer()
         return
       }
     }
 
+    pushHistory(currentChannel, trimmed)
     sendMutation.mutate(trimmed)
-  }, [text, sendMutation])
+    resetComposer()
+  }, [text, sendMutation, leadSlug, currentChannel, resetComposer])
+
+  /**
+   * Walk backward through history. On first invocation, snapshot the live
+   * draft so Ctrl+N can restore it. Returns true if recall succeeded.
+   */
+  const recallPrevious = useCallback((): boolean => {
+    const state = historyRef.current
+    if (state.index === -1) {
+      const entries = readHistory(currentChannel)
+      if (entries.length === 0) return false
+      state.entries = entries
+      state.draftStash = text
+      state.index = entries.length
+    }
+    if (state.index <= 0) return false
+    state.index -= 1
+    setText(state.entries[state.index])
+    return true
+  }, [currentChannel, text])
+
+  /**
+   * Walk forward through history. When we run off the end, restore the
+   * original draft and clear recall state.
+   */
+  const recallNext = useCallback((): boolean => {
+    const state = historyRef.current
+    if (state.index === -1) return false
+    if (state.index < state.entries.length - 1) {
+      state.index += 1
+      setText(state.entries[state.index])
+      return true
+    }
+    setText(state.draftStash ?? '')
+    historyRef.current = emptyHistoryState()
+    return true
+  }, [])
+
+  const moveCaretToEnd = useCallback(() => {
+    requestAnimationFrame(() => {
+      const el = textareaRef.current
+      if (!el) return
+      const end = el.value.length
+      el.setSelectionRange(end, end)
+      setCaret(end)
+    })
+  }, [])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    // Autocomplete navigation runs first
     if (acItems.length > 0) {
       if (e.key === 'ArrowDown') {
         e.preventDefault()
@@ -212,11 +420,46 @@ export function Composer() {
         return
       }
     }
+
+    // History recall — Ctrl+P / Ctrl+N (TUI parity: internal/tui/interaction.go:56-58)
+    if (e.ctrlKey && !e.metaKey && !e.altKey) {
+      if (e.key === 'p' || e.key === 'P') {
+        if (recallPrevious()) {
+          e.preventDefault()
+          moveCaretToEnd()
+          return
+        }
+      }
+      if (e.key === 'n' || e.key === 'N') {
+        if (recallNext()) {
+          e.preventDefault()
+          moveCaretToEnd()
+          return
+        }
+      }
+    }
+
+    // Slack-style: empty-draft ArrowUp recalls the last message.
+    if (
+      e.key === 'ArrowUp'
+      && !e.shiftKey
+      && !e.ctrlKey
+      && !e.metaKey
+      && !e.altKey
+      && text === ''
+    ) {
+      if (recallPrevious()) {
+        e.preventDefault()
+        moveCaretToEnd()
+        return
+      }
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
     }
-  }, [handleSend, acItems, acIdx, pickAutocomplete])
+  }, [handleSend, acItems, acIdx, pickAutocomplete, recallPrevious, recallNext, text, moveCaretToEnd])
 
   const handleAcItems = useCallback((items: AutocompleteItem[]) => {
     setAcItems(items)
@@ -251,7 +494,15 @@ export function Composer() {
           className="composer-input"
           placeholder={`Message #${currentChannel}`}
           value={text}
-          onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart ?? 0); handleInput() }}
+          onChange={(e) => {
+            setText(e.target.value)
+            setCaret(e.target.selectionStart ?? 0)
+            handleInput()
+            // Any manual edit cancels history recall.
+            if (historyRef.current.index !== -1) {
+              resetRecall()
+            }
+          }}
           onKeyDown={handleKeyDown}
           onKeyUp={syncCaret}
           onClick={syncCaret}
@@ -271,4 +522,15 @@ export function Composer() {
       </div>
     </div>
   )
+}
+
+// Re-export helpers for testing.
+export const __test__ = {
+  historyKey,
+  readHistory,
+  writeHistory,
+  pushHistory,
+  resolveLeadSlug,
+  askPrefix,
+  COMPOSER_HISTORY_LIMIT,
 }
