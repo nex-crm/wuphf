@@ -42,7 +42,7 @@ func TestRegistry_FakeKindRoutesEverywhere(t *testing.T) {
 	t.Setenv("WUPHF_LLM_PROVIDER", fakeKind)
 
 	// Path 1: streaming resolver.
-	fn := DefaultStreamFnResolver(nil)("agent-slug")
+	fn := DefaultStreamFnResolver(nil, nil)("agent-slug")
 	if fn == nil {
 		t.Fatal("resolver returned nil StreamFn for registered fake kind")
 	}
@@ -72,6 +72,73 @@ func TestRegistry_FakeKindRoutesEverywhere(t *testing.T) {
 func TestRegistry_LookupReturnsNilForUnknown(t *testing.T) {
 	if e := Lookup("wuphf-never-registered-kind"); e != nil {
 		t.Fatalf("Lookup returned non-nil entry %+v for unregistered kind", e)
+	}
+}
+
+// TestStreamFnResolver_PerAgentKindOverridesInstallWide is the epicentric red
+// test for P0.3: a per-agent ProviderBinding must take priority over the
+// install-wide default when the streaming resolver routes a turn.
+//
+// Today the resolver ignores its agentSlug argument and reads only
+// config.ResolveLLMProvider, so an Ollama-bound agent on a claude-default
+// install gets routed to claude — the broker's per-agent ProviderBinding
+// data layer (broker.MemberProviderKind / memberEffectiveProviderKind in
+// the launcher) doesn't reach the StreamFn dispatch.
+//
+// The fix threads an optional ProviderKindResolver through
+// DefaultStreamFnResolver. When set, the per-agent kind wins; when nil,
+// resolution falls back to the install-wide ResolveLLMProvider.
+func TestStreamFnResolver_PerAgentKindOverridesInstallWide(t *testing.T) {
+	const installKind = "wuphf-test-install-wide-kind"
+	const agentKind = "wuphf-test-per-agent-kind"
+
+	var installHits, agentHits int
+	RegisterForTest(t, &Entry{
+		Kind: installKind,
+		StreamFn: func(slug string) agent.StreamFn {
+			return func([]agent.Message, []agent.AgentTool) <-chan agent.StreamChunk {
+				installHits++
+				ch := make(chan agent.StreamChunk)
+				close(ch)
+				return ch
+			}
+		},
+	})
+	RegisterForTest(t, &Entry{
+		Kind: agentKind,
+		StreamFn: func(slug string) agent.StreamFn {
+			return func([]agent.Message, []agent.AgentTool) <-chan agent.StreamChunk {
+				agentHits++
+				ch := make(chan agent.StreamChunk)
+				close(ch)
+				return ch
+			}
+		},
+	})
+
+	t.Setenv("WUPHF_LLM_PROVIDER", installKind)
+
+	kindResolver := func(slug string) string {
+		if slug == "agent-on-per-agent-binding" {
+			return agentKind
+		}
+		return "" // empty → fall back to install-wide
+	}
+
+	resolver := DefaultStreamFnResolver(nil, kindResolver)
+
+	// Agent with a per-agent binding routes to agentKind, not installKind.
+	for range resolver("agent-on-per-agent-binding")(nil, nil) {
+	}
+	if agentHits != 1 || installHits != 0 {
+		t.Fatalf("per-agent override did not take priority: agentHits=%d installHits=%d", agentHits, installHits)
+	}
+
+	// Agent without a per-agent binding falls back to install-wide kind.
+	for range resolver("agent-using-install-default")(nil, nil) {
+	}
+	if installHits != 1 {
+		t.Fatalf("fallback to install-wide kind did not work: installHits=%d", installHits)
 	}
 }
 
