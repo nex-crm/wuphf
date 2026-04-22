@@ -195,7 +195,7 @@ func (l *Launcher) resumeInFlightWork() {
 		return
 	}
 
-	if l.usesCodexRuntime() || !l.paneBackedAgents {
+	if !l.usesPaneRuntime() || !l.paneBackedAgents {
 		lead := l.officeLeadSlug()
 		// Enqueue lead first to bypass the queue-hold guard.
 		if packet, ok := packets[lead]; ok {
