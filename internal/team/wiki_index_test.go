@@ -509,3 +509,37 @@ func TestWikiIndex_LintReportIndexed(t *testing.T) {
 		t.Errorf("hit list = %+v; want a hit with FactID lint_2026_04_22", hits)
 	}
 }
+
+// TestWikiIndex_GraphLogTimestampLayouts verifies that RFC3339 and date-only
+// timestamps both parse correctly (L19 fix). Both edges must have non-zero
+// Timestamps after reconcile.
+func TestWikiIndex_GraphLogTimestampLayouts(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	// One RFC3339 edge + one date-only edge.
+	graphLog := "alice works_at acme 2026-04-10T09:00:00Z src=rfc3339sha\n" +
+		"alice reports_to bob 2026-04-11 src=dateonly\n"
+	if err := os.WriteFile(filepath.Join(root, "graph.log"), []byte(graphLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := NewWikiIndex(root)
+	defer idx.Close()
+	if err := idx.ReconcileFromMarkdown(ctx); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	edges, err := idx.ListEdgesForEntity(ctx, "alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(edges) != 2 {
+		t.Fatalf("expected 2 edges, got %d", len(edges))
+	}
+	for _, e := range edges {
+		if e.Timestamp.IsZero() {
+			t.Errorf("edge %s-[%s]->%s has zero Timestamp; layout not parsed", e.Subject, e.Predicate, e.Object)
+		}
+	}
+}

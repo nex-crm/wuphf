@@ -38,6 +38,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -599,8 +600,8 @@ func (w *WikiIndex) reconcileGraphLog(ctx context.Context, abs string) error {
 		}
 		edge := IndexEdge{Subject: parts[0], Predicate: parts[1], Object: parts[2]}
 		if len(parts) >= 4 {
-			if t, err := time.Parse("2006-01-02", parts[3]); err == nil {
-				edge.Timestamp = t
+			if ts := parseEdgeTimestamp(parts[3]); !ts.IsZero() {
+				edge.Timestamp = ts
 			}
 		}
 		for _, p := range parts[4:] {
@@ -613,6 +614,20 @@ func (w *WikiIndex) reconcileGraphLog(ctx context.Context, abs string) error {
 		}
 	}
 	return nil
+}
+
+// parseEdgeTimestamp tries three layouts in order: RFC3339, datetime without
+// timezone, date-only. First success wins. Returns zero time if all fail.
+func parseEdgeTimestamp(s string) time.Time {
+	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02"} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	if s != "" {
+		log.Printf("wiki_index: parseEdgeTimestamp: unrecognised format %q", s)
+	}
+	return time.Time{}
 }
 
 // reconcileLintReport indexes a lint report at wiki/.lint/report-YYYY-MM-DD.md as
