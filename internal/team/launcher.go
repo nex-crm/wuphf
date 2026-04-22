@@ -1826,6 +1826,24 @@ func overflowWindowName(slug string) string {
 	return "agent-" + strings.TrimSpace(slug)
 }
 
+// resolvePaneTargetForSlug returns the current pane address for an agent
+// slug, or "" if the agent has no live pane right now. Called by the
+// pane-capture loop when its cached target keeps failing so it can pick
+// up new addresses after office reseeds recreate panes under different
+// ids. Returns ok=false when the agent isn't pane-backed at all (e.g.
+// codex-bound agents that dispatch headlessly).
+func (l *Launcher) resolvePaneTargetForSlug(slug string) (string, bool) {
+	if l == nil || slug == "" {
+		return "", false
+	}
+	targets := l.agentPaneTargets()
+	target, ok := targets[slug]
+	if !ok {
+		return "", false
+	}
+	return target.PaneTarget, true
+}
+
 func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 	targets := make(map[string]notificationTarget)
 	if l.isOneOnOne() {

@@ -17,9 +17,17 @@ const (
 	paneCapturePollInterval   = 1 * time.Second
 	paneCaptureMaxFailures    = 5
 	paneCaptureBackoffOnError = 2 * time.Second
-	paneCaptureMaxDiffBytes   = 64 * 1024
-	paneCaptureTruncateMarker = "...[truncated]"
-	paneCaptureHistoryLines   = 200 // tmux -S: scroll back lines to include
+	// After paneCaptureMaxFailures in a row, the pane is probably gone (office
+	// reseed rebuilt tmux, pane crashed, etc.). Instead of giving up forever,
+	// sleep this long then re-resolve the current pane target from the launcher
+	// and try again. Users running wuphf for hours see office reseeds and panes
+	// should recover without restarting the whole office. If the target is still
+	// stale after the long sleep, we repeat — cheaper than dropping the agent's
+	// live-stream feed.
+	paneCaptureRetryAfterDeath = 30 * time.Second
+	paneCaptureMaxDiffBytes    = 64 * 1024
+	paneCaptureTruncateMarker  = "...[truncated]"
+	paneCaptureHistoryLines    = 200 // tmux -S: scroll back lines to include
 )
 
 // ansiEscapePattern strips ANSI escape sequences (CSI, OSC, and standalone
@@ -91,9 +99,12 @@ func (l *Launcher) startPaneCaptureLoops(ctx context.Context) {
 	}
 }
 
-// paneCaptureLoop polls a single tmux pane on a fixed interval. It stops
-// when the context is canceled or after paneCaptureMaxFailures consecutive
-// tmux errors (e.g. the pane closed permanently).
+// paneCaptureLoop polls a single tmux pane on a fixed interval. It keeps
+// running even after the pane disappears: after paneCaptureMaxFailures in
+// a row, it sleeps paneCaptureRetryAfterDeath, re-resolves the current
+// pane target from the launcher (in case an office reseed rebuilt tmux
+// and the old pane id is stale), and tries again. The loop only exits
+// when the context is canceled.
 func (l *Launcher) paneCaptureLoop(ctx context.Context, slug, paneTarget string) {
 	stream := l.broker.AgentStream(slug)
 	if stream == nil {
@@ -118,10 +129,26 @@ func (l *Launcher) paneCaptureLoop(ctx context.Context, slug, paneTarget string)
 			failures++
 			if failures >= paneCaptureMaxFailures {
 				fmt.Fprintf(os.Stderr,
-					"  Agents:  pane capture for %s (%s) stopped after %d failures: %v\n",
-					slug, paneTarget, failures, err,
+					"  Agents:  pane capture for %s (%s) paused after %d failures; will retry in %s: %v\n",
+					slug, paneTarget, failures, paneCaptureRetryAfterDeath, err,
 				)
-				return
+				// Sleep, then re-resolve the pane target. Office reseeds and
+				// overflow-pane recreation change pane ids — the old target
+				// stays dead forever but the agent may have a live pane
+				// under a new address. Re-resolve before retrying.
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(paneCaptureRetryAfterDeath):
+				}
+				if newTarget, ok := l.resolvePaneTargetForSlug(slug); ok && newTarget != "" {
+					paneTarget = newTarget
+				}
+				// Clear prev-line cache so the re-surfaced pane pushes a
+				// fresh snapshot rather than diffing against stale state.
+				prevLines = nil
+				failures = 0
+				continue
 			}
 			// Back off briefly on errors instead of spinning on the 1s tick.
 			select {
