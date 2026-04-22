@@ -2,20 +2,24 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/nex-crm/wuphf/internal/agent"
 )
 
-// Real-world failure (v0.0.6.1): user typed "@pm do you know of Lenny's PM fit
-// frameworks?" in #general. The web composer did not commit `@pm` into an
-// explicit tag chip, so the POST body had empty `tagged`. The broker refused
-// to auto-promote because the sender was `you`/`human`, so the message was
-// posted with `Tagged: []`. Routing hit `addImmediate(lead)` and CEO absorbed
-// the message instead of PM.
+// User typed "@pm do you know of Lenny's PM fit frameworks?" in #general.
+// The web composer did not commit `@pm` into an explicit tag chip, so the
+// POST body had empty `tagged`. The broker refused to auto-promote because
+// the sender was `you`, and the message posted with `Tagged: []`. Routing
+// then hit `addImmediate(lead)` and CEO absorbed the message instead of PM.
 //
 // Fix: auto-promote body @-mentions for human senders too. extractMentionedSlugs
 // already restricts to registered agent slugs, so conversational @-text that
@@ -132,21 +136,116 @@ func TestAutoPromote_ExplicitTagRespected(t *testing.T) {
 	}
 }
 
-// Real-world failure (v0.0.6.1): after onboarding reseeded the roster, the
-// launcher logged `office_reseeded: respawn panes failed: ... tmux: no server
-// running on /private/tmp/tmux-501/wuphf` on every reseed. In web/headless
-// mode there is no tmux server by design — the headless dispatch path handles
-// delivery. Logging the expected attach-failure as an error made the console
-// look like it was failing repeatedly.
-//
-// Fix: swallow isNoSessionError in respawnPanesAfterReseed — headless mode
-// will take over silently. Other error types (permission denied, corrupted
-// state) keep surfacing.
+// Synthetic senders (`system`, `nex`, bridges, future automation kinds) MUST
+// NOT auto-promote. A denylist approach would leak every new synthetic
+// identity — the allowlist in senderMayAutoPromoteLocked stops that.
+// handlePostMessage rejects `system` at the channel-access gate before the
+// promote block runs, so exercise the allowlist directly here.
+func TestAutoPromote_SystemAndSyntheticSendersSkipped(t *testing.T) {
+	b := newBrokerWithPM(t)
 
-func TestRespawnPanesAfterReseed_NoSessionErrorSilenced(t *testing.T) {
-	// Cover the error-classification logic directly. Real tmux invocation
-	// happens inside reconfigureVisibleAgents and is not unit-testable here,
-	// but the decision to silence vs log lives in isNoSessionError.
+	cases := []struct {
+		name string
+		from string
+	}{
+		{"system", "system"},
+		{"nex", "nex"},
+		{"bridge-slack", "bridge-slack"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			b.mu.Lock()
+			allowed := b.senderMayAutoPromoteLocked(c.from)
+			b.mu.Unlock()
+			if allowed {
+				t.Fatalf("senderMayAutoPromoteLocked(%q) = true; synthetic senders must be denied", c.from)
+			}
+		})
+	}
+}
+
+// End-to-end: the user's exact reproduction scenario, traversing every layer
+// from HTTP POST to headless dispatch. Human posts `@pm` as text with
+// tagged=[], broker auto-promotes, launcher dispatches to pm (not CEO).
+// If either the broker fix (auto-promote) or the launcher fix (routing, PR
+// #218) regresses, this test catches it.
+func TestAutoPromote_EndToEnd_HumanTagsPM_DispatchesToPM(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
+	b.mu.Unlock()
+
+	l := newHeadlessLauncherForTest()
+	l.broker = b
+	l.provider = "codex"
+	l.notifyLastDelivered = make(map[string]time.Time)
+	l.pack = &agent.PackDefinition{
+		LeadSlug: "ceo",
+		Agents: []agent.AgentConfig{
+			{Slug: "ceo", Name: "CEO"},
+			{Slug: "pm", Name: "Product Manager"},
+		},
+	}
+
+	processed := make(chan string, 4)
+	oldRunTurn := headlessCodexRunTurn
+	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
+		ch := ""
+		if len(channel) > 0 {
+			ch = channel[0]
+		}
+		processed <- slug + "|" + ch + "|" + notification
+		return nil
+	}
+	defer func() { headlessCodexRunTurn = oldRunTurn }()
+
+	// Simulate the user's exact flow: POST /messages with @pm in body and
+	// tagged empty (composer didn't commit a chip).
+	msg := postMessage(t, b, "you", "general",
+		"@pm do you know of Lenny's PM fit frameworks?", nil)
+	if !containsString(msg.Tagged, "pm") {
+		t.Fatalf("stage 1: broker did not auto-promote @pm; tagged=%+v", msg.Tagged)
+	}
+
+	// Now dispatch: the launcher should wake PM (not CEO absorbing it).
+	l.deliverMessageNotification(msg)
+
+	var slugs []string
+	deadline := time.After(500 * time.Millisecond)
+collect:
+	for {
+		select {
+		case turn := <-processed:
+			if idx := strings.Index(turn, "|"); idx > 0 {
+				slugs = append(slugs, turn[:idx])
+			}
+		case <-deadline:
+			break collect
+		}
+	}
+
+	pmWoken := false
+	for _, s := range slugs {
+		if s == "pm" {
+			pmWoken = true
+			break
+		}
+	}
+	if !pmWoken {
+		t.Fatalf("stage 2: PM was not dispatched after @pm message (CEO absorbed it). turns=%v", slugs)
+	}
+}
+
+// Root-cause test: pin the tmux-error classification that decides whether
+// respawnPanesAfterReseed silences or logs. Web/headless mode cannot run
+// tmux directly in a unit test, but the branch selector
+// (isMissingTmuxSession) is load-bearing and a public, well-tested function.
+func TestRespawnPanesAfterReseed_TmuxNoServerClassifiedAsMissing(t *testing.T) {
 	cases := []struct {
 		name    string
 		errMsg  string
@@ -155,13 +254,14 @@ func TestRespawnPanesAfterReseed_NoSessionErrorSilenced(t *testing.T) {
 		{"no server running", "tmux: no server running on /private/tmp/tmux-501/wuphf", true},
 		{"spawn first agent wrapper", "spawn first agent: exit status 1 (tmux: no server running on /tmp/tmux-501/wuphf)", true},
 		{"cant find session", "can't find session", true},
+		{"failed to connect to server", "tmux: failed to connect to server", true},
 		{"permission denied", "permission denied accessing /tmp/tmux-501", false},
-		{"generic spawn fail", "exec: no such file or directory", false},
+		{"generic exec fail without tmux prefix", "exec: binary unreadable", false},
 	}
 	for _, c := range cases {
-		got := isNoSessionError(c.errMsg)
+		got := isMissingTmuxSession(c.errMsg)
 		if got != c.silence {
-			t.Errorf("%s: isNoSessionError(%q) = %v, want %v", c.name, c.errMsg, got, c.silence)
+			t.Errorf("%s: isMissingTmuxSession(%q) = %v, want %v", c.name, c.errMsg, got, c.silence)
 		}
 	}
 }

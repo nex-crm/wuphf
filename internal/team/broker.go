@@ -2256,6 +2256,20 @@ func (b *Broker) DisabledMembers(channel string) []string {
 	return append([]string(nil), ch.Disabled...)
 }
 
+// senderMayAutoPromoteLocked reports whether a `from` value is allowed to have
+// its @slug body text auto-promoted into the tagged array. Allowlist shape:
+// humans (empty / "you" / "human") and any registered agent slug are allowed;
+// synthetic senders ("system", "nex", bridges, automation kinds) are not. A
+// denylist would silently let every future synthetic identity leak through.
+// Caller must hold b.mu.
+func (b *Broker) senderMayAutoPromoteLocked(from string) bool {
+	switch from {
+	case "", "you", "human":
+		return true
+	}
+	return b.findMemberLocked(from) != nil
+}
+
 func (b *Broker) OfficeMembers() []officeMember {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -7070,10 +7084,14 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// agent posts only, on the theory that humans might want @ to be merely
 	// conversational. In practice humans expect every @agent to notify, and
 	// the web composer does not always commit typed @-text into an explicit
-	// tag chip. Routing a clearly-addressed message to CEO instead of the
-	// named specialist is the worse default.
+	// tag chip.
+	//
+	// Senders allowed to auto-promote: empty / "you" / "human" (humans) and
+	// any registered agent slug. Everything else — "system", "nex", future
+	// synthetic senders — is excluded by default so automation posts do not
+	// accidentally wake agents on every @-reference they quote.
 	tagged := uniqueSlugs(body.Tagged)
-	if body.From != "system" {
+	if b.senderMayAutoPromoteLocked(body.From) {
 		for _, slug := range extractMentionedSlugs(body.Content) {
 			if slug == body.From {
 				continue
@@ -7081,14 +7099,7 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 			if b.findMemberLocked(slug) == nil {
 				continue
 			}
-			already := false
-			for _, t := range tagged {
-				if t == slug {
-					already = true
-					break
-				}
-			}
-			if !already {
+			if !containsString(tagged, slug) {
 				tagged = append(tagged, slug)
 			}
 		}
