@@ -8,38 +8,87 @@
 .message-grouped .message-avatar { visibility: hidden; height: 0; }
 .message-grouped .message-header { display: none; }
 
-/* ─── Inline threaded replies ───
-   Direct replies to a top-level channel message render indented under the
-   parent, connected by a left rail, so the thread reads as a grouped
-   conversation inside the main feed. Deep-thread replies (reply-to-a-reply)
-   still live in the thread panel only. */
-.message-reply {
-  padding-left: 44px;
+/* ─── Inline threaded replies ───────────────────────────────────
+   Editorial discussion-forum treatment. A top-level message and its
+   direct replies render as one unit: parent at full width, replies
+   indented under a continuous rail that reads like structure, not
+   decoration. Body text stays at full readability — subordination
+   happens through the avatar, the meta row, and the indent, not by
+   shrinking the content. Deep-thread replies (reply-to-a-reply) go
+   to the side panel, not the main feed.
+   ───────────────────────────────────────────────────────────── */
+
+.thread-group { display: flex; flex-direction: column; }
+
+/* Rail anchors at the parent avatar's center-line (24px padding + 18px
+   = 42px from message edge), starts a touch below the avatar and ends
+   just past the last reply's header so the line reads as "belongs to"
+   without running off into whitespace. */
+.thread-replies {
   position: relative;
-  margin-top: 2px;
+  margin: 2px 0 4px;
+  padding-left: 56px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.message-reply::before {
+.thread-replies::before {
   content: "";
   position: absolute;
-  left: 20px;
+  left: 42px;
   top: 0;
-  bottom: 0;
+  bottom: 4px;
   width: 2px;
-  background: var(--border);
+  background: var(--border-dark);
   border-radius: 2px;
+  opacity: 0.7;
+}
+.thread-group-has-replies + .thread-group { margin-top: 6px; }
+
+.message-reply {
+  position: relative;
+  gap: 10px;
+  /* Pull reply flush with the -24px page margin the nex theme puts on
+     .message so hover highlights bleed edge-to-edge like top-level
+     messages — not orphaned in a smaller box. */
+  margin-left: -56px;
+  padding-left: 56px;
 }
 .message-reply .message-avatar {
   width: 28px;
   height: 28px;
   padding: 4px;
+  border-radius: 7px;
 }
-.message-reply .message-content {
-  background: var(--bg-warm);
-  border-radius: var(--radius-md);
-  padding: 8px 12px;
-  border: 1px solid var(--border-light);
+.message-reply .message-header {
+  margin-bottom: 2px;
+  gap: 6px;
 }
+.message-reply .message-author {
+  /* Stay primary color + regular-bold weight so the agent's name
+     reads as a first-class actor. Size drops one step for subordination. */
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+.message-reply .message-time { font-size: 10.5px; }
+.message-reply .message-token-badge { font-size: 10px; padding: 0 5px; }
+.message-reply .message-text {
+  /* Readability is non-negotiable. Match parent size; tighten leading
+     one notch so the reply feels dense without being cramped. */
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+/* Consecutive replies from the same agent collapse into a tight cluster:
+   the avatar and header disappear, the body indents to line up with the
+   header above, the rail stays continuous. */
 .message-reply.message-grouped { margin-top: 0; padding-top: 0; }
+.message-reply.message-grouped .message-content {
+  /* Left-align the continuation under the header text (avatar-width +
+     gap = 28 + 10 = 38px). */
+  margin-left: 38px;
+}
 
 .message-avatar { width: 36px; height: 36px; padding: 6px; box-sizing: border-box; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; background: var(--bg-warm); }
 .message-avatar .pixel-avatar { width: 100%; height: 100%; }
