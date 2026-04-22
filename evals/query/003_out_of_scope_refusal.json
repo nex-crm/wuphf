@@ -1,0 +1,28 @@
+{
+  "id": "query_003_out_of_scope_refusal",
+  "prompt": "answer_query",
+  "description": "Pure general-knowledge query with no plausible business context; answer must use the exact refusal text, cite nothing, and coverage must be none.",
+  "template_vars": {
+    "Query": "What's the capital of France?",
+    "QueryClass": "general",
+    "Now": "2026-04-22T12:00:00Z",
+    "Sources": []
+  },
+  "expected": {
+    "must_include": [
+      "I don't have information about that.",
+      "I can help with questions about people, companies, and activities in your workspace."
+    ],
+    "must_not_include": [
+      "Paris",
+      "<sup>[",
+      "France"
+    ],
+    "structured": {
+      "query_class": "general",
+      "coverage": "none",
+      "sources_cited": []
+    },
+    "notes": "Guards Section 10.3 rule 7: out-of-scope queries respond with the EXACT refusal text; coverage=none; no citations; never answer from general knowledge."
+  }
+}

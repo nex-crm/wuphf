@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wuphf.local/schemas/eval-case.json",
+  "title": "WUPHF wiki intelligence eval case",
+  "description": "Single golden test case for a prompt template in prompts/*.tmpl",
+  "type": "object",
+  "required": ["id", "prompt", "description", "template_vars", "expected"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^(extract|synthesis|query|lint)_\\d{3}_[a-z0-9_]+$",
+      "description": "Unique ID: {suite}_{NNN}_{slug}"
+    },
+    "prompt": {
+      "type": "string",
+      "enum": ["extract_entities_lite", "synthesis_v2", "answer_query", "lint_contradictions"]
+    },
+    "description": {
+      "type": "string",
+      "minLength": 10,
+      "description": "One sentence on what this case defends against"
+    },
+    "template_vars": {
+      "type": "object",
+      "description": "Inputs passed to the Go text/template renderer. Shape depends on the prompt."
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "must_include": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Substrings that must appear verbatim in the parsed output"
+        },
+        "must_not_include": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Substrings that must NOT appear (anti-hallucination guards)"
+        },
+        "structured": {
+          "type": "object",
+          "description": "Partial-match expectations against the parsed JSON/markdown output"
+        },
+        "notes": {
+          "type": "string",
+          "description": "What this case is defending"
+        }
+      }
+    }
+  }
+}

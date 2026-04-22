@@ -1,0 +1,61 @@
+{
+  "id": "query_002_multi_hop_relationship",
+  "prompt": "answer_query",
+  "description": "Multi-hop relationship query requiring chaining of two facts (employment + project championing); must cite both linking facts and wikilink all three entities.",
+  "template_vars": {
+    "Query": "Who at Acme Corp champions the Q2 pilot?",
+    "QueryClass": "multi_hop",
+    "Now": "2026-04-22T12:00:00Z",
+    "Sources": [
+      {
+        "Kind": "fact",
+        "SlugOrID": "fact_sarah_at_acme",
+        "Title": "Sarah Jones — role_at Acme Corp",
+        "Excerpt": "Sarah was promoted to VP of Sales at Acme Corp on 2026-04-10.",
+        "ValidFrom": "2026-04-10T00:00:00Z",
+        "ValidUntil": "",
+        "Staleness": 4,
+        "SourcePath": "wiki/artifacts/agent/3f9a21bc.md"
+      },
+      {
+        "Kind": "fact",
+        "SlugOrID": "fact_sarah_champions_q2",
+        "Title": "Sarah Jones — champions Q2 pilot",
+        "Excerpt": "Sarah champions the Q2 pilot.",
+        "ValidFrom": "2026-03-15T00:00:00Z",
+        "ValidUntil": "",
+        "Staleness": 8,
+        "SourcePath": "wiki/artifacts/meeting/1b7d2401.md"
+      },
+      {
+        "Kind": "brief",
+        "SlugOrID": "q2-pilot",
+        "Title": "Q2 Pilot",
+        "Excerpt": "Internal pilot running from March to June 2026.",
+        "ValidFrom": "",
+        "ValidUntil": "",
+        "Staleness": 0,
+        "SourcePath": "team/project/q2-pilot.md"
+      }
+    ]
+  },
+  "expected": {
+    "must_include": [
+      "Sarah",
+      "<sup>[1]",
+      "<sup>[2]",
+      "[[company/acme-corp",
+      "[[project/q2-pilot",
+      "[[people/sarah-jones"
+    ],
+    "must_not_include": [
+      "I don't have information",
+      "## Sources"
+    ],
+    "structured": {
+      "query_class": "multi_hop",
+      "coverage": "complete"
+    },
+    "notes": "Guards Section 10.3 rule 5: multi-hop queries must chain the linking facts with citations for each edge. Guards rule 9: wikilink all three entities on first mention."
+  }
+}

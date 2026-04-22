@@ -1,0 +1,59 @@
+{
+  "id": "query_001_status_lookup",
+  "prompt": "answer_query",
+  "description": "Simple status query (who is Sarah?) with fresh and stale sources; answer must cite only current-role source and exclude a stale prior-role fact per Section 8.1.",
+  "template_vars": {
+    "Query": "What does Sarah Jones do?",
+    "QueryClass": "status",
+    "Now": "2026-04-22T12:00:00Z",
+    "Sources": [
+      {
+        "Kind": "fact",
+        "SlugOrID": "fact_vp_of_sales",
+        "Title": "Sarah Jones — role_at Acme Corp",
+        "Excerpt": "Sarah was promoted to VP of Sales at Acme Corp on 2026-04-10.",
+        "ValidFrom": "2026-04-10T00:00:00Z",
+        "ValidUntil": "",
+        "Staleness": 4,
+        "SourcePath": "wiki/artifacts/agent/3f9a21bc.md"
+      },
+      {
+        "Kind": "fact",
+        "SlugOrID": "fact_head_of_marketing",
+        "Title": "Sarah Jones — role_at Acme Corp (superseded)",
+        "Excerpt": "Sarah joined Acme Corp in 2024 as Head of Marketing.",
+        "ValidFrom": "2024-01-01T00:00:00Z",
+        "ValidUntil": "2026-04-10T00:00:00Z",
+        "Staleness": 45,
+        "SourcePath": "wiki/artifacts/linkedin/7c2e88a1.md"
+      },
+      {
+        "Kind": "brief",
+        "SlugOrID": "sarah-jones",
+        "Title": "Sarah Jones",
+        "Excerpt": "VP of Sales at Acme Corp.",
+        "ValidFrom": "",
+        "ValidUntil": "",
+        "Staleness": 0,
+        "SourcePath": "team/person/sarah-jones.md"
+      }
+    ]
+  },
+  "expected": {
+    "must_include": [
+      "VP of Sales",
+      "<sup>[",
+      "[[company/acme-corp"
+    ],
+    "must_not_include": [
+      "Head of Marketing",
+      "I don't have information",
+      "## Sources"
+    ],
+    "structured": {
+      "query_class": "status",
+      "coverage": "complete"
+    },
+    "notes": "Guards Section 10.3 rule 2: status queries exclude facts with staleness > 20; prior-role fact (staleness 45) must NOT appear in the answer. Guards rule 1: every factual claim cites a source."
+  }
+}

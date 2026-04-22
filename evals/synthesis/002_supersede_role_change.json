@@ -1,0 +1,49 @@
+{
+  "id": "synthesis_002_supersede_role_change",
+  "prompt": "synthesis_v2",
+  "description": "Role change fact supersedes a prior fact; synthesized body must state only the new role in the current-role section and relegate the old role to past tense in History.",
+  "template_vars": {
+    "EntitySlug": "sarah-jones",
+    "EntityKind": "person",
+    "EntityDisplayName": "Sarah Jones",
+    "CurrentBody": "# Sarah Jones\n\nSarah is Head of Marketing at [[company/acme-corp|Acme Corp]]. She leads the 2025 campaign track.\n\n## Current role\n\nHead of Marketing at [[company/acme-corp]], since 2024.\n\n## Background\n\nJoined Acme Corp in 2024.\n",
+    "NewFacts": [
+      {
+        "ID": "a3f9b2c14e8d0010",
+        "Type": "status",
+        "Confidence": 0.95,
+        "Supersedes": ["a3f9b2c14e8d0002"],
+        "SupersedesJoined": "a3f9b2c14e8d0002",
+        "Text": "Sarah was promoted to VP of Sales at Acme Corp on 2026-04-10.",
+        "ValidFrom": "2026-04-10T00:00:00Z",
+        "ValidUntil": null,
+        "SourcePath": "wiki/artifacts/agent/3f9a21bc.md"
+      }
+    ],
+    "ActiveFacts": [
+      {
+        "ID": "a3f9b2c14e8d0010",
+        "Type": "status",
+        "Text": "Sarah was promoted to VP of Sales at Acme Corp on 2026-04-10."
+      }
+    ],
+    "RecentInsights": [],
+    "KnownRelatedEntities": [
+      {"Slug": "acme-corp", "Kind": "company", "DisplayName": "Acme Corp"}
+    ],
+    "Contradictions": []
+  },
+  "expected": {
+    "must_include": [
+      "# Sarah Jones",
+      "VP of Sales"
+    ],
+    "must_not_include": [
+      "Head of Marketing at [[company/acme-corp]], since 2024.\n",
+      "Contradiction:",
+      "## Related",
+      "## Sources"
+    ],
+    "notes": "Guards Section 10.2 rules 7-8: superseded facts must not appear as current; new status fact takes the current-role slot; past role may appear in History in past tense but not as current."
+  }
+}
