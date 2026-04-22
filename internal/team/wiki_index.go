@@ -202,6 +202,36 @@ func NewWikiIndex(root string, opts ...IndexOption) *WikiIndex {
 	return w
 }
 
+// NewPersistentWikiIndex constructs a WikiIndex that stores facts in a SQLite
+// database and uses bleve for full-text (BM25) search — both pure-Go, no cgo.
+//
+//   - sqlite db: indexDir/wiki.sqlite
+//   - bleve dir: indexDir/bleve/
+//
+// indexDir is created with 0o755 if it does not exist. The caller must call
+// Close() when done. NewWikiIndex (in-memory) remains the default for tests and
+// the fallback path — this constructor is additive only.
+func NewPersistentWikiIndex(root string, indexDir string) (*WikiIndex, error) {
+	if err := os.MkdirAll(indexDir, 0o755); err != nil {
+		return nil, fmt.Errorf("wiki_index: mkdir %s: %w", indexDir, err)
+	}
+
+	sqlitePath := filepath.Join(indexDir, "wiki.sqlite")
+	store, err := NewSQLiteFactStore(sqlitePath)
+	if err != nil {
+		return nil, fmt.Errorf("wiki_index: sqlite: %w", err)
+	}
+
+	bleveDir := filepath.Join(indexDir, "bleve")
+	text, err := NewBleveTextIndex(bleveDir)
+	if err != nil {
+		store.Close()
+		return nil, fmt.Errorf("wiki_index: bleve: %w", err)
+	}
+
+	return NewWikiIndex(root, WithFactStore(store), WithTextIndex(text)), nil
+}
+
 // Close releases both backends. Safe to call twice.
 func (w *WikiIndex) Close() error {
 	var errs []error
