@@ -423,6 +423,12 @@ type TeamWikiSearchArgs struct {
 // TeamWikiListArgs is intentionally empty — team_wiki_list takes no args.
 type TeamWikiListArgs struct{}
 
+// TeamWikiLookupArgs is the contract for wuphf_wiki_lookup.
+type TeamWikiLookupArgs struct {
+	Query string `json:"query" jsonschema:"Natural-language question to answer from the team wiki"`
+	TopK  int    `json:"top_k,omitempty" jsonschema:"Max sources to retrieve (default 20)"`
+}
+
 type TeamTaskAckArgs struct {
 	ID      string `json:"id" jsonschema:"Task ID to acknowledge"`
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
@@ -545,6 +551,10 @@ func registerSharedMemoryTools(server *mcp.Server) {
 			"team_wiki_list",
 			"Return the auto-regenerated catalog (index/all.md) of every article in the team wiki.",
 		), handleTeamWikiList)
+		mcp.AddTool(server, readOnlyTool(
+			"wuphf_wiki_lookup",
+			"Cited-answer lookup against the team wiki. Returns a structured JSON answer with sources and inline citations. Use when you need a verified, sourced answer rather than a raw search.",
+		), handleTeamWikiLookup)
 		// Notebook tools ride on the same markdown backend. Registered here
 		// so they share the WUPHF_MEMORY_BACKEND gate with team_wiki_*.
 		registerNotebookTools(server)
@@ -1957,6 +1967,26 @@ func handleTeamWikiSearch(ctx context.Context, _ *mcp.CallToolRequest, args Team
 // handleTeamWikiList returns the auto-regenerated catalog at index/all.md.
 func handleTeamWikiList(ctx context.Context, _ *mcp.CallToolRequest, _ TeamWikiListArgs) (*mcp.CallToolResult, any, error) {
 	bytes, err := brokerGetRaw(ctx, "/wiki/list")
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(string(bytes)), nil, nil
+}
+
+// handleTeamWikiLookup answers a natural-language question with a cited
+// response assembled from the team wiki. The broker's /wiki/lookup endpoint
+// runs the full QueryHandler pipeline: classify → search → prompt → parse.
+// Returns the raw QueryAnswer JSON so the calling agent can render citations.
+func handleTeamWikiLookup(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiLookupArgs) (*mcp.CallToolResult, any, error) {
+	q := strings.TrimSpace(args.Query)
+	if q == "" {
+		return toolError(fmt.Errorf("query is required")), nil, nil
+	}
+	path := "/wiki/lookup?q=" + url.QueryEscape(q)
+	if args.TopK > 0 {
+		path += fmt.Sprintf("&top_k=%d", args.TopK)
+	}
+	bytes, err := brokerGetRaw(ctx, path)
 	if err != nil {
 		return toolError(err), nil, nil
 	}

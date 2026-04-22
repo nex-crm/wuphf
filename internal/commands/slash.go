@@ -11,6 +11,7 @@ package commands
 func RegisterAllCommands(r *Registry) {
 	// AI
 	r.Register(SlashCommand{Name: "ask", Description: "Ask the team lead", WebSupported: true, Execute: cmdAsk})
+	r.Register(SlashCommand{Name: "lookup", Description: "Cited answer from the team wiki", WebSupported: true, Execute: cmdLookup})
 	r.Register(SlashCommand{Name: "search", Description: "Search messages + KB", WebSupported: true, Execute: cmdSearch})
 	r.Register(SlashCommand{Name: "remember", Description: "Store a fact in memory", WebSupported: true, Execute: cmdRemember})
 	r.Register(SlashCommand{Name: "youtube-pack", Description: "Generate YouTube content packages", Execute: cmdYouTubePack})
