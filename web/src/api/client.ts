@@ -164,6 +164,29 @@ export function toggleReaction(msgId: string, emoji: string, channel: string) {
   })
 }
 
+// ── Slash-command registry ──
+
+/**
+ * One entry from GET /commands. Mirrors the broker's `commandDescriptor`
+ * shape in internal/team/broker_commands.go. Sorted alphabetically by the
+ * broker — callers do not need to re-sort.
+ */
+export interface SlashCommandDescriptor {
+  name: string
+  description: string
+  /** True when the web composer has a real handler for this command. */
+  webSupported: boolean
+}
+
+/**
+ * Fetch the canonical slash-command registry from the broker. The web
+ * autocomplete filters to webSupported=true; other callers may want the
+ * full set for discovery.
+ */
+export function fetchCommands() {
+  return get<SlashCommandDescriptor[]>('/commands')
+}
+
 // ── Members ──
 
 export interface ProviderBinding {

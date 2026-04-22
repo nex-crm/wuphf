@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
 import { useOfficeMembers } from '../../hooks/useMembers'
+import { FALLBACK_SLASH_COMMANDS, type SlashCommand } from '../../hooks/useCommands'
 
 export interface AutocompleteItem {
   /** Token to insert (e.g. "/clear" or "@ceo"). */
@@ -12,35 +13,14 @@ export interface AutocompleteItem {
   icon?: string
 }
 
-export interface SlashCommand {
-  name: string
-  desc: string
-  icon: string
-}
+export type { SlashCommand }
 
-export const SLASH_COMMANDS: SlashCommand[] = [
-  { name: '/ask', desc: 'Ask the team lead', icon: '\uD83D\uDCAC' },
-  { name: '/search', desc: 'Search messages + KB', icon: '\uD83D\uDD0E' },
-  { name: '/remember', desc: 'Store a fact in memory', icon: '\uD83E\uDDE0' },
-  { name: '/help', desc: 'Show all commands + keys', icon: '\u2753' },
-  { name: '/clear', desc: 'Clear messages', icon: '\uD83E\uDDF9' },
-  { name: '/reset', desc: 'Reset the office', icon: '\uD83D\uDD04' },
-  { name: '/tasks', desc: 'Open task board', icon: '\uD83D\uDCCB' },
-  { name: '/requests', desc: 'Open requests', icon: '\uD83D\uDD14' },
-  { name: '/recover', desc: 'Health Check view', icon: '\uD83D\uDD01' },
-  { name: '/1o1', desc: '1:1 with agent', icon: '\uD83D\uDCAC' },
-  { name: '/task', desc: 'Task actions', icon: '\u2705' },
-  { name: '/cancel', desc: 'Cancel a task', icon: '\u274C' },
-  { name: '/policies', desc: 'View policies', icon: '\uD83D\uDCDC' },
-  { name: '/calendar', desc: 'View schedule', icon: '\uD83D\uDCC5' },
-  { name: '/skills', desc: 'View skills', icon: '\u26A1' },
-  { name: '/focus', desc: 'Switch to delegation mode', icon: '\uD83C\uDFAF' },
-  { name: '/collab', desc: 'Switch to collaborative mode', icon: '\uD83E\uDD1D' },
-  { name: '/pause', desc: 'Pause all agents', icon: '\u23F8' },
-  { name: '/resume', desc: 'Resume all agents', icon: '\u25B6' },
-  { name: '/threads', desc: 'See every active thread', icon: '\uD83E\uDDF5' },
-  { name: '/provider', desc: 'Switch runtime provider', icon: '\u2699' },
-]
+/**
+ * Legacy export preserved for callers that import SLASH_COMMANDS directly
+ * (tests, external tooling). The live autocomplete now reads from the
+ * broker via useCommands; this is the offline fallback list.
+ */
+export const SLASH_COMMANDS: SlashCommand[] = FALLBACK_SLASH_COMMANDS
 
 interface AutocompleteProps {
   /** Current composer text. */
@@ -53,6 +33,12 @@ interface AutocompleteProps {
   onItems: (items: AutocompleteItem[]) => void
   /** Pick an item: parent rewrites the text. */
   onPick: (item: AutocompleteItem) => void
+  /**
+   * Slash-command set to offer. Parent supplies this (usually from
+   * useCommands) so the broker registry stays the single source of truth.
+   * Defaults to the offline fallback when omitted.
+   */
+  commands?: SlashCommand[]
 }
 
 /**
@@ -60,7 +46,14 @@ interface AutocompleteProps {
  * keyboard handling (up/down/enter/tab/escape) — this component only
  * paints, calculates the items list, and reports it.
  */
-export function Autocomplete({ value, caret, selectedIdx, onItems, onPick }: AutocompleteProps) {
+export function Autocomplete({
+  value,
+  caret,
+  selectedIdx,
+  onItems,
+  onPick,
+  commands = SLASH_COMMANDS,
+}: AutocompleteProps) {
   const { data: members = [] } = useOfficeMembers()
   const listRef = useRef<HTMLDivElement>(null)
 
@@ -69,7 +62,7 @@ export function Autocomplete({ value, caret, selectedIdx, onItems, onPick }: Aut
     if (!trigger) return []
     if (trigger.kind === 'slash') {
       const q = trigger.query.toLowerCase()
-      return SLASH_COMMANDS
+      return commands
         .filter((c) => c.name.slice(1).toLowerCase().startsWith(q))
         .slice(0, 8)
         .map((c) => ({ insert: c.name, label: c.name, desc: c.desc, icon: c.icon }))
@@ -89,9 +82,9 @@ export function Autocomplete({ value, caret, selectedIdx, onItems, onPick }: Aut
         insert: '@' + m.slug,
         label: '@' + m.slug,
         desc: m.name,
-        icon: m.emoji || '\uD83E\uDD16',
+        icon: m.emoji || '🤖',
       }))
-  }, [value, caret, members])
+  }, [value, caret, members, commands])
 
   useEffect(() => {
     onItems(items)

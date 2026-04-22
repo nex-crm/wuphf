@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createDM, getConfig, postMessage, post, setMemory } from '../../api/client'
 import { directChannelSlug, useAppStore } from '../../stores/app'
 import { useOfficeMembers } from '../../hooks/useMembers'
+import { useCommands } from '../../hooks/useCommands'
 import { showNotice } from '../ui/Toast'
 import { confirm } from '../ui/ConfirmDialog'
 import { openProviderSwitcher } from '../ui/ProviderSwitcher'
@@ -268,6 +269,10 @@ export function Composer() {
     () => resolveLeadSlug(cfg?.team_lead_slug, members),
     [cfg?.team_lead_slug, members],
   )
+  // Broker-backed slash-command registry. Falls back to the hardcoded
+  // list if the broker is unreachable so the composer is never worse
+  // than before this plumbing landed.
+  const commands = useCommands()
 
   const historyRef = useRef<HistoryState>(emptyHistoryState())
 
@@ -487,6 +492,7 @@ export function Composer() {
         selectedIdx={acIdx}
         onItems={handleAcItems}
         onPick={pickAutocomplete}
+        commands={commands}
       />
       <div className="composer-inner">
         <textarea

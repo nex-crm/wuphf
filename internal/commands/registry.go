@@ -19,10 +19,16 @@ type PickerOption struct {
 }
 
 // SlashCommand is a named command with an optional Execute handler.
+//
+// WebSupported reports whether the web composer has a real handler for this
+// command. The TUI registry is the source of truth for the full command set;
+// the web surface exposes only the subset with WebSupported=true. Defaults to
+// false so new TUI commands do not silently leak into the web autocomplete.
 type SlashCommand struct {
-	Name        string
-	Description string
-	Execute     func(ctx *SlashContext, args string) error
+	Name         string
+	Description  string
+	WebSupported bool
+	Execute      func(ctx *SlashContext, args string) error
 }
 
 // SlashContext provides services and UI callbacks to command implementations.
