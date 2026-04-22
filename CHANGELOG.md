@@ -2,6 +2,13 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.6.1] - 2026-04-22
+
+### Fixed
+
+- **@-tagging a specialist now wakes the specialist, not CEO.** Tagging any non-CEO agent in `#general` was silently routing to CEO instead, because the channel-membership filter ran before the explicit @-tag check. A newly hired specialist is in the broker's member list but not yet in `ch.Members` for `#general`, so the filter dropped the notification and CEO absorbed the message. Explicit @-tags from humans or CEO now bypass the channel-membership filter, the sender's intent is explicit and trumps domain inference. Both collaborative and focus modes are patched.
+- **DMs to specialists now reach the specialist.** Agents hired via the web wizard (`POST /office-members`) were added to the broker's roster but not to the launcher's in-memory pack, so `activeSessionMembers()` silently excluded them from `agentNotificationTargets`. Any DM or explicit @-tag targeting a wizard-hired agent dropped into the void. `activeSessionMembers` now appends broker-only members after pack-listed ones, keeping pack ordering stable while ensuring every hired agent is reachable.
+
 ## [0.0.6.0] - 2026-04-21
 
 ### Fixed
