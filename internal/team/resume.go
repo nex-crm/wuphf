@@ -177,8 +177,13 @@ func (l *Launcher) buildResumePackets() map[string]string {
 
 // resumeInFlightWork builds resume packets for all agents with pending work and
 // delivers them via the appropriate runtime:
-//   - Headless (Codex / web mode): enqueueHeadlessCodexTurn
-//   - tmux: sendNotificationToPane
+//   - Headless (Codex, or any mode without live panes): enqueueHeadlessCodexTurn
+//   - tmux pane-backed: sendNotificationToPane
+//
+// The routing key is paneBackedAgents, mirroring shouldUseHeadlessDispatch.
+// webMode alone is not sufficient: TUI mode now defaults to headless dispatch,
+// and keying on webMode would send resume packets through agentPaneTargets()
+// to pane indices that were never spawned — silently dropping resumption.
 //
 // In headless mode the lead is enqueued FIRST to avoid the queue-hold guard:
 // enqueueHeadlessCodexTurn suppresses lead notifications when any specialist
@@ -190,7 +195,7 @@ func (l *Launcher) resumeInFlightWork() {
 		return
 	}
 
-	if l.usesCodexRuntime() || l.webMode {
+	if l.usesCodexRuntime() || !l.paneBackedAgents {
 		lead := l.officeLeadSlug()
 		// Enqueue lead first to bypass the queue-hold guard.
 		if packet, ok := packets[lead]; ok {
@@ -205,7 +210,7 @@ func (l *Launcher) resumeInFlightWork() {
 		return
 	}
 
-	// tmux path — need pane targets.
+	// Pane-backed fallback path — need live pane targets.
 	paneTargets := l.agentPaneTargets()
 	for slug, packet := range packets {
 		target, ok := paneTargets[slug]
