@@ -55,9 +55,13 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const remarkPlugins = useMemo<PluggableList>(() => buildRemarkPlugins([]), [])
+  // CitedAnswer does not resolve wikilinks against the local catalog — the
+  // broker's answer_query prompt only wikilinks entities that exist in sources.
+  // A permissive resolver avoids false "broken link" reds on citation anchors.
+  const resolver = useMemo(() => () => true, [])
+  const remarkPlugins = useMemo<PluggableList>(() => buildRemarkPlugins(resolver), [resolver])
   const rehypePlugins = useMemo<PluggableList>(() => buildRehypePlugins(), [])
-  const markdownComponents = useMemo(() => buildMarkdownComponents({}), [])
+  const markdownComponents = useMemo(() => buildMarkdownComponents({ resolver }), [resolver])
 
   useEffect(() => {
     if (!query.trim()) {
