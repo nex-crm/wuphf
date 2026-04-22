@@ -218,8 +218,12 @@ function formatShortTs(iso: string): string {
   return d.toISOString().slice(0, 10)
 }
 
+/** A fact is superseded when its temporal validity has ended.
+ *  Schema §8.2 — valid_until being set means a newer fact has taken its place.
+ *  A fact that HAS a supersedes list is the NEWER fact (it replaced others);
+ *  the supersedes list alone does NOT make this fact superseded. */
 function isSuperseded(f: Fact): boolean {
-  return Boolean(f.valid_until) || (Array.isArray(f.supersedes) && f.supersedes.length > 0 && Boolean(f.valid_until))
+  return Boolean(f.valid_until)
 }
 
 function formatValidity(f: Fact): string | null {

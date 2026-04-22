@@ -188,3 +188,67 @@ describe('<FactsOnFile>', () => {
     )
   })
 })
+
+describe('isSuperseded rendering (Fix C5)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.spyOn(api, 'subscribeEntityEvents').mockImplementation(() => () => {})
+  })
+
+  it('renders data-superseded=true on a fact whose valid_until is set', async () => {
+    const facts: api.Fact[] = [
+      {
+        id: 'f-superseded',
+        kind: 'people',
+        slug: 'sarah-chen',
+        text: 'Old title: Head of Marketing.',
+        recorded_by: 'archivist',
+        created_at: '2026-03-01T00:00:00Z',
+        valid_until: '2026-04-10',
+      },
+    ]
+    vi.spyOn(api, 'fetchFacts').mockResolvedValue(facts)
+    render(<FactsOnFile kind="people" slug="sarah-chen" />)
+    await screen.findByText('Old title: Head of Marketing.')
+    const li = screen.getByText('Old title: Head of Marketing.').closest('li')
+    expect(li).toHaveAttribute('data-superseded', 'true')
+  })
+
+  it('does NOT render data-superseded on a fact that supersedes others but has no valid_until', async () => {
+    const facts: api.Fact[] = [
+      {
+        id: 'f-newer',
+        kind: 'people',
+        slug: 'sarah-chen',
+        text: 'Promoted to VP of Sales.',
+        recorded_by: 'archivist',
+        created_at: '2026-04-10T00:00:00Z',
+        supersedes: ['prior-role-fact-abc'],
+        valid_until: null,
+      },
+    ]
+    vi.spyOn(api, 'fetchFacts').mockResolvedValue(facts)
+    render(<FactsOnFile kind="people" slug="sarah-chen" />)
+    await screen.findByText('Promoted to VP of Sales.')
+    const li = screen.getByText('Promoted to VP of Sales.').closest('li')
+    expect(li).not.toHaveAttribute('data-superseded')
+  })
+
+  it('does NOT render data-superseded on a fact with neither valid_until nor supersedes', async () => {
+    const facts: api.Fact[] = [
+      {
+        id: 'f-plain',
+        kind: 'people',
+        slug: 'sarah-chen',
+        text: 'Prefers async updates.',
+        recorded_by: 'pm',
+        created_at: '2026-04-01T00:00:00Z',
+      },
+    ]
+    vi.spyOn(api, 'fetchFacts').mockResolvedValue(facts)
+    render(<FactsOnFile kind="people" slug="sarah-chen" />)
+    await screen.findByText('Prefers async updates.')
+    const li = screen.getByText('Prefers async updates.').closest('li')
+    expect(li).not.toHaveAttribute('data-superseded')
+  })
+})
