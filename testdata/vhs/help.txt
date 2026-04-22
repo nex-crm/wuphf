@@ -39,7 +39,7 @@ Flags:
   --pack
         Operation blueprint ID (legacy pack alias supported)
   --provider
-        LLM provider override for this run (claude-code, codex)
+        LLM provider override for this run (claude-code, codex, opencode)
   --threads-collapsed
         Start with threads collapsed (default: expanded)
   --tui
