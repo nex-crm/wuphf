@@ -35,13 +35,18 @@
     ],
     "must_not_include": [
       "michael@",
-      "@acme.com\",\n        \"person_name\": \"Michael"
+      "@acme.com\",\n        \"person_name\": \"Michael",
+      "michael.chen@",
+      "michael-chen@",
+      "chen@"
     ],
     "structured": {
       "entities": [
         {"ghost": true, "kind": "person"}
-      ]
+      ],
+      "any_ghost_person": true,
+      "no_fabricated_email_when_artifact_silent": true
     },
-    "notes": "Guards Section 10.1 ghost-entity handling + anti-invention: new person appears with name only, must not fabricate an email."
+    "notes": "Guards Section 10.1 ghost-entity handling + anti-invention: new person appears with name only, must not fabricate an email. Devil's-advocate M14 strengthening: paraphrased fabricated emails (michael.chen@, michael-chen@, chen@) are explicitly banned; must contain at least one entity with ghost=true AND kind=person; must NOT emit signals.email for any entity whose artifact text lacks an email address."
   }
 }

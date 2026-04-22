@@ -45,8 +45,14 @@
       "{.hatnote}",
       "## Related",
       "## Sources",
-      "resolved"
+      "resolved",
+      "Michael Chen.\n",
+      "David Park.\n"
     ],
-    "notes": "Guards Section 10.2 rule 4: mark contradictions as italic *Contradiction:* callouts inline; renderer upgrades to hatnote. Synthesizer is NOT a judge; never silently pick a winner."
+    "structured": {
+      "contradiction_callout_count": 1,
+      "both_names_inside_single_contradiction_callout": true
+    },
+    "notes": "Guards Section 10.2 rule 4: mark contradictions as italic *Contradiction:* callouts inline; renderer upgrades to hatnote. Synthesizer is NOT a judge; never silently pick a winner. Devil's-advocate M14 strengthening: a lone \"Michael Chen.\\n\" or \"David Park.\\n\" at the top of the body (which would mean picking a winner) is banned; both names must appear together inside the *Contradiction: callout; the *Contradiction: string must appear exactly once (no duplicate callouts for the same pair)."
   }
 }

@@ -48,12 +48,16 @@
     "must_not_include": [
       "Head of Marketing",
       "I don't have information",
-      "## Sources"
+      "## Sources",
+      "2024"
     ],
     "structured": {
       "query_class": "status",
-      "coverage": "complete"
+      "coverage": "complete",
+      "sources_cited_subset_of": [1, 3],
+      "sources_cited_excludes": [2],
+      "confidence_min": 0.8
     },
-    "notes": "Guards Section 10.3 rule 2: status queries exclude facts with staleness > 20; prior-role fact (staleness 45) must NOT appear in the answer. Guards rule 1: every factual claim cites a source."
+    "notes": "Guards Section 10.3 rule 2: status queries exclude facts with staleness > 20; prior-role fact (staleness 45) must NOT appear in the answer. Guards rule 1: every factual claim cites a source. Devil's-advocate M14 strengthening: paraphrased stale content (\"Head of Marketing\", \"2024\" date anchor) must not appear; sources_cited must be a subset of [1, 3] (fact_vp_of_sales and brief sarah-jones) and must never include source 2 (the stale fact); confidence must be >= 0.8 given fresh grounded sources."
   }
 }

@@ -42,8 +42,15 @@
       "Head of Marketing at [[company/acme-corp]], since 2024.\n",
       "Contradiction:",
       "## Related",
-      "## Sources"
+      "## Sources",
+      "Head of Marketing at [[company/acme-corp]]",
+      "is Head of Marketing",
+      "Head of Marketing, since 2024"
     ],
-    "notes": "Guards Section 10.2 rules 7-8: superseded facts must not appear as current; new status fact takes the current-role slot; past role may appear in History in past tense but not as current."
+    "structured": {
+      "new_role_in_status_section": true,
+      "body_includes_vp_of_sales_and_current_role_header": true
+    },
+    "notes": "Guards Section 10.2 rules 7-8: superseded facts must not appear as current; new status fact takes the current-role slot; past role may appear in History in past tense but not as current. Devil's-advocate M14 strengthening: paraphrased stale claims (\"is Head of Marketing\", \"Head of Marketing, since 2024\", \"Head of Marketing at [[company/acme-corp]]\" in any form) must not appear; body must include BOTH \"VP of Sales\" AND \"## Current role\" (or an equivalent status-section heading) — the new role must replace the old in its section."
   }
 }

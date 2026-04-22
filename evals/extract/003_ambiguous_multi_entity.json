@@ -41,8 +41,11 @@
     "structured": {
       "entities": [
         {"kind": "person"}
-      ]
+      ],
+      "confidence_max": 0.6,
+      "signals_includes_person_name": true,
+      "no_candidate_slug_chosen": true
     },
-    "notes": "Guards Section 10.1 rule 7 + anti-pattern 5: when name is ambiguous and two known candidates exist, emit person_name only at confidence 0.5; do NOT pick a slug."
+    "notes": "Guards Section 10.1 rule 7 + anti-pattern 5: when name is ambiguous and two known candidates exist, emit person_name only at confidence 0.5; do NOT pick a slug. Devil's-advocate M14 strengthening: confidence must be <= 0.6 to reflect ambiguity; neither candidate slug (michael-chen, michael-scott) may appear in the output; signals block must include person_name."
   }
 }

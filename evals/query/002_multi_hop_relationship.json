@@ -50,12 +50,20 @@
     ],
     "must_not_include": [
       "I don't have information",
-      "## Sources"
+      "## Sources",
+      "I don't know",
+      "unclear",
+      "uncertain"
     ],
     "structured": {
       "query_class": "multi_hop",
-      "coverage": "complete"
+      "coverage": "complete",
+      "sources_cited_nonempty": true,
+      "sources_cited_min": 1,
+      "sources_cited_max": 3,
+      "body_includes_sarah": true,
+      "body_includes_champions_or_championed": true
     },
-    "notes": "Guards Section 10.3 rule 5: multi-hop queries must chain the linking facts with citations for each edge. Guards rule 9: wikilink all three entities on first mention."
+    "notes": "Guards Section 10.3 rule 5: multi-hop queries must chain the linking facts with citations for each edge. Guards rule 9: wikilink all three entities on first mention. Devil's-advocate M14 strengthening: every cited source index must be in [1, 3] and sources_cited must be non-empty; body must include \"Sarah\" AND the relationship verb \"champions\" or \"championed\" (from source 2); uncertainty hedges (\"I don't know\", \"unclear\", \"uncertain\") are banned because the evidence is complete."
   }
 }

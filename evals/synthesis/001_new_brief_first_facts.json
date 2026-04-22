@@ -63,8 +63,13 @@
       "## What we've learned",
       "---\ncanonical_slug",
       "```",
-      "Contradiction:"
+      "Contradiction:",
+      "---",
+      "canonical_slug"
     ],
-    "notes": "Guards Section 10.2 rules 1-4: wikilink entities on first mention, open with H1, never emit Related/Sources, never write frontmatter, no contradiction callout when none was flagged."
+    "structured": {
+      "acme_wikilink_within_lede_500_chars": true
+    },
+    "notes": "Guards Section 10.2 rules 1-4: wikilink entities on first mention, open with H1, never emit Related/Sources, never write frontmatter, no contradiction callout when none was flagged. Devil's-advocate M14 strengthening: frontmatter delimiter (---) and canonical_slug must not appear (no frontmatter in body output); the [[company/acme-corp wikilink must appear within the first 500 characters of the body (lede wikilinks rule)."
   }
 }

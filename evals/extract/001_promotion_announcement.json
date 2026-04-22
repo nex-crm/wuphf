@@ -37,14 +37,19 @@
     "must_not_include": [
       "probably",
       "likely",
-      "I think"
+      "I think",
+      "michael",
+      "david"
     ],
     "structured": {
       "artifact_sha": "3f9a21bc4e8d9102",
       "entities": [
         {"existing_slug": "sarah-jones"}
-      ]
+      ],
+      "entities_length": 1,
+      "facts_nonempty": true,
+      "facts_first_predicate": "role_at"
     },
-    "notes": "Guards Section 10.1 rules: reuse existing slug, reuse existing predicate, date from artifact, never invent."
+    "notes": "Guards Section 10.1 rules: reuse existing slug, reuse existing predicate, date from artifact, never invent. Devil's-advocate M14 strengthening: no extraneous entities (michael/david) invented; entities list must have exactly 1 element; facts must be non-empty; first fact's triplet.predicate must equal role_at."
   }
 }
