@@ -113,6 +113,23 @@ type Launcher struct {
 
 	notifyMu            sync.Mutex
 	notifyLastDelivered map[string]time.Time
+
+	// paneDispatchMu serializes access to paneDispatchQueues /
+	// paneDispatchWorkers. Each pane-backed agent has its own queue so
+	// rapid notifications no longer race with claude's in-progress turn —
+	// one worker per slug drains its queue with a minimum spacing between
+	// `/clear` sends so claude has time to finalise each reply.
+	paneDispatchMu      sync.Mutex
+	paneDispatchQueues  map[string][]paneDispatchTurn
+	paneDispatchWorkers map[string]bool
+}
+
+// paneDispatchTurn is one queued notification to type into a tmux pane.
+// Held in the per-slug queue, consumed by runPaneDispatchQueue.
+type paneDispatchTurn struct {
+	PaneTarget   string
+	Notification string
+	EnqueuedAt   time.Time
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
@@ -966,7 +983,7 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
-	l.sendNotificationToPane(target.PaneTarget, notification)
+	l.queuePaneNotification(target.Slug, target.PaneTarget, notification)
 }
 
 // isChannelDM returns true if the channel is a DM (either old dm-* format or new Store type).
@@ -2841,7 +2858,7 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
-	l.sendNotificationToPane(target.PaneTarget, notification)
+	l.queuePaneNotification(target.Slug, target.PaneTarget, notification)
 }
 
 // shouldUseHeadlessDispatch returns true when notifications must be delivered
@@ -2855,11 +2872,108 @@ func (l *Launcher) shouldUseHeadlessDispatch() bool {
 	return l.webMode && !l.paneBackedAgents
 }
 
+// Minimum gap between two consecutive pane `/clear` + type cycles for the
+// same agent. Without this, two rapid @-tags to the same specialist would
+// wipe claude's in-flight input before it had a chance to submit, and the
+// second notification either got silently dropped into an in-progress
+// generation or fused into the same turn (user-observed: PM answered one
+// of two rapid questions and ignored the other). 3s is long enough for
+// claude's TUI to return to prompt-ready in the common case; further
+// smoothing lives in the per-slug queue that drains at this cadence.
+//
+// Declared as var rather than const so tests can shorten it — the
+// serialisation contract is what's load-bearing, not the literal duration.
+var paneDispatchMinGap = 3 * time.Second
+
+// queuePaneNotification enqueues a notification for a pane-backed agent
+// and ensures there is one worker draining its queue. Replaces the old
+// direct-send path so rapid-fire notifications no longer clobber each
+// other mid-turn — previously every `/clear` came in on whatever tmux
+// typing order it won, which allowed a second message's `/clear` to wipe
+// claude's unsubmitted input from the first.
+func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) {
+	slug = strings.TrimSpace(slug)
+	paneTarget = strings.TrimSpace(paneTarget)
+	if slug == "" || paneTarget == "" || notification == "" {
+		return
+	}
+	l.paneDispatchMu.Lock()
+	if l.paneDispatchQueues == nil {
+		l.paneDispatchQueues = make(map[string][]paneDispatchTurn)
+	}
+	if l.paneDispatchWorkers == nil {
+		l.paneDispatchWorkers = make(map[string]bool)
+	}
+	l.paneDispatchQueues[slug] = append(l.paneDispatchQueues[slug], paneDispatchTurn{
+		PaneTarget:   paneTarget,
+		Notification: notification,
+		EnqueuedAt:   time.Now(),
+	})
+	startWorker := !l.paneDispatchWorkers[slug]
+	if startWorker {
+		l.paneDispatchWorkers[slug] = true
+	}
+	l.paneDispatchMu.Unlock()
+	if startWorker {
+		go l.runPaneDispatchQueue(slug)
+	}
+}
+
+// runPaneDispatchQueue is the single worker per agent slug that drains
+// pane-dispatch notifications serially with a minimum gap between
+// `/clear` cycles. Exits when the queue is empty.
+func (l *Launcher) runPaneDispatchQueue(slug string) {
+	var lastSentAt time.Time
+	for {
+		l.paneDispatchMu.Lock()
+		queue := l.paneDispatchQueues[slug]
+		if len(queue) == 0 {
+			// Atomic handoff: clear worker flag while holding the lock so a
+			// concurrent queuePaneNotification observes "no worker" and
+			// starts a fresh goroutine for the next enqueue.
+			delete(l.paneDispatchWorkers, slug)
+			delete(l.paneDispatchQueues, slug)
+			l.paneDispatchMu.Unlock()
+			return
+		}
+		turn := queue[0]
+		if len(queue) == 1 {
+			delete(l.paneDispatchQueues, slug)
+		} else {
+			l.paneDispatchQueues[slug] = queue[1:]
+		}
+		l.paneDispatchMu.Unlock()
+
+		// Honour the minimum gap. Skipped on the first turn (lastSentAt
+		// zero) so normal dispatch stays instant; only applies when a
+		// previous send happened within paneDispatchMinGap.
+		if !lastSentAt.IsZero() {
+			wait := paneDispatchMinGap - time.Since(lastSentAt)
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+		}
+		launcherSendNotificationToPane(l, turn.PaneTarget, turn.Notification)
+		lastSentAt = time.Now()
+	}
+}
+
+// launcherSendNotificationToPane is the package-level seam tests swap
+// out to observe dispatch ordering without shelling out to a real tmux.
+// In production it dispatches through the method on Launcher.
+var launcherSendNotificationToPane = func(l *Launcher, paneTarget, notification string) {
+	l.sendNotificationToPane(paneTarget, notification)
+}
+
 // sendNotificationToPane delivers a notification to a persistent interactive
 // Claude session in a tmux pane. It sends /clear first so each turn starts
 // with a fresh context window — the work packet carries all required context,
 // so accumulated history is not needed and only causes drift over time.
 // --append-system-prompt is a CLI flag and survives /clear intact.
+//
+// Callers should prefer queuePaneNotification — this function runs /clear +
+// type + Enter unconditionally, so rapid direct calls will race each other.
+// queuePaneNotification serializes per-slug and inserts the minimum gap.
 func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "/clear", "Enter",

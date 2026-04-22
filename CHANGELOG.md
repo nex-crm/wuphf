@@ -21,6 +21,12 @@ All notable changes to WUPHF will be documented in this file.
 - **Focus restoration no longer targets detached DOM nodes.** Closing the help modal checks `isConnected` before calling `focus()` on the previously-focused element — if that element was unmounted while the modal was open, focus falls back cleanly.
 - **Wizard gate logic and platform detection deduplicated.** `cmdEnterLabel()` now reuses the shared `MOD_KEY` from the Kbd component, and the inconsistent `hasAtLeastOneKey` / `hasAnyApiKey` names are unified.
 
+## [0.0.6.5] - 2026-04-22
+
+### Fixed
+
+- **Rapid `@agent` tags no longer clobber each other mid-turn.** Two `@pm` tags in quick succession used to type two `/clear` + prompt sequences into the same tmux pane back-to-back; claude's TUI finished one turn (answering whichever input it had fully parsed) and silently ate the other. A per-agent dispatch queue now serialises pane notifications with a 3-second minimum gap between `/clear` cycles, so each question gets its own turn. Different agents still dispatch in parallel — the gap is per-slug, not global.
+
 ## [0.0.6.3] - 2026-04-22
 
 ### Fixed
