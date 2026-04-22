@@ -6,5 +6,5 @@
     "secretlint": "^11.4.1",
     "@secretlint/secretlint-rule-preset-recommend": "^11.4.1"
   },
-  "version": "0.0.6.3"
+  "version": "0.0.7.0"
 }

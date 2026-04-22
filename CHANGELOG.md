@@ -2,6 +2,25 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [0.0.7.0] - 2026-04-22
+
+### Added
+
+- **Run the whole web app without a mouse.** Press `?` anywhere (outside a text field) to open a keyboard reference with every shortcut grouped by Global / Command palette / Onboarding wizard / Slash commands / Composer / Feed navigation.
+- **`⌘1`–`⌘9` jump to channels 1–9.** The first nine channels in the sidebar now advertise their shortcut with a faint kbd badge that lights up on hover/focus/active. Dark-sidebar legible via `currentColor` inheritance.
+- **Enter advances every wizard step.** Identity, Templates, Team, Setup, and Ready all move forward on Enter when their own gate is satisfied. The Task step keeps Enter for newlines and uses `⌘/Ctrl+Enter` to advance, with an inline kbd hint spelling out the difference. Every primary CTA carries a visible `↵ Enter` badge.
+- **`? shortcuts` button** in the status bar opens the help modal for mouse users who don't know the shortcut exists.
+- **Shared `<Kbd>` + `<KbdSequence>` component** with platform-aware modifier (`⌘` on macOS, `Ctrl` elsewhere). One visual treatment across sidebar hints, wizard CTAs, help modal, status bar, and command palette footer.
+- **`:focus-visible` rings** on template tiles, runtime tiles, team tiles, and task suggestions — keyboard users can see where they are without imposing an outline on mouse users.
+
+### Fixed
+
+- **Escape no longer cascades through every open panel.** Pressing Escape with the help modal + command palette + thread panel open used to close all three at once. The modal now uses capture-phase `stopImmediatePropagation` so one press closes only the topmost surface.
+- **Wizard Enter stops hijacking focused buttons.** Enter on Back/Skip/runtime-reorder buttons used to advance the step instead of firing the button. On the Ready step, Enter on Skip submitted the task anyway. Enter is now ignored when focus is on a `<button>`, `<a>`, or `<select>`.
+- **Hold-Enter on the Ready step no longer corrupts config.json.** The wizard's Enter handler now bails on `e.repeat`, preventing parallel writes to the broker's /config endpoint (which has a known race under concurrent requests).
+- **Focus restoration no longer targets detached DOM nodes.** Closing the help modal checks `isConnected` before calling `focus()` on the previously-focused element — if that element was unmounted while the modal was open, focus falls back cleanly.
+- **Wizard gate logic and platform detection deduplicated.** `cmdEnterLabel()` now reuses the shared `MOD_KEY` from the Kbd component, and the inconsistent `hasAtLeastOneKey` / `hasAnyApiKey` names are unified.
+
 ## [0.0.6.3] - 2026-04-22
 
 ### Fixed
