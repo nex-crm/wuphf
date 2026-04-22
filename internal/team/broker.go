@@ -7063,13 +7063,17 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
-	// Auto-promote @slug mentions in the body into the tagged array for
-	// agent posts. Agents routinely write "@operator please handle X" and
-	// forget to set `tagged`, which means @operator never wakes up. Human
-	// messages are left alone — humans intentionally type @-references
-	// conversationally and may not want every one to fire a notification.
+	// Auto-promote @slug mentions in the body into the tagged array. If a
+	// user or agent typed `@pm`, treat it as a tag — `extractMentionedSlugs`
+	// already restricts to registered agent slugs, so conversational use of
+	// an @ that doesn't match an agent is untouched. Previously this ran for
+	// agent posts only, on the theory that humans might want @ to be merely
+	// conversational. In practice humans expect every @agent to notify, and
+	// the web composer does not always commit typed @-text into an explicit
+	// tag chip. Routing a clearly-addressed message to CEO instead of the
+	// named specialist is the worse default.
 	tagged := uniqueSlugs(body.Tagged)
-	if body.From != "" && body.From != "you" && body.From != "human" && body.From != "system" {
+	if body.From != "system" {
 		for _, slug := range extractMentionedSlugs(body.Content) {
 			if slug == body.From {
 				continue

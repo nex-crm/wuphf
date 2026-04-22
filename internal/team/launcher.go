@@ -542,6 +542,14 @@ func (l *Launcher) respawnPanesAfterReseed() {
 	}
 	l.provider = config.ResolveLLMProvider("")
 	if err := l.reconfigureVisibleAgents(); err != nil {
+		// "No tmux server running" is the expected state when the launcher
+		// runs in headless/web mode without a persistent tmux session —
+		// reconfigureVisibleAgents tries to attach, fails, and the headless
+		// dispatch path takes over silently. Logging it as an error makes
+		// a normal code path look like a recurring failure in the console.
+		if isNoSessionError(err.Error()) {
+			return
+		}
 		log.Printf("office_reseeded: respawn panes failed: %v", err)
 	}
 }
