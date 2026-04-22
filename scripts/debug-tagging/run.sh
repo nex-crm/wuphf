@@ -60,11 +60,22 @@ kill_port() {
   local port=$1
   local pids
   pids=$(lsof -ti :"$port" 2>/dev/null || true)
-  if [ -n "$pids" ]; then
-    log "kill: pid(s) on :$port -> $pids"
-    kill $pids 2>/dev/null || true
-    sleep 0.3
-    kill -9 $pids 2>/dev/null || true
+  if [ -z "$pids" ]; then return; fi
+  log "kill: pid(s) on :$port -> $pids"
+  # shellcheck disable=SC2086  # intentional word-splitting: $pids is newline-separated
+  kill $pids 2>/dev/null || true
+  # Poll the port — not the original PID list — so multi-PID cases don't
+  # exit early when only one process is still bound. Escalate to SIGKILL
+  # if the port stays occupied past the bounded deadline.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    if [ -z "$(lsof -ti :"$port" 2>/dev/null)" ]; then return; fi
+    sleep 0.05
+  done
+  local remaining
+  remaining=$(lsof -ti :"$port" 2>/dev/null || true)
+  if [ -n "$remaining" ]; then
+    # shellcheck disable=SC2086  # intentional word-splitting
+    kill -9 $remaining 2>/dev/null || true
   fi
 }
 
@@ -157,7 +168,10 @@ cleanup() {
   if [ "$KEEP" != "1" ]; then
     log "cleanup: killing pid=$SERVER_PID"
     kill "$SERVER_PID" 2>/dev/null || true
-    sleep 0.3
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
+      sleep 0.05
+    done
     kill -9 "$SERVER_PID" 2>/dev/null || true
   else
     log "cleanup: KEEP=1 — leaving server running on pid=$SERVER_PID"
@@ -237,6 +251,48 @@ PY
 
   # Refresh roster listing so the check below sees the new agent.
   curl -sf -H "$AUTH" "${BROKER_URL}/office-members" > "$SANDBOX_HOME/.members.json"
+
+  # The actual bug PR #234 fixes is the write-side collapse: hired agent
+  # was absent from #general.members, so its reply to #general 403'd with
+  # "channel access denied". The rig MUST assert the fix at its observable
+  # surface (#general roster) — otherwise a regression that re-introduces
+  # the 403 would still report PASS based only on dispatch observation.
+  #
+  # Also check ch.Disabled: canAccessChannelLocked only consults Members
+  # (not Disabled), so a regression that put the slug in BOTH Members
+  # and Disabled would let replies through but silently drop notification
+  # delivery (via channelMemberEnabledLocked) — same user-visible symptom
+  # via a different path. Assert not-in-Disabled too.
+  curl -sf -H "$AUTH" "${BROKER_URL}/channels" > "$SANDBOX_HOME/.channels.json"
+  GENERAL_STATE=$(SPECIALIST="$SPECIALIST" SANDBOX_HOME="$SANDBOX_HOME" python3 <<'PY'
+import json, os
+with open(os.environ["SANDBOX_HOME"] + "/.channels.json") as f:
+    data = json.load(f)
+spec = os.environ["SPECIALIST"]
+for c in data.get("channels", []):
+    if c.get("slug") == "general":
+        in_members = spec in (c.get("members") or [])
+        in_disabled = spec in (c.get("disabled") or [])
+        print(f"members={'yes' if in_members else 'no'} disabled={'yes' if in_disabled else 'no'}")
+        break
+else:
+    print("members=no disabled=no")
+PY
+)
+  case "$GENERAL_STATE" in
+    "members=yes disabled=no")
+      log "hire: confirmed $SPECIALIST is in #general.members and NOT in #general.disabled (reply path + notification path unblocked)"
+      ;;
+    "members=no "*)
+      fail "hire: $SPECIALIST is NOT in #general.members after POST /office-members — the write-side fix regressed; replies will 403 with 'channel access denied' ($GENERAL_STATE)"
+      ;;
+    *"disabled=yes")
+      fail "hire: $SPECIALIST is in #general.disabled — notifications will be filtered out silently even if Members is correct ($GENERAL_STATE)"
+      ;;
+    *)
+      fail "hire: unexpected general-channel state for $SPECIALIST: $GENERAL_STATE"
+      ;;
+  esac
 fi
 
 # Check that SPECIALIST exists in the roster.
@@ -273,9 +329,26 @@ MSG_ID=$(printf '%s' "$POST_RESP" | python3 -c "import json,sys; print(json.load
 log "post: accepted id=$MSG_ID resp=$POST_RESP"
 
 # --- Step 8: wait for dispatch --------------------------------------------
+# Poll the latency log for the specialist's "stage=started" line rather than
+# sleeping a fixed WAIT_SECS. The queue fires synchronously via a goroutine
+# once the message is POSTed; appearance of the log entry is the
+# deterministic signal. WAIT_SECS is the upper bound, not the actual wait.
 
-log "wait: ${WAIT_SECS}s for headless queue to fire for $SPECIALIST"
-sleep "$WAIT_SECS"
+log "wait: up to ${WAIT_SECS}s for headless queue to fire for $SPECIALIST"
+LATENCY_LOG="${SANDBOX_HOME}/.wuphf/logs/headless-codex-latency.log"
+deadline_ms=$(( $(date +%s) * 1000 + WAIT_SECS * 1000 ))
+while :; do
+  if [ -s "$LATENCY_LOG" ] && grep -q "agent=$SPECIALIST " "$LATENCY_LOG"; then
+    log "wait: dispatch observed for $SPECIALIST"
+    break
+  fi
+  now_ms=$(( $(date +%s) * 1000 ))
+  if [ "$now_ms" -ge "$deadline_ms" ]; then
+    log "wait: deadline reached without seeing dispatch — diagnostics will show"
+    break
+  fi
+  sleep 0.1   # poll interval, bounded by the deadline above
+done
 
 # --- Step 9: diagnostics ---------------------------------------------------
 

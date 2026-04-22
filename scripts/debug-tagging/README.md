@@ -59,53 +59,50 @@ KEEP=1 ./scripts/debug-tagging/run.sh
 Exit code: `0` if the specialist was dispatched (fix works), `1` if not (bug
 reproduced).
 
-## Findings so far
+## What this rig proved (and why the fix in this PR is the right one)
 
-Running this rig revealed that PR #218 only fixed *half* the round-trip. With
-`HIRE_SLUG=qa-spec` the rig shows:
+Running `HIRE_SLUG=qa-spec` against pre-fix `main` showed that PR #218 only
+fixed *half* the round-trip:
 
-- Notification routing: ✅ `qa-spec` is correctly dispatched a turn
-  (`agent=qa-spec stage=started` in `headless-codex-latency.log`).
-- Reply posting: ❌ `fallback-post-error: channel access denied` in
-  `headless-claude-qa-spec.log`.
+- Notification routing (fixed in #218): `qa-spec` was correctly dispatched a
+  turn — `agent=qa-spec stage=started` in `headless-codex-latency.log`.
+- Reply posting (broken pre this PR, fixed here): `fallback-post-error:
+  channel access denied` in `headless-claude-qa-spec.log`.
 
 The broker's `/messages` POST handler enforces
-`canAccessChannelLocked(from, channel)` at `internal/team/broker.go:7078`,
-which requires the sender slug to be in `ch.Members` for every non-lead
-agent. CEO is hard-wired to bypass; wizard-hired specialists are not.
+`canAccessChannelLocked(from, channel)`, which requires the sender slug to
+be in `ch.Members` for every non-CEO agent. `handleOfficeMembers` with
+`action: create` appended the new member to `b.members` but **never added
+them to any channel's `Members` array** — so the agent was hireable,
+taggable, and dispatches correctly, but its reply was silently 403'd and
+the human saw nothing.
 
-`handleOfficeMembers` with `action: create` (broker.go:5992–6060) appends the
-new member to `b.members` but **never adds them to any channel's `Members`
-array**. So the agent is hireable, taggable, and dispatches correctly, but
-its reply is silently 403'd — the human sees nothing.
+Two fix directions were considered:
 
-Quick confirmation:
+1. **handleOfficeMembers `action: create`** — add the new slug to all
+   non-DM channels when the member is created. Symmetric with the
+   pack-launch seeding in `normalizeLoadedStateLocked`, and with how
+   `/channel-members` already handles the reverse. **This is what this
+   PR ships.**
+2. `canAccessChannelLocked` — treat the agent's own reply to a thread
+   they were tagged in as allowed even if not in `ch.Members`. Parallel to
+   PR #218's explicit-tag bypass on the read side. Not chosen: the bug is
+   a missing side-effect on hire, not a missing permission carve-out.
+
+Post-fix verification (this rig, `HIRE_SLUG=qa-spec`):
+
 ```bash
-# start fresh
 HIRE_SLUG=qa-spec KEEP=1 ./scripts/debug-tagging/run.sh
 
 # Inspect general's roster:
 curl -s -H "Authorization: Bearer $(cat /tmp/wuphf-broker-token-7899)" \
   http://127.0.0.1:7899/channels | jq '.channels[] | select(.slug=="general") | .members'
-# -> [ceo, pm, fe, be, ai, designer, cmo, cro]   <-- qa-spec is missing
+# -> [ceo, pm, fe, be, ai, designer, cmo, cro, qa-spec]   <-- qa-spec now present
 ```
 
-This matches the coworker's symptom exactly: "tag a specialist → no response
-comes back." Tags to pack-native agents work because those slugs are seeded
-into `#general.members` at launch (broker.go:3146). Wizard-hired agents are
-not.
-
-### Suspected fixes
-
-1. **handleOfficeMembers `action: create`** — add the new slug to all public
-   channels (or at least `#general`) when the member is created. Symmetric
-   with how `/channel-members` already handles the reverse.
-2. **canAccessChannelLocked** — treat the agent's own reply to a thread they
-   were tagged in as allowed, even if not in `ch.Members`. Parallel to PR
-   #218's explicit-tag bypass on the read side.
-
-Option 1 is more defensible — the bug is a missing side-effect on hire, not
-a missing permission carve-out on write.
+The rig also asserts this membership invariant inline (see `IN_GENERAL`
+check in `run.sh`) — it cannot report PASS on a regression that re-drops
+the hired slug from `#general.members`.
 
 ## If the bug still doesn't reproduce for the coworker
 

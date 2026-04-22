@@ -85,10 +85,10 @@ func ExecutionLogRelPath(slug string) string {
 // via the wiki worker — see WikiWorker.EnqueuePlaybookCompile). Returns the
 // wiki-relative path AND the rendered skill bytes. Callers that need to
 // commit the output must use the returned bytes — reading the file back
-// from disk is racy: concurrent filesystem pressure on macOS has been
-// observed to return an empty buffer between WriteFile and a subsequent
-// ReadFile of the same path, which then fails downstream as "content is
-// required".
+// from disk is racy under filesystem pressure in CI: an empty buffer has
+// been observed between WriteFile and a subsequent ReadFile of the same
+// path, which then fails downstream as "content is required". Eliminating
+// the round-trip is strictly cheaper than hardening it.
 //
 // Idempotency: invoking CompilePlaybook with unchanged source input produces
 // byte-identical output. The downstream git layer collapses byte-identical

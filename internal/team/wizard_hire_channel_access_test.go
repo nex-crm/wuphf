@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,9 +30,15 @@ import (
 
 func newBrokerWithPackChannels(t *testing.T, packAgents []agent.AgentConfig) *Broker {
 	t.Helper()
+	// Use leakedBrokerStatePath (not t.TempDir) because these tests go
+	// through saveLocked() — both via POST /office-members action=create
+	// and the /messages POST in the end-to-end test. Goroutines leaked by
+	// prior tests in this package can fire a late saveLocked and race
+	// t.TempDir cleanup. Same fix as the launcher_test.go pair; see
+	// broker_test.go for the helper docstring.
 	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
 	t.Cleanup(func() { brokerStatePath = oldPathFn })
 
 	b := NewBroker()
@@ -54,12 +60,17 @@ func newBrokerWithPackChannels(t *testing.T, packAgents []agent.AgentConfig) *Br
 	for _, m := range members {
 		packSlugs = append(packSlugs, m.Slug)
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	// Backdate the seed's timestamps by an hour so a subsequent hire
+	// (which sets UpdatedAt=time.Now()) always advances the RFC3339
+	// second-resolution compare. Wall-clock sleeps in tests are
+	// forbidden — if you need "now is later than seed", rewrite the
+	// seed, don't wait.
+	backdated := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
 	b.channels = []teamChannel{
-		{Slug: "general", Name: "general", Members: packSlugs, CreatedAt: now, UpdatedAt: now},
-		{Slug: "engineering", Name: "engineering", Members: []string{"ceo"}, CreatedAt: now, UpdatedAt: now},
+		{Slug: "general", Name: "general", Members: packSlugs, CreatedAt: backdated, UpdatedAt: backdated},
+		{Slug: "engineering", Name: "engineering", Members: []string{"ceo"}, CreatedAt: backdated, UpdatedAt: backdated},
 		// A DM channel that must NOT receive the new hire.
-		{Slug: "dm-human-ceo", Name: "DM: CEO", Type: "dm", Members: []string{"ceo"}, CreatedAt: now, UpdatedAt: now},
+		{Slug: "dm-human-ceo", Name: "DM: CEO", Type: "dm", Members: []string{"ceo"}, CreatedAt: backdated, UpdatedAt: backdated},
 	}
 	b.mu.Unlock()
 	return b
@@ -91,11 +102,6 @@ func TestWizardHire_AddsNewMemberToAllNonDMChannels(t *testing.T) {
 	mux.HandleFunc("/office-members", b.requireAuth(b.handleOfficeMembers))
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-
-	// Ensure at least 1 second of wall-clock passes between seed and hire so
-	// the RFC3339 timestamp compare can move forward even on systems with
-	// 1s resolution.
-	time.Sleep(1100 * time.Millisecond)
 
 	body, _ := json.Marshal(map[string]any{
 		"action": "create",
@@ -149,11 +155,12 @@ func TestWizardHire_AddsNewMemberToAllNonDMChannels(t *testing.T) {
 	}
 
 	// Event side of the fix: SSE subscribers must see one channel_updated per
-	// mutated channel plus the existing member_created. Drain with a brief
-	// timeout so the goroutine-delivered events land.
+	// mutated channel plus the existing member_created. publishOfficeChangeLocked
+	// delivers synchronously (non-blocking select) while the mutation lock is
+	// held, so by the time the HTTP response returned, all events have been
+	// placed into our 16-slot buffered channel. Drain non-blocking.
 	seenMemberCreated := false
 	updatedSlugs := map[string]bool{}
-	deadline := time.After(250 * time.Millisecond)
 drain:
 	for {
 		select {
@@ -169,7 +176,7 @@ drain:
 			case "channel_updated":
 				updatedSlugs[evt.Slug] = true
 			}
-		case <-deadline:
+		default:
 			break drain
 		}
 	}
@@ -319,9 +326,11 @@ func TestBug_WizardHiredSpecialist_ReplyEndToEnd_HTTPFlow(t *testing.T) {
 			t.Fatalf("http %s %s: %v", method, path, err)
 		}
 		defer resp.Body.Close()
-		buf := make([]byte, 4096)
-		n, _ := resp.Body.Read(buf)
-		return resp, buf[:n]
+		buf, rerr := io.ReadAll(resp.Body)
+		if rerr != nil {
+			t.Fatalf("read body %s %s: %v", method, path, rerr)
+		}
+		return resp, buf
 	}
 
 	// 1) Hire qa-spec via the same endpoint the web wizard uses.

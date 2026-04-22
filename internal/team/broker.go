@@ -6058,9 +6058,17 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 			// reply is 403'd with "channel access denied" and the user sees
 			// nothing. DM channels are intentionally skipped — DMs encode
 			// the target agent in the slug and go through a different
-			// membership gate. Mirrors the pack-launch seeding in
-			// normalizeLoadedStateLocked (auto-fills #general from
-			// b.members).
+			// membership gate.
+			//
+			// Policy note: this is broader than normalizeLoadedStateLocked's
+			// seed (which only fills #general). A wizard hire joins every
+			// topical channel by default; admins can narrow via
+			// /channel-members action=remove afterwards. The rationale is
+			// that an office member who can't post to any non-default
+			// channel without a second configuration step violates the
+			// principle of least surprise — the hire UI does not surface a
+			// channel-scope picker, so the implicit default has to be
+			// "office-wide."
 			//
 			// We also clear any stale Disabled entry for this slug. A fresh
 			// hire shouldn't inherit a mute left over from a prior lifecycle.
@@ -6075,13 +6083,18 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 					mutated = true
 				}
 				if containsString(b.channels[i].Disabled, slug) {
-					filtered := b.channels[i].Disabled[:0]
+					// Allocate a fresh slice instead of reusing the
+					// backing array via [:0]+append. The in-place form
+					// is safe but reads as if it could clobber the
+					// range — readability over one extra alloc on a
+					// rare re-hire path.
+					next := make([]string, 0, len(b.channels[i].Disabled))
 					for _, d := range b.channels[i].Disabled {
 						if d != slug {
-							filtered = append(filtered, d)
+							next = append(next, d)
 						}
 					}
-					b.channels[i].Disabled = filtered
+					b.channels[i].Disabled = next
 					mutated = true
 				}
 				if mutated {
@@ -6222,22 +6235,42 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 			}
 			b.members = filteredMembers
 			b.rebuildMemberIndexLocked()
+			// Symmetry with action:create — skip DM channels (they encode
+			// their target in the slug and go through a different
+			// membership gate) and emit a channel_updated event per
+			// actually-mutated channel so SSE subscribers refresh the
+			// roster. Without this, the UI sidebar gets a half-signal
+			// lifecycle (create emits channel_updated, remove does not).
+			removedChannels := make([]string, 0, len(b.channels))
 			for i := range b.channels {
-				nextMembers := b.channels[i].Members[:0]
-				for _, existing := range b.channels[i].Members {
-					if existing != slug {
-						nextMembers = append(nextMembers, existing)
-					}
+				if b.channels[i].isDM() {
+					continue
 				}
-				b.channels[i].Members = nextMembers
-				nextDisabled := b.channels[i].Disabled[:0]
-				for _, existing := range b.channels[i].Disabled {
-					if existing != slug {
-						nextDisabled = append(nextDisabled, existing)
+				mutated := false
+				if containsString(b.channels[i].Members, slug) {
+					next := make([]string, 0, len(b.channels[i].Members))
+					for _, existing := range b.channels[i].Members {
+						if existing != slug {
+							next = append(next, existing)
+						}
 					}
+					b.channels[i].Members = next
+					mutated = true
 				}
-				b.channels[i].Disabled = nextDisabled
-				b.channels[i].UpdatedAt = now
+				if containsString(b.channels[i].Disabled, slug) {
+					next := make([]string, 0, len(b.channels[i].Disabled))
+					for _, existing := range b.channels[i].Disabled {
+						if existing != slug {
+							next = append(next, existing)
+						}
+					}
+					b.channels[i].Disabled = next
+					mutated = true
+				}
+				if mutated {
+					b.channels[i].UpdatedAt = now
+					removedChannels = append(removedChannels, b.channels[i].Slug)
+				}
 			}
 			for i := range b.tasks {
 				if b.tasks[i].Owner == slug {
@@ -6251,6 +6284,9 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_removed", Slug: slug})
+			for _, chSlug := range removedChannels {
+				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:

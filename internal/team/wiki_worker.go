@@ -576,7 +576,14 @@ func (w *WikiWorker) Repo() *Repo {
 // source and submits the output to the queue as a compiled-skill write.
 // The commit is attributed to the archivist identity regardless of who
 // authored the source edit — the compilation is a machine artifact.
-func (w *WikiWorker) EnqueuePlaybookCompile(ctx context.Context, slug, _ string) (string, int, error) {
+//
+// authorSlug is the source-edit author on whose behalf compilation was
+// triggered; currently unused by the worker, kept in the signature so
+// callers (auto-recompile, /skill create, tests) can pass it along
+// without branching. When compile observability grows past "did it run"
+// (e.g. a per-trigger log line), this is where the value lands.
+func (w *WikiWorker) EnqueuePlaybookCompile(ctx context.Context, slug, authorSlug string) (string, int, error) {
+	_ = authorSlug // reserved for future observability; see docstring.
 	if !w.running.Load() {
 		return "", 0, ErrWorkerStopped
 	}
