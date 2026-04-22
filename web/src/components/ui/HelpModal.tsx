@@ -85,11 +85,16 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') {
         e.preventDefault()
+        // Capture phase + stopImmediatePropagation so this modal claims
+        // Escape before any underlying modal (SearchModal, ThreadPanel,
+        // etc.) or the global useKeyboardShortcuts handler. Without
+        // this, one press would cascade through every open panel.
+        e.stopImmediatePropagation()
         onClose()
       }
     }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
   }, [open, onClose])
 
   // Move focus into the modal when it opens so screen readers announce the
@@ -102,7 +107,12 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
     const id = window.requestAnimationFrame(() => closeRef.current?.focus())
     return () => {
       window.cancelAnimationFrame(id)
-      if (prevFocus && typeof prevFocus.focus === 'function') {
+      // Only restore focus if the previous element is still in the DOM.
+      // If it was unmounted while the modal was open, focus() silently
+      // no-ops OR targets a detached node — either way the user loses
+      // their place. Falling back to document.body gives the global
+      // keyboard handler a stable target.
+      if (prevFocus && prevFocus.isConnected && typeof prevFocus.focus === 'function') {
         prevFocus.focus()
       }
     }

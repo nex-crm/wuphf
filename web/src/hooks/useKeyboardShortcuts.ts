@@ -74,11 +74,15 @@ export function useKeyboardShortcuts() {
       // `?` → open keyboard + command reference. Only when not typing,
       // since `?` is a plain character inside inputs. Shift+/ also
       // produces `?` on US layouts, so we match on e.key rather than
-      // juggling modifier state.
+      // juggling modifier state. Skip during onboarding since the
+      // HelpModalHost lives in Shell — toggling composerHelpOpen there
+      // would set hidden state and then surprise the user after the
+      // wizard completes.
       if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if (isTypingTarget(e.target)) return
-        e.preventDefault()
         const state = useAppStore.getState()
+        if (!state.onboardingComplete) return
+        e.preventDefault()
         setComposerHelpOpen(!state.composerHelpOpen)
         return
       }
