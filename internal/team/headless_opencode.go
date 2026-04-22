@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -41,24 +42,31 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 		workspaceDir = "."
 	}
 
-	args := buildHeadlessOpencodeArgs(workspaceDir, config.ResolveOpencodeModel(l.cwd))
+	promptText := buildHeadlessCodexPrompt(l.buildPrompt(slug), notification)
+	args := buildHeadlessOpencodeArgs(config.ResolveOpencodeModel(l.cwd), promptText)
 	cmd := headlessOpencodeCommandContext(ctx, "opencode", args...)
 	cmd.Dir = workspaceDir
 
-	// Reuse the Codex env builder — it's provider-neutral (broker token,
-	// workspace, identity, API keys) — and override only the provider tag so
-	// downstream tooling can distinguish runs.
+	// Reuse the Codex env builder for the broker/workspace/identity plumbing,
+	// then heal the Opencode-specific differences: restore the user's real
+	// HOME (Opencode reads credentials from ~/.local/share/opencode/auth.json,
+	// not from Codex's isolated runtime home), drop CODEX_HOME, and flip
+	// the provider tag. Also set NO_COLOR so Opencode's default formatted
+	// output stays ANSI-free for the broker line scanner.
 	env := l.buildHeadlessCodexEnv(slug, workspaceDir, firstNonEmpty(channel...))
 	env = setEnvValue(env, "WUPHF_HEADLESS_PROVIDER", "opencode")
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		env = setEnvValue(env, "HOME", home)
+	}
+	env = stripEnvKeys(env, []string{"CODEX_HOME"})
+	env = setEnvValue(env, "NO_COLOR", "1")
 	if workspaceDir != strings.TrimSpace(l.cwd) {
 		env = append(env, "WUPHF_WORKTREE_PATH="+workspaceDir)
 	}
 	cmd.Env = env
 
-	stdinText := buildHeadlessCodexPrompt(l.buildPrompt(slug), notification)
-	cmd.Stdin = strings.NewReader(stdinText)
 	configureHeadlessProcess(cmd)
-	dumpHeadlessCodexInvocation(slug, workspaceDir, args, cmd.Env, stdinText)
+	dumpHeadlessCodexInvocation(slug, workspaceDir, args, cmd.Env, promptText)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -208,16 +216,17 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 // buildHeadlessOpencodeArgs mirrors provider.buildOpencodeArgs but is kept
 // local so the team package doesn't need to import the provider package just
 // for argv construction (and stays consistent with how headless_codex.go
-// builds its own argv).
-func buildHeadlessOpencodeArgs(workspaceDir string, model string) []string {
+// builds its own argv). Opencode's CLI shape: `opencode run [--model X]
+// [message..]` — no --cwd, no --quiet, no stdin sentinel. Working directory
+// is set via cmd.Dir by the caller.
+func buildHeadlessOpencodeArgs(model string, prompt string) []string {
 	args := []string{"run"}
 	if strings.TrimSpace(model) != "" {
 		args = append(args, "--model", strings.TrimSpace(model))
 	}
-	if strings.TrimSpace(workspaceDir) != "" {
-		args = append(args, "--cwd", strings.TrimSpace(workspaceDir))
+	if strings.TrimSpace(prompt) != "" {
+		args = append(args, prompt)
 	}
-	args = append(args, "--quiet", "-")
 	return args
 }
 

@@ -100,15 +100,18 @@ func RunOpencodeOneShot(systemPrompt, prompt, cwd string) (string, error) {
 	return runOpencodeOnce(systemPrompt, prompt, cwd, nil)
 }
 
-// runOpencodeOnce invokes `opencode run` with the caller's prompt on stdin,
+// runOpencodeOnce invokes `opencode run` with the caller's prompt as the final
+// variadic positional argument (Opencode has no stdin-prompt convention),
 // streams plain stdout lines via onLine (if provided), and returns the full
 // concatenated output.
 func runOpencodeOnce(systemPrompt, prompt, cwd string, onLine func(string)) (string, error) {
-	args := buildOpencodeArgs(cwd, config.ResolveOpencodeModel(cwd))
+	promptText := buildOpencodePrompt(systemPrompt, prompt)
+	args := buildOpencodeArgs(config.ResolveOpencodeModel(cwd), promptText)
 	cmd := opencodeCommand("opencode", args...)
 	cmd.Dir = cwd
-	cmd.Env = filteredEnv(nil)
-	cmd.Stdin = strings.NewReader(buildOpencodePrompt(systemPrompt, prompt))
+	// NO_COLOR suppresses ANSI decoration in Opencode's default formatted
+	// output so downstream line scanners see clean text.
+	cmd.Env = append(filteredEnv(nil), "NO_COLOR=1")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -163,17 +166,20 @@ func readOpencodeStream(r io.Reader, onLine func(string)) (string, error) {
 }
 
 // buildOpencodeArgs constructs the argv for a single-shot `opencode run`.
-// The prompt is fed on stdin via `-`. Model selection is optional; when unset
-// Opencode uses its configured default.
-func buildOpencodeArgs(cwd string, model string) []string {
+// Opencode's CLI takes the prompt as trailing variadic positional arguments
+// (`opencode run [message..]`) rather than via stdin, so we pass the full
+// composed prompt as a single argv string. Working directory is set via
+// cmd.Dir by the caller — Opencode exposes no `--cwd` flag.
+// Model selection is optional; when unset Opencode uses its configured
+// default. Expected format: `provider/model` (e.g. "anthropic/claude-sonnet-4").
+func buildOpencodeArgs(model string, prompt string) []string {
 	args := []string{"run"}
 	if strings.TrimSpace(model) != "" {
 		args = append(args, "--model", strings.TrimSpace(model))
 	}
-	if strings.TrimSpace(cwd) != "" {
-		args = append(args, "--cwd", strings.TrimSpace(cwd))
+	if strings.TrimSpace(prompt) != "" {
+		args = append(args, prompt)
 	}
-	args = append(args, "--quiet", "-")
 	return args
 }
 

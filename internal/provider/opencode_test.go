@@ -17,32 +17,40 @@ type opencodeHelperRecord struct {
 	Stdin string   `json:"stdin"`
 }
 
-func TestBuildOpencodeArgsIncludesRunAndQuietAndStdin(t *testing.T) {
-	args := buildOpencodeArgs("/tmp/work", "qwen3.6:35b-a3b")
+func TestBuildOpencodeArgsPassesPromptAsFinalArgAndModel(t *testing.T) {
+	args := buildOpencodeArgs("anthropic/claude-sonnet-4", "ship the thing")
+	if len(args) == 0 || args[0] != "run" {
+		t.Fatalf("expected `run` as first arg, got %v", args)
+	}
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "run") {
-		t.Fatalf("expected `run` subcommand, got %q", joined)
-	}
-	if !strings.Contains(joined, "--cwd /tmp/work") {
-		t.Fatalf("expected working directory, got %q", joined)
-	}
-	if !strings.Contains(joined, "--quiet") {
-		t.Fatalf("expected quiet flag, got %q", joined)
-	}
-	if !strings.Contains(joined, "--model qwen3.6:35b-a3b") {
+	if !strings.Contains(joined, "--model anthropic/claude-sonnet-4") {
 		t.Fatalf("expected explicit model flag, got %q", joined)
 	}
-	if args[len(args)-1] != "-" {
-		t.Fatalf("expected prompt to be read from stdin (last arg `-`), got %q", args[len(args)-1])
+	// Opencode's CLI has no --cwd/--quiet/- flags; working dir comes from cmd.Dir.
+	for _, a := range args {
+		if a == "--cwd" || a == "--quiet" || a == "-" {
+			t.Fatalf("unexpected flag %q: Opencode CLI does not accept it; got %v", a, args)
+		}
+	}
+	if args[len(args)-1] != "ship the thing" {
+		t.Fatalf("expected prompt as final variadic arg, got %q", args[len(args)-1])
 	}
 }
 
 func TestBuildOpencodeArgsOmitsModelWhenUnset(t *testing.T) {
-	args := buildOpencodeArgs("/tmp/work", "")
+	args := buildOpencodeArgs("", "do the thing")
 	for _, a := range args {
 		if a == "--model" {
 			t.Fatalf("did not expect --model flag when model empty, got %v", args)
 		}
+	}
+}
+
+func TestBuildOpencodeArgsOmitsPromptWhenEmpty(t *testing.T) {
+	args := buildOpencodeArgs("anthropic/claude-sonnet-4", "")
+	// With no prompt, only `run` + `--model X` should be present.
+	if len(args) != 3 {
+		t.Fatalf("expected [run --model X], got %v", args)
 	}
 }
 
@@ -94,11 +102,16 @@ func TestCreateOpencodeCLIStreamFnStreamsPlainText(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("expected 1 opencode invocation, got %d", len(records))
 	}
-	if !containsArgPair(records[0].Args, "--cwd", cwd) {
-		t.Fatalf("expected opencode cwd arg, got %#v", records[0].Args)
+	// Prompt is passed as the final variadic positional arg (not stdin).
+	lastArg := records[0].Args[len(records[0].Args)-1]
+	if !strings.Contains(lastArg, "<system>") || !strings.Contains(lastArg, "Ship it.") {
+		t.Fatalf("expected composed prompt as final argv arg, got %q", lastArg)
 	}
-	if !strings.Contains(records[0].Stdin, "<system>") {
-		t.Fatalf("expected system prompt wrapper in stdin, got %q", records[0].Stdin)
+	// cwd is conveyed via cmd.Dir, not a CLI flag — confirm no stale --cwd.
+	for _, a := range records[0].Args {
+		if a == "--cwd" {
+			t.Fatalf("Opencode CLI does not accept --cwd; got %#v", records[0].Args)
+		}
 	}
 }
 
@@ -191,8 +204,8 @@ func TestOpencodeHelperProcess(t *testing.T) {
 	}
 	file.Close()
 
-	if !containsArg(opencodeArgs, "--quiet") {
-		t.Fatalf("missing --quiet arg: %#v", opencodeArgs)
+	if !containsArg(opencodeArgs, "run") {
+		t.Fatalf("missing `run` subcommand: %#v", opencodeArgs)
 	}
 
 	switch os.Getenv("OPENCODE_TEST_SCENARIO") {
