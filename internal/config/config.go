@@ -361,8 +361,8 @@ func codexModelFromFile(path string) string {
 // run. Resolution: WUPHF_OPENCODE_MODEL env > OPENCODE_MODEL env > empty (Opencode
 // picks its configured default). Unlike Codex, Opencode has no on-disk config
 // file layout WUPHF needs to inspect — users configure their Opencode
-// ~/.config/opencode settings directly.
-func ResolveOpencodeModel(cwd string) string {
+// ~/.config/opencode settings directly, so there is no cwd-relative search.
+func ResolveOpencodeModel() string {
 	if v := strings.TrimSpace(os.Getenv("WUPHF_OPENCODE_MODEL")); v != "" {
 		return v
 	}

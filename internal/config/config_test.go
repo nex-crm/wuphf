@@ -459,7 +459,7 @@ func TestResolveLLMProviderOpencodeFromConfig(t *testing.T) {
 
 func TestResolveOpencodeModelEnvOverride(t *testing.T) {
 	t.Setenv("WUPHF_OPENCODE_MODEL", "qwen3.6:35b-a3b")
-	if got := ResolveOpencodeModel(""); got != "qwen3.6:35b-a3b" {
+	if got := ResolveOpencodeModel(); got != "qwen3.6:35b-a3b" {
 		t.Fatalf("expected WUPHF_OPENCODE_MODEL override, got %q", got)
 	}
 }
@@ -467,7 +467,7 @@ func TestResolveOpencodeModelEnvOverride(t *testing.T) {
 func TestResolveOpencodeModelFallsBackToOpencodeEnv(t *testing.T) {
 	t.Setenv("WUPHF_OPENCODE_MODEL", "")
 	t.Setenv("OPENCODE_MODEL", "llama3.3")
-	if got := ResolveOpencodeModel(""); got != "llama3.3" {
+	if got := ResolveOpencodeModel(); got != "llama3.3" {
 		t.Fatalf("expected OPENCODE_MODEL fallback, got %q", got)
 	}
 }

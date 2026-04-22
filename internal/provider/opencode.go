@@ -2,6 +2,7 @@ package provider
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -106,7 +107,7 @@ func RunOpencodeOneShot(systemPrompt, prompt, cwd string) (string, error) {
 // concatenated output.
 func runOpencodeOnce(systemPrompt, prompt, cwd string, onLine func(string)) (string, error) {
 	promptText := buildOpencodePrompt(systemPrompt, prompt)
-	args := buildOpencodeArgs(config.ResolveOpencodeModel(cwd), promptText)
+	args := buildOpencodeArgs(config.ResolveOpencodeModel(), promptText)
 	cmd := opencodeCommand("opencode", args...)
 	cmd.Dir = cwd
 	// NO_COLOR suppresses ANSI decoration in Opencode's default formatted
@@ -126,6 +127,12 @@ func runOpencodeOnce(systemPrompt, prompt, cwd string, onLine func(string)) (str
 	}
 
 	output, readErr := readOpencodeStream(stdout, onLine)
+	if readErr != nil && errors.Is(readErr, bufio.ErrTooLong) {
+		// A single >4 MiB line would block cmd.Wait() on pipe backpressure
+		// forever; kill the child so Wait returns and the caller sees a
+		// clean error.
+		_ = cmd.Process.Kill()
+	}
 	if err := cmd.Wait(); err != nil {
 		detail := strings.TrimSpace(stderr.String())
 		if detail != "" {
@@ -160,6 +167,9 @@ func readOpencodeStream(r io.Reader, onLine func(string)) (string, error) {
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if errors.Is(err, bufio.ErrTooLong) {
+			return sb.String(), fmt.Errorf("opencode output line exceeded 4 MiB buffer: %w", err)
+		}
 		return sb.String(), fmt.Errorf("read opencode stream: %w", err)
 	}
 	return sb.String(), nil
@@ -183,21 +193,38 @@ func buildOpencodeArgs(model string, prompt string) []string {
 	return args
 }
 
+// buildOpencodePrompt concatenates system and user text for delivery as a
+// single positional argument to `opencode run`. Any literal <system>/</system>
+// tokens inside user content are neutralised with a zero-width space so the
+// wrapper the builder adds cannot be closed or re-opened from within — belt
+// and suspenders for confused-deputy issues when untrusted text is passed in.
 func buildOpencodePrompt(systemPrompt, prompt string) string {
 	var parts []string
-	if strings.TrimSpace(systemPrompt) != "" {
-		parts = append(parts, "<system>\n"+strings.TrimSpace(systemPrompt)+"\n</system>")
+	if s := strings.TrimSpace(systemPrompt); s != "" {
+		parts = append(parts, "<system>\n"+escapeOpencodeSystemWrapper(s)+"\n</system>")
 	}
-	if strings.TrimSpace(prompt) != "" {
-		parts = append(parts, strings.TrimSpace(prompt))
+	if p := strings.TrimSpace(prompt); p != "" {
+		parts = append(parts, escapeOpencodeSystemWrapper(p))
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// escapeOpencodeSystemWrapper inserts a zero-width space inside any literal
+// <system>/</system> tag so the prompt wrapper buildOpencodePrompt adds cannot
+// be terminated from within user content.
+func escapeOpencodeSystemWrapper(s string) string {
+	s = strings.ReplaceAll(s, "</system>", "</​system>")
+	s = strings.ReplaceAll(s, "<system>", "<​system>")
+	return s
 }
 
 func describeOpencodeFailure(err error) string {
 	text := strings.ToLower(strings.TrimSpace(err.Error()))
 	if strings.Contains(text, "login") || strings.Contains(text, "auth") || strings.Contains(text, "unauthorized") || strings.Contains(text, "api key") {
 		return "Opencode CLI is not authenticated. Configure your Opencode provider credentials or use /provider to choose a different provider."
+	}
+	if strings.Contains(text, "exceeded 4 mib") {
+		return "Opencode produced a stream line larger than 4 MiB; aborted. Retry with a smaller response."
 	}
 	return fmt.Sprintf("opencode exited with error: %v", err)
 }

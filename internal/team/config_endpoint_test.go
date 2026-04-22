@@ -130,6 +130,22 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 		t.Fatalf("POST /config {llm_provider:opencode} status=%d body=%s", resp.StatusCode, string(raw))
 	}
 
+	// The `llm_provider_priority` allowlist had the same bug as `llm_provider`
+	// (broker.go:5617) — regression test so both switches stay in sync.
+	body = bytes.NewBufferString(`{"llm_provider_priority":["opencode","claude-code"]}`)
+	req, _ = http.NewRequest(http.MethodPost, "http://"+b.addr+"/config", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /config priority: %v", err)
+	}
+	rawPriority, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("POST /config {llm_provider_priority:[opencode,...]} status=%d body=%s", resp.StatusCode, string(rawPriority))
+	}
+
 	// Reject unsupported provider
 	body = bytes.NewBufferString(`{"llm_provider":"anthropic"}`)
 	req, _ = http.NewRequest(http.MethodPost, "http://"+b.addr+"/config", body)
