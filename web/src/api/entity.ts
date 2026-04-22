@@ -18,6 +18,23 @@ import { get, post, sseURL } from './client'
 
 export type EntityKind = 'people' | 'companies' | 'customers'
 
+/**
+ * Triplet is the subject/predicate/object shape from docs/specs/WIKI-SCHEMA.md §4.2.
+ * `object` is a slug, a literal, or `{kind}:{slug}` when the object is itself
+ * an entity reference.
+ */
+export interface Triplet {
+  subject: string
+  predicate: string
+  object: string
+}
+
+/**
+ * FactType is the §4.3 enum. Legacy rows without a type parse as `undefined`;
+ * the UI treats that the same as `"observation"` (the §4.3 default).
+ */
+export type FactType = 'status' | 'observation' | 'relationship' | 'background'
+
 export interface Fact {
   id: string
   kind: EntityKind
@@ -26,6 +43,18 @@ export interface Fact {
   source_path?: string
   recorded_by: string
   created_at: string
+  // Typed fields from docs/specs/WIKI-SCHEMA.md §4.2. All optional so legacy
+  // v1.2 rows parse with zero values and render without these fields.
+  type?: FactType
+  triplet?: Triplet
+  confidence?: number
+  valid_from?: string
+  valid_until?: string | null
+  supersedes?: string[]
+  contradicts_with?: string[]
+  source_type?: string
+  sentence_offset?: number
+  reinforced_at?: string | null
 }
 
 export interface BriefSummary {
