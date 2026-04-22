@@ -111,4 +111,3 @@ func TestQueuePaneNotification_DifferentSlugsRunInParallel(t *testing.T) {
 			elapsed, paneDispatchMinGap)
 	}
 }
-
