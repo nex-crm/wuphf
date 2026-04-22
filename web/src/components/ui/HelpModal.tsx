@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { useAppStore } from '../../stores/app'
 import { SLASH_COMMANDS } from '../messages/Autocomplete'
 import { Kbd, KbdSequence, MOD_KEY } from './Kbd'
@@ -78,6 +78,8 @@ interface HelpModalProps {
  * have to leave the app to find a shortcut.
  */
 export function HelpModal({ open, onClose }: HelpModalProps) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) {
@@ -89,6 +91,22 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [open, onClose])
+
+  // Move focus into the modal when it opens so screen readers announce the
+  // dialog and keyboard users land inside it. The close button is a stable
+  // anchor: every render path has it, and it's a safe "escape hatch" target
+  // when users hit Tab without expecting interactive content in the modal.
+  useEffect(() => {
+    if (!open) return
+    const prevFocus = document.activeElement as HTMLElement | null
+    const id = window.requestAnimationFrame(() => closeRef.current?.focus())
+    return () => {
+      window.cancelAnimationFrame(id)
+      if (prevFocus && typeof prevFocus.focus === 'function') {
+        prevFocus.focus()
+      }
+    }
+  }, [open])
 
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent) => {
@@ -117,6 +135,7 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
             </p>
           </div>
           <button
+            ref={closeRef}
             type="button"
             className="help-close"
             onClick={onClose}
