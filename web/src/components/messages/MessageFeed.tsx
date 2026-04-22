@@ -27,10 +27,19 @@ type FeedElement =
 export function MessageFeed() {
   const currentChannel = useAppStore((s) => s.currentChannel)
   const setActiveThreadId = useAppStore((s) => s.setActiveThreadId)
+  const setPendingQuoteId = useAppStore((s) => s.setPendingQuoteId)
   const collapsedThreads = useAppStore((s) => s.collapsedThreads)
   const toggleThreadCollapsed = useAppStore((s) => s.toggleThreadCollapsed)
   const containerRef = useRef<HTMLDivElement>(null)
   const prevLengthRef = useRef(0)
+
+  // Quoting an inline reply pops the thread panel open on the reply's parent
+  // and tells the panel which message to pre-quote. The panel reads
+  // pendingQuoteId from the store and seeds its local `quoting` state.
+  const openThreadWithQuote = (parentId: string, quoteId: string) => {
+    setPendingQuoteId(quoteId)
+    setActiveThreadId(parentId)
+  }
 
   const copyMessageLink = (id: string) => {
     const url = new URL(window.location.href)
@@ -206,6 +215,7 @@ export function MessageFeed() {
                     grouped={r.grouped}
                     isReply
                     onOpenThread={(id) => setActiveThreadId(id)}
+                    onQuoteReply={(m) => openThreadWithQuote(parentId, m.id)}
                     onCopyLink={copyMessageLink}
                   />
                 ))}

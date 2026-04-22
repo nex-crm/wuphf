@@ -80,6 +80,13 @@ export interface AppStore {
   activeThreadId: string | null
   setActiveThreadId: (id: string | null) => void
 
+  // Pending quote. When a user clicks "quote-reply" on an inline reply in the
+  // main feed, we open the thread panel AND ask it to pre-populate its quote
+  // state with this message id. The thread panel consumes + clears it once
+  // the quoted message shows up in its replies list.
+  pendingQuoteId: string | null
+  setPendingQuoteId: (id: string | null) => void
+
   // Per-thread collapsed state in the main feed. The key is the parent
   // message id. Default is expanded (entry absent or false); toggling
   // stores `true` so the inline replies hide.
@@ -155,6 +162,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   activeThreadId: null,
   setActiveThreadId: (id) => set({ activeThreadId: id }),
+
+  pendingQuoteId: null,
+  setPendingQuoteId: (id) => set({ pendingQuoteId: id }),
 
   collapsedThreads: {},
   toggleThreadCollapsed: (parentId) =>

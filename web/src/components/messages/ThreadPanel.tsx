@@ -10,6 +10,8 @@ import { MessageBubble } from './MessageBubble'
 export function ThreadPanel() {
   const activeThreadId = useAppStore((s) => s.activeThreadId)
   const setActiveThreadId = useAppStore((s) => s.setActiveThreadId)
+  const pendingQuoteId = useAppStore((s) => s.pendingQuoteId)
+  const setPendingQuoteId = useAppStore((s) => s.setPendingQuoteId)
   const currentChannel = useAppStore((s) => s.currentChannel)
   const [text, setText] = useState('')
   const [quoting, setQuoting] = useState<Message | null>(null)
@@ -49,6 +51,18 @@ export function ThreadPanel() {
     setQuoting(null)
     setText('')
   }, [activeThreadId])
+
+  // Consume a pending quote set by the main feed (user clicked "quote-reply"
+  // on an inline reply). Waits until replies are loaded so we can hand
+  // setQuoting a real Message, not just an id.
+  useEffect(() => {
+    if (!pendingQuoteId) return
+    const target = replies.find((r) => r.id === pendingQuoteId)
+    if (!target) return
+    setQuoting(target)
+    setPendingQuoteId(null)
+    textareaRef.current?.focus()
+  }, [pendingQuoteId, replies, setPendingQuoteId])
 
   // Focus the composer on open so users can start typing immediately.
   useEffect(() => {
