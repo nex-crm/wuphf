@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { PluggableList } from 'unified'
 import ArticleStatusBanner from './ArticleStatusBanner'
+import Pam from './Pam'
 import EntityBriefBar from './EntityBriefBar'
 import FactsOnFile from './FactsOnFile'
 import EntityRelatedPanel from './EntityRelatedPanel'
@@ -196,6 +197,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   return (
     <>
       <main className="wk-article-col">
+        <Pam articlePath={article.path} />
         {liveAgent && (
           <ArticleStatusBanner
             message={`${formatAgentName(liveAgent)} is editing this article right now.`}

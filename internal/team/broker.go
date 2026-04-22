@@ -1267,6 +1267,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/playbook/executions", b.requireAuth(b.handlePlaybookExecutionsList))
 	mux.HandleFunc("/playbook/synthesize", b.requireAuth(b.handlePlaybookSynthesize))
 	mux.HandleFunc("/playbook/synthesis-status", b.requireAuth(b.handlePlaybookSynthesisStatus))
+	mux.HandleFunc("/pam/actions", b.requireAuth(b.handlePamActions))
+	mux.HandleFunc("/pam/action", b.requireAuth(b.handlePamAction))
 	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
 	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
@@ -1785,6 +1787,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribePlaybook()
 	playbookSynthEvents, unsubscribePlaybookSynth := b.SubscribePlaybookSynthesizedEvents(64)
 	defer unsubscribePlaybookSynth()
+	pamStarted, pamDone, pamFailed, unsubscribePam := b.SubscribePamActionEvents(64)
+	defer unsubscribePam()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1851,6 +1855,18 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			}
 		case evt, ok := <-playbookSynthEvents:
 			if !ok || writeEvent("playbook:synthesized", evt) != nil {
+				return
+			}
+		case evt, ok := <-pamStarted:
+			if !ok || writeEvent("pam:action_started", evt) != nil {
+				return
+			}
+		case evt, ok := <-pamDone:
+			if !ok || writeEvent("pam:action_done", evt) != nil {
+				return
+			}
+		case evt, ok := <-pamFailed:
+			if !ok || writeEvent("pam:action_failed", evt) != nil {
 				return
 			}
 		case <-heartbeat.C:
