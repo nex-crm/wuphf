@@ -1,74 +1,11 @@
 name: Approve on Comment
 
-# Inlined (not using private nex-crm/.github reusable) because this is a
-# public repo and public repos cannot consume private reusable workflows.
-# Keep in sync with nex-crm/.github/.github/workflows/approve-on-comment.yml
-
 on:
   issue_comment:
     types: [created]
 
 jobs:
   approve:
-    if: |
-      github.event.issue.pull_request != null &&
-      startsWith(github.event.comment.body, '/approve')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      pull-requests: write
-      issues: write
-    steps:
-      - name: Mint GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.APPROVER_APP_ID }}
-          private-key: ${{ secrets.APPROVER_APP_PRIVATE_KEY }}
-
-      - name: Verify commenter is org member
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          COMMENTER: ${{ github.event.comment.user.login }}
-          ORG: ${{ github.repository_owner }}
-        run: |
-          if ! gh api "orgs/${ORG}/members/${COMMENTER}" --silent 2>/dev/null; then
-            echo "::error::@${COMMENTER} is not a member of ${ORG} — /approve denied"
-            exit 1
-          fi
-
-      - name: Reject self-approval
-        env:
-          COMMENTER: ${{ github.event.comment.user.login }}
-          PR_AUTHOR: ${{ github.event.issue.user.login }}
-        run: |
-          if [ "${COMMENTER}" = "${PR_AUTHOR}" ]; then
-            echo "::error::@${COMMENTER} cannot /approve their own PR"
-            exit 1
-          fi
-
-      - name: Submit approval review
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PR_NUMBER: ${{ github.event.issue.number }}
-          REPO: ${{ github.repository }}
-          COMMENTER: ${{ github.event.comment.user.login }}
-          BODY: ${{ github.event.comment.body }}
-        run: |
-          reason="${BODY#/approve}"
-          reason="${reason# }"
-          [ -z "$reason" ] && reason="(no reason provided)"
-          gh pr review "${PR_NUMBER}" \
-            --repo "${REPO}" \
-            --approve \
-            --body "Approved by @${COMMENTER} via \`/approve\`: ${reason}"
-
-      - name: React to comment
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          COMMENT_ID: ${{ github.event.comment.id }}
-          REPO: ${{ github.repository }}
-        run: |
-          gh api -X POST \
-            "repos/${REPO}/issues/comments/${COMMENT_ID}/reactions" \
-            -f content=+1 >/dev/null
+    uses: nex-crm/.github/.github/workflows/approve-on-comment.yml@v1
+    secrets:
+      APPROVER_APP_PRIVATE_KEY: ${{ secrets.APPROVER_APP_PRIVATE_KEY }}
