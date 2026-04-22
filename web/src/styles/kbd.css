@@ -118,11 +118,17 @@
   min-height: 14px;
   border-bottom-width: 1px;
   background: transparent;
-  color: var(--text-tertiary);
+  /* Inherit the sidebar item's color so the badge reads correctly on both
+     the dark sidebar (white-ish text) and the active row (dark text on
+     light surface). `currentColor` keeps the pill visually tied to its row
+     without requiring theme-specific overrides. */
+  color: currentColor;
+  border-color: currentColor;
 }
 .sidebar-item.active .sidebar-shortcut .kbd {
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.95);
   color: var(--text);
+  border-color: transparent;
 }
 
 /* Status-bar "? for shortcuts" pill. Clickable — opens help modal. */
