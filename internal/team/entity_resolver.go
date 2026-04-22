@@ -219,10 +219,22 @@ func collisionSafeSlug(ctx context.Context, idx SignalIndex, proposed string) (s
 
 // ── entityResolverGate — single-flight for concurrent ghost entity creation ──
 
+// resolveCall holds the in-flight result and a done channel that is closed
+// (not sent to) after the result is written — this enables fan-out: all N
+// waiters are unblocked when the channel closes, and all read the same result.
+type resolveCall struct {
+	result ResolvedEntity
+	done   chan struct{} // closed when result is ready
+}
+
 // entityResolverGate prevents two goroutines from simultaneously resolving the
 // same subject (same name/email/slug) and thereby issuing two UpsertEntity
-// calls. The second caller waits on a channel and reuses the first caller's
-// ResolvedEntity without doing its own index round-trip.
+// calls. The second caller waits on the done channel and reuses the first
+// caller's ResolvedEntity without doing its own index round-trip.
+//
+// Uses close-to-broadcast semantics: the owner goroutine closes the done
+// channel after writing the result, so ALL concurrent waiters unblock and
+// read the same shared result field.
 //
 // Gate key precedence (matches ResolveEntity step order):
 //  1. "email:<normalised>" when Signals.Email is set
@@ -230,12 +242,12 @@ func collisionSafeSlug(ctx context.Context, idx SignalIndex, proposed string) (s
 //  3. "slug:<proposed>"    otherwise
 type entityResolverGate struct {
 	mu       sync.Mutex
-	inFlight map[string]chan ResolvedEntity
+	inFlight map[string]*resolveCall
 }
 
 // newEntityResolverGate returns a ready-to-use gate.
 func newEntityResolverGate() *entityResolverGate {
-	return &entityResolverGate{inFlight: make(map[string]chan ResolvedEntity)}
+	return &entityResolverGate{inFlight: make(map[string]*resolveCall)}
 }
 
 // gateKey derives the coalesce key from a ProposedEntity.
@@ -257,27 +269,28 @@ func (g *entityResolverGate) Resolve(ctx context.Context, idx SignalIndex, p Pro
 	key := gateKey(p)
 
 	g.mu.Lock()
-	if ch, ok := g.inFlight[key]; ok {
-		// Another goroutine is resolving this key — wait for it.
+	if call, ok := g.inFlight[key]; ok {
+		// Another goroutine owns this key — wait for it to broadcast.
 		g.mu.Unlock()
 		select {
-		case result := <-ch:
-			return result, nil
+		case <-call.done:
+			return call.result, nil
 		case <-ctx.Done():
 			return ResolvedEntity{}, fmt.Errorf("entity resolver gate: context cancelled waiting for in-flight resolution of %q: %w", key, ctx.Err())
 		}
 	}
 
-	// We are the first; take ownership of this key.
-	done := make(chan ResolvedEntity, 1)
-	g.inFlight[key] = done
+	// We are the first; register ownership before dropping the lock.
+	call := &resolveCall{done: make(chan struct{})}
+	g.inFlight[key] = call
 	g.mu.Unlock()
 
-	// Resolve, then broadcast, then release the gate key.
+	// Resolve under no lock — the done channel gates all waiters.
 	resolved, err := ResolveEntity(ctx, idx, p)
 
-	// Broadcast to any waiters before releasing, so they can unblock.
-	done <- resolved
+	// Write result and broadcast to all waiters by closing the done channel.
+	call.result = resolved
+	close(call.done)
 
 	g.mu.Lock()
 	delete(g.inFlight, key)
