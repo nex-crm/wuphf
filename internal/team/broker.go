@@ -6051,11 +6051,54 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 
 			b.members = append(b.members, member)
 			b.memberIndex[member.Slug] = len(b.members) - 1
+			// Add the new hire to every non-DM channel's Members list so they
+			// can actually POST replies. canAccessChannelLocked enforces
+			// ch.Members for every non-CEO agent sender; without this, a
+			// wizard-hired specialist can be tagged and dispatched but its
+			// reply is 403'd with "channel access denied" and the user sees
+			// nothing. DM channels are intentionally skipped — DMs encode
+			// the target agent in the slug and go through a different
+			// membership gate. Mirrors the pack-launch seeding in
+			// normalizeLoadedStateLocked (auto-fills #general from
+			// b.members).
+			//
+			// We also clear any stale Disabled entry for this slug. A fresh
+			// hire shouldn't inherit a mute left over from a prior lifecycle.
+			updatedChannels := make([]string, 0, len(b.channels))
+			for i := range b.channels {
+				if b.channels[i].isDM() {
+					continue
+				}
+				mutated := false
+				if !containsString(b.channels[i].Members, slug) {
+					b.channels[i].Members = uniqueSlugs(append(b.channels[i].Members, slug))
+					mutated = true
+				}
+				if containsString(b.channels[i].Disabled, slug) {
+					filtered := b.channels[i].Disabled[:0]
+					for _, d := range b.channels[i].Disabled {
+						if d != slug {
+							filtered = append(filtered, d)
+						}
+					}
+					b.channels[i].Disabled = filtered
+					mutated = true
+				}
+				if mutated {
+					b.channels[i].UpdatedAt = now
+					updatedChannels = append(updatedChannels, b.channels[i].Slug)
+				}
+			}
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
+			// Notify SSE subscribers that these channels' rosters changed so
+			// the UI sidebar refreshes without requiring a separate trigger.
+			for _, chSlug := range updatedChannels {
+				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
 		case "update":
