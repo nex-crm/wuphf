@@ -844,6 +844,22 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 		}
 	}
 
+	// Auto-promote @-mentions in the body into the tagged array. Agents
+	// routinely write "@operator please handle X" without setting tagged,
+	// and the old path posted anyway + printed a warning nobody acted on
+	// (so @operator never woke up). The intent is unambiguous — honor it.
+	// The resulting post still passes through the broker's normal tagged
+	// pipeline, so lastTaggedAt, typing indicator, and notification fanout
+	// all fire correctly.
+	effectiveTagged := args.Tagged
+	var autoTagged []string
+	if !isOneOnOneMode() {
+		autoTagged = detectUntaggedMentions(args.Content, args.Tagged)
+		if len(autoTagged) > 0 {
+			effectiveTagged = append(append([]string{}, args.Tagged...), autoTagged...)
+		}
+	}
+
 	var result struct {
 		ID string `json:"id"`
 	}
@@ -851,7 +867,7 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 		"channel":  channel,
 		"from":     slug,
 		"content":  args.Content,
-		"tagged":   args.Tagged,
+		"tagged":   effectiveTagged,
 		"reply_to": replyTo,
 	}, &result)
 	if err != nil {
@@ -870,18 +886,11 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	}
 	text += "."
 
-	// Warn when the message text contains @-mentions but none were passed in
-	// the `tagged` parameter. Text @-mentions are display-only — they do NOT
-	// wake agents. This is the most common CEO mistake: writing "@engineering
-	// please do X" without tagging engineering in the tool call.
-	if len(args.Tagged) == 0 && !isOneOnOneMode() {
-		if untaggedMentions := detectUntaggedMentions(args.Content, args.Tagged); len(untaggedMentions) > 0 {
-			text += fmt.Sprintf(
-				" WARNING: message text mentions %s but `tagged` is empty — those agents will NOT be woken. Re-send with tagged: %s to notify them.",
-				strings.Join(untaggedMentions, ", "),
-				strings.Join(untaggedMentions, ", "),
-			)
-		}
+	if len(autoTagged) > 0 {
+		text += fmt.Sprintf(
+			" Auto-tagged %s from the body so they get woken; pass them explicitly in `tagged` next time to avoid this note.",
+			strings.Join(autoTagged, ", "),
+		)
 	}
 
 	return textResult(text), nil, nil

@@ -59,11 +59,24 @@ export function MessageFeed() {
   let lastFrom = ''
   let lastTime = ''
 
+  // Index messages by id so we can tell a top-level reply (first answer to
+  // an untagged human message in the channel — parent has no reply_to)
+  // apart from a deep thread reply (reply-to-a-reply). Top-level replies
+  // must stay in the main feed; otherwise agents' first answers disappear.
+  const byId = new Map<string, typeof messages[0]>()
+  for (const m of messages) byId.set(m.id, m)
+
   for (const msg of messages) {
     // Skip status messages from main feed grouping logic
     if (msg.content?.startsWith('[STATUS]')) continue
-    // Skip reply messages in main feed
-    if (msg.reply_to) continue
+    // Thread replies (reply chain depth > 1) are hidden from the main feed —
+    // they belong to the thread view. A reply whose parent is a top-level
+    // message stays visible so the channel shows the full human↔agent
+    // exchange inline.
+    if (msg.reply_to) {
+      const parent = byId.get(msg.reply_to)
+      if (parent && parent.reply_to) continue
+    }
 
     // Date separator
     if (msg.timestamp) {
