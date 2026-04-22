@@ -851,6 +851,13 @@ func (l *Launcher) recoverTimedOutHeadlessTurn(slug string, turn headlessCodexTu
 	}
 }
 
+// isDurabilityFailure reports whether detail came from headlessTurnCompletedDurably
+// ("completed without durable task state"). These failures mean the agent ran but did
+// nothing observable — retrying produces the same result, so we block instead.
+func isDurabilityFailure(detail string) bool {
+	return strings.Contains(strings.TrimSpace(detail), "completed without durable task state")
+}
+
 func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn, startedAt time.Time, detail string) {
 	if l == nil || l.broker == nil {
 		return
@@ -864,7 +871,7 @@ func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn
 		appendHeadlessCodexLog(slug, fmt.Sprintf("error-recovery: %s already produced durable progress; leaving task state unchanged", task.ID))
 		return
 	}
-	if shouldRetryHeadlessTurn(task, turn) {
+	if shouldRetryHeadlessTurn(task, turn) && !isDurabilityFailure(detail) {
 		retryTurn := turn
 		retryTurn.Attempts++
 		retryTurn.EnqueuedAt = time.Now()
