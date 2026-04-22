@@ -130,12 +130,17 @@ jobs:
         # of @v1 would execute with elevated privileges on the runner.
         uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
         with:
-          packages: ffmpeg
+          # libblas3 is a transitive runtime dep of ffmpeg on ubuntu-latest.
+          # Listing it explicitly guarantees it lands in the apt cache payload
+          # alongside ffmpeg, so warm restores do not surface
+          # `ffmpeg: error while loading shared libraries: libblas.so.3`.
+          packages: ffmpeg libblas3
           # NOTE: `version` is a cache-bust token, NOT an ffmpeg version pin.
           # Bump it to force a fresh apt-get install (e.g., for a security
-          # advisory). `packages: ffmpeg` has no version constraint, so warm
-          # runs reuse whatever .deb the cold run captured.
-          version: "1"
+          # advisory, or when the dependency list above changes). `packages`
+          # has no version constraint, so warm runs reuse whatever .debs the
+          # cold run captured.
+          version: "2"
       - name: Build wuphf
         run: go build -o wuphf ./cmd/wuphf
       - name: Run VHS regression checks
