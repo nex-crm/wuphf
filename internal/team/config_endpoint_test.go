@@ -112,6 +112,24 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 		t.Fatalf("config.json missing codex: %s", string(disk))
 	}
 
+	// POST /config with opencode — same flow as codex above, regression test
+	// for the broker allowlist missing "opencode" (the web UI would silently
+	// drop the switch because SettingsApp/ProviderSwitcher/Wizard all POST
+	// llm_provider=opencode).
+	body = bytes.NewBufferString(`{"llm_provider":"opencode"}`)
+	req, _ = http.NewRequest(http.MethodPost, "http://"+b.addr+"/config", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /config {opencode}: %v", err)
+	}
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("POST /config {llm_provider:opencode} status=%d body=%s", resp.StatusCode, string(raw))
+	}
+
 	// Reject unsupported provider
 	body = bytes.NewBufferString(`{"llm_provider":"anthropic"}`)
 	req, _ = http.NewRequest(http.MethodPost, "http://"+b.addr+"/config", body)

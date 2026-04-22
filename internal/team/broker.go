@@ -60,7 +60,10 @@ const agentRateLimitHeader = "X-WUPHF-Agent"
 
 var brokerStatePath = defaultBrokerStatePath
 
-var studioPackageGenerator = provider.RunCodexOneShot
+// studioPackageGenerator routes Studio package generation through the
+// install-wide LLM provider so opencode-only or claude-code-only setups
+// aren't forced to have `codex` installed.
+var studioPackageGenerator = provider.RunConfiguredOneShot
 
 var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)`)
 
@@ -5595,7 +5598,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if body.LLMProvider != nil {
 			provider = strings.TrimSpace(strings.ToLower(*body.LLMProvider))
 			switch provider {
-			case "claude-code", "codex":
+			case "claude-code", "codex", "opencode":
 				// ok
 			default:
 				http.Error(w, "unsupported llm_provider", http.StatusBadRequest)
@@ -5614,7 +5617,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				switch id {
-				case "claude-code", "codex":
+				case "claude-code", "codex", "opencode":
 					// ok
 				default:
 					http.Error(w, "unsupported entry in llm_provider_priority: "+id, http.StatusBadRequest)
