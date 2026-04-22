@@ -1288,6 +1288,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
 	mux.HandleFunc("/skills/", b.requireAuth(b.handleSkillsSubpath))
+	// GET /commands — slash-command registry mirror so the web composer
+	// renders the same command set as the TUI. See broker_commands.go.
+	mux.HandleFunc("/commands", b.requireAuth(b.handleCommands))
 	mux.HandleFunc("/telegram/groups", b.requireAuth(b.handleTelegramGroups))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
