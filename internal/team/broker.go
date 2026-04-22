@@ -1260,6 +1260,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/entity/facts", b.requireAuth(b.handleEntityFactsList))
 	mux.HandleFunc("/entity/briefs", b.requireAuth(b.handleEntityBriefsList))
 	mux.HandleFunc("/entity/graph", b.requireAuth(b.handleEntityGraph))
+	mux.HandleFunc("/entity/graph/all", b.requireAuth(b.handleEntityGraphAll))
 	mux.HandleFunc("/playbook/list", b.requireAuth(b.handlePlaybookList))
 	mux.HandleFunc("/playbook/compile", b.requireAuth(b.handlePlaybookCompile))
 	mux.HandleFunc("/playbook/execution", b.requireAuth(b.handlePlaybookExecution))
