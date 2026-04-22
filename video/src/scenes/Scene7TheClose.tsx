@@ -53,7 +53,7 @@ export const Scene7TheClose: React.FC = () => {
                 text="git clone https://github.com/nex-crm/wuphf.git"
                 startFrame={5}
                 charsPerFrame={1.4}
-                style={{ fontSize: 18 }}
+                style={{ fontSize: 18, color: colors.textBright }}
               />
             </div>
             <div>
@@ -62,7 +62,7 @@ export const Scene7TheClose: React.FC = () => {
                 text="cd wuphf && ./wuphf"
                 startFrame={45}
                 charsPerFrame={1.4}
-                style={{ fontSize: 18 }}
+                style={{ fontSize: 18, color: colors.textBright }}
               />
             </div>
           </div>
