@@ -53,32 +53,39 @@ export function MessageFeed() {
     )
   }
 
-  // Build message list with date separators and grouping
-  const elements: Array<{ type: 'date'; key: string; label: string } | { type: 'message'; key: string; message: typeof messages[0]; grouped: boolean }> = []
+  // Build message list with date separators, grouping, and inline thread
+  // nesting. Top-level messages render at full width; direct replies to a
+  // top-level message render as indented children grouped underneath it —
+  // like Slack's channel view, not like a flat Telegram feed. Replies to
+  // replies (deep thread) are hidden from the main feed; they belong in
+  // the thread panel.
+  const elements: Array<
+    | { type: 'date'; key: string; label: string }
+    | { type: 'message'; key: string; message: typeof messages[0]; grouped: boolean; isReply: boolean }
+  > = []
   let lastDate = ''
   let lastFrom = ''
   let lastTime = ''
 
-  // Index messages by id so we can tell a top-level reply (first answer to
-  // an untagged human message in the channel — parent has no reply_to)
-  // apart from a deep thread reply (reply-to-a-reply). Top-level replies
-  // must stay in the main feed; otherwise agents' first answers disappear.
   const byId = new Map<string, typeof messages[0]>()
   for (const m of messages) byId.set(m.id, m)
 
+  // Bucket messages by the top-level thread they belong to. A top-level
+  // message is its own bucket head; a direct reply joins its parent's
+  // bucket; a deep-thread reply is dropped.
+  const repliesByParent = new Map<string, typeof messages>()
   for (const msg of messages) {
-    // Skip status messages from main feed grouping logic
     if (msg.content?.startsWith('[STATUS]')) continue
-    // Thread replies (reply chain depth > 1) are hidden from the main feed —
-    // they belong to the thread view. A reply whose parent is a top-level
-    // message stays visible so the channel shows the full human↔agent
-    // exchange inline.
-    if (msg.reply_to) {
-      const parent = byId.get(msg.reply_to)
-      if (parent && parent.reply_to) continue
-    }
+    if (!msg.reply_to) continue
+    const parent = byId.get(msg.reply_to)
+    if (!parent) continue
+    if (parent.reply_to) continue // deep thread — hide
+    const list = repliesByParent.get(parent.id) ?? []
+    list.push(msg)
+    repliesByParent.set(parent.id, list)
+  }
 
-    // Date separator
+  const pushMessage = (msg: typeof messages[0], isReply: boolean) => {
     if (msg.timestamp) {
       const dayKey = dateDayKey(msg.timestamp)
       if (dayKey !== lastDate) {
@@ -88,8 +95,6 @@ export function MessageFeed() {
         lastTime = ''
       }
     }
-
-    // Grouping: same sender within 5 minutes
     let grouped = false
     if (lastFrom === msg.from && msg.timestamp && lastTime) {
       const delta = new Date(msg.timestamp).getTime() - new Date(lastTime).getTime()
@@ -97,8 +102,17 @@ export function MessageFeed() {
     }
     lastFrom = msg.from
     lastTime = msg.timestamp || lastTime
+    elements.push({ type: 'message', key: msg.id, message: msg, grouped, isReply })
+  }
 
-    elements.push({ type: 'message', key: msg.id, message: msg, grouped })
+  for (const msg of messages) {
+    if (msg.content?.startsWith('[STATUS]')) continue
+    if (msg.reply_to) continue // only top-level messages drive the outer loop
+    pushMessage(msg, false)
+    const replies = repliesByParent.get(msg.id)
+    if (replies) {
+      for (const r of replies) pushMessage(r, true)
+    }
   }
 
   return (
@@ -118,6 +132,7 @@ export function MessageFeed() {
             key={el.key}
             message={el.message}
             grouped={el.grouped}
+            isReply={el.isReply}
             onThreadClick={(id) => setActiveThreadId(id)}
           />
         )

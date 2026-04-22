@@ -13,10 +13,12 @@ import { resolveHarness } from '../../lib/harness'
 interface MessageBubbleProps {
   message: Message
   grouped?: boolean
+  /** Direct reply to a top-level channel message — renders indented under the parent. */
+  isReply?: boolean
   onThreadClick?: (id: string) => void
 }
 
-export function MessageBubble({ message, grouped = false, onThreadClick }: MessageBubbleProps) {
+export function MessageBubble({ message, grouped = false, isReply = false, onThreadClick }: MessageBubbleProps) {
   const currentChannel = useAppStore((s) => s.currentChannel)
   const { data: members = [] } = useOfficeMembers()
   const isHuman = message.from === 'you' || message.from === 'human'
@@ -54,7 +56,7 @@ export function MessageBubble({ message, grouped = false, onThreadClick }: Messa
 
   return (
     <div
-      className={`message animate-fade${grouped ? ' message-grouped' : ''}`}
+      className={`message animate-fade${grouped ? ' message-grouped' : ''}${isReply ? ' message-reply' : ''}`}
       data-msg-id={message.id}
     >
       {/* Avatar */}
