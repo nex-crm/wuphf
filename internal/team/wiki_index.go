@@ -710,11 +710,25 @@ func (s *inMemoryFactStore) UpsertEntity(_ context.Context, e IndexEntity) error
 func (s *inMemoryFactStore) UpsertEdge(_ context.Context, e IndexEdge) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.edgesBy[e.Subject] = append(s.edgesBy[e.Subject], e)
+	setKey := e.Subject + "|" + e.Predicate + "|" + e.Object
+	s.edgesBy[e.Subject] = upsertEdgeDedup(s.edgesBy[e.Subject], e, setKey)
 	if e.Object != e.Subject {
-		s.edgesBy[e.Object] = append(s.edgesBy[e.Object], e)
+		s.edgesBy[e.Object] = upsertEdgeDedup(s.edgesBy[e.Object], e, setKey)
 	}
 	return nil
+}
+
+// upsertEdgeDedup replaces an existing edge with the same composite key or
+// appends it. The key is subject+predicate+object so that repeated
+// ReconcileFromMarkdown calls are idempotent.
+func upsertEdgeDedup(bucket []IndexEdge, e IndexEdge, key string) []IndexEdge {
+	for i, existing := range bucket {
+		if existing.Subject+"|"+existing.Predicate+"|"+existing.Object == key {
+			bucket[i] = e
+			return bucket
+		}
+	}
+	return append(bucket, e)
 }
 
 func (s *inMemoryFactStore) UpsertRedirect(_ context.Context, r Redirect) error {

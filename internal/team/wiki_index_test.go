@@ -377,3 +377,40 @@ func TestWikiIndex_ReconcileMutexNarrow(t *testing.T) {
 
 	<-done
 }
+
+// TestWikiIndex_UpsertEdgeDedup verifies that repeated ReconcileFromMarkdown
+// calls do not double-index edges (H9 fix). graph.log with 3 edges reconciled
+// twice must yield exactly 3 edges per entity, not 6.
+func TestWikiIndex_UpsertEdgeDedup(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	graphLog := "sarah-jones  works_at   acme-corp   2026-04-10  src=aaa111\n" +
+		"sarah-jones  reports_to bob-smith   2026-04-10  src=bbb222\n" +
+		"bob-smith    manages    sarah-jones 2026-04-10  src=ccc333\n"
+	if err := os.WriteFile(filepath.Join(root, "graph.log"), []byte(graphLog), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := NewWikiIndex(root)
+	defer idx.Close()
+
+	// Reconcile twice — edges must be idempotent.
+	for i := 0; i < 2; i++ {
+		if err := idx.ReconcileFromMarkdown(ctx); err != nil {
+			t.Fatalf("reconcile %d: %v", i+1, err)
+		}
+	}
+
+	edges, err := idx.ListEdgesForEntity(ctx, "sarah-jones")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// sarah-jones is subject of 2 edges and object of 1 edge → 3 total.
+	if len(edges) != 3 {
+		t.Errorf("ListEdgesForEntity(sarah-jones) = %d edges, want 3 (no double-index)", len(edges))
+		for _, e := range edges {
+			t.Logf("  edge: %s -[%s]-> %s", e.Subject, e.Predicate, e.Object)
+		}
+	}
+}
