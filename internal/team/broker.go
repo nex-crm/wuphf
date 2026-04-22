@@ -2025,12 +2025,37 @@ func (b *Broker) ServeWebUI(port int) {
 			"broker_url": brokerURL,
 		})
 	})))
-	mux.Handle("/", fileServer)
+	// Cache policy: index.html must be re-fetched every load so users pick up
+	// new JS/CSS bundle hashes immediately after an upgrade. Hashed assets
+	// under /assets/ are content-addressed and safe to cache aggressively.
+	// Without this, users stay pinned to a stale bundle for days because
+	// Chrome's heuristic cache revalidates HTML only occasionally.
+	mux.Handle("/", cacheControlMiddleware(fileServer))
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("broker web UI proxy: listen on :%d: %v", port, err)
 		}
 	}()
+}
+
+// cacheControlMiddleware sets conservative cache headers on the web UI so
+// clients always receive fresh HTML and mutable assets, while long-cached
+// hashed bundles under /assets/ stay immutable for efficiency.
+func cacheControlMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasPrefix(path, "/assets/"):
+			// Vite bundles hashed filenames; they never change for a given URL.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		default:
+			// Everything else (index.html, themes/*.css, favicons that share a
+			// stable path) must re-validate on each load so upgrades land
+			// immediately.
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
