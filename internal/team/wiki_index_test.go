@@ -543,3 +543,30 @@ func TestWikiIndex_GraphLogTimestampLayouts(t *testing.T) {
 		}
 	}
 }
+
+// TestNormalizeForFactID_Unicode verifies that NFC and NFD forms of the same
+// Unicode string produce identical output (L17 fix). The hash is load-bearing:
+// LLMs may return NFD; we must produce the same ID regardless.
+func TestNormalizeForFactID_Unicode(t *testing.T) {
+	// Build NFC and NFD forms of three test strings programmatically so the
+	// source file never embeds raw combining characters.
+	cases := []struct {
+		nfc string
+		nfd string
+	}{
+		// José García: é = U+00E9 (NFC) vs e + U+0301 (NFD)
+		{nfc: "José García", nfd: "José García"},
+		// Zürich: ü = U+00FC (NFC) vs u + U+0308 (NFD)
+		{nfc: "Zürich", nfd: "Zürich"},
+		// naïve: ï = U+00EF (NFC) vs i + U+0308 (NFD)
+		{nfc: "naïve", nfd: "naïve"},
+	}
+	for _, tc := range cases {
+		nfcResult := NormalizeForFactID(tc.nfc)
+		nfdResult := NormalizeForFactID(tc.nfd)
+		if nfcResult != nfdResult {
+			t.Errorf("NFC %q → %q, NFD %q → %q; want identical output",
+				tc.nfc, nfcResult, tc.nfd, nfdResult)
+		}
+	}
+}

@@ -40,6 +40,8 @@ import (
 	"io/fs"
 	"log"
 	"os"
+
+	"golang.org/x/text/unicode/norm"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -250,8 +252,10 @@ func (w *WikiIndex) Close() error {
 }
 
 // NormalizeForFactID normalizes a triplet component per §7.3:
-// lowercase, trim, replace non-alphanumeric runs with a single dash.
+// NFC-normalize (so NFD vs NFC forms of the same glyph produce the same hash),
+// then lowercase, trim, replace non-alphanumeric runs with a single dash.
 func NormalizeForFactID(s string) string {
+	s = norm.NFC.String(s) // canonical equivalence across Unicode normalization forms
 	s = strings.ToLower(strings.TrimSpace(s))
 	var b strings.Builder
 	lastDash := false
