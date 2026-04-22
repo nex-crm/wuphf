@@ -16,6 +16,7 @@ import {
   Search,
   BookStack,
   Activity,
+  ShareAndroid,
 } from 'iconoir-react'
 import { useAppStore } from '../../stores/app'
 import { SIDEBAR_APPS } from '../../lib/constants'
@@ -30,6 +31,7 @@ const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   wiki: BookStack,
   tasks: CheckCircle,
   requests: ClipboardCheck,
+  graph: ShareAndroid,
   policies: Shield,
   calendar: Calendar,
   skills: Flash,

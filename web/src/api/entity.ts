@@ -100,6 +100,17 @@ export interface GraphQueryResponse {
   edges: GraphEdge[]
 }
 
+export interface GraphNode {
+  kind: EntityKind
+  slug: string
+  title: string
+}
+
+export interface GraphAllResponse {
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+}
+
 // ── HTTP ─────────────────────────────────────────────────────────
 
 /** `GET /entity/facts?kind=&slug=` — newest-first. */
@@ -158,6 +169,18 @@ export async function fetchEntityGraph(
   }
   const maybe = (res as { edges?: GraphEdge[] }).edges
   return Array.isArray(maybe) ? maybe : []
+}
+
+/**
+ * `GET /entity/graph/all` — returns the full cross-entity graph: every brief
+ * + every coalesced edge, in one payload. Used by the Graph app view.
+ */
+export async function fetchEntityGraphAll(): Promise<GraphAllResponse> {
+  const res = await get<GraphAllResponse>('/entity/graph/all')
+  return {
+    nodes: Array.isArray(res?.nodes) ? res.nodes : [],
+    edges: Array.isArray(res?.edges) ? res.edges : [],
+  }
 }
 
 // ── SSE ──────────────────────────────────────────────────────────

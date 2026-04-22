@@ -8,6 +8,7 @@ import { TypingIndicator } from './components/messages/TypingIndicator'
 import { DMView } from './components/messages/DMView'
 import { TasksApp } from './components/apps/TasksApp'
 import { RequestsApp } from './components/apps/RequestsApp'
+import { GraphApp } from './components/apps/GraphApp'
 import { PoliciesApp } from './components/apps/PoliciesApp'
 import { CalendarApp } from './components/apps/CalendarApp'
 import { SkillsApp } from './components/apps/SkillsApp'
@@ -163,6 +164,7 @@ function MainContent() {
     const panels: Record<string, ComponentType> = {
       tasks: TasksApp,
       requests: RequestsApp,
+      graph: GraphApp,
       policies: PoliciesApp,
       calendar: CalendarApp,
       skills: SkillsApp,

@@ -191,3 +191,85 @@ func TestEntityGraphEndpoint_MissingGraphReturns503(t *testing.T) {
 		t.Fatalf("expected 503; got %d", res.StatusCode)
 	}
 }
+
+// TestEntityGraphAllEndpoint_ReturnsNodesAndEdges verifies that posting one
+// cross-entity fact populates the /entity/graph/all payload with both the
+// inferred "to" node (companies/acme — promoted from the edge log) and the
+// matching edge. The "from" node (people/sarah) is discovered via the brief
+// that the synthesizer stub writes on threshold-crossing.
+func TestEntityGraphAllEndpoint_ReturnsNodesAndEdges(t *testing.T) {
+	srv, b, teardown := newEntityGraphTestServer(t)
+	defer teardown()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/entity/fact", b.requireAuth(b.handleEntityFact))
+	mux.HandleFunc("/entity/graph/all", b.requireAuth(b.handleEntityGraphAll))
+	localSrv := httptest.NewServer(mux)
+	defer localSrv.Close()
+	_ = srv // keep teardown consistent
+
+	payload, _ := json.Marshal(map[string]any{
+		"entity_kind": "people",
+		"entity_slug": "sarah",
+		"fact":        "Works at [[companies/acme]] as PM.",
+		"recorded_by": "pm",
+	})
+	req, _ := authReq(http.MethodPost, localSrv.URL+"/entity/fact", bytes.NewReader(payload), b.Token())
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post fact: %v", err)
+	}
+	_ = res.Body.Close()
+
+	// Give the worker a moment to persist the graph edge.
+	deadline := time.Now().Add(2 * time.Second)
+	var gr struct {
+		Nodes []struct {
+			Kind string `json:"kind"`
+			Slug string `json:"slug"`
+		} `json:"nodes"`
+		Edges []struct {
+			FromKind string `json:"from_kind"`
+			FromSlug string `json:"from_slug"`
+			ToKind   string `json:"to_kind"`
+			ToSlug   string `json:"to_slug"`
+		} `json:"edges"`
+	}
+	for time.Now().Before(deadline) {
+		req, _ := authReq(http.MethodGet, localSrv.URL+"/entity/graph/all", nil, b.Token())
+		r, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("get graph/all: %v", err)
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		if r.StatusCode != http.StatusOK {
+			t.Fatalf("graph/all status=%d body=%s", r.StatusCode, body)
+		}
+		if err := json.Unmarshal(body, &gr); err != nil {
+			t.Fatalf("decode: %v; body=%s", err, body)
+		}
+		if len(gr.Edges) >= 1 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if len(gr.Edges) < 1 {
+		t.Fatalf("want >= 1 edge; got %d", len(gr.Edges))
+	}
+	e := gr.Edges[0]
+	if e.FromKind != "people" || e.FromSlug != "sarah" || e.ToKind != "companies" || e.ToSlug != "acme" {
+		t.Errorf("edge shape wrong: %+v", e)
+	}
+
+	haveAcme := false
+	for _, n := range gr.Nodes {
+		if n.Kind == "companies" && n.Slug == "acme" {
+			haveAcme = true
+		}
+	}
+	if !haveAcme {
+		t.Errorf("expected phantom node companies/acme in nodes payload; got %+v", gr.Nodes)
+	}
+}

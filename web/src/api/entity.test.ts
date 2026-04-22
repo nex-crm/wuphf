@@ -91,6 +91,35 @@ describe('entity api client', () => {
     })
   })
 
+  it('fetchEntityGraphAll normalizes a { nodes, edges } payload', async () => {
+    const nodes: api.GraphNode[] = [
+      { kind: 'people', slug: 'sarah', title: 'Sarah' },
+      { kind: 'companies', slug: 'acme', title: 'Acme Corp' },
+    ]
+    const edges: api.GraphEdge[] = [
+      {
+        from_kind: 'people',
+        from_slug: 'sarah',
+        to_kind: 'companies',
+        to_slug: 'acme',
+        first_seen_fact_id: 'f1',
+        last_seen_ts: '2026-04-22T00:00:00Z',
+        occurrence_count: 1,
+      },
+    ]
+    const getSpy = vi.spyOn(client, 'get').mockResolvedValue({ nodes, edges })
+    const result = await api.fetchEntityGraphAll()
+    expect(getSpy).toHaveBeenCalledWith('/entity/graph/all')
+    expect(result.nodes).toEqual(nodes)
+    expect(result.edges).toEqual(edges)
+  })
+
+  it('fetchEntityGraphAll tolerates a missing key', async () => {
+    vi.spyOn(client, 'get').mockResolvedValue({})
+    const result = await api.fetchEntityGraphAll()
+    expect(result).toEqual({ nodes: [], edges: [] })
+  })
+
   it('subscribeEntityEvents returns a no-op when EventSource is undefined', () => {
     const originalES = (globalThis as { EventSource?: unknown }).EventSource
     ;(globalThis as { EventSource?: unknown }).EventSource = undefined
