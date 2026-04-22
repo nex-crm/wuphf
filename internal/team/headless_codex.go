@@ -156,6 +156,15 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	startWorker := false
 
 	l.headlessMu.Lock()
+	if l.headlessQueues == nil {
+		l.headlessQueues = make(map[string][]headlessCodexTurn)
+	}
+	if l.headlessActive == nil {
+		l.headlessActive = make(map[string]*headlessCodexActiveTurn)
+	}
+	if l.headlessWorkers == nil {
+		l.headlessWorkers = make(map[string]bool)
+	}
 	urgentLeadTurn := l.headlessLeadTurnNeedsImmediateWakeLocked(slug, turn.Prompt)
 	if turn.TaskID != "" {
 		if active := l.headlessActive[slug]; active != nil && strings.TrimSpace(active.Turn.TaskID) == turn.TaskID {
@@ -318,6 +327,7 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 
 			err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
 			ctxErr := turnCtx.Err()
+			isDurabilityError := false
 			if err == nil {
 				l.headlessMu.Lock()
 				active := l.headlessActive[slug]
@@ -325,6 +335,7 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 				if ok, reason := l.headlessTurnCompletedDurably(slug, active); !ok {
 					appendHeadlessCodexLog(slug, "durability-error: "+reason)
 					err = errors.New(reason)
+					isDurabilityError = true
 				}
 			}
 			switch {
@@ -336,6 +347,14 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 			case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
 				appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
 				l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
+			case isDurabilityError:
+				// The provider returned successfully but left no durable task state.
+				// Don't retry — the agent already had its turn. Block the task immediately.
+				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
+				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
+				exhaustedTurn := turn
+				exhaustedTurn.Attempts = headlessCodexLocalWorktreeRetryLimit
+				l.recoverFailedHeadlessTurn(slug, exhaustedTurn, startedAt, err.Error())
 			default:
 				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
 				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
@@ -832,6 +851,13 @@ func (l *Launcher) recoverTimedOutHeadlessTurn(slug string, turn headlessCodexTu
 	}
 }
 
+// isDurabilityFailure reports whether detail came from headlessTurnCompletedDurably
+// ("completed without durable task state"). These failures mean the agent ran but did
+// nothing observable — retrying produces the same result, so we block instead.
+func isDurabilityFailure(detail string) bool {
+	return strings.Contains(strings.TrimSpace(detail), "completed without durable task state")
+}
+
 func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn, startedAt time.Time, detail string) {
 	if l == nil || l.broker == nil {
 		return
@@ -845,7 +871,7 @@ func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn
 		appendHeadlessCodexLog(slug, fmt.Sprintf("error-recovery: %s already produced durable progress; leaving task state unchanged", task.ID))
 		return
 	}
-	if shouldRetryHeadlessTurn(task, turn) {
+	if shouldRetryHeadlessTurn(task, turn) && !isDurabilityFailure(detail) {
 		retryTurn := turn
 		retryTurn.Attempts++
 		retryTurn.EnqueuedAt = time.Now()

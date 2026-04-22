@@ -676,3 +676,65 @@ func TestBuildResumePacketSpecSectionMessagesLabel(t *testing.T) {
 		t.Error("old section label '## Unanswered messages awaiting your response' must not appear")
 	}
 }
+
+// TestResumeInFlightWorkTUIClaudeRoutesHeadless pins the invariant that TUI
+// mode with claude-code runtime and no pane-backed agents routes resumption
+// through the headless queue, not the tmux pane branch. Before this guard,
+// resumeInFlightWork branched on webMode alone — TUI has webMode=false, so it
+// fell through to agentPaneTargets() which computes pane addresses without
+// verifying they exist, and the resulting tmux send-keys commands silently
+// failed. Users restarting `wuphf --tui` with in-flight work lost resumption.
+func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	oldWakeLead := headlessWakeLeadFn
+	headlessWakeLeadFn = func(_ *Launcher, _ string) {}
+	defer func() { headlessWakeLeadFn = oldWakeLead }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
+	}
+	b.messages = []channelMessage{
+		{ID: "h1", From: "you", Content: "what is the strategy?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		// TUI mode: webMode=false, claude-code provider, no panes spawned.
+		provider:         "claude-code",
+		webMode:          false,
+		paneBackedAgents: false,
+		broker:           b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+		headlessWorkers: make(map[string]bool),
+		headlessActive:  make(map[string]*headlessCodexActiveTurn),
+		headlessQueues:  make(map[string][]headlessCodexTurn),
+	}
+
+	l.resumeInFlightWork()
+
+	present := func(slug string) bool {
+		l.headlessMu.Lock()
+		defer l.headlessMu.Unlock()
+		return len(l.headlessQueues[slug]) > 0 || l.headlessActive[slug] != nil
+	}
+
+	if !present("ceo") {
+		t.Error("TUI+claude: CEO resume packet dropped — TUI must route through headless queue when paneBackedAgents=false")
+	}
+	if !present("fe") {
+		t.Error("TUI+claude: fe specialist resume packet dropped — TUI must route through headless queue when paneBackedAgents=false")
+	}
+}

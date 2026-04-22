@@ -47,7 +47,8 @@ func TestClaudeCommand_UsesFileForSystemPrompt(t *testing.T) {
 // string for every visible office member and asserts the length is comfortably
 // below any plausible tmux command-parse buffer. 4096 bytes is a safety margin
 // well below historical tmux limits. If this test fails, pane-backed spawn
-// will regress and fall back to headless claude --print (extra-usage quota).
+// will regress and the opt-in WUPHF_AGENT_MODE=panes path falls back to the
+// default headless claude --print dispatch.
 func TestClaudeCommand_StaysUnderTmuxLimit(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_START_FROM_SCRATCH", "1")
