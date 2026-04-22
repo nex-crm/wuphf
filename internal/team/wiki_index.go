@@ -410,10 +410,11 @@ func (w *WikiIndex) ReconcilePath(ctx context.Context, relPath string) error {
 // index. Implements the §7.4 substrate guarantee: `rm -rf .wuphf/index/`
 // → call this → logically-identical index. Safe to run concurrently with
 // reads (writes are serialized inside the store).
+//
+// The mutex guards only lastBuild. All reconcile I/O runs outside the lock so
+// that Search and GetFact are never blocked during a long boot reconcile.
+// The FactStore's own internal synchronization serializes writes.
 func (w *WikiIndex) ReconcileFromMarkdown(ctx context.Context) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
 	factLogs := []string{
 		filepath.Join(w.root, "wiki", "facts"),
 		filepath.Join(w.root, "team", "entities"),
@@ -436,7 +437,9 @@ func (w *WikiIndex) ReconcileFromMarkdown(ctx context.Context) error {
 		}
 	}
 
+	w.mu.Lock()
 	w.lastBuild = time.Now()
+	w.mu.Unlock()
 	return nil
 }
 

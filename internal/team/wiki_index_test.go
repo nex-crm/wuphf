@@ -3,6 +3,7 @@ package team
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -305,4 +306,74 @@ func TestWikiIndex_Redirects(t *testing.T) {
 	if len(facts) != 1 || facts[0].ID != "fact001" {
 		t.Errorf("redirect follow failed: got %+v", facts)
 	}
+}
+
+// TestWikiIndex_ReconcileMutexNarrow verifies that Search and GetFact are not
+// blocked for the full duration of ReconcileFromMarkdown (H7 fix). A goroutine
+// calls ReconcileFromMarkdown over a 50-fact corpus while the main goroutine
+// concurrently issues Search + GetFact calls. Every query must complete within
+// 50 ms — far less than any full-walk latency — proving the mutex is not held
+// across the entire walk.
+func TestWikiIndex_ReconcileMutexNarrow(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	// Seed 50 facts into a single .jsonl file.
+	factsDir := filepath.Join(root, "wiki", "facts", "person")
+	if err := os.MkdirAll(factsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var lines []byte
+	for i := 0; i < 50; i++ {
+		f := TypedFact{
+			ID:         fmt.Sprintf("mutex-test-%04d", i),
+			EntitySlug: "alice-smith",
+			Type:       "observation",
+			Text:       fmt.Sprintf("Observation number %d about Alice.", i),
+			CreatedAt:  time.Now().UTC(),
+			CreatedBy:  "archivist",
+		}
+		b, _ := json.Marshal(f)
+		lines = append(lines, b...)
+		lines = append(lines, '\n')
+	}
+	if err := os.WriteFile(filepath.Join(factsDir, "alice-smith.jsonl"), lines, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := NewWikiIndex(root)
+	defer idx.Close()
+
+	// Prime with one reconcile so GetFact has something to return.
+	if err := idx.ReconcileFromMarkdown(ctx); err != nil {
+		t.Fatalf("prime reconcile: %v", err)
+	}
+
+	// Launch a second reconcile in a goroutine.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = idx.ReconcileFromMarkdown(ctx)
+	}()
+
+	// For 500 ms, fire Search + GetFact in a tight loop and assert each
+	// call completes within 50 ms.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		start := time.Now()
+		_, _ = idx.Search(ctx, "alice", 5)
+		elapsed := time.Since(start)
+		if elapsed > 50*time.Millisecond {
+			t.Errorf("Search blocked for %v, want <50ms (mutex held across walk?)", elapsed)
+		}
+
+		start = time.Now()
+		_, _, _ = idx.GetFact(ctx, "mutex-test-0000")
+		elapsed = time.Since(start)
+		if elapsed > 50*time.Millisecond {
+			t.Errorf("GetFact blocked for %v, want <50ms (mutex held across walk?)", elapsed)
+		}
+	}
+
+	<-done
 }
