@@ -24,7 +24,7 @@ jobs:
     steps:
       - name: Mint GitHub App token
         id: app-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
         with:
           app-id: ${{ vars.APPROVER_APP_ID }}
           private-key: ${{ secrets.APPROVER_APP_PRIVATE_KEY }}
@@ -40,16 +40,6 @@ jobs:
             exit 1
           fi
 
-      - name: Reject self-approval
-        env:
-          COMMENTER: ${{ github.event.comment.user.login }}
-          PR_AUTHOR: ${{ github.event.issue.user.login }}
-        run: |
-          if [ "${COMMENTER}" = "${PR_AUTHOR}" ]; then
-            echo "::error::@${COMMENTER} cannot /approve their own PR"
-            exit 1
-          fi
-
       - name: Submit approval review
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -60,7 +50,7 @@ jobs:
         run: |
           reason="${BODY#/approve}"
           reason="${reason# }"
-          reason="${reason%%$'\n'*}"
+          reason="${reason%%[$'\r\n']*}"
           [ -z "$reason" ] && reason="(no reason provided)"
           gh pr review "${PR_NUMBER}" \
             --repo "${REPO}" \

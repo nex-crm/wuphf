@@ -35,7 +35,17 @@ var (
 	headlessCodexOfficeLaunchTurnTimeout  = 10 * time.Minute
 	headlessCodexLocalWorktreeTurnTimeout = 12 * time.Minute
 	headlessCodexStaleCancelAfter         = 90 * time.Second
-	headlessCodexEnvVarsToStrip           = []string{
+	// Minimum age an active turn must have before an enqueue can preempt
+	// it via stale-cancel. Floors out tight re-enqueue loops where two
+	// near-simultaneous enqueues would otherwise cancel each other on
+	// arrival. Seen in prod (April 2026): CEO codex queue logged dozens
+	// of `stale-turn: cancelling active turn after 0s` over hours because
+	// the enqueue path exhausted the 90s threshold via clock-skew or a
+	// malformed turn, causing back-to-back cancels that never produced
+	// real work. 2s is long enough to absorb any legitimate rapid-fire
+	// wake without blocking genuine preemption.
+	headlessCodexMinTurnAgeBeforeCancel = 2 * time.Second
+	headlessCodexEnvVarsToStrip         = []string{
 		"OLDPWD",
 		"PWD",
 		"CODEX_THREAD_ID",
@@ -235,7 +245,11 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	}
 	if active := l.headlessActive[slug]; active != nil && active.Cancel != nil {
 		age := time.Since(active.StartedAt)
-		if age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn) {
+		// Two conditions must hold to preempt: past the configured staleness
+		// threshold AND past the minimum-turn-age floor. The floor breaks the
+		// tight cancel-loop pattern observed in prod (see doc on the constant).
+		if age >= headlessCodexMinTurnAgeBeforeCancel &&
+			age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn) {
 			cancel = active.Cancel
 			staleAge = age
 		}
