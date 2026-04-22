@@ -151,6 +151,7 @@ type FactStore interface {
 	ResolveRedirect(ctx context.Context, slug string) (string, bool, error)
 
 	CanonicalHashFacts(ctx context.Context) (string, error) // §7.4 rebuild check
+	CanonicalHashAll(ctx context.Context) (string, error)   // §7.4 composite: facts + entities + edges + redirects
 	Close() error
 }
 
@@ -467,6 +468,13 @@ func (w *WikiIndex) LastBuild() time.Time {
 // the §7.4 rebuild contract test: hash before rebuild must equal hash after.
 func (w *WikiIndex) CanonicalHashFacts(ctx context.Context) (string, error) {
 	return w.store.CanonicalHashFacts(ctx)
+}
+
+// CanonicalHashAll returns a composite hash over facts, entities, edges, and
+// redirects. Used by the §7.4 rebuild contract test to verify no silent drift
+// in the entity, edge, or redirect layers after a full reconcile.
+func (w *WikiIndex) CanonicalHashAll(ctx context.Context) (string, error) {
+	return w.store.CanonicalHashAll(ctx)
 }
 
 // --- path routing helpers -------------------------------------------------
@@ -935,6 +943,91 @@ func (s *inMemoryFactStore) CanonicalHashFacts(_ context.Context) (string, error
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+
+func (s *inMemoryFactStore) CanonicalHashAll(_ context.Context) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	h := sha256.New()
+
+	// Facts (sorted by ID)
+	factIDs := make([]string, 0, len(s.facts))
+	for id := range s.facts {
+		factIDs = append(factIDs, id)
+	}
+	sort.Strings(factIDs)
+	for _, id := range factIDs {
+		b, err := json.Marshal(s.facts[id])
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+
+	// Entities (sorted by slug)
+	entitySlugs := make([]string, 0, len(s.entities))
+	for slug := range s.entities {
+		entitySlugs = append(entitySlugs, slug)
+	}
+	sort.Strings(entitySlugs)
+	for _, slug := range entitySlugs {
+		b, err := json.Marshal(s.entities[slug])
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+
+	// Edges (sorted by subject|predicate|object)
+	type edgeKey struct{ s, p, o string }
+	seen := map[edgeKey]bool{}
+	var allEdges []IndexEdge
+	for _, edges := range s.edgesBy {
+		for _, e := range edges {
+			k := edgeKey{e.Subject, e.Predicate, e.Object}
+			if !seen[k] {
+				seen[k] = true
+				allEdges = append(allEdges, e)
+			}
+		}
+	}
+	sort.Slice(allEdges, func(i, j int) bool {
+		if allEdges[i].Subject != allEdges[j].Subject {
+			return allEdges[i].Subject < allEdges[j].Subject
+		}
+		if allEdges[i].Predicate != allEdges[j].Predicate {
+			return allEdges[i].Predicate < allEdges[j].Predicate
+		}
+		return allEdges[i].Object < allEdges[j].Object
+	})
+	for _, e := range allEdges {
+		b, err := json.Marshal(e)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+
+	// Redirects (sorted by From)
+	redirectFroms := make([]string, 0, len(s.redirects))
+	for from := range s.redirects {
+		redirectFroms = append(redirectFroms, from)
+	}
+	sort.Strings(redirectFroms)
+	for _, from := range redirectFroms {
+		b, err := json.Marshal(s.redirects[from])
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
 func (s *inMemoryFactStore) Close() error { return nil }
 
 // inMemoryTextIndex is a substring-match fallback that satisfies TextIndex

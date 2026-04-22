@@ -385,6 +385,162 @@ func (s *SQLiteFactStore) CanonicalHashFacts(ctx context.Context) (string, error
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+
+// CanonicalHashAll extends §7.4 to cover facts + entities + edges + redirects.
+// The per-table serialisation matches the in-memory implementation so contract
+// tests pass against both backends from the same markdown corpus.
+func (s *SQLiteFactStore) CanonicalHashAll(ctx context.Context) (string, error) {
+	// Start from the facts hash, then append entities, edges, redirects.
+	h := sha256.New()
+
+	// --- facts (sorted by id) ---
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM facts ORDER BY id ASC`)
+	if err != nil {
+		return "", fmt.Errorf("CanonicalHashAll facts ids: %w", err)
+	}
+	var factIDs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return "", err
+		}
+		factIDs = append(factIDs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	for _, id := range factIDs {
+		row := s.db.QueryRowContext(ctx,
+			`SELECT id, entity_slug, kind, type,
+			        triplet_subject, triplet_predicate, triplet_object,
+			        text, confidence, valid_from, valid_until,
+			        supersedes, contradicts_with,
+			        source_type, source_path, sentence_offset, artifact_excerpt,
+			        created_at, created_by, reinforced_at
+			 FROM facts WHERE id = ?`, id)
+		f, err := scanFact(row)
+		if err != nil {
+			return "", fmt.Errorf("CanonicalHashAll fact %s: %w", id, err)
+		}
+		b, err := json.Marshal(f)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+
+	// --- entities (sorted by slug) ---
+	entRows, err := s.db.QueryContext(ctx,
+		`SELECT slug, canonical_slug, kind, aliases,
+		        signals_email, signals_domain, signals_person_name, signals_job_title,
+		        last_synthesized_sha, last_synthesized_at, fact_count_at_synth,
+		        created_at, created_by
+		 FROM entities ORDER BY slug ASC`)
+	if err != nil {
+		return "", fmt.Errorf("CanonicalHashAll entities: %w", err)
+	}
+	defer entRows.Close()
+	for entRows.Next() {
+		var e IndexEntity
+		var aliases sql.NullString
+		var lastSynthAt, createdAt sql.NullString
+		if err := entRows.Scan(
+			&e.Slug, &e.CanonicalSlug, &e.Kind, &aliases,
+			&e.Signals.Email, &e.Signals.Domain, &e.Signals.PersonName, &e.Signals.JobTitle,
+			&e.LastSynthesizedSHA, &lastSynthAt, &e.FactCountAtSynth,
+			&createdAt, &e.CreatedBy,
+		); err != nil {
+			return "", err
+		}
+		if aliases.Valid && aliases.String != "" && aliases.String != "null" {
+			_ = json.Unmarshal([]byte(aliases.String), &e.Aliases)
+		}
+		if lastSynthAt.Valid {
+			if t, err2 := time.Parse(time.RFC3339, lastSynthAt.String); err2 == nil {
+				e.LastSynthesizedAt = t
+			}
+		}
+		if createdAt.Valid {
+			if t, err2 := time.Parse(time.RFC3339, createdAt.String); err2 == nil {
+				e.CreatedAt = t
+			}
+		}
+		b, err := json.Marshal(e)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+	if err := entRows.Err(); err != nil {
+		return "", err
+	}
+
+	// --- edges (sorted by subject, predicate, object) ---
+	edgeRows, err := s.db.QueryContext(ctx,
+		`SELECT subject, predicate, object, timestamp, source_sha
+		 FROM edges ORDER BY subject ASC, predicate ASC, object ASC`)
+	if err != nil {
+		return "", fmt.Errorf("CanonicalHashAll edges: %w", err)
+	}
+	defer edgeRows.Close()
+	for edgeRows.Next() {
+		var e IndexEdge
+		var ts sql.NullString
+		if err := edgeRows.Scan(&e.Subject, &e.Predicate, &e.Object, &ts, &e.SourceSHA); err != nil {
+			return "", err
+		}
+		if ts.Valid {
+			if t, err2 := time.Parse(time.RFC3339, ts.String); err2 == nil {
+				e.Timestamp = t
+			}
+		}
+		b, err := json.Marshal(e)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+	if err := edgeRows.Err(); err != nil {
+		return "", err
+	}
+
+	// --- redirects (sorted by slug_from) ---
+	redRows, err := s.db.QueryContext(ctx,
+		`SELECT slug_from, slug_to, merged_at, merged_by, commit_sha
+		 FROM redirects ORDER BY slug_from ASC`)
+	if err != nil {
+		return "", fmt.Errorf("CanonicalHashAll redirects: %w", err)
+	}
+	defer redRows.Close()
+	for redRows.Next() {
+		var r Redirect
+		var mergedAt sql.NullString
+		if err := redRows.Scan(&r.From, &r.To, &mergedAt, &r.MergedBy, &r.CommitSHA); err != nil {
+			return "", err
+		}
+		if mergedAt.Valid {
+			if t, err2 := time.Parse(time.RFC3339, mergedAt.String); err2 == nil {
+				r.MergedAt = t
+			}
+		}
+		b, err := json.Marshal(r)
+		if err != nil {
+			return "", err
+		}
+		h.Write(b)
+		h.Write([]byte{'\n'})
+	}
+	if err := redRows.Err(); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
 func (s *SQLiteFactStore) Close() error {
 	return s.db.Close()
 }
