@@ -2,7 +2,7 @@ import { Composition } from "remotion";
 import { WuphfDemo } from "./WuphfDemo";
 
 const FPS = 30;
-const DURATION = 96;
+const DURATION = 97;
 
 export const Root: React.FC = () => {
   return (
