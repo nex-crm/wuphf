@@ -774,7 +774,7 @@ func entriesToMessages(entries []SessionEntry) []Message {
 }
 
 func (l *AgentLoop) prepareEntriesForStreaming(entries []SessionEntry) []SessionEntry {
-	if !shouldCompactEntries(entries) {
+	if !shouldCompactEntries(entries, l.state.Config.Slug) {
 		l.lastCompactionAt = 0
 		return entries
 	}

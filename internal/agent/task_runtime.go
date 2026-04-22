@@ -13,7 +13,12 @@ const (
 	taskLogRootEnv          = "WUPHF_TASK_LOG_ROOT"
 	compactionTokenLimitEnv = "WUPHF_COMPACTION_TOKEN_LIMIT"
 	defaultTokenLimit       = 16000
-	compactionRatio         = 0.8
+	// CEO routes work for the whole office and burns through context faster
+	// than any specialist, so it gets a much larger working window before the
+	// loop archives older turns into an Office Insight.
+	ceoSlug         = "ceo"
+	ceoTokenLimit   = 200000
+	compactionRatio = 0.8
 )
 
 func defaultTaskLogRoot() string {
@@ -36,17 +41,17 @@ func nextTaskID(slug string) string {
 	return fmt.Sprintf("%s-%d", slug, time.Now().UnixMilli())
 }
 
-func compactionTokenLimit() int {
-	raw := strings.TrimSpace(os.Getenv(compactionTokenLimitEnv))
-	if raw == "" {
-		return defaultTokenLimit
+func compactionTokenLimit(slug string) int {
+	if raw := strings.TrimSpace(os.Getenv(compactionTokenLimitEnv)); raw != "" {
+		var limit int
+		if _, err := fmt.Sscanf(raw, "%d", &limit); err == nil && limit > 0 {
+			return limit
+		}
 	}
-
-	var limit int
-	if _, err := fmt.Sscanf(raw, "%d", &limit); err != nil || limit <= 0 {
-		return defaultTokenLimit
+	if slug == ceoSlug {
+		return ceoTokenLimit
 	}
-	return limit
+	return defaultTokenLimit
 }
 
 func estimateSessionTokens(entries []SessionEntry) int {
@@ -65,11 +70,11 @@ func estimateTextTokens(text string) int {
 	return (runes + 3) / 4
 }
 
-func shouldCompactEntries(entries []SessionEntry) bool {
+func shouldCompactEntries(entries []SessionEntry, slug string) bool {
 	if len(entries) < 8 {
 		return false
 	}
-	trigger := int(float64(compactionTokenLimit()) * compactionRatio)
+	trigger := int(float64(compactionTokenLimit(slug)) * compactionRatio)
 	return estimateSessionTokens(entries) >= trigger
 }
 
