@@ -551,6 +551,9 @@ func (w *WikiIndex) reconcileEntityBrief(ctx context.Context, abs, relPath strin
 		if v := frontmatterValue(fm, "created_by"); v != "" {
 			entity.CreatedBy = v
 		}
+		if aliases := frontmatterList(fm, "aliases"); len(aliases) > 0 {
+			entity.Aliases = aliases
+		}
 	}
 	if entity.CanonicalSlug != entity.Slug {
 		if err := w.store.UpsertRedirect(ctx, Redirect{
@@ -672,6 +675,56 @@ func frontmatterValue(block, key string) string {
 		}
 	}
 	return ""
+}
+
+// frontmatterList parses YAML block-list values for the given key.
+//
+// Handles two forms:
+//
+//	# Scalar (single value after colon)
+//	aliases: Sarah J.
+//
+//	# Block list (YAML indent + hyphen)
+//	aliases:
+//	  - Sarah J.
+//	  - sjones
+//
+// Inline bracket form (aliases: [a, b]) is also accepted.
+func frontmatterList(block, key string) []string {
+	prefix := key + ":"
+	lines := strings.Split(block, "\n")
+	for i, line := range lines {
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		scalar := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		if scalar != "" {
+			// Inline bracket form: [a, b, c]
+			if strings.HasPrefix(scalar, "[") && strings.HasSuffix(scalar, "]") {
+				inner := scalar[1 : len(scalar)-1]
+				var out []string
+				for _, v := range strings.Split(inner, ",") {
+					v = strings.TrimSpace(v)
+					if v != "" {
+						out = append(out, v)
+					}
+				}
+				return out
+			}
+			// Bare scalar after colon.
+			return []string{scalar}
+		}
+		// Block list: scan following lines for "  - value".
+		var out []string
+		for _, item := range lines[i+1:] {
+			if !strings.HasPrefix(item, "  - ") {
+				break
+			}
+			out = append(out, strings.TrimSpace(strings.TrimPrefix(item, "  - ")))
+		}
+		return out
+	}
+	return nil
 }
 
 // --- in-memory backends (default; replaced by sqlite/bleve behind interfaces) -

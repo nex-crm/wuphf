@@ -414,3 +414,57 @@ func TestWikiIndex_UpsertEdgeDedup(t *testing.T) {
 		}
 	}
 }
+
+// TestFrontmatterList_BlockList verifies that YAML block-list aliases are parsed
+// correctly and populated into IndexEntity.Aliases (M12 fix).
+func TestFrontmatterList_BlockList(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+
+	briefDir := filepath.Join(root, "team", "person")
+	if err := os.MkdirAll(briefDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Block-list aliases form.
+	brief := "---\ncanonical_slug: sarah-jones\nkind: person\naliases:\n  - Sarah J.\n  - sjones\ncreated_by: nazz\n---\n\n# Sarah Jones\n"
+	if err := os.WriteFile(filepath.Join(briefDir, "sarah-jones.md"), []byte(brief), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx := NewWikiIndex(root)
+	defer idx.Close()
+	if err := idx.ReconcileFromMarkdown(ctx); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	// The entity should have Aliases populated.
+	store := idx.store.(*inMemoryFactStore)
+	store.mu.RLock()
+	entity, ok := store.entities["sarah-jones"]
+	store.mu.RUnlock()
+	if !ok {
+		t.Fatal("entity sarah-jones not found in store")
+	}
+	if len(entity.Aliases) != 2 {
+		t.Fatalf("Aliases = %v, want [Sarah J. sjones]", entity.Aliases)
+	}
+	if entity.Aliases[0] != "Sarah J." || entity.Aliases[1] != "sjones" {
+		t.Errorf("Aliases = %v, want [Sarah J., sjones]", entity.Aliases)
+	}
+}
+
+func TestFrontmatterList_Scalar(t *testing.T) {
+	block := "aliases: Sarah J.\nkind: person\n"
+	got := frontmatterList(block, "aliases")
+	if len(got) != 1 || got[0] != "Sarah J." {
+		t.Errorf("frontmatterList scalar = %v, want [Sarah J.]", got)
+	}
+}
+
+func TestFrontmatterList_InlineBracket(t *testing.T) {
+	block := "aliases: [Sarah J., sjones]\nkind: person\n"
+	got := frontmatterList(block, "aliases")
+	if len(got) != 2 || got[0] != "Sarah J." || got[1] != "sjones" {
+		t.Errorf("frontmatterList inline = %v, want [Sarah J., sjones]", got)
+	}
+}
