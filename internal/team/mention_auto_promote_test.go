@@ -148,9 +148,9 @@ func TestRespawnPanesAfterReseed_NoSessionErrorSilenced(t *testing.T) {
 	// happens inside reconfigureVisibleAgents and is not unit-testable here,
 	// but the decision to silence vs log lives in isNoSessionError.
 	cases := []struct {
-		name     string
-		errMsg   string
-		silence  bool
+		name    string
+		errMsg  string
+		silence bool
 	}{
 		{"no server running", "tmux: no server running on /private/tmp/tmux-501/wuphf", true},
 		{"spawn first agent wrapper", "spawn first agent: exit status 1 (tmux: no server running on /tmp/tmux-501/wuphf)", true},
