@@ -12,7 +12,7 @@ import (
 const (
 	taskLogRootEnv          = "WUPHF_TASK_LOG_ROOT"
 	compactionTokenLimitEnv = "WUPHF_COMPACTION_TOKEN_LIMIT"
-	defaultTokenLimit       = 16000
+	defaultTokenLimit       = 100000
 	// CEO routes work for the whole office and burns through context faster
 	// than any specialist, so it gets a much larger working window before the
 	// loop archives older turns into an Office Insight.
