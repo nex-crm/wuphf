@@ -59,6 +59,7 @@ Layer 2 — The wiki (LLM-owned markdown)
   wiki/playbooks/{slug}.executions.jsonl # per-playbook execution log
   wiki/.lint/report-YYYY-MM-DD.md        # daily lint report
   wiki/.dlq/extractions.jsonl            # extraction failures awaiting replay
+  wiki/.dlq/permanent-failures.jsonl     # artifacts that exceeded max_retries
   wiki/redirects.md                      # auto-generated slug redirect index
   graph.log                              # typed cross-entity edges
 
@@ -436,6 +437,48 @@ Every instance of the below is wrong and must be corrected immediately.
 10. **Editing git history.** The wiki repo must never be force-pushed, rebased interactively in place, or amended. Every edit is a real, attributable commit. Rewriting history breaks fact ID determinism (the artifact_sha changes).
 11. **Filing speculation as fact.** "Sarah probably wants the enterprise plan" is not a fact. "Sarah said on the call: 'we're leaning toward enterprise'" is a fact.
 12. **Creating cards where the wiki design uses hatnotes or Sources.** This is a visual anti-pattern but carried through UI code. Cited answers, contradiction markers, and lint findings compose from existing Wikipedia IA primitives. See `DESIGN-WIKI.md` + the `plan-design-review` Component-level Extension Spec.
+
+### §11.13 DLQ semantics
+
+The DLQ (`wiki/.dlq/extractions.jsonl`) holds extraction failures that are eligible for replay. Files are **append-only on disk** — never rewritten. Successful replays and permanent promotions are recorded as tombstone rows.
+
+#### Per-line shape
+
+```json
+{
+  "artifact_sha": "3f9a21bc",
+  "artifact_path": "wiki/artifacts/chat/3f9a21bc.md",
+  "kind": "chat",
+  "last_error": "json_parse_error: expected { got \"\`\`\`json\\n{\"",
+  "error_category": "parse | provider_timeout | validation",
+  "retry_count": 2,
+  "max_retries": 5,
+  "first_failed_at": "2026-04-22T13:00:00Z",
+  "last_attempted_at": "2026-04-22T15:10:00Z",
+  "next_retry_not_before": "2026-04-22T15:20:00Z"
+}
+```
+
+#### Tombstone rows
+
+A **resolved** artifact appends:
+```json
+{"artifact_sha": "3f9a21bc", "resolved_at": "2026-04-22T16:00:00Z"}
+```
+
+A **promoted** artifact (exceeded `max_retries`) appends in `extractions.jsonl`:
+```json
+{"artifact_sha": "3f9a21bc", "promoted_at": "2026-04-22T16:00:00Z"}
+```
+and a full DLQ entry is written to `permanent-failures.jsonl`.
+
+#### Replay policy
+
+- Backoff: `min(10 min × 2^retry_count, 6 h)`. `next_retry_not_before` encodes the earliest eligible replay time.
+- Default `max_retries`: 5.
+- `error_category = "validation"` automatically sets `max_retries = 1` — programming errors are never retried past the first attempt.
+- After `max_retries` attempts the entry moves to `permanent-failures.jsonl` and is excluded from the active replay queue.
+- `ReadyForReplay` scans the full file and skips any `artifact_sha` that has a matching `resolved_at` or `promoted_at` tombstone.
 
 ---
 
