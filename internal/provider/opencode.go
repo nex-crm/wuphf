@@ -21,6 +21,18 @@ var (
 	opencodeGetwd    = os.Getwd
 )
 
+func init() {
+	Register(&Entry{
+		Kind:     KindOpencode,
+		StreamFn: CreateOpencodeCLIStreamFn,
+		OneShot:  RunOpencodeOneShot,
+		Capabilities: Capabilities{
+			PaneEligible:    false,
+			SupportsOneShot: true,
+		},
+	})
+}
+
 // CreateOpencodeCLIStreamFn returns a StreamFn that runs the Opencode CLI
 // non-interactively. Each invocation is ephemeral: WUPHF owns the conversation
 // history and hands Opencode a fresh prompt every turn.

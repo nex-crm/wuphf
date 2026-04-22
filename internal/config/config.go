@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // RuntimeHomeDir returns the home directory WUPHF should use for persisted
@@ -271,17 +272,46 @@ func ResolveLLMProvider(flagValue string) string {
 	return "claude-code"
 }
 
+// allowedLLMProviderKinds is the set of values normalizeLLMProvider accepts
+// for --provider, WUPHF_LLM_PROVIDER, and the config file. claude-code and
+// codex are baked in for backward compatibility and standalone config tests
+// (which don't import the provider package). Additional kinds are registered
+// at init() time by their provider implementation via AllowLLMProviderKind —
+// see internal/provider/registry.go.
+var (
+	allowedLLMProviderKindsMu sync.RWMutex
+	allowedLLMProviderKinds   = map[string]struct{}{
+		"claude-code": {},
+		"codex":       {},
+		"opencode":    {},
+	}
+)
+
+// AllowLLMProviderKind registers name as an acceptable provider value.
+// Provider implementations call this from init() so that
+// config.ResolveLLMProvider returns the kind for env/config values that match.
+// Idempotent: re-registering a known kind is a no-op.
+func AllowLLMProviderKind(name string) {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return
+	}
+	allowedLLMProviderKindsMu.Lock()
+	defer allowedLLMProviderKindsMu.Unlock()
+	allowedLLMProviderKinds[name] = struct{}{}
+}
+
 func normalizeLLMProvider(value string) string {
-	switch strings.TrimSpace(strings.ToLower(value)) {
-	case "claude-code":
-		return "claude-code"
-	case "codex":
-		return "codex"
-	case "opencode":
-		return "opencode"
-	default:
+	name := strings.TrimSpace(strings.ToLower(value))
+	if name == "" {
 		return ""
 	}
+	allowedLLMProviderKindsMu.RLock()
+	defer allowedLLMProviderKindsMu.RUnlock()
+	if _, ok := allowedLLMProviderKinds[name]; ok {
+		return name
+	}
+	return ""
 }
 
 var codexModelLinePattern = regexp.MustCompile(`(?m)^\s*model\s*=\s*("([^"\\]|\\.)*"|'[^']*')`)

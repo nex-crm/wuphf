@@ -18,6 +18,18 @@ var (
 	codexGetwd    = os.Getwd
 )
 
+func init() {
+	Register(&Entry{
+		Kind:     KindCodex,
+		StreamFn: CreateCodexCLIStreamFn,
+		OneShot:  RunCodexOneShot,
+		Capabilities: Capabilities{
+			PaneEligible:    false,
+			SupportsOneShot: true,
+		},
+	})
+}
+
 // CreateCodexCLIStreamFn returns a StreamFn that runs Codex CLI non-interactively.
 // WUPHF keeps the conversation history, so each invocation is intentionally ephemeral.
 func CreateCodexCLIStreamFn(agentSlug string) agent.StreamFn {
