@@ -35,10 +35,8 @@
   border-bottom-width: 1px;
 }
 
-.kbd-md {
-  font-size: 11px;
-  padding: 2px 5px;
-}
+/* .kbd-md is the default — no overrides needed, the base .kbd rule
+   already carries the 11px / 2px 5px / 18px min-size values. */
 
 /* Inverse variant for tinted surfaces (primary buttons). Sits cleanly on
    a saturated background without vibrating. */
@@ -166,13 +164,3 @@
   border-bottom-width: 1px;
 }
 
-/* Focus ring shared by keyboard-activatable surfaces that are easy to miss
-   without a visible outline (template tiles, runtime tiles). Scoped to
-   `:focus-visible` so mouse users don't see it. */
-.template-card:focus-visible,
-.runtime-tile:focus-visible,
-.wiz-team-tile:focus-visible,
-.task-suggestion:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}

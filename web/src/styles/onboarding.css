@@ -589,6 +589,19 @@
   margin-left: 2px;
 }
 
+/* Focus ring shared by keyboard-activatable surfaces that are easy to miss
+   without a visible outline (template tiles, runtime tiles, team tiles,
+   task suggestions). Scoped to `:focus-visible` so mouse users don't see
+   it. Kept with the onboarding styles because all four selectors target
+   wizard surfaces. */
+.template-card:focus-visible,
+.runtime-tile:focus-visible,
+.wiz-team-tile:focus-visible,
+.task-suggestion:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ─── Task Suggestions (step 6) ─── */
 .task-suggestions {
   background: var(--bg-card);
