@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAppStore } from '../../stores/app'
 import { get, post } from '../../api/client'
 import { ONBOARDING_COPY } from '../../lib/constants'
-import { Kbd } from '../ui/Kbd'
+import { Kbd, MOD_KEY } from '../ui/Kbd'
 import '../../styles/onboarding.css'
 
 /* ═══════════════════════════════════════════
@@ -761,13 +761,13 @@ function SetupStep({
     const detection = detectedBinary(prereqs, spec.binary)
     return Boolean(detection?.found)
   })
-  const hasAtLeastOneKey = Object.values(apiKeys).some((v) => v.trim().length > 0)
+  const hasAnyApiKey = Object.values(apiKeys).some((v) => v.trim().length > 0)
   // GBrain requires an OpenAI key to function — the TUI gates on this in
   // InitGBrainOpenAIKey (see internal/tui/init_flow.go:215). Mirror the
   // gate here so the wizard doesn't let users commit an unusable config.
   const gbrainSelected = memoryBackend === 'gbrain'
   const gbrainOpenAIMissing = gbrainSelected && gbrainOpenAIKey.trim().length === 0
-  const canContinue = (hasInstalledSelection || hasAtLeastOneKey) && !gbrainOpenAIMissing
+  const canContinue = (hasInstalledSelection || hasAnyApiKey) && !gbrainOpenAIMissing
 
   return (
     <div className="wizard-step">
@@ -1103,7 +1103,7 @@ function TaskStep({
         />
         <p className="task-textarea-hint">
           <Kbd size="sm">↵</Kbd> new line ·{' '}
-          <Kbd size="sm">{cmdEnterLabel().split(' ')[0]}</Kbd>
+          <Kbd size="sm">{MOD_KEY}</Kbd>
           <Kbd size="sm">↵</Kbd> review setup
         </p>
       </div>
@@ -1145,22 +1145,11 @@ function TaskStep({
         <button className="btn btn-primary" onClick={onNext} type="button">
           Review setup
           <ArrowIcon />
-          <EnterHint label={cmdEnterLabel()} />
+          <EnterHint label={`${MOD_KEY} Enter`} />
         </button>
       </div>
     </div>
   )
-}
-
-/**
- * On the task step, Enter inserts a newline inside the textarea and
- * ⌘/Ctrl+Enter advances. Compute the label lazily so non-Mac browsers
- * see "Ctrl+Enter" instead of the glyph.
- */
-function cmdEnterLabel(): string {
-  const mac = typeof navigator !== 'undefined'
-    && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
-  return mac ? '⌘ Enter' : 'Ctrl Enter'
 }
 
 /* ─── Step 7: Readiness Summary ─── */
@@ -1762,10 +1751,24 @@ export function Wizard({ onComplete }: WizardProps) {
   // onKeyDown below, so we bail out when that's the focused target.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        closeNexSignup()
+        return
+      }
       if (e.key !== 'Enter') return
+      // Guard against hold-Enter spamming onSubmit before React commits
+      // setSubmitting(true). The broker's /config endpoint races on
+      // parallel writes, so a repeat-fire on the 'ready' step could
+      // corrupt config.json.
+      if (e.repeat) return
       const target = e.target as HTMLElement | null
       if (target?.id === 'wiz-nex-email') return
-      const inTextarea = target?.tagName === 'TEXTAREA'
+      // Don't hijack Enter on interactive controls — Enter on a focused
+      // Back button should go back, not advance; Enter on a runtime
+      // reorder button should reorder, not advance.
+      const tag = target?.tagName
+      if (tag === 'BUTTON' || tag === 'A' || tag === 'SELECT') return
+      const inTextarea = tag === 'TEXTAREA'
       const isSubmitCombo = e.metaKey || e.ctrlKey
       if (inTextarea && !isSubmitCombo) return
 
@@ -1818,15 +1821,9 @@ export function Wizard({ onComplete }: WizardProps) {
           return
       }
     }
-    function onEscape(e: KeyboardEvent) {
-      if (e.key !== 'Escape') return
-      closeNexSignup()
-    }
     window.addEventListener('keydown', onKey)
-    window.addEventListener('keydown', onEscape)
     return () => {
       window.removeEventListener('keydown', onKey)
-      window.removeEventListener('keydown', onEscape)
     }
   }, [
     step,
