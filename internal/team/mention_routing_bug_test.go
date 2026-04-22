@@ -262,6 +262,172 @@ func hasSlug(xs []string, want string) bool {
 }
 
 // -----------------------------------------------------------------------------
+// Focus mode coverage: the focus-mode human-tag loop was simplified to drop an
+// isEnabled check. These tests exercise that path so regressions there aren't
+// silent.
+// -----------------------------------------------------------------------------
+
+func TestBug_FocusMode_HumanTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
+	b.mu.Unlock()
+	if err := b.SetFocusMode(true); err != nil {
+		t.Fatalf("enable focus mode: %v", err)
+	}
+
+	l := newHeadlessLauncherForTest()
+	l.broker = b
+	l.provider = "codex"
+	l.focusMode = true
+	l.notifyLastDelivered = make(map[string]time.Time)
+	l.pack = &agent.PackDefinition{
+		LeadSlug: "ceo",
+		Agents: []agent.AgentConfig{
+			{Slug: "ceo", Name: "CEO"},
+			{Slug: "planner", Name: "Planner"},
+			{Slug: "executor", Name: "Executor"},
+			{Slug: "reviewer", Name: "Reviewer"},
+		},
+	}
+
+	immediate, _ := l.notificationTargetsForMessage(channelMessage{
+		ID:      "focus-1",
+		From:    "you",
+		Channel: "general",
+		Content: "@pm please scope this",
+		Tagged:  []string{"pm"},
+	})
+
+	if !containsSlugSet(immediate, "pm") {
+		t.Fatalf("focus mode: human @pm did not reach wizard-hired specialist; got %+v", immediate)
+	}
+	if containsSlugSet(immediate, "ceo") {
+		t.Fatalf("focus mode: CEO should not also wake when specialist is explicitly tagged; got %+v", immediate)
+	}
+}
+
+func TestBug_FocusMode_CEOTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
+	b.mu.Unlock()
+	if err := b.SetFocusMode(true); err != nil {
+		t.Fatalf("enable focus mode: %v", err)
+	}
+
+	l := newHeadlessLauncherForTest()
+	l.broker = b
+	l.provider = "codex"
+	l.focusMode = true
+	l.notifyLastDelivered = make(map[string]time.Time)
+	l.pack = &agent.PackDefinition{
+		LeadSlug: "ceo",
+		Agents: []agent.AgentConfig{
+			{Slug: "ceo", Name: "CEO"},
+			{Slug: "planner", Name: "Planner"},
+		},
+	}
+
+	immediate, _ := l.notificationTargetsForMessage(channelMessage{
+		ID:      "focus-2",
+		From:    "ceo",
+		Channel: "general",
+		Content: "@pm take this",
+		Tagged:  []string{"pm"},
+	})
+
+	if !containsSlugSet(immediate, "pm") {
+		t.Fatalf("focus mode: CEO @pm did not reach wizard-hired specialist; got %+v", immediate)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// ch.Disabled must still be respected. An explicit @-tag bypasses the
+// "not yet a channel member" case (the bug this PR fixes) but MUST NOT bypass
+// a deliberate mute. Muting is the user's explicit intent to silence an agent.
+// -----------------------------------------------------------------------------
+
+func TestBug_DisabledMember_ExplicitTagDoesNotBypassMute(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
+	// Put pm in the channel then explicitly disable them.
+	for i := range b.channels {
+		if b.channels[i].Slug == "general" {
+			b.channels[i].Members = append(b.channels[i].Members, "pm")
+			b.channels[i].Disabled = append(b.channels[i].Disabled, "pm")
+			break
+		}
+	}
+	b.mu.Unlock()
+
+	l := newHeadlessLauncherForTest()
+	l.broker = b
+	l.provider = "codex"
+	l.notifyLastDelivered = make(map[string]time.Time)
+	l.pack = &agent.PackDefinition{
+		LeadSlug: "ceo",
+		Agents:   []agent.AgentConfig{{Slug: "ceo", Name: "CEO"}, {Slug: "pm", Name: "PM"}},
+	}
+
+	// Collaborative mode @-tag: disabled specialist must NOT wake.
+	immediate, _ := l.notificationTargetsForMessage(channelMessage{
+		ID:      "mute-1",
+		From:    "you",
+		Channel: "general",
+		Content: "@pm please take this",
+		Tagged:  []string{"pm"},
+	})
+	if containsSlugSet(immediate, "pm") {
+		t.Fatalf("disabled specialist was woken via @-tag (collaborative mode); muting must not be bypassed. Got %+v", immediate)
+	}
+
+	// CEO tagging disabled specialist: same — mute still wins.
+	immediate2, _ := l.notificationTargetsForMessage(channelMessage{
+		ID:      "mute-2",
+		From:    "ceo",
+		Channel: "general",
+		Content: "@pm please take this",
+		Tagged:  []string{"pm"},
+	})
+	if containsSlugSet(immediate2, "pm") {
+		t.Fatalf("disabled specialist was woken via CEO @-tag; muting must not be bypassed. Got %+v", immediate2)
+	}
+
+	// Focus mode @-tag: same.
+	if err := b.SetFocusMode(true); err != nil {
+		t.Fatalf("enable focus mode: %v", err)
+	}
+	l.focusMode = true
+	immediate3, _ := l.notificationTargetsForMessage(channelMessage{
+		ID:      "mute-3",
+		From:    "you",
+		Channel: "general",
+		Content: "@pm please take this",
+		Tagged:  []string{"pm"},
+	})
+	if containsSlugSet(immediate3, "pm") {
+		t.Fatalf("disabled specialist was woken via @-tag (focus mode); muting must not be bypassed. Got %+v", immediate3)
+	}
+}
+
+// -----------------------------------------------------------------------------
 // DM path: specialist hired via the wizard must be reachable via DM.
 // -----------------------------------------------------------------------------
 

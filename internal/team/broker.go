@@ -2237,6 +2237,25 @@ func (b *Broker) EnabledMembers(channel string) []string {
 	return nil
 }
 
+// DisabledMembers returns the slugs explicitly disabled for a channel —
+// members who were present in ch.Members at some point but have been muted
+// for this channel. Callers use this to distinguish "never added" (which an
+// explicit @-tag can bypass) from "deliberately muted" (which an @-tag must
+// respect — muting an agent is the user's explicit intent to silence them).
+func (b *Broker) DisabledMembers(channel string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	ch := b.findChannelLocked(channel)
+	if ch == nil || len(ch.Disabled) == 0 {
+		return nil
+	}
+	return append([]string(nil), ch.Disabled...)
+}
+
 func (b *Broker) OfficeMembers() []officeMember {
 	b.mu.Lock()
 	defer b.mu.Unlock()

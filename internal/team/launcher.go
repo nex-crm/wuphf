@@ -726,16 +726,32 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 	}
 	lead := l.officeLeadSlug()
 	enabledMembers := map[string]struct{}{}
+	disabledMembers := map[string]struct{}{}
 	if l.broker != nil {
 		for _, member := range l.broker.EnabledMembers(task.Channel) {
 			enabledMembers[member] = struct{}{}
 		}
+		for _, member := range l.broker.DisabledMembers(task.Channel) {
+			disabledMembers[member] = struct{}{}
+		}
+	}
+	// Task ownership is an explicit human/CEO assignment. The same bypass that
+	// lets an @-tag wake a wizard-hired specialist applies here: the owner may
+	// have been hired post-seed and not yet in ch.Members. Disabled (muted)
+	// members are still excluded — muting is an explicit silence.
+	actor := strings.TrimSpace(action.Actor)
+	owner := strings.TrimSpace(task.Owner)
+	isAssigned := func(slug string) bool {
+		return slug != "" && (slug == owner || slug == actor)
 	}
 	addImmediate := func(slug string) {
 		if slug == "" {
 			return
 		}
-		if len(enabledMembers) > 0 {
+		if _, muted := disabledMembers[slug]; muted {
+			return
+		}
+		if !isAssigned(slug) && len(enabledMembers) > 0 {
 			if _, ok := enabledMembers[slug]; !ok {
 				return
 			}
@@ -749,7 +765,10 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 		if slug == "" {
 			return
 		}
-		if len(enabledMembers) > 0 {
+		if _, muted := disabledMembers[slug]; muted {
+			return
+		}
+		if !isAssigned(slug) && len(enabledMembers) > 0 {
 			if _, ok := enabledMembers[slug]; !ok {
 				return
 			}
@@ -759,8 +778,6 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 			delete(targetMap, slug)
 		}
 	}
-	actor := strings.TrimSpace(action.Actor)
-	owner := strings.TrimSpace(task.Owner)
 
 	if owner == "" {
 		if lead != "" && lead != actor {
@@ -1010,22 +1027,31 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		owner = l.taskOwnerForMessage(msg)
 	}
 	enabledMembers := map[string]struct{}{}
+	disabledMembers := map[string]struct{}{}
 	if l.broker != nil {
 		for _, member := range l.broker.EnabledMembers(msg.Channel) {
 			enabledMembers[member] = struct{}{}
 		}
+		for _, member := range l.broker.DisabledMembers(msg.Channel) {
+			disabledMembers[member] = struct{}{}
+		}
 	}
+
+	// isExplicit checks whether a slug was explicitly @-tagged by the sender.
+	// Explicit tags bypass the enabledMembers filter so a newly hired specialist
+	// not yet in ch.Members can still be reached. They do NOT bypass ch.Disabled:
+	// an explicit disable is the user's intent to silence the agent, and an
+	// @-tag must not override it.
+	isExplicit := func(slug string) bool { return containsSlug(msg.Tagged, slug) }
 
 	addImmediate := func(slug string) {
 		if slug == "" || slug == msg.From {
 			return
 		}
-		// Explicit @-tags always bypass the channel-membership filter. A
-		// newly hired specialist won't be in ch.Members for #general yet,
-		// but the sender's intent is explicit — silently dropping them
-		// here routes the message to CEO instead and breaks direct addressing.
-		explicit := containsSlug(msg.Tagged, slug)
-		if !explicit && len(enabledMembers) > 0 {
+		if _, muted := disabledMembers[slug]; muted {
+			return
+		}
+		if !isExplicit(slug) && len(enabledMembers) > 0 {
 			if _, ok := enabledMembers[slug]; !ok {
 				return
 			}
@@ -1039,7 +1065,10 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		if slug == "" || slug == msg.From {
 			return false
 		}
-		explicit := containsSlug(msg.Tagged, slug)
+		if _, muted := disabledMembers[slug]; muted {
+			return false
+		}
+		explicit := isExplicit(slug)
 		if !explicit && len(enabledMembers) > 0 {
 			if _, ok := enabledMembers[slug]; !ok {
 				return false
@@ -1074,6 +1103,11 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 			humanExplicitlyTaggedSpecialists := false
 			for _, slug := range msg.Tagged {
 				if slug == "" || slug == msg.From || slug == lead {
+					continue
+				}
+				// Respect explicit disables. A muted specialist stays muted
+				// even when @-tagged — muting is the user's explicit intent.
+				if _, muted := disabledMembers[slug]; muted {
 					continue
 				}
 				// Explicit @-tag trumps channel-membership. The specialist
