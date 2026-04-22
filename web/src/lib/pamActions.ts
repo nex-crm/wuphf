@@ -5,11 +5,10 @@
  * so server + client stay in lockstep: new actions appear in the UI as soon as
  * they are added to pam_actions.go and exposed via GET /pam/actions.
  *
- * The `handlers` map below is how the UI actually wires each action to a
- * client-side effect. For v1, every action triggers the same POST /pam/action
- * endpoint with its id — so a single default handler is enough. If an action
- * ever needs custom UX (e.g. a pre-confirmation dialog, or an inline prompt),
- * override it here.
+ * v1: every action triggers the same POST /pam/action endpoint with its id,
+ * so one default handler is enough. If a future action ever needs custom UX
+ * (pre-confirmation dialog, inline prompt, etc.), reintroduce a per-id
+ * override map here — see PR #217 review.
  */
 
 import { triggerPamAction, type PamActionDescriptor, type PamActionId } from '../api/pam'
@@ -23,19 +22,11 @@ export type PamActionHandler = (ctx: PamActionRunContext) => Promise<{ job_id: n
 // Default handler: POST /pam/action with {action, path}. Covers every action
 // that runs entirely in Pam's sub-process (no client-side interaction beyond
 // the click that opened the menu).
-const defaultHandler =
-  (actionId: PamActionId): PamActionHandler =>
-  async (ctx) => {
+function defaultHandler(actionId: PamActionId): PamActionHandler {
+  return async (ctx) => {
     const res = await triggerPamAction(actionId, ctx.articlePath)
     return { job_id: res.job_id }
   }
-
-// handlerOverrides lets a specific action opt out of the default flow. Empty
-// for v1 — listed here so future actions have a one-line edit to plug in.
-const handlerOverrides: Partial<Record<PamActionId, PamActionHandler>> = {}
-
-export function resolvePamHandler(id: PamActionId): PamActionHandler {
-  return handlerOverrides[id] ?? defaultHandler(id)
 }
 
 /**
@@ -50,6 +41,6 @@ export interface PamMenuEntry extends PamActionDescriptor {
 export function buildPamMenu(descriptors: PamActionDescriptor[]): PamMenuEntry[] {
   return descriptors.map((d) => ({
     ...d,
-    run: resolvePamHandler(d.id),
+    run: defaultHandler(d.id),
   }))
 }

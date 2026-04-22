@@ -197,7 +197,10 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   return (
     <>
       <main className="wk-article-col">
-        <Pam articlePath={article.path} />
+        <Pam
+          articlePath={article.path}
+          onActionDone={() => setRefreshNonce((n) => n + 1)}
+        />
         {liveAgent && (
           <ArticleStatusBanner
             message={`${formatAgentName(liveAgent)} is editing this article right now.`}

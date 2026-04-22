@@ -5,10 +5,8 @@ package team
 // one ships with a prompt template, a set of allowed tools, and a commit
 // message pattern. New actions are added by appending to pamActions below.
 //
-// The registry is intentionally tiny. It exists because Pam will soon have
-// more jobs (e.g. "summarize this article", "cross-link to related briefs",
-// "generate cover image"), and we want those additions to be a one-file edit
-// rather than touching the dispatcher or handler.
+// The registry lives in a single file on purpose: adding a new Pam job
+// should be a one-file edit, never touching the dispatcher or handler.
 
 import (
 	"errors"
@@ -29,11 +27,13 @@ const (
 // plain fmt.Sprintf template: %s is replaced with the article body.
 type PamAction struct {
 	ID             PamActionID
-	Label          string   // human-facing label for the desk menu
-	SystemPrompt   string   // locked system prompt — do not edit without review
-	UserPromptTmpl string   // fmt pattern; takes article body
-	AllowedTools   []string // informational; wired into the sub-process when we gain tool-config plumbing
-	CommitMsgTmpl  string   // fmt pattern; takes article path
+	Label          string // human-facing label for the desk menu
+	SystemPrompt   string // locked system prompt — do not edit without review
+	UserPromptTmpl string // fmt pattern; takes article body
+	// AllowedTools is currently advisory only — not passed to the sub-process.
+	// Reserved for future tool-restriction plumbing.
+	AllowedTools  []string
+	CommitMsgTmpl string // fmt pattern; takes article path
 }
 
 // ErrUnknownPamAction is returned by LookupPamAction when the id is not
@@ -65,21 +65,34 @@ Use web search and web fetch to find new, reliable information and relevant medi
 	},
 }
 
+// clonePamAction returns a defensive copy of a PamAction. AllowedTools is a
+// slice, so a plain struct copy would share the backing array and let
+// callers mutate the registry entry in place.
+func clonePamAction(a PamAction) PamAction {
+	if a.AllowedTools != nil {
+		a.AllowedTools = append([]string(nil), a.AllowedTools...)
+	}
+	return a
+}
+
 // LookupPamAction returns the registered action for id, or ErrUnknownPamAction.
 func LookupPamAction(id PamActionID) (PamAction, error) {
 	for _, a := range pamActions {
 		if a.ID == id {
-			return a, nil
+			return clonePamAction(a), nil
 		}
 	}
 	return PamAction{}, fmt.Errorf("%w: %q", ErrUnknownPamAction, id)
 }
 
-// PamActions returns the registry in menu order. The returned slice is a
-// copy so callers can't mutate the registry.
+// PamActions returns the registry in menu order. The returned slice — and
+// every PamAction inside it — is a defensive copy so callers can't mutate
+// the registry (including via shared AllowedTools backing arrays).
 func PamActions() []PamAction {
 	out := make([]PamAction, len(pamActions))
-	copy(out, pamActions)
+	for i, a := range pamActions {
+		out[i] = clonePamAction(a)
+	}
 	return out
 }
 
@@ -90,13 +103,21 @@ func (a PamAction) renderCommitMsg(articlePath string) string {
 	if tmpl == "" {
 		return fmt.Sprintf("archivist: %s on %s", a.ID, articlePath)
 	}
+	// If the template doesn't have a %s verb, Sprintf would emit
+	// "...%!(EXTRA string=...)". Fall back to concatenation.
+	if !strings.Contains(tmpl, "%s") {
+		return tmpl + " " + articlePath
+	}
 	return fmt.Sprintf(tmpl, articlePath)
 }
 
 // renderUserPrompt fills the user-prompt template with the article body.
+// Guards against templates that omit %s or contain multiple verbs — both
+// would produce garbage via fmt.Sprintf. In either case we fall back to
+// concatenation so Pam still gets the article body.
 func (a PamAction) renderUserPrompt(articleBody string) string {
 	tmpl := a.UserPromptTmpl
-	if !strings.Contains(tmpl, "%s") {
+	if strings.Count(tmpl, "%s") != 1 {
 		return tmpl + "\n\n" + articleBody
 	}
 	return fmt.Sprintf(tmpl, articleBody)

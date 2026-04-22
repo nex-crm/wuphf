@@ -162,7 +162,17 @@
   font-family: var(--wk-chrome);
   font-size: 11px;
   color: var(--wk-text);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  max-width: 280px;
+}
+
+/* When the menu is open the status line is visually covered but must stay
+ * in the DOM so screen readers still announce running/done/failed state
+ * changes via its aria-live="status" role. */
+.pam-status.is-behind-menu {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* ─── Idle + busy animations ───

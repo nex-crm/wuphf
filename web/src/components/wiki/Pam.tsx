@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { PixelAvatar } from '../ui/PixelAvatar'
 import {
   listPamActions,
@@ -11,6 +11,12 @@ import '../../styles/pam.css'
 
 interface PamProps {
   articlePath: string
+  /**
+   * Called once Pam finishes an action (SSE `done`). WikiArticle uses this
+   * to bump its refreshNonce so the enriched article + history reload
+   * without a full navigation.
+   */
+  onActionDone?: () => void
 }
 
 type Status =
@@ -28,17 +34,39 @@ const STATUS_CLEAR_MS = 4000
  * spawns Pam's sub-process and fans results back via /events so we update
  * the status line without polling.
  */
-export default function Pam({ articlePath }: PamProps) {
+export default function Pam({ articlePath, onActionDone }: PamProps) {
   const [menu, setMenu] = useState<PamMenuEntry[] | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [status, setStatus] = useState<Status>({ kind: 'idle' })
   const [activeJobId, setActiveJobId] = useState<number | null>(null)
 
   const wrapRef = useRef<HTMLDivElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const menuElRef = useRef<HTMLDivElement>(null)
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Fetch the action registry once on mount. Failure falls through to an
-  // empty menu — Pam still renders so the character is visible.
+  // Refs mirror the state the SSE handler reads. The handler subscribes
+  // once on mount (empty deps) — we keep the subscription stable and read
+  // the latest activeJobId / menu through refs, rather than resubscribing on
+  // every state change (which caused the handler to miss the `started`
+  // event landing between trigger and effect re-run).
+  const activeJobIdRef = useRef<number | null>(null)
+  const menuRef = useRef<PamMenuEntry[] | null>(menu)
+  const onActionDoneRef = useRef<(() => void) | undefined>(onActionDone)
+  useEffect(() => {
+    activeJobIdRef.current = activeJobId
+  }, [activeJobId])
+  useEffect(() => {
+    menuRef.current = menu
+  }, [menu])
+  useEffect(() => {
+    onActionDoneRef.current = onActionDone
+  }, [onActionDone])
+
+  // Fetch the action registry once on mount. A fetch failure surfaces a
+  // distinct error state in the menu so it's not silently indistinguishable
+  // from "no actions available".
   useEffect(() => {
     let cancelled = false
     listPamActions()
@@ -47,8 +75,12 @@ export default function Pam({ articlePath }: PamProps) {
         const descriptors: PamActionDescriptor[] = res.actions ?? []
         setMenu(buildPamMenu(descriptors))
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (cancelled) return
+        console.error('pam: failed to load action registry', err)
+        setLoadError(
+          err instanceof Error ? err.message : 'Could not load Pam’s menu.',
+        )
         setMenu([])
       })
     return () => {
@@ -56,38 +88,37 @@ export default function Pam({ articlePath }: PamProps) {
     }
   }, [])
 
-  // Subscribe to Pam's SSE progress events. We filter by the job id we
-  // started so overlapping actions from other surfaces don't flash status
-  // here. The status line auto-clears on success after STATUS_CLEAR_MS.
+  // Subscribe to Pam's SSE progress events exactly once. The handler reads
+  // the latest activeJobId / menu / onActionDone via refs so the
+  // subscription does not churn on every state change and does not miss a
+  // `started` event fired between POST and the next effect pass.
   useEffect(() => {
     const unsub = subscribePamEvents((evt: PamActionEvent) => {
+      const current = activeJobIdRef.current
+      if (current === null || evt.job_id !== current) return
       if (evt.kind === 'started') {
-        if (activeJobId !== null && evt.job_id === activeJobId) {
-          setStatus({ kind: 'running', label: labelFor(evt.action, menu) })
-        }
+        setStatus({ kind: 'running', label: labelFor(evt.action, menuRef.current) })
         return
       }
       if (evt.kind === 'done') {
-        if (activeJobId !== null && evt.job_id === activeJobId) {
-          setStatus({ kind: 'done', label: labelFor(evt.action, menu) })
-          setActiveJobId(null)
-          scheduleClear()
-        }
+        setStatus({ kind: 'done', label: labelFor(evt.action, menuRef.current) })
+        setActiveJobId(null)
+        scheduleClear()
+        onActionDoneRef.current?.()
         return
       }
       if (evt.kind === 'failed') {
-        if (activeJobId !== null && evt.job_id === activeJobId) {
-          setStatus({ kind: 'failed', message: evt.error || 'Pam could not finish.' })
-          setActiveJobId(null)
-          scheduleClear()
-        }
+        setStatus({ kind: 'failed', message: evt.error || 'Pam could not finish.' })
+        setActiveJobId(null)
+        scheduleClear()
       }
     })
     return () => {
       unsub()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeJobId, menu])
+    // scheduleClear is stable (useCallback with empty deps) — safe to omit.
+
+  }, [])
 
   // Close menu on outside click so it doesn't linger when the user moves
   // on. Keep it simple: single global listener, cleaned up on unmount.
@@ -107,11 +138,27 @@ export default function Pam({ articlePath }: PamProps) {
     }
   }, [])
 
+  // When the menu opens, focus the first menuitem so keyboard users can
+  // immediately arrow through the list. Runs after paint so the button
+  // exists in the DOM.
+  useEffect(() => {
+    if (!menuOpen) return
+    const firstItem = menuElRef.current?.querySelector<HTMLButtonElement>(
+      '[role="menuitem"]',
+    )
+    firstItem?.focus()
+  }, [menuOpen])
+
   const scheduleClear = useCallback(() => {
     if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
     statusTimerRef.current = setTimeout(() => {
       setStatus({ kind: 'idle' })
     }, STATUS_CLEAR_MS)
+  }, [])
+
+  const closeMenuAndRefocus = useCallback(() => {
+    setMenuOpen(false)
+    triggerRef.current?.focus()
   }, [])
 
   const runAction = useCallback(
@@ -131,12 +178,36 @@ export default function Pam({ articlePath }: PamProps) {
     [articlePath, scheduleClear],
   )
 
+  const onMenuKeyDown = useCallback(
+    (e: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        closeMenuAndRefocus()
+        return
+      }
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      const items = Array.from(
+        menuElRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+      ).filter((el) => !el.disabled)
+      if (items.length === 0) return
+      e.preventDefault()
+      const activeIndex = items.findIndex((el) => el === document.activeElement)
+      const nextIndex =
+        e.key === 'ArrowDown'
+          ? (activeIndex + 1 + items.length) % items.length
+          : (activeIndex - 1 + items.length) % items.length
+      items[nextIndex]?.focus()
+    },
+    [closeMenuAndRefocus],
+  )
+
   const busy = status.kind === 'running'
 
   return (
     <div ref={wrapRef} className="pam-wrap" data-testid="pam-wrap">
       <button
         type="button"
+        ref={triggerRef}
         className="pam-button"
         data-busy={busy ? 'true' : 'false'}
         aria-haspopup="menu"
@@ -150,10 +221,20 @@ export default function Pam({ articlePath }: PamProps) {
       <div className="pam-desk" aria-hidden="true" />
 
       {menuOpen && (
-        <div className="pam-menu" role="menu" aria-label="Pam's actions">
+        <div
+          ref={menuElRef}
+          className="pam-menu"
+          role="menu"
+          aria-label="Pam's actions"
+          onKeyDown={onMenuKeyDown}
+        >
           <div className="pam-menu-header">Pam can help with</div>
           {menu === null ? (
             <div className="pam-menu-empty">Loading…</div>
+          ) : loadError ? (
+            <div className="pam-menu-empty" role="alert">
+              Could not load Pam’s menu.
+            </div>
           ) : menu.length === 0 ? (
             <div className="pam-menu-empty">No actions available.</div>
           ) : (
@@ -175,8 +256,13 @@ export default function Pam({ articlePath }: PamProps) {
         </div>
       )}
 
-      {!menuOpen && status.kind !== 'idle' && (
-        <div className="pam-status" role="status">
+      {status.kind !== 'idle' && (
+        <div
+          className={`pam-status${menuOpen ? ' is-behind-menu' : ''}`}
+          role="status"
+          aria-live="polite"
+          aria-hidden={menuOpen}
+        >
           {renderStatus(status)}
         </div>
       )}
@@ -184,8 +270,14 @@ export default function Pam({ articlePath }: PamProps) {
   )
 }
 
+function assertNever(x: never): never {
+  throw new Error(`pam: unexpected status kind ${JSON.stringify(x)}`)
+}
+
 function renderStatus(status: Status): string {
   switch (status.kind) {
+    case 'idle':
+      return ''
     case 'running':
       return `Pam is working: ${status.label}…`
     case 'done':
@@ -193,7 +285,7 @@ function renderStatus(status: Status): string {
     case 'failed':
       return `Pam: ${status.message}`
     default:
-      return ''
+      return assertNever(status)
   }
 }
 

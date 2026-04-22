@@ -497,6 +497,7 @@ type Broker struct {
 	entityGraph             *EntityGraph
 	entitySynthesizer       *EntitySynthesizer
 	playbookSynthesizer     *PlaybookSynthesizer
+	pamDispatcher           *PamDispatcher
 	scanTracker             *scanStatusTracker
 	nextSubscriberID        int
 	agentStreams            map[string]*agentStreamBuffer
@@ -1348,12 +1349,16 @@ func (b *Broker) Stop() {
 	b.mu.Lock()
 	synth := b.entitySynthesizer
 	pbSynth := b.playbookSynthesizer
+	pamDisp := b.pamDispatcher
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
 	}
 	if pbSynth != nil {
 		pbSynth.Stop()
+	}
+	if pamDisp != nil {
+		pamDisp.Stop()
 	}
 }
 
