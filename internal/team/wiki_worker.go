@@ -34,7 +34,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -582,18 +581,14 @@ func (w *WikiWorker) EnqueuePlaybookCompile(ctx context.Context, slug, _ string)
 		return "", 0, ErrWorkerStopped
 	}
 	sourcePath := playbookSourceRel(slug)
-	relSkill, err := CompilePlaybook(w.repo, sourcePath)
+	relSkill, skillBytes, err := CompilePlaybook(w.repo, sourcePath)
 	if err != nil {
 		return "", 0, err
 	}
-	fullSkill := filepath.Join(w.repo.Root(), filepath.FromSlash(relSkill))
-	// Read what CompilePlaybook just wrote; the queue submission must carry
-	// the full file bytes because CommitPlaybookSkill rewrites the file from
-	// content (mirrors entity-fact append).
-	skillBytes, rerr := os.ReadFile(fullSkill)
-	if rerr != nil {
-		return "", 0, fmt.Errorf("playbook: read compiled skill back: %w", rerr)
-	}
+	// Carry the in-memory bytes directly into the queue submission.
+	// Reading the file back from disk here was racy under filesystem
+	// pressure (macOS: empty buffer returned between WriteFile and
+	// ReadFile), which then failed as "content is required".
 	req := wikiWriteRequest{
 		Slug:              ArchivistAuthor,
 		Path:              relSkill,

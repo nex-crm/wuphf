@@ -31,6 +31,15 @@ func TestMain(m *testing.M) {
 		brokerTokenFilePath = filepath.Join(dir, "broker-token")
 		defer os.RemoveAll(dir)
 	}
+	// Redirect all headless-log writes to a package-owned dir. Many tests
+	// in this package start background goroutines (headless workers, notify
+	// loops) that outlive the test that started them; those goroutines open
+	// append-log files and race with test-scoped t.TempDir cleanup. A
+	// stable process-lifetime log dir lets leaked writes land harmlessly.
+	if logDir, lerr := os.MkdirTemp("", "wuphf-team-test-logs-*"); lerr == nil {
+		os.Setenv("WUPHF_LOG_DIR", logDir)
+		defer os.RemoveAll(logDir)
+	}
 	os.Exit(m.Run())
 }
 

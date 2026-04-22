@@ -83,38 +83,44 @@ func ExecutionLogRelPath(slug string) string {
 //
 // The write goes directly to disk (caller is responsible for committing it
 // via the wiki worker — see WikiWorker.EnqueuePlaybookCompile). Returns the
-// wiki-relative path to the compiled skill.
+// wiki-relative path AND the rendered skill bytes. Callers that need to
+// commit the output must use the returned bytes — reading the file back
+// from disk is racy: concurrent filesystem pressure on macOS has been
+// observed to return an empty buffer between WriteFile and a subsequent
+// ReadFile of the same path, which then fails downstream as "content is
+// required".
 //
 // Idempotency: invoking CompilePlaybook with unchanged source input produces
 // byte-identical output. The downstream git layer collapses byte-identical
 // writes into a no-op, so the audit log stays clean.
-func CompilePlaybook(repo *Repo, wikiPath string) (string, error) {
+func CompilePlaybook(repo *Repo, wikiPath string) (string, []byte, error) {
 	if repo == nil {
-		return "", fmt.Errorf("playbook: repo is required")
+		return "", nil, fmt.Errorf("playbook: repo is required")
 	}
 	slug, ok := PlaybookSlugFromPath(wikiPath)
 	if !ok {
-		return "", fmt.Errorf("%w: got %q", ErrNotAPlaybook, wikiPath)
+		return "", nil, fmt.Errorf("%w: got %q", ErrNotAPlaybook, wikiPath)
 	}
 
 	sourceFull := filepath.Join(repo.Root(), filepath.FromSlash(wikiPath))
 	sourceBytes, err := os.ReadFile(sourceFull)
 	if err != nil {
-		return "", fmt.Errorf("playbook: read source %s: %w", wikiPath, err)
+		return "", nil, fmt.Errorf("playbook: read source %s: %w", wikiPath, err)
 	}
 	source := string(sourceBytes)
 
 	skill := renderCompiledSkill(slug, wikiPath, source)
+	skillBytes := []byte(skill)
 
 	relSkill := CompiledSkillRelPath(slug)
 	skillFull := filepath.Join(repo.Root(), filepath.FromSlash(relSkill))
 	if err := os.MkdirAll(filepath.Dir(skillFull), 0o700); err != nil {
-		return "", fmt.Errorf("playbook: mkdir compiled dir: %w", err)
+		return "", nil, fmt.Errorf("playbook: mkdir compiled dir: %w", err)
 	}
-	if err := os.WriteFile(skillFull, []byte(skill), 0o600); err != nil {
-		return "", fmt.Errorf("playbook: write compiled skill: %w", err)
+	if err := os.WriteFile(skillFull, skillBytes, 0o600); err != nil {
+		return "", nil, fmt.Errorf("playbook: write compiled skill: %w", err)
 	}
-	return relSkill, nil
+	return relSkill, skillBytes, nil
 }
 
 // CompilePlaybookAndCommit runs CompilePlaybook and, when the output is new
@@ -125,17 +131,13 @@ func CompilePlaybook(repo *Repo, wikiPath string) (string, error) {
 // hits the single-writer queue. This helper is here so the worker's drain
 // goroutine can reuse the same compile-and-commit logic.
 func CompilePlaybookAndCommit(ctx context.Context, repo *Repo, wikiPath string) (string, string, error) {
-	relSkill, err := CompilePlaybook(repo, wikiPath)
+	relSkill, skillBytes, err := CompilePlaybook(repo, wikiPath)
 	if err != nil {
 		return "", "", err
 	}
-	content, rerr := os.ReadFile(filepath.Join(repo.Root(), filepath.FromSlash(relSkill)))
-	if rerr != nil {
-		return relSkill, "", fmt.Errorf("playbook: read back compiled skill: %w", rerr)
-	}
 	slug, _ := PlaybookSlugFromPath(wikiPath)
 	msg := fmt.Sprintf("archivist: compile playbook %s", slug)
-	sha, _, cerr := repo.CommitPlaybookSkill(ctx, ArchivistAuthor, relSkill, string(content), msg)
+	sha, _, cerr := repo.CommitPlaybookSkill(ctx, ArchivistAuthor, relSkill, string(skillBytes), msg)
 	if cerr != nil {
 		return relSkill, "", cerr
 	}

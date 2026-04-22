@@ -66,7 +66,7 @@ func TestPlaybookSlugFromPath(t *testing.T) {
 func TestCompilePlaybook_RejectsNonPlaybookPaths(t *testing.T) {
 	repo, _, _, teardown := newPlaybookFixture(t)
 	defer teardown()
-	_, err := CompilePlaybook(repo, "team/people/nazz.md")
+	_, _, err := CompilePlaybook(repo, "team/people/nazz.md")
 	if err == nil {
 		t.Fatalf("expected error for non-playbook path")
 	}
@@ -122,7 +122,7 @@ func TestCompilePlaybook_IsIdempotent(t *testing.T) {
 
 	first := readCompiled(t, repo, "mid-market-onboarding")
 	// Recompile without changing the source.
-	if _, err := CompilePlaybook(repo, "team/playbooks/mid-market-onboarding.md"); err != nil {
+	if _, _, err := CompilePlaybook(repo, "team/playbooks/mid-market-onboarding.md"); err != nil {
 		t.Fatalf("recompile: %v", err)
 	}
 	second := readCompiled(t, repo, "mid-market-onboarding")
