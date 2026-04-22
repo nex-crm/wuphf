@@ -1,14 +1,31 @@
 import { useCallback, useEffect } from 'react'
 import { useAppStore } from '../../stores/app'
 import { SLASH_COMMANDS } from '../messages/Autocomplete'
+import { Kbd, KbdSequence, MOD_KEY } from './Kbd'
 
 /**
  * One keyboard-shortcut row for the help modal.
  */
 interface Keybinding {
-  keys: string[]
+  keys: string[] | string[][]
   description: string
 }
+
+/**
+ * Global shortcuts wired in `useKeyboardShortcuts` + Wizard + SearchModal.
+ * These are the anywhere-in-the-app keys; composer/feed specifics live
+ * below.
+ */
+const GLOBAL_KEYS: Keybinding[] = [
+  { keys: ['?'], description: 'Toggle this keyboard reference' },
+  { keys: [MOD_KEY, 'K'], description: 'Command palette — channels, agents, commands, search' },
+  { keys: [MOD_KEY, '/'], description: 'Focus the composer' },
+  { keys: [MOD_KEY, '1'], description: 'Jump to channel 1' },
+  { keys: [MOD_KEY, '9'], description: 'Jump to channel 9 (1–9 supported)' },
+  { keys: ['Esc'], description: 'Close the top-most modal, panel, or thread' },
+  { keys: ['Tab'], description: 'Move focus forward between interactive elements' },
+  { keys: ['Shift', 'Tab'], description: 'Move focus backward' },
+]
 
 /**
  * Mirrors TUI operator guidance. The composer parity PR ships Ctrl+P/N history
@@ -25,15 +42,28 @@ const COMPOSER_KEYS: Keybinding[] = [
   { keys: ['Esc'], description: 'Close autocomplete, mention, modal, or help' },
 ]
 
+const WIZARD_KEYS: Keybinding[] = [
+  { keys: ['Enter'], description: 'Advance to the next step when ready' },
+  { keys: ['Shift', 'Enter'], description: 'New line inside the first-task editor' },
+  { keys: ['Tab'], description: 'Move between fields, tiles, and actions' },
+  { keys: ['Esc'], description: 'Close an inline panel (Nex signup, etc.)' },
+]
+
+const PALETTE_KEYS: Keybinding[] = [
+  { keys: ['↑'], description: 'Previous result' },
+  { keys: ['↓'], description: 'Next result' },
+  { keys: ['Enter'], description: 'Open selected result' },
+  { keys: ['Esc'], description: 'Close the palette' },
+]
+
 const NAV_KEYS: Keybinding[] = [
   { keys: ['j'], description: 'Scroll feed down one message' },
   { keys: ['k'], description: 'Scroll feed up one message' },
   { keys: ['Ctrl', 'D'], description: 'Half-page down' },
   { keys: ['Ctrl', 'U'], description: 'Half-page up' },
-  { keys: ['g', 'g'], description: 'Jump to top of feed' },
+  { keys: [['g'], ['g']], description: 'Jump to top of feed' },
   { keys: ['Shift', 'G'], description: 'Jump to bottom of feed' },
   { keys: ['/'], description: 'Open search / command palette' },
-  { keys: ['?'], description: 'Toggle keyboard cheat sheet' },
 ]
 
 interface HelpModalProps {
@@ -42,12 +72,10 @@ interface HelpModalProps {
 }
 
 /**
- * Full-screen help surface opened by the `/help` slash command. Renders the
- * complete SLASH_COMMANDS list alongside composer + feed keybindings so
- * operators never have to leave the app to find a shortcut.
- *
- * Intentionally separate from `KeyboardCheatSheet`: the cheat sheet is a
- * corner popover that toggles on `?`; HelpModal is the full reference.
+ * Full-screen help surface opened by the `/help` slash command or the
+ * global `?` shortcut. Renders the complete SLASH_COMMANDS list alongside
+ * composer, wizard, palette, and feed keybindings so operators never
+ * have to leave the app to find a shortcut.
  */
 export function HelpModal({ open, onClose }: HelpModalProps) {
   useEffect(() => {
@@ -83,7 +111,10 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
         <header className="help-header">
           <div>
             <h2 className="help-title">Keyboard + command reference</h2>
-            <p className="help-subtitle">Everything the composer and feed understand.</p>
+            <p className="help-subtitle">
+              Run the whole app without a mouse. Press <Kbd size="sm">?</Kbd> anytime
+              to open this pane.
+            </p>
           </div>
           <button
             type="button"
@@ -96,6 +127,21 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
         </header>
 
         <div className="help-body">
+          <section className="help-section">
+            <h3 className="help-section-title">Global</h3>
+            <KeybindingList items={GLOBAL_KEYS} />
+          </section>
+
+          <section className="help-section">
+            <h3 className="help-section-title">Command palette</h3>
+            <KeybindingList items={PALETTE_KEYS} />
+          </section>
+
+          <section className="help-section">
+            <h3 className="help-section-title">Onboarding wizard</h3>
+            <KeybindingList items={WIZARD_KEYS} />
+          </section>
+
           <section className="help-section">
             <h3 className="help-section-title">Slash commands</h3>
             <ul className="help-list">
@@ -135,18 +181,19 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
 function KeybindingList({ items }: { items: Keybinding[] }) {
   return (
     <ul className="help-list">
-      {items.map((item) => (
-        <li key={item.keys.join('+') + item.description} className="help-row">
-          <span className="help-keys">
-            {item.keys.map((k, i) => (
-              <kbd key={`${k}-${i}`} className="help-kbd">
-                {k}
-              </kbd>
-            ))}
-          </span>
-          <span className="help-cmd-desc">{item.description}</span>
-        </li>
-      ))}
+      {items.map((item) => {
+        const flatKey = Array.isArray(item.keys[0])
+          ? (item.keys as string[][]).flat().join('+')
+          : (item.keys as string[]).join('+')
+        return (
+          <li key={flatKey + item.description} className="help-row">
+            <span className="help-keys">
+              <KbdSequence keys={item.keys} size="sm" />
+            </span>
+            <span className="help-cmd-desc">{item.description}</span>
+          </li>
+        )
+      })}
     </ul>
   )
 }

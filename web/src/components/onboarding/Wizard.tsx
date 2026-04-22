@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAppStore } from '../../stores/app'
 import { get, post } from '../../api/client'
 import { ONBOARDING_COPY } from '../../lib/constants'
+import { Kbd } from '../ui/Kbd'
 import '../../styles/onboarding.css'
 
 /* ═══════════════════════════════════════════
@@ -226,6 +227,20 @@ function CheckIcon() {
   )
 }
 
+/**
+ * Inline "↵ Enter" hint for primary CTAs. Purely decorative — the real
+ * Enter handling lives at the Wizard level so it works from anywhere on
+ * the step, not just when the button has focus.
+ */
+function EnterHint({ label = 'Enter' }: { label?: string }) {
+  return (
+    <span className="kbd-hint" aria-hidden="true">
+      <Kbd size="sm" variant="inverse">↵</Kbd>
+      {label}
+    </span>
+  )
+}
+
 /* ═══════════════════════════════════════════
    Sub-components
    ═══════════════════════════════════════════ */
@@ -264,6 +279,7 @@ function WelcomeStep({ onNext }: WelcomeStepProps) {
         <button className="btn btn-primary" onClick={onNext}>
           {ONBOARDING_COPY.step1_cta}
           <ArrowIcon />
+          <EnterHint />
         </button>
       </div>
     </div>
@@ -390,6 +406,7 @@ function TemplatesStep({
         <button className="btn btn-primary" onClick={onNext} type="button">
           Review the team
           <ArrowIcon />
+          <EnterHint />
         </button>
       </div>
     </div>
@@ -516,6 +533,7 @@ function IdentityStep({
         >
           Choose a blueprint
           <ArrowIcon />
+          <EnterHint />
         </button>
       </div>
     </div>
@@ -583,6 +601,13 @@ function NexSignupPanel({
               placeholder="you@example.com"
               value={email}
               onChange={(e) => onChangeEmail(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && status !== 'submitting' && email.trim().length > 0) {
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onSubmit()
+                }
+              }}
               disabled={status === 'submitting'}
               style={{ flex: 1 }}
             />
@@ -676,6 +701,7 @@ function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
         <button className="btn btn-primary" onClick={onNext} type="button">
           Continue
           <ArrowIcon />
+          <EnterHint />
         </button>
       </div>
     </div>
@@ -1024,6 +1050,7 @@ function SetupStep({
         >
           {ONBOARDING_COPY.step2_cta}
           <ArrowIcon />
+          <EnterHint />
         </button>
       </div>
     </div>
@@ -1074,6 +1101,11 @@ function TaskStep({
           onChange={(e) => onChangeTaskText(e.target.value)}
           autoFocus
         />
+        <p className="task-textarea-hint">
+          <Kbd size="sm">↵</Kbd> new line ·{' '}
+          <Kbd size="sm">{cmdEnterLabel().split(' ')[0]}</Kbd>
+          <Kbd size="sm">↵</Kbd> review setup
+        </p>
       </div>
 
       {taskTemplates.length > 0 && (
@@ -1113,10 +1145,22 @@ function TaskStep({
         <button className="btn btn-primary" onClick={onNext} type="button">
           Review setup
           <ArrowIcon />
+          <EnterHint label={cmdEnterLabel()} />
         </button>
       </div>
     </div>
   )
+}
+
+/**
+ * On the task step, Enter inserts a newline inside the textarea and
+ * ⌘/Ctrl+Enter advances. Compute the label lazily so non-Mac browsers
+ * see "Ctrl+Enter" instead of the glyph.
+ */
+function cmdEnterLabel(): string {
+  const mac = typeof navigator !== 'undefined'
+    && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+  return mac ? '⌘ Enter' : 'Ctrl Enter'
 }
 
 /* ─── Step 7: Readiness Summary ─── */
@@ -1211,6 +1255,7 @@ function ReadyStep({
             type="button"
           >
             {submitting ? 'Starting...' : ONBOARDING_COPY.step3_cta}
+            {!submitting && taskText.trim().length > 0 && <EnterHint />}
           </button>
         </div>
       </div>
@@ -1468,6 +1513,16 @@ export function Wizard({ onComplete }: WizardProps) {
     }
   }, [nexEmail])
 
+  // Close the Nex signup panel via Escape — keeps the outer Escape handler
+  // in `useKeyboardShortcuts` free to act on app-level panels without
+  // fighting the wizard's internal affordance.
+  const closeNexSignup = useCallback(() => {
+    if (nexSignupStatus === 'open' || nexSignupStatus === 'ok' || nexSignupStatus === 'fallback') {
+      setNexSignupStatus('hidden')
+      setNexSignupError('')
+    }
+  }, [nexSignupStatus])
+
   // Compute readiness checks. Runs at render time for the 'ready' step — no
   // useMemo because the surface is small (6 checks) and recomputation only
   // happens when one of these inputs changes. Matches the TUI's six-item
@@ -1699,6 +1754,96 @@ export function Wizard({ onComplete }: WizardProps) {
       onComplete,
     ],
   )
+
+  // Keyboard: Enter advances each step when the step's own gate allows it,
+  // so the whole wizard can be run without reaching for the mouse. Textarea
+  // steps (TaskStep) keep Enter for newlines; ⌘/Ctrl+Enter advances there.
+  // The NexSignupPanel handles its own Enter inside the email input via an
+  // onKeyDown below, so we bail out when that's the focused target.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== 'Enter') return
+      const target = e.target as HTMLElement | null
+      if (target?.id === 'wiz-nex-email') return
+      const inTextarea = target?.tagName === 'TEXTAREA'
+      const isSubmitCombo = e.metaKey || e.ctrlKey
+      if (inTextarea && !isSubmitCombo) return
+
+      const canIdentityContinue = company.trim().length > 0 && description.trim().length > 0
+      const hasInstalledSelection = runtimePriority.some((label) => {
+        const spec = RUNTIMES.find((r) => r.label === label)
+        if (!spec) return false
+        return Boolean(detectedBinary(prereqs, spec.binary)?.found)
+      })
+      const hasAnyApiKey = Object.values(apiKeys).some((v) => v.trim().length > 0)
+      const gbrainOpenAIMissing = memoryBackend === 'gbrain' && gbrainOpenAIKey.trim().length === 0
+      const canSetupContinue = (hasInstalledSelection || hasAnyApiKey) && !gbrainOpenAIMissing
+
+      switch (step) {
+        case 'welcome':
+          e.preventDefault()
+          goTo('identity')
+          return
+        case 'templates':
+          e.preventDefault()
+          nextStep()
+          return
+        case 'identity':
+          if (canIdentityContinue) {
+            e.preventDefault()
+            nextStep()
+          }
+          return
+        case 'team':
+          e.preventDefault()
+          nextStep()
+          return
+        case 'setup':
+          if (canSetupContinue) {
+            e.preventDefault()
+            nextStep()
+          }
+          return
+        case 'task':
+          if (isSubmitCombo) {
+            e.preventDefault()
+            nextStep()
+          }
+          return
+        case 'ready':
+          if (!submitting && taskText.trim().length > 0) {
+            e.preventDefault()
+            finishOnboarding(false)
+          }
+          return
+      }
+    }
+    function onEscape(e: KeyboardEvent) {
+      if (e.key !== 'Escape') return
+      closeNexSignup()
+    }
+    window.addEventListener('keydown', onKey)
+    window.addEventListener('keydown', onEscape)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener('keydown', onEscape)
+    }
+  }, [
+    step,
+    company,
+    description,
+    runtimePriority,
+    prereqs,
+    apiKeys,
+    memoryBackend,
+    gbrainOpenAIKey,
+    submitting,
+    taskText,
+    goTo,
+    nextStep,
+    finishOnboarding,
+    closeNexSignup,
+  ])
 
   return (
     <div className="wizard-container">

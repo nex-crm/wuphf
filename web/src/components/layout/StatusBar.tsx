@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useAppStore, isDMChannel } from '../../stores/app'
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { getHealth } from '../../api/client'
+import { Kbd } from '../ui/Kbd'
 
 interface HealthSnapshot {
   status: string
@@ -18,6 +19,7 @@ export function StatusBar() {
   const currentApp = useAppStore((s) => s.currentApp)
   const channelMeta = useAppStore((s) => s.channelMeta)
   const brokerConnected = useAppStore((s) => s.brokerConnected)
+  const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen)
   const { data: members = [] } = useOfficeMembers()
   const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null
 
@@ -45,10 +47,20 @@ export function StatusBar() {
       <span className="status-bar-item">{channelLabel}</span>
       <span className="status-bar-item">{modeLabel}</span>
       <span className="status-bar-spacer" />
+      <button
+        type="button"
+        className="status-bar-shortcut"
+        onClick={() => setComposerHelpOpen(true)}
+        title="Keyboard shortcuts"
+        aria-label="Open keyboard shortcuts"
+      >
+        <Kbd size="sm">?</Kbd>
+        <span>shortcuts</span>
+      </button>
       <span className="status-bar-item">{agentCount} agent{agentCount === 1 ? '' : 's'}</span>
       {provider && (
         <span className="status-bar-item" title={`Runtime provider: ${provider}`}>
-          {'\u2699 '}{provider}
+          {'⚙ '}{provider}
         </span>
       )}
       <span

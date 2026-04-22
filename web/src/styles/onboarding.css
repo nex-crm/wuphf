@@ -573,6 +573,22 @@
   line-height: 1.55;
 }
 
+/* Keyboard cue under the task textarea. Tells users Enter is a newline
+   here and ⌘/Ctrl+Enter advances — the opposite of every other wizard
+   step, so an explicit hint avoids confusion. */
+.task-textarea-hint {
+  margin: 8px 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.task-textarea-hint .kbd + .kbd {
+  margin-left: 2px;
+}
+
 /* ─── Task Suggestions (step 6) ─── */
 .task-suggestions {
   background: var(--bg-card);
