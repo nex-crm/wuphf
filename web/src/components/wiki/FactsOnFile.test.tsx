@@ -252,3 +252,58 @@ describe('isSuperseded rendering (Fix C5)', () => {
     expect(li).not.toHaveAttribute('data-superseded')
   })
 })
+
+describe('isWikiSource source-path rendering (Fix M15)', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.spyOn(api, 'subscribeEntityEvents').mockImplementation(() => () => {})
+  })
+
+  const wikiPaths = [
+    'wiki/artifacts/agent-pm/abc123.md',
+    'team/people/sarah-chen.md',
+    'wiki/facts/person/sarah-chen.jsonl',
+    'wiki/insights/entity/sarah-chen.jsonl',
+    'wiki/playbooks/onboarding-new-account.md',
+    'agents/pm/notebook.md',
+  ]
+
+  for (const sourcePath of wikiPaths) {
+    it(`renders a wikilink for schema path: ${sourcePath}`, async () => {
+      const facts: api.Fact[] = [
+        {
+          id: 'f-wiki-path',
+          kind: 'people',
+          slug: 'sarah-chen',
+          text: `Fact with wiki source path ${sourcePath}.`,
+          recorded_by: 'archivist',
+          created_at: '2026-04-20T00:00:00Z',
+          source_path: sourcePath,
+        },
+      ]
+      vi.spyOn(api, 'fetchFacts').mockResolvedValue(facts)
+      render(<FactsOnFile kind="people" slug="sarah-chen" />)
+      await screen.findByText(`Fact with wiki source path ${sourcePath}.`)
+      const link = document.querySelector('a[data-wikilink="true"]')
+      expect(link).not.toBeNull()
+    })
+  }
+
+  it('does NOT render a wikilink for a non-wiki source path (messages/dm/123)', async () => {
+    const facts: api.Fact[] = [
+      {
+        id: 'f-dm',
+        kind: 'people',
+        slug: 'sarah-chen',
+        text: 'Fact from a Slack DM.',
+        recorded_by: 'pm',
+        created_at: '2026-04-20T00:00:00Z',
+        source_path: 'messages/dm/123',
+      },
+    ]
+    vi.spyOn(api, 'fetchFacts').mockResolvedValue(facts)
+    render(<FactsOnFile kind="people" slug="sarah-chen" />)
+    await screen.findByText('Fact from a Slack DM.')
+    expect(document.querySelector('a[data-wikilink="true"]')).toBeNull()
+  })
+})

@@ -201,9 +201,22 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
   )
 }
 
+/** Checks whether a source_path resolves to a wiki-renderable location.
+ *  Schema §3 three-layer architecture: wiki/artifacts/ (Layer 1, raw),
+ *  team/ (Layer 2, briefs), wiki/facts/ (Layer 2, fact log),
+ *  wiki/insights/ (Layer 2, insights), wiki/playbooks/ (Layer 2, playbooks).
+ *  agents/ is the legacy v1.2 per-agent notebook path and is retained for
+ *  backwards compatibility with existing fact rows. */
 function isWikiSource(path?: string): path is string {
   if (!path) return false
-  return path.startsWith('agents/') || path.startsWith('team/')
+  return (
+    path.startsWith('wiki/artifacts/') ||
+    path.startsWith('team/') ||
+    path.startsWith('wiki/facts/') ||
+    path.startsWith('wiki/insights/') ||
+    path.startsWith('wiki/playbooks/') ||
+    path.startsWith('agents/') // legacy v1.2 per-agent notebook path
+  )
 }
 
 function sourceLabel(path: string): string {
