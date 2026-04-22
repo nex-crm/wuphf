@@ -1,6 +1,8 @@
+import { useMemo } from 'react'
 import type { Message } from '../../api/client'
 import { formatTime, formatTokens } from '../../lib/format'
 import { formatMarkdown } from '../../lib/markdown'
+import { renderMentions } from '../../lib/mentions'
 import { useAppStore } from '../../stores/app'
 import { toggleReaction } from '../../api/client'
 import { useOfficeMembers } from '../../hooks/useMembers'
@@ -66,8 +68,18 @@ export function MessageBubble({
     : []
 
   // SECURITY: formatMarkdown escapes all HTML via escapeHtml() before rendering.
-  // Only trusted broker messages use this path — human input renders as plain text.
+  // Only trusted broker messages use this path — human input renders via the
+  // safe renderMentions path below (builds ReactNode children, no innerHTML).
   const renderedHtml = !isHuman ? formatMarkdown(message.content || '') : ''
+
+  // Turn human text like "@pm when are you free?" into mention chips for
+  // registered agent slugs. Non-agent @-references stay plain text. The
+  // memo keys on content + the slug list so rapid renders don't re-parse.
+  const knownSlugs = useMemo(() => members.map((m) => m.slug), [members])
+  const humanRendered = useMemo(
+    () => (isHuman ? renderMentions(message.content || '', knownSlugs) : null),
+    [isHuman, message.content, knownSlugs],
+  )
 
   return (
     <div
@@ -109,14 +121,12 @@ export function MessageBubble({
           )}
         </div>
 
-        {/* Text — human messages as plain text, agent messages as formatted markdown */}
+        {/* Text — humans render mention chips via safe ReactNode children;
+            agent messages use the formatMarkdown path. */}
         {isHuman ? (
-          <div className="message-text">{message.content}</div>
+          <div className="message-text">{humanRendered}</div>
         ) : (
-          <div
-            className="message-text"
-            dangerouslySetInnerHTML={{ __html: renderedHtml }}
-          />
+          <div className="message-text" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
         )}
 
         {/* Reactions */}

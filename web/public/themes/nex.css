@@ -707,13 +707,23 @@ html[data-theme="nex"] .composer-inner:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(6, 157, 228, 0.25);
 }
-html[data-theme="nex"] .composer-input {
+/* Both surfaces — textarea + mention-chip mirror — must share font metrics
+   so chip positions line up with the raw text the user is typing. */
+html[data-theme="nex"] .composer-input,
+html[data-theme="nex"] .composer-mirror {
   font-family: var(--font-sans);
   font-size: 15px;
   color: var(--text);
 }
 html[data-theme="nex"] .composer-input::placeholder {
   color: var(--text-tertiary);
+}
+/* When the user has typed a recognised mention, hide the textarea's text
+   layer and render chips from the mirror. Caret remains visible via
+   caret-color so typing still works. */
+html[data-theme="nex"] .composer-field:has(.mention) .composer-input {
+  color: transparent;
+  caret-color: var(--text);
 }
 
 /* Send button */

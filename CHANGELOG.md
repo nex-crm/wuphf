@@ -21,6 +21,12 @@ All notable changes to WUPHF will be documented in this file.
 - **Focus restoration no longer targets detached DOM nodes.** Closing the help modal checks `isConnected` before calling `focus()` on the previously-focused element — if that element was unmounted while the modal was open, focus falls back cleanly.
 - **Wizard gate logic and platform detection deduplicated.** `cmdEnterLabel()` now reuses the shared `MOD_KEY` from the Kbd component, and the inconsistent `hasAtLeastOneKey` / `hasAnyApiKey` names are unified.
 
+## [0.0.6.6] - 2026-04-22
+
+### Added
+
+- **@-mentions render as colored chips in both the composer and your own messages.** Typing `@pm` in the textbox now shows a pink chip inline via a mirror-overlay (same font metrics as the textarea, transparent text on top, caret still visible). Human message bubbles apply the same treatment so `@pm what are you doing?` reads with the chip, not as a literal `@pm` token. Unknown slugs like `@joedoe` stay plain text — the chip only fires for registered agents. Shared helper `parseMentions` powers both surfaces and uses the same pattern as the broker's routing regex so what the UI highlights is exactly what the backend will route. Mirror scroll-syncs with the textarea so chips stay aligned once a message exceeds the 120px visible cap.
+
 ## [0.0.6.5] - 2026-04-22
 
 ### Fixed
