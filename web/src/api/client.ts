@@ -336,7 +336,12 @@ export function answerRequest(id: string, choiceId: string, customText?: string)
 // ── Health ──
 
 export function getHealth() {
-  return get<{ status: string; agents?: Record<string, unknown> }>('/health')
+  return get<{
+    status: string
+    provider?: string
+    provider_model?: string
+    agents?: Record<string, unknown>
+  }>('/health')
 }
 
 // ── Tasks ──

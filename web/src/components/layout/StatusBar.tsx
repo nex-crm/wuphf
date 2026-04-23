@@ -7,6 +7,7 @@ import { Kbd } from '../ui/Kbd'
 interface HealthSnapshot {
   status: string
   provider?: string
+  provider_model?: string
   agents?: Record<string, unknown>
 }
 
@@ -41,6 +42,7 @@ export function StatusBar() {
       : `# ${currentChannel}`
   const modeLabel = dm ? '1:1' : 'office'
   const provider = health?.provider
+  const providerModel = health?.provider_model?.trim()
 
   return (
     <div className="status-bar">
@@ -59,8 +61,22 @@ export function StatusBar() {
       </button>
       <span className="status-bar-item">{agentCount} agent{agentCount === 1 ? '' : 's'}</span>
       {provider && (
-        <span className="status-bar-item" title={`Runtime provider: ${provider}`}>
-          {'⚙ '}{provider}
+        <span
+          className="status-bar-item"
+          title={
+            providerModel
+              ? `Runtime: ${provider} · ${providerModel}`
+              : `Runtime provider: ${provider}`
+          }
+        >
+          {'⚙ '}
+          {provider}
+          {providerModel && (
+            <>
+              <span className="status-bar-sep"> · </span>
+              <span className="status-bar-model">{providerModel}</span>
+            </>
+          )}
         </span>
       )}
       <span
