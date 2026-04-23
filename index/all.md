@@ -4,4 +4,8 @@ _Auto-generated. Do not edit by hand — agents regenerate this on every commit.
 
 ## team/playbooks
 
-- [Churn prevention](../team/playbooks/auto-through-broker.md) _(updated 2026-04-23T03:49:01Z)_
+- [Churn prevention](../team/playbooks/auto-through-broker.md) _(updated 2026-04-23T03:49:22Z)_
+
+## team/playbooks/.compiled/auto-through-broker
+
+- [Playbook: Churn prevention](../team/playbooks/.compiled/auto-through-broker/SKILL.md) _(updated 2026-04-23T03:49:13Z)_
