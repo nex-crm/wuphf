@@ -58,7 +58,7 @@ go build -o wuphf ./cmd/wuphf
 
 Paste this into Claude Code, Codex, or Cursor and let your agent drive the install:
 
-```
+```text
 Set up https://github.com/nex-crm/wuphf for me. Read `README.md` first, then run
 `npx wuphf` to install and launch the office — the web UI opens at
 http://localhost:7891 automatically.
