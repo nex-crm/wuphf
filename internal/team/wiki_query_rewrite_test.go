@@ -117,10 +117,10 @@ func TestParseMultiHopSpans(t *testing.T) {
 func TestParseCounterfactualSubject(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name       string
-		query      string
-		wantSubj   string
-		wantOK     bool
+		name     string
+		query    string
+		wantSubj string
+		wantOK   bool
 	}{
 		{
 			name:     "bench q_047 — 'what would have happened if X had not'",

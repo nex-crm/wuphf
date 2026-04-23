@@ -29,8 +29,9 @@ import (
 // Multi-hop: "who at <COMPANY> championed [the] <PROJECT> [project]?"
 //
 // Capture groups:
-//   1 — company display span (word chars, spaces, [[wikilink]] body)
-//   2 — project display span (same alphabet)
+//
+//	1 — company display span (word chars, spaces, [[wikilink]] body)
+//	2 — project display span (same alphabet)
 //
 // Both groups stop at punctuation or the trailing "project" literal.
 var multiHopRE = regexp.MustCompile(`(?i)who\s+at\s+([^?.!,]+?)\s+champion(?:ed|s)?\s+(?:the\s+)?([^?.!,]+?)(?:\s+project)?[?.!]*$`)
