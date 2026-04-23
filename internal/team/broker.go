@@ -491,6 +491,8 @@ type Broker struct {
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
 	wikiIndex               *WikiIndex
+	wikiExtractor           *Extractor
+	wikiDLQ                 *DLQ
 	wikiSectionsCache       *wikiSectionsCache
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
@@ -1223,9 +1225,18 @@ func (b *Broker) ensureWikiWorker() {
 	worker := NewWikiWorkerWithIndex(repo, b, idx)
 	worker.Start(context.Background())
 
+	// Wire the extraction loop: artifact commits → extract_entities_lite →
+	// WikiIndex. DLQ lives under <wiki>/.dlq/. Extractor failures never
+	// fail the commit path — DLQ absorbs everything per §11.13.
+	dlq := NewDLQ(repo.Root())
+	extractor := NewExtractor(brokerQueryProvider{}, worker, dlq, idx)
+	worker.SetExtractor(extractor)
+
 	b.mu.Lock()
 	b.wikiWorker = worker
 	b.wikiIndex = idx
+	b.wikiExtractor = extractor
+	b.wikiDLQ = dlq
 	b.mu.Unlock()
 
 	// Boot reconcile: walk the full wiki tree and populate the index from
@@ -1285,6 +1296,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
 	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
 	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))
+	mux.HandleFunc("/wiki/extract/replay", b.requireAuth(b.handleWikiExtractReplay))
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
