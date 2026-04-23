@@ -150,6 +150,17 @@ type FactStore interface {
 	ListEdgesForEntity(ctx context.Context, slug string) ([]IndexEdge, error)
 	ResolveRedirect(ctx context.Context, slug string) (string, bool, error)
 
+	// ListFactsByPredicateObject returns every fact whose triplet matches
+	// (predicate, object) exactly. Used by the typed-predicate graph walk
+	// for multi_hop queries (Slice 2 Thread A).
+	ListFactsByPredicateObject(ctx context.Context, predicate, object string) ([]TypedFact, error)
+
+	// ListFactsByTriplet returns every fact whose triplet matches the given
+	// subject + predicate and whose triplet.object starts with objectPrefix
+	// (case-sensitive). An empty objectPrefix matches any object. Used by the
+	// typed-predicate graph walk and counterfactual rewrite (Slice 2 Thread A).
+	ListFactsByTriplet(ctx context.Context, subject, predicate, objectPrefix string) ([]TypedFact, error)
+
 	CanonicalHashFacts(ctx context.Context) (string, error) // §7.4 rebuild check
 	CanonicalHashAll(ctx context.Context) (string, error)   // §7.4 composite: facts + entities + edges + redirects
 	Close() error
@@ -905,6 +916,48 @@ func (s *inMemoryFactStore) ListFactsForEntity(_ context.Context, slug string) (
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+// ListFactsByPredicateObject returns all facts whose triplet has the exact
+// (predicate, object) pair. Linear scan over the fact map — acceptable for
+// the in-memory default backend.
+func (s *inMemoryFactStore) ListFactsByPredicateObject(_ context.Context, predicate, object string) ([]TypedFact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []TypedFact
+	for _, f := range s.facts {
+		if f.Triplet == nil {
+			continue
+		}
+		if f.Triplet.Predicate == predicate && f.Triplet.Object == object {
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// ListFactsByTriplet returns all facts matching (subject, predicate) whose
+// triplet.object begins with objectPrefix. Empty objectPrefix matches any
+// object. Linear scan over the fact map.
+func (s *inMemoryFactStore) ListFactsByTriplet(_ context.Context, subject, predicate, objectPrefix string) ([]TypedFact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []TypedFact
+	for _, f := range s.facts {
+		if f.Triplet == nil {
+			continue
+		}
+		if f.Triplet.Subject != subject || f.Triplet.Predicate != predicate {
+			continue
+		}
+		if objectPrefix != "" && !strings.HasPrefix(f.Triplet.Object, objectPrefix) {
+			continue
+		}
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
