@@ -27,11 +27,16 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // retrieveWithClass routes a query to the appropriate retrieval path based
 // on its ClassifyQuery output. Called by WikiIndex.Search.
 func retrieveWithClass(ctx context.Context, store FactStore, text TextIndex, query string, topK int) ([]SearchHit, error) {
+	// Confidence is intentionally discarded here: the typed walks are always
+	// additive over BM25, so there is nothing a threshold gate would reject —
+	// a low-confidence classification still falls back to BM25 via the union.
+	// A future re-ranker can consume the confidence value.
 	class, _ := ClassifyQuery(query)
 	switch class {
 	case QueryClassMultiHop:
@@ -105,7 +110,13 @@ func retrieveMultiHop(ctx context.Context, store FactStore, text TextIndex, quer
 		seenSubjects[subject] = true
 		// Try each company slug candidate. First non-empty result wins; keep
 		// only the last fact (latest CreatedAt ordering per FactStore).
-		matched := false
+		//
+		// Note: there is deliberately NO "insurance" fallback to the subject's
+		// most-recent role_at regardless of company. Surfacing an off-company
+		// role for "who at Acme championed X" is an accuracy hazard (e.g. we'd
+		// return a Blueshift role when the asker specifically scoped to Acme).
+		// BM25 already provides the recall floor for the union, so dropping
+		// this branch is net-positive. Reviewed on PR #249.
 		for _, companySlug := range companyCandidates {
 			facts, err := store.ListFactsByTriplet(ctx, subject, "role_at", "company:"+companySlug)
 			if err != nil {
@@ -113,19 +124,7 @@ func retrieveMultiHop(ctx context.Context, store FactStore, text TextIndex, quer
 			}
 			if len(facts) > 0 {
 				roleAtFacts = append(roleAtFacts, latestFact(facts))
-				matched = true
 				break
-			}
-		}
-		if !matched {
-			// Recall insurance: the subject's most recent role_at regardless
-			// of company — guards against companyDisplay not slug-matching.
-			facts, err := store.ListFactsByTriplet(ctx, subject, "role_at", "")
-			if err != nil {
-				return nil, fmt.Errorf("retrieveMultiHop role_at any %s: %w", subject, err)
-			}
-			if len(facts) > 0 {
-				roleAtFacts = append(roleAtFacts, latestFact(facts))
 			}
 		}
 	}
@@ -228,10 +227,15 @@ func latestFact(facts []TypedFact) TypedFact {
 // factToHit converts a TypedFact into a SearchHit for union with BM25 results.
 // Score is set to a sentinel value (1.0) since typed walks have no BM25 score;
 // the merger uses insertion order, not score, to prioritise typed hits.
+//
+// The snippet is truncated to 300 runes (not bytes) so multi-byte UTF-8
+// characters — Japanese, emoji, accented Latin — aren't sliced mid-rune and
+// rendered as replacement characters downstream.
 func factToHit(f TypedFact) SearchHit {
 	snippet := f.Text
-	if len(snippet) > 300 {
-		snippet = snippet[:300]
+	if utf8.RuneCountInString(snippet) > 300 {
+		runes := []rune(snippet)
+		snippet = string(runes[:300])
 	}
 	return SearchHit{
 		FactID:  f.ID,

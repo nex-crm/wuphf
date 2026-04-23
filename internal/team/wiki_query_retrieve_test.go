@@ -13,8 +13,10 @@ package team
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // newBenchLikeIndex returns a WikiIndex backed by SQLiteFactStore + the real
@@ -35,6 +37,22 @@ func newBenchLikeIndex(t *testing.T) *WikiIndex {
 	idx := NewWikiIndex(dir, WithFactStore(store), WithTextIndex(text))
 	t.Cleanup(func() { _ = idx.Close() })
 	return idx
+}
+
+// seedRetrieveFact stores + indexes a pre-built TypedFact into the bench-like
+// WikiIndex and fails the test on any error. Previously the tests used
+// `_ = ...` which silently hid setup failures and produced misleading
+// assertion errors downstream. (Named distinctly from the seedFact and
+// seedTypedFact helpers in this package to avoid a redeclaration clash.)
+func seedRetrieveFact(t *testing.T, idx *WikiIndex, f TypedFact) {
+	t.Helper()
+	ctx := context.Background()
+	if err := idx.store.UpsertFact(ctx, f); err != nil {
+		t.Fatalf("seed UpsertFact %s: %v", f.ID, err)
+	}
+	if err := idx.text.Index(ctx, f); err != nil {
+		t.Fatalf("seed text.Index %s: %v", f.ID, err)
+	}
 }
 
 // TestRetrieveMultiHopFallsBackOnFuzzyResolution exercises the "slug resolver
@@ -59,8 +77,7 @@ func TestRetrieveMultiHopFallsBackOnFuzzyResolution(t *testing.T) {
 		CreatedAt:  time.Now(),
 		CreatedBy:  "test",
 	}
-	_ = idx.store.UpsertFact(ctx, f)
-	_ = idx.text.Index(ctx, f)
+	seedRetrieveFact(t, idx, f)
 
 	// Query that looks multi_hop but whose slug candidates won't match the
 	// store's actual slug for the project.
@@ -115,8 +132,7 @@ func TestRetrieveMultiHop_TypedWalkUnionsWithBM25(t *testing.T) {
 		CreatedBy:  "test",
 	}
 	for _, f := range []TypedFact{champFact, roleFact} {
-		_ = idx.store.UpsertFact(ctx, f)
-		_ = idx.text.Index(ctx, f)
+		seedRetrieveFact(t, idx, f)
 	}
 
 	hits, err := idx.Search(ctx, "Who at Blueshift championed the Q2 Pilot Program project?", 20)
@@ -160,8 +176,7 @@ func TestRetrieveCounterfactual_LatestRoleAtSurfaces(t *testing.T) {
 		CreatedAt:  time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 		CreatedBy:  "test",
 	}
-	_ = idx.store.UpsertFact(ctx, roleFact)
-	_ = idx.text.Index(ctx, roleFact)
+	seedRetrieveFact(t, idx, roleFact)
 
 	// Noise fact that BM25 will score above the role fact because it
 	// contains the query verbatim.
@@ -174,8 +189,7 @@ func TestRetrieveCounterfactual_LatestRoleAtSurfaces(t *testing.T) {
 		CreatedAt:  time.Now(),
 		CreatedBy:  "test",
 	}
-	_ = idx.store.UpsertFact(ctx, noise)
-	_ = idx.text.Index(ctx, noise)
+	seedRetrieveFact(t, idx, noise)
 
 	hits, err := idx.Search(ctx, "What would have happened if Ivan Petrov had not taken her current role?", 20)
 	if err != nil {
@@ -190,6 +204,43 @@ func TestRetrieveCounterfactual_LatestRoleAtSurfaces(t *testing.T) {
 	}
 	if !sawRole {
 		t.Errorf("counterfactual retrieval missed ivan-role; hits=%+v", hits)
+	}
+}
+
+// TestFactToHit_TruncatesOnRuneBoundary verifies the snippet truncation slices
+// on rune boundaries, not byte boundaries. Byte-slicing a multi-byte UTF-8
+// character produces a replacement character (U+FFFD) downstream, which leaks
+// all the way to UI/API consumers. Regression guard for the 300-char cap.
+func TestFactToHit_TruncatesOnRuneBoundary(t *testing.T) {
+	t.Parallel()
+
+	// Japanese character "あ" is 3 bytes, so 400 of them is 1200 bytes — well
+	// past the 300-rune cap. If the truncation sliced on bytes, it would land
+	// mid-rune and produce U+FFFD.
+	text := strings.Repeat("あ", 400)
+	f := TypedFact{
+		ID:         "utf8-trunc",
+		EntitySlug: "test",
+		Text:       text,
+		CreatedAt:  time.Now(),
+		CreatedBy:  "test",
+	}
+	hit := factToHit(f)
+
+	if !utf8.ValidString(hit.Snippet) {
+		t.Fatal("snippet is not valid UTF-8 — truncation sliced mid-rune")
+	}
+	if got := utf8.RuneCountInString(hit.Snippet); got != 300 {
+		t.Errorf("snippet rune count = %d, want 300", got)
+	}
+	if strings.ContainsRune(hit.Snippet, '�') {
+		t.Error("snippet contains U+FFFD replacement character")
+	}
+
+	// Sanity: shorter strings are untouched.
+	short := TypedFact{ID: "short", Text: "hello", CreatedAt: time.Now()}
+	if got := factToHit(short).Snippet; got != "hello" {
+		t.Errorf("short snippet mutated: %q", got)
 	}
 }
 
@@ -211,8 +262,7 @@ func TestRetrieveStatusStillUsesBM25(t *testing.T) {
 		CreatedAt:  time.Now(),
 		CreatedBy:  "test",
 	}
-	_ = idx.store.UpsertFact(ctx, roleFact)
-	_ = idx.text.Index(ctx, roleFact)
+	seedRetrieveFact(t, idx, roleFact)
 
 	hits, err := idx.Search(ctx, "What does Sarah Jones do?", 20)
 	if err != nil {
