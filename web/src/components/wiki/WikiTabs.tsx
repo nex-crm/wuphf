@@ -1,11 +1,21 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchReviews } from '../../api/notebook'
+import Pam from './Pam'
 
 export type WikiTab = 'wiki' | 'notebooks' | 'reviews'
 
 interface WikiTabsProps {
   current: WikiTab
   onSelect: (tab: WikiTab) => void
+  /**
+   * Pam sits inside the tab bar so her desk can rest on the bottom
+   * divider line. `pamArticlePath` is the article she should act on;
+   * pass `null` outside an article view (or outside the Wiki tab
+   * entirely) and her menu falls back to a "Open an article…" empty
+   * state.
+   */
+  pamArticlePath?: string | null
+  onPamActionDone?: () => void
 }
 
 /**
@@ -19,7 +29,12 @@ interface WikiTabsProps {
  * Lives above the per-surface design systems so it reads as app chrome,
  * not as a wiki- or notebook-themed element.
  */
-export default function WikiTabs({ current, onSelect }: WikiTabsProps) {
+export default function WikiTabs({
+  current,
+  onSelect,
+  pamArticlePath = null,
+  onPamActionDone,
+}: WikiTabsProps) {
   const { data: reviews } = useQuery({
     queryKey: ['reviews-tab-badge'],
     queryFn: fetchReviews,
@@ -58,6 +73,10 @@ export default function WikiTabs({ current, onSelect }: WikiTabsProps) {
           </button>
         )
       })}
+      {/* Pam the Archivist rides inside the tab bar so her desk can sit
+          exactly on the bottom divider line — see pam.css for the absolute
+          positioning. */}
+      <Pam articlePath={pamArticlePath} onActionDone={onPamActionDone} />
     </nav>
   )
 }

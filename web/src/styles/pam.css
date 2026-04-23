@@ -1,19 +1,42 @@
 /* ─── Pam the Archivist ───
  *
- * Pam sits on top of the wiki article column in the upper-right. The desk
- * is the visual anchor: a wider rectangle that she peeks out from behind,
- * so she reads as a receptionist perched above the page. The wrapper uses
- * `position: absolute` inside the article column (the column is the
- * positioning context; see .wk-article-col). Idle animations fire
- * occasionally via CSS animation-iteration-count so she's alive but not
- * distracting.
+ * Pam is rendered inside the wiki tab bar (Wiki / Notebooks / Reviews)
+ * so her desk can sit flush on the tab bar's bottom divider line — she
+ * reads as a receptionist perched on the edge of the page, looking over
+ * whatever view is active underneath.
+ *
+ * Moving her inside .wiki-tabs is what fixes the "hiding behind the
+ * article" bug. The earlier placement anchored her inside the article
+ * column (.wk-article-col has overflow-y:auto), which silently clipped
+ * anything that tried to poke above the column's top edge. The tab bar
+ * has no such clip, and its bottom border IS the divider we want, so
+ * `position: absolute; bottom: 0` lands the desk's bottom exactly on
+ * that line with no magic offset math.
+ *
+ * Idle animations fire occasionally via CSS animation-iteration-count so
+ * she's alive but not distracting.
  */
+
+/* .wiki-tabs owns Pam's positioning context. The nav already has
+ * `display: flex` — position: relative doesn't disturb its flex layout;
+ * it just lets absolute children anchor to the nav's box. */
+.wiki-tabs {
+  position: relative;
+  /* The nav itself should not clip the avatar that rises above the tab
+   * text. Its flex children are laid out explicitly so overflow:visible
+   * is safe. */
+  overflow: visible;
+}
 
 .pam-wrap {
   position: absolute;
-  top: -36px;           /* lift her above the article's top edge */
-  right: 16px;
-  z-index: 40;          /* above article content; below global overlays */
+  /* Bottom of wrap sits on the tab bar's bottom edge — which is the
+   * divider line between the tab row and the wiki body. With the flex
+   * column order (avatar first, desk second) and desk being visually
+   * the lowest element, the desk's bottom rests exactly on that line. */
+  bottom: 0;
+  right: 24px;
+  z-index: 40;          /* above content; below global overlays */
   display: flex;
   flex-direction: column;
   align-items: center;

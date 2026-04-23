@@ -20,11 +20,21 @@ const AUDIT_PATH = '_audit'
 interface WikiProps {
   /** When set, renders the article view for this path; otherwise renders the catalog. */
   articlePath?: string | null
+  /**
+   * Bumped by Pam (hoisted up to the tab bar) when she finishes an action
+   * against the current article. Wiki forwards it into WikiArticle so the
+   * article + history re-fetch without a full navigation.
+   */
+  externalRefreshNonce?: number
   onNavigate: (path: string | null) => void
 }
 
 /** Three-column wiki shell: left sidebar · main (catalog or article) · right rail (article only). */
-export default function Wiki({ articlePath, onNavigate }: WikiProps) {
+export default function Wiki({
+  articlePath,
+  externalRefreshNonce = 0,
+  onNavigate,
+}: WikiProps) {
   const [catalog, setCatalog] = useState<WikiCatalogEntry[]>([])
   const [sections, setSections] = useState<DiscoveredSection[]>([])
   const [loading, setLoading] = useState(true)
@@ -78,6 +88,7 @@ export default function Wiki({ articlePath, onNavigate }: WikiProps) {
             path={articlePath}
             catalog={catalog}
             onNavigate={(path) => onNavigate(path)}
+            externalRefreshNonce={externalRefreshNonce}
           />
         ) : (
           <WikiCatalog

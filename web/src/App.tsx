@@ -105,6 +105,10 @@ function MainContent() {
   const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug)
   const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug)
   const setNotebookRoute = useAppStore((s) => s.setNotebookRoute)
+  // Pam's onActionDone bumps this; Wiki re-fetches article + history when
+  // the prop changes. Lifted up here because Pam lives inside the tab bar
+  // (so her desk can rest on the divider line).
+  const [articleRefreshNonce, setArticleRefreshNonce] = useState(0)
 
   if (!currentApp && isDMChannel(currentChannel, channelMeta)) {
     return <DMView />
@@ -125,13 +129,25 @@ function MainContent() {
       }
     }
 
+    // Pam only belongs on the wiki surface (notebooks + reviews are
+    // separate contexts). When we're not on the wiki tab, articlePath is
+    // null so she renders as disabled scenery without actionable state.
+    const pamArticlePath =
+      currentApp === 'wiki' ? wikiPath ?? null : null
+
     return (
       <div className="wiki-shell">
-        <WikiTabs current={currentApp} onSelect={handleTabChange} />
+        <WikiTabs
+          current={currentApp}
+          onSelect={handleTabChange}
+          pamArticlePath={pamArticlePath}
+          onPamActionDone={() => setArticleRefreshNonce((n) => n + 1)}
+        />
         <div className="wiki-shell-body">
           {currentApp === 'wiki' && (
             <Wiki
               articlePath={wikiPath}
+              externalRefreshNonce={articleRefreshNonce}
               onNavigate={(path) => {
                 if (path === null) {
                   setWikiPath(null)

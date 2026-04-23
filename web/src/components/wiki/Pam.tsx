@@ -10,11 +10,16 @@ import { buildPamMenu, type PamMenuEntry } from '../../lib/pamActions'
 import '../../styles/pam.css'
 
 interface PamProps {
-  articlePath: string
   /**
-   * Called once Pam finishes an action (SSE `done`). WikiArticle uses this
-   * to bump its refreshNonce so the enriched article + history reload
-   * without a full navigation.
+   * The article Pam should act on. `null` means we're outside an article
+   * view (catalog, audit) — Pam still renders as part of the wiki chrome
+   * but article-scoped actions are disabled.
+   */
+  articlePath: string | null
+  /**
+   * Called once Pam finishes an action (SSE `done`). The Wiki shell uses
+   * this to bump an article refresh nonce so the enriched article +
+   * history reload without a full navigation.
    */
   onActionDone?: () => void
 }
@@ -28,11 +33,13 @@ type Status =
 const STATUS_CLEAR_MS = 4000
 
 /**
- * Pam — the wiki archivist, perched on top of the article column. Click Pam
- * to open her desk menu (served from GET /pam/actions so the registry stays
- * server-defined). Selecting an action POSTs to /pam/action; the dispatcher
- * spawns Pam's sub-process and fans results back via /events so we update
- * the status line without polling.
+ * Pam — the wiki archivist, perched on the divider line at the top of the
+ * wiki shell so she's visible across catalog, article, and audit views.
+ * Click Pam to open her desk menu (served from GET /pam/actions so the
+ * registry stays server-defined). Selecting an action POSTs to /pam/action;
+ * the dispatcher spawns Pam's sub-process and fans results back via /events
+ * so we update the status line without polling. Article-scoped actions
+ * disable themselves when no article is open.
  */
 export default function Pam({ articlePath, onActionDone }: PamProps) {
   const [menu, setMenu] = useState<PamMenuEntry[] | null>(null)
@@ -163,6 +170,7 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
 
   const runAction = useCallback(
     async (entry: PamMenuEntry) => {
+      if (!articlePath) return
       setMenuOpen(false)
       setStatus({ kind: 'running', label: entry.label })
       try {
@@ -237,6 +245,8 @@ export default function Pam({ articlePath, onActionDone }: PamProps) {
             </div>
           ) : menu.length === 0 ? (
             <div className="pam-menu-empty">No actions available.</div>
+          ) : !articlePath ? (
+            <div className="pam-menu-empty">Open an article to use Pam.</div>
           ) : (
             menu.map((entry) => (
               <button

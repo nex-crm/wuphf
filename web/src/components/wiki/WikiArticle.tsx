@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import type { PluggableList } from 'unified'
 import ArticleStatusBanner from './ArticleStatusBanner'
-import Pam from './Pam'
 import EntityBriefBar from './EntityBriefBar'
 import FactsOnFile from './FactsOnFile'
 import EntityRelatedPanel from './EntityRelatedPanel'
@@ -56,9 +55,20 @@ interface WikiArticleProps {
   path: string
   catalog: WikiCatalogEntry[]
   onNavigate: (path: string) => void
+  /**
+   * Bumped by Pam (now hoisted to the Wiki shell) when an action completes,
+   * so the article + history refetch without a navigation. Treated as an
+   * additive trigger on top of the local refreshNonce used by inline edits.
+   */
+  externalRefreshNonce?: number
 }
 
-export default function WikiArticle({ path, catalog, onNavigate }: WikiArticleProps) {
+export default function WikiArticle({
+  path,
+  catalog,
+  onNavigate,
+  externalRefreshNonce = 0,
+}: WikiArticleProps) {
   const [article, setArticle] = useState<WikiArticleT | null>(null)
   const [tab, setTab] = useState<HatBarTab>('article')
   const [loading, setLoading] = useState(true)
@@ -107,7 +117,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
     return () => {
       cancelled = true
     }
-  }, [path, refreshNonce])
+  }, [path, refreshNonce, externalRefreshNonce])
 
   useEffect(() => {
     let cancelled = false
@@ -131,7 +141,7 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
     return () => {
       cancelled = true
     }
-  }, [path, refreshNonce])
+  }, [path, refreshNonce, externalRefreshNonce])
 
   useEffect(() => {
     setLiveAgent(null)
@@ -197,10 +207,6 @@ export default function WikiArticle({ path, catalog, onNavigate }: WikiArticlePr
   return (
     <>
       <main className="wk-article-col">
-        <Pam
-          articlePath={article.path}
-          onActionDone={() => setRefreshNonce((n) => n + 1)}
-        />
         {liveAgent && (
           <ArticleStatusBanner
             message={`${formatAgentName(liveAgent)} is editing this article right now.`}
