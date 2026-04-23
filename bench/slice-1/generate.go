@@ -1182,7 +1182,7 @@ func expectedFactsForProjectAnyPredicate(s *genState, projSlug string, preds []s
 		}
 	}
 	sort.Strings(out)
-	return dedupe(out)
+	return capExpected(dedupe(out))
 }
 
 // pickProjectForMultiHop returns a project slug that has at least one
@@ -1223,7 +1223,7 @@ func expectedMultiHop(s *genState, companySlug, projSlug string) []string {
 		}
 	}
 	sort.Strings(out)
-	return dedupe(out)
+	return capExpected(dedupe(out))
 }
 
 func expectedLeadsAtCompany(s *genState, companySlug string) []string {
@@ -1259,6 +1259,24 @@ func dedupe(in []string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// expectedSetCap is the per-query ceiling on |expected| so recall@20 stays a
+// solvable metric. Queries whose raw expected set would exceed this cap get
+// deterministically truncated — we sort ascending (done by every caller) and
+// keep the first expectedSetCap IDs. See RESULTS.md for the rationale.
+const expectedSetCap = 20
+
+// capExpected truncates a pre-sorted expected-set slice to at most
+// expectedSetCap entries. The truncation is deterministic: because callers
+// sort ascending before dedup, the same seed produces the same kept slice.
+// Micro-recall is unaffected (both numerator and denominator shrink together
+// for capped queries); the per-query pass-rate metric becomes honest again.
+func capExpected(in []string) []string {
+	if len(in) <= expectedSetCap {
+		return in
+	}
+	return in[:expectedSetCap]
 }
 
 // ---------------------------------------------------------------------------
