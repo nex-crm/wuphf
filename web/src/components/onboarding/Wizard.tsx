@@ -63,12 +63,13 @@ interface RuntimeSpec {
   label: string
   binary: string
   installUrl: string
-  provider: 'claude-code' | 'codex' | null
+  provider: 'claude-code' | 'codex' | 'opencode' | null
 }
 
 const RUNTIMES: readonly RuntimeSpec[] = [
   { label: 'Claude Code', binary: 'claude', installUrl: 'https://claude.ai/code', provider: 'claude-code' },
   { label: 'Codex', binary: 'codex', installUrl: 'https://github.com/openai/codex', provider: 'codex' },
+  { label: 'Opencode', binary: 'opencode', installUrl: 'https://opencode.ai', provider: 'opencode' },
   { label: 'Cursor', binary: 'cursor', installUrl: 'https://cursor.com/', provider: null },
   { label: 'Windsurf', binary: 'windsurf', installUrl: 'https://codeium.com/windsurf', provider: null },
 ] as const
@@ -1648,13 +1649,13 @@ export function Wizard({ onComplete }: WizardProps) {
       setSubmitting(true)
       try {
         // Translate UI labels to the provider ids the broker validates. Only
-        // labels that map to a supported provider ("claude-code", "codex")
-        // are persisted — aspirational runtimes (Cursor, Windsurf) are shown
-        // in the UI but can't yet be dispatched, so we drop them from the
-        // priority list we send to the server.
+        // labels that map to a supported provider ("claude-code", "codex",
+        // "opencode") are persisted — aspirational runtimes (Cursor, Windsurf)
+        // are shown in the UI but can't yet be dispatched, so we drop them
+        // from the priority list we send to the server.
         const providerPriority = runtimePriority
           .map((label) => RUNTIMES.find((r) => r.label === label)?.provider)
-          .filter((p): p is 'claude-code' | 'codex' => p != null)
+          .filter((p): p is 'claude-code' | 'codex' | 'opencode' => p != null)
 
         // Persist memory backend + LLM provider choice + priority fallback
         // list + API keys so the broker reads them on next launch. Send as a

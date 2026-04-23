@@ -59,3 +59,6 @@ web/coverage/
 # Dev build artifacts
 wuphf-dev
 
+
+# Local dev binary built by scripts/debug-tagging/run.sh
+/.wuphf-debug-tagging

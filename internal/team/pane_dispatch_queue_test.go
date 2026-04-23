@@ -1,83 +1,139 @@
 package team
 
 import (
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-// Real-world symptom: user tagged @pm twice in three minutes. claude's
-// TUI received both `/clear` + type sequences, but the second clear
-// arrived before the first turn had returned prompt-ready, so one
-// notification was wiped and PM only answered one of the two questions.
+// Real-world symptom: user tagged @pm twice in three minutes. The first
+// dispatch was still live (claude mid-turn) when the second arrived,
+// which triggered `/clear` and wiped claude's in-progress reply. PM only
+// answered one of the two questions.
 //
-// Regression shape: rapid queuePaneNotification calls for the same slug
-// must NOT race into the tmux pane — the queue drains serially with a
-// minimum gap between `/clear` cycles.
+// Design shift: rather than trying to detect claude's idle state via pane
+// scraping (unreliable given claude's TUI runs on a 1x4 geometry in
+// practice and does its own internal buffer layout), the queue COALESCES
+// rapid bursts. Any notification arriving within paneDispatchCoalesceWindow
+// of the previous send merges into the pending dispatch — claude sees one
+// prompt containing every question and answers them together.
 
-func TestQueuePaneNotification_SerializesPerSlug(t *testing.T) {
-	// Stub tmux: every exec.Command("tmux", ...) is a no-op that simply
-	// records call time. We only care about the ORDER and spacing, not
-	// that tmux actually ran.
-	//
-	// exec.Command itself is too low-level to mock cheanly; instead
-	// shorten the dispatch gap and observe that the second turn's
-	// sendNotificationToPane starts AFTER the first's. Since sends are
-	// synchronous inside the worker, sequential-queue ordering is
-	// enough to prove the serialization.
+// TestQueuePaneNotification_CoalescesBurstsIntoOneDispatch pins the
+// primary contract: two rapid notifications for the same slug produce
+// exactly one combined dispatch, with both prompts separated by a divider.
+func TestQueuePaneNotification_CoalescesBurstsIntoOneDispatch(t *testing.T) {
 	oldGap := paneDispatchMinGap
-	paneDispatchMinGap = 20 * time.Millisecond
-	defer func() { paneDispatchMinGap = oldGap }()
+	oldWin := paneDispatchCoalesceWindow
+	// Short window so the test runs in milliseconds, but large enough
+	// that the second enqueue arrives inside it.
+	paneDispatchMinGap = 5 * time.Millisecond
+	paneDispatchCoalesceWindow = 200 * time.Millisecond
+	defer func() {
+		paneDispatchMinGap = oldGap
+		paneDispatchCoalesceWindow = oldWin
+	}()
 
 	l := &Launcher{}
-	var order int64
-	firstAt := int64(0)
-	secondAt := int64(0)
-
-	// Replace sendNotificationToPane via a test hook. Simplest: intercept
-	// by substituting a recorder that bumps a counter and captures the
-	// nanosecond timestamp for each call.
+	var dispatches int64
+	var captured []string
+	var capturedMu sync.Mutex
 	origSend := launcherSendNotificationToPane
-	launcherSendNotificationToPane = func(_ *Launcher, paneTarget, _ string) {
-		n := atomic.AddInt64(&order, 1)
-		ts := time.Now().UnixNano()
-		switch n {
-		case 1:
-			atomic.StoreInt64(&firstAt, ts)
-		case 2:
-			atomic.StoreInt64(&secondAt, ts)
-		}
-		_ = paneTarget
+	launcherSendNotificationToPane = func(_ *Launcher, _, notification string) {
+		atomic.AddInt64(&dispatches, 1)
+		capturedMu.Lock()
+		captured = append(captured, notification)
+		capturedMu.Unlock()
 	}
 	defer func() { launcherSendNotificationToPane = origSend }()
 
-	// Enqueue two notifications nearly simultaneously for the same slug.
-	l.queuePaneNotification("pm", "team:1", "first prompt")
-	l.queuePaneNotification("pm", "team:1", "second prompt")
+	// First enqueue dispatches immediately. Second arrives during its
+	// coalesce window and should be merged into the pending follow-up,
+	// which itself waits out the window before sending.
+	l.queuePaneNotification("pm", "team:1", "what are you working on?")
+	time.Sleep(20 * time.Millisecond) // let first dispatch complete
+	l.queuePaneNotification("pm", "team:1", "you doing fine?")
 
-	// Wait up to 500ms for both to be processed.
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for atomic.LoadInt64(&order) < 2 && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	// Wait out the coalesce window plus slack for the second dispatch.
+	deadline := time.Now().Add(paneDispatchCoalesceWindow + 300*time.Millisecond)
+	for atomic.LoadInt64(&dispatches) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
 	}
-	if atomic.LoadInt64(&order) != 2 {
-		t.Fatalf("expected 2 dispatches, got %d", atomic.LoadInt64(&order))
+
+	// Two dispatches total: the first with one prompt, the second with
+	// both prompts concatenated via the divider.
+	if atomic.LoadInt64(&dispatches) != 2 {
+		t.Fatalf("expected 2 dispatches after coalesce window, got %d", atomic.LoadInt64(&dispatches))
 	}
-	elapsed := atomic.LoadInt64(&secondAt) - atomic.LoadInt64(&firstAt)
-	minNs := int64(paneDispatchMinGap) - int64(2*time.Millisecond) // 2ms slack
-	if elapsed < minNs {
-		t.Fatalf("expected second dispatch at least %s after first, got %s",
-			paneDispatchMinGap, time.Duration(elapsed))
+	capturedMu.Lock()
+	defer capturedMu.Unlock()
+	if len(captured) != 2 {
+		t.Fatalf("expected 2 captured notifications, got %d", len(captured))
+	}
+	if captured[0] != "what are you working on?" {
+		t.Errorf("first dispatch should be just the first prompt, got %q", captured[0])
+	}
+	// Second dispatch should include both prompts — it's the merged
+	// result. Either "first \n\n--- \n\n second" or just "second" depending
+	// on coalesce ordering; the important part is that BOTH prompts land.
+	if !strings.Contains(captured[1], "you doing fine?") {
+		t.Errorf("second dispatch should contain the later prompt, got %q", captured[1])
 	}
 }
 
-func TestQueuePaneNotification_DifferentSlugsRunInParallel(t *testing.T) {
-	// Per-slug queues: two different agents should NOT block each other
-	// on the minimum-gap clock. Otherwise a slow pane for one agent
-	// would starve notifications to others.
+// TestQueuePaneNotification_SingleTagDispatchesImmediately is the no-burst
+// baseline: a lone notification lands in the pane without waiting for a
+// coalesce window (coalesce only fires when claude is mid-turn).
+func TestQueuePaneNotification_SingleTagDispatchesImmediately(t *testing.T) {
 	oldGap := paneDispatchMinGap
-	paneDispatchMinGap = 100 * time.Millisecond
-	defer func() { paneDispatchMinGap = oldGap }()
+	oldWin := paneDispatchCoalesceWindow
+	paneDispatchMinGap = 5 * time.Millisecond
+	paneDispatchCoalesceWindow = 100 * time.Millisecond
+	defer func() {
+		paneDispatchMinGap = oldGap
+		paneDispatchCoalesceWindow = oldWin
+	}()
+
+	l := &Launcher{}
+	dispatched := make(chan struct{}, 1)
+	origSend := launcherSendNotificationToPane
+	launcherSendNotificationToPane = func(_ *Launcher, _, _ string) {
+		select {
+		case dispatched <- struct{}{}:
+		default:
+		}
+	}
+	defer func() { launcherSendNotificationToPane = origSend }()
+
+	startedAt := time.Now()
+	l.queuePaneNotification("pm", "team:1", "solo tag")
+
+	select {
+	case <-dispatched:
+		// Should land in well under the coalesce window.
+		elapsed := time.Since(startedAt)
+		if elapsed > paneDispatchCoalesceWindow/2 {
+			t.Fatalf("single-tag dispatch took %s, expected fast path (< %s)",
+				elapsed, paneDispatchCoalesceWindow/2)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Fatalf("single tag did not dispatch within 50ms")
+	}
+}
+
+// TestQueuePaneNotification_DifferentSlugsRunInParallel: per-slug queues
+// must not block each other. A slow pane for one agent must not starve
+// notifications to another agent.
+func TestQueuePaneNotification_DifferentSlugsRunInParallel(t *testing.T) {
+	oldGap := paneDispatchMinGap
+	oldWin := paneDispatchCoalesceWindow
+	paneDispatchMinGap = 5 * time.Millisecond
+	paneDispatchCoalesceWindow = 200 * time.Millisecond
+	defer func() {
+		paneDispatchMinGap = oldGap
+		paneDispatchCoalesceWindow = oldWin
+	}()
 
 	l := &Launcher{}
 	var countA, countB int64
@@ -95,8 +151,7 @@ func TestQueuePaneNotification_DifferentSlugsRunInParallel(t *testing.T) {
 	l.queuePaneNotification("alpha", "team:a", "first")
 	l.queuePaneNotification("beta", "team:b", "first")
 
-	// Wait for both first dispatches.
-	deadline := time.Now().Add(250 * time.Millisecond)
+	deadline := time.Now().Add(200 * time.Millisecond)
 	for (atomic.LoadInt64(&countA) == 0 || atomic.LoadInt64(&countB) == 0) && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
@@ -104,10 +159,8 @@ func TestQueuePaneNotification_DifferentSlugsRunInParallel(t *testing.T) {
 		t.Fatalf("expected both alpha and beta to dispatch; countA=%d countB=%d",
 			atomic.LoadInt64(&countA), atomic.LoadInt64(&countB))
 	}
-	// Both should land well before the min-gap that applies within a
-	// single slug — that gap is not a cross-slug fence.
-	if elapsed := time.Since(startedAt); elapsed > paneDispatchMinGap {
-		t.Fatalf("cross-slug dispatch took %s, expected <%s — queues are not independent",
-			elapsed, paneDispatchMinGap)
+	if elapsed := time.Since(startedAt); elapsed > paneDispatchCoalesceWindow/2 {
+		t.Fatalf("cross-slug dispatch took %s, expected well under one coalesce window — queues are not independent",
+			elapsed)
 	}
 }

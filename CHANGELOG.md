@@ -2,6 +2,24 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Caret no longer drifts when typing past an `@agent` chip in the composer.** The mirror-overlay treatment rendered mention chips with 4–5px horizontal padding and `font-size: 0.9em`, so each chip took more width than the raw text in the textarea behind it. The caret fell behind the typed characters by a few pixels after every chip. Composer chips now inherit the textarea's font metrics exactly (15px, no padding, `display: inline`) and only apply a background highlight — layout-neutral, so character-for-character alignment with the textarea is preserved. Message-bubble chips keep the original styled pill treatment.
+
+### Changed
+
+- **Headless `claude --print` is now the default dispatch path for both `wuphf` (web) and `wuphf --tui`.** Anthropic re-sanctioned headless CLI reuse in the 2026-04 OpenClaw policy note, and it runs on the user's normal subscription quota — no separate extra-usage charge. Every turn now dispatches as a fresh `claude --print` invocation, matching how the Codex runtime already worked and unifying dispatch across both modes. The previous per-agent long-lived interactive tmux pane path is preserved as an internal fallback primitive (reachable if dispatch ever needs to promote to panes at runtime) but is no longer invoked at startup. tmux is still required for `--tui` since the channel-view TUI runs in tmux; the web UI no longer needs it.
+- **Pane-fallback messaging updated to reflect the new default.** The stderr banner and `#general` system post no longer frame headless as "extra-usage quota" — it isn't, anymore. Messaging now reads as: pane-backed fallback attempted but unavailable → continuing with the default headless path on your normal subscription.
+- **Inline Enter-key hint on wizard CTAs drops the redundant `Enter` word.** The hint rendered both a `↵` key pill and the word `Enter` next to it — same information twice. Now it's just the pill. On the task step (⌘+Enter), the modifier is rendered as its own pill so the cue stays two key pills instead of one pill plus a string.
+
+## [0.0.7.1] - 2026-04-23
+
+### Fixed
+
+- **Rapid `@agent` tags now coalesce into one reply instead of cutting claude off mid-turn.** The previous per-slug queue served bursts serially but the 3-second minimum gap between sends was shorter than a typical claude turn (~30s), so the second `/clear` still wiped the first reply mid-generation. The queue now tracks a 60-second coalesce window per slug: if a new notification arrives while claude's previous turn is still in flight, the new prompt is MERGED into the pending next dispatch instead of triggering a fresh `/clear`. Claude sees one combined prompt with every question separated by a divider and answers them together. Single tags still dispatch immediately — coalesce only engages when there's a live turn to protect.
+
 ## [0.0.7.0] - 2026-04-22
 
 ### Added

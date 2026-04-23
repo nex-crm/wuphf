@@ -2611,9 +2611,16 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 }
 
 func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) {
+	// Intentionally swap brokerStatePath to a leaked OS-temp dir rather than
+	// t.TempDir(). Goroutines leaked by prior tests in this package call
+	// brokerStatePath() via saveLocked() and resolve to whatever the global
+	// currently points at — which races with t.TempDir cleanup if the target
+	// is inside the test's own tempdir ("unlinkat: directory not empty").
+	// Leaking a few KB in /tmp is the cheap fix; proper goroutine hygiene
+	// across the suite is a separate refactor.
 	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
@@ -2669,9 +2676,11 @@ func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) 
 }
 
 func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T) {
+	// See TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask for
+	// why this test uses a leaked state dir instead of t.TempDir().
 	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()

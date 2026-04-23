@@ -531,7 +531,7 @@ export function setMemory(namespace: string, key: string, value: string) {
 
 // ── Config (Settings) ──
 
-export type LLMProvider = 'claude-code' | 'codex'
+export type LLMProvider = 'claude-code' | 'codex' | 'opencode'
 export type MemoryBackend = 'nex' | 'gbrain' | 'none'
 export type ActionProvider = 'auto' | 'one' | 'composio' | ''
 

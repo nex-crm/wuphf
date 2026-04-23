@@ -122,6 +122,11 @@ type Launcher struct {
 	paneDispatchMu      sync.Mutex
 	paneDispatchQueues  map[string][]paneDispatchTurn
 	paneDispatchWorkers map[string]bool
+	// paneDispatchLastSentAt records when each slug most recently had a
+	// `/clear` + type cycle dispatched. The coalesce logic in
+	// queuePaneNotification uses this to decide whether to merge a new
+	// notification with a pending one or to start a fresh dispatch.
+	paneDispatchLastSentAt map[string]time.Time
 }
 
 // paneDispatchTurn is one queued notification to type into a tmux pane.
@@ -249,6 +254,12 @@ func isOnboarded() bool {
 // Preflight checks that required tools are available.
 func (l *Launcher) Preflight() error {
 	if l.usesCodexRuntime() {
+		if l.usesOpencodeRuntime() {
+			if _, err := exec.LookPath("opencode"); err != nil {
+				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
+			}
+			return nil
+		}
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
 		}
@@ -281,9 +292,12 @@ func checkGHCapability() (installed bool, authed bool, note string) {
 	return true, true, ""
 }
 
-// Launch creates the tmux session with:
-//   - Window 0 "team": Channel on left, agent panes on the right
-//   - No extra windows: all team activity is visible in one place
+// Launch starts a tmux session hosting the channel-view TUI and the shared
+// broker. Agents run headlessly by default via `claude --print` per turn;
+// per-agent interactive panes are reserved as an internal fallback primitive
+// (see trySpawnWebAgentPanes) and are not spawned at startup. The user
+// attaches to tmux to drive the channel view; agent output is surfaced
+// through the channel timeline rather than a dedicated pane.
 func (l *Launcher) Launch() error {
 	if l.usesCodexRuntime() {
 		return l.launchHeadlessCodex()
@@ -374,29 +388,21 @@ func (l *Launcher) Launch() error {
 		"remain-on-exit", "on",
 	).Run()
 
-	visibleSlugs, err := l.spawnVisibleAgents()
-	if err != nil {
-		return err
-	}
-	l.spawnOverflowAgents()
-
-	// Enable pane borders with labels and visible resize handles.
+	// Pane border cosmetics — kept so the channel pane renders with a border
+	// title. Per-agent panes are not spawned in the default path; they live
+	// only as an internal fallback (see trySpawnWebAgentPanes).
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-status", "top",
 	).Run()
-	// Show agent name in the border; mouse drag is intentionally disabled.
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-format", " #{pane_title} ",
 	).Run()
-	// Make inactive border visible but subtle
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-style", "fg=colour240",
 	).Run()
-	// Active pane border bright so you know which pane has focus
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-active-border-style", "fg=colour45",
 	).Run()
-	// Use line-drawing characters for clear keyboard-focused pane boundaries.
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-lines", "heavy",
 	).Run()
@@ -405,20 +411,7 @@ func (l *Launcher) Launch() error {
 		"-t", l.sessionName+":team.0",
 		"-T", "📢 channel",
 	).Run()
-	for i, slug := range visibleSlugs {
-		if i == 0 {
-			i = 1
-		} else {
-			i++
-		}
-		name := l.getAgentName(slug)
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
-			"-t", fmt.Sprintf("%s:team.%d", l.sessionName, i),
-			"-T", fmt.Sprintf("🤖 %s (@%s)", name, slug),
-		).Run()
-	}
 
-	// Focus on the channel pane.
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-window",
 		"-t", l.sessionName+":team",
 	).Run()
@@ -426,12 +419,12 @@ func (l *Launcher) Launch() error {
 		"-t", l.sessionName+":team.0",
 	).Run()
 
-	// Headless context for per-turn Claude invocations in TUI mode.
+	// Headless context for per-turn Claude invocations. Used by both TUI and
+	// web modes since agent dispatch is headless by default.
 	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
+	l.resumeInFlightWork()
 
-	// Start the notification loop that pushes new messages to agent panes
 	go l.watchChannelPaneLoop(channelCmd)
-	go l.primeVisibleAgents()
 	go l.notifyAgentsLoop()
 	if !l.isOneOnOne() {
 		go l.notifyTaskActionsLoop()
@@ -1831,7 +1824,7 @@ func (l *Launcher) paneEligibleOfficeMembers() []officeMember {
 	ordered := l.officeAgentOrder()
 	filtered := make([]officeMember, 0, len(ordered))
 	for _, m := range ordered {
-		if l.memberEffectiveProviderKind(m.Slug) == provider.KindCodex {
+		if l.memberUsesHeadlessOneShotRuntime(m.Slug) {
 			continue
 		}
 		filtered = append(filtered, m)
@@ -1929,7 +1922,7 @@ func (l *Launcher) shouldUseHeadlessDispatchForSlug(slug string) bool {
 	if l.shouldUseHeadlessDispatch() {
 		return true
 	}
-	if l.memberEffectiveProviderKind(slug) == provider.KindCodex {
+	if l.memberUsesHeadlessOneShotRuntime(slug) {
 		return true
 	}
 	if _, failed := l.failedPaneSlugs[strings.TrimSpace(slug)]; failed {
@@ -1960,7 +1953,7 @@ func (l *Launcher) skipPaneForSlug(slug string) bool {
 	if _, bad := l.failedPaneSlugs[slug]; bad {
 		return true
 	}
-	if l.memberEffectiveProviderKind(slug) == provider.KindCodex {
+	if l.memberUsesHeadlessOneShotRuntime(slug) {
 		return true
 	}
 	return false
@@ -1982,8 +1975,20 @@ func (l *Launcher) oneOnOneAgent() string {
 	return NormalizeOneOnOneAgent(l.oneOnOne)
 }
 
+// usesCodexRuntime reports whether the active install-wide provider uses the
+// headless one-shot runtime (shared by Codex and Opencode — both skip the
+// tmux/claude pane infrastructure and drive a fresh CLI per turn through the
+// broker queue in headless_codex.go).
 func (l *Launcher) usesCodexRuntime() bool {
-	return strings.EqualFold(strings.TrimSpace(l.provider), "codex")
+	p := strings.TrimSpace(strings.ToLower(l.provider))
+	return p == "codex" || p == "opencode"
+}
+
+// usesOpencodeRuntime reports whether the install-wide provider is Opencode
+// specifically. Used only where the per-turn CLI invocation differs from Codex
+// (binary name, args, prompt layout).
+func (l *Launcher) usesOpencodeRuntime() bool {
+	return strings.EqualFold(strings.TrimSpace(l.provider), "opencode")
 }
 
 // memberEffectiveProviderKind returns the provider kind that should run the
@@ -1999,6 +2004,15 @@ func (l *Launcher) memberEffectiveProviderKind(slug string) string {
 	return normalizeProviderKind(l.provider)
 }
 
+// memberUsesHeadlessOneShotRuntime reports whether the given agent is bound to
+// a runtime that drives a fresh CLI per turn (Codex, Opencode). Such agents
+// skip the tmux/claude pane infrastructure in favor of the broker-driven queue
+// in headless_codex.go.
+func (l *Launcher) memberUsesHeadlessOneShotRuntime(slug string) bool {
+	kind := l.memberEffectiveProviderKind(slug)
+	return kind == provider.KindCodex || kind == provider.KindOpencode
+}
+
 // normalizeProviderKind trims and canonicalizes provider kinds while
 // preserving unknown values so dispatch code can surface explicit errors.
 func normalizeProviderKind(raw string) string {
@@ -2008,6 +2022,8 @@ func normalizeProviderKind(raw string) string {
 		return provider.KindClaudeCode
 	case "codex":
 		return provider.KindCodex
+	case "opencode":
+		return provider.KindOpencode
 	case "claude-code", "openclaw":
 		return k
 	default:
@@ -2863,34 +2879,42 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 
 // shouldUseHeadlessDispatch returns true when notifications must be delivered
 // via a queued headless `claude --print` turn rather than typed into a live
-// interactive pane. Codex runtime always needs headless. Web mode uses headless
-// only when pane-backed agents could not be spawned (tmux missing or failed).
+// interactive pane. This is the default path for both web and TUI modes.
+// Codex runtime is always headless. Pane-backed interactive dispatch is only
+// used when the fallback path explicitly brought panes up (paneBackedAgents).
 func (l *Launcher) shouldUseHeadlessDispatch() bool {
 	if l.usesCodexRuntime() {
 		return true
 	}
-	return l.webMode && !l.paneBackedAgents
+	return !l.paneBackedAgents
 }
 
 // Minimum gap between two consecutive pane `/clear` + type cycles for the
-// same agent. Without this, two rapid @-tags to the same specialist would
-// wipe claude's in-flight input before it had a chance to submit, and the
-// second notification either got silently dropped into an in-progress
-// generation or fused into the same turn (user-observed: PM answered one
-// of two rapid questions and ignored the other). 3s is long enough for
-// claude's TUI to return to prompt-ready in the common case; further
-// smoothing lives in the per-slug queue that drains at this cadence.
+// same agent. Serves as a safety floor against truly back-to-back sends
+// (sub-second bursts) that could race tmux's input buffer. Not a substitute
+// for the coalesce logic below — claude turns typically take 20-60s, which
+// is much larger than any reasonable fixed gap.
 //
-// Declared as var rather than const so tests can shorten it — the
-// serialisation contract is what's load-bearing, not the literal duration.
+// Declared as var rather than const so tests can shorten it.
 var paneDispatchMinGap = 3 * time.Second
 
+// paneDispatchCoalesceWindow: if a new notification arrives this soon after
+// the previous send, treat claude's current turn as still in flight and
+// MERGE the new content into the next dispatch instead of triggering a
+// fresh `/clear`. Mid-turn clears were wiping claude's in-progress output
+// and dropping one of two rapid @-tags entirely.
+//
+// 60s covers the p95 claude turn duration (including MCP tool calls) in
+// the observed workload. Multiple bursts in the window get concatenated
+// so claude eventually sees one prompt containing every question, answers
+// them together, and never loses one to a mid-turn clear.
+var paneDispatchCoalesceWindow = 60 * time.Second
+
 // queuePaneNotification enqueues a notification for a pane-backed agent
-// and ensures there is one worker draining its queue. Replaces the old
-// direct-send path so rapid-fire notifications no longer clobber each
-// other mid-turn — previously every `/clear` came in on whatever tmux
-// typing order it won, which allowed a second message's `/clear` to wipe
-// claude's unsubmitted input from the first.
+// and ensures there is one worker draining its queue. Rapid successive
+// tags for the same slug coalesce into a single dispatch if they arrive
+// inside paneDispatchCoalesceWindow — this is the defence against
+// mid-turn `/clear` wiping claude's in-progress output.
 func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) {
 	slug = strings.TrimSpace(slug)
 	paneTarget = strings.TrimSpace(paneTarget)
@@ -2904,6 +2928,48 @@ func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) 
 	if l.paneDispatchWorkers == nil {
 		l.paneDispatchWorkers = make(map[string]bool)
 	}
+	if l.paneDispatchLastSentAt == nil {
+		l.paneDispatchLastSentAt = make(map[string]time.Time)
+	}
+	// Coalesce path: if a pending turn already exists OR the last send was
+	// within the coalesce window, merge rather than enqueue a separate
+	// dispatch. Merging into the head-of-queue pending item is the cleanest
+	// because the worker picks up the merged content on its next iteration.
+	inflight := false
+	if last, ok := l.paneDispatchLastSentAt[slug]; ok && time.Since(last) < paneDispatchCoalesceWindow {
+		inflight = true
+	}
+	queue := l.paneDispatchQueues[slug]
+	if (inflight || len(queue) > 0) && len(queue) > 0 {
+		// Combine with the pending turn. Claude will see both prompts
+		// separated by a visible divider and typically answers both.
+		last := &l.paneDispatchQueues[slug][len(queue)-1]
+		last.Notification = last.Notification + "\n\n---\n\n" + notification
+		last.EnqueuedAt = time.Now()
+		l.paneDispatchMu.Unlock()
+		return
+	}
+	if inflight && len(queue) == 0 {
+		// No pending turn yet but claude is mid-flight from a recent send.
+		// Create a single pending turn that will absorb further bursts
+		// through the branch above. The worker's pre-send wait will let
+		// claude's current turn finish before /clear fires.
+		l.paneDispatchQueues[slug] = []paneDispatchTurn{{
+			PaneTarget:   paneTarget,
+			Notification: notification,
+			EnqueuedAt:   time.Now(),
+		}}
+		startWorker := !l.paneDispatchWorkers[slug]
+		if startWorker {
+			l.paneDispatchWorkers[slug] = true
+		}
+		l.paneDispatchMu.Unlock()
+		if startWorker {
+			go l.runPaneDispatchQueue(slug)
+		}
+		return
+	}
+	// Cold path: no recent activity, no queue. Dispatch immediately.
 	l.paneDispatchQueues[slug] = append(l.paneDispatchQueues[slug], paneDispatchTurn{
 		PaneTarget:   paneTarget,
 		Notification: notification,
@@ -2922,9 +2988,19 @@ func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) 
 // runPaneDispatchQueue is the single worker per agent slug that drains
 // pane-dispatch notifications serially with a minimum gap between
 // `/clear` cycles. Exits when the queue is empty.
+//
+// Per-iteration flow:
+//  1. Peek head of queue.
+//  2. Wait out min-gap (floor) + coalesce window (lets claude's current turn
+//     land). During the wait, concurrent queuePaneNotification calls MAY
+//     merge new content into the head's Notification field — the peek is
+//     re-read after the wait so the pop sees the merged string.
+//  3. Pop + send.
+//  4. Record the send time so the next enqueue sees "claude in flight".
 func (l *Launcher) runPaneDispatchQueue(slug string) {
 	var lastSentAt time.Time
 	for {
+		// Step 1: peek (not pop).
 		l.paneDispatchMu.Lock()
 		queue := l.paneDispatchQueues[slug]
 		if len(queue) == 0 {
@@ -2936,6 +3012,34 @@ func (l *Launcher) runPaneDispatchQueue(slug string) {
 			l.paneDispatchMu.Unlock()
 			return
 		}
+		globalLastSentAt := l.paneDispatchLastSentAt[slug]
+		l.paneDispatchMu.Unlock()
+
+		// Step 2a: min-gap floor against sub-second bursts.
+		if !lastSentAt.IsZero() {
+			wait := paneDispatchMinGap - time.Since(lastSentAt)
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+		}
+		// Step 2b: coalesce window — wait for claude's in-flight turn to
+		// land before /clear fires again. New notifications arriving
+		// during this wait are merged into the head by queuePaneNotification.
+		if !globalLastSentAt.IsZero() {
+			wait := paneDispatchCoalesceWindow - time.Since(globalLastSentAt)
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+		}
+
+		// Step 3: pop (re-read head to pick up any merged content).
+		l.paneDispatchMu.Lock()
+		queue = l.paneDispatchQueues[slug]
+		if len(queue) == 0 {
+			// Defensive: external actor emptied the queue during our wait.
+			l.paneDispatchMu.Unlock()
+			continue
+		}
 		turn := queue[0]
 		if len(queue) == 1 {
 			delete(l.paneDispatchQueues, slug)
@@ -2944,17 +3048,13 @@ func (l *Launcher) runPaneDispatchQueue(slug string) {
 		}
 		l.paneDispatchMu.Unlock()
 
-		// Honour the minimum gap. Skipped on the first turn (lastSentAt
-		// zero) so normal dispatch stays instant; only applies when a
-		// previous send happened within paneDispatchMinGap.
-		if !lastSentAt.IsZero() {
-			wait := paneDispatchMinGap - time.Since(lastSentAt)
-			if wait > 0 {
-				time.Sleep(wait)
-			}
-		}
 		launcherSendNotificationToPane(l, turn.PaneTarget, turn.Notification)
+
+		// Step 4: record send time for the next enqueue's coalesce check.
 		lastSentAt = time.Now()
+		l.paneDispatchMu.Lock()
+		l.paneDispatchLastSentAt[slug] = lastSentAt
+		l.paneDispatchMu.Unlock()
 	}
 }
 
@@ -3329,10 +3429,10 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 func (l *Launcher) spawnOverflowAgents() {
 	for _, member := range l.overflowOfficeMembers() {
-		// Codex-bound agents use the headless codex pipeline; they don't need
-		// a claude pane. Creating one would launch `claude` with the wrong
-		// model and quota semantics.
-		if l.memberEffectiveProviderKind(member.Slug) == provider.KindCodex {
+		// Codex/Opencode-bound agents use the headless one-shot pipeline; they
+		// don't need a claude pane. Creating one would launch `claude` with
+		// the wrong model and quota semantics.
+		if l.memberUsesHeadlessOneShotRuntime(member.Slug) {
 			continue
 		}
 		agentCmd, err := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
@@ -3422,13 +3522,18 @@ func (l *Launcher) recordPaneSpawnFailure(slug, reason string) {
 
 // trySpawnWebAgentPanes attempts to create a detached tmux session with one
 // interactive `claude` pane per agent so message dispatch can type into a live
-// session. This avoids the per-turn `claude --print` path, which under
-// Anthropic's recent policy consumes the separate headless/extra-usage quota.
+// session. This is the internal fallback primitive for web and TUI modes —
+// the default is headless `claude --print` per turn, which Anthropic
+// re-sanctioned in the 2026-04 OpenClaw policy note and runs on the normal
+// subscription quota without a separate extra-usage charge. Nothing in the
+// startup path calls this today; it is reachable for a runtime-promotion
+// fallback (e.g. repeated headless failures) without needing to be wired in
+// advance.
 //
 // On success, l.paneBackedAgents is set to true and dispatch routes through
 // sendNotificationToPane. On any failure (tmux missing, session create failure,
 // spawn error) the method logs the tradeoff, posts a system message to
-// #general, and leaves paneBackedAgents false so the existing headless path
+// #general, and leaves paneBackedAgents false so the default headless path
 // continues to work.
 func (l *Launcher) trySpawnWebAgentPanes() {
 	if l.broker == nil {
@@ -3479,40 +3584,42 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 
 	l.paneBackedAgents = true
 	go l.detectDeadPanesAfterSpawn(append(l.visibleOfficeMembers(), l.overflowOfficeMembers()...))
-	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (uses subscription quota)\n", l.sessionName)
+	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (pane-backed fallback active)\n", l.sessionName)
 }
 
 // paneFallbackMessages renders the two user-facing messages for a pane-spawn
-// fallback (stderr banner + broker #general post). The remediation advice
-// depends on whether tmux is installed:
+// fallback (stderr banner + broker #general post). Headless is the normal
+// default now, so the fallback message is neutral — it only fires when
+// something in the runtime promoted us to panes and the spawn failed.
+// Remediation advice depends on whether tmux is installed:
 //
-//   - tmuxInstalled=false → tell the user to install tmux (the old default,
-//     and still the right answer for most systems)
-//   - tmuxInstalled=true  → tmux rejected the command; telling the user to
-//     "install tmux" is actively wrong. Ask them to file a bug.
+//   - tmuxInstalled=false → install tmux if you want panes; otherwise headless
+//     is a fine default and runs on your normal subscription.
+//   - tmuxInstalled=true  → tmux rejected the command; ask the user to file a
+//     bug. Headless continues to work.
 //
 // Pure function so it can be unit-tested without touching os.Stderr or the
 // broker. Keep in sync with reportPaneFallback below.
 func paneFallbackMessages(tmuxInstalled bool, detail string) (stderrMsg, brokerMsg string) {
-	const headlessBlurb = "Falling back to headless `claude --print`, which consumes Anthropic's extra-usage quota."
-	const brokerBlurb = "Running in headless mode (%s). Agent turns will draw from the Anthropic extra-usage quota."
+	const headlessBlurb = "Continuing with the default headless path (`claude --print` per turn on your normal subscription)."
+	const brokerBlurb = "Running in headless mode (%s). Agent turns dispatch as `claude --print` on your normal subscription."
 	if !tmuxInstalled {
 		stderrMsg = fmt.Sprintf(
-			"  Agents:  pane-backed mode unavailable (%s). %s Install tmux to run agents on your normal subscription.\n",
+			"  Agents:  pane-backed fallback attempted but tmux not found (%s). %s Install tmux if you want the fallback to be available.\n",
 			detail, headlessBlurb,
 		)
 		brokerMsg = fmt.Sprintf(
-			brokerBlurb+" Install tmux and relaunch to use interactive Claude sessions on your normal subscription.",
+			brokerBlurb+" Install tmux so the pane-backed fallback is available next time.",
 			detail,
 		)
 		return
 	}
 	stderrMsg = fmt.Sprintf(
-		"  Agents:  pane-backed mode unavailable (%s). %s tmux IS installed but rejected the launch command; please file a bug with the detail above at https://github.com/nex-crm/wuphf/issues.\n",
+		"  Agents:  pane-backed fallback attempted but unavailable (%s). %s tmux IS installed but rejected the launch command; please file a bug with the detail above at https://github.com/nex-crm/wuphf/issues.\n",
 		detail, headlessBlurb,
 	)
 	brokerMsg = fmt.Sprintf(
-		brokerBlurb+" tmux is installed but rejected the launch command; please file a bug so we can fix the regression.",
+		brokerBlurb+" tmux is installed but rejected the pane-spawn command; please file a bug so we can fix the regression.",
 		detail,
 	)
 	return
@@ -4464,6 +4571,12 @@ func (l *Launcher) PreflightWeb() error {
 		return nil
 	}
 	if l.usesCodexRuntime() {
+		if l.usesOpencodeRuntime() {
+			if _, err := exec.LookPath("opencode"); err != nil {
+				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
+			}
+			return nil
+		}
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
 		}
@@ -4560,17 +4673,17 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
 	l.broker.ServeWebUI(webPort)
 
-	// Try to spawn interactive Claude sessions in tmux panes so dispatch can
-	// type into a live agent rather than spending `claude --print` quota.
-	// Falls back to the headless path if tmux is missing or pane spawn fails.
-	l.trySpawnWebAgentPanes()
+	// Default path: headless `claude --print` per turn. Anthropic re-sanctioned
+	// this invocation (OpenClaw policy note, 2026-04), so it runs on the user's
+	// normal subscription quota — no separate extra-usage quota is charged on
+	// top. The legacy interactive pane-per-agent mode remains reachable via
+	// trySpawnWebAgentPanes as an internal fallback primitive, but is not
+	// invoked at startup.
 
-	// Headless context is used for codex runtime, headless fallback, and
+	// Headless context is used for codex runtime, default dispatch, and
 	// per-turn operations that don't fit a long-lived pane session.
 	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
-	if !l.paneBackedAgents {
-		l.resumeInFlightWork()
-	}
+	l.resumeInFlightWork()
 
 	// Stream tmux pane output to the web UI's per-agent stream so users see
 	// live Claude TUI activity (thinking, tool calls, responses) during a

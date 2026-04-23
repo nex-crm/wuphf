@@ -10,6 +10,7 @@ interface HarnessBadgeProps {
 const PALETTE: Record<HarnessKind, { bg: string; fg: string }> = {
   'claude-code': { bg: '#D97757', fg: '#FFFFFF' },
   codex: { bg: '#10A37F', fg: '#FFFFFF' },
+  opencode: { bg: '#2563EB', fg: '#FFFFFF' },
   openclaw: { bg: '#8B5CF6', fg: '#FFFFFF' },
 }
 
@@ -28,6 +29,17 @@ function Glyph({ kind, color }: { kind: HarnessKind; color: string }) {
       return (
         <path
           d="M6 8l5 4-5 4M13 16h6"
+          stroke={color}
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
+      )
+    case 'opencode':
+      return (
+        <path
+          d="M9 8l-4 4 4 4M15 8l4 4-4 4"
           stroke={color}
           strokeWidth="2.4"
           strokeLinecap="round"
