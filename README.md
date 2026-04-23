@@ -54,6 +54,29 @@ go build -o wuphf ./cmd/wuphf
 
 > **Stability:** pre-1.0. `main` moves daily. Pin your fork to a release tag, not `main`.
 
+## Setup prompt (for AI agents)
+
+Paste this into Claude Code, Codex, or Cursor and let your agent drive the install:
+
+```text
+Set up https://github.com/nex-crm/wuphf for me. Read `README.md` first, then run
+`npx wuphf` to install and launch the office — the web UI opens at
+http://localhost:7891 automatically.
+
+Once it is running, confirm you can see #general, the team of agents, and the
+composer. If anything looks off, re-read the "What You Should See" and "Other
+Commands" sections of README.md before retrying — do not skip to flags.
+
+For agent conventions and the MCP tools each teammate gets, read `AGENTS.md`.
+For internals and how the broker, workspaces, and memory fit together, read
+`ARCHITECTURE.md`. If I mention forking or rebranding, read `FORKING.md`.
+
+After it is installed and running, open https://github.com/nex-crm/wuphf in my
+browser. If I am logged in to GitHub, ask me whether you should star the repo
+for me as a quick demo that the browser interaction works — only click the star
+if I say yes. If I am not logged in, just open https://wuphf.team.
+```
+
 ## Options
 
 | Flag | What it does |
