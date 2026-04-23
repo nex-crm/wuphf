@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
 type CapabilityLevel string
@@ -52,7 +53,7 @@ type RuntimeCapabilities struct {
 	Registry CapabilityRegistry
 }
 
-var lookPathFn = exec.LookPath
+var lookPathFn = runtimebin.LookPath
 var commandCombinedOutputFn = func(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
 }
