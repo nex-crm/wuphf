@@ -311,6 +311,12 @@ fact_id = sha256(artifact_sha + "/" + sentence_offset + "/" + norm(subject) + "/
 
 `rm -rf .wuphf/index/` → restart broker → boot reconcile runs → SQLite + bleve re-indexed from markdown. The result must be **logically identical**, not byte-identical. Logical identity means: `SELECT * FROM facts ORDER BY id` produces the same canonical hash pre- and post-rebuild.
 
+**Every code path that introduces a new fact must append it to `wiki/facts/{kind}/{slug}.jsonl` via `WikiWorker.EnqueueFactLogAppend` under the `archivist` identity.** The extraction loop, human `save_as_insight`, and any future synthesis-time fact mint all honor this contract — markdown is the source of truth, and a fact that lives only in the derived cache violates the rebuild guarantee.
+
+Reinforcement is a read-side concept: when the same `fact_id` is re-extracted, only `reinforced_at` advances in the index. No new JSONL line is appended, and the on-disk fact log remains canonical.
+
+**`ReinforcedAt` hash policy.** `CanonicalHashFacts` EXCLUDES `reinforced_at` from its input, so two extraction runs on the same artifact (the second one purely bumping `reinforced_at`) produce an identical hash. That makes `CanonicalHashFacts` the load-bearing rebuild-invariance check. `CanonicalHashAll` INCLUDES `reinforced_at` (alongside entities, edges, and redirects) and so advances whenever any layer — reinforcement included — changes. Use `CanonicalHashAll` for end-to-end drift detection and `CanonicalHashFacts` for the rebuild contract test.
+
 ---
 
 ## 8. Decay & temporal validity
