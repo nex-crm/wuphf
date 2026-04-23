@@ -7,7 +7,7 @@ package team
 // Pure text parsing — no LLM, no dictionary — so it runs at BM25 speed
 // and never falsifies the BM25-only fallback path.
 //
-// Two extractors here:
+// Three extractors here:
 //
 //   parseMultiHopSpans(q) → (companyDisplay, projectDisplay, ok)
 //     "who at <X> championed [the] <Y> [project]?"
@@ -16,6 +16,14 @@ package team
 //   parseCounterfactualSubject(q) → (personDisplay, ok)
 //     "what would have happened if <P> had (not) ..."
 //     "if <P> hadn't ..." / "without <P> ..."
+//
+//   parseRelationshipSingle(q) → (predicate, projectDisplay, ok)
+//     "who champions <Y>?"      → predicate="champions"
+//     "who leads <Y>?"          → predicate="leads"
+//     "who is involved in <Y>?" → predicate="involved_in"
+//     Single-predicate shape. Added in Slice 2 Thread A v2 to close the
+//     five bench queries (q_028/030/033/034/035) that failed with BM25
+//     alone because surface rankings scattered across 20 topK slots.
 //
 // The returned display strings are trimmed + punctuation-free but keep the
 // original casing so callers can hand them to the slug resolver without
@@ -35,6 +43,35 @@ import (
 //
 // Both groups stop at punctuation or the trailing "project" literal.
 var multiHopRE = regexp.MustCompile(`(?i)who\s+at\s+([^?.!,]+?)\s+champion(?:ed|s)?\s+(?:the\s+)?([^?.!,]+?)(?:\s+project)?[?.!]*$`)
+
+// Relationship (single-predicate) patterns. Anchored at start-of-query so
+// the multi_hop "who at <X> championed <Y>" shape never matches here —
+// the presence of "at <company>" in multi_hop queries means the regex
+// below (which requires no filler between "who" and the verb) won't fire.
+//
+// Capture group 1 is the project display span. The predicate label is
+// fixed per-regex. Present + past tense both accepted so "who led X?"
+// and "who championed X?" also route here.
+var relationshipSingleREs = []struct {
+	predicate string
+	re        *regexp.Regexp
+}{
+	// "who champions <Y>?" / "who championed <Y>?"
+	{
+		predicate: "champions",
+		re:        regexp.MustCompile(`(?i)^who\s+champion(?:ed|s)?\s+(?:the\s+)?([^?.!,]+?)(?:\s+project)?[?.!]*$`),
+	},
+	// "who leads <Y>?" / "who led <Y>?"
+	{
+		predicate: "leads",
+		re:        regexp.MustCompile(`(?i)^who\s+(?:lead|leads|led)\s+(?:the\s+)?([^?.!,]+?)(?:\s+project)?[?.!]*$`),
+	},
+	// "who is involved in <Y>?" / "who's involved in <Y>?"
+	{
+		predicate: "involved_in",
+		re:        regexp.MustCompile(`(?i)^who(?:\s+is|'s)?\s+involved\s+in\s+(?:the\s+)?([^?.!,]+?)(?:\s+project)?[?.!]*$`),
+	},
+}
 
 // Counterfactual subject patterns. Order matters — most specific first so a
 // generic "without X" never swallows "what would have happened if X…".
@@ -86,6 +123,31 @@ func parseCounterfactualSubject(query string) (personDisplay string, ok bool) {
 		}
 	}
 	return "", false
+}
+
+// parseRelationshipSingle returns the predicate + project display span from
+// a single-predicate relationship query. Tries each pattern in order; the
+// first match wins. If none match, returns ("", "", false) and the caller
+// falls back to the BM25-only path.
+//
+// Predicate values match the wiki fact schema exactly: "champions", "leads",
+// "involved_in". Any downstream consumer (the typed graph walk) can pass
+// them straight through to FactStore.ListFactsByPredicateObject without
+// remapping.
+func parseRelationshipSingle(query string) (predicate, projectDisplay string, ok bool) {
+	q := strings.TrimSpace(query)
+	for _, r := range relationshipSingleREs {
+		m := r.re.FindStringSubmatch(q)
+		if len(m) < 2 {
+			continue
+		}
+		span := cleanSpan(m[1])
+		if span == "" {
+			continue
+		}
+		return r.predicate, span, true
+	}
+	return "", "", false
 }
 
 // cleanSpan trims whitespace and strips [[...]] wikilink brackets, keeping

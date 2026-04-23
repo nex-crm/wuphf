@@ -192,6 +192,168 @@ func TestQueryRewriteParser(t *testing.T) {
 	t.Parallel()
 	t.Run("multi_hop", TestParseMultiHopSpans)
 	t.Run("counterfactual", TestParseCounterfactualSubject)
+	t.Run("relationship", TestParseRelationshipSingle)
+}
+
+// TestClassifyRelationshipSingle locks in that the classifier routes the
+// five bench shapes (q_028/030/033/034/035) to QueryClassRelationship so
+// retrieveRelationshipSingle gets called. Confidence varies between 0.75
+// and 0.85 depending on whether the verb is in the narrow relationshipVerbs
+// list ("leads") or matched by the broader "who + entity" rule; both values
+// route the query through the same retrieval path.
+func TestClassifyRelationshipSingle(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		query string
+	}{
+		{"q_028 champions APAC Launch", "Who champions APAC Launch?"},
+		{"q_030 leads Security Audit", "Who leads Security Audit?"},
+		{"q_033 leads Onboarding V3", "Who leads Onboarding V3?"},
+		{"q_034 champions Mobile Revamp", "Who champions Mobile Revamp?"},
+		{"q_035 involved in Partner Program", "Who is involved in Partner Program?"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			klass, conf := ClassifyQuery(tc.query)
+			if klass != QueryClassRelationship {
+				t.Errorf("class = %s, want %s (conf=%.2f)", klass, QueryClassRelationship, conf)
+			}
+			if conf < 0.5 {
+				t.Errorf("confidence too low: %.2f", conf)
+			}
+		})
+	}
+}
+
+// TestParseRelationshipSingle covers the bench query shapes plus defensive
+// negatives so the typed graph walk never fires on a mis-parsed query.
+// Includes past-tense and wikilink variants so /lookup history and
+// rephrasings route correctly.
+func TestParseRelationshipSingle(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		query    string
+		wantPred string
+		wantProj string
+		wantOK   bool
+	}{
+		{
+			name:     "bench q_028 — champions APAC Launch",
+			query:    "Who champions APAC Launch?",
+			wantPred: "champions",
+			wantProj: "APAC Launch",
+			wantOK:   true,
+		},
+		{
+			name:     "bench q_030 — leads Security Audit",
+			query:    "Who leads Security Audit?",
+			wantPred: "leads",
+			wantProj: "Security Audit",
+			wantOK:   true,
+		},
+		{
+			name:     "bench q_033 — leads Onboarding V3",
+			query:    "Who leads Onboarding V3?",
+			wantPred: "leads",
+			wantProj: "Onboarding V3",
+			wantOK:   true,
+		},
+		{
+			name:     "bench q_034 — champions Mobile Revamp",
+			query:    "Who champions Mobile Revamp?",
+			wantPred: "champions",
+			wantProj: "Mobile Revamp",
+			wantOK:   true,
+		},
+		{
+			name:     "bench q_035 — involved in Partner Program",
+			query:    "Who is involved in Partner Program?",
+			wantPred: "involved_in",
+			wantProj: "Partner Program",
+			wantOK:   true,
+		},
+		{
+			name:     "past tense — championed",
+			query:    "Who championed Q2 Pilot Program?",
+			wantPred: "champions",
+			wantProj: "Q2 Pilot Program",
+			wantOK:   true,
+		},
+		{
+			name:     "past tense — led",
+			query:    "Who led Onboarding V3?",
+			wantPred: "leads",
+			wantProj: "Onboarding V3",
+			wantOK:   true,
+		},
+		{
+			name:     "contraction — who's involved in",
+			query:    "Who's involved in Partner Program?",
+			wantPred: "involved_in",
+			wantProj: "Partner Program",
+			wantOK:   true,
+		},
+		{
+			name:     "with trailing 'project' suffix",
+			query:    "Who leads the Security Audit project?",
+			wantPred: "leads",
+			wantProj: "Security Audit",
+			wantOK:   true,
+		},
+		{
+			name:     "wikilink form — [[Display]]",
+			query:    "Who champions [[APAC Launch]]?",
+			wantPred: "champions",
+			wantProj: "APAC Launch",
+			wantOK:   true,
+		},
+		{
+			name:     "wikilink form — [[slug|Display]]",
+			query:    "Who leads [[security-audit|Security Audit]]?",
+			wantPred: "leads",
+			wantProj: "Security Audit",
+			wantOK:   true,
+		},
+		{
+			name:   "negative — multi_hop (has 'at <company>')",
+			query:  "Who at Blueshift championed the Q2 Pilot Program project?",
+			wantOK: false,
+		},
+		{
+			name:   "negative — counterfactual",
+			query:  "What would have happened if Ivan Petrov had not taken her current role?",
+			wantOK: false,
+		},
+		{
+			name:   "negative — status query",
+			query:  "What does Marcus Lee do?",
+			wantOK: false,
+		},
+		{
+			name:   "negative — unrelated 'who' verb",
+			query:  "Who reports to Sarah Jones?",
+			wantOK: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pred, proj, ok := parseRelationshipSingle(tc.query)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (pred=%q proj=%q)", ok, tc.wantOK, pred, proj)
+			}
+			if !ok {
+				return
+			}
+			if pred != tc.wantPred {
+				t.Errorf("predicate = %q, want %q", pred, tc.wantPred)
+			}
+			if proj != tc.wantProj {
+				t.Errorf("project = %q, want %q", proj, tc.wantProj)
+			}
+		})
+	}
 }
 
 func TestDisplayToSlugCandidates(t *testing.T) {
