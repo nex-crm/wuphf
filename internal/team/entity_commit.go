@@ -135,7 +135,11 @@ func (r *Repo) CommitLintReport(ctx context.Context, slug, relPath, content, mes
 }
 
 // factLogPathPattern validates wiki/facts/{kind}/{slug}.jsonl paths (new schema §3).
-var factLogPathPattern = regexp.MustCompile(`^wiki/facts/[^/]+/[^/]+\.jsonl$`)
+// Mirrors entityFactPathPattern's shape: kind is lowercase letters (a starter
+// letter then alnum/dash), slug is alnum/dash starting with a non-dash
+// character. Blocks traversal, hidden files, uppercase, and other shapes
+// the resolver never produces.
+var factLogPathPattern = regexp.MustCompile(`^wiki/facts/[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*\.jsonl$`)
 
 // CommitFactLog writes the given content to relPath inside wiki/facts/ and
 // commits it under the supplied slug. Used by ResolveContradiction to mutate
@@ -223,7 +227,11 @@ func (r *Repo) AppendFactLog(ctx context.Context, slug, relPath, additionalConte
 	}
 
 	fullPath := filepath.Join(r.root, clean)
-	if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+	// Match CommitEntityFact's tighter mode (0o700 dirs / 0o600 files). The
+	// wiki repo is per-user local state; the previous 0o755/0o644 mix was
+	// unnecessarily permissive for an append-only log that may carry
+	// sensitive extraction metadata.
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
 		return "", 0, fmt.Errorf("fact append: mkdir: %w", err)
 	}
 
@@ -246,7 +254,7 @@ func (r *Repo) AppendFactLog(ctx context.Context, slug, relPath, additionalConte
 		buf = append(buf, '\n')
 	}
 
-	if err := os.WriteFile(fullPath, buf, 0o644); err != nil {
+	if err := os.WriteFile(fullPath, buf, 0o600); err != nil {
 		return "", 0, fmt.Errorf("fact append: write: %w", err)
 	}
 

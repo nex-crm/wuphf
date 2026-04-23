@@ -518,7 +518,7 @@ func (w *WikiIndex) CanonicalHashAll(ctx context.Context) (string, error) {
 // --- path routing helpers -------------------------------------------------
 
 var (
-	factLogNewSchema = regexp.MustCompile(`^wiki/facts/[^/]+/[^/]+\.jsonl$`)
+	factLogNewSchema = regexp.MustCompile(`^wiki/facts/[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*\.jsonl$`)
 	factLogLegacyV12 = regexp.MustCompile(`^team/entities/[a-z]+-[a-z0-9][a-z0-9-]*\.facts\.jsonl$`)
 	entityBriefPath  = regexp.MustCompile(`^team/[^/]+/[^/]+\.md$`)
 	lintReportPath   = regexp.MustCompile(`^wiki/\.lint/report-\d{4}-\d{2}-\d{2}\.md$`)
