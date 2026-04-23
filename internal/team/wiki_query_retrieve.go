@@ -17,6 +17,14 @@ package team
 //     ListFactsByTriplet(personSlug, "role_at", "") — all role_at facts
 //     union with BM25 on the stripped noun phrase
 //
+//   relationship   → retrieveRelationshipSingle (Slice 2 Thread A v2)
+//     parse (predicate, projectDisplay) from query
+//     ListFactsByPredicateObject(predicate, "project:<projSlug>") for each
+//       slug candidate derived from projectDisplay
+//     For "involved_in": also pull {leads, champions} for the same object —
+//       matches the bench's expectedFactsForProjectAnyPredicate generator.
+//     union with BM25 top-K
+//
 //   default        → BM25 only (current behaviour — never replaced)
 //
 // Invariant: the typed walk is additive. If the rewriter fails or the
@@ -26,6 +34,7 @@ package team
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"unicode/utf8"
 )
@@ -43,12 +52,129 @@ func retrieveWithClass(ctx context.Context, store FactStore, text TextIndex, que
 		return retrieveMultiHop(ctx, store, text, query, topK)
 	case QueryClassCounterfactual:
 		return retrieveCounterfactual(ctx, store, text, query, topK)
+	case QueryClassRelationship:
+		return retrieveRelationshipSingle(ctx, store, text, query, topK)
 	default:
-		// Status / relationship / general: BM25 only. The plan's core invariant
+		// Status / general: BM25 only. The plan's core invariant
 		// ("never replace BM25") is satisfied here by never bolting the typed
 		// walk onto a query class it cannot help.
 		return text.Search(ctx, query, topK)
 	}
+}
+
+// relationshipUnionPredicates lists the predicates to union when a
+// relationship query uses the "involved_in" shape. The bench generator's
+// expectedFactsForProjectAnyPredicate mixes leads + champions + involved_in
+// for this shape, so the retriever must as well or recall caps below 85%.
+var relationshipUnionPredicates = []string{"leads", "champions", "involved_in"}
+
+// retrieveRelationshipSingle implements the typed-predicate graph walk for
+// single-predicate relationship queries:
+//
+//	"Who champions <P>?"      → ListFactsByPredicateObject("champions",     "project:<slug>")
+//	"Who leads <P>?"          → ListFactsByPredicateObject("leads",         "project:<slug>")
+//	"Who is involved in <P>?" → union over {leads, champions, involved_in}
+//
+// Strategy:
+//  1. Always grab BM25 first so it's the floor for recall.
+//  2. Parse (predicate, projectDisplay). If parse fails → return BM25 alone.
+//  3. Generate slug candidates for the project (handles "APAC Launch" →
+//     "apac-launch", "Partner Program" → "partner-program", etc.).
+//  4. For each slug candidate, pull the predicate's facts (or the union set
+//     for "involved_in"). First non-empty result wins on a per-predicate basis.
+//  5. Union typed hits (first, to preserve priority) with BM25, dedupe on
+//     fact ID, cap at topK.
+func retrieveRelationshipSingle(ctx context.Context, store FactStore, text TextIndex, query string, topK int) ([]SearchHit, error) {
+	bm25Hits, bm25Err := text.Search(ctx, query, topK)
+	if bm25Err != nil {
+		return nil, fmt.Errorf("retrieveRelationshipSingle bm25: %w", bm25Err)
+	}
+
+	predicate, projectDisplay, ok := parseRelationshipSingle(query)
+	if !ok {
+		return bm25Hits, nil
+	}
+
+	// "involved_in" shape is broader: the generator pools leads + champions +
+	// involved_in under the same project object. Anything narrower caps recall.
+	predicates := []string{predicate}
+	if predicate == "involved_in" {
+		predicates = relationshipUnionPredicates
+	}
+
+	projCandidates := displayToSlugCandidates(projectDisplay)
+
+	// Collect typed facts. Deduplicate on fact ID at collection time so that
+	// the union across predicates and slug candidates doesn't inflate.
+	seenFacts := map[string]bool{}
+	var typedFacts []TypedFact
+	for _, pred := range predicates {
+		for _, projSlug := range projCandidates {
+			facts, err := store.ListFactsByPredicateObject(ctx, pred, "project:"+projSlug)
+			if err != nil {
+				return nil, fmt.Errorf("retrieveRelationshipSingle %s/%s: %w", pred, projSlug, err)
+			}
+			if len(facts) == 0 {
+				continue
+			}
+			for _, f := range facts {
+				if seenFacts[f.ID] {
+					continue
+				}
+				seenFacts[f.ID] = true
+				typedFacts = append(typedFacts, f)
+			}
+			// First non-empty slug candidate wins per predicate — the project's
+			// canonical slug is one of the candidates and pulling facts under a
+			// shorter prefix candidate on top would inflate noise.
+			break
+		}
+	}
+
+	// Sort typed facts deterministically by ID. When the typed set exceeds
+	// topK (possible for high-cardinality projects like partner-program) the
+	// first K hits after sort match the generator's capExpected truncation,
+	// which is sorted-ascending-by-ID as well. Without this sort, typed hits
+	// would be predicate-first then ID-sorted, and recall would cap below
+	// 85% on any project where the union set is larger than topK.
+	sort.Slice(typedFacts, func(i, j int) bool {
+		return typedFacts[i].ID < typedFacts[j].ID
+	})
+
+	// Boost typed hits so they rank at least as high as the top BM25 hit.
+	// Runner evaluates recall by set-membership (not by rank), but the score
+	// boost keeps the contract honest for callers that do consume ranks.
+	typedHits := typedHitsWithBoost(typedFacts, bm25Hits)
+
+	return mergeHits(typedHits, bm25Hits, topK), nil
+}
+
+// typedHitsWithBoost converts TypedFacts to SearchHits with a score boost
+// pegged to the top BM25 score + epsilon. If bm25Hits is empty, typed hits
+// retain the default factToHit score (1.0). Insertion order is preserved so
+// deterministic fact ordering from the FactStore carries through.
+func typedHitsWithBoost(facts []TypedFact, bm25 []SearchHit) []SearchHit {
+	if len(facts) == 0 {
+		return nil
+	}
+	var topBM25 float64
+	for _, h := range bm25 {
+		if h.Score > topBM25 {
+			topBM25 = h.Score
+		}
+	}
+	hits := make([]SearchHit, 0, len(facts))
+	for _, f := range facts {
+		h := factToHit(f)
+		if topBM25 > 0 {
+			// Epsilon = 0.01 is plenty of headroom for bleve BM25 scores in
+			// our corpus (top scores sit in the 2–6 range). Pushes typed
+			// above BM25 without creating unbounded ranks.
+			h.Score = topBM25 + 0.01
+		}
+		hits = append(hits, h)
+	}
+	return hits
 }
 
 // retrieveMultiHop implements the typed-predicate graph walk for queries

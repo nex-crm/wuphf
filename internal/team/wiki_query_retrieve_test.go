@@ -244,6 +244,183 @@ func TestFactToHit_TruncatesOnRuneBoundary(t *testing.T) {
 	}
 }
 
+// TestRetrieveRelationshipSingle_UnionsWithBM25 verifies that the
+// single-predicate relationship typed walk surfaces the fact whose triplet
+// matches the predicate + object exactly AND keeps BM25's hit set so recall
+// never drops below the prior BM25-only baseline.
+//
+// Setup: one "champions" fact whose text is intentionally sparse on the
+// query verbatim (BM25 would rank it low), plus two BM25-noise facts that
+// share surface tokens with the query but do NOT match the predicate+object.
+// Expected: champ fact present AND at least one of the BM25-noise facts
+// present → both paths active, typed is additive.
+func TestRetrieveRelationshipSingle_UnionsWithBM25(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	idx := newBenchLikeIndex(t)
+
+	// Typed-walk target: text deliberately lean on query keywords so BM25
+	// alone would bury it behind the noise facts.
+	champFact := TypedFact{
+		ID:         "fact-champ",
+		EntitySlug: "alice-stone",
+		Kind:       "person",
+		Type:       "relationship",
+		Triplet:    &Triplet{Subject: "alice-stone", Predicate: "champions", Object: "project:apac-launch"},
+		Text:       "Alice Stone drove APAC Launch from kickoff through GA.",
+		CreatedAt:  time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+		CreatedBy:  "test",
+	}
+	// BM25 noise fact #1: contains "champions" verb + "launch" tokens but is
+	// not a champions-of-apac-launch triplet, so it would BM25 above the
+	// real answer if BM25 were sole retriever.
+	bm25Noise1 := TypedFact{
+		ID:         "fact-noise-1",
+		EntitySlug: "bob-klein",
+		Kind:       "person",
+		Type:       "observation",
+		Text:       "Bob Klein champions the APAC launch checklist and writes the launch brief.",
+		CreatedAt:  time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC),
+		CreatedBy:  "test",
+	}
+	// BM25 noise fact #2: more surface overlap with the query tokens.
+	bm25Noise2 := TypedFact{
+		ID:         "fact-noise-2",
+		EntitySlug: "carol-mei",
+		Kind:       "person",
+		Type:       "observation",
+		Text:       "Carol Mei mentioned APAC Launch during the weekly champions sync.",
+		CreatedAt:  time.Date(2026, 2, 3, 0, 0, 0, 0, time.UTC),
+		CreatedBy:  "test",
+	}
+	for _, f := range []TypedFact{champFact, bm25Noise1, bm25Noise2} {
+		_ = idx.store.UpsertFact(ctx, f)
+		_ = idx.text.Index(ctx, f)
+	}
+
+	hits, err := idx.Search(ctx, "Who champions APAC Launch?", 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("relationship query returned zero hits")
+	}
+
+	ids := map[string]int{} // id → position (1-indexed)
+	for i, h := range hits {
+		ids[h.FactID] = i + 1
+	}
+
+	if ids["fact-champ"] == 0 {
+		t.Errorf("typed-walk target fact-champ missing; hits=%+v", hits)
+	}
+	// BM25 path must still surface at least one noise fact — that's the
+	// "additive, never replace" invariant.
+	if ids["fact-noise-1"] == 0 && ids["fact-noise-2"] == 0 {
+		t.Errorf("BM25 fallback dropped — no noise facts in hit set; hits=%+v", hits)
+	}
+	// Typed hit must rank at least as high as any BM25-only hit for the
+	// same query. The typed fact's Score is boosted above max(BM25) + epsilon.
+	champHit := hitByID(hits, "fact-champ")
+	for _, h := range hits {
+		if h.FactID == "fact-champ" {
+			continue
+		}
+		if h.Score > champHit.Score {
+			t.Errorf("BM25 hit %s score %.3f out-ranks typed hit fact-champ score %.3f",
+				h.FactID, h.Score, champHit.Score)
+		}
+	}
+}
+
+// TestRetrieveRelationshipSingle_InvolvedInUnionsAllPredicates verifies
+// that the "who is involved in X" shape unions leads + champions + involved_in
+// facts for the same project object, matching the bench generator's
+// expectedFactsForProjectAnyPredicate pooling.
+func TestRetrieveRelationshipSingle_InvolvedInUnionsAllPredicates(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	idx := newBenchLikeIndex(t)
+
+	base := func(id, subject, predicate string) TypedFact {
+		return TypedFact{
+			ID:         id,
+			EntitySlug: subject,
+			Kind:       "person",
+			Type:       "relationship",
+			Triplet:    &Triplet{Subject: subject, Predicate: predicate, Object: "project:partner-program"},
+			Text:       subject + " is part of the Partner Program effort.",
+			CreatedAt:  time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
+			CreatedBy:  "test",
+		}
+	}
+	facts := []TypedFact{
+		base("f-leads", "dana", "leads"),
+		base("f-champ", "ellen", "champions"),
+		base("f-involved", "frank", "involved_in"),
+	}
+	for _, f := range facts {
+		_ = idx.store.UpsertFact(ctx, f)
+		_ = idx.text.Index(ctx, f)
+	}
+
+	hits, err := idx.Search(ctx, "Who is involved in Partner Program?", 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	want := []string{"f-leads", "f-champ", "f-involved"}
+	for _, id := range want {
+		if hitByID(hits, id).FactID == "" {
+			t.Errorf("expected fact %s in hits; got %+v", id, hits)
+		}
+	}
+}
+
+// TestRetrieveRelationshipSingle_FallsBackOnUnparsedQuery guards the
+// "never replace BM25" invariant: a who-verb query whose shape the rewriter
+// doesn't match (e.g. "Who manages X?") must still return BM25 results.
+func TestRetrieveRelationshipSingle_FallsBackOnUnparsedQuery(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	idx := newBenchLikeIndex(t)
+
+	// Seed a fact that only BM25 can find (no triplet matching our
+	// single-predicate rewriter).
+	f := TypedFact{
+		ID:         "seed",
+		EntitySlug: "gina",
+		Kind:       "person",
+		Type:       "observation",
+		Text:       "Gina manages the Partner Program rollout.",
+		CreatedAt:  time.Now(),
+		CreatedBy:  "test",
+	}
+	_ = idx.store.UpsertFact(ctx, f)
+	_ = idx.text.Index(ctx, f)
+
+	hits, err := idx.Search(ctx, "Who manages Partner Program?", 20)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("BM25 fallback produced zero hits — invariant violated")
+	}
+	if hitByID(hits, "seed").FactID == "" {
+		t.Errorf("BM25 fallback missed seed fact; hits=%+v", hits)
+	}
+}
+
+// hitByID returns the SearchHit with the given ID, or a zero-value SearchHit
+// if not present. Test helper for readable assertions.
+func hitByID(hits []SearchHit, id string) SearchHit {
+	for _, h := range hits {
+		if h.FactID == id {
+			return h
+		}
+	}
+	return SearchHit{}
+}
+
 // TestRetrieveStatusStillUsesBM25 confirms that non-multi_hop, non-
 // counterfactual queries don't accidentally engage the typed walk.
 // Regression guard for the "never replace BM25" invariant.
