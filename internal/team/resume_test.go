@@ -686,9 +686,12 @@ func TestBuildResumePacketSpecSectionMessagesLabel(t *testing.T) {
 // verifying they exist, and the resulting tmux send-keys commands silently
 // failed. Users restarting `wuphf --tui` with in-flight work lost resumption.
 func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
+	// Leaked path (not t.TempDir) so a headless worker goroutine that
+	// outlives the test can keep writing without racing the dir cleanup
+	// and failing the test with an `unlinkat ... directory not empty`.
 	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	oldWakeLead := headlessWakeLeadFn
@@ -741,9 +744,12 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 }
 
 func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
+	// Leaked path (not t.TempDir) so a headless worker goroutine that
+	// outlives the test can keep writing without racing the dir cleanup
+	// and failing the test with an `unlinkat ... directory not empty`.
 	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	oldWakeLead := headlessWakeLeadFn

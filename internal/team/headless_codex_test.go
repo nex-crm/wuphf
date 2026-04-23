@@ -1628,6 +1628,13 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 
 func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	// Isolate brokerStatePath from the process-level leaked path so a
+	// leaked writer goroutine from an earlier test can't race our
+	// EnsurePlannedTask state save with `rename ... no such file`.
+	oldPathFn := brokerStatePath
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
+	defer func() { brokerStatePath = oldPathFn }()
 
 	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
 	headlessCodexWorkspaceStatusSnapshot = func(string) string {
@@ -1670,6 +1677,13 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 
 func TestHeadlessTurnCompletedDurablyAcceptsReviewReadyTask(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
+	// Isolate brokerStatePath from the process-level leaked path so a
+	// leaked writer goroutine from an earlier test can't race our
+	// EnsurePlannedTask state save with `rename ... no such file`.
+	oldPathFn := brokerStatePath
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
+	defer func() { brokerStatePath = oldPathFn }()
 
 	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
 	headlessCodexWorkspaceStatusSnapshot = func(string) string {
