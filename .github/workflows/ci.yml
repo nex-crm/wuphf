@@ -39,6 +39,24 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Check gofmt
+        # Belt-and-braces net against the golangci-lint `gofmt` formatter (see
+        # .golangci.yml). `-s` matches that linter's simplify=true default so
+        # the two agree on "formatted". The empty-file guard keeps `gofmt -l`
+        # from reading stdin and hanging on a sparse checkout.
+        run: |
+          files=$(git ls-files '*.go')
+          if [ -z "$files" ]; then
+            exit 0
+          fi
+          unformatted=$(gofmt -s -l $files)
+          if [ -n "$unformatted" ]; then
+            echo "gofmt reports the following files need formatting:"
+            echo "$unformatted"
+            echo
+            echo "Run: gofmt -s -w \$(git ls-files '*.go')"
+            exit 1
+          fi
       # Pin to full SHA: third-party action, runs on pull_request from forks
       # and can read any GITHUB_TOKEN the workflow exposes. A @v9 re-tag
       # would execute with CI privileges.
@@ -67,7 +85,22 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      - run: go test ./...
+      # internal/team and internal/teammcp have known test-isolation issues
+      # (WUPHF_RUNTIME_HOME, shared wiki path, worktree registration against
+      # the invoking repo) tracked in the test-isolation memo. They run
+      # without -race until that fix lands; everything else gets the race
+      # detector. Re-fold into a single -race suite once the memo's 7-step
+      # fix plan completes.
+      #
+      # Pattern anchoring: `/internal/team(mcp)?($|/)` matches exactly
+      # `internal/team`, `internal/teammcp`, and their subpackages — but not a
+      # hypothetical sibling like `internal/teammcpx`. `-timeout=15m` is a
+      # margin over Go's 10m default because race instrumentation routinely
+      # 2-3x's wall-clock; applied on both steps for symmetry.
+      - name: Tests (internal/team, internal/teammcp)
+        run: go test -timeout=15m $(go list ./... | grep -E '/internal/team(mcp)?($|/)')
+      - name: Tests with race detector (everything else)
+        run: go test -race -timeout=15m $(go list ./... | grep -vE '/internal/team(mcp)?($|/)')
 
   build:
     needs: web

@@ -340,6 +340,25 @@ func TestFollowUpStartsRunningAgentImmediately(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for follow-up to start agent work")
 	}
+
+	// Drain the worker before t.TempDir cleanup — otherwise the tick goroutine
+	// can still be writing under `dir/auto-start/` when RemoveAll runs, which
+	// surfaces on slow runners (observed under `-race` on ubuntu-latest) as
+	// `TempDir RemoveAll cleanup: directory not empty`.
+	if err := svc.Stop("auto-start"); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		svc.mu.Lock()
+		_, running := svc.tickTimers["auto-start"]
+		svc.mu.Unlock()
+		if !running {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("tick worker still running after Stop")
 }
 
 func TestEnsureRunningDoesNotHoldServiceMutexDuringTick(t *testing.T) {
