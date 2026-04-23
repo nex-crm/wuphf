@@ -404,3 +404,82 @@ func TestReconcileFromMarkdownReadsFactLogJSONL(t *testing.T) {
 		t.Errorf("BM25 search missed the reconciled fact; got %+v", hits)
 	}
 }
+
+// TestReconcileFactLogPreservesInMemoryReinforcement is a regression guard
+// for the race that caused TestExtractIdempotentOnRepeat to flake on CI:
+// after the extractor appends a fact-log line, the worker fires a
+// post-commit reconcile on that JSONL path in a side goroutine. A second
+// extraction that only bumps in-memory ReinforcedAt (the §7.3 reinforcement
+// path) can land BEFORE the reconcile goroutine runs. Reconcile then reads
+// the JSONL (which never carries reinforced_at by design — it is excluded
+// from serialization so the append-only log stays immutable) and must NOT
+// clobber the in-memory ReinforcedAt back to nil.
+//
+// Breaking this invariant silently un-reinforces every fact any time the
+// index reconciles a fact-log path — the SymptomFAIL on CI was
+// "expected reinforced_at to be set after second extract" but the real
+// failure mode is any JSONL reconcile (boot, DLQ replay, external git sync)
+// erasing reinforcement.
+func TestReconcileFactLogPreservesInMemoryReinforcement(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+
+	// Seed JSONL on disk WITHOUT reinforced_at — this mirrors how the
+	// extractor writes new facts: ReinforcedAt is nil on first emission and
+	// subsequent reinforcements are intentionally NOT appended.
+	fact := TypedFact{
+		ID:         "reinforce-preserve-1",
+		EntitySlug: "sarah-chen",
+		Kind:       "person",
+		Type:       "observation",
+		Triplet:    &Triplet{Subject: "sarah-chen", Predicate: "role_at", Object: "acme"},
+		Text:       "Sarah Chen is VP of Sales.",
+		Confidence: 0.9,
+		CreatedAt:  time.Date(2026, 4, 10, 0, 0, 0, 0, time.UTC),
+		CreatedBy:  ArchivistAuthor,
+	}
+	line, err := json.Marshal(fact)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	factLogRel := factLogPath("person", "sarah-chen")
+	factLogAbs := filepath.Join(root, filepath.FromSlash(factLogRel))
+	if err := os.MkdirAll(filepath.Dir(factLogAbs), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(factLogAbs, append(line, '\n'), 0o600); err != nil {
+		t.Fatalf("seed fact log: %v", err)
+	}
+
+	idx := NewWikiIndex(root)
+	defer idx.Close()
+
+	ctx := context.Background()
+
+	// Pre-load the fact into memory AS-IF SubmitFacts had just bumped
+	// reinforced_at — this is the state the extractor's §7.3 path leaves the
+	// store in after a second-run reinforcement.
+	reinforcedAt := time.Date(2026, 4, 23, 12, 0, 0, 0, time.UTC)
+	inMem := fact
+	inMem.ReinforcedAt = &reinforcedAt
+	if err := idx.store.UpsertFact(ctx, inMem); err != nil {
+		t.Fatalf("seed in-memory reinforced fact: %v", err)
+	}
+
+	// Now trigger the same reconcile path the post-commit side goroutine
+	// runs after an IsFactLogAppend commit.
+	if err := idx.ReconcilePath(ctx, factLogRel); err != nil {
+		t.Fatalf("ReconcilePath: %v", err)
+	}
+
+	got, ok, _ := idx.GetFact(ctx, fact.ID)
+	if !ok {
+		t.Fatal("fact missing after ReconcilePath")
+	}
+	if got.ReinforcedAt == nil {
+		t.Fatal("reconcile clobbered in-memory ReinforcedAt — §7.3 broken (JSONL must not un-reinforce memory)")
+	}
+	if !got.ReinforcedAt.Equal(reinforcedAt) {
+		t.Errorf("ReinforcedAt drift after reconcile: got %v, want %v", got.ReinforcedAt, reinforcedAt)
+	}
+}

@@ -566,6 +566,19 @@ func (w *WikiIndex) reconcileFactLog(ctx context.Context, abs, relPath string) e
 			continue // legacy rows without IDs are skipped; a later synth will re-emit them with IDs
 		}
 		_ = i
+		// Preserve the in-memory ReinforcedAt marker. It is a derived runtime
+		// signal — NOT written to the JSONL substrate by design (§7.3
+		// reinforcement bumps only the in-memory row; the original JSONL line
+		// still represents the authoritative source-of-truth for the fact's
+		// content). Reconcile is the rebuild path — it must carry forward the
+		// reinforcement bump a parallel SubmitFacts may have landed AFTER the
+		// JSONL line was written. Clobbering it would silently un-reinforce
+		// facts on every post-append reconcile side goroutine, breaking §7.3.
+		if f.ReinforcedAt == nil {
+			if existing, ok, _ := w.store.GetFact(ctx, f.ID); ok && existing.ReinforcedAt != nil {
+				f.ReinforcedAt = existing.ReinforcedAt
+			}
+		}
 		if err := w.store.UpsertFact(ctx, f); err != nil {
 			return fmt.Errorf("upsert fact %s: %w", f.ID, err)
 		}
