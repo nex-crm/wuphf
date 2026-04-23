@@ -2217,7 +2217,7 @@ func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
 			for {
 				n, readErr := resp.Body.Read(buf)
 				if n > 0 {
-					w.Write(buf[:n]) //nolint:errcheck
+					w.Write(buf[:n]) //nolint:errcheck // SSE proxy: client disconnects surface via the next Read in this loop.
 					if canFlush {
 						flusher.Flush()
 					}

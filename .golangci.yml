@@ -14,10 +14,17 @@ linters:
     - staticcheck
     - misspell
     - unconvert
+    - asasalint
+    - durationcheck
+    - nakedret
+    - nolintlint
   settings:
     errcheck:
       exclude-functions:
         - (io.Closer).Close
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     staticcheck:
       # Disable the QF* quickfix suggestions (pure style hints) and the
       # ST1000/ST1003/ST1021 naming/comment rules (pedantic, massive scope).
