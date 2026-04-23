@@ -101,6 +101,12 @@ func TestStaleUnansweredFilteredOnResume(t *testing.T) {
 	stale := time.Now().UTC().Add(-90 * time.Minute).Format(time.RFC3339)
 	fresh := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339)
 	b.mu.Lock()
+	// Pin members explicitly so the test is not affected by whatever manifest
+	// a prior test may have written to WUPHF_RUNTIME_HOME.
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO"},
+		{Slug: "planner", Name: "Planner"},
+	}
 	b.messages = []channelMessage{
 		{ID: "h1", From: "you", Channel: "general", Content: "stale — ignore", Tagged: []string{"planner"}, Timestamp: stale},
 		{ID: "h2", From: "you", Channel: "general", Content: "fresh — answer", Tagged: []string{"planner"}, Timestamp: fresh},

@@ -287,6 +287,12 @@ func TestOperationBlueprintMatrixNewLauncherAcceptsAllBlueprints(t *testing.T) {
 		t.Run(id, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			// Pair HOME with WUPHF_RUNTIME_HOME so NewLauncher writes its
+			// blueprint-materialized company.json into this test's tmpdir,
+			// not the process-level leaked runtime home from
+			// worktree_guard_test's init — that leak pollutes downstream
+			// tests that read company.json via NewBroker.
+			t.Setenv("WUPHF_RUNTIME_HOME", home)
 			t.Setenv("WUPHF_BROKER_TOKEN", "")
 			if err := config.Save(config.Config{LLMProvider: "codex"}); err != nil {
 				t.Fatalf("save config: %v", err)
