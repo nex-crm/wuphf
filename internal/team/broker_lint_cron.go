@@ -1,13 +1,16 @@
 package team
 
 // broker_lint_cron.go manages the daily lint run scheduled at a configured
-// local time (default 09:00). The goroutine is started from ensureWikiWorker
-// after the wiki worker and index are up. It cancels cleanly when the broker's
-// context is done.
+// local time. The goroutine is started from ensureWikiWorker after the wiki
+// worker and index are up. It cancels cleanly when the broker's context
+// is done.
+//
+// Lint runs cost real money (contradiction judging shells out to the user's
+// LLM CLI), so the cron is opt-in: absent env var = disabled.
 //
 // Environment variables:
-//   WUPHF_LINT_CRON   — "HH:MM" (24-hour, local time). Default "09:00".
-//                        Set to empty string to disable the cron entirely.
+//   WUPHF_LINT_CRON   — "HH:MM" (24-hour, local time) to enable a daily run
+//                        at that time. Unset or empty = cron disabled.
 
 import (
 	"context"
@@ -19,31 +22,24 @@ import (
 	"time"
 )
 
-// defaultLintCronTime is the HH:MM at which the lint cron fires if no env
-// override is set.
-const defaultLintCronTime = "09:00"
-
 // startLintCron launches a goroutine that sleeps until the next HH:MM in the
 // local timezone and then runs the Lint suite once per day. The goroutine
 // stops when ctx is cancelled (broker shutdown).
 //
-// When WUPHF_LINT_CRON is empty the goroutine exits immediately without
-// running lint — this is the intended path for dev and tests.
+// The cron is opt-in. Set WUPHF_LINT_CRON=HH:MM to enable a daily run.
+// Unset / empty / "disabled" all mean no cron — no LLM calls happen unless
+// a human explicitly clicks "Check wiki health" in the UI.
 func (b *Broker) startLintCron(ctx context.Context, idx *WikiIndex, worker *WikiWorker) {
-	schedule := os.Getenv("WUPHF_LINT_CRON")
-	if schedule == "" {
-		schedule = defaultLintCronTime // use default if unset
-	}
-	// Sentinel: caller explicitly disabled cron.
-	if strings.TrimSpace(schedule) == "disabled" {
-		log.Printf("wiki lint cron: disabled via WUPHF_LINT_CRON=disabled")
+	schedule := strings.TrimSpace(os.Getenv("WUPHF_LINT_CRON"))
+	if schedule == "" || schedule == "disabled" {
+		log.Printf("wiki lint cron: disabled (set WUPHF_LINT_CRON=HH:MM to enable a daily run)")
 		return
 	}
 
 	hour, minute, err := parseLintCronTime(schedule)
 	if err != nil {
-		log.Printf("wiki lint cron: invalid WUPHF_LINT_CRON %q: %v — using default %s", schedule, err, defaultLintCronTime)
-		hour, minute = 9, 0
+		log.Printf("wiki lint cron: invalid WUPHF_LINT_CRON %q: %v — cron disabled", schedule, err)
+		return
 	}
 
 	go func() {

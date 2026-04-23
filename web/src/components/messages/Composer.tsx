@@ -147,6 +147,11 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       })
       return true
     }
+    case '/lint': {
+      store.setCurrentApp('wiki')
+      store.setWikiPath('_lint')
+      return true
+    }
     case '/remember': {
       if (!args) {
         showNotice('Usage: /remember <fact>', 'info')

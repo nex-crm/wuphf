@@ -113,6 +113,16 @@ func NewRepoAt(root, backup string) *Repo {
 // Root returns the wiki root path.
 func (r *Repo) Root() string { return r.root }
 
+// HeadSHA returns the short HEAD commit hash. Returns empty string if the
+// repo has no commits yet.
+func (r *Repo) HeadSHA(ctx context.Context) (string, error) {
+	out, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("wiki: resolve HEAD sha: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
 // BackupRoot returns the wiki backup mirror path.
 func (r *Repo) BackupRoot() string { return r.backupRoot }
 

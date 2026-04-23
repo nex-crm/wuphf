@@ -154,7 +154,10 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
         </p>
       )}
 
-      {/* Sources — only cited entries, only when not out-of-scope */}
+      {/* Sources — only cited entries, only when not out-of-scope.
+          Each <li> carries an explicit `value` so browser numbering matches
+          the [n] citations in the body even when gaps exist (e.g. cited [3, 5]
+          drops sources 1, 2, 4 entirely). */}
       {!isOutOfScope && citedSources.length > 0 && (
         <section
           className="wk-sources"
@@ -162,23 +165,25 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
         >
           <h2 id="ca-sources-heading">Sources</h2>
           <ol>
-            {answer.sources.map((src, i) => {
-              if (!answer.sources_cited.includes(i + 1)) return null
-              const excerpt = src.excerpt.length > 120
-                ? src.excerpt.slice(0, 120) + '…'
-                : src.excerpt
-              return (
-                <li key={src.slug_or_id || `src-${i}`} id={`ca-s${i + 1}`}>
-                  <span className="wk-commit-msg">{excerpt}</span>
-                  {src.title && (
-                    <span className="wk-agent">{src.title}</span>
-                  )}
-                  {src.valid_from && (
-                    <span className="wk-dim"> · {src.valid_from.slice(0, 10)}</span>
-                  )}
-                </li>
-              )
-            })}
+            {answer.sources
+              .map((src, i) => ({ src, n: i + 1 }))
+              .filter(({ n }) => answer.sources_cited.includes(n))
+              .map(({ src, n }) => {
+                const excerpt = src.excerpt.length > 120
+                  ? src.excerpt.slice(0, 120) + '…'
+                  : src.excerpt
+                return (
+                  <li key={src.slug_or_id || `src-${n}`} id={`ca-s${n}`} value={n}>
+                    <span className="wk-commit-msg">{excerpt}</span>
+                    {src.title && (
+                      <span className="wk-agent">{src.title}</span>
+                    )}
+                    {src.valid_from && (
+                      <span className="wk-dim"> · {src.valid_from.slice(0, 10)}</span>
+                    )}
+                  </li>
+                )
+              })}
           </ol>
         </section>
       )}

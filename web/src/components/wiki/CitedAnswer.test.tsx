@@ -71,8 +71,35 @@ describe('<CitedAnswer>', () => {
     await waitFor(() => {
       expect(screen.getByText(/Sources/i)).toBeTruthy()
     })
-    // Sources section has the cited excerpt
-    expect(screen.getByText(/Sarah Jones is VP/)).toBeTruthy()
+    // Sources section has the cited excerpt — scope to the <ol> so we don't
+    // match the body text that happens to share prose with the excerpt.
+    const sourcesList = document.querySelector('.wk-sources ol')
+    expect(sourcesList).toBeTruthy()
+    expect(sourcesList!.textContent).toContain('Sarah Jones is VP')
+  })
+
+  it('preserves citation numbering when some sources are uncited (gap case)', async () => {
+    const gapped: QueryAnswer = {
+      ...STUB_ANSWER,
+      answer_markdown: 'First fact.<sup>[1]</sup> Third fact.<sup>[3]</sup>',
+      sources_cited: [1, 3],
+      sources: [
+        { ...STUB_ANSWER.sources[0], slug_or_id: 'a', excerpt: 'First source excerpt.' },
+        { ...STUB_ANSWER.sources[0], slug_or_id: 'b', excerpt: 'Second source uncited.' },
+        { ...STUB_ANSWER.sources[0], slug_or_id: 'c', excerpt: 'Third source excerpt.' },
+      ],
+    }
+    vi.spyOn(apiClient, 'get').mockResolvedValue(gapped)
+    render(<CitedAnswer query="gap?" />)
+    await waitFor(() => {
+      expect(document.querySelector('#ca-sources-heading')).toBeTruthy()
+    })
+    const items = document.querySelectorAll('.wk-sources ol > li')
+    expect(items.length).toBe(2)
+    expect(items[0].getAttribute('value')).toBe('1')
+    expect(items[0].getAttribute('id')).toBe('ca-s1')
+    expect(items[1].getAttribute('value')).toBe('3')
+    expect(items[1].getAttribute('id')).toBe('ca-s3')
   })
 
   it('shows no Sources block for out-of-scope queries', async () => {

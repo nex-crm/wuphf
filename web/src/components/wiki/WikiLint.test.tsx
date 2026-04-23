@@ -71,6 +71,7 @@ describe('<WikiLint>', () => {
       expect(resolveSpy).toHaveBeenCalledWith({
         report_date: '2026-04-22',
         finding_idx: 0,
+        finding: CRITICAL_FINDING,
         winner: 'A',
       }),
     )

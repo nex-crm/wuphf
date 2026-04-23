@@ -60,6 +60,7 @@ export default function ResolveContradictionModal({
       await resolveContradiction({
         report_date: reportDate,
         finding_idx: findingIdx,
+        finding,
         winner,
       })
       onResolved()

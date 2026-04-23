@@ -92,7 +92,13 @@ func (b *Broker) handleWikiLookup(w http.ResponseWriter, r *http.Request) {
 
 	channel := strings.TrimSpace(r.URL.Query().Get("channel"))
 
-	idx := NewWikiIndex(worker.Repo().Root())
+	idx := b.WikiIndex()
+	if idx == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "wiki index is not ready — the boot reconcile may still be in progress",
+		})
+		return
+	}
 	handler := NewQueryHandler(idx, brokerQueryProvider{})
 
 	ans, err := handler.Answer(r.Context(), QueryRequest{
