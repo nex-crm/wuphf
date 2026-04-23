@@ -1943,7 +1943,7 @@ func (l *Launcher) shouldUseHeadlessDispatchForTarget(target notificationTarget)
 
 // skipPaneForSlug returns true when the given slug should not have a tmux
 // pane target registered — either because pane spawn failed earlier, or
-// because the agent is bound to the codex runtime and uses its own headless
+// because the agent is bound to a non-pane provider and uses its own headless
 // pipeline. In either case, dispatch falls back to the headless path.
 func (l *Launcher) skipPaneForSlug(slug string) bool {
 	slug = strings.TrimSpace(slug)
@@ -2026,12 +2026,11 @@ func (l *Launcher) memberEffectiveProviderKind(slug string) string {
 }
 
 // memberUsesHeadlessOneShotRuntime reports whether the given agent is bound to
-// a runtime that drives a fresh CLI per turn (Codex, Opencode). Such agents
-// skip the tmux/claude pane infrastructure in favor of the broker-driven queue
-// in headless_codex.go.
+// a runtime that is not pane-eligible and therefore skips the tmux/claude pane
+// infrastructure in favor of the broker-driven headless queue.
 func (l *Launcher) memberUsesHeadlessOneShotRuntime(slug string) bool {
 	kind := l.memberEffectiveProviderKind(slug)
-	return kind == provider.KindCodex || kind == provider.KindOpencode
+	return !provider.CapabilitiesFor(kind).PaneEligible
 }
 
 // normalizeProviderKind trims and canonicalizes provider kinds while

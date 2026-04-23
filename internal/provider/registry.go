@@ -3,7 +3,6 @@ package provider
 import (
 	"fmt"
 	"sync"
-	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -76,6 +75,35 @@ func Register(e *Entry) {
 	config.AllowLLMProviderKind(e.Kind)
 }
 
+// RegisterTemporary installs e and returns a restore function. It is intended
+// for internal test support packages that need to inject fake providers without
+// importing testing from production provider code.
+func RegisterTemporary(e *Entry) func() {
+	if e == nil {
+		panic("provider: RegisterTemporary requires non-nil Entry")
+	}
+	if e.Kind == "" {
+		panic("provider: RegisterTemporary requires non-empty Entry.Kind")
+	}
+	if e.StreamFn == nil {
+		panic(fmt.Sprintf("provider: RegisterTemporary Kind %q requires non-nil StreamFn", e.Kind))
+	}
+	registryMu.Lock()
+	prev, hadPrev := registry[e.Kind]
+	registry[e.Kind] = e
+	registryMu.Unlock()
+	config.AllowLLMProviderKind(e.Kind)
+	return func() {
+		registryMu.Lock()
+		defer registryMu.Unlock()
+		if hadPrev {
+			registry[e.Kind] = prev
+		} else {
+			delete(registry, e.Kind)
+		}
+	}
+}
+
 // Lookup returns the registered Entry for kind, or nil if no provider with
 // that Kind has been registered. Callers that need a fallback (e.g., the
 // streaming resolver, the one-shot dispatcher) check for nil and use the
@@ -95,35 +123,4 @@ func CapabilitiesFor(kind string) Capabilities {
 		return e.Capabilities
 	}
 	return Capabilities{}
-}
-
-// RegisterForTest installs e for the duration of the test, restoring the prior
-// registration (if any) on cleanup. Use this in tests that need to inject a
-// fake provider without conflicting with init()-time registration of the
-// shipped providers.
-//
-// Like Register, this also teaches config.normalizeLLMProvider to accept
-// e.Kind so that t.Setenv("WUPHF_LLM_PROVIDER", e.Kind) round-trips through
-// config.ResolveLLMProvider. The config-side allowlist entry is permanent —
-// the kind name remains valid for the rest of the test binary's lifetime —
-// but Lookup returns the prior entry (or nil) once the test ends.
-func RegisterForTest(t testing.TB, e *Entry) {
-	t.Helper()
-	if e == nil || e.Kind == "" {
-		t.Fatal("RegisterForTest: Entry must be non-nil with non-empty Kind")
-	}
-	registryMu.Lock()
-	prev, hadPrev := registry[e.Kind]
-	registry[e.Kind] = e
-	registryMu.Unlock()
-	config.AllowLLMProviderKind(e.Kind)
-	t.Cleanup(func() {
-		registryMu.Lock()
-		defer registryMu.Unlock()
-		if hadPrev {
-			registry[e.Kind] = prev
-		} else {
-			delete(registry, e.Kind)
-		}
-	})
 }

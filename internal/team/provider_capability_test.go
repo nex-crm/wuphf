@@ -5,6 +5,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/providertest"
 )
 
 // TestUsesPaneRuntime_ConsultsRegistryCapabilities is the epicentric red test
@@ -25,7 +26,7 @@ import (
 //	and returns the registered PaneEligible value. Test PASSES.
 func TestUsesPaneRuntime_ConsultsRegistryCapabilities(t *testing.T) {
 	const fakeKind = "wuphf-test-fake-non-pane"
-	provider.RegisterForTest(t, &provider.Entry{
+	providertest.RegisterForTest(t, &provider.Entry{
 		Kind: fakeKind,
 		StreamFn: func(slug string) agent.StreamFn {
 			return func([]agent.Message, []agent.AgentTool) <-chan agent.StreamChunk {
@@ -49,7 +50,7 @@ func TestUsesPaneRuntime_ConsultsRegistryCapabilities(t *testing.T) {
 // pane-runtime status after the refactor.
 func TestUsesPaneRuntime_PaneEligibleProviderStaysTrue(t *testing.T) {
 	const fakeKind = "wuphf-test-fake-pane"
-	provider.RegisterForTest(t, &provider.Entry{
+	providertest.RegisterForTest(t, &provider.Entry{
 		Kind: fakeKind,
 		StreamFn: func(slug string) agent.StreamFn {
 			return func([]agent.Message, []agent.AgentTool) <-chan agent.StreamChunk {

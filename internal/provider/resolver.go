@@ -26,6 +26,7 @@ type ProviderKindResolver func(agentSlug string) string
 // Config is re-read on each call so runtime provider changes (e.g., a /provider
 // switch from the TUI) take effect on the next agent turn without restart.
 func DefaultStreamFnResolver(client *api.Client, kindResolver ProviderKindResolver) agent.StreamFnResolver {
+	// TODO: thread client into provider-specific StreamFn factories (see issue #186).
 	return func(agentSlug string) agent.StreamFn {
 		var kind string
 		if kindResolver != nil {

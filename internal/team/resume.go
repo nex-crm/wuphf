@@ -177,13 +177,14 @@ func (l *Launcher) buildResumePackets() map[string]string {
 
 // resumeInFlightWork builds resume packets for all agents with pending work and
 // delivers them via the appropriate runtime:
-//   - Headless (Codex, or any mode without live panes): enqueueHeadlessCodexTurn
-//   - tmux pane-backed: sendNotificationToPane
+//   - Headless or non-pane provider: enqueueHeadlessCodexTurn
+//   - Pane-eligible provider with a live pane target: sendNotificationToPane
 //
-// The routing key is paneBackedAgents, mirroring shouldUseHeadlessDispatch.
-// webMode alone is not sufficient: TUI mode now defaults to headless dispatch,
-// and keying on webMode would send resume packets through agentPaneTargets()
-// to pane indices that were never spawned — silently dropping resumption.
+// Routing is decided per agent so ProviderBinding overrides can mix pane-backed
+// and headless runtimes in the same team. webMode alone is not sufficient: TUI
+// mode now defaults to headless dispatch, and keying on webMode would send
+// resume packets through agentPaneTargets() to pane indices that were never
+// spawned, silently dropping resumption.
 //
 // In headless mode the lead is enqueued FIRST to avoid the queue-hold guard:
 // enqueueHeadlessCodexTurn suppresses lead notifications when any specialist
@@ -195,28 +196,28 @@ func (l *Launcher) resumeInFlightWork() {
 		return
 	}
 
-	if !l.usesPaneRuntime() || !l.paneBackedAgents {
-		lead := l.officeLeadSlug()
-		// Enqueue lead first to bypass the queue-hold guard.
-		if packet, ok := packets[lead]; ok {
-			l.enqueueHeadlessCodexTurn(lead, packet)
-		}
-		for slug, packet := range packets {
-			if slug == lead {
-				continue
-			}
-			l.enqueueHeadlessCodexTurn(slug, packet)
-		}
-		return
-	}
-
-	// Pane-backed fallback path — need live pane targets.
 	paneTargets := l.agentPaneTargets()
-	for slug, packet := range packets {
+	routePacket := func(slug, packet string) {
+		if l.memberUsesHeadlessOneShotRuntime(slug) || !l.paneBackedAgents {
+			l.enqueueHeadlessCodexTurn(slug, packet)
+			return
+		}
 		target, ok := paneTargets[slug]
 		if !ok {
+			l.enqueueHeadlessCodexTurn(slug, packet)
+			return
+		}
+		launcherSendNotificationToPane(l, target.PaneTarget, packet)
+	}
+
+	lead := l.officeLeadSlug()
+	if packet, ok := packets[lead]; ok {
+		routePacket(lead, packet)
+	}
+	for slug, packet := range packets {
+		if slug == lead {
 			continue
 		}
-		l.sendNotificationToPane(target.PaneTarget, packet)
+		routePacket(slug, packet)
 	}
 }

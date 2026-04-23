@@ -1,9 +1,11 @@
-package provider
+package provider_test
 
 import (
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
+	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/providertest"
 )
 
 // TestRegistry_FakeKindRoutesEverywhere is the epicentric red test for the
@@ -22,7 +24,7 @@ func TestRegistry_FakeKindRoutesEverywhere(t *testing.T) {
 	const fakeKind = "wuphf-test-fake-provider"
 
 	var streamFnHits, oneShotHits int
-	RegisterForTest(t, &Entry{
+	providertest.RegisterForTest(t, &provider.Entry{
 		Kind: fakeKind,
 		StreamFn: func(slug string) agent.StreamFn {
 			return func([]agent.Message, []agent.AgentTool) <-chan agent.StreamChunk {
@@ -36,13 +38,13 @@ func TestRegistry_FakeKindRoutesEverywhere(t *testing.T) {
 			oneShotHits++
 			return "fake-oneshot-result", nil
 		},
-		Capabilities: Capabilities{SupportsOneShot: true},
+		Capabilities: provider.Capabilities{SupportsOneShot: true},
 	})
 
 	t.Setenv("WUPHF_LLM_PROVIDER", fakeKind)
 
 	// Path 1: streaming resolver.
-	fn := DefaultStreamFnResolver(nil, nil)("agent-slug")
+	fn := provider.DefaultStreamFnResolver(nil, nil)("agent-slug")
 	if fn == nil {
 		t.Fatal("resolver returned nil StreamFn for registered fake kind")
 	}
@@ -54,7 +56,7 @@ func TestRegistry_FakeKindRoutesEverywhere(t *testing.T) {
 	}
 
 	// Path 2: one-shot dispatch.
-	out, err := RunConfiguredOneShot("sys", "prompt", "/tmp")
+	out, err := provider.RunConfiguredOneShot("sys", "prompt", "/tmp")
 	if err != nil {
 		t.Fatalf("RunConfiguredOneShot returned error: %v", err)
 	}
@@ -70,7 +72,7 @@ func TestRegistry_FakeKindRoutesEverywhere(t *testing.T) {
 // TestRegistry_LookupReturnsNilForUnknown documents that a non-registered Kind
 // returns nil so dispatchers know to fall back to a default (claude-code).
 func TestRegistry_LookupReturnsNilForUnknown(t *testing.T) {
-	if e := Lookup("wuphf-never-registered-kind"); e != nil {
+	if e := provider.Lookup("wuphf-never-registered-kind"); e != nil {
 		t.Fatalf("Lookup returned non-nil entry %+v for unregistered kind", e)
 	}
 }
@@ -93,7 +95,7 @@ func TestStreamFnResolver_PerAgentKindOverridesInstallWide(t *testing.T) {
 	const agentKind = "wuphf-test-per-agent-kind"
 
 	var installHits, agentHits int
-	RegisterForTest(t, &Entry{
+	providertest.RegisterForTest(t, &provider.Entry{
 		Kind: installKind,
 		StreamFn: func(slug string) agent.StreamFn {
 			return func([]agent.Message, []agent.AgentTool) <-chan agent.StreamChunk {
@@ -104,7 +106,7 @@ func TestStreamFnResolver_PerAgentKindOverridesInstallWide(t *testing.T) {
 			}
 		},
 	})
-	RegisterForTest(t, &Entry{
+	providertest.RegisterForTest(t, &provider.Entry{
 		Kind: agentKind,
 		StreamFn: func(slug string) agent.StreamFn {
 			return func([]agent.Message, []agent.AgentTool) <-chan agent.StreamChunk {
@@ -125,7 +127,7 @@ func TestStreamFnResolver_PerAgentKindOverridesInstallWide(t *testing.T) {
 		return "" // empty → fall back to install-wide
 	}
 
-	resolver := DefaultStreamFnResolver(nil, kindResolver)
+	resolver := provider.DefaultStreamFnResolver(nil, kindResolver)
 
 	// Agent with a per-agent binding routes to agentKind, not installKind.
 	for range resolver("agent-on-per-agent-binding")(nil, nil) {
@@ -146,8 +148,8 @@ func TestStreamFnResolver_PerAgentKindOverridesInstallWide(t *testing.T) {
 // shipped providers so external callers (resolver, oneshot, future capability
 // checks) can rely on Lookup("claude-code") and Lookup("codex").
 func TestRegistry_BuiltinsRegistered(t *testing.T) {
-	for _, kind := range []string{KindClaudeCode, KindCodex} {
-		if e := Lookup(kind); e == nil {
+	for _, kind := range []string{provider.KindClaudeCode, provider.KindCodex} {
+		if e := provider.Lookup(kind); e == nil {
 			t.Errorf("builtin Kind %q not registered — init() missing or out of order", kind)
 		}
 	}

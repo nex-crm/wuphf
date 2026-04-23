@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 // agent is used by the routing tests to construct legacy compatibility packs.
@@ -736,5 +737,79 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 	}
 	if !present("fe") {
 		t.Error("TUI+claude: fe specialist resume packet dropped — TUI must route through headless queue when paneBackedAgents=false")
+	}
+}
+
+func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	oldWakeLead := headlessWakeLeadFn
+	headlessWakeLeadFn = func(_ *Launcher, _ string) {}
+	defer func() { headlessWakeLeadFn = oldWakeLead }()
+
+	oldSendPane := launcherSendNotificationToPane
+	var paneNotifications []string
+	launcherSendNotificationToPane = func(_ *Launcher, paneTarget, notification string) {
+		paneNotifications = append(paneNotifications, paneTarget+"\n"+notification)
+	}
+	defer func() { launcherSendNotificationToPane = oldSendPane }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO", Provider: provider.ProviderBinding{Kind: provider.KindClaudeCode}},
+		{Slug: "fe", Name: "Frontend Engineer"},
+	}
+	b.tasks = []teamTask{
+		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
+	}
+	b.messages = []channelMessage{
+		{ID: "h1", From: "you", Content: "what is the strategy?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		provider:         provider.KindCodex,
+		paneBackedAgents: true,
+		sessionName:      "test-session",
+		broker:           b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+		headlessWorkers: map[string]bool{
+			"ceo": true,
+			"fe":  true,
+		},
+		headlessActive: make(map[string]*headlessCodexActiveTurn),
+		headlessQueues: make(map[string][]headlessCodexTurn),
+	}
+
+	l.resumeInFlightWork()
+
+	if len(paneNotifications) != 1 {
+		t.Fatalf("expected 1 pane notification for claude-bound lead, got %d: %#v", len(paneNotifications), paneNotifications)
+	}
+	if !strings.Contains(paneNotifications[0], "test-session:team.1") || !strings.Contains(paneNotifications[0], "strategy") {
+		t.Fatalf("unexpected pane notification: %q", paneNotifications[0])
+	}
+
+	l.headlessMu.Lock()
+	ceoQueue := append([]headlessCodexTurn(nil), l.headlessQueues["ceo"]...)
+	feQueue := append([]headlessCodexTurn(nil), l.headlessQueues["fe"]...)
+	l.headlessMu.Unlock()
+
+	if len(ceoQueue) != 0 {
+		t.Fatalf("claude-bound lead should not also be enqueued headless, got %#v", ceoQueue)
+	}
+	if len(feQueue) != 1 || !strings.Contains(feQueue[0].Prompt, "Build login form") {
+		t.Fatalf("expected codex-default specialist to resume through headless queue, got %#v", feQueue)
 	}
 }
