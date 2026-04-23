@@ -22,6 +22,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify releasable tree
+        run: |
+          missing=0
+          for path in go.mod cmd/wuphf/main.go npm/package.json web/package-lock.json; do
+            if [ ! -e "$path" ]; then
+              echo "::error::missing ${path}; refusing to build or publish this tag"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
+
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
