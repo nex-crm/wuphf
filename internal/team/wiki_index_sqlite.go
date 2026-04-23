@@ -410,7 +410,10 @@ func (s *SQLiteFactStore) ResolveRedirect(ctx context.Context, slug string) (str
 
 // CanonicalHashFacts implements §7.4: sha256 over all fact rows sorted by ID.
 // Serialisation is identical to inMemoryFactStore so the contract test passes
-// against both backends from the same markdown corpus.
+// against both backends from the same markdown corpus. ReinforcedAt is
+// EXCLUDED from the hash input so two extraction runs on the same artifact
+// (the second one purely bumps reinforced_at) produce identical hashes.
+// End-to-end drift including reinforcement lives in CanonicalHashAll.
 func (s *SQLiteFactStore) CanonicalHashFacts(ctx context.Context) (string, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id FROM facts ORDER BY id ASC`)
@@ -447,6 +450,7 @@ func (s *SQLiteFactStore) CanonicalHashFacts(ctx context.Context) (string, error
 		if err != nil {
 			return "", fmt.Errorf("hash scan %s: %w", id, err)
 		}
+		f.ReinforcedAt = nil
 		b, err := json.Marshal(f)
 		if err != nil {
 			return "", err

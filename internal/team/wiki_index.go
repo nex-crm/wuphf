@@ -161,8 +161,17 @@ type FactStore interface {
 	// typed-predicate graph walk and counterfactual rewrite (Slice 2 Thread A).
 	ListFactsByTriplet(ctx context.Context, subject, predicate, objectPrefix string) ([]TypedFact, error)
 
-	CanonicalHashFacts(ctx context.Context) (string, error) // §7.4 rebuild check
-	CanonicalHashAll(ctx context.Context) (string, error)   // §7.4 composite: facts + entities + edges + redirects
+	// CanonicalHashFacts returns a stable hash over all indexed facts for
+	// the §7.4 rebuild contract. ReinforcedAt is EXCLUDED from the hash
+	// input so two extraction runs on the same artifact (the second one
+	// purely bumps reinforced_at) produce identical hashes. Use
+	// CanonicalHashAll for end-to-end drift detection where ReinforcedAt
+	// participates.
+	CanonicalHashFacts(ctx context.Context) (string, error)
+	// CanonicalHashAll is the composite §7.4 hash over facts + entities +
+	// edges + redirects. ReinforcedAt IS included here so the hash advances
+	// whenever any layer (including reinforcement) changes.
+	CanonicalHashAll(ctx context.Context) (string, error)
 	Close() error
 }
 
@@ -1004,7 +1013,12 @@ func (s *inMemoryFactStore) CanonicalHashFacts(_ context.Context) (string, error
 	sort.Strings(ids)
 	h := sha256.New()
 	for _, id := range ids {
-		b, err := json.Marshal(s.facts[id])
+		// ReinforcedAt is excluded from the facts hash so repeated extraction
+		// runs that only bump reinforced_at do not drift the hash. End-to-end
+		// drift detection lives in CanonicalHashAll.
+		clone := s.facts[id]
+		clone.ReinforcedAt = nil
+		b, err := json.Marshal(clone)
 		if err != nil {
 			return "", err
 		}
