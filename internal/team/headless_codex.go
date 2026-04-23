@@ -1512,7 +1512,13 @@ func wuphfLogDir() string {
 		return ""
 	}
 	dir := filepath.Join(home, ".wuphf", "logs")
-	_ = os.MkdirAll(dir, 0o700)
+	// Match the override branch: surface mkdir failures and degrade to
+	// "" rather than silently returning a directory we can't write into.
+	// appendHeadless*Log callers no-op on an empty dir.
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		fmt.Fprintf(os.Stderr, "wuphf: ~/.wuphf/logs unwritable (%v) — headless logging disabled\n", err)
+		return ""
+	}
 	return dir
 }
 
