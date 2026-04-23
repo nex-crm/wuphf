@@ -34,8 +34,8 @@ func TestComputeFactID_ExtendedTableCases(t *testing.T) {
 		{
 			name: "unicode_NFC_vs_NFD_normalization",
 			// é in NFC (U+00E9) vs NFD (U+0065 U+0301)
-			a: func() string { return ComputeFactID("sha", 1, "José", "role_at", "acme") },
-			b: func() string { return ComputeFactID("sha", 1, "José", "role_at", "acme") },
+			a:     func() string { return ComputeFactID("sha", 1, "José", "role_at", "acme") },
+			b:     func() string { return ComputeFactID("sha", 1, "José", "role_at", "acme") },
 			equal: true,
 		},
 		{
@@ -307,8 +307,8 @@ func TestIsLintReportPath(t *testing.T) {
 func TestIsFactLogPath_ExtendedCases(t *testing.T) {
 	t.Parallel()
 	cases := map[string]bool{
-		"wiki/facts/person/sarah-jones.jsonl":        true,
-		"wiki/facts/company/acme-corp.jsonl":         true,
+		"wiki/facts/person/sarah-jones.jsonl":          true,
+		"wiki/facts/company/acme-corp.jsonl":           true,
 		"team/entities/person-sarah-jones.facts.jsonl": true,
 		"team/entities/company-acme-corp.facts.jsonl":  true,
 		"wiki/facts/sarah-jones.jsonl":                 false, // missing kind segment
@@ -327,8 +327,8 @@ func TestIsFactLogPath_ExtendedCases(t *testing.T) {
 func TestParseEdgeTimestamp_Layouts(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name    string
-		in      string
+		name     string
+		in       string
 		wantZero bool
 	}{
 		{"rfc3339", "2026-04-10T09:00:00Z", false},

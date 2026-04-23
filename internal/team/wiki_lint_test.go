@@ -326,12 +326,12 @@ func TestLintResolveContradictionBoth(t *testing.T) {
 	factA := TypedFact{
 		ID: "bothA1", EntitySlug: "mark-lee", Type: "status",
 		Triplet: &Triplet{Subject: "mark-lee", Predicate: "role", Object: "cto"},
-		Text: "Mark is CTO.", Confidence: 0.8, ValidFrom: validFrom, CreatedAt: validFrom, CreatedBy: "archivist",
+		Text:    "Mark is CTO.", Confidence: 0.8, ValidFrom: validFrom, CreatedAt: validFrom, CreatedBy: "archivist",
 	}
 	factB := TypedFact{
 		ID: "bothB1", EntitySlug: "mark-lee", Type: "status",
 		Triplet: &Triplet{Subject: "mark-lee", Predicate: "role", Object: "coo"},
-		Text: "Mark is COO.", Confidence: 0.8, ValidFrom: validFrom, CreatedAt: validFrom, CreatedBy: "archivist",
+		Text:    "Mark is COO.", Confidence: 0.8, ValidFrom: validFrom, CreatedAt: validFrom, CreatedBy: "archivist",
 	}
 
 	seedTypedFact(t, idx, factA)

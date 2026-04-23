@@ -1414,7 +1414,7 @@ func writeJSONL(path string, rows interface{}) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	enc := json.NewEncoder(f)
 	enc.SetEscapeHTML(false)
 

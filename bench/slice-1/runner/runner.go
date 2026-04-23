@@ -157,7 +157,7 @@ func LoadCorpus(path string) ([]Artifact, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open corpus %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var arts []Artifact
 	sc := bufio.NewScanner(f)
@@ -185,7 +185,7 @@ func LoadQueries(path string) ([]Query, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open queries %s: %w", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var qs []Query
 	sc := bufio.NewScanner(f)
@@ -270,7 +270,7 @@ func MaterialiseCorpus(root string, arts []Artifact) (int, error) {
 		enc.SetEscapeHTML(false)
 		for _, tf := range grouped[slug] {
 			if err := enc.Encode(tf); err != nil {
-				f.Close()
+				_ = f.Close()
 				return total, fmt.Errorf("encode %s: %w", tf.ID, err)
 			}
 			total++
@@ -314,13 +314,13 @@ func Run(ctx context.Context, cfg Config) (*Aggregate, []QueryResult, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("mktemp: %w", err)
 	}
-	defer os.RemoveAll(tempRoot)
+	defer func() { _ = os.RemoveAll(tempRoot) }()
 
 	factCount, err := MaterialiseCorpus(tempRoot, arts)
 	if err != nil {
 		return nil, nil, err
 	}
-	fmt.Fprintf(out, "materialised %d facts across %d artifacts into %s\n",
+	_, _ = fmt.Fprintf(out, "materialised %d facts across %d artifacts into %s\n",
 		factCount, len(arts), tempRoot)
 
 	indexDir := filepath.Join(tempRoot, ".index")
@@ -328,14 +328,14 @@ func Run(ctx context.Context, cfg Config) (*Aggregate, []QueryResult, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("new index: %w", err)
 	}
-	defer idx.Close()
+	defer func() { _ = idx.Close() }()
 
 	t0 := time.Now()
 	if err := idx.ReconcileFromMarkdown(ctx); err != nil {
 		return nil, nil, fmt.Errorf("reconcile: %w", err)
 	}
 	reconcileMs := time.Since(t0).Milliseconds()
-	fmt.Fprintf(out, "reconciled in %d ms\n", reconcileMs)
+	_, _ = fmt.Fprintf(out, "reconciled in %d ms\n", reconcileMs)
 
 	// Query pass.
 	results := make([]QueryResult, 0, len(qs))
@@ -370,16 +370,13 @@ func Run(ctx context.Context, cfg Config) (*Aggregate, []QueryResult, error) {
 		}
 		recall, intersection := scoreRecall(q.ExpectedFactIDs, got)
 
+		// Out-of-scope queries (no expected fact IDs) auto-pass the recall
+		// gate by "vacuous truth" convention from README — the retriever
+		// should return nothing, and precision failures are flagged in the
+		// aggregate report below, not on the recall gate.
 		passed := true
-		if len(q.ExpectedFactIDs) > 0 {
-			if recall < q.ExpectedMinRecallAt20 {
-				passed = false
-			}
-		} else {
-			// Out-of-scope: retriever should ideally return nothing, but the
-			// "vacuous truth" convention from README means recall=1 automatically.
-			// We still flag precision failures for the OOS case below in the
-			// aggregate report, but we do not fail the gate on precision alone.
+		if len(q.ExpectedFactIDs) > 0 && recall < q.ExpectedMinRecallAt20 {
+			passed = false
 		}
 
 		res := QueryResult{

@@ -112,10 +112,10 @@ func TestDLQ_ProviderTimeoutHonorsDefault5(t *testing.T) {
 	ctx := context.Background()
 
 	entry := DLQEntry{
-		ArtifactSHA:        "provider-tmo-001",
-		ArtifactPath:       "wiki/artifacts/chat/provider-tmo-001.md",
-		Kind:               "chat",
-		ErrorCategory:      DLQCategoryProviderTimeout,
+		ArtifactSHA:   "provider-tmo-001",
+		ArtifactPath:  "wiki/artifacts/chat/provider-tmo-001.md",
+		Kind:          "chat",
+		ErrorCategory: DLQCategoryProviderTimeout,
 		// MaxRetries zero → default of 5
 		NextRetryNotBefore: time.Now().UTC().Add(-time.Second),
 	}

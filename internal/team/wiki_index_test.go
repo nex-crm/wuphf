@@ -76,7 +76,7 @@ func TestComputeFactID_Deterministic(t *testing.T) {
 
 func TestNormalizeForFactID(t *testing.T) {
 	cases := map[string]string{
-		"Sarah Jones":  "sarah-jones",
+		"Sarah Jones": "sarah-jones",
 		"  foo  bar ": "foo-bar",
 		"ACME_CORP!!": "acme-corp",
 		"a/b/c":       "a-b-c",

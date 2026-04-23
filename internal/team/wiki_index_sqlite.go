@@ -44,7 +44,7 @@ func NewSQLiteFactStore(path string) (*SQLiteFactStore, error) {
 
 	s := &SQLiteFactStore{db: db}
 	if err := s.applySchema(context.Background()); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("sqlite schema: %w", err)
 	}
 	return s, nil
@@ -294,7 +294,7 @@ func (s *SQLiteFactStore) ListFactsForEntity(ctx context.Context, slug string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanFacts(rows)
 }
 
@@ -305,7 +305,7 @@ func (s *SQLiteFactStore) ListEdgesForEntity(ctx context.Context, slug string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []IndexEdge
 	for rows.Next() {
 		var e IndexEdge
@@ -345,7 +345,7 @@ func (s *SQLiteFactStore) CanonicalHashFacts(ctx context.Context) (string, error
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
@@ -385,7 +385,6 @@ func (s *SQLiteFactStore) CanonicalHashFacts(ctx context.Context) (string, error
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-
 // CanonicalHashAll extends §7.4 to cover facts + entities + edges + redirects.
 // The per-table serialisation matches the in-memory implementation so contract
 // tests pass against both backends from the same markdown corpus.
@@ -402,12 +401,12 @@ func (s *SQLiteFactStore) CanonicalHashAll(ctx context.Context) (string, error) 
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return "", err
 		}
 		factIDs = append(factIDs, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return "", err
 	}
@@ -442,7 +441,7 @@ func (s *SQLiteFactStore) CanonicalHashAll(ctx context.Context) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("CanonicalHashAll entities: %w", err)
 	}
-	defer entRows.Close()
+	defer func() { _ = entRows.Close() }()
 	for entRows.Next() {
 		var e IndexEntity
 		var aliases sql.NullString
@@ -486,7 +485,7 @@ func (s *SQLiteFactStore) CanonicalHashAll(ctx context.Context) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("CanonicalHashAll edges: %w", err)
 	}
-	defer edgeRows.Close()
+	defer func() { _ = edgeRows.Close() }()
 	for edgeRows.Next() {
 		var e IndexEdge
 		var ts sql.NullString
@@ -516,7 +515,7 @@ func (s *SQLiteFactStore) CanonicalHashAll(ctx context.Context) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("CanonicalHashAll redirects: %w", err)
 	}
-	defer redRows.Close()
+	defer func() { _ = redRows.Close() }()
 	for redRows.Next() {
 		var r Redirect
 		var mergedAt sql.NullString

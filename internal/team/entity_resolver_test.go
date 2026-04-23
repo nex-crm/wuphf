@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // ── spySignalIndex ─────────────────────────────────────────────────────────────
@@ -339,10 +340,19 @@ func TestEntityResolverGate_SpyStore_SingleUpsertCall(t *testing.T) {
 
 	// Because SignalIndex is an interface, we need a wrapper type that delegates
 	// and counts. Use a closure struct.
+	//
+	// The wrapped EntityBySlug deliberately sleeps a few milliseconds so the
+	// gate's in-flight window stays open long enough for the remaining
+	// goroutines to arrive and coalesce. Without this, a sub-microsecond
+	// resolution finishes before any other goroutine enters the gate, and the
+	// dedup-count assertion below races (every goroutine then runs its own
+	// resolution, all 10 hit EntityBySlug, deduplication appears broken even
+	// though the gate is correct).
 	var slugCallCount atomic.Int64
 	wrapped := signalIndexFunc{
 		entityBySlug: func(ctx context.Context, slug string) (resolverEntity, bool, error) {
 			slugCallCount.Add(1)
+			time.Sleep(10 * time.Millisecond)
 			return base.EntityBySlug(ctx, slug)
 		},
 		entityByEmail: func(ctx context.Context, email string) (resolverEntity, bool, error) {

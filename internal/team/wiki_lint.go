@@ -315,10 +315,6 @@ func (l *Lint) rewriteFactInFile(ctx context.Context, root, absPath, id string, 
 	}
 	rel = filepath.ToSlash(rel)
 
-	slug := identity.Slug
-	if slug == "" {
-		slug = ArchivistAuthor
-	}
 	authorSlug := identity.Slug
 	if authorSlug == "" {
 		authorSlug = ArchivistAuthor

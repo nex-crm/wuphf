@@ -40,14 +40,14 @@ import (
 	"io/fs"
 	"log"
 	"os"
-
-	"golang.org/x/text/unicode/norm"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // TypedFact is the schema-aligned fact row used by the index.
@@ -56,23 +56,23 @@ import (
 // per §4.3 so legacy Fact rows (v1.2) parse cleanly with zero-value typed
 // fields — no backfill migration required.
 type TypedFact struct {
-	ID              string    `json:"id"`
-	EntitySlug      string    `json:"entity_slug"`
-	Kind            string    `json:"kind,omitempty"` // person | company | project | team | workspace
-	Type            string    `json:"type,omitempty"` // status | observation | relationship | background
-	Triplet         *Triplet  `json:"triplet,omitempty"`
-	Text            string    `json:"text"`
-	Confidence      float64   `json:"confidence,omitempty"`
-	ValidFrom       time.Time `json:"valid_from,omitempty"`
+	ID              string     `json:"id"`
+	EntitySlug      string     `json:"entity_slug"`
+	Kind            string     `json:"kind,omitempty"` // person | company | project | team | workspace
+	Type            string     `json:"type,omitempty"` // status | observation | relationship | background
+	Triplet         *Triplet   `json:"triplet,omitempty"`
+	Text            string     `json:"text"`
+	Confidence      float64    `json:"confidence,omitempty"`
+	ValidFrom       time.Time  `json:"valid_from,omitempty"`
 	ValidUntil      *time.Time `json:"valid_until,omitempty"`
-	Supersedes      []string  `json:"supersedes,omitempty"`
-	ContradictsWith []string  `json:"contradicts_with,omitempty"`
-	SourceType      string    `json:"source_type,omitempty"` // chat | meeting | email | manual | linkedin
-	SourcePath      string    `json:"source_path,omitempty"`
-	SentenceOffset  int       `json:"sentence_offset,omitempty"`
-	ArtifactExcerpt string    `json:"artifact_excerpt,omitempty"`
-	CreatedAt       time.Time `json:"created_at"`
-	CreatedBy       string    `json:"created_by"`
+	Supersedes      []string   `json:"supersedes,omitempty"`
+	ContradictsWith []string   `json:"contradicts_with,omitempty"`
+	SourceType      string     `json:"source_type,omitempty"` // chat | meeting | email | manual | linkedin
+	SourcePath      string     `json:"source_path,omitempty"`
+	SentenceOffset  int        `json:"sentence_offset,omitempty"`
+	ArtifactExcerpt string     `json:"artifact_excerpt,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	CreatedBy       string     `json:"created_by"`
 	ReinforcedAt    *time.Time `json:"reinforced_at,omitempty"`
 }
 
@@ -118,19 +118,19 @@ type IndexEdge struct {
 
 // Redirect maps a younger slug to its survivor (§7.2).
 type Redirect struct {
-	From       string    `json:"from"`
-	To         string    `json:"to"`
-	MergedAt   time.Time `json:"merged_at"`
-	MergedBy   string    `json:"merged_by"`
-	CommitSHA  string    `json:"commit_sha"`
+	From      string    `json:"from"`
+	To        string    `json:"to"`
+	MergedAt  time.Time `json:"merged_at"`
+	MergedBy  string    `json:"merged_by"`
+	CommitSHA string    `json:"commit_sha"`
 }
 
 // SearchHit is one result row from the text index.
 type SearchHit struct {
-	FactID   string  `json:"fact_id"`
-	Score    float64 `json:"score"`
-	Snippet  string  `json:"snippet,omitempty"`
-	Entity   string  `json:"entity_slug,omitempty"`
+	FactID  string  `json:"fact_id"`
+	Score   float64 `json:"score"`
+	Snippet string  `json:"snippet,omitempty"`
+	Entity  string  `json:"entity_slug,omitempty"`
 }
 
 // FactStore is the narrow interface the index uses for structured storage.
@@ -229,7 +229,7 @@ func NewPersistentWikiIndex(root string, indexDir string) (*WikiIndex, error) {
 	bleveDir := filepath.Join(indexDir, "bleve")
 	text, err := NewBleveTextIndex(bleveDir)
 	if err != nil {
-		store.Close()
+		_ = store.Close()
 		return nil, fmt.Errorf("wiki_index: bleve: %w", err)
 	}
 
@@ -283,7 +283,7 @@ func NormalizeForFactID(s string) string {
 // Same artifact + same extraction → same ID. Substrate guarantee.
 func ComputeFactID(artifactSHA string, sentenceOffset int, subject, predicate, object string) string {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s/%d/%s/%s/%s",
+	_, _ = fmt.Fprintf(h, "%s/%d/%s/%s/%s",
 		artifactSHA,
 		sentenceOffset,
 		NormalizeForFactID(subject),
@@ -942,7 +942,6 @@ func (s *inMemoryFactStore) CanonicalHashFacts(_ context.Context) (string, error
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
-
 
 func (s *inMemoryFactStore) CanonicalHashAll(_ context.Context) (string, error) {
 	s.mu.RLock()

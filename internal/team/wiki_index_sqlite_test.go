@@ -420,11 +420,11 @@ func TestSQLiteFactStore_FactWithNilOptionals(t *testing.T) {
 	s := openTestStore(t)
 
 	f := TypedFact{
-		ID:        "minimal001",
+		ID:         "minimal001",
 		EntitySlug: "alice",
-		Text:      "A minimal fact with no optional fields.",
-		CreatedAt: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
-		CreatedBy: "archivist",
+		Text:       "A minimal fact with no optional fields.",
+		CreatedAt:  time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+		CreatedBy:  "archivist",
 	}
 	if err := s.UpsertFact(ctx, f); err != nil {
 		t.Fatalf("UpsertFact: %v", err)

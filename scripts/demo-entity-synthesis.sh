@@ -169,6 +169,8 @@ print('null')
     continue
   fi
 
+  # pending_delta is read for documentation/logging; the loop pivots on ts changes.
+  # shellcheck disable=SC2034
   pending=$("$PY" -c "import json,sys; print(json.loads(sys.argv[1])['pending_delta'])" "$row")
   ts=$("$PY" -c "import json,sys; print(json.loads(sys.argv[1]).get('last_synthesized_ts',''))" "$row")
 

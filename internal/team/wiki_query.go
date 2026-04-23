@@ -84,12 +84,12 @@ type QuerySource struct {
 
 // llmQueryAnswer is the JSON shape the LLM emits, mapped from answer_query.tmpl.
 type llmQueryAnswer struct {
-	QueryClass     string `json:"query_class"`
-	AnswerMarkdown string `json:"answer_markdown"`
-	SourcesCited   []int  `json:"sources_cited"`
+	QueryClass     string  `json:"query_class"`
+	AnswerMarkdown string  `json:"answer_markdown"`
+	SourcesCited   []int   `json:"sources_cited"`
 	Confidence     float64 `json:"confidence"`
-	Coverage       string `json:"coverage"`
-	Notes          string `json:"notes,omitempty"`
+	Coverage       string  `json:"coverage"`
+	Notes          string  `json:"notes,omitempty"`
 }
 
 // templateVars holds the variables rendered into answer_query.tmpl.

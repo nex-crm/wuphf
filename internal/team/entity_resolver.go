@@ -311,5 +311,3 @@ func normalizeNameForMatch(s string) string {
 	}
 	return strings.TrimSpace(b.String())
 }
-
-

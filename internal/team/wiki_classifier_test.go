@@ -10,9 +10,9 @@ func TestClassifyQuery(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name       string
-		query      string
-		wantClass  QueryClass
+		name        string
+		query       string
+		wantClass   QueryClass
 		wantMinConf float64 // confidence must be >= this
 	}{
 		// ── status ────────────────────────────────────────────────────────────

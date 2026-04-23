@@ -320,11 +320,21 @@ func coerceDLQEntry(e DLQEntry, now time.Time) DLQEntry {
 	return e
 }
 
-// dlqBackoff returns min(10min × 2^retryCount, 6h).
+// dlqBackoff returns min(10min × 2^retryCount, 6h). Saturates at the ceiling
+// for any large retryCount so float overflow never produces a negative
+// duration.
 func dlqBackoff(retryCount int) time.Duration {
+	if retryCount < 0 {
+		retryCount = 0
+	}
+	// 2^16 × 10min ≈ 11.4 days, well past dlqMaxBackoff (6h). Past that
+	// the float would overflow on conversion to int64.
+	if retryCount > 16 {
+		return dlqMaxBackoff
+	}
 	multiplier := math.Pow(2, float64(retryCount))
 	dur := time.Duration(float64(dlqBaseBackoff) * multiplier)
-	if dur > dlqMaxBackoff {
+	if dur < 0 || dur > dlqMaxBackoff {
 		return dlqMaxBackoff
 	}
 	return dur

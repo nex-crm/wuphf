@@ -98,11 +98,11 @@ func runCase(casePath, repoRoot string) caseResult {
 	failures = append(failures, mr.failures...)
 
 	return caseResult{
-		suite:   suite,
-		caseID:  ec.ID,
-		pass:    len(failures) == 0,
+		suite:    suite,
+		caseID:   ec.ID,
+		pass:     len(failures) == 0,
 		failures: failures,
-		elapsed: time.Since(start),
+		elapsed:  time.Since(start),
 	}
 }
 

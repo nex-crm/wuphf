@@ -154,7 +154,6 @@ func (b *Broker) handleLintResolve(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 // resolveCallerIdentity extracts the HumanIdentity from the request context.
 // Falls back to the synthetic human identity when none is registered.
 func (b *Broker) resolveCallerIdentity(r *http.Request) HumanIdentity {

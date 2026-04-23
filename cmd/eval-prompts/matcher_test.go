@@ -305,8 +305,8 @@ func TestCombinedContractAllThreeTypes(t *testing.T) {
 	// Exercises all three matcher types together on a single case.
 	raw := `{"query_class":"status","coverage":"complete","answer_markdown":"Sarah is VP of Sales <sup>[1]</sup>."}`
 	parsed := map[string]any{
-		"query_class": "status",
-		"coverage":    "complete",
+		"query_class":     "status",
+		"coverage":        "complete",
 		"answer_markdown": "Sarah is VP of Sales <sup>[1]</sup>.",
 	}
 	expected := expectedBlock{
