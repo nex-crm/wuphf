@@ -229,15 +229,16 @@ function CheckIcon() {
 }
 
 /**
- * Inline "↵ Enter" hint for primary CTAs. Purely decorative — the real
+ * Inline Enter-key hint for primary CTAs. Purely decorative — the real
  * Enter handling lives at the Wizard level so it works from anywhere on
- * the step, not just when the button has focus.
+ * the step, not just when the button has focus. Pass `modifier` (e.g.
+ * ⌘/Ctrl) when the step binds ⌘+Enter instead of plain Enter.
  */
-function EnterHint({ label = 'Enter' }: { label?: string }) {
+function EnterHint({ modifier }: { modifier?: string } = {}) {
   return (
     <span className="kbd-hint" aria-hidden="true">
+      {modifier && <Kbd size="sm" variant="inverse">{modifier}</Kbd>}
       <Kbd size="sm" variant="inverse">↵</Kbd>
-      {label}
     </span>
   )
 }
@@ -1159,7 +1160,7 @@ function TaskStep({
           <button className="btn btn-primary" onClick={onNext} type="button">
             Review setup
             <ArrowIcon />
-            <EnterHint label={`${MOD_KEY} Enter`} />
+            <EnterHint modifier={MOD_KEY} />
           </button>
         </div>
       </div>
