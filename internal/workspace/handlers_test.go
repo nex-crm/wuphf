@@ -94,8 +94,8 @@ func TestShredHandlerWipesWorkspace(t *testing.T) {
 	for _, label := range []string{"onboarded", "company", "brokerState", "officeTasks", "workflow"} {
 		assertGone(t, label, paths[label])
 	}
-	// History preserved even when we can't assert every preserved path here.
-	assertStays(t, "session", paths["session"])
+	// Runtime history is wiped, but in-flight task worktrees remain on disk.
+	assertGone(t, "session", paths["session"])
 	assertStays(t, "worktree", paths["worktree"])
 }
 

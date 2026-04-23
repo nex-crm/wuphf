@@ -514,6 +514,8 @@ type Broker struct {
 	// produce a truncated/overlaid file.
 	configMu           sync.Mutex
 	server             *http.Server
+	shutdownOnce       sync.Once
+	shutdownCh         chan struct{}
 	token              string          // shared secret for authenticating requests
 	addr               string          // actual listen address (useful when port=0)
 	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
@@ -891,6 +893,7 @@ func NewBroker() *Broker {
 	b := &Broker{
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
+		shutdownCh:          make(chan struct{}),
 		messageSubscribers:  make(map[int]chan channelMessage),
 		actionSubscribers:   make(map[int]chan officeActionLog),
 		activity:            make(map[string]agentActivitySnapshot),
@@ -1543,10 +1546,16 @@ func (b *Broker) StartOnPort(port int) error {
 	// completeFn posts the first task as a human message and seeds the team.
 	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
-	// These are disk-only; the caller reloads or re-launches to rebuild state.
+	// Shred requests launcher shutdown after the response so live in-memory
+	// broker state cannot write stale messages back onto disk.
 	// Auth-gated via requireAuth because shred permanently deletes state and
 	// must not be reachable without the broker token.
-	workspace.RegisterRoutes(mux, b.requireAuth)
+	workspace.RegisterRoutesWithOptions(mux, workspace.RouteOptions{
+		AuthMiddleware: b.requireAuth,
+		AfterShred: func(workspace.Result) {
+			b.requestShutdown()
+		},
+	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -1602,6 +1611,26 @@ func (b *Broker) Stop() {
 	if pamDisp != nil {
 		pamDisp.Stop()
 	}
+}
+
+// ShutdownRequested is closed when a destructive operation needs the launcher
+// process to stop after the HTTP response has reached the client.
+func (b *Broker) ShutdownRequested() <-chan struct{} {
+	if b.shutdownCh == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return b.shutdownCh
+}
+
+func (b *Broker) requestShutdown() {
+	if b == nil || b.shutdownCh == nil {
+		return
+	}
+	b.shutdownOnce.Do(func() {
+		close(b.shutdownCh)
+	})
 }
 
 func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
