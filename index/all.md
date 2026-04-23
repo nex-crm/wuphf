@@ -2,6 +2,10 @@
 
 _Auto-generated. Do not edit by hand — agents regenerate this on every commit._
 
+## team/companies
+
+- [HubSpot](../team/companies/hubspot.md) _(updated 2026-04-23T03:45:41Z)_
+
 ## team/people
 
 - [Nazz](../team/people/nazz.md) _(updated 2026-04-23T03:45:41Z)_
