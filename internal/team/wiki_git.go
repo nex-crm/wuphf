@@ -81,23 +81,35 @@ type Repo struct {
 	mu         sync.Mutex
 }
 
+// unscopedWikiRootAllowed gates WikiRootDir / WikiBackupDir access when
+// WUPHF_RUNTIME_HOME is unset. Production keeps it true; a *_test.go init
+// flips it to false so any future test that wires up a real wiki Repo
+// without first setting WUPHF_RUNTIME_HOME to a tempdir panics up front
+// instead of silently touching the developer's real ~/.wuphf/wiki.
+var unscopedWikiRootAllowed = true
+
 // WikiRootDir returns the canonical on-disk path for the team wiki.
 // It honours config.RuntimeHomeDir so dev runs stay isolated from prod.
 func WikiRootDir() string {
-	home := strings.TrimSpace(config.RuntimeHomeDir())
-	if home == "" {
-		return filepath.Join(".wuphf", "wiki")
-	}
-	return filepath.Join(home, ".wuphf", "wiki")
+	return wikiDirForSegment("wiki")
 }
 
 // WikiBackupDir returns the path to the lightweight backup mirror.
 func WikiBackupDir() string {
+	return wikiDirForSegment("wiki.bak")
+}
+
+func wikiDirForSegment(segment string) string {
+	runtimeOverride := strings.TrimSpace(os.Getenv("WUPHF_RUNTIME_HOME"))
+	if runtimeOverride == "" && !unscopedWikiRootAllowed {
+		panic("team: WikiRootDir called under tests without WUPHF_RUNTIME_HOME set — " +
+			"set t.Setenv(\"WUPHF_RUNTIME_HOME\", t.TempDir()) or inject a Repo via NewRepoAt(...)")
+	}
 	home := strings.TrimSpace(config.RuntimeHomeDir())
 	if home == "" {
-		return filepath.Join(".wuphf", "wiki.bak")
+		return filepath.Join(".wuphf", segment)
 	}
-	return filepath.Join(home, ".wuphf", "wiki.bak")
+	return filepath.Join(home, ".wuphf", segment)
 }
 
 // NewRepo returns a Repo rooted at the resolved wiki path.

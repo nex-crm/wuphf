@@ -20,6 +20,10 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 	// Redirect config file to a temp HOME so we don't clobber user state.
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	// Pair HOME with WUPHF_RUNTIME_HOME so config.RuntimeHomeDir resolves
+	// to this test's tmpdir instead of the process-level leaked home
+	// from worktree_guard_test's init.
+	t.Setenv("WUPHF_RUNTIME_HOME", tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, ".wuphf"), 0o700); err != nil {
 		t.Fatal(err)
 	}

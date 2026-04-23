@@ -1915,6 +1915,17 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
 
+	oldPrepare := prepareTaskWorktree
+	oldCleanup := cleanupTaskWorktree
+	prepareTaskWorktree = func(taskID string) (string, string, error) {
+		return filepath.Join(tmpDir, "wuphf-task-"+taskID), "wuphf-" + taskID, nil
+	}
+	cleanupTaskWorktree = func(string, string) error { return nil }
+	defer func() {
+		prepareTaskWorktree = oldPrepare
+		cleanupTaskWorktree = oldCleanup
+	}()
+
 	oldWakeLead := headlessWakeLeadFn
 	headlessWakeLeadFn = func(_ *Launcher, _ string) {}
 	defer func() { headlessWakeLeadFn = oldWakeLead }()
@@ -2068,6 +2079,17 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 	stateDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(stateDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldStatePath }()
+
+	oldPrepare := prepareTaskWorktree
+	oldCleanup := cleanupTaskWorktree
+	prepareTaskWorktree = func(taskID string) (string, string, error) {
+		return filepath.Join(stateDir, "wuphf-task-"+taskID), "wuphf-" + taskID, nil
+	}
+	cleanupTaskWorktree = func(string, string) error { return nil }
+	defer func() {
+		prepareTaskWorktree = oldPrepare
+		cleanupTaskWorktree = oldCleanup
+	}()
 
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{

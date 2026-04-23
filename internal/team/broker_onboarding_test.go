@@ -329,7 +329,7 @@ func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
 	}
 
 	// Fresh broker instance re-reads state from disk.
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	reloaded.mu.Lock()
 	slugs := make([]string, 0, len(reloaded.members))
 	for _, m := range reloaded.members {

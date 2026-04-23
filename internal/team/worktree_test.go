@@ -67,6 +67,7 @@ func TestCleanupPersistedTaskWorktreesMissingStateIsNoOp(t *testing.T) {
 }
 
 func TestDefaultPrepareTaskWorktreeOverlaysDirtyWorkspace(t *testing.T) {
+	allowRealTaskWorktreeForTest(t)
 	repoDir := t.TempDir()
 	worktreeRoot := filepath.Join(t.TempDir(), "task-worktrees")
 	oldCwd, err := os.Getwd()
@@ -176,6 +177,7 @@ func TestDefaultPrepareTaskWorktreeOverlaysDirtyWorkspace(t *testing.T) {
 }
 
 func TestDefaultPrepareTaskWorktreeOverlaysCompletedSiblingTaskWorkspace(t *testing.T) {
+	allowRealTaskWorktreeForTest(t)
 	repoDir := t.TempDir()
 	worktreeRoot := filepath.Join(t.TempDir(), "task-worktrees")
 	stateDir := t.TempDir()
@@ -278,6 +280,7 @@ func TestDefaultPrepareTaskWorktreeOverlaysCompletedSiblingTaskWorkspace(t *test
 }
 
 func TestDefaultPrepareTaskWorktreeSkipsDuplicateAndMissingCompletedSiblingSources(t *testing.T) {
+	allowRealTaskWorktreeForTest(t)
 	repoDir := t.TempDir()
 	worktreeRoot := filepath.Join(t.TempDir(), "task-worktrees")
 	stateDir := t.TempDir()

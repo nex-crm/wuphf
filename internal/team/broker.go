@@ -884,6 +884,14 @@ func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
 }
 
 // NewBroker creates a new channel broker with a random auth token.
+// skipBrokerStateLoadOnConstruct gates the lazy read of brokerStatePath()
+// inside NewBroker. Production keeps it false so the CLI resumes from disk
+// state. A *_test.go init flips it to true so tests that call NewBroker get
+// a fresh broker by default, immune to state leaked by prior tests via a
+// shared broker-state.json. Persistence tests that want the load call
+// b.loadState() explicitly after construction.
+var skipBrokerStateLoadOnConstruct = false
+
 func NewBroker() *Broker {
 	b := &Broker{
 		channelStore:        channel.NewStore(),
@@ -907,7 +915,9 @@ func NewBroker() *Broker {
 		agentRateLimitWindow:   defaultAgentRateLimitWindow,
 		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
 	}
-	_ = b.loadState()
+	if !skipBrokerStateLoadOnConstruct {
+		_ = b.loadState()
+	}
 	b.mu.Lock()
 	b.ensureDefaultOfficeMembersLocked()
 	b.ensureDefaultChannelsLocked()

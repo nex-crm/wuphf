@@ -16,6 +16,22 @@ var cleanupTaskWorktree = defaultCleanupTaskWorktree
 var taskWorktreeRootDir = defaultTaskWorktreeRootDir
 var verifyTaskWorktreeWritable = defaultVerifyTaskWorktreeWritable
 
+// allowRealTaskWorktree gates access to the real git-worktree codepath. In
+// production it stays true; an init() in a *_test.go file in this package
+// flips it to false so test runs cannot accidentally register a real worktree
+// against the developer's `wuphf` repo. Tests that legitimately need the real
+// codepath (always against a tempdir-rooted repo) opt in via
+// allowRealTaskWorktreeForTest(t), which scopes the re-enable to one test.
+var allowRealTaskWorktree = true
+
+// errRealTaskWorktreeDisabled is returned by defaultPrepareTaskWorktree when
+// it is called from a test that has not opted into the real codepath. The
+// message names the opt-in helper so the fix is immediate.
+var errRealTaskWorktreeDisabled = fmt.Errorf(
+	"defaultPrepareTaskWorktree disabled in tests: call allowRealTaskWorktreeForTest(t) " +
+		"or monkey-patch prepareTaskWorktree",
+)
+
 var overlaySourceWorkspaceSkipExact = map[string]struct{}{
 	".playwright-cli": {},
 	".playwright-mcp": {},
@@ -28,6 +44,9 @@ var overlaySourceWorkspaceSkipPrefixes = []string{
 }
 
 func defaultPrepareTaskWorktree(taskID string) (string, string, error) {
+	if !allowRealTaskWorktree {
+		return "", "", errRealTaskWorktreeDisabled
+	}
 	repoRoot, err := gitRepoRoot()
 	if err != nil {
 		return "", "", err

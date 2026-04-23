@@ -43,18 +43,15 @@ pre-push:
   parallel: true
   commands:
     test:
-      # internal/team is excluded from the local pre-push smoke run because
-      # its broker/wiki/entity suite has pre-existing test isolation bugs:
-      # WikiRootDir() falls back to a CWD-relative `.wuphf/wiki` when
-      # WUPHF_RUNTIME_HOME is unset, so concurrent wiki worker /
-      # synthesizer goroutines across tests write to the same dir and race
-      # on `.git/refs/heads/main.lock`. Worse, the racing wiki commits can
-      # also touch the invoking worktree's `.git/worktrees/<name>/index.lock`
-      # and corrupt its branch state.
-      # CI runs the full suite (including team) on every PR, so the only
-      # thing this exclusion changes is the local pre-push signal. Restore
-      # the package once the test isolation is fixed (separate follow-up).
-      run: go test $(go list ./... | grep -v /internal/team)
+      # internal/team's former test-isolation bugs (shared ~/.wuphf/wiki,
+      # worktrees registered against the invoking repo, cross-test state
+      # leakage via broker-state.json) are now guarded at the package
+      # level: worktree_guard_test.go flips allowRealTaskWorktree and
+      # unscopedWikiRootAllowed off for tests, installs safe stub
+      # prepare/cleanup worktree funcs, and skips the NewBroker auto-load
+      # so every test starts from a clean slate. Persistence tests opt
+      # back in via reloadedBroker(t). Full suite runs on pre-push again.
+      run: go test ./...
     build:
       run: go build -o /dev/null ./cmd/wuphf
     vhs:

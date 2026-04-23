@@ -104,7 +104,12 @@ func TestAgentPaneSlugsOneOnOneUsesOnlySelectedAgent(t *testing.T) {
 }
 
 func TestNewLauncherFromScratchUsesGenericOffice(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// Pair HOME with WUPHF_RUNTIME_HOME so NewLauncher reads from this
+	// test's tmpdir instead of the process-level leaked runtime home
+	// installed by worktree_guard_test's init.
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
 	t.Setenv("WUPHF_START_FROM_SCRATCH", "1")
 
 	l, err := NewLauncher("from-scratch")
@@ -2150,6 +2155,17 @@ func TestRelevantTaskForTargetCrossChannel(t *testing.T) {
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
+
+	oldPrepare := prepareTaskWorktree
+	oldCleanup := cleanupTaskWorktree
+	prepareTaskWorktree = func(taskID string) (string, string, error) {
+		return filepath.Join(tmpDir, "wuphf-task-"+taskID), "wuphf-" + taskID, nil
+	}
+	cleanupTaskWorktree = func(string, string) error { return nil }
+	defer func() {
+		prepareTaskWorktree = oldPrepare
+		cleanupTaskWorktree = oldCleanup
+	}()
 
 	b := NewBroker()
 
