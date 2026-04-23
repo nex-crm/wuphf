@@ -317,6 +317,8 @@ Reinforcement is a read-side concept: when the same `fact_id` is re-extracted, o
 
 **`ReinforcedAt` hash policy.** `CanonicalHashFacts` EXCLUDES `reinforced_at` from its input, so two extraction runs on the same artifact (the second one purely bumping `reinforced_at`) produce an identical hash. That makes `CanonicalHashFacts` the load-bearing rebuild-invariance check. `CanonicalHashAll` INCLUDES `reinforced_at` (alongside entities, edges, and redirects) and so advances whenever any layer — reinforcement included — changes. Use `CanonicalHashAll` for end-to-end drift detection and `CanonicalHashFacts` for the rebuild contract test.
 
+**Append-failure closure.** When `EnqueueFactLogAppend` fails (queue saturated, local I/O, git error), the failure is routed to the DLQ under the dedicated `fact_log_persist` category — NOT `provider_timeout`. The replay path retries the APPEND only, reading the current fact log and appending any missing `fact_id`s. Re-running extraction would treat the fact as reinforcement per §7.3 and never write the missing JSONL line, permanently breaking §7.4 for that fact. See §11.13 for category details.
+
 ---
 
 ## 8. Decay & temporal validity
@@ -456,14 +458,22 @@ The DLQ (`wiki/.dlq/extractions.jsonl`) holds extraction failures that are eligi
   "artifact_path": "wiki/artifacts/chat/3f9a21bc.md",
   "kind": "chat",
   "last_error": "json_parse_error: expected { got \"\`\`\`json\\n{\"",
-  "error_category": "parse | provider_timeout | validation",
+  "error_category": "parse | provider_timeout | validation | fact_log_persist",
   "retry_count": 2,
   "max_retries": 5,
   "first_failed_at": "2026-04-22T13:00:00Z",
   "last_attempted_at": "2026-04-22T15:10:00Z",
-  "next_retry_not_before": "2026-04-22T15:20:00Z"
+  "next_retry_not_before": "2026-04-22T15:20:00Z",
+  "fact_log_append": {
+    "kind": "person",
+    "slug": "sarah-chen",
+    "artifact_sha": "3f9a21bc",
+    "jsonl_lines": "{\"id\":\"a3f9b2c14e8d\",...}\n"
+  }
 }
 ```
+
+`fact_log_append` is populated only for `error_category = "fact_log_persist"`. Carries the exact state needed for the append-replay path to reconstruct the `AppendFactLog` call without re-running extraction — see the §7.4 closure guarantee below.
 
 #### Tombstone rows
 
@@ -485,6 +495,17 @@ and a full DLQ entry is written to `permanent-failures.jsonl`.
 - `error_category = "validation"` automatically sets `max_retries = 1` — programming errors are never retried past the first attempt.
 - After `max_retries` attempts the entry moves to `permanent-failures.jsonl` and is excluded from the active replay queue.
 - `ReadyForReplay` scans the full file and skips any `artifact_sha` that has a matching `resolved_at` or `promoted_at` tombstone.
+
+#### Error categories
+
+| category | source | replay path |
+|---|---|---|
+| `parse` | LLM returned malformed JSON | re-run extraction via `ExtractFromArtifact` |
+| `provider_timeout` | LLM call failed / cancelled / index mutation failed | re-run extraction via `ExtractFromArtifact` |
+| `validation` | programming-class error (bad path, template failure) | re-run extraction once, then promote |
+| `fact_log_persist` | fact-log JSONL append failed AFTER extraction succeeded | re-run APPEND only — never re-run extraction (§7.4 closure) |
+
+`fact_log_persist` is distinct from `provider_timeout` because re-running extraction is not a valid replay for an append failure. Extraction would treat the fact as reinforcement (`reinforced_at` bump only, no new JSONL line — see §7.3), and the on-disk fact log would never recover. The replay handler instead reads the current fact log, dedupes by `fact_id`, and appends any missing lines via `EnqueueFactLogAppend`. The composite DLQ key for a `fact_log_persist` entry is `factlog:{kind}:{slug}:{artifact_sha}` so concurrent append failures for different entities from the same artifact never clobber each other under the last-write-wins keying of `readLatestStateLocked`.
 
 ---
 
