@@ -63,6 +63,10 @@ type Extractor struct {
 	// now returns the current time; overridable in tests for deterministic
 	// created_at / valid_from values.
 	now func() time.Time
+	// appendFactLog is the fact-log append seam. Defaults to
+	// worker.EnqueueFactLogAppend. Tests override to simulate
+	// ErrQueueSaturated without fighting the worker's drain lifecycle.
+	appendFactLog func(ctx context.Context, slug, path, content, commitMsg string) (string, int, error)
 }
 
 // NewExtractor constructs an Extractor. All arguments except `now` are
@@ -73,7 +77,7 @@ func NewExtractor(provider QueryProvider, worker *WikiWorker, dlq *DLQ, index *W
 		// The template is embedded and known-valid; a parse error is a build-time bug.
 		panic(fmt.Sprintf("wiki_extractor: parse embedded template: %v", err))
 	}
-	return &Extractor{
+	ex := &Extractor{
 		provider: provider,
 		worker:   worker,
 		gate:     newEntityResolverGate(),
@@ -82,11 +86,22 @@ func NewExtractor(provider QueryProvider, worker *WikiWorker, dlq *DLQ, index *W
 		tmpl:     tmpl,
 		now:      func() time.Time { return time.Now().UTC() },
 	}
+	ex.appendFactLog = func(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+		return worker.EnqueueFactLogAppend(ctx, slug, path, content, commitMsg)
+	}
+	return ex
 }
 
 // SetNow overrides the clock used for created_at / valid_from defaults.
 // Test-only hook.
 func (e *Extractor) SetNow(now func() time.Time) { e.now = now }
+
+// setAppendFactLog overrides the fact-log append seam. Test-only — used to
+// simulate ErrQueueSaturated deterministically without racing the worker's
+// drain goroutine.
+func (e *Extractor) setAppendFactLog(fn func(ctx context.Context, slug, path, content, commitMsg string) (string, int, error)) {
+	e.appendFactLog = fn
+}
 
 // ── Prompt template context ───────────────────────────────────────────────────
 
@@ -382,10 +397,11 @@ func (e *Extractor) apply(ctx context.Context, out extractionOutput, artifactPat
 // it, the fact lives only in the derived index cache and evaporates on
 // `rm -rf .wuphf/index/`.
 //
-// Errors are logged (and routed through the DLQ for optional replay) but
-// never propagated — the in-memory submission already succeeded, so failing
-// the extractor here would cause SubmitFacts re-execution on replay and
-// break the §7.3 reinforcement invariant.
+// Errors are logged and routed through the DLQ under the dedicated
+// DLQCategoryFactLogPersist category so ReplayDLQ can retry the append
+// without re-running extraction. Re-running extraction would skip the fact
+// as reinforcement (§7.3) and the JSONL line would never be written,
+// permanently breaking §7.4 for that fact.
 func (e *Extractor) persistFactLogs(ctx context.Context, artifactSHA string, facts []TypedFact) {
 	if len(facts) == 0 || e.worker == nil {
 		return
@@ -415,21 +431,26 @@ func (e *Extractor) persistFactLogs(ctx context.Context, artifactSHA string, fac
 	}
 	msg := fmt.Sprintf("archivist: extract facts from %s", artifactSHA)
 	for key, batch := range groups {
-		body, err := serializeFactsAsJSONL(batch)
-		if err != nil {
-			log.Printf("wiki_extractor: serialize fact log for %s/%s: %v", key.kind, key.slug, err)
+		body, serErr := serializeFactsAsJSONL(batch)
+		if serErr != nil {
+			// Should be unreachable now that serializeFactsAsJSONL collects
+			// partials — but keep the guard so a future invariant change
+			// cannot silently swallow a whole batch.
+			log.Printf("wiki_extractor: serialize fact log for %s/%s: %v", key.kind, key.slug, serErr)
 			continue
 		}
 		if body == "" {
 			continue
 		}
 		path := factLogPath(key.kind, key.slug)
-		if _, _, err := e.worker.EnqueueFactLogAppend(ctx, ArchivistAuthor, path, body, msg); err != nil {
+		if _, _, err := e.appendFactLog(ctx, ArchivistAuthor, path, body, msg); err != nil {
 			log.Printf("wiki_extractor: append fact log %s: %v", path, err)
-			// The artifact is committed and SubmitFacts succeeded. Route the
-			// append failure to the DLQ so a later ReplayDLQ call can retry,
-			// but do NOT double-fail the extractor (SubmitFacts already ran).
-			e.queueDLQ(ctx, artifactSHA, path, key.kind, fmt.Errorf("append fact log: %w", err), DLQCategoryProviderTimeout)
+			// SubmitFacts already ran. Route the append failure to the DLQ
+			// under the dedicated fact-log-persist category so ReplayDLQ
+			// retries the APPEND (not the full extraction). Retrying the
+			// full extraction would treat every fact as reinforcement and
+			// never write the missing JSONL lines. See §7.4.
+			e.queueFactLogPersistDLQ(ctx, artifactSHA, key.kind, key.slug, path, body, err)
 		}
 	}
 }
@@ -442,6 +463,15 @@ func factLogPath(kind, slug string) string {
 
 // serializeFactsAsJSONL marshals each TypedFact as one JSON object per line,
 // terminated by '\n'. Returns "" when the input is empty.
+//
+// A marshal failure on any single fact is logged and that fact is skipped —
+// the remaining facts in the batch are still serialized and returned. An
+// earlier version aborted the whole batch on the first failure, silently
+// dropping every sibling fact in the same (kind, slug) group and breaking
+// the §7.4 substrate guarantee for every fact that came after the bad
+// record. That trade-off was strictly worse than losing one pathological
+// fact — TypedFact has no pointers to types that json/encoding would fail
+// on under normal operation, so the skip path is defensive only.
 func serializeFactsAsJSONL(facts []TypedFact) (string, error) {
 	if len(facts) == 0 {
 		return "", nil
@@ -450,12 +480,39 @@ func serializeFactsAsJSONL(facts []TypedFact) (string, error) {
 	for i := range facts {
 		line, err := json.Marshal(facts[i])
 		if err != nil {
-			return "", fmt.Errorf("marshal fact %s: %w", facts[i].ID, err)
+			log.Printf("wiki_extractor: skipping unmarshalable fact %s in batch: %v", facts[i].ID, err)
+			continue
 		}
 		b.Write(line)
 		b.WriteByte('\n')
 	}
 	return b.String(), nil
+}
+
+// queueFactLogPersistDLQ routes a fact-log append failure to the DLQ under
+// the dedicated DLQCategoryFactLogPersist category. The entry carries the
+// exact JSONL lines the original append tried to write so ReplayDLQ can
+// reconstruct the call without re-running extraction.
+func (e *Extractor) queueFactLogPersistDLQ(ctx context.Context, artifactSHA, kind, slug, path, body string, appendErr error) {
+	if e.dlq == nil {
+		return
+	}
+	entry := DLQEntry{
+		ArtifactSHA:   FactLogAppendSHA(kind, slug, artifactSHA),
+		ArtifactPath:  path,
+		Kind:          kind,
+		LastError:     appendErr.Error(),
+		ErrorCategory: DLQCategoryFactLogPersist,
+		FactLogAppend: &FactLogAppendPayload{
+			Kind:        kind,
+			Slug:        slug,
+			ArtifactSHA: artifactSHA,
+			JSONLLines:  body,
+		},
+	}
+	if enqErr := e.dlq.Enqueue(ctx, entry); enqErr != nil {
+		log.Printf("wiki_extractor: enqueue fact-log-persist DLQ for %s/%s: %v", kind, slug, enqErr)
+	}
 }
 
 // ── DLQ plumbing ──────────────────────────────────────────────────────────────
@@ -479,9 +536,16 @@ func (e *Extractor) queueDLQ(ctx context.Context, sha, path, kind string, err er
 	}
 }
 
-// ReplayDLQ walks the DLQ replay queue and re-runs ExtractFromArtifact on
-// each ready entry. Success → MarkResolved tombstone; failure → RecordAttempt
-// so the entry either backs off or promotes to permanent-failures.jsonl.
+// ReplayDLQ walks the DLQ replay queue and retries each ready entry. Routing
+// depends on the ErrorCategory:
+//
+//   - DLQCategoryFactLogPersist: re-attempt the JSONL append only (no
+//     extraction rerun). Re-running extraction would skip the fact as
+//     reinforcement and the append would never recover — see §7.4.
+//   - everything else: re-run ExtractFromArtifact on the artifact.
+//
+// Success → MarkResolved tombstone; failure → RecordAttempt so the entry
+// either backs off or promotes to permanent-failures.jsonl.
 //
 // Returns (processed, retired, err) where processed is the number of entries
 // attempted, retired is the count that moved out of the active queue
@@ -497,12 +561,13 @@ func (e *Extractor) ReplayDLQ(ctx context.Context) (int, int, error) {
 	var processed, retired int
 	for _, entry := range ready {
 		processed++
-		if err := e.ExtractFromArtifact(ctx, entry.ArtifactPath); err != nil {
+		retiredThis, handledErr := e.replayDLQEntry(ctx, entry)
+		if handledErr != nil {
 			cat := string(entry.ErrorCategory)
 			if cat == "" {
 				cat = string(DLQCategoryProviderTimeout)
 			}
-			if recErr := e.dlq.RecordAttempt(ctx, entry.ArtifactSHA, err, cat); recErr != nil {
+			if recErr := e.dlq.RecordAttempt(ctx, entry.ArtifactSHA, handledErr, cat); recErr != nil {
 				log.Printf("wiki_extractor: record attempt for %s: %v", entry.ArtifactSHA, recErr)
 				continue
 			}
@@ -518,8 +583,142 @@ func (e *Extractor) ReplayDLQ(ctx context.Context) (int, int, error) {
 			continue
 		}
 		retired++
+		_ = retiredThis
 	}
 	return processed, retired, nil
+}
+
+// replayDLQEntry dispatches one DLQ entry to the right retry path based on
+// its ErrorCategory. Returns (retiredImmediately, err); err != nil means the
+// retry failed and the caller should RecordAttempt.
+func (e *Extractor) replayDLQEntry(ctx context.Context, entry DLQEntry) (bool, error) {
+	if entry.ErrorCategory == DLQCategoryFactLogPersist {
+		if err := e.replayFactLogAppend(ctx, entry); err != nil {
+			return false, err
+		}
+		return true, nil
+	}
+	if err := e.ExtractFromArtifact(ctx, entry.ArtifactPath); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// replayFactLogAppend retries a failed fact-log JSONL append. It is
+// idempotent: the on-disk file is consulted first and any fact_id that is
+// already present is dropped from the append payload before re-enqueueing.
+// If every payload line is already on disk the retry is treated as resolved
+// with a no-op, which is the intended behaviour when the prior attempt
+// actually landed on disk but this process missed the success signal.
+func (e *Extractor) replayFactLogAppend(ctx context.Context, entry DLQEntry) error {
+	if entry.FactLogAppend == nil {
+		return fmt.Errorf("replay fact-log append: missing payload on entry %q", entry.ArtifactSHA)
+	}
+	payload := *entry.FactLogAppend
+	kind := strings.TrimSpace(payload.Kind)
+	slug := strings.TrimSpace(payload.Slug)
+	if kind == "" || slug == "" {
+		return fmt.Errorf("replay fact-log append: empty kind/slug in payload")
+	}
+	path := factLogPath(kind, slug)
+
+	// Dedupe by fact_id against the current on-disk fact log — the prior
+	// attempt may have partially landed, or a concurrent extraction may have
+	// reinforced these facts via a different code path and persisted them
+	// already. Either way, append only the fact_ids that are still missing.
+	onDisk, err := e.readFactIDsFromFactLog(path)
+	if err != nil {
+		return fmt.Errorf("replay fact-log append: read existing: %w", err)
+	}
+
+	missing, err := filterMissingJSONLLines(payload.JSONLLines, onDisk)
+	if err != nil {
+		return fmt.Errorf("replay fact-log append: filter missing: %w", err)
+	}
+	if missing == "" {
+		// Every line already present — nothing to do. Treat as success so
+		// ReplayDLQ writes the resolved tombstone and this entry leaves the
+		// active queue.
+		return nil
+	}
+
+	artifactSHA := payload.ArtifactSHA
+	if artifactSHA == "" {
+		artifactSHA = entry.ArtifactSHA
+	}
+	msg := fmt.Sprintf("archivist: replay fact-log append for %s", artifactSHA)
+	if _, _, err := e.appendFactLog(ctx, ArchivistAuthor, path, missing, msg); err != nil {
+		return fmt.Errorf("replay fact-log append %s: %w", path, err)
+	}
+	return nil
+}
+
+// readFactIDsFromFactLog reads wiki/facts/{kind}/{slug}.jsonl and returns
+// the set of fact_ids currently on disk. A missing file returns an empty
+// set (the typical first-retry case). Malformed lines are skipped with a
+// log — reconcile applies the same tolerance.
+func (e *Extractor) readFactIDsFromFactLog(relPath string) (map[string]struct{}, error) {
+	if e.worker == nil || e.worker.Repo() == nil {
+		return map[string]struct{}{}, nil
+	}
+	full := filepath.Join(e.worker.Repo().Root(), filepath.FromSlash(relPath))
+	data, err := os.ReadFile(full)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]struct{}{}, nil
+		}
+		return nil, err
+	}
+	ids := make(map[string]struct{})
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		var probe struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
+			// Tolerate malformed rows — the same posture reconcile takes.
+			continue
+		}
+		if probe.ID != "" {
+			ids[probe.ID] = struct{}{}
+		}
+	}
+	return ids, nil
+}
+
+// filterMissingJSONLLines returns the subset of `lines` whose fact_id is
+// NOT already present in `onDisk`. Lines that cannot be parsed as a JSON
+// object with an `id` field are passed through unchanged — they were valid
+// in the original append attempt and the retry should carry them forward.
+func filterMissingJSONLLines(lines string, onDisk map[string]struct{}) (string, error) {
+	if lines == "" {
+		return "", nil
+	}
+	var b strings.Builder
+	for _, line := range strings.Split(lines, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		var probe struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal([]byte(trimmed), &probe); err != nil {
+			// Preserve verbatim — caller validated the payload at queue time.
+			b.WriteString(line)
+			b.WriteByte('\n')
+			continue
+		}
+		if _, already := onDisk[probe.ID]; already {
+			continue
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

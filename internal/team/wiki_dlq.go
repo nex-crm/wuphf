@@ -53,7 +53,46 @@ const (
 	DLQCategoryParse           DLQErrorCategory = "parse"
 	DLQCategoryProviderTimeout DLQErrorCategory = "provider_timeout"
 	DLQCategoryValidation      DLQErrorCategory = "validation"
+	// DLQCategoryFactLogPersist is the category for a fact-log JSONL append
+	// that failed AFTER the extraction LLM call succeeded and SubmitFacts
+	// applied the in-memory index mutation. These are local I/O / git /
+	// queue-saturation failures — NOT provider timeouts — so they carry
+	// their own category (different metrics bucket, same backoff curve)
+	// and a dedicated replay path that re-tries the append without
+	// re-running the LLM (which would skip reinforced rows and leave the
+	// JSONL permanently missing). See §7.4 substrate guarantee.
+	DLQCategoryFactLogPersist DLQErrorCategory = "fact_log_persist"
 )
+
+// FactLogAppendPayload carries the state needed to retry a failed fact-log
+// JSONL append without re-running extraction. Populated on entries whose
+// ErrorCategory is DLQCategoryFactLogPersist.
+//
+// The payload captures the exact JSONL lines the original append tried to
+// write (one JSON-encoded TypedFact per line, newline-terminated) along with
+// the target kind/slug and the originating artifact SHA — enough for the
+// replay handler to reconstruct the EnqueueFactLogAppend call and
+// deterministically dedupe by fact_id against the current on-disk file.
+type FactLogAppendPayload struct {
+	Kind        string `json:"kind"`
+	Slug        string `json:"slug"`
+	ArtifactSHA string `json:"artifact_sha"`
+	// JSONLLines is the raw multi-line content the append was attempting to
+	// write. Preserving the bytes verbatim keeps the content hash stable
+	// across retries.
+	JSONLLines string `json:"jsonl_lines"`
+}
+
+// FactLogAppendSHA synthesises the DLQ row key for a fact-log append failure.
+// One artifact extraction can produce append failures for multiple
+// (kind, slug) groups; using the raw artifact SHA would collide across them
+// in readLatestStateLocked. The synthesized form
+// "factlog:{kind}:{slug}:{artifactSHA}" is unique per target file, never
+// collides with an extraction-class entry, and keeps the rest of the DLQ
+// contract unchanged (tombstones, retry bookkeeping, last-write-wins).
+func FactLogAppendSHA(kind, slug, artifactSHA string) string {
+	return "factlog:" + kind + ":" + slug + ":" + artifactSHA
+}
 
 // DLQEntry is one row in wiki/.dlq/extractions.jsonl.
 // All time fields are RFC3339 UTC strings on the wire.
@@ -68,6 +107,10 @@ type DLQEntry struct {
 	FirstFailedAt      time.Time        `json:"first_failed_at"`
 	LastAttemptedAt    time.Time        `json:"last_attempted_at"`
 	NextRetryNotBefore time.Time        `json:"next_retry_not_before"`
+	// FactLogAppend is populated only when ErrorCategory is
+	// DLQCategoryFactLogPersist. Carries the state needed for the
+	// append-specific replay path; unused/nil for extraction-class entries.
+	FactLogAppend *FactLogAppendPayload `json:"fact_log_append,omitempty"`
 }
 
 // dlqTombstone is the append-only tombstone written when an entry is resolved
