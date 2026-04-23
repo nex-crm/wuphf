@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -14,9 +13,10 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/nex"
 	"github.com/nex-crm/wuphf/internal/operations"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
-var initFlowLookPathFn = exec.LookPath
+var initFlowLookPathFn = runtimebin.LookPath
 
 type initReadinessCheck struct {
 	Label  string

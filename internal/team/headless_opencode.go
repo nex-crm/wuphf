@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
 // Opencode-specific test hooks. Kept separate from the codex hooks so test
 // setups can stub one runtime without colliding with the other.
 var (
-	headlessOpencodeLookPath       = exec.LookPath
+	headlessOpencodeLookPath       = runtimebin.LookPath
 	headlessOpencodeCommandContext = exec.CommandContext
 	headlessOpencodeExecutablePath = os.Executable
 )

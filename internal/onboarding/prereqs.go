@@ -1,8 +1,12 @@
 package onboarding
 
 import (
+	"context"
 	"os/exec"
 	"strings"
+	"time"
+
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
 // PrereqResult describes the detection outcome for a single prerequisite binary.
@@ -56,9 +60,9 @@ func CheckAll() []PrereqResult {
 	return results
 }
 
-// CheckOne probes a single binary by name. It runs exec.LookPath to confirm
-// the binary exists on PATH, then invokes `<name> --version` to capture the
-// version string. If LookPath fails the binary is considered absent and the
+// CheckOne probes a single binary by name. It resolves from PATH plus common
+// CLI install directories, then invokes `<name> --version` to capture the
+// version string. If resolution fails the binary is considered absent and the
 // version field is left empty.
 func CheckOne(name string) PrereqResult {
 	spec := prereqSpecs[name]
@@ -68,15 +72,17 @@ func CheckOne(name string) PrereqResult {
 		InstallURL: spec.installURL,
 	}
 
-	if _, err := exec.LookPath(name); err != nil {
-		// Binary not on PATH.
+	path, err := runtimebin.LookPath(name)
+	if err != nil {
 		return r
 	}
 	r.Found = true
 	r.OK = true
 
 	// Best-effort version capture; ignore errors.
-	out, err := exec.Command(name, "--version").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, path, "--version").Output()
 	if err == nil {
 		r.Version = parseVersion(string(out))
 	}

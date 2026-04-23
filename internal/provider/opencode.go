@@ -13,10 +13,11 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
 var (
-	opencodeLookPath = exec.LookPath
+	opencodeLookPath = runtimebin.LookPath
 	opencodeCommand  = exec.Command
 	opencodeGetwd    = os.Getwd
 )

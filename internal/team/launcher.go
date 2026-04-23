@@ -36,6 +36,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 	"github.com/nex-crm/wuphf/internal/setup"
 )
 
@@ -255,7 +256,7 @@ func isOnboarded() bool {
 func (l *Launcher) Preflight() error {
 	if l.usesCodexRuntime() {
 		if l.usesOpencodeRuntime() {
-			if _, err := exec.LookPath("opencode"); err != nil {
+			if _, err := runtimebin.LookPath("opencode"); err != nil {
 				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
 			}
 			return nil
@@ -4572,7 +4573,7 @@ func (l *Launcher) PreflightWeb() error {
 	}
 	if l.usesCodexRuntime() {
 		if l.usesOpencodeRuntime() {
-			if _, err := exec.LookPath("opencode"); err != nil {
+			if _, err := runtimebin.LookPath("opencode"); err != nil {
 				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
 			}
 			return nil
