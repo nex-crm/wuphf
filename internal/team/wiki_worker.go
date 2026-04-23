@@ -111,6 +111,11 @@ type wikiWriteRequest struct {
 	// wiki/facts/**/*.jsonl or team/entities/*.facts.jsonl (used by lint
 	// ResolveContradiction to update supersedes/valid_until/contradicts_with).
 	IsFactLog bool
+	// IsFactLogAppend routes to Repo.AppendFactLog — append-only writes to
+	// wiki/facts/**/*.jsonl. Used by the extractor to close the substrate
+	// guarantee (§7.4): every successfully-submitted fact lands in markdown
+	// so a wipe + reconcile rebuilds to a logically-identical index.
+	IsFactLogAppend bool
 	// IsArtifact routes the request to Repo.CommitArtifact — writes the raw
 	// source artifact under wiki/artifacts/{kind}/{sha}.md. Never regens the
 	// catalog; triggers the extractor hook on success.
@@ -343,6 +348,8 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.CommitLintReport(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsFactLog {
 		sha, n, err = w.repo.CommitFactLog(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsFactLogAppend {
+		sha, n, err = w.repo.AppendFactLog(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsNotebook {
 		// Notebook writes do NOT regen the team wiki index. Commit target is
 		// agents/{slug}/notebook/... — scoped to the author.
@@ -1201,6 +1208,8 @@ func (w *WikiWorker) Index() *WikiIndex {
 // EnqueueFactLog submits a fact-log mutation to the shared wiki queue.
 // The path must be wiki/facts/**/*.jsonl or team/entities/*.facts.jsonl.
 // Used by lint ResolveContradiction to update supersedes/valid_until/contradicts_with.
+// `content` is the FULL replacement body for the file (not a diff).
+// Prefer EnqueueFactLogAppend for the extractor append path.
 func (w *WikiWorker) EnqueueFactLog(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
 	if !w.running.Load() {
 		return "", 0, ErrWorkerStopped
@@ -1226,5 +1235,42 @@ func (w *WikiWorker) EnqueueFactLog(ctx context.Context, slug, path, content, co
 		return result.SHA, result.BytesWritten, result.Err
 	case <-waitCtx.Done():
 		return "", 0, fmt.Errorf("wiki: fact log write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// EnqueueFactLogAppend appends JSONL content to a fact-log file via the
+// shared single-writer queue. `content` is only the new lines — the worker
+// reads the existing file, concatenates, and commits. Used by the extractor
+// to close the §7.4 substrate guarantee: every successfully-submitted fact
+// lands in markdown so a wipe + reconcile rebuilds to a logically-identical
+// index.
+//
+// The read-modify-write happens inside the worker's repo mutex (AppendFactLog),
+// so callers MUST NOT bypass the queue — that would race two appenders.
+func (w *WikiWorker) EnqueueFactLogAppend(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:            slug,
+		Path:            path,
+		Content:         content,
+		Mode:            "append",
+		CommitMsg:       commitMsg,
+		IsFactLogAppend: true,
+		ReplyCh:         make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: fact log append timed out after %s", wikiWriteTimeout)
 	}
 }
