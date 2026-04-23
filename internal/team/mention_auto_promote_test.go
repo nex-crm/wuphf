@@ -207,38 +207,29 @@ func TestAutoPromote_EndToEnd_HumanTagsPM_DispatchesToPM(t *testing.T) {
 	// Now dispatch: the launcher should wake PM (not CEO absorbing it).
 	l.deliverMessageNotification(msg)
 
-	// Wait for at least one dispatch, then non-blocking drain. Avoids paying
-	// the full deadline on every green-path run.
+	// Wait until PM is dispatched, with a hard deadline. Both CEO (the lead)
+	// and PM (the @-tagged specialist) get enqueued — they run concurrently in
+	// separate goroutines, so the order PM vs CEO arrives at `processed` is
+	// non-deterministic, and either one may take longer under system load
+	// (the previous "first dispatch + non-blocking drain" pattern flaked
+	// under hook concurrency: CEO arrived first, drain ran to empty, PM was
+	// still in flight, test failed even though dispatch was correct).
+	deadline := time.After(2 * time.Second)
 	var slugs []string
-	select {
-	case turn := <-processed:
-		if idx := strings.Index(turn, "|"); idx > 0 {
-			slugs = append(slugs, turn[:idx])
-		}
-	case <-time.After(500 * time.Millisecond):
-		t.Fatalf("stage 2: no dispatch within 500ms after @pm message")
-	}
-drain:
+waitLoop:
 	for {
 		select {
 		case turn := <-processed:
 			if idx := strings.Index(turn, "|"); idx > 0 {
-				slugs = append(slugs, turn[:idx])
+				slug := turn[:idx]
+				slugs = append(slugs, slug)
+				if slug == "pm" {
+					break waitLoop
+				}
 			}
-		default:
-			break drain
+		case <-deadline:
+			t.Fatalf("stage 2: PM was not dispatched within 2s after @pm message (CEO absorbed it). turns=%v", slugs)
 		}
-	}
-
-	pmWoken := false
-	for _, s := range slugs {
-		if s == "pm" {
-			pmWoken = true
-			break
-		}
-	}
-	if !pmWoken {
-		t.Fatalf("stage 2: PM was not dispatched after @pm message (CEO absorbed it). turns=%v", slugs)
 	}
 }
 
