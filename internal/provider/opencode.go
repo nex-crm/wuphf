@@ -13,13 +13,26 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
 var (
-	opencodeLookPath = exec.LookPath
+	opencodeLookPath = runtimebin.LookPath
 	opencodeCommand  = exec.Command
 	opencodeGetwd    = os.Getwd
 )
+
+func init() {
+	Register(&Entry{
+		Kind:     KindOpencode,
+		StreamFn: CreateOpencodeCLIStreamFn,
+		OneShot:  RunOpencodeOneShot,
+		Capabilities: Capabilities{
+			PaneEligible:    false,
+			SupportsOneShot: true,
+		},
+	})
+}
 
 // CreateOpencodeCLIStreamFn returns a StreamFn that runs the Opencode CLI
 // non-interactively. Each invocation is ephemeral: WUPHF owns the conversation

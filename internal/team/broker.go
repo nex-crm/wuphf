@@ -514,6 +514,8 @@ type Broker struct {
 	// produce a truncated/overlaid file.
 	configMu           sync.Mutex
 	server             *http.Server
+	shutdownOnce       sync.Once
+	shutdownCh         chan struct{}
 	token              string          // shared secret for authenticating requests
 	addr               string          // actual listen address (useful when port=0)
 	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
@@ -537,6 +539,9 @@ type Broker struct {
 	agentRateLimitRequests  int
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
+
+	stopCh   chan struct{} // closed by Stop(); signals background goroutines to exit
+	stopOnce sync.Once
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -896,6 +901,7 @@ func NewBroker() *Broker {
 	b := &Broker{
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
+		shutdownCh:          make(chan struct{}),
 		messageSubscribers:  make(map[int]chan channelMessage),
 		actionSubscribers:   make(map[int]chan officeActionLog),
 		activity:            make(map[string]agentActivitySnapshot),
@@ -923,6 +929,17 @@ func NewBroker() *Broker {
 	b.ensureDefaultChannelsLocked()
 	b.normalizeLoadedStateLocked()
 	b.mu.Unlock()
+	b.stopCh = make(chan struct{})
+	if activityWatchdogEnabled {
+		// Watchdog: reap agents stuck in "active"/"thinking" when the spawn
+		// crashed before reaching the idle transition. Stopped via b.stopCh.
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-b.stopCh
+			cancel()
+		}()
+		go b.runActivityWatchdog(ctx)
+	}
 	return b
 }
 
@@ -1157,6 +1174,174 @@ func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	b.mu.Unlock()
 }
 
+// duplicateBroadcastWindow is how recent an earlier broadcast from the same
+// agent in the same channel+thread must be to count as a duplicate. Set tight
+// so legitimate quick follow-ups still land, but tight enough to catch the
+// "same turn, paraphrased again" pattern that agents produce.
+const duplicateBroadcastWindow = 30 * time.Second
+
+// duplicateBroadcastSimilarity is the lower bound at which two messages are
+// considered near-duplicates. 1.0 means "byte-identical"; we pick 0.85 to
+// catch paraphrased restatements while letting actual new content through.
+const duplicateBroadcastSimilarity = 0.85
+
+// isDuplicateAgentBroadcastLocked returns true when the agent has already
+// posted a nearly-identical message to the same (channel, thread) pair within
+// duplicateBroadcastWindow. Must be called with b.mu held.
+func (b *Broker) isDuplicateAgentBroadcastLocked(sender, channel, replyTo, content string) bool {
+	newNorm := normalizeBroadcastContent(content)
+	if newNorm == "" {
+		return false
+	}
+	cutoff := time.Now().UTC().Add(-duplicateBroadcastWindow)
+	// Walk backwards — most recent messages are at the end.
+	for i := len(b.messages) - 1; i >= 0; i-- {
+		prev := b.messages[i]
+		ts, err := time.Parse(time.RFC3339, prev.Timestamp)
+		if err == nil && ts.Before(cutoff) {
+			break
+		}
+		if prev.From != sender {
+			continue
+		}
+		if normalizeChannelSlug(prev.Channel) != channel {
+			continue
+		}
+		if strings.TrimSpace(prev.ReplyTo) != strings.TrimSpace(replyTo) {
+			continue
+		}
+		prevNorm := normalizeBroadcastContent(prev.Content)
+		if prevNorm == "" {
+			continue
+		}
+		if jaccardWordSimilarity(newNorm, prevNorm) >= duplicateBroadcastSimilarity {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeBroadcastContent lowercases and collapses whitespace so trivial
+// formatting drift does not defeat the dedup check.
+func normalizeBroadcastContent(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// jaccardWordSimilarity returns the Jaccard similarity of the two strings'
+// whitespace-split word sets. 1.0 = identical word sets; 0.0 = disjoint.
+// Cheap and good enough to catch "ship it" / "ship it 🚀" style paraphrases.
+func jaccardWordSimilarity(a, b string) float64 {
+	wa := uniqueWordSet(a)
+	wb := uniqueWordSet(b)
+	if len(wa) == 0 || len(wb) == 0 {
+		return 0
+	}
+	inter := 0
+	for w := range wa {
+		if _, ok := wb[w]; ok {
+			inter++
+		}
+	}
+	union := len(wa) + len(wb) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+func uniqueWordSet(s string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, w := range strings.Fields(s) {
+		// Strip leading/trailing ASCII punctuation so "court," and "court"
+		// collapse to the same token for Jaccard. Keeps intra-word characters
+		// like apostrophes inside "reviewer's".
+		w = strings.TrimFunc(w, func(r rune) bool {
+			switch r {
+			case '.', ',', ';', ':', '!', '?', '—', '–', '-', '"', '\'', '(', ')', '[', ']', '`':
+				return true
+			}
+			return false
+		})
+		if w == "" {
+			continue
+		}
+		out[w] = struct{}{}
+	}
+	return out
+}
+
+// activityWatchdogEnabled controls whether NewBroker starts the background
+// activity-watchdog goroutine. Tests that create many short-lived brokers set
+// this to false via TestMain so goroutines don't accumulate and cause
+// goleak/timeout failures. Production always runs with the default (true).
+var activityWatchdogEnabled = true
+
+// staleActivityThreshold is how long an agent can stay in a non-idle/non-error
+// activity state before the watchdog forcibly resets it to idle. Set long
+// enough to cover normal long turns (tool chains, big edits) but short enough
+// that a crashed spawn does not leave the agent looking "active" for hours —
+// which blocks the CEO's "Already active in this thread" re-route guard and
+// prevents the specialist from being dispatched again.
+const staleActivityThreshold = 5 * time.Minute
+
+// reapStaleActivityLocked transitions any agent whose LastTime is older than
+// staleActivityThreshold from "active"/"thinking"/"tool_use" back to "idle".
+// Must be called with b.mu held. Returns the slugs that were reset so the
+// caller can emit activity-change events after releasing the lock.
+func (b *Broker) reapStaleActivityLocked(now time.Time) []agentActivitySnapshot {
+	if len(b.activity) == 0 {
+		return nil
+	}
+	var reset []agentActivitySnapshot
+	for slug, snap := range b.activity {
+		status := strings.ToLower(strings.TrimSpace(snap.Status))
+		if status == "" || status == "idle" || status == "error" {
+			continue
+		}
+		lastTime, err := time.Parse(time.RFC3339, snap.LastTime)
+		if err != nil {
+			// Unparseable LastTime means we cannot age the entry safely; leave it.
+			continue
+		}
+		if now.Sub(lastTime) < staleActivityThreshold {
+			continue
+		}
+		snap.Status = "idle"
+		snap.Activity = "idle"
+		snap.Detail = "stale activity reaped (no progress for " + staleActivityThreshold.String() + ")"
+		snap.LastTime = now.UTC().Format(time.RFC3339)
+		b.activity[slug] = snap
+		reset = append(reset, snap)
+	}
+	return reset
+}
+
+// runActivityWatchdog scans the in-memory activity map every minute and
+// resets agents that have been stuck in a non-terminal state past
+// staleActivityThreshold. Stops when ctx is done so NewBroker can tear it
+// down alongside the rest of the broker's lifecycle.
+func (b *Broker) runActivityWatchdog(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			b.mu.Lock()
+			reset := b.reapStaleActivityLocked(now)
+			for _, snap := range reset {
+				b.publishActivityLocked(snap)
+			}
+			b.mu.Unlock()
+		}
+	}
+}
+
 // Token returns the shared secret that agents must include in requests.
 func (b *Broker) Token() string {
 	return b.token
@@ -1371,10 +1556,16 @@ func (b *Broker) StartOnPort(port int) error {
 	// completeFn posts the first task as a human message and seeds the team.
 	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
-	// These are disk-only; the caller reloads or re-launches to rebuild state.
+	// Shred requests launcher shutdown after the response so live in-memory
+	// broker state cannot write stale messages back onto disk.
 	// Auth-gated via requireAuth because shred permanently deletes state and
 	// must not be reachable without the broker token.
-	workspace.RegisterRoutes(mux, b.requireAuth)
+	workspace.RegisterRoutesWithOptions(mux, workspace.RouteOptions{
+		AuthMiddleware: b.requireAuth,
+		AfterShred: func(workspace.Result) {
+			b.requestShutdown()
+		},
+	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -1408,6 +1599,11 @@ func (b *Broker) StartOnPort(port int) error {
 
 // Stop shuts down the broker.
 func (b *Broker) Stop() {
+	if b.stopCh != nil {
+		b.stopOnce.Do(func() {
+			close(b.stopCh)
+		})
+	}
 	if b.server != nil {
 		_ = b.server.Close()
 	}
@@ -1425,6 +1621,26 @@ func (b *Broker) Stop() {
 	if pamDisp != nil {
 		pamDisp.Stop()
 	}
+}
+
+// ShutdownRequested is closed when a destructive operation needs the launcher
+// process to stop after the HTTP response has reached the client.
+func (b *Broker) ShutdownRequested() <-chan struct{} {
+	if b.shutdownCh == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return b.shutdownCh
+}
+
+func (b *Broker) requestShutdown() {
+	if b == nil || b.shutdownCh == nil {
+		return
+	}
+	b.shutdownOnce.Do(func() {
+		close(b.shutdownCh)
+	})
 }
 
 func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
@@ -7254,10 +7470,26 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// any registered agent slug. Everything else — "system", "nex", future
 	// synthetic senders — is excluded by default so automation posts do not
 	// accidentally wake agents on every @-reference they quote.
+	//
+	// Exception: when the human explicitly tags the lead (CEO), do not
+	// auto-promote OTHER agents mentioned in the body. Example:
+	// "@ceo ask @reviewer to ..." — the human's intent is for CEO to route,
+	// not for the broker to fan out in parallel. Without this guard the
+	// reviewer gets notified twice (by auto-promote AND later by CEO's
+	// explicit tag), spawning two turns with nearly identical answers.
 	tagged := uniqueSlugs(body.Tagged)
 	sender := normalizeActorSlug(body.From)
-	if b.senderMayAutoPromoteLocked(sender) {
-		for _, slug := range extractMentionedSlugs(body.Content) {
+	isHuman := sender == "" || sender == "you" || sender == "human"
+	leadSlug := officeLeadSlugFrom(b.members)
+	mentionedSlugs := extractMentionedSlugs(body.Content)
+	leadExplicitlyTagged := leadSlug != "" && containsString(tagged, leadSlug)
+	if isHuman && !leadExplicitlyTagged && leadSlug != "" && containsString(mentionedSlugs, leadSlug) && b.findMemberLocked(leadSlug) != nil {
+		tagged = append(tagged, leadSlug)
+		leadExplicitlyTagged = true
+	}
+	suppressAutoPromote := isHuman && leadExplicitlyTagged
+	if b.senderMayAutoPromoteLocked(sender) && !suppressAutoPromote {
+		for _, slug := range mentionedSlugs {
 			if slug == sender {
 				continue
 			}
@@ -7302,6 +7534,29 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		tagged = uniqueSlugs(append(tagged, threadParticipants...))
+	}
+
+	// Dedup near-identical consecutive broadcasts from the same agent in the
+	// same channel + thread within a short window. Observed symptom: a single
+	// CEO turn emits 2-3 team_broadcast calls with the same content in
+	// slightly different wording, each costing a full round-trip downstream.
+	// The prompt tells the model "at most one broadcast per turn", but that
+	// rule is routinely ignored; this is the broker-side safety net.
+	//
+	// Humans and system senders are exempt — this only fires for agent posts.
+	if !isHuman && sender != "" && sender != "system" && sender != "nex" {
+		if b.isDuplicateAgentBroadcastLocked(sender, channel, replyTo, body.Content) {
+			b.counter--
+			b.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":         "",
+				"deduped":    true,
+				"total":      len(b.messages),
+				"suppressed": "duplicate broadcast from the same agent in the same thread within the dedup window",
+			})
+			return
+		}
 	}
 
 	msg := channelMessage{

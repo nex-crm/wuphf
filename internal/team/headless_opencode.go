@@ -14,12 +14,13 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
 // Opencode-specific test hooks. Kept separate from the codex hooks so test
 // setups can stub one runtime without colliding with the other.
 var (
-	headlessOpencodeLookPath       = exec.LookPath
+	headlessOpencodeLookPath       = runtimebin.LookPath
 	headlessOpencodeCommandContext = exec.CommandContext
 	headlessOpencodeExecutablePath = os.Executable
 )
@@ -84,10 +85,13 @@ func (l *Launcher) runHeadlessOpencodeTurn(ctx context.Context, slug string, not
 	if workspaceDir != strings.TrimSpace(l.cwd) {
 		env = append(env, "WUPHF_WORKTREE_PATH="+workspaceDir)
 	}
-	if err := l.writeHeadlessOpencodeMCPConfig(slug); err != nil {
+	opencodeConfigPath, err := l.writeHeadlessOpencodeMCPConfig(slug)
+	if err != nil {
 		// MCP failure is loud but non-fatal — opencode will still run, just
 		// without the wuphf-office tools. Log so the user can debug.
 		appendHeadlessCodexLog(slug, "opencode_mcp-config-failed: "+err.Error())
+	} else {
+		env = setEnvValue(env, "OPENCODE_CONFIG", opencodeConfigPath)
 	}
 	cmd.Env = env
 
@@ -287,28 +291,31 @@ func escapeHeadlessOpencodeSystemWrapper(s string) string {
 	return s
 }
 
-// writeHeadlessOpencodeMCPConfig merges WUPHF's MCP server definition into the
-// user's $HOME/.config/opencode/opencode.json. Preserves any other top-level
-// keys (theme, provider preferences, user-configured MCP servers) and only
-// touches the wuphf-office entry under `mcp`. Secrets live in the MCP
-// subprocess's `environment` block so they never reach the model backend
-// opencode routes to.
-func (l *Launcher) writeHeadlessOpencodeMCPConfig(slug string) error {
+// writeHeadlessOpencodeMCPConfig merges WUPHF's MCP server definition into an
+// agent-scoped Opencode config derived from the user's normal
+// $HOME/.config/opencode/opencode.json. The caller passes the returned path via
+// OPENCODE_CONFIG, so concurrent agents do not race to rewrite a shared config
+// with different WUPHF_AGENT_SLUG values. Preserves other top-level user keys
+// (theme, provider preferences, user-configured MCP servers) and only touches
+// the wuphf-office entry under `mcp`. Secrets live in the MCP subprocess's
+// `environment` block so they never reach the model backend opencode routes to.
+func (l *Launcher) writeHeadlessOpencodeMCPConfig(slug string) (string, error) {
 	wuphfBinary, err := headlessOpencodeExecutablePath()
 	if err != nil {
-		return fmt.Errorf("resolve wuphf binary: %w", err)
+		return "", fmt.Errorf("resolve wuphf binary: %w", err)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
-		return fmt.Errorf("resolve user home: %w", err)
+		return "", fmt.Errorf("resolve user home: %w", err)
 	}
-	configPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	baseConfigPath := filepath.Join(home, ".config", "opencode", "opencode.json")
+	configPath := headlessOpencodeAgentConfigPath(home, slug)
 	if err := os.MkdirAll(filepath.Dir(configPath), 0o755); err != nil {
-		return fmt.Errorf("mkdir opencode config dir: %w", err)
+		return "", fmt.Errorf("mkdir opencode config dir: %w", err)
 	}
 
 	merged := map[string]any{}
-	if raw, err := os.ReadFile(configPath); err == nil && len(raw) > 0 {
+	if raw, err := os.ReadFile(baseConfigPath); err == nil && len(raw) > 0 {
 		// Best-effort: if the existing file isn't valid JSON, overwrite it
 		// rather than silently losing the WUPHF overlay.
 		_ = json.Unmarshal(raw, &merged)
@@ -326,12 +333,62 @@ func (l *Launcher) writeHeadlessOpencodeMCPConfig(slug string) error {
 
 	data, err := json.MarshalIndent(merged, "", "  ")
 	if err != nil {
-		return fmt.Errorf("marshal opencode.json: %w", err)
+		return "", fmt.Errorf("marshal opencode config: %w", err)
 	}
-	if err := os.WriteFile(configPath, data, 0o600); err != nil {
-		return fmt.Errorf("write opencode.json: %w", err)
+	// os.Rename on the same filesystem is atomic (POSIX), so readers always see
+	// either the old complete file or the new complete file — never a half-write.
+	tmp, err := os.CreateTemp(filepath.Dir(configPath), ".opencode-*.json")
+	if err != nil {
+		return "", fmt.Errorf("create temp opencode config: %w", err)
 	}
-	return nil
+	tmpPath := tmp.Name()
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("chmod temp opencode config: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("write temp opencode config: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("close temp opencode config: %w", err)
+	}
+	if err := os.Rename(tmpPath, configPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("install opencode config: %w", err)
+	}
+	return configPath, nil
+}
+
+func headlessOpencodeAgentConfigPath(home string, slug string) string {
+	return filepath.Join(home, ".config", "opencode", "opencode."+safeHeadlessOpencodeConfigSlug(slug)+".json")
+}
+
+func safeHeadlessOpencodeConfigSlug(slug string) string {
+	slug = normalizeActorSlug(slug)
+	if slug == "" {
+		slug = "agent"
+	}
+	var b strings.Builder
+	for _, r := range slug {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "agent"
+	}
+	return b.String()
 }
 
 // buildHeadlessOpencodeMCPEntry constructs the `mcp.wuphf-office` block for

@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go SQLite driver
@@ -75,6 +76,7 @@ CREATE TABLE IF NOT EXISTS facts (
 );
 CREATE INDEX IF NOT EXISTS idx_facts_entity   ON facts(entity_slug);
 CREATE INDEX IF NOT EXISTS idx_facts_triplet  ON facts(triplet_subject, triplet_predicate);
+CREATE INDEX IF NOT EXISTS idx_facts_triplet_pred_obj ON facts(triplet_predicate, triplet_object);
 
 CREATE TABLE IF NOT EXISTS entities (
   slug                    TEXT PRIMARY KEY,
@@ -116,6 +118,10 @@ func (s *SQLiteFactStore) applySchema(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, sqliteSchema)
 	return err
 }
+
+// likeEscaper escapes the three SQL LIKE metacharacters so a raw user-supplied
+// prefix string matches only itself when used with `... LIKE ? ESCAPE '\'`.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
 // --- FactStore interface --------------------------------------------------
 
@@ -293,6 +299,72 @@ func (s *SQLiteFactStore) ListFactsForEntity(ctx context.Context, slug string) (
 		 ORDER BY created_at ASC`, slug)
 	if err != nil {
 		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return scanFacts(rows)
+}
+
+// ListFactsByPredicateObject returns every fact whose triplet predicate+object
+// match exactly. Backed by idx_facts_triplet_pred_obj.
+func (s *SQLiteFactStore) ListFactsByPredicateObject(ctx context.Context, predicate, object string) ([]TypedFact, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, entity_slug, kind, type,
+		        triplet_subject, triplet_predicate, triplet_object,
+		        text, confidence, valid_from, valid_until,
+		        supersedes, contradicts_with,
+		        source_type, source_path, sentence_offset, artifact_excerpt,
+		        created_at, created_by, reinforced_at
+		 FROM facts
+		 WHERE triplet_predicate = ? AND triplet_object = ?
+		 ORDER BY id ASC`, predicate, object)
+	if err != nil {
+		return nil, fmt.Errorf("ListFactsByPredicateObject: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanFacts(rows)
+}
+
+// ListFactsByTriplet returns every fact whose triplet matches (subject, predicate)
+// and whose triplet.object starts with objectPrefix. Empty objectPrefix matches
+// any object. Backed by idx_facts_triplet (subject, predicate).
+//
+// objectPrefix may contain any bytes; SQL LIKE metacharacters are escaped so a
+// literal "%" or "_" in the prefix matches only itself, not any-char wildcards.
+func (s *SQLiteFactStore) ListFactsByTriplet(ctx context.Context, subject, predicate, objectPrefix string) ([]TypedFact, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if objectPrefix == "" {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT id, entity_slug, kind, type,
+			        triplet_subject, triplet_predicate, triplet_object,
+			        text, confidence, valid_from, valid_until,
+			        supersedes, contradicts_with,
+			        source_type, source_path, sentence_offset, artifact_excerpt,
+			        created_at, created_by, reinforced_at
+			 FROM facts
+			 WHERE triplet_subject = ? AND triplet_predicate = ?
+			 ORDER BY id ASC`, subject, predicate)
+	} else {
+		// Escape SQL LIKE metacharacters so raw bytes in objectPrefix don't
+		// turn into wildcards. Callers today funnel through NormalizeForFactID
+		// ([a-z0-9-] only) so this is defensive, not corrective — but cheap.
+		escaped := likeEscaper.Replace(objectPrefix)
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT id, entity_slug, kind, type,
+			        triplet_subject, triplet_predicate, triplet_object,
+			        text, confidence, valid_from, valid_until,
+			        supersedes, contradicts_with,
+			        source_type, source_path, sentence_offset, artifact_excerpt,
+			        created_at, created_by, reinforced_at
+			 FROM facts
+			 WHERE triplet_subject = ? AND triplet_predicate = ?
+			   AND triplet_object LIKE ? ESCAPE '\'
+			 ORDER BY id ASC`, subject, predicate, escaped+"%")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("ListFactsByTriplet: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanFacts(rows)

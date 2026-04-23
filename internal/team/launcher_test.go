@@ -209,8 +209,9 @@ func TestOfficeMembersSnapshotPrefersPersistedStateOverPack(t *testing.T) {
 
 func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
 	l := &Launcher{
-		sessionMode: SessionModeOneOnOne,
-		oneOnOne:    "pm",
+		sessionMode:      SessionModeOneOnOne,
+		oneOnOne:         "pm",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 	}
 
 	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
@@ -2663,8 +2664,9 @@ func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) 
 	b.mu.Unlock()
 
 	l := &Launcher{
-		broker:      b,
-		sessionName: "office-test",
+		broker:           b,
+		sessionName:      "office-test",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
 			Agents: []agent.AgentConfig{
@@ -2729,8 +2731,9 @@ func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T
 	b.mu.Unlock()
 
 	l := &Launcher{
-		broker:      b,
-		sessionName: "office-test",
+		broker:           b,
+		sessionName:      "office-test",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
 			Agents: []agent.AgentConfig{
@@ -2791,6 +2794,81 @@ func TestAllOperationBlueprintsUseCEOLead(t *testing.T) {
 		if !bytes.Contains(data, []byte("lead_slug: ceo")) {
 			t.Errorf("blueprint %s must declare lead_slug: ceo", entry.Name())
 		}
+	}
+}
+
+func TestBuildPromptToolHygieneSection(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "eng", Name: "Engineer"},
+			},
+		},
+	}
+
+	for _, slug := range []string{"ceo", "eng"} {
+		prompt := l.buildPrompt(slug)
+		if !strings.Contains(prompt, "== TOOL HYGIENE ==") {
+			t.Errorf("%s prompt missing TOOL HYGIENE section", slug)
+		}
+		if !strings.Contains(prompt, "ALREADY registered") {
+			t.Errorf("%s prompt missing 'ALREADY registered' line", slug)
+		}
+		if !strings.Contains(prompt, "Do not read unrelated files") {
+			t.Errorf("%s prompt missing unrelated-files guidance", slug)
+		}
+		if !strings.Contains(prompt, "Emit at most one team_broadcast per turn") {
+			t.Errorf("%s prompt missing broadcast throttle guidance", slug)
+		}
+	}
+}
+
+func TestBuildMessageActiveAgentsSorted(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "eng", Name: "Engineer"},
+			},
+		},
+		headlessActive: map[string]*headlessCodexActiveTurn{
+			"zebra": {},
+			"alpha": {},
+			"mango": {},
+		},
+		headlessQueues: make(map[string][]headlessCodexTurn),
+	}
+
+	// Run multiple times — Go map iteration order is non-deterministic, so
+	// a missing sort would produce different output across iterations.
+	var first string
+	for i := 0; i < 20; i++ {
+		packet := l.buildMessageWorkPacket(channelMessage{
+			ID: "h1", From: "you", Channel: "general", Content: "ship it",
+		}, "ceo")
+		idx := strings.Index(packet, "Already active in this thread")
+		if idx == -1 {
+			t.Fatal("expected 'Already active in this thread' line in work packet")
+		}
+		rest := packet[idx:]
+		nl := strings.Index(rest, "\n")
+		var line string
+		if nl == -1 {
+			line = rest
+		} else {
+			line = rest[:nl]
+		}
+		if first == "" {
+			first = line
+		} else if line != first {
+			t.Fatalf("active-agents line is non-deterministic:\n  iter 0: %q\n  iter %d: %q", first, i, line)
+		}
+	}
+	if !strings.Contains(first, "@alpha, @mango, @zebra") {
+		t.Fatalf("active-agents line not alphabetically sorted: %q", first)
 	}
 }
 

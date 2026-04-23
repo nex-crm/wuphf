@@ -3,11 +3,20 @@ package team
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // recentHumanMessageLimit is the number of recent human messages to consider
 // when building resume packets. The spec requires the last 50 messages.
 const recentHumanMessageLimit = 50
+
+// staleUnansweredThreshold is the oldest an unanswered human message can be
+// before it gets dropped on broker restart. Older messages are zombie work —
+// the user's intent has likely moved on, and replaying them burns a spawn per
+// agent for a turn the human didn't ask for. If the human still wants the old
+// message answered they can retag. Exposed as a var so tests that pre-seed
+// broker state with ancient timestamps can raise the threshold.
+var staleUnansweredThreshold = time.Hour
 
 // isHumanOrSystemSender reports whether a message sender is a human or system
 // source (not an agent). Only agent replies count as "answers".
@@ -132,6 +141,26 @@ func (l *Launcher) buildResumePackets() map[string]string {
 	humanMsgs := l.broker.RecentHumanMessages(recentHumanMessageLimit)
 	allMsgs := l.broker.AllMessages()
 	unanswered := findUnansweredMessages(humanMsgs, allMsgs)
+	// Drop unanswered messages older than staleUnansweredThreshold on startup.
+	// Without this, a broker that was down for hours replays every stale tag
+	// on restart — observed symptom: "@planner say hi" from 2 hours ago
+	// triggers a planner spawn that answers in the wrong context. If the human
+	// still wants the old message handled, they can retag.
+	if len(unanswered) > 0 {
+		cutoff := time.Now().UTC().Add(-staleUnansweredThreshold)
+		fresh := unanswered[:0]
+		for _, msg := range unanswered {
+			ts, err := time.Parse(time.RFC3339, msg.Timestamp)
+			if err != nil {
+				continue
+			}
+			if ts.Before(cutoff) {
+				continue
+			}
+			fresh = append(fresh, msg)
+		}
+		unanswered = fresh
+	}
 
 	// Route unanswered messages: explicit tags → tagged agents; untagged → lead.
 	// Skip agents not in the current pack.
@@ -177,13 +206,14 @@ func (l *Launcher) buildResumePackets() map[string]string {
 
 // resumeInFlightWork builds resume packets for all agents with pending work and
 // delivers them via the appropriate runtime:
-//   - Headless (Codex, or any mode without live panes): enqueueHeadlessCodexTurn
-//   - tmux pane-backed: sendNotificationToPane
+//   - Headless or non-pane provider: enqueueHeadlessCodexTurn
+//   - Pane-eligible provider with a live pane target: sendNotificationToPane
 //
-// The routing key is paneBackedAgents, mirroring shouldUseHeadlessDispatch.
-// webMode alone is not sufficient: TUI mode now defaults to headless dispatch,
-// and keying on webMode would send resume packets through agentPaneTargets()
-// to pane indices that were never spawned — silently dropping resumption.
+// Routing is decided per agent so ProviderBinding overrides can mix pane-backed
+// and headless runtimes in the same team. webMode alone is not sufficient: TUI
+// mode now defaults to headless dispatch, and keying on webMode would send
+// resume packets through agentPaneTargets() to pane indices that were never
+// spawned, silently dropping resumption.
 //
 // In headless mode the lead is enqueued FIRST to avoid the queue-hold guard:
 // enqueueHeadlessCodexTurn suppresses lead notifications when any specialist
@@ -195,28 +225,28 @@ func (l *Launcher) resumeInFlightWork() {
 		return
 	}
 
-	if l.usesCodexRuntime() || !l.paneBackedAgents {
-		lead := l.officeLeadSlug()
-		// Enqueue lead first to bypass the queue-hold guard.
-		if packet, ok := packets[lead]; ok {
-			l.enqueueHeadlessCodexTurn(lead, packet)
-		}
-		for slug, packet := range packets {
-			if slug == lead {
-				continue
-			}
-			l.enqueueHeadlessCodexTurn(slug, packet)
-		}
-		return
-	}
-
-	// Pane-backed fallback path — need live pane targets.
 	paneTargets := l.agentPaneTargets()
-	for slug, packet := range packets {
+	routePacket := func(slug, packet string) {
+		if l.memberUsesHeadlessOneShotRuntime(slug) || !l.paneBackedAgents {
+			l.enqueueHeadlessCodexTurn(slug, packet)
+			return
+		}
 		target, ok := paneTargets[slug]
 		if !ok {
+			l.enqueueHeadlessCodexTurn(slug, packet)
+			return
+		}
+		launcherSendNotificationToPane(l, target.PaneTarget, packet)
+	}
+
+	lead := l.officeLeadSlug()
+	if packet, ok := packets[lead]; ok {
+		routePacket(lead, packet)
+	}
+	for slug, packet := range packets {
+		if slug == lead {
 			continue
 		}
-		l.sendNotificationToPane(target.PaneTarget, packet)
+		routePacket(slug, packet)
 	}
 }

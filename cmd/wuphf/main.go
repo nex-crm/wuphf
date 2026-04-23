@@ -51,10 +51,11 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "wuphf shred — burn the whole workspace down")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Stops the running session, clears broker state, and deletes the team")
-		fmt.Fprintln(os.Stderr, "roster, company identity, office task receipts, and saved workflows.")
+		fmt.Fprintln(os.Stderr, "roster, company identity, office task receipts, saved workflows, logs,")
+		fmt.Fprintln(os.Stderr, "sessions, provider state, calendar, and local wiki memory.")
 		fmt.Fprintln(os.Stderr, "Next launch reopens onboarding.")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Preserved: logs, sessions, task worktrees, LLM caches, config.json.")
+		fmt.Fprintln(os.Stderr, "Preserved: task worktrees, OpenClaw device identity, config.json.")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf shred           Prompts before wiping")
@@ -492,9 +493,10 @@ func isPiped() bool {
 const shredSummary = `This will:
   • Stop the running WUPHF session
   • Delete your team, company identity, office task receipts, workflows
+  • Delete logs, sessions, provider state, calendar, and local wiki memory
   • Wipe broker runtime state
   • Reopen onboarding on next launch
-Preserved: logs, sessions, task worktrees, LLM caches, config.json.`
+Preserved: task worktrees, OpenClaw device identity, config.json.`
 
 // confirmDestructive gates a destructive subcommand behind a y/N prompt.
 // A "-y" / "--yes" in rest skips the prompt — useful for scripted teardown.

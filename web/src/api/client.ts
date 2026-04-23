@@ -79,6 +79,35 @@ export async function post<T = unknown>(
   return r.json()
 }
 
+export async function postWithTimeout<T = unknown>(
+  path: string,
+  body: unknown,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController()
+  const timeout = globalThis.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const r = await fetch(baseURL() + path, {
+      method: 'POST',
+      headers: authHeaders(),
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    })
+    if (!r.ok) {
+      const text = (await r.text().catch(() => '')).trim()
+      throw new Error(text || `${r.status} ${r.statusText}`)
+    }
+    return r.json()
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new Error('Request timed out')
+    }
+    throw err
+  } finally {
+    globalThis.clearTimeout(timeout)
+  }
+}
+
 export async function del<T = unknown>(
   path: string,
   body?: unknown,
@@ -640,12 +669,12 @@ export interface WorkspaceWipeResult {
 // window.location.reload() after success so the UI picks up the empty
 // broker state.
 export function resetWorkspace() {
-  return post<WorkspaceWipeResult>('/workspace/reset', {})
+  return postWithTimeout<WorkspaceWipeResult>('/workspace/reset', {}, 20_000)
 }
 
-// shredWorkspace is the full wipe: broker runtime + team + company + office
-// + workflows. Onboarding reopens on the next load. Call window.location
-// .reload() after success.
+// shredWorkspace is the full wipe: broker runtime + team + company + office,
+// workflows, logs, sessions, provider state, and local markdown memory.
+// The broker exits after success; relaunch WUPHF to reopen onboarding.
 export function shredWorkspace() {
-  return post<WorkspaceWipeResult>('/workspace/shred', {})
+  return postWithTimeout<WorkspaceWipeResult>('/workspace/shred', {}, 20_000)
 }

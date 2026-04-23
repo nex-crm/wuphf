@@ -608,6 +608,15 @@ func TestEnqueueHeadlessCodexTurnProcessesFIFO(t *testing.T) {
 }
 
 func TestPostHeadlessFinalMessageIfSilentPostsFinalOutput(t *testing.T) {
+	// Isolate state from the user's real ~/.wuphf/team/broker-state.json.
+	// Without this override NewBroker loads whatever prior test runs (or a
+	// real WUPHF run in ~/.wuphf/) persisted, and agentPostedSubstantiveMessageToChannelSince
+	// picks up an unrelated ceo message, making the "expected posted=true"
+	// assertion fail non-deterministically depending on machine history.
+	oldPathFn := brokerStatePath
+	brokerStatePath = func() string { return filepath.Join(t.TempDir(), "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
 	b := NewBroker()
 	channel := DMSlugFor("ceo")
 	root, err := b.PostMessage("you", channel, "Ping the CEO.", nil, "")

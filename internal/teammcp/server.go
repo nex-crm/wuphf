@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/team"
 )
@@ -623,7 +624,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
 		), handleTeamRuntimeState)
 
-		registerActionTools(server)
+		if hasActionProvider() {
+			registerActionTools(server)
+		}
 		return
 	}
 
@@ -656,7 +659,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
-		registerActionTools(server)
+		if hasActionProvider() {
+			registerActionTools(server)
+		}
 		return
 	}
 
@@ -703,26 +708,6 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"Open or find a direct message channel with the human. Use this when the human explicitly asks to DM an agent. Agent-to-agent DMs are not allowed — all inter-agent communication must happen in public channels.",
 	), handleTeamDMOpen)
 
-	mcp.AddTool(server, officeWriteTool(
-		"team_channel",
-		"Create or remove an office channel. When creating a channel, include a clear description of what work belongs there and the initial roster that should be in it. Only do this when the human explicitly wants channel structure.",
-	), handleTeamChannel)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_channel_member",
-		"Add, remove, disable, or enable an agent in a specific office channel.",
-	), handleTeamChannelMember)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_bridge",
-		"CEO-only tool to bridge relevant context from one channel into another and leave a visible cross-channel trail.",
-	), handleTeamBridge)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_member",
-		"Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
-	), handleTeamMember)
-
 	mcp.AddTool(server, readOnlyTool(
 		"team_tasks",
 		"List the current shared tasks and who owns them so the team does not duplicate work.",
@@ -742,11 +727,6 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"team_task",
 		"Create, claim, assign, complete, block, or release a shared task in the office task list.",
 	), handleTeamTask)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_plan",
-		"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
-	), handleTeamPlan)
 
 	registerSharedMemoryTools(server)
 
@@ -770,78 +750,60 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"Send a direct note to the human.",
 	), handleHumanMessage)
 	mcp.AddTool(server, officeWriteTool(
-		"human_interview",
-		"Ask the human a blocking decision question.",
-	), handleHumanInterview)
-	mcp.AddTool(server, readOnlyTool(
-		"team_tasks",
-		"List shared tasks and ownership.",
-	), handleTeamTasks)
-	mcp.AddTool(server, officeWriteTool(
 		"team_react",
 		"React to a message with an emoji.",
 	), handleTeamReact)
 	mcp.AddTool(server, officeWriteTool(
-		"team_status",
-		"Share a short status update.",
-	), handleTeamStatus)
-	mcp.AddTool(server, officeWriteTool(
 		"team_skill_run",
 		"Invoke a named team skill. When the request matches an available skill (see the skill list in your prompt), call this BEFORE doing the work — do not freelance. Bumps the skill's usage, logs a skill_invocation in the channel so the office sees you followed the playbook, and returns the skill's canonical step-by-step content for you to execute.",
 	), handleTeamSkillRun)
-	registerActionTools(server)
 
-	// Lead-only tools: CEO gets coordination, delegation, and structural tools
+	// Gate external-action tools behind a configured provider. Registering 14
+	// empty action tools inflates the MCP tool schema and pushes the total
+	// registry past Claude Code's deferred-tools threshold, which causes the
+	// model to emit a wasted ToolSearch before every call to a deferred tool.
+	// When no provider is available the tools would just return errors anyway.
+	if hasActionProvider() {
+		registerActionTools(server)
+	}
+
+	// Lead-only tools: structural + coordination tools that specialists should
+	// never invoke. Specialists still see them in the prompt's role-specific
+	// guidance, but the MCP schema omits them, so the model cannot call them
+	// and cannot waste a ToolSearch turn looking them up.
 	if isLead {
 		mcp.AddTool(server, officeWriteTool(
-			"team_task",
-			"Create, assign, complete, or block a task.",
-		), handleTeamTask)
-		mcp.AddTool(server, officeWriteTool(
 			"team_plan",
-			"Create a batch of tasks with dependency ordering.",
+			"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
 		), handleTeamPlan)
 		mcp.AddTool(server, officeWriteTool(
 			"team_bridge",
-			"Bridge context from one channel to another.",
+			"CEO-only tool to bridge relevant context from one channel into another and leave a visible cross-channel trail.",
 		), handleTeamBridge)
-		mcp.AddTool(server, readOnlyTool(
-			"team_members",
-			"List channel participants and activity.",
-		), handleTeamMembers)
-		mcp.AddTool(server, readOnlyTool(
-			"team_requests",
-			"List pending human requests.",
-		), handleTeamRequests)
-		mcp.AddTool(server, officeWriteTool(
-			"team_request",
-			"Create a structured request for the human.",
-		), handleTeamRequest)
-		mcp.AddTool(server, readOnlyTool(
-			"team_runtime_state",
-			"Office runtime snapshot: tasks, requests, recovery.",
-		), handleTeamRuntimeState)
-		mcp.AddTool(server, readOnlyTool(
-			"team_office_members",
-			"List the full office roster.",
-		), handleTeamOfficeMembers)
-		mcp.AddTool(server, readOnlyTool(
-			"team_channels",
-			"List office channels and memberships.",
-		), handleTeamChannels)
 		mcp.AddTool(server, officeWriteTool(
 			"team_channel",
-			"Create or remove a channel.",
+			"Create or remove an office channel. When creating a channel, include a clear description of what work belongs there and the initial roster that should be in it. Only do this when the human explicitly wants channel structure.",
 		), handleTeamChannel)
 		mcp.AddTool(server, officeWriteTool(
 			"team_channel_member",
-			"Add or remove an agent from a channel.",
+			"Add, remove, disable, or enable an agent in a specific office channel.",
 		), handleTeamChannelMember)
 		mcp.AddTool(server, officeWriteTool(
 			"team_member",
-			"Create or remove an office member.",
+			"Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
 		), handleTeamMember)
 	}
+}
+
+// hasActionProvider reports whether any external action provider is configured
+// and usable. Used to gate registerActionTools so agents in offices without a
+// connected provider do not see 14 action tools that would all return errors.
+func hasActionProvider() bool {
+	if externalActionProvider != nil {
+		return true
+	}
+	_, err := team.ResolveActionProviderForCapability(action.CapabilityGuide)
+	return err == nil
 }
 
 func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamBroadcastArgs) (*mcp.CallToolResult, any, error) {

@@ -1,18 +1,17 @@
 // Package workspace wipes WUPHF's on-disk state for two distinct blast radii:
 //
-//   - Reset: narrow. Clears broker runtime state and task worktrees so a stuck
-//     office can restart clean. Preserves team, company, office history, and
+//   - Reset: narrow. Clears broker runtime state so a stuck office can restart
+//     clean. Preserves task worktrees, team, company, office history, and
 //     workflows. Equivalent to what `wuphf shred` did before the verb swap.
 //
 //   - Shred: full. Everything Reset does, plus deletes the team roster, company
-//     identity, the office's task receipts, and saved workflows. The next
-//     launch shows the onboarding wizard.
+//     identity, the office's task receipts, saved workflows, logs, sessions,
+//     provider state, calendar, and local markdown memory. The next launch
+//     shows the onboarding wizard.
 //
-// Preserved in both cases: logs/, sessions/, codex-headless/, providers/,
-// openclaw/, calendar.json, config.json. In-flight work (task-worktrees/) is
-// preserved by Reset but wiped as part of Shred via its broker-runtime reset —
-// actually, task-worktrees/ is preserved by both. Branches and local changes
-// inside those worktrees remain intact.
+// Preserved in both cases: task-worktrees/, openclaw/, config.json. In-flight
+// work remains on disk so branches and local changes inside task worktrees
+// survive, and credentials/preferences stay available for the next launch.
 package workspace
 
 import (
@@ -33,10 +32,10 @@ type Result struct {
 	Errors  []string `json:"errors,omitempty"`
 }
 
-// ClearRuntime performs a narrow reset: deletes the broker state file and the
-// task-worktrees registry (the worktrees themselves stay on disk). Safe to
-// call when no broker is running. Callers that need to stop a live broker or
-// tmux session must do so separately — this package only touches the disk.
+// ClearRuntime performs a narrow reset: deletes the broker state directory.
+// Task worktrees stay on disk. Safe to call when no broker is running. Callers
+// that need to stop a live broker or tmux session must do so separately — this
+// package only touches the disk.
 func ClearRuntime() (Result, error) {
 	home, err := wuphfHome()
 	if err != nil {
@@ -51,7 +50,8 @@ func ClearRuntime() (Result, error) {
 }
 
 // Shred performs a full workspace wipe. Runs ClearRuntime first, then removes
-// onboarding state, company identity, office task receipts, and workflows.
+// onboarding state, company identity, office task receipts, workflows, logs,
+// provider session state, and local markdown memory.
 func Shred() (Result, error) {
 	home, err := wuphfHome()
 	if err != nil {
@@ -65,6 +65,13 @@ func Shred() (Result, error) {
 	res.removeIfPresent(company.ManifestPath())
 	res.removeIfPresent(filepath.Join(home, "office"))
 	res.removeIfPresent(filepath.Join(home, "workflows"))
+	res.removeIfPresent(filepath.Join(home, "logs"))
+	res.removeIfPresent(filepath.Join(home, "sessions"))
+	res.removeIfPresent(filepath.Join(home, "providers"))
+	res.removeIfPresent(filepath.Join(home, "codex-headless"))
+	res.removeIfPresent(filepath.Join(home, "wiki"))
+	res.removeIfPresent(filepath.Join(home, "wiki.bak"))
+	res.removeIfPresent(filepath.Join(home, "calendar.json"))
 	return res, nil
 }
 

@@ -72,6 +72,23 @@ func TestMain(m *testing.M) {
 	}
 	cleanups = append(cleanups, func() { _ = os.RemoveAll(logDir) })
 
+	// 3) Stale-unanswered threshold: resume tests pre-seed broker state with
+	//    ancient timestamps (e.g. "2026-04-14T10:00:00Z") to exercise routing
+	//    logic without fighting a clock. The production default (1 hour)
+	//    would drop those seeds. Raise the window to ~10 years during tests
+	//    so the resume-routing tests keep their fixtures while production
+	//    keeps the stale-message-dropping behavior.
+	origStaleUnanswered := staleUnansweredThreshold
+	staleUnansweredThreshold = 10 * 365 * 24 * time.Hour
+	cleanups = append(cleanups, func() { staleUnansweredThreshold = origStaleUnanswered })
+
+	// 4) Activity watchdog: tests create many short-lived brokers. The watchdog
+	//    goroutine fires every minute, so leaving it running accumulates
+	//    hundreds of stuck goroutines and causes timeout/goleak failures.
+	//    Disable it for the test run; production always starts with it enabled.
+	activityWatchdogEnabled = false
+	cleanups = append(cleanups, func() { activityWatchdogEnabled = true })
+
 	rc := m.Run()
 	cleanup()
 	os.Exit(rc)
@@ -469,6 +486,67 @@ func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for subscribed action")
 	}
+}
+
+func TestReapStaleActivityLocked(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	now := time.Now().UTC()
+	stale := now.Add(-10 * time.Minute).Format(time.RFC3339)
+	fresh := now.Add(-1 * time.Minute).Format(time.RFC3339)
+
+	b.activity = map[string]agentActivitySnapshot{
+		"stale-active":   {Slug: "stale-active", Status: "active", Activity: "tool_use", LastTime: stale},
+		"stale-thinking": {Slug: "stale-thinking", Status: "thinking", Activity: "thinking", LastTime: stale},
+		"fresh-active":   {Slug: "fresh-active", Status: "active", Activity: "tool_use", LastTime: fresh},
+		"already-idle":   {Slug: "already-idle", Status: "idle", Activity: "idle", LastTime: stale},
+		"already-error":  {Slug: "already-error", Status: "error", Activity: "error", LastTime: stale},
+		"bad-time":       {Slug: "bad-time", Status: "active", Activity: "tool_use", LastTime: "not-a-time"},
+	}
+
+	b.mu.Lock()
+	reset := b.reapStaleActivityLocked(now)
+	b.mu.Unlock()
+
+	if len(reset) != 2 {
+		t.Fatalf("expected 2 stale agents reaped, got %d: %+v", len(reset), reset)
+	}
+	for _, snap := range reset {
+		if snap.Status != "idle" {
+			t.Errorf("reaped agent %q should be idle, got %q", snap.Slug, snap.Status)
+		}
+		if snap.Slug != "stale-active" && snap.Slug != "stale-thinking" {
+			t.Errorf("unexpected reaped slug: %q", snap.Slug)
+		}
+	}
+
+	if b.activity["fresh-active"].Status != "active" {
+		t.Error("fresh-active should not be reaped")
+	}
+	if b.activity["already-idle"].Status != "idle" {
+		t.Error("already-idle should be unchanged")
+	}
+	if b.activity["already-error"].Status != "error" {
+		t.Error("already-error should be unchanged")
+	}
+	if b.activity["bad-time"].Status != "active" {
+		t.Error("unparseable LastTime should be left alone")
+	}
+}
+
+func TestBrokerStopIsIdempotent(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.Stop()
+	b.Stop()
 }
 
 func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {

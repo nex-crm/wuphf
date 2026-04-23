@@ -36,7 +36,9 @@ import (
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 	"github.com/nex-crm/wuphf/internal/setup"
+	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
 const (
@@ -255,7 +257,7 @@ func isOnboarded() bool {
 func (l *Launcher) Preflight() error {
 	if l.usesCodexRuntime() {
 		if l.usesOpencodeRuntime() {
-			if _, err := exec.LookPath("opencode"); err != nil {
+			if _, err := runtimebin.LookPath("opencode"); err != nil {
 				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
 			}
 			return nil
@@ -1856,6 +1858,15 @@ func (l *Launcher) resolvePaneTargetForSlug(slug string) (string, bool) {
 
 func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 	targets := make(map[string]notificationTarget)
+	// Pane targets only make sense when tmux panes actually back the agents.
+	// Otherwise every PaneTarget string we return is a ghost pointing at a
+	// non-existent pane — and downstream code (agentNotificationTargets,
+	// shouldUseHeadlessDispatchForTarget) treats the non-empty PaneTarget as
+	// "pane path", which bypasses the headless dispatcher and types into a
+	// dead tmux session that silently drops every notification.
+	if l == nil || !l.paneBackedAgents {
+		return targets
+	}
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
 		if slug != "" && !l.skipPaneForSlug(slug) {
@@ -1943,7 +1954,7 @@ func (l *Launcher) shouldUseHeadlessDispatchForTarget(target notificationTarget)
 
 // skipPaneForSlug returns true when the given slug should not have a tmux
 // pane target registered — either because pane spawn failed earlier, or
-// because the agent is bound to the codex runtime and uses its own headless
+// because the agent is bound to a non-pane provider and uses its own headless
 // pipeline. In either case, dispatch falls back to the headless path.
 func (l *Launcher) skipPaneForSlug(slug string) bool {
 	slug = strings.TrimSpace(slug)
@@ -1979,6 +1990,12 @@ func (l *Launcher) oneOnOneAgent() string {
 // headless one-shot runtime (shared by Codex and Opencode — both skip the
 // tmux/claude pane infrastructure and drive a fresh CLI per turn through the
 // broker queue in headless_codex.go).
+//
+// Prefer the capability helpers (usesPaneRuntime, requiresClaudeSessionReset)
+// for new code asking "is this a non-pane runtime" — they're Registry-driven
+// and pick up future providers (Ollama, vLLM, exo, OpenAI-compatible) without
+// further edits here. usesCodexRuntime stays for codex/opencode-binary-specific
+// concerns (Preflight, launch routing).
 func (l *Launcher) usesCodexRuntime() bool {
 	p := strings.TrimSpace(strings.ToLower(l.provider))
 	return p == "codex" || p == "opencode"
@@ -1989,6 +2006,21 @@ func (l *Launcher) usesCodexRuntime() bool {
 // (binary name, args, prompt layout).
 func (l *Launcher) usesOpencodeRuntime() bool {
 	return strings.EqualFold(strings.TrimSpace(l.provider), "opencode")
+}
+
+// usesPaneRuntime reports whether the install-wide provider should run
+// agents in interactive tmux panes. Reads PaneEligible from the provider
+// Registry; an unregistered or non-pane-eligible provider returns false,
+// so dispatch falls through to the headless path.
+func (l *Launcher) usesPaneRuntime() bool {
+	return provider.CapabilitiesFor(normalizeProviderKind(l.provider)).PaneEligible
+}
+
+// requiresClaudeSessionReset reports whether the install-wide provider
+// populates the Claude session store and therefore needs provider.ResetClaudeSessions
+// to run on ResetSession / ReconfigureSession. Today only Claude Code does.
+func (l *Launcher) requiresClaudeSessionReset() bool {
+	return provider.CapabilitiesFor(normalizeProviderKind(l.provider)).RequiresClaudeSessionReset
 }
 
 // memberEffectiveProviderKind returns the provider kind that should run the
@@ -2005,12 +2037,11 @@ func (l *Launcher) memberEffectiveProviderKind(slug string) string {
 }
 
 // memberUsesHeadlessOneShotRuntime reports whether the given agent is bound to
-// a runtime that drives a fresh CLI per turn (Codex, Opencode). Such agents
-// skip the tmux/claude pane infrastructure in favor of the broker-driven queue
-// in headless_codex.go.
+// a runtime that is not pane-eligible and therefore skips the tmux/claude pane
+// infrastructure in favor of the broker-driven headless queue.
 func (l *Launcher) memberUsesHeadlessOneShotRuntime(slug string) bool {
 	kind := l.memberEffectiveProviderKind(slug)
-	return kind == provider.KindCodex || kind == provider.KindOpencode
+	return !provider.CapabilitiesFor(kind).PaneEligible
 }
 
 // normalizeProviderKind trims and canonicalizes provider kinds while
@@ -2031,8 +2062,10 @@ func normalizeProviderKind(raw string) string {
 	}
 }
 
+// UsesTmuxRuntime reports whether agents run in tmux panes. Equivalent to
+// usesPaneRuntime — exported for cmd/wuphf/main.go and tests.
 func (l *Launcher) UsesTmuxRuntime() bool {
-	return !l.usesCodexRuntime()
+	return l.usesPaneRuntime()
 }
 
 func (l *Launcher) BrokerToken() string {
@@ -2146,7 +2179,7 @@ func (l *Launcher) Kill() error {
 	// still alive to release any open handles (harmless, but principle of
 	// least surprise).
 	l.cleanupAgentTempFiles()
-	if l.usesCodexRuntime() {
+	if !l.usesPaneRuntime() {
 		if err := killPersistedOfficeProcess(); err != nil {
 			return err
 		}
@@ -2167,7 +2200,7 @@ func (l *Launcher) Kill() error {
 }
 
 func (l *Launcher) ResetSession() error {
-	if l.usesCodexRuntime() {
+	if !l.requiresClaudeSessionReset() {
 		if l != nil && l.broker != nil {
 			l.broker.Reset()
 			return nil
@@ -2191,7 +2224,7 @@ func (l *Launcher) ResetSession() error {
 }
 
 func (l *Launcher) ReconfigureSession() error {
-	if l.usesCodexRuntime() {
+	if !l.usesPaneRuntime() {
 		if err := provider.ResetClaudeSessions(); err != nil {
 			return fmt.Errorf("reset Claude sessions: %w", err)
 		}
@@ -2206,7 +2239,7 @@ func (l *Launcher) ReconfigureSession() error {
 
 func (l *Launcher) reconfigureVisibleAgents() error {
 	l.provider = config.ResolveLLMProvider("")
-	if l.usesCodexRuntime() {
+	if !l.usesPaneRuntime() {
 		if l.paneBackedAgents {
 			_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 			l.paneBackedAgents = false
@@ -2777,6 +2810,10 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 			for name := range activeAgents {
 				names = append(names, "@"+name)
 			}
+			// Sort so this line is byte-identical across spawns that see the same
+			// set of active agents; Go map iteration order is randomized and would
+			// otherwise break prompt caching on the work-packet suffix.
+			sort.Strings(names)
 			lines = append(lines, fmt.Sprintf("- Already active in this thread (do NOT re-route): %s", strings.Join(names, ", ")))
 		}
 	}
@@ -2883,7 +2920,7 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 // Codex runtime is always headless. Pane-backed interactive dispatch is only
 // used when the fallback path explicitly brought panes up (paneBackedAgents).
 func (l *Launcher) shouldUseHeadlessDispatch() bool {
-	if l.usesCodexRuntime() {
+	if !l.usesPaneRuntime() {
 		return true
 	}
 	return !l.paneBackedAgents
@@ -3539,8 +3576,9 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 	if l.broker == nil {
 		return
 	}
-	// Codex runtime uses its own headless pipeline; panes don't apply.
-	if l.usesCodexRuntime() {
+	// Non-pane runtimes (Codex, future Ollama/vLLM/exo/openai-compat) use the
+	// headless pipeline; panes don't apply.
+	if !l.usesPaneRuntime() {
 		return
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -3648,11 +3686,18 @@ func (l *Launcher) buildPrompt(slug string) string {
 	member := l.officeMemberBySlug(slug)
 	agentCfg := agentConfigFromMember(member)
 	officeMembers := l.officeMembersSnapshot()
+	// Sort by Slug so the prompt prefix is byte-identical across spawns for the
+	// same office; otherwise prompt caching (ANTHROPIC_PROMPT_CACHING=1) would
+	// miss on every turn just because member insertion order drifted.
+	sort.Slice(officeMembers, func(i, j int) bool { return officeMembers[i].Slug < officeMembers[j].Slug })
 	lead := officeLeadSlugFrom(officeMembers)
 	noNex := config.ResolveNoNex() || config.ResolveAPIKey("") == ""
 	var activePolicies []officePolicy
 	if l.broker != nil {
 		activePolicies = l.broker.ListPolicies()
+		// Same reason as officeMembers: sort so the policies section is
+		// deterministic and cache-friendly across turns.
+		sort.Slice(activePolicies, func(i, j int) bool { return activePolicies[i].ID < activePolicies[j].ID })
 	}
 
 	var sb strings.Builder
@@ -3722,6 +3767,10 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a blocking decision question — only when the team cannot proceed without it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
+		sb.WriteString("== TOOL HYGIENE ==\n")
+		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
+		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
+		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
 		if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Work only with the shared office channel and human answers.\n\n")
 		} else {
@@ -3834,6 +3883,10 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human only for blocking clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
+		sb.WriteString("== TOOL HYGIENE ==\n")
+		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
+		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
+		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
 		if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the office conversation and direct human answers only.\n\n")
 		} else {
@@ -4572,7 +4625,7 @@ func (l *Launcher) PreflightWeb() error {
 	}
 	if l.usesCodexRuntime() {
 		if l.usesOpencodeRuntime() {
-			if _, err := exec.LookPath("opencode"); err != nil {
+			if _, err := runtimebin.LookPath("opencode"); err != nil {
 				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
 			}
 			return nil
@@ -4708,7 +4761,21 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		openBrowser(webURL)
 	}
 
-	select {}
+	<-l.broker.ShutdownRequested()
+	fmt.Println()
+	fmt.Println("  Workspace shredded. Stopping WUPHF; relaunch to start onboarding.")
+	fmt.Println()
+	if l.headlessCancel != nil {
+		l.headlessCancel()
+	}
+	// Give the web proxy a moment to finish copying the successful shred
+	// response before the broker listener and process go away.
+	time.Sleep(300 * time.Millisecond)
+	if err := l.Kill(); err != nil {
+		return err
+	}
+	_, _ = workspace.Shred()
+	return nil
 }
 
 func openBrowser(url string) {

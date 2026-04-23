@@ -136,6 +136,23 @@ func TestAutoPromote_ExplicitTagRespected(t *testing.T) {
 	}
 }
 
+func TestAutoPromote_HumanTypedLeadSuppressesOtherMentions(t *testing.T) {
+	b := newBrokerWithPM(t)
+	b.mu.Lock()
+	b.members = append(b.members, officeMember{Slug: "reviewer", Name: "Reviewer"})
+	b.mu.Unlock()
+
+	msg := postMessage(t, b, "you", "general",
+		"@ceo ask @reviewer to check the PR", nil)
+
+	if !containsString(msg.Tagged, "ceo") {
+		t.Fatalf("raw @ceo should be treated as an explicit lead tag; got %+v", msg.Tagged)
+	}
+	if containsString(msg.Tagged, "reviewer") {
+		t.Fatalf("raw @ceo should suppress auto-promoting secondary mentions; got %+v", msg.Tagged)
+	}
+}
+
 // Synthetic senders (`system`, `nex`, bridges, future automation kinds) MUST
 // NOT auto-promote. A denylist approach would leak every new synthetic
 // identity — the allowlist in senderMayAutoPromoteLocked stops that.
