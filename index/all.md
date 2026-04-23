@@ -4,4 +4,8 @@ _Auto-generated. Do not edit by hand — agents regenerate this on every commit.
 
 ## team/playbooks
 
-- [Churn prevention](../team/playbooks/reactivation.md) _(updated 2026-04-23T03:47:47Z)_
+- [Churn prevention](../team/playbooks/reactivation.md) _(updated 2026-04-23T03:48:00Z)_
+
+## team/playbooks/.compiled/reactivation
+
+- [Playbook: Churn prevention](../team/playbooks/.compiled/reactivation/SKILL.md) _(updated 2026-04-23T03:47:55Z)_
