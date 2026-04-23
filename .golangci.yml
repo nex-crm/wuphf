@@ -14,6 +14,15 @@ linters:
     - staticcheck
     - misspell
     - unconvert
+    # Zero-finding additions — ratchet current cleanliness forward.
+    # Noisier size/complexity gates (funlen, gocognit, cyclop) and dead-code
+    # sweeps (unused, unparam) are deferred: they'd drown the first run in
+    # ~100+ pre-existing findings and tangle with the god-file decomposition
+    # planned in Phases 4-6. Revisit once those land.
+    - nolintlint       # every //nolint must have a reason + be specific
+    - nakedret         # naked returns in long funcs
+    - durationcheck    # time.Duration arithmetic mistakes
+    - asasalint        # passing []any to variadic any
   settings:
     errcheck:
       exclude-functions:
