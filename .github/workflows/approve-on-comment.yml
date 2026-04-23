@@ -2,8 +2,14 @@ name: Approve on Comment
 
 # Inlined (not using private nex-crm/.github reusable) because this is a
 # public repo and public repos cannot consume private reusable workflows.
-# Keep in sync with nex-crm/.github/.github/workflows/approve-on-comment.yml
-# (current canonical SHA tracked via the v1 tag on that repo).
+#
+# Auth: uses the FRAN_GOD_MODE PAT (org-wide, scoped for repo + read:org)
+# rather than a GitHub App token. Simpler — no APPROVER_APP_ID / APPROVER_
+# APP_PRIVATE_KEY config needed. The PAT must be tied to an identity that
+# can approve the target PR under the repo's branch-protection rules
+# (GitHub rejects approvals submitted by the PR's own author even when
+# using a different token, so the PAT account and the PR author must be
+# distinct for self-approve flows to land).
 
 on:
   issue_comment:
@@ -22,16 +28,18 @@ jobs:
       cancel-in-progress: false
     permissions: {}
     steps:
-      - name: Mint GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
-        with:
-          app-id: ${{ vars.APPROVER_APP_ID }}
-          private-key: ${{ secrets.APPROVER_APP_PRIVATE_KEY }}
+      - name: Verify PAT is configured
+        env:
+          TOKEN: ${{ secrets.FRAN_GOD_MODE }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "::error::secrets.FRAN_GOD_MODE is not set — /approve cannot authenticate. Configure a PAT under Settings → Secrets → Actions."
+            exit 1
+          fi
 
       - name: Verify commenter is org member
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.FRAN_GOD_MODE }}
           COMMENTER: ${{ github.event.comment.user.login }}
           ORG: ${{ github.repository_owner }}
         run: |
@@ -42,7 +50,7 @@ jobs:
 
       - name: Submit approval review
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.FRAN_GOD_MODE }}
           PR_NUMBER: ${{ github.event.issue.number }}
           REPO: ${{ github.repository }}
           COMMENTER: ${{ github.event.comment.user.login }}
@@ -59,7 +67,7 @@ jobs:
 
       - name: React to comment
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.FRAN_GOD_MODE }}
           COMMENT_ID: ${{ github.event.comment.id }}
           REPO: ${{ github.repository }}
         run: |
