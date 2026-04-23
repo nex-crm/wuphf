@@ -243,6 +243,18 @@ bad" is useless. Under 500 words.
 
 We run this ourselves before every release. If the AI finds something we missed, [file an issue](https://github.com/nex-crm/wuphf/issues).
 
+## Watch the wiki write itself
+
+5-minute terminal walkthrough of the Karpathy LLM-wiki loop: an agent records five facts, the synthesis threshold fires, the broker shells out to your own LLM CLI, the result commits to a git repo under the `archivist` identity, and the full author chain is visible in `git log`.
+
+```bash
+WUPHF_MEMORY_BACKEND=markdown HOME="$HOME/.wuphf-dev-home" \
+  ./wuphf-dev --broker-port 7899 --web-port 7900 &
+./scripts/demo-entity-synthesis.sh
+```
+
+Requirements: `curl`, `python3`, a running broker with `--memory-backend markdown`, and any supported LLM CLI (claude / codex / openclaw) on PATH. Env vars `BROKER`, `ENTITY_KIND`, `ENTITY_SLUG`, `AGENT_SLUG`, `THRESHOLD` override the defaults — see the header of `scripts/demo-entity-synthesis.sh`.
+
 ## The Name
 
 From [*The Office*](https://theoffice.fandom.com/wiki/WUPHF.com_(Website)), Season 7. Ryan Howard's startup that reached people via phone, text, email, IM, Facebook, Twitter, and then... WUPHF. Michael Scott invested $10,000. Ryan burned through it. The site went offline.
