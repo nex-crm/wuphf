@@ -3,6 +3,19 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAppStore } from '../stores/app'
 import { getChannels } from '../api/client'
 
+/**
+ * `?` opens the global help/shortcut reference, but only when the user
+ * is not currently typing. Returning true here means we intercept the
+ * keystroke; false means let it through to the focused field.
+ */
+function isTypingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  const tag = target.tagName
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true
+  if (target.isContentEditable) return true
+  return false
+}
+
 /** Global keyboard shortcuts matching legacy behavior. */
 export function useKeyboardShortcuts() {
   const setSearchOpen = useAppStore((s) => s.setSearchOpen)
@@ -11,6 +24,7 @@ export function useKeyboardShortcuts() {
   const setCurrentApp = useAppStore((s) => s.setCurrentApp)
   const setCurrentChannel = useAppStore((s) => s.setCurrentChannel)
   const setLastMessageId = useAppStore((s) => s.setLastMessageId)
+  const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -57,9 +71,26 @@ export function useKeyboardShortcuts() {
         return
       }
 
+      // `?` → open keyboard + command reference. Only when not typing,
+      // since `?` is a plain character inside inputs. Shift+/ also
+      // produces `?` on US layouts, so we match on e.key rather than
+      // juggling modifier state. Skip during onboarding since the
+      // HelpModalHost lives in Shell — toggling composerHelpOpen there
+      // would set hidden state and then surprise the user after the
+      // wizard completes.
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (isTypingTarget(e.target)) return
+        const state = useAppStore.getState()
+        if (!state.onboardingComplete) return
+        e.preventDefault()
+        setComposerHelpOpen(!state.composerHelpOpen)
+        return
+      }
+
       // Escape → close panels in priority order
       if (e.key === 'Escape') {
         const state = useAppStore.getState()
+        if (state.composerHelpOpen) { setComposerHelpOpen(false); return }
         if (state.searchOpen) { setSearchOpen(false); return }
         if (state.activeAgentSlug) { setActiveAgentSlug(null); return }
         if (state.activeThreadId) { setActiveThreadId(null); return }
@@ -68,5 +99,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [setSearchOpen, setActiveAgentSlug, setActiveThreadId, setCurrentApp, setCurrentChannel, setLastMessageId, queryClient])
+  }, [setSearchOpen, setActiveAgentSlug, setActiveThreadId, setCurrentApp, setCurrentChannel, setLastMessageId, setComposerHelpOpen, queryClient])
 }

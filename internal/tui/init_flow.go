@@ -309,9 +309,14 @@ func ProviderOptions() []PickerOption {
 	if _, err := initFlowLookPathFn("codex"); err != nil {
 		codexDesc = "Codex via codex CLI (not found in PATH!)"
 	}
+	opencodeDesc := "Opencode via opencode CLI (BYO provider: Claude, OpenAI, local/Ollama)"
+	if _, err := initFlowLookPathFn("opencode"); err != nil {
+		opencodeDesc = "Opencode via opencode CLI (not found in PATH!)"
+	}
 	options := []PickerOption{
 		{Label: "Claude Code (default)", Value: "claude-code", Description: claudeDesc},
 		{Label: "Codex CLI", Value: "codex", Description: codexDesc},
+		{Label: "Opencode CLI", Value: "opencode", Description: opencodeDesc},
 	}
 	return options
 }
@@ -615,6 +620,8 @@ func providerRuntimeStatus(provider string) string {
 		return readinessStatusForBool(binaryAvailable("claude"))
 	case "codex":
 		return readinessStatusForBool(binaryAvailable("codex"))
+	case "opencode":
+		return readinessStatusForBool(binaryAvailable("opencode"))
 	default:
 		return "ready"
 	}
@@ -626,6 +633,8 @@ func providerRuntimeDetail(provider string) string {
 		return binaryReadinessDetail("claude", "Claude CLI is ready for teammate sessions.", "Install claude or pick another provider.")
 	case "codex":
 		return binaryReadinessDetail("codex", "Codex CLI is ready for teammate sessions.", "Install codex or pick another provider.")
+	case "opencode":
+		return binaryReadinessDetail("opencode", "Opencode CLI is ready for teammate sessions.", "Install opencode or pick another provider.")
 	case "gemini":
 		return "Gemini uses an API key. No local CLI is required."
 	case "nex-ask":

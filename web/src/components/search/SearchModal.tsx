@@ -9,6 +9,7 @@ import { searchNotebook, type NotebookSearchHit } from '../../api/notebook'
 import { showNotice } from '../ui/Toast'
 import { openProviderSwitcher } from '../ui/ProviderSwitcher'
 import { SLASH_COMMANDS } from '../messages/Autocomplete'
+import { Kbd } from '../ui/Kbd'
 
 interface PaletteItem {
   id: string
@@ -422,9 +423,9 @@ export function SearchModal() {
         </div>
 
         <div className="cmd-palette-footer">
-          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
-          <span><kbd>↵</kbd> open</span>
-          <span><kbd>esc</kbd> close</span>
+          <span><Kbd size="sm">↑</Kbd><Kbd size="sm">↓</Kbd> navigate</span>
+          <span><Kbd size="sm">↵</Kbd> open</span>
+          <span><Kbd size="sm">esc</Kbd> close</span>
         </div>
       </div>
     </div>

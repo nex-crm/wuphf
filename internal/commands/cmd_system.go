@@ -123,6 +123,7 @@ func cmdProvider(ctx *SlashContext, args string) error {
 	options := []PickerOption{
 		{Label: "Codex CLI", Value: "codex", Description: "Codex via codex CLI"},
 		{Label: "Claude Code", Value: "claude-code", Description: "Claude via claude-code CLI"},
+		{Label: "Opencode CLI", Value: "opencode", Description: "Opencode via opencode CLI (BYO provider)"},
 	}
 	if ctx.ShowPicker != nil {
 		ctx.ShowPicker("Switch LLM Provider", options)

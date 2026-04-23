@@ -73,4 +73,23 @@ describe('FALLBACK_SLASH_COMMANDS', () => {
       expect(cmd.icon).not.toBe('')
     }
   })
+
+  // Real-world bug: useCommands returned a fresh array on every render, so
+  // the Autocomplete effect that watches `commands` + items fired on every
+  // render, called `onItems(items)` which called setAcItems in Composer,
+  // re-rendering Composer, which re-ran useCommands, which returned a new
+  // array... React bailed with "Maximum update depth exceeded" and the UI
+  // thrashed into unresponsiveness. Referential stability of the returned
+  // list is load-bearing, not cosmetic.
+  it('toAutocomplete returns a stable result shape for identical input', () => {
+    const broker: SlashCommandDescriptor[] = [
+      { name: 'ask', description: 'Ask the team lead', webSupported: true },
+    ]
+    const a = toAutocomplete(broker)
+    const b = toAutocomplete(broker)
+    // Same-content input → equal shape. The useMemo in useCommands takes
+    // care of referential identity across renders; this pins the pure
+    // helper's deterministic output contract.
+    expect(a).toEqual(b)
+  })
 })

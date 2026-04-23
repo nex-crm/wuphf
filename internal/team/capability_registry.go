@@ -36,6 +36,7 @@ const (
 	CapabilityKeyTmux          = "tmux"
 	CapabilityKeyClaude        = "claude"
 	CapabilityKeyCodex         = "codex"
+	CapabilityKeyOpencode      = "opencode"
 	CapabilityKeyOfficeRuntime = "office_runtime"
 	CapabilityKeyDirectRuntime = "direct_runtime"
 	CapabilityKeyMemory        = "memory"
@@ -120,16 +121,17 @@ func BuildCapabilityRegistry(runtime RuntimeCapabilities) CapabilityRegistry {
 	if len(runtime.Registry.Entries) > 0 {
 		return runtime.Registry
 	}
-	return buildCapabilityRegistry(config.ResolveLLMProvider(""), runtimeCapabilityStatus(runtime, "tmux"), runtimeCapabilityStatus(runtime, "claude"), runtimeCapabilityStatus(runtime, "codex"), CapabilityProbeOptions{})
+	return buildCapabilityRegistry(config.ResolveLLMProvider(""), runtimeCapabilityStatus(runtime, "tmux"), runtimeCapabilityStatus(runtime, "claude"), runtimeCapabilityStatus(runtime, "codex"), runtimeCapabilityStatus(runtime, "opencode"), CapabilityProbeOptions{})
 }
 
-func buildCapabilityRegistry(providerName string, tmuxStatus, claudeStatus, codexStatus CapabilityStatus, opts CapabilityProbeOptions) CapabilityRegistry {
+func buildCapabilityRegistry(providerName string, tmuxStatus, claudeStatus, codexStatus, opencodeStatus CapabilityStatus, opts CapabilityProbeOptions) CapabilityRegistry {
 	entries := []CapabilityDescriptor{
-		buildOfficeRuntimeDescriptor(providerName, tmuxStatus, claudeStatus, codexStatus),
-		buildDirectRuntimeDescriptor(providerName, claudeStatus, codexStatus),
+		buildOfficeRuntimeDescriptor(providerName, tmuxStatus, claudeStatus, codexStatus, opencodeStatus),
+		buildDirectRuntimeDescriptor(providerName, claudeStatus, codexStatus, opencodeStatus),
 		descriptorFromStatus(CapabilityKeyTmux, "tmux", CapabilityCategoryRuntime, tmuxStatus),
 		descriptorFromStatus(CapabilityKeyClaude, "claude", CapabilityCategoryRuntime, claudeStatus),
 		descriptorFromStatus(CapabilityKeyCodex, "codex", CapabilityCategoryRuntime, codexStatus),
+		descriptorFromStatus(CapabilityKeyOpencode, "opencode", CapabilityCategoryRuntime, opencodeStatus),
 		buildMemoryDescriptor(),
 		buildActionCapabilityDescriptor(CapabilityKeyActions, "Action execution", CapabilityCategoryAction, action.CapabilityActionExecute),
 		buildActionCapabilityDescriptor(CapabilityKeyWorkflows, "Workflow execution", CapabilityCategoryWorkflow, action.CapabilityWorkflowExecute),
@@ -157,8 +159,9 @@ func RegistryKeyForActionCapability(cap action.Capability) string {
 	}
 }
 
-func buildOfficeRuntimeDescriptor(providerName string, tmuxStatus, claudeStatus, codexStatus CapabilityStatus) CapabilityDescriptor {
-	if strings.EqualFold(strings.TrimSpace(providerName), "codex") {
+func buildOfficeRuntimeDescriptor(providerName string, tmuxStatus, claudeStatus, codexStatus, opencodeStatus CapabilityStatus) CapabilityDescriptor {
+	switch strings.ToLower(strings.TrimSpace(providerName)) {
+	case "codex":
 		level := codexStatus.Level
 		lifecycle := CapabilityLifecycleReady
 		if level != CapabilityReady {
@@ -172,6 +175,21 @@ func buildOfficeRuntimeDescriptor(providerName string, tmuxStatus, claudeStatus,
 			Lifecycle: lifecycle,
 			Detail:    codexStatus.Detail,
 			NextStep:  codexStatus.NextStep,
+		}
+	case "opencode":
+		level := opencodeStatus.Level
+		lifecycle := CapabilityLifecycleReady
+		if level != CapabilityReady {
+			lifecycle = CapabilityLifecycleNeedsSetup
+		}
+		return CapabilityDescriptor{
+			Key:       CapabilityKeyOfficeRuntime,
+			Label:     "Office runtime",
+			Category:  CapabilityCategoryOffice,
+			Level:     level,
+			Lifecycle: lifecycle,
+			Detail:    opencodeStatus.Detail,
+			NextStep:  opencodeStatus.NextStep,
 		}
 	}
 	level := CapabilityReady
@@ -193,10 +211,13 @@ func buildOfficeRuntimeDescriptor(providerName string, tmuxStatus, claudeStatus,
 	}
 }
 
-func buildDirectRuntimeDescriptor(providerName string, claudeStatus, codexStatus CapabilityStatus) CapabilityDescriptor {
+func buildDirectRuntimeDescriptor(providerName string, claudeStatus, codexStatus, opencodeStatus CapabilityStatus) CapabilityDescriptor {
 	status := claudeStatus
-	if strings.EqualFold(strings.TrimSpace(providerName), "codex") {
+	switch strings.ToLower(strings.TrimSpace(providerName)) {
+	case "codex":
 		status = codexStatus
+	case "opencode":
+		status = opencodeStatus
 	}
 	level := status.Level
 	lifecycle := CapabilityLifecycleReady
@@ -399,6 +420,13 @@ func runtimeCapabilityStatus(runtime RuntimeCapabilities, name string) Capabilit
 		status := runtime.Codex
 		if strings.TrimSpace(status.Name) == "" {
 			status.Name = "codex"
+		}
+		return status
+	}
+	if name == "opencode" && strings.TrimSpace(runtime.Opencode.Name) != "" {
+		status := runtime.Opencode
+		if strings.TrimSpace(status.Name) == "" {
+			status.Name = "opencode"
 		}
 		return status
 	}

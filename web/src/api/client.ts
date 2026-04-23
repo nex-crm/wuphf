@@ -336,7 +336,12 @@ export function answerRequest(id: string, choiceId: string, customText?: string)
 // ── Health ──
 
 export function getHealth() {
-  return get<{ status: string; agents?: Record<string, unknown> }>('/health')
+  return get<{
+    status: string
+    provider?: string
+    provider_model?: string
+    agents?: Record<string, unknown>
+  }>('/health')
 }
 
 // ── Tasks ──
@@ -531,7 +536,7 @@ export function setMemory(namespace: string, key: string, value: string) {
 
 // ── Config (Settings) ──
 
-export type LLMProvider = 'claude-code' | 'codex'
+export type LLMProvider = 'claude-code' | 'codex' | 'opencode'
 export type MemoryBackend = 'nex' | 'gbrain' | 'none'
 export type ActionProvider = 'auto' | 'one' | 'composio' | ''
 

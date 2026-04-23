@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCommands, type SlashCommandDescriptor } from '../api/client'
 
@@ -116,15 +117,22 @@ export function useCommands(): SlashCommand[] {
     retry: 1,
   })
 
-  if (isError || !data) {
-    return FALLBACK_SLASH_COMMANDS
-  }
-
-  const mapped = toAutocomplete(data)
-  // Defensive: if the broker returns an empty webSupported set (e.g. an
-  // older broker without the flag), prefer the fallback rather than an
-  // empty autocomplete.
-  return mapped.length > 0 ? mapped : FALLBACK_SLASH_COMMANDS
+  // Memoize the derived view so consumers relying on the returned array as
+  // a dependency (e.g. the autocomplete effect) don't see a fresh reference
+  // on every render. Without this, every Composer render rebuilt `commands`,
+  // which rebuilt the autocomplete `items` array, which re-fired the effect
+  // that calls `onItems(items)` — looping setState until React bailed with
+  // "Maximum update depth exceeded."
+  return useMemo(() => {
+    if (isError || !data) {
+      return FALLBACK_SLASH_COMMANDS
+    }
+    const mapped = toAutocomplete(data)
+    // Defensive: if the broker returns an empty webSupported set (e.g. an
+    // older broker without the flag), prefer the fallback rather than an
+    // empty autocomplete.
+    return mapped.length > 0 ? mapped : FALLBACK_SLASH_COMMANDS
+  }, [data, isError])
 }
 
 // Exported for tests.

@@ -42,6 +42,7 @@ import './styles/messages.css'
 import './styles/agents.css'
 import './styles/search.css'
 import './styles/wiki-shell.css'
+import './styles/kbd.css'
 
 // ── Error boundary ─────────────────────────────────────────────
 

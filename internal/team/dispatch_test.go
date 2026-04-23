@@ -84,11 +84,15 @@ func TestShouldUseHeadlessDispatch(t *testing.T) {
 		paneBackedAgents bool
 		want             bool
 	}{
-		{"tui mode, claude → pane", "claude-code", false, false, false},
+		// Both web and TUI modes default to headless: `claude --print` per turn
+		// is the primary dispatch path; pane-backed dispatch is reserved as an
+		// internal fallback that sets paneBackedAgents=true.
+		{"tui mode, claude, no panes → headless", "claude-code", false, false, true},
 		{"tui mode, codex → headless", "codex", false, false, true},
+		{"tui mode with panes (fallback active) → pane", "claude-code", false, true, false},
 		{"web mode, no panes → headless", "claude-code", true, false, true},
-		{"web mode with panes → pane", "claude-code", true, true, false},
-		{"web mode, codex always headless even if panes flag set", "codex", true, true, true},
+		{"web mode with panes (fallback active) → pane", "claude-code", true, true, false},
+		{"web mode, codex always headless even when panes flag set", "codex", true, true, true},
 	}
 	for _, tt := range tests {
 		l := &Launcher{

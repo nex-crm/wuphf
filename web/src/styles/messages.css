@@ -132,6 +132,19 @@
 
 /* ─── @mention ─── */
 .mention { display: inline-block; background: #FDF1E2; color: #D4700E; padding: 0 5px; border-radius: 3px; font-weight: 600; font-size: 0.9em; line-height: 1.4; vertical-align: baseline; }
+/* Composer mirror: the overlay text must share character metrics with
+   the textarea, otherwise padding + font-size-shrinking pushes the
+   caret out of alignment as the user types past the first tag.
+   Highlight-only treatment — no layout-affecting properties. */
+.composer-mirror .mention {
+  display: inline;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: inherit;
+  border-radius: 0;
+  vertical-align: baseline;
+}
 
 /* ─── Reactions ─── */
 .message-reactions { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
@@ -272,8 +285,43 @@ html[data-theme] .interview-bar-actions .btn-primary:hover { background: var(--t
 .autocomplete-item-desc { font-size: 12px; color: var(--text-tertiary); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
 .composer-inner { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 8px 8px 16px; transition: border-color 0.2s; }
 .composer-inner:focus-within { border-color: var(--accent); }
-.composer-input { flex: 1; border: none; background: transparent; font-family: var(--font-sans); font-size: 14px; color: var(--text); outline: none; resize: none; min-height: 28px; max-height: 120px; line-height: 1.5; padding: 4px 0; align-self: center; }
+/* Mirror + textarea share a relative container so their text lays out on
+   the same pixel grid. Font metrics (family, size, color) are set by the
+   active theme (nex.css etc.) so a single place controls both surfaces. */
+.composer-field { position: relative; flex: 1; min-height: 28px; align-self: center; }
+.composer-mirror,
+.composer-input {
+  line-height: 1.5;
+  padding: 4px 0;
+  min-height: 28px;
+  max-height: 120px;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  letter-spacing: inherit;
+}
+.composer-mirror {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  user-select: none;
+  overflow-y: hidden;
+}
+.composer-input {
+  position: relative;
+  width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  resize: none;
+  max-height: 120px;
+  display: block;
+}
 .composer-input::placeholder { color: var(--text-tertiary); }
+/* Hide the mirror when no mention chips exist so text-only input doesn't
+   render twice (once in textarea, once in mirror). The theme controls the
+   textarea's color — default is opaque; when .mention exists the theme
+   switches it to transparent so only the mirror paints the visible text. */
+.composer-field:not(:has(.mention)) .composer-mirror { display: none; }
 .composer-send {
   width: 32px;
   height: 32px;

@@ -60,7 +60,10 @@ const agentRateLimitHeader = "X-WUPHF-Agent"
 
 var brokerStatePath = defaultBrokerStatePath
 
-var studioPackageGenerator = provider.RunCodexOneShot
+// studioPackageGenerator routes Studio package generation through the
+// install-wide LLM provider so opencode-only or claude-code-only setups
+// aren't forced to have `codex` installed.
+var studioPackageGenerator = provider.RunConfiguredOneShot
 
 var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)`)
 
@@ -2305,6 +2308,23 @@ func (b *Broker) DisabledMembers(channel string) []string {
 	return append([]string(nil), ch.Disabled...)
 }
 
+// senderMayAutoPromoteLocked reports whether a `from` value is allowed to have
+// its @slug body text auto-promoted into the tagged array. Allowlist shape:
+// humans (empty / "you" / "human") and any registered agent slug are allowed;
+// synthetic senders ("system", "nex", bridges, automation kinds) are not. A
+// denylist would silently let every future synthetic identity leak through.
+// Sender is normalized first so case drift ("PM", "Human") matches the
+// allowlist the same way channel access does.
+// Caller must hold b.mu.
+func (b *Broker) senderMayAutoPromoteLocked(from string) bool {
+	from = normalizeActorSlug(from)
+	switch from {
+	case "", "you", "human":
+		return true
+	}
+	return b.findMemberLocked(from) != nil
+}
+
 func (b *Broker) OfficeMembers() []officeMember {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -4257,12 +4277,32 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"one_on_one_agent":      agent,
 		"focus_mode":            focus,
 		"provider":              provider,
+		"provider_model":        resolveProviderModel(provider),
 		"memory_backend":        memoryStatus.SelectedKind,
 		"memory_backend_active": memoryStatus.ActiveKind,
 		"memory_backend_ready":  memoryStatus.ActiveKind != config.MemoryBackendNone,
 		"nex_connected":         memoryStatus.ActiveKind == config.MemoryBackendNex && nex.Connected(),
 		"build":                 buildinfo.Current(),
 	})
+}
+
+// resolveProviderModel returns the effective model id for the active LLM
+// provider so the web UI's status bar can show, e.g.
+// "opencode · ollama/qwen2.5-coder:1.5b". Returns "" when the provider has
+// no resolvable model (claude-code uses the CLI's bundled default unless the
+// user overrides via --model; we don't parse that out here).
+func resolveProviderModel(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "codex":
+		// Empty cwd keeps the home-dir config lookup but skips the
+		// workspace-relative walk — Broker doesn't know which workspace the
+		// caller is in, and the status bar is a coarse indicator anyway.
+		return config.ResolveCodexModel("")
+	case "opencode":
+		return config.ResolveOpencodeModel()
+	default:
+		return ""
+	}
 }
 
 func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
@@ -5687,7 +5727,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if body.LLMProvider != nil {
 			provider = strings.TrimSpace(strings.ToLower(*body.LLMProvider))
 			switch provider {
-			case "claude-code", "codex":
+			case "claude-code", "codex", "opencode":
 				// ok
 			default:
 				http.Error(w, "unsupported llm_provider", http.StatusBadRequest)
@@ -5706,7 +5746,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				switch id {
-				case "claude-code", "codex":
+				case "claude-code", "codex", "opencode":
 					// ok
 				default:
 					http.Error(w, "unsupported entry in llm_provider_priority: "+id, http.StatusBadRequest)
@@ -6083,11 +6123,67 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 
 			b.members = append(b.members, member)
 			b.memberIndex[member.Slug] = len(b.members) - 1
+			// Add the new hire to every non-DM channel's Members list so they
+			// can actually POST replies. canAccessChannelLocked enforces
+			// ch.Members for every non-CEO agent sender; without this, a
+			// wizard-hired specialist can be tagged and dispatched but its
+			// reply is 403'd with "channel access denied" and the user sees
+			// nothing. DM channels are intentionally skipped — DMs encode
+			// the target agent in the slug and go through a different
+			// membership gate.
+			//
+			// Policy note: this is broader than normalizeLoadedStateLocked's
+			// seed (which only fills #general). A wizard hire joins every
+			// topical channel by default; admins can narrow via
+			// /channel-members action=remove afterwards. The rationale is
+			// that an office member who can't post to any non-default
+			// channel without a second configuration step violates the
+			// principle of least surprise — the hire UI does not surface a
+			// channel-scope picker, so the implicit default has to be
+			// "office-wide."
+			//
+			// We also clear any stale Disabled entry for this slug. A fresh
+			// hire shouldn't inherit a mute left over from a prior lifecycle.
+			updatedChannels := make([]string, 0, len(b.channels))
+			for i := range b.channels {
+				if b.channels[i].isDM() {
+					continue
+				}
+				mutated := false
+				if !containsString(b.channels[i].Members, slug) {
+					b.channels[i].Members = uniqueSlugs(append(b.channels[i].Members, slug))
+					mutated = true
+				}
+				if containsString(b.channels[i].Disabled, slug) {
+					// Allocate a fresh slice instead of reusing the
+					// backing array via [:0]+append. The in-place form
+					// is safe but reads as if it could clobber the
+					// range — readability over one extra alloc on a
+					// rare re-hire path.
+					next := make([]string, 0, len(b.channels[i].Disabled))
+					for _, d := range b.channels[i].Disabled {
+						if d != slug {
+							next = append(next, d)
+						}
+					}
+					b.channels[i].Disabled = next
+					mutated = true
+				}
+				if mutated {
+					b.channels[i].UpdatedAt = now
+					updatedChannels = append(updatedChannels, b.channels[i].Slug)
+				}
+			}
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
+			// Notify SSE subscribers that these channels' rosters changed so
+			// the UI sidebar refreshes without requiring a separate trigger.
+			for _, chSlug := range updatedChannels {
+				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
 		case "update":
@@ -6211,22 +6307,42 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 			}
 			b.members = filteredMembers
 			b.rebuildMemberIndexLocked()
+			// Symmetry with action:create — skip DM channels (they encode
+			// their target in the slug and go through a different
+			// membership gate) and emit a channel_updated event per
+			// actually-mutated channel so SSE subscribers refresh the
+			// roster. Without this, the UI sidebar gets a half-signal
+			// lifecycle (create emits channel_updated, remove does not).
+			removedChannels := make([]string, 0, len(b.channels))
 			for i := range b.channels {
-				nextMembers := b.channels[i].Members[:0]
-				for _, existing := range b.channels[i].Members {
-					if existing != slug {
-						nextMembers = append(nextMembers, existing)
-					}
+				if b.channels[i].isDM() {
+					continue
 				}
-				b.channels[i].Members = nextMembers
-				nextDisabled := b.channels[i].Disabled[:0]
-				for _, existing := range b.channels[i].Disabled {
-					if existing != slug {
-						nextDisabled = append(nextDisabled, existing)
+				mutated := false
+				if containsString(b.channels[i].Members, slug) {
+					next := make([]string, 0, len(b.channels[i].Members))
+					for _, existing := range b.channels[i].Members {
+						if existing != slug {
+							next = append(next, existing)
+						}
 					}
+					b.channels[i].Members = next
+					mutated = true
 				}
-				b.channels[i].Disabled = nextDisabled
-				b.channels[i].UpdatedAt = now
+				if containsString(b.channels[i].Disabled, slug) {
+					next := make([]string, 0, len(b.channels[i].Disabled))
+					for _, existing := range b.channels[i].Disabled {
+						if existing != slug {
+							next = append(next, existing)
+						}
+					}
+					b.channels[i].Disabled = next
+					mutated = true
+				}
+				if mutated {
+					b.channels[i].UpdatedAt = now
+					removedChannels = append(removedChannels, b.channels[i].Slug)
+				}
 			}
 			for i := range b.tasks {
 				if b.tasks[i].Owner == slug {
@@ -6240,6 +6356,9 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_removed", Slug: slug})
+			for _, chSlug := range removedChannels {
+				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
@@ -7112,28 +7231,30 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
-	// Auto-promote @slug mentions in the body into the tagged array for
-	// agent posts. Agents routinely write "@operator please handle X" and
-	// forget to set `tagged`, which means @operator never wakes up. Human
-	// messages are left alone — humans intentionally type @-references
-	// conversationally and may not want every one to fire a notification.
+	// Auto-promote @slug mentions in the body into the tagged array. If a
+	// user or agent typed `@pm`, treat it as a tag — `extractMentionedSlugs`
+	// already restricts to registered agent slugs, so conversational use of
+	// an @ that doesn't match an agent is untouched. Previously this ran for
+	// agent posts only, on the theory that humans might want @ to be merely
+	// conversational. In practice humans expect every @agent to notify, and
+	// the web composer does not always commit typed @-text into an explicit
+	// tag chip.
+	//
+	// Senders allowed to auto-promote: empty / "you" / "human" (humans) and
+	// any registered agent slug. Everything else — "system", "nex", future
+	// synthetic senders — is excluded by default so automation posts do not
+	// accidentally wake agents on every @-reference they quote.
 	tagged := uniqueSlugs(body.Tagged)
-	if body.From != "" && body.From != "you" && body.From != "human" && body.From != "system" {
+	sender := normalizeActorSlug(body.From)
+	if b.senderMayAutoPromoteLocked(sender) {
 		for _, slug := range extractMentionedSlugs(body.Content) {
-			if slug == body.From {
+			if slug == sender {
 				continue
 			}
 			if b.findMemberLocked(slug) == nil {
 				continue
 			}
-			already := false
-			for _, t := range tagged {
-				if t == slug {
-					already = true
-					break
-				}
-			}
-			if !already {
+			if !containsString(tagged, slug) {
 				tagged = append(tagged, slug)
 			}
 		}

@@ -37,17 +37,18 @@ var prereqSpecs = map[string]prereqSpec{
 	"git":      {required: true, installURL: "https://git-scm.com"},
 	"claude":   {required: false, installURL: "https://claude.ai/code"},
 	"codex":    {required: false, installURL: "https://github.com/openai/codex"},
+	"opencode": {required: false, installURL: "https://opencode.ai"},
 	"cursor":   {required: false, installURL: "https://cursor.com/"},
 	"windsurf": {required: false, installURL: "https://codeium.com/windsurf"},
 }
 
 // CheckAll returns a PrereqResult for each tracked binary in a stable order:
-// node, git, claude, codex, cursor, windsurf. At least one of the CLI
-// runtimes must be present for wuphf to actually run a turn, but all are
+// node, git, claude, codex, opencode, cursor, windsurf. At least one of the
+// CLI runtimes must be present for wuphf to actually run a turn, but all are
 // marked optional here so the user can proceed with whichever runtime
 // they have.
 func CheckAll() []PrereqResult {
-	names := []string{"node", "git", "claude", "codex", "cursor", "windsurf"}
+	names := []string{"node", "git", "claude", "codex", "opencode", "cursor", "windsurf"}
 	results := make([]PrereqResult, 0, len(names))
 	for _, name := range names {
 		results = append(results, CheckOne(name))

@@ -21,8 +21,15 @@ var (
 	headlessCodexCommandContext = exec.CommandContext
 	headlessCodexExecutablePath = os.Executable
 	headlessCodexRunTurn        = func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
-		if l != nil && l.memberEffectiveProviderKind(slug) != provider.KindCodex {
-			return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
+		if l != nil {
+			switch l.memberEffectiveProviderKind(slug) {
+			case provider.KindCodex:
+				return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
+			case provider.KindOpencode:
+				return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
+			default:
+				return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
+			}
 		}
 		return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
 	}
@@ -35,7 +42,17 @@ var (
 	headlessCodexOfficeLaunchTurnTimeout  = 10 * time.Minute
 	headlessCodexLocalWorktreeTurnTimeout = 12 * time.Minute
 	headlessCodexStaleCancelAfter         = 90 * time.Second
-	headlessCodexEnvVarsToStrip           = []string{
+	// Minimum age an active turn must have before an enqueue can preempt
+	// it via stale-cancel. Floors out tight re-enqueue loops where two
+	// near-simultaneous enqueues would otherwise cancel each other on
+	// arrival. Seen in prod (April 2026): CEO codex queue logged dozens
+	// of `stale-turn: cancelling active turn after 0s` over hours because
+	// the enqueue path exhausted the 90s threshold via clock-skew or a
+	// malformed turn, causing back-to-back cancels that never produced
+	// real work. 2s is long enough to absorb any legitimate rapid-fire
+	// wake without blocking genuine preemption.
+	headlessCodexMinTurnAgeBeforeCancel = 2 * time.Second
+	headlessCodexEnvVarsToStrip         = []string{
 		"OLDPWD",
 		"PWD",
 		"CODEX_THREAD_ID",
@@ -146,6 +163,15 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	startWorker := false
 
 	l.headlessMu.Lock()
+	if l.headlessQueues == nil {
+		l.headlessQueues = make(map[string][]headlessCodexTurn)
+	}
+	if l.headlessActive == nil {
+		l.headlessActive = make(map[string]*headlessCodexActiveTurn)
+	}
+	if l.headlessWorkers == nil {
+		l.headlessWorkers = make(map[string]bool)
+	}
 	urgentLeadTurn := l.headlessLeadTurnNeedsImmediateWakeLocked(slug, turn.Prompt)
 	if turn.TaskID != "" {
 		if active := l.headlessActive[slug]; active != nil && strings.TrimSpace(active.Turn.TaskID) == turn.TaskID {
@@ -235,7 +261,11 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	}
 	if active := l.headlessActive[slug]; active != nil && active.Cancel != nil {
 		age := time.Since(active.StartedAt)
-		if age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn) {
+		// Two conditions must hold to preempt: past the configured staleness
+		// threshold AND past the minimum-turn-age floor. The floor breaks the
+		// tight cancel-loop pattern observed in prod (see doc on the constant).
+		if age >= headlessCodexMinTurnAgeBeforeCancel &&
+			age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn) {
 			cancel = active.Cancel
 			staleAge = age
 		}
@@ -304,6 +334,7 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 
 			err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
 			ctxErr := turnCtx.Err()
+			isDurabilityError := false
 			if err == nil {
 				l.headlessMu.Lock()
 				active := l.headlessActive[slug]
@@ -311,6 +342,7 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 				if ok, reason := l.headlessTurnCompletedDurably(slug, active); !ok {
 					appendHeadlessCodexLog(slug, "durability-error: "+reason)
 					err = errors.New(reason)
+					isDurabilityError = true
 				}
 			}
 			switch {
@@ -322,6 +354,14 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 			case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
 				appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
 				l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
+			case isDurabilityError:
+				// The provider returned successfully but left no durable task state.
+				// Don't retry — the agent already had its turn. Block the task immediately.
+				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
+				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
+				exhaustedTurn := turn
+				exhaustedTurn.Attempts = headlessCodexLocalWorktreeRetryLimit
+				l.recoverFailedHeadlessTurn(slug, exhaustedTurn, startedAt, err.Error())
 			default:
 				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
 				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
@@ -818,6 +858,13 @@ func (l *Launcher) recoverTimedOutHeadlessTurn(slug string, turn headlessCodexTu
 	}
 }
 
+// isDurabilityFailure reports whether detail came from headlessTurnCompletedDurably
+// ("completed without durable task state"). These failures mean the agent ran but did
+// nothing observable — retrying produces the same result, so we block instead.
+func isDurabilityFailure(detail string) bool {
+	return strings.Contains(strings.TrimSpace(detail), "completed without durable task state")
+}
+
 func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn, startedAt time.Time, detail string) {
 	if l == nil || l.broker == nil {
 		return
@@ -831,7 +878,7 @@ func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn
 		appendHeadlessCodexLog(slug, fmt.Sprintf("error-recovery: %s already produced durable progress; leaving task state unchanged", task.ID))
 		return
 	}
-	if shouldRetryHeadlessTurn(task, turn) {
+	if shouldRetryHeadlessTurn(task, turn) && !isDurabilityFailure(detail) {
 		retryTurn := turn
 		retryTurn.Attempts++
 		retryTurn.EnqueuedAt = time.Now()
@@ -1448,6 +1495,25 @@ func buildHeadlessCodexPrompt(systemPrompt string, prompt string) string {
 }
 
 func wuphfLogDir() string {
+	// WUPHF_LOG_DIR lets tests redirect headless log writes to a
+	// process-stable path. Headless-worker goroutines routinely outlive the
+	// test that started them; if they wrote to the test's t.TempDir() they
+	// would race with go's test-scoped RemoveAll ("directory not empty" on
+	// unlinkat). Tests set this to a package-owned leaked dir so writes
+	// from leaked goroutines land harmlessly. Unset in production → HOME.
+	if override := strings.TrimSpace(os.Getenv("WUPHF_LOG_DIR")); override != "" {
+		// Fail loudly on a broken override instead of silently falling
+		// through — a misconfigured WUPHF_LOG_DIR path otherwise surfaces
+		// as confusing "file open failed" errors far from the root cause.
+		// Returning "" disables headless logging for this call (the
+		// appendHeadless*Log helpers no-op on empty dir), which matches
+		// the HOME-lookup graceful-degradation path below.
+		if err := os.MkdirAll(override, 0o700); err != nil {
+			fmt.Fprintf(os.Stderr, "wuphf: WUPHF_LOG_DIR=%q unwritable: %v — headless logging disabled\n", override, err)
+			return ""
+		}
+		return override
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""

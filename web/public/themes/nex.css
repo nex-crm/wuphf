@@ -634,6 +634,25 @@ html[data-theme="nex"] .mention {
   border-radius: var(--radius-sm);
   padding: 1px 4px;
 }
+/* Composer mirror: the chip MUST use the same character metrics as the
+   textarea behind it, otherwise the caret drifts — `@pm` in the mirror
+   was rendering with 4px horizontal padding + 0.9em font size, so each
+   mention took ~10px more width than the raw text in the textarea and
+   the caret fell behind after the first tag. Background highlight only;
+   no layout-affecting properties. */
+html[data-theme="nex"] .composer-mirror .mention {
+  display: inline;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: inherit;
+  border-radius: 0;
+  /* Use a box-shadow inset so the visual highlight stays without
+     adding any extrinsic padding. */
+  background: var(--accent-bg);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent-bg);
+}
 
 /* Timestamps */
 html[data-theme="nex"] .message-time {
@@ -707,13 +726,23 @@ html[data-theme="nex"] .composer-inner:focus-within {
   border-color: var(--accent);
   box-shadow: 0 0 0 1px rgba(6, 157, 228, 0.25);
 }
-html[data-theme="nex"] .composer-input {
+/* Both surfaces — textarea + mention-chip mirror — must share font metrics
+   so chip positions line up with the raw text the user is typing. */
+html[data-theme="nex"] .composer-input,
+html[data-theme="nex"] .composer-mirror {
   font-family: var(--font-sans);
   font-size: 15px;
   color: var(--text);
 }
 html[data-theme="nex"] .composer-input::placeholder {
   color: var(--text-tertiary);
+}
+/* When the user has typed a recognised mention, hide the textarea's text
+   layer and render chips from the mirror. Caret remains visible via
+   caret-color so typing still works. */
+html[data-theme="nex"] .composer-field:has(.mention) .composer-input {
+  color: transparent;
+  caret-color: var(--text);
 }
 
 /* Send button */

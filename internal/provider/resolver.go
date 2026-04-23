@@ -14,6 +14,8 @@ func DefaultStreamFnResolver(client *api.Client) agent.StreamFnResolver {
 		switch config.ResolveLLMProvider("") {
 		case "codex":
 			return CreateCodexCLIStreamFn(agentSlug)
+		case "opencode":
+			return CreateOpencodeCLIStreamFn(agentSlug)
 		case "claude-code", "":
 			// Default to Claude Code — most capable for multi-turn orchestration
 			return CreateClaudeCodeStreamFn(agentSlug)

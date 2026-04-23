@@ -27,7 +27,7 @@ One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all v
 
 ## Get Started
 
-**Prerequisites:** one agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) by default, or [Codex CLI](https://github.com/openai/codex) when you pass `--provider codex`. [tmux](https://github.com/tmux/tmux/wiki/Installing) is only required for `--tui` mode.
+**Prerequisites:** one agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) by default, or [Codex CLI](https://github.com/openai/codex) when you pass `--provider codex`. [tmux](https://github.com/tmux/tmux/wiki/Installing) is required for `--tui` mode (the web UI runs agents headlessly by default; tmux-backed dispatch remains as an internal fallback).
 
 ```bash
 npx wuphf
@@ -53,6 +53,29 @@ go build -o wuphf ./cmd/wuphf
 > **Forking this?** See [FORKING.md](FORKING.md) for running WUPHF without Nex, swapping branding, and adding your own agent packs. For the internals, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 > **Stability:** pre-1.0. `main` moves daily. Pin your fork to a release tag, not `main`.
+
+## Setup prompt (for AI agents)
+
+Paste this into Claude Code, Codex, or Cursor and let your agent drive the install:
+
+```text
+Set up https://github.com/nex-crm/wuphf for me. Read `README.md` first, then run
+`npx wuphf` to install and launch the office — the web UI opens at
+http://localhost:7891 automatically.
+
+Once it is running, confirm you can see #general, the team of agents, and the
+composer. If anything looks off, re-read the "What You Should See" and "Other
+Commands" sections of README.md before retrying — do not skip to flags.
+
+For agent conventions and the MCP tools each teammate gets, read `AGENTS.md`.
+For internals and how the broker, workspaces, and memory fit together, read
+`ARCHITECTURE.md`. If I mention forking or rebranding, read `FORKING.md`.
+
+After it is installed and running, open https://github.com/nex-crm/wuphf in my
+browser. If I am logged in to GitHub, ask me whether you should star the repo
+for me as a quick demo that the browser interaction works — only click the star
+if I say yes. If I am not logged in, just open https://wuphf.team.
+```
 
 ## Options
 
@@ -86,12 +109,12 @@ Nothing is promoted automatically. Agents decide what graduates from notebook to
 
 **Backends for the wiki:**
 
-- `markdown` is the default for new installs (since v0.0.6). Your team's knowledge lives as a local git repo at `~/.wuphf/wiki/` — each article a real markdown file, each agent commits under its own git identity. `cat`, `grep`, `git log`, `git clone` — all work. Open `/wiki` in the web UI for the Wikipedia-style reading view. No API key required.
+- `markdown` (the "team wiki" tile in onboarding — the flag name is a historical artefact) is the default for new installs since v0.0.6. It is not just a markdown folder. It is a living knowledge graph: typed facts with triplets, per-entity append-only fact logs, LLM-synthesized briefs committed under the `archivist` identity, `/lookup` cited-answer retrieval, and a `/lint` suite that flags contradictions, orphans, stale claims, and broken cross-references. Everything lives as a local git repo at `~/.wuphf/wiki/` — `cat`, `grep`, `git log`, `git clone`, all work. No API key required.
 - `nex` was the previous default. Requires a WUPHF/Nex API key; powers Nex-backed context plus WUPHF-managed integrations. Existing users stay on `nex` via persisted config — no forced migration.
 - `gbrain` mounts `gbrain serve` as the wiki backend. It requires an API key during `/init`: `OpenAI` gives you the full path with embeddings and vector search, while `Anthropic` alone is reduced mode.
 - `none` disables the shared wiki entirely. Notebooks still work locally.
 
-**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. On `markdown` the MCP tools are `team_wiki_read | team_wiki_search | team_wiki_list | team_wiki_write`. On `nex`/`gbrain` the MCP tools are the legacy `team_memory_query | team_memory_write | team_memory_promote`. The two tool sets never coexist on one server instance — backend selection flips the surface. See `DESIGN-WIKI.md` for the full wiki design spec.
+**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. On the team-wiki backend (`markdown`) the MCP tools are `team_wiki_read | team_wiki_search | team_wiki_list | team_wiki_write | wuphf_wiki_lookup | run_lint | resolve_contradiction`. On `nex`/`gbrain` the MCP tools are the legacy `team_memory_query | team_memory_write | team_memory_promote`. The two tool sets never coexist on one server instance — backend selection flips the surface. See `DESIGN-WIKI.md` for the reading view and `docs/specs/WIKI-SCHEMA.md` for the operational contract.
 
 Examples:
 

@@ -684,12 +684,18 @@ func TestEnqueueHeadlessCodexTurnCancelsStaleTurn(t *testing.T) {
 	oldRunTurn := headlessCodexRunTurn
 	oldTimeout := headlessCodexTurnTimeout
 	oldStale := headlessCodexStaleCancelAfter
+	oldMinAge := headlessCodexMinTurnAgeBeforeCancel
 	headlessCodexTurnTimeout = 5 * time.Second
 	headlessCodexStaleCancelAfter = 20 * time.Millisecond
+	// The min-age floor exists to prevent cancel-storms in prod; for this
+	// test it must be smaller than the stale threshold so the
+	// "cancel-old, process-new" behaviour can be exercised in milliseconds.
+	headlessCodexMinTurnAgeBeforeCancel = 10 * time.Millisecond
 	defer func() {
 		headlessCodexRunTurn = oldRunTurn
 		headlessCodexTurnTimeout = oldTimeout
 		headlessCodexStaleCancelAfter = oldStale
+		headlessCodexMinTurnAgeBeforeCancel = oldMinAge
 	}()
 
 	started := make(chan struct{}, 1)
@@ -1908,6 +1914,10 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 	tmpDir := t.TempDir()
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
+
+	oldWakeLead := headlessWakeLeadFn
+	headlessWakeLeadFn = func(_ *Launcher, _ string) {}
+	defer func() { headlessWakeLeadFn = oldWakeLead }()
 
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{

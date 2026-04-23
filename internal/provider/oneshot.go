@@ -10,6 +10,8 @@ func RunConfiguredOneShot(systemPrompt, prompt, cwd string) (string, error) {
 	switch config.ResolveLLMProvider("") {
 	case "codex":
 		return RunCodexOneShot(systemPrompt, prompt, cwd)
+	case "opencode":
+		return RunOpencodeOneShot(systemPrompt, prompt, cwd)
 	default:
 		return RunClaudeOneShot(systemPrompt, prompt, cwd)
 	}

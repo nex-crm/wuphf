@@ -24,14 +24,77 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	// Redirect broker token file to a temp path so tests don't clobber the live broker token
-	// at /tmp/wuphf-broker-token. Tests get the token directly from b.Token(), not from the file.
-	dir, err := os.MkdirTemp("", "wuphf-broker-test-*")
-	if err == nil {
-		brokerTokenFilePath = filepath.Join(dir, "broker-token")
-		defer os.RemoveAll(dir)
+	// Globals that leaked background goroutines can write to after a test
+	// returns need a process-lifetime home so cleanup doesn't race the
+	// leaked writes. We pre-seed two (token file, headless log dir) and
+	// deliberately DO NOT pre-seed brokerStatePath: NewBroker auto-loads
+	// from that path, so a shared default would cross-contaminate tests
+	// that add state without their own swap.
+	var cleanups []func()
+	cleanup := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
 	}
-	os.Exit(m.Run())
+
+	// 1) Broker token file: default path is /tmp/wuphf-broker-token which
+	//    collides with a running broker. Point at a temp file so tests
+	//    don't clobber it. Tests get the token directly from b.Token().
+	//    Fail fast if we cannot establish the redirect — a silent fallback
+	//    to the production path is exactly the collision this guards against.
+	dir, err := os.MkdirTemp("", "wuphf-broker-test-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: mktemp broker-token dir: %v\n", err)
+		os.Exit(1)
+	}
+	brokerTokenFilePath = filepath.Join(dir, "broker-token")
+	cleanups = append(cleanups, func() { _ = os.RemoveAll(dir) })
+
+	// 2) Headless log dir: leaked headless-worker goroutines open append
+	//    files under wuphfLogDir(). WUPHF_LOG_DIR is the env hook; honored
+	//    by wuphfLogDir() in headless_codex.go. Append-only writes are
+	//    safe to share across tests (nothing reads them). Fail fast on
+	//    mktemp error for the same reason as above — and run any cleanups
+	//    already registered so the token dir doesn't leak on the error path.
+	logDir, err := os.MkdirTemp("", "wuphf-team-test-logs-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: mktemp headless log dir: %v\n", err)
+		cleanup()
+		os.Exit(1)
+	}
+	if err := os.Setenv("WUPHF_LOG_DIR", logDir); err != nil {
+		// Silent fallback to the default log dir would reintroduce the
+		// cross-test cleanup race this setup exists to prevent.
+		fmt.Fprintf(os.Stderr, "TestMain: setenv WUPHF_LOG_DIR: %v\n", err)
+		_ = os.RemoveAll(logDir)
+		cleanup()
+		os.Exit(1)
+	}
+	cleanups = append(cleanups, func() { _ = os.RemoveAll(logDir) })
+
+	rc := m.Run()
+	cleanup()
+	os.Exit(rc)
+}
+
+// leakedBrokerStatePath returns a per-test-unique filesystem path for a
+// broker-state.json, rooted in a temp dir OUTSIDE t.TempDir(). Callers use
+// it to swap the package-global brokerStatePath without exposing t.TempDir
+// to late-arriving writes from goroutines leaked by prior tests. Those
+// late writes hit brokerStatePath() (resolved lazily on each call) and
+// resolve to whatever the global points at — so if it pointed into
+// t.TempDir, cleanup would race the write and fail with "unlinkat:
+// directory not empty". The returned dir is intentionally NOT registered
+// for cleanup: a handful of KB per test run leaks to /tmp, which the OS
+// reclaims on reboot or tmpfs eviction. Cheap fix for a cross-test
+// goroutine-leak hazard that a larger refactor will eventually retire.
+func leakedBrokerStatePath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "wuphf-test-state-*")
+	if err != nil {
+		t.Fatalf("mktemp broker state dir: %v", err)
+	}
+	return filepath.Join(dir, "broker-state.json")
 }
 
 func initUsableGitWorktree(t *testing.T, path string) {

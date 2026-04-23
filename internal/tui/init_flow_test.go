@@ -107,15 +107,30 @@ func TestProviderOptionsIncludeCodex(t *testing.T) {
 	t.Fatal("expected codex provider option")
 }
 
-func TestProviderOptionsOnlyExposeClaudeAndCodex(t *testing.T) {
+func TestProviderOptionsIncludeOpencode(t *testing.T) {
+	options := ProviderOptions()
+	for _, opt := range options {
+		if opt.Value == "opencode" {
+			return
+		}
+	}
+	t.Fatal("expected opencode provider option")
+}
+
+func TestProviderOptionsExcludeUnsupportedProviders(t *testing.T) {
 	options := ProviderOptions()
 	values := make([]string, 0, len(options))
 	for _, opt := range options {
 		values = append(values, opt.Value)
 	}
 	joined := strings.Join(values, ",")
-	if strings.Contains(joined, "gemini") || strings.Contains(joined, "nex-ask") {
-		t.Fatalf("expected provider options to hide gemini and nex-ask, got %q", joined)
+	// Unsupported providers must not appear. Framed as a negative invariant
+	// (rather than an exact allowlist) so adding new supported providers —
+	// opencode, openclaw, etc. — doesn't require editing this test.
+	for _, banned := range []string{"gemini", "nex-ask"} {
+		if strings.Contains(joined, banned) {
+			t.Fatalf("expected provider options to hide %q, got %q", banned, joined)
+		}
 	}
 }
 

@@ -8,6 +8,7 @@ import "fmt"
 const (
 	KindClaudeCode = "claude-code"
 	KindCodex      = "codex"
+	KindOpencode   = "opencode"
 	KindOpenclaw   = "openclaw"
 )
 
@@ -36,11 +37,11 @@ type OpenclawProviderBinding struct {
 // The empty string is valid and means "use install-wide default."
 func ValidateKind(s string) error {
 	switch s {
-	case "", KindClaudeCode, KindCodex, KindOpenclaw:
+	case "", KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw:
 		return nil
 	default:
-		return fmt.Errorf("unknown provider kind %q (valid: %s, %s, %s, or empty)",
-			s, KindClaudeCode, KindCodex, KindOpenclaw)
+		return fmt.Errorf("unknown provider kind %q (valid: %s, %s, %s, %s, or empty)",
+			s, KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw)
 	}
 }
 

@@ -8,6 +8,7 @@ import { showNotice } from '../ui/Toast'
 import { confirm } from '../ui/ConfirmDialog'
 import { openProviderSwitcher } from '../ui/ProviderSwitcher'
 import { Autocomplete, applyAutocomplete, type AutocompleteItem } from './Autocomplete'
+import { parseMentions, renderMentionTokens } from '../../lib/mentions'
 
 /** How many sent messages to keep in per-channel history. */
 const COMPOSER_HISTORY_LIMIT = 20
@@ -275,6 +276,7 @@ export function Composer() {
   const [acItems, setAcItems] = useState<AutocompleteItem[]>([])
   const [acIdx, setAcIdx] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const mirrorRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const { data: cfg } = useQuery({
     queryKey: ['config'],
@@ -286,6 +288,11 @@ export function Composer() {
     () => resolveLeadSlug(cfg?.team_lead_slug, members),
     [cfg?.team_lead_slug, members],
   )
+  // Slugs the mirror-overlay recognises as mention chips. Memoed against
+  // the member list reference so the token parse downstream doesn't
+  // re-allocate on every Composer render.
+  const knownSlugs = useMemo(() => members.map((m) => m.slug), [members])
+  const mentionTokens = useMemo(() => parseMentions(text, knownSlugs), [text, knownSlugs])
   // Broker-backed slash-command registry. Falls back to the hardcoded
   // list if the broker is unreachable so the composer is never worse
   // than before this plumbing landed.
@@ -501,6 +508,16 @@ export function Composer() {
     }
   }, [])
 
+  // Keep the mirror overlay scroll-locked to the textarea. Once content
+  // overflows the 120px cap, the textarea scrolls internally; the mirror
+  // has no scroll constraint of its own, so without this the chips would
+  // drift out of alignment with the visible text rows.
+  const syncScroll = useCallback(() => {
+    const src = textareaRef.current
+    const dst = mirrorRef.current
+    if (src && dst) dst.scrollTop = src.scrollTop
+  }, [])
+
   return (
     <div className="composer">
       <Autocomplete
@@ -512,25 +529,41 @@ export function Composer() {
         commands={commands}
       />
       <div className="composer-inner">
-        <textarea
-          ref={textareaRef}
-          className="composer-input"
-          placeholder={`Message #${currentChannel}`}
-          value={text}
-          onChange={(e) => {
-            setText(e.target.value)
-            setCaret(e.target.selectionStart ?? 0)
-            handleInput()
-            // Any manual edit cancels history recall.
-            if (historyRef.current.index !== -1) {
-              resetRecall()
-            }
-          }}
-          onKeyDown={handleKeyDown}
-          onKeyUp={syncCaret}
-          onClick={syncCaret}
-          rows={1}
-        />
+        <div className="composer-field">
+          {/* Mirror overlay: renders the same text as the textarea but with
+              mention chips. The textarea sits on top with transparent text
+              and a visible caret so the user still sees and edits the raw
+              string — only the chips are styled. aria-hidden because the
+              textarea is the interactive source of truth. */}
+          <div ref={mirrorRef} className="composer-mirror" aria-hidden="true">
+            {renderMentionTokens(mentionTokens)}
+            {/* Trailing newline so the mirror height matches a textarea
+                that ends on a blank line (otherwise the chip layout
+                truncates by one row). */}
+            {'\n'}
+          </div>
+          <textarea
+            ref={textareaRef}
+            className="composer-input"
+            placeholder={`Message #${currentChannel}`}
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value)
+              setCaret(e.target.selectionStart ?? 0)
+              handleInput()
+              syncScroll()
+              // Any manual edit cancels history recall.
+              if (historyRef.current.index !== -1) {
+                resetRecall()
+              }
+            }}
+            onKeyDown={handleKeyDown}
+            onKeyUp={syncCaret}
+            onClick={syncCaret}
+            onScroll={syncScroll}
+            rows={1}
+          />
+        </div>
         <button
           className="composer-send"
           disabled={!text.trim() || sendMutation.isPending}
