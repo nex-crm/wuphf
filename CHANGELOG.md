@@ -4,6 +4,10 @@ All notable changes to WUPHF will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Caret no longer drifts when typing past an `@agent` chip in the composer.** The mirror-overlay treatment rendered mention chips with 4–5px horizontal padding and `font-size: 0.9em`, so each chip took more width than the raw text in the textarea behind it. The caret fell behind the typed characters by a few pixels after every chip. Composer chips now inherit the textarea's font metrics exactly (15px, no padding, `display: inline`) and only apply a background highlight — layout-neutral, so character-for-character alignment with the textarea is preserved. Message-bubble chips keep the original styled pill treatment.
+
 ### Changed
 
 - **Headless `claude --print` is now the default dispatch path for both `wuphf` (web) and `wuphf --tui`.** Anthropic re-sanctioned headless CLI reuse in the 2026-04 OpenClaw policy note, and it runs on the user's normal subscription quota — no separate extra-usage charge. Every turn now dispatches as a fresh `claude --print` invocation, matching how the Codex runtime already worked and unifying dispatch across both modes. The previous per-agent long-lived interactive tmux pane path is preserved as an internal fallback primitive (reachable if dispatch ever needs to promote to panes at runtime) but is no longer invoked at startup. tmux is still required for `--tui` since the channel-view TUI runs in tmux; the web UI no longer needs it.

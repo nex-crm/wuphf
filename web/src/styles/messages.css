@@ -132,6 +132,19 @@
 
 /* ─── @mention ─── */
 .mention { display: inline-block; background: #FDF1E2; color: #D4700E; padding: 0 5px; border-radius: 3px; font-weight: 600; font-size: 0.9em; line-height: 1.4; vertical-align: baseline; }
+/* Composer mirror: the overlay text must share character metrics with
+   the textarea, otherwise padding + font-size-shrinking pushes the
+   caret out of alignment as the user types past the first tag.
+   Highlight-only treatment — no layout-affecting properties. */
+.composer-mirror .mention {
+  display: inline;
+  padding: 0;
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: inherit;
+  border-radius: 0;
+  vertical-align: baseline;
+}
 
 /* ─── Reactions ─── */
 .message-reactions { display: flex; gap: 4px; margin-top: 4px; flex-wrap: wrap; }
