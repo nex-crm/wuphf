@@ -357,8 +357,14 @@ func Staleness(f TypedFact, now time.Time) float64 {
 	return (daysOld * weight) - (conf * 10) - reinforcement
 }
 
-// Search runs a BM25 query against the text index and hydrates hits with
-// their full TypedFact row from the store. `topK` is clamped to [1, 100].
+// Search runs a class-aware retrieval against the index. Multi_hop and
+// counterfactual queries take the typed-predicate graph walk path (Slice 2
+// Thread A); every other class falls through to plain BM25. `topK` is
+// clamped to [1, 100].
+//
+// Invariant: the typed walk is additive. If the rewriter fails to parse
+// spans or the FactStore yields no typed hits, the BM25 path answers alone.
+// Recall never falls below the BM25-only baseline.
 func (w *WikiIndex) Search(ctx context.Context, query string, topK int) ([]SearchHit, error) {
 	if topK < 1 {
 		topK = 10
@@ -366,7 +372,7 @@ func (w *WikiIndex) Search(ctx context.Context, query string, topK int) ([]Searc
 	if topK > 100 {
 		topK = 100
 	}
-	return w.text.Search(ctx, query, topK)
+	return retrieveWithClass(ctx, w.store, w.text, query, topK)
 }
 
 // GetFact returns a single fact by ID.
@@ -386,6 +392,18 @@ func (w *WikiIndex) ListFactsForEntity(ctx context.Context, slug string) ([]Type
 		resolved = slug
 	}
 	return w.store.ListFactsForEntity(ctx, resolved)
+}
+
+// ListFactsByPredicateObject passes through to the FactStore. Used by the
+// typed-predicate graph walk for multi_hop queries (Slice 2 Thread A).
+func (w *WikiIndex) ListFactsByPredicateObject(ctx context.Context, predicate, object string) ([]TypedFact, error) {
+	return w.store.ListFactsByPredicateObject(ctx, predicate, object)
+}
+
+// ListFactsByTriplet passes through to the FactStore. Used by the typed-
+// predicate graph walk and counterfactual rewrite (Slice 2 Thread A).
+func (w *WikiIndex) ListFactsByTriplet(ctx context.Context, subject, predicate, objectPrefix string) ([]TypedFact, error) {
+	return w.store.ListFactsByTriplet(ctx, subject, predicate, objectPrefix)
 }
 
 // ListEdgesForEntity returns graph.log edges incident on an entity.
