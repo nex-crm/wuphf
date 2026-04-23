@@ -202,6 +202,55 @@ func TestListFactsByTriplet(t *testing.T) {
 	}
 }
 
+// TestListFactsByTriplet_EscapesLikeWildcards guards against a future caller
+// passing raw bytes (not just NormalizeForFactID output) as the object prefix.
+// A literal "%" or "_" must match only itself, not act as a SQL LIKE wildcard
+// that causes over-matching. The in-memory backend uses strings.HasPrefix and
+// is inherently safe; the SQLite backend explicitly escapes metacharacters.
+func TestListFactsByTriplet_EscapesLikeWildcards(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	for _, tc := range factStoreCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			s := tc.open(t)
+
+			// Two facts: one with a "%" in the object (exact prefix "foo%")
+			// and a sibling that would false-match if "%" were treated as a
+			// wildcard ("foobar").
+			seed := []TypedFact{
+				seedTriplet("exact-pct", "alice", "custom_pred", "foo%bar"),
+				seedTriplet("wildcard-trap", "alice", "custom_pred", "foobar"),
+				seedTriplet("exact-under", "alice", "custom_pred", "foo_baz"),
+				seedTriplet("under-trap", "alice", "custom_pred", "fooXbaz"),
+			}
+			for _, f := range seed {
+				if err := s.UpsertFact(ctx, f); err != nil {
+					t.Fatalf("UpsertFact %s: %v", f.ID, err)
+				}
+			}
+
+			// "foo%" prefix must match only "foo%bar", never "foobar".
+			got, err := s.ListFactsByTriplet(ctx, "alice", "custom_pred", "foo%")
+			if err != nil {
+				t.Fatalf("ListFactsByTriplet %%: %v", err)
+			}
+			if ids := collectIDs(got); !equalStringSlices(ids, []string{"exact-pct"}) {
+				t.Errorf("%% escape: got %v, want [exact-pct]", ids)
+			}
+
+			// "foo_" prefix must match only "foo_baz", never "fooXbaz".
+			got, err = s.ListFactsByTriplet(ctx, "alice", "custom_pred", "foo_")
+			if err != nil {
+				t.Fatalf("ListFactsByTriplet _: %v", err)
+			}
+			if ids := collectIDs(got); !equalStringSlices(ids, []string{"exact-under"}) {
+				t.Errorf("_ escape: got %v, want [exact-under]", ids)
+			}
+		})
+	}
+}
+
 // equalStringSlices compares two string slices assuming both are already
 // sorted. Keeps test intent explicit without pulling reflect.DeepEqual into
 // the hot path.
