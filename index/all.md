@@ -4,4 +4,4 @@ _Auto-generated. Do not edit by hand — agents regenerate this on every commit.
 
 ## team/companies
 
-- [Acme](../team/companies/acme.md) _(updated 2026-04-23T03:51:45Z)_
+- [Existing article](../team/companies/acme.md) _(updated 2026-04-23T03:51:45Z)_
