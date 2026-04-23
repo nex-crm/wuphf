@@ -39,23 +39,36 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
   const countBySev = (sev: string) =>
     (report?.findings ?? []).filter((f) => f.severity === sev).length
 
+  /** Translate the engineering finding type into plain operator language. */
+  const humanType = (t: string): string => {
+    switch (t) {
+      case 'contradictions': return 'Conflicting facts'
+      case 'orphans': return 'Page with no links'
+      case 'stale': return 'May be out of date'
+      case 'missing_crossrefs': return 'Should probably be linked'
+      case 'dedup_review': return 'Possible duplicate'
+      default: return t.replace(/_/g, ' ')
+    }
+  }
+
   return (
     <main className="wk-audit" data-testid="wk-lint">
       <header className="wk-audit-header">
         <div>
-          <h1 className="wk-audit-title">Wiki lint</h1>
+          <h1 className="wk-audit-title">Wiki health check</h1>
           <p className="wk-audit-strapline">
-            Daily health check across all wiki entities — contradictions, orphans, stale claims,
-            missing cross-refs, and dedup review.
+            A daily sweep of the whole wiki to surface things worth your attention:
+            conflicting facts, pages with no links in or out, claims that may be out of date,
+            entities that should probably be linked, and possible duplicates.
           </p>
         </div>
         <div className="wk-audit-stats" aria-live="polite">
           {loading
-            ? 'Running lint…'
+            ? 'Checking…'
             : error
               ? 'Error'
               : report
-                ? `${countBySev('critical')} critical · ${countBySev('warning')} warnings · ${countBySev('info')} info`
+                ? `${countBySev('critical')} need attention · ${countBySev('warning')} worth a look · ${countBySev('info')} FYI`
                 : ''}
         </div>
       </header>
@@ -67,31 +80,31 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
           onClick={loadReport}
           disabled={loading}
         >
-          {loading ? 'Running…' : 'Run lint now'}
+          {loading ? 'Checking…' : 'Check again now'}
         </button>
         {report && (
           <span className="wk-audit-strapline" style={{ alignSelf: 'center' }}>
-            Report date: {report.date}
+            Last checked: {report.date}
           </span>
         )}
       </section>
 
       {loading && !report ? (
-        <div className="wk-loading">Running lint checks…</div>
+        <div className="wk-loading">Checking the wiki…</div>
       ) : error ? (
         <div className="wk-error">Error: {error}</div>
       ) : report && report.findings.length === 0 ? (
         <div className="wk-audit-empty" data-testid="wk-lint-empty">
-          No findings — wiki is healthy.
+          All clear. Nothing needs your attention right now.
         </div>
       ) : report ? (
         <table className="wk-audit-table">
           <thead>
             <tr>
-              <th scope="col">Severity</th>
-              <th scope="col">Type</th>
-              <th scope="col">Entity</th>
-              <th scope="col">Summary</th>
+              <th scope="col">Priority</th>
+              <th scope="col">Issue</th>
+              <th scope="col">Page</th>
+              <th scope="col">What's going on</th>
               <th scope="col">Action</th>
             </tr>
           </thead>
@@ -109,7 +122,7 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
                     {severityLabel(f.severity)}
                   </span>
                 </td>
-                <td className="wk-audit-msg">{f.type.replace(/_/g, ' ')}</td>
+                <td className="wk-audit-msg">{humanType(f.type)}</td>
                 <td className="wk-audit-author">
                   {f.entity_slug ? (
                     <a
@@ -167,11 +180,11 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
 function severityLabel(sev: string): string {
   switch (sev) {
     case 'critical':
-      return 'Critical'
+      return 'Needs attention'
     case 'warning':
-      return 'Warning'
+      return 'Worth a look'
     case 'info':
-      return 'Info'
+      return 'FYI'
     default:
       return sev
   }

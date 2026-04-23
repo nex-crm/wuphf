@@ -150,7 +150,7 @@ export default function WikiSidebar({
               onNavigateLint()
             }}
           >
-            Wiki lint →
+            Check wiki health →
           </button>
         </div>
       )}

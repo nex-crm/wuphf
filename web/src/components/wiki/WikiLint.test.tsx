@@ -34,16 +34,16 @@ describe('<WikiLint>', () => {
     await waitFor(() =>
       expect(screen.getByTestId('wk-lint-empty')).toBeInTheDocument(),
     )
-    expect(screen.getByText(/no findings/i)).toBeInTheDocument()
+    expect(screen.getByText(/all clear/i)).toBeInTheDocument()
   })
 
-  it('critical finding row has aria-label="Critical finding"', async () => {
+  it('critical finding row has aria-label="Needs attention finding"', async () => {
     vi.spyOn(wikiApi, 'runLint').mockResolvedValue(REPORT_WITH_CRITICAL)
     render(<WikiLint onNavigate={vi.fn()} />)
     // Wait for the findings table to appear.
-    const severityBadge = await screen.findByLabelText('Critical finding')
+    const severityBadge = await screen.findByLabelText('Needs attention finding')
     expect(severityBadge).toBeInTheDocument()
-    expect(severityBadge.textContent).toBe('Critical')
+    expect(severityBadge.textContent).toBe('Needs attention')
   })
 
   it('clicking Resolve opens modal, picking A calls resolveContradiction with winner=A', async () => {
