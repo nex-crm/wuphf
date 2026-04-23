@@ -104,14 +104,58 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
         <>
           <ol className="wk-facts-items">
             {visibleFacts.map((f) => (
-              <li key={f.id} className="wk-facts-item">
+              <li
+                key={f.id}
+                className="wk-facts-item"
+                data-fact-type={f.type ?? 'observation'}
+                data-superseded={isSuperseded(f) ? 'true' : undefined}
+              >
                 <PixelAvatar slug={f.recorded_by} size={14} />
                 <div className="wk-facts-body">
                   <span className="wk-facts-text">{f.text}</span>
+                  {f.triplet && (
+                    <span className="wk-facts-triplet" aria-label="Typed triplet">
+                      <code>{f.triplet.subject}</code>
+                      {' — '}
+                      <code>{f.triplet.predicate}</code>
+                      {' → '}
+                      <code>{f.triplet.object}</code>
+                    </span>
+                  )}
                   <span className="wk-facts-meta">
+                    {f.type && <span className="wk-facts-type">{f.type}</span>}
+                    {typeof f.confidence === 'number' && (
+                      <>
+                        {f.type && ' · '}
+                        <span
+                          className="wk-facts-confidence"
+                          aria-label={`Confidence ${(f.confidence * 100).toFixed(0)} percent`}
+                        >
+                          {f.confidence.toFixed(2)}
+                        </span>
+                      </>
+                    )}
+                    {(f.type || typeof f.confidence === 'number') && ' · '}
                     {formatAgentName(f.recorded_by)}
                     {' · '}
                     <time dateTime={f.created_at}>{formatShortTs(f.created_at)}</time>
+                    {formatValidity(f) && (
+                      <>
+                        {' · '}
+                        <span className="wk-facts-validity">{formatValidity(f)}</span>
+                      </>
+                    )}
+                    {f.reinforced_at && (
+                      <>
+                        {' · '}
+                        <span
+                          className="wk-facts-reinforced"
+                          aria-label={`Reinforced ${formatShortTs(f.reinforced_at)}`}
+                        >
+                          reinforced {formatShortTs(f.reinforced_at)}
+                        </span>
+                      </>
+                    )}
                     {isWikiSource(f.source_path) && (
                       <>
                         {' · '}
@@ -122,6 +166,17 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
                         >
                           {sourceLabel(f.source_path as string)}
                         </a>
+                      </>
+                    )}
+                    {f.supersedes && f.supersedes.length > 0 && (
+                      <>
+                        {' · '}
+                        <span
+                          className="wk-facts-supersedes"
+                          aria-label={`Supersedes ${f.supersedes.length} prior fact${f.supersedes.length === 1 ? '' : 's'}`}
+                        >
+                          supersedes {f.supersedes.length} prior
+                        </span>
                       </>
                     )}
                   </span>
@@ -146,9 +201,22 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
   )
 }
 
+/** Checks whether a source_path resolves to a wiki-renderable location.
+ *  Schema §3 three-layer architecture: wiki/artifacts/ (Layer 1, raw),
+ *  team/ (Layer 2, briefs), wiki/facts/ (Layer 2, fact log),
+ *  wiki/insights/ (Layer 2, insights), wiki/playbooks/ (Layer 2, playbooks).
+ *  agents/ is the legacy v1.2 per-agent notebook path and is retained for
+ *  backwards compatibility with existing fact rows. */
 function isWikiSource(path?: string): path is string {
   if (!path) return false
-  return path.startsWith('agents/') || path.startsWith('team/')
+  return (
+    path.startsWith('wiki/artifacts/') ||
+    path.startsWith('team/') ||
+    path.startsWith('wiki/facts/') ||
+    path.startsWith('wiki/insights/') ||
+    path.startsWith('wiki/playbooks/') ||
+    path.startsWith('agents/') // legacy v1.2 per-agent notebook path
+  )
 }
 
 function sourceLabel(path: string): string {
@@ -161,4 +229,22 @@ function formatShortTs(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return d.toISOString().slice(0, 10)
+}
+
+/** A fact is superseded when its temporal validity has ended.
+ *  Schema §8.2 — valid_until being set means a newer fact has taken its place.
+ *  A fact that HAS a supersedes list is the NEWER fact (it replaced others);
+ *  the supersedes list alone does NOT make this fact superseded. */
+function isSuperseded(f: Fact): boolean {
+  return Boolean(f.valid_until)
+}
+
+function formatValidity(f: Fact): string | null {
+  if (!f.valid_from && !f.valid_until) return null
+  const from = f.valid_from ? formatShortTs(f.valid_from) : null
+  const until = f.valid_until ? formatShortTs(f.valid_until) : null
+  if (from && until) return `valid ${from} → ${until}`
+  if (until) return `valid until ${until}`
+  if (from) return `valid from ${from}`
+  return null
 }

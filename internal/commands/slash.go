@@ -11,6 +11,7 @@ package commands
 func RegisterAllCommands(r *Registry) {
 	// AI
 	r.Register(SlashCommand{Name: "ask", Description: "Ask the team lead", WebSupported: true, Execute: cmdAsk})
+	r.Register(SlashCommand{Name: "lookup", Description: "Cited answer from the team wiki", WebSupported: true, Execute: cmdLookup})
 	r.Register(SlashCommand{Name: "search", Description: "Search messages + KB", WebSupported: true, Execute: cmdSearch})
 	r.Register(SlashCommand{Name: "remember", Description: "Store a fact in memory", WebSupported: true, Execute: cmdRemember})
 	r.Register(SlashCommand{Name: "youtube-pack", Description: "Generate YouTube content packages", Execute: cmdYouTubePack})
@@ -43,6 +44,9 @@ func RegisterAllCommands(r *Registry) {
 	r.Register(SlashCommand{Name: "help", Description: "Show all commands + keys", WebSupported: true, Execute: cmdHelp})
 	r.Register(SlashCommand{Name: "clear", Description: "Clear messages", WebSupported: true, Execute: cmdClear})
 	r.Register(SlashCommand{Name: "quit", Description: "Exit WUPHF", Execute: cmdQuit})
+
+	// Wiki intelligence
+	r.Register(SlashCommand{Name: "lint", Description: "Run wiki lint — checks contradictions, orphans, stale claims, cross-refs", WebSupported: true})
 
 	// Web-only surfaces. No TUI Execute handler yet; the web composer owns the
 	// behaviour (navigate to a view, post to /signals, etc). Listed here so

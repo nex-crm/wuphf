@@ -1,0 +1,58 @@
+{
+  "id": "synthesis_003_contradiction_flagged",
+  "prompt": "synthesis_v2",
+  "description": "Two conflicting reports-to facts flagged by lint; synthesis must surface an inline italic *Contradiction:* callout and must NOT silently pick a winner.",
+  "template_vars": {
+    "EntitySlug": "sarah-jones",
+    "EntityKind": "person",
+    "EntityDisplayName": "Sarah Jones",
+    "CurrentBody": "# Sarah Jones\n\nSarah is VP of Sales at [[company/acme-corp|Acme Corp]].\n",
+    "NewFacts": [],
+    "ActiveFacts": [
+      {
+        "ID": "fact_reports_to_michael",
+        "Type": "relationship",
+        "Text": "Sarah reports to Michael Chen."
+      },
+      {
+        "ID": "fact_reports_to_david",
+        "Type": "relationship",
+        "Text": "Sarah reports to David Park."
+      }
+    ],
+    "RecentInsights": [],
+    "KnownRelatedEntities": [
+      {"Slug": "acme-corp", "Kind": "company", "DisplayName": "Acme Corp"}
+    ],
+    "Contradictions": [
+      {
+        "FactAID": "fact_reports_to_michael",
+        "FactAText": "Sarah reports to Michael Chen.",
+        "FactBID": "fact_reports_to_david",
+        "FactBText": "Sarah reports to David Park.",
+        "Reason": "Conflicting manager on the same subject/predicate with both valid_until null."
+      }
+    ]
+  },
+  "expected": {
+    "must_include": [
+      "*Contradiction:",
+      "Michael",
+      "David"
+    ],
+    "must_not_include": [
+      "Sarah reports to Michael Chen.\n\nSarah is",
+      "{.hatnote}",
+      "## Related",
+      "## Sources",
+      "resolved",
+      "Michael Chen.\n",
+      "David Park.\n"
+    ],
+    "structured": {
+      "contradiction_callout_count": 1,
+      "both_names_inside_single_contradiction_callout": true
+    },
+    "notes": "Guards Section 10.2 rule 4: mark contradictions as italic *Contradiction:* callouts inline; renderer upgrades to hatnote. Synthesizer is NOT a judge; never silently pick a winner. Devil's-advocate M14 strengthening: a lone \"Michael Chen.\\n\" or \"David Park.\\n\" at the top of the body (which would mean picking a winner) is banned; both names must appear together inside the *Contradiction: callout; the *Contradiction: string must appear exactly once (no duplicate callouts for the same pair)."
+  }
+}

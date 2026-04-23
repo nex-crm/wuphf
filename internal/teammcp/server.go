@@ -423,6 +423,12 @@ type TeamWikiSearchArgs struct {
 // TeamWikiListArgs is intentionally empty — team_wiki_list takes no args.
 type TeamWikiListArgs struct{}
 
+// TeamWikiLookupArgs is the contract for wuphf_wiki_lookup.
+type TeamWikiLookupArgs struct {
+	Query string `json:"query" jsonschema:"Natural-language question to answer from the team wiki"`
+	TopK  int    `json:"top_k,omitempty" jsonschema:"Max sources to retrieve (default 20)"`
+}
+
 type TeamTaskAckArgs struct {
 	ID      string `json:"id" jsonschema:"Task ID to acknowledge"`
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
@@ -545,6 +551,10 @@ func registerSharedMemoryTools(server *mcp.Server) {
 			"team_wiki_list",
 			"Return the auto-regenerated catalog (index/all.md) of every article in the team wiki.",
 		), handleTeamWikiList)
+		mcp.AddTool(server, readOnlyTool(
+			"wuphf_wiki_lookup",
+			"Cited-answer lookup against the team wiki. Returns a structured JSON answer with sources and inline citations. Use when you need a verified, sourced answer rather than a raw search.",
+		), handleTeamWikiLookup)
 		// Notebook tools ride on the same markdown backend. Registered here
 		// so they share the WUPHF_MEMORY_BACKEND gate with team_wiki_*.
 		registerNotebookTools(server)
@@ -555,6 +565,16 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// into invokable skills + record execution outcomes. Same markdown
 		// substrate, so the backend gate is unchanged.
 		registerPlaybookTools(server)
+		// Lint tools (Slice 1 wiki intelligence) — daily health check +
+		// contradiction resolution. Same markdown substrate.
+		mcp.AddTool(server, readOnlyTool(
+			"run_lint",
+			"Run the wiki lint check. Flags contradictions (critical), orphans (warning), stale claims (warning), missing cross-refs (info), and dedup review (info). Returns LintReport JSON with findings and resolve actions.",
+		), handleRunLint)
+		mcp.AddTool(server, officeWriteTool(
+			"resolve_contradiction",
+			"Resolve a contradiction finding from a prior run_lint call. winner must be A (first fact wins), B (second fact wins), or Both (acknowledge both as valid).",
+		), handleResolveContradiction)
 	case "none":
 		// Nothing — user explicitly disabled shared memory.
 	default:
@@ -1953,6 +1973,26 @@ func handleTeamWikiList(ctx context.Context, _ *mcp.CallToolRequest, _ TeamWikiL
 	return textResult(string(bytes)), nil, nil
 }
 
+// handleTeamWikiLookup answers a natural-language question with a cited
+// response assembled from the team wiki. The broker's /wiki/lookup endpoint
+// runs the full QueryHandler pipeline: classify → search → prompt → parse.
+// Returns the raw QueryAnswer JSON so the calling agent can render citations.
+func handleTeamWikiLookup(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiLookupArgs) (*mcp.CallToolResult, any, error) {
+	q := strings.TrimSpace(args.Query)
+	if q == "" {
+		return toolError(fmt.Errorf("query is required")), nil, nil
+	}
+	path := "/wiki/lookup?q=" + url.QueryEscape(q)
+	if args.TopK > 0 {
+		path += fmt.Sprintf("&top_k=%d", args.TopK)
+	}
+	bytes, err := brokerGetRaw(ctx, path)
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(string(bytes)), nil, nil
+}
+
 func handleTeamTaskAck(ctx context.Context, _ *mcp.CallToolRequest, args TeamTaskAckArgs) (*mcp.CallToolResult, any, error) {
 	mySlug, err := resolveSlug(args.MySlug)
 	if err != nil {
@@ -3334,4 +3374,54 @@ func truncate(text string, max int) string {
 		return text[:max]
 	}
 	return text[:max-1] + "…"
+}
+
+// ── Lint tools ────────────────────────────────────────────────────────────────
+
+// RunLintArgs is intentionally empty — run_lint takes no input parameters.
+type RunLintArgs struct{}
+
+// ResolveContradictionArgs is the contract for resolve_contradiction.
+type ResolveContradictionArgs struct {
+	ReportDate string `json:"report_date" jsonschema:"YYYY-MM-DD date of the lint report to resolve from"`
+	FindingIdx int    `json:"finding_idx" jsonschema:"0-based index into the findings array returned by run_lint"`
+	Winner     string `json:"winner"      jsonschema:"A | B | Both — which fact wins; Both acknowledges both as valid"`
+}
+
+// handleRunLint calls POST /wiki/lint/run on the broker and returns the
+// full LintReport JSON.
+func handleRunLint(ctx context.Context, _ *mcp.CallToolRequest, _ RunLintArgs) (*mcp.CallToolResult, any, error) {
+	var report any
+	if err := brokerPostJSON(ctx, "/wiki/lint/run", nil, &report); err != nil {
+		return toolError(err), nil, nil
+	}
+	payload, _ := json.Marshal(report)
+	return textResult(string(payload)), nil, nil
+}
+
+// handleResolveContradiction calls POST /wiki/lint/resolve on the broker.
+func handleResolveContradiction(ctx context.Context, _ *mcp.CallToolRequest, args ResolveContradictionArgs) (*mcp.CallToolResult, any, error) {
+	reportDate := strings.TrimSpace(args.ReportDate)
+	if reportDate == "" {
+		return toolError(fmt.Errorf("report_date is required")), nil, nil
+	}
+	winner := strings.TrimSpace(args.Winner)
+	if winner != "A" && winner != "B" && winner != "Both" {
+		return toolError(fmt.Errorf("winner must be A, B, or Both; got %q", winner)), nil, nil
+	}
+
+	var resp map[string]string
+	body := map[string]any{
+		"report_date": reportDate,
+		"finding_idx": args.FindingIdx,
+		"winner":      winner,
+	}
+	if err := brokerPostJSON(ctx, "/wiki/lint/resolve", body, &resp); err != nil {
+		return toolError(err), nil, nil
+	}
+	msg := resp["message"]
+	if msg == "" {
+		msg = fmt.Sprintf("Resolved finding %d from report %s as winner=%s", args.FindingIdx, reportDate, winner)
+	}
+	return textResult(msg), nil, nil
 }

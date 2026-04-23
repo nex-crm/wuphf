@@ -109,12 +109,12 @@ Nothing is promoted automatically. Agents decide what graduates from notebook to
 
 **Backends for the wiki:**
 
-- `markdown` is the default for new installs (since v0.0.6). Your team's knowledge lives as a local git repo at `~/.wuphf/wiki/` — each article a real markdown file, each agent commits under its own git identity. `cat`, `grep`, `git log`, `git clone` — all work. Open `/wiki` in the web UI for the Wikipedia-style reading view. No API key required.
+- `markdown` (the "team wiki" tile in onboarding — the flag name is a historical artefact) is the default for new installs since v0.0.6. It is not just a markdown folder. It is a living knowledge graph: typed facts with triplets, per-entity append-only fact logs, LLM-synthesized briefs committed under the `archivist` identity, `/lookup` cited-answer retrieval, and a `/lint` suite that flags contradictions, orphans, stale claims, and broken cross-references. Everything lives as a local git repo at `~/.wuphf/wiki/` — `cat`, `grep`, `git log`, `git clone`, all work. No API key required.
 - `nex` was the previous default. Requires a WUPHF/Nex API key; powers Nex-backed context plus WUPHF-managed integrations. Existing users stay on `nex` via persisted config — no forced migration.
 - `gbrain` mounts `gbrain serve` as the wiki backend. It requires an API key during `/init`: `OpenAI` gives you the full path with embeddings and vector search, while `Anthropic` alone is reduced mode.
 - `none` disables the shared wiki entirely. Notebooks still work locally.
 
-**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. On `markdown` the MCP tools are `team_wiki_read | team_wiki_search | team_wiki_list | team_wiki_write`. On `nex`/`gbrain` the MCP tools are the legacy `team_memory_query | team_memory_write | team_memory_promote`. The two tool sets never coexist on one server instance — backend selection flips the surface. See `DESIGN-WIKI.md` for the full wiki design spec.
+**Internal naming (for code spelunkers):** the notebook is `private` memory, the wiki is `shared` memory. On the team-wiki backend (`markdown`) the MCP tools are `team_wiki_read | team_wiki_search | team_wiki_list | team_wiki_write | wuphf_wiki_lookup | run_lint | resolve_contradiction`. On `nex`/`gbrain` the MCP tools are the legacy `team_memory_query | team_memory_write | team_memory_promote`. The two tool sets never coexist on one server instance — backend selection flips the surface. See `DESIGN-WIKI.md` for the reading view and `docs/specs/WIKI-SCHEMA.md` for the operational contract.
 
 Examples:
 
@@ -265,6 +265,18 @@ bad" is useless. Under 500 words.
 ```
 
 We run this ourselves before every release. If the AI finds something we missed, [file an issue](https://github.com/nex-crm/wuphf/issues).
+
+## Watch the wiki write itself
+
+5-minute terminal walkthrough of the Karpathy LLM-wiki loop: an agent records five facts, the synthesis threshold fires, the broker shells out to your own LLM CLI, the result commits to a git repo under the `archivist` identity, and the full author chain is visible in `git log`.
+
+```bash
+WUPHF_MEMORY_BACKEND=markdown HOME="$HOME/.wuphf-dev-home" \
+  ./wuphf-dev --broker-port 7899 --web-port 7900 &
+./scripts/demo-entity-synthesis.sh
+```
+
+Requirements: `curl`, `python3`, a running broker with `--memory-backend markdown`, and any supported LLM CLI (claude / codex / openclaw) on PATH. Env vars `BROKER`, `ENTITY_KIND`, `ENTITY_SLUG`, `AGENT_SLUG`, `THRESHOLD` override the defaults — see the header of `scripts/demo-entity-synthesis.sh`.
 
 ## The Name
 

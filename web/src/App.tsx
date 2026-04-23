@@ -17,6 +17,7 @@ import { ReceiptsApp } from './components/apps/ReceiptsApp'
 import { HealthCheckApp } from './components/apps/HealthCheckApp'
 import { SettingsApp } from './components/apps/SettingsApp'
 import { ThreadsApp } from './components/apps/ThreadsApp'
+import CitedAnswer from './components/wiki/CitedAnswer'
 import Wiki from './components/wiki/Wiki'
 import WikiTabs from './components/wiki/WikiTabs'
 import type { WikiTab } from './components/wiki/WikiTabs'
@@ -102,6 +103,7 @@ function MainContent() {
   const channelMeta = useAppStore((s) => s.channelMeta)
   const wikiPath = useAppStore((s) => s.wikiPath)
   const setWikiPath = useAppStore((s) => s.setWikiPath)
+  const wikiLookupQuery = useAppStore((s) => s.wikiLookupQuery)
   const setCurrentApp = useAppStore((s) => s.setCurrentApp)
   const notebookAgentSlug = useAppStore((s) => s.notebookAgentSlug)
   const notebookEntrySlug = useAppStore((s) => s.notebookEntrySlug)
@@ -114,6 +116,21 @@ function MainContent() {
   // Wiki, Notebooks, and Reviews share one app shell with a tab bar on top.
   // The surfaces underneath keep their own design systems (.wiki-surface vs
   // .notebook-surface) but the parent chrome is unified.
+  if (currentApp === 'wiki-lookup') {
+    return (
+      <div className="wiki-shell">
+        <WikiTabs current="wiki" onSelect={(tab) => {
+          if (tab === 'wiki') setCurrentApp('wiki')
+          else if (tab === 'notebooks') { setNotebookRoute(null, null); setCurrentApp('notebooks') }
+          else setCurrentApp('reviews')
+        }} />
+        <div className="wiki-shell-body">
+          <CitedAnswer query={wikiLookupQuery || ''} />
+        </div>
+      </div>
+    )
+  }
+
   if (currentApp === 'wiki' || currentApp === 'notebooks' || currentApp === 'reviews') {
     const handleTabChange = (tab: WikiTab) => {
       if (tab === 'wiki') {

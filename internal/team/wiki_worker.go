@@ -103,6 +103,28 @@ type wikiWriteRequest struct {
 	// PlaybookSlug carries the source slug so the post-write hook can
 	// enqueue a follow-up recompile without re-parsing the path.
 	PlaybookSlug string
+	// IsLintReport routes to Repo.CommitLintReport — writes the daily lint
+	// report to wiki/.lint/report-YYYY-MM-DD.md. Same serialization as entity
+	// facts; no team-wiki index regen, no backlinks recompute.
+	IsLintReport bool
+	// IsFactLog routes to Repo.CommitFactLog — mutates a fact record in
+	// wiki/facts/**/*.jsonl or team/entities/*.facts.jsonl (used by lint
+	// ResolveContradiction to update supersedes/valid_until/contradicts_with).
+	IsFactLog bool
+	// IsArtifact routes the request to Repo.CommitArtifact — writes the raw
+	// source artifact under wiki/artifacts/{kind}/{sha}.md. Never regens the
+	// catalog; triggers the extractor hook on success.
+	IsArtifact bool
+	// IsIndexMutation is a non-git job: the worker applies the carried facts
+	// and entities directly to the WikiIndex (store + text index). Preserves
+	// the single-writer invariant required by the extractor (§11.5).
+	IsIndexMutation bool
+	// IndexFacts    carries the facts to Upsert when IsIndexMutation is true.
+	IndexFacts []TypedFact
+	// IndexEntities carries the entities to Upsert when IsIndexMutation is
+	// true. Entities are upserted BEFORE facts so fact rows always resolve
+	// against a known entity row.
+	IndexEntities []IndexEntity
 	// IsHuman routes the request to Repo.CommitHuman — optimistic
 	// concurrency via expected_sha, per-human git identity. Wikipedia-
 	// style Edit source flow. v1.5: identity is resolved from the
@@ -152,12 +174,16 @@ func (noopPublisher) PublishPlaybookExecutionRecorded(PlaybookExecutionRecordedE
 type WikiWorker struct {
 	repo      *Repo
 	publisher wikiEventPublisher
+	index     *WikiIndex // optional derived cache; nil means no-op
 	requests  chan wikiWriteRequest
 
 	running       atomic.Bool
-	mu            sync.Mutex // guards lastBackupAt
+	mu            sync.Mutex // guards lastBackupAt + extractor
 	lastBackupAt  time.Time
 	backupPending atomic.Bool
+	// extractor is the optional hook fired on successful artifact commits.
+	// nil is the default — no extraction occurs until broker wires it up.
+	extractor ExtractorHook
 
 	// sideGoroutines tracks async helpers (e.g. auto-recompile, backup
 	// mirror) spawned from the drain loop so Stop() and WaitForIdle() can
@@ -172,7 +198,9 @@ type WikiWorker struct {
 }
 
 // NewWikiWorker returns a worker ready to Start. The publisher is optional;
-// when nil, events are dropped silently.
+// when nil, events are dropped silently. The worker's index is nil — no
+// derived-cache updates occur. Use NewWikiWorkerWithIndex when an index is
+// available (production path).
 func NewWikiWorker(repo *Repo, publisher wikiEventPublisher) *WikiWorker {
 	if publisher == nil {
 		publisher = noopPublisher{}
@@ -183,6 +211,17 @@ func NewWikiWorker(repo *Repo, publisher wikiEventPublisher) *WikiWorker {
 		requests:  make(chan wikiWriteRequest, wikiRequestBuffer),
 		drainDone: make(chan struct{}),
 	}
+}
+
+// NewWikiWorkerWithIndex is the production constructor. It behaves identically
+// to NewWikiWorker but additionally wires up a WikiIndex so that after every
+// successful commit the worker reconciles the affected path into the derived
+// cache (SQLite+bleve in prod, in-memory for tests). The index update runs in
+// a side goroutine tracked by sideGoroutines — WaitForIdle() covers it.
+func NewWikiWorkerWithIndex(repo *Repo, publisher wikiEventPublisher, index *WikiIndex) *WikiWorker {
+	w := NewWikiWorker(repo, publisher)
+	w.index = index
+	return w
 }
 
 // Start launches the drain goroutine. Returns immediately. The worker stops
@@ -274,6 +313,15 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		n   int
 		err error
 	)
+	if req.IsIndexMutation {
+		// Apply index writes under the single-writer invariant. The underlying
+		// store is goroutine-safe, but routing through the worker's drain loop
+		// prevents reordering vs. commit-driven ReconcilePath calls for the
+		// same artifact/fact.
+		mutErr := w.applyIndexMutation(writeCtx, req)
+		req.ReplyCh <- wikiWriteResult{Err: mutErr}
+		return
+	}
 	if req.IsHuman {
 		// Human edits use optimistic concurrency (expected_sha) and the
 		// per-human identity resolved from the registry — req.Slug is
@@ -281,6 +329,8 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		// attribution. Zero-value HumanIdentity falls back to the
 		// synthetic `human` author inside CommitHuman.
 		sha, n, err = w.repo.CommitHuman(writeCtx, req.Path, req.Content, req.ExpectedSHA, req.CommitMsg, req.HumanIdentity)
+	} else if req.IsArtifact {
+		sha, n, err = w.repo.CommitArtifact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsEntityFact {
 		sha, n, err = w.repo.CommitEntityFact(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsEntityGraph {
@@ -289,6 +339,10 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 		sha, n, err = w.repo.CommitPlaybookSkill(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsPlaybookExecution {
 		sha, n, err = w.repo.CommitPlaybookExecution(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsLintReport {
+		sha, n, err = w.repo.CommitLintReport(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
+	} else if req.IsFactLog {
+		sha, n, err = w.repo.CommitFactLog(writeCtx, req.Slug, req.Path, req.Content, req.CommitMsg)
 	} else if req.IsNotebook {
 		// Notebook writes do NOT regen the team wiki index. Commit target is
 		// agents/{slug}/notebook/... — scoped to the author.
@@ -320,6 +374,10 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 
 	ts := time.Now().UTC().Format(time.RFC3339)
 	switch {
+	case req.IsArtifact:
+		// Artifact commits fire the extractor hook asynchronously. Every
+		// failure lands in the DLQ — the commit itself is already durable.
+		w.maybeRunExtractor(ctx, req.Path)
 	case req.IsEntityFact:
 		// Entity fact writes have their own SSE event (entity:fact_recorded)
 		// published by the broker handler, not by the worker. No-op here.
@@ -386,6 +444,29 @@ func (w *WikiWorker) process(ctx context.Context, req wikiWriteRequest) {
 	}
 
 	w.maybeScheduleBackup(ctx)
+	w.maybeReconcileIndex(writeCtx, req.Path)
+}
+
+// maybeReconcileIndex updates the derived WikiIndex for the committed path.
+// It is a no-op when no index is wired (w.index == nil), so existing tests
+// that construct workers without an index are unaffected.
+//
+// The update runs in a tracked side goroutine so it never blocks the commit
+// reply to the caller. On error the failure is logged but does NOT propagate
+// — markdown is the source of truth; the index is a rebuildable cache (§7.4).
+func (w *WikiWorker) maybeReconcileIndex(ctx context.Context, relPath string) {
+	if w.index == nil {
+		return
+	}
+	w.sideGoroutines.Add(1)
+	go func() {
+		defer w.sideGoroutines.Done()
+		bgCtx, cancel := context.WithTimeout(context.Background(), wikiWriteTimeout)
+		defer cancel()
+		if err := w.index.ReconcilePath(bgCtx, relPath); err != nil {
+			log.Printf("wiki_index: reconcile %s failed: %v", relPath, err)
+		}
+	}()
 }
 
 // maybeScheduleBackup kicks off a debounced backup mirror. The copy runs in
@@ -947,4 +1028,203 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// EnqueueLintReport submits a lint report write to the shared wiki queue.
+// The path must be wiki/.lint/report-YYYY-MM-DD.md and is routed to
+// Repo.CommitLintReport (which does NOT regen the team-wiki index).
+func (w *WikiWorker) EnqueueLintReport(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:         slug,
+		Path:         path,
+		Content:      content,
+		Mode:         "replace",
+		CommitMsg:    commitMsg,
+		IsLintReport: true,
+		ReplyCh:      make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: lint report write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// ExtractorHook is the narrow interface the worker uses to trigger the
+// extraction loop after a successful artifact commit. Kept as an interface so
+// wiki_worker.go does not take a hard dependency on wiki_extractor.go —
+// tests can pass a fake hook that asserts ExtractFromArtifact was called.
+type ExtractorHook interface {
+	ExtractFromArtifact(ctx context.Context, artifactPath string) error
+}
+
+// SetExtractor wires an ExtractorHook onto the worker. Safe to call before
+// or after Start; the hook is only consulted inside process. Passing nil
+// disables the hook (default behaviour).
+func (w *WikiWorker) SetExtractor(e ExtractorHook) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.extractor = e
+}
+
+// maybeRunExtractor fires the extractor hook in a tracked side goroutine so
+// it never blocks the commit reply. On error the extractor is expected to
+// route the failure to the DLQ itself — see wiki_extractor.go.
+func (w *WikiWorker) maybeRunExtractor(_ context.Context, relPath string) {
+	w.mu.Lock()
+	hook := w.extractor
+	w.mu.Unlock()
+	if hook == nil {
+		return
+	}
+	w.sideGoroutines.Add(1)
+	go func() {
+		defer w.sideGoroutines.Done()
+		bgCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if err := hook.ExtractFromArtifact(bgCtx, relPath); err != nil {
+			log.Printf("wiki_extractor: %s: %v", relPath, err)
+		}
+	}()
+}
+
+// applyIndexMutation is the body of the IsIndexMutation branch in process.
+// Entities are written before facts so fact rows always reference a known
+// entity. Errors short-circuit so the caller sees the first failure.
+func (w *WikiWorker) applyIndexMutation(ctx context.Context, req wikiWriteRequest) error {
+	if w.index == nil {
+		return fmt.Errorf("wiki: index mutation requested but no index is attached")
+	}
+	for _, ent := range req.IndexEntities {
+		if err := w.index.store.UpsertEntity(ctx, ent); err != nil {
+			return fmt.Errorf("wiki: upsert entity %q: %w", ent.Slug, err)
+		}
+	}
+	for _, f := range req.IndexFacts {
+		if err := w.index.store.UpsertFact(ctx, f); err != nil {
+			return fmt.Errorf("wiki: upsert fact %q: %w", f.ID, err)
+		}
+		if err := w.index.text.Index(ctx, f); err != nil {
+			return fmt.Errorf("wiki: text index fact %q: %w", f.ID, err)
+		}
+	}
+	return nil
+}
+
+// EnqueueArtifact submits a raw source artifact write to the shared wiki
+// queue. The path must match wiki/artifacts/{kind}/{sha}.md. On success, the
+// worker fires the extractor hook in a side goroutine — the reply returns
+// as soon as the git commit lands; extraction is best-effort and never fails
+// the commit path.
+func (w *WikiWorker) EnqueueArtifact(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:       slug,
+		Path:       path,
+		Content:    content,
+		Mode:       "create",
+		CommitMsg:  commitMsg,
+		IsArtifact: true,
+		ReplyCh:    make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: artifact write timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// SubmitFacts routes an index mutation — entities + facts — through the
+// single-writer queue. This preserves the single-writer invariant for the
+// extractor loop: agents, the resolver, and the extractor ask; only the
+// worker writes.
+//
+// Entities are upserted BEFORE facts so fact rows always resolve against a
+// known entity row. Never mutates git — this is a cache-only job that keeps
+// the index live between markdown-reconcile passes.
+func (w *WikiWorker) SubmitFacts(ctx context.Context, facts []TypedFact, entities []IndexEntity) error {
+	if !w.running.Load() {
+		return ErrWorkerStopped
+	}
+	if len(facts) == 0 && len(entities) == 0 {
+		return nil
+	}
+	req := wikiWriteRequest{
+		IsIndexMutation: true,
+		IndexFacts:      facts,
+		IndexEntities:   entities,
+		ReplyCh:         make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.Err
+	case <-waitCtx.Done():
+		return fmt.Errorf("wiki: index mutation timed out after %s", wikiWriteTimeout)
+	}
+}
+
+// Index returns the derived WikiIndex attached to this worker, or nil when
+// none is wired. Read-only access is safe — the extractor uses this to
+// consult the signal index through an adapter.
+func (w *WikiWorker) Index() *WikiIndex {
+	return w.index
+}
+
+// EnqueueFactLog submits a fact-log mutation to the shared wiki queue.
+// The path must be wiki/facts/**/*.jsonl or team/entities/*.facts.jsonl.
+// Used by lint ResolveContradiction to update supersedes/valid_until/contradicts_with.
+func (w *WikiWorker) EnqueueFactLog(ctx context.Context, slug, path, content, commitMsg string) (string, int, error) {
+	if !w.running.Load() {
+		return "", 0, ErrWorkerStopped
+	}
+	req := wikiWriteRequest{
+		Slug:      slug,
+		Path:      path,
+		Content:   content,
+		Mode:      "replace",
+		CommitMsg: commitMsg,
+		IsFactLog: true,
+		ReplyCh:   make(chan wikiWriteResult, 1),
+	}
+	select {
+	case w.requests <- req:
+	default:
+		return "", 0, ErrQueueSaturated
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, wikiWriteTimeout)
+	defer cancel()
+	select {
+	case result := <-req.ReplyCh:
+		return result.SHA, result.BytesWritten, result.Err
+	case <-waitCtx.Done():
+		return "", 0, fmt.Errorf("wiki: fact log write timed out after %s", wikiWriteTimeout)
+	}
 }

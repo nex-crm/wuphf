@@ -493,6 +493,9 @@ type Broker struct {
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
+	wikiIndex               *WikiIndex
+	wikiExtractor           *Extractor
+	wikiDLQ                 *DLQ
 	wikiSectionsCache       *wikiSectionsCache
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
@@ -1093,6 +1096,15 @@ func (b *Broker) WikiWorker() *WikiWorker {
 	return b.wikiWorker
 }
 
+// WikiIndex returns the broker's derived wiki index, or nil when the active
+// memory backend is not markdown. HTTP handlers use this to run search queries
+// against the structured fact store without going through the write worker.
+func (b *Broker) WikiIndex() *WikiIndex {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.wikiIndex
+}
+
 func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	slug := normalizeChannelSlug(update.Slug)
 	if slug == "" {
@@ -1211,12 +1223,45 @@ func (b *Broker) ensureWikiWorker() {
 		}
 	}
 
-	worker := NewWikiWorker(repo, b)
+	idx := NewWikiIndex(repo.Root())
+
+	worker := NewWikiWorkerWithIndex(repo, b, idx)
 	worker.Start(context.Background())
+
+	// Wire the extraction loop: artifact commits → extract_entities_lite →
+	// WikiIndex. DLQ lives under <wiki>/.dlq/. Extractor failures never
+	// fail the commit path — DLQ absorbs everything per §11.13.
+	dlq := NewDLQ(repo.Root())
+	extractor := NewExtractor(brokerQueryProvider{}, worker, dlq, idx)
+	worker.SetExtractor(extractor)
 
 	b.mu.Lock()
 	b.wikiWorker = worker
+	b.wikiIndex = idx
+	b.wikiExtractor = extractor
+	b.wikiDLQ = dlq
 	b.mu.Unlock()
+
+	// Boot reconcile: walk the full wiki tree and populate the index from
+	// existing markdown + jsonl. Runs async so it does not delay broker
+	// startup. The per-commit ReconcilePath calls keep the index live once
+	// the reconcile finishes. If reconcile fails the index is empty but
+	// readable — it will self-heal on the next ReconcilePath call.
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := idx.ReconcileFromMarkdown(bgCtx); err != nil {
+			log.Printf("wiki_index: boot reconcile failed: %v", err)
+		} else {
+			log.Printf("wiki_index: boot reconcile complete")
+		}
+	}()
+
+	// Daily lint cron. The schedule is controlled by WUPHF_LINT_CRON (default
+	// "09:00" local time). Empty string disables the cron (useful in tests).
+	// The goroutine is cancelled by the background context when the broker
+	// shuts down.
+	b.startLintCron(context.Background(), idx, worker)
 }
 
 // StartOnPort launches the broker on the given port. Use 0 for an OS-assigned port.
@@ -1246,11 +1291,15 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/humans", b.requireAuth(b.handleHumans))
 	mux.HandleFunc("/wiki/read", b.requireAuth(b.handleWikiRead))
 	mux.HandleFunc("/wiki/search", b.requireAuth(b.handleWikiSearch))
+	mux.HandleFunc("/wiki/lookup", b.requireAuth(b.handleWikiLookup))
 	mux.HandleFunc("/wiki/list", b.requireAuth(b.handleWikiList))
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
+	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
+	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))
+	mux.HandleFunc("/wiki/extract/replay", b.requireAuth(b.handleWikiExtractReplay))
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))

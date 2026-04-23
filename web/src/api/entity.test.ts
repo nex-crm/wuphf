@@ -216,3 +216,36 @@ describe('entity api client', () => {
     }
   })
 })
+
+describe('SchemaKind bridge helpers (Fix C2)', () => {
+  it('toSchemaKind maps all legacy plural kinds to schema singular', () => {
+    expect(api.toSchemaKind('people')).toBe('person')
+    expect(api.toSchemaKind('companies')).toBe('company')
+    expect(api.toSchemaKind('customers')).toBe('company')
+  })
+
+  it('fromSchemaKind maps person → people and company → companies', () => {
+    expect(api.fromSchemaKind('person')).toBe('people')
+    expect(api.fromSchemaKind('company')).toBe('companies')
+  })
+
+  it('fromSchemaKind throws for schema-only kinds with no legacy mapping', () => {
+    expect(() => api.fromSchemaKind('project')).toThrow('legacy v1.2 mapping')
+    expect(() => api.fromSchemaKind('team')).toThrow('legacy v1.2 mapping')
+    expect(() => api.fromSchemaKind('workspace')).toThrow('legacy v1.2 mapping')
+  })
+
+  it('toSchemaKind → fromSchemaKind roundtrips for person and company', () => {
+    const kinds: api.EntityKind[] = ['people', 'companies']
+    for (const k of kinds) {
+      expect(api.fromSchemaKind(api.toSchemaKind(k))).toBe(k)
+    }
+  })
+
+  it('customers roundtrip loses specificity (customers → company → companies)', () => {
+    // customers maps to company (schema) which maps back to companies (legacy) — not customers.
+    // This is expected: customers is a sales-relationship signal, not a distinct schema kind.
+    expect(api.toSchemaKind('customers')).toBe('company')
+    expect(api.fromSchemaKind('company')).toBe('companies')
+  })
+})

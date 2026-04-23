@@ -119,6 +119,8 @@ export interface AppStore {
   // Wiki
   wikiPath: string | null
   setWikiPath: (path: string | null) => void
+  wikiLookupQuery: string | null
+  setWikiLookupQuery: (q: string | null) => void
 
   // Notebooks
   notebookAgentSlug: string | null
@@ -204,6 +206,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   wikiPath: null,
   setWikiPath: (path) => set({ wikiPath: path }),
+
+  wikiLookupQuery: null,
+  setWikiLookupQuery: (q) => set({ wikiLookupQuery: q }),
 
   notebookAgentSlug: null,
   notebookEntrySlug: null,

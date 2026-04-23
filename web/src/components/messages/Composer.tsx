@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { createDM, getConfig, postMessage, post, setMemory } from '../../api/client'
+import { createDM, get, getConfig, postMessage, post, setMemory } from '../../api/client'
 import { directChannelSlug, useAppStore } from '../../stores/app'
 import { useOfficeMembers } from '../../hooks/useMembers'
 import { useCommands } from '../../hooks/useCommands'
@@ -134,6 +134,23 @@ function handleSlashCommand(input: string, handlers: SlashHandlers): boolean {
       // TUI's cmdAsk always routes to the team lead. Mirror that by
       // prefixing an @mention so the broker's routing picks up the lead.
       handlers.sendAsMessage(askPrefix(handlers.leadSlug) + args)
+      return true
+    }
+    case '/lookup': {
+      if (!args) {
+        showNotice('Usage: /lookup <question>', 'info')
+        return true
+      }
+      const channel = store.currentChannel
+      showNotice('Looking up in wiki…', 'info')
+      get('/wiki/lookup', { q: args, channel }).catch((e: Error) => {
+        showNotice('Wiki lookup failed: ' + e.message, 'error')
+      })
+      return true
+    }
+    case '/lint': {
+      store.setCurrentApp('wiki')
+      store.setWikiPath('_lint')
       return true
     }
     case '/remember': {

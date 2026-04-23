@@ -1,0 +1,52 @@
+{
+  "id": "extract_002_ghost_entity_in_transcript",
+  "prompt": "extract_entities_lite",
+  "description": "Meeting transcript names a new person with no email or domain; must emit a ghost entity with confidence 0.8 and person_name signal only.",
+  "template_vars": {
+    "ArtifactKind": "meeting",
+    "ArtifactSHA": "8c2e88a1b9f30042",
+    "ArtifactPath": "wiki/artifacts/meeting/8c2e88a1b9f30042.md",
+    "OccurredAt": "2026-04-15T10:00:00Z",
+    "Body": "Meeting: Q2 Pilot sync\nAttendees: Nazz, Michael Chen\n\n[00:03] Nazz: Walk me through where you are on the Q2 pilot.\n[00:05] Michael Chen: We shipped the ingest layer last week. Sarah's team is picking up evaluation next.\n[00:14] Nazz: Nice. Any blockers?\n[00:18] Michael Chen: Not yet. I'll flag Thursday if we hit the vector-store decision.",
+    "KnownEntities": [
+      {
+        "Slug": "sarah-jones",
+        "Kind": "person",
+        "SignalsOneLine": "email=sarah@acme.com, person_name=Sarah Jones",
+        "Aliases": [],
+        "AliasesJoined": ""
+      },
+      {
+        "Slug": "q2-pilot",
+        "Kind": "project",
+        "SignalsOneLine": "project_name=Q2 Pilot",
+        "Aliases": [],
+        "AliasesJoined": ""
+      }
+    ],
+    "PredicateVocabulary": ["works_at", "champions", "blocks"]
+  },
+  "expected": {
+    "must_include": [
+      "michael-chen",
+      "ghost",
+      "person_name",
+      "Michael Chen"
+    ],
+    "must_not_include": [
+      "michael@",
+      "@acme.com\",\n        \"person_name\": \"Michael",
+      "michael.chen@",
+      "michael-chen@",
+      "chen@"
+    ],
+    "structured": {
+      "entities": [
+        {"ghost": true, "kind": "person"}
+      ],
+      "any_ghost_person": true,
+      "no_fabricated_email_when_artifact_silent": true
+    },
+    "notes": "Guards Section 10.1 ghost-entity handling + anti-invention: new person appears with name only, must not fabricate an email. Devil's-advocate M14 strengthening: paraphrased fabricated emails (michael.chen@, michael-chen@, chen@) are explicitly banned; must contain at least one entity with ghost=true AND kind=person; must NOT emit signals.email for any entity whose artifact text lacks an email address."
+  }
+}

@@ -336,6 +336,52 @@ export async function fetchAuditLog(
   }
 }
 
+// ── Lint API ──────────────────────────────────────────────────────────────────
+
+/**
+ * One finding from the daily lint run.
+ * Mirrors internal/team.LintFinding exactly.
+ */
+export interface LintFinding {
+  severity: 'critical' | 'warning' | 'info'
+  type: 'contradictions' | 'orphans' | 'stale' | 'missing_crossrefs' | 'dedup_review'
+  entity_slug?: string
+  fact_ids?: string[]
+  summary: string
+  /**
+   * Only present on contradictions findings. Three entries:
+   * ["Fact A (id: …): …", "Fact B (id: …): …", "Both"]
+   */
+  resolve_actions?: string[]
+}
+
+export interface LintReport {
+  date: string
+  findings: LintFinding[]
+}
+
+/**
+ * POST /wiki/lint/run — triggers all 5 lint checks and returns the report.
+ */
+export async function runLint(): Promise<LintReport> {
+  return await post<LintReport>('/wiki/lint/run', null)
+}
+
+/**
+ * POST /wiki/lint/resolve — resolves a contradiction finding.
+ *
+ * The caller echoes the full LintFinding it received from /wiki/lint/run so
+ * the broker can resolve without re-running or persisting structured findings.
+ */
+export async function resolveContradiction(args: {
+  report_date: string
+  finding_idx: number
+  finding: LintFinding
+  winner: 'A' | 'B' | 'Both'
+}): Promise<{ commit_sha: string; message: string }> {
+  return await post<{ commit_sha: string; message: string }>('/wiki/lint/resolve', args)
+}
+
 export async function fetchHistory(
   path: string,
 ): Promise<{ commits: WikiHistoryCommit[] }> {

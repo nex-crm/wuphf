@@ -18,6 +18,51 @@ import { get, post, sseURL } from './client'
 
 export type EntityKind = 'people' | 'companies' | 'customers'
 
+/** Schema-aligned kind enum per docs/specs/WIKI-SCHEMA.md §4.1. */
+export type SchemaKind = 'person' | 'company' | 'project' | 'team' | 'workspace'
+
+/** Bridge helper — maps the legacy plural (people/companies/customers) to
+ *  the schema singular (person/company). customers → company per §4.1 (no
+ *  separate "customer" kind at the schema level; customers are companies
+ *  with a sales-relationship signal). */
+export function toSchemaKind(k: EntityKind): SchemaKind {
+  switch (k) {
+    case 'people': return 'person'
+    case 'companies': return 'company'
+    case 'customers': return 'company'
+  }
+}
+
+/** Bridge helper — maps a schema singular back to the nearest legacy plural.
+ *  project, team, and workspace have no legacy v1.2 mapping and throw. */
+export function fromSchemaKind(k: SchemaKind): EntityKind {
+  switch (k) {
+    case 'person': return 'people'
+    case 'company': return 'companies'
+    case 'project':
+    case 'team':
+    case 'workspace':
+      throw new Error(`Schema kind "${k}" has no legacy v1.2 mapping`)
+  }
+}
+
+/**
+ * Triplet is the subject/predicate/object shape from docs/specs/WIKI-SCHEMA.md §4.2.
+ * `object` is a slug, a literal, or `{kind}:{slug}` when the object is itself
+ * an entity reference.
+ */
+export interface Triplet {
+  subject: string
+  predicate: string
+  object: string
+}
+
+/**
+ * FactType is the §4.3 enum. Legacy rows without a type parse as `undefined`;
+ * the UI treats that the same as `"observation"` (the §4.3 default).
+ */
+export type FactType = 'status' | 'observation' | 'relationship' | 'background'
+
 export interface Fact {
   id: string
   kind: EntityKind
@@ -26,6 +71,18 @@ export interface Fact {
   source_path?: string
   recorded_by: string
   created_at: string
+  // Typed fields from docs/specs/WIKI-SCHEMA.md §4.2. All optional so legacy
+  // v1.2 rows parse with zero values and render without these fields.
+  type?: FactType
+  triplet?: Triplet
+  confidence?: number
+  valid_from?: string
+  valid_until?: string | null
+  supersedes?: string[]
+  contradicts_with?: string[]
+  source_type?: string
+  sentence_offset?: number
+  reinforced_at?: string | null
 }
 
 export interface BriefSummary {
