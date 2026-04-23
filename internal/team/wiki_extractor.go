@@ -361,7 +361,101 @@ func (e *Extractor) apply(ctx context.Context, out extractionOutput, artifactPat
 		e.queueDLQ(ctx, out.ArtifactSHA, artifactPath, kind, err, DLQCategoryProviderTimeout)
 		return err
 	}
+	// Substrate guarantee (§7.4): after in-memory submission succeeds, persist
+	// every NEW (non-reinforced) fact to the append-only JSONL log so a wipe +
+	// reconcile rebuilds to a logically-identical index. Reinforced facts only
+	// update reinforced_at in-memory; they are already in the JSONL file from
+	// the first extraction run, so re-appending would duplicate the line.
+	//
+	// Failures here never fail the caller — the artifact commit already
+	// succeeded and SubmitFacts was atomic from the caller's perspective. A
+	// persistence failure is logged + queued to the DLQ for replay.
+	e.persistFactLogs(ctx, out.ArtifactSHA, factsToWrite)
 	return nil
+}
+
+// persistFactLogs appends newly-introduced facts to wiki/facts/{kind}/{slug}.jsonl
+// under the archivist identity. Batches per-entity so one artifact with N
+// facts about the same entity results in 1 commit (not N).
+//
+// This is the §7.4 substrate-rebuild closure for the extraction path: without
+// it, the fact lives only in the derived index cache and evaporates on
+// `rm -rf .wuphf/index/`.
+//
+// Errors are logged (and routed through the DLQ for optional replay) but
+// never propagated — the in-memory submission already succeeded, so failing
+// the extractor here would cause SubmitFacts re-execution on replay and
+// break the §7.3 reinforcement invariant.
+func (e *Extractor) persistFactLogs(ctx context.Context, artifactSHA string, facts []TypedFact) {
+	if len(facts) == 0 || e.worker == nil {
+		return
+	}
+	// Group by (kind, entity_slug). Reinforced facts (ReinforcedAt != nil) are
+	// already on disk from a prior run; skip to avoid duplicate JSONL lines.
+	type groupKey struct{ kind, slug string }
+	groups := make(map[groupKey][]TypedFact)
+	for _, f := range facts {
+		if f.ReinforcedAt != nil {
+			continue
+		}
+		kind := strings.TrimSpace(f.Kind)
+		slug := strings.TrimSpace(f.EntitySlug)
+		if kind == "" || slug == "" {
+			// Missing kind/slug means we cannot deterministically locate the
+			// fact log. Log and skip — the in-memory submission already ran,
+			// so this fact is findable at query time but will be dropped on
+			// the next rebuild. Slice 3 hardens this via a resolver fallback.
+			log.Printf("wiki_extractor: persist fact log: missing kind/slug for fact %s (kind=%q slug=%q)", f.ID, kind, slug)
+			continue
+		}
+		groups[groupKey{kind: kind, slug: slug}] = append(groups[groupKey{kind: kind, slug: slug}], f)
+	}
+	if len(groups) == 0 {
+		return
+	}
+	msg := fmt.Sprintf("archivist: extract facts from %s", artifactSHA)
+	for key, batch := range groups {
+		body, err := serializeFactsAsJSONL(batch)
+		if err != nil {
+			log.Printf("wiki_extractor: serialize fact log for %s/%s: %v", key.kind, key.slug, err)
+			continue
+		}
+		if body == "" {
+			continue
+		}
+		path := factLogPath(key.kind, key.slug)
+		if _, _, err := e.worker.EnqueueFactLogAppend(ctx, ArchivistAuthor, path, body, msg); err != nil {
+			log.Printf("wiki_extractor: append fact log %s: %v", path, err)
+			// The artifact is committed and SubmitFacts succeeded. Route the
+			// append failure to the DLQ so a later ReplayDLQ call can retry,
+			// but do NOT double-fail the extractor (SubmitFacts already ran).
+			e.queueDLQ(ctx, artifactSHA, path, key.kind, fmt.Errorf("append fact log: %w", err), DLQCategoryProviderTimeout)
+		}
+	}
+}
+
+// factLogPath returns the JSONL path for an entity's fact log, matching the
+// §3 Layer-2 layout and the walker in wiki_index.go.
+func factLogPath(kind, slug string) string {
+	return "wiki/facts/" + kind + "/" + slug + ".jsonl"
+}
+
+// serializeFactsAsJSONL marshals each TypedFact as one JSON object per line,
+// terminated by '\n'. Returns "" when the input is empty.
+func serializeFactsAsJSONL(facts []TypedFact) (string, error) {
+	if len(facts) == 0 {
+		return "", nil
+	}
+	var b strings.Builder
+	for i := range facts {
+		line, err := json.Marshal(facts[i])
+		if err != nil {
+			return "", fmt.Errorf("marshal fact %s: %w", facts[i].ID, err)
+		}
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
 }
 
 // ── DLQ plumbing ──────────────────────────────────────────────────────────────
