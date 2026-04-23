@@ -4228,12 +4228,32 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"one_on_one_agent":      agent,
 		"focus_mode":            focus,
 		"provider":              provider,
+		"provider_model":        resolveProviderModel(provider),
 		"memory_backend":        memoryStatus.SelectedKind,
 		"memory_backend_active": memoryStatus.ActiveKind,
 		"memory_backend_ready":  memoryStatus.ActiveKind != config.MemoryBackendNone,
 		"nex_connected":         memoryStatus.ActiveKind == config.MemoryBackendNex && nex.Connected(),
 		"build":                 buildinfo.Current(),
 	})
+}
+
+// resolveProviderModel returns the effective model id for the active LLM
+// provider so the web UI's status bar can show, e.g.
+// "opencode · ollama/qwen2.5-coder:1.5b". Returns "" when the provider has
+// no resolvable model (claude-code uses the CLI's bundled default unless the
+// user overrides via --model; we don't parse that out here).
+func resolveProviderModel(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "codex":
+		// Empty cwd keeps the home-dir config lookup but skips the
+		// workspace-relative walk — Broker doesn't know which workspace the
+		// caller is in, and the status bar is a coarse indicator anyway.
+		return config.ResolveCodexModel("")
+	case "opencode":
+		return config.ResolveOpencodeModel()
+	default:
+		return ""
+	}
 }
 
 func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
