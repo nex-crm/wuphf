@@ -1,3 +1,3 @@
-# Pricing negotiations
+# Pricing negotiations v2
 
-Short body.
+Updated body reflecting last quarter's deals.
