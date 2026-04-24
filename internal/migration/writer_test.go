@@ -14,6 +14,34 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
+// filterOutGitEnv returns env with GIT_DIR / GIT_WORK_TREE /
+// GIT_INDEX_FILE / GIT_OBJECT_DIRECTORY / GIT_COMMON_DIR / GIT_NAMESPACE
+// and the GIT_CONFIG_* family removed. Used by tests that shell out to
+// `git -C <tmpdir>` and would otherwise be hijacked by the pre-push
+// hook's exported GIT_DIR. team.gitCleanEnv is unexported — this is the
+// local mirror for this package's single caller.
+func filterOutGitEnv(env []string) []string {
+	filtered := env[:0]
+	for _, kv := range env {
+		switch {
+		case strings.HasPrefix(kv, "GIT_DIR="),
+			strings.HasPrefix(kv, "GIT_WORK_TREE="),
+			strings.HasPrefix(kv, "GIT_INDEX_FILE="),
+			strings.HasPrefix(kv, "GIT_OBJECT_DIRECTORY="),
+			strings.HasPrefix(kv, "GIT_COMMON_DIR="),
+			strings.HasPrefix(kv, "GIT_NAMESPACE="),
+			strings.HasPrefix(kv, "GIT_CONFIG="),
+			strings.HasPrefix(kv, "GIT_CONFIG_COUNT="),
+			strings.HasPrefix(kv, "GIT_CONFIG_KEY_"),
+			strings.HasPrefix(kv, "GIT_CONFIG_VALUE_"),
+			strings.HasPrefix(kv, "GIT_CONFIG_PARAMETERS="):
+			continue
+		}
+		filtered = append(filtered, kv)
+	}
+	return filtered
+}
+
 // wikiWorkerWriter adapts team.WikiWorker onto WikiWriter so the
 // integration test can drive the real write path without the worker
 // needing to know about migration.WikiWriter directly.
@@ -277,8 +305,14 @@ func TestMigratorIntegrationWithWikiWorker(t *testing.T) {
 		}
 	}
 
-	// Confirm commit author == migrate.
-	out, err := exec.Command("git", "-C", root, "log", "--format=%an <%ae>").Output()
+	// Confirm commit author == migrate. Clean the subprocess env so this
+	// assertion is not hijacked by an inherited GIT_DIR (e.g. when the test
+	// runs under a pre-push hook — git exports GIT_DIR pointing at the
+	// outer repo and `git log` would return the outer repo's history
+	// instead of this test's fixture.
+	gitLog := exec.Command("git", "-C", root, "log", "--format=%an <%ae>")
+	gitLog.Env = filterOutGitEnv(os.Environ())
+	out, err := gitLog.Output()
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}
