@@ -4,3 +4,5 @@
 {"id":"70218128-be30-4b61-b874-995a05e4a708","kind":"customers","slug":"northstar","text":"fact-B","recorded_by":"eng","created_at":"2026-04-24T03:03:02.683271Z"}
 {"id":"3f05b2d8-7d33-4464-93d7-b2538c631643","kind":"customers","slug":"northstar","text":"fact-D","recorded_by":"cs","created_at":"2026-04-24T03:03:02.683256Z"}
 {"id":"42640b43-33d9-4b63-86f7-00084aa997fd","kind":"customers","slug":"northstar","text":"fact-F","recorded_by":"pm","created_at":"2026-04-24T03:03:02.683296Z"}
+{"id":"3af4ddc3-43a8-46f2-b3db-f5e86aa1f1bf","kind":"customers","slug":"northstar","text":"fact-H","recorded_by":"sales","created_at":"2026-04-24T03:03:02.683302Z"}
+{"id":"a9b7d5b8-72a1-491f-a6c9-606a70370101","kind":"customers","slug":"northstar","text":"fact-C","recorded_by":"sales","created_at":"2026-04-24T03:03:02.683303Z"}
