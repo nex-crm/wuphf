@@ -78,15 +78,15 @@ pre-commit:
         [ "$fail" -eq 0 ]
 
 pre-push:
-  # Serial, not parallel: running `go test ./...`, `go build ./cmd/wuphf`,
-  # and `vhs` concurrently contends for disk/CPU on workstations, and
+  # Serial, not parallel: running `go build ./...`, `go vet ./...`, and
+  # `vhs` concurrently contends for disk/CPU on workstations, and
   # internal/team's wiki worker queue saturates under that load
   # ("playbook: compile write timed out after 10s", "wiki: queue saturated,
   # retry on next turn"). Same tests pass reliably when run sequentially.
   # Until the wiki worker is bounded-queue-tolerant, keep pre-push serial.
   parallel: false
   commands:
-    test:
+    smoke:
       # internal/team's former test-isolation bugs (shared ~/.wuphf/wiki,
       # worktrees registered against the invoking repo, cross-test state
       # leakage via broker-state.json) are now guarded at the package
@@ -94,8 +94,9 @@ pre-push:
       # unscopedWikiRootAllowed off for tests, installs safe stub
       # prepare/cleanup worktree funcs, and skips the NewBroker auto-load
       # so every test starts from a clean slate. Persistence tests opt
-      # back in via reloadedBroker(t). Full suite runs on pre-push again.
-      run: go test ./...
+      # back in via reloadedBroker(t). Full-suite testing now lives in
+      # CI (go-test-matrix job) so pre-push stays a ~10s smoke.
+      run: go build ./... && go vet ./...
     build:
       run: go build -o /dev/null ./cmd/wuphf
     vhs:

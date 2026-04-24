@@ -75,9 +75,50 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
-  test:
-    needs: web
+  # Generates the list of Go packages for the go-test-matrix fan-out below.
+  # Separate job so the matrix can consume its output via
+  # strategy.matrix.package: ${{ fromJSON(needs.go-test-list.outputs.packages) }}.
+  # Also emits a parallel `race` flag per package: internal/team and
+  # internal/teammcp (and subpackages) opt OUT of -race until the
+  # test-isolation memo's 7-step fix plan completes — the race detector
+  # trips on the very shared state that worktree_guard_test.go now guards
+  # against. Everything else gets -race.
+  go-test-list:
     runs-on: ubuntu-latest
+    outputs:
+      packages: ${{ steps.list.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - id: list
+        run: |
+          set -euo pipefail
+          # Emit a JSON array of {package, race} objects. `jq -R -s` reads
+          # stdin as a single string; split on newlines, drop empties, then
+          # map each package to an object with the race flag.
+          packages=$(go list ./... | jq -R -s -c '
+            split("\n")
+            | map(select(length > 0))
+            | map({
+                package: .,
+                race: (test("/internal/team(mcp)?($|/)") | not)
+              })
+          ')
+          echo "packages=${packages}" >> "$GITHUB_OUTPUT"
+
+  go-test-matrix:
+    needs: [web, go-test-list]
+    runs-on: ubuntu-latest
+    strategy:
+      # One flaky package shouldn't mask other real failures. Each matrix
+      # leg is independent, so let them all finish and surface their own
+      # red x's.
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.go-test-list.outputs.packages) }}
+    name: "go test ${{ matrix.package }}"
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -87,28 +128,30 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      # `go vet` runs separately from `go test` so a vet failure surfaces with
-      # its own red x instead of being mixed into the test output. golangci-lint
-      # in the lint job runs vet too, but only what its govet linter enables;
-      # an explicit standalone vet step protects against config drift.
+      - name: Test
+        # `-timeout 5m` is a per-package margin. Race instrumentation 2-3x's
+        # wall-clock, so 5m is comfortable headroom for the slowest
+        # per-package legs (internal/team* hit ~1-2m locally without race).
+        run: |
+          if [ "${{ matrix.race }}" = "true" ]; then
+            go test -race -timeout 5m ${{ matrix.package }}
+          else
+            go test -timeout 5m ${{ matrix.package }}
+          fi
+
+  # Keep a standalone vet job so config drift (a new vet check landing in
+  # a Go minor bump, or an unknown //go:build tag) surfaces with its own
+  # red x instead of being mixed into a test leg. golangci-lint runs vet
+  # too but only what its govet linter enables.
+  vet:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
       - name: Vet
         run: go vet ./...
-      # internal/team and internal/teammcp have known test-isolation issues
-      # (WUPHF_RUNTIME_HOME, shared wiki path, worktree registration against
-      # the invoking repo) tracked in the test-isolation memo. They run
-      # without -race until that fix lands; everything else gets the race
-      # detector. Re-fold into a single -race suite once the memo's 7-step
-      # fix plan completes.
-      #
-      # Pattern anchoring: `/internal/team(mcp)?($|/)` matches exactly
-      # `internal/team`, `internal/teammcp`, and their subpackages — but not a
-      # hypothetical sibling like `internal/teammcpx`. `-timeout=15m` is a
-      # margin over Go's 10m default because race instrumentation routinely
-      # 2-3x's wall-clock; applied on both steps for symmetry.
-      - name: Tests (internal/team, internal/teammcp)
-        run: go test -timeout=15m $(go list ./... | grep -E '/internal/team(mcp)?($|/)')
-      - name: Tests with race detector (everything else)
-        run: go test -race -timeout=15m $(go list ./... | grep -vE '/internal/team(mcp)?($|/)')
 
   build:
     needs: web
