@@ -1,6 +1,20 @@
+commit-msg:
+  commands:
+    commitlint:
+      run: bunx --bun commitlint --edit {1}
+
 pre-commit:
   parallel: true
   commands:
+    secretlint:
+      run: bunx --bun secretlint {staged_files}
+      exclude:
+        - "node_modules/**"
+        - "web/dist/**"
+        - "web/node_modules/**"
+        - "bun.lock"
+        - "web/bun.lock"
+
     gofmt:
       glob: "*.go"
       run: |
@@ -33,11 +47,17 @@ pre-commit:
       run: grep -lE '^(<{7}|>{7}|={7})' {staged_files} && echo "Merge conflict markers found" && exit 1 || true
 
     no-large-files:
-      run: >
-        find {staged_files} -size +500k 2>/dev/null
-        | head -1 | grep .
-        && echo 'File too large (>500KB)' && exit 1
-        || true
+      run: |
+        fail=0
+        for f in {staged_files}; do
+          [ -f "$f" ] || continue
+          size=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+          if [ "${size:-0}" -gt 5242880 ]; then
+            echo "ERROR: $f exceeds 5MB ($(( size / 1048576 ))MB)"
+            fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ]
 
 pre-push:
   parallel: true
