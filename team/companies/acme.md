@@ -1,3 +1,11 @@
+# Existing article
+
 # Acme
 
 Old body.
+
+# Your task
+
+Use web search and web fetch to find new, reliable information and relevant media for this article. Update the body with what you find. Output the full updated markdown.
+
+Pam was here.
