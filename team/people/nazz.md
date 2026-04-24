@@ -1,3 +1,0 @@
-# Nazz
-
-Edited by human.
