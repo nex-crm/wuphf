@@ -1,6 +1,7 @@
 package team
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -526,9 +527,17 @@ func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
 		cmd.Env = gitCleanEnv() // don't inherit outer test runner's GIT_DIR
 		return cmd.Output()
 	}
-	headBefore, err := outerGit("rev-parse", "HEAD")
+	// Snapshot *all* refs + working-tree status, not just HEAD. The class of
+	// bug covers any write to the outer repo's object store / refs, not only
+	// HEAD movement: a regression could update refs/heads/<other> or stage
+	// into the outer index without touching HEAD.
+	refsBefore, err := outerGit("rev-parse", "--all")
 	if err != nil {
-		t.Fatalf("outer rev-parse before: %v", err)
+		t.Fatalf("outer rev-parse --all before: %v", err)
+	}
+	statusBefore, err := outerGit("status", "--porcelain")
+	if err != nil {
+		t.Fatalf("outer status before: %v", err)
 	}
 
 	// Inherit GIT_DIR pointing at the outer repo. This is exactly what a
@@ -541,19 +550,42 @@ func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
 		t.Fatalf("wiki init: %v", err)
 	}
 
-	headAfter, err := outerGit("rev-parse", "HEAD")
+	refsAfter, err := outerGit("rev-parse", "--all")
 	if err != nil {
-		t.Fatalf("outer rev-parse after: %v", err)
+		t.Fatalf("outer rev-parse --all after: %v", err)
 	}
-	if strings.TrimSpace(string(headAfter)) != strings.TrimSpace(string(headBefore)) {
-		log, _ := outerGit("log", "--oneline", "-5")
-		t.Fatalf("outer repo HEAD moved (leak!):\nbefore %s\nafter  %s\nlog:\n%s",
-			strings.TrimSpace(string(headBefore)),
-			strings.TrimSpace(string(headAfter)),
-			string(log))
+	if !bytes.Equal(refsAfter, refsBefore) {
+		log, _ := outerGit("log", "--all", "--oneline", "-10")
+		t.Fatalf("outer repo refs moved (leak!):\nbefore:\n%s\nafter:\n%s\nlog:\n%s",
+			string(refsBefore), string(refsAfter), string(log))
+	}
+	statusAfter, err := outerGit("status", "--porcelain")
+	if err != nil {
+		t.Fatalf("outer status after: %v", err)
+	}
+	if !bytes.Equal(statusAfter, statusBefore) {
+		t.Fatalf("outer working tree mutated (leak!):\nbefore:\n%q\nafter:\n%q",
+			string(statusBefore), string(statusAfter))
 	}
 
+	// Positive oracle: the wiki init commit should have landed in the wiki
+	// repo, not just "some .git exists." A future refactor that silently
+	// skips the commit under inherited GIT_DIR rather than clobbering the
+	// outer repo would still be a bug; this catches it.
 	if _, err := os.Stat(filepath.Join(repo.Root(), ".git")); err != nil {
 		t.Fatalf("wiki .git missing — init did not target the wiki path: %v", err)
+	}
+	wikiGit := func(args ...string) ([]byte, error) {
+		cmd := exec.Command("git", append([]string{"-C", repo.Root()}, args...)...)
+		cmd.Env = gitCleanEnv()
+		return cmd.Output()
+	}
+	msg, err := wikiGit("log", "-1", "--format=%s")
+	if err != nil {
+		t.Fatalf("wiki log: %v", err)
+	}
+	if got := strings.TrimSpace(string(msg)); got != "wuphf: init wiki" {
+		t.Fatalf("wiki HEAD commit message = %q, want %q (init did not commit to the wiki repo)",
+			got, "wuphf: init wiki")
 	}
 }

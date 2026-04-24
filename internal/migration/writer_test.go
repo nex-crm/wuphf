@@ -14,23 +14,25 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-// filterOutGitEnv returns env with GIT_DIR / GIT_WORK_TREE /
-// GIT_INDEX_FILE / GIT_OBJECT_DIRECTORY / GIT_COMMON_DIR / GIT_NAMESPACE
-// and the GIT_CONFIG_* family removed. Used by tests that shell out to
-// `git -C <tmpdir>` and would otherwise be hijacked by the pre-push
-// hook's exported GIT_DIR. team.gitCleanEnv is unexported — this is the
-// local mirror for this package's single caller.
+// filterOutGitEnv mirrors team.gitCleanEnv (unexported) for this test
+// package's single caller. Keep in sync with internal/team/worktree.go:
+// any env var added to gitCleanEnv's strip list belongs here too.
+// Follow-up tracked: export team.GitCleanEnv and delete this duplicate.
 func filterOutGitEnv(env []string) []string {
-	filtered := env[:0]
+	filtered := make([]string, 0, len(env))
 	for _, kv := range env {
 		switch {
 		case strings.HasPrefix(kv, "GIT_DIR="),
 			strings.HasPrefix(kv, "GIT_WORK_TREE="),
 			strings.HasPrefix(kv, "GIT_INDEX_FILE="),
 			strings.HasPrefix(kv, "GIT_OBJECT_DIRECTORY="),
+			strings.HasPrefix(kv, "GIT_ALTERNATE_OBJECT_DIRECTORIES="),
 			strings.HasPrefix(kv, "GIT_COMMON_DIR="),
 			strings.HasPrefix(kv, "GIT_NAMESPACE="),
+			strings.HasPrefix(kv, "GIT_ATTR_SOURCE="),
 			strings.HasPrefix(kv, "GIT_CONFIG="),
+			strings.HasPrefix(kv, "GIT_CONFIG_GLOBAL="),
+			strings.HasPrefix(kv, "GIT_CONFIG_SYSTEM="),
 			strings.HasPrefix(kv, "GIT_CONFIG_COUNT="),
 			strings.HasPrefix(kv, "GIT_CONFIG_KEY_"),
 			strings.HasPrefix(kv, "GIT_CONFIG_VALUE_"),
