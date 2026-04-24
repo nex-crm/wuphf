@@ -8,6 +8,10 @@ go build -o wuphf ./cmd/wuphf
 
 For normal app usage you do not need Bun. The local office/team MCP tools now run from the main Go binary through the hidden `wuphf mcp-team` subcommand.
 
+## Git hooks
+
+Hooks run via [lefthook](https://github.com/evilmartians/lefthook) (`lefthook.yml`). On `pre-push` the full Go test suite and a `cmd/wuphf` build are executed; on `pre-commit` gofmt/go vet/golangci-lint run against staged Go files. Do not push with `--no-verify` — fix the underlying failure instead.
+
 ## Latest Published CLI
 
 The old standalone CLI is no longer vendored in this repo.
