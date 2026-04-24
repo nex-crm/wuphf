@@ -883,11 +883,9 @@ func newHeadlessLauncherForTest() *Launcher {
 
 func TestFinishHeadlessTurnWakesLeadWhenAllSpecialistsDone(t *testing.T) {
 	woken := make(chan string, 4)
-	oldWakeLead := headlessWakeLeadFn
-	headlessWakeLeadFn = func(_ *Launcher, specialistSlug string) {
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, specialistSlug string) {
 		woken <- specialistSlug
-	}
-	defer func() { headlessWakeLeadFn = oldWakeLead }()
+	})
 
 	l := newHeadlessLauncherForTest()
 
@@ -902,11 +900,9 @@ func TestFinishHeadlessTurnWakesLeadWhenAllSpecialistsDone(t *testing.T) {
 
 func TestFinishHeadlessTurnDoesNotWakeLeadWhenOtherSpecialistsActive(t *testing.T) {
 	woken := make(chan string, 4)
-	oldWakeLead := headlessWakeLeadFn
-	headlessWakeLeadFn = func(_ *Launcher, specialistSlug string) {
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, specialistSlug string) {
 		woken <- specialistSlug
-	}
-	defer func() { headlessWakeLeadFn = oldWakeLead }()
+	})
 
 	l := newHeadlessLauncherForTest()
 	// "be" is still active while "fe" finishes.
@@ -924,11 +920,9 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenOtherSpecialistsActive(t *testing.
 
 func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadFinishes(t *testing.T) {
 	woken := make(chan string, 4)
-	oldWakeLead := headlessWakeLeadFn
-	headlessWakeLeadFn = func(_ *Launcher, specialistSlug string) {
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, specialistSlug string) {
 		woken <- specialistSlug
-	}
-	defer func() { headlessWakeLeadFn = oldWakeLead }()
+	})
 
 	l := newHeadlessLauncherForTest()
 	// CEO finishes — should not self-wake.
@@ -944,11 +938,9 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadFinishes(t *testing.T) {
 
 func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadAlreadyQueued(t *testing.T) {
 	woken := make(chan string, 4)
-	oldWakeLead := headlessWakeLeadFn
-	headlessWakeLeadFn = func(_ *Launcher, specialistSlug string) {
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, specialistSlug string) {
 		woken <- specialistSlug
-	}
-	defer func() { headlessWakeLeadFn = oldWakeLead }()
+	})
 
 	l := newHeadlessLauncherForTest()
 	// CEO already has a pending turn.
@@ -1958,9 +1950,7 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldWakeLead := headlessWakeLeadFn
-	headlessWakeLeadFn = func(_ *Launcher, _ string) {}
-	defer func() { headlessWakeLeadFn = oldWakeLead }()
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{

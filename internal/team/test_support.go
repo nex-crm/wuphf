@@ -49,6 +49,13 @@ func DisableRealTaskWorktreeForTests() {
 		return path, branch, nil
 	}
 	cleanupTaskWorktree = func(string, string) error { return nil }
+	// Stub verifyTaskWorktreeWritable too: rejectFalseLocalWorktreeBlock
+	// in broker.go calls it with the stub path, which never exists on
+	// disk, so the default `os.Stat` check would fail. No tests exercise
+	// this path today, but keeping the three worktree vars stubbed
+	// together preserves the "real-worktree is off for tests" contract
+	// as defense-in-depth for future callers.
+	verifyTaskWorktreeWritable = func(string) error { return nil }
 
 	// If the caller's test package hasn't set WUPHF_RUNTIME_HOME, point
 	// it at a process-lifetime leaked tempdir so any implicit

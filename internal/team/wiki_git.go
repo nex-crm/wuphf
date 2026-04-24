@@ -102,8 +102,8 @@ func WikiBackupDir() string {
 func wikiDirForSegment(segment string) string {
 	runtimeOverride := strings.TrimSpace(os.Getenv("WUPHF_RUNTIME_HOME"))
 	if runtimeOverride == "" && !unscopedWikiRootAllowed {
-		panic("team: WikiRootDir called under tests without WUPHF_RUNTIME_HOME set — " +
-			"set t.Setenv(\"WUPHF_RUNTIME_HOME\", t.TempDir()) or inject a Repo via NewRepoAt(...)")
+		panic(fmt.Sprintf("team: wiki %q resolved under tests without WUPHF_RUNTIME_HOME set — "+
+			"set t.Setenv(%q, t.TempDir()) or inject a Repo via NewRepoAt(...)", segment, "WUPHF_RUNTIME_HOME"))
 	}
 	home := strings.TrimSpace(config.RuntimeHomeDir())
 	if home == "" {

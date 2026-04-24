@@ -70,6 +70,16 @@ func stubPrepareTaskWorktree(taskID string) (string, string, error) {
 
 func stubCleanupTaskWorktree(string, string) error { return nil }
 
+// allowRealTaskWorktreeForTest opts the current test into the real
+// defaultPrepareTaskWorktree / defaultCleanupTaskWorktree codepath. It
+// mutates three package-level globals (allowRealTaskWorktree,
+// prepareTaskWorktree, cleanupTaskWorktree) without synchronization and
+// restores them via t.Cleanup. Call sites MUST NOT call t.Parallel() in
+// the same test, and the test MUST NOT spawn background brokers/workers
+// that read those function pointers concurrently — both conditions hold
+// for the three current callers in worktree_test.go (no t.Parallel, no
+// Broker goroutines). If a future caller needs either, convert this to
+// a mutex-guarded swap like setHeadlessWakeLeadFn in broker_test.go.
 func allowRealTaskWorktreeForTest(t *testing.T) {
 	t.Helper()
 	prevAllow := allowRealTaskWorktree
