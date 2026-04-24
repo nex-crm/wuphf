@@ -1,3 +1,0 @@
-# Newbie
-
-Fresh article.
