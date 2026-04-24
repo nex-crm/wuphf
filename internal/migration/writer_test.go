@@ -14,36 +14,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
-// filterOutGitEnv mirrors team.gitCleanEnv (unexported) for this test
-// package's single caller. Keep in sync with internal/team/worktree.go:
-// any env var added to gitCleanEnv's strip list belongs here too.
-// Follow-up tracked: export team.GitCleanEnv and delete this duplicate.
-func filterOutGitEnv(env []string) []string {
-	filtered := make([]string, 0, len(env))
-	for _, kv := range env {
-		switch {
-		case strings.HasPrefix(kv, "GIT_DIR="),
-			strings.HasPrefix(kv, "GIT_WORK_TREE="),
-			strings.HasPrefix(kv, "GIT_INDEX_FILE="),
-			strings.HasPrefix(kv, "GIT_OBJECT_DIRECTORY="),
-			strings.HasPrefix(kv, "GIT_ALTERNATE_OBJECT_DIRECTORIES="),
-			strings.HasPrefix(kv, "GIT_COMMON_DIR="),
-			strings.HasPrefix(kv, "GIT_NAMESPACE="),
-			strings.HasPrefix(kv, "GIT_ATTR_SOURCE="),
-			strings.HasPrefix(kv, "GIT_CONFIG="),
-			strings.HasPrefix(kv, "GIT_CONFIG_GLOBAL="),
-			strings.HasPrefix(kv, "GIT_CONFIG_SYSTEM="),
-			strings.HasPrefix(kv, "GIT_CONFIG_COUNT="),
-			strings.HasPrefix(kv, "GIT_CONFIG_KEY_"),
-			strings.HasPrefix(kv, "GIT_CONFIG_VALUE_"),
-			strings.HasPrefix(kv, "GIT_CONFIG_PARAMETERS="):
-			continue
-		}
-		filtered = append(filtered, kv)
-	}
-	return filtered
-}
-
 // wikiWorkerWriter adapts team.WikiWorker onto WikiWriter so the
 // integration test can drive the real write path without the worker
 // needing to know about migration.WikiWriter directly.
@@ -313,7 +283,7 @@ func TestMigratorIntegrationWithWikiWorker(t *testing.T) {
 	// outer repo and `git log` would return the outer repo's history
 	// instead of this test's fixture.
 	gitLog := exec.Command("git", "-C", root, "log", "--format=%an <%ae>")
-	gitLog.Env = filterOutGitEnv(os.Environ())
+	gitLog.Env = team.GitCleanEnv()
 	out, err := gitLog.Output()
 	if err != nil {
 		t.Fatalf("git log: %v", err)

@@ -175,7 +175,7 @@ func cleanupTaskWorktreeAtRepoRoot(repoRoot, path, branch string) error {
 
 func gitRepoRoot() (string, error) {
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Env = gitCleanEnv()
+	cmd.Env = GitCleanEnv()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -186,7 +186,7 @@ func gitRepoRoot() (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
-// gitCleanEnv returns os.Environ() minus the GIT_* variables that pin git to a
+// GitCleanEnv returns os.Environ() minus the GIT_* variables that pin git to a
 // specific repo, index, or worktree; the GIT_CONFIG_* family that can inject
 // `-c` overrides (including GIT_CONFIG_GLOBAL/_SYSTEM which redirect config
 // discovery); GIT_ALTERNATE_OBJECT_DIRECTORIES which lets the subprocess
@@ -201,7 +201,7 @@ func gitRepoRoot() (string, error) {
 // path in wiki_git.go) should append GIT_CONFIG_GLOBAL=/dev/null AFTER this
 // — os/exec dedupes env keys last-wins, so stripping here + appending the
 // override is the clean pattern and does not rely on unspecified ordering.
-func gitCleanEnv() []string {
+func GitCleanEnv() []string {
 	env := os.Environ()
 	filtered := make([]string, 0, len(env))
 	for _, kv := range env {
@@ -243,7 +243,7 @@ func defaultTaskWorktreeRootDir(repoRoot string) string {
 func runGit(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = gitCleanEnv()
+	cmd.Env = GitCleanEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -255,7 +255,7 @@ func runGit(dir string, args ...string) error {
 func runGitOutput(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = gitCleanEnv()
+	cmd.Env = GitCleanEnv()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -421,7 +421,7 @@ func copyWorkspacePath(src, dst string, info os.FileInfo) error {
 func gitRefExists(dir, ref string) bool {
 	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", ref)
 	cmd.Dir = dir
-	cmd.Env = gitCleanEnv()
+	cmd.Env = GitCleanEnv()
 	return cmd.Run() == nil
 }
 
