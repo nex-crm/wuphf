@@ -95,17 +95,22 @@ jobs:
       - id: list
         run: |
           set -euo pipefail
-          # Emit a JSON array of {package, race} objects. `jq -R -s` reads
-          # stdin as a single string; split on newlines, drop empties, then
-          # map each package to an object with the race flag.
-          packages=$(go list ./... | jq -R -s -c '
-            split("\n")
-            | map(select(length > 0))
-            | map({
-                package: .,
-                race: (test("/internal/team(mcp)?($|/)") | not)
-              })
-          ')
+          # Emit a JSON array of {package, race} objects. Only packages with
+          # actual *_test.go files (TestGoFiles or XTestGoFiles) are emitted —
+          # spawning a matrix leg for a test-less package burns CI minutes
+          # for no signal. `jq -R -s` reads stdin as a single string; split
+          # on newlines, drop empties, then map each package to an object
+          # with the race flag (no -race for internal/team or
+          # internal/teammcp; see comment above).
+          packages=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... \
+            | jq -R -s -c '
+                split("\n")
+                | map(select(length > 0))
+                | map({
+                    package: .,
+                    race: (test("/internal/team(mcp)?($|/)") | not)
+                  })
+              ')
           echo "packages=${packages}" >> "$GITHUB_OUTPUT"
 
   go-test-matrix:

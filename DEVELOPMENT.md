@@ -49,7 +49,7 @@ Hooks run via [lefthook](https://github.com/evilmartians/lefthook) (`lefthook.ym
 | `build` | `go build -o /dev/null ./cmd/wuphf` — verify the main binary still links |
 | `vhs` | Runs `testdata/vhs/check.sh` if `vhs` is on PATH (skipped with a warning otherwise) |
 
-The full Go test suite runs in CI (`go-test-matrix` job) instead of pre-push — fan-out per package with `-race` on everything except `internal/team(mcp)` (see test-isolation memo).
+The full Go test suite runs in CI (`go-test-matrix` job) instead of pre-push — fan-out per package with `-race` on everything except `internal/team` and `internal/teammcp` (see test-isolation memo).
 
 **Do NOT push with `--no-verify`.** If a hook fails, fix the underlying failure — skipping it lands the problem in CI for everyone else to hit. If a hook is genuinely wrong for your change, open a PR to the hook config rather than bypassing it.
 
