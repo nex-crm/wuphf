@@ -1620,13 +1620,6 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 
 func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	// Isolate brokerStatePath from the process-level leaked path so a
-	// leaked writer goroutine from an earlier test can't race our
-	// EnsurePlannedTask state save with `rename ... no such file`.
-	oldPathFn := brokerStatePath
-	statePath := leakedBrokerStatePath(t)
-	brokerStatePath = func() string { return statePath }
-	defer func() { brokerStatePath = oldPathFn }()
 
 	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
 	headlessCodexWorkspaceStatusSnapshot = func(string) string {
@@ -1634,19 +1627,25 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 	}
 	defer func() { headlessCodexWorkspaceStatusSnapshot = oldSnapshot }()
 
+	// Build the task state directly instead of going through
+	// EnsurePlannedTask so we never call saveLocked — the broker-state
+	// save path races with leaked goroutines from earlier tests that
+	// read the swapped brokerStatePath global (rename .tmp -> final
+	// fails mid-flight). We don't need persistence here; we only need
+	// the task fields that headlessTurnCompletedDurably reads.
 	b := NewBroker()
-	ensureTestMemberAccess(b, "general", "builder", "Builder")
-	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+	b.mu.Lock()
+	b.tasks = []teamTask{{
+		ID:            "task-1",
 		Channel:       "general",
 		Title:         "Implement the durable turn guard",
 		Owner:         "eng",
-		CreatedBy:     "ceo",
+		Status:        "open",
 		TaskType:      "feature",
 		ExecutionMode: "local_worktree",
-	})
-	if err != nil || reused {
-		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
-	}
+	}}
+	task := b.tasks[0]
+	b.mu.Unlock()
 
 	l := newHeadlessLauncherForTest()
 	l.broker = b
@@ -1669,13 +1668,6 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 
 func TestHeadlessTurnCompletedDurablyAcceptsReviewReadyTask(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	// Isolate brokerStatePath from the process-level leaked path so a
-	// leaked writer goroutine from an earlier test can't race our
-	// EnsurePlannedTask state save with `rename ... no such file`.
-	oldPathFn := brokerStatePath
-	statePath := leakedBrokerStatePath(t)
-	brokerStatePath = func() string { return statePath }
-	defer func() { brokerStatePath = oldPathFn }()
 
 	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
 	headlessCodexWorkspaceStatusSnapshot = func(string) string {
@@ -1683,26 +1675,22 @@ func TestHeadlessTurnCompletedDurablyAcceptsReviewReadyTask(t *testing.T) {
 	}
 	defer func() { headlessCodexWorkspaceStatusSnapshot = oldSnapshot }()
 
+	// See TestHeadlessTurnCompletedDurablyRejectsCodingTurn... for why
+	// we build the task state directly rather than via EnsurePlannedTask.
 	b := NewBroker()
-	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+	b.mu.Lock()
+	b.tasks = []teamTask{{
+		ID:            "task-1",
 		Channel:       "general",
 		Title:         "Implement the durable turn guard",
 		Owner:         "eng",
-		CreatedBy:     "ceo",
+		Status:        "review",
+		ReviewState:   "ready_for_review",
 		TaskType:      "feature",
 		ExecutionMode: "local_worktree",
-	})
-	if err != nil || reused {
-		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
-	}
-	for i := range b.tasks {
-		if b.tasks[i].ID != task.ID {
-			continue
-		}
-		b.tasks[i].Status = "review"
-		b.tasks[i].ReviewState = "ready_for_review"
-		break
-	}
+	}}
+	task := b.tasks[0]
+	b.mu.Unlock()
 
 	l := newHeadlessLauncherForTest()
 	l.broker = b
