@@ -277,8 +277,14 @@ func TestMigratorIntegrationWithWikiWorker(t *testing.T) {
 		}
 	}
 
-	// Confirm commit author == migrate.
-	out, err := exec.Command("git", "-C", root, "log", "--format=%an <%ae>").Output()
+	// Confirm commit author == migrate. Clean the subprocess env so this
+	// assertion is not hijacked by an inherited GIT_DIR (e.g. when the test
+	// runs under a pre-push hook — git exports GIT_DIR pointing at the
+	// outer repo and `git log` would return the outer repo's history
+	// instead of this test's fixture.
+	gitLog := exec.Command("git", "-C", root, "log", "--format=%an <%ae>")
+	gitLog.Env = team.GitCleanEnv()
+	out, err := gitLog.Output()
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}

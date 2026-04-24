@@ -473,7 +473,7 @@ func TestBuildOperationBootstrapPackageSynthesizesWhenNoPackSeedExists(t *testin
 	tmpRepo := t.TempDir()
 	cmd := exec.Command("git", "init")
 	cmd.Dir = tmpRepo
-	cmd.Env = gitCleanEnv()
+	cmd.Env = GitCleanEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init temp repo: %v: %s", err, strings.TrimSpace(string(out)))
 	}
