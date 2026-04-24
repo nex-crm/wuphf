@@ -80,7 +80,13 @@ func CheckOne(name string) PrereqResult {
 	r.OK = true
 
 	// Best-effort version capture; ignore errors.
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	//
+	// 10s (up from 3s) to keep the probe reliable when the machine is under
+	// parallel test load — `go test ./...` can stack 20+ concurrent fork+exec
+	// calls, and a 3s window was flaky on a developer laptop running the
+	// pre-push hook. This is a one-shot `--version` probe, not a hot path;
+	// the timeout is a floor on machine health, not on binary response time.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, path, "--version").Output()
 	if err == nil {
