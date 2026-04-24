@@ -4,4 +4,8 @@ _Auto-generated. Do not edit by hand — agents regenerate this on every commit.
 
 ## team/playbooks
 
-- [Churn prevention](../team/playbooks/auto.md) _(updated 2026-04-24T03:11:40Z)_
+- [Churn prevention](../team/playbooks/auto.md) _(updated 2026-04-24T03:11:41Z)_
+
+## team/playbooks/.compiled/auto
+
+- [Playbook: Churn prevention](../team/playbooks/.compiled/auto/SKILL.md) _(updated 2026-04-24T03:11:40Z)_
