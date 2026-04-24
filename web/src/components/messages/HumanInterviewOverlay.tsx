@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { answerRequest, type AgentRequest } from '../../api/client'
-import { useRequests } from '../../hooks/useRequests'
-import { showNotice } from '../ui/Toast'
+import { useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { type AgentRequest, answerRequest } from "../../api/client";
+import { useRequests } from "../../hooks/useRequests";
+import { showNotice } from "../ui/Toast";
 
 /**
  * Global blocking-interview overlay. Always renders the first blocking pending
@@ -10,53 +11,58 @@ import { showNotice } from '../ui/Toast'
  * Non-blocking requests get a one-time toast and stay in the Requests panel.
  */
 export function HumanInterviewOverlay() {
-  const { blockingPending, pending } = useRequests()
-  const queryClient = useQueryClient()
-  const [submitting, setSubmitting] = useState(false)
-  const seenNonBlockingIds = useRef<Set<string>>(new Set())
+  const { blockingPending, pending } = useRequests();
+  const queryClient = useQueryClient();
+  const [submitting, setSubmitting] = useState(false);
+  const seenNonBlockingIds = useRef<Set<string>>(new Set());
 
   // Toast non-blocking requests once each
   useEffect(() => {
     for (const req of pending) {
-      if (req.blocking) continue
-      if (!req.id || seenNonBlockingIds.current.has(req.id)) continue
-      seenNonBlockingIds.current.add(req.id)
-      showNotice(`@${req.from || 'someone'} asked: ${req.question}`, 'info')
+      if (req.blocking) continue;
+      if (!req.id || seenNonBlockingIds.current.has(req.id)) continue;
+      seenNonBlockingIds.current.add(req.id);
+      showNotice(`@${req.from || "someone"} asked: ${req.question}`, "info");
     }
-  }, [pending])
+  }, [pending]);
 
-  if (!blockingPending) return null
+  if (!blockingPending) return null;
 
   return (
     <BlockingInterview
       request={blockingPending}
       submitting={submitting}
       onAnswer={async (choiceId) => {
-        if (submitting) return
-        setSubmitting(true)
+        if (submitting) return;
+        setSubmitting(true);
         try {
-          await answerRequest(blockingPending.id, choiceId)
-          await queryClient.invalidateQueries({ queryKey: ['requests'] })
-          await queryClient.invalidateQueries({ queryKey: ['requests-badge'] })
+          await answerRequest(blockingPending.id, choiceId);
+          await queryClient.invalidateQueries({ queryKey: ["requests"] });
+          await queryClient.invalidateQueries({ queryKey: ["requests-badge"] });
         } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : 'Failed to answer'
-          showNotice(message, 'error')
+          const message =
+            err instanceof Error ? err.message : "Failed to answer";
+          showNotice(message, "error");
         } finally {
-          setSubmitting(false)
+          setSubmitting(false);
         }
       }}
     />
-  )
+  );
 }
 
 interface BlockingInterviewProps {
-  request: AgentRequest
-  submitting: boolean
-  onAnswer: (choiceId: string) => void
+  request: AgentRequest;
+  submitting: boolean;
+  onAnswer: (choiceId: string) => void;
 }
 
-function BlockingInterview({ request, submitting, onAnswer }: BlockingInterviewProps) {
-  const options = request.options ?? request.choices ?? []
+function BlockingInterview({
+  request,
+  submitting,
+  onAnswer,
+}: BlockingInterviewProps) {
+  const options = request.options ?? request.choices ?? [];
 
   return (
     <div
@@ -68,11 +74,15 @@ function BlockingInterview({ request, submitting, onAnswer }: BlockingInterviewP
       <div className="interview-card">
         <div className="interview-meta">
           <span className="badge badge-yellow">BLOCKING</span>
-          <span className="interview-from">@{request.from || 'agent'}</span>
-          {request.channel && <span className="interview-channel">in #{request.channel}</span>}
+          <span className="interview-from">@{request.from || "agent"}</span>
+          {request.channel && (
+            <span className="interview-channel">in #{request.channel}</span>
+          )}
         </div>
         <h2 id="interview-title" className="interview-title">
-          {request.title && request.title !== 'Request' ? request.title : 'Human input required'}
+          {request.title && request.title !== "Request"
+            ? request.title
+            : "Human input required"}
         </h2>
         <p className="interview-question">{request.question}</p>
         {request.context && (
@@ -84,7 +94,7 @@ function BlockingInterview({ request, submitting, onAnswer }: BlockingInterviewP
               <button
                 key={opt.id}
                 type="button"
-                className={`btn btn-sm ${opt.id === request.recommended_id ? 'btn-primary' : 'btn-ghost'}`}
+                className={`btn btn-sm ${opt.id === request.recommended_id ? "btn-primary" : "btn-ghost"}`}
                 onClick={() => onAnswer(opt.id)}
                 disabled={submitting}
                 title={opt.description}
@@ -100,5 +110,5 @@ function BlockingInterview({ request, submitting, onAnswer }: BlockingInterviewP
         )}
       </div>
     </div>
-  )
+  );
 }

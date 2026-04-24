@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react'
-import { drawPixelAvatar } from '../../lib/pixelAvatar'
+import { useEffect, useRef } from "react";
+
+import { drawPixelAvatar } from "../../lib/pixelAvatar";
 
 interface PixelAvatarProps {
-  slug: string
-  size: number
-  className?: string
+  slug: string;
+  size: number;
+  className?: string;
 }
 
 /**
@@ -13,15 +14,17 @@ interface PixelAvatarProps {
  * to apply theme-level sizing/treatment around the canvas.
  */
 export function PixelAvatar({ slug, size, className }: PixelAvatarProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    drawPixelAvatar(canvas, slug, size)
-  }, [slug, size])
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    drawPixelAvatar(canvas, slug, size);
+  }, [slug, size]);
 
-  const composedClassName = ['pixel-avatar', className].filter(Boolean).join(' ')
+  const composedClassName = ["pixel-avatar", className]
+    .filter(Boolean)
+    .join(" ");
 
-  return <canvas ref={canvasRef} className={composedClassName} aria-hidden="true" />
+  return <canvas ref={canvasRef} className={composedClassName} />;
 }

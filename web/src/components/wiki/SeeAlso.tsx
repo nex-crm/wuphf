@@ -1,20 +1,20 @@
-import WikiLink from './WikiLink'
+import WikiLink from "./WikiLink";
 
 /** "See also" italic list at the bottom of an article. */
 
 export interface SeeAlsoItem {
-  slug: string
-  display: string
-  broken?: boolean
+  slug: string;
+  display: string;
+  broken?: boolean;
 }
 
 interface SeeAlsoProps {
-  items: SeeAlsoItem[]
-  onNavigate?: (slug: string) => void
+  items: SeeAlsoItem[];
+  onNavigate?: (slug: string) => void;
 }
 
 export default function SeeAlso({ items, onNavigate }: SeeAlsoProps) {
-  if (items.length === 0) return null
+  if (items.length === 0) return null;
   return (
     <section className="wk-see-also" aria-labelledby="wk-see-also-heading">
       <h2 id="wk-see-also-heading">See also</h2>
@@ -31,5 +31,5 @@ export default function SeeAlso({ items, onNavigate }: SeeAlsoProps) {
         ))}
       </ul>
     </section>
-  )
+  );
 }

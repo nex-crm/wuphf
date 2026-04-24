@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useRef } from 'react'
-import { useAppStore } from '../../stores/app'
-import { SLASH_COMMANDS } from '../messages/Autocomplete'
-import { Kbd, KbdSequence, MOD_KEY } from './Kbd'
+import { useCallback, useEffect, useRef } from "react";
+
+import { useAppStore } from "../../stores/app";
+import { SLASH_COMMANDS } from "../messages/Autocomplete";
+import { Kbd, KbdSequence, MOD_KEY } from "./Kbd";
 
 /**
  * One keyboard-shortcut row for the help modal.
  */
 interface Keybinding {
-  keys: string[] | string[][]
-  description: string
+  keys: string[] | string[][];
+  description: string;
 }
 
 /**
@@ -17,15 +18,21 @@ interface Keybinding {
  * below.
  */
 const GLOBAL_KEYS: Keybinding[] = [
-  { keys: ['?'], description: 'Toggle this keyboard reference' },
-  { keys: [MOD_KEY, 'K'], description: 'Command palette — channels, agents, commands, search' },
-  { keys: [MOD_KEY, '/'], description: 'Focus the composer' },
-  { keys: [MOD_KEY, '1'], description: 'Jump to channel 1' },
-  { keys: [MOD_KEY, '9'], description: 'Jump to channel 9 (1–9 supported)' },
-  { keys: ['Esc'], description: 'Close the top-most modal, panel, or thread' },
-  { keys: ['Tab'], description: 'Move focus forward between interactive elements' },
-  { keys: ['Shift', 'Tab'], description: 'Move focus backward' },
-]
+  { keys: ["?"], description: "Toggle this keyboard reference" },
+  {
+    keys: [MOD_KEY, "K"],
+    description: "Command palette — channels, agents, commands, search",
+  },
+  { keys: [MOD_KEY, "/"], description: "Focus the composer" },
+  { keys: [MOD_KEY, "1"], description: "Jump to channel 1" },
+  { keys: [MOD_KEY, "9"], description: "Jump to channel 9 (1–9 supported)" },
+  { keys: ["Esc"], description: "Close the top-most modal, panel, or thread" },
+  {
+    keys: ["Tab"],
+    description: "Move focus forward between interactive elements",
+  },
+  { keys: ["Shift", "Tab"], description: "Move focus backward" },
+];
 
 /**
  * Mirrors TUI operator guidance. The composer parity PR ships Ctrl+P/N history
@@ -34,41 +41,50 @@ const GLOBAL_KEYS: Keybinding[] = [
  * the full keymap.
  */
 const COMPOSER_KEYS: Keybinding[] = [
-  { keys: ['Enter'], description: 'Send message' },
-  { keys: ['Shift', 'Enter'], description: 'Newline inside composer' },
-  { keys: ['Ctrl', 'P'], description: 'Recall previous message in this channel' },
-  { keys: ['Ctrl', 'N'], description: 'Forward through recalled history / restore draft' },
-  { keys: ['↑'], description: 'Recall previous when composer is empty' },
-  { keys: ['Esc'], description: 'Close autocomplete, mention, modal, or help' },
-]
+  { keys: ["Enter"], description: "Send message" },
+  { keys: ["Shift", "Enter"], description: "Newline inside composer" },
+  {
+    keys: ["Ctrl", "P"],
+    description: "Recall previous message in this channel",
+  },
+  {
+    keys: ["Ctrl", "N"],
+    description: "Forward through recalled history / restore draft",
+  },
+  { keys: ["↑"], description: "Recall previous when composer is empty" },
+  { keys: ["Esc"], description: "Close autocomplete, mention, modal, or help" },
+];
 
 const WIZARD_KEYS: Keybinding[] = [
-  { keys: ['Enter'], description: 'Advance to the next step when ready' },
-  { keys: ['Shift', 'Enter'], description: 'New line inside the first-task editor' },
-  { keys: ['Tab'], description: 'Move between fields, tiles, and actions' },
-  { keys: ['Esc'], description: 'Close an inline panel (Nex signup, etc.)' },
-]
+  { keys: ["Enter"], description: "Advance to the next step when ready" },
+  {
+    keys: ["Shift", "Enter"],
+    description: "New line inside the first-task editor",
+  },
+  { keys: ["Tab"], description: "Move between fields, tiles, and actions" },
+  { keys: ["Esc"], description: "Close an inline panel (Nex signup, etc.)" },
+];
 
 const PALETTE_KEYS: Keybinding[] = [
-  { keys: ['↑'], description: 'Previous result' },
-  { keys: ['↓'], description: 'Next result' },
-  { keys: ['Enter'], description: 'Open selected result' },
-  { keys: ['Esc'], description: 'Close the palette' },
-]
+  { keys: ["↑"], description: "Previous result" },
+  { keys: ["↓"], description: "Next result" },
+  { keys: ["Enter"], description: "Open selected result" },
+  { keys: ["Esc"], description: "Close the palette" },
+];
 
 const NAV_KEYS: Keybinding[] = [
-  { keys: ['j'], description: 'Scroll feed down one message' },
-  { keys: ['k'], description: 'Scroll feed up one message' },
-  { keys: ['Ctrl', 'D'], description: 'Half-page down' },
-  { keys: ['Ctrl', 'U'], description: 'Half-page up' },
-  { keys: [['g'], ['g']], description: 'Jump to top of feed' },
-  { keys: ['Shift', 'G'], description: 'Jump to bottom of feed' },
-  { keys: ['/'], description: 'Open search / command palette' },
-]
+  { keys: ["j"], description: "Scroll feed down one message" },
+  { keys: ["k"], description: "Scroll feed up one message" },
+  { keys: ["Ctrl", "D"], description: "Half-page down" },
+  { keys: ["Ctrl", "U"], description: "Half-page up" },
+  { keys: [["g"], ["g"]], description: "Jump to top of feed" },
+  { keys: ["Shift", "G"], description: "Jump to bottom of feed" },
+  { keys: ["/"], description: "Open search / command palette" },
+];
 
 interface HelpModalProps {
-  open: boolean
-  onClose: () => void
+  open: boolean;
+  onClose: () => void;
 }
 
 /**
@@ -78,54 +94,54 @@ interface HelpModalProps {
  * have to leave the app to find a shortcut.
  */
 export function HelpModal({ open, onClose }: HelpModalProps) {
-  const closeRef = useRef<HTMLButtonElement>(null)
+  const closeRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!open) return
+    if (!open) return;
     function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        e.preventDefault()
+      if (e.key === "Escape") {
+        e.preventDefault();
         // Capture phase + stopImmediatePropagation so this modal claims
         // Escape before any underlying modal (SearchModal, ThreadPanel,
         // etc.) or the global useKeyboardShortcuts handler. Without
         // this, one press would cascade through every open panel.
-        e.stopImmediatePropagation()
-        onClose()
+        e.stopImmediatePropagation();
+        onClose();
       }
     }
-    document.addEventListener('keydown', onKey, true)
-    return () => document.removeEventListener('keydown', onKey, true)
-  }, [open, onClose])
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [open, onClose]);
 
   // Move focus into the modal when it opens so screen readers announce the
   // dialog and keyboard users land inside it. The close button is a stable
   // anchor: every render path has it, and it's a safe "escape hatch" target
   // when users hit Tab without expecting interactive content in the modal.
   useEffect(() => {
-    if (!open) return
-    const prevFocus = document.activeElement as HTMLElement | null
-    const id = window.requestAnimationFrame(() => closeRef.current?.focus())
+    if (!open) return;
+    const prevFocus = document.activeElement as HTMLElement | null;
+    const id = window.requestAnimationFrame(() => closeRef.current?.focus());
     return () => {
-      window.cancelAnimationFrame(id)
+      window.cancelAnimationFrame(id);
       // Only restore focus if the previous element is still in the DOM.
       // If it was unmounted while the modal was open, focus() silently
       // no-ops OR targets a detached node — either way the user loses
       // their place. Falling back to document.body gives the global
       // keyboard handler a stable target.
-      if (prevFocus && prevFocus.isConnected && typeof prevFocus.focus === 'function') {
-        prevFocus.focus()
+      if (prevFocus?.isConnected && typeof prevFocus.focus === "function") {
+        prevFocus.focus();
       }
-    }
-  }, [open])
+    };
+  }, [open]);
 
   const handleOverlayClick = useCallback(
     (e: React.MouseEvent) => {
-      if (e.target === e.currentTarget) onClose()
+      if (e.target === e.currentTarget) onClose();
     },
     [onClose],
-  )
+  );
 
-  if (!open) return null
+  if (!open) return null;
 
   return (
     <div
@@ -140,8 +156,8 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
           <div>
             <h2 className="help-title">Keyboard + command reference</h2>
             <p className="help-subtitle">
-              Run the whole app without a mouse. Press <Kbd size="sm">?</Kbd> anytime
-              to open this pane.
+              Run the whole app without a mouse. Press <Kbd size="sm">?</Kbd>{" "}
+              anytime to open this pane.
             </p>
           </div>
           <button
@@ -177,7 +193,7 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
               {SLASH_COMMANDS.map((cmd) => (
                 <li key={cmd.name} className="help-row">
                   <span className="help-cmd">
-                    <span className="help-cmd-icon" aria-hidden>
+                    <span className="help-cmd-icon" aria-hidden={true}>
                       {cmd.icon}
                     </span>
                     <code className="help-cmd-name">{cmd.name}</code>
@@ -197,14 +213,15 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
             <h3 className="help-section-title">Feed navigation</h3>
             <KeybindingList items={NAV_KEYS} />
             <p className="help-note">
-              Vim-style nav and the graph app ship in sibling PRs. This reference
-              lists them upfront so your muscle memory does not have to wait.
+              Vim-style nav and the graph app ship in sibling PRs. This
+              reference lists them upfront so your muscle memory does not have
+              to wait.
             </p>
           </section>
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function KeybindingList({ items }: { items: Keybinding[] }) {
@@ -212,8 +229,8 @@ function KeybindingList({ items }: { items: Keybinding[] }) {
     <ul className="help-list">
       {items.map((item) => {
         const flatKey = Array.isArray(item.keys[0])
-          ? (item.keys as string[][]).flat().join('+')
-          : (item.keys as string[]).join('+')
+          ? (item.keys as string[][]).flat().join("+")
+          : (item.keys as string[]).join("+");
         return (
           <li key={flatKey + item.description} className="help-row">
             <span className="help-keys">
@@ -221,10 +238,10 @@ function KeybindingList({ items }: { items: Keybinding[] }) {
             </span>
             <span className="help-cmd-desc">{item.description}</span>
           </li>
-        )
+        );
       })}
     </ul>
-  )
+  );
 }
 
 /**
@@ -233,7 +250,7 @@ function KeybindingList({ items }: { items: Keybinding[] }) {
  * and the dialog live side-by-side.
  */
 export function HelpModalHost() {
-  const open = useAppStore((s) => s.composerHelpOpen)
-  const setOpen = useAppStore((s) => s.setComposerHelpOpen)
-  return <HelpModal open={open} onClose={() => setOpen(false)} />
+  const open = useAppStore((s) => s.composerHelpOpen);
+  const setOpen = useAppStore((s) => s.setComposerHelpOpen);
+  return <HelpModal open={open} onClose={() => setOpen(false)} />;
 }

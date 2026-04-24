@@ -1,35 +1,36 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState } from "react";
+
 import {
+  type DiscoveredSection,
   fetchCatalog,
   fetchSections,
   subscribeSectionsUpdated,
-  type DiscoveredSection,
   type WikiCatalogEntry,
-} from '../../api/wiki'
-import WikiSidebar from './WikiSidebar'
-import WikiCatalog from './WikiCatalog'
-import WikiArticle from './WikiArticle'
-import WikiAudit from './WikiAudit'
-import WikiLint from './WikiLint'
-import EditLogFooter from './EditLogFooter'
-import '../../styles/wiki.css'
+} from "../../api/wiki";
+import EditLogFooter from "./EditLogFooter";
+import WikiArticle from "./WikiArticle";
+import WikiAudit from "./WikiAudit";
+import WikiCatalog from "./WikiCatalog";
+import WikiLint from "./WikiLint";
+import WikiSidebar from "./WikiSidebar";
+import "../../styles/wiki.css";
 
 // Reserved pseudo-path for the audit view. Never collides with a real
 // article because real articles must live under `team/` and end in `.md`.
-const AUDIT_PATH = '_audit'
+const AUDIT_PATH = "_audit";
 // Reserved pseudo-path for the lint view.
-const LINT_PATH = '_lint'
+const LINT_PATH = "_lint";
 
 interface WikiProps {
   /** When set, renders the article view for this path; otherwise renders the catalog. */
-  articlePath?: string | null
+  articlePath?: string | null;
   /**
    * Bumped by Pam (hoisted up to the tab bar) when she finishes an action
    * against the current article. Wiki forwards it into WikiArticle so the
    * article + history re-fetch without a full navigation.
    */
-  externalRefreshNonce?: number
-  onNavigate: (path: string | null) => void
+  externalRefreshNonce?: number;
+  onNavigate: (path: string | null) => void;
 }
 
 /** Three-column wiki shell: left sidebar · main (catalog or article) · right rail (article only). */
@@ -38,42 +39,48 @@ export default function Wiki({
   externalRefreshNonce = 0,
   onNavigate,
 }: WikiProps) {
-  const [catalog, setCatalog] = useState<WikiCatalogEntry[]>([])
-  const [sections, setSections] = useState<DiscoveredSection[]>([])
-  const [loading, setLoading] = useState(true)
+  const [catalog, setCatalog] = useState<WikiCatalogEntry[]>([]);
+  const [sections, setSections] = useState<DiscoveredSection[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
     // Parallel fetch: catalog and sections are independent so we pay one
     // round-trip of latency, not two.
     Promise.all([fetchCatalog(), fetchSections()])
       .then(([c, s]) => {
-        if (cancelled) return
-        setCatalog(c)
-        setSections(s)
+        if (cancelled) return;
+        setCatalog(c);
+        setSections(s);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+        if (!cancelled) setLoading(false);
+      });
     return () => {
-      cancelled = true
-    }
-  }, [])
+      cancelled = true;
+    };
+  }, []);
 
   // Live-update sections when the broker emits wiki:sections_updated.
   // The event payload carries the full list so no refetch is needed.
   useEffect(() => {
     const unsubscribe = subscribeSectionsUpdated((event) => {
       if (Array.isArray(event.sections)) {
-        setSections(event.sections)
+        setSections(event.sections);
       }
-    })
-    return () => unsubscribe()
-  }, [])
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const isAudit = articlePath === AUDIT_PATH
-  const isLint = articlePath === LINT_PATH
-  const view = isAudit ? 'audit' : isLint ? 'lint' : articlePath ? 'article' : 'catalog'
+  const isAudit = articlePath === AUDIT_PATH;
+  const isLint = articlePath === LINT_PATH;
+  const view = isAudit
+    ? "audit"
+    : isLint
+      ? "lint"
+      : articlePath
+        ? "article"
+        : "catalog";
 
   return (
     <div className="wiki-root" data-testid="wiki-root">
@@ -107,5 +114,5 @@ export default function Wiki({
       </div>
       {!loading && <EditLogFooter onNavigate={(path) => onNavigate(path)} />}
     </div>
-  )
+  );
 }

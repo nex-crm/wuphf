@@ -55,7 +55,9 @@
 .wizard-progress-dot {
   height: 6px;
   border-radius: var(--radius-full);
-  transition: width 0.25s, background 0.25s;
+  transition:
+    width 0.25s,
+    background 0.25s;
 }
 
 .wizard-progress-dot.active {
@@ -170,7 +172,10 @@
   font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 500;
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
 }
 
 .template-from-scratch-btn:hover {
@@ -225,7 +230,9 @@
   border-radius: var(--radius-md);
   background: var(--bg-card);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   text-align: left;
 }
 
@@ -278,7 +285,9 @@
   border: 1px solid var(--border);
   background: var(--bg-card);
   cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
   text-align: left;
   width: 100%;
   font-family: var(--font-sans);
@@ -327,7 +336,9 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.2s, border-color 0.2s;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
 }
 
 .wiz-team-tile.selected .wiz-team-check {
@@ -406,7 +417,9 @@
   border: 1px solid var(--border);
   background: var(--bg-card);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   text-align: center;
   font-size: 13px;
   font-weight: 500;
@@ -637,7 +650,9 @@
   cursor: pointer;
   text-align: left;
   font-family: var(--font-sans);
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .task-suggestion:hover {
@@ -746,7 +761,7 @@
   font-size: 64px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--yellow, #ECB22E);
+  color: var(--yellow, #ecb22e);
   margin-bottom: 8px;
 }
 
@@ -767,7 +782,7 @@
 .wiz-nex-trigger-link {
   background: none;
   border: none;
-  color: var(--accent, #1264A3);
+  color: var(--accent, #1264a3);
   font-size: 13px;
   cursor: pointer;
   padding: 8px 0;

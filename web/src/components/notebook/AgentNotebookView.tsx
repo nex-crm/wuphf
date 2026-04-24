@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
-import AuthorShelfSidebar from './AuthorShelfSidebar'
-import NotebookEntryView from './NotebookEntry'
+import { useEffect, useState } from "react";
+
 import {
   fetchAgentEntries,
   type NotebookAgentSummary,
   type NotebookEntry,
-} from '../../api/notebook'
+} from "../../api/notebook";
+import AuthorShelfSidebar from "./AuthorShelfSidebar";
+import NotebookEntryView from "./NotebookEntry";
 
 /**
  * `/notebooks/{agent-slug}[/{entry-slug}]` — two-column view. Left: dated
@@ -14,11 +15,11 @@ import {
  */
 
 interface AgentNotebookViewProps {
-  agentSlug: string
-  entrySlug?: string | null
-  onNavigateCatalog: () => void
-  onSelectEntry: (entrySlug: string | null) => void
-  onNavigateWiki?: (wikiPath: string) => void
+  agentSlug: string;
+  entrySlug?: string | null;
+  onNavigateCatalog: () => void;
+  onSelectEntry: (entrySlug: string | null) => void;
+  onNavigateWiki?: (wikiPath: string) => void;
 }
 
 export default function AgentNotebookView({
@@ -28,82 +29,97 @@ export default function AgentNotebookView({
   onSelectEntry,
   onNavigateWiki,
 }: AgentNotebookViewProps) {
-  const [agent, setAgent] = useState<NotebookAgentSummary | null>(null)
-  const [entries, setEntries] = useState<NotebookEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [agent, setAgent] = useState<NotebookAgentSummary | null>(null);
+  const [entries, setEntries] = useState<NotebookEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     fetchAgentEntries(agentSlug)
       .then((res) => {
-        if (cancelled) return
-        setAgent(res.agent)
-        setEntries(res.entries)
+        if (cancelled) return;
+        setAgent(res.agent);
+        setEntries(res.entries);
       })
       .catch((err: unknown) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to load notebook')
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : "Failed to load notebook",
+        );
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [agentSlug])
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentSlug]);
 
   if (loading) {
     return (
       <div className="nb-layout">
-        <div className="nb-shelf"><span className="nb-skeleton" /><span className="nb-skeleton" /></div>
+        <div className="nb-shelf">
+          <span className="nb-skeleton" />
+          <span className="nb-skeleton" />
+        </div>
         <div className="nb-article" aria-busy="true">
           <div className="nb-loading">Loading notebook…</div>
         </div>
       </div>
-    )
+    );
   }
 
   if (error) {
     return (
       <div className="nb-article">
-        <p className="nb-error" role="alert">Error: {error}</p>
+        <p className="nb-error" role="alert">
+          Error: {error}
+        </p>
         <button
           type="button"
           className="nb-retry-btn"
           onClick={() => {
-            setLoading(true)
-            setError(null)
+            setLoading(true);
+            setError(null);
             fetchAgentEntries(agentSlug)
               .then((res) => {
-                setAgent(res.agent)
-                setEntries(res.entries)
+                setAgent(res.agent);
+                setEntries(res.entries);
               })
-              .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Retry failed'))
-              .finally(() => setLoading(false))
+              .catch((err: unknown) =>
+                setError(err instanceof Error ? err.message : "Retry failed"),
+              )
+              .finally(() => setLoading(false));
           }}
         >
           Retry
         </button>
       </div>
-    )
+    );
   }
 
   if (!agent) {
     return (
       <div className="nb-article">
         <p className="nb-error">Agent not found: {agentSlug}</p>
-        <button type="button" className="nb-retry-btn" onClick={onNavigateCatalog}>
+        <button
+          type="button"
+          className="nb-retry-btn"
+          onClick={onNavigateCatalog}
+        >
           Back to bookshelf
         </button>
       </div>
-    )
+    );
   }
 
   // Pick the entry to render: explicit slug → matching entry; else first.
   const activeEntry: NotebookEntry | null = entrySlug
-    ? entries.find((e) => e.entry_slug === entrySlug) ?? null
-    : entries[0] ?? null
+    ? (entries.find((e) => e.entry_slug === entrySlug) ?? null)
+    : (entries[0] ?? null);
 
   return (
     <div className="nb-layout">
@@ -131,5 +147,5 @@ export default function AgentNotebookView({
         </div>
       )}
     </div>
-  )
+  );
 }

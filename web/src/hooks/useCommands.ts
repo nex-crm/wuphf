@@ -1,6 +1,7 @@
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { fetchCommands, type SlashCommandDescriptor } from '../api/client'
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+
+import { fetchCommands, type SlashCommandDescriptor } from "../api/client";
 
 /**
  * Web-autocomplete view of one slash command. Mirrors the legacy
@@ -9,9 +10,9 @@ import { fetchCommands, type SlashCommandDescriptor } from '../api/client'
  * fallback.
  */
 export interface SlashCommand {
-  name: string
-  desc: string
-  icon: string
+  name: string;
+  desc: string;
+  icon: string;
 }
 
 /**
@@ -27,28 +28,28 @@ export interface SlashCommand {
  * emoji literals in source).
  */
 export const FALLBACK_SLASH_COMMANDS: SlashCommand[] = [
-  { name: '/ask', desc: 'Ask the team lead', icon: '💬' },
-  { name: '/search', desc: 'Search messages + KB', icon: '🔎' },
-  { name: '/remember', desc: 'Store a fact in memory', icon: '🧠' },
-  { name: '/help', desc: 'Show all commands + keys', icon: '❓' },
-  { name: '/clear', desc: 'Clear messages', icon: '🧹' },
-  { name: '/reset', desc: 'Reset the office', icon: '🔄' },
-  { name: '/tasks', desc: 'Open task board', icon: '📋' },
-  { name: '/requests', desc: 'Open requests', icon: '🔔' },
-  { name: '/recover', desc: 'Health Check view', icon: '🔁' },
-  { name: '/1o1', desc: '1:1 with agent', icon: '💬' },
-  { name: '/task', desc: 'Task actions', icon: '✅' },
-  { name: '/cancel', desc: 'Cancel a task', icon: '❌' },
-  { name: '/policies', desc: 'View policies', icon: '📜' },
-  { name: '/calendar', desc: 'View schedule', icon: '📅' },
-  { name: '/skills', desc: 'View skills', icon: '⚡' },
-  { name: '/focus', desc: 'Switch to delegation mode', icon: '🎯' },
-  { name: '/collab', desc: 'Switch to collaborative mode', icon: '🤝' },
-  { name: '/pause', desc: 'Pause all agents', icon: '⏸' },
-  { name: '/resume', desc: 'Resume all agents', icon: '▶' },
-  { name: '/threads', desc: 'See every active thread', icon: '🧵' },
-  { name: '/provider', desc: 'Switch runtime provider', icon: '⚙' },
-]
+  { name: "/ask", desc: "Ask the team lead", icon: "💬" },
+  { name: "/search", desc: "Search messages + KB", icon: "🔎" },
+  { name: "/remember", desc: "Store a fact in memory", icon: "🧠" },
+  { name: "/help", desc: "Show all commands + keys", icon: "❓" },
+  { name: "/clear", desc: "Clear messages", icon: "🧹" },
+  { name: "/reset", desc: "Reset the office", icon: "🔄" },
+  { name: "/tasks", desc: "Open task board", icon: "📋" },
+  { name: "/requests", desc: "Open requests", icon: "🔔" },
+  { name: "/recover", desc: "Health Check view", icon: "🔁" },
+  { name: "/1o1", desc: "1:1 with agent", icon: "💬" },
+  { name: "/task", desc: "Task actions", icon: "✅" },
+  { name: "/cancel", desc: "Cancel a task", icon: "❌" },
+  { name: "/policies", desc: "View policies", icon: "📜" },
+  { name: "/calendar", desc: "View schedule", icon: "📅" },
+  { name: "/skills", desc: "View skills", icon: "⚡" },
+  { name: "/focus", desc: "Switch to delegation mode", icon: "🎯" },
+  { name: "/collab", desc: "Switch to collaborative mode", icon: "🤝" },
+  { name: "/pause", desc: "Pause all agents", icon: "⏸" },
+  { name: "/resume", desc: "Resume all agents", icon: "▶" },
+  { name: "/threads", desc: "See every active thread", icon: "🧵" },
+  { name: "/provider", desc: "Switch runtime provider", icon: "⚙" },
+];
 
 /**
  * Icon map for commands returned by the broker. Keyed by bare command name
@@ -57,30 +58,30 @@ export const FALLBACK_SLASH_COMMANDS: SlashCommand[] = [
  * and flips webSupported before updating this list.
  */
 const COMMAND_ICONS: Record<string, string> = {
-  ask: '💬',
-  search: '🔎',
-  remember: '🧠',
-  help: '❓',
-  clear: '🧹',
-  reset: '🔄',
-  tasks: '📋',
-  requests: '🔔',
-  recover: '🔁',
-  '1o1': '💬',
-  task: '✅',
-  cancel: '❌',
-  policies: '📜',
-  calendar: '📅',
-  skills: '⚡',
-  focus: '🎯',
-  collab: '🤝',
-  pause: '⏸',
-  resume: '▶',
-  threads: '🧵',
-  provider: '⚙',
-}
+  ask: "💬",
+  search: "🔎",
+  remember: "🧠",
+  help: "❓",
+  clear: "🧹",
+  reset: "🔄",
+  tasks: "📋",
+  requests: "🔔",
+  recover: "🔁",
+  "1o1": "💬",
+  task: "✅",
+  cancel: "❌",
+  policies: "📜",
+  calendar: "📅",
+  skills: "⚡",
+  focus: "🎯",
+  collab: "🤝",
+  pause: "⏸",
+  resume: "▶",
+  threads: "🧵",
+  provider: "⚙",
+};
 
-const DEFAULT_ICON = '›'
+const DEFAULT_ICON = "›";
 
 /**
  * Convert the broker's payload into the shape the autocomplete renderer
@@ -91,10 +92,10 @@ function toAutocomplete(commands: SlashCommandDescriptor[]): SlashCommand[] {
   return commands
     .filter((c) => c.webSupported)
     .map((c) => ({
-      name: '/' + c.name,
+      name: `/${c.name}`,
       desc: c.description,
       icon: COMMAND_ICONS[c.name] ?? DEFAULT_ICON,
-    }))
+    }));
 }
 
 /**
@@ -108,14 +109,14 @@ function toAutocomplete(commands: SlashCommandDescriptor[]): SlashCommand[] {
  */
 export function useCommands(): SlashCommand[] {
   const { data, isError } = useQuery({
-    queryKey: ['commands'],
+    queryKey: ["commands"],
     queryFn: fetchCommands,
     // Registry only changes on rebuild. Five minutes is enough to absorb a
     // dev loop without hammering the broker.
     staleTime: 5 * 60_000,
     // Failures fall through to the fallback — don't retry aggressively.
     retry: 1,
-  })
+  });
 
   // Memoize the derived view so consumers relying on the returned array as
   // a dependency (e.g. the autocomplete effect) don't see a fresh reference
@@ -125,14 +126,14 @@ export function useCommands(): SlashCommand[] {
   // "Maximum update depth exceeded."
   return useMemo(() => {
     if (isError || !data) {
-      return FALLBACK_SLASH_COMMANDS
+      return FALLBACK_SLASH_COMMANDS;
     }
-    const mapped = toAutocomplete(data)
+    const mapped = toAutocomplete(data);
     // Defensive: if the broker returns an empty webSupported set (e.g. an
     // older broker without the flag), prefer the fallback rather than an
     // empty autocomplete.
-    return mapped.length > 0 ? mapped : FALLBACK_SLASH_COMMANDS
-  }, [data, isError])
+    return mapped.length > 0 ? mapped : FALLBACK_SLASH_COMMANDS;
+  }, [data, isError]);
 }
 
 // Exported for tests.
@@ -140,4 +141,4 @@ export const __test__ = {
   toAutocomplete,
   COMMAND_ICONS,
   DEFAULT_ICON,
-}
+};

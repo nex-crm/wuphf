@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react'
-import { writeHumanArticle, type WikiCatalogEntry } from '../../api/wiki'
+import { useMemo, useState } from "react";
+
+import { type WikiCatalogEntry, writeHumanArticle } from "../../api/wiki";
 
 interface NewArticleModalProps {
-  catalog: WikiCatalogEntry[]
-  onCancel: () => void
-  onCreated: (path: string) => void
+  catalog: WikiCatalogEntry[];
+  onCancel: () => void;
+  onCreated: (path: string) => void;
 }
 
 /**
@@ -16,51 +17,68 @@ interface NewArticleModalProps {
  * Intentionally minimal — the heavy lift (markdown editing, headings,
  * wikilinks) happens in the WikiEditor once the article exists.
  */
-export default function NewArticleModal({ catalog, onCancel, onCreated }: NewArticleModalProps) {
+export default function NewArticleModal({
+  catalog,
+  onCancel,
+  onCreated,
+}: NewArticleModalProps) {
   const existingGroups = useMemo(() => {
-    const set = new Set<string>()
-    for (const e of catalog) set.add(e.group)
-    return Array.from(set).sort()
-  }, [catalog])
+    const set = new Set<string>();
+    for (const e of catalog) set.add(e.group);
+    return Array.from(set).sort();
+  }, [catalog]);
 
-  const [group, setGroup] = useState(existingGroups[0] ?? 'people')
-  const [customGroup, setCustomGroup] = useState('')
-  const [slug, setSlug] = useState('')
-  const [title, setTitle] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [group, setGroup] = useState(existingGroups[0] ?? "people");
+  const [customGroup, setCustomGroup] = useState("");
+  const [slug, setSlug] = useState("");
+  const [title, setTitle] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const resolvedGroup = (group === '__custom__' ? customGroup : group).trim()
-  const path = resolvedGroup && slug ? `team/${resolvedGroup}/${slug}.md` : ''
+  const resolvedGroup = (group === "__custom__" ? customGroup : group).trim();
+  const path = resolvedGroup && slug ? `team/${resolvedGroup}/${slug}.md` : "";
 
   async function handleCreate() {
-    setError(null)
-    const groupErr = validateSegment(resolvedGroup, 'Section')
-    if (groupErr) { setError(groupErr); return }
-    const slugErr = validateSegment(slug, 'Slug')
-    if (slugErr) { setError(slugErr); return }
-    if (!title.trim()) { setError('Title is required.'); return }
+    setError(null);
+    const groupErr = validateSegment(resolvedGroup, "Section");
+    if (groupErr) {
+      setError(groupErr);
+      return;
+    }
+    const slugErr = validateSegment(slug, "Slug");
+    if (slugErr) {
+      setError(slugErr);
+      return;
+    }
+    if (!title.trim()) {
+      setError("Title is required.");
+      return;
+    }
 
-    const fullPath = `team/${resolvedGroup}/${slug}.md`
-    const body = `# ${title.trim()}\n\n_Stub — write something useful here._\n`
+    const fullPath = `team/${resolvedGroup}/${slug}.md`;
+    const body = `# ${title.trim()}\n\n_Stub — write something useful here._\n`;
 
-    setSubmitting(true)
+    setSubmitting(true);
     try {
       const result = await writeHumanArticle({
         path: fullPath,
         content: body,
         commitMessage: `human: create ${fullPath}`,
-        expectedSha: '',
-      })
-      if ('conflict' in result) {
-        setError('An article already exists at that path. Pick a different slug.')
-        return
+        expectedSha: "",
+      });
+      if ("conflict" in result) {
+        setError(
+          "An article already exists at that path. Pick a different slug.",
+        );
+        return;
       }
-      onCreated(fullPath)
+      onCreated(fullPath);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to create article.')
+      setError(
+        err instanceof Error ? err.message : "Failed to create article.",
+      );
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
   }
 
@@ -75,18 +93,22 @@ export default function NewArticleModal({ catalog, onCancel, onCreated }: NewArt
       <div className="wk-modal">
         <h2 id="wk-new-article-title">New wiki article</h2>
 
-        <label className="wk-editor-label" htmlFor="wk-new-group">Section</label>
+        <label className="wk-editor-label" htmlFor="wk-new-group">
+          Section
+        </label>
         <select
           id="wk-new-group"
           value={group}
           onChange={(e) => setGroup(e.target.value)}
         >
           {existingGroups.map((g) => (
-            <option key={g} value={g}>{g}</option>
+            <option key={g} value={g}>
+              {g}
+            </option>
           ))}
           <option value="__custom__">+ New section…</option>
         </select>
-        {group === '__custom__' && (
+        {group === "__custom__" && (
           <input
             className="wk-editor-commit"
             type="text"
@@ -96,7 +118,9 @@ export default function NewArticleModal({ catalog, onCancel, onCreated }: NewArt
           />
         )}
 
-        <label className="wk-editor-label" htmlFor="wk-new-slug">Slug</label>
+        <label className="wk-editor-label" htmlFor="wk-new-slug">
+          Slug
+        </label>
         <input
           id="wk-new-slug"
           className="wk-editor-commit"
@@ -104,10 +128,14 @@ export default function NewArticleModal({ catalog, onCancel, onCreated }: NewArt
           type="text"
           placeholder="sarah-chen"
           value={slug}
-          onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
+          onChange={(e) =>
+            setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-"))
+          }
         />
 
-        <label className="wk-editor-label" htmlFor="wk-new-title">Title</label>
+        <label className="wk-editor-label" htmlFor="wk-new-title">
+          Title
+        </label>
         <input
           id="wk-new-title"
           className="wk-editor-commit"
@@ -123,7 +151,14 @@ export default function NewArticleModal({ catalog, onCancel, onCreated }: NewArt
           </p>
         )}
 
-        {error && <div className="wk-editor-banner wk-editor-banner--error" role="alert">{error}</div>}
+        {error && (
+          <div
+            className="wk-editor-banner wk-editor-banner--error"
+            role="alert"
+          >
+            {error}
+          </div>
+        )}
 
         <div className="wk-editor-actions">
           <button
@@ -133,7 +168,7 @@ export default function NewArticleModal({ catalog, onCancel, onCreated }: NewArt
             onClick={handleCreate}
             disabled={submitting}
           >
-            {submitting ? 'Creating…' : 'Create article'}
+            {submitting ? "Creating…" : "Create article"}
           </button>
           <button
             type="button"
@@ -146,7 +181,7 @@ export default function NewArticleModal({ catalog, onCancel, onCreated }: NewArt
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 /**
@@ -155,12 +190,13 @@ export default function NewArticleModal({ catalog, onCancel, onCreated }: NewArt
  * the error before an HTTP round-trip.
  */
 function validateSegment(seg: string, label: string): string | null {
-  const trimmed = seg.trim()
-  if (!trimmed) return `${label} is required.`
-  if (trimmed.startsWith('.') || trimmed.includes('..')) return `${label} cannot contain "..".`
-  if (trimmed.includes('/')) return `${label} cannot contain "/".`
+  const trimmed = seg.trim();
+  if (!trimmed) return `${label} is required.`;
+  if (trimmed.startsWith(".") || trimmed.includes(".."))
+    return `${label} cannot contain "..".`;
+  if (trimmed.includes("/")) return `${label} cannot contain "/".`;
   if (!/^[a-z0-9][a-z0-9-]*$/.test(trimmed)) {
-    return `${label} must be lowercase letters, numbers, and hyphens only.`
+    return `${label} must be lowercase letters, numbers, and hyphens only.`;
   }
-  return null
+  return null;
 }

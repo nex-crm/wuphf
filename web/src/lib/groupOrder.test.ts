@@ -1,36 +1,38 @@
-import { describe, expect, it } from 'vitest'
-import { resolveGroupOrder } from './groupOrder'
+import { describe, expect, it } from "vitest";
 
-describe('resolveGroupOrder', () => {
-  it('returns preferred groups in canonical order when present', () => {
-    expect(resolveGroupOrder(['playbooks', 'people'])).toEqual(['people', 'playbooks'])
-  })
+import { resolveGroupOrder } from "./groupOrder";
 
-  it('appends blueprint-specific groups after preferred ones', () => {
-    expect(resolveGroupOrder(['customers', 'playbooks', 'scripts'])).toEqual([
-      'customers',
-      'playbooks',
-      'scripts',
-    ])
-  })
+describe("resolveGroupOrder", () => {
+  it("returns preferred groups in canonical order when present", () => {
+    expect(resolveGroupOrder(["playbooks", "people"])).toEqual([
+      "people",
+      "playbooks",
+    ]);
+  });
 
-  it('dedupes repeated groups, keeping first-seen', () => {
-    expect(resolveGroupOrder(['playbooks', 'scripts', 'playbooks', 'videos'])).toEqual([
-      'playbooks',
-      'scripts',
-      'videos',
-    ])
-  })
+  it("appends blueprint-specific groups after preferred ones", () => {
+    expect(resolveGroupOrder(["customers", "playbooks", "scripts"])).toEqual([
+      "customers",
+      "playbooks",
+      "scripts",
+    ]);
+  });
 
-  it('preserves order of first appearance for unknown groups', () => {
-    expect(resolveGroupOrder(['videos', 'members', 'events'])).toEqual([
-      'videos',
-      'members',
-      'events',
-    ])
-  })
+  it("dedupes repeated groups, keeping first-seen", () => {
+    expect(
+      resolveGroupOrder(["playbooks", "scripts", "playbooks", "videos"]),
+    ).toEqual(["playbooks", "scripts", "videos"]);
+  });
 
-  it('handles empty input', () => {
-    expect(resolveGroupOrder([])).toEqual([])
-  })
-})
+  it("preserves order of first appearance for unknown groups", () => {
+    expect(resolveGroupOrder(["videos", "members", "events"])).toEqual([
+      "videos",
+      "members",
+      "events",
+    ]);
+  });
+
+  it("handles empty input", () => {
+    expect(resolveGroupOrder([])).toEqual([]);
+  });
+});

@@ -36,7 +36,7 @@
    * the lowest element, the desk's bottom rests exactly on that line. */
   bottom: 0;
   right: 24px;
-  z-index: 40;          /* above content; below global overlays */
+  z-index: 40; /* above content; below global overlays */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -61,7 +61,7 @@
   border-radius: 4px;
 }
 
-.pam-button[data-busy='true'] {
+.pam-button[data-busy="true"] {
   animation: pam-busy-bob 1.2s ease-in-out infinite;
 }
 
@@ -77,11 +77,10 @@
   margin-top: -18px;
   width: 92px;
   height: 22px;
-  background:
-    /* Top edge — lighter highlight */
-    linear-gradient(to bottom, #c6a37a 0 2px, transparent 2px),
-    /* Main desk surface — warm wood */
-    linear-gradient(to bottom, #a57f52 0%, #8b6635 100%);
+  background: /* Top edge — lighter highlight */
+      linear-gradient(to bottom, #c6a37a 0 2px, transparent 2px),
+      /* Main desk surface — warm wood */
+      linear-gradient(to bottom, #a57f52 0%, #8b6635 100%);
   border: 2px solid #3a2710;
   border-radius: 2px 2px 0 0;
   box-shadow:
@@ -92,7 +91,7 @@
 
 /* Two small pixel-art "objects" on the desk — a name plaque + a paper stack. */
 .pam-desk::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 10px;
   top: 6px;
@@ -103,7 +102,7 @@
 }
 
 .pam-desk::after {
-  content: '';
+  content: "";
   position: absolute;
   right: 12px;
   top: 4px;
@@ -203,19 +202,33 @@
  * vertical squash so Pam feels alive without motion-sickness risk. Busy-bob
  * fires while an action is in flight so the user sees feedback. */
 @keyframes pam-idle-sway {
-  0%, 42%, 58%, 100% { transform: rotate(0deg); }
-  48% { transform: rotate(-1.5deg); }
-  52% { transform: rotate(1.5deg); }
+  0%,
+  42%,
+  58%,
+  100% {
+    transform: rotate(0deg);
+  }
+  48% {
+    transform: rotate(-1.5deg);
+  }
+  52% {
+    transform: rotate(1.5deg);
+  }
 }
 
 @keyframes pam-busy-bob {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-2px); }
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .pam-button,
-  .pam-button[data-busy='true'] {
+  .pam-button[data-busy="true"] {
     animation: none;
   }
 }

@@ -1,4 +1,4 @@
-import { PixelAvatar as CanvasPixelAvatar } from '../ui/PixelAvatar'
+import { PixelAvatar as CanvasPixelAvatar } from "../ui/PixelAvatar";
 
 /**
  * Wiki-surface pixel avatar — default-export wrapper over the shared canvas
@@ -8,16 +8,16 @@ import { PixelAvatar as CanvasPixelAvatar } from '../ui/PixelAvatar'
  */
 
 interface PixelAvatarProps {
-  slug: string
-  size?: number
-  className?: string
-  title?: string
+  slug: string;
+  size?: number;
+  className?: string;
+  title?: string;
 }
 
 export default function PixelAvatar({
   slug,
   size = 14,
-  className = 'wk-avatar',
+  className = "wk-avatar",
   title,
 }: PixelAvatarProps) {
   // The underlying component is aria-hidden; the wiki uses avatars purely
@@ -26,13 +26,13 @@ export default function PixelAvatar({
   // via a wrapping span when provided.
   const avatar = (
     <CanvasPixelAvatar slug={slug} size={size} className={className} />
-  )
+  );
   if (title) {
     return (
       <span className="wk-avatar-wrap" title={title}>
         {avatar}
       </span>
-    )
+    );
   }
-  return avatar
+  return avatar;
 }

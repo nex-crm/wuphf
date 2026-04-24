@@ -31,7 +31,9 @@
   height: 42px;
   background: var(--surface, #ffffff);
   border-bottom: 1px solid var(--border, rgba(29, 28, 29, 0.08));
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    sans-serif;
   flex-shrink: 0;
 }
 
@@ -52,7 +54,9 @@
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
 }
 
 .wiki-tab:hover {
@@ -82,7 +86,7 @@
   padding: 0 6px;
   background: var(--purple, #9f4dbf);
   color: #ffffff;
-  font-family: 'Geist Mono', 'SFMono-Regular', Menlo, monospace;
+  font-family: "Geist Mono", "SFMono-Regular", Menlo, monospace;
   font-size: 11px;
   font-weight: 500;
   line-height: 1;

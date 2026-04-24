@@ -1,36 +1,41 @@
-import { useEffect, useMemo, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import type { PluggableList } from 'unified'
-import Hatnote from './Hatnote'
-import { get } from '../../api/client'
-import { buildRemarkPlugins, buildRehypePlugins, buildMarkdownComponents } from '../../lib/wikiMarkdownConfig'
+import { useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import type { PluggableList } from "unified";
+
+import { get } from "../../api/client";
+import {
+  buildMarkdownComponents,
+  buildRehypePlugins,
+  buildRemarkPlugins,
+} from "../../lib/wikiMarkdownConfig";
+import Hatnote from "./Hatnote";
 
 // QueryAnswer mirrors the JSON shape returned by GET /wiki/lookup.
 export interface QuerySource {
-  kind: string
-  slug_or_id: string
-  title: string
-  excerpt: string
-  valid_from?: string
-  valid_until?: string
-  staleness: number
-  source_path?: string
+  kind: string;
+  slug_or_id: string;
+  title: string;
+  excerpt: string;
+  valid_from?: string;
+  valid_until?: string;
+  staleness: number;
+  source_path?: string;
 }
 
 export interface QueryAnswer {
-  query_class: string
-  answer_markdown: string
-  sources_cited: number[]
-  sources: QuerySource[]
-  confidence: number
-  coverage: string // 'complete' | 'partial' | 'none'
-  notes?: string
-  latency_ms: number
+  query_class: string;
+  answer_markdown: string;
+  sources_cited: number[];
+  sources: QuerySource[];
+  confidence: number;
+  coverage: string; // 'complete' | 'partial' | 'none'
+  notes?: string;
+  latency_ms: number;
 }
 
 export interface CitedAnswerProps {
   /** The natural-language question to answer. */
-  query: string
+  query: string;
 }
 
 /**
@@ -51,37 +56,43 @@ export interface CitedAnswerProps {
  *   - Answer: full composition
  */
 export default function CitedAnswer({ query }: CitedAnswerProps) {
-  const [answer, setAnswer] = useState<QueryAnswer | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [answer, setAnswer] = useState<QueryAnswer | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   // CitedAnswer does not resolve wikilinks against the local catalog — the
   // broker's answer_query prompt only wikilinks entities that exist in sources.
   // A permissive resolver avoids false "broken link" reds on citation anchors.
-  const resolver = useMemo(() => () => true, [])
-  const remarkPlugins = useMemo<PluggableList>(() => buildRemarkPlugins(resolver), [resolver])
-  const rehypePlugins = useMemo<PluggableList>(() => buildRehypePlugins(), [])
-  const markdownComponents = useMemo(() => buildMarkdownComponents({ resolver }), [resolver])
+  const resolver = useMemo(() => () => true, []);
+  const remarkPlugins = useMemo<PluggableList>(
+    () => buildRemarkPlugins(resolver),
+    [resolver],
+  );
+  const rehypePlugins = useMemo<PluggableList>(() => buildRehypePlugins(), []);
+  const markdownComponents = useMemo(
+    () => buildMarkdownComponents({ resolver }),
+    [resolver],
+  );
 
   useEffect(() => {
     if (!query.trim()) {
-      setLoading(false)
-      return
+      setLoading(false);
+      return;
     }
-    setLoading(true)
-    setAnswer(null)
-    setError(null)
+    setLoading(true);
+    setAnswer(null);
+    setError(null);
 
-    get<QueryAnswer>('/wiki/lookup', { q: query })
+    get<QueryAnswer>("/wiki/lookup", { q: query })
       .then((ans) => {
-        setAnswer(ans)
-        setLoading(false)
+        setAnswer(ans);
+        setLoading(false);
       })
       .catch((e: Error) => {
-        setError(e.message)
-        setLoading(false)
-      })
-  }, [query])
+        setError(e.message);
+        setLoading(false);
+      });
+  }, [query]);
 
   // Loading skeleton
   if (loading) {
@@ -94,9 +105,12 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
       >
         <div className="wk-hatnote wk-skeleton" aria-hidden="true" />
         <div className="wk-skeleton wk-skeleton--body" aria-hidden="true" />
-        <div className="wk-skeleton wk-skeleton--body wk-skeleton--short" aria-hidden="true" />
+        <div
+          className="wk-skeleton wk-skeleton--body wk-skeleton--short"
+          aria-hidden="true"
+        />
       </div>
-    )
+    );
   }
 
   // Error state — hatnote-styled
@@ -107,31 +121,31 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
           <em>Wiki lookup failed:</em> {error}
         </Hatnote>
       </div>
-    )
+    );
   }
 
-  if (!answer) return null
+  if (!answer) return null;
 
   const isOutOfScope =
-    answer.query_class === 'general' || answer.coverage === 'none'
+    answer.query_class === "general" || answer.coverage === "none";
 
   const citedSources = answer.sources.filter((_, i) =>
     answer.sources_cited.includes(i + 1),
-  )
+  );
 
   const mostRecentValidFrom = answer.sources.reduce<string>((best, s) => {
-    const vf = (s.valid_from || '').trim()
-    if (!vf) return best
-    return best === '' || vf > best ? vf : best
-  }, '')
+    const vf = (s.valid_from || "").trim();
+    if (!vf) return best;
+    return best === "" || vf > best ? vf : best;
+  }, "");
 
   return (
     <article className="wk-cited-answer">
       {/* Hatnote — always present, coverage context */}
       <Hatnote>
         <em>From the wiki</em>
-        {answer.coverage === 'partial' && ' (partial match)'}
-        {answer.coverage === 'none' && ' (no match)'}
+        {answer.coverage === "partial" && " (partial match)"}
+        {answer.coverage === "none" && " (no match)"}
       </Hatnote>
 
       {/* Body — only when there is an answer */}
@@ -150,7 +164,8 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
       {/* Out-of-scope: no sources block */}
       {isOutOfScope && (
         <p className="wk-cited-answer-oos">
-          I can help with questions about people, companies, and activities in your workspace.
+          I can help with questions about people, companies, and activities in
+          your workspace.
         </p>
       )}
 
@@ -159,30 +174,33 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
           the [n] citations in the body even when gaps exist (e.g. cited [3, 5]
           drops sources 1, 2, 4 entirely). */}
       {!isOutOfScope && citedSources.length > 0 && (
-        <section
-          className="wk-sources"
-          aria-labelledby="ca-sources-heading"
-        >
+        <section className="wk-sources" aria-labelledby="ca-sources-heading">
           <h2 id="ca-sources-heading">Sources</h2>
           <ol>
             {answer.sources
               .map((src, i) => ({ src, n: i + 1 }))
               .filter(({ n }) => answer.sources_cited.includes(n))
               .map(({ src, n }) => {
-                const excerpt = src.excerpt.length > 120
-                  ? src.excerpt.slice(0, 120) + '…'
-                  : src.excerpt
+                const excerpt =
+                  src.excerpt.length > 120
+                    ? `${src.excerpt.slice(0, 120)}…`
+                    : src.excerpt;
                 return (
-                  <li key={src.slug_or_id || `src-${n}`} id={`ca-s${n}`} value={n}>
+                  <li
+                    key={src.slug_or_id || `src-${n}`}
+                    id={`ca-s${n}`}
+                    value={n}
+                  >
                     <span className="wk-commit-msg">{excerpt}</span>
-                    {src.title && (
-                      <span className="wk-agent">{src.title}</span>
-                    )}
+                    {src.title && <span className="wk-agent">{src.title}</span>}
                     {src.valid_from && (
-                      <span className="wk-dim"> · {src.valid_from.slice(0, 10)}</span>
+                      <span className="wk-dim">
+                        {" "}
+                        · {src.valid_from.slice(0, 10)}
+                      </span>
                     )}
                   </li>
-                )
+                );
               })}
           </ol>
         </section>
@@ -194,16 +212,15 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
           {mostRecentValidFrom && (
             <span>Last updated: {mostRecentValidFrom}</span>
           )}
-          <span aria-label="Answer latency">
-            {answer.latency_ms}ms
-          </span>
+          <span aria-label="Answer latency">{answer.latency_ms}ms</span>
           {answer.sources.length > 0 && (
             <span>
-              {answer.sources.length} {answer.sources.length === 1 ? 'source' : 'sources'}
+              {answer.sources.length}{" "}
+              {answer.sources.length === 1 ? "source" : "sources"}
             </span>
           )}
         </div>
       </div>
     </article>
-  )
+  );
 }

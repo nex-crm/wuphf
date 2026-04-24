@@ -8,7 +8,7 @@
 
 interface DraftStampProps {
   /** Override the aria-label; default covers both the stamp symbol and state. */
-  label?: string
+  label?: string;
 }
 
 export default function DraftStamp({ label }: DraftStampProps) {
@@ -16,9 +16,9 @@ export default function DraftStamp({ label }: DraftStampProps) {
     <div
       className="nb-draft-stamp"
       role="img"
-      aria-label={label ?? 'Draft entry, not yet reviewed'}
+      aria-label={label ?? "Draft entry, not yet reviewed"}
     >
       DRAFT
     </div>
-  )
+  );
 }

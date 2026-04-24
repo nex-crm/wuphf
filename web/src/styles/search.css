@@ -143,20 +143,97 @@
 }
 
 /* ─── Command palette (channels + agents + commands + messages) ─── */
-.cmd-palette { display: flex; flex-direction: column; max-height: 70vh; }
-.cmd-palette-results { flex: 1; overflow-y: auto; padding: 4px 0; }
-.cmd-palette-empty { padding: 24px 16px; text-align: center; color: var(--text-tertiary); font-size: 13px; }
-.cmd-palette-group { padding: 4px 0 8px; }
-.cmd-palette-group-title { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary); padding: 6px 16px 4px; }
-.cmd-palette-item { display: flex; align-items: center; gap: 12px; padding: 8px 16px; cursor: pointer; font-size: 13px; transition: background 0.1s; width: 100%; border: none; background: transparent; color: var(--text); font-family: var(--font-sans); text-align: left; }
-.cmd-palette-item:hover, .cmd-palette-item.selected { background: var(--accent-bg); }
-.cmd-palette-item-icon { width: 22px; flex-shrink: 0; text-align: center; font-size: 14px; }
-.cmd-palette-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.cmd-palette-item-label { font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmd-palette-item-desc { font-size: 11px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cmd-palette-item-meta { font-size: 11px; color: var(--text-tertiary); font-family: var(--font-mono); flex-shrink: 0; }
-.cmd-palette-footer { display: flex; align-items: center; gap: 14px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); }
-.cmd-palette-footer .kbd { margin-right: 4px; }
+.cmd-palette {
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+}
+.cmd-palette-results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.cmd-palette-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+.cmd-palette-group {
+  padding: 4px 0 8px;
+}
+.cmd-palette-group-title {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+  padding: 6px 16px 4px;
+}
+.cmd-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.1s;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  text-align: left;
+}
+.cmd-palette-item:hover,
+.cmd-palette-item.selected {
+  background: var(--accent-bg);
+}
+.cmd-palette-item-icon {
+  width: 22px;
+  flex-shrink: 0;
+  text-align: center;
+  font-size: 14px;
+}
+.cmd-palette-item-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.cmd-palette-item-label {
+  font-weight: 500;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmd-palette-item-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cmd-palette-item-meta {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+.cmd-palette-footer {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.cmd-palette-footer .kbd {
+  margin-right: 4px;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    Channel Wizard
@@ -414,7 +491,9 @@
   font-size: 11px;
   font-family: SFMono-Regular, Menlo, monospace;
   cursor: pointer;
-  transition: background 0.1s, color 0.1s;
+  transition:
+    background 0.1s,
+    color 0.1s;
 }
 .help-close:hover {
   background: var(--accent-bg);

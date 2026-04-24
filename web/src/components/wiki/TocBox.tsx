@@ -1,20 +1,20 @@
-import { useState } from 'react'
+import { useState } from "react";
 
 /** Right-rail Contents box with nested numbered entries and a [hide] toggle. */
 
 export interface TocEntry {
-  level: 1 | 2 | 3
-  num: string
-  anchor: string
-  title: string
+  level: 1 | 2 | 3;
+  num: string;
+  anchor: string;
+  title: string;
 }
 
 interface TocBoxProps {
-  entries: TocEntry[]
+  entries: TocEntry[];
 }
 
 export default function TocBox({ entries }: TocBoxProps) {
-  const [hidden, setHidden] = useState(false)
+  const [hidden, setHidden] = useState(false);
   return (
     <div className="wk-toc-nested">
       <div className="wk-toc-box">
@@ -26,20 +26,21 @@ export default function TocBox({ entries }: TocBoxProps) {
             onClick={() => setHidden((v) => !v)}
             aria-expanded={!hidden}
           >
-            [{hidden ? 'show' : 'hide'}]
+            [{hidden ? "show" : "hide"}]
           </button>
         </div>
-        {!hidden && entries.map((entry) => (
-          <a
-            key={`${entry.anchor}-${entry.num}`}
-            href={`#${entry.anchor}`}
-            className={`wk-lvl-${entry.level}`}
-          >
-            {entry.num && <span className="wk-num">{entry.num}</span>}
-            {entry.title}
-          </a>
-        ))}
+        {!hidden &&
+          entries.map((entry) => (
+            <a
+              key={`${entry.anchor}-${entry.num}`}
+              href={`#${entry.anchor}`}
+              className={`wk-lvl-${entry.level}`}
+            >
+              {entry.num && <span className="wk-num">{entry.num}</span>}
+              {entry.title}
+            </a>
+          ))}
       </div>
     </div>
-  )
+  );
 }

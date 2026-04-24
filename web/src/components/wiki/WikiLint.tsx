@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
-import { runLint, resolveContradiction, type LintFinding, type LintReport } from '../../api/wiki'
-import ResolveContradictionModal from './ResolveContradictionModal'
+import { useCallback, useEffect, useState } from "react";
+
+import { type LintFinding, type LintReport, runLint } from "../../api/wiki";
+import ResolveContradictionModal from "./ResolveContradictionModal";
 
 /**
  * WikiLint — the /wiki/lint surface.
@@ -14,42 +15,53 @@ import ResolveContradictionModal from './ResolveContradictionModal'
  * Mirrors WikiAudit.tsx in layout and data-loading pattern.
  */
 interface WikiLintProps {
-  onNavigate: (path: string | null) => void
+  onNavigate: (path: string | null) => void;
 }
 
 export default function WikiLint({ onNavigate }: WikiLintProps) {
-  const [report, setReport] = useState<LintReport | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [resolveTarget, setResolveTarget] = useState<{ finding: LintFinding; idx: number } | null>(null)
+  const [report, setReport] = useState<LintReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [resolveTarget, setResolveTarget] = useState<{
+    finding: LintFinding;
+    idx: number;
+  } | null>(null);
 
   const loadReport = useCallback(() => {
-    setLoading(true)
-    setError(null)
+    setLoading(true);
+    setError(null);
     runLint()
       .then((r) => setReport(r))
-      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Failed to run lint'))
-      .finally(() => setLoading(false))
-  }, [])
+      .catch((err: unknown) =>
+        setError(err instanceof Error ? err.message : "Failed to run lint"),
+      )
+      .finally(() => setLoading(false));
+  }, []);
 
   useEffect(() => {
-    loadReport()
-  }, [loadReport])
+    loadReport();
+  }, [loadReport]);
 
   const countBySev = (sev: string) =>
-    (report?.findings ?? []).filter((f) => f.severity === sev).length
+    (report?.findings ?? []).filter((f) => f.severity === sev).length;
 
   /** Translate the engineering finding type into plain operator language. */
   const humanType = (t: string): string => {
     switch (t) {
-      case 'contradictions': return 'Conflicting facts'
-      case 'orphans': return 'Page with no links'
-      case 'stale': return 'May be out of date'
-      case 'missing_crossrefs': return 'Should probably be linked'
-      case 'dedup_review': return 'Possible duplicate'
-      default: return t.replace(/_/g, ' ')
+      case "contradictions":
+        return "Conflicting facts";
+      case "orphans":
+        return "Page with no links";
+      case "stale":
+        return "May be out of date";
+      case "missing_crossrefs":
+        return "Should probably be linked";
+      case "dedup_review":
+        return "Possible duplicate";
+      default:
+        return t.replace(/_/g, " ");
     }
-  }
+  };
 
   return (
     <main className="wk-audit" data-testid="wk-lint">
@@ -57,19 +69,20 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
         <div>
           <h1 className="wk-audit-title">Wiki health check</h1>
           <p className="wk-audit-strapline">
-            A daily sweep of the whole wiki to surface things worth your attention:
-            conflicting facts, pages with no links in or out, claims that may be out of date,
-            entities that should probably be linked, and possible duplicates.
+            A daily sweep of the whole wiki to surface things worth your
+            attention: conflicting facts, pages with no links in or out, claims
+            that may be out of date, entities that should probably be linked,
+            and possible duplicates.
           </p>
         </div>
         <div className="wk-audit-stats" aria-live="polite">
           {loading
-            ? 'Checking…'
+            ? "Checking…"
             : error
-              ? 'Error'
+              ? "Error"
               : report
-                ? `${countBySev('critical')} need attention · ${countBySev('warning')} worth a look · ${countBySev('info')} FYI`
-                : ''}
+                ? `${countBySev("critical")} need attention · ${countBySev("warning")} worth a look · ${countBySev("info")} FYI`
+                : ""}
         </div>
       </header>
 
@@ -80,10 +93,10 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
           onClick={loadReport}
           disabled={loading}
         >
-          {loading ? 'Checking…' : 'Check again now'}
+          {loading ? "Checking…" : "Check again now"}
         </button>
         {report && (
-          <span className="wk-audit-strapline" style={{ alignSelf: 'center' }}>
+          <span className="wk-audit-strapline" style={{ alignSelf: "center" }}>
             Last checked: {report.date}
           </span>
         )}
@@ -111,13 +124,13 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
           <tbody>
             {report.findings.map((f, idx) => (
               <tr
-                key={`${f.type}-${f.entity_slug ?? ''}-${idx}`}
+                key={`${f.type}-${f.entity_slug ?? ""}-${idx}`}
                 className={`wk-audit-row ${findingRowClass(f.severity)}`}
               >
                 <td className="wk-audit-when">
                   <span
                     className={`wk-lint-severity wk-lint-severity--${f.severity}`}
-                    aria-label={severityLabel(f.severity) + ' finding'}
+                    aria-label={`${severityLabel(f.severity)} finding`}
                   >
                     {severityLabel(f.severity)}
                   </span>
@@ -128,8 +141,8 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
                     <a
                       href={`#/wiki/${encodeURI(f.entity_slug)}`}
                       onClick={(ev) => {
-                        ev.preventDefault()
-                        onNavigate(f.entity_slug ?? null)
+                        ev.preventDefault();
+                        onNavigate(f.entity_slug ?? null);
                       }}
                       className="wk-wikilink"
                       data-wikilink="true"
@@ -142,11 +155,11 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
                 </td>
                 <td className="wk-audit-msg">{f.summary}</td>
                 <td>
-                  {f.type === 'contradictions' && f.resolve_actions ? (
+                  {f.type === "contradictions" && f.resolve_actions ? (
                     <button
                       type="button"
                       className="wk-editor-save"
-                      style={{ padding: '4px 10px', fontSize: 12 }}
+                      style={{ padding: "4px 10px", fontSize: 12 }}
                       onClick={() => setResolveTarget({ finding: f, idx })}
                     >
                       Resolve
@@ -168,35 +181,35 @@ export default function WikiLint({ onNavigate }: WikiLintProps) {
           reportDate={report.date}
           onClose={() => setResolveTarget(null)}
           onResolved={() => {
-            setResolveTarget(null)
-            loadReport()
+            setResolveTarget(null);
+            loadReport();
           }}
         />
       )}
     </main>
-  )
+  );
 }
 
 function severityLabel(sev: string): string {
   switch (sev) {
-    case 'critical':
-      return 'Needs attention'
-    case 'warning':
-      return 'Worth a look'
-    case 'info':
-      return 'FYI'
+    case "critical":
+      return "Needs attention";
+    case "warning":
+      return "Worth a look";
+    case "info":
+      return "FYI";
     default:
-      return sev
+      return sev;
   }
 }
 
 function findingRowClass(sev: string): string {
   switch (sev) {
-    case 'critical':
-      return 'is-recovery' // reuse existing red-ish row style
-    case 'warning':
-      return 'is-bootstrap' // amber
+    case "critical":
+      return "is-recovery"; // reuse existing red-ish row style
+    case "warning":
+      return "is-bootstrap"; // amber
     default:
-      return 'is-agent'
+      return "is-agent";
   }
 }

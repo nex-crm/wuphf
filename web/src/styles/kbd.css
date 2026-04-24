@@ -148,7 +148,9 @@
   font-size: 11px;
   color: var(--text-tertiary);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 .status-bar-shortcut:hover,
 .status-bar-shortcut:focus-visible {
@@ -163,4 +165,3 @@
   min-height: 14px;
   border-bottom-width: 1px;
 }
-

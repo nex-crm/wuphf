@@ -1,29 +1,32 @@
-import { create } from 'zustand'
+import { create } from "zustand";
 
-export type Theme = 'nex'
+export type Theme = "nex";
 
 export interface ChannelMeta {
-  type: 'O' | 'D' | 'G'
-  name?: string
-  members?: string[]
-  agentSlug?: string
+  type: "O" | "D" | "G";
+  name?: string;
+  members?: string[];
+  agentSlug?: string;
 }
 
-const LEGACY_DM_SLUG_PREFIX = 'dm-'
-const BROKEN_DM_SLUG_PREFIX = 'dm-human-'
+const LEGACY_DM_SLUG_PREFIX = "dm-";
+const BROKEN_DM_SLUG_PREFIX = "dm-human-";
 
-export function directChannelSlug(agentSlug: string, humanSlug = 'human'): string {
-  const a = humanSlug.trim().toLowerCase()
-  const b = agentSlug.trim().toLowerCase()
-  return a > b ? `${b}__${a}` : `${a}__${b}`
+export function directChannelSlug(
+  agentSlug: string,
+  humanSlug = "human",
+): string {
+  const a = humanSlug.trim().toLowerCase();
+  const b = agentSlug.trim().toLowerCase();
+  return a > b ? `${b}__${a}` : `${a}__${b}`;
 }
 
 function agentFromDirectSlug(slug: string): string | null {
-  const parts = slug.split('__')
-  if (parts.length !== 2) return null
-  if (parts[0] === 'human' || parts[0] === 'you') return parts[1] || null
-  if (parts[1] === 'human' || parts[1] === 'you') return parts[0] || null
-  return null
+  const parts = slug.split("__");
+  if (parts.length !== 2) return null;
+  if (parts[0] === "human" || parts[0] === "you") return parts[1] || null;
+  if (parts[1] === "human" || parts[1] === "you") return parts[0] || null;
+  return null;
 }
 
 /**
@@ -38,132 +41,137 @@ export function isDMChannel(
   slug: string,
   meta: Record<string, ChannelMeta>,
 ): { agentSlug: string } | null {
-  const m = meta[slug]
-  if (m?.type === 'D' && m.agentSlug) return { agentSlug: m.agentSlug }
-  const directAgent = agentFromDirectSlug(slug)
-  if (directAgent) return { agentSlug: directAgent }
+  const m = meta[slug];
+  if (m?.type === "D" && m.agentSlug) return { agentSlug: m.agentSlug };
+  const directAgent = agentFromDirectSlug(slug);
+  if (directAgent) return { agentSlug: directAgent };
   if (slug.startsWith(BROKEN_DM_SLUG_PREFIX)) {
-    return { agentSlug: slug.slice(BROKEN_DM_SLUG_PREFIX.length) }
+    return { agentSlug: slug.slice(BROKEN_DM_SLUG_PREFIX.length) };
   }
   if (slug.startsWith(LEGACY_DM_SLUG_PREFIX)) {
-    return { agentSlug: slug.slice(LEGACY_DM_SLUG_PREFIX.length) }
+    return { agentSlug: slug.slice(LEGACY_DM_SLUG_PREFIX.length) };
   }
-  return null
+  return null;
 }
 
 export interface AppStore {
   // Connection
-  brokerConnected: boolean
-  setBrokerConnected: (v: boolean) => void
+  brokerConnected: boolean;
+  setBrokerConnected: (v: boolean) => void;
 
   // Navigation
-  currentChannel: string
-  setCurrentChannel: (ch: string) => void
-  currentApp: string | null // null = messages view
-  setCurrentApp: (app: string | null) => void
+  currentChannel: string;
+  setCurrentChannel: (ch: string) => void;
+  currentApp: string | null; // null = messages view
+  setCurrentApp: (app: string | null) => void;
 
   // Channel metadata (DM info, etc.)
-  channelMeta: Record<string, ChannelMeta>
-  setChannelMeta: (slug: string, meta: ChannelMeta) => void
+  channelMeta: Record<string, ChannelMeta>;
+  setChannelMeta: (slug: string, meta: ChannelMeta) => void;
 
   // Theme
-  theme: Theme
-  setTheme: (t: Theme) => void
+  theme: Theme;
+  setTheme: (t: Theme) => void;
 
   // Sidebar
-  sidebarAgentsOpen: boolean
-  toggleSidebarAgents: () => void
-  sidebarCollapsed: boolean
-  toggleSidebarCollapsed: () => void
+  sidebarAgentsOpen: boolean;
+  toggleSidebarAgents: () => void;
+  sidebarCollapsed: boolean;
+  toggleSidebarCollapsed: () => void;
 
   // Thread panel
-  activeThreadId: string | null
-  setActiveThreadId: (id: string | null) => void
+  activeThreadId: string | null;
+  setActiveThreadId: (id: string | null) => void;
 
   // Per-thread collapsed state in the main feed. The key is the parent
   // message id. Default is expanded (entry absent or false); toggling
   // stores `true` so the inline replies hide.
-  collapsedThreads: Record<string, boolean>
-  toggleThreadCollapsed: (parentId: string) => void
+  collapsedThreads: Record<string, boolean>;
+  toggleThreadCollapsed: (parentId: string) => void;
 
   // DM entry: opens the given DM channel and records {type: 'D', agentSlug}
   // in channelMeta so downstream views can resolve the paired agent.
-  enterDM: (agentSlug: string, channelSlug: string) => void
+  enterDM: (agentSlug: string, channelSlug: string) => void;
 
   // Message polling state
-  lastMessageId: string | null
-  setLastMessageId: (id: string | null) => void
+  lastMessageId: string | null;
+  setLastMessageId: (id: string | null) => void;
 
   // Agent panel
-  activeAgentSlug: string | null
-  setActiveAgentSlug: (slug: string | null) => void
+  activeAgentSlug: string | null;
+  setActiveAgentSlug: (slug: string | null) => void;
 
   // Search
-  searchOpen: boolean
-  setSearchOpen: (v: boolean) => void
+  searchOpen: boolean;
+  setSearchOpen: (v: boolean) => void;
   /**
    * Query to prefill in the SearchModal on next open. Set by the composer
    * `/search <query>` command and cleared by the modal when consumed.
    */
-  composerSearchInitialQuery: string
-  setComposerSearchInitialQuery: (q: string) => void
+  composerSearchInitialQuery: string;
+  setComposerSearchInitialQuery: (q: string) => void;
 
   // Help modal — /help slash command surface
-  composerHelpOpen: boolean
-  setComposerHelpOpen: (v: boolean) => void
+  composerHelpOpen: boolean;
+  setComposerHelpOpen: (v: boolean) => void;
 
   // Onboarding
-  onboardingComplete: boolean
-  setOnboardingComplete: (v: boolean) => void
+  onboardingComplete: boolean;
+  setOnboardingComplete: (v: boolean) => void;
 
   // Wiki
-  wikiPath: string | null
-  setWikiPath: (path: string | null) => void
-  wikiLookupQuery: string | null
-  setWikiLookupQuery: (q: string | null) => void
+  wikiPath: string | null;
+  setWikiPath: (path: string | null) => void;
+  wikiLookupQuery: string | null;
+  setWikiLookupQuery: (q: string | null) => void;
 
   // Notebooks
-  notebookAgentSlug: string | null
-  notebookEntrySlug: string | null
-  setNotebookRoute: (agentSlug: string | null, entrySlug: string | null) => void
+  notebookAgentSlug: string | null;
+  notebookEntrySlug: string | null;
+  setNotebookRoute: (
+    agentSlug: string | null,
+    entrySlug: string | null,
+  ) => void;
 }
 
 export const useAppStore = create<AppStore>((set, get) => ({
   brokerConnected: false,
   setBrokerConnected: (v) => set({ brokerConnected: v }),
 
-  currentChannel: 'general',
+  currentChannel: "general",
   setCurrentChannel: (ch) => set({ currentChannel: ch, currentApp: null }),
   currentApp: null,
   setCurrentApp: (app) => {
     if (!app) {
-      set({ currentApp: null })
-      return
+      set({ currentApp: null });
+      return;
     }
 
-    const { currentChannel, channelMeta } = get()
+    const { currentChannel, channelMeta } = get();
     if (isDMChannel(currentChannel, channelMeta)) {
-      set({ currentApp: app, currentChannel: 'general' })
-      return
+      set({ currentApp: app, currentChannel: "general" });
+      return;
     }
 
-    set({ currentApp: app })
+    set({ currentApp: app });
   },
 
   channelMeta: {},
   setChannelMeta: (slug, meta) =>
     set({ channelMeta: { ...get().channelMeta, [slug]: meta } }),
 
-  theme: 'nex',
+  theme: "nex",
   setTheme: (t) => {
-    document.documentElement.setAttribute('data-theme', t)
-    set({ theme: t })
+    document.documentElement.setAttribute("data-theme", t);
+    set({ theme: t });
   },
 
   sidebarAgentsOpen: true,
-  toggleSidebarAgents: () => set({ sidebarAgentsOpen: !get().sidebarAgentsOpen }),
+  toggleSidebarAgents: () =>
+    set({ sidebarAgentsOpen: !get().sidebarAgentsOpen }),
   sidebarCollapsed: false,
-  toggleSidebarCollapsed: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
+  toggleSidebarCollapsed: () =>
+    set({ sidebarCollapsed: !get().sidebarCollapsed }),
 
   activeThreadId: null,
   setActiveThreadId: (id) => set({ activeThreadId: id }),
@@ -183,7 +191,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
       currentApp: null,
       channelMeta: {
         ...s.channelMeta,
-        [channelSlug]: { ...s.channelMeta[channelSlug], type: 'D', agentSlug },
+        [channelSlug]: { ...s.channelMeta[channelSlug], type: "D", agentSlug },
       },
     })),
 
@@ -195,7 +203,7 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   searchOpen: false,
   setSearchOpen: (v) => set({ searchOpen: v }),
-  composerSearchInitialQuery: '',
+  composerSearchInitialQuery: "",
   setComposerSearchInitialQuery: (q) => set({ composerSearchInitialQuery: q }),
 
   composerHelpOpen: false,
@@ -214,4 +222,4 @@ export const useAppStore = create<AppStore>((set, get) => ({
   notebookEntrySlug: null,
   setNotebookRoute: (agentSlug: string | null, entrySlug: string | null) =>
     set({ notebookAgentSlug: agentSlug, notebookEntrySlug: entrySlug }),
-}))
+}));

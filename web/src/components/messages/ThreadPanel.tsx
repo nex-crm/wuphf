@@ -1,72 +1,76 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useThreadMessages } from '../../hooks/useMessages'
-import { useAppStore } from '../../stores/app'
-import { postMessage } from '../../api/client'
-import type { Message } from '../../api/client'
-import { showNotice } from '../ui/Toast'
-import { MessageBubble } from './MessageBubble'
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+
+import type { Message } from "../../api/client";
+import { postMessage } from "../../api/client";
+import { useThreadMessages } from "../../hooks/useMessages";
+import { useAppStore } from "../../stores/app";
+import { showNotice } from "../ui/Toast";
+import { MessageBubble } from "./MessageBubble";
 
 export function ThreadPanel() {
-  const activeThreadId = useAppStore((s) => s.activeThreadId)
-  const setActiveThreadId = useAppStore((s) => s.setActiveThreadId)
-  const currentChannel = useAppStore((s) => s.currentChannel)
-  const [text, setText] = useState('')
-  const [quoting, setQuoting] = useState<Message | null>(null)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const messagesRef = useRef<HTMLDivElement>(null)
-  const queryClient = useQueryClient()
+  const activeThreadId = useAppStore((s) => s.activeThreadId);
+  const setActiveThreadId = useAppStore((s) => s.setActiveThreadId);
+  const currentChannel = useAppStore((s) => s.currentChannel);
+  const [text, setText] = useState("");
+  const [quoting, setQuoting] = useState<Message | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
+  const queryClient = useQueryClient();
 
-  const { data: messages = [] } = useThreadMessages(currentChannel, activeThreadId)
+  const { data: messages = [] } = useThreadMessages(
+    currentChannel,
+    activeThreadId,
+  );
 
   // Split the thread query response into parent + replies so we can render
   // the parent prominently at the top (like Slack's thread pane). The broker
   // returns both in the same list because thread_id matches either id or
   // reply_to.
   const { parent, replies } = useMemo(() => {
-    let parent: Message | null = null
-    const replies: Message[] = []
+    let parent: Message | null = null;
+    const replies: Message[] = [];
     for (const m of messages) {
-      if (m.id === activeThreadId) parent = m
-      else if (m.reply_to) replies.push(m)
+      if (m.id === activeThreadId) parent = m;
+      else if (m.reply_to) replies.push(m);
     }
-    return { parent, replies }
-  }, [messages, activeThreadId])
+    return { parent, replies };
+  }, [messages, activeThreadId]);
 
   // Auto-scroll to the bottom when a new reply arrives. Anchoring at the
   // bottom means the composer is always in context and new agent replies
   // land where your eye already is.
   useEffect(() => {
     if (messagesRef.current) {
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight
+      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     }
-  }, [replies.length])
+  }, []);
 
   // Reset the quote chip when the panel closes OR when the user switches
   // to a different thread. Persisting the quote would mean a stale reply_to
   // fires against the wrong thread on the next send.
   useEffect(() => {
-    setQuoting(null)
-    setText('')
-  }, [activeThreadId])
+    setQuoting(null);
+    setText("");
+  }, []);
 
   // Focus the composer on open so users can start typing immediately.
   useEffect(() => {
     if (activeThreadId && textareaRef.current) {
-      textareaRef.current.focus()
+      textareaRef.current.focus();
     }
-  }, [activeThreadId])
+  }, [activeThreadId]);
 
   // Escape closes the panel — matches the close button affordance.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && activeThreadId) {
-        setActiveThreadId(null)
+      if (e.key === "Escape" && activeThreadId) {
+        setActiveThreadId(null);
       }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [activeThreadId, setActiveThreadId])
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeThreadId, setActiveThreadId]);
 
   // The thread target is the quoted reply if the user clicked "quote" on a
   // specific reply; otherwise it's the parent. Broker thread semantics
@@ -74,30 +78,33 @@ export function ThreadPanel() {
   // under this thread_id — so quoting-a-reply just tags the new message
   // against that reply's id for display, while still appearing in the same
   // thread panel.
-  const replyTarget = quoting?.id ?? activeThreadId ?? undefined
+  const replyTarget = quoting?.id ?? activeThreadId ?? undefined;
 
   const sendReply = useMutation({
     mutationFn: (content: string) =>
       postMessage(content, currentChannel, replyTarget),
     onSuccess: () => {
-      setText('')
-      setQuoting(null)
-      queryClient.invalidateQueries({ queryKey: ['thread-messages', currentChannel, activeThreadId] })
-      queryClient.invalidateQueries({ queryKey: ['messages', currentChannel] })
+      setText("");
+      setQuoting(null);
+      queryClient.invalidateQueries({
+        queryKey: ["thread-messages", currentChannel, activeThreadId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["messages", currentChannel] });
     },
     onError: (err: unknown) => {
-      const message = err instanceof Error ? err.message : 'Failed to send reply'
-      showNotice(message, 'error')
+      const message =
+        err instanceof Error ? err.message : "Failed to send reply";
+      showNotice(message, "error");
     },
-  })
+  });
 
   const handleSend = () => {
-    const trimmed = text.trim()
-    if (!trimmed || sendReply.isPending) return
-    sendReply.mutate(trimmed)
-  }
+    const trimmed = text.trim();
+    if (!trimmed || sendReply.isPending) return;
+    sendReply.mutate(trimmed);
+  };
 
-  if (!activeThreadId) return null
+  if (!activeThreadId) return null;
 
   return (
     <div className="thread-panel open" role="complementary" aria-label="Thread">
@@ -112,7 +119,16 @@ export function ThreadPanel() {
           aria-label="Close thread"
           title="Close (Esc)"
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
             <path d="M18 6 6 18" />
             <path d="m6 6 12 12" />
           </svg>
@@ -127,7 +143,7 @@ export function ThreadPanel() {
         )}
         {replies.length > 0 && (
           <div className="thread-panel-replies-count">
-            {replies.length} {replies.length === 1 ? 'reply' : 'replies'}
+            {replies.length} {replies.length === 1 ? "reply" : "replies"}
           </div>
         )}
         {replies.length === 0 ? (
@@ -140,8 +156,8 @@ export function ThreadPanel() {
               key={msg.id}
               message={msg}
               onQuoteReply={(m) => {
-                setQuoting(m)
-                textareaRef.current?.focus()
+                setQuoting(m);
+                textareaRef.current?.focus();
               }}
             />
           ))
@@ -155,7 +171,16 @@ export function ThreadPanel() {
       <div className="composer">
         {quoting && (
           <div className="thread-quote-chip">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="M3 21v-5a5 5 0 0 1 5-5h13" />
               <path d="m16 16-5-5 5-5" />
             </svg>
@@ -171,7 +196,16 @@ export function ThreadPanel() {
               aria-label="Cancel quote"
               title="Cancel quote"
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <path d="M18 6 6 18" />
                 <path d="m6 6 12 12" />
               </svg>
@@ -182,17 +216,19 @@ export function ThreadPanel() {
           <textarea
             ref={textareaRef}
             className="composer-input"
-            placeholder={quoting ? `Reply to @${quoting.from}…` : 'Reply to thread…'}
+            placeholder={
+              quoting ? `Reply to @${quoting.from}…` : "Reply to thread…"
+            }
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                handleSend()
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
               }
-              if (e.key === 'Escape' && quoting) {
-                e.preventDefault()
-                setQuoting(null)
+              if (e.key === "Escape" && quoting) {
+                e.preventDefault();
+                setQuoting(null);
               }
             }}
             rows={1}
@@ -203,7 +239,16 @@ export function ThreadPanel() {
             onClick={handleSend}
             aria-label="Send reply"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <path d="m22 2-7 20-4-9-9-4Z" />
               <path d="M22 2 11 13" />
             </svg>
@@ -211,10 +256,10 @@ export function ThreadPanel() {
         </div>
       </div>
     </div>
-  )
+  );
 }
 
 function truncate(s: string, n: number): string {
-  const oneLine = s.replace(/\s+/g, ' ').trim()
-  return oneLine.length > n ? oneLine.slice(0, n - 1) + '…' : oneLine
+  const oneLine = s.replace(/\s+/g, " ").trim();
+  return oneLine.length > n ? `${oneLine.slice(0, n - 1)}…` : oneLine;
 }

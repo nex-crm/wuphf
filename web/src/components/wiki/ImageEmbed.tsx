@@ -1,47 +1,47 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface ImageEmbedProps {
   /** Absolute URL the agent embedded in markdown. */
-  src: string
-  alt?: string
-  width?: number
-  height?: number
+  src: string;
+  alt?: string;
+  width?: number;
+  height?: number;
   /**
    * When true, render inside an article body — applies the editorial
    * figure styling and enables the lightbox. Inline previews (e.g. in
    * compose forms) should pass false to get a plain <img>.
    */
-  editorial?: boolean
+  editorial?: boolean;
 }
 
 export function ImageEmbed({
   src,
-  alt = '',
+  alt = "",
   width,
   height,
   editorial = true,
 }: ImageEmbedProps) {
-  const [open, setOpen] = useState(false)
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const [open, setOpen] = useState(false);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (!open) return
+    if (!open) return;
     const handler = (ev: KeyboardEvent) => {
-      if (ev.key === 'Escape') setOpen(false)
-    }
-    window.addEventListener('keydown', handler)
-    closeButtonRef.current?.focus()
-    return () => window.removeEventListener('keydown', handler)
-  }, [open])
+      if (ev.key === "Escape") setOpen(false);
+    };
+    window.addEventListener("keydown", handler);
+    closeButtonRef.current?.focus();
+    return () => window.removeEventListener("keydown", handler);
+  }, [open]);
 
   const onImgClick = useCallback(
     (ev: React.MouseEvent) => {
-      if (!editorial) return
-      ev.preventDefault()
-      setOpen(true)
+      if (!editorial) return;
+      ev.preventDefault();
+      setOpen(true);
     },
     [editorial],
-  )
+  );
 
   if (!editorial) {
     return (
@@ -55,7 +55,7 @@ export function ImageEmbed({
         referrerPolicy="no-referrer"
         className="image-embed__inline"
       />
-    )
+    );
   }
 
   return (
@@ -64,7 +64,7 @@ export function ImageEmbed({
         <button
           type="button"
           className="image-embed__trigger"
-          aria-label={alt ? `View full-size: ${alt}` : 'View full-size image'}
+          aria-label={alt ? `View full-size: ${alt}` : "View full-size image"}
           onClick={() => setOpen(true)}
         >
           <img
@@ -86,7 +86,7 @@ export function ImageEmbed({
           className="image-embed__lightbox"
           role="dialog"
           aria-modal="true"
-          aria-label={alt || 'Image viewer'}
+          aria-label={alt || "Image viewer"}
           onClick={() => setOpen(false)}
         >
           <button
@@ -95,8 +95,8 @@ export function ImageEmbed({
             className="image-embed__close"
             aria-label="Close image viewer"
             onClick={(e) => {
-              e.stopPropagation()
-              setOpen(false)
+              e.stopPropagation();
+              setOpen(false);
             }}
           >
             ×
@@ -111,7 +111,7 @@ export function ImageEmbed({
         </div>
       )}
     </>
-  )
+  );
 }
 
-export default ImageEmbed
+export default ImageEmbed;

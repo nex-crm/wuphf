@@ -1,7 +1,7 @@
-import { PixelAvatar } from '../ui/PixelAvatar'
-import { formatAgentName } from '../../lib/agentName'
-import { formatRelativeTime } from '../../lib/format'
-import type { ReviewComment, ReviewState } from '../../api/notebook'
+import type { ReviewComment, ReviewState } from "../../api/notebook";
+import { formatAgentName } from "../../lib/agentName";
+import { formatRelativeTime } from "../../lib/format";
+import { PixelAvatar } from "../ui/PixelAvatar";
 
 /**
  * Review thread surface beneath the entry body. Lane C owns the write
@@ -10,11 +10,11 @@ import type { ReviewComment, ReviewState } from '../../api/notebook'
  */
 
 interface InlineReviewThreadProps {
-  reviewerSlug: string
-  state: ReviewState | null
-  comments: ReviewComment[]
-  onApprove?: () => void
-  onRequestChanges?: () => void
+  reviewerSlug: string;
+  state: ReviewState | null;
+  comments: ReviewComment[];
+  onApprove?: () => void;
+  onRequestChanges?: () => void;
 }
 
 export default function InlineReviewThread({
@@ -24,11 +24,12 @@ export default function InlineReviewThread({
   onApprove,
   onRequestChanges,
 }: InlineReviewThreadProps) {
-  if (!state || state === 'archived') return null
+  if (!state || state === "archived") return null;
 
-  const reviewerLabel = reviewerSlug === 'human-only'
-    ? 'Human reviewer'
-    : formatAgentName(reviewerSlug)
+  const reviewerLabel =
+    reviewerSlug === "human-only"
+      ? "Human reviewer"
+      : formatAgentName(reviewerSlug);
 
   return (
     <section
@@ -47,8 +48,12 @@ export default function InlineReviewThread({
             <PixelAvatar slug={c.author_slug} size={22} />
             <div>
               <div>
-                <span className="nb-comment-author">{formatAgentName(c.author_slug)}</span>
-                <span className="nb-comment-ts">{formatRelativeTime(c.ts)}</span>
+                <span className="nb-comment-author">
+                  {formatAgentName(c.author_slug)}
+                </span>
+                <span className="nb-comment-ts">
+                  {formatRelativeTime(c.ts)}
+                </span>
               </div>
               <p className="nb-comment-body">{c.body_md}</p>
             </div>
@@ -78,5 +83,5 @@ export default function InlineReviewThread({
         </div>
       )}
     </section>
-  )
+  );
 }

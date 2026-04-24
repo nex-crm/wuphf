@@ -1,89 +1,90 @@
-import { useCallback, useEffect, useState } from 'react'
-import PixelAvatar from './PixelAvatar'
+import { useCallback, useEffect, useState } from "react";
+
 import {
-  fetchFacts,
-  subscribeEntityEvents,
   type EntityKind,
   type Fact,
-} from '../../api/entity'
-import { formatAgentName } from '../../lib/agentName'
+  fetchFacts,
+  subscribeEntityEvents,
+} from "../../api/entity";
+import { formatAgentName } from "../../lib/agentName";
+import PixelAvatar from "./PixelAvatar";
 
 interface FactsOnFileProps {
-  kind: EntityKind
-  slug: string
+  kind: EntityKind;
+  slug: string;
 }
 
-const INITIAL_LIMIT = 50
+const INITIAL_LIMIT = 50;
 
 export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
-  const [facts, setFacts] = useState<Fact[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [showAll, setShowAll] = useState(false)
+  const [facts, setFacts] = useState<Fact[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     fetchFacts(kind, slug)
       .then((rows) => {
-        if (cancelled) return
-        setFacts(rows)
+        if (cancelled) return;
+        setFacts(rows);
       })
       .catch((err: unknown) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to load facts')
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Failed to load facts");
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+        if (!cancelled) setLoading(false);
+      });
     return () => {
-      cancelled = true
-    }
-  }, [kind, slug])
+      cancelled = true;
+    };
+  }, [kind, slug]);
 
-  const handleFact = useCallback((ev: { fact_id: string; recorded_by: string; timestamp: string }) => {
-    setFacts((prev) => {
-      // Skip if we already have this id (shouldn't happen, but the SSE
-      // stream can replay on reconnect in theory).
-      if (prev.some((f) => f.id === ev.fact_id)) return prev
-      // Prepend an optimistic row. Refetch in parallel so the real row
-      // (with text + source_path) replaces this shortly.
-      const optimistic: Fact = {
-        id: ev.fact_id,
-        kind,
-        slug,
-        text: '…',
-        recorded_by: ev.recorded_by,
-        created_at: ev.timestamp,
-      }
-      return [optimistic, ...prev]
-    })
-    // Refetch to resolve the optimistic row with full fact text. Fire and
-    // forget — errors here are visible in the next render cycle.
-    void fetchFacts(kind, slug)
-      .then((rows) => setFacts(rows))
-      .catch(() => {
-        // Keep the optimistic row; surfacing a second error on top of the
-        // initial fetch would flood the UI.
-      })
-  }, [kind, slug])
+  const handleFact = useCallback(
+    (ev: { fact_id: string; recorded_by: string; timestamp: string }) => {
+      setFacts((prev) => {
+        // Skip if we already have this id (shouldn't happen, but the SSE
+        // stream can replay on reconnect in theory).
+        if (prev.some((f) => f.id === ev.fact_id)) return prev;
+        // Prepend an optimistic row. Refetch in parallel so the real row
+        // (with text + source_path) replaces this shortly.
+        const optimistic: Fact = {
+          id: ev.fact_id,
+          kind,
+          slug,
+          text: "…",
+          recorded_by: ev.recorded_by,
+          created_at: ev.timestamp,
+        };
+        return [optimistic, ...prev];
+      });
+      // Refetch to resolve the optimistic row with full fact text. Fire and
+      // forget — errors here are visible in the next render cycle.
+      void fetchFacts(kind, slug)
+        .then((rows) => setFacts(rows))
+        .catch(() => {
+          // Keep the optimistic row; surfacing a second error on top of the
+          // initial fetch would flood the UI.
+        });
+    },
+    [kind, slug],
+  );
 
   useEffect(() => {
-    const unsubscribe = subscribeEntityEvents(
-      kind,
-      slug,
-      handleFact,
-      () => {
-        // Brief synthesis doesn't change the facts list itself, but refetch
-        // anyway in case the synthesis raced with a batch of new facts.
-        void fetchFacts(kind, slug).then(setFacts).catch(() => {})
-      },
-    )
-    return unsubscribe
-  }, [kind, slug, handleFact])
+    const unsubscribe = subscribeEntityEvents(kind, slug, handleFact, () => {
+      // Brief synthesis doesn't change the facts list itself, but refetch
+      // anyway in case the synthesis raced with a batch of new facts.
+      void fetchFacts(kind, slug)
+        .then(setFacts)
+        .catch(() => {});
+    });
+    return unsubscribe;
+  }, [kind, slug, handleFact]);
 
-  const visibleFacts = showAll ? facts : facts.slice(0, INITIAL_LIMIT)
+  const visibleFacts = showAll ? facts : facts.slice(0, INITIAL_LIMIT);
 
   return (
     <section
@@ -107,26 +108,29 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
               <li
                 key={f.id}
                 className="wk-facts-item"
-                data-fact-type={f.type ?? 'observation'}
-                data-superseded={isSuperseded(f) ? 'true' : undefined}
+                data-fact-type={f.type ?? "observation"}
+                data-superseded={isSuperseded(f) ? "true" : undefined}
               >
                 <PixelAvatar slug={f.recorded_by} size={14} />
                 <div className="wk-facts-body">
                   <span className="wk-facts-text">{f.text}</span>
                   {f.triplet && (
-                    <span className="wk-facts-triplet" aria-label="Typed triplet">
+                    <span
+                      className="wk-facts-triplet"
+                      aria-label="Typed triplet"
+                    >
                       <code>{f.triplet.subject}</code>
-                      {' — '}
+                      {" — "}
                       <code>{f.triplet.predicate}</code>
-                      {' → '}
+                      {" → "}
                       <code>{f.triplet.object}</code>
                     </span>
                   )}
                   <span className="wk-facts-meta">
                     {f.type && <span className="wk-facts-type">{f.type}</span>}
-                    {typeof f.confidence === 'number' && (
+                    {typeof f.confidence === "number" && (
                       <>
-                        {f.type && ' · '}
+                        {f.type && " · "}
                         <span
                           className="wk-facts-confidence"
                           aria-label={`Confidence ${(f.confidence * 100).toFixed(0)} percent`}
@@ -135,19 +139,23 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
                         </span>
                       </>
                     )}
-                    {(f.type || typeof f.confidence === 'number') && ' · '}
+                    {(f.type || typeof f.confidence === "number") && " · "}
                     {formatAgentName(f.recorded_by)}
-                    {' · '}
-                    <time dateTime={f.created_at}>{formatShortTs(f.created_at)}</time>
+                    {" · "}
+                    <time dateTime={f.created_at}>
+                      {formatShortTs(f.created_at)}
+                    </time>
                     {formatValidity(f) && (
                       <>
-                        {' · '}
-                        <span className="wk-facts-validity">{formatValidity(f)}</span>
+                        {" · "}
+                        <span className="wk-facts-validity">
+                          {formatValidity(f)}
+                        </span>
                       </>
                     )}
                     {f.reinforced_at && (
                       <>
-                        {' · '}
+                        {" · "}
                         <span
                           className="wk-facts-reinforced"
                           aria-label={`Reinforced ${formatShortTs(f.reinforced_at)}`}
@@ -158,7 +166,7 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
                     )}
                     {isWikiSource(f.source_path) && (
                       <>
-                        {' · '}
+                        {" · "}
                         <a
                           className="wk-facts-source"
                           href={`#/wiki/${f.source_path}`}
@@ -170,10 +178,10 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
                     )}
                     {f.supersedes && f.supersedes.length > 0 && (
                       <>
-                        {' · '}
+                        {" · "}
                         <span
                           className="wk-facts-supersedes"
-                          aria-label={`Supersedes ${f.supersedes.length} prior fact${f.supersedes.length === 1 ? '' : 's'}`}
+                          aria-label={`Supersedes ${f.supersedes.length} prior fact${f.supersedes.length === 1 ? "" : "s"}`}
                         >
                           supersedes {f.supersedes.length} prior
                         </span>
@@ -191,14 +199,14 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
               onClick={() => setShowAll((v) => !v)}
             >
               {showAll
-                ? 'show recent only'
+                ? "show recent only"
                 : `show all (${facts.length - INITIAL_LIMIT} more)`}
             </button>
           )}
         </>
       )}
     </section>
-  )
+  );
 }
 
 /** Checks whether a source_path resolves to a wiki-renderable location.
@@ -208,27 +216,27 @@ export default function FactsOnFile({ kind, slug }: FactsOnFileProps) {
  *  agents/ is the legacy v1.2 per-agent notebook path and is retained for
  *  backwards compatibility with existing fact rows. */
 function isWikiSource(path?: string): path is string {
-  if (!path) return false
+  if (!path) return false;
   return (
-    path.startsWith('wiki/artifacts/') ||
-    path.startsWith('team/') ||
-    path.startsWith('wiki/facts/') ||
-    path.startsWith('wiki/insights/') ||
-    path.startsWith('wiki/playbooks/') ||
-    path.startsWith('agents/') // legacy v1.2 per-agent notebook path
-  )
+    path.startsWith("wiki/artifacts/") ||
+    path.startsWith("team/") ||
+    path.startsWith("wiki/facts/") ||
+    path.startsWith("wiki/insights/") ||
+    path.startsWith("wiki/playbooks/") ||
+    path.startsWith("agents/") // legacy v1.2 per-agent notebook path
+  );
 }
 
 function sourceLabel(path: string): string {
-  const base = path.replace(/\.md$/, '')
-  const tail = base.split('/').slice(-2).join('/')
-  return tail || base
+  const base = path.replace(/\.md$/, "");
+  const tail = base.split("/").slice(-2).join("/");
+  return tail || base;
 }
 
 function formatShortTs(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toISOString().slice(0, 10)
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toISOString().slice(0, 10);
 }
 
 /** A fact is superseded when its temporal validity has ended.
@@ -236,15 +244,15 @@ function formatShortTs(iso: string): string {
  *  A fact that HAS a supersedes list is the NEWER fact (it replaced others);
  *  the supersedes list alone does NOT make this fact superseded. */
 function isSuperseded(f: Fact): boolean {
-  return Boolean(f.valid_until)
+  return Boolean(f.valid_until);
 }
 
 function formatValidity(f: Fact): string | null {
-  if (!f.valid_from && !f.valid_until) return null
-  const from = f.valid_from ? formatShortTs(f.valid_from) : null
-  const until = f.valid_until ? formatShortTs(f.valid_until) : null
-  if (from && until) return `valid ${from} → ${until}`
-  if (until) return `valid until ${until}`
-  if (from) return `valid from ${from}`
-  return null
+  if (!(f.valid_from || f.valid_until)) return null;
+  const from = f.valid_from ? formatShortTs(f.valid_from) : null;
+  const until = f.valid_until ? formatShortTs(f.valid_until) : null;
+  if (from && until) return `valid ${from} → ${until}`;
+  if (until) return `valid until ${until}`;
+  if (from) return `valid from ${from}`;
+  return null;
 }

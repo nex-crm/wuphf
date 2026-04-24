@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react'
-import BookshelfCatalog from './BookshelfCatalog'
-import AgentNotebookView from './AgentNotebookView'
+import { useEffect, useState } from "react";
+
 import {
   fetchCatalog,
-  subscribeNotebookEvents,
   type NotebookCatalogSummary,
-} from '../../api/notebook'
-import '../../styles/notebook.css'
+  subscribeNotebookEvents,
+} from "../../api/notebook";
+import AgentNotebookView from "./AgentNotebookView";
+import BookshelfCatalog from "./BookshelfCatalog";
+import "../../styles/notebook.css";
 
 /**
  * Route root for the `/notebooks` surface. Applies `.notebook-surface` so
@@ -19,12 +20,12 @@ import '../../styles/notebook.css'
  */
 
 interface NotebookProps {
-  agentSlug: string | null
-  entrySlug: string | null
-  onOpenCatalog: () => void
-  onOpenAgent: (agentSlug: string) => void
-  onOpenEntry: (agentSlug: string, entrySlug: string | null) => void
-  onNavigateWiki: (wikiPath: string) => void
+  agentSlug: string | null;
+  entrySlug: string | null;
+  onOpenCatalog: () => void;
+  onOpenAgent: (agentSlug: string) => void;
+  onOpenEntry: (agentSlug: string, entrySlug: string | null) => void;
+  onNavigateWiki: (wikiPath: string) => void;
 }
 
 export default function Notebook({
@@ -35,38 +36,49 @@ export default function Notebook({
   onOpenEntry,
   onNavigateWiki,
 }: NotebookProps) {
-  const [catalog, setCatalog] = useState<NotebookCatalogSummary | null>(null)
-  const [catalogLoading, setCatalogLoading] = useState(!agentSlug)
-  const [catalogError, setCatalogError] = useState<string | null>(null)
-  const [refreshTick, setRefreshTick] = useState(0)
+  const [catalog, setCatalog] = useState<NotebookCatalogSummary | null>(null);
+  const [catalogLoading, setCatalogLoading] = useState(!agentSlug);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   // Fetch catalog when rendering the bookshelf.
   useEffect(() => {
-    if (agentSlug) return
-    let cancelled = false
-    setCatalogLoading(true)
-    setCatalogError(null)
+    if (agentSlug) return;
+    let cancelled = false;
+    setCatalogLoading(true);
+    setCatalogError(null);
     fetchCatalog()
-      .then((c) => { if (!cancelled) setCatalog(c) })
-      .catch((err: unknown) => {
-        if (!cancelled) setCatalogError(err instanceof Error ? err.message : 'Failed to load')
+      .then((c) => {
+        if (!cancelled) setCatalog(c);
       })
-      .finally(() => { if (!cancelled) setCatalogLoading(false) })
-    return () => { cancelled = true }
-  }, [agentSlug, refreshTick])
+      .catch((err: unknown) => {
+        if (!cancelled)
+          setCatalogError(
+            err instanceof Error ? err.message : "Failed to load",
+          );
+      })
+      .finally(() => {
+        if (!cancelled) setCatalogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentSlug]);
 
   // Subscribe to broker notebook:write + review:state_change events; on
   // any event, nudge the active view to refetch by bumping the tick.
   useEffect(() => {
     const unsub = subscribeNotebookEvents(() => {
-      setRefreshTick((n) => n + 1)
-    })
-    return unsub
-  }, [])
+      setRefreshTick((n) => n + 1);
+    });
+    return unsub;
+  }, []);
 
   return (
     <div className="notebook-surface" data-testid="notebook-surface">
-      <a href="#nb-entry-main" className="nb-skip-link">Skip to entry</a>
+      <a href="#nb-entry-main" className="nb-skip-link">
+        Skip to entry
+      </a>
       {agentSlug ? (
         <AgentNotebookView
           key={`${agentSlug}-${refreshTick}`}
@@ -77,10 +89,14 @@ export default function Notebook({
           onNavigateWiki={onNavigateWiki}
         />
       ) : catalogLoading ? (
-        <div className="nb-loading" aria-busy="true">Loading bookshelf…</div>
+        <div className="nb-loading" aria-busy="true">
+          Loading bookshelf…
+        </div>
       ) : catalogError ? (
         <div className="nb-article">
-          <p className="nb-error" role="alert">Error: {catalogError}</p>
+          <p className="nb-error" role="alert">
+            Error: {catalogError}
+          </p>
           <button
             type="button"
             className="nb-retry-btn"
@@ -97,5 +113,5 @@ export default function Notebook({
         />
       ) : null}
     </div>
-  )
+  );
 }

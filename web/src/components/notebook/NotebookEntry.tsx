@@ -1,12 +1,18 @@
-import { useCallback, useState } from 'react'
-import DraftStamp from './DraftStamp'
-import ByLineStrip from './ByLineStrip'
-import EntryBody from './EntryBody'
-import PromotedBackCallout from './PromotedBackCallout'
-import PromoteButton from './PromoteButton'
-import InlineReviewThread from './InlineReviewThread'
-import PosterityLine from './PosterityLine'
-import { promoteEntry, type NotebookEntry, type ReviewState, type ReviewComment } from '../../api/notebook'
+import { useCallback, useState } from "react";
+
+import {
+  type NotebookEntry,
+  promoteEntry,
+  type ReviewComment,
+  type ReviewState,
+} from "../../api/notebook";
+import ByLineStrip from "./ByLineStrip";
+import DraftStamp from "./DraftStamp";
+import EntryBody from "./EntryBody";
+import InlineReviewThread from "./InlineReviewThread";
+import PosterityLine from "./PosterityLine";
+import PromoteButton from "./PromoteButton";
+import PromotedBackCallout from "./PromotedBackCallout";
 
 /**
  * Full notebook-entry article view. Composes the ruled-paper surface with
@@ -19,25 +25,27 @@ import { promoteEntry, type NotebookEntry, type ReviewState, type ReviewComment 
  */
 
 interface NotebookEntryProps {
-  entry: NotebookEntry
+  entry: NotebookEntry;
   /** Comments threaded against the active review, if any. */
-  reviewComments?: ReviewComment[]
-  reviewState?: ReviewState | null
-  onNavigateCatalog?: () => void
-  onNavigateAgent?: (agentSlug: string) => void
-  onNavigateWiki?: (wikiPath: string) => void
+  reviewComments?: ReviewComment[];
+  reviewState?: ReviewState | null;
+  onNavigateCatalog?: () => void;
+  onNavigateAgent?: (agentSlug: string) => void;
+  onNavigateWiki?: (wikiPath: string) => void;
 }
 
-function statusToReviewState(status: NotebookEntry['status']): ReviewState | null {
+function statusToReviewState(
+  status: NotebookEntry["status"],
+): ReviewState | null {
   switch (status) {
-    case 'in-review':
-      return 'in-review'
-    case 'changes-requested':
-      return 'changes-requested'
-    case 'promoted':
-      return 'approved'
+    case "in-review":
+      return "in-review";
+    case "changes-requested":
+      return "changes-requested";
+    case "promoted":
+      return "approved";
     default:
-      return null
+      return null;
   }
 }
 
@@ -50,28 +58,28 @@ export default function NotebookEntryView({
   onNavigateWiki,
 }: NotebookEntryProps) {
   const [pending, setPending] = useState(
-    entry.status === 'in-review' || entry.status === 'changes-requested',
-  )
-  const [promoteError, setPromoteError] = useState<string | null>(null)
+    entry.status === "in-review" || entry.status === "changes-requested",
+  );
+  const [promoteError, setPromoteError] = useState<string | null>(null);
 
   const handlePromote = useCallback(async () => {
-    setPromoteError(null)
-    setPending(true)
+    setPromoteError(null);
+    setPending(true);
     try {
       await promoteEntry(entry.agent_slug, entry.entry_slug, {
         proposed_wiki_path: `drafts/${entry.agent_slug}-${entry.entry_slug}`,
         reviewer_slug: entry.reviewer_slug,
-      })
+      });
     } catch (err: unknown) {
-      setPending(false)
-      setPromoteError(err instanceof Error ? err.message : 'Promote failed')
+      setPending(false);
+      setPromoteError(err instanceof Error ? err.message : "Promote failed");
     }
-  }, [entry.agent_slug, entry.entry_slug, entry.reviewer_slug])
+  }, [entry.agent_slug, entry.entry_slug, entry.reviewer_slug]);
 
-  const effectiveReviewState = reviewState ?? statusToReviewState(entry.status)
+  const effectiveReviewState = reviewState ?? statusToReviewState(entry.status);
 
   // DRAFT stamp only appears when the entry has never been reviewed/promoted.
-  const showDraftStamp = entry.status === 'draft'
+  const showDraftStamp = entry.status === "draft";
 
   return (
     <main
@@ -84,32 +92,34 @@ export default function NotebookEntryView({
           href="#/apps/notebooks"
           onClick={(e) => {
             if (onNavigateCatalog) {
-              e.preventDefault()
-              onNavigateCatalog()
+              e.preventDefault();
+              onNavigateCatalog();
             }
           }}
         >
           Notebooks
-        </a>{' '}
-        /{' '}
+        </a>{" "}
+        /{" "}
         <a
           href={`#/notebooks/${encodeURIComponent(entry.agent_slug)}`}
           onClick={(e) => {
             if (onNavigateAgent) {
-              e.preventDefault()
-              onNavigateAgent(entry.agent_slug)
+              e.preventDefault();
+              onNavigateAgent(entry.agent_slug);
             }
           }}
         >
           {entry.agent_slug}
-        </a>{' '}
+        </a>{" "}
         / <strong>{entry.entry_slug}</strong>
       </nav>
 
       {showDraftStamp && <DraftStamp />}
 
       <h1 className="nb-entry-title">{entry.title}</h1>
-      {entry.subtitle && <div className="nb-entry-subtitle">{entry.subtitle}</div>}
+      {entry.subtitle && (
+        <div className="nb-entry-subtitle">{entry.subtitle}</div>
+      )}
 
       <ByLineStrip
         authorSlug={entry.agent_slug}
@@ -122,7 +132,10 @@ export default function NotebookEntryView({
       <EntryBody markdown={entry.body_md} onWikiNavigate={onNavigateWiki} />
 
       {entry.promoted_back && (
-        <PromotedBackCallout link={entry.promoted_back} onNavigate={onNavigateWiki} />
+        <PromotedBackCallout
+          link={entry.promoted_back}
+          onNavigate={onNavigateWiki}
+        />
       )}
 
       <InlineReviewThread
@@ -148,5 +161,5 @@ export default function NotebookEntryView({
         filePath={entry.file_path}
       />
     </main>
-  )
+  );
 }

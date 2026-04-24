@@ -10,63 +10,63 @@
  * message.
  */
 
-import { get, post, sseURL } from './client'
+import { get, post, sseURL } from "./client";
 
 // ── Types ────────────────────────────────────────────────────────
 
-export type PlaybookOutcome = 'success' | 'partial' | 'aborted'
+export type PlaybookOutcome = "success" | "partial" | "aborted";
 
 export interface PlaybookSummary {
-  slug: string
-  title: string
-  source_path: string
-  skill_path: string
-  skill_exists: boolean
-  execution_log_path: string
-  execution_count: number
-  runnable_by_agents: string[]
+  slug: string;
+  title: string;
+  source_path: string;
+  skill_path: string;
+  skill_exists: boolean;
+  execution_log_path: string;
+  execution_count: number;
+  runnable_by_agents: string[];
 }
 
 export interface PlaybookExecution {
-  id: string
-  slug: string
-  outcome: PlaybookOutcome
-  summary: string
-  notes?: string
-  recorded_by: string
-  created_at: string
+  id: string;
+  slug: string;
+  outcome: PlaybookOutcome;
+  summary: string;
+  notes?: string;
+  recorded_by: string;
+  created_at: string;
 }
 
 export interface PlaybookExecutionRecordedEvent {
-  slug: string
-  path: string
-  commit_sha: string
-  recorded_by: string
-  timestamp: string
+  slug: string;
+  path: string;
+  commit_sha: string;
+  recorded_by: string;
+  timestamp: string;
 }
 
 export interface PlaybookSynthesizedEvent {
-  slug: string
-  commit_sha: string
-  execution_count: number
-  synthesized_ts: string
-  source_path: string
-  triggered_by_user: boolean
+  slug: string;
+  commit_sha: string;
+  execution_count: number;
+  synthesized_ts: string;
+  source_path: string;
+  triggered_by_user: boolean;
 }
 
 export interface PlaybookSynthesisStatus {
-  slug: string
-  source_path: string
-  execution_count: number
-  last_synthesized_ts: string
-  last_synthesized_sha: string
-  executions_since_last_synthesis: number
-  threshold: number
+  slug: string;
+  source_path: string;
+  execution_count: number;
+  last_synthesized_ts: string;
+  last_synthesized_sha: string;
+  executions_since_last_synthesis: number;
+  threshold: number;
 }
 
 export interface PlaybookSynthesizeResponse {
-  synthesis_id: number
-  queued_at: string
+  synthesis_id: number;
+  queued_at: string;
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────
@@ -74,13 +74,13 @@ export interface PlaybookSynthesizeResponse {
 /** `GET /playbook/list` — every source playbook + its compiled skill status. */
 export async function fetchPlaybooks(): Promise<PlaybookSummary[]> {
   try {
-    const res = await get<{ playbooks?: PlaybookSummary[] } | PlaybookSummary[]>(
-      '/playbook/list',
-    )
-    if (Array.isArray(res)) return res
-    return Array.isArray(res?.playbooks) ? res.playbooks : []
+    const res = await get<
+      { playbooks?: PlaybookSummary[] } | PlaybookSummary[]
+    >("/playbook/list");
+    if (Array.isArray(res)) return res;
+    return Array.isArray(res?.playbooks) ? res.playbooks : [];
   } catch {
-    return []
+    return [];
   }
 }
 
@@ -89,11 +89,11 @@ export async function synthesizeNow(
   slug: string,
 ): Promise<PlaybookSynthesizeResponse | null> {
   try {
-    return await post<PlaybookSynthesizeResponse>('/playbook/synthesize', {
+    return await post<PlaybookSynthesizeResponse>("/playbook/synthesize", {
       slug,
-    })
+    });
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -104,9 +104,9 @@ export async function fetchSynthesisStatus(
   try {
     return await get<PlaybookSynthesisStatus>(
       `/playbook/synthesis-status?slug=${encodeURIComponent(slug)}`,
-    )
+    );
   } catch {
-    return null
+    return null;
   }
 }
 
@@ -117,10 +117,10 @@ export async function fetchPlaybookExecutions(
   try {
     const res = await get<{ executions: PlaybookExecution[] }>(
       `/playbook/executions?slug=${encodeURIComponent(slug)}`,
-    )
-    return Array.isArray(res?.executions) ? res.executions : []
+    );
+    return Array.isArray(res?.executions) ? res.executions : [];
   } catch {
-    return []
+    return [];
   }
 }
 
@@ -137,48 +137,48 @@ export function subscribePlaybookEvents(
   slug: string,
   onExecutionRecorded: (ev: PlaybookExecutionRecordedEvent) => void,
 ): () => void {
-  let closed = false
-  let source: EventSource | null = null
+  let closed = false;
+  let source: EventSource | null = null;
 
   const handler = (ev: MessageEvent) => {
-    if (closed) return
+    if (closed) return;
     try {
-      const data = JSON.parse(ev.data) as PlaybookExecutionRecordedEvent
+      const data = JSON.parse(ev.data) as PlaybookExecutionRecordedEvent;
       if (data && data.slug === slug) {
-        onExecutionRecorded(data)
+        onExecutionRecorded(data);
       }
     } catch {
       // ignore malformed events
     }
-  }
+  };
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource
-    if (!ES) return () => {}
-    source = new ES(sseURL('/events'))
+    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
+    if (!ES) return () => {};
+    source = new ES(sseURL("/events"));
     source.addEventListener(
-      'playbook:execution_recorded',
+      "playbook:execution_recorded",
       handler as EventListener,
-    )
+    );
     source.onerror = () => {
       // Keep the source open — EventSource auto-reconnects on transient
       // network blips. Closing here would drop live updates.
-    }
+    };
   } catch {
-    source = null
+    source = null;
   }
 
   return () => {
-    closed = true
+    closed = true;
     if (source) {
       source.removeEventListener(
-        'playbook:execution_recorded',
+        "playbook:execution_recorded",
         handler as EventListener,
-      )
-      source.close()
-      source = null
+      );
+      source.close();
+      source = null;
     }
-  }
+  };
 }
 
 /**
@@ -191,53 +191,54 @@ export function subscribePlaybookSynthesizedEvents(
   slug: string,
   onSynthesized: (ev: PlaybookSynthesizedEvent) => void,
 ): () => void {
-  let closed = false
-  let source: EventSource | null = null
+  let closed = false;
+  let source: EventSource | null = null;
 
   const handler = (ev: MessageEvent) => {
-    if (closed) return
+    if (closed) return;
     try {
-      const data = JSON.parse(ev.data) as PlaybookSynthesizedEvent
+      const data = JSON.parse(ev.data) as PlaybookSynthesizedEvent;
       if (data && data.slug === slug) {
-        onSynthesized(data)
+        onSynthesized(data);
       }
     } catch {
       // ignore malformed events
     }
-  }
+  };
 
   try {
-    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource
-    if (!ES) return () => {}
-    source = new ES(sseURL('/events'))
-    source.addEventListener('playbook:synthesized', handler as EventListener)
+    const ES = (globalThis as { EventSource?: typeof EventSource }).EventSource;
+    if (!ES) return () => {};
+    source = new ES(sseURL("/events"));
+    source.addEventListener("playbook:synthesized", handler as EventListener);
     source.onerror = () => {
       // Keep open; EventSource auto-reconnects.
-    }
+    };
   } catch {
-    source = null
+    source = null;
   }
 
   return () => {
-    closed = true
+    closed = true;
     if (source) {
       source.removeEventListener(
-        'playbook:synthesized',
+        "playbook:synthesized",
         handler as EventListener,
-      )
-      source.close()
-      source = null
+      );
+      source.close();
+      source = null;
     }
-  }
+  };
 }
 
 /** Detect whether a wiki path is a source playbook article. Matches the
  *  backend regex `team/playbooks/{slug}.md` (with optional `team/` prefix
  *  and optional `.md` suffix, to match dev/mock shapes). */
-const PLAYBOOK_PATH_RE = /^(?:team\/)?playbooks\/([a-z0-9][a-z0-9-]*)(?:\.md)?$/
+const PLAYBOOK_PATH_RE =
+  /^(?:team\/)?playbooks\/([a-z0-9][a-z0-9-]*)(?:\.md)?$/;
 
 export function detectPlaybook(path: string): { slug: string } | null {
-  const m = path.match(PLAYBOOK_PATH_RE)
-  if (!m) return null
-  return { slug: m[1] }
+  const m = path.match(PLAYBOOK_PATH_RE);
+  if (!m) return null;
+  return { slug: m[1] };
 }

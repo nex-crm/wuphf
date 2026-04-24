@@ -1,14 +1,14 @@
-import { formatRelativeTime } from '../../lib/format'
+import { formatRelativeTime } from "../../lib/format";
 
 /** Right-rail page statistics panel with mono-font values. */
 
 interface PageStatsPanelProps {
-  revisions: number
-  contributors: number
-  wordCount: number
-  created: string
-  lastEdit: string
-  viewed?: number
+  revisions: number;
+  contributors: number;
+  wordCount: number;
+  created: string;
+  lastEdit: string;
+  viewed?: number;
 }
 
 export default function PageStatsPanel({
@@ -33,7 +33,7 @@ export default function PageStatsPanel({
         <dd>{shortDate(created)}</dd>
         <dt>Last edit</dt>
         <dd>{safeRelative(lastEdit)}</dd>
-        {typeof viewed === 'number' && (
+        {typeof viewed === "number" && (
           <>
             <dt>Viewed</dt>
             <dd>{viewed} times</dd>
@@ -41,23 +41,23 @@ export default function PageStatsPanel({
         )}
       </dl>
     </div>
-  )
+  );
 }
 
 function shortDate(iso: string): string {
   try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return iso
-    return d.toISOString().slice(0, 10)
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return iso;
+    return d.toISOString().slice(0, 10);
   } catch {
-    return iso
+    return iso;
   }
 }
 
 function safeRelative(iso: string): string {
   try {
-    return formatRelativeTime(iso)
+    return formatRelativeTime(iso);
   } catch {
-    return iso
+    return iso;
   }
 }

@@ -1,10 +1,11 @@
-import { useMemo } from 'react'
-import { PixelAvatar } from '../ui/PixelAvatar'
-import { formatDateLabel } from '../../lib/format'
+import { useMemo } from "react";
+
 import type {
   NotebookAgentSummary,
   NotebookEntrySummary,
-} from '../../api/notebook'
+} from "../../api/notebook";
+import { formatDateLabel } from "../../lib/format";
+import { PixelAvatar } from "../ui/PixelAvatar";
 
 /**
  * Left-hand author shelf for `/notebooks/{agent-slug}`. Shows the agent's
@@ -13,51 +14,57 @@ import type {
  */
 
 interface AuthorShelfSidebarProps {
-  agent: NotebookAgentSummary
-  entries: NotebookEntrySummary[]
-  currentEntrySlug?: string | null
-  onSelect: (entrySlug: string) => void
+  agent: NotebookAgentSummary;
+  entries: NotebookEntrySummary[];
+  currentEntrySlug?: string | null;
+  onSelect: (entrySlug: string) => void;
 }
 
 interface Group {
-  label: string
-  key: string
-  items: NotebookEntrySummary[]
+  label: string;
+  key: string;
+  items: NotebookEntrySummary[];
 }
 
 function groupByDay(entries: NotebookEntrySummary[]): Group[] {
-  const groups: Record<string, Group> = {}
-  const order: string[] = []
+  const groups: Record<string, Group> = {};
+  const order: string[] = [];
   for (const e of entries) {
-    const d = new Date(e.last_edited_ts)
-    const key = isNaN(d.getTime())
-      ? 'unknown'
-      : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const d = new Date(e.last_edited_ts);
+    const key = Number.isNaN(d.getTime())
+      ? "unknown"
+      : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
     if (!groups[key]) {
-      const label = isNaN(d.getTime())
-        ? 'Unknown'
-        : `${formatDateLabel(e.last_edited_ts)} · ${key}`
-      groups[key] = { label, key, items: [] }
-      order.push(key)
+      const label = Number.isNaN(d.getTime())
+        ? "Unknown"
+        : `${formatDateLabel(e.last_edited_ts)} · ${key}`;
+      groups[key] = { label, key, items: [] };
+      order.push(key);
     }
-    groups[key].items.push(e)
+    groups[key].items.push(e);
   }
-  order.sort((a, b) => (a < b ? 1 : -1))
-  return order.map((k) => groups[k])
+  order.sort((a, b) => (a < b ? 1 : -1));
+  return order.map((k) => groups[k]);
 }
 
-function statusTag(status: NotebookEntrySummary['status']): { label: string; className: string } | null {
-  if (status === 'promoted') return { label: '→ Promoted', className: 'nb-promoted' }
-  if (status === 'draft') return { label: 'DRAFT', className: 'nb-status-draft' }
-  if (status === 'in-review') return { label: 'in review', className: 'nb-status-review' }
-  if (status === 'changes-requested') return { label: 'changes req.', className: 'nb-status-changes' }
-  return null
+function statusTag(
+  status: NotebookEntrySummary["status"],
+): { label: string; className: string } | null {
+  if (status === "promoted")
+    return { label: "→ Promoted", className: "nb-promoted" };
+  if (status === "draft")
+    return { label: "DRAFT", className: "nb-status-draft" };
+  if (status === "in-review")
+    return { label: "in review", className: "nb-status-review" };
+  if (status === "changes-requested")
+    return { label: "changes req.", className: "nb-status-changes" };
+  return null;
 }
 
 function formatTimeOnly(iso: string): string {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 export default function AuthorShelfSidebar({
@@ -66,13 +73,10 @@ export default function AuthorShelfSidebar({
   currentEntrySlug,
   onSelect,
 }: AuthorShelfSidebarProps) {
-  const groups = useMemo(() => groupByDay(entries), [entries])
+  const groups = useMemo(() => groupByDay(entries), [entries]);
 
   return (
-    <aside
-      className="nb-shelf"
-      aria-label={`${agent.name}'s notebook entries`}
-    >
+    <aside className="nb-shelf" aria-label={`${agent.name}'s notebook entries`}>
       <div className="nb-shelf-head">
         <PixelAvatar slug={agent.agent_slug} size={22} />
         <div>
@@ -89,33 +93,36 @@ export default function AuthorShelfSidebar({
               {g.label}
             </li>,
             ...g.items.map((item) => {
-              const tag = statusTag(item.status)
-              const isCurrent = item.entry_slug === currentEntrySlug
+              const tag = statusTag(item.status);
+              const isCurrent = item.entry_slug === currentEntrySlug;
               return (
-                <li key={item.entry_slug} style={{ padding: 0, listStyle: 'none' }}>
+                <li
+                  key={item.entry_slug}
+                  style={{ padding: 0, listStyle: "none" }}
+                >
                   <button
                     type="button"
-                    className={`nb-shelf-item${isCurrent ? ' is-current' : ''}`}
+                    className={`nb-shelf-item${isCurrent ? " is-current" : ""}`}
                     onClick={() => onSelect(item.entry_slug)}
-                    aria-current={isCurrent ? 'page' : undefined}
+                    aria-current={isCurrent ? "page" : undefined}
                   >
                     <span className="nb-shelf-t">{item.title}</span>
                     <span className="nb-shelf-meta">
                       {formatTimeOnly(item.last_edited_ts)}
                       {tag && (
                         <>
-                          {' · '}
+                          {" · "}
                           <span className={tag.className}>{tag.label}</span>
                         </>
                       )}
                     </span>
                   </button>
                 </li>
-              )
+              );
             }),
           ])}
         </ul>
       )}
     </aside>
-  )
+  );
 }

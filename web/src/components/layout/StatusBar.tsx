@@ -1,14 +1,15 @@
-import { useQuery } from '@tanstack/react-query'
-import { useAppStore, isDMChannel } from '../../stores/app'
-import { useOfficeMembers } from '../../hooks/useMembers'
-import { getHealth } from '../../api/client'
-import { Kbd } from '../ui/Kbd'
+import { useQuery } from "@tanstack/react-query";
+
+import { getHealth } from "../../api/client";
+import { useOfficeMembers } from "../../hooks/useMembers";
+import { isDMChannel, useAppStore } from "../../stores/app";
+import { Kbd } from "../ui/Kbd";
 
 interface HealthSnapshot {
-  status: string
-  provider?: string
-  provider_model?: string
-  agents?: Record<string, unknown>
+  status: string;
+  provider?: string;
+  provider_model?: string;
+  agents?: Record<string, unknown>;
 }
 
 /**
@@ -16,33 +17,34 @@ interface HealthSnapshot {
  * mode (office vs 1:1), agent count, broker connection, and runtime provider.
  */
 export function StatusBar() {
-  const currentChannel = useAppStore((s) => s.currentChannel)
-  const currentApp = useAppStore((s) => s.currentApp)
-  const channelMeta = useAppStore((s) => s.channelMeta)
-  const brokerConnected = useAppStore((s) => s.brokerConnected)
-  const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen)
-  const { data: members = [] } = useOfficeMembers()
-  const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null
+  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentApp = useAppStore((s) => s.currentApp);
+  const channelMeta = useAppStore((s) => s.channelMeta);
+  const brokerConnected = useAppStore((s) => s.brokerConnected);
+  const setComposerHelpOpen = useAppStore((s) => s.setComposerHelpOpen);
+  const { data: members = [] } = useOfficeMembers();
+  const dm = !currentApp ? isDMChannel(currentChannel, channelMeta) : null;
 
   const { data: health } = useQuery<HealthSnapshot>({
-    queryKey: ['health'],
+    queryKey: ["health"],
     queryFn: () => getHealth() as Promise<HealthSnapshot>,
     refetchInterval: 15_000,
     enabled: brokerConnected,
-  })
+  });
 
   const agentCount = members.filter(
-    (m) => m.slug && m.slug !== 'human' && m.slug !== 'you' && m.slug !== 'system',
-  ).length
+    (m) =>
+      m.slug && m.slug !== "human" && m.slug !== "you" && m.slug !== "system",
+  ).length;
 
   const channelLabel = currentApp
     ? currentApp
     : dm
       ? `@${dm.agentSlug}`
-      : `# ${currentChannel}`
-  const modeLabel = dm ? '1:1' : 'office'
-  const provider = health?.provider
-  const providerModel = health?.provider_model?.trim()
+      : `# ${currentChannel}`;
+  const modeLabel = dm ? "1:1" : "office";
+  const provider = health?.provider;
+  const providerModel = health?.provider_model?.trim();
 
   return (
     <div className="status-bar">
@@ -59,7 +61,9 @@ export function StatusBar() {
         <Kbd size="sm">?</Kbd>
         <span>shortcuts</span>
       </button>
-      <span className="status-bar-item">{agentCount} agent{agentCount === 1 ? '' : 's'}</span>
+      <span className="status-bar-item">
+        {agentCount} agent{agentCount === 1 ? "" : "s"}
+      </span>
       {provider && (
         <span
           className="status-bar-item"
@@ -69,7 +73,7 @@ export function StatusBar() {
               : `Runtime provider: ${provider}`
           }
         >
-          {'⚙ '}
+          {"⚙ "}
           {provider}
           {providerModel && (
             <>
@@ -80,10 +84,10 @@ export function StatusBar() {
         </span>
       )}
       <span
-        className={`status-bar-item status-bar-conn${brokerConnected ? '' : ' disconnected'}`}
+        className={`status-bar-item status-bar-conn${brokerConnected ? "" : " disconnected"}`}
       >
-        {brokerConnected ? 'connected' : 'disconnected'}
+        {brokerConnected ? "connected" : "disconnected"}
       </span>
     </div>
-  )
+  );
 }

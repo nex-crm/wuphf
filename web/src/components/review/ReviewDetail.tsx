@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
-import InlineReviewThread from '../notebook/InlineReviewThread'
-import type { ReviewItem } from '../../api/notebook'
+import { useEffect } from "react";
+
+import type { ReviewItem } from "../../api/notebook";
+import InlineReviewThread from "../notebook/InlineReviewThread";
 
 /**
  * Right-side drawer that opens when a review card is clicked. No modal
@@ -9,10 +10,10 @@ import type { ReviewItem } from '../../api/notebook'
  */
 
 interface ReviewDetailProps {
-  review: ReviewItem
-  onClose: () => void
-  onApprove?: (id: string) => void
-  onRequestChanges?: (id: string) => void
+  review: ReviewItem;
+  onClose: () => void;
+  onApprove?: (id: string) => void;
+  onRequestChanges?: (id: string) => void;
 }
 
 export default function ReviewDetail({
@@ -23,11 +24,11 @@ export default function ReviewDetail({
 }: ReviewDetailProps) {
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
+      if (e.key === "Escape") onClose();
     }
-    window.addEventListener('keydown', handleKey)
-    return () => window.removeEventListener('keydown', handleKey)
-  }, [onClose])
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [onClose]);
 
   return (
     <>
@@ -60,9 +61,11 @@ export default function ReviewDetail({
           state={review.state}
           comments={review.comments}
           onApprove={onApprove ? () => onApprove(review.id) : undefined}
-          onRequestChanges={onRequestChanges ? () => onRequestChanges(review.id) : undefined}
+          onRequestChanges={
+            onRequestChanges ? () => onRequestChanges(review.id) : undefined
+          }
         />
       </aside>
     </>
-  )
+  );
 }

@@ -7,18 +7,18 @@
  * badges, review hints) drop anchored callouts.
  */
 
-import type { ReactNode } from 'react'
+import type { ReactNode } from "react";
 
 interface MarginaliaProps {
-  tag?: 'Q' | 'Next' | 'TODO' | string
-  children: ReactNode
+  tag?: "Q" | "Next" | "TODO" | string;
+  children: ReactNode;
 }
 
-export default function Marginalia({ tag = 'Q', children }: MarginaliaProps) {
+export default function Marginalia({ tag = "Q", children }: MarginaliaProps) {
   return (
     <aside className="nb-margin" role="note" aria-label={`Margin note: ${tag}`}>
       <span className="nb-margin-tag">{tag}:</span>
       {children}
     </aside>
-  )
+  );
 }

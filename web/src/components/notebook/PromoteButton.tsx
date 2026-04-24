@@ -1,4 +1,4 @@
-import { formatAgentName } from '../../lib/agentName'
+import { formatAgentName } from "../../lib/agentName";
 
 /**
  * Primary Promote-to-wiki button + Discard link. On click, transitions to a
@@ -7,11 +7,11 @@ import { formatAgentName } from '../../lib/agentName'
  */
 
 interface PromoteButtonProps {
-  reviewerSlug: string
-  pending: boolean
-  onPromote: () => void
-  onDiscard?: () => void
-  disabled?: boolean
+  reviewerSlug: string;
+  pending: boolean;
+  onPromote: () => void;
+  onDiscard?: () => void;
+  disabled?: boolean;
 }
 
 export default function PromoteButton({
@@ -21,16 +21,17 @@ export default function PromoteButton({
   onDiscard,
   disabled,
 }: PromoteButtonProps) {
-  const reviewerLabel = reviewerSlug === 'human-only'
-    ? 'a human reviewer'
-    : formatAgentName(reviewerSlug)
+  const reviewerLabel =
+    reviewerSlug === "human-only"
+      ? "a human reviewer"
+      : formatAgentName(reviewerSlug);
   return (
     <div className="nb-actions">
       {pending ? (
         <button
           type="button"
           className="nb-promote-btn is-pending"
-          disabled
+          disabled={true}
           aria-label={`Pending review by ${reviewerLabel}`}
         >
           Pending review by {reviewerLabel}
@@ -52,5 +53,5 @@ export default function PromoteButton({
         </button>
       )}
     </div>
-  )
+  );
 }

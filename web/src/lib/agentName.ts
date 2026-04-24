@@ -13,12 +13,14 @@
  *   formatAgentName('eng-1')    -> 'Eng-1'
  */
 export function formatAgentName(slug: string): string {
-  if (!slug) return ''
-  if (slug.length <= 3) return slug.toUpperCase()
+  if (!slug) return "";
+  if (slug.length <= 3) return slug.toUpperCase();
   return slug
-    .split('-')
+    .split("-")
     .map((part) =>
-      part.length === 0 ? part : part[0].toUpperCase() + part.slice(1).toLowerCase(),
+      part.length === 0
+        ? part
+        : part[0].toUpperCase() + part.slice(1).toLowerCase(),
     )
-    .join('-')
+    .join("-");
 }
