@@ -1,3 +1,0 @@
-# Alice
-
-Updated.
