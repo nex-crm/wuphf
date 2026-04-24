@@ -77,7 +77,13 @@ pre-commit:
         [ "$fail" -eq 0 ]
 
 pre-push:
-  parallel: true
+  # Serial, not parallel: running `go test ./...`, `go build ./cmd/wuphf`,
+  # and `vhs` concurrently contends for disk/CPU on workstations, and
+  # internal/team's wiki worker queue saturates under that load
+  # ("playbook: compile write timed out after 10s", "wiki: queue saturated,
+  # retry on next turn"). Same tests pass reliably when run sequentially.
+  # Until the wiki worker is bounded-queue-tolerant, keep pre-push serial.
+  parallel: false
   commands:
     test:
       # internal/team's former test-isolation bugs (shared ~/.wuphf/wiki,
