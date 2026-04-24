@@ -150,7 +150,6 @@ func TestChannelViewShowsThreadReplyLabel(t *testing.T) {
 }
 
 func TestThreadsStartCollapsedByDefault(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	m := newChannelModel(true) // explicit collapsed mode
 	m.width = 120
 	m.height = 30
@@ -186,7 +185,6 @@ func TestCountRepliesCountsNestedDescendants(t *testing.T) {
 }
 
 func TestRenderThreadPanelShowsNestedReplies(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	messages := []brokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root topic", Timestamp: "2026-03-24T10:00:00Z"},
 		{ID: "msg-2", From: "fe", Content: "First reply", ReplyTo: "msg-1", Timestamp: "2026-03-24T10:01:00Z"},
@@ -194,8 +192,8 @@ func TestRenderThreadPanelShowsNestedReplies(t *testing.T) {
 	}
 
 	view := stripANSI(renderThreadPanel(messages, "msg-1", 44, 18, nil, 0, 0, "", true, false))
-	if !strings.Contains(view, "Reply one") || !strings.Contains(view, "Reply two") {
-		t.Fatalf("expected thread panel to count nested replies, got %q", view)
+	if !strings.Contains(view, "First reply") {
+		t.Fatalf("expected first reply to render in thread panel, got %q", view)
 	}
 	if !strings.Contains(view, "Nested reply") {
 		t.Fatalf("expected nested reply to render in thread panel, got %q", view)
@@ -618,7 +616,6 @@ func TestHumanFacingMessageSwitchesBackToMessages(t *testing.T) {
 }
 
 func TestInitialHumanFacingHistoryDoesNotForceMessagesApp(t *testing.T) {
-	t.Skip("skipped: pre-existing failure, needs CI environment fix")
 	m := newChannelModelWithApp(false, officeAppPolicies)
 
 	next, _ := m.Update(channelMsg{messages: []brokerMessage{
@@ -1216,7 +1213,6 @@ func TestChannelViewRendersNexAutomationMessage(t *testing.T) {
 }
 
 func TestReplyCommandEntersReplyMode(t *testing.T) {
-	t.Skip("skipped: pre-existing failure, needs CI environment fix")
 	m := newChannelModel(false)
 	m.messages = []brokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root topic"},
@@ -1236,7 +1232,6 @@ func TestReplyCommandEntersReplyMode(t *testing.T) {
 }
 
 func TestExpandCommandExpandsThread(t *testing.T) {
-	t.Skip("skipped: pre-existing failure, needs CI environment fix")
 	m := newChannelModel(false)
 	m.messages = []brokerMessage{
 		{ID: "msg-1", From: "ceo", Content: "Root topic"},
@@ -1254,7 +1249,6 @@ func TestExpandCommandExpandsThread(t *testing.T) {
 }
 
 func TestCancelCommandClearsReplyMode(t *testing.T) {
-	t.Skip("skipped: pre-existing failure, needs CI environment fix")
 	m := newChannelModel(false)
 	m.replyToID = "msg-1"
 	m.input = []rune("/cancel")
@@ -1272,7 +1266,6 @@ func TestCancelCommandClearsReplyMode(t *testing.T) {
 }
 
 func TestInitCommandStartsSetupFlow(t *testing.T) {
-	t.Skip("skipped: pre-existing failure, needs CI environment fix")
 	m := newChannelModel(false)
 	m.input = []rune("/init")
 	m.inputPos = len(m.input)
@@ -1509,7 +1502,6 @@ func TestOneOnOneSlashAutocompleteShowsResetAndHidesChannels(t *testing.T) {
 }
 
 func TestSlashAutocompleteEnterSubmitsSelectedCommand(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.input = []rune("/in")
 	m.inputPos = len(m.input)
@@ -1527,7 +1519,6 @@ func TestSlashAutocompleteEnterSubmitsSelectedCommand(t *testing.T) {
 }
 
 func TestThreadSlashAutocompleteEnterSubmitsSelectedCommand(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.threadPanelOpen = true
 	m.threadPanelID = "msg-1"
@@ -1548,7 +1539,6 @@ func TestThreadSlashAutocompleteEnterSubmitsSelectedCommand(t *testing.T) {
 }
 
 func TestSlashAutocompleteEnterSubmitsQuitCommand(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.input = []rune("/qui")
 	m.inputPos = len(m.input)
@@ -1729,10 +1719,10 @@ func TestThreadComposerRecallRestoresDraft(t *testing.T) {
 }
 
 func TestIntegrateCommandOpensPicker(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
+	t.Setenv("WUPHF_MEMORY_BACKEND", config.MemoryBackendNex)
+	t.Setenv("WUPHF_API_KEY", "test-key")
 	m := newChannelModel(false)
 	m.notice = ""
-	t.Setenv("WUPHF_API_KEY", "test-key")
 	m.input = []rune("/integrate")
 	m.inputPos = len(m.input)
 
@@ -1751,7 +1741,6 @@ func TestIntegrateCommandOpensPicker(t *testing.T) {
 }
 
 func TestRequestsCommandSwitchesToRequestsView(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.requests = []channelInterview{{
 		ID:       "request-1",
@@ -1774,7 +1763,6 @@ func TestRequestsCommandSwitchesToRequestsView(t *testing.T) {
 }
 
 func TestTasksCommandSwitchesToTasksView(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.input = []rune("/tasks")
 	m.inputPos = len(m.input)
@@ -1787,7 +1775,6 @@ func TestTasksCommandSwitchesToTasksView(t *testing.T) {
 }
 
 func TestTaskSlashCommandOpensPicker(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.tasks = []channelTask{{
 		ID:        "task-1",
@@ -1810,7 +1797,6 @@ func TestTaskSlashCommandOpensPicker(t *testing.T) {
 }
 
 func TestRequestSlashCommandOpensPicker(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.requests = []channelInterview{{
 		ID:       "request-1",
@@ -1871,7 +1857,6 @@ func TestRequestRowOpensActionPicker(t *testing.T) {
 }
 
 func TestTaskSlashCommandQueuesMutation(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.input = []rune("/task claim task-1")
 	m.inputPos = len(m.input)
@@ -1887,7 +1872,6 @@ func TestTaskSlashCommandQueuesMutation(t *testing.T) {
 }
 
 func TestRequestSlashCommandFocusesRequest(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.requests = []channelInterview{{
 		ID:       "request-1",
@@ -1912,10 +1896,20 @@ func TestRequestSlashCommandFocusesRequest(t *testing.T) {
 }
 
 func TestSidebarNavigationCanSwitchToCalendar(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.focus = focusSidebar
-	m.sidebarCursor = len(m.sidebarItems()) - 1
+	items := m.sidebarItems()
+	calendarIdx := -1
+	for i, item := range items {
+		if item.Kind == "app" && item.Value == string(officeAppCalendar) {
+			calendarIdx = i
+			break
+		}
+	}
+	if calendarIdx < 0 {
+		t.Fatal("calendar sidebar item missing")
+	}
+	m.sidebarCursor = calendarIdx
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	got := next.(channelModel)
@@ -1945,7 +1939,6 @@ func TestRequestsViewRendersOpenRequests(t *testing.T) {
 }
 
 func TestCalendarViewRendersSchedulerAndActions(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
@@ -1961,7 +1954,6 @@ func TestCalendarViewRendersSchedulerAndActions(t *testing.T) {
 }
 
 func TestInsightsViewRendersSignalsDecisionsAndWatchdogs(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	m := newChannelModel(false)
 	m.width = 120
 	m.height = 30
@@ -2005,7 +1997,6 @@ func TestInsightsViewRendersSignalsDecisionsAndWatchdogs(t *testing.T) {
 }
 
 func TestCalendarSlashCommandCanChangeRangeAndFilter(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.members = []channelMember{{Slug: "fe", Name: "Frontend Engineer"}}
 	m.input = []rune("/calendar day")
@@ -2331,7 +2322,6 @@ func TestBuildLiveWorkLinesShowsBlockedWork(t *testing.T) {
 }
 
 func TestMouseClickCollapsedThreadOpensThreadPanel(t *testing.T) {
-	t.Skip("skipped: test needs update after thread/policies/calendar refactors")
 	m := newChannelModel(true)
 	m.width = 120
 	m.height = 32
@@ -2730,7 +2720,6 @@ func TestBlockingRequestCannotBeSnoozedWithEsc(t *testing.T) {
 }
 
 func TestBlockingRequestCannotBeSnoozedByCommand(t *testing.T) {
-	t.Skip("skipped: pre-existing CI environment issue")
 	m := newChannelModel(false)
 	m.requests = []channelInterview{{
 		ID:       "request-1",
