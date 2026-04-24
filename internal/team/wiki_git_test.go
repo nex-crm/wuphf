@@ -509,6 +509,7 @@ func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
 			"-c", "init.defaultBranch=main",
 		}, args...)...)
 		cmd.Dir = outer
+		cmd.Env = gitCleanEnv() // don't inherit the test runner's GIT_DIR
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("outer git %v: %v: %s", args, err, out)
 		}
@@ -520,7 +521,12 @@ func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
 	runOuter("add", "seed.txt")
 	runOuter("commit", "-q", "-m", "outer: seed")
 
-	headBefore, err := exec.Command("git", "-C", outer, "rev-parse", "HEAD").Output()
+	outerGit := func(args ...string) ([]byte, error) {
+		cmd := exec.Command("git", append([]string{"-C", outer}, args...)...)
+		cmd.Env = gitCleanEnv() // don't inherit outer test runner's GIT_DIR
+		return cmd.Output()
+	}
+	headBefore, err := outerGit("rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("outer rev-parse before: %v", err)
 	}
@@ -535,12 +541,12 @@ func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
 		t.Fatalf("wiki init: %v", err)
 	}
 
-	headAfter, err := exec.Command("git", "-C", outer, "rev-parse", "HEAD").Output()
+	headAfter, err := outerGit("rev-parse", "HEAD")
 	if err != nil {
 		t.Fatalf("outer rev-parse after: %v", err)
 	}
 	if strings.TrimSpace(string(headAfter)) != strings.TrimSpace(string(headBefore)) {
-		log, _ := exec.Command("git", "-C", outer, "log", "--oneline", "-5").Output()
+		log, _ := outerGit("log", "--oneline", "-5")
 		t.Fatalf("outer repo HEAD moved (leak!):\nbefore %s\nafter  %s\nlog:\n%s",
 			strings.TrimSpace(string(headBefore)),
 			strings.TrimSpace(string(headAfter)),
