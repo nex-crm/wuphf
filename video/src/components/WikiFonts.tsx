@@ -22,10 +22,25 @@ function ensureFontsLoaded(): Promise<void> {
     // shows a system serif.
     if ("fonts" in document && typeof (document as Document).fonts.load === "function") {
       await Promise.all([
+        // Fraunces (display) — title 52 + section heading 28
         document.fonts.load("500 52px Fraunces"),
+        document.fonts.load("500 28px Fraunces"),
+        // Source Serif 4 — body 18 + strapline/hatnote 15 + bold via <strong>
         document.fonts.load("400 18px 'Source Serif 4'"),
+        document.fonts.load("400 15px 'Source Serif 4'"),
+        document.fonts.load("italic 400 18px 'Source Serif 4'"),
+        document.fonts.load("italic 400 15px 'Source Serif 4'"),
+        document.fonts.load("italic 400 12px 'Source Serif 4'"),
+        document.fonts.load("500 18px 'Source Serif 4'"),
+        // Geist Mono — wikilinks & mono chips
         document.fonts.load("400 13px 'Geist Mono'"),
+        document.fonts.load("400 11px 'Geist Mono'"),
+        document.fonts.load("400 12px 'Geist Mono'"),
       ]);
+      // Also wait for every other font in the stylesheet — catches
+      // variable-font axis combinations (Fraunces opsz) that a single
+      // `.load(weight size family)` call doesn't cover.
+      await (document as Document).fonts.ready;
     }
   })();
   return loadingPromise;

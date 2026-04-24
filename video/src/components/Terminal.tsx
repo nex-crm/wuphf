@@ -16,32 +16,29 @@ export const Terminal: React.FC<TerminalProps> = ({
     <div
       style={{
         backgroundColor: colors.bgTerminal,
-        borderRadius: 12,
+        borderRadius: 24,
         overflow: "hidden",
-        boxShadow: "0 25px 50px rgba(0,0,0,0.5)",
-        border: "1px solid #30363D",
+        boxShadow: "0 0 0 2px rgba(255,255,255,0.1), 0 25px 60px rgba(0,0,0,0.35)",
         ...style,
       }}
     >
-      {/* Title bar */}
+      {/* Title bar — unified with content bg, no separator */}
       <div
         style={{
-          backgroundColor: "#161B22",
-          padding: "12px 16px",
+          padding: "20px 24px",
           display: "flex",
           alignItems: "center",
-          gap: 8,
-          borderBottom: "1px solid #30363D",
+          gap: 10,
         }}
       >
-        <div style={{ width: 12, height: 12, borderRadius: "50%", backgroundColor: "#FF5F57" }} />
-        <div style={{ width: 12, height: 12, borderRadius: "50%", backgroundColor: "#FEBC2E" }} />
-        <div style={{ width: 12, height: 12, borderRadius: "50%", backgroundColor: "#28C840" }} />
+        <div style={{ width: 16, height: 16, borderRadius: "50%", backgroundColor: "#FF5F57" }} />
+        <div style={{ width: 16, height: 16, borderRadius: "50%", backgroundColor: "#FEBC2E" }} />
+        <div style={{ width: 16, height: 16, borderRadius: "50%", backgroundColor: "#28C840" }} />
         <span
           style={{
-            marginLeft: 8,
-            color: colors.textMuted,
-            fontSize: 13,
+            marginLeft: 14,
+            color: "#85898b",
+            fontSize: 16,
             fontFamily: fonts.mono,
           }}
         >
@@ -51,11 +48,11 @@ export const Terminal: React.FC<TerminalProps> = ({
       {/* Content */}
       <div
         style={{
-          padding: "20px 24px",
+          padding: "8px 28px 28px",
           fontFamily: fonts.mono,
-          fontSize: 18,
-          lineHeight: 1.6,
-          color: colors.text,
+          fontSize: 26,
+          lineHeight: 1.7,
+          color: "#85898b",
         }}
       >
         {children}
