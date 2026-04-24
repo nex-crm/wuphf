@@ -1,3 +1,0 @@
-# Sarah
-
-Founding PM.
