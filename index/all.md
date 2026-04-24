@@ -4,4 +4,4 @@ _Auto-generated. Do not edit by hand — agents regenerate this on every commit.
 
 ## team/people
 
-- [Nazz](../team/people/nazz.md) _(updated 2026-04-24T03:06:22Z)_
+- [Nazz](../team/people/nazz.md) _(updated 2026-04-24T03:06:23Z)_
