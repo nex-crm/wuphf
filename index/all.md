@@ -8,4 +8,4 @@ _Auto-generated. Do not edit by hand — agents regenerate this on every commit.
 
 ## team/playbooks
 
-- [Renewal](../team/playbooks/renewal.md) _(updated 2026-04-24T03:11:48Z)_
+- [Renewal v2](../team/playbooks/renewal.md) _(updated 2026-04-24T03:11:48Z)_
