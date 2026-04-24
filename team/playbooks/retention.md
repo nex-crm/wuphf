@@ -1,5 +1,8 @@
 ---
 author: pm
+last_synthesized_sha: 49a6c8f
+last_synthesized_ts: 2026-04-24T03:01:00Z
+fact_count_at_synthesis: 1
 ---
 
 # Churn prevention
@@ -12,4 +15,4 @@ author: pm
 
 ## What we've learned
 
-- Stale lesson from before.
+- New lesson from the latest run.
