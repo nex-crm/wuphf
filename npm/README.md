@@ -166,4 +166,15 @@ To point the wrapper at a locally-built binary, set `WUPHF_BINARY`:
 WUPHF_BINARY=./wuphf npx wuphf --version
 ```
 
+## Auto-upgrade
+
+`npm install -g` does not pull new versions on its own, so the wrapper
+checks `registry.npmjs.org` once per 24h (cached at
+`~/.wuphf/cache/latest-version.json`). If a newer release is available it
+downloads the matching binary into `~/.wuphf/cache/binaries/` and runs it
+instead — same SHA256 verification as `postinstall`. A one-line hint points
+you at `npm install -g wuphf@latest` for a permanent upgrade.
+
+Set `WUPHF_SKIP_VERSION_CHECK=1` to disable the check entirely.
+
 MIT licensed. Free, open source, self-hosted, your API keys.
