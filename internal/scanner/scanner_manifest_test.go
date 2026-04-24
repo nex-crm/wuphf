@@ -1,4 +1,4 @@
-package team
+package scanner
 
 import (
 	"encoding/json"

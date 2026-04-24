@@ -1,4 +1,4 @@
-package team
+package scanner
 
 // scanner_patterns_test.go asserts one positive hit + one near-miss per
 // named pattern in the secretPatterns catalog. "Near-miss" strings are

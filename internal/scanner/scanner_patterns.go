@@ -1,4 +1,4 @@
-package team
+package scanner
 
 // scanner_patterns.go is the exhaustive secret-shape catalog used by the
 // scanner's redaction pass. Each entry carries a stable Name so the human-

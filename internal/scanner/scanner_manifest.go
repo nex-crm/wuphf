@@ -1,4 +1,4 @@
-package team
+package scanner
 
 // scanner_manifest.go ports file-manifest.ts to Go. The on-disk shape is
 // compatible JSON so migration tooling (if any) can interop.

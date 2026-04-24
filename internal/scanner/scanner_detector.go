@@ -1,4 +1,4 @@
-package team
+package scanner
 
 // scanner_detector.go hosts the pluggable ChangeDetector interface plus
 // the mtime-based implementation (and its secret-redaction helpers). The

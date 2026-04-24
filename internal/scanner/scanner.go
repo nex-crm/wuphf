@@ -1,4 +1,4 @@
-package team
+package scanner
 
 // scanner.go is the Scan entrypoint — it composes the walker
 // (scanner_walk.go), the mtime detector + redaction (scanner_detector.go),
@@ -28,10 +28,10 @@ import (
 	"github.com/nex-crm/wuphf/internal/config"
 )
 
-// scannerSlug is the reserved git identity for scanner-authored commits.
+// ScannerSlug is the reserved git identity for scanner-authored commits.
 // Distinct from wuphf-bootstrap / wuphf-recovery / system so audit tools
 // can filter scanner ingestion out of human-authored history.
-const scannerSlug = "scanner"
+const ScannerSlug = "scanner"
 
 // Size caps. Per eng-review v1.1: exceeding any cap aborts the scan.
 const (
@@ -269,7 +269,7 @@ func Scan(
 
 	if commitFn != nil {
 		msg := fmt.Sprintf("scanner: ingested %d files from %s", result.Ingested, absRoot)
-		sha, err := commitFn(ctx, scannerSlug, msg)
+		sha, err := commitFn(ctx, ScannerSlug, msg)
 		if err != nil {
 			return result, nil, fmt.Errorf("scanner: commit: %w", err)
 		}

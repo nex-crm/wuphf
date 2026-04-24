@@ -1,4 +1,4 @@
-package team
+package scanner
 
 // scanner_entropy_test.go proves the entropy heuristic distinguishes
 // English prose (low entropy) from base64-encoded random bytes (high

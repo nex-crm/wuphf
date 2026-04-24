@@ -1,4 +1,4 @@
-package team
+package scanner
 
 // scanner_walk.go ports walk-dir.ts to Go. See scanner.go for the package-
 // level overview.

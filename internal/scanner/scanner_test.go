@@ -1,4 +1,4 @@
-package team
+package scanner
 
 import (
 	"context"
@@ -311,7 +311,7 @@ func TestScannerScanConfirmsAndIngests(t *testing.T) {
 	commitCalls := 0
 	commit := func(_ context.Context, author, msg string) (string, error) {
 		commitCalls++
-		if author != scannerSlug {
+		if author != ScannerSlug {
 			t.Errorf("wrong author %q", author)
 		}
 		if !strings.Contains(msg, "2 files") {

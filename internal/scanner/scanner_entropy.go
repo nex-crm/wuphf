@@ -1,4 +1,4 @@
-package team
+package scanner
 
 // scanner_entropy.go provides the Shannon-entropy heuristic the redaction
 // pass uses to catch unknown-format secrets: anything that doesn't match a
