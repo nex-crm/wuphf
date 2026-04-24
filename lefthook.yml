@@ -30,8 +30,6 @@ pre-commit:
         - "node_modules/**"
         - "bun.lock"
         - "web/bun.lock"
-        - "package-lock.json"
-        - "web/package-lock.json"
         - "**/*.gen.ts"
         - "**/*.gen.tsx"
 

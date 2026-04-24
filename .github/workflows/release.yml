@@ -25,7 +25,7 @@ jobs:
       - name: Verify releasable tree
         run: |
           missing=0
-          for path in go.mod cmd/wuphf/main.go npm/package.json web/package-lock.json; do
+          for path in go.mod cmd/wuphf/main.go npm/package.json web/bun.lock; do
             if [ ! -e "$path" ]; then
               echo "::error::missing ${path}; refusing to build or publish this tag"
               missing=1
@@ -37,17 +37,18 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v6
+      # Pin to full SHA: third-party action, runs with write access to
+      # contents (release upload). Same SHA is reused across all web-facing
+      # workflows — keep them in sync.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          bun-version: "1.1.38"
 
       - name: Build React frontend
         working-directory: web
         run: |
-          npm ci
-          npm run build
+          bun install --frozen-lockfile
+          bun run build
 
       - run: go test ./...
 

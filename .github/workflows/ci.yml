@@ -15,17 +15,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      # Pin to full SHA: third-party action, runs on pull_request from forks
+      # and can read any GITHUB_TOKEN the workflow exposes. A @v2 re-tag
+      # would execute with CI privileges. Same SHA is reused in the web-e2e
+      # job below — keep them in sync.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          bun-version: "1.1.38"
       - name: Install and build
         working-directory: web
         run: |
-          npm ci
-          npm run typecheck
-          npm run build
+          bun install --frozen-lockfile
+          bun run typecheck
+          bun run build
       - uses: actions/upload-artifact@v7
         with:
           name: web-dist
