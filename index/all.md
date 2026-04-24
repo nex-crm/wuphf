@@ -4,4 +4,4 @@ _Auto-generated. Do not edit by hand — agents regenerate this on every commit.
 
 ## team/people
 
-- [Stubbed brief](../team/people/ceo.md) _(updated 2026-04-24T03:01:34Z)_
+- [Race](../team/people/race.md) _(updated 2026-04-24T03:01:34Z)_
