@@ -694,9 +694,7 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 	brokerStatePath = func() string { return statePath }
 	defer func() { brokerStatePath = oldPathFn }()
 
-	oldWakeLead := headlessWakeLeadFn
-	headlessWakeLeadFn = func(_ *Launcher, _ string) {}
-	defer func() { headlessWakeLeadFn = oldWakeLead }()
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -752,9 +750,7 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 	brokerStatePath = func() string { return statePath }
 	defer func() { brokerStatePath = oldPathFn }()
 
-	oldWakeLead := headlessWakeLeadFn
-	headlessWakeLeadFn = func(_ *Launcher, _ string) {}
-	defer func() { headlessWakeLeadFn = oldWakeLead }()
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
 	oldSendPane := launcherSendNotificationToPane
 	var paneNotifications []string

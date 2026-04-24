@@ -128,6 +128,22 @@ func leakedBrokerStatePath(t *testing.T) string {
 	return filepath.Join(dir, "broker-state.json")
 }
 
+// setHeadlessWakeLeadFn swaps headlessWakeLeadFn under its mutex and restores
+// the previous value on test cleanup. Use this instead of direct assignment to
+// avoid DATA RACEs with leaked runHeadlessCodexQueue goroutines from prior tests.
+func setHeadlessWakeLeadFn(t *testing.T, fn func(*Launcher, string)) {
+	t.Helper()
+	headlessWakeLeadFnMu.Lock()
+	old := headlessWakeLeadFn
+	headlessWakeLeadFn = fn
+	headlessWakeLeadFnMu.Unlock()
+	t.Cleanup(func() {
+		headlessWakeLeadFnMu.Lock()
+		headlessWakeLeadFn = old
+		headlessWakeLeadFnMu.Unlock()
+	})
+}
+
 func initUsableGitWorktree(t *testing.T, path string) {
 	t.Helper()
 	if err := os.MkdirAll(path, 0o755); err != nil {

@@ -3,31 +3,62 @@ package team
 import (
 	"os"
 	"path/filepath"
+	"testing"
 )
 
+// stubTaskWorktreePath returns the canonical stub path + branch shape used
+// by both the in-package worktree guard (worktree_guard_test.go) and the
+// cross-package helper below. Shape mirrors production
+// (<root>/.wuphf/task-worktrees/<repoToken>/wuphf-task-<id>) so test
+// assertions on the worktree path format stay consistent with real
+// behavior. Having two different stub shapes in the past let tests drift
+// apart — one stub passing "contains .wuphf/task-worktrees/" while the
+// other didn't — so this is the single source of truth.
+func stubTaskWorktreePath(taskID string) (string, string) {
+	id := sanitizeWorktreeToken(taskID)
+	root := defaultTaskWorktreeRootDir("stub")
+	return filepath.Join(root, "wuphf-task-"+id), "wuphf-" + id
+}
+
 // DisableRealTaskWorktreeForTests replaces the package-level
-// prepare/cleanup task worktree funcs with no-op stubs that return a
-// deterministic fake path+branch. It also flips allowRealTaskWorktree to
-// false so any stray defaultPrepareTaskWorktree caller errors loudly.
+// prepare/cleanup task worktree funcs with no-op stubs and flips the
+// broker-state-load + real-worktree guards so that tests which exercise
+// the local_worktree dispatch path (handleTeamTask etc.) cannot reach
+// `git worktree add` against the developer's wuphf repo, nor load stale
+// state from the user's real ~/.wuphf/.
 //
-// Intended for TestMain in packages that depend on team and exercise the
-// local_worktree dispatch path via integration tests (e.g.
-// internal/teammcp's handleTeamTask). Without this, those tests reach
-// `git worktree add` against the developer's wuphf repo and leave stale
-// `wuphf-<hash>-task-N` branches plus interleaving HEAD ref-lock
-// failures on the invoking worktree's `git push`.
+// Intended for TestMain in packages that depend on team and exercise
+// this codepath via integration tests. Currently only
+// internal/teammcp/testmain_test.go. Grep for `ExecutionMode:
+// "local_worktree"` in internal/*/\*_test.go to find additional
+// candidates.
 //
-// Production MUST NOT call this — the team package's own *_test.go init
-// uses the same stubs for in-package tests. See worktree_guard_test.go.
+// Guarded by testing.Testing() so a production caller panics
+// immediately instead of silently corrupting the real task dispatcher
+// for the lifetime of the process. The in-package tests inside the team
+// package get equivalent guards from worktree_guard_test.go's init.
 func DisableRealTaskWorktreeForTests() {
+	if !testing.Testing() {
+		panic("team: DisableRealTaskWorktreeForTests must only be called from tests " +
+			"(it mutates package-level worktree dispatch vars with no restore path)")
+	}
 	allowRealTaskWorktree = false
+	skipBrokerStateLoadOnConstruct = true
 	prepareTaskWorktree = func(taskID string) (string, string, error) {
-		id := sanitizeWorktreeToken(taskID)
-		// Mirror the production path shape (.wuphf/task-worktrees/...) so
-		// callers that assert on the worktree path format (e.g. the
-		// runtime-state snapshot tests) see a realistic value.
-		path := filepath.Join(os.TempDir(), ".wuphf", "task-worktrees", "wuphf-task-stub-"+id)
-		return path, "wuphf-" + id, nil
+		path, branch := stubTaskWorktreePath(taskID)
+		return path, branch, nil
 	}
 	cleanupTaskWorktree = func(string, string) error { return nil }
+
+	// If the caller's test package hasn't set WUPHF_RUNTIME_HOME, point
+	// it at a process-lifetime leaked tempdir so any implicit
+	// ~/.wuphf/... write falls through to /tmp instead of the user's
+	// real home. Matches worktree_guard_test.go's init for the team
+	// package's own tests. Tests that override with t.Setenv take
+	// precedence and their restore lands on this safe default.
+	if os.Getenv("WUPHF_RUNTIME_HOME") == "" {
+		if dir, err := os.MkdirTemp("", "wuphf-disable-real-worktree-home-*"); err == nil {
+			_ = os.Setenv("WUPHF_RUNTIME_HOME", dir)
+		}
+	}
 }

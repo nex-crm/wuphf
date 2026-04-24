@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -33,8 +34,11 @@ var (
 		}
 		return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
 	}
-	// headlessWakeLeadFn is nil in production; override in tests to intercept lead wake-ups.
-	headlessWakeLeadFn func(l *Launcher, specialistSlug string)
+	// headlessWakeLeadFn is nil in production; override in tests to intercept
+	// lead wake-ups. Always access via headlessWakeLeadFnMu to avoid races
+	// with leaked goroutines from concurrent tests.
+	headlessWakeLeadFn   func(l *Launcher, specialistSlug string)
+	headlessWakeLeadFnMu sync.RWMutex
 )
 
 var (
@@ -558,8 +562,11 @@ func (l *Launcher) finishHeadlessTurn(slug string) {
 		return
 	}
 	if shouldWakeLead {
-		if headlessWakeLeadFn != nil {
-			headlessWakeLeadFn(l, slug)
+		headlessWakeLeadFnMu.RLock()
+		fn := headlessWakeLeadFn
+		headlessWakeLeadFnMu.RUnlock()
+		if fn != nil {
+			fn(l, slug)
 		} else {
 			l.wakeLeadAfterSpecialist(slug)
 		}

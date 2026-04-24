@@ -61,8 +61,11 @@ func init() {
 }
 
 func stubPrepareTaskWorktree(taskID string) (string, string, error) {
-	return filepath.Join(os.TempDir(), "wuphf-task-stub-"+sanitizeWorktreeToken(taskID)),
-		"wuphf-" + sanitizeWorktreeToken(taskID), nil
+	// Share stubTaskWorktreePath with DisableRealTaskWorktreeForTests so
+	// both stubs emit the same `<root>/.wuphf/task-worktrees/<repoToken>/wuphf-task-<id>`
+	// shape — downstream assertions on the path format stay consistent.
+	path, branch := stubTaskWorktreePath(taskID)
+	return path, branch, nil
 }
 
 func stubCleanupTaskWorktree(string, string) error { return nil }

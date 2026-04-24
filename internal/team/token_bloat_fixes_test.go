@@ -101,8 +101,13 @@ func TestStaleUnansweredFilteredOnResume(t *testing.T) {
 	stale := time.Now().UTC().Add(-90 * time.Minute).Format(time.RFC3339)
 	fresh := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339)
 	b.mu.Lock()
-	// Pin members explicitly so the test is not affected by whatever manifest
-	// a prior test may have written to WUPHF_RUNTIME_HOME.
+	// Pin members explicitly so the test stays self-contained: this
+	// scenario only cares about ceo + planner routing. Defense-in-depth
+	// against future leaks — the root cause (launcher tests leaking a
+	// youtube-factory manifest into the init-time WUPHF_RUNTIME_HOME) is
+	// fixed in the same PR, but the buildResumePackets inPack-drop path
+	// fails silently (no error, just a missing packet) so any new leak
+	// would be painful to re-diagnose.
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},
 		{Slug: "planner", Name: "Planner"},
