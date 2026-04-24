@@ -1,51 +1,63 @@
-import { AbsoluteFill, useCurrentFrame, interpolate, Easing, spring } from "remotion";
-import { colors, fonts, slack, FPS } from "../theme";
-import { DotGrid, RadialGlow } from "../components/DotGrid";
+import { AbsoluteFill, useCurrentFrame, interpolate, Easing } from "remotion";
+import { fonts } from "../theme";
+import { DotGrid } from "../components/DotGrid";
+
+const WUPHF_LETTERS = "WUPHF".split("");
+const ELEGANT = Easing.bezier(0.25, 0.46, 0.45, 0.94);
 
 export const Scene1ColdOpen: React.FC = () => {
   const frame = useCurrentFrame();
 
-  // Title fades in gracefully (no shake, no bounce)
-  const titleOp = interpolate(frame, [8, 22], [0, 1], {
+  // Title: per-letter cubic stagger — smooth rise, no overshoot
+  const letterAnim = (i: number) => {
+    const start = 6 + i * 3;
+    const op = interpolate(frame, [start, start + 20], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: ELEGANT,
+    });
+    const slide = interpolate(frame, [start, start + 20], [18, 0], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: ELEGANT,
+    });
+    return { op, slide };
+  };
+
+  // Subtitle — slide + fade
+  const subOp = interpolate(frame, [36, 54], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
+    easing: ELEGANT,
   });
-  const titleScale = interpolate(frame, [8, 22], [0.94, 1], {
+  const subSlide = interpolate(frame, [36, 54], [14, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
+    easing: ELEGANT,
   });
 
-  // Subtitle fades in
-  const subOp = interpolate(frame, [38, 52], [0, 1], {
+  // Strikethrough — gentle sweep
+  const strikeWidth = interpolate(frame, [55, 72], [0, 100], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
 
-  // Strikethrough sweeps in — no wobble
-  const strikeWidth = interpolate(frame, [55, 70], [0, 100], {
+  // Real subtitle — smooth fade + slide
+  const realSubOp = interpolate(frame, [72, 92], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
+    easing: ELEGANT,
   });
-
-  // Real subtitle fades in gracefully — stays visible for full remaining scene
-  const realSubOp = interpolate(frame, [72, 88], [0, 1], {
+  const realSubSlide = interpolate(frame, [72, 92], [18, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
-  });
-  const realSubSlide = interpolate(frame, [72, 88], [14, 0], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
+    easing: ELEGANT,
   });
 
   return (
-    <AbsoluteFill style={{ backgroundColor: colors.bgBlack, overflow: "hidden" }}>
+    <AbsoluteFill style={{ backgroundColor: "#3B145D", overflow: "hidden" }}>
       <DotGrid color="#FFFFFF" opacity={0.05} spacing={40} size={1.2} drift={false} />
-      <RadialGlow color={slack.sidebar} x="50%" y="50%" size={1400} opacity={0.35} />
 
       <div style={{
         position: "absolute",
@@ -55,26 +67,36 @@ export const Scene1ColdOpen: React.FC = () => {
         alignItems: "center",
         justifyContent: "center",
       }}>
-        {/* WUPHF — no shake, settled */}
+        {/* WUPHF — per-letter stagger with smooth rise */}
         <div style={{
-          opacity: titleOp,
-          transform: `scale(${titleScale})`,
+          display: "flex",
           fontFamily: fonts.sans,
           fontSize: 180,
           fontWeight: 900,
-          color: "#FFF",
+          color: "#FFEBFC",
           letterSpacing: -6,
-          textShadow: `0 0 80px ${slack.sidebar}`,
         }}>
-          WUPHF
+          {WUPHF_LETTERS.map((ch, i) => {
+            const a = letterAnim(i);
+            return (
+              <span key={i} style={{
+                display: "inline-block",
+                opacity: a.op,
+                transform: `translateY(${a.slide}px)`,
+              }}>
+                {ch}
+              </span>
+            );
+          })}
         </div>
 
         {/* Fake subtitle with strikethrough */}
         <div style={{
           opacity: subOp,
+          transform: `translateY(${subSlide}px)`,
           fontFamily: fonts.sans,
           fontSize: 32,
-          color: colors.textMuted,
+          color: "#9F4DBF",
           marginTop: 20,
           position: "relative",
         }}>
@@ -85,18 +107,18 @@ export const Scene1ColdOpen: React.FC = () => {
             left: 0,
             width: `${strikeWidth}%`,
             height: 4,
-            backgroundColor: slack.red,
+            backgroundColor: "#9F4DBF",
             borderRadius: 2,
           }} />
         </div>
 
-        {/* "The Office" of AI agents — stays on screen for full remaining duration */}
+        {/* "The Office" of AI agents — spring-pop entry */}
         <div style={{
           opacity: realSubOp,
           transform: `translateY(${realSubSlide}px)`,
           fontFamily: fonts.sans,
           fontSize: 52,
-          color: colors.yellow,
+          color: "#CF72D9",
           marginTop: 36,
           fontStyle: "italic",
           fontWeight: 700,

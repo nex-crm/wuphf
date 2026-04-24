@@ -1,91 +1,155 @@
-import { AbsoluteFill, useCurrentFrame, interpolate, Easing, spring } from "remotion";
-import { colors, fonts, sec, FPS, olive, tertiary } from "../theme";
+import { AbsoluteFill, useCurrentFrame, interpolate, Easing } from "remotion";
+import { colors, fonts, sec } from "../theme";
 import { PixelAvatar } from "../components/PixelAvatar";
 import { FadeIn } from "../components/FadeIn";
-import { DotGrid, RadialGlow } from "../components/DotGrid";
+import { NotebookFonts } from "../components/NotebookFonts";
 
 // v26 Scene 5b, reframed 2026-04-22: narration stays byte-for-byte
 // ("They notice patterns, propose improvements. You just say yes…"),
 // but the artifact on screen now reflects the real product feature —
 // an agent's notebook entry being promoted to the team wiki via
-// human review. Matches web/src/components/notebook/PromoteButton.tsx.
+// human review. Card styled against web/src/styles/notebook.css tokens.
+
+const NB = {
+  paper: "#FAFFE5",
+  paperDark: "#E9DFC9",
+  rule: "rgba(150, 150, 64, 0.07)",
+  surface: "#FAF5E8",
+  text: "#2A2721",
+  textMuted: "#5B5547",
+  textTertiary: "#8A8373",
+  border: "#D9CEB5",
+  borderLight: "#E6DEC6",
+  amber: "#C78A1F",
+  amberBg: "rgba(199, 138, 31, 0.10)",
+  green: "#6A8B52",
+  greenBg: "rgba(106, 139, 82, 0.12)",
+  stampRed: "#B43A2F",
+  display: "'Covered By Your Grace', 'Comic Sans MS', cursive",
+  bodySerif: "'IBM Plex Serif', Georgia, serif",
+  chrome: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+  mono: "'Geist Mono', SFMono-Regular, Menlo, monospace",
+};
+
+const ELEGANT = Easing.bezier(0.25, 0.46, 0.45, 0.94);
 
 export const Scene5bSystemLearns: React.FC = () => {
   const frame = useCurrentFrame();
 
-  const bgOpacity = interpolate(frame, [0, 12], [0, 1], {
+  const bgOpacity = interpolate(frame, [0, 14], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+  });
+  // Tail fade-out — keeps gradient bg continuous with neighboring scenes
+  const SCENE_DURATION_5B = sec(10);
+  const exitFade = interpolate(
+    frame,
+    [SCENE_DURATION_5B - 18, SCENE_DURATION_5B],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: ELEGANT },
+  );
+
+  const headerOpacity = interpolate(frame, [5, 22], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: ELEGANT,
+  });
+  const headerSlide = interpolate(frame, [5, 22], [8, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
 
-  const headerOpacity = interpolate(frame, [5, 17], [0, 1], {
+  // Notebook card appears FIRST; CEO bubble slides out from under it
+  const cardOpacity = interpolate(frame, [5, 22], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: ELEGANT,
+  });
+  const cardSlide = interpolate(frame, [5, 22], [18, 0], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
 
-  const ceoMsgOpacity = interpolate(frame, [15, 25], [0, 1], {
+  // Bubble slides down from behind the card's bottom edge
+  const bubbleStart = sec(1.4);
+  const bubbleEnd = sec(2.1);
+  const ceoMsgOpacity = interpolate(frame, [bubbleStart, bubbleStart + 6], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
-  const ceoMsgSlide = interpolate(frame, [15, 25], [12, 0], {
+  // Starts hidden behind the card (negative Y), ends at natural flex slot below
+  const ceoMsgSlide = interpolate(frame, [bubbleStart, bubbleEnd], [-180, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
+    easing: ELEGANT,
   });
 
-  const cardScale = spring({
-    frame: Math.max(0, frame - sec(1.5)),
-    fps: FPS,
-    config: { damping: 14, stiffness: 180 },
-  });
-  const cardOpacity = interpolate(frame, [sec(1.5), sec(2)], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
-
-  // State machine on the "Promote to wiki" button:
-  //   before 3.8s : idle "Promote to wiki →"
-  //   3.8s–5.0s   : "Pending review by you"
-  //   after 5.0s  : promoted — green border + "Added to wiki"
+  // Promote state machine — smoother crossfades between states
   const clickFrame = sec(3.8);
   const promotedFrame = sec(5.0);
-
   const buttonGlow = interpolate(
     frame,
-    [sec(2.5), sec(3.2), sec(3.8), sec(4.2)],
+    [sec(2.5), sec(3.2), sec(3.8), sec(4.4)],
     [0, 1, 1, 0.2],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: ELEGANT },
   );
-  const buttonPress = frame >= clickFrame
-    ? interpolate(frame, [clickFrame, clickFrame + 3, clickFrame + 8], [1, 0.94, 1], {
-        extrapolateLeft: "clamp",
-        extrapolateRight: "clamp",
-      })
-    : 1;
-
+  const buttonPress =
+    frame >= clickFrame
+      ? interpolate(frame, [clickFrame, clickFrame + 3, clickFrame + 10], [1, 0.94, 1], {
+          extrapolateLeft: "clamp",
+          extrapolateRight: "clamp",
+          easing: ELEGANT,
+        })
+      : 1;
+  // Smooth state-blend values: 0 idle → 1 pending (at clickFrame+8) → 1 promoted
+  const toPending = interpolate(frame, [clickFrame, clickFrame + 8], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: ELEGANT,
+  });
+  const toPromoted = interpolate(frame, [promotedFrame, promotedFrame + 10], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: ELEGANT,
+  });
   const pending = frame >= clickFrame && frame < promotedFrame;
   const promoted = frame >= promotedFrame;
 
-  const rippleScale = interpolate(frame, [promotedFrame, promotedFrame + 18], [0.6, 2.1], {
+  const rippleScale = interpolate(frame, [promotedFrame, promotedFrame + 22], [0.6, 2], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
+    easing: ELEGANT,
   });
-  const rippleOpacity = interpolate(frame, [promotedFrame, promotedFrame + 18], [0.35, 0], {
+  const rippleOpacity = interpolate(frame, [promotedFrame, promotedFrame + 22], [0.3, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
 
-  const taglineOpacity = interpolate(frame, [sec(5.8), sec(6.3)], [0, 1], {
+  const taglineOpacity = interpolate(frame, [sec(5.8), sec(6.6)], [0, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: ELEGANT,
+  });
+
+  // Slow scene zoom — 1.1 → 1.18 across the full 10-second beat
+  const SCENE_DURATION = sec(10);
+  const sceneZoom = interpolate(frame, [0, SCENE_DURATION], [1.1, 1.18], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
   return (
-    <AbsoluteFill style={{ backgroundColor: colors.bgWarm, opacity: bgOpacity }}>
-      <DotGrid color={tertiary[400]} opacity={0.05} spacing={40} size={1.2} />
-      <RadialGlow color={tertiary[400]} x="50%" y="50%" size={1200} opacity={0.12} />
-
+    <AbsoluteFill
+      style={{
+        opacity: bgOpacity,
+        background: "radial-gradient(ellipse at top, #f3e8ff 0%, #ede2f7 40%, #d9c6ea 100%)",
+      }}
+    >
+      <NotebookFonts />
       <div
         style={{
           position: "absolute",
@@ -95,46 +159,260 @@ export const Scene5bSystemLearns: React.FC = () => {
           alignItems: "center",
           justifyContent: "center",
           padding: 60,
-          gap: 24,
+          gap: 28,
+          transform: `scale(${sceneZoom})`,
+          transformOrigin: "center",
+          willChange: "transform",
+          backfaceVisibility: "hidden",
+          opacity: exitFade,
         }}
       >
-        {/* Header */}
+        {/* Eyebrow — matches Scene 3 "Pick a pack" style */}
         <div
           style={{
             opacity: headerOpacity,
+            transform: `translateY(${headerSlide}px)`,
             fontFamily: fonts.sans,
-            fontSize: 22,
-            color: colors.textTertiary,
+            fontSize: 20,
+            fontWeight: 700,
+            letterSpacing: "0.22em",
             textTransform: "uppercase" as const,
-            letterSpacing: 3,
-            marginBottom: 8,
-            fontWeight: 600,
+            color: "#9F4DBF",
           }}
         >
-          Pattern Detected
+          Pattern detected
         </div>
 
-        {/* CEO message (dark chat bubble, matches in-app chat style) */}
+        {/* Notebook entry card — full nb-* token set from notebook.css */}
+        <div
+          style={{
+            opacity: cardOpacity,
+            transform: `translateY(${cardSlide}px)`,
+            width: 860,
+            background: NB.paper,
+            backgroundImage: `repeating-linear-gradient(0deg, transparent 0, transparent 15px, ${NB.rule} 15px, ${NB.rule} 16px)`,
+            borderRadius: 14,
+            border: `1px solid ${toPromoted > 0.5 ? NB.green : NB.border}`,
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.08), 0 24px 60px rgba(0,0,0,0.10)",
+            overflow: "hidden",
+            position: "relative",
+            zIndex: 2,
+            color: NB.text,
+          }}
+        >
+          {/* Meta strip */}
+          <div
+            style={{
+              padding: "14px 24px 10px",
+              borderBottom: `1px solid ${NB.borderLight}`,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontFamily: NB.chrome,
+              fontSize: 12,
+              color: NB.textMuted,
+            }}
+          >
+            <div style={{ width: 22, height: 22, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <PixelAvatar slug="ceo" color={colors.ceo} size={22} />
+            </div>
+            <span style={{ color: NB.text, fontWeight: 500 }}>CEO&rsquo;s notebook</span>
+            <span style={{ color: NB.textTertiary }}>·</span>
+            <span
+              style={{
+                fontFamily: NB.chrome,
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase" as const,
+                letterSpacing: "0.08em",
+                color: pending ? NB.amber : promoted ? NB.green : NB.textTertiary,
+              }}
+            >
+              {promoted ? "Promoted" : pending ? "In review" : "Draft"}
+            </span>
+            <span
+              style={{
+                marginLeft: "auto",
+                fontFamily: NB.mono,
+                fontSize: 11,
+                color: NB.textTertiary,
+              }}
+            >
+              team/playbooks/deal-prep.md
+            </span>
+          </div>
+
+          {/* Title + body */}
+          <div style={{ padding: "26px 34px 20px" }}>
+            <div
+              style={{
+                fontFamily: NB.display,
+                fontSize: 54,
+                fontWeight: 400,
+                color: NB.text,
+                lineHeight: 1.05,
+              }}
+            >
+              Deal prep playbook
+            </div>
+            <div
+              style={{
+                fontFamily: NB.bodySerif,
+                fontStyle: "italic",
+                fontSize: 16,
+                color: NB.textMuted,
+                marginTop: 6,
+                marginBottom: 16,
+              }}
+            >
+              Draft, from CEO&rsquo;s notebook.
+            </div>
+            <div
+              style={{
+                fontFamily: NB.bodySerif,
+                fontSize: 20,
+                lineHeight: 1.65,
+                color: NB.text,
+                maxWidth: 820,
+              }}
+            >
+              Pull the company brief, past touchpoints, the buying committee, and likely objections.
+              Drop the note in the channel ten minutes before every meeting.
+            </div>
+          </div>
+
+          {/* Actions footer — mirrors real PromoteButton row */}
+          <div
+            style={{
+              padding: "14px 24px",
+              borderTop: `1px solid ${NB.border}`,
+              background: "#FFFFFF",
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+            }}
+          >
+            <span style={{ fontFamily: NB.chrome, fontSize: 13, color: NB.textMuted }}>
+              {promoted ? (
+                <span style={{ color: NB.green, fontWeight: 600 }}>Added to team wiki ✓</span>
+              ) : pending ? (
+                <>Waiting on reviewer…</>
+              ) : (
+                <>Ready to submit for review.</>
+              )}
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 16 }}>
+              {/* .nb-discard-link — exact port from notebook.css:634-643 */}
+              <button
+                style={{
+                  fontFamily: NB.chrome,
+                  fontSize: 13,
+                  color: NB.textMuted,
+                  textDecoration: "underline",
+                  background: "transparent",
+                  border: 0,
+                  cursor: "pointer",
+                  padding: "4px 2px",
+                }}
+              >
+                Discard entry
+              </button>
+              {/* .nb-promote-btn — exact port from notebook.css:600-632 */}
+              <button
+                style={{
+                  position: "relative",
+                  fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  lineHeight: 1,
+                  background: promoted
+                    ? NB.green
+                    : pending
+                    ? "rgba(159, 77, 191, 0.12)"
+                    : "#9f4dbf",
+                  color: promoted || !pending ? "#fff" : "#9f4dbf",
+                  border: `1px solid ${
+                    promoted ? NB.green : pending ? "rgba(159, 77, 191, 0.35)" : "#9f4dbf"
+                  }`,
+                  padding: "0 16px",
+                  height: 44,
+                  minHeight: 44,
+                  cursor: pending ? "not-allowed" : "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  textDecoration: "none",
+                  borderRadius: 8,
+                  transform: `scale(${buttonPress})`,
+                  overflow: "hidden",
+                }}
+              >
+                {/* Crossfade labels across states */}
+                <span style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  opacity: 1 - Math.max(toPending, toPromoted),
+                }}>Promote to wiki →</span>
+                <span style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  opacity: toPending * (1 - toPromoted),
+                }}>Pending review…</span>
+                <span style={{
+                  position: "absolute", inset: 0,
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  opacity: toPromoted,
+                }}>Added to wiki ✓</span>
+                {/* invisible spacer keeps box height */}
+                <span style={{ visibility: "hidden" }}>Pending review…</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Success ripple */}
+          {frame >= promotedFrame && (
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                right: 140,
+                width: 260,
+                height: 260,
+                borderRadius: "50%",
+                border: `2px solid ${NB.green}`,
+                transform: `translate(-50%, -50%) scale(${rippleScale})`,
+                opacity: rippleOpacity,
+                pointerEvents: "none" as const,
+              }}
+            />
+          )}
+        </div>
+
+        {/* CEO chat bubble — slides down from behind the card's bottom edge */}
         <div
           style={{
             opacity: ceoMsgOpacity,
             transform: `translateY(${ceoMsgSlide}px)`,
             display: "flex",
             gap: 18,
-            maxWidth: 960,
-            padding: "20px 28px",
-            backgroundColor: colors.bgCard,
-            borderRadius: 14,
+            width: 720,
+            padding: "24px 32px",
+            marginTop: -40,
+            fontFamily: fonts.sans,
+            backgroundColor: "#FFFFFF",
+            borderRadius: 16,
             border: `1px solid ${colors.border}`,
-            boxShadow: "0 8px 22px rgba(40,41,42,0.08)",
+            boxShadow: "0 1px 2px rgba(0,0,0,0.05), 0 8px 24px rgba(0,0,0,0.08), 0 24px 60px rgba(0,0,0,0.10)",
+            zIndex: 1,
+            position: "relative",
           }}
         >
           <div
             style={{
-              width: 44,
-              height: 44,
+              width: 46,
+              height: 46,
               background: "#f2f2f3",
-              borderRadius: 8,
+              borderRadius: 9,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -145,15 +423,16 @@ export const Scene5bSystemLearns: React.FC = () => {
             <PixelAvatar slug="ceo" color={colors.ceo} size={36} />
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <span style={{ fontFamily: fonts.sans, fontSize: 18, fontWeight: 700, color: "#28292a" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <span style={{ fontFamily: fonts.sans, fontSize: 17, fontWeight: 700, color: "#28292a" }}>
                 CEO
               </span>
               <span
                 style={{
+                  fontFamily: fonts.sans,
                   background: colors.greenBg,
                   color: colors.green,
-                  padding: "1px 6px",
+                  padding: "2px 8px",
                   borderRadius: 3,
                   fontSize: 11,
                   fontWeight: 500,
@@ -161,229 +440,85 @@ export const Scene5bSystemLearns: React.FC = () => {
               >
                 lead
               </span>
+              <span style={{ fontFamily: fonts.sans, fontSize: 12, color: colors.textTertiary, marginLeft: "auto" }}>
+                9:14 AM
+              </span>
             </div>
             <div
               style={{
                 fontFamily: fonts.sans,
-                fontSize: 19,
-                color: "#28292a",
+                fontSize: 17,
+                color: colors.textSecondary,
                 marginTop: 6,
-                lineHeight: 1.45,
+                lineHeight: 1.55,
               }}
             >
-              I&rsquo;ve noticed we prep every sales meeting the same way. Drafting a playbook for the wiki…
+              I&rsquo;ve noticed we prep every sales meeting the same way.
+              <br />
+              Drafting a playbook for the wiki…
             </div>
           </div>
         </div>
 
-        {/* Notebook entry card — reflects the real product feature */}
-        <div
-          style={{
-            opacity: cardOpacity,
-            transform: `scale(${cardScale})`,
-            width: 760,
-            background: "#FAF8F2",
-            borderRadius: 14,
-            border: `1px solid ${promoted ? colors.green : "#E8E4D8"}`,
-            boxShadow: promoted
-              ? `0 12px 30px rgba(3, 160, 76, 0.22)`
-              : `0 12px 30px rgba(40, 41, 42, 0.10)`,
-            overflow: "hidden",
-            position: "relative",
-          }}
-        >
-          {/* Notebook meta row */}
-          <div
-            style={{
-              padding: "14px 22px 10px",
-              borderBottom: "1px solid #E8E4D8",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              fontFamily: fonts.sans,
-              fontSize: 12,
-              color: "#616061",
-            }}
-          >
+        {/* Promoted trail pill — grows its height so the tagline below
+            smoothly slides down as the pill claims its space. */}
+        {(() => {
+          const pillExpand = interpolate(
+            frame,
+            [promotedFrame + 2, promotedFrame + 18],
+            [0, 1],
+            { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: ELEGANT },
+          );
+          const pillOpacity = interpolate(
+            frame,
+            [promotedFrame + 4, promotedFrame + 16],
+            [0, 1],
+            { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: ELEGANT },
+          );
+          return (
             <div
               style={{
-                background: "#F5F1E6",
-                border: "1px solid #E8E4D8",
-                padding: "2px 8px",
-                borderRadius: 999,
-                fontSize: 10,
-                fontWeight: 700,
-                textTransform: "uppercase" as const,
-                letterSpacing: "0.08em",
-                color: "#616061",
+                overflow: "hidden",
+                maxHeight: pillExpand * 80,
+                marginTop: pillExpand * 4,
+                display: "flex",
+                justifyContent: "center",
               }}
             >
-              Notebook · CEO
-            </div>
-            <span style={{ color: "#8A8680" }}>draft</span>
-            <span style={{ marginLeft: "auto", fontFamily: fonts.mono, fontSize: 11, color: "#8A8680" }}>
-              team/playbooks/deal-prep.md
-            </span>
-          </div>
-
-          {/* Entry title + body */}
-          <div style={{ padding: "18px 26px 14px" }}>
-            <div
-              style={{
-                fontFamily: fonts.display,
-                fontSize: 30,
-                fontWeight: 500,
-                color: "#1D1C1D",
-                letterSpacing: -0.3,
-                lineHeight: 1.15,
-                fontVariationSettings: '"opsz" 36',
-              }}
-            >
-              Deal prep playbook
-            </div>
-            <div
-              style={{
-                fontFamily: fonts.serif,
-                fontStyle: "italic",
-                fontSize: 14,
-                color: "#616061",
-                marginTop: 4,
-                marginBottom: 12,
-              }}
-            >
-              Draft, from CEO&rsquo;s notebook.
-            </div>
-            <div
-              style={{
-                fontFamily: fonts.serif,
-                fontSize: 16,
-                lineHeight: 1.6,
-                color: "#1D1C1D",
-                maxWidth: 620,
-              }}
-            >
-              Pull the company brief, past touchpoints, the buying committee, and likely objections.
-              Drop the note in the channel ten minutes before every meeting.
-            </div>
-          </div>
-
-          {/* Actions footer — real PromoteButton pattern */}
-          <div
-            style={{
-              padding: "10px 18px",
-              borderTop: "1px solid #E8E4D8",
-              background: "#FFFFFF",
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-            }}
-          >
-            <span style={{ fontFamily: fonts.sans, fontSize: 12, color: "#616061" }}>
-              {promoted ? (
-                <span style={{ color: colors.green, fontWeight: 600 }}>Added to team wiki ✓</span>
-              ) : pending ? (
-                <>Waiting on reviewer…</>
-              ) : (
-                <>Ready to submit for review.</>
-              )}
-            </span>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
               <div
                 style={{
-                  padding: "8px 14px",
-                  borderRadius: 8,
-                  border: "1px solid #E8E4D8",
-                  color: "#616061",
-                  fontFamily: fonts.sans,
+                  opacity: pillOpacity,
+                  transform: `translateY(${(1 - pillOpacity) * 8}px)`,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  background: "#FFFFFF",
+                  border: `1px solid ${colors.border}`,
+                  padding: "7px 14px",
+                  borderRadius: 999,
+                  fontFamily: fonts.mono,
                   fontSize: 13,
-                  background: "transparent",
+                  color: colors.text,
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.06), 0 8px 20px rgba(0,0,0,0.08)",
                 }}
               >
-                Discard entry
-              </div>
-              <div
-                style={{
-                  padding: "8px 18px",
-                  borderRadius: 8,
-                  background: promoted
-                    ? colors.green
-                    : pending
-                    ? "#C9C5B8"
-                    : olive[400],
-                  color: "#FFFFFF",
-                  fontFamily: fonts.sans,
-                  fontSize: 13,
-                  fontWeight: 600,
-                  transform: `scale(${buttonPress})`,
-                  boxShadow: buttonGlow
-                    ? `0 0 ${buttonGlow * 20}px ${olive[400]}88`
-                    : "none",
-                  position: "relative",
-                }}
-              >
-                {promoted
-                  ? "Added to wiki ✓"
-                  : pending
-                  ? "Pending review by you"
-                  : "Promote to wiki →"}
+                <span style={{ color: NB.green }}>+</span>
+                <span>team / playbooks / deal-prep.md</span>
+                <span style={{ color: colors.textTertiary }}>→ wiki</span>
               </div>
             </div>
-          </div>
-
-          {/* Success ripple */}
-          {frame >= promotedFrame && (
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                right: 120,
-                width: 260,
-                height: 260,
-                borderRadius: "50%",
-                border: `2px solid ${colors.green}`,
-                transform: `translate(-50%, -50%) scale(${rippleScale})`,
-                opacity: rippleOpacity,
-                pointerEvents: "none" as const,
-              }}
-            />
-          )}
-        </div>
-
-        {/* Promoted trail — pill appears below the card */}
-        {promoted && (
-          <div
-            style={{
-              opacity: interpolate(frame, [promotedFrame, promotedFrame + 10], [0, 1], {
-                extrapolateLeft: "clamp",
-                extrapolateRight: "clamp",
-              }),
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              background: colors.bgCard,
-              border: `1px solid ${colors.border}`,
-              padding: "7px 14px",
-              borderRadius: 999,
-              fontFamily: fonts.mono,
-              fontSize: 13,
-              color: colors.text,
-              boxShadow: "0 2px 8px rgba(40,41,42,0.06)",
-            }}
-          >
-            <span style={{ color: colors.green }}>+</span>
-            <span>team / playbooks / deal-prep.md</span>
-            <span style={{ color: colors.textTertiary }}>→ wiki</span>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Closing tagline */}
-        <FadeIn startFrame={sec(5.8)} durationFrames={12} slideUp={10}>
+        <FadeIn startFrame={sec(5.8)} durationFrames={14} slideUp={10}>
           <div
             style={{
               opacity: taglineOpacity,
               fontFamily: fonts.sans,
-              fontSize: 18,
-              color: colors.textSecondary,
+              fontSize: 20,
+              fontWeight: 500,
+              color: "#3B145D",
               textAlign: "center",
               maxWidth: 900,
             }}

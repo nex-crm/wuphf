@@ -6,35 +6,77 @@ import { TypeWriter } from "../components/TypeWriter";
 export const Scene2TheCommand: React.FC = () => {
   const frame = useCurrentFrame();
 
-  const terminalOpacity = interpolate(frame, [0, 12], [0, 1], {
+  const ELEGANT = Easing.bezier(0.25, 0.46, 0.45, 0.94);
+
+  // Terminal enters from the bottom already at its zoomed-in size,
+  // waits during typing, then smoothly zooms out to default size.
+  const terminalOpacity = interpolate(frame, [0, 18], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
-  const terminalScale = interpolate(frame, [0, 12], [0.96, 1], {
+  const terminalSlide = interpolate(frame, [0, 24], [360, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
+    easing: ELEGANT,
+  });
+  // Holds at 1.2× through entry + typing (ends ~frame 30), then eases to 1.0
+  const zoom = interpolate(frame, [0, 40, 60], [1.2, 1.2, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
 
-  // Output after typing
-  const outputOpacity = interpolate(frame, [50, 60], [0, 1], {
+  // Output rows appear one-by-one
+  const row = (start: number) => {
+    const op = interpolate(frame, [start, start + 12], [0, 1], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: ELEGANT,
+    });
+    const slide = interpolate(frame, [start, start + 12], [6, 0], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: ELEGANT,
+    });
+    return { opacity: op, transform: `translateY(${slide}px)` };
+  };
+  const row1 = row(46);
+  const row2 = row(58);
+  const row3 = row(70);
+
+  // Each row collapses to 0 height until it appears, then expands smoothly.
+  // This makes the terminal fit only its visible content.
+  const rowH = (start: number) =>
+    interpolate(frame, [start, start + 8], [0, 52], {
+      extrapolateLeft: "clamp",
+      extrapolateRight: "clamp",
+      easing: ELEGANT,
+    });
+  const h1 = rowH(46);
+  const h2 = rowH(58);
+  const h3 = rowH(70);
+  // Output-block margin-top grows with the first row
+  const outputMt = interpolate(frame, [46, 54], [0, 20], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
 
-  // Browser slide-up
-  const browserOpacity = interpolate(frame, [75, 90], [0, 1], {
+  // Pill slides in from above
+  const browserOpacity = interpolate(frame, [75, 92], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
+    easing: ELEGANT,
   });
-  const browserSlide = interpolate(frame, [75, 105], [300, 0], {
+  const browserSlide = interpolate(frame, [75, 100], [-260, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
-    easing: Easing.out(Easing.cubic),
+    easing: ELEGANT,
   });
 
   return (
-    <AbsoluteFill style={{ backgroundColor: colors.bgBlack }}>
+    <AbsoluteFill style={{ backgroundColor: "#3B145D" }}>
       <div
       style={{
         position: "absolute", inset: 0,
@@ -49,46 +91,54 @@ export const Scene2TheCommand: React.FC = () => {
       <div
         style={{
           opacity: terminalOpacity,
-          transform: `scale(${terminalScale})`,
+          transform: `translateY(${terminalSlide}px) scale(${zoom})`,
+          transformOrigin: "center 30%",
           width: 800,
+          position: "relative",
+          zIndex: 2,
         }}
       >
         <Terminal title="~/my-startup">
-          <div style={{ fontSize: 32 }}>
-            <span style={{ color: colors.green }}>$</span>{" "}
-            <TypeWriter text="./wuphf" startFrame={10} charsPerFrame={0.4} style={{ fontSize: 32 }} />
+          <div style={{ fontSize: 38, lineHeight: 1.4 }}>
+            <span style={{ color: "#969640" }}>$</span>{" "}
+            <TypeWriter text="./wuphf" startFrame={10} charsPerFrame={0.4} style={{ color: "#D4DB18", fontSize: 38 }} />
           </div>
 
-          <div style={{ opacity: outputOpacity, marginTop: 20 }}>
-            <div style={{ color: colors.yellow, fontSize: 26 }}>Starting office...</div>
-            <div style={{ color: colors.text, fontSize: 26 }}>
-              Pack: <span style={{ color: colors.ceo, fontWeight: 700 }}>starter</span>
+          <div style={{ marginTop: outputMt }}>
+            <div style={{ height: h1, overflow: "hidden" }}>
+              <div style={row1}>Starting office...</div>
             </div>
-            <div style={{ color: colors.green, fontSize: 26, fontWeight: 600 }}>
-              Ready at localhost:7891
+            <div style={{ height: h2, overflow: "hidden" }}>
+              <div style={row2}>
+                Pack: <span style={{ color: "#cfd1d2", fontWeight: 600 }}>starter</span>
+              </div>
+            </div>
+            <div style={{ height: h3, overflow: "hidden" }}>
+              <div style={{ ...row3, color: "#cfd1d2" }}>
+                Ready at localhost:7891
+              </div>
             </div>
           </div>
         </Terminal>
       </div>
 
-      {/* Browser preview hint */}
+      {/* Localhost pill — slides down from behind the terminal */}
       <div
         style={{
           opacity: browserOpacity,
           transform: `translateY(${browserSlide}px)`,
-          width: 800,
-          height: 160,
-          backgroundColor: colors.bgSidebar,
-          borderRadius: 12,
-          border: "1px solid #35363A",
-          display: "flex",
+          display: "inline-flex",
           alignItems: "center",
-          justifyContent: "center",
           gap: 12,
+          padding: "12px 26px",
+          backgroundColor: "#FFFFFF",
+          borderRadius: 9999,
+          zIndex: 1,
+          marginTop: 32,
         }}
       >
-        <div style={{ width: 10, height: 10, borderRadius: "50%", backgroundColor: colors.green }} />
-        <span style={{ fontFamily: fonts.sans, fontSize: 20, color: colors.textDim }}>
+        <div style={{ width: 10, height: 10, borderRadius: "50%", backgroundColor: "#03a04c" }} />
+        <span style={{ fontFamily: fonts.sans, fontSize: 26, fontWeight: 400, color: "#000000" }}>
           localhost:7891
         </span>
       </div>
