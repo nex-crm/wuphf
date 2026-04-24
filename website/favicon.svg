@@ -1,11 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
-  <rect width="16" height="16" fill="#ECB22E"/>
-  <rect x="1" y="1" width="14" height="14" fill="#1A1610"/>
-  <g fill="#ECB22E">
-    <rect x="3" y="3" width="2" height="10"/>
-    <rect x="11" y="3" width="2" height="10"/>
-    <rect x="7" y="7" width="2" height="4"/>
-    <rect x="5" y="11" width="2" height="2"/>
-    <rect x="9" y="11" width="2" height="2"/>
-  </g>
+<svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g clip-path="url(#clip0_3074_2914)">
+<path d="M80 0H0V80H80V0Z" fill="#FFB3E6"/>
+<path d="M75 5H5V75H75V5Z" fill="#421867"/>
+<path d="M25 15H15V65H25V15Z" fill="#FFB3E6"/>
+<path d="M65 15H55V65H65V15Z" fill="#FFB3E6"/>
+<path d="M45 35H35V55H45V35Z" fill="#FFB3E6"/>
+<path d="M35 55H25V65H35V55Z" fill="#FFB3E6"/>
+<path d="M55 55H45V65H55V55Z" fill="#FFB3E6"/>
+</g>
+<defs>
+<clipPath id="clip0_3074_2914">
+<rect width="80" height="80" fill="white"/>
+</clipPath>
+</defs>
 </svg>
