@@ -15,6 +15,23 @@ pre-commit:
         - "bun.lock"
         - "web/bun.lock"
 
+    biome:
+      # biome runs against staged web/** files only — it's scoped to web/
+      # because that's where biome.json lives. `root: web` chdirs lefthook
+      # into web/ so {staged_files} arrives as paths relative to web/;
+      # stage_fixed=true re-stages formatter + safe-autofix changes so the
+      # commit includes them.
+      root: web
+      glob: "**/*.{js,ts,jsx,tsx,json,css}"
+      run: bunx --bun biome check --write --max-diagnostics=500 {staged_files}
+      stage_fixed: true
+      exclude:
+        - "dist/**"
+        - "node_modules/**"
+        - "bun.lock"
+        - "**/*.gen.ts"
+        - "**/*.gen.tsx"
+
     gofmt:
       glob: "*.go"
       run: |
