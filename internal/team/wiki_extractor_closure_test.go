@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -375,25 +374,19 @@ func countNonEmptyLines(t *testing.T, path string) int {
 }
 
 // commitCountForPath returns the number of commits that touched relPath.
-// Uses `git log --oneline -- <path>` so the test does not depend on any
-// internal helper.
-//
-// Clean the subprocess env so the lookup isn't hijacked by an inherited
-// GIT_DIR — when tests run under a pre-push hook, git exports GIT_DIR
-// pointing at the outer repo and `git log` would then query the outer
-// history (zero commits touching wiki/facts/**) instead of this test's
-// fixture repo. Same pattern as internal/migration/writer_test.go.
+// gitexec.Run scrubs GIT_DIR / GIT_CONFIG_* so the lookup isn't hijacked
+// by an inherited GIT_DIR when tests run under a pre-push hook (git
+// exports GIT_DIR pointing at the outer repo, and an unscrubbed `git
+// log` would then query the outer history instead of this test's
+// fixture repo). Same pattern as internal/migration/writer_test.go.
 func commitCountForPath(t *testing.T, repoRoot, relPath string) int {
 	t.Helper()
-	cmd := exec.Command("git", "-C", repoRoot, "log", "--oneline", "--", relPath)
-	cmd.Env = gitexec.CleanEnv()
-	out, err := cmd.CombinedOutput()
+	out, err := gitexec.Run(t.Context(), repoRoot, "log", "--oneline", "--", relPath)
 	if err != nil {
-		t.Fatalf("git log %s: %v: %s", relPath, err, out)
+		t.Fatalf("git log %s: %v", relPath, err)
 	}
-	trimmed := strings.TrimSpace(string(out))
-	if trimmed == "" {
+	if out == "" {
 		return 0
 	}
-	return strings.Count(trimmed, "\n") + 1
+	return strings.Count(out, "\n") + 1
 }

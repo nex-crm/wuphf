@@ -2,6 +2,7 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -176,16 +177,11 @@ func cleanupTaskWorktreeAtRepoRoot(repoRoot, path, branch string) error {
 }
 
 func gitRepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Env = gitexec.CleanEnv()
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("resolve repo root: %w: %s", err, strings.TrimSpace(stderr.String()))
+	root, err := gitexec.Run(context.Background(), "", "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("resolve repo root: %w", err)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return root, nil
 }
 
 // GitCleanEnv is a thin backwards-compatibility shim that delegates to

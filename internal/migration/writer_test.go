@@ -278,18 +278,16 @@ func TestMigratorIntegrationWithWikiWorker(t *testing.T) {
 		}
 	}
 
-	// Confirm commit author == migrate. Clean the subprocess env so this
-	// assertion is not hijacked by an inherited GIT_DIR (e.g. when the test
-	// runs under a pre-push hook — git exports GIT_DIR pointing at the
-	// outer repo and `git log` would return the outer repo's history
-	// instead of this test's fixture.
-	gitLog := exec.Command("git", "-C", root, "log", "--format=%an <%ae>")
-	gitLog.Env = gitexec.CleanEnv()
-	out, err := gitLog.Output()
+	// Confirm commit author == migrate. gitexec.Run scrubs the subprocess
+	// env so this assertion is not hijacked by an inherited GIT_DIR (e.g.
+	// when the test runs under a pre-push hook — git exports GIT_DIR
+	// pointing at the outer repo and `git log` would return the outer
+	// repo's history instead of this test's fixture).
+	out, err := gitexec.Run(t.Context(), root, "log", "--format=%an <%ae>")
 	if err != nil {
 		t.Fatalf("git log: %v", err)
 	}
-	if !strings.Contains(string(out), "migrate <migrate@wuphf.local>") {
-		t.Fatalf("expected migrate author in log, got:\n%s", string(out))
+	if !strings.Contains(out, "migrate <migrate@wuphf.local>") {
+		t.Fatalf("expected migrate author in log, got:\n%s", out)
 	}
 }
