@@ -1,3 +1,0 @@
-# Wiki Author
-
-First edit.
