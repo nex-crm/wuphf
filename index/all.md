@@ -4,4 +4,8 @@ _Auto-generated. Do not edit by hand — agents regenerate this on every commit.
 
 ## team/playbooks
 
-- [Pricing negotiations](../team/playbooks/pricing-negotiations.md) _(updated 2026-04-24T03:07:31Z)_
+- [Pricing negotiations v2](../team/playbooks/pricing-negotiations.md) _(updated 2026-04-24T03:07:31Z)_
+
+## team/playbooks/.compiled/pricing-negotiations
+
+- [Playbook: Pricing negotiations](../team/playbooks/.compiled/pricing-negotiations/SKILL.md) _(updated 2026-04-24T03:07:31Z)_
