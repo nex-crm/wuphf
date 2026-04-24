@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -481,5 +482,72 @@ func TestRepoAuditLogLimitCaps(t *testing.T) {
 	}
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries with limit=2, got %d", len(entries))
+	}
+}
+
+// TestRepoInitIgnoresInheritedGitDir is a regression test for the bug where
+// wuphf invoked from inside a git hook (which exports GIT_DIR pointing at the
+// outer repo) silently commits wiki state onto the user's real branch. The
+// symptom was thousands of `wuphf: init wiki` commits in the reflog of real
+// working branches. Fix was `cmd.Env = gitCleanEnv()` in runGitLockedAs.
+//
+// Setup: create a sacrificial "outer" git repo with one commit, point GIT_DIR
+// at it, and call Repo.Init() on an unrelated tempdir. Assert the outer repo's
+// HEAD is unchanged after the wiki init. Before the fix, the wiki commit
+// lands on the outer repo's HEAD and this assertion fails.
+func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
+	outer := filepath.Join(t.TempDir(), "outer")
+	if err := os.MkdirAll(outer, 0o755); err != nil {
+		t.Fatalf("mkdir outer: %v", err)
+	}
+	runOuter := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{
+			"-c", "user.name=outer",
+			"-c", "user.email=outer@test.local",
+			"-c", "commit.gpgsign=false",
+			"-c", "init.defaultBranch=main",
+		}, args...)...)
+		cmd.Dir = outer
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("outer git %v: %v: %s", args, err, out)
+		}
+	}
+	runOuter("init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(outer, "seed.txt"), []byte("seed\n"), 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	runOuter("add", "seed.txt")
+	runOuter("commit", "-q", "-m", "outer: seed")
+
+	headBefore, err := exec.Command("git", "-C", outer, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("outer rev-parse before: %v", err)
+	}
+
+	// Inherit GIT_DIR pointing at the outer repo. This is exactly what a
+	// git hook subprocess sees.
+	t.Setenv("GIT_DIR", filepath.Join(outer, ".git"))
+	t.Setenv("GIT_WORK_TREE", outer)
+
+	repo := newTestRepo(t)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("wiki init: %v", err)
+	}
+
+	headAfter, err := exec.Command("git", "-C", outer, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("outer rev-parse after: %v", err)
+	}
+	if strings.TrimSpace(string(headAfter)) != strings.TrimSpace(string(headBefore)) {
+		log, _ := exec.Command("git", "-C", outer, "log", "--oneline", "-5").Output()
+		t.Fatalf("outer repo HEAD moved (leak!):\nbefore %s\nafter  %s\nlog:\n%s",
+			strings.TrimSpace(string(headBefore)),
+			strings.TrimSpace(string(headAfter)),
+			string(log))
+	}
+
+	if _, err := os.Stat(filepath.Join(repo.Root(), ".git")); err != nil {
+		t.Fatalf("wiki .git missing — init did not target the wiki path: %v", err)
 	}
 }

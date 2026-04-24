@@ -187,10 +187,13 @@ func gitRepoRoot() (string, error) {
 }
 
 // gitCleanEnv returns os.Environ() minus the GIT_* variables that pin git to a
-// specific repo, index, or worktree. Callers set cmd.Dir explicitly, so
-// inheriting GIT_DIR/GIT_WORK_TREE from a parent (e.g. when wuphf runs inside
-// a `git push` hook or a nested git operation) would silently redirect every
-// subprocess to the outer repo and break worktree setup.
+// specific repo, index, or worktree, plus the GIT_CONFIG_* family that can
+// inject `-c` overrides into every child git (core.worktree, core.hooksPath,
+// etc.). Callers set cmd.Dir explicitly, so inheriting GIT_DIR/GIT_WORK_TREE
+// from a parent (e.g. when wuphf runs inside a `git push` hook or a nested
+// git operation) would silently redirect every subprocess to the outer repo —
+// that's what produced the runaway "wuphf: init wiki" commits clobbering real
+// branches. GIT_CONFIG_PARAMETERS has the same blast radius via `-c` injection.
 func gitCleanEnv() []string {
 	env := os.Environ()
 	filtered := env[:0]
@@ -201,7 +204,12 @@ func gitCleanEnv() []string {
 			strings.HasPrefix(kv, "GIT_INDEX_FILE="),
 			strings.HasPrefix(kv, "GIT_OBJECT_DIRECTORY="),
 			strings.HasPrefix(kv, "GIT_COMMON_DIR="),
-			strings.HasPrefix(kv, "GIT_NAMESPACE="):
+			strings.HasPrefix(kv, "GIT_NAMESPACE="),
+			strings.HasPrefix(kv, "GIT_CONFIG="),
+			strings.HasPrefix(kv, "GIT_CONFIG_COUNT="),
+			strings.HasPrefix(kv, "GIT_CONFIG_KEY_"),
+			strings.HasPrefix(kv, "GIT_CONFIG_VALUE_"),
+			strings.HasPrefix(kv, "GIT_CONFIG_PARAMETERS="):
 			continue
 		}
 		filtered = append(filtered, kv)

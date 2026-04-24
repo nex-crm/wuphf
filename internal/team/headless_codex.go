@@ -1231,7 +1231,14 @@ func (l *Launcher) headlessCodexNeedsDangerousBypass(slug string) bool {
 }
 
 func (l *Launcher) buildHeadlessCodexEnv(slug string, workspaceDir string, channel string) []string {
-	env := stripEnvKeys(os.Environ(), headlessCodexEnvVarsToStrip)
+	// gitCleanEnv: codex agents run `git` subcommands inside their sandbox.
+	// If wuphf inherited GIT_DIR / GIT_WORK_TREE / GIT_CONFIG_PARAMETERS from
+	// a parent (git hook, nested wuphf call) every child git would retarget
+	// the outer repo. Clean those first, then drop codex-specific noise.
+	// stripEnvKeys is exact-match, gitCleanEnv is prefix-match — the
+	// GIT_CONFIG_KEY_<n> family needs prefix-match, so we run gitCleanEnv
+	// first and stripEnvKeys second.
+	env := stripEnvKeys(gitCleanEnv(), headlessCodexEnvVarsToStrip)
 	if workspaceDir = normalizeHeadlessWorkspaceDir(workspaceDir); workspaceDir != "" {
 		env = setEnvValue(env, "PWD", workspaceDir)
 	}
