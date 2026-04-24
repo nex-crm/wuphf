@@ -1,3 +1,0 @@
-# Acme
-
-Body.
