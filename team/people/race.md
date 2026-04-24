@@ -1,3 +1,0 @@
-# Race
-
-writer A
