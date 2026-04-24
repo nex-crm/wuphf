@@ -1,3 +1,0 @@
-# Article B
-
-The target.
