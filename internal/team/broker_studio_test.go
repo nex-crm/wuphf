@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 func writeFakeOperationOne(t *testing.T) string {
@@ -473,7 +475,7 @@ func TestBuildOperationBootstrapPackageSynthesizesWhenNoPackSeedExists(t *testin
 	tmpRepo := t.TempDir()
 	cmd := exec.Command("git", "init")
 	cmd.Dir = tmpRepo
-	cmd.Env = GitCleanEnv()
+	cmd.Env = gitexec.CleanEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init temp repo: %v: %s", err, strings.TrimSpace(string(out)))
 	}

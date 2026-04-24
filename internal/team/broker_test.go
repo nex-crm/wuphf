@@ -20,6 +20,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -151,7 +152,7 @@ func initUsableGitWorktree(t *testing.T, path string) {
 	}
 	cmd := exec.Command("git", "init")
 	cmd.Dir = path
-	cmd.Env = GitCleanEnv()
+	cmd.Env = gitexec.CleanEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v: %s", path, err, strings.TrimSpace(string(out)))
 	}

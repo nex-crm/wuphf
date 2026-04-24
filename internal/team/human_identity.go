@@ -68,6 +68,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 // HumanIdentity is the cached git identity for a single human.
@@ -277,11 +278,11 @@ func runGitConfig(key string) string {
 	// WANT the user's real global config. Honour a short timeout so a
 	// hung git doesn't stall broker startup.
 	//
-	// GitCleanEnv strips GIT_CONFIG_PARAMETERS and friends: when wuphf
+	// gitexec.CleanEnv strips GIT_CONFIG_PARAMETERS and friends: when wuphf
 	// runs inside a git hook, the outer git may inject `-c` overrides
 	// via that env var which would silently override --global reads.
 	cmd := exec.Command("git", "config", "--global", key)
-	cmd.Env = GitCleanEnv()
+	cmd.Env = gitexec.CleanEnv()
 	out, err := cmd.Output()
 	if err != nil {
 		return ""

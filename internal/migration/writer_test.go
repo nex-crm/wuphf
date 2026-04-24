@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/gitexec"
 	"github.com/nex-crm/wuphf/internal/team"
 )
 
@@ -283,7 +284,7 @@ func TestMigratorIntegrationWithWikiWorker(t *testing.T) {
 	// outer repo and `git log` would return the outer repo's history
 	// instead of this test's fixture.
 	gitLog := exec.Command("git", "-C", root, "log", "--format=%an <%ae>")
-	gitLog.Env = team.GitCleanEnv()
+	gitLog.Env = gitexec.CleanEnv()
 	out, err := gitLog.Output()
 	if err != nil {
 		t.Fatalf("git log: %v", err)

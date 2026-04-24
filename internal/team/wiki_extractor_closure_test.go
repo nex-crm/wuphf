@@ -14,6 +14,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 // extractSecondArtifactResponse returns an extraction payload for the SAME
@@ -384,7 +386,7 @@ func countNonEmptyLines(t *testing.T, path string) int {
 func commitCountForPath(t *testing.T, repoRoot, relPath string) int {
 	t.Helper()
 	cmd := exec.Command("git", "-C", repoRoot, "log", "--oneline", "--", relPath)
-	cmd.Env = GitCleanEnv()
+	cmd.Env = gitexec.CleanEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git log %s: %v: %s", relPath, err, out)

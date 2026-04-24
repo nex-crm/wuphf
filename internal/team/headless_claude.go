@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -251,10 +252,11 @@ func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
 }
 
 func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
-	// GitCleanEnv: a spawned claude agent will run `git status/diff/commit`
-	// inside its sandbox. If wuphf inherited GIT_DIR (e.g. launched from a
-	// git hook) every child `git` would silently retarget the outer repo.
-	env := GitCleanEnv()
+	// gitexec.CleanEnv: a spawned claude agent will run
+	// `git status/diff/commit` inside its sandbox. If wuphf inherited
+	// GIT_DIR (e.g. launched from a git hook) every child `git` would
+	// silently retarget the outer repo.
+	env := gitexec.CleanEnv()
 	env = append(env,
 		"WUPHF_AGENT_SLUG="+slug,
 		"WUPHF_BROKER_TOKEN="+l.broker.Token(),

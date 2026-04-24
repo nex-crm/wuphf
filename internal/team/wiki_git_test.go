@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 func newTestRepo(t *testing.T) *Repo {
@@ -490,7 +492,7 @@ func TestRepoAuditLogLimitCaps(t *testing.T) {
 // wuphf invoked from inside a git hook (which exports GIT_DIR pointing at the
 // outer repo) silently commits wiki state onto the user's real branch. The
 // symptom was thousands of `wuphf: init wiki` commits in the reflog of real
-// working branches. Fix was `cmd.Env = GitCleanEnv()` in runGitLockedAs.
+// working branches. Fix was `cmd.Env = gitexec.CleanEnv()` in runGitLockedAs.
 //
 // Setup: create a sacrificial "outer" git repo with one commit, point GIT_DIR
 // at it, and call Repo.Init() on an unrelated tempdir. Assert the outer repo's
@@ -510,7 +512,7 @@ func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
 			"-c", "init.defaultBranch=main",
 		}, args...)...)
 		cmd.Dir = outer
-		cmd.Env = GitCleanEnv() // don't inherit the test runner's GIT_DIR
+		cmd.Env = gitexec.CleanEnv() // don't inherit the test runner's GIT_DIR
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("outer git %v: %v: %s", args, err, out)
 		}
@@ -524,7 +526,7 @@ func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
 
 	outerGit := func(args ...string) ([]byte, error) {
 		cmd := exec.Command("git", append([]string{"-C", outer}, args...)...)
-		cmd.Env = GitCleanEnv() // don't inherit outer test runner's GIT_DIR
+		cmd.Env = gitexec.CleanEnv() // don't inherit outer test runner's GIT_DIR
 		return cmd.Output()
 	}
 	// Snapshot *all* refs + working-tree status, not just HEAD. The class of
@@ -577,7 +579,7 @@ func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
 	}
 	wikiGit := func(args ...string) ([]byte, error) {
 		cmd := exec.Command("git", append([]string{"-C", repo.Root()}, args...)...)
-		cmd.Env = GitCleanEnv()
+		cmd.Env = gitexec.CleanEnv()
 		return cmd.Output()
 	}
 	msg, err := wikiGit("log", "-1", "--format=%s")

@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 // ErrGitUnavailable is returned by Init when the `git` binary cannot be
@@ -724,15 +725,16 @@ func (r *Repo) runGitLockedAs(ctx context.Context, name, email string, args ...s
 	all := append(identity, args...)
 	cmd := exec.CommandContext(ctx, "git", all...)
 	cmd.Dir = r.root
-	// GitCleanEnv strips GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE etc. so a
-	// wuphf invocation launched from inside a git hook (which exports GIT_DIR
-	// pointing at the outer repo) cannot silently retarget these commits onto
-	// the user's actual working branch — that's what produced the runaway
-	// "wuphf: init wiki" commits clobbering real branches. GitCleanEnv now
-	// also strips GIT_CONFIG_GLOBAL/_SYSTEM; the literal /dev/null appends
-	// below re-pin them last-wins via os/exec dedupEnv, so config discovery
-	// is fully scoped to this call regardless of parent env.
-	cmd.Env = append(GitCleanEnv(),
+	// gitexec.CleanEnv strips GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE etc.
+	// so a wuphf invocation launched from inside a git hook (which exports
+	// GIT_DIR pointing at the outer repo) cannot silently retarget these
+	// commits onto the user's actual working branch — that's what produced
+	// the runaway "wuphf: init wiki" commits clobbering real branches.
+	// gitexec.CleanEnv also strips GIT_CONFIG_GLOBAL/_SYSTEM; the literal
+	// /dev/null appends below re-pin them last-wins via os/exec dedupEnv,
+	// so config discovery is fully scoped to this call regardless of parent
+	// env.
+	cmd.Env = append(gitexec.CleanEnv(),
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_TERMINAL_PROMPT=0",

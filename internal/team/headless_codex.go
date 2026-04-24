@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -1231,14 +1232,15 @@ func (l *Launcher) headlessCodexNeedsDangerousBypass(slug string) bool {
 }
 
 func (l *Launcher) buildHeadlessCodexEnv(slug string, workspaceDir string, channel string) []string {
-	// GitCleanEnv: codex agents run `git` subcommands inside their sandbox.
-	// If wuphf inherited GIT_DIR / GIT_WORK_TREE / GIT_CONFIG_PARAMETERS from
-	// a parent (git hook, nested wuphf call) every child git would retarget
-	// the outer repo. Clean those first, then drop codex-specific noise.
-	// stripEnvKeys is exact-match, GitCleanEnv is prefix-match — the
-	// GIT_CONFIG_KEY_<n> family needs prefix-match, so we run GitCleanEnv
-	// first and stripEnvKeys second.
-	env := stripEnvKeys(GitCleanEnv(), headlessCodexEnvVarsToStrip)
+	// gitexec.CleanEnv: codex agents run `git` subcommands inside their
+	// sandbox. If wuphf inherited GIT_DIR / GIT_WORK_TREE /
+	// GIT_CONFIG_PARAMETERS from a parent (git hook, nested wuphf call)
+	// every child git would retarget the outer repo. Clean those first,
+	// then drop codex-specific noise. stripEnvKeys is exact-match,
+	// gitexec.CleanEnv is prefix-match — the GIT_CONFIG_KEY_<n> family
+	// needs prefix-match, so we run gitexec.CleanEnv first and stripEnvKeys
+	// second.
+	env := stripEnvKeys(gitexec.CleanEnv(), headlessCodexEnvVarsToStrip)
 	if workspaceDir = normalizeHeadlessWorkspaceDir(workspaceDir); workspaceDir != "" {
 		env = setEnvValue(env, "PWD", workspaceDir)
 	}
