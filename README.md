@@ -19,7 +19,7 @@ One command. One shared office. CEO, PM, engineers, designer, CMO, CRO — all v
 
 > _30-second teaser — what the office feels like when the agents are actually working._
 
-<video width="630" height="300" src="https://github.com/user-attachments/assets/9b1706d3-4bc1-4b4f-a4a4-6058e3546e6d"></video>
+<video width="630" height="300" src="https://github.com/user-attachments/assets/36661391-a0ee-43d6-80d9-177776a53bc9"></video>
 
 > _Full walkthrough — launch to first shipped task, end to end._
 
