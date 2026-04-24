@@ -1,3 +1,0 @@
-# Retro
-
-We launched cleanly.
