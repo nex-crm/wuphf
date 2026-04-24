@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/runtimebin"
@@ -51,12 +52,25 @@ var prereqSpecs = map[string]prereqSpec{
 // CLI runtimes must be present for wuphf to actually run a turn, but all are
 // marked optional here so the user can proceed with whichever runtime
 // they have.
+//
+// Probes run concurrently. CheckOne's per-probe timeout is 10s (see comment
+// there for rationale) and CheckAll is invoked from an HTTP handler with a
+// 5s client deadline at cmd/wuphf/onboarding.go; running probes serially
+// would mean worst-case wall-clock = 7 × 10s = 70s, far past any sane HTTP
+// budget. Concurrent probes cap wall-clock at max(probe), well under the
+// client timeout. Order of `names` is preserved in the returned slice.
 func CheckAll() []PrereqResult {
 	names := []string{"node", "git", "claude", "codex", "opencode", "cursor", "windsurf"}
-	results := make([]PrereqResult, 0, len(names))
-	for _, name := range names {
-		results = append(results, CheckOne(name))
+	results := make([]PrereqResult, len(names))
+	var wg sync.WaitGroup
+	wg.Add(len(names))
+	for i, name := range names {
+		go func(i int, name string) {
+			defer wg.Done()
+			results[i] = CheckOne(name)
+		}(i, name)
 	}
+	wg.Wait()
 	return results
 }
 
