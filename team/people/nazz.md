@@ -1,3 +1,0 @@
-# Nazz
-
-Founder.
