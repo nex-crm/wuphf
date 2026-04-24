@@ -2,3 +2,4 @@
 {"id":"df8ffcd7-9f64-4b89-b4dc-66ebf0c598d0","kind":"customers","slug":"northstar","text":"fact-A","recorded_by":"pm","created_at":"2026-04-24T03:05:59.009693Z"}
 {"id":"40829866-7243-48e7-a149-40bba7c72d32","kind":"customers","slug":"northstar","text":"fact-D","recorded_by":"cs","created_at":"2026-04-24T03:05:59.009757Z"}
 {"id":"ef67a55a-b6fd-4949-80f9-7b21ab7a53fb","kind":"customers","slug":"northstar","text":"fact-E","recorded_by":"ceo","created_at":"2026-04-24T03:05:59.009732Z"}
+{"id":"4a6bdb06-3c1c-47f9-87e8-ea153b591053","kind":"customers","slug":"northstar","text":"fact-G","recorded_by":"eng","created_at":"2026-04-24T03:05:59.009722Z"}
