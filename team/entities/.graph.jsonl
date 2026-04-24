@@ -1,1 +1,2 @@
 {"from_kind":"people","from_slug":"sarah","to_kind":"companies","to_slug":"acme","first_seen_fact_id":"88ffa19e-457b-47d6-9f45-10dbf3f6bdda","last_seen_ts":"2026-04-24T03:05:21.266426Z"}
+{"from_kind":"companies","from_slug":"acme","to_kind":"people","to_slug":"sarah","first_seen_fact_id":"29d61b46-2066-4a4c-baf2-a15ec9001919","last_seen_ts":"2026-04-24T03:05:21.493833Z"}
