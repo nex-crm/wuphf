@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Xmark } from "iconoir-react";
 
@@ -365,18 +365,25 @@ function AgentPanelView({ agent, onClose }: AgentPanelViewProps) {
 export function AgentPanel() {
   const activeAgentSlug = useAppStore((s) => s.activeAgentSlug);
   const setActiveAgentSlug = useAppStore((s) => s.setActiveAgentSlug);
-  const _currentChannel = useAppStore((s) => s.currentChannel);
-  const _currentApp = useAppStore((s) => s.currentApp);
+  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentApp = useAppStore((s) => s.currentApp);
   const { data: members = [] } = useOfficeMembers();
   const panelRef = useRef<HTMLDivElement>(null);
 
-  const close = () => setActiveAgentSlug(null);
+  const close = useCallback(
+    () => setActiveAgentSlug(null),
+    [setActiveAgentSlug],
+  );
 
-  // Close when user navigates to a different sidebar section.
+  // Close when user navigates to a different sidebar section. The intent is
+  // "nav away from the agent panel" — driven by currentChannel / currentApp,
+  // NOT by activeAgentSlug itself. The previous version depended on
+  // activeAgentSlug and closed whenever one was set, so clicking any agent
+  // instantly un-selected it and the panel never mounted (React #31 guard
+  // e2e regression).
   useEffect(() => {
-    if (activeAgentSlug) close();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeAgentSlug, close]);
+    close();
+  }, [currentChannel, currentApp, close]);
 
   // Close on outside click — ignore clicks on sidebar agent items that would
   // just re-open the panel, and ignore clicks inside the panel itself.
@@ -393,7 +400,6 @@ export function AgentPanel() {
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAgentSlug, close]);
 
   if (!activeAgentSlug) return null;

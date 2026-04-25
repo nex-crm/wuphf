@@ -373,7 +373,6 @@ func countNonEmptyLines(t *testing.T, path string) int {
 	return n
 }
 
-// commitCountForPath returns the number of commits that touched relPath.
 // gitexec.Run scrubs GIT_DIR / GIT_CONFIG_* so the lookup isn't hijacked
 // by an inherited GIT_DIR when tests run under a pre-push hook (git
 // exports GIT_DIR pointing at the outer repo, and an unscrubbed `git
