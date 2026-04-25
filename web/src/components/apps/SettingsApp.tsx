@@ -26,6 +26,7 @@ import {
   updateConfig,
   type WorkspaceWipeResult,
 } from "../../api/client";
+import { useAppStore } from "../../stores/app";
 import { showNotice } from "../ui/Toast";
 
 type SectionId =
@@ -1197,6 +1198,7 @@ function DangerZoneSection() {
   const [open, setOpen] = useState<DangerAction | null>(null);
   const [busy, setBusy] = useState(false);
   const queryClient = useQueryClient();
+  const resetForOnboarding = useAppStore((s) => s.resetForOnboarding);
 
   const handleReset = async () => {
     setBusy(true);
@@ -1225,12 +1227,11 @@ function DangerZoneSection() {
         return;
       }
       queryClient.clear();
+      window.history.replaceState(null, "", "#/channels/general");
+      resetForOnboarding();
       setOpen(null);
       setBusy(false);
-      showNotice(
-        "Workspace shredded. Relaunch wuphf to start onboarding.",
-        "success",
-      );
+      showNotice("Workspace shredded. Onboarding reopened.", "success");
     } catch (err) {
       showNotice(err instanceof Error ? err.message : "Shred failed", "error");
       setBusy(false);
@@ -1242,9 +1243,8 @@ function DangerZoneSection() {
       <div style={styles.sectionTitle}>Danger Zone</div>
       <div style={styles.sectionDesc}>
         Irreversible operations on this workspace. Reset reloads the current
-        broker. Shred wipes local workspace history, stops WUPHF after the
-        response returns, and requires a fresh
-        <code style={{ margin: "0 4px" }}>wuphf</code> launch.
+        broker. Shred wipes local workspace history and reopens onboarding in
+        the running web UI.
       </div>
 
       {/* RESET — narrow: broker runtime state only */}
@@ -1263,7 +1263,7 @@ function DangerZoneSection() {
           <li>
             Broker runtime state (<code>~/.wuphf/team/broker-state.json</code>)
           </li>
-          <li>Office PID file and in-memory snapshot</li>
+          <li>Last-good in-memory snapshot</li>
         </ul>
         <div style={dangerStyles.listLabel}>Preserved</div>
         <ul style={dangerStyles.list}>
@@ -1290,8 +1290,8 @@ function DangerZoneSection() {
         <div style={dangerStyles.cardSubtitle}>
           Full wipe. Deletes your team, company identity, office task receipts,
           saved workflows, local memory, logs, and provider session state, then
-          stops WUPHF. Use this to start completely fresh or to try a different
-          blueprint.
+          returns you to onboarding. Use this to start completely fresh or to try
+          a different blueprint.
         </div>
         <div style={dangerStyles.listLabel}>Deletes</div>
         <ul style={dangerStyles.list}>
@@ -1303,7 +1303,8 @@ function DangerZoneSection() {
             Company identity (<code>~/.wuphf/company.json</code>)
           </li>
           <li>
-            Team, office, workflows directories under <code>~/.wuphf/</code>
+            Team runtime state, office, and workflows under{" "}
+            <code>~/.wuphf/</code>
           </li>
           <li>
             Logs, sessions, provider state, calendar, and local wiki memory
@@ -1358,9 +1359,9 @@ function DangerZoneSection() {
             <>
               This permanently deletes your team, company identity, office task
               receipts, and saved workflows, plus local logs, sessions, provider
-              state, calendar, and wiki memory. WUPHF will stop after the wipe;
-              relaunch it to reopen onboarding. Task worktrees and config are
-              kept. <strong>This cannot be undone.</strong>
+              state, calendar, and wiki memory. Onboarding will reopen
+              immediately. Task worktrees, config, and device identity are kept.{" "}
+              <strong>This cannot be undone.</strong>
             </>
           }
           confirmLabel="Shred workspace"

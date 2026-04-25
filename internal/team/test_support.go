@@ -1,6 +1,7 @@
 package team
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,4 +69,25 @@ func DisableRealTaskWorktreeForTests() {
 			_ = os.Setenv("WUPHF_RUNTIME_HOME", dir)
 		}
 	}
+}
+
+// setHeadlessCodexRunTurnForTest redirects headlessCodexRunTurn(...) to fn
+// for the duration of the test, then restores the prior override on cleanup.
+//
+// Tests previously did `oldFn := headlessCodexRunTurn; headlessCodexRunTurn = ...`
+// against a package-level var. That pattern was a data race against the
+// queue worker spawned by enqueueHeadlessCodexTurnRecord — the worker could
+// outlive the test's deferred restore and observe the swap mid-call. Use
+// this helper instead.
+func setHeadlessCodexRunTurnForTest(t *testing.T, fn func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error) {
+	t.Helper()
+	prior := headlessCodexRunTurnOverride.Load()
+	headlessCodexRunTurnOverride.Store(&fn)
+	t.Cleanup(func() {
+		if prior == nil {
+			headlessCodexRunTurnOverride.Store(nil)
+			return
+		}
+		headlessCodexRunTurnOverride.Store(prior)
+	})
 }

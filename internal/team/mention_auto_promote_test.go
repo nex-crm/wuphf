@@ -196,16 +196,14 @@ func TestAutoPromote_EndToEnd_HumanTagsPM_DispatchesToPM(t *testing.T) {
 	}
 
 	processed := make(chan string, 4)
-	oldRunTurn := headlessCodexRunTurn
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
 		ch := ""
 		if len(channel) > 0 {
 			ch = channel[0]
 		}
 		processed <- slug + "|" + ch + "|" + notification
 		return nil
-	}
-	defer func() { headlessCodexRunTurn = oldRunTurn }()
+	})
 
 	// Simulate the user's exact flow: POST /messages with @pm in body and
 	// tagged empty (composer didn't commit a chip).

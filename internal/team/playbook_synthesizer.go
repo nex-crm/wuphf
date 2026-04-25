@@ -49,6 +49,17 @@ const MaxPlaybookBodySize = 64 * 1024
 // bounded even when a playbook has hundreds of runs.
 const MaxExecutionsForPrompt = 20
 
+// DefaultClusterMinEntities is the v2 prompt threshold for surfacing a
+// "pattern across entities". Mirrors WIKI-SLICE2-PLAN.md Thread C bullet 1:
+// ≥3 distinct entities sharing a reinforced (predicate, object) pair.
+const DefaultClusterMinEntities = 3
+
+// MaxClustersForPrompt caps how many clusters the v2 prompt carries. Keeps
+// the LLM input bounded when the wiki has hundreds of reinforced patterns.
+// Clusters are sorted strongest-first (count desc), so the head window is
+// the most informative slice.
+const MaxClustersForPrompt = 10
+
 // PlaybookSynthesisPromptSystem is the system prompt sent on every call.
 // Locked here so the behavior is reviewable — do not edit casually.
 const PlaybookSynthesisPromptSystem = `You maintain playbooks in a team wiki. Each playbook has an author who specified the canonical steps. Your job is to integrate lessons from recent executions WITHOUT rewriting the author's body.
@@ -112,6 +123,19 @@ type PlaybookSynthesizerConfig struct {
 	// this nil and the worker falls back to defaultLLMCall from
 	// entity_synthesizer.go (provider.RunConfiguredOneShot).
 	LLMCall func(ctx context.Context, systemPrompt, userPrompt string) (string, error)
+
+	// ClusterSource enables the Slice 2 Thread C v2 prompt. When non-nil,
+	// synthesize() queries this store for reinforced (predicate, object)
+	// pairs shared across ≥ ClusterMinEntities distinct entities and feeds
+	// them into prompts/synthesis_playbook_v2.tmpl. When nil, the v1 prompt
+	// builder runs unchanged — additive rollout, no hot-path regression.
+	ClusterSource FactStore
+
+	// ClusterMinEntities overrides DefaultClusterMinEntities. Values ≤ 0
+	// use the default. Small-workspace operators can drop this to 2 to
+	// surface patterns earlier; the default of 3 is deliberately
+	// conservative per WIKI-SLICE2-PLAN.md Thread C.
+	ClusterMinEntities int
 }
 
 // playbookSynthEventPublisher is the subset of Broker the synthesizer needs.
@@ -394,7 +418,35 @@ func (s *PlaybookSynthesizer) synthesize(ctx context.Context, job PlaybookSynthe
 		window = window[:MaxExecutionsForPrompt]
 	}
 
-	userPrompt := buildPlaybookSynthUserPrompt(source, window)
+	// Slice 2 Thread C: when a cluster source is wired, collect cross-entity
+	// patterns and render via the v2 prompt. Fall back to the v1 builder on
+	// any clustering error so the synthesis path stays live — patterns are
+	// a supplement, not a gate. An empty cluster slice with the v2 prompt is
+	// valid; the template tells the model to omit the patterns section.
+	var (
+		userPrompt string
+		clusters   []FactCluster
+	)
+	if s.cfg.ClusterSource != nil {
+		collected, cerr := s.collectReinforcedClusters(ctx)
+		if cerr != nil {
+			log.Printf("playbook synth: cluster collection for %s: %v (falling back to v1 prompt)", job.Slug, cerr)
+		} else {
+			// collectReinforcedClusters already head-slices at MaxClustersForPrompt
+			// via the topN arg to clusterReinforcedFacts, so no post-truncation
+			// is required here.
+			clusters = collected
+			rendered, rerr := buildPlaybookSynthUserPromptV2(source, window, clusters)
+			if rerr != nil {
+				log.Printf("playbook synth: v2 render for %s: %v (falling back to v1 prompt)", job.Slug, rerr)
+			} else {
+				userPrompt = rendered
+			}
+		}
+	}
+	if userPrompt == "" {
+		userPrompt = buildPlaybookSynthUserPrompt(source, window)
+	}
 
 	callCtx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()

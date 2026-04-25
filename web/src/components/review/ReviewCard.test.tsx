@@ -7,10 +7,10 @@ import ReviewCard from "./ReviewCard";
 
 const REVIEW: ReviewItem = {
   id: "r1",
-  agent_slug: "pm",
-  entry_slug: "acme",
-  entry_title: "Customer Acme rough notes",
-  proposed_wiki_path: "customers/acme-logistics",
+  agent_slug: "planner",
+  entry_slug: "reliable-handoffs",
+  entry_title: "Reliable handoffs",
+  proposed_wiki_path: "team/playbooks/reliable-handoffs.md",
   excerpt: "A tiny excerpt that should appear as the card preview.",
   reviewer_slug: "ceo",
   state: "pending",
@@ -22,9 +22,11 @@ const REVIEW: ReviewItem = {
 describe("<ReviewCard>", () => {
   it("renders title, excerpt, and proposed wiki path", () => {
     render(<ReviewCard review={REVIEW} onOpen={() => {}} />);
-    expect(screen.getByText("Customer Acme rough notes")).toBeInTheDocument();
+    expect(screen.getByText("Reliable handoffs")).toBeInTheDocument();
     expect(screen.getByText(/A tiny excerpt/)).toBeInTheDocument();
-    expect(screen.getByText("customers/acme-logistics")).toBeInTheDocument();
+    expect(
+      screen.getByText("team/playbooks/reliable-handoffs.md"),
+    ).toBeInTheDocument();
   });
 
   it("invokes onOpen when clicked", async () => {

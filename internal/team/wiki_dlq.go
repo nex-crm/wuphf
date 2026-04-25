@@ -20,10 +20,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -122,9 +124,17 @@ type dlqTombstone struct {
 }
 
 // DLQ owns all read/write access to wiki/.dlq/. It is safe for concurrent use.
+//
+// mu is an RWMutex: writers (Enqueue, RecordAttempt, MarkResolved) take the
+// write lock; read-only callers (Inspect, ReadyForReplay) take the read
+// lock. ReadyForReplay is semantically read-only — it does not modify any
+// file — so it can safely hold RLock alongside concurrent Inspect calls
+// from an operator dashboard.
 type DLQ struct {
-	root string     // absolute path to wiki root; DLQ files live in <root>/.dlq/
-	mu   sync.Mutex // guards all file mutations
+	root               string       // absolute path to wiki root; DLQ files live in <root>/.dlq/
+	mu                 sync.RWMutex // guards all file mutations
+	corruptLineCount   atomic.Uint64
+	permCorruptLineCnt atomic.Uint64
 }
 
 // ── Constructor ───────────────────────────────────────────────────────────────
@@ -175,9 +185,11 @@ func (d *DLQ) Enqueue(_ context.Context, e DLQEntry) error {
 // Only the latest state per artifact_sha is consulted (last-write-wins in
 // append order), so successive RecordAttempt calls correctly reflect the
 // updated backoff window rather than an old eligible row.
+//
+// Read-only: holds the read lock so concurrent Inspect calls do not block.
 func (d *DLQ) ReadyForReplay(_ context.Context, now time.Time) ([]DLQEntry, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	latest, tombstones, err := d.readLatestStateLocked()
 	if err != nil {
@@ -252,6 +264,126 @@ func (d *DLQ) RecordAttempt(_ context.Context, artifactSHA string, attemptErr er
 	return appendLine(d.extractionsPath(), current)
 }
 
+// Snapshot is the read-only view of the DLQ returned by Inspect. It is
+// safe to serialise to JSON for operator surfaces.
+type Snapshot struct {
+	// Pending are extraction entries that have not been tombstoned. They
+	// may or may not be past their NextRetryNotBefore — callers that
+	// need "ready now" should filter by NextRetryNotBefore ≤ now.
+	Pending []DLQEntry `json:"pending"`
+	// PermanentFailures are entries that crossed their max_retries and
+	// were promoted to permanent-failures.jsonl. Append-only; callers
+	// should treat the order as oldest-first (file order).
+	PermanentFailures []DLQEntry `json:"permanent_failures"`
+}
+
+// Inspect returns a Snapshot of the current DLQ state. Read-only: does not
+// append, tombstone, or mutate any file. Safe to call from an HTTP handler
+// while the worker continues to enqueue and retry.
+//
+// Uses the read lock so multiple operator dashboards polling GET /wiki/dlq
+// do not serialise on each other.
+func (d *DLQ) Inspect(_ context.Context) (Snapshot, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	latest, tombstones, err := d.readLatestStateLocked()
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("dlq: read latest: %w", err)
+	}
+
+	pending := make([]DLQEntry, 0, len(latest))
+	for _, e := range latest {
+		if _, dead := tombstones[e.ArtifactSHA]; dead {
+			continue
+		}
+		pending = append(pending, e)
+	}
+	// Stable order by FirstFailedAt ascending so UI paginates predictably.
+	sortEntriesByFirstFailedAt(pending)
+
+	permanent, err := d.readPermanentLocked()
+	if err != nil {
+		return Snapshot{}, fmt.Errorf("dlq: read permanent: %w", err)
+	}
+
+	return Snapshot{
+		Pending:           pending,
+		PermanentFailures: permanent,
+	}, nil
+}
+
+// readPermanentLocked scans permanent-failures.jsonl and returns every
+// DLQEntry row in file order. Caller must hold d.mu (read or write).
+//
+// Lines that fail to unmarshal are logged and counted on
+// d.permCorruptLineCnt so operators can distinguish "file is empty" from
+// "file has corrupted rows". We do NOT abort the scan on a single bad row
+// — the file is append-only and a single half-written line from a crash
+// must not make the entire DLQ surface unreadable.
+func (d *DLQ) readPermanentLocked() ([]DLQEntry, error) {
+	f, err := os.Open(d.permanentPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("open permanent-failures: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	var out []DLQEntry
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 512*1024)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var e DLQEntry
+		if err := json.Unmarshal(line, &e); err != nil {
+			d.permCorruptLineCnt.Add(1)
+			log.Printf("wiki_dlq: skipping corrupt permanent-failures.jsonl line %d: %v", lineNo, err)
+			continue
+		}
+		if e.ArtifactSHA == "" {
+			d.permCorruptLineCnt.Add(1)
+			log.Printf("wiki_dlq: skipping permanent-failures.jsonl line %d: missing artifact_sha", lineNo)
+			continue
+		}
+		out = append(out, e)
+	}
+	return out, scanner.Err()
+}
+
+// CorruptLineCounts returns the running tally of JSONL rows the DLQ has
+// skipped because they failed to decode or were missing required fields.
+// Operators poll this to distinguish "queue is empty" from "queue file is
+// corrupted and silently losing entries". Counts are process-local and
+// reset on restart — persistent counters are a Slice 3 concern.
+func (d *DLQ) CorruptLineCounts() (extractions, permanent uint64) {
+	return d.corruptLineCount.Load(), d.permCorruptLineCnt.Load()
+}
+
+// sortEntriesByFirstFailedAt orders in ascending FirstFailedAt so older
+// failures list first. Stable against entries with identical timestamps
+// (tie-break by ArtifactSHA).
+func sortEntriesByFirstFailedAt(entries []DLQEntry) {
+	// Small slice (bounded by active DLQ depth); insertion sort is fine.
+	for i := 1; i < len(entries); i++ {
+		for j := i; j > 0; j-- {
+			a, b := entries[j-1], entries[j]
+			if a.FirstFailedAt.After(b.FirstFailedAt) ||
+				(a.FirstFailedAt.Equal(b.FirstFailedAt) && a.ArtifactSHA > b.ArtifactSHA) {
+				entries[j-1], entries[j] = entries[j], entries[j-1]
+			} else {
+				break
+			}
+		}
+	}
+}
+
 // MarkResolved appends a resolved_at tombstone. ReadyForReplay will skip this
 // artifact_sha from now on.
 func (d *DLQ) MarkResolved(_ context.Context, artifactSHA string) error {
@@ -304,6 +436,8 @@ func (d *DLQ) readLatestStateLocked() (latest map[string]DLQEntry, tombstones ma
 			PromotedAt  time.Time `json:"promoted_at,omitempty"`
 		}
 		if err := json.Unmarshal(line, &probe); err != nil {
+			d.corruptLineCount.Add(1)
+			log.Printf("wiki_dlq: skipping corrupt extractions.jsonl line %d: %v", lineNo, err)
 			continue
 		}
 		if !probe.ResolvedAt.IsZero() || !probe.PromotedAt.IsZero() {
@@ -313,9 +447,13 @@ func (d *DLQ) readLatestStateLocked() (latest map[string]DLQEntry, tombstones ma
 
 		var entry DLQEntry
 		if err := json.Unmarshal(line, &entry); err != nil {
+			d.corruptLineCount.Add(1)
+			log.Printf("wiki_dlq: skipping corrupt extractions.jsonl line %d: %v", lineNo, err)
 			continue
 		}
 		if entry.ArtifactSHA == "" {
+			d.corruptLineCount.Add(1)
+			log.Printf("wiki_dlq: skipping extractions.jsonl line %d: missing artifact_sha", lineNo)
 			continue
 		}
 		// Last-write-wins: overwrite any earlier state for this SHA.

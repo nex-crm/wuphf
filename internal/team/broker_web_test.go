@@ -48,7 +48,7 @@ func TestWebUIProxyHandlerForwardsOnboardingRoutes(t *testing.T) {
 	}
 }
 
-func TestWorkspaceShredRouteRequestsBrokerShutdown(t *testing.T) {
+func TestWorkspaceShredRouteResetsBrokerWithoutShutdown(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("WUPHF_RUNTIME_HOME", home)
 
@@ -61,6 +61,15 @@ func TestWorkspaceShredRouteRequestsBrokerShutdown(t *testing.T) {
 	}
 
 	b := NewBroker()
+	b.mu.Lock()
+	b.messages = []channelMessage{{
+		ID:        "stale-message",
+		From:      "human",
+		Channel:   "general",
+		Content:   "old run",
+		Timestamp: time.Now().UTC().Format(time.RFC3339),
+	}}
+	b.mu.Unlock()
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -85,9 +94,16 @@ func TestWorkspaceShredRouteRequestsBrokerShutdown(t *testing.T) {
 		t.Fatalf("expected shred to remove logs, stat err=%v", err)
 	}
 
+	b.mu.Lock()
+	messageCount := len(b.messages)
+	b.mu.Unlock()
+	if messageCount != 0 {
+		t.Fatalf("expected shred route to reset broker messages, got %d", messageCount)
+	}
+
 	select {
 	case <-b.ShutdownRequested():
-	case <-time.After(time.Second):
-		t.Fatal("expected shred route to request broker shutdown")
+		t.Fatal("expected shred route to keep broker running")
+	case <-time.After(50 * time.Millisecond):
 	}
 }

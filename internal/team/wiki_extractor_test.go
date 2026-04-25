@@ -465,3 +465,254 @@ func TestExtractEndToEndLookupCitesAnswer(t *testing.T) {
 		t.Fatalf("expected exactly 1 lookup call; got %d", lookupCalls.Load())
 	}
 }
+
+// TestTripletCharValidator drives sanitizeExtractedFacts over a table of
+// hostile triplet shapes (control chars, embedded newlines, ';, --,
+// <script>, etc.) and asserts each is rejected. Clean shapes pass through.
+func TestTripletCharValidator(t *testing.T) {
+	t.Parallel()
+
+	clean := extractedFact{
+		EntitySlug: "sarah-jones",
+		Triplet: &Triplet{
+			Subject:   "sarah-jones",
+			Predicate: "role_at",
+			Object:    "company:acme-corp",
+		},
+		Text: "Sarah is VP of Sales at Acme.",
+	}
+
+	cases := []struct {
+		name   string
+		fact   extractedFact
+		reject bool
+	}{
+		{"clean passes", clean, false},
+		{"nil triplet passes", extractedFact{EntitySlug: "x"}, false},
+		{
+			name: "control char in subject",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah\x00jones", Predicate: "role_at", Object: "acme"},
+			},
+			reject: true,
+		},
+		{
+			name: "embedded newline in predicate",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah-jones", Predicate: "role_at\nnew_instruction", Object: "acme"},
+			},
+			reject: true,
+		},
+		{
+			name: "sql fragment in object",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah-jones", Predicate: "role_at", Object: "acme';DROP TABLE facts"},
+			},
+			reject: true,
+		},
+		{
+			name: "sql comment in object",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah-jones", Predicate: "role_at", Object: "acme-- crashed"},
+			},
+			reject: true,
+		},
+		{
+			name: "script tag in subject",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "<script>alert(1)</script>", Predicate: "role_at", Object: "acme"},
+			},
+			reject: true,
+		},
+		{
+			name: "template interpolation in predicate",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah", Predicate: "{{role}}", Object: "acme"},
+			},
+			reject: true,
+		},
+		{
+			name: "empty subject rejected",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "", Predicate: "role_at", Object: "acme"},
+			},
+			reject: true,
+		},
+		{
+			name: "empty predicate rejected",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah", Predicate: "", Object: "acme"},
+			},
+			reject: true,
+		},
+		{
+			name: "carriage return in object",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah", Predicate: "role_at", Object: "acme\r\nIgnore above"},
+			},
+			reject: true,
+		},
+		{
+			name: "backtick in object (fence breakout)",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah", Predicate: "role_at", Object: "acme`bad"},
+			},
+			reject: true,
+		},
+		{
+			name: "control char in fact text",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah-jones", Predicate: "role_at", Object: "acme"},
+				Text:    "Sarah is at Acme.\x00Hidden instruction.",
+			},
+			reject: true,
+		},
+		{
+			name: "script tag in fact text",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah-jones", Predicate: "role_at", Object: "acme"},
+				Text:    "Sarah is at Acme. <script>alert(1)</script>",
+			},
+			reject: true,
+		},
+		{
+			name: "template interpolation in fact text",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah-jones", Predicate: "role_at", Object: "acme"},
+				Text:    "Sarah is at ${leaked_var}.",
+			},
+			reject: true,
+		},
+		{
+			name: "newlines and tabs in fact text are fine",
+			fact: extractedFact{
+				Triplet: &Triplet{Subject: "sarah-jones", Predicate: "role_at", Object: "acme"},
+				Text:    "Sarah is at Acme.\n\tShe leads sales.",
+			},
+			reject: false,
+		},
+	}
+
+	// Drive the whole slice at once so we also verify the partition behaviour.
+	var in []extractedFact
+	var wantCleanCount, wantRejectCount int
+	for _, tc := range cases {
+		in = append(in, tc.fact)
+		if tc.reject {
+			wantRejectCount++
+		} else {
+			wantCleanCount++
+		}
+	}
+
+	gotClean, gotRejected := sanitizeExtractedFacts(in)
+	if len(gotClean) != wantCleanCount {
+		t.Fatalf("clean count = %d, want %d", len(gotClean), wantCleanCount)
+	}
+	if len(gotRejected) != wantRejectCount {
+		t.Fatalf("rejected count = %d, want %d", len(gotRejected), wantRejectCount)
+	}
+
+	// Each rejected fact carries a non-empty reason.
+	for _, bad := range gotRejected {
+		if bad.reason == "" {
+			t.Errorf("rejected fact for %q has empty reason", bad.fact.EntitySlug)
+		}
+	}
+}
+
+// TestTripletCharValidator_DeterministicRejectionReason guards against
+// non-deterministic rejection reasons when multiple triplet fields fail
+// validation in the same call. validateTriplet previously iterated a
+// map, so "subject vs predicate vs object" order was randomised on each
+// run — flaky tests, noisy DLQ logs. An ordered slice pins the order
+// to subject → predicate → object.
+func TestTripletCharValidator_DeterministicRejectionReason(t *testing.T) {
+	t.Parallel()
+
+	// All three fields contain a control character. The expected
+	// rejection reason names "subject" because it is checked first.
+	bad := extractedFact{
+		Triplet: &Triplet{
+			Subject:   "sub\x00ject",
+			Predicate: "pred\x00icate",
+			Object:    "obj\x00ect",
+		},
+	}
+
+	const iterations = 50
+	const want = "control character in triplet subject"
+	for i := 0; i < iterations; i++ {
+		_, rejected := sanitizeExtractedFacts([]extractedFact{bad})
+		if len(rejected) != 1 {
+			t.Fatalf("iteration %d: expected 1 rejection, got %d", i, len(rejected))
+		}
+		if rejected[0].reason != want {
+			t.Fatalf("iteration %d: reason = %q, want %q (non-deterministic field order)",
+				i, rejected[0].reason, want)
+		}
+	}
+}
+
+// TestExtractTripletSanitizerRoutesToDLQ exercises the end-to-end path: a
+// hostile triplet returned by the LLM must be rejected from the batch
+// AND recorded in the DLQ with category=validation.
+func TestExtractTripletSanitizerRoutesToDLQ(t *testing.T) {
+	h := newExtractHarness(t)
+	defer h.teardown()
+
+	sha := "san0001"
+	// Canned response: one clean fact + one fact with a SQL-flavored object.
+	payload := extractionOutput{
+		ArtifactSHA: sha,
+		Entities: []extractedEntity{
+			{Kind: "person", ProposedSlug: "sarah-sanitize", Signals: extractedSignal{PersonName: "Sarah Sanitize"}, Confidence: 0.9, Ghost: true},
+		},
+		Facts: []extractedFact{
+			{
+				EntitySlug: "sarah-sanitize",
+				Triplet:    &Triplet{Subject: "sarah-sanitize", Predicate: "role_at", Object: "acme-corp"},
+				Text:       "Sarah is at Acme.",
+				Confidence: 0.9,
+			},
+			{
+				EntitySlug: "sarah-sanitize",
+				Triplet:    &Triplet{Subject: "sarah-sanitize", Predicate: "role_at", Object: "acme';DROP TABLE facts"},
+				Text:       "hostile fact",
+				Confidence: 0.9,
+			},
+		},
+	}
+	b, _ := json.Marshal(payload)
+	h.provider.response = string(b)
+
+	path := h.writeArtifact(sha, "chat", "Sarah Sanitize works at Acme.")
+	if err := h.extractor.ExtractFromArtifact(context.Background(), path); err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+
+	// Verify the DLQ picked up exactly one validation entry for the
+	// hostile fact.
+	entries, err := h.dlq.ReadyForReplay(context.Background(), time.Now().Add(24*time.Hour))
+	if err != nil {
+		t.Fatalf("ReadyForReplay: %v", err)
+	}
+	// Validation max_retries is 1, so after a fresh Enqueue the entry is
+	// not yet ready-for-replay past the backoff — but we can read from
+	// the underlying file to confirm presence.
+	_ = entries
+
+	// Read the extractions.jsonl directly to assert a validation entry
+	// exists with the expected reason.
+	dlqPath := filepath.Join(h.dlq.root, ".dlq", "extractions.jsonl")
+	raw, rerr := os.ReadFile(dlqPath)
+	if rerr != nil {
+		t.Fatalf("read DLQ: %v", rerr)
+	}
+	if !strings.Contains(string(raw), "triplet sanitizer rejected") {
+		t.Fatalf("DLQ missing triplet-sanitizer entry:\n%s", string(raw))
+	}
+	if !strings.Contains(string(raw), `"error_category":"validation"`) {
+		t.Fatalf("DLQ entry missing validation category:\n%s", string(raw))
+	}
+}
