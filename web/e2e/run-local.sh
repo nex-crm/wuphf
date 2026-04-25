@@ -94,10 +94,11 @@ trap cleanup EXIT
 
 start_wuphf() {
   local label="$1"
-  echo "[run-local] starting wuphf (${label})"
+  local logfile="${runtime_home}/wuphf-${label}.log"
+  echo "[run-local] starting wuphf (${label}); log: ${logfile}"
   WUPHF_RUNTIME_HOME="$runtime_home" \
     ./wuphf --no-open --broker-port "$broker_port" --web-port "$web_port" --no-nex \
-    </dev/null > "/tmp/wuphf-e2e-${label}.log" 2>&1 &
+    </dev/null > "$logfile" 2>&1 &
   pid=$!
   for _ in $(seq 1 30); do
     if curl -sf "http://localhost:${web_port}/onboarding/state" -o /dev/null; then
@@ -107,7 +108,7 @@ start_wuphf() {
     sleep 1
   done
   echo "[run-local] wuphf failed to become ready (${label})" >&2
-  cat "/tmp/wuphf-e2e-${label}.log" >&2 || true
+  cat "$logfile" >&2 || true
   exit 1
 }
 

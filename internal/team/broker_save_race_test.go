@@ -21,6 +21,7 @@ package team
 // concurrent saves can never race on the source of a Rename.
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -46,10 +47,13 @@ func TestSaveLocked_ConcurrentBrokersSamePathDoNotRace(t *testing.T) {
 			b := NewBroker()
 			// EnsurePlannedTask calls saveLocked synchronously under b.mu —
 			// each broker serializes its own saves, but two brokers do not
-			// share a mutex, so they race on the on-disk tmp filename.
+			// share a mutex, so they race on the on-disk tmp filename. Vary
+			// Title per goroutine so each save serializes a distinct JSON
+			// payload — otherwise WriteFile clobbers see byte-identical
+			// content and the rename race is artificially harder to surface.
 			_, _, err := b.EnsurePlannedTask(plannedTaskInput{
 				Channel:       "general",
-				Title:         "race repro",
+				Title:         fmt.Sprintf("race repro %d", i),
 				Owner:         "ceo",
 				CreatedBy:     "ceo",
 				TaskType:      "feature",
