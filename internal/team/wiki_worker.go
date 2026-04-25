@@ -660,6 +660,13 @@ func (w *WikiWorker) Repo() *Repo {
 	return w.repo
 }
 
+// ReadArticle returns the raw article bytes for a validated path. Exposed so
+// callers in other packages (notably internal/pam after extraction) can read
+// articles without importing internal/team to name *team.Repo.
+func (w *WikiWorker) ReadArticle(relPath string) ([]byte, error) {
+	return readArticle(w.repo, relPath)
+}
+
 // EnqueuePlaybookCompile runs CompilePlaybook against the current on-disk
 // source and submits the output to the queue as a compiled-skill write.
 // The commit is attributed to the archivist identity regardless of who

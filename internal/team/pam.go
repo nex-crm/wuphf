@@ -145,18 +145,13 @@ type PamDispatcherConfig struct {
 	Runner  PamRunner
 }
 
-// pamWiki is the slice of WikiWorker that Pam actually depends on:
-// commit a replacement article body via Enqueue, and read the existing
-// article body via Repo (which reads through to the on-disk markdown).
-//
-// Stating it as an interface here is the dependency-inversion seam for
-// the planned `internal/pam` extraction (Track B): once pam.go lives
-// in its own package, this interface stays with pam (the consumer) and
-// `*team.WikiWorker` continues to satisfy it via duck typing — no
-// import-cycle, no shared "core" package needed.
+// pamWiki is the slice of WikiWorker that Pam actually depends on. Stays
+// with pam after Track B's `internal/pam` extraction; *team.WikiWorker keeps
+// satisfying it via duck typing, no import cycle. ReadArticle keeps the
+// signature primitive-only so the seam doesn't leak *team.Repo.
 type pamWiki interface {
 	Enqueue(ctx context.Context, slug, path, content, mode, commitMsg string) (string, int, error)
-	Repo() *Repo
+	ReadArticle(relPath string) ([]byte, error)
 }
 
 // PamDispatcher serializes Pam's work. Like the entity + playbook
@@ -364,8 +359,7 @@ func (d *PamDispatcher) execute(ctx context.Context, job PamJob) error {
 		return err
 	}
 
-	repo := d.worker.Repo()
-	articleBytes, err := readArticle(repo, job.ArticlePath)
+	articleBytes, err := d.worker.ReadArticle(job.ArticlePath)
 	if err != nil {
 		return fmt.Errorf("%w: %s", ErrPamArticleMissing, job.ArticlePath)
 	}
