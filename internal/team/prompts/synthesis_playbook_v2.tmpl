@@ -1,0 +1,58 @@
+{{/*
+  synthesis_playbook_v2.tmpl — WUPHF playbook synthesis prompt, clusters variant
+
+  Additive sibling to buildPlaybookSynthUserPrompt (v1). The v1 body is
+  preserved verbatim; the only delta is a final "## Reinforced patterns across
+  entities" input section and a rule-4a instruction telling the model to
+  surface those patterns under "## Patterns across entities" in the playbook
+  body.
+
+  Gated behind PlaybookSynthesizerConfig.ClusterSource. When the field is nil
+  the synthesizer falls back to the v1 prompt builder — existing hot-path
+  behavior is unchanged.
+
+  Template variables:
+    .Source        string           — the existing playbook markdown
+    .MaxExecs      int              — MaxExecutionsForPrompt, rendered in the
+                                      section heading for honesty
+    .Executions    []Execution      — newest-first slice, already windowed
+    .Clusters      []FactCluster    — cross-entity reinforced patterns from
+                                      playbook_clusters.go. Empty is fine; the
+                                      model is told to omit the section then.
+    .LearningsHead string           — WhatWeveLearnedHeading literal
+*/}}# Existing playbook
+
+{{trimSpace .Source}}
+
+# Recent executions (newest first, max {{.MaxExecs}})
+
+{{if .Executions}}{{range $i, $e := .Executions}}## Execution {{add $i 1}} — {{$e.Outcome}}
+- recorded_by: {{$e.RecordedBy}}
+- timestamp: {{rfc3339 $e.CreatedAt}}
+- summary: {{oneLine $e.Summary}}
+{{if trimSpace $e.Notes}}- notes: {{oneLine $e.Notes}}
+{{end}}
+{{end}}{{else}}_No executions provided._
+{{end}}
+# Reinforced patterns across entities
+
+{{if .Clusters}}Each row below is a (predicate, object) pair that has been reinforced on at least two distinct entities in the wiki. Use these to generalize the learnings — they are signals of team-wide patterns, not noise from a single relationship.
+
+{{range .Clusters}}- {{.Count}} entities share `{{.Predicate}} → {{.Object}}` ({{joinEntities .Entities}})
+{{end}}{{else}}_No cross-entity reinforced patterns were detected for this synthesis run._
+{{end}}
+# Your task
+
+Produce the FULL updated playbook markdown now. Rules:
+
+1. Preserve the frontmatter (the leading --- block) exactly as given.
+2. Preserve the author's main body verbatim.
+3. Maintain the trailing "{{.LearningsHead}}" section. If it already exists, update the bullets; if it does not, append it. Only bullets traceable to at least one execution above.
+4. When "# Reinforced patterns across entities" above is non-empty, append a single additional section titled exactly "## Patterns across entities" below "{{.LearningsHead}}". Under that heading, render one bullet per cluster in the SAME order the patterns were provided, with:
+   - the (predicate, object) pair verbatim,
+   - the entity count,
+   - one concrete, boring sentence on what the pattern means for this playbook.
+   Cite entity counts only, never individual entity slugs. If the section is empty above, OMIT this section entirely — do not emit an empty "## Patterns across entities".
+5. When two executions disagree, record the disagreement as a "**Contradiction:**" inline callout under "{{.LearningsHead}}" and DO NOT resolve it.
+6. Do not invent lessons. Every bullet must be traceable to at least one execution entry or cluster row.
+7. Output ONLY the full updated markdown of the playbook file. No commentary, no code fences.
