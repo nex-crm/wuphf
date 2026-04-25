@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -27,12 +26,7 @@ import (
 
 func newBrokerWithPM(t *testing.T) *Broker {
 	t.Helper()
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
 	b.mu.Unlock()

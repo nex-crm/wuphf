@@ -1,7 +1,7 @@
 package team
 
 // Characterization tests for broker state-path resolution. Intended as
-// the floor that the "Track A" refactor (replacing the brokerStatePath
+// the floor that the "Track A" refactor (replacing the state-path
 // package-var with a Broker constructor argument) must not regress.
 //
 // The existing TestBrokerPersistsAndReloadsState + Loads… tests cover
@@ -76,18 +76,15 @@ func TestDefaultBrokerStatePath_RelativeFallbackWhenHomeMissing(t *testing.T) {
 }
 
 func TestBrokerStateSnapshotPathIsLastGoodSibling(t *testing.T) {
-	// Snapshot path is always `<brokerStatePath>.last-good` — same
-	// directory, same base name plus suffix. The load-side path (hit
-	// by TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered)
-	// relies on this exact shape. Post-refactor, if snapshot
-	// derivation drifts to a different directory or format, recovery
-	// silently breaks.
-	oldPathFn := brokerStatePath
+	// Snapshot path is always `<statePath>.last-good` — same directory,
+	// same base name plus suffix. The load-side path (hit by
+	// TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered) relies
+	// on this exact shape. If snapshot derivation ever drifts to a
+	// different directory or format, recovery silently breaks.
 	statePath := filepath.Join(t.TempDir(), "broker-state.json")
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	b := NewBrokerAt(statePath)
 
-	got := brokerStateSnapshotPath()
+	got := b.stateSnapshotPath()
 	want := statePath + ".last-good"
 	if got != want {
 		t.Fatalf("snapshot path drifted: got %q, want %q", got, want)
@@ -103,19 +100,16 @@ func TestBrokerStateSnapshotPathIsLastGoodSibling(t *testing.T) {
 
 func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 	// The TestMain in this package flips skipBrokerStateLoadOnConstruct
-	// to true so NewBroker() starts fresh and tests don't cross-
+	// to true so NewBrokerAt() starts fresh and tests don't cross-
 	// contaminate via a shared broker-state.json. Persistence-checking
-	// tests opt back into disk load via reloadedBroker(t). Track A
-	// must preserve this contract: constructor argument or not, a
-	// test-mode NewBroker() must NOT auto-load.
+	// tests opt back into disk load via reloadedBroker(t, b). Track A
+	// must preserve this contract: a test-mode constructor must NOT
+	// auto-load.
 	statePath := leakedBrokerStatePath(t)
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
 
 	// Seed disk with a distinctive message. If the gate is broken,
-	// NewBroker() will pick it up.
-	seed := NewBroker()
+	// NewBrokerAt() will pick it up.
+	seed := NewBrokerAt(statePath)
 	seed.mu.Lock()
 	seed.messages = []channelMessage{{
 		ID:        "seed-msg",
@@ -134,16 +128,16 @@ func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 	if !skipBrokerStateLoadOnConstruct {
 		t.Fatal("precondition: skipBrokerStateLoadOnConstruct should be true in tests")
 	}
-	gated := NewBroker()
+	gated := NewBrokerAt(statePath)
 	if got := len(gated.Messages()); got != 0 {
 		t.Fatalf("gate=true must yield 0 messages on construct; got %d", got)
 	}
 
-	// Gate OFF (production default): NewBroker() reads from disk.
+	// Gate OFF (production default): NewBrokerAt() reads from disk.
 	oldGate := skipBrokerStateLoadOnConstruct
 	skipBrokerStateLoadOnConstruct = false
 	t.Cleanup(func() { skipBrokerStateLoadOnConstruct = oldGate })
-	loaded := NewBroker()
+	loaded := NewBrokerAt(statePath)
 	msgs := loaded.Messages()
 	if len(msgs) != 1 || msgs[0].ID != "seed-msg" {
 		t.Fatalf("gate=false must auto-load seed; got %+v", msgs)
@@ -152,19 +146,19 @@ func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 
 func TestNewBrokerAt_PathSnapshottedAtConstruction(t *testing.T) {
 	// NewBrokerAt binds the state path to the Broker at construction so a
-	// later reassignment of the package-level brokerStatePath var (or a
-	// goroutine reading it via a stale closure) can't retarget this
-	// broker's saves. Contract: after construction, reassigning
-	// brokerStatePath must NOT move where this broker persists.
+	// later construction of a second broker at a different path can't
+	// retarget the first broker's saves. Contract: after construction,
+	// every save from this broker lands at b.statePath regardless of
+	// what other brokers (constructed later, with other paths) are doing
+	// in the same process.
 	boundPath := filepath.Join(t.TempDir(), "bound-state.json")
 	b := NewBrokerAt(boundPath)
 
-	// Retarget the package var — simulates a sibling test leaking a
-	// monkey-patch, or the pre-migration test pattern running before us.
-	oldPathFn := brokerStatePath
+	// Construct a second broker at a distinct path — simulates another
+	// test running alongside this one. Its statePath must not bleed into
+	// b's saves.
 	unboundPath := filepath.Join(t.TempDir(), "should-not-be-written.json")
-	brokerStatePath = func() string { return unboundPath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	_ = NewBrokerAt(unboundPath)
 
 	b.mu.Lock()
 	b.messages = []channelMessage{{
@@ -184,7 +178,7 @@ func TestNewBrokerAt_PathSnapshottedAtConstruction(t *testing.T) {
 		t.Fatalf("bound path missing after save: %v", err)
 	}
 	if _, err := os.Stat(unboundPath); !os.IsNotExist(err) {
-		t.Fatalf("unbound path was written (package-var leak): err=%v", err)
+		t.Fatalf("unbound path was written: err=%v", err)
 	}
 	if b.stateSnapshotPath() != boundPath+".last-good" {
 		t.Fatalf("snapshot method did not derive from bound path: got %q, want %q",
@@ -206,11 +200,7 @@ func TestBrokerStop_NoWriteAfterReturn(t *testing.T) {
 	// reads a refactored `b.statePath` via a pointer captured at Start
 	// time and continues writing after b.stopCh closes).
 	statePath := leakedBrokerStatePath(t)
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
-
-	b := NewBroker()
+	b := NewBrokerAt(statePath)
 	b.mu.Lock()
 	b.messages = []channelMessage{{
 		ID:        "pre-stop",

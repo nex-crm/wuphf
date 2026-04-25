@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,12 +13,7 @@ import (
 
 func newTestBrokerWithTelegramChannel(t *testing.T, chatID string) *Broker {
 	t.Helper()
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.channels = append(b.channels, teamChannel{
 		Slug:    "telegram-general",
@@ -336,12 +330,7 @@ func TestTelegramStartFailsWithoutToken(t *testing.T) {
 }
 
 func TestTelegramStartFailsWithoutChannels(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	// Clear all channels so there are no telegram surfaces
 	b.mu.Lock()
 	b.channels = []teamChannel{{Slug: "general", Name: "general", Members: []string{"ceo"}}}

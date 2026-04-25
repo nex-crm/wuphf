@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/commands"
@@ -15,12 +14,7 @@ import (
 // authenticate their requests.
 func newCommandsHTTPTest(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/commands", b.requireAuth(b.handleCommands))
 	ts := httptest.NewServer(mux)

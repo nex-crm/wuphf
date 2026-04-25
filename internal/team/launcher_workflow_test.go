@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -18,11 +17,6 @@ func TestProcessDueWorkflowJobUsesComposioProvider(t *testing.T) {
 	t.Setenv("WUPHF_API_KEY", "nex-test-key")
 	t.Setenv("WUPHF_COMPOSIO_API_KEY", "cmp-test-key")
 	t.Setenv("WUPHF_COMPOSIO_USER_ID", "najmuzzaman@nex.ai")
-
-	tmpDir := t.TempDir()
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/connected_accounts/ca_123", func(w http.ResponseWriter, r *http.Request) {
@@ -131,7 +125,7 @@ func TestProcessDueWorkflowJobUsesComposioProvider(t *testing.T) {
 		t.Fatalf("create workflow: %v", err)
 	}
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.skills = append(b.skills, teamSkill{
 		Name:             "daily-digest",
 		Title:            "Daily Digest",

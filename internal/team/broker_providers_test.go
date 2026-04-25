@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -129,12 +128,7 @@ func TestHandleOfficeMembers_InvalidProviderKind(t *testing.T) {
 }
 
 func TestProviderFieldSurvivesBrokerReload(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{
 		Slug: "persist-test",
@@ -152,7 +146,7 @@ func TestProviderFieldSurvivesBrokerReload(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	reloaded := reloadedBroker(t)
+	reloaded := reloadedBroker(t, b)
 	reloaded.mu.Lock()
 	got := reloaded.findMemberLocked("persist-test")
 	reloaded.mu.Unlock()
@@ -203,12 +197,7 @@ func TestRebuildMemberIndex_AfterRemove(t *testing.T) {
 // httptest server, returning the broker, the server, and the auth token.
 func newBrokerHTTPTest(t *testing.T) (*Broker, *httptest.Server, string) {
 	t.Helper()
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	// Attach a fake bridge so handleOfficeMembers can exercise openclaw
 	// create/update/remove paths without dialing a real gateway.
 	fake := newFakeOC()

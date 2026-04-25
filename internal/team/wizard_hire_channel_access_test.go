@@ -36,12 +36,7 @@ func newBrokerWithPackChannels(t *testing.T, packAgents []agent.AgentConfig) *Br
 	// prior tests in this package can fire a late saveLocked and race
 	// t.TempDir cleanup. Same fix as the launcher_test.go pair; see
 	// broker_test.go for the helper docstring.
-	oldPathFn := brokerStatePath
-	statePath := leakedBrokerStatePath(t)
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
-
-	b := NewBroker()
+	b := NewBrokerAt(leakedBrokerStatePath(t))
 	b.mu.Lock()
 	// Seed pack-like roster.
 	members := make([]officeMember, 0, len(packAgents))

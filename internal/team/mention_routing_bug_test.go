@@ -2,7 +2,6 @@ package team
 
 import (
 	"context"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -30,10 +29,6 @@ import (
 
 func collaborativeTestLauncher(t *testing.T) *Launcher {
 	t.Helper()
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
 	return &Launcher{
 		// focusMode intentionally left false: collaborative is the default.
 		pack: &agent.PackDefinition{
@@ -124,11 +119,7 @@ func TestBug_HumanDMsSpecialist_CollaborativeMode_SpecialistIsImmediate(t *testi
 // required), which lets us deterministically observe what got enqueued.
 func fullDispatchLauncher(t *testing.T) (*Launcher, chan string, func()) {
 	t.Helper()
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},
@@ -163,7 +154,6 @@ func fullDispatchLauncher(t *testing.T) (*Launcher, chan string, func()) {
 
 	cleanup := func() {
 		headlessCodexRunTurn = oldRunTurn
-		brokerStatePath = oldPathFn
 	}
 	return l, processed, cleanup
 }
@@ -282,12 +272,7 @@ func hasSlug(xs []string, want string) bool {
 // -----------------------------------------------------------------------------
 
 func TestBug_FocusMode_HumanTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
 	b.mu.Unlock()
@@ -327,12 +312,7 @@ func TestBug_FocusMode_HumanTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T
 }
 
 func TestBug_FocusMode_CEOTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
 	b.mu.Unlock()
@@ -373,12 +353,7 @@ func TestBug_FocusMode_CEOTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T) 
 // -----------------------------------------------------------------------------
 
 func TestBug_DisabledMember_ExplicitTagDoesNotBypassMute(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
 	// Put pm in the channel then explicitly disable them.
@@ -451,12 +426,7 @@ func TestBug_DisabledMember_ExplicitTagDoesNotBypassMute(t *testing.T) {
 // activeSessionMembers (which is pack-gated) excludes pm, agentNotificationTargets
 // never registers pm, and DM dispatch silently returns zero targets.
 func TestBug_DMToWizardHiredPM_Dispatch(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	// Simulate the wizard flow: POST /office-members adds to b.members, but
 	// the Launcher's pack is frozen at launch time.
 	b.mu.Lock()
@@ -502,12 +472,7 @@ func TestBug_DMToWizardHiredPM_Dispatch(t *testing.T) {
 // from targetMap entirely, so even the explicit-tag bypass (just-applied fix)
 // can't save the delivery.
 func TestBug_TagWizardHiredPM_InGeneral_Dispatch(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
 	b.mu.Unlock()
@@ -554,12 +519,7 @@ func TestBug_TagWizardHiredPM_InGeneral_Dispatch(t *testing.T) {
 // allowTarget / isEnabled check silently drops the explicit mention and only
 // CEO gets notified. This is symptom 1 of the reported bug.
 func TestBug_RootCause_ChannelMembershipFilterDropsExplicitMention(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	// Add a specialist AFTER the broker has seeded default channels (this is
 	// what happens when a user hires a new agent via the wizard).
 	b.mu.Lock()
