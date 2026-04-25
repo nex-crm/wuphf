@@ -145,11 +145,25 @@ type PamDispatcherConfig struct {
 	Runner  PamRunner
 }
 
+// pamWiki is the slice of WikiWorker that Pam actually depends on:
+// commit a replacement article body via Enqueue, and read the existing
+// article body via Repo (which reads through to the on-disk markdown).
+//
+// Stating it as an interface here is the dependency-inversion seam for
+// the planned `internal/pam` extraction (Track B): once pam.go lives
+// in its own package, this interface stays with pam (the consumer) and
+// `*team.WikiWorker` continues to satisfy it via duck typing — no
+// import-cycle, no shared "core" package needed.
+type pamWiki interface {
+	Enqueue(ctx context.Context, slug, path, content, mode, commitMsg string) (string, int, error)
+	Repo() *Repo
+}
+
 // PamDispatcher serializes Pam's work. Like the entity + playbook
 // synthesizers, only one job runs at a time — otherwise two archivist
 // commits could race on the WikiWorker queue.
 type PamDispatcher struct {
-	worker    *WikiWorker
+	worker    pamWiki
 	publisher pamEventPublisher
 	cfg       PamDispatcherConfig
 
@@ -169,8 +183,10 @@ type PamDispatcher struct {
 }
 
 // NewPamDispatcher wires a dispatcher against the given worker. The publisher
-// may be nil in tests that don't care about SSE fan-out.
-func NewPamDispatcher(worker *WikiWorker, publisher pamEventPublisher, cfg PamDispatcherConfig) *PamDispatcher {
+// may be nil in tests that don't care about SSE fan-out. Worker is typed as
+// the narrow `pamWiki` interface — *WikiWorker satisfies it today, and any
+// future test seam or alternative backend only needs Enqueue + Repo.
+func NewPamDispatcher(worker pamWiki, publisher pamEventPublisher, cfg PamDispatcherConfig) *PamDispatcher {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultPamTimeout
 	}
