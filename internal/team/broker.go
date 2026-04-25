@@ -1586,15 +1586,13 @@ func (b *Broker) StartOnPort(port int) error {
 	// completeFn posts the first task as a human message and seeds the team.
 	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
-	// Shred requests launcher shutdown after the response so live in-memory
-	// broker state cannot write stale messages back onto disk.
+	// After a successful wipe, b.Reset clears live in-memory broker state so the
+	// broker stays up without repersisting stale messages back onto disk.
 	// Auth-gated via requireAuth because shred permanently deletes state and
 	// must not be reachable without the broker token.
 	workspace.RegisterRoutesWithOptions(mux, workspace.RouteOptions{
 		AuthMiddleware: b.requireAuth,
-		AfterShred: func(workspace.Result) {
-			b.requestShutdown()
-		},
+		ResetRuntime:   b.Reset,
 	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)

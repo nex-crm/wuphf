@@ -8,7 +8,7 @@ import (
 // RouteOptions controls optional side effects around workspace wipe routes.
 type RouteOptions struct {
 	AuthMiddleware func(http.HandlerFunc) http.HandlerFunc
-	AfterShred     func(Result)
+	ResetRuntime   func()
 }
 
 // RegisterRoutes attaches the two workspace wipe endpoints to mux.
@@ -17,8 +17,8 @@ type RouteOptions struct {
 //	POST /workspace/shred  — Shred (full wipe, reopens onboarding)
 //
 // By default both endpoints only touch disk. RegisterRoutesWithOptions can add
-// process-level side effects after a successful wipe response; the web broker
-// uses that to stop itself after shred so live memory cannot repersist.
+// a live runtime reset after a successful wipe so the broker stays up without
+// repersisting stale in-memory state.
 //
 // authMiddleware wraps each handler. Pass the broker's requireAuth so local
 // scripts cannot POST without the broker token — these operations are strictly
@@ -29,25 +29,34 @@ func RegisterRoutes(mux *http.ServeMux, authMiddleware func(http.HandlerFunc) ht
 }
 
 // RegisterRoutesWithOptions attaches the workspace wipe endpoints and runs any
-// configured callbacks only after a successful wipe response has been written.
+// configured callbacks after a successful disk wipe.
 func RegisterRoutesWithOptions(mux *http.ServeMux, opts RouteOptions) {
 	authMiddleware := opts.AuthMiddleware
 	if authMiddleware == nil {
 		authMiddleware = func(h http.HandlerFunc) http.HandlerFunc { return h }
 	}
-	mux.HandleFunc("/workspace/reset", authMiddleware(handleReset))
+	mux.HandleFunc("/workspace/reset", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		handleResetWithOptions(w, r, opts)
+	}))
 	mux.HandleFunc("/workspace/shred", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		handleShredWithOptions(w, r, opts)
 	}))
 }
 
 func handleReset(w http.ResponseWriter, r *http.Request) {
+	handleResetWithOptions(w, r, RouteOptions{})
+}
+
+func handleResetWithOptions(w http.ResponseWriter, r *http.Request, opts RouteOptions) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	res, err := ClearRuntime()
-	writeResult(w, res, err, "/")
+	if err == nil && opts.ResetRuntime != nil {
+		opts.ResetRuntime()
+	}
+	writeResult(w, res, err, "/", opts.ResetRuntime == nil)
 }
 
 func handleShred(w http.ResponseWriter, r *http.Request) {
@@ -60,17 +69,13 @@ func handleShredWithOptions(w http.ResponseWriter, r *http.Request, opts RouteOp
 		return
 	}
 	res, err := Shred()
-	writeResult(w, res, err, "/")
-	if err != nil || opts.AfterShred == nil {
-		return
+	if err == nil && opts.ResetRuntime != nil {
+		opts.ResetRuntime()
 	}
-	if flusher, ok := w.(http.Flusher); ok {
-		flusher.Flush()
-	}
-	go opts.AfterShred(res)
+	writeResult(w, res, err, "/", opts.ResetRuntime == nil)
 }
 
-func writeResult(w http.ResponseWriter, res Result, err error, redirect string) {
+func writeResult(w http.ResponseWriter, res Result, err error, redirect string, restartRequired bool) {
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -82,7 +87,7 @@ func writeResult(w http.ResponseWriter, res Result, err error, redirect string) 
 	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"ok":               true,
-		"restart_required": true,
+		"restart_required": restartRequired,
 		"redirect":         redirect,
 		"removed":          res.Removed,
 		"errors":           res.Errors,

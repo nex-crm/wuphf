@@ -4,9 +4,8 @@ import { formatRelativeTime } from "../../lib/format";
 import { PixelAvatar } from "../ui/PixelAvatar";
 
 /**
- * Review thread surface beneath the entry body. Lane C owns the write
- * path; this component is read-only in v1.1 but keeps space for Lane C
- * to wire approve/request-changes/reply controls.
+ * Review thread surface beneath the entry body. The broker owns the write
+ * path; this component renders current comments and optional review actions.
  */
 
 interface InlineReviewThreadProps {
@@ -24,12 +23,19 @@ export default function InlineReviewThread({
   onApprove,
   onRequestChanges,
 }: InlineReviewThreadProps) {
-  if (!state || state === "archived") return null;
+  if (
+    !state ||
+    state === "archived" ||
+    state === "rejected" ||
+    state === "expired"
+  )
+    return null;
 
   const reviewerLabel =
     reviewerSlug === "human-only"
       ? "Human reviewer"
       : formatAgentName(reviewerSlug);
+  const hasActions = Boolean(onApprove || onRequestChanges);
 
   return (
     <section
@@ -60,9 +66,9 @@ export default function InlineReviewThread({
           </div>
         ))
       )}
-      {(onApprove || onRequestChanges) && (
+      {hasActions ? (
         <div className="nb-review-drawer-actions">
-          {onApprove && (
+          {onApprove ? (
             <button
               type="button"
               className="nb-review-drawer-approve"
@@ -70,8 +76,8 @@ export default function InlineReviewThread({
             >
               Approve
             </button>
-          )}
-          {onRequestChanges && (
+          ) : null}
+          {onRequestChanges ? (
             <button
               type="button"
               className="nb-review-drawer-reject"
@@ -79,9 +85,9 @@ export default function InlineReviewThread({
             >
               Request changes
             </button>
-          )}
+          ) : null}
         </div>
-      )}
+      ) : null}
     </section>
   );
 }

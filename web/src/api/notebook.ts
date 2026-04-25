@@ -1,8 +1,7 @@
 /**
  * Notebook API client — thin wrapper over `client.ts` following the same
- * shape as `api/wiki.ts`. Returns mock fixtures when
- * `VITE_NOTEBOOK_MOCK !== 'false'` (default TRUE) so Lane E ships before
- * Lane B (backend) and Lane C (review state machine) are wired.
+ * shape as `api/wiki.ts`. Uses the live broker by default. Mock fixtures are
+ * opt-in with `VITE_NOTEBOOK_MOCK=true` for isolated UI work.
  */
 
 import {
@@ -12,7 +11,7 @@ import {
   mockEntry,
   mockReview,
 } from "./__fixtures__/notebook-mock";
-import { get, post, sseURL } from "./client";
+import * as client from "./client";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -28,6 +27,8 @@ export type ReviewState =
   | "in-review"
   | "changes-requested"
   | "approved"
+  | "rejected"
+  | "expired"
   | "archived";
 
 /** Lightweight summary used in bookshelf rows + sidebar lists. */
@@ -80,6 +81,15 @@ export interface ReviewComment {
   ts: string;
 }
 
+interface BackendReviewComment {
+  id?: string;
+  author_slug?: string;
+  body?: string;
+  body_md?: string;
+  created_at?: string;
+  ts?: string;
+}
+
 export interface ReviewItem {
   id: string;
   agent_slug: string;
@@ -92,6 +102,19 @@ export interface ReviewItem {
   submitted_ts: string;
   updated_ts: string;
   comments: ReviewComment[];
+}
+
+interface BackendPromotion {
+  id?: string;
+  state?: string;
+  source_slug?: string;
+  source_path?: string;
+  target_path?: string;
+  rationale?: string;
+  reviewer_slug?: string;
+  created_at?: string;
+  updated_at?: string;
+  comments?: BackendReviewComment[];
 }
 
 export interface NotebookCatalogSummary {
@@ -134,7 +157,7 @@ export async function searchNotebook(
   const trimmed = pattern.trim();
   if (!(trimmed && agentSlug)) return [];
   try {
-    const res = await get<{
+    const res = await client.get<{
       hits: Array<{ path: string; line: number; snippet: string }>;
     }>(
       `/notebook/search?slug=${encodeURIComponent(agentSlug)}&q=${encodeURIComponent(trimmed)}`,
@@ -148,21 +171,115 @@ export async function searchNotebook(
 
 // ── Env toggle ───────────────────────────────────────────────────
 
-function useMocks(): boolean {
-  const v = (import.meta.env.VITE_NOTEBOOK_MOCK ?? "true") as string;
-  // Default TRUE — real backend flips with `VITE_NOTEBOOK_MOCK=false`.
-  return v !== "false";
+function shouldUseMocks(): boolean {
+  const v = (import.meta.env.VITE_NOTEBOOK_MOCK ?? "false") as string;
+  return v === "true";
+}
+
+function entrySlugFromPath(path: string): string {
+  return path.replace(/^.*\//, "").replace(/\.md$/i, "");
+}
+
+function fallbackTitleFromSlug(slug: string): string {
+  return slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function titleFromMarkdown(markdown: string, fallbackSlug: string): string {
+  for (const rawLine of markdown.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.startsWith("# ")) return line.replace(/^#\s+/, "").trim();
+  }
+  return fallbackTitleFromSlug(fallbackSlug);
+}
+
+function excerptFromMarkdown(markdown: string, fallback = ""): string {
+  const lines = markdown
+    .replace(/^---\s*[\s\S]*?\n---\s*/m, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+  const text = (lines.join(" ") || fallback).replace(/\s+/g, " ").trim();
+  return text.length > 220 ? `${text.slice(0, 217)}...` : text;
+}
+
+function normalizeReviewState(state: unknown): ReviewState {
+  switch (state) {
+    case "pending":
+    case "in-review":
+    case "changes-requested":
+    case "approved":
+    case "rejected":
+    case "expired":
+    case "archived":
+      return state;
+    default:
+      return "archived";
+  }
+}
+
+function statusFromReviewState(state: ReviewState): NotebookEntryStatus {
+  switch (state) {
+    case "pending":
+    case "in-review":
+      return "in-review";
+    case "changes-requested":
+      return "changes-requested";
+    case "approved":
+    case "archived":
+      return "promoted";
+    case "rejected":
+    case "expired":
+      return "discarded";
+    default:
+      return "draft";
+  }
+}
+
+function normalizeReviewItem(raw: ReviewItem | BackendPromotion): ReviewItem {
+  const record = raw as ReviewItem &
+    BackendPromotion & { source_body_md?: string };
+  const sourcePath = record.source_path ?? "";
+  const entrySlug = record.entry_slug || entrySlugFromPath(sourcePath);
+  const body = record.source_body_md ?? "";
+  const state = normalizeReviewState(record.state);
+  const submitted = record.submitted_ts ?? record.created_at ?? "";
+  const updated = record.updated_ts ?? record.updated_at ?? submitted;
+  return {
+    id: record.id ?? "",
+    agent_slug: record.agent_slug ?? record.source_slug ?? "",
+    entry_slug: entrySlug,
+    entry_title:
+      record.entry_title ?? titleFromMarkdown(body, entrySlug || "review"),
+    proposed_wiki_path: record.proposed_wiki_path ?? record.target_path ?? "",
+    excerpt:
+      record.excerpt ?? excerptFromMarkdown(body, record.rationale ?? ""),
+    reviewer_slug: record.reviewer_slug ?? "",
+    state,
+    submitted_ts: submitted,
+    updated_ts: updated,
+    comments: (
+      (record.comments ?? []) as Array<ReviewComment | BackendReviewComment>
+    ).map((c) => {
+      const comment = c as ReviewComment & BackendReviewComment;
+      return {
+        id: comment.id ?? "",
+        author_slug: comment.author_slug ?? "",
+        body_md: comment.body_md ?? comment.body ?? "",
+        ts: comment.ts ?? comment.created_at ?? updated,
+      };
+    }),
+  };
 }
 
 // ── Catalog ──────────────────────────────────────────────────────
 
 export async function fetchCatalog(): Promise<NotebookCatalogSummary> {
-  if (!useMocks()) {
+  if (!shouldUseMocks()) {
     // Real backend: propagate errors so the empty-state / error-state UI
     // surfaces real problems instead of masking them with mock fixtures.
     // Swapping to mocks silently was hiding a missing /notebook/catalog
     // endpoint for weeks in internal demos.
-    return await get<NotebookCatalogSummary>("/notebook/catalog");
+    return await client.get<NotebookCatalogSummary>("/notebook/catalog");
   }
   const agents = MOCK_AGENTS;
   const total_entries = agents.reduce((sum, a) => sum + a.total, 0);
@@ -183,10 +300,10 @@ export async function fetchCatalog(): Promise<NotebookCatalogSummary> {
 export async function fetchAgentEntries(
   agentSlug: string,
 ): Promise<{ agent: NotebookAgentSummary | null; entries: NotebookEntry[] }> {
-  if (!useMocks()) {
+  if (!shouldUseMocks()) {
     // Backend exposes list-by-slug; synthesize the agent header client-side
     // from the catalog so one route missing doesn't blank the page.
-    const raw = await get<{
+    const raw = await client.get<{
       entries: Array<{
         path: string;
         title: string;
@@ -194,22 +311,39 @@ export async function fetchAgentEntries(
         size_bytes: number;
       }>;
     }>(`/notebook/list?slug=${encodeURIComponent(agentSlug)}`);
-    const catalog = await get<NotebookCatalogSummary>(
-      "/notebook/catalog",
-    ).catch(() => null);
+    const catalog = await client
+      .get<NotebookCatalogSummary>("/notebook/catalog")
+      .catch(() => null);
     const agent =
       catalog?.agents.find((a) => a.agent_slug === agentSlug) ?? null;
-    const entries: NotebookEntry[] = (raw.entries ?? []).map((e) => ({
-      agent_slug: agentSlug,
-      entry_slug: e.path.replace(/^.*\//, "").replace(/\.md$/, ""),
-      title: e.title,
-      last_edited_ts: e.modified,
-      revisions: 1,
-      body_md: "",
-      status: "draft",
-      file_path: e.path,
-      reviewer_slug: "",
-    }));
+    const reviews = await fetchReviews().catch(() => [] as ReviewItem[]);
+    const entries: NotebookEntry[] = await Promise.all(
+      (raw.entries ?? []).map(async (e) => {
+        const entry_slug = entrySlugFromPath(e.path);
+        const review = reviews.find(
+          (r) => r.agent_slug === agentSlug && r.entry_slug === entry_slug,
+        );
+        const catalogEntry = agent?.entries.find(
+          (candidate) => candidate.entry_slug === entry_slug,
+        );
+        const body_md = await client
+          .getText("/notebook/read", { slug: agentSlug, path: e.path })
+          .catch(() => "");
+        return {
+          agent_slug: agentSlug,
+          entry_slug,
+          title: e.title || titleFromMarkdown(body_md, entry_slug),
+          last_edited_ts: e.modified,
+          revisions: 1,
+          body_md,
+          status: review
+            ? statusFromReviewState(review.state)
+            : (catalogEntry?.status ?? "draft"),
+          file_path: e.path,
+          reviewer_slug: review?.reviewer_slug ?? "",
+        };
+      }),
+    );
     return { agent, entries };
   }
   const agent = MOCK_AGENTS.find((a) => a.agent_slug === agentSlug) ?? null;
@@ -220,32 +354,39 @@ export async function fetchEntry(
   agentSlug: string,
   entrySlug: string,
 ): Promise<NotebookEntry | null> {
-  if (!useMocks()) {
+  if (!shouldUseMocks()) {
     // Backend doesn't expose a single-entry endpoint yet, but the list +
     // read pair is enough for now: list gives the metadata, read returns
     // body bytes. Throw on genuine errors instead of falling through to
     // mocks (same silent-fallback fix as fetchCatalog).
     const path = `agents/${agentSlug}/notebook/${entrySlug}.md`;
-    const body = await get<{ content: string; commit_sha: string }>(
-      `/notebook/read?slug=${encodeURIComponent(agentSlug)}&path=${encodeURIComponent(path)}`,
-    );
+    const body = await client.getText("/notebook/read", {
+      slug: agentSlug,
+      path,
+    });
     // Fetch list so we can fill title + last_edited_ts for the header.
-    const list = await get<{
-      entries: Array<{ path: string; title: string; modified: string }>;
-    }>(`/notebook/list?slug=${encodeURIComponent(agentSlug)}`).catch(() => ({
-      entries: [] as Array<{ path: string; title: string; modified: string }>,
-    }));
+    const list = await client
+      .get<{
+        entries: Array<{ path: string; title: string; modified: string }>;
+      }>(`/notebook/list?slug=${encodeURIComponent(agentSlug)}`)
+      .catch(() => ({
+        entries: [] as Array<{ path: string; title: string; modified: string }>,
+      }));
+    const reviews = await fetchReviews().catch(() => [] as ReviewItem[]);
+    const review = reviews.find(
+      (r) => r.agent_slug === agentSlug && r.entry_slug === entrySlug,
+    );
     const meta = list.entries.find((e) => e.path === path);
     return {
       agent_slug: agentSlug,
       entry_slug: entrySlug,
-      title: meta?.title ?? entrySlug,
+      title: meta?.title ?? titleFromMarkdown(body, entrySlug),
       last_edited_ts: meta?.modified ?? new Date().toISOString(),
       revisions: 1,
-      body_md: body?.content ?? "",
-      status: "draft",
+      body_md: body,
+      status: review ? statusFromReviewState(review.state) : "draft",
       file_path: path,
-      reviewer_slug: "",
+      reviewer_slug: review?.reviewer_slug ?? "",
     };
   }
   return mockEntry(agentSlug, entrySlug);
@@ -254,23 +395,30 @@ export async function fetchEntry(
 // ── Reviews ──────────────────────────────────────────────────────
 
 export async function fetchReviews(): Promise<ReviewItem[]> {
-  if (!useMocks()) {
+  if (!shouldUseMocks()) {
     // Propagate errors — silent fallback to mocks was masking a real-backend
     // bug where /review/list was 503 because the ReviewLog never initialized.
-    const res = await get<{ reviews: ReviewItem[] }>("/review/list?scope=all");
-    return Array.isArray(res?.reviews) ? res.reviews : [];
+    const res = await client.get<{
+      reviews: Array<ReviewItem | BackendPromotion>;
+    }>("/review/list?scope=all");
+    return Array.isArray(res?.reviews)
+      ? res.reviews.map(normalizeReviewItem)
+      : [];
   }
   return MOCK_REVIEWS;
 }
 
 export async function fetchReview(id: string): Promise<ReviewItem | null> {
-  if (!useMocks()) {
-    return await get<ReviewItem>(`/review/${encodeURIComponent(id)}`);
+  if (!shouldUseMocks()) {
+    const raw = await client.get<ReviewItem | BackendPromotion>(
+      `/review/${encodeURIComponent(id)}`,
+    );
+    return normalizeReviewItem(raw);
   }
   return mockReview(id);
 }
 
-// ── Mutations (Lane C: /review/*, /notebook/promote). ────────────
+// ── Mutations (/review/*, /notebook/promote). ────────────────────
 
 export async function promoteEntry(
   agentSlug: string,
@@ -281,32 +429,40 @@ export async function promoteEntry(
     rationale?: string;
   } = {},
 ): Promise<ReviewItem | null> {
-  if (!useMocks()) {
-    try {
-      // Backend returns { promotion_id, reviewer_slug, state, human_only }.
-      // Fetch the full ReviewItem shape via the detail endpoint so UI gets
-      // the populated comment thread + timestamps in one call flow.
-      const target =
-        opts.proposed_wiki_path ?? `team/drafts/${agentSlug}-${entrySlug}.md`;
-      const submitted = await post<{
-        promotion_id: string;
-        reviewer_slug: string;
-        state: ReviewState;
-        human_only: boolean;
-      }>("/notebook/promote", {
-        my_slug: agentSlug,
+  if (!shouldUseMocks()) {
+    // Backend returns { promotion_id, reviewer_slug, state, human_only }.
+    // Fetch the full ReviewItem shape via the detail endpoint so UI gets
+    // the populated comment thread + timestamps in one call flow.
+    const target =
+      opts.proposed_wiki_path ?? `team/drafts/${agentSlug}-${entrySlug}.md`;
+    const submitted = await client.post<{
+      promotion_id: string;
+      reviewer_slug: string;
+      state: ReviewState;
+      human_only: boolean;
+    }>("/notebook/promote", {
+      my_slug: agentSlug,
+      source_path: `agents/${agentSlug}/notebook/${entrySlug}.md`,
+      target_wiki_path: target,
+      rationale: opts.rationale ?? "Ready for team wiki review.",
+      reviewer_slug: opts.reviewer_slug,
+    });
+    if (submitted?.promotion_id) {
+      const full = await fetchReview(submitted.promotion_id).catch(() => null);
+      if (full) return full;
+      return normalizeReviewItem({
+        id: submitted.promotion_id,
+        source_slug: agentSlug,
         source_path: `agents/${agentSlug}/notebook/${entrySlug}.md`,
-        target_wiki_path: target,
-        rationale: opts.rationale ?? "",
-        reviewer_slug: opts.reviewer_slug,
+        target_path: target,
+        reviewer_slug: submitted.reviewer_slug,
+        state: submitted.state,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        comments: [],
       });
-      if (submitted?.promotion_id) {
-        const full = await fetchReview(submitted.promotion_id);
-        if (full) return full;
-      }
-    } catch {
-      // fall through — caller handles UI state
     }
+    return null;
   }
   // Mock: return a synthetic pending review card so the UI can transition.
   const entry = mockEntry(agentSlug, entrySlug);
@@ -318,7 +474,7 @@ export async function promoteEntry(
     entry_title: entry.title,
     proposed_wiki_path:
       opts.proposed_wiki_path ??
-      `drafts/${entry.agent_slug}-${entry.entry_slug}`,
+      `team/drafts/${entry.agent_slug}-${entry.entry_slug}.md`,
     excerpt: entry.body_md.slice(0, 200),
     reviewer_slug: opts.reviewer_slug ?? entry.reviewer_slug,
     state: "pending",
@@ -333,32 +489,27 @@ export async function updateReviewState(
   state: ReviewState,
   opts: { actor_slug?: string; rationale?: string } = {},
 ): Promise<ReviewItem | null> {
-  if (!useMocks()) {
+  if (!shouldUseMocks()) {
     // Backend exposes state-specific verbs, not a generic /state POST.
     // actor_slug empty = human action (web UI); non-empty = agent slug.
     const verbMap: Record<ReviewState, string | null> = {
       approved: "approve",
       "changes-requested": "request-changes",
-      // 'rejected' is author-initiated withdraw; send via /reject.
-      // TypeScript's ReviewState union doesn't include 'rejected' today, but
-      // keep this fallthrough so the type widens cleanly when it does.
+      rejected: "reject",
       pending: null,
       "in-review": "resubmit",
+      expired: null,
       archived: null,
     };
     const verb = verbMap[state];
     if (verb) {
-      try {
-        await post<unknown>(`/review/${encodeURIComponent(id)}/${verb}`, {
-          actor_slug: opts.actor_slug ?? "",
-          rationale: opts.rationale ?? "",
-        });
-        const full = await fetchReview(id);
-        if (full) return full;
-      } catch {
-        // fall through
-      }
+      await client.post<unknown>(`/review/${encodeURIComponent(id)}/${verb}`, {
+        actor_slug: opts.actor_slug ?? "",
+        rationale: opts.rationale ?? "",
+      });
+      return await fetchReview(id);
     }
+    return await fetchReview(id);
   }
   // Mock: mutate in-memory fixture so re-fetch reflects the change this
   // session (tests spy on the function; they don't rely on this persistence).
@@ -374,17 +525,12 @@ export async function postReviewComment(
   body_md: string,
   author_slug: string,
 ): Promise<ReviewItem | null> {
-  if (!useMocks()) {
-    try {
-      await post<unknown>(`/review/${encodeURIComponent(id)}/comment`, {
-        actor_slug: author_slug,
-        body: body_md,
-      });
-      const full = await fetchReview(id);
-      if (full) return full;
-    } catch {
-      // fall through
-    }
+  if (!shouldUseMocks()) {
+    await client.post<unknown>(`/review/${encodeURIComponent(id)}/comment`, {
+      actor_slug: author_slug,
+      body: body_md,
+    });
+    return await fetchReview(id);
   }
   const r = MOCK_REVIEWS.find((x) => x.id === id);
   if (!r) return null;
@@ -431,7 +577,7 @@ export function subscribeNotebookEvents(
       return () => {
         closed = true;
       };
-    source = new ES(sseURL("/events"));
+    source = new ES(client.sseURL("/events"));
 
     const onNotebook = (ev: MessageEvent) => {
       if (closed) return;

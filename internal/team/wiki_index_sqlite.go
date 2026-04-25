@@ -370,6 +370,37 @@ func (s *SQLiteFactStore) ListFactsByTriplet(ctx context.Context, subject, predi
 	return scanFacts(rows)
 }
 
+// CountFacts returns the total number of rows in the facts table. Cheap —
+// COUNT(*) hits the primary index on id. Used by cross-entity consumers
+// to pre-check corpus size before triggering a full scan via ListAllFacts.
+func (s *SQLiteFactStore) CountFacts(ctx context.Context) (int, error) {
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM facts`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("sqlite: count facts: %w", err)
+	}
+	return n, nil
+}
+
+// ListAllFacts returns every fact in the store sorted by ID. Matches
+// inMemoryFactStore ordering so cross-entity consumers (playbook clustering)
+// see deterministic results regardless of backend.
+func (s *SQLiteFactStore) ListAllFacts(ctx context.Context) ([]TypedFact, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, entity_slug, kind, type,
+		        triplet_subject, triplet_predicate, triplet_object,
+		        text, confidence, valid_from, valid_until,
+		        supersedes, contradicts_with,
+		        source_type, source_path, sentence_offset, artifact_excerpt,
+		        created_at, created_by, reinforced_at
+		 FROM facts
+		 ORDER BY id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list all facts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanFacts(rows)
+}
+
 func (s *SQLiteFactStore) ListEdgesForEntity(ctx context.Context, slug string) ([]IndexEdge, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT subject, predicate, object, timestamp, source_sha
@@ -689,4 +720,51 @@ func scanFacts(rows *sql.Rows) ([]TypedFact, error) {
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// IterateEntities streams every entity row through fn. Rows close on return
+// (defer Close + final rows.Err() check). The query uses ORDER BY entities.slug
+// so iteration is stable across calls.
+func (s *SQLiteFactStore) IterateEntities(ctx context.Context, fn func(IndexEntity) error) error {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT slug, canonical_slug, kind, aliases,
+		        signals_email, signals_domain, signals_person_name, signals_job_title,
+		        last_synthesized_sha, last_synthesized_at, fact_count_at_synth,
+		        created_at, created_by
+		 FROM entities ORDER BY slug ASC`)
+	if err != nil {
+		return fmt.Errorf("sqlite: iterate entities: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	for rows.Next() {
+		var e IndexEntity
+		var aliases sql.NullString
+		var lastSynthAt, createdAt sql.NullString
+		if err := rows.Scan(
+			&e.Slug, &e.CanonicalSlug, &e.Kind, &aliases,
+			&e.Signals.Email, &e.Signals.Domain, &e.Signals.PersonName, &e.Signals.JobTitle,
+			&e.LastSynthesizedSHA, &lastSynthAt, &e.FactCountAtSynth,
+			&createdAt, &e.CreatedBy,
+		); err != nil {
+			return fmt.Errorf("sqlite: scan entity: %w", err)
+		}
+		if aliases.Valid && aliases.String != "" && aliases.String != "null" {
+			_ = json.Unmarshal([]byte(aliases.String), &e.Aliases)
+		}
+		if lastSynthAt.Valid {
+			if t, perr := time.Parse(time.RFC3339, lastSynthAt.String); perr == nil {
+				e.LastSynthesizedAt = t
+			}
+		}
+		if createdAt.Valid {
+			if t, perr := time.Parse(time.RFC3339, createdAt.String); perr == nil {
+				e.CreatedAt = t
+			}
+		}
+		if err := fn(e); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
 }
