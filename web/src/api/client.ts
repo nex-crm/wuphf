@@ -65,6 +65,28 @@ export async function get<T = unknown>(
   return r.json();
 }
 
+export async function getText(
+  path: string,
+  params?: Record<string, string | number | boolean | null | undefined>,
+): Promise<string> {
+  let url = baseURL() + path;
+  if (params) {
+    const qs = Object.entries(params)
+      .filter(([, v]) => v !== null)
+      .map(
+        ([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`,
+      )
+      .join("&");
+    if (qs) url += `?${qs}`;
+  }
+  const r = await fetch(url, { headers: authHeaders() });
+  if (!r.ok) {
+    const text = (await r.text().catch(() => "")).trim();
+    throw new Error(text || `${r.status} ${r.statusText}`);
+  }
+  return r.text();
+}
+
 export async function post<T = unknown>(
   path: string,
   body?: unknown,

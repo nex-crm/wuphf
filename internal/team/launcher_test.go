@@ -1232,6 +1232,35 @@ func TestBuildPromptIncludesTaskStatusAndWorktreeGuidance(t *testing.T) {
 	}
 }
 
+func TestBuildPromptIncludesMarkdownNotebookPromotionGuidance(t *testing.T) {
+	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
+	t.Setenv("NEX_API_KEY", "")
+
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "builder", Name: "Builder"},
+			},
+		},
+	}
+
+	for _, slug := range []string{"ceo", "builder"} {
+		prompt := l.buildPrompt(slug)
+		for _, want := range []string{
+			"notebook_write",
+			"notebook_promote",
+			"wuphf_wiki_lookup",
+			"Do not bypass notebook_promote",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("%s prompt missing %q:\n%s", slug, want, prompt)
+			}
+		}
+	}
+}
+
 func TestResponseInstructionForTargetLiveExternalTaskPromptsCapabilityCreation(t *testing.T) {
 	b := &Broker{
 		tasks: []teamTask{{

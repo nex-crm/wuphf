@@ -63,7 +63,7 @@ export default function Notebook({
     return () => {
       cancelled = true;
     };
-  }, [agentSlug]);
+  }, [agentSlug, refreshTick]);
 
   // Subscribe to broker notebook:write + review:state_change events; on
   // any event, nudge the active view to refetch by bumping the tick.
