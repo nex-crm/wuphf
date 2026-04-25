@@ -6,6 +6,13 @@ on:
   pull_request:
     branches: [main]
 
+# Tighten the org default (`default_workflow_permissions: write`) — every
+# job in CI is read-only against the repo. The matrix legs that need to
+# upload-artifact / download-artifact rely on actions/upload-artifact's
+# self-managed temporary token and don't need write contents.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true

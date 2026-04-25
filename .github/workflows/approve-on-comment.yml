@@ -9,6 +9,12 @@ on:
   issue_comment:
     types: [created]
 
+# Top-level floor at the empty set; the actual approve job below uses a
+# minted GitHub App token with its own scoped permissions. Without this
+# block, a sibling job added later would inherit the org default of
+# `write` on every scope.
+permissions: {}
+
 jobs:
   approve:
     if: |
