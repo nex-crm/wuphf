@@ -49,7 +49,19 @@ Hooks run via [lefthook](https://github.com/evilmartians/lefthook) (`lefthook.ym
 | `build` | `go build -o /dev/null ./cmd/wuphf` — verify the main binary still links |
 | `vhs` | Runs `testdata/vhs/check.sh` if `vhs` is on PATH (skipped with a warning otherwise) |
 
-The full Go test suite runs in CI (`go-test-matrix` job) instead of pre-push — fan-out per package with `-race` on everything except `internal/team` and `internal/teammcp` (see test-isolation memo).
+The full Go test suite runs in CI (`go-test-matrix` job) instead of pre-push — fan-out per package with `-race` on everything except `internal/team` and `internal/teammcp`. Those two packages have known goroutine-leak patterns where a worker spawned by one test outlives that test and races against the next test's setup; the race detector is correct to flag them, but the result is non-deterministic local failures on Mac. The fix lives upstream in those packages' lifecycles (tracked at `internal/team/headless_codex.go` :: `enqueueHeadlessCodexTurnRecord`, where `runHeadlessCodexQueue` is spawned without a per-test cleanup channel). Until that lands, the carve-out keeps CI honest.
+
+### Running tests locally
+
+To match CI's gate locally — per-package fan-out with the same `-race` carve-out — use:
+
+```bash
+bash scripts/test-go.sh                  # whole repo (~3-5 min)
+bash scripts/test-go.sh ./internal/team  # one package
+COUNT=3 bash scripts/test-go.sh ./...    # flake-hunt
+```
+
+Plain `go test -race ./...` will reproduce the `internal/team` flakes documented above. If you need to verify a change touches the team package, the script is the sanctioned entry point — it's the same shape CI runs.
 
 **Do NOT push with `--no-verify`.** If a hook fails, fix the underlying failure — skipping it lands the problem in CI for everyone else to hit. If a hook is genuinely wrong for your change, open a PR to the hook config rather than bypassing it.
 

@@ -283,6 +283,26 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 		cancel()
 	}
 	if startWorker {
+		// TODO(test-isolation): this goroutine has no per-test cleanup channel,
+		// so under `go test -race ./internal/team/` it outlives the spawning
+		// test and trips DATA RACE on subsequent tests' setup of headlessActive
+		// / headlessQueues maps. Reproducible:
+		//
+		//   bash scripts/test-go.sh ./internal/team   # passes (-race carved out)
+		//   go test -race ./internal/team             # flakes
+		//
+		// The race detector trace (representative — different tests on each run):
+		//
+		//   Write at ... by goroutine N (this gowrap, after test exit):
+		//     (*Launcher).beginHeadlessCodexTurn  ← l.headlessActive[slug] = …
+		//   Previous read at ... by goroutine N-1 (test cleanup, finished):
+		//     TestRecoverFailedHeadlessTurnRequeues...  ← delete(l.headlessActive, slug)
+		//
+		// Fix shape: thread a per-test stop channel through Launcher (or
+		// reuse l.broker.stopCh) and have runHeadlessCodexQueue select on
+		// it inside its outer for-loop, so test cleanup can drain in-flight
+		// workers before the next TestMain leg starts. Tracked alongside
+		// the carve-out in .github/workflows/ci.yml (go-test-list).
 		go l.runHeadlessCodexQueue(slug)
 	}
 }
