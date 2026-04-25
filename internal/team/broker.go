@@ -542,6 +542,14 @@ type Broker struct {
 
 	stopCh   chan struct{} // closed by Stop(); signals background goroutines to exit
 	stopOnce sync.Once
+
+	// statePath is the on-disk broker-state.json path bound at construction.
+	// NewBroker() snapshots the package-level brokerStatePath() at call time
+	// so later monkey-patches (or a late-arriving goroutine writing via a
+	// stale closure) cannot retarget this broker's saves. NewBrokerAt()
+	// takes the path explicitly and is the preferred constructor for new
+	// code / test sites migrating off the package var.
+	statePath string
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -897,7 +905,25 @@ func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
 // b.loadState() explicitly after construction.
 var skipBrokerStateLoadOnConstruct = false
 
+// NewBroker constructs a Broker bound to the package-level brokerStatePath()
+// resolved at call time. Production code uses this directly so the CLI
+// resumes from the default ~/.wuphf/team/broker-state.json. Tests that
+// monkey-patch brokerStatePath before calling NewBroker still work —
+// they effectively pin the path via the package var and NewBroker snapshots
+// it into b.statePath below.
+//
+// New test sites (and any new code) should prefer NewBrokerAt, which is
+// explicit about the path and doesn't depend on the package var at all.
 func NewBroker() *Broker {
+	return NewBrokerAt(brokerStatePath())
+}
+
+// NewBrokerAt constructs a Broker whose state is persisted to statePath.
+// The path is bound at construction time and stored on the Broker; later
+// reassignments of the package-level brokerStatePath do NOT retarget this
+// broker's saves. Use this instead of NewBroker() everywhere that needs
+// path isolation — notably tests that want to pin state under t.TempDir.
+func NewBrokerAt(statePath string) *Broker {
 	b := &Broker{
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
@@ -920,6 +946,8 @@ func NewBroker() *Broker {
 		agentRateLimitBuckets:  make(map[string]ipRateLimitBucket),
 		agentRateLimitWindow:   defaultAgentRateLimitWindow,
 		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
+
+		statePath: statePath,
 	}
 	if !skipBrokerStateLoadOnConstruct {
 		_ = b.loadState()
@@ -3022,6 +3050,13 @@ func brokerStateSnapshotPath() string {
 	return brokerStatePath() + ".last-good"
 }
 
+// stateSnapshotPath returns the path the Broker writes its last-good
+// crash-recovery snapshot to. Bound to b.statePath (set at construction),
+// so it does not depend on the package-level brokerStatePath var.
+func (b *Broker) stateSnapshotPath() string {
+	return b.statePath + ".last-good"
+}
+
 func loadBrokerStateFile(path string) (brokerState, error) {
 	var state brokerState
 	data, err := os.ReadFile(path)
@@ -3058,7 +3093,7 @@ func brokerStateShouldSnapshot(state brokerState) bool {
 }
 
 func (b *Broker) loadState() error {
-	path := brokerStatePath()
+	path := b.statePath
 	state, err := loadBrokerStateFile(path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -3066,7 +3101,7 @@ func (b *Broker) loadState() error {
 		}
 		state = brokerState{}
 	}
-	snapshotPath := brokerStateSnapshotPath()
+	snapshotPath := b.stateSnapshotPath()
 	if snapshot, snapErr := loadBrokerStateFile(snapshotPath); snapErr == nil {
 		if brokerStateActivityScore(snapshot) > brokerStateActivityScore(state) {
 			state = snapshot
@@ -3127,8 +3162,8 @@ func (b *Broker) loadState() error {
 }
 
 func (b *Broker) saveLocked() error {
-	path := brokerStatePath()
-	snapshotPath := brokerStateSnapshotPath()
+	path := b.statePath
+	snapshotPath := b.stateSnapshotPath()
 	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.policies) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
