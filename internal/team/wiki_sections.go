@@ -63,8 +63,8 @@ import (
 const SectionsRefreshDebounce = 500 * time.Millisecond
 
 // SectionDiscoveryTimeout bounds one DiscoverSections call. git log
-// shell-outs per section can add up on a very large wiki; the cap keeps
-// a pathological filesystem from stalling the broker forever.
+// discovery is bounded so a pathological filesystem or large wiki history
+// cannot stall the broker forever.
 const SectionDiscoveryTimeout = 10 * time.Second
 
 // wikiSectionsEventName is the SSE event name emitted when the cached
@@ -153,6 +153,7 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 	if walkErr != nil {
 		return nil, fmt.Errorf("wiki sections: walk team/: %w", walkErr)
 	}
+	commitBounds, _ := repo.commitBoundsByPath(ctx)
 
 	// Assemble the section list: blueprint-declared first (in blueprint
 	// order), then discovered-only alphabetically.
@@ -161,7 +162,7 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 
 	for _, slug := range blueprintOrder {
 		entries := bySection[slug]
-		section := materializeSection(ctx, repo, slug, entries, true)
+		section := materializeSection(ctx, repo, slug, entries, true, commitBounds)
 		out = append(out, section)
 		seen[slug] = struct{}{}
 	}
@@ -178,7 +179,7 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 		if _, ok := seen[slug]; ok {
 			continue
 		}
-		section := materializeSection(ctx, repo, slug, bySection[slug], false)
+		section := materializeSection(ctx, repo, slug, bySection[slug], false, commitBounds)
 		out = append(out, section)
 	}
 
@@ -232,12 +233,10 @@ func blueprintDirToSlug(dir string) string {
 	return cleaned
 }
 
-// materializeSection computes the metadata for one section from its
-// article paths. Timestamps are resolved via git log on the oldest and
-// newest commits touching any file in the section; articles without git
-// history (pre-worker writes, tests) contribute a zero time which we
-// collapse to the filesystem mtime as a reasonable fallback.
-func materializeSection(ctx context.Context, repo *Repo, slug string, entries []CatalogEntry, fromSchema bool) DiscoveredSection {
+// materializeSection computes the metadata for one section from its article
+// paths. Timestamps come from a batch git-log index; articles without git
+// history fall back to filesystem mtime.
+func materializeSection(ctx context.Context, repo *Repo, slug string, entries []CatalogEntry, fromSchema bool, commitBounds map[string]pathCommitBounds) DiscoveredSection {
 	title := sectionTitleFromSlug(slug)
 	paths := make([]string, 0, len(entries))
 	for _, e := range entries {
@@ -257,16 +256,14 @@ func materializeSection(ctx context.Context, repo *Repo, slug string, entries []
 		return section
 	}
 
-	// Resolve first-seen and last-update by scanning git log on every
-	// article in the section. For a small section this is cheap; for a
-	// large one (100+ articles) we cap the ctx via the caller's timeout.
+	// Resolve first-seen and last-update from the precomputed commit index.
 	var earliest, latest time.Time
 	for _, rel := range paths {
 		if err := ctx.Err(); err != nil {
 			break
 		}
-		refs, err := repo.Log(ctx, rel)
-		if err != nil || len(refs) == 0 {
+		bounds, ok := commitBounds[rel]
+		if !ok || !bounds.Has {
 			// Fall back to mtime — keeps sections with pre-worker
 			// history (git bootstrap restore, tests) from rendering
 			// with zero timestamps.
@@ -281,8 +278,8 @@ func materializeSection(ctx context.Context, repo *Repo, slug string, entries []
 			}
 			continue
 		}
-		newest := refs[0].Timestamp.UTC()
-		oldest := refs[len(refs)-1].Timestamp.UTC()
+		newest := bounds.Latest.Timestamp.UTC()
+		oldest := bounds.Oldest.Timestamp.UTC()
 		if earliest.IsZero() || oldest.Before(earliest) {
 			earliest = oldest
 		}

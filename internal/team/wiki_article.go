@@ -41,6 +41,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ArticleMeta is the rich view sent to the UI for an article.
@@ -82,7 +83,8 @@ type CatalogEntry struct {
 }
 
 // BuildCatalog walks team/ and returns every .md article with title + author +
-// last-edit metadata grouped by top-level thematic dir.
+// last-edit metadata grouped by top-level thematic dir. Git metadata is read
+// in one batch so catalog latency scales with repo history, not article count.
 //
 // Shape matches web/src/api/wiki.ts WikiCatalogEntry. Sorted by path for
 // reproducibility; the UI re-sorts by recency within each group.
@@ -125,10 +127,6 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 			Title: extractTitle(content, rel),
 			Group: groupFromPath(rel),
 		}
-		if refs, err := r.Log(ctx, rel); err == nil && len(refs) > 0 {
-			entry.AuthorSlug = refs[0].Author
-			entry.LastEditedTs = refs[0].Timestamp.Format("2006-01-02T15:04:05Z07:00")
-		}
 		entries = append(entries, entry)
 		return nil
 	})
@@ -136,8 +134,50 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 		return nil, fmt.Errorf("wiki: walk team/: %w", walkErr)
 	}
 
+	if bounds, err := r.commitBoundsByPath(ctx); err == nil {
+		for i := range entries {
+			if b, ok := bounds[entries[i].Path]; ok && b.Has {
+				entries[i].AuthorSlug = b.Latest.Author
+				entries[i].LastEditedTs = b.Latest.Timestamp.Format("2006-01-02T15:04:05Z07:00")
+			}
+		}
+	}
+
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Path < entries[j].Path })
 	return entries, nil
+}
+
+type pathCommitBounds struct {
+	Latest CommitRef
+	Oldest CommitRef
+	Has    bool
+}
+
+func (r *Repo) commitBoundsByPath(ctx context.Context) (map[string]pathCommitBounds, error) {
+	entries, err := r.AuditLog(ctx, time.Time{}, 0)
+	if err != nil {
+		return nil, err
+	}
+	bounds := make(map[string]pathCommitBounds)
+	for _, entry := range entries {
+		for _, p := range entry.Paths {
+			p = filepath.ToSlash(p)
+			ref := CommitRef{
+				SHA:       entry.SHA,
+				Author:    entry.Author,
+				Timestamp: entry.Timestamp,
+				Message:   entry.Message,
+			}
+			b := bounds[p]
+			if !b.Has {
+				b.Latest = ref
+				b.Has = true
+			}
+			b.Oldest = ref
+			bounds[p] = b
+		}
+	}
+	return bounds, nil
 }
 
 // groupFromPath returns the first subdir under team/ (e.g. "team/people/x.md"
@@ -205,7 +245,7 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath string) (ArticleMeta, e
 // Does NOT hold r.mu: read-only filesystem access, safe to race with writes
 // (the worker's commit serialization means mid-walk state is at worst one
 // article stale — acceptable for a reverse index).
-func (r *Repo) backlinksFor(_ context.Context, target string) ([]Backlink, error) {
+func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, error) {
 	targetSlug := relPathToSlug(target)
 	if targetSlug == "" {
 		return nil, fmt.Errorf("wiki: target has no slug mapping: %q", target)
@@ -262,11 +302,12 @@ func (r *Repo) backlinksFor(_ context.Context, target string) ([]Backlink, error
 
 	// Fill author_slug per article from git log. Best-effort: if log fails,
 	// leave author_slug empty rather than abort.
+	commitBounds, _ := r.commitBoundsByPath(ctx)
 	backs := make([]Backlink, 0, len(hits))
 	for _, h := range hits {
 		author := ""
-		if refs, err := r.Log(context.Background(), h.relPath); err == nil && len(refs) > 0 {
-			author = refs[0].Author
+		if bounds, ok := commitBounds[h.relPath]; ok && bounds.Has {
+			author = bounds.Latest.Author
 		}
 		backs = append(backs, Backlink{
 			Path:       h.relPath,
