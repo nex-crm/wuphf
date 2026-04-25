@@ -150,6 +150,48 @@ func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 	}
 }
 
+func TestNewBrokerAt_PathSnapshottedAtConstruction(t *testing.T) {
+	// NewBrokerAt binds the state path to the Broker at construction so a
+	// later reassignment of the package-level brokerStatePath var (or a
+	// goroutine reading it via a stale closure) can't retarget this
+	// broker's saves. Contract: after construction, reassigning
+	// brokerStatePath must NOT move where this broker persists.
+	boundPath := filepath.Join(t.TempDir(), "bound-state.json")
+	b := NewBrokerAt(boundPath)
+
+	// Retarget the package var — simulates a sibling test leaking a
+	// monkey-patch, or the pre-migration test pattern running before us.
+	oldPathFn := brokerStatePath
+	unboundPath := filepath.Join(t.TempDir(), "should-not-be-written.json")
+	brokerStatePath = func() string { return unboundPath }
+	t.Cleanup(func() { brokerStatePath = oldPathFn })
+
+	b.mu.Lock()
+	b.messages = []channelMessage{{
+		ID:        "bound-msg",
+		From:      "ceo",
+		Content:   "belongs to the bound path",
+		Timestamp: "2026-04-25T00:00:00Z",
+	}}
+	b.counter = 1
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("saveLocked: %v", err)
+	}
+	b.mu.Unlock()
+
+	if _, err := os.Stat(boundPath); err != nil {
+		t.Fatalf("bound path missing after save: %v", err)
+	}
+	if _, err := os.Stat(unboundPath); !os.IsNotExist(err) {
+		t.Fatalf("unbound path was written (package-var leak): err=%v", err)
+	}
+	if b.stateSnapshotPath() != boundPath+".last-good" {
+		t.Fatalf("snapshot method did not derive from bound path: got %q, want %q",
+			b.stateSnapshotPath(), boundPath+".last-good")
+	}
+}
+
 func TestBrokerStop_NoWriteAfterReturn(t *testing.T) {
 	// Regression cover for the goroutine-drain gap: if Stop() returns
 	// while a background goroutine is still holding a reference to the
