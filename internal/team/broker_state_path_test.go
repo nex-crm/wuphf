@@ -12,17 +12,15 @@ package team
 //  2. .last-good snapshot path is always a sibling of the main path.
 //  3. skipBrokerStateLoadOnConstruct still gates the auto-load hook.
 //
-// Also covers: Stop() must not continue writing the state file after
-// returning. Catches a regression where a background goroutine would
-// read a refactored statePath via a stale closure and race the next
-// construction.
+// Also covers: Stop()'s observable contract — stopCh is closed and the
+// last-saved state file is byte-identical immediately afterward.
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestDefaultBrokerStatePath_EnvOverrideWins(t *testing.T) {
@@ -201,21 +199,29 @@ func TestNewBrokerAt_PanicsOnEmptyPath(t *testing.T) {
 	_ = NewBrokerAt("")
 }
 
-func TestBrokerStop_NoWriteAfterReturn(t *testing.T) {
-	// Regression cover for the goroutine-drain gap: if Stop() returns
-	// while a background goroutine is still holding a reference to the
-	// state path and mid-save, the next construction (or the test
-	// tempdir cleanup) can race the late write. Stop's contract must
-	// be "no further state writes after I return."
+func TestBrokerStop_ClosesStopChannelAndPreservesState(t *testing.T) {
+	// Stop()'s observable contract: stopCh is closed (so any goroutine
+	// selecting on it has been told to exit) and the on-disk state file
+	// the broker last saved is byte-identical when Stop returns.
 	//
-	// Implementation note: the activity watchdog is disabled in tests,
-	// so the set of goroutines that could write post-Stop is small —
-	// but this test is cheap and catches the class of regression a
-	// Track A refactor most easily introduces (e.g. a goroutine that
-	// reads a refactored `b.statePath` via a pointer captured at Start
-	// time and continues writing after b.stopCh closes).
+	// This is an honest test of what Stop() actually guarantees today.
+	// The previous incarnation slept 250ms and asserted no late writes,
+	// which (a) violated this repo's no-sleeps-in-tests rule and (b)
+	// would pass for the wrong reason if the offending goroutine was
+	// quiescent during the window. A real "no late writes" check
+	// requires a sync.WaitGroup on the goroutine set, which is broker
+	// instrumentation worth doing separately if/when the goroutine
+	// surface grows.
+	//
+	// Starts the broker via StartOnPort(0) so the HTTP listener
+	// goroutine is actually present — without that, Stop is a near-noop
+	// and the test wouldn't exercise the drain path at all.
 	statePath := leakedBrokerStatePath(t)
 	b := NewBrokerAt(statePath)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("StartOnPort: %v", err)
+	}
+
 	b.mu.Lock()
 	b.messages = []channelMessage{{
 		ID:        "pre-stop",
@@ -230,30 +236,34 @@ func TestBrokerStop_NoWriteAfterReturn(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	beforeStat, err := os.Stat(statePath)
+	beforeBytes, err := os.ReadFile(statePath)
 	if err != nil {
-		t.Fatalf("stat before Stop: %v", err)
+		t.Fatalf("read before Stop: %v", err)
 	}
 
 	b.Stop()
 
-	// Give any straggler goroutine a realistic window to misbehave —
-	// the watchdog ticker, if enabled, fires once per minute; shorter
-	// loops like wiki-index reconcile use 100ms+ intervals. 250ms is
-	// long enough to catch short-interval leaks without slowing the
-	// test suite meaningfully.
-	time.Sleep(250 * time.Millisecond)
+	// Deterministic check: stopCh must be closed when Stop returns.
+	// Any background goroutine that selects on it has observed the
+	// signal — the read here cannot happen before Stop closes the
+	// channel, since Stop is synchronous.
+	select {
+	case <-b.stopCh:
+		// closed, as required
+	default:
+		t.Fatal("Stop returned but b.stopCh is not closed")
+	}
 
-	afterStat, err := os.Stat(statePath)
+	// State file is byte-identical immediately after Stop returns.
+	// If a future regression makes Stop trigger a save (intentionally
+	// or via a leaked goroutine that wins a race against Stop's
+	// completion), this catches it without sleeping.
+	afterBytes, err := os.ReadFile(statePath)
 	if err != nil {
-		t.Fatalf("stat after Stop: %v", err)
+		t.Fatalf("read after Stop: %v", err)
 	}
-	if !afterStat.ModTime().Equal(beforeStat.ModTime()) {
-		t.Fatalf("state file modified after Stop returned: before=%s after=%s",
-			beforeStat.ModTime(), afterStat.ModTime())
-	}
-	if afterStat.Size() != beforeStat.Size() {
-		t.Fatalf("state file size changed after Stop: before=%d after=%d",
-			beforeStat.Size(), afterStat.Size())
+	if !bytes.Equal(beforeBytes, afterBytes) {
+		t.Fatalf("state file content changed across Stop:\nbefore: %s\nafter: %s",
+			beforeBytes, afterBytes)
 	}
 }
