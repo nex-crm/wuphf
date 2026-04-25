@@ -37,6 +37,80 @@ func TestPostEscalation_MaxRetries_WritesToGeneralChannel(t *testing.T) {
 	t.Fatalf("expected max-retries escalation message in #general, found none; got %d messages", len(msgs))
 }
 
+func TestPostEscalation_CreatesSelfHealingTask(t *testing.T) {
+	b := newTestBroker(t)
+	l := &Launcher{broker: b}
+
+	l.postEscalation("eng", "eng-42", agent.EscalationStuck, "stuck in build_context for 20 ticks")
+
+	var found teamTask
+	for _, task := range b.AllTasks() {
+		if task.Title == "Self-heal @eng on eng-42" {
+			found = task
+			break
+		}
+	}
+	if found.ID == "" {
+		t.Fatalf("expected self-healing task, got %+v", b.AllTasks())
+	}
+	if found.Owner != "ceo" {
+		t.Fatalf("expected self-healing task owned by ceo, got %+v", found)
+	}
+	if found.TaskType != "incident" || found.PipelineID != "incident" || found.ExecutionMode != "office" {
+		t.Fatalf("expected incident office task, got %+v", found)
+	}
+	if !strings.Contains(found.Details, "Classify the blocker") || !strings.Contains(found.Details, "missing or outdated skill/playbook") {
+		t.Fatalf("expected repair-loop details, got %q", found.Details)
+	}
+}
+
+func TestPostEscalation_ReusesSelfHealingTask(t *testing.T) {
+	b := newTestBroker(t)
+	l := &Launcher{broker: b}
+
+	l.postEscalation("eng", "eng-42", agent.EscalationStuck, "first stuck event")
+	l.postEscalation("eng", "eng-42", agent.EscalationMaxRetries, "second stuck event")
+
+	var count int
+	var found teamTask
+	for _, task := range b.AllTasks() {
+		if task.Title == "Self-heal @eng on eng-42" {
+			count++
+			found = task
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one reusable self-healing task, got %d tasks: %+v", count, b.AllTasks())
+	}
+	if !strings.Contains(found.Details, "first stuck event") || !strings.Contains(found.Details, "second stuck event") {
+		t.Fatalf("expected reused self-healing task to retain both incident details, got %q", found.Details)
+	}
+	if got := strings.Count(found.Details, "Latest incident:"); got != 1 {
+		t.Fatalf("expected one appended latest incident block, got %d in %q", got, found.Details)
+	}
+}
+
+func TestPostEscalation_DoesNotNestSelfHealingTasks(t *testing.T) {
+	b := newTestBroker(t)
+	l := &Launcher{broker: b}
+
+	task, _, err := l.requestSelfHealing("eng", "eng-42", agent.EscalationStuck, "initial incident")
+	if err != nil {
+		t.Fatalf("request self-healing: %v", err)
+	}
+	l.postEscalation("ceo", task.ID, agent.EscalationStuck, "self-healing lane stuck")
+
+	var count int
+	for _, candidate := range b.AllTasks() {
+		if isSelfHealingTaskTitle(candidate.Title) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected no nested self-healing task, got %d tasks: %+v", count, b.AllTasks())
+	}
+}
+
 func TestPostEscalation_NilBroker_DoesNotPanic(t *testing.T) {
 	l := &Launcher{broker: nil}
 	// Should be a no-op, not a panic.
