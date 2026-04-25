@@ -1,0 +1,46 @@
+# wuphf code owners
+#
+# This file is currently advisory: branch protection on `main` does NOT
+# have `require_code_owner_reviews` enabled, so GitHub will auto-suggest
+# reviewers from this list but a PR can still merge without their
+# approval. The intent is that the file moves with the codebase as
+# ownership shifts; flipping branch protection to enforce is a one-line
+# admin action when the team is ready.
+#
+# Order matters in CODEOWNERS: the LAST matching pattern wins. So the
+# global default sits first, then more specific overrides.
+
+# Global default: every change pings the maintainer.
+*   @FranDias
+
+# Go service code & tests
+/cmd/                       @FranDias @nex-crm/backend
+/internal/                  @FranDias @nex-crm/backend
+/tests/                     @FranDias @nex-crm/backend
+go.mod                      @FranDias @nex-crm/backend
+go.sum                      @FranDias @nex-crm/backend
+
+# Web UI (vite + React + biome)
+/web/                       @FranDias @nex-crm/web
+
+# Build, release, and supply-chain hygiene — owners across both teams,
+# since a regression here breaks every consumer of every artifact.
+/.github/                   @FranDias @nex-crm/backend @nex-crm/web
+/scripts/                   @FranDias @nex-crm/backend
+/lefthook.yml               @FranDias @nex-crm/backend @nex-crm/web
+/.golangci.yml              @FranDias @nex-crm/backend
+/.goreleaser.yml            @FranDias @nex-crm/backend
+/.commitlintrc.json         @FranDias @nex-crm/backend @nex-crm/web
+/.secretlintrc.json         @FranDias @nex-crm/backend @nex-crm/web
+
+# Public-facing surfaces
+README.md                   @FranDias
+CHANGELOG.md                @FranDias
+DESIGN.md                   @FranDias
+DESIGN-WIKI.md              @FranDias
+DESIGN-NOTEBOOK.md          @FranDias
+DEVELOPMENT.md              @FranDias
+ARCHITECTURE.md             @FranDias
+
+# CODEOWNERS itself: only the maintainer can repoint ownership.
+/.github/CODEOWNERS         @FranDias
