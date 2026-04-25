@@ -487,18 +487,16 @@ function buildOfficePamPortrait(officePortrait, spec) {
     ], 2)
   }
 
-  fillCells(portrait, rectCells(5, 5, 12, 8), 5)
+  fillCells(portrait, rectCells(5, 5, 12, 9), 5)
   paintCells(portrait, [
     [7, 6],
     [11, 6],
   ], 9)
   paintCells(portrait, [
-    [6, 7],
-    [12, 7],
-  ], 15)
-  paintCells(portrait, [
+    [8, 8],
     [9, 8],
-  ], 14)
+    [10, 8],
+  ], 18)
 
   if (spec.outfit === 'pinkCardigan') {
     fillCells(portrait, rectCells(4, 10, 11, 13), 11)
