@@ -9,7 +9,7 @@ interface PixelAvatarProps {
 }
 
 /**
- * Renders a 14x14 pixel-art agent avatar on a <canvas>.
+ * Renders a pixel-art agent portrait on a <canvas>.
  * Pass a className like `pixel-avatar-sidebar` or `pixel-avatar-panel`
  * to apply theme-level sizing/treatment around the canvas.
  */
