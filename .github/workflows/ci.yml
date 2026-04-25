@@ -26,7 +26,7 @@ jobs:
       # and can read any GITHUB_TOKEN the workflow exposes. A @v2 re-tag
       # would execute with CI privileges. Same SHA is reused in the web-e2e
       # job below — keep them in sync.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.1.38"
       - name: Install and build
@@ -69,7 +69,7 @@ jobs:
       # Pin to full SHA: third-party action, runs on pull_request from forks
       # and can read any GITHUB_TOKEN the workflow exposes. A @v9 re-tag
       # would execute with CI privileges.
-      - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # v9.2.0
+      - uses: golangci/golangci-lint-action@1e7e51e771db61008b38414a730f564565cf7c20 # ratchet:golangci/golangci-lint-action@v9.2.0
         with:
           version: v2.11.4
           args: --timeout=5m
@@ -224,7 +224,7 @@ jobs:
       - name: Install ffmpeg
         # Pin to full SHA: third-party action runs `sudo apt-get`, so a re-tag
         # of @v1 would execute with elevated privileges on the runner.
-        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # v1.6.0
+        uses: awalsh128/cache-apt-pkgs-action@acb598e5ddbc6f68a970c5da0688d2f3a9f04d05 # ratchet:awalsh128/cache-apt-pkgs-action@v1.6.0
         with:
           # libblas3 is a transitive runtime dep of ffmpeg on ubuntu-latest.
           # Listing it explicitly guarantees it lands in the apt cache payload
@@ -275,7 +275,7 @@ jobs:
       # Pin to full SHA: third-party action, runs on every PR. A @v2 re-tag
       # would exec with CI privileges — see the awalsh128 pin above for the
       # same pattern.
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
         with:
           bun-version: "1.1.38"
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # ratchet:actions/download-artifact@v8
