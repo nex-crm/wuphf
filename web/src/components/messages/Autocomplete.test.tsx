@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { applyAutocomplete, currentTrigger } from "./Autocomplete";
+import {
+  applyAutocomplete,
+  currentTrigger,
+  mentionAutocompleteItems,
+} from "./Autocomplete";
 
 describe("currentTrigger", () => {
   describe("mention scoping — TUI parity with internal/tui/mention.go", () => {
@@ -71,5 +75,27 @@ describe("applyAutocomplete", () => {
     });
     expect(result.text).toBe("/ask ");
     expect(result.caret).toBe(5);
+  });
+});
+
+describe("mentionAutocompleteItems", () => {
+  const members = [
+    { slug: "ceo", name: "CEO" },
+    { slug: "pm", name: "Product" },
+    { slug: "human", name: "Human" },
+  ];
+
+  it("offers @all before individual agents", () => {
+    expect(mentionAutocompleteItems("", members).slice(0, 3)).toEqual([
+      { insert: "@all", label: "@all", desc: "Notify every agent", icon: "📣" },
+      { insert: "@ceo", label: "@ceo", desc: "CEO", icon: "🤖" },
+      { insert: "@pm", label: "@pm", desc: "Product", icon: "🤖" },
+    ]);
+  });
+
+  it("matches @all by prefix query", () => {
+    expect(mentionAutocompleteItems("al", members)).toEqual([
+      { insert: "@all", label: "@all", desc: "Notify every agent", icon: "📣" },
+    ]);
   });
 });

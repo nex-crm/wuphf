@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 
+import type { OfficeMember } from "../../api/client";
 import {
   FALLBACK_SLASH_COMMANDS,
   type SlashCommand,
@@ -25,6 +26,8 @@ export type { SlashCommand };
  * broker via useCommands; this is the offline fallback list.
  */
 export const SLASH_COMMANDS: SlashCommand[] = FALLBACK_SLASH_COMMANDS;
+
+const MAX_AUTOCOMPLETE_ITEMS = 8;
 
 interface AutocompleteProps {
   /** Current composer text. */
@@ -68,7 +71,7 @@ export function Autocomplete({
       const q = trigger.query.toLowerCase();
       return commands
         .filter((c) => c.name.slice(1).toLowerCase().startsWith(q))
-        .slice(0, 8)
+        .slice(0, MAX_AUTOCOMPLETE_ITEMS)
         .map((c) => ({
           insert: c.name,
           label: c.name,
@@ -76,23 +79,7 @@ export function Autocomplete({
           icon: c.icon,
         }));
     }
-    const q = trigger.query.toLowerCase();
-    return members
-      .filter((m) => m.slug && m.slug !== "human" && m.slug !== "you")
-      .filter((m) => {
-        if (!q) return true;
-        return (
-          (m.slug || "").toLowerCase().includes(q) ||
-          (m.name || "").toLowerCase().includes(q)
-        );
-      })
-      .slice(0, 8)
-      .map((m) => ({
-        insert: `@${m.slug}`,
-        label: `@${m.slug}`,
-        desc: m.name,
-        icon: m.emoji || "🤖",
-      }));
+    return mentionAutocompleteItems(trigger.query, members);
   }, [value, caret, members, commands]);
 
   useEffect(() => {
@@ -131,6 +118,41 @@ export function Autocomplete({
       ))}
     </div>
   );
+}
+
+export function mentionAutocompleteItems(
+  query: string,
+  members: Pick<OfficeMember, "slug" | "name" | "emoji">[],
+): AutocompleteItem[] {
+  const q = query.toLowerCase();
+  const items: AutocompleteItem[] = [];
+  if ("all".startsWith(q)) {
+    items.push({
+      insert: "@all",
+      label: "@all",
+      desc: "Notify every agent",
+      icon: "📣",
+    });
+  }
+  for (const member of members) {
+    if (!member.slug || member.slug === "human" || member.slug === "you")
+      continue;
+    if (
+      q &&
+      !member.slug.toLowerCase().includes(q) &&
+      !(member.name || "").toLowerCase().includes(q)
+    ) {
+      continue;
+    }
+    items.push({
+      insert: `@${member.slug}`,
+      label: `@${member.slug}`,
+      desc: member.name,
+      icon: member.emoji || "🤖",
+    });
+    if (items.length >= MAX_AUTOCOMPLETE_ITEMS) break;
+  }
+  return items;
 }
 
 /**

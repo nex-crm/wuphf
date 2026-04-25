@@ -176,13 +176,15 @@ export function postMessage(
   content: string,
   channel: string,
   replyTo?: string,
+  tagged?: string[],
 ) {
-  const body: Record<string, string> = {
+  const body: Record<string, string | string[]> = {
     from: "you",
     channel: channel || "general",
     content,
   };
   if (replyTo) body.reply_to = replyTo;
+  if (tagged && tagged.length > 0) body.tagged = tagged;
   return post<Message>("/messages", body);
 }
 

@@ -3,7 +3,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import type { Message } from "../../api/client";
 import { postMessage } from "../../api/client";
+import { useOfficeMembers } from "../../hooks/useMembers";
 import { useThreadMessages } from "../../hooks/useMessages";
+import { extractTaggedMentions } from "../../lib/mentions";
 import { useAppStore } from "../../stores/app";
 import { showNotice } from "../ui/Toast";
 import { MessageBubble } from "./MessageBubble";
@@ -17,6 +19,8 @@ export function ThreadPanel() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesRef = useRef<HTMLDivElement>(null);
   const queryClient = useQueryClient();
+  const { data: members = [] } = useOfficeMembers();
+  const knownSlugs = useMemo(() => members.map((m) => m.slug), [members]);
 
   const { data: messages = [] } = useThreadMessages(
     currentChannel,
@@ -82,7 +86,12 @@ export function ThreadPanel() {
 
   const sendReply = useMutation({
     mutationFn: (content: string) =>
-      postMessage(content, currentChannel, replyTarget),
+      postMessage(
+        content,
+        currentChannel,
+        replyTarget,
+        extractTaggedMentions(content, knownSlugs),
+      ),
     onSuccess: () => {
       setText("");
       setQuoting(null);
