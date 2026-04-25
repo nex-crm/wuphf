@@ -38,7 +38,6 @@ import (
 	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/runtimebin"
 	"github.com/nex-crm/wuphf/internal/setup"
-	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
 const (
@@ -4794,21 +4793,9 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		openBrowser(webURL)
 	}
 
-	<-l.broker.ShutdownRequested()
-	fmt.Println()
-	fmt.Println("  Workspace shredded. Stopping WUPHF; relaunch to start onboarding.")
-	fmt.Println()
-	if l.headlessCancel != nil {
-		l.headlessCancel()
-	}
-	// Give the web proxy a moment to finish copying the successful shred
-	// response before the broker listener and process go away.
-	time.Sleep(300 * time.Millisecond)
-	if err := l.Kill(); err != nil {
-		return err
-	}
-	_, _ = workspace.Shred()
-	return nil
+	// Broker, web UI, and background goroutines own the process lifetime;
+	// Ctrl+C (default SIGINT) is the only exit path.
+	select {}
 }
 
 func openBrowser(url string) {

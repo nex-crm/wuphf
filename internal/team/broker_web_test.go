@@ -101,9 +101,19 @@ func TestWorkspaceShredRouteResetsBrokerWithoutShutdown(t *testing.T) {
 		t.Fatalf("expected shred route to reset broker messages, got %d", messageCount)
 	}
 
-	select {
-	case <-b.ShutdownRequested():
-		t.Fatal("expected shred route to keep broker running")
-	case <-time.After(50 * time.Millisecond):
+	// Broker stays alive after shred — follow-up HTTP request on the same
+	// listener must succeed. Pre-#264 the broker tore itself down here.
+	versionReq, err := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/version", nil)
+	if err != nil {
+		t.Fatalf("new version request: %v", err)
+	}
+	versionReq.Header.Set("Authorization", "Bearer "+b.Token())
+	versionResp, err := http.DefaultClient.Do(versionReq)
+	if err != nil {
+		t.Fatalf("expected broker to keep serving after shred, got: %v", err)
+	}
+	defer versionResp.Body.Close()
+	if versionResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 from /version after shred, got %d", versionResp.StatusCode)
 	}
 }

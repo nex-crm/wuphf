@@ -535,8 +535,6 @@ type Broker struct {
 	// produce a truncated/overlaid file.
 	configMu           sync.Mutex
 	server             *http.Server
-	shutdownOnce       sync.Once
-	shutdownCh         chan struct{}
 	token              string          // shared secret for authenticating requests
 	addr               string          // actual listen address (useful when port=0)
 	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
@@ -922,7 +920,6 @@ func NewBroker() *Broker {
 	b := &Broker{
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
-		shutdownCh:          make(chan struct{}),
 		messageSubscribers:  make(map[int]chan channelMessage),
 		actionSubscribers:   make(map[int]chan officeActionLog),
 		activity:            make(map[string]agentActivitySnapshot),
@@ -1641,26 +1638,6 @@ func (b *Broker) Stop() {
 	if pamDisp != nil {
 		pamDisp.Stop()
 	}
-}
-
-// ShutdownRequested is closed when a destructive operation needs the launcher
-// process to stop after the HTTP response has reached the client.
-func (b *Broker) ShutdownRequested() <-chan struct{} {
-	if b.shutdownCh == nil {
-		ch := make(chan struct{})
-		close(ch)
-		return ch
-	}
-	return b.shutdownCh
-}
-
-func (b *Broker) requestShutdown() {
-	if b == nil || b.shutdownCh == nil {
-		return
-	}
-	b.shutdownOnce.Do(func() {
-		close(b.shutdownCh)
-	})
 }
 
 func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
