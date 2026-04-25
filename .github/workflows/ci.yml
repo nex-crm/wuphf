@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+  # Fire on every PR regardless of base branch. Without this, stacked
+  # PRs (whose base is another open PR's branch, not main) get only
+  # commitlint + scan + CodeRabbit — the full Go test job, web/web-e2e,
+  # and release-build are skipped, so a typo or break can land
+  # unnoticed and only surface when the stack tip retargets to main.
+  # See the Track A/B refactor train (#289 → #297 → #298 → #299) for
+  # the failure mode this filter caused.
   pull_request:
-    branches: [main]
 
 # Tighten the org default (`default_workflow_permissions: write`) — every
 # job in CI is read-only against the repo. The matrix legs that need to
