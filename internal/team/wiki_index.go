@@ -172,6 +172,16 @@ type FactStore interface {
 	// typed-predicate graph walk and counterfactual rewrite (Slice 2 Thread A).
 	ListFactsByTriplet(ctx context.Context, subject, predicate, objectPrefix string) ([]TypedFact, error)
 
+	// IterateEntities invokes fn for every entity row in the store. Iteration
+	// order is implementation-defined but stable within a single call.
+	// Callers use this to implement signal lookups (by email, name, domain)
+	// that need to scan every entity when a direct index is not available.
+	//
+	// Contract: fn must be safe to call repeatedly; IterateEntities does not
+	// buffer the full result set. An error returned from fn short-circuits
+	// the iteration and is returned to the caller verbatim.
+	IterateEntities(ctx context.Context, fn func(IndexEntity) error) error
+
 	// CanonicalHashFacts returns a stable hash over all indexed facts for
 	// the §7.4 rebuild contract. ReinforcedAt is EXCLUDED from the hash
 	// input so two extraction runs on the same artifact (the second one
@@ -1042,6 +1052,25 @@ func (s *inMemoryFactStore) CountFacts(_ context.Context) (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.facts), nil
+}
+
+func (s *inMemoryFactStore) IterateEntities(_ context.Context, fn func(IndexEntity) error) error {
+	s.mu.RLock()
+	// Snapshot under the read lock so the caller's fn cannot deadlock by
+	// touching the store. Iteration order matches map iteration (undefined)
+	// but stable within this call.
+	snapshot := make([]IndexEntity, 0, len(s.entities))
+	for _, e := range s.entities {
+		snapshot = append(snapshot, e)
+	}
+	s.mu.RUnlock()
+
+	for _, e := range snapshot {
+		if err := fn(e); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *inMemoryFactStore) ResolveRedirect(_ context.Context, slug string) (string, bool, error) {
