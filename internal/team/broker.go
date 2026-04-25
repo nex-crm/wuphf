@@ -3179,11 +3179,11 @@ func (b *Broker) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	if err := atomicWriteFile(path, data, 0o600); err != nil {
+	if err := atomicWriteFile(path, data); err != nil {
 		return err
 	}
 	if brokerStateShouldSnapshot(state) {
-		if err := atomicWriteFile(snapshotPath, data, 0o600); err != nil {
+		if err := atomicWriteFile(snapshotPath, data); err != nil {
 			return err
 		}
 	}
@@ -3191,9 +3191,9 @@ func (b *Broker) saveLocked() error {
 }
 
 // atomicWriteFile writes data to path atomically by creating a uniquely-named
-// sibling tmp file and renaming. Each call uses a fresh tmp filename via
-// os.CreateTemp, so concurrent writers to the same destination cannot race
-// on the source path of the rename.
+// sibling tmp file (mode 0o600 via os.CreateTemp) and renaming. Each call
+// uses a fresh tmp filename, so concurrent writers to the same destination
+// cannot race on the source path of the rename.
 //
 // The previous fixed `<path>.tmp` filename was safe in production (one broker
 // owns one path) but broke the test suite: 22 *_test.go files override
@@ -3204,7 +3204,11 @@ func (b *Broker) saveLocked() error {
 // A had already renamed the shared tmp out from under it. That was the CI
 // flake on PR #281's `test` job. See broker_save_race_test.go for the
 // regression repro.
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+//
+// 0o600 is hard-coded because the only callers (broker state file +
+// snapshot) want exactly that mode; CreateTemp already produces it on the
+// platforms we support, so no os.Chmod is needed.
+func atomicWriteFile(path string, data []byte) error {
 	dir := filepath.Dir(path)
 	base := filepath.Base(path)
 	tmpf, err := os.CreateTemp(dir, base+".*.tmp")
@@ -3219,13 +3223,6 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 		return err
 	}
 	if err := tmpf.Close(); err != nil {
-		cleanup()
-		return err
-	}
-	// os.CreateTemp creates with mode 0o600 already, but tighten / loosen
-	// per the caller's request so this helper is interchangeable with the
-	// previous os.WriteFile call.
-	if err := os.Chmod(tmpName, perm); err != nil {
 		cleanup()
 		return err
 	}

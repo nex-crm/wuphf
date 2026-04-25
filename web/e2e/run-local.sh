@@ -47,11 +47,22 @@ if [ ! -x ./wuphf ]; then
   go build -o wuphf ./cmd/wuphf
 fi
 
-echo "[run-local] installing e2e deps"
-(cd web/e2e && bun install --frozen-lockfile >/dev/null)
+if [ ! -d web/e2e/node_modules ]; then
+  echo "[run-local] installing e2e deps"
+  (cd web/e2e && bun install --frozen-lockfile >/dev/null)
+fi
 
-echo "[run-local] ensuring playwright chromium is installed"
-(cd web/e2e && bunx playwright install chromium >/dev/null)
+# Playwright caches chromium in ~/.cache/ms-playwright (Linux) or
+# ~/Library/Caches/ms-playwright (macOS). If either has any chromium-*
+# directory, skip the install — `bunx playwright install` is itself a
+# multi-second no-op when the browser is cached, but we'd rather not pay
+# even that on every run. compgen -G returns 0 iff the glob matches
+# anything (bash builtin, no subprocess; shellcheck-clean).
+if ! compgen -G "$HOME/.cache/ms-playwright/chromium-*" >/dev/null \
+   && ! compgen -G "$HOME/Library/Caches/ms-playwright/chromium-*" >/dev/null; then
+  echo "[run-local] installing playwright chromium"
+  (cd web/e2e && bunx playwright install chromium >/dev/null)
+fi
 
 # Sandbox: every wuphf state file lands under this throwaway dir, so a
 # developer running this script never has their real onboarded.json or
@@ -59,11 +70,24 @@ echo "[run-local] ensuring playwright chromium is installed"
 runtime_home="$(mktemp -d -t wuphf-e2e-runtime-XXXXXX)"
 echo "[run-local] sandboxed WUPHF_RUNTIME_HOME=${runtime_home}"
 
+# kill_wuphf sends SIGTERM, polls up to 5s for the process to exit, then
+# SIGKILLs if it's still around. Bare `wait` is unbounded — if wuphf hangs
+# on shutdown the trap blocks the script forever and leaks $runtime_home.
+kill_wuphf() {
+  local p="$1"
+  [ -n "$p" ] || return 0
+  kill -0 "$p" 2>/dev/null || return 0
+  kill -TERM "$p" 2>/dev/null || true
+  for _ in $(seq 1 50); do
+    kill -0 "$p" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  kill -KILL "$p" 2>/dev/null || true
+  wait "$p" 2>/dev/null || true
+}
+
 cleanup() {
-  if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
-  fi
+  kill_wuphf "${pid:-}"
   rm -rf "$runtime_home"
 }
 trap cleanup EXIT
@@ -88,12 +112,11 @@ start_wuphf() {
 }
 
 stop_wuphf() {
-  if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
-    pid=""
-  fi
-  # Wait for the port to free up so the next phase can rebind.
+  kill_wuphf "${pid:-}"
+  pid=""
+  # Wait for the port to free up so the next phase can rebind. The
+  # /dev/tcp/<host>/<port> trick is bash-only (not POSIX sh) — relies on
+  # the shebang being bash.
   for _ in $(seq 1 10); do
     if ! (exec 3<>/dev/tcp/127.0.0.1/"$web_port") 2>/dev/null; then break; fi
     sleep 1
