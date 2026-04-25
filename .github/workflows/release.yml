@@ -9,12 +9,17 @@ on:
   # GITHUB_TOKEN does not fire other workflows, but workflow_dispatch does.
   workflow_dispatch:
 
+# Default to least-privilege; per-job blocks below add only what each job
+# actually needs. The release job uploads artifacts (contents: write); npm
+# publish + npx smoke only need to read the repo.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -68,6 +73,16 @@ jobs:
   publish-npm:
     needs: release
     runs-on: ubuntu-latest
+    # GitHub Environment gate: protection rules (required reviewer +
+    # branch policy `v*` tags) live on the env, so any future change to
+    # who/what can publish to npm is configured in one place rather than
+    # scattered across the workflow. NPM_TOKEN is bound to this env, not
+    # the repo, so a fork PR cannot reach it even via workflow_dispatch.
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/wuphf
+    permissions:
+      contents: read
     env:
       VERSION: ${{ needs.release.outputs.version }}
     steps:
@@ -95,6 +110,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     env:
       VERSION: ${{ needs.release.outputs.version }}
     steps:
