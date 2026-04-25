@@ -1,169 +1,14 @@
-// Pixel-art agent avatars — ported from web/index.legacy.html (feature #25).
-// Each sprite is a 14x14 grid where each cell is an index into a 6-color palette:
-//   0 = transparent, 1 = outline, 2 = skin, 3 = accent, 4 = hair, 5 = prop, 6 = highlight.
-// Hand-designed sprites in SPRITE_DATA cover the named roles; unknown slugs
-// are composed procedurally from modular layers (see proceduralAvatar.ts).
+// Office-sheet avatar portraits for built-in agents, with procedural fallback
+// for any dynamic or unknown slugs that do not have a mapped character yet.
 
+import { resolveKnownPortraitSprite } from './avatarSprites.generated'
 import { buildProceduralSprite, getProceduralAccent } from './proceduralAvatar'
-
-export const SPRITE_DATA: Record<string, number[][]> = {
-  ceo: [
-    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,1,1,1,2,2,1,1,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,0,1,2,1,1,2,1,0,0,0,0],
-    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
-    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
-    [0,0,2,2,3,3,3,3,3,3,2,5,1,0],
-    [0,0,1,2,1,3,3,3,3,1,2,5,1,0],
-    [0,0,0,1,0,1,1,1,1,0,1,5,0,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-  ],
-  pm: [
-    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
-    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
-    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
-    [0,0,2,3,3,3,3,3,3,3,5,5,1,0],
-    [0,0,1,2,1,3,3,3,3,1,5,5,1,0],
-    [0,0,0,1,0,0,1,1,0,0,5,5,0,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-  ],
-  fe: [
-    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
-    [0,0,1,4,2,2,2,2,2,2,4,1,0,0],
-    [0,0,1,4,2,1,2,2,1,2,4,1,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
-    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
-    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
-    [0,2,2,5,5,5,5,5,5,5,5,2,2,0],
-    [0,0,1,5,6,6,6,6,6,6,5,1,0,0],
-    [0,0,0,5,5,5,5,5,5,5,5,0,0,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-  ],
-  be: [
-    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
-    [0,0,0,1,2,2,1,1,2,2,1,0,0,0],
-    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
-    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
-    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
-    [0,0,1,2,3,3,3,3,3,3,2,1,0,0],
-    [0,0,1,3,2,3,3,3,3,2,3,1,0,0],
-    [0,0,0,1,1,1,1,1,1,1,1,0,0,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-  ],
-  ai: [
-    [0,0,0,0,0,0,5,5,0,0,0,0,0,0],
-    [0,0,0,0,0,0,1,1,0,0,0,0,0,0],
-    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,1,5,1,2,2,1,5,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
-    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
-    [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
-    [0,0,2,2,3,3,3,3,3,3,2,2,0,0],
-    [0,0,1,2,1,3,3,3,3,1,2,1,0,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-  ],
-  designer: [
-    [0,0,0,5,5,5,5,1,0,0,0,0,0,0],
-    [0,0,0,1,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,0,1,2,3,3,2,1,0,0,0,0],
-    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
-    [0,1,2,3,3,3,3,3,3,3,3,2,5,0],
-    [0,0,2,2,3,3,3,3,3,3,2,2,5,0],
-    [0,0,1,2,1,3,3,3,3,1,2,1,5,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-  ],
-  cmo: [
-    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,0,1,2,3,3,2,1,0,0,0,0],
-    [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
-    [5,1,2,3,3,3,3,3,3,3,3,2,1,0],
-    [5,5,2,2,3,3,3,3,3,3,2,2,0,0],
-    [5,0,1,2,1,3,3,3,3,1,2,1,0,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-    [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-  ],
-  cro: [
-    [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-    [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
-    [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-    [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
-    [0,0,1,3,6,3,3,3,3,6,3,1,0,0],
-    [0,1,2,3,6,3,3,3,3,6,3,2,1,0],
-    [0,0,2,2,3,3,3,3,3,3,2,2,0,0],
-    [0,0,1,2,1,3,3,3,3,1,2,1,0,0],
-    [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-    [0,0,0,1,0,0,1,1,0,5,5,5,0,0],
-    [0,0,0,0,1,0,0,0,0,5,1,5,0,0],
-    [0,0,0,1,1,0,0,0,0,5,5,5,0,0],
-  ],
-}
-
-export const SPRITE_GENERIC: number[][] = [
-  [0,0,0,0,1,1,1,1,1,1,0,0,0,0],
-  [0,0,0,1,4,4,4,4,4,4,1,0,0,0],
-  [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-  [0,0,0,1,2,1,2,2,1,2,1,0,0,0],
-  [0,0,0,1,2,2,2,2,2,2,1,0,0,0],
-  [0,0,0,0,1,2,2,2,2,1,0,0,0,0],
-  [0,0,1,3,3,3,3,3,3,3,3,1,0,0],
-  [0,1,2,3,3,3,3,3,3,3,3,2,1,0],
-  [0,0,2,2,3,3,3,3,3,3,2,2,0,0],
-  [0,0,1,2,1,3,3,3,3,1,2,1,0,0],
-  [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-  [0,0,0,1,0,0,1,1,0,0,1,0,0,0],
-  [0,0,0,0,1,0,0,0,0,1,0,0,0,0],
-  [0,0,0,1,1,0,0,0,0,1,1,0,0,0],
-]
-
-// Map agent slug aliases to sprite keys.
-export const SPRITE_SLUG_MAP: Record<string, string> = {
-  frontend: 'fe',
-  backend: 'be',
-  'ai-eng': 'ai',
-  ai_eng: 'ai',
-}
 
 const AGENT_COLORS: Record<string, string> = {
   ceo: '#E8A838',
+  eng: '#3FB950',
+  gtm: '#FFA657',
+  human: '#38BDF8',
   pm: '#58A6FF',
   fe: '#A371F7',
   frontend: '#A371F7',
@@ -171,58 +16,49 @@ const AGENT_COLORS: Record<string, string> = {
   backend: '#3FB950',
   ai: '#D2A8FF',
   'ai-eng': '#D2A8FF',
+  ai_eng: '#D2A8FF',
   designer: '#F778BA',
   cmo: '#FFA657',
   cro: '#79C0FF',
-}
-
-export function getAgentColor(slug: string): string {
-  const direct = AGENT_COLORS[slug]
-  if (direct) return direct
-  const aliased = SPRITE_SLUG_MAP[slug]
-  if (aliased && AGENT_COLORS[aliased]) return AGENT_COLORS[aliased]
-  return getProceduralAccent(slug)
+  pam: '#F4B6C2',
+  nex: '#56D4DD',
 }
 
 type Rgb = readonly [number, number, number]
 
+function hexToRgb(hex: string): Rgb {
+  return [
+    Number.parseInt(hex.slice(1, 3), 16),
+    Number.parseInt(hex.slice(3, 5), 16),
+    Number.parseInt(hex.slice(5, 7), 16),
+  ]
+}
+
+function paletteFromHexes(palette: string[]): Record<number, Rgb> {
+  return Object.fromEntries(palette.map((hex, index) => [index + 1, hexToRgb(hex)]))
+}
+
+export function getAgentColor(slug: string): string {
+  return AGENT_COLORS[slug] ?? getProceduralAccent(slug)
+}
+
 /**
  * Paint a pixel-art agent avatar into an existing canvas element.
- * The canvas is sized to the sprite's native pixel grid so the browser
- * upscales with nearest-neighbor when CSS `image-rendering: pixelated` is set.
+ * Known agents render from the extracted office-sheet portraits plus a few
+ * hand-tuned hybrids; everything else keeps the deterministic procedural fallback.
  */
 export function drawPixelAvatar(
   canvas: HTMLCanvasElement,
   slug: string,
   size: number,
 ): void {
-  const key = SPRITE_SLUG_MAP[slug] ?? slug
-  const hand = SPRITE_DATA[key]
+  const known = resolveKnownPortraitSprite(slug)
+  const procedural = known ? null : buildProceduralSprite(slug)
 
-  let sprite: number[][]
-  let palette: Record<number, Rgb>
-
-  if (hand) {
-    // Hand-designed role sprite — keep original palette treatment.
-    sprite = hand
-    const accentHex = getAgentColor(slug)
-    const ar = parseInt(accentHex.slice(1, 3), 16)
-    const ag = parseInt(accentHex.slice(3, 5), 16)
-    const ab = parseInt(accentHex.slice(5, 7), 16)
-    palette = {
-      1: [36, 32, 30],
-      2: [235, 215, 190],
-      3: [ar, ag, ab],
-      4: [Math.max(0, ar - 60), Math.max(0, ag - 60), Math.max(0, ab - 60)],
-      5: [180, 170, 155],
-      6: [255, 255, 255],
-    }
-  } else {
-    // Unknown slug — build procedurally with a palette keyed off the slug hash.
-    const procedural = buildProceduralSprite(slug)
-    sprite = procedural.grid
-    palette = procedural.palette
-  }
+  const sprite = known?.portrait ?? procedural?.grid ?? []
+  const palette = known
+    ? paletteFromHexes(known.palette)
+    : procedural?.palette ?? {}
 
   const rows = sprite.length
   const cols = sprite[0]?.length ?? 0
@@ -246,14 +82,16 @@ export function drawPixelAvatar(
         imgData.data[idx + 1] = 0
         imgData.data[idx + 2] = 0
         imgData.data[idx + 3] = 0
-      } else {
-        const rgb = palette[px] ?? ([128, 128, 128] as const)
-        imgData.data[idx] = rgb[0]
-        imgData.data[idx + 1] = rgb[1]
-        imgData.data[idx + 2] = rgb[2]
-        imgData.data[idx + 3] = 255
+        continue
       }
+
+      const rgb = palette[px] ?? ([128, 128, 128] as const)
+      imgData.data[idx] = rgb[0]
+      imgData.data[idx + 1] = rgb[1]
+      imgData.data[idx + 2] = rgb[2]
+      imgData.data[idx + 3] = 255
     }
   }
+
   ctx.putImageData(imgData, 0, 0)
 }
