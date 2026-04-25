@@ -37,6 +37,7 @@ func TestArtifactsCommandSwitchesToArtifactsApp(t *testing.T) {
 func TestCurrentArtifactSummaryUsesLogsAndWorkflows(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
 
 	writeTaskLog(t, home, "task-1", `{"task_id":"task-1","agent_slug":"fe","tool_name":"grep","result":"Found Bubble Tea callsites","started_at":"2026-04-07T10:00:00Z","completed_at":"2026-04-07T10:01:00Z"}`)
 	writeWorkflowRun(t, home, "one", "daily-digest", `{"provider":"one","workflow_key":"daily-digest","run_id":"run-1","status":"success","started_at":"2026-04-07T10:02:00Z","finished_at":"2026-04-07T10:03:00Z"}`)
@@ -59,6 +60,7 @@ func TestCurrentArtifactSummaryUsesLogsAndWorkflows(t *testing.T) {
 func TestBuildArtifactLinesShowsTaskLogsWorkflowRunsAndApprovals(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
 
 	writeTaskLog(t, home, "task-1", `{"task_id":"task-1","agent_slug":"fe","tool_name":"bash","result":"ok","started_at":"2026-04-07T10:00:00Z","completed_at":"2026-04-07T10:01:00Z"}`)
 	writeWorkflowRun(t, home, "one", "launch-sync", `{"provider":"one","workflow_key":"launch-sync","run_id":"run-2","status":"success","started_at":"2026-04-07T10:02:00Z","finished_at":"2026-04-07T10:03:00Z"}`)

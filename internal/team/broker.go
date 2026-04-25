@@ -3179,21 +3179,56 @@ func (b *Broker) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := atomicWriteFile(path, data); err != nil {
 		return err
 	}
 	if brokerStateShouldSnapshot(state) {
-		snapshotTmp := snapshotPath + ".tmp"
-		if err := os.WriteFile(snapshotTmp, data, 0o600); err != nil {
+		if err := atomicWriteFile(snapshotPath, data); err != nil {
 			return err
 		}
-		if err := os.Rename(snapshotTmp, snapshotPath); err != nil {
-			return err
-		}
+	}
+	return nil
+}
+
+// atomicWriteFile writes data to path atomically by creating a uniquely-named
+// sibling tmp file (mode 0o600 via os.CreateTemp) and renaming. Each call
+// uses a fresh tmp filename, so concurrent writers to the same destination
+// cannot race on the source path of the rename.
+//
+// The previous fixed `<path>.tmp` filename was safe in production (one broker
+// owns one path) but broke the test suite: 22 *_test.go files override
+// brokerStatePath, plus a leaked tempdir from worktree_guard_test.go init()
+// is shared across every test that doesn't override. Two saves landing on
+// the same path could interleave like A.WriteFile / B.WriteFile / A.Rename /
+// B.Rename — and B's Rename failed with "no such file or directory" because
+// A had already renamed the shared tmp out from under it. That was the CI
+// flake on PR #281's `test` job. See broker_save_race_test.go for the
+// regression repro.
+//
+// 0o600 is hard-coded because the only callers (broker state file +
+// snapshot) want exactly that mode; CreateTemp already produces it on the
+// platforms we support, so no os.Chmod is needed.
+func atomicWriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	tmpf, err := os.CreateTemp(dir, base+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpf.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmpf.Write(data); err != nil {
+		_ = tmpf.Close()
+		cleanup()
+		return err
+	}
+	if err := tmpf.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
 	}
 	return nil
 }
