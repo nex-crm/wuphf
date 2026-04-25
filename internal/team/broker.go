@@ -9785,7 +9785,7 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 		if normalizeChannelSlug(task.Channel) != channel {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if isTerminalTeamTaskStatus(task.Status) {
 			continue
 		}
 		sameTitle := title != "" && strings.EqualFold(strings.TrimSpace(task.Title), title)
@@ -9821,6 +9821,15 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 		return task
 	}
 	return nil
+}
+
+func isTerminalTeamTaskStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done", "completed", "canceled", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func (b *Broker) handleRequests(w http.ResponseWriter, r *http.Request) {
