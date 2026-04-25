@@ -84,10 +84,6 @@ func setHeadlessCodexRunTurnForTest(t *testing.T, fn func(l *Launcher, ctx conte
 	prior := headlessCodexRunTurnOverride.Load()
 	headlessCodexRunTurnOverride.Store(&fn)
 	t.Cleanup(func() {
-		if prior == nil {
-			headlessCodexRunTurnOverride.Store(nil)
-			return
-		}
 		headlessCodexRunTurnOverride.Store(prior)
 	})
 }
