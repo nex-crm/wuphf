@@ -20,9 +20,7 @@ func TestProcessDueWorkflowJobUsesComposioProvider(t *testing.T) {
 	t.Setenv("WUPHF_COMPOSIO_USER_ID", "najmuzzaman@nex.ai")
 
 	tmpDir := t.TempDir()
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/connected_accounts/ca_123", func(w http.ResponseWriter, r *http.Request) {

@@ -594,13 +594,11 @@ func TestPrepareHeadlessCodexHomeUsesDedicatedRuntimeHomeAndCopiesAuth(t *testin
 }
 
 func TestEnqueueHeadlessCodexTurnProcessesFIFO(t *testing.T) {
-	oldRunTurn := headlessCodexRunTurn
 	processed := make(chan string, 4)
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
 		processed <- notification
 		return nil
-	}
-	defer func() { headlessCodexRunTurn = oldRunTurn }()
+	})
 
 	l := newHeadlessLauncherForTest()
 
@@ -622,9 +620,7 @@ func TestPostHeadlessFinalMessageIfSilentPostsFinalOutput(t *testing.T) {
 	// real WUPHF run in ~/.wuphf/) persisted, and agentPostedSubstantiveMessageToChannelSince
 	// picks up an unrelated ceo message, making the "expected posted=true"
 	// assertion fail non-deterministically depending on machine history.
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(t.TempDir(), "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(t.TempDir(), "broker-state.json") })
 
 	b := NewBroker()
 	channel := DMSlugFor("ceo")
@@ -662,16 +658,14 @@ func TestPostHeadlessFinalMessageIfSilentPostsFinalOutput(t *testing.T) {
 }
 
 func TestSendTaskUpdatePassesTaskChannelToHeadlessTurn(t *testing.T) {
-	oldRunTurn := headlessCodexRunTurn
 	processed := make(chan processedTurn, 1)
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
 		processed <- processedTurn{
 			notification: notification,
 			channel:      firstNonEmpty(channel...),
 		}
 		return nil
-	}
-	defer func() { headlessCodexRunTurn = oldRunTurn }()
+	})
 
 	l := newHeadlessLauncherForTest()
 	l.provider = "codex"
@@ -699,7 +693,6 @@ func TestSendTaskUpdatePassesTaskChannelToHeadlessTurn(t *testing.T) {
 }
 
 func TestEnqueueHeadlessCodexTurnCancelsStaleTurn(t *testing.T) {
-	oldRunTurn := headlessCodexRunTurn
 	oldTimeout := headlessCodexTurnTimeout
 	oldStale := headlessCodexStaleCancelAfter
 	oldMinAge := headlessCodexMinTurnAgeBeforeCancel
@@ -710,7 +703,6 @@ func TestEnqueueHeadlessCodexTurnCancelsStaleTurn(t *testing.T) {
 	// "cancel-old, process-new" behaviour can be exercised in milliseconds.
 	headlessCodexMinTurnAgeBeforeCancel = 10 * time.Millisecond
 	defer func() {
-		headlessCodexRunTurn = oldRunTurn
 		headlessCodexTurnTimeout = oldTimeout
 		headlessCodexStaleCancelAfter = oldStale
 		headlessCodexMinTurnAgeBeforeCancel = oldMinAge
@@ -719,7 +711,7 @@ func TestEnqueueHeadlessCodexTurnCancelsStaleTurn(t *testing.T) {
 	started := make(chan struct{}, 1)
 	cancelled := make(chan struct{}, 1)
 	processed := make(chan string, 4)
-	headlessCodexRunTurn = func(_ *Launcher, ctx context.Context, _ string, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, ctx context.Context, _ string, notification string, channel ...string) error {
 		if notification == "first" {
 			select {
 			case started <- struct{}{}:
@@ -734,7 +726,7 @@ func TestEnqueueHeadlessCodexTurnCancelsStaleTurn(t *testing.T) {
 		}
 		processed <- notification
 		return nil
-	}
+	})
 
 	l := newHeadlessLauncherForTest()
 	l.enqueueHeadlessCodexTurn("ceo", "first")
@@ -1117,15 +1109,13 @@ func TestEnqueueHeadlessCodexTurnRecordAllowsRetryBehindActiveAgentTask(t *testi
 func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	oldRunTurn := headlessCodexRunTurn
 	notifications := make(chan string, 1)
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
 		if slug == "ceo" {
 			notifications <- notification
 		}
 		return nil
-	}
-	defer func() { headlessCodexRunTurn = oldRunTurn }()
+	})
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
@@ -1603,7 +1593,12 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 		Attempts: 0,
 	}, time.Now().UTC().Add(-2*time.Second), "channel_not_found")
 
-	queue := l.headlessQueues["operator"]
+	// Snapshot the queue under the launcher's headlessMu — the spawned worker
+	// goroutine drains headlessQueues under that mutex, so an unguarded read
+	// from the test races with the drain (caught by `go test -race`).
+	l.headlessMu.Lock()
+	queue := append([]headlessCodexTurn(nil), l.headlessQueues["operator"]...)
+	l.headlessMu.Unlock()
 	if len(queue) != 1 {
 		t.Fatalf("expected one retry queued for external action, got %+v", queue)
 	}
@@ -1922,10 +1917,8 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 
 func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	oldPrepare := prepareTaskWorktree
 	oldCleanup := cleanupTaskWorktree
@@ -1953,19 +1946,16 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	oldRunTurn := headlessCodexRunTurn
-	defer func() { headlessCodexRunTurn = oldRunTurn }()
-
 	processed := make(chan string, 2)
 	attempt := 0
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
 		attempt++
 		processed <- notification
 		if attempt == 1 {
 			return fmt.Errorf("Selected model is at capacity. Please try a different model.")
 		}
 		return nil
-	}
+	})
 
 	l := newHeadlessLauncherForTest()
 	l.broker = b
@@ -2053,13 +2043,11 @@ func TestHeadlessCodexTurnTimeoutForOfficeLaunchTask(t *testing.T) {
 }
 
 func TestEnqueueHeadlessCodexTurnDefersLeadUntilSpecialistFinishes(t *testing.T) {
-	oldRunTurn := headlessCodexRunTurn
 	processed := make(chan string, 2)
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
 		processed <- notification
 		return nil
-	}
-	defer func() { headlessCodexRunTurn = oldRunTurn }()
+	})
 
 	l := newHeadlessLauncherForTest()
 	l.headlessActive["eng"] = &headlessCodexActiveTurn{}
@@ -2077,18 +2065,14 @@ func TestEnqueueHeadlessCodexTurnDefersLeadUntilSpecialistFinishes(t *testing.T)
 }
 
 func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T) {
-	oldRunTurn := headlessCodexRunTurn
 	processed := make(chan string, 1)
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, _ string, notification string, channel ...string) error {
 		processed <- notification
 		return nil
-	}
-	defer func() { headlessCodexRunTurn = oldRunTurn }()
+	})
 
-	oldStatePath := brokerStatePath
 	stateDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(stateDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldStatePath }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(stateDir, "broker-state.json") })
 
 	oldPrepare := prepareTaskWorktree
 	oldCleanup := cleanupTaskWorktree

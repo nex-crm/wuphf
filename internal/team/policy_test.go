@@ -39,12 +39,10 @@ func TestNewOfficePolicyTrimsRule(t *testing.T) {
 }
 
 func TestBrokerRecordAndListPolicies(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
 	import_path := tmpDir + "/broker-state.json"
 	_ = import_path
-	brokerStatePath = func() string { return tmpDir + "/broker-state.json" }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return tmpDir + "/broker-state.json" })
 
 	b := NewBroker()
 	p1, err := b.RecordPolicy("human_directed", "Always ask before deploying to production")
@@ -69,10 +67,8 @@ func TestBrokerRecordAndListPolicies(t *testing.T) {
 }
 
 func TestBrokerRecordPolicyDeduplicates(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return tmpDir + "/broker-state.json" }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return tmpDir + "/broker-state.json" })
 
 	b := NewBroker()
 	const rule = "Work autonomously without approval"
@@ -90,10 +86,8 @@ func TestBrokerRecordPolicyDeduplicates(t *testing.T) {
 }
 
 func TestBrokerDeletePolicyDeactivates(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return tmpDir + "/broker-state.json" }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return tmpDir + "/broker-state.json" })
 
 	b := NewBroker()
 	p, err := b.RecordPolicy("human_directed", "Ask before sending external emails")
@@ -118,10 +112,8 @@ func TestBrokerDeletePolicyDeactivates(t *testing.T) {
 }
 
 func TestBrokerRecordPolicyEmptyRuleErrors(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return tmpDir + "/broker-state.json" }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return tmpDir + "/broker-state.json" })
 
 	b := NewBroker()
 	_, err := b.RecordPolicy("human_directed", "  ")

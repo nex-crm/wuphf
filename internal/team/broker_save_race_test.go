@@ -32,9 +32,7 @@ func TestSaveLocked_ConcurrentBrokersSamePathDoNotRace(t *testing.T) {
 	// Pin brokerStatePath to a per-test tempdir so all N goroutines target
 	// the same path (the production failure mode).
 	statePath := filepath.Join(t.TempDir(), "broker-state.json")
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return statePath })
 
 	const goroutines = 32
 

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -39,6 +40,27 @@ type ReviewStateChangeEvent struct {
 	NewState  PromotionState `json:"new_state"`
 	ActorSlug string         `json:"actor_slug"`
 	Timestamp string         `json:"timestamp"`
+}
+
+type reviewCommentResponse struct {
+	ID         string `json:"id"`
+	AuthorSlug string `json:"author_slug"`
+	BodyMD     string `json:"body_md"`
+	TS         string `json:"ts"`
+}
+
+type reviewItemResponse struct {
+	ID               string                  `json:"id"`
+	AgentSlug        string                  `json:"agent_slug"`
+	EntrySlug        string                  `json:"entry_slug"`
+	EntryTitle       string                  `json:"entry_title"`
+	ProposedWikiPath string                  `json:"proposed_wiki_path"`
+	Excerpt          string                  `json:"excerpt"`
+	ReviewerSlug     string                  `json:"reviewer_slug"`
+	State            PromotionState          `json:"state"`
+	SubmittedTS      string                  `json:"submitted_ts"`
+	UpdatedTS        string                  `json:"updated_ts"`
+	Comments         []reviewCommentResponse `json:"comments"`
 }
 
 // SubscribeReviewEvents returns a channel of review state-change events
@@ -257,7 +279,101 @@ func (b *Broker) handleReviewList(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	reviews := rl.List(scope)
-	writeJSON(w, http.StatusOK, map[string]any{"reviews": reviews})
+	out := make([]reviewItemResponse, 0, len(reviews))
+	for _, p := range reviews {
+		out = append(out, b.reviewItemForPromotion(p))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reviews": out})
+}
+
+func (b *Broker) reviewItemForPromotion(p *Promotion) reviewItemResponse {
+	if p == nil {
+		return reviewItemResponse{}
+	}
+	sourceBody := ""
+	if worker := b.WikiWorker(); worker != nil {
+		if bytes, err := worker.NotebookRead(p.SourcePath); err == nil {
+			sourceBody = string(bytes)
+		}
+	}
+	entrySlug := notebookEntrySlug(p.SourcePath)
+	comments := make([]reviewCommentResponse, 0, len(p.Comments))
+	for _, c := range p.Comments {
+		comments = append(comments, reviewCommentResponse{
+			ID:         c.ID,
+			AuthorSlug: c.AuthorSlug,
+			BodyMD:     c.Body,
+			TS:         c.CreatedAt.UTC().Format(time.RFC3339),
+		})
+	}
+	return reviewItemResponse{
+		ID:               p.ID,
+		AgentSlug:        p.SourceSlug,
+		EntrySlug:        entrySlug,
+		EntryTitle:       markdownTitle(sourceBody, entrySlug),
+		ProposedWikiPath: p.TargetPath,
+		Excerpt:          markdownExcerpt(sourceBody, p.Rationale),
+		ReviewerSlug:     p.ReviewerSlug,
+		State:            p.State,
+		SubmittedTS:      p.CreatedAt.UTC().Format(time.RFC3339),
+		UpdatedTS:        p.UpdatedAt.UTC().Format(time.RFC3339),
+		Comments:         comments,
+	}
+}
+
+func notebookEntrySlug(sourcePath string) string {
+	base := filepath.Base(filepath.ToSlash(sourcePath))
+	if ext := filepath.Ext(base); ext != "" {
+		base = strings.TrimSuffix(base, ext)
+	}
+	return base
+}
+
+func markdownTitle(body, fallbackSlug string) string {
+	for _, line := range strings.Split(stripFrontmatter(body), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "# ") {
+			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+	if fallbackSlug == "" {
+		return "Review"
+	}
+	return titleFromSlug(fallbackSlug)
+}
+
+func titleFromSlug(slug string) string {
+	words := strings.Fields(strings.ReplaceAll(strings.ReplaceAll(slug, "-", " "), "_", " "))
+	for i, word := range words {
+		if word == "" {
+			continue
+		}
+		words[i] = strings.ToUpper(word[:1]) + word[1:]
+	}
+	return strings.Join(words, " ")
+}
+
+func markdownExcerpt(body, fallback string) string {
+	var parts []string
+	for _, line := range strings.Split(stripFrontmatter(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || line == "---" {
+			continue
+		}
+		parts = append(parts, line)
+		if len(strings.Join(parts, " ")) >= 220 {
+			break
+		}
+	}
+	text := strings.Join(parts, " ")
+	if strings.TrimSpace(text) == "" {
+		text = firstLine(fallback)
+	}
+	text = strings.Join(strings.Fields(text), " ")
+	if len(text) > 220 {
+		text = text[:217] + "..."
+	}
+	return text
 }
 
 // handleReviewSubpath dispatches /review/{id}[/{verb}] to the right action.
@@ -300,7 +416,7 @@ func (b *Broker) handleReviewSubpath(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, p)
+		writeJSON(w, http.StatusOK, b.reviewItemForPromotion(p))
 		return
 	case "approve":
 		b.reviewApprove(w, r, id)

@@ -94,9 +94,7 @@ func TestHandleStudioGeneratePackagePersistsAction(t *testing.T) {
 	defer func() { studioPackageGenerator = restore }()
 
 	tmpDir := t.TempDir()
-	prevStatePath := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = prevStatePath }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	body := map[string]any{
@@ -166,9 +164,7 @@ func TestHandleStudioGeneratePackagePersistsAction(t *testing.T) {
 
 func TestHandleMemoryRoundTripScopedStudioRecords(t *testing.T) {
 	tmpDir := t.TempDir()
-	prevStatePath := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = prevStatePath }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 
@@ -231,9 +227,7 @@ func TestHandleStudioRunWorkflowExecutesOneDraftAndUpdatesSkill(t *testing.T) {
 	t.Setenv("WUPHF_ONE_BIN", writeFakeOperationOne(t))
 
 	tmpDir := t.TempDir()
-	prevStatePath := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = prevStatePath }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.skills = append(b.skills, teamSkill{
@@ -313,9 +307,7 @@ func TestHandleStudioRunWorkflowReturnsRateLimitMetadata(t *testing.T) {
 	t.Setenv("WUPHF_ONE_BIN", writeRateLimitedOperationOne(t))
 
 	tmpDir := t.TempDir()
-	prevStatePath := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = prevStatePath }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.skills = append(b.skills, teamSkill{

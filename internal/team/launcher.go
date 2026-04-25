@@ -3680,6 +3680,18 @@ func (l *Launcher) reportPaneFallback(tmuxInstalled bool, summary string, err er
 	}
 }
 
+func markdownKnowledgeToolBlock() string {
+	return "- notebook_write: Save your own working notes, rough observations, draft decisions, draft playbooks, and task learnings at agents/{my_slug}/notebook/{date-or-topic}.md. This is the default write path for agent-authored knowledge.\n" +
+		"- notebook_promote: Submit a durable notebook entry for reviewer approval into the team wiki. Use this when the team should rely on the note as canonical knowledge.\n" +
+		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves.\n" +
+		"- team_wiki_read / team_wiki_search / team_wiki_list / wuphf_wiki_lookup: Read the canonical shared wiki.\n" +
+		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge.\n"
+}
+
+func markdownKnowledgeMemoryBlock() string {
+	return "Markdown notebook/wiki memory is active. Keep scratch and draft knowledge in notebook_write first; promote durable conclusions with notebook_promote when they are ready for review. Do not claim something is in the team wiki unless notebook_promote was submitted and approved, or team_wiki_write was explicitly appropriate and succeeded.\n\n"
+}
+
 // buildPrompt generates the system prompt for an agent, including
 // channel communication instructions.
 func (l *Launcher) buildPrompt(slug string) string {
@@ -3691,6 +3703,8 @@ func (l *Launcher) buildPrompt(slug string) string {
 	// miss on every turn just because member insertion order drifted.
 	sort.Slice(officeMembers, func(i, j int) bool { return officeMembers[i].Slug < officeMembers[j].Slug })
 	lead := officeLeadSlugFrom(officeMembers)
+	memoryBackendKind := config.ResolveMemoryBackend("")
+	markdownMemory := memoryBackendKind == config.MemoryBackendMarkdown
 	noNex := config.ResolveNoNex() || config.ResolveAPIKey("") == ""
 	var activePolicies []officePolicy
 	if l.broker != nil {
@@ -3765,6 +3779,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_skill_create: Create or propose a reusable skill through structured fields. Use action=create only as CEO when the human explicitly asked to create/activate a skill; use action=propose for proposed improvements from any agent.\n")
 		sb.WriteString("- team_action_connections / team_action_search / team_action_knowledge: inspect connected external systems and the exact action/workflow schema before you improvise. If connection listing is flaky, do NOT stop there; search/knowledge still give you the real action contract.\n")
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
+		if markdownMemory {
+			sb.WriteString(markdownKnowledgeToolBlock())
+		}
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a blocking decision question — only when the team cannot proceed without it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
@@ -3772,7 +3789,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
 		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
 		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
-		if noNex {
+		if markdownMemory {
+			sb.WriteString(markdownKnowledgeMemoryBlock())
+		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Work only with the shared office channel and human answers.\n\n")
 		} else {
 			sb.WriteString("Nex memory: query_context before reinventing; add_context only after a decision is actually landed.\n\n")
@@ -3796,7 +3815,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("1. On strategy or prior decisions, use wuphf_wiki_lookup or notebook_search before guessing\n")
+		} else if noNex {
 			sb.WriteString("1. Coordinate inside the office channel first and keep the team aligned there\n")
 		} else {
 			sb.WriteString("1. On strategy or prior decisions, call query_context early\n")
@@ -3807,7 +3828,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("5. Keep specialists in their lane and mostly offstage. You make the FINAL decision.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for blocking decisions\n")
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("8. When you lock a durable decision, write it to your notebook first and submit notebook_promote if it should become canonical wiki knowledge\n")
+		} else if noNex {
 			sb.WriteString("8. Summarize final decisions clearly in-channel\n")
 		} else {
 			sb.WriteString("8. When you lock a decision, call add_context before claiming it is stored\n")
@@ -3850,7 +3873,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- When integrations matter, make the required systems explicit in the skill instructions and agent rationale so the team knows which connected accounts or placeholders each workflow expects\n")
 		sb.WriteString("- When you create a new specialist for integration/onboarding work, include the owned integrations directly in that agent's expertise so the roster clearly shows who owns Gmail, Slack, YouTube, Drive, analytics, or similar lanes\n\n")
 		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data.\n")
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("Do not pretend the team wiki was updated; verify notebook_promote or team_wiki_write succeeded before claiming canonical storage.\n")
+		} else if noNex {
 			sb.WriteString("Do not claim you stored anything outside the office.\n")
 		} else {
 			sb.WriteString("Do not pretend the graph was updated; verify add_context succeeded.\n")
@@ -3880,6 +3905,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_skill_create: Propose a reusable skill yourself with action=propose when you spot a repeatable workflow. You do not need to ask @ceo to propose it for you. Only @ceo may use action=create.\n")
 		sb.WriteString("- team_action_connections / team_action_search / team_action_knowledge: inspect connected external systems and the exact action/workflow schema before you improvise. If connection listing is flaky, do NOT stop there; search/knowledge still give you the real action contract.\n")
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
+		if markdownMemory {
+			sb.WriteString(markdownKnowledgeToolBlock())
+		}
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human only for blocking clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
@@ -3887,7 +3915,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
 		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
 		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
-		if noNex {
+		if markdownMemory {
+			sb.WriteString(markdownKnowledgeMemoryBlock())
+		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the office conversation and direct human answers only.\n\n")
 		} else {
 			sb.WriteString("Nex memory: query_context before making assumptions; add_context only for durable conclusions.\n\n")
@@ -3932,7 +3962,10 @@ func (l *Launcher) buildPrompt(slug string) string {
 		if codingAgentSlugs[slug] {
 			sb.WriteString("11g. When you commit to opening a pull request, actually open it. Run `gh pr create --title \"<short title>\" --body \"<body>\" --head \"<your-branch>\" --base main` via the bash tool. Paste the returned URL into your channel message so the team can click through. Do not claim a PR is open unless the bash output shows a https://github.com/... URL.\n")
 		}
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("12. Use wuphf_wiki_lookup, team_wiki_search, or notebook_search when prior knowledge matters. Store your own durable working notes with notebook_write and submit notebook_promote when they should become canonical.\n")
+			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
+		} else if noNex {
 			sb.WriteString("12. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n")
 			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
 		} else {

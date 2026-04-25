@@ -15,10 +15,8 @@ import (
 // authenticate their requests.
 func newCommandsHTTPTest(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	mux := http.NewServeMux()

@@ -14,10 +14,8 @@ import (
 // It follows the same pattern used throughout broker_test.go.
 func newTestBroker(t *testing.T) *Broker {
 	t.Helper()
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 	return NewBroker()
 }
 

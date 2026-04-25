@@ -71,10 +71,8 @@ func TestHeadlessClaudeModel_OpusForLeadOnly(t *testing.T) {
 // brokerStatePath is redirected to an empty temp dir so officeMembersSnapshot()
 // falls through to the pack definition instead of loading live state.
 func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	l := &Launcher{
 		pack: &agent.PackDefinition{
@@ -117,10 +115,8 @@ func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
 // captured args are all we need.
 func TestRunHeadlessClaudeTurn_NoResumeFlag(t *testing.T) {
 	// Redirect broker state to an isolated temp dir.
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	origCommandContext := headlessClaudeCommandContext
 	origLookPath := headlessClaudeLookPath

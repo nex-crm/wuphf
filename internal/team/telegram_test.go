@@ -14,10 +14,8 @@ import (
 
 func newTestBrokerWithTelegramChannel(t *testing.T, chatID string) *Broker {
 	t.Helper()
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -336,10 +334,8 @@ func TestTelegramStartFailsWithoutToken(t *testing.T) {
 }
 
 func TestTelegramStartFailsWithoutChannels(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	// Clear all channels so there are no telegram surfaces

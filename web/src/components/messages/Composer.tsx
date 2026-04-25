@@ -11,7 +11,11 @@ import {
 } from "../../api/client";
 import { useCommands } from "../../hooks/useCommands";
 import { useOfficeMembers } from "../../hooks/useMembers";
-import { parseMentions, renderMentionTokens } from "../../lib/mentions";
+import {
+  extractTaggedMentions,
+  parseMentions,
+  renderMentionTokens,
+} from "../../lib/mentions";
 import { directChannelSlug, useAppStore } from "../../stores/app";
 import { confirm } from "../ui/ConfirmDialog";
 import { openProviderSwitcher } from "../ui/ProviderSwitcher";
@@ -92,6 +96,11 @@ interface SlashHandlers {
   leadSlug: string | undefined;
   /** Send the given text as a normal message (bypasses slash parsing). */
   sendAsMessage: (text: string) => void;
+}
+
+interface OutboundMessage {
+  content: string;
+  tagged: string[];
 }
 
 /**
@@ -368,7 +377,8 @@ export function Composer() {
   );
 
   const sendMutation = useMutation({
-    mutationFn: (content: string) => postMessage(content, currentChannel),
+    mutationFn: ({ content, tagged }: OutboundMessage) =>
+      postMessage(content, currentChannel, undefined, tagged),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["messages", currentChannel] });
     },
@@ -408,7 +418,10 @@ export function Composer() {
       const consumed = handleSlashCommand(trimmed, {
         leadSlug,
         sendAsMessage: (rewritten) => {
-          sendMutation.mutate(rewritten);
+          sendMutation.mutate({
+            content: rewritten,
+            tagged: extractTaggedMentions(rewritten, knownSlugs),
+          });
         },
       });
       if (consumed) {
@@ -421,9 +434,12 @@ export function Composer() {
     }
 
     pushHistory(currentChannel, trimmed);
-    sendMutation.mutate(trimmed);
+    sendMutation.mutate({
+      content: trimmed,
+      tagged: extractTaggedMentions(trimmed, knownSlugs),
+    });
     resetComposer();
-  }, [text, sendMutation, leadSlug, currentChannel, resetComposer]);
+  }, [text, sendMutation, leadSlug, currentChannel, resetComposer, knownSlugs]);
 
   /**
    * Walk backward through history. On first invocation, snapshot the live

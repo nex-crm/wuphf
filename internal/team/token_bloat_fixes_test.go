@@ -14,10 +14,8 @@ import (
 // pattern — the prompt rule telling agents not to do that is routinely
 // ignored, so this enforces it at the persistence layer.
 func TestDuplicateAgentBroadcastIsSuppressed(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -62,10 +60,8 @@ func TestDuplicateAgentBroadcastIsSuppressed(t *testing.T) {
 // TestDuplicateAgentBroadcastWindowExpires verifies the dedup window is time
 // bounded — a follow-up beyond the window posts normally.
 func TestDuplicateAgentBroadcastWindowExpires(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	old := time.Now().UTC().Add(-2 * duplicateBroadcastWindow).Format(time.RFC3339)
@@ -86,10 +82,8 @@ func TestDuplicateAgentBroadcastWindowExpires(t *testing.T) {
 // old "@planner say hi" from hours before the restart wakes planner with
 // the wrong intent).
 func TestStaleUnansweredFilteredOnResume(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	// This test runs with the production-like threshold, not the test-suite
 	// override from TestMain. Swap locally so production semantics win here.
