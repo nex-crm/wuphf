@@ -3179,21 +3179,59 @@ func (b *Broker) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := atomicWriteFile(path, data, 0o600); err != nil {
 		return err
 	}
 	if brokerStateShouldSnapshot(state) {
-		snapshotTmp := snapshotPath + ".tmp"
-		if err := os.WriteFile(snapshotTmp, data, 0o600); err != nil {
+		if err := atomicWriteFile(snapshotPath, data, 0o600); err != nil {
 			return err
 		}
-		if err := os.Rename(snapshotTmp, snapshotPath); err != nil {
-			return err
-		}
+	}
+	return nil
+}
+
+// atomicWriteFile writes data to path atomically by creating a uniquely-named
+// sibling tmp file and renaming. Each call uses a fresh tmp filename via
+// os.CreateTemp, so concurrent writers to the same destination cannot race
+// on the source path of the rename.
+//
+// The previous fixed `<path>.tmp` filename was safe in production (one broker
+// owns one path) but broke the test suite: 22 *_test.go files override
+// brokerStatePath, plus a leaked tempdir from worktree_guard_test.go init()
+// is shared across every test that doesn't override. Two saves landing on
+// the same path could interleave like A.WriteFile / B.WriteFile / A.Rename /
+// B.Rename — and B's Rename failed with "no such file or directory" because
+// A had already renamed the shared tmp out from under it. That was the CI
+// flake on PR #281's `test` job. See broker_save_race_test.go for the
+// regression repro.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	tmpf, err := os.CreateTemp(dir, base+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpf.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmpf.Write(data); err != nil {
+		_ = tmpf.Close()
+		cleanup()
+		return err
+	}
+	if err := tmpf.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	// os.CreateTemp creates with mode 0o600 already, but tighten / loosen
+	// per the caller's request so this helper is interchangeable with the
+	// previous os.WriteFile call.
+	if err := os.Chmod(tmpName, perm); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
 	}
 	return nil
 }
