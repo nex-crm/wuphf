@@ -567,18 +567,8 @@ function applyFaceProfile(face, portrait) {
     case 'glassesSoft':
       fillCells(clean, rectCells(4, 4, 12, 4), 5)
       fillCells(clean, rectCells(6, 5, 12, 9), 5)
-      paintCells(clean, [
-        [6, 6],
-        [8, 6],
-        [10, 6],
-        [12, 6],
-        [6, 7],
-        [8, 7],
-        [10, 7],
-        [12, 7],
-      ], 24)
-      paintCells(clean, [[7, 6], [11, 6]], 9)
-      paintCells(clean, [[9, 8]], 15)
+      paintCells(clean, [[7, 6], [11, 6]], 4)
+      paintCells(clean, [[8, 8], [9, 8], [10, 8]], 12)
       break
     case 'silver':
       applyStandardFacePatch(clean, { skin: 5, skinLight: 4, dark: 6, brow: 1, mouth: 7, face: rectCells(6, 4, 12, 8) })
