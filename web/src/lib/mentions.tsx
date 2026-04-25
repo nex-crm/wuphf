@@ -7,10 +7,31 @@ import type { ReactNode } from "react";
  * highlighting exactly what the backend stops routing. Keep the two in sync.
  */
 const MENTION_RE = /(?:^|[^a-zA-Z0-9_])@([a-z0-9][a-z0-9-]{1,29})\b/g;
+const SPECIAL_MENTION_SLUGS = ["all"] as const;
+const NON_MENTIONABLE_SLUGS = new Set(["human", "you", "system"]);
 
 export interface MentionToken {
   kind: "text" | "mention";
   value: string;
+}
+
+function normalizeMentionableSlugs(knownSlugs: readonly string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of knownSlugs) {
+    const slug = raw.trim().toLowerCase();
+    if (!slug || NON_MENTIONABLE_SLUGS.has(slug) || seen.has(slug)) continue;
+    seen.add(slug);
+    out.push(slug);
+  }
+  return out;
+}
+
+function knownMentionSet(knownSlugs: readonly string[]): Set<string> {
+  return new Set([
+    ...normalizeMentionableSlugs(knownSlugs),
+    ...SPECIAL_MENTION_SLUGS,
+  ]);
 }
 
 /**
@@ -27,7 +48,7 @@ export function parseMentions(
   knownSlugs: readonly string[],
 ): MentionToken[] {
   if (!content) return [];
-  const known = new Set(knownSlugs.map((s) => s.toLowerCase()));
+  const known = knownMentionSet(knownSlugs);
   const out: MentionToken[] = [];
   let lastIdx = 0;
   // matchAll over a fresh regex avoids lastIndex leaking between invocations.
@@ -49,6 +70,37 @@ export function parseMentions(
     out.push({ kind: "text", value: content.slice(lastIdx) });
   }
   return out;
+}
+
+/**
+ * Extract the agent slugs that should be sent in the broker's `tagged`
+ * payload. `@all` expands to every known agent slug because the HTTP
+ * message endpoint validates tagged members individually.
+ */
+export function extractTaggedMentions(
+  content: string,
+  knownSlugs: readonly string[],
+): string[] {
+  if (!content) return [];
+  const available = normalizeMentionableSlugs(knownSlugs);
+  const known = knownMentionSet(knownSlugs);
+  const tagged: string[] = [];
+  const seen = new Set<string>();
+  let wantsAll = false;
+  const re = new RegExp(MENTION_RE.source, "g");
+  for (const match of content.matchAll(re)) {
+    const slug = match[1]?.toLowerCase();
+    if (!slug || !known.has(slug)) continue;
+    if (slug === "all") {
+      wantsAll = true;
+      continue;
+    }
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+    tagged.push(slug);
+  }
+  if (wantsAll) return available;
+  return tagged;
 }
 
 export function renderMentionTokens(tokens: MentionToken[]): ReactNode[] {

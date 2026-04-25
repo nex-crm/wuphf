@@ -538,7 +538,7 @@ func registerSharedMemoryTools(server *mcp.Server) {
 	case "markdown":
 		mcp.AddTool(server, officeWriteTool(
 			"team_wiki_write",
-			"Write a markdown article to the team wiki git repo. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article. Images are supported via standard markdown: embed a remote URL with `![alt text](https://example.com/diagram.png)` and the wiki renderer will show it inline. Use images you found on the web while researching the article; do not upload bytes — only reference URLs.",
+			"Write directly to the canonical team wiki git repo. Use this for already-approved canonical edits, bootstrap/admin updates, or explicit human requests. For agent-authored working notes, observations, draft playbooks, and proposed new wiki knowledge, write to notebook_write first and submit with notebook_promote so the review gate runs. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article. Images are supported via standard markdown: embed a remote URL with `![alt text](https://example.com/diagram.png)` and the wiki renderer will show it inline. Use images you found on the web while researching the article; do not upload bytes — only reference URLs.",
 		), handleTeamWikiWrite)
 		mcp.AddTool(server, readOnlyTool(
 			"team_wiki_read",
@@ -619,6 +619,8 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 		registerSharedMemoryTools(server)
 
+		registerSkillAuthoringTools(server)
+
 		mcp.AddTool(server, readOnlyTool(
 			"team_runtime_state",
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
@@ -659,6 +661,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
+		registerSkillAuthoringTools(server)
 		if hasActionProvider() {
 			registerActionTools(server)
 		}
@@ -757,6 +760,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"team_skill_run",
 		"Invoke a named team skill. When the request matches an available skill (see the skill list in your prompt), call this BEFORE doing the work — do not freelance. Bumps the skill's usage, logs a skill_invocation in the channel so the office sees you followed the playbook, and returns the skill's canonical step-by-step content for you to execute.",
 	), handleTeamSkillRun)
+	registerSkillAuthoringTools(server)
 
 	// Gate external-action tools behind a configured provider. Registering 14
 	// empty action tools inflates the MCP tool schema and pushes the total

@@ -207,11 +207,23 @@ func (h *QueryHandler) Answer(ctx context.Context, req QueryRequest) (QueryAnswe
 	}
 
 	// Step 5: render the prompt template.
+	//
+	// Security: both the user-submitted Query and each Source.Excerpt reach
+	// the LLM inside answer_query.tmpl. Source.Excerpt carries verbatim
+	// artifact content through two hops (extraction → fact → source excerpt);
+	// req.Query is attacker-controlled at hop zero (any authenticated user
+	// can submit a hostile string). Escape both at the interpolation site so
+	// an injection cannot hijack the answer prompt. See prompt_escape.go.
+	promptSources := make([]QuerySource, len(sources))
+	for i, src := range sources {
+		src.Excerpt = EscapeForPromptBody(src.Excerpt)
+		promptSources[i] = src
+	}
 	vars := templateVars{
-		Query:      req.Query,
+		Query:      EscapeForPromptBody(req.Query),
 		QueryClass: string(class),
 		Now:        now.UTC().Format(time.RFC3339),
-		Sources:    sources,
+		Sources:    promptSources,
 	}
 	var promptBuf bytes.Buffer
 	if err := h.tmpl.Execute(&promptBuf, vars); err != nil {
@@ -274,16 +286,51 @@ func (h *QueryHandler) Answer(ctx context.Context, req QueryRequest) (QueryAnswe
 		}, nil
 	}
 
+	// Step 8: validate sources_cited. The LLM may hallucinate citation
+	// indices outside the provided range; those would silently vanish in
+	// the renderer but could also enable confusion about coverage. Drop
+	// invalid entries and record the drop in Notes so operators can see
+	// the hallucination rate.
+	cleanCites, dropped := filterValidCitations(parsed.SourcesCited, len(sources))
+	notes := parsed.Notes
+	if len(dropped) > 0 {
+		msg := fmt.Sprintf("dropped invalid citations: %v", dropped)
+		if notes != "" {
+			notes = notes + " | " + msg
+		} else {
+			notes = msg
+		}
+	}
+
 	return QueryAnswer{
 		QueryClass:     QueryClass(parsed.QueryClass),
 		AnswerMarkdown: parsed.AnswerMarkdown,
-		SourcesCited:   parsed.SourcesCited,
+		SourcesCited:   cleanCites,
 		Sources:        sources,
 		Confidence:     parsed.Confidence,
 		Coverage:       parsed.Coverage,
-		Notes:          parsed.Notes,
+		Notes:          notes,
 		LatencyMs:      latency,
 	}, nil
+}
+
+// filterValidCitations enforces the §10.3 contract that sources_cited
+// indices are 1-indexed and must be a subset of [1..sourceCount]. Any
+// index outside that range is dropped and reported to the caller so the
+// validation failure is observable.
+func filterValidCitations(cites []int, sourceCount int) (clean []int, dropped []int) {
+	if len(cites) == 0 {
+		return []int{}, nil
+	}
+	clean = make([]int, 0, len(cites))
+	for _, c := range cites {
+		if c >= 1 && c <= sourceCount {
+			clean = append(clean, c)
+		} else {
+			dropped = append(dropped, c)
+		}
+	}
+	return clean, dropped
 }
 
 // hydrateFact converts a TypedFact into a QuerySource for the prompt template.

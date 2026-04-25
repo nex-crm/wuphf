@@ -584,16 +584,14 @@ func TestDeliverDMMessageQueuesCodexHeadlessTurn(t *testing.T) {
 	l.notifyLastDelivered = make(map[string]time.Time)
 
 	processed := make(chan string, 1)
-	oldRunTurn := headlessCodexRunTurn
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
 		targetChannel := ""
 		if len(channel) > 0 {
 			targetChannel = channel[0]
 		}
 		processed <- strings.Join([]string{slug, targetChannel, notification}, "\n---\n")
 		return nil
-	}
-	defer func() { headlessCodexRunTurn = oldRunTurn }()
+	})
 
 	dmSlug := DMSlugFor("ceo")
 	l.deliverMessageNotification(channelMessage{

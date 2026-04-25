@@ -142,18 +142,16 @@ func fullDispatchLauncher(t *testing.T) (*Launcher, chan string, func()) {
 	}
 
 	processed := make(chan string, 8)
-	oldRunTurn := headlessCodexRunTurn
-	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
 		ch := ""
 		if len(channel) > 0 {
 			ch = channel[0]
 		}
 		processed <- slug + "|" + ch + "|" + notification
 		return nil
-	}
+	})
 
 	cleanup := func() {
-		headlessCodexRunTurn = oldRunTurn
 	}
 	return l, processed, cleanup
 }

@@ -11,16 +11,21 @@ import ReviewColumn from "./ReviewColumn";
 import ReviewDetail from "./ReviewDetail";
 import "../../styles/notebook.css";
 
-/** `/reviews` 5-column Kanban + detail drawer. UI-only in Lane E. */
+/** `/reviews` 5-column Kanban + detail drawer backed by the broker review log. */
 
-const STATE_ORDER: ReviewState[] = [
+type ReviewColumnState = Extract<
+  ReviewState,
+  "pending" | "in-review" | "changes-requested" | "approved" | "archived"
+>;
+
+const STATE_ORDER: ReviewColumnState[] = [
   "pending",
   "in-review",
   "changes-requested",
   "approved",
   "archived",
 ];
-const STATE_TITLE: Record<ReviewState, string> = {
+const STATE_TITLE: Record<ReviewColumnState, string> = {
   pending: "Pending",
   "in-review": "In review",
   "changes-requested": "Changes requested",
@@ -28,12 +33,17 @@ const STATE_TITLE: Record<ReviewState, string> = {
   archived: "Archived",
 };
 
+function reviewColumnState(state: ReviewState): ReviewColumnState {
+  if (state === "rejected" || state === "expired") return "archived";
+  return state;
+}
+
 export default function ReviewQueueKanban() {
   const [reviews, setReviews] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [_refreshTick, setRefreshTick] = useState(0);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +63,7 @@ export default function ReviewQueueKanban() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshTick]);
 
   useEffect(() => {
     const unsub = subscribeNotebookEvents((ev) => {
@@ -65,16 +75,14 @@ export default function ReviewQueueKanban() {
   }, []);
 
   const grouped = useMemo(() => {
-    const out: Record<ReviewState, ReviewItem[]> = {
+    const out: Record<ReviewColumnState, ReviewItem[]> = {
       pending: [],
       "in-review": [],
       "changes-requested": [],
       approved: [],
       archived: [],
     };
-    for (const r of reviews) {
-      if (out[r.state]) out[r.state].push(r);
-    }
+    for (const r of reviews) out[reviewColumnState(r.state)].push(r);
     return out;
   }, [reviews]);
 
@@ -142,7 +150,7 @@ export default function ReviewQueueKanban() {
           </div>
         )}
       </main>
-      {active && (
+      {active ? (
         <ReviewDetail
           review={active}
           onClose={() => setActiveId(null)}
@@ -155,7 +163,7 @@ export default function ReviewQueueKanban() {
             setActiveId(null);
           }}
         />
-      )}
+      ) : null}
     </div>
   );
 }

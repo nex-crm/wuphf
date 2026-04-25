@@ -182,13 +182,17 @@ var spriteCRO = pixelSprite{
 	{0, 0, 0, 1, 1, 0, 0, 0, 0, 5, 5, 5, 0, 0},
 }
 
-// spriteForSlug returns the unique sprite for a known role,
-// or a seeded variation of the generic sprite for dynamic agents.
-// frame alternates 0/1 for animation.
+// spriteForSlug returns the extracted office-sheet sprite for mapped roles,
+// or a seeded procedural variation for dynamic slugs. frame alternates 0/1.
 func spriteForSlug(slug string, frame ...int) pixelSprite {
 	f := 0
 	if len(frame) > 0 {
 		f = frame[0] % 2
+	}
+
+	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
+		_ = f // The extracted office-sheet sprites are static for now.
+		return cloneSprite(sprite.Full)
 	}
 
 	var sprite pixelSprite
@@ -220,7 +224,7 @@ func spriteForSlug(slug string, frame ...int) pixelSprite {
 	return sprite
 }
 
-// animateFrame applies micro-animations for frame 1 (frame 0 is the base).
+// animateFrame applies micro-animations for frame 1 on the legacy sprite path.
 // Each character has a unique animation that conveys personality:
 //
 //	CEO:      raises coffee cup (arm moves up)
@@ -342,6 +346,10 @@ func parseHexColor(hex string) [3]int {
 }
 
 func spritePaletteForSlug(slug string) map[int][3]int {
+	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
+		return sprite.Palette
+	}
+
 	// Unknown slugs get a fully procedural palette (hash picks skin/hair/accent
 	// independently) to match proceduralSpriteForSlug.
 	if isProceduralSlug(slug) {
@@ -427,6 +435,10 @@ func renderWuphfSplashAvatar(seed, slug string, frame int) []string {
 // renderWuphfAvatar renders a small face portrait for inline use.
 func renderWuphfAvatar(seed, slug string, frame int) []string {
 	_ = seed
+	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
+		return renderSpriteToANSI(sprite.Portrait, sprite.Palette)
+	}
+
 	// Use just the head portion (rows 0-5) of the full sprite
 	full := spriteForSlug(slug, frame)
 	if len(full) > 6 {
