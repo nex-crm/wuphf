@@ -220,6 +220,22 @@ func (e *Extractor) ExtractFromArtifact(ctx context.Context, artifactPath string
 	// poison the fact ID hash. §7.3 determinism starts here.
 	parsed.ArtifactSHA = sha
 
+	// Security: strip facts whose triplets contain control chars, embedded
+	// newlines, or known SQL/XSS-flavored sequences. Rejected rows route to
+	// the DLQ with category=validation so operators can audit the pattern.
+	// See sanitizeExtractedFacts / §11.13 policy.
+	cleanFacts, rejected := sanitizeExtractedFacts(parsed.Facts)
+	parsed.Facts = cleanFacts
+	for _, bad := range rejected {
+		reason := bad.reason
+		if reason == "" {
+			reason = "triplet failed validation"
+		}
+		e.queueDLQ(ctx, sha, artifactPath, kind,
+			fmt.Errorf("triplet sanitizer rejected fact for entity %q: %s", bad.fact.EntitySlug, reason),
+			DLQCategoryValidation)
+	}
+
 	return e.apply(ctx, parsed, artifactPath, kind)
 }
 
@@ -740,6 +756,12 @@ func (e *Extractor) readArtifact(relPath string) (string, error) {
 
 // renderPrompt executes the embedded template with the artifact context +
 // a best-effort signal-index snapshot.
+//
+// Security: the Body field is the untrusted artifact content. It flows into
+// extract_entities_lite.tmpl inside a fenced code block. EscapeForPromptBody
+// neutralises fence-breakouts, frontmatter-delimiters, and known
+// injection-flavored instruction sequences so a hostile artifact cannot
+// smuggle instructions into the LLM prompt. See prompt_escape.go.
 func (e *Extractor) renderPrompt(ctx context.Context, kind, sha, path, body string) (string, error) {
 	known, predicates := e.gatherIndexContext(ctx)
 	vars := extractTmplVars{
@@ -747,7 +769,7 @@ func (e *Extractor) renderPrompt(ctx context.Context, kind, sha, path, body stri
 		ArtifactSHA:         sha,
 		ArtifactPath:        path,
 		OccurredAt:          e.now().Format(time.RFC3339),
-		Body:                body,
+		Body:                EscapeForPromptBody(body),
 		KnownEntities:       known,
 		PredicateVocabulary: predicates,
 	}
@@ -760,53 +782,71 @@ func (e *Extractor) renderPrompt(ctx context.Context, kind, sha, path, body stri
 
 // gatherIndexContext returns a snapshot of known entities and predicates
 // for the prompt. Bounded so a large index does not blow the context
-// window; we take the first 50 entities and 30 predicates sorted by seen
-// order. This is a Slice 1 heuristic — Slice 2 may add signal-scoped
-// retrieval.
+// window; we take the first 50 entities. Predicate vocabulary comes from
+// the in-memory backend when available — a future iteration can add a
+// typed SELECT for the SQLite path.
 func (e *Extractor) gatherIndexContext(ctx context.Context) ([]tmplEntity, []string) {
 	if e.index == nil {
 		return nil, nil
 	}
-	mem, ok := e.index.store.(*inMemoryFactStore)
-	if !ok {
-		// Persistent backends do not currently expose an Iterate method.
-		// Slice 2 will add one; for now the prompt runs without known
-		// entities, which simply means the LLM will propose fresh slugs
-		// the resolver can still dedupe against the SQLite rows.
-		_ = ctx
-		return nil, nil
-	}
-	mem.mu.RLock()
-	defer mem.mu.RUnlock()
 
-	var ents []tmplEntity
 	const maxEntities = 50
-	for slug, ent := range mem.entities {
-		if len(ents) >= maxEntities {
-			break
+	var ents []tmplEntity
+
+	// Entity snapshot: prefer the in-memory fast path; fall through to
+	// FactStore.IterateEntities for persistent backends so the extraction
+	// prompt still sees "known entities" on SQLite. Stop once we have
+	// maxEntities so the context window stays bounded.
+	if mem, ok := e.index.store.(*inMemoryFactStore); ok {
+		mem.mu.RLock()
+		for slug, ent := range mem.entities {
+			if len(ents) >= maxEntities {
+				break
+			}
+			ents = append(ents, tmplEntity{
+				Slug:           slug,
+				Kind:           ent.Kind,
+				SignalsOneLine: signalsOneLine(ent.Signals),
+				AliasesJoined:  strings.Join(ent.Aliases, ", "),
+				Aliases:        ent.Aliases,
+			})
 		}
-		ents = append(ents, tmplEntity{
-			Slug:           slug,
-			Kind:           ent.Kind,
-			SignalsOneLine: signalsOneLine(ent.Signals),
-			AliasesJoined:  strings.Join(ent.Aliases, ", "),
-			Aliases:        ent.Aliases,
+		mem.mu.RUnlock()
+	} else {
+		_ = e.index.store.IterateEntities(ctx, func(ent IndexEntity) error {
+			if len(ents) >= maxEntities {
+				return errStopIteration
+			}
+			ents = append(ents, tmplEntity{
+				Slug:           ent.Slug,
+				Kind:           ent.Kind,
+				SignalsOneLine: signalsOneLine(ent.Signals),
+				AliasesJoined:  strings.Join(ent.Aliases, ", "),
+				Aliases:        ent.Aliases,
+			})
+			return nil
 		})
 	}
 
-	predSet := map[string]struct{}{}
-	for _, f := range mem.facts {
-		if f.Triplet == nil {
-			continue
+	// Predicate vocabulary is still a best-effort in-memory scan. The
+	// resolver + fact-ID path works without it on persistent backends
+	// because the LLM will propose fresh predicates that normalize to the
+	// same typed keys.
+	var predicates []string
+	if mem, ok := e.index.store.(*inMemoryFactStore); ok {
+		mem.mu.RLock()
+		predSet := map[string]struct{}{}
+		for _, f := range mem.facts {
+			if f.Triplet == nil || f.Triplet.Predicate == "" {
+				continue
+			}
+			predSet[f.Triplet.Predicate] = struct{}{}
 		}
-		if f.Triplet.Predicate == "" {
-			continue
+		mem.mu.RUnlock()
+		predicates = make([]string, 0, len(predSet))
+		for p := range predSet {
+			predicates = append(predicates, p)
 		}
-		predSet[f.Triplet.Predicate] = struct{}{}
-	}
-	predicates := make([]string, 0, len(predSet))
-	for p := range predSet {
-		predicates = append(predicates, p)
 	}
 	const maxPredicates = 30
 	if len(predicates) > maxPredicates {
@@ -905,4 +945,157 @@ func ifBlank(s, fallback string) string {
 		return fallback
 	}
 	return s
+}
+
+// ── Triplet sanitizer ─────────────────────────────────────────────────────────
+
+// rejectedFact carries an extractedFact the sanitizer rejected plus a
+// human-readable reason. The DLQ enqueue path surfaces the reason in
+// last_error for operator audit.
+type rejectedFact struct {
+	fact   extractedFact
+	reason string
+}
+
+// sanitizeExtractedFacts partitions the input into a clean slice and a
+// rejected slice. A fact is rejected if its triplet or fact text contains:
+//
+//   - an ASCII control character (0x00-0x1F) other than tab/newline in
+//     fields that should be single-line (subject, predicate, object);
+//   - an embedded newline or carriage return in subject / predicate /
+//     object (those fields are always single-token per §4.2);
+//   - a known SQL/XSS-flavored substring (';, --, </script>, etc.) in any
+//     triplet field OR in the fact text — these never appear in
+//     legitimate fact prose either, and the fact text rides the 3-hop
+//     path (source excerpt → prompt body) so hostile content here has a
+//     clear injection vector;
+//   - empty subject or predicate (triplet contract requires both).
+//
+// Null triplets are passed through untouched — the apply() step already
+// handles the "no clean triplet" case per §4.2 rule 4. The sanitizer's job
+// is to catch hostile content inside an otherwise-valid triplet, not to
+// enforce the general "facts need triplets" rule.
+func sanitizeExtractedFacts(in []extractedFact) (clean []extractedFact, rejected []rejectedFact) {
+	clean = make([]extractedFact, 0, len(in))
+	for _, f := range in {
+		if ok, reason := validateTriplet(f.Triplet); !ok {
+			rejected = append(rejected, rejectedFact{fact: f, reason: reason})
+			continue
+		}
+		if ok, reason := validateFactText(f.Text); !ok {
+			rejected = append(rejected, rejectedFact{fact: f, reason: reason})
+			continue
+		}
+		clean = append(clean, f)
+	}
+	return clean, rejected
+}
+
+// validateFactText returns (true, "") for a safe fact text, else
+// (false, reason). Unlike triplet fields, fact text is human-readable
+// prose so embedded newlines and tabs are fine — we only reject ASCII
+// control characters (other than \t/\n/\r) and the same high-signal
+// SQL/XSS/template sequences that validateTriplet uses. The fact text
+// is interpolated into source-excerpt prompts and rendered to entity
+// briefs, so it must be scanned for the same injection vectors the
+// triplet sanitizer catches.
+func validateFactText(s string) (bool, string) {
+	if s == "" {
+		return true, ""
+	}
+	if hasControlChar(s) {
+		return false, "control character in fact text"
+	}
+	if hasSuspiciousSequence(s) {
+		return false, "suspicious sequence in fact text"
+	}
+	return true, ""
+}
+
+// validateTriplet returns (true, "") for a safe triplet, else (false, reason).
+// A nil triplet is accepted — the downstream apply() step has its own
+// handling for facts without a clean triplet shape.
+func validateTriplet(t *Triplet) (bool, string) {
+	if t == nil {
+		return true, ""
+	}
+	// Subject and predicate are required per §4.2. Object is required
+	// except when the triplet is entirely null (handled above), so an
+	// empty object here is also a rejection.
+	if strings.TrimSpace(t.Subject) == "" {
+		return false, "empty triplet subject"
+	}
+	if strings.TrimSpace(t.Predicate) == "" {
+		return false, "empty triplet predicate"
+	}
+	// Use an ordered slice rather than a map so the rejection reason is
+	// deterministic when multiple fields fail (maps iterate in random
+	// order → flaky tests and noisy DLQ logs).
+	fields := []struct {
+		name string
+		v    string
+	}{
+		{"subject", t.Subject},
+		{"predicate", t.Predicate},
+		{"object", t.Object},
+	}
+	for _, f := range fields {
+		if hasControlChar(f.v) {
+			return false, "control character in triplet " + f.name
+		}
+		if strings.ContainsAny(f.v, "\r\n") {
+			return false, "embedded newline in triplet " + f.name
+		}
+		if hasSuspiciousSequence(f.v) {
+			return false, "suspicious sequence in triplet " + f.name
+		}
+	}
+	return true, ""
+}
+
+// hasControlChar reports whether s contains an ASCII control character
+// (0x00–0x1F) other than tab. Newlines are handled separately by
+// validateTriplet so the caller can emit a more specific reason.
+func hasControlChar(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 && c != '\t' && c != '\n' && c != '\r' {
+			return true
+		}
+	}
+	return false
+}
+
+// suspiciousSequences are literal substrings that never legitimately appear
+// in a triplet subject, predicate, or object but do appear in SQL, HTML,
+// and script injection payloads. Keep this list short and high-signal;
+// false positives on legitimate slugs would block extraction.
+var suspiciousSequences = []string{
+	"';",
+	"--",
+	"/*",
+	"*/",
+	"<script",
+	"</script",
+	"<iframe",
+	"javascript:",
+	"data:text/html",
+	"${",
+	"{{",
+	"`",
+}
+
+// hasSuspiciousSequence reports whether s contains any of the
+// suspiciousSequences patterns (case-insensitive).
+func hasSuspiciousSequence(s string) bool {
+	if s == "" {
+		return false
+	}
+	lower := strings.ToLower(s)
+	for _, seq := range suspiciousSequences {
+		if strings.Contains(lower, seq) {
+			return true
+		}
+	}
+	return false
 }
