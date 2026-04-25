@@ -10,9 +10,7 @@ import (
 
 func TestHandleActionsPostRecordsAction(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -50,9 +48,7 @@ func TestHandleActionsPostRecordsAction(t *testing.T) {
 
 func TestHandleSchedulerPostRecordsWorkflowJob(t *testing.T) {
 	tmpDir := t.TempDir()
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {

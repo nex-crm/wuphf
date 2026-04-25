@@ -50,10 +50,11 @@ func ensureOperationsFallbackFS(t *testing.T) {
 // and a clean broker state on disk, then cleans up when done.
 func withIsolatedBrokerState(t *testing.T) func() {
 	t.Helper()
-	old := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	return func() { brokerStatePath = old }
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
+	// setBrokerStatePathForTest registers t.Cleanup; the returned no-op
+	// preserves the legacy "call this when done" call-site shape.
+	return func() {}
 }
 
 // TestOnboardingCompleteSeedsFromPickedBlueprint verifies that when the

@@ -57,7 +57,8 @@ func init() {
 		panic(fmt.Sprintf("worktree_guard_test init: mktemp broker state: %v", err))
 	}
 	defaultTestStatePath := filepath.Join(stateDir, "broker-state.json")
-	brokerStatePath = func() string { return defaultTestStatePath }
+	defaultFn := func() string { return defaultTestStatePath }
+	brokerStatePathOverride.Store(&defaultFn)
 }
 
 func stubPrepareTaskWorktree(taskID string) (string, string, error) {

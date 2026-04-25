@@ -122,8 +122,6 @@ func TestOperationBlueprintMatrixBuildsBootstrapPackage(t *testing.T) {
 
 func TestOperationBlueprintMatrixSeedsBrokerOffice(t *testing.T) {
 	repoRoot := teamTestRepoRoot(t)
-	oldPathFn := brokerStatePath
-	defer func() { brokerStatePath = oldPathFn }()
 
 	for _, id := range teamOperationFixtureIDs(t, repoRoot) {
 		t.Run(id, func(t *testing.T) {
@@ -147,7 +145,7 @@ func TestOperationBlueprintMatrixSeedsBrokerOffice(t *testing.T) {
 			}
 
 			stateDir := t.TempDir()
-			brokerStatePath = func() string { return filepath.Join(stateDir, "broker-state.json") }
+			setBrokerStatePathForTest(t, func() string { return filepath.Join(stateDir, "broker-state.json") })
 
 			blueprint, err := operations.LoadBlueprint(repoRoot, id)
 			if err != nil {
@@ -194,8 +192,6 @@ func TestOperationBlueprintMatrixSeedsBrokerOffice(t *testing.T) {
 
 func TestOperationBlueprintMatrixServesBootstrapPackageEndpoint(t *testing.T) {
 	repoRoot := teamTestRepoRoot(t)
-	oldPathFn := brokerStatePath
-	defer func() { brokerStatePath = oldPathFn }()
 
 	for _, id := range teamOperationFixtureIDs(t, repoRoot) {
 		t.Run(id, func(t *testing.T) {
@@ -219,7 +215,7 @@ func TestOperationBlueprintMatrixServesBootstrapPackageEndpoint(t *testing.T) {
 			}
 
 			stateDir := t.TempDir()
-			brokerStatePath = func() string { return filepath.Join(stateDir, "broker-state.json") }
+			setBrokerStatePathForTest(t, func() string { return filepath.Join(stateDir, "broker-state.json") })
 
 			blueprint, err := operations.LoadBlueprint(repoRoot, id)
 			if err != nil {

@@ -82,10 +82,8 @@ func TestBrokerStateSnapshotPathIsLastGoodSibling(t *testing.T) {
 	// relies on this exact shape. Post-refactor, if snapshot
 	// derivation drifts to a different directory or format, recovery
 	// silently breaks.
-	oldPathFn := brokerStatePath
 	statePath := filepath.Join(t.TempDir(), "broker-state.json")
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return statePath })
 
 	got := brokerStateSnapshotPath()
 	want := statePath + ".last-good"
@@ -109,9 +107,7 @@ func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 	// must preserve this contract: constructor argument or not, a
 	// test-mode NewBroker() must NOT auto-load.
 	statePath := leakedBrokerStatePath(t)
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return statePath })
 
 	// Seed disk with a distinctive message. If the gate is broken,
 	// NewBroker() will pick it up.
@@ -164,9 +160,7 @@ func TestBrokerStop_NoWriteAfterReturn(t *testing.T) {
 	// reads a refactored `b.statePath` via a pointer captured at Start
 	// time and continues writing after b.stopCh closes).
 	statePath := leakedBrokerStatePath(t)
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return statePath })
 
 	b := NewBroker()
 	b.mu.Lock()

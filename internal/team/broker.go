@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wuphf "github.com/nex-crm/wuphf"
@@ -58,7 +59,27 @@ const defaultAgentRateLimitWindow = time.Minute
 // the value set by internal/teammcp/server.go authHeaders().
 const agentRateLimitHeader = "X-WUPHF-Agent"
 
-var brokerStatePath = defaultBrokerStatePath
+// brokerStatePathOverride lets tests redirect the state path to a temp dir
+// without racing with production goroutines (the headless-codex queue worker
+// spawned by resumeInFlightWork can outlive a test's deferred cleanup).
+//
+// Production reads via brokerStatePath() — a function, not a var — go through
+// the atomic. Tests must call setBrokerStatePathForTest(t, fn) instead of
+// mutating a package-level variable directly.
+var brokerStatePathOverride atomic.Pointer[func() string]
+
+// brokerStatePath returns the current state-file path. Defaults to
+// defaultBrokerStatePath; tests can override via setBrokerStatePathForTest.
+//
+// Race safety: read goes through atomic.Pointer.Load so it can interleave
+// safely with a test's override + cleanup, even if a queue worker spawned
+// before cleanup observes the swap mid-test.
+func brokerStatePath() string {
+	if p := brokerStatePathOverride.Load(); p != nil {
+		return (*p)()
+	}
+	return defaultBrokerStatePath()
+}
 
 // studioPackageGenerator routes Studio package generation through the
 // install-wide LLM provider so opencode-only or claude-code-only setups

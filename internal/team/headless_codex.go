@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
@@ -22,25 +23,49 @@ var (
 	headlessCodexLookPath       = exec.LookPath
 	headlessCodexCommandContext = exec.CommandContext
 	headlessCodexExecutablePath = os.Executable
-	headlessCodexRunTurn        = func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
-		if l != nil {
-			switch l.memberEffectiveProviderKind(slug) {
-			case provider.KindCodex:
-				return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
-			case provider.KindOpencode:
-				return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
-			default:
-				return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
-			}
-		}
-		return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
-	}
+
+	// headlessCodexRunTurnOverride lets tests intercept turn execution
+	// without racing with goroutines that the queue worker spawned before
+	// the test's deferred restore ran. Tests must use
+	// setHeadlessCodexRunTurnForTest(t, fn) — never assign directly.
+	//
+	// Production callers go through headlessCodexRunTurn(...) which reads
+	// the atomic and falls back to defaultHeadlessCodexRunTurn.
+	headlessCodexRunTurnOverride atomic.Pointer[func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error]
 	// headlessWakeLeadFn is nil in production; override in tests to intercept
 	// lead wake-ups. Always access via headlessWakeLeadFnMu to avoid races
 	// with leaked goroutines from concurrent tests.
 	headlessWakeLeadFn   func(l *Launcher, specialistSlug string)
 	headlessWakeLeadFnMu sync.RWMutex
 )
+
+// defaultHeadlessCodexRunTurn is the production implementation of
+// headlessCodexRunTurn. Routes by provider kind to the codex/opencode/claude
+// turn runner. Tests substitute via setHeadlessCodexRunTurnForTest.
+func defaultHeadlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
+	if l != nil {
+		switch l.memberEffectiveProviderKind(slug) {
+		case provider.KindCodex:
+			return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
+		case provider.KindOpencode:
+			return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
+		default:
+			return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
+		}
+	}
+	return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
+}
+
+// headlessCodexRunTurn dispatches a queued turn to whichever runner the
+// member's effective provider kind picks. Reads the test override via
+// atomic.Pointer.Load so a worker goroutine that spawned before a test's
+// override-restore cleanup ran cannot race against the assignment.
+func headlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
+	if p := headlessCodexRunTurnOverride.Load(); p != nil {
+		return (*p)(l, ctx, slug, notification, channel...)
+	}
+	return defaultHeadlessCodexRunTurn(l, ctx, slug, notification, channel...)
+}
 
 var (
 	headlessCodexTurnTimeout              = 4 * time.Minute

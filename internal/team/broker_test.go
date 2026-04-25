@@ -170,10 +170,8 @@ func TestFormatChannelViewIncludesThreadReference(t *testing.T) {
 }
 
 func TestBrokerPersistsAndReloadsState(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -202,10 +200,8 @@ func TestBrokerPersistsAndReloadsState(t *testing.T) {
 }
 
 func TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -267,10 +263,8 @@ func TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered(t *testing.T) {
 }
 
 func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -312,10 +306,8 @@ func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
 }
 
 func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	msgs, unsubscribe := b.SubscribeMessages(4)
@@ -337,10 +329,8 @@ func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 }
 
 func TestBrokerCanonicalizesLegacyDMSlugs(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -482,10 +472,8 @@ func TestRecordAgentUsageAttachesToCurrentTurnMessagesOnly(t *testing.T) {
 }
 
 func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	actions, unsubscribe := b.SubscribeActions(4)
@@ -506,10 +494,8 @@ func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
 }
 
 func TestReapStaleActivityLocked(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	now := time.Now().UTC()
@@ -556,10 +542,8 @@ func TestReapStaleActivityLocked(t *testing.T) {
 }
 
 func TestBrokerStopIsIdempotent(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.Stop()
@@ -567,10 +551,8 @@ func TestBrokerStopIsIdempotent(t *testing.T) {
 }
 
 func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	updates, unsubscribe := b.SubscribeActivity(4)
@@ -595,10 +577,8 @@ func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
 }
 
 func TestBrokerEventsEndpointStreamsMessages(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.channels = []teamChannel{
@@ -665,10 +645,8 @@ func TestBrokerEventsEndpointStreamsMessages(t *testing.T) {
 }
 
 func TestBrokerMessageKindAndTitleRoundTrip(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -727,10 +705,8 @@ func TestBrokerMessageKindAndTitleRoundTrip(t *testing.T) {
 }
 
 func TestBrokerMessagesCanScopeToThread(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -778,10 +754,8 @@ func TestBrokerMessagesCanScopeToThread(t *testing.T) {
 }
 
 func TestBrokerMessagesCanScopeToAgentInbox(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -856,10 +830,8 @@ func TestBrokerMessagesCanScopeToAgentInbox(t *testing.T) {
 
 func TestNewBrokerSeedsDefaultOfficeRosterOnFreshState(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // isolate from ~/.wuphf company.json (e.g. RevOps pack)
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	members := b.OfficeMembers()
@@ -904,10 +876,8 @@ func TestNewBrokerSeedsBlueprintBackedOfficeRosterOnFreshState(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	members := b.OfficeMembers()
@@ -1007,10 +977,8 @@ func TestHandleMessagesSupportsInboxAndOutboxScopes(t *testing.T) {
 }
 
 func TestOfficeMemberLifecycle(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -1033,10 +1001,8 @@ func TestOfficeMemberLifecycle(t *testing.T) {
 }
 
 func TestBrokerPersistsNotificationCursorWithoutMessages(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.SetNotificationCursor("2026-03-24T10:00:00Z"); err != nil {
@@ -1050,10 +1016,8 @@ func TestBrokerPersistsNotificationCursorWithoutMessages(t *testing.T) {
 }
 
 func TestChannelMembersRejectUnknownOfficeMember(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -1086,10 +1050,8 @@ func TestChannelMembersRejectUnknownOfficeMember(t *testing.T) {
 // slug was protected — blueprint teams whose lead is something else (e.g.
 // niche-crm uses "operator") could silently lose their lead from #general.
 func TestChannelMembersRejectDisableOrRemoveOfLead(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -1148,10 +1110,8 @@ func TestChannelMembersRejectDisableOrRemoveOfLead(t *testing.T) {
 }
 
 func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.runtimeProvider = "codex"
@@ -1773,10 +1733,8 @@ func TestNormalizeChannelSlugStripsLeadingHash(t *testing.T) {
 }
 
 func TestChannelDescriptionsAreVisibleButContentStaysRestricted(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
@@ -1862,10 +1820,8 @@ func TestChannelDescriptionsAreVisibleButContentStaysRestricted(t *testing.T) {
 }
 
 func TestChannelUpdateMutatesDescriptionAndMembers(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -1995,10 +1951,8 @@ func TestNormalizeLoadedStateRepopulatesGeneralFromOfficeRoster(t *testing.T) {
 }
 
 func TestTaskAndRequestViewsRejectNonMembers(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2091,10 +2045,8 @@ func TestParseOTLPUsageEvents(t *testing.T) {
 }
 
 func TestBrokerUsageEndpointAggregatesTelemetry(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2164,10 +2116,8 @@ func TestBrokerUsageEndpointAggregatesTelemetry(t *testing.T) {
 }
 
 func TestBrokerActionsAndSchedulerEndpoints(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -2204,10 +2154,8 @@ func TestBrokerActionsAndSchedulerEndpoints(t *testing.T) {
 }
 
 func TestSchedulerDueOnlyFiltersFutureJobs(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.SetSchedulerJob(schedulerJob{
@@ -2249,10 +2197,8 @@ func TestSchedulerDueOnlyFiltersFutureJobs(t *testing.T) {
 }
 
 func TestBrokerPostsAndDedupesNexNotifications(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2298,10 +2244,8 @@ func TestBrokerPostsAndDedupesNexNotifications(t *testing.T) {
 }
 
 func TestBrokerTaskLifecycle(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2396,10 +2340,8 @@ func TestBrokerTaskLifecycle(t *testing.T) {
 }
 
 func TestBrokerTaskReassignNotifies(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2516,10 +2458,8 @@ func TestBrokerTaskReassignNotifies(t *testing.T) {
 }
 
 func TestBrokerTaskCancelNotifies(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2630,10 +2570,8 @@ func containsAll(got, want []string) bool {
 }
 
 func TestBrokerOfficeFeatureTaskForGTMCompletesWithoutReviewAndUnblocksDependents(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2718,10 +2656,8 @@ func TestBrokerOfficeFeatureTaskForGTMCompletesWithoutReviewAndUnblocksDependent
 }
 
 func TestBrokerTaskCreateReusesExistingOpenTask(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2793,10 +2729,8 @@ func TestBrokerEnsurePlannedTaskKeepsScopedDuplicateTitlesDistinct(t *testing.T)
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 
@@ -2853,10 +2787,8 @@ func TestBrokerEnsurePlannedTaskKeepsScopedDuplicateTitlesDistinct(t *testing.T)
 }
 
 func TestBrokerTaskCreateKeepsDistinctTasksInSameThread(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -2925,10 +2857,8 @@ func TestBrokerTaskPlanAssignsWorktreeForLocalWorktreeTask(t *testing.T) {
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "operator", "Operator")
@@ -2983,10 +2913,8 @@ func TestBrokerTaskPlanAssignsWorktreeForLocalWorktreeTask(t *testing.T) {
 }
 
 func TestBrokerTaskCreateAddsAssignedOwnerToChannelMembers(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "youtube-factory", "operator", "Operator")
@@ -3038,10 +2966,8 @@ func TestBrokerTaskCreateAddsAssignedOwnerToChannelMembers(t *testing.T) {
 }
 
 func TestBrokerResumeTaskUnblocksAndSchedulesOwnerLane(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
@@ -3078,10 +3004,8 @@ func TestBrokerResumeTaskUnblocksAndSchedulesOwnerLane(t *testing.T) {
 }
 
 func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "client-loop", "operator", "Operator")
@@ -3133,10 +3057,8 @@ func TestBrokerResumeTaskQueuesBehindExistingExclusiveOwnerLane(t *testing.T) {
 }
 
 func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "youtube-factory", "ceo", "CEO")
@@ -3220,10 +3142,8 @@ func TestBrokerUnblockDependentsQueuesExclusiveOwnerLanes(t *testing.T) {
 }
 
 func TestBrokerTaskPlanRejectsTheaterTaskInLiveDeliveryLane(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "client-delivery", "operator", "Operator")
@@ -3262,10 +3182,8 @@ func TestBrokerTaskPlanRejectsTheaterTaskInLiveDeliveryLane(t *testing.T) {
 }
 
 func TestBrokerTaskCreateRejectsLiveBusinessTheater(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "operator", "Operator")
@@ -3301,10 +3219,8 @@ func TestBrokerTaskCreateRejectsLiveBusinessTheater(t *testing.T) {
 }
 
 func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "operator", "Operator")
@@ -3363,10 +3279,8 @@ func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -3463,10 +3377,8 @@ func TestBrokerReleaseTaskCleansWorktree(t *testing.T) {
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -3534,10 +3446,8 @@ func TestBrokerApproveRetainsLocalWorktree(t *testing.T) {
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -3654,10 +3564,8 @@ func TestBrokerHandlePostTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *tes
 		verifyTaskWorktreeWritable = oldVerify
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
@@ -3742,10 +3650,8 @@ func TestBrokerBlockTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *testing.
 		verifyTaskWorktreeWritable = oldVerify
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
@@ -3801,10 +3707,8 @@ func TestBrokerEnsurePlannedTaskQueuesConcurrentExclusiveOwnerWork(t *testing.T)
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "executor", "Executor")
@@ -3849,10 +3753,8 @@ func TestBrokerEnsurePlannedTaskQueuesConcurrentExclusiveOwnerWork(t *testing.T)
 }
 
 func TestBrokerTaskPlanRoutesLiveBusinessTasksIntoRecentExecutionChannel(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
@@ -3910,10 +3812,8 @@ func TestBrokerTaskPlanRoutesLiveBusinessTasksIntoRecentExecutionChannel(t *test
 }
 
 func TestBrokerTaskPlanReusesExistingActiveLane(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "client-loop", "builder", "Builder")
@@ -4013,10 +3913,8 @@ func TestBrokerBlockTaskAllowsReadOnlyBlockWhenWriteProbeFails(t *testing.T) {
 		verifyTaskWorktreeWritable = oldVerify
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
@@ -4058,10 +3956,8 @@ func TestBrokerCompleteClosesReviewTaskAndUnblocksDependents(t *testing.T) {
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
@@ -4176,10 +4072,8 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
@@ -4345,10 +4239,8 @@ func TestBrokerNormalizeLoadedStateRepairsStaleAssignedWorktree(t *testing.T) {
 }
 
 func TestBrokerUpdatesTaskByIDAcrossChannels(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.channels = []teamChannel{
@@ -4425,10 +4317,8 @@ func TestBrokerCompleteAlreadyDoneTaskStaysApproved(t *testing.T) {
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
@@ -4505,10 +4395,8 @@ func TestBrokerCompleteAlreadyDoneTaskStaysApproved(t *testing.T) {
 }
 
 func TestBrokerBridgeEndpointRecordsVisibleBridge(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -4579,10 +4467,8 @@ func TestBrokerBridgeEndpointRecordsVisibleBridge(t *testing.T) {
 }
 
 func TestBrokerRequestsLifecycle(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -4682,10 +4568,8 @@ func TestBrokerRequestsLifecycle(t *testing.T) {
 // web UI only sees per-channel requests and can't render a blocker that lives
 // in another channel — leaving the human stuck: can't send, can't see why.
 func TestBrokerGetRequestsScopeAllSeesCrossChannelBlocker(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "ceo", "CEO")
@@ -4765,10 +4649,8 @@ func TestBrokerGetRequestsScopeAllSeesCrossChannelBlocker(t *testing.T) {
 }
 
 func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	ensureTestMemberAccess(b, "general", "ceo", "CEO")
@@ -4894,10 +4776,8 @@ func TestBrokerRequestAnswerUnblocksDependentTask(t *testing.T) {
 }
 
 func TestBrokerDecisionRequestsDefaultToBlocking(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -4954,10 +4834,8 @@ func TestBrokerDecisionRequestsDefaultToBlocking(t *testing.T) {
 }
 
 func TestBrokerRequestAnswerRequiresCustomTextWhenOptionNeedsIt(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -5008,10 +4886,8 @@ func TestBrokerRequestAnswerRequiresCustomTextWhenOptionNeedsIt(t *testing.T) {
 }
 
 func TestQueueEndpointShowsDueJobs(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.SetSchedulerJob(schedulerJob{
@@ -5052,10 +4928,8 @@ func TestQueueEndpointShowsDueJobs(t *testing.T) {
 }
 
 func TestBrokerGetMessagesAgentScopeKeepsHumanAndCEOContext(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5175,10 +5049,8 @@ func TestLastTaggedAtSetOnPost(t *testing.T) {
 }
 
 func TestBrokerSurfaceMetadataPersists(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5236,10 +5108,8 @@ func TestBrokerSurfaceMetadataPersists(t *testing.T) {
 
 func TestBrokerSurfaceChannelsFilter(t *testing.T) {
 	t.Skip("skipped: manifest interference")
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5284,10 +5154,8 @@ func TestBrokerSurfaceChannelsFilter(t *testing.T) {
 }
 
 func TestBrokerExternalQueueDeduplication(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5326,10 +5194,8 @@ func TestBrokerExternalQueueDeduplication(t *testing.T) {
 }
 
 func TestBrokerPostInboundSurfaceMessage(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5366,10 +5232,8 @@ func TestBrokerPostInboundSurfaceMessage(t *testing.T) {
 }
 
 func TestInFlightTasksReturnsOnlyNonTerminalOwned(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5419,10 +5283,8 @@ func TestInFlightTasksReturnsOnlyNonTerminalOwned(t *testing.T) {
 }
 
 func TestInFlightTasksExcludesCompletedStatus(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5449,10 +5311,8 @@ func TestInFlightTasksExcludesCompletedStatus(t *testing.T) {
 }
 
 func TestRecentHumanMessagesReturnsLastNHumanMessages(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5480,10 +5340,8 @@ func TestRecentHumanMessagesReturnsLastNHumanMessages(t *testing.T) {
 }
 
 func TestRecentHumanMessagesLimitCapsResults(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5502,10 +5360,8 @@ func TestRecentHumanMessagesLimitCapsResults(t *testing.T) {
 }
 
 func TestRecentHumanMessagesExcludesNonHuman(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5522,10 +5378,8 @@ func TestRecentHumanMessagesExcludesNonHuman(t *testing.T) {
 }
 
 func TestRecentHumanMessagesIncludesNexSender(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5561,10 +5415,8 @@ func TestRecentHumanMessagesIncludesNexSender(t *testing.T) {
 // --- Skill proposal system tests ---
 
 func TestPostSkillProposeCreatesApprovalRequest(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	body := bytes.NewBufferString(`{
@@ -5601,10 +5453,8 @@ func TestPostSkillProposeCreatesApprovalRequest(t *testing.T) {
 }
 
 func TestPostSkillProposeRejectsUnregisteredAgent(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	body := bytes.NewBufferString(`{
@@ -5629,10 +5479,8 @@ func TestPostSkillProposeRejectsUnregisteredAgent(t *testing.T) {
 
 // Test 1: Answering "accept" via HTTP activates the skill.
 func TestSkillProposalAcceptCallbackActivatesSkill(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -5693,10 +5541,8 @@ func TestSkillProposalAcceptCallbackActivatesSkill(t *testing.T) {
 
 // Test 8: Answering "reject" via HTTP archives the skill.
 func TestSkillProposalRejectCallbackArchivesSkill(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -5755,10 +5601,8 @@ func TestSkillProposalRejectCallbackArchivesSkill(t *testing.T) {
 }
 
 func TestRequestAnswerUnblocksReferencedTask(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	if err := b.StartOnPort(0); err != nil {
@@ -5838,10 +5682,8 @@ func TestRequestAnswerUnblocksReferencedTask(t *testing.T) {
 }
 
 func TestInvokeSkillTracksInvokerChannelAndExecutionMetadata(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5894,10 +5736,8 @@ func TestInvokeSkillTracksInvokerChannelAndExecutionMetadata(t *testing.T) {
 
 // Test 10: buildPrompt for the lead includes SKILL & AGENT AWARENESS section.
 func TestBuildPromptLeadIncludesSkillAwareness(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	l := &Launcher{
 		pack: &agent.PackDefinition{
@@ -5919,10 +5759,8 @@ func TestBuildPromptLeadIncludesSkillAwareness(t *testing.T) {
 
 // Test 10: Skill proposal and interview persist and reload correctly.
 func TestSkillProposalPersistenceRoundTrip(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -5969,10 +5807,8 @@ func TestSkillProposalPersistenceRoundTrip(t *testing.T) {
 // message with the same eventID twice stores only one copy and returns the
 // existing message on the second call.
 func TestPostAutomationMessageDeduplicatesByEventID(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 
@@ -6011,10 +5847,8 @@ func TestPostAutomationMessageDeduplicatesByEventID(t *testing.T) {
 // TestExternalQueueDeduplicatesByMessageID verifies that calling ExternalQueue
 // twice for a surface channel only delivers each message once.
 func TestExternalQueueDeduplicatesByMessageID(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 
@@ -6059,10 +5893,8 @@ func TestExternalQueueDeduplicatesByMessageID(t *testing.T) {
 // members (ceo, eng, pm) wired into the general channel, and focus mode on.
 func makeFocusModeLauncher(t *testing.T) (*Launcher, *Broker) {
 	t.Helper()
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 
@@ -6146,10 +5978,8 @@ func TestFocusModeRouting_TaggedSpecialistWakesSpecialistOnly(t *testing.T) {
 // TestFocusModeRouting_CollobaborativeUntaggedWakesAll verifies the contrast:
 // without focus mode, an untagged human message wakes all enabled agents.
 func TestFocusModeRouting_CollaborativeUntaggedWakesAll(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -6234,14 +6064,12 @@ func TestHeadlessQueue_EmptyBeforePush(t *testing.T) {
 // adds exactly one turn to the target agent's queue.
 func TestHeadlessQueue_PopulatedAfterEnqueue(t *testing.T) {
 	// Override headlessCodexRunTurn to be a no-op so no real process is started.
-	origRunTurn := headlessCodexRunTurn
-	headlessCodexRunTurn = func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
 		// Block until the context is cancelled so the worker stays "active"
 		// and doesn't drain the queue during the test assertion window.
 		<-ctx.Done()
 		return ctx.Err()
-	}
-	defer func() { headlessCodexRunTurn = origRunTurn }()
+	})
 
 	l := &Launcher{
 		pack: &agent.PackDefinition{
@@ -6370,10 +6198,8 @@ func TestEnsureDefaultOfficeMembersNoOpWhenNonEmpty(t *testing.T) {
 // ensureDefaultOfficeMembersLocked (called from Broker.Load() at broker.go:2260)
 // silently re-added ceo/planner/executor/reviewer.
 func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()

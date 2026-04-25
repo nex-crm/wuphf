@@ -129,10 +129,8 @@ func TestHandleOfficeMembers_InvalidProviderKind(t *testing.T) {
 }
 
 func TestProviderFieldSurvivesBrokerReload(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -203,10 +201,8 @@ func TestRebuildMemberIndex_AfterRemove(t *testing.T) {
 // httptest server, returning the broker, the server, and the auth token.
 func newBrokerHTTPTest(t *testing.T) (*Broker, *httptest.Server, string) {
 	t.Helper()
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	// Attach a fake bridge so handleOfficeMembers can exercise openclaw

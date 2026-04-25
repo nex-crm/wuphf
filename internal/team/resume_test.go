@@ -115,10 +115,8 @@ func TestFindUnansweredMessagesNexReplyDoesNotCountAsAgentAnswer(t *testing.T) {
 
 func TestBuildResumePacketWithTasksAndMessages(t *testing.T) {
 	// Suppress broker state path for this test.
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	tasks := []teamTask{
 		{ID: "t1", Title: "Build the login page", Owner: "fe", Status: "in_progress"},
@@ -184,10 +182,8 @@ func TestBuildResumePacketMessagesOnly(t *testing.T) {
 // --- Tests for Launcher.buildResumePackets ---
 
 func TestBuildResumePacketsTaggedMessageRoutesToTaggedAgent(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -224,10 +220,8 @@ func TestBuildResumePacketsTaggedMessageRoutesToTaggedAgent(t *testing.T) {
 }
 
 func TestBuildResumePacketsIncludesDynamicBrokerMembersOutsideLaunchPack(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -270,10 +264,8 @@ func TestBuildResumePacketsIncludesDynamicBrokerMembersOutsideLaunchPack(t *test
 }
 
 func TestBuildResumePacketsUntaggedMessageRoutesToLead(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -306,10 +298,8 @@ func TestBuildResumePacketsUntaggedMessageRoutesToLead(t *testing.T) {
 }
 
 func TestBuildResumePacketsInFlightTasksIncluded(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -341,10 +331,8 @@ func TestBuildResumePacketsInFlightTasksIncluded(t *testing.T) {
 }
 
 func TestBuildResumePacketsEmptyWhenNothingInFlight(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	// No tasks, no messages.
@@ -372,10 +360,8 @@ func TestResumeInFlightWorkNoBrokerNoPanic(t *testing.T) {
 }
 
 func TestResumeInFlightWorkNoPackNoPanic(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -391,10 +377,8 @@ func TestResumeInFlightWorkNoPackNoPanic(t *testing.T) {
 }
 
 func TestBuildResumePacketsUnansweredRoutesToLead(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -435,10 +419,8 @@ func TestBuildResumePacketsUnansweredRoutesToLead(t *testing.T) {
 }
 
 func TestBuildResumePacketsSkipsAgentsNotInPack(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -478,10 +460,8 @@ func TestBuildResumePacketsSkipsAgentsNotInPack(t *testing.T) {
 }
 
 func TestBuildResumePacketsSkipsTaggedAgentsNotInPack(t *testing.T) {
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -567,10 +547,8 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 	// Fix: enqueue the lead first so its queue entry is set before specialists'
 	// queues are populated — the queue-hold check fires only when OTHER slugs
 	// have non-empty queues at the time of the CEO enqueue.
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	b := NewBroker()
 	b.mu.Lock()
@@ -689,10 +667,8 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 	// Leaked path (not t.TempDir) so a headless worker goroutine that
 	// outlives the test can keep writing without racing the dir cleanup
 	// and failing the test with an `unlinkat ... directory not empty`.
-	oldPathFn := brokerStatePath
 	statePath := leakedBrokerStatePath(t)
-	brokerStatePath = func() string { return statePath }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return statePath })
 
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
@@ -745,10 +721,8 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 	// Leaked path (not t.TempDir) so a headless worker goroutine that
 	// outlives the test can keep writing without racing the dir cleanup
 	// and failing the test with an `unlinkat ... directory not empty`.
-	oldPathFn := brokerStatePath
 	statePath := leakedBrokerStatePath(t)
-	brokerStatePath = func() string { return statePath }
-	defer func() { brokerStatePath = oldPathFn }()
+	setBrokerStatePathForTest(t, func() string { return statePath })
 
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
