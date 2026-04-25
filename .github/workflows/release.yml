@@ -9,12 +9,33 @@ on:
   # GITHUB_TOKEN does not fire other workflows, but workflow_dispatch does.
   workflow_dispatch:
 
+# Default to least-privilege; per-job blocks below add only what each job
+# actually needs. The release job uploads artifacts (contents: write); npm
+# publish + npx smoke only need to read the repo.
 permissions:
-  contents: write
+  contents: read
+
+# Don't cancel an in-flight release: a partially-finished goreleaser leaves
+# orphan release assets, and a partial npm publish leaves a half-shipped
+# version. Two concurrent releases for the same tag can't be valid anyway —
+# tags are immutable; the second invocation has nothing new to ship.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Env gate sits on the FIRST job that ships anything (goreleaser uploads
+    # GitHub Release artifacts). Putting it on `publish-npm` instead would
+    # leave a published GitHub Release with no corresponding npm package on
+    # rejection, requiring manual cleanup. Pausing here means the human
+    # approves once and both surfaces ship together — or nothing ships.
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/wuphf
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
@@ -65,21 +86,21 @@ jobs:
           REF="${GITHUB_REF#refs/tags/}"
           echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
 
-  publish-npm:
-    needs: release
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ needs.release.outputs.version }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-
+      # npm publish runs in the SAME job as goreleaser so the GitHub Release
+      # and the npm package ship atomically: either both succeed or neither
+      # leaves an artifact users can install. Splitting into two jobs would
+      # let goreleaser ship a GitHub Release that humans can download while
+      # publish-npm fails (env approval timeout, npm registry hiccup,
+      # version-already-published) — leaving the install surfaces drifted.
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Set package version
+      - name: Set npm package version
         working-directory: npm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Publish to npm
@@ -89,12 +110,14 @@ jobs:
         run: npm publish --access public
 
   smoke-test-npx:
-    needs: [release, publish-npm]
+    needs: [release]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     env:
       VERSION: ${{ needs.release.outputs.version }}
     steps:
