@@ -7761,6 +7761,9 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
 	}
+	// Agent turns land here rather than through handlePostMessage. Keep the
+	// durable skill proposal side effect identical for CEO-authored blocks.
+	b.parseSkillProposalLocked(msg)
 	b.appendActionLocked("automation", msg.Source, channel, msg.From, truncateSummary(msg.Title+" "+msg.Content, 140), msg.ID)
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, err
@@ -10391,6 +10394,9 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		Timestamp: now,
 	})
 	b.appendActionLocked(msgKind, "office", channel, sk.CreatedBy, truncateSummary(sk.Title, 140), sk.ID)
+	if action == "propose" {
+		b.appendSkillProposalRequestLocked(sk, channel, now)
+	}
 
 	if err := b.saveLocked(); err != nil {
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -10764,26 +10770,39 @@ func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
 		})
 
 		// Surface the proposal in the Requests panel as a non-blocking human decision.
-		b.counter++
-		interview := humanInterview{
-			ID:        fmt.Sprintf("request-%d", b.counter),
-			Kind:      "skill_proposal",
-			Status:    "pending",
-			From:      msg.From,
-			Channel:   channel,
-			Title:     "Approve skill: " + title,
-			Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", msg.From, title, description),
-			ReplyTo:   slug,
-			Blocking:  false,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
-			{ID: "accept", Label: "Accept"},
-			{ID: "reject", Label: "Reject"},
-		})
-		b.requests = append(b.requests, interview)
+		b.appendSkillProposalRequestLocked(skill, channel, now)
 	}
+}
+
+func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string) {
+	title := strings.TrimSpace(skill.Title)
+	if title == "" {
+		title = strings.TrimSpace(skill.Name)
+	}
+	description := strings.TrimSpace(skill.Description)
+	createdBy := strings.TrimSpace(skill.CreatedBy)
+	if createdBy == "" {
+		createdBy = "system"
+	}
+	b.counter++
+	interview := humanInterview{
+		ID:        fmt.Sprintf("request-%d", b.counter),
+		Kind:      "skill_proposal",
+		Status:    "pending",
+		From:      createdBy,
+		Channel:   normalizeChannelSlug(channel),
+		Title:     "Approve skill: " + title,
+		Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description),
+		ReplyTo:   strings.TrimSpace(skill.Name),
+		Blocking:  false,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
+		{ID: "accept", Label: "Accept"},
+		{ID: "reject", Label: "Reject"},
+	})
+	b.requests = append(b.requests, interview)
 }
 
 // SeedDefaultSkills pre-populates the broker with the pack's default skills.

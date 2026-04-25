@@ -5612,6 +5612,82 @@ func TestParseSkillProposalCEOHappyPath(t *testing.T) {
 	}
 }
 
+func TestPostMessageParsesCEOSkillProposal(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
+	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
+	b.messages = nil
+	b.requests = nil
+	b.skills = nil
+	b.counter = 0
+	b.mu.Unlock()
+
+	if _, err := b.PostMessage("ceo", "general", "I noticed a pattern.\n\n"+skillProposalContent("agent-handoff", "Agent Handoff"), nil, ""); err != nil {
+		t.Fatalf("PostMessage: %v", err)
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.skills) != 1 {
+		t.Fatalf("expected 1 skill from CEO PostMessage, got %d", len(b.skills))
+	}
+	if got := b.skills[0].Name; got != "agent-handoff" {
+		t.Fatalf("expected skill name agent-handoff, got %q", got)
+	}
+	if b.skills[0].Status != "proposed" {
+		t.Fatalf("expected status 'proposed', got %q", b.skills[0].Status)
+	}
+	if len(b.requests) != 1 || b.requests[0].Kind != "skill_proposal" {
+		t.Fatalf("expected skill_proposal request from CEO PostMessage, got %+v", b.requests)
+	}
+}
+
+func TestPostSkillProposeCreatesApprovalRequest(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	body := bytes.NewBufferString(`{
+		"action":"propose",
+		"name":"deterministic-skill",
+		"title":"Deterministic Skill",
+		"description":"Created through the skill API.",
+		"content":"1. Do the deterministic thing",
+		"created_by":"ceo",
+		"channel":"general"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills", body)
+	rec := httptest.NewRecorder()
+
+	b.handlePostSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.skills) != 1 {
+		t.Fatalf("expected proposed skill, got %+v", b.skills)
+	}
+	if b.skills[0].Status != "proposed" {
+		t.Fatalf("expected proposed status, got %q", b.skills[0].Status)
+	}
+	if len(b.requests) != 1 {
+		t.Fatalf("expected approval request, got %+v", b.requests)
+	}
+	if b.requests[0].Kind != "skill_proposal" || b.requests[0].ReplyTo != "deterministic-skill" {
+		t.Fatalf("unexpected skill proposal request: %+v", b.requests[0])
+	}
+}
+
 // Test 2: Non-CEO message is silently skipped.
 func TestParseSkillProposalNonCEOSkipped(t *testing.T) {
 	b := &Broker{}

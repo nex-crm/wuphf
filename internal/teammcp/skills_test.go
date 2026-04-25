@@ -146,3 +146,128 @@ func TestHandleTeamSkillRunMissingSkillReturnsToolError(t *testing.T) {
 		t.Fatalf("expected IsError=true for missing skill, got %+v", res)
 	}
 }
+
+func TestHandleTeamSkillCreateProposesSkill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
+		Name:        "handoff-checklist",
+		Title:       "Handoff Checklist",
+		Description: "A deterministic checklist for cross-agent handoffs.",
+		Content:     "1. Summarize state.\n2. Name the owner.\n3. Name the next action.",
+		Trigger:     "Before delegating multi-step work",
+		Tags:        []string{"coordination", "ops"},
+		MySlug:      "ceo",
+		Channel:     "general",
+	})
+	if err != nil {
+		t.Fatalf("skill create: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected successful tool result, got %+v", res)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/skills?channel=general", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get skills: %v", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Skills []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"skills"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode skills: %v", err)
+	}
+	if len(result.Skills) != 1 {
+		t.Fatalf("expected 1 skill, got %+v", result.Skills)
+	}
+	if got := result.Skills[0].Name; got != "handoff-checklist" {
+		t.Fatalf("expected handoff-checklist skill, got %q", got)
+	}
+	if got := result.Skills[0].Status; got != "proposed" {
+		t.Fatalf("expected proposed skill, got %q", got)
+	}
+	if got := len(b.Requests("general", false)); got != 1 {
+		t.Fatalf("expected 1 approval request, got %d", got)
+	}
+}
+
+func TestHandleTeamSkillCreateRejectsNonCEO(t *testing.T) {
+	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
+		Name:    "handoff-checklist",
+		Content: "1. Do it",
+		MySlug:  "pm",
+	})
+	if err != nil {
+		t.Fatalf("unexpected go error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected IsError=true for non-CEO create, got %+v", res)
+	}
+}
+
+func TestHandleTeamSkillCreateCanActivateImmediately(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
+		Name:    "already-approved",
+		Title:   "Already Approved",
+		Content: "1. Run the already-approved workflow.",
+		Action:  "create",
+		MySlug:  "ceo",
+		Channel: "general",
+	})
+	if err != nil {
+		t.Fatalf("skill create: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected successful tool result, got %+v", res)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+b.Addr()+"/skills?channel=general", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get skills: %v", err)
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Skills []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+		} `json:"skills"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		t.Fatalf("decode skills: %v", err)
+	}
+	if len(result.Skills) != 1 || result.Skills[0].Name != "already-approved" {
+		t.Fatalf("expected already-approved skill, got %+v", result.Skills)
+	}
+	if got := result.Skills[0].Status; got != "active" {
+		t.Fatalf("expected active skill, got %q", got)
+	}
+	if got := len(b.Requests("general", false)); got != 0 {
+		t.Fatalf("expected no approval request for action=create, got %d", got)
+	}
+}

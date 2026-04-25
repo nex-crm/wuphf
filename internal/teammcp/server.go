@@ -619,6 +619,10 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 		registerSharedMemoryTools(server)
 
+		if slug == "" || slug == "ceo" {
+			registerSkillAuthoringTools(server)
+		}
+
 		mcp.AddTool(server, readOnlyTool(
 			"team_runtime_state",
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
@@ -659,6 +663,9 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
+		if slug == "" || slug == "ceo" {
+			registerSkillAuthoringTools(server)
+		}
 		if hasActionProvider() {
 			registerActionTools(server)
 		}
@@ -772,6 +779,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 	// guidance, but the MCP schema omits them, so the model cannot call them
 	// and cannot waste a ToolSearch turn looking them up.
 	if isLead {
+		registerSkillAuthoringTools(server)
 		mcp.AddTool(server, officeWriteTool(
 			"team_plan",
 			"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
