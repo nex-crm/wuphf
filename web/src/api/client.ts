@@ -719,7 +719,7 @@ export function resetWorkspace() {
 
 // shredWorkspace is the full wipe: broker runtime + team + company + office,
 // workflows, logs, sessions, provider state, and local markdown memory.
-// The broker exits after success; relaunch WUPHF to reopen onboarding.
+// The broker resets in place after success so onboarding can reopen immediately.
 export function shredWorkspace() {
   return postWithTimeout<WorkspaceWipeResult>("/workspace/shred", {}, 20_000);
 }

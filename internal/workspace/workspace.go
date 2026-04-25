@@ -6,12 +6,13 @@
 //
 //   - Shred: full. Everything Reset does, plus deletes the team roster, company
 //     identity, the office's task receipts, saved workflows, logs, sessions,
-//     provider state, calendar, and local markdown memory. The next launch
-//     shows the onboarding wizard.
+//     provider state, calendar, and local markdown memory. The next load shows
+//     the onboarding wizard.
 //
-// Preserved in both cases: task-worktrees/, openclaw/, config.json. In-flight
-// work remains on disk so branches and local changes inside task worktrees
-// survive, and credentials/preferences stay available for the next launch.
+// Preserved in both cases: office.pid, task-worktrees/, openclaw/, config.json.
+// In-flight work remains on disk so branches and local changes inside task
+// worktrees survive, and credentials/preferences stay available for the next
+// launch.
 package workspace
 
 import (
@@ -19,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/nex-crm/wuphf/internal/company"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -32,20 +34,18 @@ type Result struct {
 	Errors  []string `json:"errors,omitempty"`
 }
 
-// ClearRuntime performs a narrow reset: deletes the broker state directory.
-// Task worktrees stay on disk. Safe to call when no broker is running. Callers
-// that need to stop a live broker or tmux session must do so separately — this
-// package only touches the disk.
+// ClearRuntime performs a narrow reset: deletes the broker state file and the
+// last-good snapshot. Safe to call when no broker is running. The live broker
+// may keep using the same office.pid and team directory; callers that want to
+// clear in-memory runtime should do so separately.
 func ClearRuntime() (Result, error) {
-	home, err := wuphfHome()
+	var res Result
+	statePath, snapshotPath, err := brokerStatePaths()
 	if err != nil {
 		return Result{}, err
 	}
-	var res Result
-	// ~/.wuphf/team/ holds broker-state.json, office.pid, and the snapshot.
-	// Wiping the whole dir is simpler than enumerating and matches what
-	// the broker rebuilds on next boot.
-	res.removeIfPresent(filepath.Join(home, "team"))
+	res.removeIfPresent(statePath)
+	res.removeIfPresent(snapshotPath)
 	return res, nil
 }
 
@@ -83,6 +83,18 @@ func wuphfHome() (string, error) {
 		return "", errors.New("workspace: could not resolve home directory")
 	}
 	return filepath.Join(home, ".wuphf"), nil
+}
+
+func brokerStatePaths() (string, string, error) {
+	if p := strings.TrimSpace(os.Getenv("WUPHF_BROKER_STATE_PATH")); p != "" {
+		return p, p + ".last-good", nil
+	}
+	home, err := wuphfHome()
+	if err != nil {
+		return "", "", err
+	}
+	path := filepath.Join(home, "team", "broker-state.json")
+	return path, path + ".last-good", nil
 }
 
 func (r *Result) removeIfPresent(path string) {

@@ -147,3 +147,29 @@ func TestShredHandlerOnEmptyHomeIsOK(t *testing.T) {
 		t.Fatalf("expected 200 on empty home, got %d", w.Code)
 	}
 }
+
+func TestShredHandlerResetsLiveRuntimeWithoutRestartHint(t *testing.T) {
+	dir := withRuntimeHome(t)
+	seedWorkspace(t, dir)
+
+	var resetCalls int
+	mux := http.NewServeMux()
+	RegisterRoutesWithOptions(mux, RouteOptions{
+		ResetRuntime: func() { resetCalls++ },
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/workspace/shred", nil)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if resetCalls != 1 {
+		t.Fatalf("expected reset callback once, got %d", resetCalls)
+	}
+	body := decodeBody(t, w.Body.String())
+	if restartRequired, _ := body["restart_required"].(bool); restartRequired {
+		t.Fatalf("expected restart_required=false when reset callback is wired, got %v", body)
+	}
+}

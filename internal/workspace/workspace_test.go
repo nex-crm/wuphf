@@ -13,22 +13,23 @@ func seedWorkspace(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	base := filepath.Join(dir, ".wuphf")
 	paths := map[string]string{
-		"onboarded":   filepath.Join(base, "onboarded.json"),
-		"company":     filepath.Join(base, "company.json"),
-		"brokerState": filepath.Join(base, "team", "broker-state.json"),
-		"officePID":   filepath.Join(base, "team", "office.pid"),
-		"officeTasks": filepath.Join(base, "office", "tasks", "t-1.json"),
-		"workflow":    filepath.Join(base, "workflows", "wf-1.json"),
-		"logs":        filepath.Join(base, "logs", "channel-stderr.log"),
-		"session":     filepath.Join(base, "sessions", "s-1.json"),
-		"worktree":    filepath.Join(base, "task-worktrees", "wt-1", "file"),
-		"codex":       filepath.Join(base, "codex-headless", "cache"),
-		"providers":   filepath.Join(base, "providers", "claude-sessions.json"),
-		"openclaw":    filepath.Join(base, "openclaw", "identity.json"),
-		"config":      filepath.Join(base, "config.json"),
-		"calendar":    filepath.Join(base, "calendar.json"),
-		"wiki":        filepath.Join(base, "wiki", "team", "playbooks", "starter.md"),
-		"wikiBackup":  filepath.Join(base, "wiki.bak", "team", "playbooks", "starter.md"),
+		"onboarded":           filepath.Join(base, "onboarded.json"),
+		"company":             filepath.Join(base, "company.json"),
+		"brokerState":         filepath.Join(base, "team", "broker-state.json"),
+		"brokerStateSnapshot": filepath.Join(base, "team", "broker-state.json.last-good"),
+		"officePID":           filepath.Join(base, "team", "office.pid"),
+		"officeTasks":         filepath.Join(base, "office", "tasks", "t-1.json"),
+		"workflow":            filepath.Join(base, "workflows", "wf-1.json"),
+		"logs":                filepath.Join(base, "logs", "channel-stderr.log"),
+		"session":             filepath.Join(base, "sessions", "s-1.json"),
+		"worktree":            filepath.Join(base, "task-worktrees", "wt-1", "file"),
+		"codex":               filepath.Join(base, "codex-headless", "cache"),
+		"providers":           filepath.Join(base, "providers", "claude-sessions.json"),
+		"openclaw":            filepath.Join(base, "openclaw", "identity.json"),
+		"config":              filepath.Join(base, "config.json"),
+		"calendar":            filepath.Join(base, "calendar.json"),
+		"wiki":                filepath.Join(base, "wiki", "team", "playbooks", "starter.md"),
+		"wikiBackup":          filepath.Join(base, "wiki.bak", "team", "playbooks", "starter.md"),
 	}
 	for _, p := range paths {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
@@ -77,13 +78,13 @@ func TestClearRuntimeRemovesBrokerStateOnly(t *testing.T) {
 	}
 
 	assertGone(t, "brokerState", paths["brokerState"])
-	assertGone(t, "officePID", paths["officePID"])
+	assertGone(t, "brokerStateSnapshot", paths["brokerStateSnapshot"])
 
 	// Everything else survives a narrow reset.
 	for _, label := range []string{
 		"onboarded", "company", "officeTasks", "workflow",
 		"logs", "session", "worktree", "codex", "providers",
-		"openclaw", "config", "calendar",
+		"officePID", "openclaw", "config", "calendar",
 	} {
 		assertStays(t, label, paths[label])
 	}
@@ -103,7 +104,7 @@ func TestShredRemovesWorkspaceHistoryButPreservesUserWorkAndConfig(t *testing.T)
 
 	// Wiped by shred.
 	for _, label := range []string{
-		"onboarded", "company", "brokerState", "officePID",
+		"onboarded", "company", "brokerState", "brokerStateSnapshot",
 		"officeTasks", "workflow", "logs", "session", "codex",
 		"providers", "calendar", "wiki", "wikiBackup",
 	} {
@@ -112,7 +113,7 @@ func TestShredRemovesWorkspaceHistoryButPreservesUserWorkAndConfig(t *testing.T)
 
 	// Preserved: in-flight work and user credentials/preferences.
 	for _, label := range []string{
-		"worktree", "openclaw", "config",
+		"officePID", "worktree", "openclaw", "config",
 	} {
 		assertStays(t, label, paths[label])
 	}
