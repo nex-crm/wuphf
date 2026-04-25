@@ -1,6 +1,9 @@
 package onboarding
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,12 +37,12 @@ func TestCheckOneNonexistentBinary(t *testing.T) {
 	}
 }
 
-func TestCheckAllReturnsSixItems(t *testing.T) {
+func TestCheckAllReturnsSevenItems(t *testing.T) {
 	results := CheckAll()
-	if len(results) != 6 {
-		t.Fatalf("CheckAll: got %d results, want 6", len(results))
+	if len(results) != 7 {
+		t.Fatalf("CheckAll: got %d results, want 7", len(results))
 	}
-	names := []string{"node", "git", "claude", "codex", "cursor", "windsurf"}
+	names := []string{"node", "git", "claude", "codex", "opencode", "cursor", "windsurf"}
 	for i, r := range results {
 		if r.Name != names[i] {
 			t.Errorf("CheckAll[%d].Name: got %q, want %q", i, r.Name, names[i])
@@ -49,12 +52,13 @@ func TestCheckAllReturnsSixItems(t *testing.T) {
 
 func TestCheckAllRequiredFlags(t *testing.T) {
 	// node and git are required (infrastructure).
-	// claude, codex, cursor, windsurf are optional — the user picks runtime CLIs.
+	// claude, codex, opencode, cursor, windsurf are optional — the user picks runtime CLIs.
 	wantRequired := map[string]bool{
 		"node":     true,
 		"git":      true,
 		"claude":   false,
 		"codex":    false,
+		"opencode": false,
 		"cursor":   false,
 		"windsurf": false,
 	}
@@ -75,6 +79,7 @@ func TestCheckAllInstallURLs(t *testing.T) {
 		"git":      "https://git-scm.com",
 		"claude":   "https://claude.ai/code",
 		"codex":    "https://github.com/openai/codex",
+		"opencode": "https://opencode.ai",
 		"cursor":   "https://cursor.com/",
 		"windsurf": "https://codeium.com/windsurf",
 	}
@@ -103,5 +108,31 @@ func TestCheckOneResultFields(t *testing.T) {
 	}
 	if !r.Found && r.Version != "" {
 		t.Error("if Found is false, Version should be empty")
+	}
+}
+
+func TestCheckOneFindsOpencodeInCommonUserBinWhenPATHIsMinimal(t *testing.T) {
+	home := t.TempDir()
+	binDir := filepath.Join(home, ".opencode", "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatalf("mkdir opencode bin: %v", err)
+	}
+	opencodePath := filepath.Join(binDir, "opencode")
+	if err := os.WriteFile(opencodePath, []byte("#!/bin/sh\nprintf 'opencode 9.9.9\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake opencode: %v", err)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", filepath.Join(home, "minimal-path"))
+
+	r := CheckOne("opencode")
+	if !r.Found {
+		t.Fatal("expected fallback opencode to be found")
+	}
+	if r.Version != "opencode 9.9.9" {
+		t.Fatalf("Version: got %q, want %q", r.Version, "opencode 9.9.9")
+	}
+	if got := os.Getenv("PATH"); !strings.Contains(got, binDir) {
+		t.Fatalf("expected PATH to include discovered opencode dir, got %q", got)
 	}
 }

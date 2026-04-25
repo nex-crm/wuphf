@@ -1,56 +1,51 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { useOfficeMembers } from '../../hooks/useMembers'
+import { useEffect, useMemo, useRef } from "react";
+
+import type { OfficeMember } from "../../api/client";
+import {
+  FALLBACK_SLASH_COMMANDS,
+  type SlashCommand,
+} from "../../hooks/useCommands";
+import { useOfficeMembers } from "../../hooks/useMembers";
 
 export interface AutocompleteItem {
   /** Token to insert (e.g. "/clear" or "@ceo"). */
-  insert: string
+  insert: string;
   /** Primary label shown in the panel. */
-  label: string
+  label: string;
   /** Secondary description. */
-  desc?: string
+  desc?: string;
   /** Leading glyph. */
-  icon?: string
+  icon?: string;
 }
 
-export interface SlashCommand {
-  name: string
-  desc: string
-  icon: string
-}
+export type { SlashCommand };
 
-export const SLASH_COMMANDS: SlashCommand[] = [
-  { name: '/clear', desc: 'Clear messages', icon: '\uD83E\uDDF9' },
-  { name: '/help', desc: 'Show all commands', icon: '\u2753' },
-  { name: '/reset', desc: 'Reset the office', icon: '\uD83D\uDD04' },
-  { name: '/search', desc: 'Search messages', icon: '\uD83D\uDD0E' },
-  { name: '/tasks', desc: 'Open task board', icon: '\uD83D\uDCCB' },
-  { name: '/requests', desc: 'Open requests', icon: '\uD83D\uDD14' },
-  { name: '/recover', desc: 'Health Check view', icon: '\uD83D\uDD01' },
-  { name: '/1o1', desc: '1:1 with agent', icon: '\uD83D\uDCAC' },
-  { name: '/task', desc: 'Task actions', icon: '\u2705' },
-  { name: '/cancel', desc: 'Cancel a task', icon: '\u274C' },
-  { name: '/policies', desc: 'View policies', icon: '\uD83D\uDCDC' },
-  { name: '/calendar', desc: 'View schedule', icon: '\uD83D\uDCC5' },
-  { name: '/skills', desc: 'View skills', icon: '\u26A1' },
-  { name: '/focus', desc: 'Switch to delegation mode', icon: '\uD83C\uDFAF' },
-  { name: '/collab', desc: 'Switch to collaborative mode', icon: '\uD83E\uDD1D' },
-  { name: '/pause', desc: 'Pause all agents', icon: '\u23F8' },
-  { name: '/resume', desc: 'Resume all agents', icon: '\u25B6' },
-  { name: '/threads', desc: 'See every active thread', icon: '\uD83E\uDDF5' },
-  { name: '/provider', desc: 'Switch runtime provider', icon: '\u2699' },
-]
+/**
+ * Legacy export preserved for callers that import SLASH_COMMANDS directly
+ * (tests, external tooling). The live autocomplete now reads from the
+ * broker via useCommands; this is the offline fallback list.
+ */
+export const SLASH_COMMANDS: SlashCommand[] = FALLBACK_SLASH_COMMANDS;
+
+const MAX_AUTOCOMPLETE_ITEMS = 8;
 
 interface AutocompleteProps {
   /** Current composer text. */
-  value: string
+  value: string;
   /** Caret position in the textarea (0-based). */
-  caret: number
+  caret: number;
   /** Currently highlighted item index, set by parent. */
-  selectedIdx: number
+  selectedIdx: number;
   /** Notify parent of total visible items so it can clamp selectedIdx. */
-  onItems: (items: AutocompleteItem[]) => void
+  onItems: (items: AutocompleteItem[]) => void;
   /** Pick an item: parent rewrites the text. */
-  onPick: (item: AutocompleteItem) => void
+  onPick: (item: AutocompleteItem) => void;
+  /**
+   * Slash-command set to offer. Parent supplies this (usually from
+   * useCommands) so the broker registry stays the single source of truth.
+   * Defaults to the offline fallback when omitted.
+   */
+  commands?: SlashCommand[];
 }
 
 /**
@@ -58,50 +53,48 @@ interface AutocompleteProps {
  * keyboard handling (up/down/enter/tab/escape) — this component only
  * paints, calculates the items list, and reports it.
  */
-export function Autocomplete({ value, caret, selectedIdx, onItems, onPick }: AutocompleteProps) {
-  const { data: members = [] } = useOfficeMembers()
-  const listRef = useRef<HTMLDivElement>(null)
+export function Autocomplete({
+  value,
+  caret,
+  selectedIdx,
+  onItems,
+  onPick,
+  commands = SLASH_COMMANDS,
+}: AutocompleteProps) {
+  const { data: members = [] } = useOfficeMembers();
+  const listRef = useRef<HTMLDivElement>(null);
 
   const items = useMemo<AutocompleteItem[]>(() => {
-    const trigger = currentTrigger(value, caret)
-    if (!trigger) return []
-    if (trigger.kind === 'slash') {
-      const q = trigger.query.toLowerCase()
-      return SLASH_COMMANDS
+    const trigger = currentTrigger(value, caret);
+    if (!trigger) return [];
+    if (trigger.kind === "slash") {
+      const q = trigger.query.toLowerCase();
+      return commands
         .filter((c) => c.name.slice(1).toLowerCase().startsWith(q))
-        .slice(0, 8)
-        .map((c) => ({ insert: c.name, label: c.name, desc: c.desc, icon: c.icon }))
+        .slice(0, MAX_AUTOCOMPLETE_ITEMS)
+        .map((c) => ({
+          insert: c.name,
+          label: c.name,
+          desc: c.desc,
+          icon: c.icon,
+        }));
     }
-    const q = trigger.query.toLowerCase()
-    return members
-      .filter((m) => m.slug && m.slug !== 'human' && m.slug !== 'you')
-      .filter((m) => {
-        if (!q) return true
-        return (
-          (m.slug || '').toLowerCase().includes(q) ||
-          (m.name || '').toLowerCase().includes(q)
-        )
-      })
-      .slice(0, 8)
-      .map((m) => ({
-        insert: '@' + m.slug,
-        label: '@' + m.slug,
-        desc: m.name,
-        icon: m.emoji || '\uD83E\uDD16',
-      }))
-  }, [value, caret, members])
+    return mentionAutocompleteItems(trigger.query, members);
+  }, [value, caret, members, commands]);
 
   useEffect(() => {
-    onItems(items)
-  }, [items, onItems])
+    onItems(items);
+  }, [items, onItems]);
 
   // Scroll selected into view
   useEffect(() => {
-    const el = listRef.current?.children[selectedIdx] as HTMLElement | undefined
-    el?.scrollIntoView({ block: 'nearest' })
-  }, [selectedIdx])
+    const el = listRef.current?.children[selectedIdx] as
+      | HTMLElement
+      | undefined;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [selectedIdx]);
 
-  if (items.length === 0) return null
+  if (items.length === 0) return null;
 
   return (
     <div ref={listRef} className="autocomplete open">
@@ -109,20 +102,57 @@ export function Autocomplete({ value, caret, selectedIdx, onItems, onPick }: Aut
         <button
           key={item.insert}
           type="button"
-          className={`autocomplete-item${idx === selectedIdx ? ' selected' : ''}`}
+          className={`autocomplete-item${idx === selectedIdx ? " selected" : ""}`}
           onMouseDown={(e) => {
             // Prevent textarea blur before the click registers
-            e.preventDefault()
-            onPick(item)
+            e.preventDefault();
+            onPick(item);
           }}
         >
           <span className="autocomplete-item-icon">{item.icon}</span>
           <span className="autocomplete-item-label">{item.label}</span>
-          {item.desc && <span className="autocomplete-item-desc">{item.desc}</span>}
+          {item.desc && (
+            <span className="autocomplete-item-desc">{item.desc}</span>
+          )}
         </button>
       ))}
     </div>
-  )
+  );
+}
+
+export function mentionAutocompleteItems(
+  query: string,
+  members: Pick<OfficeMember, "slug" | "name" | "emoji">[],
+): AutocompleteItem[] {
+  const q = query.toLowerCase();
+  const items: AutocompleteItem[] = [];
+  if ("all".startsWith(q)) {
+    items.push({
+      insert: "@all",
+      label: "@all",
+      desc: "Notify every agent",
+      icon: "📣",
+    });
+  }
+  for (const member of members) {
+    if (!member.slug || member.slug === "human" || member.slug === "you")
+      continue;
+    if (
+      q &&
+      !member.slug.toLowerCase().includes(q) &&
+      !(member.name || "").toLowerCase().includes(q)
+    ) {
+      continue;
+    }
+    items.push({
+      insert: `@${member.slug}`,
+      label: `@${member.slug}`,
+      desc: member.name,
+      icon: member.emoji || "🤖",
+    });
+    if (items.length >= MAX_AUTOCOMPLETE_ITEMS) break;
+  }
+  return items;
 }
 
 /**
@@ -136,21 +166,21 @@ export function Autocomplete({ value, caret, selectedIdx, onItems, onPick }: Aut
 export function currentTrigger(
   value: string,
   caret: number,
-): { kind: 'slash' | 'mention'; query: string; start: number } | null {
-  const before = value.slice(0, caret)
+): { kind: "slash" | "mention"; query: string; start: number } | null {
+  const before = value.slice(0, caret);
   // Slash must be at the very start of input (legacy behavior)
   if (/^\/\S*$/.test(value) && caret > 0) {
-    return { kind: 'slash', query: value.slice(1, caret), start: 0 }
+    return { kind: "slash", query: value.slice(1, caret), start: 0 };
   }
   // @-mention: find the last @ that is preceded by start-of-string or whitespace,
   // and has no whitespace between it and the caret.
-  const atIdx = before.lastIndexOf('@')
-  if (atIdx === -1) return null
-  const prevChar = atIdx === 0 ? '' : before[atIdx - 1]
-  if (prevChar !== '' && !/\s/.test(prevChar)) return null
-  const tail = before.slice(atIdx + 1)
-  if (/\s/.test(tail)) return null
-  return { kind: 'mention', query: tail, start: atIdx }
+  const atIdx = before.lastIndexOf("@");
+  if (atIdx === -1) return null;
+  const prevChar = atIdx === 0 ? "" : before[atIdx - 1];
+  if (prevChar !== "" && !/\s/.test(prevChar)) return null;
+  const tail = before.slice(atIdx + 1);
+  if (/\s/.test(tail)) return null;
+  return { kind: "mention", query: tail, start: atIdx };
 }
 
 /**
@@ -162,10 +192,13 @@ export function applyAutocomplete(
   caret: number,
   item: AutocompleteItem,
 ): { text: string; caret: number } {
-  const trigger = currentTrigger(value, caret)
-  if (!trigger) return { text: value, caret }
-  const before = value.slice(0, trigger.start)
-  const after = value.slice(caret)
-  const insert = item.insert + ' '
-  return { text: before + insert + after, caret: before.length + insert.length }
+  const trigger = currentTrigger(value, caret);
+  if (!trigger) return { text: value, caret };
+  const before = value.slice(0, trigger.start);
+  const after = value.slice(caret);
+  const insert = `${item.insert} `;
+  return {
+    text: before + insert + after,
+    caret: before.length + insert.length,
+  };
 }

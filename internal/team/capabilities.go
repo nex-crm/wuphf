@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 )
 
 type CapabilityLevel string
@@ -47,11 +48,12 @@ type TmuxCapability struct {
 type RuntimeCapabilities struct {
 	Tmux     TmuxCapability
 	Codex    CapabilityStatus
+	Opencode CapabilityStatus
 	Items    []CapabilityStatus
 	Registry CapabilityRegistry
 }
 
-var lookPathFn = exec.LookPath
+var lookPathFn = runtimebin.LookPath
 var commandCombinedOutputFn = func(name string, args ...string) ([]byte, error) {
 	return exec.Command(name, args...).CombinedOutput()
 }
@@ -64,7 +66,8 @@ func DetectRuntimeCapabilitiesWithOptions(opts CapabilityProbeOptions) RuntimeCa
 	tmuxStatus, tmux := probeTmuxCapability()
 	claudeStatus := probeBinaryCapability("claude", "Install claude so WUPHF can start teammate runtime sessions.")
 	codexStatus := probeBinaryCapability("codex", "Install Codex CLI and run `codex login` so WUPHF can start the headless Codex office runtime.")
-	registry := buildCapabilityRegistry(config.ResolveLLMProvider(""), tmuxStatus, claudeStatus, codexStatus, opts)
+	opencodeStatus := probeBinaryCapability("opencode", "Install Opencode CLI (https://opencode.ai) and configure your provider credentials so WUPHF can start the headless Opencode office runtime.")
+	registry := buildCapabilityRegistry(config.ResolveLLMProvider(""), tmuxStatus, claudeStatus, codexStatus, opencodeStatus, opts)
 	summaryKeys := []string{
 		CapabilityKeyOfficeRuntime,
 		CapabilityKeyDirectRuntime,
@@ -80,6 +83,7 @@ func DetectRuntimeCapabilitiesWithOptions(opts CapabilityProbeOptions) RuntimeCa
 	return RuntimeCapabilities{
 		Tmux:     tmux,
 		Codex:    codexStatus,
+		Opencode: opencodeStatus,
 		Items:    registry.SummaryStatuses(summaryKeys...),
 		Registry: registry,
 	}

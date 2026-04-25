@@ -1,10 +1,13 @@
 {
   "name": "wuphf-dev-tooling",
   "private": true,
-  "description": "Root-level dev tooling (secretlint). The app itself is Go; web UI lives in ./web with its own package.json.",
+  "description": "Root-level dev tooling (secretlint, commitlint). The app itself is Go; web UI lives in ./web with its own package.json.",
   "devDependencies": {
-    "secretlint": "^11.4.1",
-    "@secretlint/secretlint-rule-preset-recommend": "^11.4.1"
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "@secretlint/secretlint-rule-pattern": "^12.2.0",
+    "@secretlint/secretlint-rule-preset-recommend": "^12.2.0",
+    "secretlint": "^12.2.0"
   },
-  "version": "0.0.6.0"
+  "version": "0.0.7.1"
 }

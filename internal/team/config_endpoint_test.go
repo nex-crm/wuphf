@@ -20,6 +20,10 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 	// Redirect config file to a temp HOME so we don't clobber user state.
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	// Pair HOME with WUPHF_RUNTIME_HOME so config.RuntimeHomeDir resolves
+	// to this test's tmpdir instead of the process-level leaked home
+	// from worktree_guard_test's init.
+	t.Setenv("WUPHF_RUNTIME_HOME", tmp)
 	if err := os.MkdirAll(filepath.Join(tmp, ".wuphf"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +114,40 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 	disk, _ := os.ReadFile(filepath.Join(tmp, ".wuphf", "config.json"))
 	if !strings.Contains(string(disk), `"llm_provider": "codex"`) {
 		t.Fatalf("config.json missing codex: %s", string(disk))
+	}
+
+	// POST /config with opencode — same flow as codex above, regression test
+	// for the broker allowlist missing "opencode" (the web UI would silently
+	// drop the switch because SettingsApp/ProviderSwitcher/Wizard all POST
+	// llm_provider=opencode).
+	body = bytes.NewBufferString(`{"llm_provider":"opencode"}`)
+	req, _ = http.NewRequest(http.MethodPost, "http://"+b.addr+"/config", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /config {opencode}: %v", err)
+	}
+	raw, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("POST /config {llm_provider:opencode} status=%d body=%s", resp.StatusCode, string(raw))
+	}
+
+	// The `llm_provider_priority` allowlist had the same bug as `llm_provider`
+	// (broker.go:5617) — regression test so both switches stay in sync.
+	body = bytes.NewBufferString(`{"llm_provider_priority":["opencode","claude-code"]}`)
+	req, _ = http.NewRequest(http.MethodPost, "http://"+b.addr+"/config", body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST /config priority: %v", err)
+	}
+	rawPriority, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("POST /config {llm_provider_priority:[opencode,...]} status=%d body=%s", resp.StatusCode, string(rawPriority))
 	}
 
 	// Reject unsupported provider

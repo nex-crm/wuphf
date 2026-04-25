@@ -20,18 +20,129 @@ import (
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 func TestMain(m *testing.M) {
-	// Redirect broker token file to a temp path so tests don't clobber the live broker token
-	// at /tmp/wuphf-broker-token. Tests get the token directly from b.Token(), not from the file.
-	dir, err := os.MkdirTemp("", "wuphf-broker-test-*")
-	if err == nil {
-		brokerTokenFilePath = filepath.Join(dir, "broker-token")
-		defer os.RemoveAll(dir)
+	// Globals that leaked background goroutines can write to after a test
+	// returns need a process-lifetime home so cleanup doesn't race the
+	// leaked writes. We pre-seed two (token file, headless log dir) and
+	// deliberately DO NOT pre-seed brokerStatePath: NewBroker auto-loads
+	// from that path, so a shared default would cross-contaminate tests
+	// that add state without their own swap.
+	var cleanups []func()
+	cleanup := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
 	}
-	os.Exit(m.Run())
+
+	// 1) Broker token file: default path is /tmp/wuphf-broker-token which
+	//    collides with a running broker. Point at a temp file so tests
+	//    don't clobber it. Tests get the token directly from b.Token().
+	//    Fail fast if we cannot establish the redirect — a silent fallback
+	//    to the production path is exactly the collision this guards against.
+	dir, err := os.MkdirTemp("", "wuphf-broker-test-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: mktemp broker-token dir: %v\n", err)
+		os.Exit(1)
+	}
+	brokerTokenFilePath = filepath.Join(dir, "broker-token")
+	cleanups = append(cleanups, func() { _ = os.RemoveAll(dir) })
+
+	// 2) Headless log dir: leaked headless-worker goroutines open append
+	//    files under wuphfLogDir(). WUPHF_LOG_DIR is the env hook; honored
+	//    by wuphfLogDir() in headless_codex.go. Append-only writes are
+	//    safe to share across tests (nothing reads them). Fail fast on
+	//    mktemp error for the same reason as above — and run any cleanups
+	//    already registered so the token dir doesn't leak on the error path.
+	logDir, err := os.MkdirTemp("", "wuphf-team-test-logs-*")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "TestMain: mktemp headless log dir: %v\n", err)
+		cleanup()
+		os.Exit(1)
+	}
+	if err := os.Setenv("WUPHF_LOG_DIR", logDir); err != nil {
+		// Silent fallback to the default log dir would reintroduce the
+		// cross-test cleanup race this setup exists to prevent.
+		fmt.Fprintf(os.Stderr, "TestMain: setenv WUPHF_LOG_DIR: %v\n", err)
+		_ = os.RemoveAll(logDir)
+		cleanup()
+		os.Exit(1)
+	}
+	cleanups = append(cleanups, func() { _ = os.RemoveAll(logDir) })
+
+	// 3) Stale-unanswered threshold: resume tests pre-seed broker state with
+	//    ancient timestamps (e.g. "2026-04-14T10:00:00Z") to exercise routing
+	//    logic without fighting a clock. The production default (1 hour)
+	//    would drop those seeds. Raise the window to ~10 years during tests
+	//    so the resume-routing tests keep their fixtures while production
+	//    keeps the stale-message-dropping behavior.
+	origStaleUnanswered := staleUnansweredThreshold
+	staleUnansweredThreshold = 10 * 365 * 24 * time.Hour
+	cleanups = append(cleanups, func() { staleUnansweredThreshold = origStaleUnanswered })
+
+	// 4) Activity watchdog: tests create many short-lived brokers. The watchdog
+	//    goroutine fires every minute, so leaving it running accumulates
+	//    hundreds of stuck goroutines and causes timeout/goleak failures.
+	//    Disable it for the test run; production always starts with it enabled.
+	activityWatchdogEnabled = false
+	cleanups = append(cleanups, func() { activityWatchdogEnabled = true })
+
+	rc := m.Run()
+	cleanup()
+	os.Exit(rc)
+}
+
+// reloadedBroker constructs a Broker and replays state from brokerStatePath
+// so persistence tests can verify what a production restart would see.
+// Test-mode NewBroker skips the automatic disk load (to stop cross-test
+// state leakage via a shared broker-state.json), so any test that checks
+// persistence behavior must opt in through this helper.
+func reloadedBroker(t *testing.T) *Broker {
+	t.Helper()
+	b := NewBroker()
+	if err := b.loadState(); err != nil {
+		t.Fatalf("loadState: %v", err)
+	}
+	return b
+}
+
+// leakedBrokerStatePath returns a per-test-unique filesystem path for a
+// broker-state.json, rooted in a temp dir OUTSIDE t.TempDir(). Callers use
+// it to swap the package-global brokerStatePath without exposing t.TempDir
+// to late-arriving writes from goroutines leaked by prior tests. Those
+// late writes hit brokerStatePath() (resolved lazily on each call) and
+// resolve to whatever the global points at — so if it pointed into
+// t.TempDir, cleanup would race the write and fail with "unlinkat:
+// directory not empty". The returned dir is intentionally NOT registered
+// for cleanup: a handful of KB per test run leaks to /tmp, which the OS
+// reclaims on reboot or tmpfs eviction. Cheap fix for a cross-test
+// goroutine-leak hazard that a larger refactor will eventually retire.
+func leakedBrokerStatePath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "wuphf-test-state-*")
+	if err != nil {
+		t.Fatalf("mktemp broker state dir: %v", err)
+	}
+	return filepath.Join(dir, "broker-state.json")
+}
+
+// setHeadlessWakeLeadFn swaps headlessWakeLeadFn under its mutex and restores
+// the previous value on test cleanup. Use this instead of direct assignment to
+// avoid DATA RACEs with leaked runHeadlessCodexQueue goroutines from prior tests.
+func setHeadlessWakeLeadFn(t *testing.T, fn func(*Launcher, string)) {
+	t.Helper()
+	headlessWakeLeadFnMu.Lock()
+	old := headlessWakeLeadFn
+	headlessWakeLeadFn = fn
+	headlessWakeLeadFnMu.Unlock()
+	t.Cleanup(func() {
+		headlessWakeLeadFnMu.Lock()
+		headlessWakeLeadFn = old
+		headlessWakeLeadFnMu.Unlock()
+	})
 }
 
 func initUsableGitWorktree(t *testing.T, path string) {
@@ -41,7 +152,7 @@ func initUsableGitWorktree(t *testing.T, path string) {
 	}
 	cmd := exec.Command("git", "init")
 	cmd.Dir = path
-	cmd.Env = gitCleanEnv()
+	cmd.Env = gitexec.CleanEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init %s: %v: %s", path, err, strings.TrimSpace(string(out)))
 	}
@@ -74,7 +185,7 @@ func TestBrokerPersistsAndReloadsState(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	msgs := reloaded.Messages()
 	if len(msgs) != 1 {
 		t.Fatalf("expected 1 persisted message, got %d", len(msgs))
@@ -84,7 +195,7 @@ func TestBrokerPersistsAndReloadsState(t *testing.T) {
 	}
 
 	reloaded.Reset()
-	empty := NewBroker()
+	empty := reloadedBroker(t)
 	if len(empty.Messages()) != 0 {
 		t.Fatalf("expected reset to clear persisted messages, got %d", len(empty.Messages()))
 	}
@@ -112,7 +223,7 @@ func TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered(t *testing.T) {
 	}
 
 	// Simulate a later clobber that keeps the custom office shell but loses live work.
-	clobbered := NewBroker()
+	clobbered := reloadedBroker(t)
 	clobbered.mu.Lock()
 	clobbered.messages = nil
 	clobbered.tasks = nil
@@ -140,7 +251,7 @@ func TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered(t *testing.T) {
 		t.Fatalf("unexpected snapshot contents: %+v", snap)
 	}
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	if got := len(reloaded.Messages()); got != 1 {
 		t.Fatalf("expected snapshot recovery to restore 1 message, got %d", got)
 	}
@@ -178,7 +289,7 @@ func TestBrokerSessionModePersistsAndSurvivesReset(t *testing.T) {
 		t.Fatalf("seed direct message: %v", err)
 	}
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	mode, agent := reloaded.SessionModeState()
 	if mode != SessionModeOneOnOne {
 		t.Fatalf("expected persisted 1o1 mode, got %q", mode)
@@ -222,6 +333,93 @@ func TestBrokerMessageSubscribersReceivePostedMessages(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for subscribed message")
+	}
+}
+
+func TestBrokerCanonicalizesLegacyDMSlugs(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+	postJSON := func(path string, payload map[string]any) *http.Response {
+		t.Helper()
+		body, _ := json.Marshal(payload)
+		req, _ := http.NewRequest(http.MethodPost, base+path, bytes.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+b.Token())
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("POST %s failed: %v", path, err)
+		}
+		return resp
+	}
+
+	resp := postJSON("/channels/dm", map[string]any{
+		"members": []string{"human", "ceo"},
+		"type":    "direct",
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("create dm status %d: %s", resp.StatusCode, raw)
+	}
+	var created struct {
+		Slug string `json:"slug"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatalf("decode create dm: %v", err)
+	}
+	wantSlug := channelDirectSlug("human", "ceo")
+	if created.Slug != wantSlug {
+		t.Fatalf("expected canonical slug %q, got %q", wantSlug, created.Slug)
+	}
+
+	msgResp := postJSON("/messages", map[string]any{
+		"from":    "human",
+		"channel": "dm-human-ceo",
+		"content": "hello ceo",
+	})
+	defer msgResp.Body.Close()
+	if msgResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(msgResp.Body)
+		t.Fatalf("post legacy dm status %d: %s", msgResp.StatusCode, raw)
+	}
+	msgs := b.Messages()
+	if len(msgs) != 1 {
+		t.Fatalf("expected one message, got %d", len(msgs))
+	}
+	if msgs[0].Channel != wantSlug {
+		t.Fatalf("expected message to land in %q, got %q", wantSlug, msgs[0].Channel)
+	}
+
+	req, _ := http.NewRequest(http.MethodGet, base+"/messages?channel=dm-human-ceo&viewer_slug=human", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	getResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET legacy dm failed: %v", err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(getResp.Body)
+		t.Fatalf("get legacy dm status %d: %s", getResp.StatusCode, raw)
+	}
+	var got struct {
+		Channel  string           `json:"channel"`
+		Messages []channelMessage `json:"messages"`
+	}
+	if err := json.NewDecoder(getResp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode get dm: %v", err)
+	}
+	if got.Channel != wantSlug || len(got.Messages) != 1 {
+		t.Fatalf("expected canonical channel %q with one message, got channel=%q messages=%d", wantSlug, got.Channel, len(got.Messages))
 	}
 }
 
@@ -305,6 +503,67 @@ func TestBrokerActionSubscribersReceiveTaskLifecycle(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for subscribed action")
 	}
+}
+
+func TestReapStaleActivityLocked(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	now := time.Now().UTC()
+	stale := now.Add(-10 * time.Minute).Format(time.RFC3339)
+	fresh := now.Add(-1 * time.Minute).Format(time.RFC3339)
+
+	b.activity = map[string]agentActivitySnapshot{
+		"stale-active":   {Slug: "stale-active", Status: "active", Activity: "tool_use", LastTime: stale},
+		"stale-thinking": {Slug: "stale-thinking", Status: "thinking", Activity: "thinking", LastTime: stale},
+		"fresh-active":   {Slug: "fresh-active", Status: "active", Activity: "tool_use", LastTime: fresh},
+		"already-idle":   {Slug: "already-idle", Status: "idle", Activity: "idle", LastTime: stale},
+		"already-error":  {Slug: "already-error", Status: "error", Activity: "error", LastTime: stale},
+		"bad-time":       {Slug: "bad-time", Status: "active", Activity: "tool_use", LastTime: "not-a-time"},
+	}
+
+	b.mu.Lock()
+	reset := b.reapStaleActivityLocked(now)
+	b.mu.Unlock()
+
+	if len(reset) != 2 {
+		t.Fatalf("expected 2 stale agents reaped, got %d: %+v", len(reset), reset)
+	}
+	for _, snap := range reset {
+		if snap.Status != "idle" {
+			t.Errorf("reaped agent %q should be idle, got %q", snap.Slug, snap.Status)
+		}
+		if snap.Slug != "stale-active" && snap.Slug != "stale-thinking" {
+			t.Errorf("unexpected reaped slug: %q", snap.Slug)
+		}
+	}
+
+	if b.activity["fresh-active"].Status != "active" {
+		t.Error("fresh-active should not be reaped")
+	}
+	if b.activity["already-idle"].Status != "idle" {
+		t.Error("already-idle should be unchanged")
+	}
+	if b.activity["already-error"].Status != "error" {
+		t.Error("already-error should be unchanged")
+	}
+	if b.activity["bad-time"].Status != "active" {
+		t.Error("unparseable LastTime should be left alone")
+	}
+}
+
+func TestBrokerStopIsIdempotent(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	b.Stop()
+	b.Stop()
 }
 
 func TestBrokerActivitySubscribersReceiveUpdates(t *testing.T) {
@@ -625,6 +884,11 @@ func TestNewBrokerSeedsDefaultOfficeRosterOnFreshState(t *testing.T) {
 func TestNewBrokerSeedsBlueprintBackedOfficeRosterOnFreshState(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	// Pair HOME with WUPHF_RUNTIME_HOME so config.RuntimeHomeDir (which
+	// prefers the env override) resolves to this test's tmpdir. Without
+	// it the process-level leaked runtime-home from worktree_guard_test
+	// wins and the manifest below is invisible to the blueprint loader.
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
 	manifestPath := filepath.Join(home, ".wuphf", "company.json")
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
 		t.Fatalf("mkdir manifest dir: %v", err)
@@ -762,7 +1026,7 @@ func TestOfficeMemberLifecycle(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	if reloaded.findMemberLocked("growthops") == nil {
 		t.Fatal("expected custom office member to persist")
 	}
@@ -779,7 +1043,7 @@ func TestBrokerPersistsNotificationCursorWithoutMessages(t *testing.T) {
 		t.Fatalf("SetNotificationCursor failed: %v", err)
 	}
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	if got := reloaded.NotificationCursor(); got != "2026-03-24T10:00:00Z" {
 		t.Fatalf("expected persisted notification cursor, got %q", got)
 	}
@@ -4877,34 +5141,6 @@ func TestResolveTaskIntervalsRespectMinimumFloor(t *testing.T) {
 	}
 }
 
-func TestParseSkillProposalFromMessage(t *testing.T) {
-	b := &Broker{}
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO"}}
-	msg := channelMessage{
-		ID:      "msg-1",
-		From:    "ceo",
-		Channel: "general",
-		Content: "I noticed a pattern.\n\n[SKILL PROPOSAL]\nName: deploy-verify\nTitle: Deploy Verification\nDescription: Post-deploy checks\nTrigger: after deploy\nTags: deploy, ops\n---\n1. Check health\n2. Check errors\n[/SKILL PROPOSAL]",
-	}
-	b.parseSkillProposalLocked(msg)
-	if len(b.skills) != 1 {
-		t.Fatalf("expected 1 skill, got %d", len(b.skills))
-	}
-	s := b.skills[0]
-	if s.Name != "deploy-verify" {
-		t.Fatalf("expected name 'deploy-verify', got %q", s.Name)
-	}
-	if s.Title != "Deploy Verification" {
-		t.Fatalf("expected title 'Deploy Verification', got %q", s.Title)
-	}
-	if s.Status != "proposed" {
-		t.Fatalf("expected status 'proposed', got %q", s.Status)
-	}
-	if s.Description != "Post-deploy checks" {
-		t.Fatalf("expected description 'Post-deploy checks', got %q", s.Description)
-	}
-}
-
 func TestLastTaggedAtSetOnPost(t *testing.T) {
 	b := &Broker{}
 	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo", "pm"}}}
@@ -4967,7 +5203,7 @@ func TestBrokerSurfaceMetadataPersists(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	var found *teamChannel
 	for _, ch := range reloaded.channels {
 		if ch.Slug == "tg-ops" {
@@ -5324,163 +5560,74 @@ func TestRecentHumanMessagesIncludesNexSender(t *testing.T) {
 
 // --- Skill proposal system tests ---
 
-// Helper: skillProposalContent returns a well-formed [SKILL PROPOSAL] block.
-func skillProposalContent(name, title string) string {
-	return fmt.Sprintf("[SKILL PROPOSAL]\nName: %s\nTitle: %s\nDescription: Test description\nTrigger: on test\nTags: test\n---\n1. Do the thing\n[/SKILL PROPOSAL]", name, title)
-}
+func TestPostSkillProposeCreatesApprovalRequest(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
 
-// Test 1: CEO (lead) message creates a proposed skill.
-func TestParseSkillProposalCEOHappyPath(t *testing.T) {
-	b := &Broker{}
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
-	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
-	msg := channelMessage{
-		ID:      "msg-1",
-		From:    "ceo",
-		Channel: "general",
-		Content: "I noticed a pattern.\n\n" + skillProposalContent("my-skill", "My Skill"),
+	b := NewBroker()
+	body := bytes.NewBufferString(`{
+		"action":"propose",
+		"name":"deterministic-skill",
+		"title":"Deterministic Skill",
+		"description":"Created through the skill API.",
+		"content":"1. Do the deterministic thing",
+		"created_by":"ceo",
+		"channel":"general"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills", body)
+	rec := httptest.NewRecorder()
+
+	b.handlePostSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	b.parseSkillProposalLocked(msg)
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if len(b.skills) != 1 {
-		t.Fatalf("expected 1 skill from CEO, got %d", len(b.skills))
+		t.Fatalf("expected proposed skill, got %+v", b.skills)
 	}
 	if b.skills[0].Status != "proposed" {
-		t.Fatalf("expected status 'proposed', got %q", b.skills[0].Status)
+		t.Fatalf("expected proposed status, got %q", b.skills[0].Status)
 	}
-}
-
-// Test 2: Non-CEO message is silently skipped.
-func TestParseSkillProposalNonCEOSkipped(t *testing.T) {
-	b := &Broker{}
-	b.members = []officeMember{
-		{Slug: "ceo", Name: "CEO", Role: "lead"},
-		{Slug: "fe", Name: "Frontend Engineer"},
-	}
-	msg := channelMessage{
-		ID:      "msg-1",
-		From:    "fe",
-		Channel: "general",
-		Content: skillProposalContent("fe-skill", "FE Skill"),
-	}
-	b.parseSkillProposalLocked(msg)
-	if len(b.skills) != 0 {
-		t.Fatalf("expected 0 skills from non-CEO, got %d", len(b.skills))
-	}
-}
-
-// Test 3: Malformed proposal (missing Name) is skipped.
-func TestParseSkillProposalMalformedSkipped(t *testing.T) {
-	b := &Broker{}
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
-	msg := channelMessage{
-		From:    "ceo",
-		Channel: "general",
-		Content: "[SKILL PROPOSAL]\nTitle: No Name Skill\nDescription: missing name field\n---\n1. Do thing\n[/SKILL PROPOSAL]",
-	}
-	b.parseSkillProposalLocked(msg)
-	if len(b.skills) != 0 {
-		t.Fatalf("expected 0 skills for malformed proposal, got %d", len(b.skills))
-	}
-}
-
-// Test 4: Duplicate proposal (same name, non-archived) is skipped.
-func TestParseSkillProposalDedup(t *testing.T) {
-	b := &Broker{}
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
-	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
-	b.skills = []teamSkill{{
-		ID: "dup-skill", Name: "dup-skill", Title: "Dup Skill",
-		Status: "proposed", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
-	}}
-	msg := channelMessage{
-		From:    "ceo",
-		Channel: "general",
-		Content: skillProposalContent("dup-skill", "Dup Skill"),
-	}
-	b.parseSkillProposalLocked(msg)
-	if len(b.skills) != 1 {
-		t.Fatalf("expected dedup to skip re-proposal, got %d skills", len(b.skills))
-	}
-}
-
-// Test 5: Archived skill can be re-proposed (not deduped).
-func TestParseSkillProposalAllowsReproposalAfterArchive(t *testing.T) {
-	b := &Broker{}
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
-	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
-	b.skills = []teamSkill{{
-		ID: "old-skill", Name: "old-skill", Title: "Old Skill",
-		Status: "archived", CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z",
-	}}
-	msg := channelMessage{
-		From:    "ceo",
-		Channel: "general",
-		Content: skillProposalContent("old-skill", "Old Skill Revised"),
-	}
-	b.parseSkillProposalLocked(msg)
-	if len(b.skills) != 2 {
-		t.Fatalf("expected archived skill to allow re-proposal (2 total), got %d", len(b.skills))
-	}
-}
-
-// Test 6: parseSkillProposalLocked creates a non-blocking humanInterview in b.requests.
-func TestParseSkillProposalCreatesNonBlockingInterview(t *testing.T) {
-	b := &Broker{}
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
-	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
-	msg := channelMessage{
-		From:    "ceo",
-		Channel: "general",
-		Content: skillProposalContent("interview-skill", "Interview Skill"),
-	}
-	b.parseSkillProposalLocked(msg)
 	if len(b.requests) != 1 {
-		t.Fatalf("expected 1 interview request, got %d", len(b.requests))
+		t.Fatalf("expected approval request, got %+v", b.requests)
 	}
-	req := b.requests[0]
-	if req.Blocking {
-		t.Fatalf("expected non-blocking skill proposal interview, got Blocking=true")
-	}
-	if req.Kind != "skill_proposal" {
-		t.Fatalf("expected kind 'skill_proposal', got %q", req.Kind)
-	}
-	if req.ReplyTo != "interview-skill" {
-		t.Fatalf("expected ReplyTo='interview-skill', got %q", req.ReplyTo)
+	if b.requests[0].Kind != "skill_proposal" || b.requests[0].ReplyTo != "deterministic-skill" {
+		t.Fatalf("unexpected skill proposal request: %+v", b.requests[0])
 	}
 }
 
-func TestParseSkillProposalParsesMultipleBlocks(t *testing.T) {
-	b := &Broker{}
-	b.members = []officeMember{{Slug: "ceo", Name: "CEO", Role: "lead"}}
-	b.channels = []teamChannel{{Slug: "general", Members: []string{"ceo"}}}
-	msg := channelMessage{
-		From:    "ceo",
-		Channel: "general",
-		Content: strings.Join([]string{
-			"Integration bundle follows.",
-			skillProposalContent("gmail-dry-run-harness", "Gmail Dry-Run Harness"),
-			skillProposalContent("youtube-data-publish-dry-run", "YouTube Data Publish Dry-Run"),
-			skillProposalContent("drive-asset-stage-dry-run", "Drive Asset Stage Dry-Run"),
-		}, "\n\n"),
-	}
+func TestPostSkillProposeRejectsUnregisteredAgent(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
 
-	b.parseSkillProposalLocked(msg)
+	b := NewBroker()
+	body := bytes.NewBufferString(`{
+		"action":"propose",
+		"name":"synthetic-skill",
+		"title":"Synthetic Skill",
+		"content":"1. Do the synthetic thing",
+		"created_by":"nex",
+		"channel":"general"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills", body)
+	rec := httptest.NewRecorder()
 
-	if len(b.skills) != 3 {
-		t.Fatalf("expected 3 skills from one CEO message, got %d", len(b.skills))
+	b.handlePostSkill(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", rec.Code, rec.Body.String())
 	}
-	if len(b.requests) != 3 {
-		t.Fatalf("expected 3 interview requests from one CEO message, got %d", len(b.requests))
-	}
-	if got := b.skills[0].Name; got != "gmail-dry-run-harness" {
-		t.Fatalf("unexpected first skill slug: %q", got)
-	}
-	if got := b.skills[2].Name; got != "drive-asset-stage-dry-run" {
-		t.Fatalf("unexpected third skill slug: %q", got)
+	if len(b.skills) != 0 {
+		t.Fatalf("expected no skill from unregistered proposer, got %+v", b.skills)
 	}
 }
 
-// Test 7: Answering "accept" via HTTP activates the skill.
+// Test 1: Answering "accept" via HTTP activates the skill.
 func TestSkillProposalAcceptCallbackActivatesSkill(t *testing.T) {
 	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
@@ -5765,8 +5912,8 @@ func TestBuildPromptLeadIncludesSkillAwareness(t *testing.T) {
 	if !strings.Contains(prompt, "SKILL & AGENT AWARENESS") {
 		t.Fatalf("expected SKILL & AGENT AWARENESS block in lead prompt")
 	}
-	if !strings.Contains(prompt, "[SKILL PROPOSAL]") {
-		t.Fatalf("expected [SKILL PROPOSAL] format example in lead prompt")
+	if !strings.Contains(prompt, "team_skill_create(action=create)") {
+		t.Fatalf("expected team_skill_create guidance in lead prompt")
 	}
 }
 
@@ -5785,20 +5932,24 @@ func TestSkillProposalPersistenceRoundTrip(t *testing.T) {
 			b.channels[i].Members = append(b.channels[i].Members, "ceo")
 		}
 	}
-	msg := channelMessage{
-		ID:      "msg-1",
-		From:    "ceo",
-		Channel: "general",
-		Content: skillProposalContent("persist-skill", "Persist Skill"),
-	}
-	b.parseSkillProposalLocked(msg)
-	if err := b.saveLocked(); err != nil {
-		b.mu.Unlock()
-		t.Fatalf("saveLocked: %v", err)
-	}
 	b.mu.Unlock()
+	body := bytes.NewBufferString(`{
+		"action":"propose",
+		"name":"persist-skill",
+		"title":"Persist Skill",
+		"description":"Persisted proposed skill",
+		"content":"1. Do the thing",
+		"created_by":"ceo",
+		"channel":"general"
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/skills", body)
+	rec := httptest.NewRecorder()
+	b.handlePostSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("handlePostSkill: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	reloaded.mu.Lock()
 	skills := append([]teamSkill(nil), reloaded.skills...)
 	requests := append([]humanInterview(nil), reloaded.requests...)
@@ -6242,7 +6393,7 @@ func TestLoadDoesNotAppendDefaultsAfterBlueprintSeed(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	reloaded.mu.Lock()
 	slugs := make([]string, 0, len(reloaded.members))
 	for _, m := range reloaded.members {

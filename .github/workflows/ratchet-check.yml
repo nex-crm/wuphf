@@ -1,0 +1,58 @@
+name: ratchet-check
+# Drift gate for action SHA-pinning. Fails if any workflow under
+# .github/workflows references a third-party action by tag/branch instead
+# of a 40-char commit SHA — supply-chain hardening: a re-tagged action
+# would otherwise execute with whatever permissions the workflow has,
+# silently. ratchet (sethvargo/ratchet) checks both the file and the
+# resolution of any `# v…` trailing comments.
+#
+# Local fix when this fails:
+#   go install github.com/sethvargo/ratchet@v0.11.4
+#   ratchet pin .github/workflows/<file>.yml
+#
+# Skipped on docs-only diffs (paths filter) so docs PRs don't pay the
+# Go install cost.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ratchet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
+        with:
+          # No go.mod-version mode: ratchet has its own go.mod, we just
+          # need any modern Go to build it. Match the major used elsewhere
+          # in this workflow set.
+          go-version: stable
+
+      - name: Install ratchet
+        # SHA-pinned to v0.11.4. Update this commit when bumping; CI fails
+        # closed if the pin and the resolved tag drift.
+        run: go install github.com/sethvargo/ratchet@8b4ca256dbed184350608a3023620f267f0a5253 # v0.11.4
+
+      - name: ratchet check
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(.github/workflows/*.yml .github/workflows/*.yaml)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "no workflow files to check"
+            exit 0
+          fi
+          ratchet check "${files[@]}"

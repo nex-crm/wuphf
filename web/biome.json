@@ -1,0 +1,132 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.13/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "ignoreUnknown": false,
+    "includes": [
+      "*",
+      "**",
+      "!dist",
+      "!node_modules",
+      "!e2e/node_modules",
+      "!e2e/playwright-report",
+      "!e2e/test-results",
+      "!playwright-report",
+      "!test-results",
+      "!**/*.gen.ts",
+      "!**/*.gen.tsx"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "lineWidth": 80
+  },
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "a11y": {
+        "noLabelWithoutControl": "info",
+        "useButtonType": "warn",
+        "useAriaPropsSupportedByRole": "warn",
+        "noSvgWithoutTitle": "warn",
+        "useKeyWithClickEvents": "warn",
+        "noStaticElementInteractions": "warn",
+        "useValidAnchor": "warn",
+        "useSemanticElements": "warn"
+      },
+      "suspicious": {
+        "noEvolvingTypes": "error",
+        "noMisplacedAssertion": "error",
+        "noAlert": "warn",
+        "noArrayIndexKey": "warn",
+        "noAssignInExpressions": "warn",
+        "noControlCharactersInRegex": "warn",
+        "noDuplicateProperties": "warn",
+        "noUnknownAtRules": "warn",
+        "useIterableCallbackReturn": "warn"
+      },
+      "style": {
+        "noEnum": "error",
+        "noImplicitBoolean": "error",
+        "useObjectSpread": "error",
+        "noCommonJs": "error",
+        "noUselessElse": "error",
+        "noYodaExpression": "error",
+        "useAsConstAssertion": "error",
+        "useCollapsedIf": "error",
+        "useReactFunctionComponents": "error",
+        "useSelfClosingElements": "error",
+        "noNonNullAssertion": "warn",
+        "noDescendingSpecificity": "warn"
+      },
+      "correctness": {
+        "noEmptyPattern": "error",
+        "noNestedComponentDefinitions": "error",
+        "noReactPropAssignments": "error",
+        "noUndeclaredVariables": "error",
+        "noInvalidUseBeforeDeclaration": "warn",
+        "noUndeclaredDependencies": "warn",
+        "useExhaustiveDependencies": "warn",
+        "useHookAtTopLevel": "warn"
+      },
+      "complexity": {
+        "useSimplifiedLogicExpression": "error",
+        "noForEach": "warn",
+        "noExcessiveCognitiveComplexity": "warn",
+        "noExcessiveLinesPerFunction": {
+          "level": "warn",
+          "options": {
+            "maxLines": 200,
+            "skipBlankLines": true
+          }
+        }
+      },
+      "nursery": {
+        "noDuplicatedSpreadProps": "error",
+        "useFind": "error",
+        "useSpread": "error",
+        "noEqualsToNull": "warn",
+        "noLeakedRender": "warn",
+        "noShadow": "warn",
+        "useArraySortCompare": "warn",
+        "useDestructuring": "warn"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double"
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": {
+          "level": "on",
+          "options": {
+            "groups": [
+              ["react*", "react*/*"],
+              ":PACKAGE:",
+              ":BLANK_LINE:",
+              ":ALIAS:",
+              ":BLANK_LINE:",
+              ":PATH:"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

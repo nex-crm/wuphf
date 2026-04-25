@@ -150,11 +150,20 @@ func TestBrokerEntity_FactThresholdTriggersSynthesis(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("synthesis not triggered within 3s")
 	}
-	// Give the worker a tick to commit.
-	time.Sleep(300 * time.Millisecond)
-	if pub.briefCount() == 0 {
-		t.Fatal("expected a brief synthesis after threshold crossed")
+	// Poll for the worker's briefCount commit. Used to be a fixed
+	// 300ms sleep, which flaked roughly 1-in-3 under parallel test load
+	// when the worker goroutine didn't get scheduled in time. Polling
+	// with a 3s ceiling makes the test pass-fast on a quiet machine
+	// (~tens of ms) without depending on a sleep duration that's
+	// "long enough" for any specific load profile.
+	commitDeadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(commitDeadline) {
+		if pub.briefCount() > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatal("expected a brief synthesis after threshold crossed")
 }
 
 func TestBrokerEntity_FactValidationErrors(t *testing.T) {

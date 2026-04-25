@@ -1,13 +1,17 @@
 package team
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 func newTestRepo(t *testing.T) *Repo {
@@ -481,5 +485,109 @@ func TestRepoAuditLogLimitCaps(t *testing.T) {
 	}
 	if len(entries) != 2 {
 		t.Fatalf("expected 2 entries with limit=2, got %d", len(entries))
+	}
+}
+
+// TestRepoInitIgnoresInheritedGitDir is a regression test for the bug where
+// wuphf invoked from inside a git hook (which exports GIT_DIR pointing at the
+// outer repo) silently commits wiki state onto the user's real branch. The
+// symptom was thousands of `wuphf: init wiki` commits in the reflog of real
+// working branches. Fix was `cmd.Env = gitexec.CleanEnv()` in runGitLockedAs.
+//
+// Setup: create a sacrificial "outer" git repo with one commit, point GIT_DIR
+// at it, and call Repo.Init() on an unrelated tempdir. Assert the outer repo's
+// HEAD is unchanged after the wiki init. Before the fix, the wiki commit
+// lands on the outer repo's HEAD and this assertion fails.
+func TestRepoInitIgnoresInheritedGitDir(t *testing.T) {
+	outer := filepath.Join(t.TempDir(), "outer")
+	if err := os.MkdirAll(outer, 0o755); err != nil {
+		t.Fatalf("mkdir outer: %v", err)
+	}
+	runOuter := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{
+			"-c", "user.name=outer",
+			"-c", "user.email=outer@test.local",
+			"-c", "commit.gpgsign=false",
+			"-c", "init.defaultBranch=main",
+		}, args...)...)
+		cmd.Dir = outer
+		cmd.Env = gitexec.CleanEnv() // don't inherit the test runner's GIT_DIR
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("outer git %v: %v: %s", args, err, out)
+		}
+	}
+	runOuter("init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(outer, "seed.txt"), []byte("seed\n"), 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	runOuter("add", "seed.txt")
+	runOuter("commit", "-q", "-m", "outer: seed")
+
+	outerGit := func(args ...string) ([]byte, error) {
+		cmd := exec.Command("git", append([]string{"-C", outer}, args...)...)
+		cmd.Env = gitexec.CleanEnv() // don't inherit outer test runner's GIT_DIR
+		return cmd.Output()
+	}
+	// Snapshot *all* refs + working-tree status, not just HEAD. The class of
+	// bug covers any write to the outer repo's object store / refs, not only
+	// HEAD movement: a regression could update refs/heads/<other> or stage
+	// into the outer index without touching HEAD.
+	refsBefore, err := outerGit("rev-parse", "--all")
+	if err != nil {
+		t.Fatalf("outer rev-parse --all before: %v", err)
+	}
+	statusBefore, err := outerGit("status", "--porcelain")
+	if err != nil {
+		t.Fatalf("outer status before: %v", err)
+	}
+
+	// Inherit GIT_DIR pointing at the outer repo. This is exactly what a
+	// git hook subprocess sees.
+	t.Setenv("GIT_DIR", filepath.Join(outer, ".git"))
+	t.Setenv("GIT_WORK_TREE", outer)
+
+	repo := newTestRepo(t)
+	if err := repo.Init(context.Background()); err != nil {
+		t.Fatalf("wiki init: %v", err)
+	}
+
+	refsAfter, err := outerGit("rev-parse", "--all")
+	if err != nil {
+		t.Fatalf("outer rev-parse --all after: %v", err)
+	}
+	if !bytes.Equal(refsAfter, refsBefore) {
+		log, _ := outerGit("log", "--all", "--oneline", "-10")
+		t.Fatalf("outer repo refs moved (leak!):\nbefore:\n%s\nafter:\n%s\nlog:\n%s",
+			string(refsBefore), string(refsAfter), string(log))
+	}
+	statusAfter, err := outerGit("status", "--porcelain")
+	if err != nil {
+		t.Fatalf("outer status after: %v", err)
+	}
+	if !bytes.Equal(statusAfter, statusBefore) {
+		t.Fatalf("outer working tree mutated (leak!):\nbefore:\n%q\nafter:\n%q",
+			string(statusBefore), string(statusAfter))
+	}
+
+	// Positive oracle: the wiki init commit should have landed in the wiki
+	// repo, not just "some .git exists." A future refactor that silently
+	// skips the commit under inherited GIT_DIR rather than clobbering the
+	// outer repo would still be a bug; this catches it.
+	if _, err := os.Stat(filepath.Join(repo.Root(), ".git")); err != nil {
+		t.Fatalf("wiki .git missing — init did not target the wiki path: %v", err)
+	}
+	wikiGit := func(args ...string) ([]byte, error) {
+		cmd := exec.Command("git", append([]string{"-C", repo.Root()}, args...)...)
+		cmd.Env = gitexec.CleanEnv()
+		return cmd.Output()
+	}
+	msg, err := wikiGit("log", "-1", "--format=%s")
+	if err != nil {
+		t.Fatalf("wiki log: %v", err)
+	}
+	if got := strings.TrimSpace(string(msg)); got != "wuphf: init wiki" {
+		t.Fatalf("wiki HEAD commit message = %q, want %q (init did not commit to the wiki repo)",
+			got, "wuphf: init wiki")
 	}
 }

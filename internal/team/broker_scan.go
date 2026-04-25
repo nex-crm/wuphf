@@ -29,20 +29,22 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/nex-crm/wuphf/internal/scanner"
 )
 
 // scanStatusTracker tracks the most recent ScanResult per root-hash. The
 // broker holds one of these and evicts old entries on a simple cap.
 type scanStatusTracker struct {
 	mu      sync.Mutex
-	results map[string]*ScanResult
+	results map[string]*scanner.ScanResult
 }
 
 func newScanStatusTracker() *scanStatusTracker {
-	return &scanStatusTracker{results: make(map[string]*ScanResult)}
+	return &scanStatusTracker{results: make(map[string]*scanner.ScanResult)}
 }
 
-func (t *scanStatusTracker) set(id string, res *ScanResult) {
+func (t *scanStatusTracker) set(id string, res *scanner.ScanResult) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Simple cap — drop one arbitrary entry once we hit 64. v1.1 workloads
@@ -56,7 +58,7 @@ func (t *scanStatusTracker) set(id string, res *ScanResult) {
 	t.results[id] = res
 }
 
-func (t *scanStatusTracker) get(id string) (*ScanResult, bool) {
+func (t *scanStatusTracker) get(id string) (*scanner.ScanResult, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	res, ok := t.results[id]
@@ -96,7 +98,7 @@ func (b *Broker) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detector, err := NewMtimeChangeDetector()
+	detector, err := scanner.NewMtimeChangeDetector()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -107,18 +109,18 @@ func (b *Broker) handleScanStart(w http.ResponseWriter, r *http.Request) {
 		return worker.Repo().CommitScanStaged(ctx, message)
 	}
 
-	result, preview, err := Scan(r.Context(), ScanOptions{
+	result, preview, err := scanner.Scan(r.Context(), scanner.ScanOptions{
 		Root:    root,
 		Confirm: body.Confirm,
 	}, detector, worker.Repo().Root(), commit)
 
 	switch {
-	case errors.Is(err, ErrScanConfirmationRequired):
+	case errors.Is(err, scanner.ErrScanConfirmationRequired):
 		writeJSON(w, http.StatusAccepted, map[string]any{"preview": preview})
 		return
-	case errors.Is(err, ErrScanFileCountExceeded),
-		errors.Is(err, ErrScanFileTooLarge),
-		errors.Is(err, ErrScanTotalTooLarge):
+	case errors.Is(err, scanner.ErrScanFileCountExceeded),
+		errors.Is(err, scanner.ErrScanFileTooLarge),
+		errors.Is(err, scanner.ErrScanTotalTooLarge):
 		writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": err.Error()})
 		return
 	case err != nil:
@@ -182,14 +184,14 @@ func (r *Repo) CommitScanStaged(ctx context.Context, message string) (string, er
 		return "", nil
 	}
 
-	if out, err := r.runGitLocked(ctx, scannerSlug, "add", "-A"); err != nil {
+	if out, err := r.runGitLocked(ctx, scanner.ScannerSlug, "add", "-A"); err != nil {
 		return "", scanCommitErr("git add -A", err, out)
 	}
 	msg := strings.TrimSpace(message)
 	if msg == "" {
 		msg = "scanner: ingest"
 	}
-	if out, err := r.runGitLocked(ctx, scannerSlug, "commit", "-q", "-m", msg); err != nil {
+	if out, err := r.runGitLocked(ctx, scanner.ScannerSlug, "commit", "-q", "-m", msg); err != nil {
 		return "", scanCommitErr("git commit", err, out)
 	}
 	sha, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")

@@ -11,6 +11,7 @@ import (
 
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/operations"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 func testRepoRoot(t *testing.T) string {
@@ -219,6 +220,11 @@ func TestMaterializeManifestBuildsRuntimeOfficeFromBlueprintRefs(t *testing.T) {
 		BlueprintRefs: []BlueprintRef{
 			{Kind: "operation", ID: "youtube-factory", Source: "test"},
 		},
+		Members: []MemberSpec{{
+			Slug:     "ceo",
+			Name:     "Stale CEO",
+			Provider: provider.ProviderBinding{Kind: provider.KindClaudeCode},
+		}},
 	}
 	resolved, ok := MaterializeManifest(manifest, testRepoRoot(t))
 	if !ok {
@@ -232,6 +238,11 @@ func TestMaterializeManifestBuildsRuntimeOfficeFromBlueprintRefs(t *testing.T) {
 	}
 	if len(resolved.Channels) == 0 || resolved.Channels[0].Slug != "general" {
 		t.Fatalf("expected general channel from blueprint, got %+v", resolved.Channels)
+	}
+	for _, member := range resolved.Members {
+		if member.Provider.Kind != "" {
+			t.Fatalf("blueprint materialization must not set member provider bindings, got %+v", member)
+		}
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 func TestCleanupPersistedTaskWorktreesRemovesUniqueTrackedWorktrees(t *testing.T) {
@@ -67,6 +69,7 @@ func TestCleanupPersistedTaskWorktreesMissingStateIsNoOp(t *testing.T) {
 }
 
 func TestDefaultPrepareTaskWorktreeOverlaysDirtyWorkspace(t *testing.T) {
+	allowRealTaskWorktreeForTest(t)
 	repoDir := t.TempDir()
 	worktreeRoot := filepath.Join(t.TempDir(), "task-worktrees")
 	oldCwd, err := os.Getwd()
@@ -84,7 +87,7 @@ func TestDefaultPrepareTaskWorktreeOverlaysDirtyWorkspace(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = repoDir
-		cmd.Env = gitCleanEnv()
+		cmd.Env = gitexec.CleanEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s failed: %v\n%s", strings.Join(args, " "), err, out)
 		}
@@ -176,6 +179,7 @@ func TestDefaultPrepareTaskWorktreeOverlaysDirtyWorkspace(t *testing.T) {
 }
 
 func TestDefaultPrepareTaskWorktreeOverlaysCompletedSiblingTaskWorkspace(t *testing.T) {
+	allowRealTaskWorktreeForTest(t)
 	repoDir := t.TempDir()
 	worktreeRoot := filepath.Join(t.TempDir(), "task-worktrees")
 	stateDir := t.TempDir()
@@ -201,7 +205,7 @@ func TestDefaultPrepareTaskWorktreeOverlaysCompletedSiblingTaskWorkspace(t *test
 		t.Helper()
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
-		cmd.Env = gitCleanEnv()
+		cmd.Env = gitexec.CleanEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s failed: %v\n%s", strings.Join(args, " "), err, out)
 		}
@@ -278,6 +282,7 @@ func TestDefaultPrepareTaskWorktreeOverlaysCompletedSiblingTaskWorkspace(t *test
 }
 
 func TestDefaultPrepareTaskWorktreeSkipsDuplicateAndMissingCompletedSiblingSources(t *testing.T) {
+	allowRealTaskWorktreeForTest(t)
 	repoDir := t.TempDir()
 	worktreeRoot := filepath.Join(t.TempDir(), "task-worktrees")
 	stateDir := t.TempDir()
@@ -303,7 +308,7 @@ func TestDefaultPrepareTaskWorktreeSkipsDuplicateAndMissingCompletedSiblingSourc
 		t.Helper()
 		cmd := exec.Command(args[0], args[1:]...)
 		cmd.Dir = dir
-		cmd.Env = gitCleanEnv()
+		cmd.Env = gitexec.CleanEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%s failed: %v\n%s", strings.Join(args, " "), err, out)
 		}

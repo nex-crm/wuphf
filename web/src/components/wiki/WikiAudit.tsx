@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
-import { fetchAuditLog, type WikiAuditEntry } from '../../api/wiki'
-import { formatRelativeTime } from '../../lib/format'
-import { formatAgentName } from '../../lib/agentName'
-import PixelAvatar from './PixelAvatar'
+import { useEffect, useMemo, useState } from "react";
+
+import { fetchAuditLog, type WikiAuditEntry } from "../../api/wiki";
+import { formatAgentName } from "../../lib/agentName";
+import { formatRelativeTime } from "../../lib/format";
+import PixelAvatar from "./PixelAvatar";
 
 /**
  * Audit-log view at #/wiki/_audit.
@@ -22,67 +23,69 @@ import PixelAvatar from './PixelAvatar'
  * detection sidecar. These are v1.1 items (see TESTING-WIKI.md).
  */
 interface WikiAuditProps {
-  onNavigate: (path: string | null) => void
+  onNavigate: (path: string | null) => void;
 }
 
-type AuthorBucket = 'all' | 'agents' | 'system' | string
+type AuthorBucket = "all" | "agents" | "system" | string;
 
 export default function WikiAudit({ onNavigate }: WikiAuditProps) {
-  const [entries, setEntries] = useState<WikiAuditEntry[] | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [authorFilter, setAuthorFilter] = useState<AuthorBucket>('all')
-  const [pathQuery, setPathQuery] = useState('')
-  const [sinceDays, setSinceDays] = useState<number | null>(null)
-  const [limit, setLimit] = useState(200)
+  const [entries, setEntries] = useState<WikiAuditEntry[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [authorFilter, setAuthorFilter] = useState<AuthorBucket>("all");
+  const [pathQuery, setPathQuery] = useState("");
+  const [sinceDays, setSinceDays] = useState<number | null>(null);
+  const [limit, setLimit] = useState(200);
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
     const since =
-      typeof sinceDays === 'number'
+      typeof sinceDays === "number"
         ? new Date(Date.now() - sinceDays * 86400 * 1000).toISOString()
-        : undefined
+        : undefined;
     fetchAuditLog({ limit, since })
       .then((res) => {
-        if (cancelled) return
-        setEntries(res.entries ?? [])
+        if (cancelled) return;
+        setEntries(res.entries ?? []);
       })
       .catch((err: unknown) => {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : 'Failed to load audit log')
+        if (cancelled) return;
+        setError(
+          err instanceof Error ? err.message : "Failed to load audit log",
+        );
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+        if (!cancelled) setLoading(false);
+      });
     return () => {
-      cancelled = true
-    }
-  }, [limit, sinceDays])
+      cancelled = true;
+    };
+  }, [limit, sinceDays]);
 
   const knownAuthors = useMemo(() => {
-    const set = new Set<string>()
-    for (const e of entries ?? []) set.add(e.author_slug)
-    return Array.from(set).sort()
-  }, [entries])
+    const set = new Set<string>();
+    for (const e of entries ?? []) set.add(e.author_slug);
+    return Array.from(set).sort();
+  }, [entries]);
 
   const filtered = useMemo(() => {
-    if (!entries) return []
-    const q = pathQuery.trim().toLowerCase()
+    if (!entries) return [];
+    const q = pathQuery.trim().toLowerCase();
     return entries.filter((e) => {
-      if (!passesAuthor(e.author_slug, authorFilter)) return false
+      if (!passesAuthor(e.author_slug, authorFilter)) return false;
       if (q) {
         const hit =
           e.message.toLowerCase().includes(q) ||
-          e.paths.some((p) => p.toLowerCase().includes(q))
-        if (!hit) return false
+          e.paths.some((p) => p.toLowerCase().includes(q));
+        if (!hit) return false;
       }
-      return true
-    })
-  }, [entries, pathQuery, authorFilter])
+      return true;
+    });
+  }, [entries, pathQuery, authorFilter]);
 
-  const stats = useMemo(() => summarize(filtered), [filtered])
+  const stats = useMemo(() => summarize(filtered), [filtered]);
 
   return (
     <main className="wk-audit" data-testid="wk-audit">
@@ -90,12 +93,17 @@ export default function WikiAudit({ onNavigate }: WikiAuditProps) {
         <div>
           <h1 className="wk-audit-title">Audit log</h1>
           <p className="wk-audit-strapline">
-            Every edit to the team wiki, newest first. Attribution comes from per-commit
-            git identity — same data `git log` would give you on disk.
+            Every edit to the team wiki, newest first. Attribution comes from
+            per-commit git identity — same data `git log` would give you on
+            disk.
           </p>
         </div>
         <div className="wk-audit-stats" aria-live="polite">
-          {loading ? 'Loading…' : error ? 'Error' : `${stats.total} entries · ${stats.authors} authors · ${stats.paths} paths touched`}
+          {loading
+            ? "Loading…"
+            : error
+              ? "Error"
+              : `${stats.total} entries · ${stats.authors} authors · ${stats.paths} paths touched`}
         </div>
       </header>
 
@@ -128,10 +136,10 @@ export default function WikiAudit({ onNavigate }: WikiAuditProps) {
         <label className="wk-audit-filter">
           <span>Window</span>
           <select
-            value={sinceDays ?? 'all'}
+            value={sinceDays ?? "all"}
             onChange={(e) => {
-              const v = e.target.value
-              setSinceDays(v === 'all' ? null : Number(v))
+              const v = e.target.value;
+              setSinceDays(v === "all" ? null : Number(v));
             }}
           >
             <option value="all">All time</option>
@@ -143,7 +151,10 @@ export default function WikiAudit({ onNavigate }: WikiAuditProps) {
         </label>
         <label className="wk-audit-filter">
           <span>Limit</span>
-          <select value={String(limit)} onChange={(e) => setLimit(Number(e.target.value))}>
+          <select
+            value={String(limit)}
+            onChange={(e) => setLimit(Number(e.target.value))}
+          >
             <option value="50">50</option>
             <option value="200">200</option>
             <option value="500">500</option>
@@ -167,8 +178,8 @@ export default function WikiAudit({ onNavigate }: WikiAuditProps) {
       ) : filtered.length === 0 ? (
         <div className="wk-audit-empty">
           {entries && entries.length === 0
-            ? 'No edits yet. This page will populate as soon as any agent (or bootstrap pass) commits to the wiki.'
-            : 'No entries match your filters.'}
+            ? "No edits yet. This page will populate as soon as any agent (or bootstrap pass) commits to the wiki."
+            : "No entries match your filters."}
         </div>
       ) : (
         <table className="wk-audit-table">
@@ -183,7 +194,10 @@ export default function WikiAudit({ onNavigate }: WikiAuditProps) {
           </thead>
           <tbody>
             {filtered.map((e) => (
-              <tr key={e.sha} className={`wk-audit-row ${rowClass(e.author_slug)}`}>
+              <tr
+                key={e.sha}
+                className={`wk-audit-row ${rowClass(e.author_slug)}`}
+              >
                 <td className="wk-audit-when" title={e.timestamp}>
                   {safeRelative(e.timestamp)}
                 </td>
@@ -191,7 +205,9 @@ export default function WikiAudit({ onNavigate }: WikiAuditProps) {
                   <PixelAvatar slug={e.author_slug} size={16} />
                   <span>{formatAgentName(e.author_slug)}</span>
                   {authorTag(e.author_slug) && (
-                    <span className="wk-audit-tag">{authorTag(e.author_slug)}</span>
+                    <span className="wk-audit-tag">
+                      {authorTag(e.author_slug)}
+                    </span>
                   )}
                 </td>
                 <td className="wk-audit-msg">{e.message}</td>
@@ -206,8 +222,8 @@ export default function WikiAudit({ onNavigate }: WikiAuditProps) {
                             <a
                               href={`#/wiki/${encodeURI(p)}`}
                               onClick={(ev) => {
-                                ev.preventDefault()
-                                onNavigate(p)
+                                ev.preventDefault();
+                                onNavigate(p);
                               }}
                             >
                               {p}
@@ -227,58 +243,64 @@ export default function WikiAudit({ onNavigate }: WikiAuditProps) {
         </table>
       )}
     </main>
-  )
+  );
 }
 
 function passesAuthor(slug: string, filter: AuthorBucket): boolean {
-  if (filter === 'all') return true
-  if (filter === 'system') return isSystemSlug(slug)
-  if (filter === 'agents') return !isSystemSlug(slug)
-  return slug === filter
+  if (filter === "all") return true;
+  if (filter === "system") return isSystemSlug(slug);
+  if (filter === "agents") return !isSystemSlug(slug);
+  return slug === filter;
 }
 
 function isSystemSlug(slug: string): boolean {
-  return slug === 'system' || slug === 'wuphf-bootstrap' || slug === 'wuphf-recovery'
+  return (
+    slug === "system" || slug === "wuphf-bootstrap" || slug === "wuphf-recovery"
+  );
 }
 
 function authorTag(slug: string): string | null {
-  if (slug === 'wuphf-bootstrap') return 'bootstrap'
-  if (slug === 'wuphf-recovery') return 'recovery'
-  if (slug === 'system') return 'system'
-  return null
+  if (slug === "wuphf-bootstrap") return "bootstrap";
+  if (slug === "wuphf-recovery") return "recovery";
+  if (slug === "system") return "system";
+  return null;
 }
 
 function rowClass(slug: string): string {
-  if (slug === 'wuphf-bootstrap') return 'is-bootstrap'
-  if (slug === 'wuphf-recovery') return 'is-recovery'
-  if (slug === 'system') return 'is-system'
-  return 'is-agent'
+  if (slug === "wuphf-bootstrap") return "is-bootstrap";
+  if (slug === "wuphf-recovery") return "is-recovery";
+  if (slug === "system") return "is-system";
+  return "is-agent";
 }
 
 function isArticlePath(p: string): boolean {
-  return p.startsWith('team/') && p.endsWith('.md')
+  return p.startsWith("team/") && p.endsWith(".md");
 }
 
 function safeRelative(iso: string): string {
   try {
-    return formatRelativeTime(iso)
+    return formatRelativeTime(iso);
   } catch {
-    return iso
+    return iso;
   }
 }
 
-function summarize(entries: WikiAuditEntry[]): { total: number; authors: number; paths: number } {
-  const authors = new Set<string>()
-  const paths = new Set<string>()
+function summarize(entries: WikiAuditEntry[]): {
+  total: number;
+  authors: number;
+  paths: number;
+} {
+  const authors = new Set<string>();
+  const paths = new Set<string>();
   for (const e of entries) {
-    authors.add(e.author_slug)
-    for (const p of e.paths) paths.add(p)
+    authors.add(e.author_slug);
+    for (const p of e.paths) paths.add(p);
   }
-  return { total: entries.length, authors: authors.size, paths: paths.size }
+  return { total: entries.length, authors: authors.size, paths: paths.size };
 }
 
 function downloadCSV(entries: WikiAuditEntry[]): void {
-  const rows: string[] = ['timestamp,author,sha,message,paths']
+  const rows: string[] = ["timestamp,author,sha,message,paths"];
   for (const e of entries) {
     rows.push(
       [
@@ -286,25 +308,25 @@ function downloadCSV(entries: WikiAuditEntry[]): void {
         csvField(e.author_slug),
         csvField(e.sha),
         csvField(e.message),
-        csvField(e.paths.join(' | ')),
-      ].join(','),
-    )
+        csvField(e.paths.join(" | ")),
+      ].join(","),
+    );
   }
-  const blob = new Blob([rows.join('\n') + '\n'], { type: 'text/csv' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `wuphf-wiki-audit-${new Date().toISOString().slice(0, 10)}.csv`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  const blob = new Blob([`${rows.join("\n")}\n`], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `wuphf-wiki-audit-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function csvField(raw: string): string {
-  const s = String(raw ?? '')
+  const s = String(raw ?? "");
   if (/[",\n]/.test(s)) {
-    return `"${s.replace(/"/g, '""')}"`
+    return `"${s.replace(/"/g, '""')}"`;
   }
-  return s
+  return s;
 }

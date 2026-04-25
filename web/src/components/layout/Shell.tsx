@@ -1,23 +1,25 @@
-import { type ReactNode } from 'react'
-import { Sidebar } from './Sidebar'
-import { ChannelHeader } from './ChannelHeader'
-import { DisconnectBanner } from './DisconnectBanner'
-import { StatusBar } from './StatusBar'
-import { RuntimeStrip } from './RuntimeStrip'
-import { ThreadPanel } from '../messages/ThreadPanel'
-import { AgentPanel } from '../agents/AgentPanel'
-import { SearchModal } from '../search/SearchModal'
-import { useAppStore, isDMChannel } from '../../stores/app'
+import type { ReactNode } from "react";
+
+import { isDMChannel, useAppStore } from "../../stores/app";
+import { AgentPanel } from "../agents/AgentPanel";
+import { ThreadPanel } from "../messages/ThreadPanel";
+import { SearchModal } from "../search/SearchModal";
+import { HelpModalHost } from "../ui/HelpModal";
+import { ChannelHeader } from "./ChannelHeader";
+import { DisconnectBanner } from "./DisconnectBanner";
+import { RuntimeStrip } from "./RuntimeStrip";
+import { Sidebar } from "./Sidebar";
+import { StatusBar } from "./StatusBar";
 
 interface ShellProps {
-  children: ReactNode
+  children: ReactNode;
 }
 
 export function Shell({ children }: ShellProps) {
-  const currentChannel = useAppStore((s) => s.currentChannel)
-  const currentApp = useAppStore((s) => s.currentApp)
-  const channelMeta = useAppStore((s) => s.channelMeta)
-  const inDM = !currentApp && !!isDMChannel(currentChannel, channelMeta)
+  const currentChannel = useAppStore((s) => s.currentChannel);
+  const currentApp = useAppStore((s) => s.currentApp);
+  const channelMeta = useAppStore((s) => s.channelMeta);
+  const inDM = !currentApp && !!isDMChannel(currentChannel, channelMeta);
 
   return (
     <div className="office">
@@ -32,6 +34,7 @@ export function Shell({ children }: ShellProps) {
       <ThreadPanel />
       <AgentPanel />
       <SearchModal />
+      <HelpModalHost />
     </div>
-  )
+  );
 }

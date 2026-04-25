@@ -1,11 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
-import { useOfficeMembers } from '../../hooks/useMembers'
-import { getOfficeTasks, getUsage } from '../../api/client'
+import { useQuery } from "@tanstack/react-query";
+
+import { getOfficeTasks, getUsage } from "../../api/client";
+import { useOfficeMembers } from "../../hooks/useMembers";
 
 function formatTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M'
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k'
-  return String(n)
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
 }
 
 /**
@@ -13,43 +14,44 @@ function formatTokens(n: number): string {
  * `renderWorkspaceSummary` output: active agents, open tasks, total tokens.
  */
 export function WorkspaceSummary() {
-  const { data: members = [] } = useOfficeMembers()
+  const { data: members = [] } = useOfficeMembers();
   const { data: tasksData } = useQuery({
-    queryKey: ['office-tasks'],
+    queryKey: ["office-tasks"],
     queryFn: () => getOfficeTasks({ includeDone: false }),
     refetchInterval: 30_000,
-  })
+  });
   const { data: usage } = useQuery({
-    queryKey: ['usage'],
+    queryKey: ["usage"],
     queryFn: () => getUsage(),
     refetchInterval: 30_000,
-  })
+  });
 
   const activeAgents = members.filter((m) => {
-    if (!m.slug || m.slug === 'human' || m.slug === 'you') return false
-    return (m.status || '').toLowerCase() === 'active'
-  }).length
+    if (!m.slug || m.slug === "human" || m.slug === "you") return false;
+    return (m.status || "").toLowerCase() === "active";
+  }).length;
 
   const openTasks = (tasksData?.tasks ?? []).filter((t) => {
-    const s = (t.status || '').toLowerCase()
-    return s && s !== 'done' && s !== 'completed'
-  }).length
+    const s = (t.status || "").toLowerCase();
+    return s && s !== "done" && s !== "completed";
+  }).length;
 
   const parts: string[] = [
-    `${activeAgents} agent${activeAgents === 1 ? '' : 's'} active`,
-    `${openTasks} task${openTasks === 1 ? '' : 's'} open`,
-  ]
-  const total = usage?.total?.total_tokens ?? 0
-  if (total > 0) parts.push(`${formatTokens(total)} tokens`)
+    `${activeAgents} agent${activeAgents === 1 ? "" : "s"} active`,
+    `${openTasks} task${openTasks === 1 ? "" : "s"} open`,
+  ];
+  const total = usage?.total?.total_tokens ?? 0;
+  if (total > 0) parts.push(`${formatTokens(total)} tokens`);
 
-  const hint = openTasks > 0
-    ? `${openTasks} task${openTasks === 1 ? '' : 's'} in progress`
-    : 'Type / for commands'
+  const hint =
+    openTasks > 0
+      ? `${openTasks} task${openTasks === 1 ? "" : "s"} in progress`
+      : "Type / for commands";
 
   return (
     <>
-      <div className="sidebar-summary">{parts.join(', ')}</div>
+      <div className="sidebar-summary">{parts.join(", ")}</div>
       <div className="sidebar-hint">{hint}</div>
     </>
-  )
+  );
 }

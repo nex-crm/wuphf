@@ -9,6 +9,7 @@
     "bin/wuphf.js",
     "scripts/download-binary.js",
     "scripts/postinstall.js",
+    "scripts/version-check.js",
     "README.md"
   ],
   "scripts": {

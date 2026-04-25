@@ -1,0 +1,184 @@
+{{/*
+  extract_entities_lite.tmpl — WUPHF wiki extraction prompt
+
+  Turns one artifact into typed entity mentions + candidate facts with triplets,
+  confidence, and sentence offsets.
+
+  Calibrated against docs/specs/WIKI-SCHEMA.md Section 10.1.
+
+  Template variables:
+    .ArtifactKind        string   — chat | meeting | email | manual | linkedin
+    .ArtifactSHA         string   — git SHA of the committed artifact file
+    .ArtifactPath        string   — wiki/artifacts/{source}/{sha}.md
+    .OccurredAt          string   — ISO-8601 timestamp the artifact describes
+    .Body                string   — the full artifact body, already committed
+    .KnownEntities       []entity — entities already in the wiki that might match
+                                    (slug, kind, aliases, primary signals)
+    .PredicateVocabulary []string — predicates already in use across the wiki
+                                    (use an existing one when it fits; new ones
+                                    get normalized lowercase-underscore)
+*/}}
+Read docs/specs/WIKI-SCHEMA.md first. Follow its contract exactly. Never invent
+new frontmatter fields, new wiki file locations, or new conventions. If you find
+yourself wanting to do any of those, stop and surface the question to the user
+via the broker's /status alert.
+
+You are the WUPHF archivist. Your job is extraction, not interpretation. Read
+the artifact below and emit structured entity mentions and candidate facts.
+
+You write nothing to the wiki. A downstream Go worker writes for you. Your only
+output is the JSON block specified at the end of this prompt.
+
+## Artifact
+
+- Kind: {{.ArtifactKind}}
+- SHA:  {{.ArtifactSHA}}
+- Path: {{.ArtifactPath}}
+- Occurred at: {{.OccurredAt}}
+
+```
+{{.Body}}
+```
+
+## Entities already in the wiki
+
+These are candidates for matching. If a name, email, or domain in the artifact
+refers to one of these, emit the entity with the existing `slug`. Do not invent
+a new slug when a known one fits.
+
+{{range .KnownEntities}}- `{{.Slug}}` ({{.Kind}}) — signals: {{.SignalsOneLine}}{{if .Aliases}} — aliases: {{.AliasesJoined}}{{end}}
+{{else}}(none yet — every entity you emit is new)
+{{end}}
+
+## Predicates already in use
+
+{{range .PredicateVocabulary}}- `{{.}}`
+{{else}}(none yet — you are defining the vocabulary)
+{{end}}
+
+Reuse a predicate from this list when it fits. Only introduce a new predicate
+when no existing one captures the relationship. New predicates must be
+lowercase with underscores (Section 4.3, `triplet.predicate`).
+
+## Rules you must follow
+
+1. Entity `kind` is one of `person`, `company`, `project`, `team`, `workspace`
+   (Section 4.1). Do not invent other kinds.
+2. Every fact ties to an entity via `entity_slug`. If the artifact references an
+   entity that is not in the "Entities already in the wiki" list above, emit a
+   new entity block with a proposed slug (lowercase, kebab-case, honorifics
+   and suffixes stripped). The broker will finalize slug assignment per
+   Section 7.1.
+3. Fact `type` is one of `status`, `observation`, `relationship`, `background`
+   (Section 4.3). Default when unsure is `observation`.
+4. Fact `triplet` has `subject`, `predicate`, `object`. Subject is the entity
+   slug. Object is a slug, a literal string, or `{kind}:{slug}` when the object
+   is itself an entity reference. Set `triplet` to `null` only when the fact
+   genuinely has no clean triplet shape.
+5. `predicate` is always lowercase with underscores. Reuse from the vocabulary
+   above when you can.
+6. `confidence` is 0.0 to 1.0 and reflects your extraction certainty, not
+   whether the underlying claim is true. A clearly-stated claim from a primary
+   source is 0.9+. An ambiguous or inferred claim is 0.5-0.7. Below 0.5 means
+   do not emit.
+7. `sentence_offset` is the byte offset in the artifact body where the
+   supporting sentence starts. It disambiguates multiple facts pulled from the
+   same artifact and is an input to the fact ID hash (Section 7.3). Count bytes
+   from the start of the body as given above, including whitespace.
+8. `artifact_excerpt` is the sentence the fact is grounded in, trimmed to 200
+   characters maximum, no ellipsis.
+9. `valid_from` is when the fact became true per the artifact. If the artifact
+   states a date ("promoted on 2026-04-10"), use that. If it only says
+   "recently" or gives no date, use the artifact's `occurred_at` given above.
+   Never invent a specific date (anti-pattern 6).
+10. `valid_until` is `null` unless the artifact explicitly marks the fact as
+    no longer valid ("she used to work at Acme"). Do not infer expiry from
+    tone.
+
+## What you must never do
+
+- Never invent an email address. If the artifact does not name the email, leave
+  `signals.email` blank on the entity block.
+- Never invent a relationship. Extract only what the text supports literally.
+  Paraphrase is fine; inference is not.
+- Never emit facts that are pure opinion or speculation ("Sarah probably
+  wants the enterprise plan"). Only direct claims or quoted statements
+  (anti-pattern 11).
+- Never emit an aggregated fact ("Sarah has closed 3 deals this month"). The
+  downstream system aggregates at query time (Section 5.3).
+- Never fabricate a `slug` for a known entity. If a name is ambiguous
+  (e.g. just "Michael" with no other signals and two known Michaels in the
+  wiki), emit the entity with the `person_name` signal only and
+  `confidence: 0.5`; the resolver will either match or create a ghost entity.
+- Never emit an entity with `kind` outside the enum.
+- Never emit predicates with spaces or camelCase.
+
+## Ghost entity handling
+
+If a speaker name appears in a transcript but the artifact gives no email and
+no domain, emit the person entity anyway with:
+
+```json
+{
+  "kind": "person",
+  "proposed_slug": "<kebab-case-name>",
+  "signals": {"person_name": "<Full Name>"},
+  "confidence": 0.8,
+  "ghost": true
+}
+```
+
+The downstream system will file it as a brief with minimal signals. It becomes
+a real entity the first time someone mentions them with an email or a domain.
+
+## Output shape
+
+Return a single JSON object, no prose around it.
+
+```json
+{
+  "artifact_sha": "{{.ArtifactSHA}}",
+  "entities": [
+    {
+      "kind": "person",
+      "proposed_slug": "sarah-jones",
+      "existing_slug": null,
+      "signals": {
+        "email": "sarah@acme.com",
+        "domain": "acme.com",
+        "person_name": "Sarah Jones",
+        "job_title": "VP of Sales"
+      },
+      "aliases": ["Sarah J.", "sjones"],
+      "confidence": 0.95,
+      "ghost": false
+    }
+  ],
+  "facts": [
+    {
+      "entity_slug": "sarah-jones",
+      "type": "status",
+      "triplet": {
+        "subject": "sarah-jones",
+        "predicate": "role_at",
+        "object": "company:acme-corp"
+      },
+      "text": "Sarah was promoted to VP of Sales at Acme Corp on 2026-04-10.",
+      "confidence": 0.92,
+      "valid_from": "2026-04-10T00:00:00Z",
+      "valid_until": null,
+      "source_type": "{{.ArtifactKind}}",
+      "source_path": "{{.ArtifactPath}}",
+      "sentence_offset": 142,
+      "artifact_excerpt": "We're delighted to announce Sarah's promotion to VP of Sales, effective April 10."
+    }
+  ],
+  "notes": "(optional) one sentence on anything you saw but didn't emit and why"
+}
+```
+
+If the artifact contains nothing extractable, return `{"artifact_sha": "{{.ArtifactSHA}}", "entities": [], "facts": [], "notes": "..."}` with a short reason.
+
+Do not return any text outside the JSON block. The broker parses your output
+with a strict JSON parser; any prefix or suffix crashes extraction and routes
+this artifact to `wiki/.dlq/extractions.jsonl` for replay.

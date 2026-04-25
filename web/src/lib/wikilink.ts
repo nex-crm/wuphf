@@ -14,73 +14,73 @@
  */
 
 export interface WikiLink {
-  slug: string
-  display: string
+  slug: string;
+  display: string;
 }
 
-const WIKILINK_RE = /^\[\[(.+?)\]\]$/s
+const WIKILINK_RE = /^\[\[(.+?)\]\]$/s;
 
 export function parseWikiLink(input: string): WikiLink | null {
-  if (typeof input !== 'string') return null
-  const match = input.match(WIKILINK_RE)
-  if (!match) return null
-  return parseWikiLinkInner(match[1])
+  if (typeof input !== "string") return null;
+  const match = input.match(WIKILINK_RE);
+  if (!match) return null;
+  return parseWikiLinkInner(match[1]);
 }
 
 /**
  * Parse the inner text of a `[[...]]` link (without the surrounding brackets).
  */
 export function parseWikiLinkInner(raw: string): WikiLink | null {
-  if (typeof raw !== 'string') return null
+  if (typeof raw !== "string") return null;
 
   // Multiple pipes disallowed.
-  const pipeCount = (raw.match(/\|/g) || []).length
-  if (pipeCount > 1) return null
+  const pipeCount = (raw.match(/\|/g) || []).length;
+  if (pipeCount > 1) return null;
 
-  let slug: string
-  let display: string
+  let slug: string;
+  let display: string;
   if (pipeCount === 1) {
-    const idx = raw.indexOf('|')
-    slug = raw.slice(0, idx).trim()
-    display = raw.slice(idx + 1).trim()
+    const idx = raw.indexOf("|");
+    slug = raw.slice(0, idx).trim();
+    display = raw.slice(idx + 1).trim();
   } else {
-    slug = raw.trim()
-    display = slug
+    slug = raw.trim();
+    display = slug;
   }
 
-  if (!slug) return null
-  if (!display) display = slug
+  if (!slug) return null;
+  if (!display) display = slug;
 
   // Path traversal + absolute paths slip users out of the wiki root.
-  if (slug.includes('..')) return null
-  if (slug.startsWith('/')) return null
+  if (slug.includes("..")) return null;
+  if (slug.startsWith("/")) return null;
   // Control chars / NUL.
-  if (/[\x00-\x1f]/.test(slug)) return null
+  if (/[\x00-\x1f]/.test(slug)) return null;
 
-  return { slug, display }
+  return { slug, display };
 }
 
 // ── AST types (minimal mdast surface for the remark plugin) ──
 
 interface MdTextNode {
-  type: 'text'
-  value: string
+  type: "text";
+  value: string;
 }
 
 interface MdLinkNode {
-  type: 'link'
-  url: string
-  children: MdAnyNode[]
-  data?: { hProperties?: Record<string, string> }
+  type: "link";
+  url: string;
+  children: MdAnyNode[];
+  data?: { hProperties?: Record<string, string> };
 }
 
 type MdAnyNode =
   | MdTextNode
   | MdLinkNode
-  | { type: string; children?: MdAnyNode[]; value?: string }
+  | { type: string; children?: MdAnyNode[]; value?: string };
 
 interface MdParent {
-  children: MdAnyNode[]
+  children: MdAnyNode[];
 }
 
 /**
@@ -94,69 +94,76 @@ export function wikiLinkRemarkPlugin(resolver: (slug: string) => boolean) {
   return function plugin() {
     return function transformer(tree: unknown) {
       walk(tree as MdAnyNode, (parent) => {
-        const children = parent.children
+        const children = parent.children;
         for (let i = 0; i < children.length; i++) {
-          const child = children[i]
-          if (child.type !== 'text' || typeof (child as MdTextNode).value !== 'string') continue
-          const value = (child as MdTextNode).value
-          if (!value.includes('[[')) continue
+          const child = children[i];
+          if (
+            child.type !== "text" ||
+            typeof (child as MdTextNode).value !== "string"
+          )
+            continue;
+          const value = (child as MdTextNode).value;
+          if (!value.includes("[[")) continue;
 
-          const replacements = buildReplacements(value, resolver)
-          if (replacements.length === 0) continue
-          children.splice(i, 1, ...replacements)
-          i += replacements.length - 1
+          const replacements = buildReplacements(value, resolver);
+          if (replacements.length === 0) continue;
+          children.splice(i, 1, ...replacements);
+          i += replacements.length - 1;
         }
-      })
-    }
-  }
+      });
+    };
+  };
 }
 
-function buildReplacements(value: string, resolver: (slug: string) => boolean): MdAnyNode[] {
-  const re = /\[\[([^\]\n]+)\]\]/g
-  const out: MdAnyNode[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-  let changed = false
+function buildReplacements(
+  value: string,
+  resolver: (slug: string) => boolean,
+): MdAnyNode[] {
+  const re = /\[\[([^\]\n]+)\]\]/g;
+  const out: MdAnyNode[] = [];
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+  let changed = false;
   while ((match = re.exec(value)) !== null) {
-    const link = parseWikiLinkInner(match[1])
-    if (!link) continue
-    changed = true
+    const link = parseWikiLinkInner(match[1]);
+    if (!link) continue;
+    changed = true;
     if (match.index > lastIndex) {
-      out.push({ type: 'text', value: value.slice(lastIndex, match.index) })
+      out.push({ type: "text", value: value.slice(lastIndex, match.index) });
     }
-    const broken = !resolver(link.slug)
+    const broken = !resolver(link.slug);
     out.push({
-      type: 'link',
+      type: "link",
       url: `#/wiki/${encodeURI(link.slug)}`,
-      children: [{ type: 'text', value: link.display }],
+      children: [{ type: "text", value: link.display }],
       data: {
         hProperties: {
-          'data-wikilink': 'true',
-          'data-broken': broken ? 'true' : 'false',
-          'data-slug': link.slug,
-          className: broken ? 'wk-wikilink wk-broken' : 'wk-wikilink',
+          "data-wikilink": "true",
+          "data-broken": broken ? "true" : "false",
+          "data-slug": link.slug,
+          className: broken ? "wk-wikilink wk-broken" : "wk-wikilink",
         },
       },
-    })
-    lastIndex = re.lastIndex
+    });
+    lastIndex = re.lastIndex;
   }
-  if (!changed) return []
+  if (!changed) return [];
   if (lastIndex < value.length) {
-    out.push({ type: 'text', value: value.slice(lastIndex) })
+    out.push({ type: "text", value: value.slice(lastIndex) });
   }
-  return out
+  return out;
 }
 
 function walk(node: MdAnyNode, onParent: (parent: MdParent) => void) {
-  const maybeParent = node as { children?: MdAnyNode[] }
-  const children = maybeParent.children
-  if (!Array.isArray(children)) return
-  onParent(node as MdParent)
+  const maybeParent = node as { children?: MdAnyNode[] };
+  const children = maybeParent.children;
+  if (!Array.isArray(children)) return;
+  onParent(node as MdParent);
   // Walk a snapshot because onParent may have mutated children.
-  const snapshot = [...(maybeParent.children || [])]
+  const snapshot = [...(maybeParent.children || [])];
   for (const child of snapshot) {
-    if (child && typeof child === 'object' && 'children' in child) {
-      walk(child as MdAnyNode, onParent)
+    if (child && typeof child === "object" && "children" in child) {
+      walk(child as MdAnyNode, onParent);
     }
   }
 }

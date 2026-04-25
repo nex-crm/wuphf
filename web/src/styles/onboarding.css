@@ -55,7 +55,9 @@
 .wizard-progress-dot {
   height: 6px;
   border-radius: var(--radius-full);
-  transition: width 0.25s, background 0.25s;
+  transition:
+    width 0.25s,
+    background 0.25s;
 }
 
 .wizard-progress-dot.active {
@@ -170,7 +172,10 @@
   font-family: var(--font-sans);
   font-size: 13px;
   font-weight: 500;
-  transition: border-color 0.15s, background 0.15s, color 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
 }
 
 .template-from-scratch-btn:hover {
@@ -225,7 +230,9 @@
   border-radius: var(--radius-md);
   background: var(--bg-card);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   text-align: left;
 }
 
@@ -278,7 +285,9 @@
   border: 1px solid var(--border);
   background: var(--bg-card);
   cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
   text-align: left;
   width: 100%;
   font-family: var(--font-sans);
@@ -327,7 +336,9 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.2s, border-color 0.2s;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
 }
 
 .wiz-team-tile.selected .wiz-team-check {
@@ -406,7 +417,9 @@
   border: 1px solid var(--border);
   background: var(--bg-card);
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
   text-align: center;
   font-size: 13px;
   font-weight: 500;
@@ -573,6 +586,35 @@
   line-height: 1.55;
 }
 
+/* Keyboard cue under the task textarea. Tells users Enter is a newline
+   here and ⌘/Ctrl+Enter advances — the opposite of every other wizard
+   step, so an explicit hint avoids confusion. */
+.task-textarea-hint {
+  margin: 8px 2px 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+.task-textarea-hint .kbd + .kbd {
+  margin-left: 2px;
+}
+
+/* Focus ring shared by keyboard-activatable surfaces that are easy to miss
+   without a visible outline (template tiles, runtime tiles, team tiles,
+   task suggestions). Scoped to `:focus-visible` so mouse users don't see
+   it. Kept with the onboarding styles because all four selectors target
+   wizard surfaces. */
+.template-card:focus-visible,
+.runtime-tile:focus-visible,
+.wiz-team-tile:focus-visible,
+.task-suggestion:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ─── Task Suggestions (step 6) ─── */
 .task-suggestions {
   background: var(--bg-card);
@@ -608,7 +650,9 @@
   cursor: pointer;
   text-align: left;
   font-family: var(--font-sans);
-  transition: border-color 0.15s, background 0.15s;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
 }
 
 .task-suggestion:hover {
@@ -717,11 +761,155 @@
   font-size: 64px;
   font-weight: 700;
   letter-spacing: -0.02em;
-  color: var(--yellow, #ECB22E);
+  color: var(--yellow, #ecb22e);
   margin-bottom: 8px;
 }
 
 .launch-sub {
   font-size: 14px;
   color: var(--text-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Wizard parity — Nex signup, conditional GBrain keys, readiness
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Inline "don't have a Nex account?" trigger on Identity step ─── */
+.wiz-nex-trigger {
+  text-align: center;
+}
+
+.wiz-nex-trigger-link {
+  background: none;
+  border: none;
+  color: var(--accent, #1264a3);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 8px 0;
+  text-decoration: underline;
+}
+
+.wiz-nex-trigger-link:hover {
+  color: var(--accent-hover, var(--accent));
+}
+
+/* ─── Expanded Nex signup panel ─── */
+.wiz-nex-signup {
+  border: 1px solid var(--border);
+}
+
+.wiz-nex-ok {
+  background: rgba(34, 197, 94, 0.08);
+  border: 1px solid rgba(34, 197, 94, 0.3);
+  color: var(--text);
+  padding: 12px;
+  border-radius: var(--radius-md, 6px);
+  font-size: 13px;
+  margin: 0;
+}
+
+/* ─── Conditional GBrain keys (inside Setup step's memory panel) ─── */
+.wiz-backend-keys {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.wiz-backend-keys-title {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  color: var(--text);
+}
+
+.wiz-backend-keys-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+}
+
+/* ─── Readiness summary (final step) ─── */
+.readiness-panel {
+  padding: 8px 0;
+}
+
+.readiness-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.readiness-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-light, var(--border));
+}
+
+.readiness-item:last-child {
+  border-bottom: none;
+}
+
+.readiness-glyph,
+.readiness-glyph-inline {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.readiness-glyph.ready,
+.readiness-glyph-inline.ready {
+  background: rgba(34, 197, 94, 0.15);
+  color: #16a34a;
+}
+
+.readiness-glyph.next,
+.readiness-glyph-inline.next {
+  background: rgba(234, 179, 8, 0.15);
+  color: #ca8a04;
+}
+
+.readiness-glyph.missing,
+.readiness-glyph-inline.missing {
+  background: rgba(239, 68, 68, 0.15);
+  color: #dc2626;
+}
+
+.readiness-glyph {
+  margin-top: 2px;
+}
+
+.readiness-glyph-inline {
+  width: 16px;
+  height: 16px;
+  font-size: 10px;
+  vertical-align: -3px;
+  margin: 0 2px;
+}
+
+.readiness-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.readiness-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.readiness-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 2px;
 }

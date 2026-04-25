@@ -51,6 +51,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 // ErrGitUnavailable is returned by Init when the `git` binary cannot be
@@ -81,23 +82,35 @@ type Repo struct {
 	mu         sync.Mutex
 }
 
+// unscopedWikiRootAllowed gates WikiRootDir / WikiBackupDir access when
+// WUPHF_RUNTIME_HOME is unset. Production keeps it true; a *_test.go init
+// flips it to false so any future test that wires up a real wiki Repo
+// without first setting WUPHF_RUNTIME_HOME to a tempdir panics up front
+// instead of silently touching the developer's real ~/.wuphf/wiki.
+var unscopedWikiRootAllowed = true
+
 // WikiRootDir returns the canonical on-disk path for the team wiki.
 // It honours config.RuntimeHomeDir so dev runs stay isolated from prod.
 func WikiRootDir() string {
-	home := strings.TrimSpace(config.RuntimeHomeDir())
-	if home == "" {
-		return filepath.Join(".wuphf", "wiki")
-	}
-	return filepath.Join(home, ".wuphf", "wiki")
+	return wikiDirForSegment("wiki")
 }
 
 // WikiBackupDir returns the path to the lightweight backup mirror.
 func WikiBackupDir() string {
+	return wikiDirForSegment("wiki.bak")
+}
+
+func wikiDirForSegment(segment string) string {
+	runtimeOverride := strings.TrimSpace(os.Getenv("WUPHF_RUNTIME_HOME"))
+	if runtimeOverride == "" && !unscopedWikiRootAllowed {
+		panic(fmt.Sprintf("team: wiki %q resolved under tests without WUPHF_RUNTIME_HOME set — "+
+			"set t.Setenv(%q, t.TempDir()) or inject a Repo via NewRepoAt(...)", segment, "WUPHF_RUNTIME_HOME"))
+	}
 	home := strings.TrimSpace(config.RuntimeHomeDir())
 	if home == "" {
-		return filepath.Join(".wuphf", "wiki.bak")
+		return filepath.Join(".wuphf", segment)
 	}
-	return filepath.Join(home, ".wuphf", "wiki.bak")
+	return filepath.Join(home, ".wuphf", segment)
 }
 
 // NewRepo returns a Repo rooted at the resolved wiki path.
@@ -112,6 +125,16 @@ func NewRepoAt(root, backup string) *Repo {
 
 // Root returns the wiki root path.
 func (r *Repo) Root() string { return r.root }
+
+// HeadSHA returns the short HEAD commit hash. Returns empty string if the
+// repo has no commits yet.
+func (r *Repo) HeadSHA(ctx context.Context) (string, error) {
+	out, err := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("wiki: resolve HEAD sha: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
 
 // BackupRoot returns the wiki backup mirror path.
 func (r *Repo) BackupRoot() string { return r.backupRoot }
@@ -702,7 +725,16 @@ func (r *Repo) runGitLockedAs(ctx context.Context, name, email string, args ...s
 	all := append(identity, args...)
 	cmd := exec.CommandContext(ctx, "git", all...)
 	cmd.Dir = r.root
-	cmd.Env = append(os.Environ(),
+	// gitexec.CleanEnv strips GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE etc.
+	// so a wuphf invocation launched from inside a git hook (which exports
+	// GIT_DIR pointing at the outer repo) cannot silently retarget these
+	// commits onto the user's actual working branch — that's what produced
+	// the runaway "wuphf: init wiki" commits clobbering real branches.
+	// gitexec.CleanEnv also strips GIT_CONFIG_GLOBAL/_SYSTEM; the literal
+	// /dev/null appends below re-pin them last-wins via os/exec dedupEnv,
+	// so config discovery is fully scoped to this call regardless of parent
+	// env.
+	cmd.Env = append(gitexec.CleanEnv(),
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"GIT_CONFIG_SYSTEM=/dev/null",
 		"GIT_TERMINAL_PROMPT=0",

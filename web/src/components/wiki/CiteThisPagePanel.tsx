@@ -1,27 +1,27 @@
-import { useState } from 'react'
+import { useState } from "react";
 
 /** Right-rail "Cite this page" panel: shows the canonical wikilink + copy button. */
 
 interface CiteThisPagePanelProps {
-  slug: string
+  slug: string;
 }
 
 export default function CiteThisPagePanel({ slug }: CiteThisPagePanelProps) {
-  const [copied, setCopied] = useState(false)
-  const wikilink = `[[${slug}]]`
+  const [copied, setCopied] = useState(false);
+  const wikilink = `[[${slug}]]`;
 
   async function handleCopy() {
     try {
-      const clip = (typeof navigator !== 'undefined' ? navigator.clipboard : null) as
-        | { writeText?: (v: string) => Promise<void> }
-        | null
-      if (clip && typeof clip.writeText === 'function') {
-        await clip.writeText(wikilink)
+      const clip = (
+        typeof navigator !== "undefined" ? navigator.clipboard : null
+      ) as { writeText?: (v: string) => Promise<void> } | null;
+      if (clip && typeof clip.writeText === "function") {
+        await clip.writeText(wikilink);
       }
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1500)
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     } catch {
-      setCopied(false)
+      setCopied(false);
     }
   }
 
@@ -36,10 +36,10 @@ export default function CiteThisPagePanel({ slug }: CiteThisPagePanelProps) {
           onClick={handleCopy}
           aria-label="Copy wikilink"
         >
-          {copied ? 'copied' : 'copy'}
+          {copied ? "copied" : "copy"}
         </button>
       </div>
       <div className="wk-hint">Paste this in any article to link here.</div>
     </div>
-  )
+  );
 }

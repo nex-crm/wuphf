@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
+	"github.com/nex-crm/wuphf/internal/provider"
 )
 
 // agent is used by the routing tests to construct legacy compatibility packs.
@@ -674,5 +675,143 @@ func TestBuildResumePacketSpecSectionMessagesLabel(t *testing.T) {
 	}
 	if strings.Contains(packet, "## Unanswered messages awaiting your response") {
 		t.Error("old section label '## Unanswered messages awaiting your response' must not appear")
+	}
+}
+
+// TestResumeInFlightWorkTUIClaudeRoutesHeadless pins the invariant that TUI
+// mode with claude-code runtime and no pane-backed agents routes resumption
+// through the headless queue, not the tmux pane branch. Before this guard,
+// resumeInFlightWork branched on webMode alone — TUI has webMode=false, so it
+// fell through to agentPaneTargets() which computes pane addresses without
+// verifying they exist, and the resulting tmux send-keys commands silently
+// failed. Users restarting `wuphf --tui` with in-flight work lost resumption.
+func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
+	// Leaked path (not t.TempDir) so a headless worker goroutine that
+	// outlives the test can keep writing without racing the dir cleanup
+	// and failing the test with an `unlinkat ... directory not empty`.
+	oldPathFn := brokerStatePath
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.tasks = []teamTask{
+		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
+	}
+	b.messages = []channelMessage{
+		{ID: "h1", From: "you", Content: "what is the strategy?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		// TUI mode: webMode=false, claude-code provider, no panes spawned.
+		provider:         "claude-code",
+		webMode:          false,
+		paneBackedAgents: false,
+		broker:           b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+		headlessWorkers: make(map[string]bool),
+		headlessActive:  make(map[string]*headlessCodexActiveTurn),
+		headlessQueues:  make(map[string][]headlessCodexTurn),
+	}
+
+	l.resumeInFlightWork()
+
+	present := func(slug string) bool {
+		l.headlessMu.Lock()
+		defer l.headlessMu.Unlock()
+		return len(l.headlessQueues[slug]) > 0 || l.headlessActive[slug] != nil
+	}
+
+	if !present("ceo") {
+		t.Error("TUI+claude: CEO resume packet dropped — TUI must route through headless queue when paneBackedAgents=false")
+	}
+	if !present("fe") {
+		t.Error("TUI+claude: fe specialist resume packet dropped — TUI must route through headless queue when paneBackedAgents=false")
+	}
+}
+
+func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
+	// Leaked path (not t.TempDir) so a headless worker goroutine that
+	// outlives the test can keep writing without racing the dir cleanup
+	// and failing the test with an `unlinkat ... directory not empty`.
+	oldPathFn := brokerStatePath
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
+
+	oldSendPane := launcherSendNotificationToPane
+	var paneNotifications []string
+	launcherSendNotificationToPane = func(_ *Launcher, paneTarget, notification string) {
+		paneNotifications = append(paneNotifications, paneTarget+"\n"+notification)
+	}
+	defer func() { launcherSendNotificationToPane = oldSendPane }()
+
+	b := NewBroker()
+	b.mu.Lock()
+	b.members = []officeMember{
+		{Slug: "ceo", Name: "CEO", Provider: provider.ProviderBinding{Kind: provider.KindClaudeCode}},
+		{Slug: "fe", Name: "Frontend Engineer"},
+	}
+	b.tasks = []teamTask{
+		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
+	}
+	b.messages = []channelMessage{
+		{ID: "h1", From: "you", Content: "what is the strategy?", Timestamp: "2026-04-14T10:00:00Z"},
+	}
+	b.mu.Unlock()
+
+	l := &Launcher{
+		provider:         provider.KindCodex,
+		paneBackedAgents: true,
+		sessionName:      "test-session",
+		broker:           b,
+		pack: &agent.PackDefinition{
+			Slug:     "founding-team",
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+		headlessWorkers: map[string]bool{
+			"ceo": true,
+			"fe":  true,
+		},
+		headlessActive: make(map[string]*headlessCodexActiveTurn),
+		headlessQueues: make(map[string][]headlessCodexTurn),
+	}
+
+	l.resumeInFlightWork()
+
+	if len(paneNotifications) != 1 {
+		t.Fatalf("expected 1 pane notification for claude-bound lead, got %d: %#v", len(paneNotifications), paneNotifications)
+	}
+	if !strings.Contains(paneNotifications[0], "test-session:team.1") || !strings.Contains(paneNotifications[0], "strategy") {
+		t.Fatalf("unexpected pane notification: %q", paneNotifications[0])
+	}
+
+	l.headlessMu.Lock()
+	ceoQueue := append([]headlessCodexTurn(nil), l.headlessQueues["ceo"]...)
+	feQueue := append([]headlessCodexTurn(nil), l.headlessQueues["fe"]...)
+	l.headlessMu.Unlock()
+
+	if len(ceoQueue) != 0 {
+		t.Fatalf("claude-bound lead should not also be enqueued headless, got %#v", ceoQueue)
+	}
+	if len(feQueue) != 1 || !strings.Contains(feQueue[0].Prompt, "Build login form") {
+		t.Fatalf("expected codex-default specialist to resume through headless queue, got %#v", feQueue)
 	}
 }

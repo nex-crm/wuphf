@@ -152,7 +152,7 @@ func TestProviderFieldSurvivesBrokerReload(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	reloaded.mu.Lock()
 	got := reloaded.findMemberLocked("persist-test")
 	reloaded.mu.Unlock()

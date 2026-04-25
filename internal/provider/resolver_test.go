@@ -9,7 +9,7 @@ import (
 func TestDefaultResolverUsesClaudeCode(t *testing.T) {
 	// When LLMProvider is empty, should resolve to claude-code, not nex-ask
 	cfg := config.Config{} // empty provider
-	resolver := DefaultStreamFnResolver(nil)
+	resolver := DefaultStreamFnResolver(nil, nil)
 	fn := resolver("test-agent")
 	if fn == nil {
 		t.Fatal("resolver returned nil StreamFn")

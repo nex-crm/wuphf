@@ -162,12 +162,21 @@ async function verifyArchive({ version, archivePath, archiveBasename, silent }) 
   }
 }
 
-async function downloadBinary({ silent = false } = {}) {
-  const version = packageVersion();
-  const archiveBasename = archiveName(version);
-  const url = releaseAssetUrl(version, archiveBasename);
-  const binDir = path.join(__dirname, "..", "bin");
-  const binaryPath = path.join(binDir, "wuphf");
+// Options:
+//   silent      — suppress progress output on stderr.
+//   version     — download a specific tagged release instead of the one
+//                 recorded in package.json. Used by bin/wuphf.js to fetch a
+//                 newer release into an out-of-tree cache when npm's latest
+//                 has moved past the installed version.
+//   targetPath  — where to place the extracted binary. Defaults to
+//                 bin/wuphf inside this package. The out-of-tree cache uses
+//                 a version-keyed path so multiple versions can coexist.
+async function downloadBinary({ silent = false, version, targetPath } = {}) {
+  const resolvedVersion = version ?? packageVersion();
+  const archiveBasename = archiveName(resolvedVersion);
+  const url = releaseAssetUrl(resolvedVersion, archiveBasename);
+  const binaryPath = targetPath ?? path.join(__dirname, "..", "bin", "wuphf");
+  const binDir = path.dirname(binaryPath);
 
   await fsp.mkdir(binDir, { recursive: true });
 
@@ -181,7 +190,12 @@ async function downloadBinary({ silent = false } = {}) {
     await fetchToFile(url, archivePath);
 
     // Integrity check BEFORE we extract or execute anything.
-    await verifyArchive({ version, archivePath, archiveBasename, silent });
+    await verifyArchive({
+      version: resolvedVersion,
+      archivePath,
+      archiveBasename,
+      silent,
+    });
 
     // Extract using system tar (available on darwin + linux).
     execFileSync("tar", ["-xzf", archivePath, "-C", tmpDir], {

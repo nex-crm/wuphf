@@ -1,6 +1,38 @@
+commit-msg:
+  commands:
+    commitlint:
+      run: bunx --bun commitlint --edit {1}
+
 pre-commit:
   parallel: true
   commands:
+    secretlint:
+      run: bunx --bun secretlint {staged_files}
+      exclude:
+        - "node_modules/**"
+        - "web/dist/**"
+        - "web/node_modules/**"
+        - "bun.lock"
+        - "web/bun.lock"
+
+    biome:
+      # biome runs against staged web/** files only — it's scoped to web/
+      # because that's where biome.json lives. `root: web` chdirs lefthook
+      # into web/ so {staged_files} arrives as paths relative to web/;
+      # stage_fixed=true re-stages formatter + safe-autofix changes so the
+      # commit includes them.
+      root: web
+      glob: "**/*.{js,ts,jsx,tsx,json,css}"
+      run: bunx --bun biome check --write --max-diagnostics=500 {staged_files}
+      stage_fixed: true
+      exclude:
+        - "dist/**"
+        - "node_modules/**"
+        - "bun.lock"
+        - "web/bun.lock"
+        - "**/*.gen.ts"
+        - "**/*.gen.tsx"
+
     gofmt:
       glob: "*.go"
       run: |
@@ -33,17 +65,38 @@ pre-commit:
       run: grep -lE '^(<{7}|>{7}|={7})' {staged_files} && echo "Merge conflict markers found" && exit 1 || true
 
     no-large-files:
-      run: >
-        find {staged_files} -size +500k 2>/dev/null
-        | head -1 | grep .
-        && echo 'File too large (>500KB)' && exit 1
-        || true
+      run: |
+        fail=0
+        for f in {staged_files}; do
+          [ -f "$f" ] || continue
+          size=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+          if [ "${size:-0}" -gt 5242880 ]; then
+            echo "ERROR: $f exceeds 5MB ($(( size / 1048576 ))MB)"
+            fail=1
+          fi
+        done
+        [ "$fail" -eq 0 ]
 
 pre-push:
-  parallel: true
+  # Serial, not parallel: running `go build ./...`, `go vet ./...`, and
+  # `vhs` concurrently contends for disk/CPU on workstations, and
+  # internal/team's wiki worker queue saturates under that load
+  # ("playbook: compile write timed out after 10s", "wiki: queue saturated,
+  # retry on next turn"). Same tests pass reliably when run sequentially.
+  # Until the wiki worker is bounded-queue-tolerant, keep pre-push serial.
+  parallel: false
   commands:
-    test:
-      run: go test ./...
+    smoke:
+      # internal/team's former test-isolation bugs (shared ~/.wuphf/wiki,
+      # worktrees registered against the invoking repo, cross-test state
+      # leakage via broker-state.json) are now guarded at the package
+      # level: worktree_guard_test.go flips allowRealTaskWorktree and
+      # unscopedWikiRootAllowed off for tests, installs safe stub
+      # prepare/cleanup worktree funcs, and skips the NewBroker auto-load
+      # so every test starts from a clean slate. Persistence tests opt
+      # back in via reloadedBroker(t). Full-suite testing now lives in
+      # CI (go-test-matrix job) so pre-push stays a ~10s smoke.
+      run: go build ./... && go vet ./...
     build:
       run: go build -o /dev/null ./cmd/wuphf
     vhs:

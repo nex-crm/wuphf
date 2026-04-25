@@ -68,6 +68,19 @@ type claudeAttemptResult struct {
 	loginRequired  bool
 }
 
+func init() {
+	Register(&Entry{
+		Kind:     KindClaudeCode,
+		StreamFn: CreateClaudeCodeStreamFn,
+		OneShot:  RunClaudeOneShot,
+		Capabilities: Capabilities{
+			PaneEligible:               true,
+			SupportsOneShot:            true,
+			RequiresClaudeSessionReset: true,
+		},
+	})
+}
+
 // CreateClaudeCodeStreamFn returns a StreamFn that runs the `claude` CLI and
 // parses its NDJSON stream output.
 func CreateClaudeCodeStreamFn(agentSlug string) agent.StreamFn {

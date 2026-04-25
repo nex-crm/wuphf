@@ -36,7 +36,9 @@ import (
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/runtimebin"
 	"github.com/nex-crm/wuphf/internal/setup"
+	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
 const (
@@ -105,8 +107,36 @@ type Launcher struct {
 	paneBackedAgents     bool // web mode may spawn per-agent tmux panes; true when panes are live
 	noOpen               bool
 
+	// failedPaneSlugs records agents whose tmux pane/window creation failed.
+	// agentPaneTargets() omits them so the pane-capture loops don't spin on
+	// missing targets (which produces "stopped after 5 failures" spam). These
+	// agents fall back to the headless dispatch path automatically.
+	failedPaneSlugs map[string]string
+
 	notifyMu            sync.Mutex
 	notifyLastDelivered map[string]time.Time
+
+	// paneDispatchMu serializes access to paneDispatchQueues /
+	// paneDispatchWorkers. Each pane-backed agent has its own queue so
+	// rapid notifications no longer race with claude's in-progress turn —
+	// one worker per slug drains its queue with a minimum spacing between
+	// `/clear` sends so claude has time to finalise each reply.
+	paneDispatchMu      sync.Mutex
+	paneDispatchQueues  map[string][]paneDispatchTurn
+	paneDispatchWorkers map[string]bool
+	// paneDispatchLastSentAt records when each slug most recently had a
+	// `/clear` + type cycle dispatched. The coalesce logic in
+	// queuePaneNotification uses this to decide whether to merge a new
+	// notification with a pending one or to start a fresh dispatch.
+	paneDispatchLastSentAt map[string]time.Time
+}
+
+// paneDispatchTurn is one queued notification to type into a tmux pane.
+// Held in the per-slug queue, consumed by runPaneDispatchQueue.
+type paneDispatchTurn struct {
+	PaneTarget   string
+	Notification string
+	EnqueuedAt   time.Time
 }
 
 // SetUnsafe enables unrestricted permissions for all agents (CLI-only flag).
@@ -226,6 +256,12 @@ func isOnboarded() bool {
 // Preflight checks that required tools are available.
 func (l *Launcher) Preflight() error {
 	if l.usesCodexRuntime() {
+		if l.usesOpencodeRuntime() {
+			if _, err := runtimebin.LookPath("opencode"); err != nil {
+				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
+			}
+			return nil
+		}
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
 		}
@@ -258,9 +294,12 @@ func checkGHCapability() (installed bool, authed bool, note string) {
 	return true, true, ""
 }
 
-// Launch creates the tmux session with:
-//   - Window 0 "team": Channel on left, agent panes on the right
-//   - No extra windows: all team activity is visible in one place
+// Launch starts a tmux session hosting the channel-view TUI and the shared
+// broker. Agents run headlessly by default via `claude --print` per turn;
+// per-agent interactive panes are reserved as an internal fallback primitive
+// (see trySpawnWebAgentPanes) and are not spawned at startup. The user
+// attaches to tmux to drive the channel view; agent output is surfaced
+// through the channel timeline rather than a dedicated pane.
 func (l *Launcher) Launch() error {
 	if l.usesCodexRuntime() {
 		return l.launchHeadlessCodex()
@@ -351,29 +390,21 @@ func (l *Launcher) Launch() error {
 		"remain-on-exit", "on",
 	).Run()
 
-	visibleSlugs, err := l.spawnVisibleAgents()
-	if err != nil {
-		return err
-	}
-	l.spawnOverflowAgents()
-
-	// Enable pane borders with labels and visible resize handles.
+	// Pane border cosmetics — kept so the channel pane renders with a border
+	// title. Per-agent panes are not spawned in the default path; they live
+	// only as an internal fallback (see trySpawnWebAgentPanes).
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-status", "top",
 	).Run()
-	// Show agent name in the border; mouse drag is intentionally disabled.
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-format", " #{pane_title} ",
 	).Run()
-	// Make inactive border visible but subtle
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-style", "fg=colour240",
 	).Run()
-	// Active pane border bright so you know which pane has focus
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-active-border-style", "fg=colour45",
 	).Run()
-	// Use line-drawing characters for clear keyboard-focused pane boundaries.
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-lines", "heavy",
 	).Run()
@@ -382,20 +413,7 @@ func (l *Launcher) Launch() error {
 		"-t", l.sessionName+":team.0",
 		"-T", "📢 channel",
 	).Run()
-	for i, slug := range visibleSlugs {
-		if i == 0 {
-			i = 1
-		} else {
-			i++
-		}
-		name := l.getAgentName(slug)
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
-			"-t", fmt.Sprintf("%s:team.%d", l.sessionName, i),
-			"-T", fmt.Sprintf("🤖 %s (@%s)", name, slug),
-		).Run()
-	}
 
-	// Focus on the channel pane.
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-window",
 		"-t", l.sessionName+":team",
 	).Run()
@@ -403,12 +421,12 @@ func (l *Launcher) Launch() error {
 		"-t", l.sessionName+":team.0",
 	).Run()
 
-	// Headless context for per-turn Claude invocations in TUI mode.
+	// Headless context for per-turn Claude invocations. Used by both TUI and
+	// web modes since agent dispatch is headless by default.
 	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
+	l.resumeInFlightWork()
 
-	// Start the notification loop that pushes new messages to agent panes
 	go l.watchChannelPaneLoop(channelCmd)
-	go l.primeVisibleAgents()
 	go l.notifyAgentsLoop()
 	if !l.isOneOnOne() {
 		go l.notifyTaskActionsLoop()
@@ -531,10 +549,23 @@ func (l *Launcher) notifyOfficeChangesLoop() {
 // — failing to respawn leaves the previous panes running (degraded, but the
 // headless path can still deliver).
 func (l *Launcher) respawnPanesAfterReseed() {
-	if l == nil || l.usesCodexRuntime() || !l.paneBackedAgents {
+	if l == nil {
 		return
 	}
+	l.provider = config.ResolveLLMProvider("")
 	if err := l.reconfigureVisibleAgents(); err != nil {
+		// "No tmux server running" / "can't find session" are the expected
+		// states when the launcher runs in headless/web mode without a
+		// persistent tmux session — reconfigureVisibleAgents tries to
+		// attach, fails, and the headless dispatch path takes over silently.
+		// Logging it as an error makes a normal code path look like a
+		// recurring failure in the console. Uses the canonical tmux-error
+		// classifier (isMissingTmuxSession) so this path stays consistent
+		// with every other tmux-attach site. Real failures (permission
+		// denied, exec-not-found with no tmux prefix) keep logging.
+		if isMissingTmuxSession(err.Error()) {
+			return
+		}
 		log.Printf("office_reseeded: respawn panes failed: %v", err)
 	}
 }
@@ -667,22 +698,15 @@ func (l *Launcher) deliverMessageNotification(msg channelMessage) {
 	l.notifyMu.Unlock()
 	immediate = filtered
 
-	// Broadcast stage update only for untagged messages in public channels.
-	// Never in DMs — DMs are private 1:1 conversations, no routing noise.
+	// Mark implicit public-channel routing targets as active so the UI can show
+	// the ephemeral "X is thinking..." indicator. DMs suppress this signal.
 	isDM, _ := l.isChannelDM(normalizeChannelSlug(msg.Channel))
 	if l.broker != nil && len(immediate) > 0 && (msg.From == "you" || msg.From == "human") && !l.isOneOnOne() && !isDM && len(msg.Tagged) == 0 {
-		names := make([]string, 0, len(immediate))
+		slugs := make([]string, 0, len(immediate))
 		for _, t := range immediate {
-			names = append(names, "@"+t.Slug)
+			slugs = append(slugs, t.Slug)
 		}
-		channel := msg.Channel
-		if channel == "" {
-			channel = "general"
-		}
-		l.broker.PostSystemMessage(channel,
-			fmt.Sprintf("Routing to %s...", strings.Join(names, ", ")),
-			"routing",
-		)
+		l.broker.MarkRoutingTargets(slugs)
 	}
 
 	for _, target := range immediate {
@@ -720,22 +744,38 @@ type notificationTarget struct {
 }
 
 func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask) (immediate []notificationTarget, delayed []notificationTarget) {
-	targetMap := l.agentPaneTargets()
+	targetMap := l.agentNotificationTargets()
 	if len(targetMap) == 0 {
 		return nil, nil
 	}
 	lead := l.officeLeadSlug()
 	enabledMembers := map[string]struct{}{}
+	disabledMembers := map[string]struct{}{}
 	if l.broker != nil {
 		for _, member := range l.broker.EnabledMembers(task.Channel) {
 			enabledMembers[member] = struct{}{}
 		}
+		for _, member := range l.broker.DisabledMembers(task.Channel) {
+			disabledMembers[member] = struct{}{}
+		}
+	}
+	// Task ownership is an explicit human/CEO assignment. The same bypass that
+	// lets an @-tag wake a wizard-hired specialist applies here: the owner may
+	// have been hired post-seed and not yet in ch.Members. Disabled (muted)
+	// members are still excluded — muting is an explicit silence.
+	actor := strings.TrimSpace(action.Actor)
+	owner := strings.TrimSpace(task.Owner)
+	isAssigned := func(slug string) bool {
+		return slug != "" && (slug == owner || slug == actor)
 	}
 	addImmediate := func(slug string) {
 		if slug == "" {
 			return
 		}
-		if len(enabledMembers) > 0 {
+		if _, muted := disabledMembers[slug]; muted {
+			return
+		}
+		if !isAssigned(slug) && len(enabledMembers) > 0 {
 			if _, ok := enabledMembers[slug]; !ok {
 				return
 			}
@@ -749,7 +789,10 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 		if slug == "" {
 			return
 		}
-		if len(enabledMembers) > 0 {
+		if _, muted := disabledMembers[slug]; muted {
+			return
+		}
+		if !isAssigned(slug) && len(enabledMembers) > 0 {
 			if _, ok := enabledMembers[slug]; !ok {
 				return
 			}
@@ -759,8 +802,6 @@ func (l *Launcher) taskNotificationTargets(action officeActionLog, task teamTask
 			delete(targetMap, slug)
 		}
 	}
-	actor := strings.TrimSpace(action.Actor)
-	owner := strings.TrimSpace(task.Owner)
 
 	if owner == "" {
 		if lead != "" && lead != actor {
@@ -933,11 +974,11 @@ func (l *Launcher) sendTaskUpdate(target notificationTarget, action officeAction
 		channel = "general"
 	}
 	notification := l.buildTaskExecutionPacket(target.Slug, action, task, content)
-	if l.shouldUseHeadlessDispatch() {
+	if l.shouldUseHeadlessDispatchForTarget(target) {
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
-	l.sendNotificationToPane(target.PaneTarget, notification)
+	l.queuePaneNotification(target.Slug, target.PaneTarget, notification)
 }
 
 // isChannelDM returns true if the channel is a DM (either old dm-* format or new Store type).
@@ -966,7 +1007,7 @@ func (l *Launcher) isChannelDM(channelSlug string) (isDM bool, agentTarget strin
 }
 
 func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate []notificationTarget, delayed []notificationTarget) {
-	targetMap := l.agentPaneTargets()
+	targetMap := l.agentNotificationTargets()
 	if len(targetMap) == 0 {
 		return nil, nil
 	}
@@ -1010,17 +1051,31 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		owner = l.taskOwnerForMessage(msg)
 	}
 	enabledMembers := map[string]struct{}{}
+	disabledMembers := map[string]struct{}{}
 	if l.broker != nil {
 		for _, member := range l.broker.EnabledMembers(msg.Channel) {
 			enabledMembers[member] = struct{}{}
 		}
+		for _, member := range l.broker.DisabledMembers(msg.Channel) {
+			disabledMembers[member] = struct{}{}
+		}
 	}
+
+	// isExplicit checks whether a slug was explicitly @-tagged by the sender.
+	// Explicit tags bypass the enabledMembers filter so a newly hired specialist
+	// not yet in ch.Members can still be reached. They do NOT bypass ch.Disabled:
+	// an explicit disable is the user's intent to silence the agent, and an
+	// @-tag must not override it.
+	isExplicit := func(slug string) bool { return containsSlug(msg.Tagged, slug) }
 
 	addImmediate := func(slug string) {
 		if slug == "" || slug == msg.From {
 			return
 		}
-		if len(enabledMembers) > 0 {
+		if _, muted := disabledMembers[slug]; muted {
+			return
+		}
+		if !isExplicit(slug) && len(enabledMembers) > 0 {
 			if _, ok := enabledMembers[slug]; !ok {
 				return
 			}
@@ -1034,7 +1089,11 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		if slug == "" || slug == msg.From {
 			return false
 		}
-		if len(enabledMembers) > 0 {
+		if _, muted := disabledMembers[slug]; muted {
+			return false
+		}
+		explicit := isExplicit(slug)
+		if !explicit && len(enabledMembers) > 0 {
 			if _, ok := enabledMembers[slug]; !ok {
 				return false
 			}
@@ -1044,7 +1103,7 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 		}
 		// Explicit @-tag: always allow regardless of domain. Domain inference is
 		// for implicit routing only — it should never suppress an explicit mention.
-		if containsSlug(msg.Tagged, slug) {
+		if explicit {
 			return true
 		}
 		if owner != "" {
@@ -1070,19 +1129,19 @@ func (l *Launcher) notificationTargetsForMessage(msg channelMessage) (immediate 
 				if slug == "" || slug == msg.From || slug == lead {
 					continue
 				}
-				// Human explicitly tagged this specialist. Skip domain inference —
-				// the human's intent is explicit and trumps content-based routing.
-				// Only check that the specialist is an enabled channel member.
-				isEnabled := len(enabledMembers) == 0
-				if !isEnabled {
-					_, isEnabled = enabledMembers[slug]
+				// Respect explicit disables. A muted specialist stays muted
+				// even when @-tagged — muting is the user's explicit intent.
+				if _, muted := disabledMembers[slug]; muted {
+					continue
 				}
-				if isEnabled {
-					if target, ok := targetMap[slug]; ok {
-						immediate = append(immediate, target)
-						delete(targetMap, slug)
-						humanExplicitlyTaggedSpecialists = true
-					}
+				// Explicit @-tag trumps channel-membership. The specialist
+				// may have been hired after #general was seeded and not yet
+				// added to ch.Members; dropping the notification here would
+				// silently re-route the human's direct address to CEO.
+				if target, ok := targetMap[slug]; ok {
+					immediate = append(immediate, target)
+					delete(targetMap, slug)
+					humanExplicitlyTaggedSpecialists = true
 				}
 			}
 			if !humanExplicitlyTaggedSpecialists {
@@ -1741,7 +1800,7 @@ func (l *Launcher) visibleOfficeMembers() []officeMember {
 		member := l.officeMemberBySlug(l.oneOnOneAgent())
 		return []officeMember{member}
 	}
-	ordered := l.officeAgentOrder()
+	ordered := l.paneEligibleOfficeMembers()
 	if len(ordered) <= maxVisibleOfficeAgents {
 		return ordered
 	}
@@ -1752,22 +1811,65 @@ func (l *Launcher) overflowOfficeMembers() []officeMember {
 	if l.isOneOnOne() {
 		return nil
 	}
-	ordered := l.officeAgentOrder()
+	ordered := l.paneEligibleOfficeMembers()
 	if len(ordered) <= maxVisibleOfficeAgents {
 		return nil
 	}
 	return ordered[maxVisibleOfficeAgents:]
 }
 
+// paneEligibleOfficeMembers returns officeAgentOrder() minus agents that
+// should never get a tmux/claude pane (e.g. codex-bound agents, which use
+// their own headless pipeline). Filtering upstream keeps visible/overflow
+// slot indices in sync with agentPaneTargets().
+func (l *Launcher) paneEligibleOfficeMembers() []officeMember {
+	ordered := l.officeAgentOrder()
+	filtered := make([]officeMember, 0, len(ordered))
+	for _, m := range ordered {
+		if l.memberUsesHeadlessOneShotRuntime(m.Slug) {
+			continue
+		}
+		filtered = append(filtered, m)
+	}
+	return filtered
+}
+
 func overflowWindowName(slug string) string {
 	return "agent-" + strings.TrimSpace(slug)
 }
 
+// resolvePaneTargetForSlug returns the current pane address for an agent
+// slug, or "" if the agent has no live pane right now. Called by the
+// pane-capture loop when its cached target keeps failing so it can pick
+// up new addresses after office reseeds recreate panes under different
+// ids. Returns ok=false when the agent isn't pane-backed at all (e.g.
+// codex-bound agents that dispatch headlessly).
+func (l *Launcher) resolvePaneTargetForSlug(slug string) (string, bool) {
+	if l == nil || slug == "" {
+		return "", false
+	}
+	targets := l.agentPaneTargets()
+	target, ok := targets[slug]
+	if !ok {
+		return "", false
+	}
+	return target.PaneTarget, true
+}
+
 func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 	targets := make(map[string]notificationTarget)
+	// Pane targets only make sense when tmux panes actually back the agents.
+	// Otherwise every PaneTarget string we return is a ghost pointing at a
+	// non-existent pane — and downstream code (agentNotificationTargets,
+	// shouldUseHeadlessDispatchForTarget) treats the non-empty PaneTarget as
+	// "pane path", which bypasses the headless dispatcher and types into a
+	// dead tmux session that silently drops every notification.
+	if l == nil || !l.paneBackedAgents {
+		return targets
+	}
 	if l.isOneOnOne() {
 		slug := l.oneOnOneAgent()
-		if slug != "" {
+		if slug != "" && !l.skipPaneForSlug(slug) {
 			targets[slug] = notificationTarget{
 				Slug:       slug,
 				PaneTarget: fmt.Sprintf("%s:team.1", l.sessionName),
@@ -1776,18 +1878,96 @@ func (l *Launcher) agentPaneTargets() map[string]notificationTarget {
 		return targets
 	}
 	for i, member := range l.visibleOfficeMembers() {
+		if l.skipPaneForSlug(member.Slug) {
+			continue
+		}
 		targets[member.Slug] = notificationTarget{
 			Slug:       member.Slug,
 			PaneTarget: fmt.Sprintf("%s:team.%d", l.sessionName, i+1),
 		}
 	}
 	for _, member := range l.overflowOfficeMembers() {
+		if l.skipPaneForSlug(member.Slug) {
+			continue
+		}
 		targets[member.Slug] = notificationTarget{
 			Slug:       member.Slug,
 			PaneTarget: fmt.Sprintf("%s:%s.0", l.sessionName, overflowWindowName(member.Slug)),
 		}
 	}
 	return targets
+}
+
+func (l *Launcher) agentNotificationTargets() map[string]notificationTarget {
+	targets := l.agentPaneTargets()
+	if l == nil {
+		return targets
+	}
+	addHeadless := func(slug string) {
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			return
+		}
+		if _, ok := targets[slug]; ok {
+			return
+		}
+		if l.shouldUseHeadlessDispatchForSlug(slug) {
+			targets[slug] = notificationTarget{Slug: slug}
+		}
+	}
+	if l.isOneOnOne() {
+		addHeadless(l.oneOnOneAgent())
+		return targets
+	}
+	addHeadless(l.officeLeadSlug())
+	for _, member := range l.activeSessionMembers() {
+		addHeadless(member.Slug)
+	}
+	return targets
+}
+
+func (l *Launcher) shouldUseHeadlessDispatchForSlug(slug string) bool {
+	if l == nil || strings.TrimSpace(slug) == "" {
+		return false
+	}
+	if l.shouldUseHeadlessDispatch() {
+		return true
+	}
+	if l.memberUsesHeadlessOneShotRuntime(slug) {
+		return true
+	}
+	if _, failed := l.failedPaneSlugs[strings.TrimSpace(slug)]; failed {
+		return true
+	}
+	return false
+}
+
+func (l *Launcher) shouldUseHeadlessDispatchForTarget(target notificationTarget) bool {
+	if l == nil {
+		return false
+	}
+	if l.shouldUseHeadlessDispatchForSlug(target.Slug) {
+		return true
+	}
+	return strings.TrimSpace(target.PaneTarget) == ""
+}
+
+// skipPaneForSlug returns true when the given slug should not have a tmux
+// pane target registered — either because pane spawn failed earlier, or
+// because the agent is bound to a non-pane provider and uses its own headless
+// pipeline. In either case, dispatch falls back to the headless path.
+func (l *Launcher) skipPaneForSlug(slug string) bool {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return true
+	}
+	if _, bad := l.failedPaneSlugs[slug]; bad {
+		return true
+	}
+	if l.memberUsesHeadlessOneShotRuntime(slug) {
+		return true
+	}
+	return false
 }
 
 func (l *Launcher) isOneOnOne() bool {
@@ -1806,8 +1986,41 @@ func (l *Launcher) oneOnOneAgent() string {
 	return NormalizeOneOnOneAgent(l.oneOnOne)
 }
 
+// usesCodexRuntime reports whether the active install-wide provider uses the
+// headless one-shot runtime (shared by Codex and Opencode — both skip the
+// tmux/claude pane infrastructure and drive a fresh CLI per turn through the
+// broker queue in headless_codex.go).
+//
+// Prefer the capability helpers (usesPaneRuntime, requiresClaudeSessionReset)
+// for new code asking "is this a non-pane runtime" — they're Registry-driven
+// and pick up future providers (Ollama, vLLM, exo, OpenAI-compatible) without
+// further edits here. usesCodexRuntime stays for codex/opencode-binary-specific
+// concerns (Preflight, launch routing).
 func (l *Launcher) usesCodexRuntime() bool {
-	return strings.EqualFold(strings.TrimSpace(l.provider), "codex")
+	p := strings.TrimSpace(strings.ToLower(l.provider))
+	return p == "codex" || p == "opencode"
+}
+
+// usesOpencodeRuntime reports whether the install-wide provider is Opencode
+// specifically. Used only where the per-turn CLI invocation differs from Codex
+// (binary name, args, prompt layout).
+func (l *Launcher) usesOpencodeRuntime() bool {
+	return strings.EqualFold(strings.TrimSpace(l.provider), "opencode")
+}
+
+// usesPaneRuntime reports whether the install-wide provider should run
+// agents in interactive tmux panes. Reads PaneEligible from the provider
+// Registry; an unregistered or non-pane-eligible provider returns false,
+// so dispatch falls through to the headless path.
+func (l *Launcher) usesPaneRuntime() bool {
+	return provider.CapabilitiesFor(normalizeProviderKind(l.provider)).PaneEligible
+}
+
+// requiresClaudeSessionReset reports whether the install-wide provider
+// populates the Claude session store and therefore needs provider.ResetClaudeSessions
+// to run on ResetSession / ReconfigureSession. Today only Claude Code does.
+func (l *Launcher) requiresClaudeSessionReset() bool {
+	return provider.CapabilitiesFor(normalizeProviderKind(l.provider)).RequiresClaudeSessionReset
 }
 
 // memberEffectiveProviderKind returns the provider kind that should run the
@@ -1823,6 +2036,14 @@ func (l *Launcher) memberEffectiveProviderKind(slug string) string {
 	return normalizeProviderKind(l.provider)
 }
 
+// memberUsesHeadlessOneShotRuntime reports whether the given agent is bound to
+// a runtime that is not pane-eligible and therefore skips the tmux/claude pane
+// infrastructure in favor of the broker-driven headless queue.
+func (l *Launcher) memberUsesHeadlessOneShotRuntime(slug string) bool {
+	kind := l.memberEffectiveProviderKind(slug)
+	return !provider.CapabilitiesFor(kind).PaneEligible
+}
+
 // normalizeProviderKind trims and canonicalizes provider kinds while
 // preserving unknown values so dispatch code can surface explicit errors.
 func normalizeProviderKind(raw string) string {
@@ -1832,6 +2053,8 @@ func normalizeProviderKind(raw string) string {
 		return provider.KindClaudeCode
 	case "codex":
 		return provider.KindCodex
+	case "opencode":
+		return provider.KindOpencode
 	case "claude-code", "openclaw":
 		return k
 	default:
@@ -1839,8 +2062,10 @@ func normalizeProviderKind(raw string) string {
 	}
 }
 
+// UsesTmuxRuntime reports whether agents run in tmux panes. Equivalent to
+// usesPaneRuntime — exported for cmd/wuphf/main.go and tests.
 func (l *Launcher) UsesTmuxRuntime() bool {
-	return !l.usesCodexRuntime()
+	return l.usesPaneRuntime()
 }
 
 func (l *Launcher) BrokerToken() string {
@@ -1954,7 +2179,7 @@ func (l *Launcher) Kill() error {
 	// still alive to release any open handles (harmless, but principle of
 	// least surprise).
 	l.cleanupAgentTempFiles()
-	if l.usesCodexRuntime() {
+	if !l.usesPaneRuntime() {
 		if err := killPersistedOfficeProcess(); err != nil {
 			return err
 		}
@@ -1975,7 +2200,7 @@ func (l *Launcher) Kill() error {
 }
 
 func (l *Launcher) ResetSession() error {
-	if l.usesCodexRuntime() {
+	if !l.requiresClaudeSessionReset() {
 		if l != nil && l.broker != nil {
 			l.broker.Reset()
 			return nil
@@ -1999,7 +2224,7 @@ func (l *Launcher) ResetSession() error {
 }
 
 func (l *Launcher) ReconfigureSession() error {
-	if l.usesCodexRuntime() {
+	if !l.usesPaneRuntime() {
 		if err := provider.ResetClaudeSessions(); err != nil {
 			return fmt.Errorf("reset Claude sessions: %w", err)
 		}
@@ -2013,6 +2238,15 @@ func (l *Launcher) ReconfigureSession() error {
 }
 
 func (l *Launcher) reconfigureVisibleAgents() error {
+	l.provider = config.ResolveLLMProvider("")
+	if !l.usesPaneRuntime() {
+		if l.paneBackedAgents {
+			_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+			l.paneBackedAgents = false
+		}
+		return nil
+	}
+
 	mcpConfig, err := l.ensureMCPConfig()
 	if err != nil {
 		return fmt.Errorf("prepare mcp config: %w", err)
@@ -2022,6 +2256,8 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	if err := provider.ResetClaudeSessions(); err != nil {
 		return fmt.Errorf("reset Claude sessions: %w", err)
 	}
+
+	l.failedPaneSlugs = nil
 
 	// Use respawn-pane to restart agent processes IN PLACE.
 	// This preserves pane sizes and positions (no layout reset).
@@ -2042,6 +2278,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 			return err
 		}
 		l.spawnOverflowAgents()
+		go l.detectDeadPanesAfterSpawn(visibleMembers)
 		if l.broker != nil {
 			go l.primeVisibleAgents()
 		}
@@ -2058,19 +2295,33 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 		cmd, err := l.claudeCommand(slug, l.buildPrompt(slug))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "respawn pane for %s: %v\n", slug, err)
+			l.recordPaneSpawnFailure(slug, fmt.Sprintf("claudeCommand: %v", err))
 			continue
 		}
 
 		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
 		// respawn-pane -k kills the current process and starts a new one
 		// in the same pane — preserving size and position
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
 			"-t", target,
 			"-c", l.cwd,
 			cmd,
-		).Run()
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			reason := err.Error()
+			if detail != "" {
+				reason = fmt.Sprintf("%s (tmux: %s)", reason, detail)
+			}
+			fmt.Fprintf(os.Stderr,
+				"  Agents:  respawn-pane for %s failed (%s); falling back to headless\n",
+				slug, reason,
+			)
+			l.recordPaneSpawnFailure(slug, reason)
+		}
 	}
 	l.spawnOverflowAgents()
+	go l.detectDeadPanesAfterSpawn(visibleMembers)
 
 	if l.broker != nil {
 		go l.primeVisibleAgents()
@@ -2559,6 +2810,10 @@ func (l *Launcher) buildMessageWorkPacket(msg channelMessage, slug string) strin
 			for name := range activeAgents {
 				names = append(names, "@"+name)
 			}
+			// Sort so this line is byte-identical across spawns that see the same
+			// set of active agents; Go map iteration order is randomized and would
+			// otherwise break prompt caching on the work-packet suffix.
+			sort.Strings(names)
 			lines = append(lines, fmt.Sprintf("- Already active in this thread (do NOT re-route): %s", strings.Join(names, ", ")))
 		}
 	}
@@ -2652,22 +2907,199 @@ func (l *Launcher) sendChannelUpdate(target notificationTarget, msg channelMessa
 		)
 	}
 
-	if l.shouldUseHeadlessDispatch() {
+	if l.shouldUseHeadlessDispatchForTarget(target) {
 		l.enqueueHeadlessCodexTurn(target.Slug, headlessSandboxNote()+notification, channel)
 		return
 	}
-	l.sendNotificationToPane(target.PaneTarget, notification)
+	l.queuePaneNotification(target.Slug, target.PaneTarget, notification)
 }
 
 // shouldUseHeadlessDispatch returns true when notifications must be delivered
 // via a queued headless `claude --print` turn rather than typed into a live
-// interactive pane. Codex runtime always needs headless. Web mode uses headless
-// only when pane-backed agents could not be spawned (tmux missing or failed).
+// interactive pane. This is the default path for both web and TUI modes.
+// Codex runtime is always headless. Pane-backed interactive dispatch is only
+// used when the fallback path explicitly brought panes up (paneBackedAgents).
 func (l *Launcher) shouldUseHeadlessDispatch() bool {
-	if l.usesCodexRuntime() {
+	if !l.usesPaneRuntime() {
 		return true
 	}
-	return l.webMode && !l.paneBackedAgents
+	return !l.paneBackedAgents
+}
+
+// Minimum gap between two consecutive pane `/clear` + type cycles for the
+// same agent. Serves as a safety floor against truly back-to-back sends
+// (sub-second bursts) that could race tmux's input buffer. Not a substitute
+// for the coalesce logic below — claude turns typically take 20-60s, which
+// is much larger than any reasonable fixed gap.
+//
+// Declared as var rather than const so tests can shorten it.
+var paneDispatchMinGap = 3 * time.Second
+
+// paneDispatchCoalesceWindow: if a new notification arrives this soon after
+// the previous send, treat claude's current turn as still in flight and
+// MERGE the new content into the next dispatch instead of triggering a
+// fresh `/clear`. Mid-turn clears were wiping claude's in-progress output
+// and dropping one of two rapid @-tags entirely.
+//
+// 60s covers the p95 claude turn duration (including MCP tool calls) in
+// the observed workload. Multiple bursts in the window get concatenated
+// so claude eventually sees one prompt containing every question, answers
+// them together, and never loses one to a mid-turn clear.
+var paneDispatchCoalesceWindow = 60 * time.Second
+
+// queuePaneNotification enqueues a notification for a pane-backed agent
+// and ensures there is one worker draining its queue. Rapid successive
+// tags for the same slug coalesce into a single dispatch if they arrive
+// inside paneDispatchCoalesceWindow — this is the defence against
+// mid-turn `/clear` wiping claude's in-progress output.
+func (l *Launcher) queuePaneNotification(slug, paneTarget, notification string) {
+	slug = strings.TrimSpace(slug)
+	paneTarget = strings.TrimSpace(paneTarget)
+	if slug == "" || paneTarget == "" || notification == "" {
+		return
+	}
+	l.paneDispatchMu.Lock()
+	if l.paneDispatchQueues == nil {
+		l.paneDispatchQueues = make(map[string][]paneDispatchTurn)
+	}
+	if l.paneDispatchWorkers == nil {
+		l.paneDispatchWorkers = make(map[string]bool)
+	}
+	if l.paneDispatchLastSentAt == nil {
+		l.paneDispatchLastSentAt = make(map[string]time.Time)
+	}
+	// Coalesce path: if a pending turn already exists OR the last send was
+	// within the coalesce window, merge rather than enqueue a separate
+	// dispatch. Merging into the head-of-queue pending item is the cleanest
+	// because the worker picks up the merged content on its next iteration.
+	inflight := false
+	if last, ok := l.paneDispatchLastSentAt[slug]; ok && time.Since(last) < paneDispatchCoalesceWindow {
+		inflight = true
+	}
+	queue := l.paneDispatchQueues[slug]
+	if (inflight || len(queue) > 0) && len(queue) > 0 {
+		// Combine with the pending turn. Claude will see both prompts
+		// separated by a visible divider and typically answers both.
+		last := &l.paneDispatchQueues[slug][len(queue)-1]
+		last.Notification = last.Notification + "\n\n---\n\n" + notification
+		last.EnqueuedAt = time.Now()
+		l.paneDispatchMu.Unlock()
+		return
+	}
+	if inflight && len(queue) == 0 {
+		// No pending turn yet but claude is mid-flight from a recent send.
+		// Create a single pending turn that will absorb further bursts
+		// through the branch above. The worker's pre-send wait will let
+		// claude's current turn finish before /clear fires.
+		l.paneDispatchQueues[slug] = []paneDispatchTurn{{
+			PaneTarget:   paneTarget,
+			Notification: notification,
+			EnqueuedAt:   time.Now(),
+		}}
+		startWorker := !l.paneDispatchWorkers[slug]
+		if startWorker {
+			l.paneDispatchWorkers[slug] = true
+		}
+		l.paneDispatchMu.Unlock()
+		if startWorker {
+			go l.runPaneDispatchQueue(slug)
+		}
+		return
+	}
+	// Cold path: no recent activity, no queue. Dispatch immediately.
+	l.paneDispatchQueues[slug] = append(l.paneDispatchQueues[slug], paneDispatchTurn{
+		PaneTarget:   paneTarget,
+		Notification: notification,
+		EnqueuedAt:   time.Now(),
+	})
+	startWorker := !l.paneDispatchWorkers[slug]
+	if startWorker {
+		l.paneDispatchWorkers[slug] = true
+	}
+	l.paneDispatchMu.Unlock()
+	if startWorker {
+		go l.runPaneDispatchQueue(slug)
+	}
+}
+
+// runPaneDispatchQueue is the single worker per agent slug that drains
+// pane-dispatch notifications serially with a minimum gap between
+// `/clear` cycles. Exits when the queue is empty.
+//
+// Per-iteration flow:
+//  1. Peek head of queue.
+//  2. Wait out min-gap (floor) + coalesce window (lets claude's current turn
+//     land). During the wait, concurrent queuePaneNotification calls MAY
+//     merge new content into the head's Notification field — the peek is
+//     re-read after the wait so the pop sees the merged string.
+//  3. Pop + send.
+//  4. Record the send time so the next enqueue sees "claude in flight".
+func (l *Launcher) runPaneDispatchQueue(slug string) {
+	var lastSentAt time.Time
+	for {
+		// Step 1: peek (not pop).
+		l.paneDispatchMu.Lock()
+		queue := l.paneDispatchQueues[slug]
+		if len(queue) == 0 {
+			// Atomic handoff: clear worker flag while holding the lock so a
+			// concurrent queuePaneNotification observes "no worker" and
+			// starts a fresh goroutine for the next enqueue.
+			delete(l.paneDispatchWorkers, slug)
+			delete(l.paneDispatchQueues, slug)
+			l.paneDispatchMu.Unlock()
+			return
+		}
+		globalLastSentAt := l.paneDispatchLastSentAt[slug]
+		l.paneDispatchMu.Unlock()
+
+		// Step 2a: min-gap floor against sub-second bursts.
+		if !lastSentAt.IsZero() {
+			wait := paneDispatchMinGap - time.Since(lastSentAt)
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+		}
+		// Step 2b: coalesce window — wait for claude's in-flight turn to
+		// land before /clear fires again. New notifications arriving
+		// during this wait are merged into the head by queuePaneNotification.
+		if !globalLastSentAt.IsZero() {
+			wait := paneDispatchCoalesceWindow - time.Since(globalLastSentAt)
+			if wait > 0 {
+				time.Sleep(wait)
+			}
+		}
+
+		// Step 3: pop (re-read head to pick up any merged content).
+		l.paneDispatchMu.Lock()
+		queue = l.paneDispatchQueues[slug]
+		if len(queue) == 0 {
+			// Defensive: external actor emptied the queue during our wait.
+			l.paneDispatchMu.Unlock()
+			continue
+		}
+		turn := queue[0]
+		if len(queue) == 1 {
+			delete(l.paneDispatchQueues, slug)
+		} else {
+			l.paneDispatchQueues[slug] = queue[1:]
+		}
+		l.paneDispatchMu.Unlock()
+
+		launcherSendNotificationToPane(l, turn.PaneTarget, turn.Notification)
+
+		// Step 4: record send time for the next enqueue's coalesce check.
+		lastSentAt = time.Now()
+		l.paneDispatchMu.Lock()
+		l.paneDispatchLastSentAt[slug] = lastSentAt
+		l.paneDispatchMu.Unlock()
+	}
+}
+
+// launcherSendNotificationToPane is the package-level seam tests swap
+// out to observe dispatch ordering without shelling out to a real tmux.
+// In production it dispatches through the method on Launcher.
+var launcherSendNotificationToPane = func(l *Launcher, paneTarget, notification string) {
+	l.sendNotificationToPane(paneTarget, notification)
 }
 
 // sendNotificationToPane delivers a notification to a persistent interactive
@@ -2675,6 +3107,10 @@ func (l *Launcher) shouldUseHeadlessDispatch() bool {
 // with a fresh context window — the work packet carries all required context,
 // so accumulated history is not needed and only causes drift over time.
 // --append-system-prompt is a CLI flag and survives /clear intact.
+//
+// Callers should prefer queuePaneNotification — this function runs /clear +
+// type + Enter unconditionally, so rapid direct calls will race each other.
+// queuePaneNotification serializes per-slug and inserts the minimum gap.
 func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
 	_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "/clear", "Enter",
@@ -2964,18 +3400,34 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 		return nil, fmt.Errorf("spawn first agent: %w (tmux: %s)", err, detail)
 	}
 
-	// Remaining agents: split from agent area, then use "tiled" layout
+	// Remaining agents: split from agent area, then use "tiled" layout. First
+	// agent (pane 1) is mandatory — a failure there aborts the whole launch.
+	// Subsequent splits can fail individually (e.g. terminal too small to
+	// accommodate another tile); record the failure and fall those agents
+	// back to headless dispatch so the capture loop doesn't hunt ghost panes.
 	for i := 1; i < len(visible); i++ {
 		agentCmd, err := l.claudeCommand(visible[i].Slug, l.buildPrompt(visible[i].Slug))
 		if err != nil {
-			return nil, fmt.Errorf("spawn agent %s: %w", visible[i].Slug, err)
+			l.recordPaneSpawnFailure(visible[i].Slug, fmt.Sprintf("claudeCommand: %v", err))
+			continue
 		}
-		// Split from the last agent pane
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "split-window",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window",
 			"-t", l.sessionName+":team.1",
 			"-c", l.cwd,
 			agentCmd,
-		).Run()
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			reason := err.Error()
+			if detail != "" {
+				reason = fmt.Sprintf("%s (tmux: %s)", reason, detail)
+			}
+			fmt.Fprintf(os.Stderr,
+				"  Agents:  visible pane for %s failed to spawn; falling back to headless (%s)\n",
+				visible[i].Slug, reason,
+			)
+			l.recordPaneSpawnFailure(visible[i].Slug, reason)
+		}
 	}
 
 	// Apply tiled layout to agent panes, but keep channel (pane 0) as main-vertical
@@ -3014,37 +3466,119 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 func (l *Launcher) spawnOverflowAgents() {
 	for _, member := range l.overflowOfficeMembers() {
+		// Codex/Opencode-bound agents use the headless one-shot pipeline; they
+		// don't need a claude pane. Creating one would launch `claude` with
+		// the wrong model and quota semantics.
+		if l.memberUsesHeadlessOneShotRuntime(member.Slug) {
+			continue
+		}
 		agentCmd, err := l.claudeCommand(member.Slug, l.buildPrompt(member.Slug))
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "spawn overflow agent %s: %v\n", member.Slug, err)
+			l.recordPaneSpawnFailure(member.Slug, fmt.Sprintf("claudeCommand: %v", err))
 			continue
 		}
 		windowName := overflowWindowName(member.Slug)
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
 			"-t", l.sessionName,
 			"-n", windowName,
 			"-c", l.cwd,
 			agentCmd,
-		).Run()
+		).CombinedOutput()
+		if err != nil {
+			detail := strings.TrimSpace(string(out))
+			reason := err.Error()
+			if detail != "" {
+				reason = fmt.Sprintf("%s (tmux: %s)", reason, detail)
+			}
+			fmt.Fprintf(os.Stderr,
+				"  Agents:  overflow pane for %s failed to spawn; falling back to headless for this agent (%s)\n",
+				member.Slug, reason,
+			)
+			l.recordPaneSpawnFailure(member.Slug, reason)
+		}
 	}
+}
+
+// detectDeadPanesAfterSpawn waits briefly for fresh panes to either settle
+// into claude or die on launch. Dead panes are marked failed so subsequent
+// notifications fall back to the headless path instead of polling ghost panes.
+func (l *Launcher) detectDeadPanesAfterSpawn(members []officeMember) {
+	if l == nil || l.sessionName == "" {
+		return
+	}
+	time.Sleep(1500 * time.Millisecond)
+	targets := l.agentPaneTargets()
+	for _, m := range members {
+		target, ok := targets[m.Slug]
+		if !ok || target.PaneTarget == "" {
+			continue
+		}
+		out, err := exec.Command("tmux", "-L", tmuxSocketName, "display-message",
+			"-t", target.PaneTarget,
+			"-p", "#{pane_dead}",
+		).CombinedOutput()
+		if err != nil || strings.TrimSpace(string(out)) != "1" {
+			continue
+		}
+		history, _ := exec.Command("tmux", "-L", tmuxSocketName, "capture-pane",
+			"-t", target.PaneTarget,
+			"-p", "-J", "-S", "-200",
+		).CombinedOutput()
+		snippet := strings.TrimSpace(string(history))
+		if len(snippet) > 400 {
+			snippet = snippet[:400] + "..."
+		}
+		fmt.Fprintf(os.Stderr,
+			"  Agents:  pane for %s (%s) died on launch; falling back to headless. Last output: %q\n",
+			m.Slug, target.PaneTarget, snippet,
+		)
+		l.recordPaneSpawnFailure(m.Slug, "pane died on launch; last output: "+snippet)
+		if l.broker != nil {
+			l.broker.PostSystemMessage("general",
+				fmt.Sprintf("Agent @%s did not start cleanly; running in headless fallback. Check the launcher log for details.", m.Slug),
+				"runtime",
+			)
+		}
+	}
+}
+
+// recordPaneSpawnFailure marks a slug so agentPaneTargets() omits it and the
+// pane-capture loops never try to read from a non-existent target. The agent
+// still receives messages via the headless dispatch fallback.
+func (l *Launcher) recordPaneSpawnFailure(slug, reason string) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return
+	}
+	if l.failedPaneSlugs == nil {
+		l.failedPaneSlugs = make(map[string]string)
+	}
+	l.failedPaneSlugs[slug] = reason
 }
 
 // trySpawnWebAgentPanes attempts to create a detached tmux session with one
 // interactive `claude` pane per agent so message dispatch can type into a live
-// session. This avoids the per-turn `claude --print` path, which under
-// Anthropic's recent policy consumes the separate headless/extra-usage quota.
+// session. This is the internal fallback primitive for web and TUI modes —
+// the default is headless `claude --print` per turn, which Anthropic
+// re-sanctioned in the 2026-04 OpenClaw policy note and runs on the normal
+// subscription quota without a separate extra-usage charge. Nothing in the
+// startup path calls this today; it is reachable for a runtime-promotion
+// fallback (e.g. repeated headless failures) without needing to be wired in
+// advance.
 //
 // On success, l.paneBackedAgents is set to true and dispatch routes through
 // sendNotificationToPane. On any failure (tmux missing, session create failure,
 // spawn error) the method logs the tradeoff, posts a system message to
-// #general, and leaves paneBackedAgents false so the existing headless path
+// #general, and leaves paneBackedAgents false so the default headless path
 // continues to work.
 func (l *Launcher) trySpawnWebAgentPanes() {
 	if l.broker == nil {
 		return
 	}
-	// Codex runtime uses its own headless pipeline; panes don't apply.
-	if l.usesCodexRuntime() {
+	// Non-pane runtimes (Codex, future Ollama/vLLM/exo/openai-compat) use the
+	// headless pipeline; panes don't apply.
+	if !l.usesPaneRuntime() {
 		return
 	}
 	if _, err := exec.LookPath("tmux"); err != nil {
@@ -3087,40 +3621,43 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 	l.spawnOverflowAgents()
 
 	l.paneBackedAgents = true
-	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (uses subscription quota)\n", l.sessionName)
+	go l.detectDeadPanesAfterSpawn(append(l.visibleOfficeMembers(), l.overflowOfficeMembers()...))
+	fmt.Printf("  Agents:  interactive Claude panes in tmux session %q (pane-backed fallback active)\n", l.sessionName)
 }
 
 // paneFallbackMessages renders the two user-facing messages for a pane-spawn
-// fallback (stderr banner + broker #general post). The remediation advice
-// depends on whether tmux is installed:
+// fallback (stderr banner + broker #general post). Headless is the normal
+// default now, so the fallback message is neutral — it only fires when
+// something in the runtime promoted us to panes and the spawn failed.
+// Remediation advice depends on whether tmux is installed:
 //
-//   - tmuxInstalled=false → tell the user to install tmux (the old default,
-//     and still the right answer for most systems)
-//   - tmuxInstalled=true  → tmux rejected the command; telling the user to
-//     "install tmux" is actively wrong. Ask them to file a bug.
+//   - tmuxInstalled=false → install tmux if you want panes; otherwise headless
+//     is a fine default and runs on your normal subscription.
+//   - tmuxInstalled=true  → tmux rejected the command; ask the user to file a
+//     bug. Headless continues to work.
 //
 // Pure function so it can be unit-tested without touching os.Stderr or the
 // broker. Keep in sync with reportPaneFallback below.
 func paneFallbackMessages(tmuxInstalled bool, detail string) (stderrMsg, brokerMsg string) {
-	const headlessBlurb = "Falling back to headless `claude --print`, which consumes Anthropic's extra-usage quota."
-	const brokerBlurb = "Running in headless mode (%s). Agent turns will draw from the Anthropic extra-usage quota."
+	const headlessBlurb = "Continuing with the default headless path (`claude --print` per turn on your normal subscription)."
+	const brokerBlurb = "Running in headless mode (%s). Agent turns dispatch as `claude --print` on your normal subscription."
 	if !tmuxInstalled {
 		stderrMsg = fmt.Sprintf(
-			"  Agents:  pane-backed mode unavailable (%s). %s Install tmux to run agents on your normal subscription.\n",
+			"  Agents:  pane-backed fallback attempted but tmux not found (%s). %s Install tmux if you want the fallback to be available.\n",
 			detail, headlessBlurb,
 		)
 		brokerMsg = fmt.Sprintf(
-			brokerBlurb+" Install tmux and relaunch to use interactive Claude sessions on your normal subscription.",
+			brokerBlurb+" Install tmux so the pane-backed fallback is available next time.",
 			detail,
 		)
 		return
 	}
 	stderrMsg = fmt.Sprintf(
-		"  Agents:  pane-backed mode unavailable (%s). %s tmux IS installed but rejected the launch command; please file a bug with the detail above at https://github.com/nex-crm/wuphf/issues.\n",
+		"  Agents:  pane-backed fallback attempted but unavailable (%s). %s tmux IS installed but rejected the launch command; please file a bug with the detail above at https://github.com/nex-crm/wuphf/issues.\n",
 		detail, headlessBlurb,
 	)
 	brokerMsg = fmt.Sprintf(
-		brokerBlurb+" tmux is installed but rejected the launch command; please file a bug so we can fix the regression.",
+		brokerBlurb+" tmux is installed but rejected the pane-spawn command; please file a bug so we can fix the regression.",
 		detail,
 	)
 	return
@@ -3143,17 +3680,38 @@ func (l *Launcher) reportPaneFallback(tmuxInstalled bool, summary string, err er
 	}
 }
 
+func markdownKnowledgeToolBlock() string {
+	return "- notebook_write: Save your own working notes, rough observations, draft decisions, draft playbooks, and task learnings at agents/{my_slug}/notebook/{date-or-topic}.md. This is the default write path for agent-authored knowledge.\n" +
+		"- notebook_promote: Submit a durable notebook entry for reviewer approval into the team wiki. Use this when the team should rely on the note as canonical knowledge.\n" +
+		"- notebook_read / notebook_list / notebook_search: Inspect agent notebooks for fresh working context before asking someone to repeat themselves.\n" +
+		"- team_wiki_read / team_wiki_search / team_wiki_list / wuphf_wiki_lookup: Read the canonical shared wiki.\n" +
+		"- team_wiki_write: Direct canonical wiki writes only for already-approved edits, bootstrap/admin maintenance, or explicit human requests. Do not bypass notebook_promote for new agent-authored knowledge.\n"
+}
+
+func markdownKnowledgeMemoryBlock() string {
+	return "Markdown notebook/wiki memory is active. Keep scratch and draft knowledge in notebook_write first; promote durable conclusions with notebook_promote when they are ready for review. Do not claim something is in the team wiki unless notebook_promote was submitted and approved, or team_wiki_write was explicitly appropriate and succeeded.\n\n"
+}
+
 // buildPrompt generates the system prompt for an agent, including
 // channel communication instructions.
 func (l *Launcher) buildPrompt(slug string) string {
 	member := l.officeMemberBySlug(slug)
 	agentCfg := agentConfigFromMember(member)
 	officeMembers := l.officeMembersSnapshot()
+	// Sort by Slug so the prompt prefix is byte-identical across spawns for the
+	// same office; otherwise prompt caching (ANTHROPIC_PROMPT_CACHING=1) would
+	// miss on every turn just because member insertion order drifted.
+	sort.Slice(officeMembers, func(i, j int) bool { return officeMembers[i].Slug < officeMembers[j].Slug })
 	lead := officeLeadSlugFrom(officeMembers)
+	memoryBackendKind := config.ResolveMemoryBackend("")
+	markdownMemory := memoryBackendKind == config.MemoryBackendMarkdown
 	noNex := config.ResolveNoNex() || config.ResolveAPIKey("") == ""
 	var activePolicies []officePolicy
 	if l.broker != nil {
 		activePolicies = l.broker.ListPolicies()
+		// Same reason as officeMembers: sort so the policies section is
+		// deterministic and cache-friendly across turns.
+		sort.Slice(activePolicies, func(i, j int) bool { return activePolicies[i].ID < activePolicies[j].ID })
 	}
 
 	var sb strings.Builder
@@ -3218,12 +3776,22 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_bridge: Carry context from one channel into another (CEO only).\n")
 		sb.WriteString("- team_task: Create and assign tasks so ownership is explicit.\n")
 		sb.WriteString("- team_skill_run: Invoke a saved skill by name when the request matches one. Use this BEFORE routing or replying — it returns the canonical playbook content to follow and logs a visible skill_invocation in the channel.\n")
+		sb.WriteString("- team_skill_create: Create or propose a reusable skill through structured fields. Use action=create only as CEO when the human explicitly asked to create/activate a skill; use action=propose for proposed improvements from any agent.\n")
 		sb.WriteString("- team_action_connections / team_action_search / team_action_knowledge: inspect connected external systems and the exact action/workflow schema before you improvise. If connection listing is flaky, do NOT stop there; search/knowledge still give you the real action contract.\n")
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
+		if markdownMemory {
+			sb.WriteString(markdownKnowledgeToolBlock())
+		}
 		sb.WriteString("- human_message: Present output or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human a blocking decision question — only when the team cannot proceed without it.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
-		if noNex {
+		sb.WriteString("== TOOL HYGIENE ==\n")
+		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
+		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
+		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
+		if markdownMemory {
+			sb.WriteString(markdownKnowledgeMemoryBlock())
+		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Work only with the shared office channel and human answers.\n\n")
 		} else {
 			sb.WriteString("Nex memory: query_context before reinventing; add_context only after a decision is actually landed.\n\n")
@@ -3247,7 +3815,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		}
 		sb.WriteString("THREADING: Default to replying in the active thread. If you intentionally cross into another channel or start a new topic, pass channel or new_topic explicitly.\n\n")
 		sb.WriteString("YOUR ROLE AS LEADER:\n")
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("1. On strategy or prior decisions, use wuphf_wiki_lookup or notebook_search before guessing\n")
+		} else if noNex {
 			sb.WriteString("1. Coordinate inside the office channel first and keep the team aligned there\n")
 		} else {
 			sb.WriteString("1. On strategy or prior decisions, call query_context early\n")
@@ -3258,7 +3828,9 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("5. Keep specialists in their lane and mostly offstage. You make the FINAL decision.\n")
 		sb.WriteString("6. Check team_requests before asking the human anything new\n")
 		sb.WriteString("7. Use human_message for direct human-facing output, human_interview for blocking decisions\n")
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("8. When you lock a durable decision, write it to your notebook first and submit notebook_promote if it should become canonical wiki knowledge\n")
+		} else if noNex {
 			sb.WriteString("8. Summarize final decisions clearly in-channel\n")
 		} else {
 			sb.WriteString("8. When you lock a decision, call add_context before claiming it is stored\n")
@@ -3290,20 +3862,20 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("== SKILL & AGENT AWARENESS ==\n")
 		sb.WriteString("When a request matches an existing skill (by name, trigger, or tags), you MUST invoke it via team_skill_run(skill_name) BEFORE doing the work. That tool bumps usage, logs a skill_invocation in the channel, and returns the skill's canonical content — follow those steps exactly, don't freelance.\n")
 		sb.WriteString("When delegating to a specialist, tell them which skill to run (by slug) so they call team_skill_run before acting. Never paraphrase a skill's steps into a delegation message — the skill IS the spec.\n")
-		sb.WriteString("You can propose new skills when you notice a repeated workflow worth codifying.\n")
-		sb.WriteString("Format a proposal inline in your message using:\n")
-		sb.WriteString("[SKILL PROPOSAL]\nName: <slug-name>\nTitle: <Short human title>\nDescription: <one-line description>\nTrigger: <when to invoke>\nTags: <tag1, tag2>\n---\n<step-by-step instructions>\n[/SKILL PROPOSAL]\n\n")
+		sb.WriteString("You can create or propose new skills when you notice a repeated workflow worth codifying. Use team_skill_create for this; do not rely on prose-only proposals.\n")
 		sb.WriteString("Rules:\n")
-		sb.WriteString("- Propose when you see a pattern repeated 2+ times by the team, or when the human explicitly asked for reusable workflow automation\n")
-		sb.WriteString("- If the human explicitly asked for generated skills or reusable workflows, at least one concrete proposal or update must land in the same turn before you stop; narrative mentions alone are a failure\n")
+		sb.WriteString("- Create when the human explicitly asked for reusable workflow automation; propose when you independently see a pattern repeated 2+ times by the team\n")
+		sb.WriteString("- If the human explicitly asked for generated skills or reusable workflows, call team_skill_create(action=create) in the same turn before you stop; narrative mentions alone are a failure\n")
 		sb.WriteString("- If a recurring workflow is central to the project's operation, propose it instead of re-explaining it every round\n")
 		sb.WriteString("- Keep instructions concrete and executable, not vague\n")
-		sb.WriteString("- The human will be asked to approve before it becomes active\n")
+		sb.WriteString("- Use team_skill_create(action=propose) for unsolicited workflow suggestions so the human is asked to approve before activation\n")
 		sb.WriteString("- To suggest adding a new specialist agent, use team_member with a clear expertise and rationale\n")
 		sb.WriteString("- When integrations matter, make the required systems explicit in the skill instructions and agent rationale so the team knows which connected accounts or placeholders each workflow expects\n")
 		sb.WriteString("- When you create a new specialist for integration/onboarding work, include the owned integrations directly in that agent's expertise so the roster clearly shows who owns Gmail, Slack, YouTube, Drive, analytics, or similar lanes\n\n")
 		sb.WriteString("STYLE: Be concise, delegate, short lively messages. Use markdown tables/checklists for structured data.\n")
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("Do not pretend the team wiki was updated; verify notebook_promote or team_wiki_write succeeded before claiming canonical storage.\n")
+		} else if noNex {
 			sb.WriteString("Do not claim you stored anything outside the office.\n")
 		} else {
 			sb.WriteString("Do not pretend the graph was updated; verify add_context succeeded.\n")
@@ -3330,12 +3902,22 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_bridge: CEO-only bridge for cross-channel context. Ask the CEO to use it.\n")
 		sb.WriteString("- team_task: Claim, complete, block, or release tasks in your domain.\n")
 		sb.WriteString("- team_skill_run: When @ceo tells you to run a skill, or when the request clearly matches one, call team_skill_run(skill_name) BEFORE doing the work. It returns the canonical step-by-step content — follow it exactly instead of freelancing. Failing to invoke the skill leaves the office with no trace that the playbook was actually used.\n")
+		sb.WriteString("- team_skill_create: Propose a reusable skill yourself with action=propose when you spot a repeatable workflow. You do not need to ask @ceo to propose it for you. Only @ceo may use action=create.\n")
 		sb.WriteString("- team_action_connections / team_action_search / team_action_knowledge: inspect connected external systems and the exact action/workflow schema before you improvise. If connection listing is flaky, do NOT stop there; search/knowledge still give you the real action contract.\n")
 		sb.WriteString("- team_action_execute / team_action_workflow_execute: use these for real external reads, writes, and workflow runs. Prefer dry_run only when the task or policy says preview/mock first. When the provider is One and there is exactly one connected account for that platform, you may omit connection_key and let the runtime auto-resolve it.\n")
+		if markdownMemory {
+			sb.WriteString(markdownKnowledgeToolBlock())
+		}
 		sb.WriteString("- human_message: Present completion or a recommendation directly to the human.\n")
 		sb.WriteString("- human_interview: Ask the human only for blocking clarifications you cannot responsibly guess.\n")
 		sb.WriteString("Other tools: team_tasks, team_task_status, team_requests, team_request, team_status, team_members, team_office_members, team_channels, team_channel, team_member, team_channel_member, team_action_guide, team_action_workflow_create, team_action_workflow_schedule, team_action_relays, team_action_relay_event_types, team_action_relay_create, team_action_relay_activate, team_action_relay_events, team_action_relay_event.\n\n")
-		if noNex {
+		sb.WriteString("== TOOL HYGIENE ==\n")
+		sb.WriteString("All team_*, human_*, and mcp__wuphf-office__* tools listed above are ALREADY registered. Call them directly. Do NOT use ToolSearch/select: to look them up — that wastes a full turn.\n")
+		sb.WriteString("Do not read unrelated files (MEMORY.md, arbitrary docs) unless the current packet's task requires it. Every tool call pays full turn cost.\n")
+		sb.WriteString("Emit at most one team_broadcast per turn unless you are deliberately crossing channels. Never re-post the same content in different wording.\n\n")
+		if markdownMemory {
+			sb.WriteString(markdownKnowledgeMemoryBlock())
+		} else if noNex {
 			sb.WriteString("Nex tools are disabled for this run. Base your work on the office conversation and direct human answers only.\n\n")
 		} else {
 			sb.WriteString("Nex memory: query_context before making assumptions; add_context only for durable conclusions.\n\n")
@@ -3380,7 +3962,10 @@ func (l *Launcher) buildPrompt(slug string) string {
 		if codingAgentSlugs[slug] {
 			sb.WriteString("11g. When you commit to opening a pull request, actually open it. Run `gh pr create --title \"<short title>\" --body \"<body>\" --head \"<your-branch>\" --base main` via the bash tool. Paste the returned URL into your channel message so the team can click through. Do not claim a PR is open unless the bash output shows a https://github.com/... URL.\n")
 		}
-		if noNex {
+		if markdownMemory {
+			sb.WriteString("12. Use wuphf_wiki_lookup, team_wiki_search, or notebook_search when prior knowledge matters. Store your own durable working notes with notebook_write and submit notebook_promote when they should become canonical.\n")
+			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
+		} else if noNex {
 			sb.WriteString("12. Don't fake outside memory. Surface uncertainty in-channel and keep outcomes explicit in-thread.\n")
 			sb.WriteString("13. Once you have posted the needed update for the current packet, stop. A later pushed notification will wake you again if more is needed.\n\n")
 		} else {
@@ -3978,10 +4563,16 @@ func (l *Launcher) activeSessionMembers() []officeMember {
 	for _, member := range members {
 		bySlug[member.Slug] = member
 	}
-	filtered := make([]officeMember, 0, len(l.pack.Agents))
+	// Pack order comes first (stable UI / pane layout), then any broker
+	// members not in the pack (wizard-hired agents post-launch). Dropping
+	// broker-only members here silently excluded wizard-hired specialists
+	// from agentNotificationTargets, making @-tags and DMs route to CEO.
+	filtered := make([]officeMember, 0, len(members))
+	seen := make(map[string]struct{}, len(members))
 	for _, cfg := range l.pack.Agents {
 		if member, ok := bySlug[cfg.Slug]; ok {
 			filtered = append(filtered, member)
+			seen[cfg.Slug] = struct{}{}
 			continue
 		}
 		member := officeMember{
@@ -3995,6 +4586,13 @@ func (l *Launcher) activeSessionMembers() []officeMember {
 			BuiltIn:        cfg.Slug == l.pack.LeadSlug || cfg.Slug == "ceo",
 		}
 		applyOfficeMemberDefaults(&member)
+		filtered = append(filtered, member)
+		seen[cfg.Slug] = struct{}{}
+	}
+	for _, member := range members {
+		if _, ok := seen[member.Slug]; ok {
+			continue
+		}
 		filtered = append(filtered, member)
 	}
 	if len(filtered) > 0 {
@@ -4059,6 +4657,12 @@ func (l *Launcher) PreflightWeb() error {
 		return nil
 	}
 	if l.usesCodexRuntime() {
+		if l.usesOpencodeRuntime() {
+			if _, err := runtimebin.LookPath("opencode"); err != nil {
+				return fmt.Errorf("opencode not found. Install Opencode CLI (https://opencode.ai) and configure your provider credentials")
+			}
+			return nil
+		}
 		if _, err := exec.LookPath("codex"); err != nil {
 			return fmt.Errorf("codex not found. Install Codex CLI and run `codex login`")
 		}
@@ -4155,17 +4759,17 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 	l.broker.SetGenerateChannelFn(l.GenerateChannelTemplateFromPrompt)
 	l.broker.ServeWebUI(webPort)
 
-	// Try to spawn interactive Claude sessions in tmux panes so dispatch can
-	// type into a live agent rather than spending `claude --print` quota.
-	// Falls back to the headless path if tmux is missing or pane spawn fails.
-	l.trySpawnWebAgentPanes()
+	// Default path: headless `claude --print` per turn. Anthropic re-sanctioned
+	// this invocation (OpenClaw policy note, 2026-04), so it runs on the user's
+	// normal subscription quota — no separate extra-usage quota is charged on
+	// top. The legacy interactive pane-per-agent mode remains reachable via
+	// trySpawnWebAgentPanes as an internal fallback primitive, but is not
+	// invoked at startup.
 
-	// Headless context is used for codex runtime, headless fallback, and
+	// Headless context is used for codex runtime, default dispatch, and
 	// per-turn operations that don't fit a long-lived pane session.
 	l.headlessCtx, l.headlessCancel = context.WithCancel(context.Background())
-	if !l.paneBackedAgents {
-		l.resumeInFlightWork()
-	}
+	l.resumeInFlightWork()
 
 	// Stream tmux pane output to the web UI's per-agent stream so users see
 	// live Claude TUI activity (thinking, tool calls, responses) during a
@@ -4190,7 +4794,21 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		openBrowser(webURL)
 	}
 
-	select {}
+	<-l.broker.ShutdownRequested()
+	fmt.Println()
+	fmt.Println("  Workspace shredded. Stopping WUPHF; relaunch to start onboarding.")
+	fmt.Println()
+	if l.headlessCancel != nil {
+		l.headlessCancel()
+	}
+	// Give the web proxy a moment to finish copying the successful shred
+	// response before the broker listener and process go away.
+	time.Sleep(300 * time.Millisecond)
+	if err := l.Kill(); err != nil {
+		return err
+	}
+	_, _ = workspace.Shred()
+	return nil
 }
 
 func openBrowser(url string) {

@@ -10,9 +10,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -21,13 +23,23 @@ var (
 	headlessCodexCommandContext = exec.CommandContext
 	headlessCodexExecutablePath = os.Executable
 	headlessCodexRunTurn        = func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
-		if l != nil && !l.usesCodexRuntime() {
-			return l.runHeadlessClaudeTurn(ctx, slug, notification)
+		if l != nil {
+			switch l.memberEffectiveProviderKind(slug) {
+			case provider.KindCodex:
+				return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
+			case provider.KindOpencode:
+				return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
+			default:
+				return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
+			}
 		}
 		return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
 	}
-	// headlessWakeLeadFn is nil in production; override in tests to intercept lead wake-ups.
-	headlessWakeLeadFn func(l *Launcher, specialistSlug string)
+	// headlessWakeLeadFn is nil in production; override in tests to intercept
+	// lead wake-ups. Always access via headlessWakeLeadFnMu to avoid races
+	// with leaked goroutines from concurrent tests.
+	headlessWakeLeadFn   func(l *Launcher, specialistSlug string)
+	headlessWakeLeadFnMu sync.RWMutex
 )
 
 var (
@@ -35,7 +47,17 @@ var (
 	headlessCodexOfficeLaunchTurnTimeout  = 10 * time.Minute
 	headlessCodexLocalWorktreeTurnTimeout = 12 * time.Minute
 	headlessCodexStaleCancelAfter         = 90 * time.Second
-	headlessCodexEnvVarsToStrip           = []string{
+	// Minimum age an active turn must have before an enqueue can preempt
+	// it via stale-cancel. Floors out tight re-enqueue loops where two
+	// near-simultaneous enqueues would otherwise cancel each other on
+	// arrival. Seen in prod (April 2026): CEO codex queue logged dozens
+	// of `stale-turn: cancelling active turn after 0s` over hours because
+	// the enqueue path exhausted the 90s threshold via clock-skew or a
+	// malformed turn, causing back-to-back cancels that never produced
+	// real work. 2s is long enough to absorb any legitimate rapid-fire
+	// wake without blocking genuine preemption.
+	headlessCodexMinTurnAgeBeforeCancel = 2 * time.Second
+	headlessCodexEnvVarsToStrip         = []string{
 		"OLDPWD",
 		"PWD",
 		"CODEX_THREAD_ID",
@@ -146,6 +168,15 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	startWorker := false
 
 	l.headlessMu.Lock()
+	if l.headlessQueues == nil {
+		l.headlessQueues = make(map[string][]headlessCodexTurn)
+	}
+	if l.headlessActive == nil {
+		l.headlessActive = make(map[string]*headlessCodexActiveTurn)
+	}
+	if l.headlessWorkers == nil {
+		l.headlessWorkers = make(map[string]bool)
+	}
 	urgentLeadTurn := l.headlessLeadTurnNeedsImmediateWakeLocked(slug, turn.Prompt)
 	if turn.TaskID != "" {
 		if active := l.headlessActive[slug]; active != nil && strings.TrimSpace(active.Turn.TaskID) == turn.TaskID {
@@ -235,7 +266,11 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 	}
 	if active := l.headlessActive[slug]; active != nil && active.Cancel != nil {
 		age := time.Since(active.StartedAt)
-		if age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn) {
+		// Two conditions must hold to preempt: past the configured staleness
+		// threshold AND past the minimum-turn-age floor. The floor breaks the
+		// tight cancel-loop pattern observed in prod (see doc on the constant).
+		if age >= headlessCodexMinTurnAgeBeforeCancel &&
+			age >= l.headlessCodexStaleCancelAfterForTurn(active.Turn) {
 			cancel = active.Cancel
 			staleAge = age
 		}
@@ -248,6 +283,26 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 		cancel()
 	}
 	if startWorker {
+		// TODO(test-isolation): this goroutine has no per-test cleanup channel,
+		// so under `go test -race ./internal/team/` it outlives the spawning
+		// test and trips DATA RACE on subsequent tests' setup of headlessActive
+		// / headlessQueues maps. Reproducible:
+		//
+		//   bash scripts/test-go.sh ./internal/team   # passes (-race carved out)
+		//   go test -race ./internal/team             # flakes
+		//
+		// The race detector trace (representative — different tests on each run):
+		//
+		//   Write at ... by goroutine N (this gowrap, after test exit):
+		//     (*Launcher).beginHeadlessCodexTurn  ← l.headlessActive[slug] = …
+		//   Previous read at ... by goroutine N-1 (test cleanup, finished):
+		//     TestRecoverFailedHeadlessTurnRequeues...  ← delete(l.headlessActive, slug)
+		//
+		// Fix shape: thread a per-test stop channel through Launcher (or
+		// reuse l.broker.stopCh) and have runHeadlessCodexQueue select on
+		// it inside its outer for-loop, so test cleanup can drain in-flight
+		// workers before the next TestMain leg starts. Tracked alongside
+		// the carve-out in .github/workflows/ci.yml (go-test-list).
 		go l.runHeadlessCodexQueue(slug)
 	}
 }
@@ -304,6 +359,7 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 
 			err := headlessCodexRunTurn(l, turnCtx, slug, turn.Prompt, turn.Channel)
 			ctxErr := turnCtx.Err()
+			isDurabilityError := false
 			if err == nil {
 				l.headlessMu.Lock()
 				active := l.headlessActive[slug]
@@ -311,6 +367,7 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 				if ok, reason := l.headlessTurnCompletedDurably(slug, active); !ok {
 					appendHeadlessCodexLog(slug, "durability-error: "+reason)
 					err = errors.New(reason)
+					isDurabilityError = true
 				}
 			}
 			switch {
@@ -322,6 +379,14 @@ func (l *Launcher) runHeadlessCodexQueue(slug string) {
 			case errors.Is(ctxErr, context.Canceled) || errors.Is(err, context.Canceled):
 				appendHeadlessCodexLog(slug, "error: headless codex turn cancelled so newer queued work can run")
 				l.updateHeadlessProgress(slug, "active", "queued", "restarting on newer queued work", headlessProgressMetrics{})
+			case isDurabilityError:
+				// The provider returned successfully but left no durable task state.
+				// Don't retry — the agent already had its turn. Block the task immediately.
+				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
+				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
+				exhaustedTurn := turn
+				exhaustedTurn.Attempts = headlessCodexLocalWorktreeRetryLimit
+				l.recoverFailedHeadlessTurn(slug, exhaustedTurn, startedAt, err.Error())
 			default:
 				appendHeadlessCodexLog(slug, fmt.Sprintf("error: %v", err))
 				l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), headlessProgressMetrics{})
@@ -518,8 +583,11 @@ func (l *Launcher) finishHeadlessTurn(slug string) {
 		return
 	}
 	if shouldWakeLead {
-		if headlessWakeLeadFn != nil {
-			headlessWakeLeadFn(l, slug)
+		headlessWakeLeadFnMu.RLock()
+		fn := headlessWakeLeadFn
+		headlessWakeLeadFnMu.RUnlock()
+		if fn != nil {
+			fn(l, slug)
 		} else {
 			l.wakeLeadAfterSpecialist(slug)
 		}
@@ -538,7 +606,7 @@ func (l *Launcher) wakeLeadAfterSpecialist(specialistSlug string) {
 	if lead == "" {
 		return
 	}
-	targets := l.agentPaneTargets()
+	targets := l.agentNotificationTargets()
 	target, ok := targets[lead]
 	if !ok {
 		return
@@ -643,6 +711,79 @@ func (l *Launcher) agentPostedSubstantiveMessageSince(slug string, startedAt tim
 	return false
 }
 
+func (l *Launcher) agentPostedSubstantiveMessageToChannelSince(slug string, targetChannel string, startedAt time.Time) bool {
+	if l == nil || l.broker == nil {
+		return false
+	}
+	targetChannel = normalizeChannelSlug(targetChannel)
+	if IsDMSlug(targetChannel) {
+		if targetAgent := DMTargetAgent(targetChannel); targetAgent != "" {
+			targetChannel = DMSlugFor(targetAgent)
+		}
+	}
+	for _, msg := range l.broker.AllMessages() {
+		if msg.From != slug {
+			continue
+		}
+		if targetChannel != "" && normalizeChannelSlug(msg.Channel) != targetChannel {
+			continue
+		}
+		content := strings.TrimSpace(msg.Content)
+		if content == "" || strings.HasPrefix(content, "[STATUS]") {
+			continue
+		}
+		when, err := time.Parse(time.RFC3339, msg.Timestamp)
+		if err != nil {
+			continue
+		}
+		if when.Add(time.Second).After(startedAt) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *Launcher) postHeadlessFinalMessageIfSilent(slug string, targetChannel string, notification string, text string, startedAt time.Time) (channelMessage, bool, error) {
+	if l == nil || l.broker == nil {
+		return channelMessage{}, false, nil
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return channelMessage{}, false, nil
+	}
+	targetChannel = normalizeChannelSlug(targetChannel)
+	if targetChannel == "" {
+		targetChannel = "general"
+	}
+	if IsDMSlug(targetChannel) {
+		if targetAgent := DMTargetAgent(targetChannel); targetAgent != "" {
+			targetChannel = DMSlugFor(targetAgent)
+		}
+	}
+	if l.agentPostedSubstantiveMessageToChannelSince(slug, targetChannel, startedAt) {
+		return channelMessage{}, false, nil
+	}
+	msg, err := l.broker.PostMessage(slug, targetChannel, text, nil, headlessReplyToID(notification))
+	if err != nil {
+		return channelMessage{}, false, err
+	}
+	return msg, true, nil
+}
+
+func headlessReplyToID(notification string) string {
+	const marker = `reply_to_id "`
+	idx := strings.LastIndex(notification, marker)
+	if idx == -1 {
+		return ""
+	}
+	start := idx + len(marker)
+	end := strings.Index(notification[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+	return strings.TrimSpace(notification[start : start+end])
+}
+
 func (l *Launcher) timedOutTaskForTurn(slug string, turn headlessCodexTurn) *teamTask {
 	if l == nil || l.broker == nil {
 		return nil
@@ -745,6 +886,13 @@ func (l *Launcher) recoverTimedOutHeadlessTurn(slug string, turn headlessCodexTu
 	}
 }
 
+// isDurabilityFailure reports whether detail came from headlessTurnCompletedDurably
+// ("completed without durable task state"). These failures mean the agent ran but did
+// nothing observable — retrying produces the same result, so we block instead.
+func isDurabilityFailure(detail string) bool {
+	return strings.Contains(strings.TrimSpace(detail), "completed without durable task state")
+}
+
 func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn, startedAt time.Time, detail string) {
 	if l == nil || l.broker == nil {
 		return
@@ -758,7 +906,7 @@ func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn
 		appendHeadlessCodexLog(slug, fmt.Sprintf("error-recovery: %s already produced durable progress; leaving task state unchanged", task.ID))
 		return
 	}
-	if shouldRetryHeadlessTurn(task, turn) {
+	if shouldRetryHeadlessTurn(task, turn) && !isDurabilityFailure(detail) {
 		retryTurn := turn
 		retryTurn.Attempts++
 		retryTurn.EnqueuedAt = time.Now()
@@ -1081,6 +1229,13 @@ func (l *Launcher) runHeadlessCodexTurn(ctx context.Context, slug string, notifi
 	}
 	if text := strings.TrimSpace(firstNonEmpty(result.FinalMessage, result.LastPlainLine)); text != "" {
 		appendHeadlessCodexLog(slug, "result: "+text)
+		target := firstNonEmpty(channel...)
+		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
+		if err != nil {
+			appendHeadlessCodexLog(slug, "fallback-post-error: "+err.Error())
+		} else if posted {
+			appendHeadlessCodexLog(slug, fmt.Sprintf("fallback-post: posted final output to #%s as %s", msg.Channel, msg.ID))
+		}
 	}
 	return nil
 }
@@ -1097,7 +1252,15 @@ func (l *Launcher) headlessCodexNeedsDangerousBypass(slug string) bool {
 }
 
 func (l *Launcher) buildHeadlessCodexEnv(slug string, workspaceDir string, channel string) []string {
-	env := stripEnvKeys(os.Environ(), headlessCodexEnvVarsToStrip)
+	// gitexec.CleanEnv: codex agents run `git` subcommands inside their
+	// sandbox. If wuphf inherited GIT_DIR / GIT_WORK_TREE /
+	// GIT_CONFIG_PARAMETERS from a parent (git hook, nested wuphf call)
+	// every child git would retarget the outer repo. Clean those first,
+	// then drop codex-specific noise. stripEnvKeys is exact-match,
+	// gitexec.CleanEnv is prefix-match — the GIT_CONFIG_KEY_<n> family
+	// needs prefix-match, so we run gitexec.CleanEnv first and stripEnvKeys
+	// second.
+	env := stripEnvKeys(gitexec.CleanEnv(), headlessCodexEnvVarsToStrip)
 	if workspaceDir = normalizeHeadlessWorkspaceDir(workspaceDir); workspaceDir != "" {
 		env = setEnvValue(env, "PWD", workspaceDir)
 	}
@@ -1368,6 +1531,25 @@ func buildHeadlessCodexPrompt(systemPrompt string, prompt string) string {
 }
 
 func wuphfLogDir() string {
+	// WUPHF_LOG_DIR lets tests redirect headless log writes to a
+	// process-stable path. Headless-worker goroutines routinely outlive the
+	// test that started them; if they wrote to the test's t.TempDir() they
+	// would race with go's test-scoped RemoveAll ("directory not empty" on
+	// unlinkat). Tests set this to a package-owned leaked dir so writes
+	// from leaked goroutines land harmlessly. Unset in production → HOME.
+	if override := strings.TrimSpace(os.Getenv("WUPHF_LOG_DIR")); override != "" {
+		// Fail loudly on a broken override instead of silently falling
+		// through — a misconfigured WUPHF_LOG_DIR path otherwise surfaces
+		// as confusing "file open failed" errors far from the root cause.
+		// Returning "" disables headless logging for this call (the
+		// appendHeadless*Log helpers no-op on empty dir), which matches
+		// the HOME-lookup graceful-degradation path below.
+		if err := os.MkdirAll(override, 0o700); err != nil {
+			fmt.Fprintf(os.Stderr, "wuphf: WUPHF_LOG_DIR=%q unwritable: %v — headless logging disabled\n", override, err)
+			return ""
+		}
+		return override
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""

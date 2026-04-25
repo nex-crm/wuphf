@@ -1,52 +1,53 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useAppStore } from '../../stores/app'
-import { initApi } from '../../api/client'
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { initApi } from "../../api/client";
+import { useAppStore } from "../../stores/app";
 
 export function DisconnectBanner() {
-  const brokerConnected = useAppStore((s) => s.brokerConnected)
-  const setBrokerConnected = useAppStore((s) => s.setBrokerConnected)
+  const brokerConnected = useAppStore((s) => s.brokerConnected);
+  const setBrokerConnected = useAppStore((s) => s.setBrokerConnected);
 
-  const [hadConnection, setHadConnection] = useState(false)
-  const [dismissed, setDismissed] = useState(false)
-  const [retrying, setRetrying] = useState(false)
-  const dismissedForRef = useRef<boolean | null>(null)
+  const [hadConnection, setHadConnection] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const dismissedForRef = useRef<boolean | null>(null);
 
   // Track that we previously had a connection
   useEffect(() => {
     if (brokerConnected) {
-      setHadConnection(true)
-      setDismissed(false)
-      dismissedForRef.current = null
+      setHadConnection(true);
+      setDismissed(false);
+      dismissedForRef.current = null;
     }
-  }, [brokerConnected])
+  }, [brokerConnected]);
 
   // If dismissed and then connection state changes, reset dismiss
   useEffect(() => {
     if (dismissed && dismissedForRef.current !== brokerConnected) {
-      setDismissed(false)
+      setDismissed(false);
     }
-  }, [brokerConnected, dismissed])
+  }, [brokerConnected, dismissed]);
 
   const handleRetry = useCallback(async () => {
-    setRetrying(true)
+    setRetrying(true);
     try {
-      await initApi()
-      setBrokerConnected(true)
+      await initApi();
+      setBrokerConnected(true);
     } catch {
       // Still disconnected
     } finally {
-      setRetrying(false)
+      setRetrying(false);
     }
-  }, [setBrokerConnected])
+  }, [setBrokerConnected]);
 
   const handleDismiss = useCallback(() => {
-    dismissedForRef.current = brokerConnected
-    setDismissed(true)
-  }, [brokerConnected])
+    dismissedForRef.current = brokerConnected;
+    setDismissed(true);
+  }, [brokerConnected]);
 
   // Only show when: previously connected, currently disconnected, not dismissed
-  const visible = hadConnection && !brokerConnected && !dismissed
-  if (!visible) return null
+  const visible = hadConnection && !brokerConnected && !dismissed;
+  if (!visible) return null;
 
   return (
     <div className="disconnect-banner" role="alert">
@@ -74,7 +75,7 @@ export function DisconnectBanner() {
           disabled={retrying}
           type="button"
         >
-          {retrying ? 'Retrying...' : 'Retry'}
+          {retrying ? "Retrying..." : "Retry"}
         </button>
         <button
           className="disconnect-banner-dismiss"
@@ -98,5 +99,5 @@ export function DisconnectBanner() {
         </button>
       </div>
     </div>
-  )
+  );
 }

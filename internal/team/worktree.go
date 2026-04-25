@@ -2,6 +2,7 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"hash/fnv"
@@ -9,12 +10,30 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
 var prepareTaskWorktree = defaultPrepareTaskWorktree
 var cleanupTaskWorktree = defaultCleanupTaskWorktree
 var taskWorktreeRootDir = defaultTaskWorktreeRootDir
 var verifyTaskWorktreeWritable = defaultVerifyTaskWorktreeWritable
+
+// allowRealTaskWorktree gates access to the real git-worktree codepath. In
+// production it stays true; an init() in a *_test.go file in this package
+// flips it to false so test runs cannot accidentally register a real worktree
+// against the developer's `wuphf` repo. Tests that legitimately need the real
+// codepath (always against a tempdir-rooted repo) opt in via
+// allowRealTaskWorktreeForTest(t), which scopes the re-enable to one test.
+var allowRealTaskWorktree = true
+
+// errRealTaskWorktreeDisabled is returned by defaultPrepareTaskWorktree when
+// it is called from a test that has not opted into the real codepath. The
+// message names the opt-in helper so the fix is immediate.
+var errRealTaskWorktreeDisabled = fmt.Errorf(
+	"defaultPrepareTaskWorktree disabled in tests: call allowRealTaskWorktreeForTest(t) " +
+		"or monkey-patch prepareTaskWorktree",
+)
 
 var overlaySourceWorkspaceSkipExact = map[string]struct{}{
 	".playwright-cli": {},
@@ -28,6 +47,9 @@ var overlaySourceWorkspaceSkipPrefixes = []string{
 }
 
 func defaultPrepareTaskWorktree(taskID string) (string, string, error) {
+	if !allowRealTaskWorktree {
+		return "", "", errRealTaskWorktreeDisabled
+	}
 	repoRoot, err := gitRepoRoot()
 	if err != nil {
 		return "", "", err
@@ -155,39 +177,22 @@ func cleanupTaskWorktreeAtRepoRoot(repoRoot, path, branch string) error {
 }
 
 func gitRepoRoot() (string, error) {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
-	cmd.Env = gitCleanEnv()
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("resolve repo root: %w: %s", err, strings.TrimSpace(stderr.String()))
+	root, err := gitexec.Run(context.Background(), "", "rev-parse", "--show-toplevel")
+	if err != nil {
+		return "", fmt.Errorf("resolve repo root: %w", err)
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return root, nil
 }
 
-// gitCleanEnv returns os.Environ() minus the GIT_* variables that pin git to a
-// specific repo, index, or worktree. Callers set cmd.Dir explicitly, so
-// inheriting GIT_DIR/GIT_WORK_TREE from a parent (e.g. when wuphf runs inside
-// a `git push` hook or a nested git operation) would silently redirect every
-// subprocess to the outer repo and break worktree setup.
-func gitCleanEnv() []string {
-	env := os.Environ()
-	filtered := env[:0]
-	for _, kv := range env {
-		switch {
-		case strings.HasPrefix(kv, "GIT_DIR="),
-			strings.HasPrefix(kv, "GIT_WORK_TREE="),
-			strings.HasPrefix(kv, "GIT_INDEX_FILE="),
-			strings.HasPrefix(kv, "GIT_OBJECT_DIRECTORY="),
-			strings.HasPrefix(kv, "GIT_COMMON_DIR="),
-			strings.HasPrefix(kv, "GIT_NAMESPACE="):
-			continue
-		}
-		filtered = append(filtered, kv)
-	}
-	return filtered
+// GitCleanEnv is a thin backwards-compatibility shim that delegates to
+// gitexec.CleanEnv. The canonical implementation (and the full godoc
+// describing the GIT_DIR / GIT_CONFIG_* strip policy) now lives in
+// internal/gitexec. Kept exported for one release as a safety net for any
+// out-of-tree callers; new code should import gitexec directly.
+//
+// Deprecated: use gitexec.CleanEnv directly.
+func GitCleanEnv() []string {
+	return gitexec.CleanEnv()
 }
 
 func defaultTaskWorktreeRootDir(repoRoot string) string {
@@ -205,7 +210,7 @@ func defaultTaskWorktreeRootDir(repoRoot string) string {
 func runGit(dir string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = gitCleanEnv()
+	cmd.Env = gitexec.CleanEnv()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
@@ -217,7 +222,7 @@ func runGit(dir string, args ...string) error {
 func runGitOutput(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	cmd.Env = gitCleanEnv()
+	cmd.Env = gitexec.CleanEnv()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -383,7 +388,7 @@ func copyWorkspacePath(src, dst string, info os.FileInfo) error {
 func gitRefExists(dir, ref string) bool {
 	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", ref)
 	cmd.Dir = dir
-	cmd.Env = gitCleanEnv()
+	cmd.Env = gitexec.CleanEnv()
 	return cmd.Run() == nil
 }
 

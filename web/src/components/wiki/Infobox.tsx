@@ -1,18 +1,18 @@
 /** Right-floated Wikipedia-style infobox: dark title band + structured dt/dd. */
 
 export interface InfoboxField {
-  dt: string
-  dd: string
+  dt: string;
+  dd: string;
 }
 
 export interface InfoboxSection {
-  fields: InfoboxField[]
+  fields: InfoboxField[];
 }
 
 interface InfoboxProps {
-  title: string
-  fields: InfoboxField[]
-  sections?: InfoboxSection[]
+  title: string;
+  fields: InfoboxField[];
+  sections?: InfoboxSection[];
 }
 
 export default function Infobox({ title, fields, sections }: InfoboxProps) {
@@ -36,7 +36,7 @@ export default function Infobox({ title, fields, sections }: InfoboxProps) {
         ))}
       </div>
     </aside>
-  )
+  );
 }
 
 function FieldRow({ field }: { field: InfoboxField }) {
@@ -45,5 +45,5 @@ function FieldRow({ field }: { field: InfoboxField }) {
       <dt>{field.dt}</dt>
       <dd>{field.dd}</dd>
     </>
-  )
+  );
 }

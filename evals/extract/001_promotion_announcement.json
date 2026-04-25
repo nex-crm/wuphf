@@ -1,0 +1,55 @@
+{
+  "id": "extract_001_promotion_announcement",
+  "prompt": "extract_entities_lite",
+  "description": "Explicit promotion announcement with full email signals present; must produce a status-type fact with a clean triplet and not invent any other entities.",
+  "template_vars": {
+    "ArtifactKind": "chat",
+    "ArtifactSHA": "3f9a21bc4e8d9102",
+    "ArtifactPath": "wiki/artifacts/agent/3f9a21bc4e8d9102.md",
+    "OccurredAt": "2026-04-10T15:22:00Z",
+    "Body": "From: announcements@acme.com\nDate: 2026-04-10T15:22:00Z\n\nHi team,\n\nWe're delighted to announce Sarah Jones's promotion to VP of Sales, effective April 10. Sarah has been leading our marketing-to-sales transition and has earned this step up. Please join me in congratulating her.\n\nCheers,\nAcme HR",
+    "KnownEntities": [
+      {
+        "Slug": "sarah-jones",
+        "Kind": "person",
+        "SignalsOneLine": "email=sarah@acme.com, domain=acme.com, person_name=Sarah Jones",
+        "Aliases": ["Sarah J."],
+        "AliasesJoined": "Sarah J."
+      },
+      {
+        "Slug": "acme-corp",
+        "Kind": "company",
+        "SignalsOneLine": "domain=acme.com",
+        "Aliases": [],
+        "AliasesJoined": ""
+      }
+    ],
+    "PredicateVocabulary": ["role_at", "works_at", "champions"]
+  },
+  "expected": {
+    "must_include": [
+      "sarah-jones",
+      "role_at",
+      "acme-corp",
+      "2026-04-10",
+      "status"
+    ],
+    "must_not_include": [
+      "probably",
+      "likely",
+      "I think",
+      "michael",
+      "david"
+    ],
+    "structured": {
+      "artifact_sha": "3f9a21bc4e8d9102",
+      "entities": [
+        {"existing_slug": "sarah-jones"}
+      ],
+      "entities_length": 1,
+      "facts_nonempty": true,
+      "facts_first_predicate": "role_at"
+    },
+    "notes": "Guards Section 10.1 rules: reuse existing slug, reuse existing predicate, date from artifact, never invent. Devil's-advocate M14 strengthening: no extraneous entities (michael/david) invented; entities list must have exactly 1 element; facts must be non-empty; first fact's triplet.predicate must equal role_at."
+  }
+}

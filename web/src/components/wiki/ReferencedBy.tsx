@@ -1,25 +1,30 @@
-import PixelAvatar from './PixelAvatar'
-import { formatAgentName } from '../../lib/agentName'
+import { formatAgentName } from "../../lib/agentName";
+import PixelAvatar from "./PixelAvatar";
 
 /** Right-rail backlinks: articles that link TO this article. */
 
 export interface Backlink {
-  path: string
-  title: string
-  author_slug: string
+  path: string;
+  title: string;
+  author_slug: string;
 }
 
 interface ReferencedByProps {
-  backlinks: Backlink[]
-  onNavigate?: (path: string) => void
+  backlinks: Backlink[];
+  onNavigate?: (path: string) => void;
 }
 
-export default function ReferencedBy({ backlinks, onNavigate }: ReferencedByProps) {
+export default function ReferencedBy({
+  backlinks,
+  onNavigate,
+}: ReferencedByProps) {
   return (
     <div>
       <h4>
         Referenced by
-        <span className="wk-toggle" data-testid="wk-backlink-count">{backlinks.length}</span>
+        <span className="wk-toggle" data-testid="wk-backlink-count">
+          {backlinks.length}
+        </span>
       </h4>
       <div className="wk-backlinks">
         {backlinks.map((b) => (
@@ -28,8 +33,8 @@ export default function ReferencedBy({ backlinks, onNavigate }: ReferencedByProp
             href={`#/wiki/${encodeURI(b.path)}`}
             onClick={(e) => {
               if (onNavigate) {
-                e.preventDefault()
-                onNavigate(b.path)
+                e.preventDefault();
+                onNavigate(b.path);
               }
             }}
           >
@@ -40,5 +45,5 @@ export default function ReferencedBy({ backlinks, onNavigate }: ReferencedByProp
         ))}
       </div>
     </div>
-  )
+  );
 }

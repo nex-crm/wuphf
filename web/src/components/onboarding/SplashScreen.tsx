@@ -1,20 +1,20 @@
-import { useEffect, useCallback } from 'react'
+import { useCallback, useEffect } from "react";
 
-const AUTO_DISMISS_MS = 2000
+const AUTO_DISMISS_MS = 2000;
 
 interface SplashScreenProps {
-  onDone: () => void
+  onDone: () => void;
 }
 
 export function SplashScreen({ onDone }: SplashScreenProps) {
   const dismiss = useCallback(() => {
-    onDone()
-  }, [onDone])
+    onDone();
+  }, [onDone]);
 
   useEffect(() => {
-    const timer = setTimeout(dismiss, AUTO_DISMISS_MS)
-    return () => clearTimeout(timer)
-  }, [dismiss])
+    const timer = setTimeout(dismiss, AUTO_DISMISS_MS);
+    return () => clearTimeout(timer);
+  }, [dismiss]);
 
   return (
     <div
@@ -23,7 +23,7 @@ export function SplashScreen({ onDone }: SplashScreenProps) {
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') dismiss()
+        if (e.key === "Enter" || e.key === " ") dismiss();
       }}
       aria-label="Dismiss splash screen"
     >
@@ -32,5 +32,5 @@ export function SplashScreen({ onDone }: SplashScreenProps) {
       <p className="launch-text">Opening the office&hellip;</p>
       <p className="launch-sub">Preparing a live operating loop</p>
     </div>
-  )
+  );
 }

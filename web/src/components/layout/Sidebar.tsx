@@ -1,22 +1,23 @@
-import { Settings as SettingsIcon, SidebarCollapse } from 'iconoir-react'
-import { useAppStore } from '../../stores/app'
-import { AgentList } from '../sidebar/AgentList'
-import { ChannelList } from '../sidebar/ChannelList'
-import { AppList } from '../sidebar/AppList'
-import { UsagePanel } from '../sidebar/UsagePanel'
-import { WorkspaceSummary } from '../sidebar/WorkspaceSummary'
-import { CollapsedSidebar } from './CollapsedSidebar'
+import { Settings as SettingsIcon, SidebarCollapse } from "iconoir-react";
+
+import { useAppStore } from "../../stores/app";
+import { AgentList } from "../sidebar/AgentList";
+import { AppList } from "../sidebar/AppList";
+import { ChannelList } from "../sidebar/ChannelList";
+import { UsagePanel } from "../sidebar/UsagePanel";
+import { WorkspaceSummary } from "../sidebar/WorkspaceSummary";
+import { CollapsedSidebar } from "./CollapsedSidebar";
 
 export function Sidebar() {
-  const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen)
-  const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents)
-  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed)
-  const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed)
-  const currentApp = useAppStore((s) => s.currentApp)
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp)
+  const sidebarAgentsOpen = useAppStore((s) => s.sidebarAgentsOpen);
+  const toggleSidebarAgents = useAppStore((s) => s.toggleSidebarAgents);
+  const sidebarCollapsed = useAppStore((s) => s.sidebarCollapsed);
+  const toggleSidebarCollapsed = useAppStore((s) => s.toggleSidebarCollapsed);
+  const currentApp = useAppStore((s) => s.currentApp);
+  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
 
   return (
-    <aside className={`sidebar${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
+    <aside className={`sidebar${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       {sidebarCollapsed ? (
         <CollapsedSidebar />
       ) : (
@@ -35,17 +36,19 @@ export function Sidebar() {
               </button>
               <button
                 type="button"
-                className={`sidebar-icon-btn${currentApp === 'settings' ? ' active' : ''}`}
+                className={`sidebar-icon-btn${currentApp === "settings" ? " active" : ""}`}
                 aria-label="Open settings"
                 title="Settings"
-                onClick={() => setCurrentApp('settings')}
+                onClick={() => setCurrentApp("settings")}
               >
                 <SettingsIcon />
               </button>
             </div>
           </div>
 
-          <div className={`sidebar-section is-team${sidebarAgentsOpen ? '' : ' is-collapsed'}`}>
+          <div
+            className={`sidebar-section is-team${sidebarAgentsOpen ? "" : " is-collapsed"}`}
+          >
             <button
               type="button"
               className="sidebar-section-title sidebar-section-toggle"
@@ -57,17 +60,26 @@ export function Sidebar() {
                 style={{
                   width: 10,
                   height: 10,
-                  transform: sidebarAgentsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                  transition: 'transform 0.15s',
+                  transform: sidebarAgentsOpen
+                    ? "rotate(90deg)"
+                    : "rotate(0deg)",
+                  transition: "transform 0.15s",
                 }}
-                viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
                 <path d="m9 18 6-6-6-6" />
               </svg>
             </button>
           </div>
 
-          <div className={`sidebar-collapsible${sidebarAgentsOpen ? ' is-open' : ''}`}>
+          <div
+            className={`sidebar-collapsible${sidebarAgentsOpen ? " is-open" : ""}`}
+          >
             <AgentList />
           </div>
 
@@ -86,5 +98,5 @@ export function Sidebar() {
         </>
       )}
     </aside>
-  )
+  );
 }

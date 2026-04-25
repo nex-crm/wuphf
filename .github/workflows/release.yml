@@ -9,38 +9,71 @@ on:
   # GITHUB_TOKEN does not fire other workflows, but workflow_dispatch does.
   workflow_dispatch:
 
+# Default to least-privilege; per-job blocks below add only what each job
+# actually needs. The release job uploads artifacts (contents: write); npm
+# publish + npx smoke only need to read the repo.
 permissions:
-  contents: write
+  contents: read
+
+# Don't cancel an in-flight release: a partially-finished goreleaser leaves
+# orphan release assets, and a partial npm publish leaves a half-shipped
+# version. Two concurrent releases for the same tag can't be valid anyway —
+# tags are immutable; the second invocation has nothing new to ship.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Env gate sits on the FIRST job that ships anything (goreleaser uploads
+    # GitHub Release artifacts). Putting it on `publish-npm` instead would
+    # leave a published GitHub Release with no corresponding npm package on
+    # rejection, requiring manual cleanup. Pausing here means the human
+    # approves once and both surfaces ship together — or nothing ships.
+    environment:
+      name: npm-publish
+      url: https://www.npmjs.com/package/wuphf
+    permissions:
+      contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - name: Verify releasable tree
+        run: |
+          missing=0
+          for path in go.mod cmd/wuphf/main.go npm/package.json web/bun.lock; do
+            if [ ! -e "$path" ]; then
+              echo "::error::missing ${path}; refusing to build or publish this tag"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
+
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:
           go-version-file: go.mod
 
-      - uses: actions/setup-node@v4
+      # Pin to full SHA: third-party action, runs with write access to
+      # contents (release upload). Same SHA is reused across all web-facing
+      # workflows — keep them in sync.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
+          bun-version: "1.1.38"
 
       - name: Build React frontend
         working-directory: web
         run: |
-          npm ci
-          npm run build
+          bun install --frozen-lockfile
+          bun run build
 
       - run: go test ./...
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # ratchet:goreleaser/goreleaser-action@v7
         with:
           version: latest
           args: release --clean
@@ -53,21 +86,21 @@ jobs:
           REF="${GITHUB_REF#refs/tags/}"
           echo "version=${REF#v}" >> "$GITHUB_OUTPUT"
 
-  publish-npm:
-    needs: release
-    runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ needs.release.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      # npm publish runs in the SAME job as goreleaser so the GitHub Release
+      # and the npm package ship atomically: either both succeed or neither
+      # leaves an artifact users can install. Splitting into two jobs would
+      # let goreleaser ship a GitHub Release that humans can download while
+      # publish-npm fails (env approval timeout, npm registry hiccup,
+      # version-already-published) — leaving the install surfaces drifted.
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6
         with:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
-      - name: Set package version
+      - name: Set npm package version
         working-directory: npm
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
       - name: Publish to npm
@@ -77,16 +110,18 @@ jobs:
         run: npm publish --access public
 
   smoke-test-npx:
-    needs: [release, publish-npm]
+    needs: [release]
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     env:
       VERSION: ${{ needs.release.outputs.version }}
     steps:
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # ratchet:actions/setup-node@v6
         with:
           node-version: "20"
 

@@ -1,157 +1,162 @@
-import { useCallback, useMemo, useState } from 'react'
-import { post, generateAgent } from '../../api/client'
-import { useQueryClient } from '@tanstack/react-query'
+import { useCallback, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
-type Provider = 'claude' | 'openai' | 'gemini'
-type WizardMode = 'describe' | 'manual'
+import { generateAgent, post } from "../../api/client";
+
+type Provider = "inherit" | "claude-code" | "codex" | "opencode";
+type WizardMode = "describe" | "manual";
 
 interface AgentFormData {
-  name: string
-  slug: string
-  role: string
-  emoji: string
-  provider: Provider
-  expertise: string
+  name: string;
+  slug: string;
+  role: string;
+  emoji: string;
+  provider: Provider;
+  expertise: string;
 }
 
 const INITIAL_FORM: AgentFormData = {
-  name: '',
-  slug: '',
-  role: '',
-  emoji: '',
-  provider: 'claude',
-  expertise: '',
-}
+  name: "",
+  slug: "",
+  role: "",
+  emoji: "",
+  provider: "inherit",
+  expertise: "",
+};
 
 const PROVIDERS: { value: Provider; label: string }[] = [
-  { value: 'claude', label: 'Claude (Anthropic)' },
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'gemini', label: 'Gemini (Google)' },
-]
+  { value: "inherit", label: "Default runtime" },
+  { value: "codex", label: "Codex" },
+  { value: "claude-code", label: "Claude Code" },
+  { value: "opencode", label: "Opencode" },
+];
 
 function slugify(name: string): string {
   return name
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 interface AgentWizardProps {
-  open: boolean
-  onClose: () => void
-  onCreated?: () => void
+  open: boolean;
+  onClose: () => void;
+  onCreated?: () => void;
 }
 
 export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
-  const [mode, setMode] = useState<WizardMode>('describe')
-  const [prompt, setPrompt] = useState('')
-  const [generating, setGenerating] = useState(false)
-  const [form, setForm] = useState<AgentFormData>(INITIAL_FORM)
-  const [slugEdited, setSlugEdited] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const queryClient = useQueryClient()
+  const [mode, setMode] = useState<WizardMode>("describe");
+  const [prompt, setPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [form, setForm] = useState<AgentFormData>(INITIAL_FORM);
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
 
   async function handleGenerate() {
-    const trimmed = prompt.trim()
+    const trimmed = prompt.trim();
     if (!trimmed) {
-      setError('Describe the agent you want first.')
-      return
+      setError("Describe the agent you want first.");
+      return;
     }
-    setGenerating(true)
-    setError(null)
+    setGenerating(true);
+    setError(null);
     try {
-      const tmpl = await generateAgent(trimmed)
-      const generatedSlug = tmpl.slug || ''
+      const tmpl = await generateAgent(trimmed);
+      const generatedSlug = tmpl.slug || "";
       setForm({
-        name: tmpl.name || '',
+        name: tmpl.name || "",
         slug: generatedSlug,
-        role: tmpl.role || '',
-        emoji: tmpl.emoji || '',
-        provider: 'claude',
-        expertise: (tmpl.expertise || []).join(', '),
-      })
-      setSlugEdited(generatedSlug.length > 0)
-      setMode('manual')
+        role: tmpl.role || "",
+        emoji: tmpl.emoji || "",
+        provider: "inherit",
+        expertise: (tmpl.expertise || []).join(", "),
+      });
+      setSlugEdited(generatedSlug.length > 0);
+      setMode("manual");
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Generation failed'
-      setError(message)
+      const message = err instanceof Error ? err.message : "Generation failed";
+      setError(message);
     } finally {
-      setGenerating(false)
+      setGenerating(false);
     }
   }
 
   const updateField = useCallback(
     <K extends keyof AgentFormData>(field: K, value: AgentFormData[K]) => {
       setForm((prev) => {
-        const next = { ...prev, [field]: value }
-        if (field === 'name' && !slugEdited) {
-          next.slug = slugify(value as string)
+        const next = { ...prev, [field]: value };
+        if (field === "name" && !slugEdited) {
+          next.slug = slugify(value as string);
         }
-        return next
-      })
-      setError(null)
+        return next;
+      });
+      setError(null);
     },
     [slugEdited],
-  )
+  );
 
   const expertiseTags = useMemo(() => {
     return form.expertise
-      .split(',')
+      .split(",")
       .map((t) => t.trim())
-      .filter(Boolean)
-  }, [form.expertise])
+      .filter(Boolean);
+  }, [form.expertise]);
 
-  const canSubmit = form.name.trim().length > 0 && form.slug.trim().length > 0
+  const canSubmit = form.name.trim().length > 0 && form.slug.trim().length > 0;
 
   async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
+    e.preventDefault();
 
-    if (!canSubmit) return
-    setSubmitting(true)
-    setError(null)
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
 
     try {
       const body = {
+        action: "create",
         slug: form.slug,
         name: form.name,
         role: form.role || undefined,
         emoji: form.emoji || undefined,
-        provider: form.provider,
+        provider:
+          form.provider === "inherit" ? undefined : { kind: form.provider },
         expertise: expertiseTags.length > 0 ? expertiseTags : undefined,
-      }
+      };
 
-      await post('/office-members', body)
-      await queryClient.invalidateQueries({ queryKey: ['office-members'] })
+      await post("/office-members", body);
+      await queryClient.invalidateQueries({ queryKey: ["office-members"] });
 
-      setForm(INITIAL_FORM)
-      setSlugEdited(false)
-      onCreated?.()
-      onClose()
+      setForm(INITIAL_FORM);
+      setSlugEdited(false);
+      onCreated?.();
+      onClose();
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to create agent'
-      setError(message)
+      const message =
+        err instanceof Error ? err.message : "Failed to create agent";
+      setError(message);
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
   }
 
   function handleCancel() {
-    setForm(INITIAL_FORM)
-    setSlugEdited(false)
-    setError(null)
-    setMode('describe')
-    setPrompt('')
-    onClose()
+    setForm(INITIAL_FORM);
+    setSlugEdited(false);
+    setError(null);
+    setMode("describe");
+    setPrompt("");
+    onClose();
   }
 
   function handleOverlayClick(e: React.MouseEvent) {
     if (e.target === e.currentTarget) {
-      handleCancel()
+      handleCancel();
     }
   }
 
-  if (!open) return null
+  if (!open) return null;
 
   return (
     <div className="agent-wizard-overlay" onClick={handleOverlayClick}>
@@ -162,21 +167,27 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
         <div className="channel-wizard-tabs" style={{ marginBottom: 16 }}>
           <button
             type="button"
-            className={`channel-wizard-tab${mode === 'describe' ? ' active' : ''}`}
-            onClick={() => { setMode('describe'); setError(null) }}
+            className={`channel-wizard-tab${mode === "describe" ? " active" : ""}`}
+            onClick={() => {
+              setMode("describe");
+              setError(null);
+            }}
           >
             Describe
           </button>
           <button
             type="button"
-            className={`channel-wizard-tab${mode === 'manual' ? ' active' : ''}`}
-            onClick={() => { setMode('manual'); setError(null) }}
+            className={`channel-wizard-tab${mode === "manual" ? " active" : ""}`}
+            onClick={() => {
+              setMode("manual");
+              setError(null);
+            }}
           >
             Manual
           </button>
         </div>
 
-        {mode === 'describe' ? (
+        {mode === "describe" ? (
           <div className="agent-wizard-form">
             <div className="agent-wizard-field">
               <label className="label" htmlFor="agent-prompt">
@@ -187,13 +198,28 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
                 className="input"
                 placeholder='e.g. "A DevOps engineer who manages CI/CD and infrastructure"'
                 value={prompt}
-                onChange={(e) => { setPrompt(e.target.value); setError(null) }}
+                onChange={(e) => {
+                  setPrompt(e.target.value);
+                  setError(null);
+                }}
                 rows={3}
-                style={{ minHeight: 80, resize: 'vertical', padding: '10px 12px', lineHeight: 1.5 }}
-                autoFocus
+                style={{
+                  minHeight: 80,
+                  resize: "vertical",
+                  padding: "10px 12px",
+                  lineHeight: 1.5,
+                }}
               />
-              <span style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 6, display: 'block' }}>
-                AI will draft a slug, name, role, expertise, and personality. You can edit before creating.
+              <span
+                style={{
+                  fontSize: 11,
+                  color: "var(--text-tertiary)",
+                  marginTop: 6,
+                  display: "block",
+                }}
+              >
+                AI will draft a slug, name, role, expertise, and personality.
+                You can edit before creating.
               </span>
             </div>
 
@@ -214,131 +240,151 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
                 onClick={handleGenerate}
                 disabled={generating || !prompt.trim()}
               >
-                {generating ? 'Generating...' : 'Generate'}
+                {generating ? "Generating..." : "Generate"}
               </button>
             </div>
           </div>
         ) : (
-        <form className="agent-wizard-form" onSubmit={handleSubmit}>
-          {/* Name */}
-          <div className="agent-wizard-field">
-            <label className="label" htmlFor="agent-name">Name</label>
-            <input
-              id="agent-name"
-              className="input"
-              type="text"
-              placeholder="e.g. Sales Rep"
-              value={form.name}
-              onChange={(e) => updateField('name', e.target.value)}
-              autoFocus
-            />
-          </div>
+          <form className="agent-wizard-form" onSubmit={handleSubmit}>
+            {/* Name */}
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-name">
+                Name
+              </label>
+              <input
+                id="agent-name"
+                className="input"
+                type="text"
+                placeholder="e.g. Sales Rep"
+                value={form.name}
+                onChange={(e) => updateField("name", e.target.value)}
+              />
+            </div>
 
-          {/* Slug */}
-          <div className="agent-wizard-field">
-            <label className="label" htmlFor="agent-slug">Slug</label>
-            <input
-              id="agent-slug"
-              className="input"
-              type="text"
-              placeholder="auto-generated-from-name"
-              value={form.slug}
-              onChange={(e) => {
-                setSlugEdited(true)
-                updateField('slug', e.target.value)
-              }}
-            />
-          </div>
+            {/* Slug */}
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-slug">
+                Slug
+              </label>
+              <input
+                id="agent-slug"
+                className="input"
+                type="text"
+                placeholder="auto-generated-from-name"
+                value={form.slug}
+                onChange={(e) => {
+                  setSlugEdited(true);
+                  updateField("slug", e.target.value);
+                }}
+              />
+            </div>
 
-          {/* Role */}
-          <div className="agent-wizard-field">
-            <label className="label" htmlFor="agent-role">Role</label>
-            <input
-              id="agent-role"
-              className="input"
-              type="text"
-              placeholder="e.g. SDR, Engineer, Support"
-              value={form.role}
-              onChange={(e) => updateField('role', e.target.value)}
-            />
-          </div>
+            {/* Role */}
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-role">
+                Role
+              </label>
+              <input
+                id="agent-role"
+                className="input"
+                type="text"
+                placeholder="e.g. SDR, Engineer, Support"
+                value={form.role}
+                onChange={(e) => updateField("role", e.target.value)}
+              />
+            </div>
 
-          {/* Emoji */}
-          <div className="agent-wizard-field">
-            <label className="label" htmlFor="agent-emoji">Emoji</label>
-            <input
-              id="agent-emoji"
-              className="input"
-              type="text"
-              placeholder="e.g. robot face"
-              value={form.emoji}
-              onChange={(e) => updateField('emoji', e.target.value)}
-              maxLength={4}
-              style={{ width: 80 }}
-            />
-          </div>
+            {/* Emoji */}
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-emoji">
+                Emoji
+              </label>
+              <input
+                id="agent-emoji"
+                className="input"
+                type="text"
+                placeholder="e.g. robot face"
+                value={form.emoji}
+                onChange={(e) => updateField("emoji", e.target.value)}
+                maxLength={4}
+                style={{ width: 80 }}
+              />
+            </div>
 
-          {/* Provider */}
-          <div className="agent-wizard-field">
-            <label className="label" htmlFor="agent-provider">Provider</label>
-            <select
-              id="agent-provider"
-              value={form.provider}
-              onChange={(e) => updateField('provider', e.target.value as Provider)}
-            >
-              {PROVIDERS.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Expertise */}
-          <div className="agent-wizard-field">
-            <label className="label" htmlFor="agent-expertise">
-              Expertise <span style={{ fontWeight: 400, color: 'var(--text-tertiary)' }}>(comma-separated)</span>
-            </label>
-            <input
-              id="agent-expertise"
-              className="input"
-              type="text"
-              placeholder="e.g. outreach, cold email, pipeline"
-              value={form.expertise}
-              onChange={(e) => updateField('expertise', e.target.value)}
-            />
-            {expertiseTags.length > 0 && (
-              <div className="agent-panel-tags" style={{ marginTop: 6 }}>
-                {expertiseTags.map((tag) => (
-                  <span key={tag} className="agent-panel-tag">{tag}</span>
+            {/* Provider */}
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-provider">
+                Provider
+              </label>
+              <select
+                id="agent-provider"
+                value={form.provider}
+                onChange={(e) =>
+                  updateField("provider", e.target.value as Provider)
+                }
+              >
+                {PROVIDERS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {p.label}
+                  </option>
                 ))}
-              </div>
-            )}
-          </div>
+              </select>
+            </div>
 
-          {error && <div className="agent-wizard-error">{error}</div>}
+            {/* Expertise */}
+            <div className="agent-wizard-field">
+              <label className="label" htmlFor="agent-expertise">
+                Expertise{" "}
+                <span
+                  style={{ fontWeight: 400, color: "var(--text-tertiary)" }}
+                >
+                  (comma-separated)
+                </span>
+              </label>
+              <input
+                id="agent-expertise"
+                className="input"
+                type="text"
+                placeholder="e.g. outreach, cold email, pipeline"
+                value={form.expertise}
+                onChange={(e) => updateField("expertise", e.target.value)}
+              />
+              {expertiseTags.length > 0 && (
+                <div className="agent-panel-tags" style={{ marginTop: 6 }}>
+                  {expertiseTags.map((tag) => (
+                    <span key={tag} className="agent-panel-tag">
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
 
-          {/* Footer */}
-          <div className="agent-wizard-footer">
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              onClick={handleCancel}
-              disabled={submitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary btn-sm"
-              disabled={!canSubmit || submitting}
-            >
-              {submitting ? 'Creating...' : 'Create'}
-            </button>
-          </div>
-        </form>
+            {error && <div className="agent-wizard-error">{error}</div>}
+
+            {/* Footer */}
+            <div className="agent-wizard-footer">
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                onClick={handleCancel}
+                disabled={submitting}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary btn-sm"
+                disabled={!canSubmit || submitting}
+              >
+                {submitting ? "Creating..." : "Create"}
+              </button>
+            </div>
+          </form>
         )}
       </div>
     </div>
-  )
+  );
 }
 
 /**
@@ -349,8 +395,8 @@ export function AgentWizard({ open, onClose, onCreated }: AgentWizardProps) {
  *   <AgentWizard open={open} onClose={hide} />
  */
 export function useAgentWizard() {
-  const [open, setOpen] = useState(false)
-  const show = useCallback(() => setOpen(true), [])
-  const hide = useCallback(() => setOpen(false), [])
-  return { open, show, hide }
+  const [open, setOpen] = useState(false);
+  const show = useCallback(() => setOpen(true), []);
+  const hide = useCallback(() => setOpen(false), []);
+  return { open, show, hide };
 }

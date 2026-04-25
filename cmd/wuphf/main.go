@@ -51,10 +51,11 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "wuphf shred — burn the whole workspace down")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Stops the running session, clears broker state, and deletes the team")
-		fmt.Fprintln(os.Stderr, "roster, company identity, office task receipts, and saved workflows.")
+		fmt.Fprintln(os.Stderr, "roster, company identity, office task receipts, saved workflows, logs,")
+		fmt.Fprintln(os.Stderr, "sessions, provider state, calendar, and local wiki memory.")
 		fmt.Fprintln(os.Stderr, "Next launch reopens onboarding.")
 		fmt.Fprintln(os.Stderr, "")
-		fmt.Fprintln(os.Stderr, "Preserved: logs, sessions, task worktrees, LLM caches, config.json.")
+		fmt.Fprintln(os.Stderr, "Preserved: task worktrees, OpenClaw device identity, config.json.")
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf shred           Prompts before wiping")
@@ -129,7 +130,7 @@ func main() {
 	blueprintFlag := flag.String("blueprint", "", "Operation blueprint ID for this run")
 	packFlag := flag.String("pack", "", "Operation blueprint ID (legacy pack alias supported)")
 	fromScratchFlag := flag.Bool("from-scratch", false, "Start without a saved blueprint and synthesize the first operation from the directive")
-	providerFlag := flag.String("provider", "", "LLM provider override for this run (claude-code, codex)")
+	providerFlag := flag.String("provider", "", "LLM provider override for this run (claude-code, codex, opencode)")
 	oneOnOne := flag.Bool("1o1", false, "Launch a direct 1:1 session with a single agent (default ceo)")
 	channelView := flag.Bool("channel-view", false, "Run as channel view (internal)")
 	channelApp := flag.String("channel-app", "", "Start channel view on a specific app (internal)")
@@ -185,10 +186,10 @@ func main() {
 	}
 	if provider := strings.TrimSpace(*providerFlag); provider != "" {
 		switch provider {
-		case "claude-code", "codex":
+		case "claude-code", "codex", "opencode":
 			_ = os.Setenv("WUPHF_LLM_PROVIDER", provider)
 		default:
-			fmt.Fprintf(os.Stderr, "error: unsupported provider %q (expected claude-code or codex)\n", provider)
+			fmt.Fprintf(os.Stderr, "error: unsupported provider %q (expected claude-code, codex, or opencode)\n", provider)
 			os.Exit(1)
 		}
 	}
@@ -492,9 +493,10 @@ func isPiped() bool {
 const shredSummary = `This will:
   • Stop the running WUPHF session
   • Delete your team, company identity, office task receipts, workflows
+  • Delete logs, sessions, provider state, calendar, and local wiki memory
   • Wipe broker runtime state
   • Reopen onboarding on next launch
-Preserved: logs, sessions, task worktrees, LLM caches, config.json.`
+Preserved: task worktrees, OpenClaw device identity, config.json.`
 
 // confirmDestructive gates a destructive subcommand behind a y/N prompt.
 // A "-y" / "--yes" in rest skips the prompt — useful for scripted teardown.

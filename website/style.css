@@ -1,14 +1,15 @@
 /* ── Design tokens ──────────────────────────────────────────────── */
 :root {
-  --bg:           #1A1610;
-  --surface:      #242018;
-  --surface-high: #2E2820;
-  --border:       #3A3028;
-  --text:         #F0EBD8;
-  --text-muted:   #8A7D6A;
-  --yellow:       #ECB22E;
-  --yellow-dark:  #C49020;
-  --blue:         #5A9AC8;
+  /* Palette sourced from Figma: Brand/Tertiary (purple) */
+  --bg:           #1b0d2a;
+  --surface:      #2a1440;
+  --surface-high: #3a1d58;
+  --border:       #612a92; /* Tertiary/500 */
+  --text:         #ffebfc; /* Tertiary/100 */
+  --text-muted:   #a580c0;
+  --yellow:       #cf72d9; /* Tertiary/300 — primary accent */
+  --yellow-dark:  #9f4dbf; /* Tertiary/400 — accent shadow */
+  --blue:         #ffb3e6; /* Tertiary/200 — secondary accent */
 
   --font-pixel:    'Press Start 2P', cursive;
   --font-dialogue: 'VT323', monospace;

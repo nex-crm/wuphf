@@ -1,11 +1,9 @@
-import { useEffect, useState } from 'react'
-import {
-  fetchPlaybooks,
-  type PlaybookSummary,
-} from '../../api/playbook'
+import { useEffect, useState } from "react";
+
+import { fetchPlaybooks, type PlaybookSummary } from "../../api/playbook";
 
 interface PlaybookSkillBadgeProps {
-  slug: string
+  slug: string;
 }
 
 /**
@@ -15,43 +13,44 @@ interface PlaybookSkillBadgeProps {
  * this milestone).
  */
 export default function PlaybookSkillBadge({ slug }: PlaybookSkillBadgeProps) {
-  const [playbook, setPlaybook] = useState<PlaybookSummary | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [playbook, setPlaybook] = useState<PlaybookSummary | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
+    let cancelled = false;
+    setLoading(true);
     fetchPlaybooks()
       .then((rows) => {
-        if (cancelled) return
-        setPlaybook(rows.find((r) => r.slug === slug) ?? null)
+        if (cancelled) return;
+        setPlaybook(rows.find((r) => r.slug === slug) ?? null);
       })
       .catch(() => {
-        if (!cancelled) setPlaybook(null)
+        if (!cancelled) setPlaybook(null);
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+        if (!cancelled) setLoading(false);
+      });
     return () => {
-      cancelled = true
-    }
-  }, [slug])
+      cancelled = true;
+    };
+  }, [slug]);
 
-  if (loading) return null
+  if (loading) return null;
 
   // If the backend does not know about this playbook yet — e.g. because
   // the source article was written seconds ago and the catalog scan hasn't
   // picked it up — render a pending badge instead of nothing so the reader
   // knows compilation is in-flight.
-  const skillPath = playbook?.skill_path ?? `team/playbooks/.compiled/${slug}/SKILL.md`
-  const compiled = playbook?.skill_exists ?? false
+  const skillPath =
+    playbook?.skill_path ?? `team/playbooks/.compiled/${slug}/SKILL.md`;
+  const compiled = playbook?.skill_exists ?? false;
 
   return (
     <div
       className={
         compiled
-          ? 'wk-playbook-badge wk-playbook-badge--compiled'
-          : 'wk-playbook-badge wk-playbook-badge--pending'
+          ? "wk-playbook-badge wk-playbook-badge--compiled"
+          : "wk-playbook-badge wk-playbook-badge--pending"
       }
       role="status"
       data-testid="wk-playbook-badge"
@@ -60,7 +59,8 @@ export default function PlaybookSkillBadge({ slug }: PlaybookSkillBadgeProps) {
       <span className="wk-playbook-badge__label">
         {compiled ? (
           <>
-            Compiled skill: <code className="wk-playbook-badge__path">{skillPath}</code>
+            Compiled skill:{" "}
+            <code className="wk-playbook-badge__path">{skillPath}</code>
           </>
         ) : (
           <>Compiled skill pending — recompiling…</>
@@ -68,9 +68,10 @@ export default function PlaybookSkillBadge({ slug }: PlaybookSkillBadgeProps) {
       </span>
       {compiled && playbook && (
         <span className="wk-playbook-badge__meta">
-          {playbook.execution_count} execution{playbook.execution_count === 1 ? '' : 's'} logged
+          {playbook.execution_count} execution
+          {playbook.execution_count === 1 ? "" : "s"} logged
         </span>
       )}
     </div>
-  )
+  );
 }

@@ -1,21 +1,26 @@
-import ReviewCard from './ReviewCard'
-import type { ReviewItem } from '../../api/notebook'
+import type { ReviewItem } from "../../api/notebook";
+import ReviewCard from "./ReviewCard";
 
 /** A Kanban column with a Caveat header and list of cards. */
 
 interface ReviewColumnProps {
-  title: string
-  items: ReviewItem[]
-  activeId?: string | null
-  onOpenCard: (id: string) => void
+  title: string;
+  items: ReviewItem[];
+  activeId?: string | null;
+  onOpenCard: (id: string) => void;
 }
 
-export default function ReviewColumn({ title, items, activeId, onOpenCard }: ReviewColumnProps) {
+export default function ReviewColumn({
+  title,
+  items,
+  activeId,
+  onOpenCard,
+}: ReviewColumnProps) {
   return (
     <section
       className="nb-review-col"
       aria-label={`${title} reviews`}
-      data-testid={`nb-review-col-${title.toLowerCase().replace(/\s+/g, '-')}`}
+      data-testid={`nb-review-col-${title.toLowerCase().replace(/\s+/g, "-")}`}
     >
       <div className="nb-review-col-head">
         <h3>{title}</h3>
@@ -25,9 +30,14 @@ export default function ReviewColumn({ title, items, activeId, onOpenCard }: Rev
         <p className="nb-review-col-empty">Empty</p>
       ) : (
         items.map((r) => (
-          <ReviewCard key={r.id} review={r} active={activeId === r.id} onOpen={onOpenCard} />
+          <ReviewCard
+            key={r.id}
+            review={r}
+            active={activeId === r.id}
+            onOpen={onOpenCard}
+          />
         ))
       )}
     </section>
-  )
+  );
 }

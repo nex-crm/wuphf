@@ -2,6 +2,7 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -103,7 +104,12 @@ func TestAgentPaneSlugsOneOnOneUsesOnlySelectedAgent(t *testing.T) {
 }
 
 func TestNewLauncherFromScratchUsesGenericOffice(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	// Pair HOME with WUPHF_RUNTIME_HOME so NewLauncher reads from this
+	// test's tmpdir instead of the process-level leaked runtime home
+	// installed by worktree_guard_test's init.
+	t.Setenv("WUPHF_RUNTIME_HOME", home)
 	t.Setenv("WUPHF_START_FROM_SCRATCH", "1")
 
 	l, err := NewLauncher("from-scratch")
@@ -203,8 +209,9 @@ func TestOfficeMembersSnapshotPrefersPersistedStateOverPack(t *testing.T) {
 
 func TestNotificationTargetsForMessageOneOnOneWakesSelectedAgent(t *testing.T) {
 	l := &Launcher{
-		sessionMode: SessionModeOneOnOne,
-		oneOnOne:    "pm",
+		sessionMode:      SessionModeOneOnOne,
+		oneOnOne:         "pm",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 	}
 
 	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
@@ -567,6 +574,86 @@ func TestNotificationTargetsForDMChannel(t *testing.T) {
 	})
 	if len(immediate2) != 0 {
 		t.Errorf("agent's own DM message should not echo back, got %+v", immediate2)
+	}
+}
+
+func TestNotificationTargetsForDMChannelCodexRuntimeUsesHeadlessTarget(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	l := &Launcher{
+		provider: "codex",
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "fe", Name: "Frontend Engineer"},
+			},
+		},
+	}
+
+	immediate, delayed := l.notificationTargetsForMessage(channelMessage{
+		From:    "you",
+		Channel: "dm-fe",
+		Content: "Check this component",
+	})
+	if len(immediate) != 1 {
+		t.Fatalf("expected 1 immediate headless target for Codex DM, got %d: %+v", len(immediate), immediate)
+	}
+	if immediate[0].Slug != "fe" {
+		t.Fatalf("expected DM target fe, got %q", immediate[0].Slug)
+	}
+	if immediate[0].PaneTarget != "" {
+		t.Fatalf("expected headless target without pane, got %+v", immediate[0])
+	}
+	if len(delayed) != 0 {
+		t.Fatalf("expected no delayed targets for Codex DM, got %+v", delayed)
+	}
+}
+
+func TestDeliverDMMessageQueuesCodexHeadlessTurn(t *testing.T) {
+	oldPathFn := brokerStatePath
+	tmpDir := t.TempDir()
+	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	defer func() { brokerStatePath = oldPathFn }()
+
+	b := NewBroker()
+	l := newHeadlessLauncherForTest()
+	l.broker = b
+	l.provider = "codex"
+	l.notifyLastDelivered = make(map[string]time.Time)
+
+	processed := make(chan string, 1)
+	oldRunTurn := headlessCodexRunTurn
+	headlessCodexRunTurn = func(_ *Launcher, _ context.Context, slug, notification string, channel ...string) error {
+		targetChannel := ""
+		if len(channel) > 0 {
+			targetChannel = channel[0]
+		}
+		processed <- strings.Join([]string{slug, targetChannel, notification}, "\n---\n")
+		return nil
+	}
+	defer func() { headlessCodexRunTurn = oldRunTurn }()
+
+	dmSlug := DMSlugFor("ceo")
+	l.deliverMessageNotification(channelMessage{
+		ID:      "msg-1",
+		From:    "you",
+		Channel: dmSlug,
+		Content: "Real agent smoke test",
+	})
+
+	got := waitForString(t, processed)
+	if !strings.Contains(got, "ceo") {
+		t.Fatalf("expected ceo headless turn, got %q", got)
+	}
+	if !strings.Contains(got, dmSlug) {
+		t.Fatalf("expected DM channel %q in headless turn, got %q", dmSlug, got)
+	}
+	if !strings.Contains(got, "Context: DIRECT MESSAGE") || !strings.Contains(got, "Respond to every message") {
+		t.Fatalf("expected direct-message response instruction, got %q", got)
 	}
 }
 
@@ -1142,6 +1229,35 @@ func TestBuildPromptIncludesTaskStatusAndWorktreeGuidance(t *testing.T) {
 	}
 	if !strings.Contains(lead, "if a live business lane gets named or reframed as a review packet, proof artifact, blueprint-derived scaffold") {
 		t.Fatalf("expected task-hygiene guidance in lead prompt: %q", lead)
+	}
+}
+
+func TestBuildPromptIncludesMarkdownNotebookPromotionGuidance(t *testing.T) {
+	t.Setenv("WUPHF_MEMORY_BACKEND", "markdown")
+	t.Setenv("NEX_API_KEY", "")
+
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "builder", Name: "Builder"},
+			},
+		},
+	}
+
+	for _, slug := range []string{"ceo", "builder"} {
+		prompt := l.buildPrompt(slug)
+		for _, want := range []string{
+			"notebook_write",
+			"notebook_promote",
+			"wuphf_wiki_lookup",
+			"Do not bypass notebook_promote",
+		} {
+			if !strings.Contains(prompt, want) {
+				t.Fatalf("%s prompt missing %q:\n%s", slug, want, prompt)
+			}
+		}
 	}
 }
 
@@ -2070,6 +2186,17 @@ func TestRelevantTaskForTargetCrossChannel(t *testing.T) {
 	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
 	defer func() { brokerStatePath = oldPathFn }()
 
+	oldPrepare := prepareTaskWorktree
+	oldCleanup := cleanupTaskWorktree
+	prepareTaskWorktree = func(taskID string) (string, string, error) {
+		return filepath.Join(tmpDir, "wuphf-task-"+taskID), "wuphf-" + taskID, nil
+	}
+	cleanupTaskWorktree = func(string, string) error { return nil }
+	defer func() {
+		prepareTaskWorktree = oldPrepare
+		cleanupTaskWorktree = oldCleanup
+	}()
+
 	b := NewBroker()
 
 	// Create "engineering" channel directly in broker state.
@@ -2530,9 +2657,16 @@ func TestProcessDueTaskJobResumesRateLimitedBlockedTask(t *testing.T) {
 }
 
 func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) {
+	// Intentionally swap brokerStatePath to a leaked OS-temp dir rather than
+	// t.TempDir(). Goroutines leaked by prior tests in this package call
+	// brokerStatePath() via saveLocked() and resolve to whatever the global
+	// currently points at — which races with t.TempDir cleanup if the target
+	// is inside the test's own tempdir ("unlinkat: directory not empty").
+	// Leaking a few KB in /tmp is the cheap fix; proper goroutine hygiene
+	// across the suite is a separate refactor.
 	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
@@ -2559,8 +2693,9 @@ func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) 
 	b.mu.Unlock()
 
 	l := &Launcher{
-		broker:      b,
-		sessionName: "office-test",
+		broker:           b,
+		sessionName:      "office-test",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
 			Agents: []agent.AgentConfig{
@@ -2588,9 +2723,11 @@ func TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask(t *testing.T) 
 }
 
 func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T) {
+	// See TestOfficeChangeTaskNotificationsBackfillGeneratedMemberTask for
+	// why this test uses a leaked state dir instead of t.TempDir().
 	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
+	statePath := leakedBrokerStatePath(t)
+	brokerStatePath = func() string { return statePath }
 	defer func() { brokerStatePath = oldPathFn }()
 
 	b := NewBroker()
@@ -2623,8 +2760,9 @@ func TestOfficeChangeTaskNotificationsBackfillChannelMembershipTask(t *testing.T
 	b.mu.Unlock()
 
 	l := &Launcher{
-		broker:      b,
-		sessionName: "office-test",
+		broker:           b,
+		sessionName:      "office-test",
+		paneBackedAgents: true, // test exercises the pane-target path specifically
 		pack: &agent.PackDefinition{
 			LeadSlug: "ceo",
 			Agents: []agent.AgentConfig{
@@ -2685,6 +2823,81 @@ func TestAllOperationBlueprintsUseCEOLead(t *testing.T) {
 		if !bytes.Contains(data, []byte("lead_slug: ceo")) {
 			t.Errorf("blueprint %s must declare lead_slug: ceo", entry.Name())
 		}
+	}
+}
+
+func TestBuildPromptToolHygieneSection(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "eng", Name: "Engineer"},
+			},
+		},
+	}
+
+	for _, slug := range []string{"ceo", "eng"} {
+		prompt := l.buildPrompt(slug)
+		if !strings.Contains(prompt, "== TOOL HYGIENE ==") {
+			t.Errorf("%s prompt missing TOOL HYGIENE section", slug)
+		}
+		if !strings.Contains(prompt, "ALREADY registered") {
+			t.Errorf("%s prompt missing 'ALREADY registered' line", slug)
+		}
+		if !strings.Contains(prompt, "Do not read unrelated files") {
+			t.Errorf("%s prompt missing unrelated-files guidance", slug)
+		}
+		if !strings.Contains(prompt, "Emit at most one team_broadcast per turn") {
+			t.Errorf("%s prompt missing broadcast throttle guidance", slug)
+		}
+	}
+}
+
+func TestBuildMessageActiveAgentsSorted(t *testing.T) {
+	l := &Launcher{
+		pack: &agent.PackDefinition{
+			LeadSlug: "ceo",
+			Agents: []agent.AgentConfig{
+				{Slug: "ceo", Name: "CEO"},
+				{Slug: "eng", Name: "Engineer"},
+			},
+		},
+		headlessActive: map[string]*headlessCodexActiveTurn{
+			"zebra": {},
+			"alpha": {},
+			"mango": {},
+		},
+		headlessQueues: make(map[string][]headlessCodexTurn),
+	}
+
+	// Run multiple times — Go map iteration order is non-deterministic, so
+	// a missing sort would produce different output across iterations.
+	var first string
+	for i := 0; i < 20; i++ {
+		packet := l.buildMessageWorkPacket(channelMessage{
+			ID: "h1", From: "you", Channel: "general", Content: "ship it",
+		}, "ceo")
+		idx := strings.Index(packet, "Already active in this thread")
+		if idx == -1 {
+			t.Fatal("expected 'Already active in this thread' line in work packet")
+		}
+		rest := packet[idx:]
+		nl := strings.Index(rest, "\n")
+		var line string
+		if nl == -1 {
+			line = rest
+		} else {
+			line = rest[:nl]
+		}
+		if first == "" {
+			first = line
+		} else if line != first {
+			t.Fatalf("active-agents line is non-deterministic:\n  iter 0: %q\n  iter %d: %q", first, i, line)
+		}
+	}
+	if !strings.Contains(first, "@alpha, @mango, @zebra") {
+		t.Fatalf("active-agents line not alphabetically sorted: %q", first)
 	}
 }
 

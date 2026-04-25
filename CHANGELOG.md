@@ -2,6 +2,77 @@
 
 All notable changes to WUPHF will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Caret no longer drifts when typing past an `@agent` chip in the composer.** The mirror-overlay treatment rendered mention chips with 4–5px horizontal padding and `font-size: 0.9em`, so each chip took more width than the raw text in the textarea behind it. The caret fell behind the typed characters by a few pixels after every chip. Composer chips now inherit the textarea's font metrics exactly (15px, no padding, `display: inline`) and only apply a background highlight — layout-neutral, so character-for-character alignment with the textarea is preserved. Message-bubble chips keep the original styled pill treatment.
+
+### Changed
+
+- **Headless `claude --print` is now the default dispatch path for both `wuphf` (web) and `wuphf --tui`.** Anthropic re-sanctioned headless CLI reuse in the 2026-04 OpenClaw policy note, and it runs on the user's normal subscription quota — no separate extra-usage charge. Every turn now dispatches as a fresh `claude --print` invocation, matching how the Codex runtime already worked and unifying dispatch across both modes. The previous per-agent long-lived interactive tmux pane path is preserved as an internal fallback primitive (reachable if dispatch ever needs to promote to panes at runtime) but is no longer invoked at startup. tmux is still required for `--tui` since the channel-view TUI runs in tmux; the web UI no longer needs it.
+- **Pane-fallback messaging updated to reflect the new default.** The stderr banner and `#general` system post no longer frame headless as "extra-usage quota" — it isn't, anymore. Messaging now reads as: pane-backed fallback attempted but unavailable → continuing with the default headless path on your normal subscription.
+- **Inline Enter-key hint on wizard CTAs drops the redundant `Enter` word.** The hint rendered both a `↵` key pill and the word `Enter` next to it — same information twice. Now it's just the pill. On the task step (⌘+Enter), the modifier is rendered as its own pill so the cue stays two key pills instead of one pill plus a string.
+
+## [0.0.7.1] - 2026-04-23
+
+### Fixed
+
+- **Rapid `@agent` tags now coalesce into one reply instead of cutting claude off mid-turn.** The previous per-slug queue served bursts serially but the 3-second minimum gap between sends was shorter than a typical claude turn (~30s), so the second `/clear` still wiped the first reply mid-generation. The queue now tracks a 60-second coalesce window per slug: if a new notification arrives while claude's previous turn is still in flight, the new prompt is MERGED into the pending next dispatch instead of triggering a fresh `/clear`. Claude sees one combined prompt with every question separated by a divider and answers them together. Single tags still dispatch immediately — coalesce only engages when there's a live turn to protect.
+
+## [0.0.7.0] - 2026-04-22
+
+### Added
+
+- **Run the whole web app without a mouse.** Press `?` anywhere (outside a text field) to open a keyboard reference with every shortcut grouped by Global / Command palette / Onboarding wizard / Slash commands / Composer / Feed navigation.
+- **`⌘1`–`⌘9` jump to channels 1–9.** The first nine channels in the sidebar now advertise their shortcut with a faint kbd badge that lights up on hover/focus/active. Dark-sidebar legible via `currentColor` inheritance.
+- **Enter advances every wizard step.** Identity, Templates, Team, Setup, and Ready all move forward on Enter when their own gate is satisfied. The Task step keeps Enter for newlines and uses `⌘/Ctrl+Enter` to advance, with an inline kbd hint spelling out the difference. Every primary CTA carries a visible `↵ Enter` badge.
+- **`? shortcuts` button** in the status bar opens the help modal for mouse users who don't know the shortcut exists.
+- **Shared `<Kbd>` + `<KbdSequence>` component** with platform-aware modifier (`⌘` on macOS, `Ctrl` elsewhere). One visual treatment across sidebar hints, wizard CTAs, help modal, status bar, and command palette footer.
+- **`:focus-visible` rings** on template tiles, runtime tiles, team tiles, and task suggestions — keyboard users can see where they are without imposing an outline on mouse users.
+
+### Fixed
+
+- **Escape no longer cascades through every open panel.** Pressing Escape with the help modal + command palette + thread panel open used to close all three at once. The modal now uses capture-phase `stopImmediatePropagation` so one press closes only the topmost surface.
+- **Wizard Enter stops hijacking focused buttons.** Enter on Back/Skip/runtime-reorder buttons used to advance the step instead of firing the button. On the Ready step, Enter on Skip submitted the task anyway. Enter is now ignored when focus is on a `<button>`, `<a>`, or `<select>`.
+- **Hold-Enter on the Ready step no longer corrupts config.json.** The wizard's Enter handler now bails on `e.repeat`, preventing parallel writes to the broker's /config endpoint (which has a known race under concurrent requests).
+- **Focus restoration no longer targets detached DOM nodes.** Closing the help modal checks `isConnected` before calling `focus()` on the previously-focused element — if that element was unmounted while the modal was open, focus falls back cleanly.
+- **Wizard gate logic and platform detection deduplicated.** `cmdEnterLabel()` now reuses the shared `MOD_KEY` from the Kbd component, and the inconsistent `hasAtLeastOneKey` / `hasAnyApiKey` names are unified.
+
+## [0.0.6.6] - 2026-04-22
+
+### Added
+
+- **@-mentions render as colored chips in both the composer and your own messages.** Typing `@pm` in the textbox now shows a pink chip inline via a mirror-overlay (same font metrics as the textarea, transparent text on top, caret still visible). Human message bubbles apply the same treatment so `@pm what are you doing?` reads with the chip, not as a literal `@pm` token. Unknown slugs like `@joedoe` stay plain text — the chip only fires for registered agents. Shared helper `parseMentions` powers both surfaces and uses the same pattern as the broker's routing regex so what the UI highlights is exactly what the backend will route. Mirror scroll-syncs with the textarea so chips stay aligned once a message exceeds the 120px visible cap.
+
+## [0.0.6.5] - 2026-04-22
+
+### Fixed
+
+- **Rapid `@agent` tags no longer clobber each other mid-turn.** Two `@pm` tags in quick succession used to type two `/clear` + prompt sequences into the same tmux pane back-to-back; claude's TUI finished one turn (answering whichever input it had fully parsed) and silently ate the other. A per-agent dispatch queue now serialises pane notifications with a 3-second minimum gap between `/clear` cycles, so each question gets its own turn. Different agents still dispatch in parallel — the gap is per-slug, not global.
+
+## [0.0.6.3] - 2026-04-22
+
+### Fixed
+
+- **Web UI no longer thrashes with `Maximum update depth exceeded` on every render.** `useCommands` returned a freshly-built array on every call, so the Autocomplete effect watching `commands + items` re-fired on every Composer render, calling `onItems(items)` which re-set `acItems`, which re-rendered Composer. The hook now memoizes the derived array against the underlying query data, giving stable referential identity across renders.
+- **Dead tmux panes no longer silently break the live-output stream forever.** When an office reseed (or an agent crash, or an overflow-pane recreation) invalidates a pane target, the capture loop used to log "stopped after 5 failures" and exit permanently. It now sleeps 30s, re-resolves the current pane target from the launcher, and resumes — so long-running sessions recover from pane churn without a restart.
+- **Headless codex queue no longer spins in a stale-cancel livelock.** Prod logs showed dozens of `stale-turn: cancelling active turn after 0s` lines per session because an enqueue could preempt an active turn that had just started. Cancellation now requires both the configured staleness threshold AND a 2-second minimum turn age, floors out tight cancel loops without blocking legitimate preemption.
+
+## [0.0.6.2] - 2026-04-22
+
+### Fixed
+
+- **Typing `@pm` in a human message now tags PM.** The web composer does not always commit typed `@slug` text into an explicit tag chip, so the POST body arrived with `tagged: []`. Routing then treated the message as untagged and woke CEO instead. The broker now auto-promotes `@slug` body mentions to `tagged` for every sender (not only agents), provided the slug matches a registered agent. Conversational `@` references to non-agents stay untouched.
+- **`office_reseeded: respawn panes failed: tmux: no server running` no longer logs as an error.** Web/headless mode never has a tmux server; attaching to it is expected to fail and the headless dispatch path handles delivery. The no-session error class is now silenced there, so the console stops surfacing a recurring error for a normal code path. Real failures (permission denied, corrupt state) keep logging.
+
+## [0.0.6.1] - 2026-04-22
+
+### Fixed
+
+- **@-tagging a specialist now wakes the specialist, not CEO.** Tagging any non-CEO agent in `#general` was silently routing to CEO instead, because the channel-membership filter ran before the explicit @-tag check. A newly hired specialist is in the broker's member list but not yet in `ch.Members` for `#general`, so the filter dropped the notification and CEO absorbed the message. Explicit @-tags from humans or CEO now bypass the channel-membership filter, the sender's intent is explicit and trumps domain inference. Both collaborative and focus modes are patched.
+- **DMs to specialists now reach the specialist.** Agents hired via the web wizard (`POST /office-members`) were added to the broker's roster but not to the launcher's in-memory pack, so `activeSessionMembers()` silently excluded them from `agentNotificationTargets`. Any DM or explicit @-tag targeting a wizard-hired agent dropped into the void. `activeSessionMembers` now appends broker-only members after pack-listed ones, keeping pack ordering stable while ensuring every hired agent is reachable.
+
 ## [0.0.6.0] - 2026-04-21
 
 ### Fixed

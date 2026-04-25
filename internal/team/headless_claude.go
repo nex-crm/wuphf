@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/gitexec"
 	"github.com/nex-crm/wuphf/internal/provider"
 )
 
@@ -20,7 +21,7 @@ var (
 	headlessClaudeCommandContext = exec.CommandContext
 )
 
-func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notification string) error {
+func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notification string, channel ...string) error {
 	if _, err := headlessClaudeLookPath("claude"); err != nil {
 		return fmt.Errorf("claude not found: %w", err)
 	}
@@ -221,6 +222,13 @@ func (l *Launcher) runHeadlessClaudeTurn(ctx context.Context, slug string, notif
 	}
 	if text := strings.TrimSpace(result.FinalMessage); text != "" {
 		appendHeadlessClaudeLog(slug, "result: "+text)
+		target := firstNonEmpty(channel...)
+		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
+		if err != nil {
+			appendHeadlessClaudeLog(slug, "fallback-post-error: "+err.Error())
+		} else if posted {
+			appendHeadlessClaudeLog(slug, fmt.Sprintf("fallback-post: posted final output to #%s as %s", msg.Channel, msg.ID))
+		}
 	}
 	return nil
 }
@@ -244,7 +252,11 @@ func (l *Launcher) headlessClaudeMaxTurns(slug string) string {
 }
 
 func (l *Launcher) buildHeadlessClaudeEnv(slug string) []string {
-	env := os.Environ()
+	// gitexec.CleanEnv: a spawned claude agent will run
+	// `git status/diff/commit` inside its sandbox. If wuphf inherited
+	// GIT_DIR (e.g. launched from a git hook) every child `git` would
+	// silently retarget the outer repo.
+	env := gitexec.CleanEnv()
 	env = append(env,
 		"WUPHF_AGENT_SLUG="+slug,
 		"WUPHF_BROKER_TOKEN="+l.broker.Token(),

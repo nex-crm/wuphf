@@ -27,6 +27,8 @@ func seedWorkspace(t *testing.T, dir string) map[string]string {
 		"openclaw":    filepath.Join(base, "openclaw", "identity.json"),
 		"config":      filepath.Join(base, "config.json"),
 		"calendar":    filepath.Join(base, "calendar.json"),
+		"wiki":        filepath.Join(base, "wiki", "team", "playbooks", "starter.md"),
+		"wikiBackup":  filepath.Join(base, "wiki.bak", "team", "playbooks", "starter.md"),
 	}
 	for _, p := range paths {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
@@ -87,7 +89,7 @@ func TestClearRuntimeRemovesBrokerStateOnly(t *testing.T) {
 	}
 }
 
-func TestShredRemovesWorkspaceButPreservesHistory(t *testing.T) {
+func TestShredRemovesWorkspaceHistoryButPreservesUserWorkAndConfig(t *testing.T) {
 	dir := withRuntimeHome(t)
 	paths := seedWorkspace(t, dir)
 
@@ -102,15 +104,15 @@ func TestShredRemovesWorkspaceButPreservesHistory(t *testing.T) {
 	// Wiped by shred.
 	for _, label := range []string{
 		"onboarded", "company", "brokerState", "officePID",
-		"officeTasks", "workflow",
+		"officeTasks", "workflow", "logs", "session", "codex",
+		"providers", "calendar", "wiki", "wikiBackup",
 	} {
 		assertGone(t, label, paths[label])
 	}
 
-	// Preserved: history, in-flight work, auth caches, user prefs.
+	// Preserved: in-flight work and user credentials/preferences.
 	for _, label := range []string{
-		"logs", "session", "worktree", "codex", "providers",
-		"openclaw", "config", "calendar",
+		"worktree", "openclaw", "config",
 	} {
 		assertStays(t, label, paths[label])
 	}

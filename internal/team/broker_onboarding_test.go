@@ -215,6 +215,75 @@ func TestOnboardingCompleteFromScratchSynthesizes(t *testing.T) {
 	}
 }
 
+func TestOnboardingCompleteFromScratchHonorsSelectedFoundingAgents(t *testing.T) {
+	ensureOperationsFallbackFS(t)
+	defer withIsolatedBrokerState(t)()
+
+	b := NewBroker()
+	if err := b.onboardingCompleteFn("Build an automated customer-support operation", false, "", []string{"ceo", "founding-engineer"}); err != nil {
+		t.Fatalf("onboardingCompleteFn: %v", err)
+	}
+
+	b.mu.Lock()
+	slugs := make([]string, 0, len(b.members))
+	for _, m := range b.members {
+		slugs = append(slugs, m.Slug)
+	}
+	b.mu.Unlock()
+
+	want := []string{"ceo", "founding-engineer"}
+	if len(slugs) != len(want) {
+		t.Fatalf("from-scratch selected roster got %v, want %v", slugs, want)
+	}
+	for i, slug := range want {
+		if slugs[i] != slug {
+			t.Fatalf("member[%d]: got %q, want %q (all: %v)", i, slugs[i], slug, slugs)
+		}
+	}
+}
+
+func TestBlankSlateMembersStaleScratchSelectionDoesNotCollapseToOperator(t *testing.T) {
+	blueprint := operations.SynthesizeBlueprint(operations.SynthesisInput{})
+
+	members := blankSlateOfficeMembersFromBlueprint(blueprint, []string{
+		"ceo",
+		"gtm-lead",
+		"founding-engineer",
+		"pm",
+		"designer",
+	})
+
+	slugs := make([]string, 0, len(members))
+	for _, member := range members {
+		slugs = append(slugs, member.Slug)
+	}
+	if len(slugs) <= 1 {
+		t.Fatalf("stale scratch selection collapsed to lead-only roster: %v", slugs)
+	}
+	for _, want := range []string{"operator", "planner", "executor", "reviewer"} {
+		found := false
+		for _, got := range slugs {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected stale scratch selection to keep full synthesized roster; missing %q in %v", want, slugs)
+		}
+	}
+}
+
+func TestBlankSlateMembersExplicitLeadOnlySelectionStaysLeadOnly(t *testing.T) {
+	blueprint := operations.SynthesizeBlueprint(operations.SynthesisInput{})
+
+	members := blankSlateOfficeMembersFromBlueprint(blueprint, []string{"operator"})
+
+	if len(members) != 1 || members[0].Slug != "operator" {
+		t.Fatalf("explicit lead-only selection got %+v, want only operator", members)
+	}
+}
+
 // TestOnboardingCompleteSkipTaskSeedsNoKickoff verifies that skip_task=true
 // seeds the team but does not post an onboarding_origin message.
 func TestOnboardingCompleteSkipTaskSeedsNoKickoff(t *testing.T) {
@@ -260,7 +329,7 @@ func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
 	}
 
 	// Fresh broker instance re-reads state from disk.
-	reloaded := NewBroker()
+	reloaded := reloadedBroker(t)
 	reloaded.mu.Lock()
 	slugs := make([]string, 0, len(reloaded.members))
 	for _, m := range reloaded.members {

@@ -1,0 +1,60 @@
+name: commitlint
+# Validates that every commit on a PR matches the conventional-commits
+# format defined in .commitlintrc.json. Mirrors the lefthook commit-msg
+# hook (lefthook.yml :: commitlint) so commits that bypass the local hook
+# (e.g. via the GitHub UI or --no-verify) are still caught at PR time.
+#
+# This is the only mandatory workflow from the org policy that wuphf was
+# missing pre-#283 (per nex-crm/.github :: org-rulesets/required-workflows).
+# Public-repo convention is to inline rather than delegate, matching
+# secret-scan.yml in this repo.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: commitlint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
+        with:
+          # Need history back to the merge base so commitlint can lint
+          # every commit on the PR, not just the head.
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # ratchet:oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: "1.3.10"
+
+      - name: Install commitlint
+        run: bun install --frozen-lockfile
+
+      - name: Lint commits
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            from="origin/${{ github.base_ref }}"
+            to="HEAD"
+          else
+            # push to main: lint just the new commits in this push.
+            from="${{ github.event.before }}"
+            to="${{ github.sha }}"
+            # Initial branch push has before=000…0; in that case lint
+            # only the head commit so we don't trip on pre-policy history.
+            if [ "$from" = "0000000000000000000000000000000000000000" ]; then
+              from="$(git rev-parse HEAD~1 2>/dev/null || echo HEAD)"
+            fi
+          fi
+          echo "linting $from..$to"
+          bunx --bun commitlint --from "$from" --to "$to" --verbose

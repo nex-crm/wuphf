@@ -21,7 +21,7 @@
 <meta name="twitter:description" content="A collaborative office of AI employees that execute your playbooks, and get better at it everyday.">
 <meta name="twitter:image" content="https://wuphf.team/og-image.png">
 <meta name="twitter:image:alt" content="WUPHF logo">
-<meta name="theme-color" content="#1A1610">
+<meta name="theme-color" content="#1b0d2a">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
@@ -31,14 +31,16 @@
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
   :root {
-    --bg: #1A1610;
-    --bg2: #201C14;
-    --bg3: #2A2418;
-    --yellow: #ECB22E;
-    --yellow-dark: #C49020;
-    --yellow-dim: rgba(236,178,46,0.12);
-    --text: #F0E6CC;
-    --text-dim: #A89870;
+    /* Palette sourced from Figma: Brand/Tertiary (purple) */
+    --bg: #1b0d2a;
+    --bg2: #24123a;
+    --bg3: #2e1647;
+    --yellow: #cf72d9;       /* Tertiary/300 — primary accent */
+    --yellow-dark: #9f4dbf;  /* Tertiary/400 — accent shadow */
+    --yellow-dim: rgba(207,114,217,0.12);
+    --accent-lime: #D4DB18;  /* accent pop against the purple palette */
+    --text: #ffebfc;         /* Tertiary/100 */
+    --text-dim: #a580c0;
     --font-display: 'Press Start 2P', monospace;
     --font-vt: 'VT323', monospace;
     --font-mono: 'DM Mono', monospace;
@@ -137,7 +139,7 @@
     content: '';
     position: absolute; inset: 0;
     background:
-      radial-gradient(ellipse 700px 400px at 50% 48%, rgba(236,178,46,0.07) 0%, transparent 70%),
+      radial-gradient(ellipse 700px 400px at 50% 48%, rgba(207,114,217,0.07) 0%, transparent 70%),
       repeating-linear-gradient(
         0deg,
         transparent,
@@ -201,7 +203,7 @@
   }
   .blink {
     width: 8px; height: 12px;
-    background: var(--yellow);
+    background: var(--accent-lime);
     display: inline-block;
     animation: blink-cursor 1s steps(1, end) infinite;
   }
@@ -316,7 +318,7 @@
   .install-prompt {
     font-family: var(--font-mono);
     font-size: 14px;
-    color: var(--yellow);
+    color: var(--accent-lime);
     flex-shrink: 0;
   }
   .install-cmd {
@@ -333,7 +335,7 @@
     flex-shrink: 0;
     letter-spacing: 0.08em;
   }
-  .install-copy.copied { color: var(--yellow); }
+  .install-copy.copied { color: var(--accent-lime); }
 
   .install-note {
     font-family: var(--font-mono);
@@ -392,7 +394,11 @@
     transform: rotate(45deg);
     animation: arrow-bounce 0.8s steps(1, end) infinite;
   }
-  .scroll-arrow:nth-child(2) { animation-delay: 0.2s; margin-top: -8px; opacity: 0.5; }
+  .scroll-arrow:nth-child(2) {
+    animation-delay: 0.2s; margin-top: -8px; opacity: 0.5;
+    border-right-color: var(--accent-lime);
+    border-bottom-color: var(--accent-lime);
+  }
   @keyframes arrow-bounce {
     0%, 50% { opacity: 1; }
     51%, 100% { opacity: 0.2; }
@@ -475,6 +481,12 @@
     height: 2px;
     background: var(--yellow-dark);
   }
+  .section-eyebrow::before {
+    content: '';
+    width: 8px; height: 8px;
+    background: var(--accent-lime);
+    flex-shrink: 0;
+  }
 
   .section-title {
     font-family: var(--font-display);
@@ -510,7 +522,7 @@
   .step-num {
     font-family: var(--font-display);
     font-size: 9px;
-    color: var(--yellow);
+    color: var(--accent-lime);
     margin-bottom: 16px;
     letter-spacing: 0.1em;
   }
@@ -634,9 +646,9 @@
   }
 
   .tok-kw { color: var(--yellow); }
-  .tok-str { color: #98C379; }
+  .tok-str { color: var(--accent-lime); }
   .tok-cmt { color: var(--text-dim); font-style: italic; }
-  .tok-fn { color: #61AFEF; }
+  .tok-fn { color: #ffb3e6; }
 
   /* ── THREAD DEMO ──────────────────────────────────── */
   .thread-demo {
@@ -719,7 +731,7 @@
 
   .thread-mention {
     color: var(--yellow);
-    background: rgba(236,178,46,0.12);
+    background: var(--yellow-dim);
     padding: 0 3px;
     font-family: var(--font-display);
     font-size: 0.7em;
@@ -969,7 +981,7 @@
     position: absolute;
     left: 0;
     top: 0;
-    color: var(--yellow);
+    color: var(--accent-lime);
     font-family: var(--font-display);
     font-size: 12px;
     line-height: 1.6;
@@ -1160,7 +1172,7 @@
   <p class="video-prompt">Watch the demo ↓</p>
   <div class="video-wrap">
     <video
-      src="https://github.com/user-attachments/assets/d62766ba-ebb3-4948-bc02-770ebcc51d5a"
+      src="wuphf-demo-v28.mp4"
       controls
       preload="metadata"
     ></video>
@@ -1577,7 +1589,7 @@
 
   // ── SPRITE CANVASES ───────────────────────────────────────────────────
   var bodyColors = ['#2D4A7A', '#4A7A2D', '#7A2D4A'];
-  var accentColors = ['#ECB22E', '#7EC8C8', '#E07E6E'];
+  var accentColors = ['#cf72d9', '#ffb3e6', '#9f4dbf'];
 
   function drawSprite(canvasId, colorBody, colorAccent, frame) {
     var canvas = document.getElementById(canvasId);
@@ -1660,24 +1672,25 @@
     }
 
     var TILE_COLORS = {
-      0: { top: '#252018', left: '#1C1A12', right: '#201C14' },
-      1: { top: '#1E1C2A', left: '#181627', right: '#1C1A2C' },
-      2: { top: '#1A1E28', left: '#141820', right: '#181C24' },
-      3: { top: '#221E14', left: '#181610', right: '#1E1A12' },
-      4: { top: '#1E1A14', left: '#1A1812', right: '#1C1814' }
+      0: { top: '#4a2d6e', left: '#372053', right: '#3f2660' },
+      1: { top: '#57347f', left: '#41286a', right: '#4c2e75' },
+      2: { top: '#432968', left: '#321e4f', right: '#38235a' },
+      3: { top: '#4e3074', left: '#3a2258', right: '#422865' },
+      4: { top: '#402561', left: '#2f1b47', right: '#362052' }
     };
 
     // ── RESIZE ──────────────────────────────────────────
     function resize() {
-      W = canvas.offsetWidth || window.innerWidth;
+      // Read parent width so CSS `width: 100%` keeps flexing responsively;
+      // setting canvas.style.width would lock it at the first measured size.
+      W = (canvas.parentElement && canvas.parentElement.clientWidth) || canvas.offsetWidth || window.innerWidth;
       DPR = window.devicePixelRatio || 1;
       canvas.width = Math.round(W * DPR);
       canvas.height = Math.round(CANVAS_H * DPR);
-      canvas.style.width = W + 'px';
       canvas.style.height = CANVAS_H + 'px';
       TW = Math.max(44, Math.min(68, Math.round(W / 13)));
       TH = Math.round(TW / 2);
-      OX = Math.round(W * 0.52);
+      OX = Math.round(W / 2 - TW);
       OY = 70;
     }
 
@@ -1817,21 +1830,21 @@
         hair:'#1A1610', skin:'#D4B896', shirt:'#2D4A7A', pants:'#1A2A4A',
         faceRight:true, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:5000, arriveState:'IDLE_DESK', arriveWait:5000,
-        destX:8.0, destY:4.0, isAgent:true, agentColor:'#ECB22E', label:'CEO',
+        destX:8.0, destY:4.0, isAgent:true, agentColor:'#cf72d9', label:'CEO', /* unified agent-badge color */
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 },
       { id:'eng',    name:'ENG',    x:10.0, y:3.0, homeX:10.0, homeY:3.0,
         hair:'#2A1A40', skin:'#C4A882', shirt:'#4A2D7A', pants:'#2A1A4A',
         faceRight:false, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:7000, arriveState:'IDLE_DESK', arriveWait:7000,
-        destX:10.0, destY:3.0, isAgent:true, agentColor:'#7EC8C8', label:'ENG',
+        destX:10.0, destY:3.0, isAgent:true, agentColor:'#cf72d9', label:'ENG',
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 },
       { id:'cmo',    name:'CMO',    x:3.0, y:5.0, homeX:3.0, homeY:5.0,
         hair:'#4A2010', skin:'#D4A870', shirt:'#7A4A2D', pants:'#3A2010',
         faceRight:true, walkFrame:0, animTimer:0,
         state:'IDLE_DESK', stateTimer:5500, arriveState:'IDLE_DESK', arriveWait:5500,
-        destX:3.0, destY:5.0, isAgent:true, agentColor:'#E07E6E', label:'CMO',
+        destX:3.0, destY:5.0, isAgent:true, agentColor:'#cf72d9', label:'CMO',
         chatPartner:null, chatStep:0, chatTimer:0, chatConvo:null,
         patrolStep:0, patrolTimer:0, bubbleTimer: 8000 + Math.random()*8000 }
     ];
@@ -1954,6 +1967,25 @@
       if (Math.abs(dx) > 0.05) ch.faceRight = dx > 0;
     }
 
+    // Solid obstacles characters should walk around (bullpen desks left walkable — agents sit at them)
+    var OBSTACLES = [
+      [0.6, 0.7, 1.8, 0.8],   // conference table
+      [9.8, 0.6, 1.2, 0.7],   // Michael's desk
+      [4.8, 5.2, 1.0, 0.6],   // reception desk
+      [5.8, 5.0, 0.8, 0.6],   // reception desk
+      [7.3, 6.3, 0.3, 0.3],   // water cooler
+      [0.05, 4.2, 0.08, 0.8]  // whiteboard
+    ];
+    var OBSTACLE_PAD = 0.18;
+    function blocked(x, y) {
+      for (var i = 0; i < OBSTACLES.length; i++) {
+        var o = OBSTACLES[i];
+        if (x > o[0] - OBSTACLE_PAD && x < o[0] + o[2] + OBSTACLE_PAD &&
+            y > o[1] - OBSTACLE_PAD && y < o[1] + o[3] + OBSTACLE_PAD) return true;
+      }
+      return false;
+    }
+
     function walkTowards(ch, tx, ty, dt) {
       var dx = tx - ch.x;
       var dy = ty - ch.y;
@@ -1965,8 +1997,26 @@
       }
       var nx = dx / dist;
       var ny = dy / dist;
-      ch.x += nx * speed * (dt / 16);
-      ch.y += ny * speed * (dt / 16);
+      var stepX = nx * speed * (dt / 16);
+      var stepY = ny * speed * (dt / 16);
+      var nextX = ch.x + stepX;
+      var nextY = ch.y + stepY;
+      // Slide against obstacles: try full move, then axis-only fallbacks.
+      // Destination is always allowed (characters sit AT desks).
+      var destBlocked = blocked(tx, ty);
+      if (!blocked(nextX, nextY) || destBlocked) {
+        ch.x = nextX; ch.y = nextY;
+      } else if (!blocked(nextX, ch.y)) {
+        ch.x = nextX;
+      } else if (!blocked(ch.x, nextY)) {
+        ch.y = nextY;
+      } else {
+        // corner-trapped: nudge perpendicular to primary motion to escape
+        var perpX = -ny, perpY = nx;
+        var nudgeX = ch.x + perpX * speed * (dt / 16);
+        var nudgeY = ch.y + perpY * speed * (dt / 16);
+        if (!blocked(nudgeX, nudgeY)) { ch.x = nudgeX; ch.y = nudgeY; }
+      }
       if (Math.abs(dx) > 0.05) ch.faceRight = dx > 0;
       ch.animTimer += dt;
       if (ch.animTimer > 180) {
@@ -2142,12 +2192,7 @@
       // head bob only when walking
       var bob = (!sitting && (frame === 1 || frame === 3)) ? 1 : 0;
 
-      // agent glow
-      if (ch.isAgent) {
-        ctx.globalAlpha = 0.18; ctx.fillStyle = ch.agentColor;
-        ctx.fillRect(ox - 4, oy, 12 * S + 8, 20 * S);
-        ctx.globalAlpha = 1.0;
-      }
+      // (agent backplate removed — label above character carries identity)
 
       var sk = ch.skin, hr = ch.hair, sh = ch.shirt, pt = ch.pants;
       var shoe = '#2A2010', eye = '#1A0E08', mth = shadeHex(sk, -30);
@@ -2256,23 +2301,23 @@
 
       ctx.restore();
 
-      // ── NAME LABEL ──
+      // ── NAME / ROLE LABEL ──
       ctx.save();
       ctx.textAlign = 'center';
       var nameY = oy - 7;
-      ctx.fillStyle = 'rgba(240,230,204,0.88)';
-      ctx.font = '12px "VT323", monospace';
-      ctx.fillText(ch.name, cx, nameY);
-
-      // agent role badge
       if (ch.isAgent && ch.label) {
+        // agents get only the role badge (name === label would duplicate)
         var badgeW = 30, badgeH = 11;
-        var badgeY = nameY - badgeH - 5;
+        var badgeY = nameY - badgeH + 4;
         ctx.fillStyle = ch.agentColor;
         ctx.fillRect(cx - badgeW / 2, badgeY, badgeW, badgeH);
-        ctx.fillStyle = '#1A1610';
+        ctx.fillStyle = '#1b0d2a';
         ctx.font = '6px "Press Start 2P", monospace';
         ctx.fillText(ch.label, cx, badgeY + badgeH - 2);
+      } else {
+        ctx.fillStyle = 'rgba(255,235,252,0.88)';
+        ctx.font = '6px "Press Start 2P", monospace';
+        ctx.fillText(ch.name, cx, nameY);
       }
       ctx.restore();
     }
@@ -2300,26 +2345,26 @@
       var bx3 = pos.x - bw / 2;
       var by3 = headTop - bh - 10;
 
-      ctx.fillStyle = '#F0E6CC';
+      ctx.fillStyle = '#ffebfc';
       ctx.fillRect(bx3, by3, bw, bh);
-      ctx.fillStyle = '#3A3020';
-      ctx.strokeStyle = '#3A3020';
+      ctx.fillStyle = '#612a92';
+      ctx.strokeStyle = '#612a92';
       ctx.lineWidth = 2;
       ctx.strokeRect(bx3, by3, bw, bh);
 
       // tail
-      ctx.fillStyle = '#F0E6CC';
+      ctx.fillStyle = '#ffebfc';
       ctx.beginPath();
       ctx.moveTo(pos.x - 4, by3 + bh);
       ctx.lineTo(pos.x + 4, by3 + bh);
       ctx.lineTo(pos.x, by3 + bh + 8);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = '#3A3020';
+      ctx.strokeStyle = '#612a92';
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      ctx.fillStyle = '#1A1610';
+      ctx.fillStyle = '#1b0d2a';
       ctx.textAlign = 'center';
       ctx.fillText(b.text, pos.x, by3 + bh - 7);
 
@@ -2333,7 +2378,7 @@
       var wallH = 48;
 
       // ── BACK WALLS ──────────────────────────────────
-      ctx.fillStyle = '#1A1810';
+      ctx.fillStyle = '#2a1445';
       for (var gx2 = 0; gx2 < 12; gx2++) {
         var p0 = iso(gx2, 0);
         var p1 = iso(gx2 + 1, 0);
@@ -2345,7 +2390,7 @@
         ctx.closePath();
         ctx.fill();
       }
-      ctx.fillStyle = '#171510';
+      ctx.fillStyle = '#20103a';
       for (var gy2 = 0; gy2 < 8; gy2++) {
         var lp0 = iso(0, gy2);
         var lp1 = iso(0, gy2 + 1);
@@ -2403,9 +2448,9 @@
       // ── MICHAEL'S OFFICE WALL AWARDS ─────────────────
       // Plaques on the interior face of the gx=9 glass wall
       var awards = [
-        { gy: 0.55, lines: ['DUNDIE', 'AWARD'], color: '#ECB22E' },
-        { gy: 1.55, lines: ["WORLD'S", 'BEST BOSS'], color: '#F0D060' },
-        { gy: 2.45, lines: ['MIT', 'LICENSE'], color: '#7EC8C8' }
+        { gy: 0.55, lines: ['DUNDIE', 'AWARD'], color: '#cf72d9' },
+        { gy: 1.55, lines: ["WORLD'S", 'BEST BOSS'], color: '#cf72d9' },
+        { gy: 2.45, lines: ['MIT', 'LICENSE'], color: '#cf72d9' }
       ];
       ctx.save();
       ctx.font = '5px "Press Start 2P", monospace';
@@ -2415,7 +2460,7 @@
         var aw = 30, ah = 18;
         var ax = ap.x - aw / 2;
         var ay = ap.y - wallH + 8;
-        ctx.fillStyle = '#1E1C14';
+        ctx.fillStyle = '#1b0d2a';
         ctx.fillRect(ax, ay, aw, ah);
         ctx.strokeStyle = a.color;
         ctx.lineWidth = 1.5;
@@ -2429,45 +2474,45 @@
       // ── FURNITURE ────────────────────────────────────
 
       // Conference table
-      drawBox(ctx, 0.6, 0.7, 1.8, 0.8, 12, '#3A2C1C', '#2A1E10', '#2A1E10');
+      drawBox(ctx, 0.6, 0.7, 1.8, 0.8, 12, '#5c3c82', '#432a62', '#432a62');
       // Conf chairs
-      drawBox(ctx, 0.5, 0.5, 0.4, 0.4, 8, '#4A3A28', '#3A2A18', '#3A2A18');
-      drawBox(ctx, 2.1, 0.5, 0.4, 0.4, 8, '#4A3A28', '#3A2A18', '#3A2A18');
-      drawBox(ctx, 0.5, 1.4, 0.4, 0.4, 8, '#4A3A28', '#3A2A18', '#3A2A18');
-      drawBox(ctx, 2.1, 1.4, 0.4, 0.4, 8, '#4A3A28', '#3A2A18', '#3A2A18');
+      drawBox(ctx, 0.5, 0.5, 0.4, 0.4, 8, '#6a4a90', '#523470', '#523470');
+      drawBox(ctx, 2.1, 0.5, 0.4, 0.4, 8, '#6a4a90', '#523470', '#523470');
+      drawBox(ctx, 0.5, 1.4, 0.4, 0.4, 8, '#6a4a90', '#523470', '#523470');
+      drawBox(ctx, 2.1, 1.4, 0.4, 0.4, 8, '#6a4a90', '#523470', '#523470');
 
       // Bullpen desks
       var desks = [[3,2.8],[5,2.8],[3,4.3],[5,4.3],[8,2.8],[10,2.8]];
       desks.forEach(function(d) {
-        drawBox(ctx, d[0], d[1], 0.9, 0.6, 10, '#4A3C28', '#3A2C18', '#3A2C18');
+        drawBox(ctx, d[0], d[1], 0.9, 0.6, 10, '#634692', '#4c3472', '#4c3472');
         // monitor
         var mp = iso(d[0] + 0.35, d[1] + 0.1);
-        ctx.fillStyle = '#1A1610';
+        ctx.fillStyle = '#1b0d2a';
         ctx.fillRect(mp.x - 9, mp.y - 26, 18, 16);
-        ctx.fillStyle = 'rgba(236,178,46,0.28)';
+        ctx.fillStyle = 'rgba(207,114,217,0.28)';
         ctx.fillRect(mp.x - 7, mp.y - 24, 14, 12);
       });
 
       // Michael's fancy desk
-      drawBox(ctx, 9.8, 0.6, 1.2, 0.7, 12, '#5A4A34', '#4A3A24', '#4A3A24');
+      drawBox(ctx, 9.8, 0.6, 1.2, 0.7, 12, '#7a55a6', '#5c3e80', '#5c3e80');
 
       // Reception desk
-      drawBox(ctx, 4.8, 5.2, 1.0, 0.6, 12, '#3A3028', '#2A2018', '#2A2018');
-      drawBox(ctx, 5.8, 5.0, 0.8, 0.6, 12, '#3A3028', '#2A2018', '#2A2018');
+      drawBox(ctx, 4.8, 5.2, 1.0, 0.6, 12, '#4f3770', '#3a2454', '#3a2454');
+      drawBox(ctx, 5.8, 5.0, 0.8, 0.6, 12, '#4f3770', '#3a2454', '#3a2454');
 
       // Whiteboard
-      drawBox(ctx, 0.05, 4.2, 0.08, 0.8, 20, '#F0E8D0', '#D0C8B0', '#D0C8B0');
+      drawBox(ctx, 0.05, 4.2, 0.08, 0.8, 20, '#ffebfc', '#cf72d9', '#9f4dbf');
       var wb = iso(0.1, 4.5);
-      ctx.fillStyle = '#4A7ABA';
+      ctx.fillStyle = '#D4DB18';
       ctx.fillRect(wb.x, wb.y - 30, 3, 2);
       ctx.fillRect(wb.x + 1, wb.y - 26, 2, 2);
-      ctx.fillStyle = '#4ABA6A';
+      ctx.fillStyle = '#cf72d9';
       ctx.fillRect(wb.x + 2, wb.y - 22, 4, 2);
 
       // Water cooler
-      drawBox(ctx, 7.3, 6.3, 0.3, 0.3, 16, '#4A7A9B', '#3A6A8B', '#3A6A8B');
+      drawBox(ctx, 7.3, 6.3, 0.3, 0.3, 16, '#7a55a6', '#5c3e80', '#5c3e80');
       var wcTop = iso(7.45, 6.45);
-      ctx.fillStyle = '#7ABADB';
+      ctx.fillStyle = '#cf72d9';
       ctx.fillRect(wcTop.x - 3, wcTop.y - 20, 6, 6);
 
       // ── ROOM LABELS ──────────────────────────────────
@@ -2476,17 +2521,16 @@
       ctx.textAlign = 'center';
 
       var confLabel = iso(1.5, 2.6);
-      ctx.fillStyle = 'rgba(236,178,46,0.7)';
+      ctx.fillStyle = 'rgba(207,114,217,0.75)';
       ctx.fillText('CONF ROOM', confLabel.x, confLabel.y);
 
       var mLabel = iso(10.5, 2.6);
-      ctx.fillStyle = 'rgba(236,178,46,0.7)';
+      ctx.fillStyle = 'rgba(207,114,217,0.75)';
       ctx.fillText("MICHAEL'S", mLabel.x, mLabel.y);
       ctx.fillText('OFFICE', mLabel.x, mLabel.y + 10);
 
       var recLabel = iso(5.5, 6.4);
-      ctx.fillStyle = 'rgba(168,152,112,0.5)';
-      ctx.font = '5px "Press Start 2P", monospace';
+      ctx.fillStyle = 'rgba(207,114,217,0.75)';
       ctx.fillText('RECEPTION', recLabel.x, recLabel.y);
 
       ctx.restore();

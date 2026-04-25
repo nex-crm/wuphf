@@ -1,85 +1,92 @@
-import { useQuery } from '@tanstack/react-query'
-import type { ComponentType } from 'react'
-import { useOverflow } from '../../hooks/useOverflow'
+import type { ComponentType } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  Play,
+  BookStack,
+  Calendar,
   CheckCircle,
   ClipboardCheck,
-  Shield,
-  Calendar,
   Flash,
   Package,
   Page,
+  Play,
   Search,
   Settings,
-  BookStack,
-} from 'iconoir-react'
-import { SIDEBAR_APPS } from '../../lib/constants'
-import { useAppStore } from '../../stores/app'
-import { getRequests } from '../../api/client'
-import { fetchReviews } from '../../api/notebook'
+  ShareAndroid,
+  Shield,
+} from "iconoir-react";
+
+import { getRequests } from "../../api/client";
+import { fetchReviews } from "../../api/notebook";
+import { useOverflow } from "../../hooks/useOverflow";
+import { SIDEBAR_APPS } from "../../lib/constants";
+import { useAppStore } from "../../stores/app";
 
 // Notebooks and reviews render inside the Wiki app shell via tabs, so the
 // 'Wiki' sidebar entry lights up for any of those three currentApp values.
-const WIKI_SURFACE_APPS = new Set(['wiki', 'notebooks', 'reviews'])
+const WIKI_SURFACE_APPS = new Set(["wiki", "notebooks", "reviews"]);
 
 const APP_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   studio: Play,
   wiki: BookStack,
   tasks: CheckCircle,
   requests: ClipboardCheck,
+  graph: ShareAndroid,
   policies: Shield,
   calendar: Calendar,
   skills: Flash,
   activity: Package,
   receipts: Page,
-  'health-check': Search,
+  "health-check": Search,
   settings: Settings,
-}
+};
 
 export function AppList() {
-  const currentApp = useAppStore((s) => s.currentApp)
-  const setCurrentApp = useAppStore((s) => s.setCurrentApp)
-  const currentChannel = useAppStore((s) => s.currentChannel)
+  const currentApp = useAppStore((s) => s.currentApp);
+  const setCurrentApp = useAppStore((s) => s.setCurrentApp);
+  const currentChannel = useAppStore((s) => s.currentChannel);
 
   const { data: requestsData } = useQuery({
-    queryKey: ['requests-badge', currentChannel],
+    queryKey: ["requests-badge", currentChannel],
     queryFn: () => getRequests(currentChannel),
     refetchInterval: 5_000,
-  })
+  });
 
   const { data: reviewsData } = useQuery({
-    queryKey: ['reviews-badge'],
+    queryKey: ["reviews-badge"],
     queryFn: fetchReviews,
     refetchInterval: 15_000,
-  })
+  });
 
   const pendingCount = (requestsData?.requests ?? []).filter(
-    (r) => !r.status || r.status === 'open' || r.status === 'pending',
-  ).length
+    (r) => !r.status || r.status === "open" || r.status === "pending",
+  ).length;
 
   const pendingReviewsCount = (reviewsData ?? []).filter(
-    (r) => r.state === 'pending' || r.state === 'in-review' || r.state === 'changes-requested',
-  ).length
+    (r) =>
+      r.state === "pending" ||
+      r.state === "in-review" ||
+      r.state === "changes-requested",
+  ).length;
 
-  const overflowRef = useOverflow<HTMLDivElement>()
+  const overflowRef = useOverflow<HTMLDivElement>();
 
   return (
     <div className="sidebar-scroll-wrap is-apps">
       <div className="sidebar-apps" ref={overflowRef}>
-        {SIDEBAR_APPS.filter((app) => app.id !== 'settings').map((app) => {
-          let badge: number | null = null
-          if (app.id === 'requests' && pendingCount > 0) badge = pendingCount
-          if (app.id === 'wiki' && pendingReviewsCount > 0) badge = pendingReviewsCount
-          const Icon = APP_ICONS[app.id]
+        {SIDEBAR_APPS.filter((app) => app.id !== "settings").map((app) => {
+          let badge: number | null = null;
+          if (app.id === "requests" && pendingCount > 0) badge = pendingCount;
+          if (app.id === "wiki" && pendingReviewsCount > 0)
+            badge = pendingReviewsCount;
+          const Icon = APP_ICONS[app.id];
           const isActive =
-            app.id === 'wiki'
-              ? WIKI_SURFACE_APPS.has(currentApp ?? '')
-              : currentApp === app.id
+            app.id === "wiki"
+              ? WIKI_SURFACE_APPS.has(currentApp ?? "")
+              : currentApp === app.id;
           return (
             <button
               key={app.id}
-              className={`sidebar-item${isActive ? ' active' : ''}`}
+              className={`sidebar-item${isActive ? " active" : ""}`}
               onClick={() => setCurrentApp(app.id)}
             >
               {Icon ? (
@@ -94,9 +101,9 @@ export function AppList() {
                 </span>
               )}
             </button>
-          )
+          );
         })}
       </div>
     </div>
-  )
+  );
 }

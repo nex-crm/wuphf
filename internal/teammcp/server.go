@@ -14,6 +14,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/brokeraddr"
 	"github.com/nex-crm/wuphf/internal/team"
 )
@@ -360,7 +361,7 @@ type TeamMemberArgs struct {
 	// install-wide default runtime. Set Provider to pick a specific runtime and
 	// (optionally) model for this agent: one team can mix Claude, Codex, and
 	// OpenClaw agents, each on its own provider.
-	Provider           string `json:"provider,omitempty" jsonschema:"LLM runtime for this agent. One of: claude-code, codex, openclaw. Empty = install default."`
+	Provider           string `json:"provider,omitempty" jsonschema:"LLM runtime for this agent. One of: claude-code, codex, opencode, openclaw. Empty = install default."`
 	Model              string `json:"model,omitempty" jsonschema:"Model name passed to the runtime (e.g. claude-sonnet-4.6, gpt-5.4, openai-codex/gpt-5.4). Free-form; runtime validates."`
 	OpenclawSessionKey string `json:"openclaw_session_key,omitempty" jsonschema:"Optional: attach to an existing OpenClaw session key (e.g. after WUPHF reinstall). Leave empty to auto-create a new session."`
 	OpenclawAgentID    string `json:"openclaw_agent_id,omitempty" jsonschema:"Optional: OpenClaw agent config name (defaults to 'main')."`
@@ -423,6 +424,12 @@ type TeamWikiSearchArgs struct {
 // TeamWikiListArgs is intentionally empty — team_wiki_list takes no args.
 type TeamWikiListArgs struct{}
 
+// TeamWikiLookupArgs is the contract for wuphf_wiki_lookup.
+type TeamWikiLookupArgs struct {
+	Query string `json:"query" jsonschema:"Natural-language question to answer from the team wiki"`
+	TopK  int    `json:"top_k,omitempty" jsonschema:"Max sources to retrieve (default 20)"`
+}
+
 type TeamTaskAckArgs struct {
 	ID      string `json:"id" jsonschema:"Task ID to acknowledge"`
 	Channel string `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
@@ -439,8 +446,87 @@ func Run(ctx context.Context) error {
 		Version: "0.1.0",
 	}, nil)
 
+	server.AddReceivingMiddleware(agentToolEventMiddleware)
 	configureServerTools(server, resolveSlugOptional(""), strings.TrimSpace(os.Getenv("WUPHF_CHANNEL")), isOneOnOneMode())
 	return server.Run(ctx, &mcp.StdioTransport{})
+}
+
+// agentToolEventMiddleware wraps every incoming MCP method so tools/call
+// invocations are teed to the broker's per-agent stream. This gives the web
+// UI an audit trail of what tool each agent called, with arguments and
+// either the result summary or an error — visibility the raw pane capture
+// can't provide for agents that do their work through MCP calls.
+func agentToolEventMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		if method != "tools/call" {
+			return next(ctx, method, req)
+		}
+		toolName, argsJSON := extractToolCallRequest(req)
+		if toolName != "" {
+			postAgentToolEvent(ctx, resolveSlugOptional(""), "call", toolName, argsJSON, "", "")
+		}
+		result, err := next(ctx, method, req)
+		if toolName != "" {
+			phase := "result"
+			errStr := ""
+			if err != nil {
+				phase = "error"
+				errStr = err.Error()
+			}
+			postAgentToolEvent(ctx, resolveSlugOptional(""), phase, toolName, "", summarizeToolResult(result), errStr)
+		}
+		return result, err
+	}
+}
+
+func extractToolCallRequest(req mcp.Request) (tool, args string) {
+	if req == nil {
+		return "", ""
+	}
+	sr, ok := req.(*mcp.ServerRequest[*mcp.CallToolParamsRaw])
+	if !ok || sr == nil || sr.Params == nil {
+		return "", ""
+	}
+	tool = sr.Params.Name
+	if len(sr.Params.Arguments) > 0 {
+		args = string(sr.Params.Arguments)
+	}
+	return tool, args
+}
+
+func summarizeToolResult(res mcp.Result) string {
+	r, ok := res.(*mcp.CallToolResult)
+	if !ok || r == nil {
+		return ""
+	}
+	for _, c := range r.Content {
+		if tc, ok := c.(*mcp.TextContent); ok && tc != nil {
+			return tc.Text
+		}
+	}
+	return ""
+}
+
+func postAgentToolEvent(ctx context.Context, slug, phase, tool, args, result, errStr string) {
+	slug = strings.TrimSpace(slug)
+	if slug == "" || tool == "" {
+		return
+	}
+	body := map[string]string{
+		"slug":   slug,
+		"phase":  phase,
+		"tool":   tool,
+		"args":   args,
+		"result": result,
+		"error":  errStr,
+	}
+	// Fire-and-forget; dropping a log line must never fail a tool call.
+	go func() {
+		// Ignore errors — the broker might be restarting or unreachable,
+		// and an audit-log failure is not worth surfacing to the agent.
+		_ = brokerPostJSON(context.Background(), "/agent-tool-event", body, nil)
+	}()
+	_ = ctx
 }
 
 // registerSharedMemoryTools registers the active shared-memory / wiki tool
@@ -452,7 +538,7 @@ func registerSharedMemoryTools(server *mcp.Server) {
 	case "markdown":
 		mcp.AddTool(server, officeWriteTool(
 			"team_wiki_write",
-			"Write a markdown article to the team wiki git repo. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article. Images are supported via standard markdown: embed a remote URL with `![alt text](https://example.com/diagram.png)` and the wiki renderer will show it inline. Use images you found on the web while researching the article; do not upload bytes — only reference URLs.",
+			"Write directly to the canonical team wiki git repo. Use this for already-approved canonical edits, bootstrap/admin updates, or explicit human requests. For agent-authored working notes, observations, draft playbooks, and proposed new wiki knowledge, write to notebook_write first and submit with notebook_promote so the review gate runs. The content you pass becomes the article bytes; this tool does not rewrite for you. Picks author identity from my_slug so git log shows which agent wrote each article. Images are supported via standard markdown: embed a remote URL with `![alt text](https://example.com/diagram.png)` and the wiki renderer will show it inline. Use images you found on the web while researching the article; do not upload bytes — only reference URLs.",
 		), handleTeamWikiWrite)
 		mcp.AddTool(server, readOnlyTool(
 			"team_wiki_read",
@@ -466,6 +552,10 @@ func registerSharedMemoryTools(server *mcp.Server) {
 			"team_wiki_list",
 			"Return the auto-regenerated catalog (index/all.md) of every article in the team wiki.",
 		), handleTeamWikiList)
+		mcp.AddTool(server, readOnlyTool(
+			"wuphf_wiki_lookup",
+			"Cited-answer lookup against the team wiki. Returns a structured JSON answer with sources and inline citations. Use when you need a verified, sourced answer rather than a raw search.",
+		), handleTeamWikiLookup)
 		// Notebook tools ride on the same markdown backend. Registered here
 		// so they share the WUPHF_MEMORY_BACKEND gate with team_wiki_*.
 		registerNotebookTools(server)
@@ -476,6 +566,16 @@ func registerSharedMemoryTools(server *mcp.Server) {
 		// into invokable skills + record execution outcomes. Same markdown
 		// substrate, so the backend gate is unchanged.
 		registerPlaybookTools(server)
+		// Lint tools (Slice 1 wiki intelligence) — daily health check +
+		// contradiction resolution. Same markdown substrate.
+		mcp.AddTool(server, readOnlyTool(
+			"run_lint",
+			"Run the wiki lint check. Flags contradictions (critical), orphans (warning), stale claims (warning), missing cross-refs (info), and dedup review (info). Returns LintReport JSON with findings and resolve actions.",
+		), handleRunLint)
+		mcp.AddTool(server, officeWriteTool(
+			"resolve_contradiction",
+			"Resolve a contradiction finding from a prior run_lint call. winner must be A (first fact wins), B (second fact wins), or Both (acknowledge both as valid).",
+		), handleResolveContradiction)
 	case "none":
 		// Nothing — user explicitly disabled shared memory.
 	default:
@@ -519,12 +619,16 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 		registerSharedMemoryTools(server)
 
+		registerSkillAuthoringTools(server)
+
 		mcp.AddTool(server, readOnlyTool(
 			"team_runtime_state",
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
 		), handleTeamRuntimeState)
 
-		registerActionTools(server)
+		if hasActionProvider() {
+			registerActionTools(server)
+		}
 		return
 	}
 
@@ -557,7 +661,10 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
-		registerActionTools(server)
+		registerSkillAuthoringTools(server)
+		if hasActionProvider() {
+			registerActionTools(server)
+		}
 		return
 	}
 
@@ -604,26 +711,6 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"Open or find a direct message channel with the human. Use this when the human explicitly asks to DM an agent. Agent-to-agent DMs are not allowed — all inter-agent communication must happen in public channels.",
 	), handleTeamDMOpen)
 
-	mcp.AddTool(server, officeWriteTool(
-		"team_channel",
-		"Create or remove an office channel. When creating a channel, include a clear description of what work belongs there and the initial roster that should be in it. Only do this when the human explicitly wants channel structure.",
-	), handleTeamChannel)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_channel_member",
-		"Add, remove, disable, or enable an agent in a specific office channel.",
-	), handleTeamChannelMember)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_bridge",
-		"CEO-only tool to bridge relevant context from one channel into another and leave a visible cross-channel trail.",
-	), handleTeamBridge)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_member",
-		"Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
-	), handleTeamMember)
-
 	mcp.AddTool(server, readOnlyTool(
 		"team_tasks",
 		"List the current shared tasks and who owns them so the team does not duplicate work.",
@@ -643,11 +730,6 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"team_task",
 		"Create, claim, assign, complete, block, or release a shared task in the office task list.",
 	), handleTeamTask)
-
-	mcp.AddTool(server, officeWriteTool(
-		"team_plan",
-		"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
-	), handleTeamPlan)
 
 	registerSharedMemoryTools(server)
 
@@ -671,78 +753,61 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"Send a direct note to the human.",
 	), handleHumanMessage)
 	mcp.AddTool(server, officeWriteTool(
-		"human_interview",
-		"Ask the human a blocking decision question.",
-	), handleHumanInterview)
-	mcp.AddTool(server, readOnlyTool(
-		"team_tasks",
-		"List shared tasks and ownership.",
-	), handleTeamTasks)
-	mcp.AddTool(server, officeWriteTool(
 		"team_react",
 		"React to a message with an emoji.",
 	), handleTeamReact)
 	mcp.AddTool(server, officeWriteTool(
-		"team_status",
-		"Share a short status update.",
-	), handleTeamStatus)
-	mcp.AddTool(server, officeWriteTool(
 		"team_skill_run",
 		"Invoke a named team skill. When the request matches an available skill (see the skill list in your prompt), call this BEFORE doing the work — do not freelance. Bumps the skill's usage, logs a skill_invocation in the channel so the office sees you followed the playbook, and returns the skill's canonical step-by-step content for you to execute.",
 	), handleTeamSkillRun)
-	registerActionTools(server)
+	registerSkillAuthoringTools(server)
 
-	// Lead-only tools: CEO gets coordination, delegation, and structural tools
+	// Gate external-action tools behind a configured provider. Registering 14
+	// empty action tools inflates the MCP tool schema and pushes the total
+	// registry past Claude Code's deferred-tools threshold, which causes the
+	// model to emit a wasted ToolSearch before every call to a deferred tool.
+	// When no provider is available the tools would just return errors anyway.
+	if hasActionProvider() {
+		registerActionTools(server)
+	}
+
+	// Lead-only tools: structural + coordination tools that specialists should
+	// never invoke. Specialists still see them in the prompt's role-specific
+	// guidance, but the MCP schema omits them, so the model cannot call them
+	// and cannot waste a ToolSearch turn looking them up.
 	if isLead {
 		mcp.AddTool(server, officeWriteTool(
-			"team_task",
-			"Create, assign, complete, or block a task.",
-		), handleTeamTask)
-		mcp.AddTool(server, officeWriteTool(
 			"team_plan",
-			"Create a batch of tasks with dependency ordering.",
+			"Create a batch of tasks in one shot with optional dependency ordering. Use this instead of multiple team_task calls when you know the full plan up front.",
 		), handleTeamPlan)
 		mcp.AddTool(server, officeWriteTool(
 			"team_bridge",
-			"Bridge context from one channel to another.",
+			"CEO-only tool to bridge relevant context from one channel into another and leave a visible cross-channel trail.",
 		), handleTeamBridge)
-		mcp.AddTool(server, readOnlyTool(
-			"team_members",
-			"List channel participants and activity.",
-		), handleTeamMembers)
-		mcp.AddTool(server, readOnlyTool(
-			"team_requests",
-			"List pending human requests.",
-		), handleTeamRequests)
-		mcp.AddTool(server, officeWriteTool(
-			"team_request",
-			"Create a structured request for the human.",
-		), handleTeamRequest)
-		mcp.AddTool(server, readOnlyTool(
-			"team_runtime_state",
-			"Office runtime snapshot: tasks, requests, recovery.",
-		), handleTeamRuntimeState)
-		mcp.AddTool(server, readOnlyTool(
-			"team_office_members",
-			"List the full office roster.",
-		), handleTeamOfficeMembers)
-		mcp.AddTool(server, readOnlyTool(
-			"team_channels",
-			"List office channels and memberships.",
-		), handleTeamChannels)
 		mcp.AddTool(server, officeWriteTool(
 			"team_channel",
-			"Create or remove a channel.",
+			"Create or remove an office channel. When creating a channel, include a clear description of what work belongs there and the initial roster that should be in it. Only do this when the human explicitly wants channel structure.",
 		), handleTeamChannel)
 		mcp.AddTool(server, officeWriteTool(
 			"team_channel_member",
-			"Add or remove an agent from a channel.",
+			"Add, remove, disable, or enable an agent in a specific office channel.",
 		), handleTeamChannelMember)
 		mcp.AddTool(server, officeWriteTool(
 			"team_member",
-			"Create or remove an office member.",
+			"Create or remove an office-wide member. Only create new members when the human explicitly wants to expand the team.",
 		), handleTeamMember)
 	}
+}
+
+// hasActionProvider reports whether any external action provider is configured
+// and usable. Used to gate registerActionTools so agents in offices without a
+// connected provider do not see 14 action tools that would all return errors.
+func hasActionProvider() bool {
+	if externalActionProvider != nil {
+		return true
+	}
+	_, err := team.ResolveActionProviderForCapability(action.CapabilityGuide)
+	return err == nil
 }
 
 func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamBroadcastArgs) (*mcp.CallToolResult, any, error) {
@@ -765,6 +830,22 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 		}
 	}
 
+	// Auto-promote @-mentions in the body into the tagged array. Agents
+	// routinely write "@operator please handle X" without setting tagged,
+	// and the old path posted anyway + printed a warning nobody acted on
+	// (so @operator never woke up). The intent is unambiguous — honor it.
+	// The resulting post still passes through the broker's normal tagged
+	// pipeline, so lastTaggedAt, typing indicator, and notification fanout
+	// all fire correctly.
+	effectiveTagged := args.Tagged
+	var autoTagged []string
+	if !isOneOnOneMode() {
+		autoTagged = detectUntaggedMentions(args.Content, args.Tagged)
+		if len(autoTagged) > 0 {
+			effectiveTagged = append(append([]string{}, args.Tagged...), autoTagged...)
+		}
+	}
+
 	var result struct {
 		ID string `json:"id"`
 	}
@@ -772,7 +853,7 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 		"channel":  channel,
 		"from":     slug,
 		"content":  args.Content,
-		"tagged":   args.Tagged,
+		"tagged":   effectiveTagged,
 		"reply_to": replyTo,
 	}, &result)
 	if err != nil {
@@ -791,18 +872,11 @@ func handleTeamBroadcast(ctx context.Context, _ *mcp.CallToolRequest, args TeamB
 	}
 	text += "."
 
-	// Warn when the message text contains @-mentions but none were passed in
-	// the `tagged` parameter. Text @-mentions are display-only — they do NOT
-	// wake agents. This is the most common CEO mistake: writing "@engineering
-	// please do X" without tagging engineering in the tool call.
-	if len(args.Tagged) == 0 && !isOneOnOneMode() {
-		if untaggedMentions := detectUntaggedMentions(args.Content, args.Tagged); len(untaggedMentions) > 0 {
-			text += fmt.Sprintf(
-				" WARNING: message text mentions %s but `tagged` is empty — those agents will NOT be woken. Re-send with tagged: %s to notify them.",
-				strings.Join(untaggedMentions, ", "),
-				strings.Join(untaggedMentions, ", "),
-			)
-		}
+	if len(autoTagged) > 0 {
+		text += fmt.Sprintf(
+			" Auto-tagged %s from the body so they get woken; pass them explicitly in `tagged` next time to avoid this note.",
+			strings.Join(autoTagged, ", "),
+		)
 	}
 
 	return textResult(text), nil, nil
@@ -1859,6 +1933,26 @@ func handleTeamWikiSearch(ctx context.Context, _ *mcp.CallToolRequest, args Team
 // handleTeamWikiList returns the auto-regenerated catalog at index/all.md.
 func handleTeamWikiList(ctx context.Context, _ *mcp.CallToolRequest, _ TeamWikiListArgs) (*mcp.CallToolResult, any, error) {
 	bytes, err := brokerGetRaw(ctx, "/wiki/list")
+	if err != nil {
+		return toolError(err), nil, nil
+	}
+	return textResult(string(bytes)), nil, nil
+}
+
+// handleTeamWikiLookup answers a natural-language question with a cited
+// response assembled from the team wiki. The broker's /wiki/lookup endpoint
+// runs the full QueryHandler pipeline: classify → search → prompt → parse.
+// Returns the raw QueryAnswer JSON so the calling agent can render citations.
+func handleTeamWikiLookup(ctx context.Context, _ *mcp.CallToolRequest, args TeamWikiLookupArgs) (*mcp.CallToolResult, any, error) {
+	q := strings.TrimSpace(args.Query)
+	if q == "" {
+		return toolError(fmt.Errorf("query is required")), nil, nil
+	}
+	path := "/wiki/lookup?q=" + url.QueryEscape(q)
+	if args.TopK > 0 {
+		path += fmt.Sprintf("&top_k=%d", args.TopK)
+	}
+	bytes, err := brokerGetRaw(ctx, path)
 	if err != nil {
 		return toolError(err), nil, nil
 	}
@@ -3246,4 +3340,54 @@ func truncate(text string, max int) string {
 		return text[:max]
 	}
 	return text[:max-1] + "…"
+}
+
+// ── Lint tools ────────────────────────────────────────────────────────────────
+
+// RunLintArgs is intentionally empty — run_lint takes no input parameters.
+type RunLintArgs struct{}
+
+// ResolveContradictionArgs is the contract for resolve_contradiction.
+type ResolveContradictionArgs struct {
+	ReportDate string `json:"report_date" jsonschema:"YYYY-MM-DD date of the lint report to resolve from"`
+	FindingIdx int    `json:"finding_idx" jsonschema:"0-based index into the findings array returned by run_lint"`
+	Winner     string `json:"winner"      jsonschema:"A | B | Both — which fact wins; Both acknowledges both as valid"`
+}
+
+// handleRunLint calls POST /wiki/lint/run on the broker and returns the
+// full LintReport JSON.
+func handleRunLint(ctx context.Context, _ *mcp.CallToolRequest, _ RunLintArgs) (*mcp.CallToolResult, any, error) {
+	var report any
+	if err := brokerPostJSON(ctx, "/wiki/lint/run", nil, &report); err != nil {
+		return toolError(err), nil, nil
+	}
+	payload, _ := json.Marshal(report)
+	return textResult(string(payload)), nil, nil
+}
+
+// handleResolveContradiction calls POST /wiki/lint/resolve on the broker.
+func handleResolveContradiction(ctx context.Context, _ *mcp.CallToolRequest, args ResolveContradictionArgs) (*mcp.CallToolResult, any, error) {
+	reportDate := strings.TrimSpace(args.ReportDate)
+	if reportDate == "" {
+		return toolError(fmt.Errorf("report_date is required")), nil, nil
+	}
+	winner := strings.TrimSpace(args.Winner)
+	if winner != "A" && winner != "B" && winner != "Both" {
+		return toolError(fmt.Errorf("winner must be A, B, or Both; got %q", winner)), nil, nil
+	}
+
+	var resp map[string]string
+	body := map[string]any{
+		"report_date": reportDate,
+		"finding_idx": args.FindingIdx,
+		"winner":      winner,
+	}
+	if err := brokerPostJSON(ctx, "/wiki/lint/resolve", body, &resp); err != nil {
+		return toolError(err), nil, nil
+	}
+	msg := resp["message"]
+	if msg == "" {
+		msg = fmt.Sprintf("Resolved finding %d from report %s as winner=%s", args.FindingIdx, reportDate, winner)
+	}
+	return textResult(msg), nil, nil
 }

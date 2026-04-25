@@ -3,6 +3,11 @@ name: Auto Release
 on:
   push:
     branches: [main]
+    # Team wiki imports live in-repo but should not cut a new CLI/npm release.
+    # Ignore pushes that only touch the generated wiki payload.
+    paths-ignore:
+      - "index/**"
+      - "team/**"
 
 permissions:
   contents: write
@@ -17,9 +22,20 @@ jobs:
     # The if: expression is evaluated by GitHub, not a shell — no injection risk.
     if: "!contains(github.event.head_commit.message, '[skip-release]')"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
         with:
           fetch-depth: 0
+
+      - name: Refuse auto-release from a non-app tree
+        run: |
+          missing=0
+          for path in go.mod cmd/wuphf/main.go npm/package.json; do
+            if [ ! -e "$path" ]; then
+              echo "::error::missing ${path}; refusing to tag this tree"
+              missing=1
+            fi
+          done
+          test "$missing" -eq 0
 
       - name: Get latest tag
         id: latest

@@ -9,6 +9,7 @@ package team
 //	POST /entity/brief/synthesize   — explicit refresh, any actor
 //	GET  /entity/facts?kind=&slug=  — list facts newest-first
 //	GET  /entity/briefs             — enumerate every brief + synth status
+//	GET  /entity/graph/all          — full cross-entity graph (nodes + edges)
 //
 // SSE events fanned out via /events (handleEvents subscribes):
 //
@@ -535,5 +536,105 @@ func (b *Broker) handleEntityGraph(w http.ResponseWriter, r *http.Request) {
 		"slug":      slug,
 		"direction": direction,
 		"edges":     edges,
+	})
+}
+
+// GraphAllNode is one entity rendered as a node by GET /entity/graph/all.
+type GraphAllNode struct {
+	Kind  EntityKind `json:"kind"`
+	Slug  string     `json:"slug"`
+	Title string     `json:"title"`
+}
+
+// handleEntityGraphAll is GET /entity/graph/all — returns the full
+// cross-entity graph: every brief discovered under team/{kind}/ plus every
+// coalesced edge in the adjacency log. Response shape is flat (nodes +
+// edges) so the web graph view can lay the whole thing out in one pass.
+func (b *Broker) handleEntityGraphAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	worker := b.WikiWorker()
+	graph := b.EntityGraph()
+	if worker == nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "entity-brief backend is not active"})
+		return
+	}
+
+	// Discover every entity brief on disk and emit one node per file. The
+	// graph-level "kinds" (people|companies|customers) are the only valid
+	// node kinds — the TUI's richer palette (deals, tasks, tickets, …) is
+	// a fallback mapping the client can apply later.
+	root := worker.Repo().Root()
+	nodes := make([]GraphAllNode, 0, 16)
+	for _, kind := range ValidEntityKinds() {
+		dir := filepath.Join(root, "team", string(kind))
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if !strings.HasSuffix(strings.ToLower(name), ".md") {
+				continue
+			}
+			slug := strings.TrimSuffix(name, ".md")
+			if !slugPattern.MatchString(slug) {
+				continue
+			}
+			title := slug
+			if bodyBytes, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+				title = briefTitleFrom(string(bodyBytes), slug)
+			}
+			nodes = append(nodes, GraphAllNode{Kind: kind, Slug: slug, Title: title})
+		}
+	}
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].Kind != nodes[j].Kind {
+			return nodes[i].Kind < nodes[j].Kind
+		}
+		return nodes[i].Slug < nodes[j].Slug
+	})
+
+	edges := []CoalescedEdge{}
+	if graph != nil {
+		all, err := graph.Coalesce()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		if all != nil {
+			edges = all
+		}
+	}
+
+	// Promote edges that point at unknown entities into "phantom" nodes so
+	// the graph view renders them rather than silently dropping them. This
+	// happens when a fact references `[[companies/acme]]` before the brief
+	// file has been seeded — the log still records the reference.
+	known := make(map[string]bool, len(nodes))
+	for _, n := range nodes {
+		known[string(n.Kind)+"/"+n.Slug] = true
+	}
+	for _, e := range edges {
+		fromKey := string(e.FromKind) + "/" + e.FromSlug
+		if !known[fromKey] {
+			nodes = append(nodes, GraphAllNode{Kind: e.FromKind, Slug: e.FromSlug, Title: e.FromSlug})
+			known[fromKey] = true
+		}
+		toKey := string(e.ToKind) + "/" + e.ToSlug
+		if !known[toKey] {
+			nodes = append(nodes, GraphAllNode{Kind: e.ToKind, Slug: e.ToSlug, Title: e.ToSlug})
+			known[toKey] = true
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"nodes": nodes,
+		"edges": edges,
 	})
 }

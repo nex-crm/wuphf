@@ -60,7 +60,10 @@ const agentRateLimitHeader = "X-WUPHF-Agent"
 
 var brokerStatePath = defaultBrokerStatePath
 
-var studioPackageGenerator = provider.RunCodexOneShot
+// studioPackageGenerator routes Studio package generation through the
+// install-wide LLM provider so opencode-only or claude-code-only setups
+// aren't forced to have `codex` installed.
+var studioPackageGenerator = provider.RunConfiguredOneShot
 
 var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)`)
 
@@ -231,26 +234,50 @@ type teamChannel struct {
 }
 
 func (ch *teamChannel) isDM() bool {
-	return ch.Type == "dm" || strings.HasPrefix(ch.Slug, "dm-")
+	return ch.Type == "dm" || IsDMSlug(ch.Slug)
 }
 
 // IsDMSlug checks whether a channel slug represents a direct message.
 func IsDMSlug(slug string) bool {
-	return strings.HasPrefix(slug, "dm-")
+	slug = normalizeChannelSlug(slug)
+	return strings.HasPrefix(slug, "dm-") || canonicalDMTargetAgent(slug) != ""
 }
 
 // DMSlugFor returns the DM channel slug for a given agent.
 func DMSlugFor(agentSlug string) string {
-	return "dm-" + agentSlug
+	agentSlug = normalizeActorSlug(agentSlug)
+	if agentSlug == "" {
+		return ""
+	}
+	return channel.DirectSlug("human", agentSlug)
 }
 
 // DMTargetAgent extracts the agent slug from a DM channel slug.
 // Returns "" if the slug is not a DM.
 func DMTargetAgent(slug string) string {
-	if !IsDMSlug(slug) {
+	slug = normalizeChannelSlug(slug)
+	if strings.HasPrefix(slug, "dm-human-") {
+		return strings.TrimPrefix(slug, "dm-human-")
+	}
+	if strings.HasPrefix(slug, "dm-") {
+		return strings.TrimPrefix(slug, "dm-")
+	}
+	return canonicalDMTargetAgent(slug)
+}
+
+func canonicalDMTargetAgent(slug string) string {
+	parts := strings.Split(normalizeChannelSlug(slug), "__")
+	if len(parts) != 2 {
 		return ""
 	}
-	return strings.TrimPrefix(slug, "dm-")
+	switch {
+	case parts[0] == "human" || parts[0] == "you":
+		return parts[1]
+	case parts[1] == "human" || parts[1] == "you":
+		return parts[0]
+	default:
+		return ""
+	}
 }
 
 type officeMember struct {
@@ -466,6 +493,9 @@ type Broker struct {
 	factSubscribers         map[int]chan EntityFactRecordedEvent
 	wikiSectionsSubscribers map[int]chan WikiSectionsUpdatedEvent
 	wikiWorker              *WikiWorker
+	wikiIndex               *WikiIndex
+	wikiExtractor           *Extractor
+	wikiDLQ                 *DLQ
 	wikiSectionsCache       *wikiSectionsCache
 	reviewLog               *ReviewLog
 	reviewResolver          ReviewerResolver
@@ -473,6 +503,7 @@ type Broker struct {
 	entityGraph             *EntityGraph
 	entitySynthesizer       *EntitySynthesizer
 	playbookSynthesizer     *PlaybookSynthesizer
+	pamDispatcher           *PamDispatcher
 	scanTracker             *scanStatusTracker
 	nextSubscriberID        int
 	agentStreams            map[string]*agentStreamBuffer
@@ -483,6 +514,8 @@ type Broker struct {
 	// produce a truncated/overlaid file.
 	configMu           sync.Mutex
 	server             *http.Server
+	shutdownOnce       sync.Once
+	shutdownCh         chan struct{}
 	token              string          // shared secret for authenticating requests
 	addr               string          // actual listen address (useful when port=0)
 	webUIOrigins       []string        // allowed CORS origins for web UI (set by ServeWebUI)
@@ -506,6 +539,9 @@ type Broker struct {
 	agentRateLimitRequests  int
 	lastAgentRateLimitPrune time.Time
 	agentLogRoot            string // override for tests; empty means agent.DefaultTaskLogRoot()
+
+	stopCh   chan struct{} // closed by Stop(); signals background goroutines to exit
+	stopOnce sync.Once
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -853,10 +889,19 @@ func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
 }
 
 // NewBroker creates a new channel broker with a random auth token.
+// skipBrokerStateLoadOnConstruct gates the lazy read of brokerStatePath()
+// inside NewBroker. Production keeps it false so the CLI resumes from disk
+// state. A *_test.go init flips it to true so tests that call NewBroker get
+// a fresh broker by default, immune to state leaked by prior tests via a
+// shared broker-state.json. Persistence tests that want the load call
+// b.loadState() explicitly after construction.
+var skipBrokerStateLoadOnConstruct = false
+
 func NewBroker() *Broker {
 	b := &Broker{
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
+		shutdownCh:          make(chan struct{}),
 		messageSubscribers:  make(map[int]chan channelMessage),
 		actionSubscribers:   make(map[int]chan officeActionLog),
 		activity:            make(map[string]agentActivitySnapshot),
@@ -876,12 +921,25 @@ func NewBroker() *Broker {
 		agentRateLimitWindow:   defaultAgentRateLimitWindow,
 		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
 	}
-	_ = b.loadState()
+	if !skipBrokerStateLoadOnConstruct {
+		_ = b.loadState()
+	}
 	b.mu.Lock()
 	b.ensureDefaultOfficeMembersLocked()
 	b.ensureDefaultChannelsLocked()
 	b.normalizeLoadedStateLocked()
 	b.mu.Unlock()
+	b.stopCh = make(chan struct{})
+	if activityWatchdogEnabled {
+		// Watchdog: reap agents stuck in "active"/"thinking" when the spawn
+		// crashed before reaching the idle transition. Stopped via b.stopCh.
+		ctx, cancel := context.WithCancel(context.Background())
+		go func() {
+			<-b.stopCh
+			cancel()
+		}()
+		go b.runActivityWatchdog(ctx)
+	}
 	return b
 }
 
@@ -1065,6 +1123,15 @@ func (b *Broker) WikiWorker() *WikiWorker {
 	return b.wikiWorker
 }
 
+// WikiIndex returns the broker's derived wiki index, or nil when the active
+// memory backend is not markdown. HTTP handlers use this to run search queries
+// against the structured fact store without going through the write worker.
+func (b *Broker) WikiIndex() *WikiIndex {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.wikiIndex
+}
+
 func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	slug := normalizeChannelSlug(update.Slug)
 	if slug == "" {
@@ -1105,6 +1172,174 @@ func (b *Broker) UpdateAgentActivity(update agentActivitySnapshot) {
 	b.activity[slug] = current
 	b.publishActivityLocked(current)
 	b.mu.Unlock()
+}
+
+// duplicateBroadcastWindow is how recent an earlier broadcast from the same
+// agent in the same channel+thread must be to count as a duplicate. Set tight
+// so legitimate quick follow-ups still land, but tight enough to catch the
+// "same turn, paraphrased again" pattern that agents produce.
+const duplicateBroadcastWindow = 30 * time.Second
+
+// duplicateBroadcastSimilarity is the lower bound at which two messages are
+// considered near-duplicates. 1.0 means "byte-identical"; we pick 0.85 to
+// catch paraphrased restatements while letting actual new content through.
+const duplicateBroadcastSimilarity = 0.85
+
+// isDuplicateAgentBroadcastLocked returns true when the agent has already
+// posted a nearly-identical message to the same (channel, thread) pair within
+// duplicateBroadcastWindow. Must be called with b.mu held.
+func (b *Broker) isDuplicateAgentBroadcastLocked(sender, channel, replyTo, content string) bool {
+	newNorm := normalizeBroadcastContent(content)
+	if newNorm == "" {
+		return false
+	}
+	cutoff := time.Now().UTC().Add(-duplicateBroadcastWindow)
+	// Walk backwards — most recent messages are at the end.
+	for i := len(b.messages) - 1; i >= 0; i-- {
+		prev := b.messages[i]
+		ts, err := time.Parse(time.RFC3339, prev.Timestamp)
+		if err == nil && ts.Before(cutoff) {
+			break
+		}
+		if prev.From != sender {
+			continue
+		}
+		if normalizeChannelSlug(prev.Channel) != channel {
+			continue
+		}
+		if strings.TrimSpace(prev.ReplyTo) != strings.TrimSpace(replyTo) {
+			continue
+		}
+		prevNorm := normalizeBroadcastContent(prev.Content)
+		if prevNorm == "" {
+			continue
+		}
+		if jaccardWordSimilarity(newNorm, prevNorm) >= duplicateBroadcastSimilarity {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeBroadcastContent lowercases and collapses whitespace so trivial
+// formatting drift does not defeat the dedup check.
+func normalizeBroadcastContent(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if s == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// jaccardWordSimilarity returns the Jaccard similarity of the two strings'
+// whitespace-split word sets. 1.0 = identical word sets; 0.0 = disjoint.
+// Cheap and good enough to catch "ship it" / "ship it 🚀" style paraphrases.
+func jaccardWordSimilarity(a, b string) float64 {
+	wa := uniqueWordSet(a)
+	wb := uniqueWordSet(b)
+	if len(wa) == 0 || len(wb) == 0 {
+		return 0
+	}
+	inter := 0
+	for w := range wa {
+		if _, ok := wb[w]; ok {
+			inter++
+		}
+	}
+	union := len(wa) + len(wb) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+func uniqueWordSet(s string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, w := range strings.Fields(s) {
+		// Strip leading/trailing ASCII punctuation so "court," and "court"
+		// collapse to the same token for Jaccard. Keeps intra-word characters
+		// like apostrophes inside "reviewer's".
+		w = strings.TrimFunc(w, func(r rune) bool {
+			switch r {
+			case '.', ',', ';', ':', '!', '?', '—', '–', '-', '"', '\'', '(', ')', '[', ']', '`':
+				return true
+			}
+			return false
+		})
+		if w == "" {
+			continue
+		}
+		out[w] = struct{}{}
+	}
+	return out
+}
+
+// activityWatchdogEnabled controls whether NewBroker starts the background
+// activity-watchdog goroutine. Tests that create many short-lived brokers set
+// this to false via TestMain so goroutines don't accumulate and cause
+// goleak/timeout failures. Production always runs with the default (true).
+var activityWatchdogEnabled = true
+
+// staleActivityThreshold is how long an agent can stay in a non-idle/non-error
+// activity state before the watchdog forcibly resets it to idle. Set long
+// enough to cover normal long turns (tool chains, big edits) but short enough
+// that a crashed spawn does not leave the agent looking "active" for hours —
+// which blocks the CEO's "Already active in this thread" re-route guard and
+// prevents the specialist from being dispatched again.
+const staleActivityThreshold = 5 * time.Minute
+
+// reapStaleActivityLocked transitions any agent whose LastTime is older than
+// staleActivityThreshold from "active"/"thinking"/"tool_use" back to "idle".
+// Must be called with b.mu held. Returns the slugs that were reset so the
+// caller can emit activity-change events after releasing the lock.
+func (b *Broker) reapStaleActivityLocked(now time.Time) []agentActivitySnapshot {
+	if len(b.activity) == 0 {
+		return nil
+	}
+	var reset []agentActivitySnapshot
+	for slug, snap := range b.activity {
+		status := strings.ToLower(strings.TrimSpace(snap.Status))
+		if status == "" || status == "idle" || status == "error" {
+			continue
+		}
+		lastTime, err := time.Parse(time.RFC3339, snap.LastTime)
+		if err != nil {
+			// Unparseable LastTime means we cannot age the entry safely; leave it.
+			continue
+		}
+		if now.Sub(lastTime) < staleActivityThreshold {
+			continue
+		}
+		snap.Status = "idle"
+		snap.Activity = "idle"
+		snap.Detail = "stale activity reaped (no progress for " + staleActivityThreshold.String() + ")"
+		snap.LastTime = now.UTC().Format(time.RFC3339)
+		b.activity[slug] = snap
+		reset = append(reset, snap)
+	}
+	return reset
+}
+
+// runActivityWatchdog scans the in-memory activity map every minute and
+// resets agents that have been stuck in a non-terminal state past
+// staleActivityThreshold. Stops when ctx is done so NewBroker can tear it
+// down alongside the rest of the broker's lifecycle.
+func (b *Broker) runActivityWatchdog(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-ticker.C:
+			b.mu.Lock()
+			reset := b.reapStaleActivityLocked(now)
+			for _, snap := range reset {
+				b.publishActivityLocked(snap)
+			}
+			b.mu.Unlock()
+		}
+	}
 }
 
 // Token returns the shared secret that agents must include in requests.
@@ -1183,12 +1418,45 @@ func (b *Broker) ensureWikiWorker() {
 		}
 	}
 
-	worker := NewWikiWorker(repo, b)
+	idx := NewWikiIndex(repo.Root())
+
+	worker := NewWikiWorkerWithIndex(repo, b, idx)
 	worker.Start(context.Background())
+
+	// Wire the extraction loop: artifact commits → extract_entities_lite →
+	// WikiIndex. DLQ lives under <wiki>/.dlq/. Extractor failures never
+	// fail the commit path — DLQ absorbs everything per §11.13.
+	dlq := NewDLQ(repo.Root())
+	extractor := NewExtractor(brokerQueryProvider{}, worker, dlq, idx)
+	worker.SetExtractor(extractor)
 
 	b.mu.Lock()
 	b.wikiWorker = worker
+	b.wikiIndex = idx
+	b.wikiExtractor = extractor
+	b.wikiDLQ = dlq
 	b.mu.Unlock()
+
+	// Boot reconcile: walk the full wiki tree and populate the index from
+	// existing markdown + jsonl. Runs async so it does not delay broker
+	// startup. The per-commit ReconcilePath calls keep the index live once
+	// the reconcile finishes. If reconcile fails the index is empty but
+	// readable — it will self-heal on the next ReconcilePath call.
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		if err := idx.ReconcileFromMarkdown(bgCtx); err != nil {
+			log.Printf("wiki_index: boot reconcile failed: %v", err)
+		} else {
+			log.Printf("wiki_index: boot reconcile complete")
+		}
+	}()
+
+	// Daily lint cron. The schedule is controlled by WUPHF_LINT_CRON (default
+	// "09:00" local time). Empty string disables the cron (useful in tests).
+	// The goroutine is cancelled by the background context when the broker
+	// shuts down.
+	b.startLintCron(context.Background(), idx, worker)
 }
 
 // StartOnPort launches the broker on the given port. Use 0 for an OS-assigned port.
@@ -1218,11 +1486,16 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/humans", b.requireAuth(b.handleHumans))
 	mux.HandleFunc("/wiki/read", b.requireAuth(b.handleWikiRead))
 	mux.HandleFunc("/wiki/search", b.requireAuth(b.handleWikiSearch))
+	mux.HandleFunc("/wiki/lookup", b.requireAuth(b.handleWikiLookup))
 	mux.HandleFunc("/wiki/list", b.requireAuth(b.handleWikiList))
 	mux.HandleFunc("/wiki/article", b.requireAuth(b.handleWikiArticle))
 	mux.HandleFunc("/wiki/catalog", b.requireAuth(b.handleWikiCatalog))
 	mux.HandleFunc("/wiki/audit", b.requireAuth(b.handleWikiAudit))
 	mux.HandleFunc("/wiki/sections", b.requireAuth(b.handleWikiSections))
+	mux.HandleFunc("/wiki/lint/run", b.requireAuth(b.handleLintRun))
+	mux.HandleFunc("/wiki/lint/resolve", b.requireAuth(b.handleLintResolve))
+	mux.HandleFunc("/wiki/extract/replay", b.requireAuth(b.handleWikiExtractReplay))
+	mux.HandleFunc("/wiki/dlq", b.requireAuth(b.handleWikiDLQ))
 	mux.HandleFunc("/notebook/write", b.requireAuth(b.handleNotebookWrite))
 	mux.HandleFunc("/notebook/read", b.requireAuth(b.handleNotebookRead))
 	mux.HandleFunc("/notebook/list", b.requireAuth(b.handleNotebookList))
@@ -1236,12 +1509,15 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/entity/facts", b.requireAuth(b.handleEntityFactsList))
 	mux.HandleFunc("/entity/briefs", b.requireAuth(b.handleEntityBriefsList))
 	mux.HandleFunc("/entity/graph", b.requireAuth(b.handleEntityGraph))
+	mux.HandleFunc("/entity/graph/all", b.requireAuth(b.handleEntityGraphAll))
 	mux.HandleFunc("/playbook/list", b.requireAuth(b.handlePlaybookList))
 	mux.HandleFunc("/playbook/compile", b.requireAuth(b.handlePlaybookCompile))
 	mux.HandleFunc("/playbook/execution", b.requireAuth(b.handlePlaybookExecution))
 	mux.HandleFunc("/playbook/executions", b.requireAuth(b.handlePlaybookExecutionsList))
 	mux.HandleFunc("/playbook/synthesize", b.requireAuth(b.handlePlaybookSynthesize))
 	mux.HandleFunc("/playbook/synthesis-status", b.requireAuth(b.handlePlaybookSynthesisStatus))
+	mux.HandleFunc("/pam/actions", b.requireAuth(b.handlePamActions))
+	mux.HandleFunc("/pam/action", b.requireAuth(b.handlePamAction))
 	mux.HandleFunc("/scan/start", b.requireAuth(b.handleScanStart))
 	mux.HandleFunc("/scan/status", b.requireAuth(b.handleScanStatus))
 	mux.HandleFunc("/studio/generate-package", b.requireAuth(b.handleStudioGeneratePackage))
@@ -1263,6 +1539,9 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/scheduler", b.requireAuth(b.handleScheduler))
 	mux.HandleFunc("/skills", b.requireAuth(b.handleSkills))
 	mux.HandleFunc("/skills/", b.requireAuth(b.handleSkillsSubpath))
+	// GET /commands — slash-command registry mirror so the web composer
+	// renders the same command set as the TUI. See broker_commands.go.
+	mux.HandleFunc("/commands", b.requireAuth(b.handleCommands))
 	mux.HandleFunc("/telegram/groups", b.requireAuth(b.handleTelegramGroups))
 	mux.HandleFunc("/bridges", b.requireAuth(b.handleBridge))
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
@@ -1272,15 +1551,22 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
 	mux.HandleFunc("/agent-stream/", b.requireAuth(b.handleAgentStream))
+	mux.HandleFunc("/agent-tool-event", b.requireAuth(b.handleAgentToolEvent))
 	mux.HandleFunc("/web-token", b.handleWebToken)
 	// Onboarding: state/progress/complete + prereqs/templates/validate-key + checklist.
 	// completeFn posts the first task as a human message and seeds the team.
 	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
-	// These are disk-only; the caller reloads or re-launches to rebuild state.
+	// Shred requests launcher shutdown after the response so live in-memory
+	// broker state cannot write stale messages back onto disk.
 	// Auth-gated via requireAuth because shred permanently deletes state and
 	// must not be reachable without the broker token.
-	workspace.RegisterRoutes(mux, b.requireAuth)
+	workspace.RegisterRoutesWithOptions(mux, workspace.RouteOptions{
+		AuthMiddleware: b.requireAuth,
+		AfterShred: func(workspace.Result) {
+			b.requestShutdown()
+		},
+	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
 	ln, err := net.Listen("tcp", addr)
@@ -1314,12 +1600,18 @@ func (b *Broker) StartOnPort(port int) error {
 
 // Stop shuts down the broker.
 func (b *Broker) Stop() {
+	if b.stopCh != nil {
+		b.stopOnce.Do(func() {
+			close(b.stopCh)
+		})
+	}
 	if b.server != nil {
 		_ = b.server.Close()
 	}
 	b.mu.Lock()
 	synth := b.entitySynthesizer
 	pbSynth := b.playbookSynthesizer
+	pamDisp := b.pamDispatcher
 	b.mu.Unlock()
 	if synth != nil {
 		synth.Stop()
@@ -1327,6 +1619,29 @@ func (b *Broker) Stop() {
 	if pbSynth != nil {
 		pbSynth.Stop()
 	}
+	if pamDisp != nil {
+		pamDisp.Stop()
+	}
+}
+
+// ShutdownRequested is closed when a destructive operation needs the launcher
+// process to stop after the HTTP response has reached the client.
+func (b *Broker) ShutdownRequested() <-chan struct{} {
+	if b.shutdownCh == nil {
+		ch := make(chan struct{})
+		close(ch)
+		return ch
+	}
+	return b.shutdownCh
+}
+
+func (b *Broker) requestShutdown() {
+	if b == nil || b.shutdownCh == nil {
+		return
+	}
+	b.shutdownOnce.Do(func() {
+		close(b.shutdownCh)
+	})
 }
 
 func (b *Broker) rateLimitMiddleware(next http.Handler) http.Handler {
@@ -1759,6 +2074,8 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer unsubscribePlaybook()
 	playbookSynthEvents, unsubscribePlaybookSynth := b.SubscribePlaybookSynthesizedEvents(64)
 	defer unsubscribePlaybookSynth()
+	pamStarted, pamDone, pamFailed, unsubscribePam := b.SubscribePamActionEvents(64)
+	defer unsubscribePam()
 
 	writeEvent := func(name string, payload any) error {
 		data, err := json.Marshal(payload)
@@ -1827,6 +2144,18 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok || writeEvent("playbook:synthesized", evt) != nil {
 				return
 			}
+		case evt, ok := <-pamStarted:
+			if !ok || writeEvent("pam:action_started", evt) != nil {
+				return
+			}
+		case evt, ok := <-pamDone:
+			if !ok || writeEvent("pam:action_done", evt) != nil {
+				return
+			}
+		case evt, ok := <-pamFailed:
+			if !ok || writeEvent("pam:action_failed", evt) != nil {
+				return
+			}
 		case <-heartbeat.C:
 			if _, err := fmt.Fprintf(w, ": ping\n\n"); err != nil {
 				return
@@ -1834,6 +2163,92 @@ func (b *Broker) handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// handleAgentToolEvent appends a tool-call log line to the agent's stream so
+// the per-agent activity panel shows which MCP tool was invoked with what
+// arguments. Without this, the stream only shows raw pane-captured stdout —
+// useless for agents whose work happens entirely through MCP tool calls.
+//
+// Body: {"slug":"ceo","phase":"call|result|error","tool":"team_broadcast","args":"...","result":"...","error":"..."}
+// Phase is informational; all fields but slug are optional.
+func (b *Broker) handleAgentToolEvent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var body struct {
+		Slug   string `json:"slug"`
+		Phase  string `json:"phase,omitempty"`
+		Tool   string `json:"tool,omitempty"`
+		Args   string `json:"args,omitempty"`
+		Result string `json:"result,omitempty"`
+		Error  string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	slug := strings.TrimSpace(body.Slug)
+	if slug == "" {
+		http.Error(w, "missing slug", http.StatusBadRequest)
+		return
+	}
+	stream := b.AgentStream(slug)
+	if stream == nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	line := formatAgentToolEvent(body.Phase, body.Tool, body.Args, body.Result, body.Error)
+	if line != "" {
+		stream.Push(line)
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// formatAgentToolEvent renders one structured audit record for the per-agent
+// stream. SSE data lines must stay single-line; JSON encoding preserves exact
+// arguments/results while escaping embedded newlines.
+func formatAgentToolEvent(phase, tool, args, result, errStr string) string {
+	tool = strings.TrimSpace(tool)
+	phase = strings.TrimSpace(phase)
+	if phase == "" {
+		phase = "tool"
+	}
+	if tool == "" {
+		return ""
+	}
+	payload := map[string]any{
+		"type":  "mcp_tool_event",
+		"phase": phase,
+		"tool":  tool,
+	}
+	if args != "" {
+		payload["arguments"] = decodeToolEventField(args)
+	}
+	if result != "" {
+		payload["result"] = decodeToolEventField(result)
+	}
+	if errStr != "" {
+		payload["error"] = decodeToolEventField(errStr)
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func decodeToolEventField(raw string) any {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
+		return decoded
+	}
+	return raw
 }
 
 // handleAgentStream serves a per-agent stdout SSE stream.
@@ -1949,12 +2364,37 @@ func (b *Broker) ServeWebUI(port int) {
 			"broker_url": brokerURL,
 		})
 	})))
-	mux.Handle("/", fileServer)
+	// Cache policy: index.html must be re-fetched every load so users pick up
+	// new JS/CSS bundle hashes immediately after an upgrade. Hashed assets
+	// under /assets/ are content-addressed and safe to cache aggressively.
+	// Without this, users stay pinned to a stale bundle for days because
+	// Chrome's heuristic cache revalidates HTML only occasionally.
+	mux.Handle("/", cacheControlMiddleware(fileServer))
 	go func() {
 		if err := http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), mux); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("broker web UI proxy: listen on :%d: %v", port, err)
 		}
 	}()
+}
+
+// cacheControlMiddleware sets conservative cache headers on the web UI so
+// clients always receive fresh HTML and mutable assets, while long-cached
+// hashed bundles under /assets/ stay immutable for efficiency.
+func cacheControlMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+		switch {
+		case strings.HasPrefix(path, "/assets/"):
+			// Vite bundles hashed filenames; they never change for a given URL.
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		default:
+			// Everything else (index.html, themes/*.css, favicons that share a
+			// stable path) must re-validate on each load so upgrades land
+			// immediately.
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
@@ -2074,6 +2514,42 @@ func (b *Broker) EnabledMembers(channel string) []string {
 		return b.enabledChannelMembersLocked(channel, ch.Members)
 	}
 	return nil
+}
+
+// DisabledMembers returns the slugs explicitly disabled for a channel —
+// members who were present in ch.Members at some point but have been muted
+// for this channel. Callers use this to distinguish "never added" (which an
+// explicit @-tag can bypass) from "deliberately muted" (which an @-tag must
+// respect — muting an agent is the user's explicit intent to silence them).
+func (b *Broker) DisabledMembers(channel string) []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	channel = normalizeChannelSlug(channel)
+	if channel == "" {
+		channel = "general"
+	}
+	ch := b.findChannelLocked(channel)
+	if ch == nil || len(ch.Disabled) == 0 {
+		return nil
+	}
+	return append([]string(nil), ch.Disabled...)
+}
+
+// senderMayAutoPromoteLocked reports whether a `from` value is allowed to have
+// its @slug body text auto-promoted into the tagged array. Allowlist shape:
+// humans (empty / "you" / "human") and any registered agent slug are allowed;
+// synthetic senders ("system", "nex", bridges, automation kinds) are not. A
+// denylist would silently let every future synthetic identity leak through.
+// Sender is normalized first so case drift ("PM", "Human") matches the
+// allowlist the same way channel access does.
+// Caller must hold b.mu.
+func (b *Broker) senderMayAutoPromoteLocked(from string) bool {
+	from = normalizeActorSlug(from)
+	switch from {
+	case "", "you", "human":
+		return true
+	}
+	return b.findMemberLocked(from) != nil
 }
 
 func (b *Broker) OfficeMembers() []officeMember {
@@ -2271,7 +2747,9 @@ func (b *Broker) PostInboundSurfaceMessage(from, channel, content, provider stri
 	}
 	if b.findChannelLocked(channel) == nil {
 		if IsDMSlug(channel) {
-			b.ensureDMConversationLocked(channel)
+			if dm := b.ensureDMConversationLocked(channel); dm != nil {
+				channel = dm.Slug
+			}
 		} else {
 			return channelMessage{}, fmt.Errorf("channel not found: %s", channel)
 		}
@@ -2702,21 +3180,56 @@ func (b *Broker) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
+	if err := atomicWriteFile(path, data); err != nil {
 		return err
 	}
 	if brokerStateShouldSnapshot(state) {
-		snapshotTmp := snapshotPath + ".tmp"
-		if err := os.WriteFile(snapshotTmp, data, 0o600); err != nil {
+		if err := atomicWriteFile(snapshotPath, data); err != nil {
 			return err
 		}
-		if err := os.Rename(snapshotTmp, snapshotPath); err != nil {
-			return err
-		}
+	}
+	return nil
+}
+
+// atomicWriteFile writes data to path atomically by creating a uniquely-named
+// sibling tmp file (mode 0o600 via os.CreateTemp) and renaming. Each call
+// uses a fresh tmp filename, so concurrent writers to the same destination
+// cannot race on the source path of the rename.
+//
+// The previous fixed `<path>.tmp` filename was safe in production (one broker
+// owns one path) but broke the test suite: 22 *_test.go files override
+// brokerStatePath, plus a leaked tempdir from worktree_guard_test.go init()
+// is shared across every test that doesn't override. Two saves landing on
+// the same path could interleave like A.WriteFile / B.WriteFile / A.Rename /
+// B.Rename — and B's Rename failed with "no such file or directory" because
+// A had already renamed the shared tmp out from under it. That was the CI
+// flake on PR #281's `test` job. See broker_save_race_test.go for the
+// regression repro.
+//
+// 0o600 is hard-coded because the only callers (broker state file +
+// snapshot) want exactly that mode; CreateTemp already produces it on the
+// platforms we support, so no os.Chmod is needed.
+func atomicWriteFile(path string, data []byte) error {
+	dir := filepath.Dir(path)
+	base := filepath.Base(path)
+	tmpf, err := os.CreateTemp(dir, base+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmpf.Name()
+	cleanup := func() { _ = os.Remove(tmpName) }
+	if _, err := tmpf.Write(data); err != nil {
+		_ = tmpf.Close()
+		cleanup()
+		return err
+	}
+	if err := tmpf.Close(); err != nil {
+		cleanup()
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		cleanup()
+		return err
 	}
 	return nil
 }
@@ -3068,10 +3581,13 @@ func (b *Broker) ensureDMConversationLocked(slug string) *teamChannel {
 		return nil
 	}
 	agentSlug := DMTargetAgent(slug)
+	if agentSlug == "" {
+		return nil
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	// Register in channelStore for proper type-based DM detection.
 	if b.channelStore != nil {
-		newSlug := channel.DirectSlug("human", agentSlug)
+		newSlug := DMSlugFor(agentSlug)
 		if _, err := b.channelStore.GetOrCreateDirect("human", agentSlug); err == nil {
 			// Update slug in broker to the new deterministic format if different.
 			if newSlug != slug {
@@ -3192,6 +3708,37 @@ func memberFromSpec(spec company.MemberSpec, createdBy, createdAt string, builtI
 		BuiltIn:        builtIn,
 		Provider:       spec.Provider,
 	}
+}
+
+// mentionPattern matches @slug tokens in free-form message text. Slugs are
+// alphanumeric plus hyphen, 2–30 chars (to dodge false positives from
+// conversational @ use). A preceding word character (e.g. email "a@b.com")
+// is excluded via the lookahead-free alternative: we anchor to start of
+// string or a non-alphanumeric rune.
+var mentionPattern = regexp.MustCompile(`(?:^|[^a-zA-Z0-9_])@([a-z0-9][a-z0-9-]{1,29})\b`)
+
+// extractMentionedSlugs pulls @-mention slugs out of body content. Duplicates
+// are removed. The caller is responsible for validating whether each slug is
+// a real office member.
+func extractMentionedSlugs(content string) []string {
+	matches := mentionPattern.FindAllStringSubmatch(strings.ToLower(content), -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		if len(m) < 2 {
+			continue
+		}
+		slug := m[1]
+		if _, ok := seen[slug]; ok {
+			continue
+		}
+		seen[slug] = struct{}{}
+		out = append(out, slug)
+	}
+	return out
 }
 
 func uniqueSlugs(items []string) []string {
@@ -3992,12 +4539,32 @@ func (b *Broker) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"one_on_one_agent":      agent,
 		"focus_mode":            focus,
 		"provider":              provider,
+		"provider_model":        resolveProviderModel(provider),
 		"memory_backend":        memoryStatus.SelectedKind,
 		"memory_backend_active": memoryStatus.ActiveKind,
 		"memory_backend_ready":  memoryStatus.ActiveKind != config.MemoryBackendNone,
 		"nex_connected":         memoryStatus.ActiveKind == config.MemoryBackendNex && nex.Connected(),
 		"build":                 buildinfo.Current(),
 	})
+}
+
+// resolveProviderModel returns the effective model id for the active LLM
+// provider so the web UI's status bar can show, e.g.
+// "opencode · ollama/qwen2.5-coder:1.5b". Returns "" when the provider has
+// no resolvable model (claude-code uses the CLI's bundled default unless the
+// user overrides via --model; we don't parse that out here).
+func resolveProviderModel(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "codex":
+		// Empty cwd keeps the home-dir config lookup but skips the
+		// workspace-relative walk — Broker doesn't know which workspace the
+		// caller is in, and the status bar is a coarse indicator anyway.
+		return config.ResolveCodexModel("")
+	case "opencode":
+		return config.ResolveOpencodeModel()
+	default:
+		return ""
+	}
 }
 
 func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
@@ -5422,7 +5989,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		if body.LLMProvider != nil {
 			provider = strings.TrimSpace(strings.ToLower(*body.LLMProvider))
 			switch provider {
-			case "claude-code", "codex":
+			case "claude-code", "codex", "opencode":
 				// ok
 			default:
 				http.Error(w, "unsupported llm_provider", http.StatusBadRequest)
@@ -5441,7 +6008,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 				switch id {
-				case "claude-code", "codex":
+				case "claude-code", "codex", "opencode":
 					// ok
 				default:
 					http.Error(w, "unsupported entry in llm_provider_priority: "+id, http.StatusBadRequest)
@@ -5629,7 +6196,11 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		// reflected immediately without requiring a broker restart.
 		if provider != "" {
 			b.mu.Lock()
+			providerChanged := b.runtimeProvider != provider
 			b.runtimeProvider = provider
+			if providerChanged {
+				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "office_reseeded"})
+			}
 			b.mu.Unlock()
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -5682,8 +6253,45 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		b.mu.Lock()
-		members := make([]officeMember, len(b.members))
-		copy(members, b.members)
+		type officeMemberResponse struct {
+			officeMember
+			Status       string `json:"status,omitempty"`
+			Activity     string `json:"activity,omitempty"`
+			Detail       string `json:"detail,omitempty"`
+			Task         string `json:"task,omitempty"`
+			LiveActivity string `json:"liveActivity,omitempty"`
+			LastTime     string `json:"lastTime,omitempty"`
+		}
+		now := time.Now()
+		members := make([]officeMemberResponse, 0, len(b.members))
+		for _, member := range b.members {
+			entry := officeMemberResponse{officeMember: member}
+			if snapshot, ok := b.activity[member.Slug]; ok {
+				entry.Status = snapshot.Status
+				entry.Activity = snapshot.Activity
+				entry.Detail = snapshot.Detail
+				entry.LiveActivity = snapshot.Detail
+				entry.Task = snapshot.Detail
+				entry.LastTime = snapshot.LastTime
+			}
+			if entry.Status == "" && b.lastTaggedAt != nil {
+				if taggedAt, ok := b.lastTaggedAt[member.Slug]; ok && now.Sub(taggedAt) < 60*time.Second {
+					entry.Status = "active"
+					entry.Activity = "queued"
+					entry.Detail = "active"
+					entry.LiveActivity = "active"
+					entry.Task = "active"
+					entry.LastTime = taggedAt.UTC().Format(time.RFC3339)
+				}
+			}
+			if entry.Status == "" {
+				entry.Status = "idle"
+			}
+			if entry.Activity == "" {
+				entry.Activity = "idle"
+			}
+			members = append(members, entry)
+		}
 		b.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"members": members})
@@ -5777,11 +6385,67 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 
 			b.members = append(b.members, member)
 			b.memberIndex[member.Slug] = len(b.members) - 1
+			// Add the new hire to every non-DM channel's Members list so they
+			// can actually POST replies. canAccessChannelLocked enforces
+			// ch.Members for every non-CEO agent sender; without this, a
+			// wizard-hired specialist can be tagged and dispatched but its
+			// reply is 403'd with "channel access denied" and the user sees
+			// nothing. DM channels are intentionally skipped — DMs encode
+			// the target agent in the slug and go through a different
+			// membership gate.
+			//
+			// Policy note: this is broader than normalizeLoadedStateLocked's
+			// seed (which only fills #general). A wizard hire joins every
+			// topical channel by default; admins can narrow via
+			// /channel-members action=remove afterwards. The rationale is
+			// that an office member who can't post to any non-default
+			// channel without a second configuration step violates the
+			// principle of least surprise — the hire UI does not surface a
+			// channel-scope picker, so the implicit default has to be
+			// "office-wide."
+			//
+			// We also clear any stale Disabled entry for this slug. A fresh
+			// hire shouldn't inherit a mute left over from a prior lifecycle.
+			updatedChannels := make([]string, 0, len(b.channels))
+			for i := range b.channels {
+				if b.channels[i].isDM() {
+					continue
+				}
+				mutated := false
+				if !containsString(b.channels[i].Members, slug) {
+					b.channels[i].Members = uniqueSlugs(append(b.channels[i].Members, slug))
+					mutated = true
+				}
+				if containsString(b.channels[i].Disabled, slug) {
+					// Allocate a fresh slice instead of reusing the
+					// backing array via [:0]+append. The in-place form
+					// is safe but reads as if it could clobber the
+					// range — readability over one extra alloc on a
+					// rare re-hire path.
+					next := make([]string, 0, len(b.channels[i].Disabled))
+					for _, d := range b.channels[i].Disabled {
+						if d != slug {
+							next = append(next, d)
+						}
+					}
+					b.channels[i].Disabled = next
+					mutated = true
+				}
+				if mutated {
+					b.channels[i].UpdatedAt = now
+					updatedChannels = append(updatedChannels, b.channels[i].Slug)
+				}
+			}
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_created", Slug: slug})
+			// Notify SSE subscribers that these channels' rosters changed so
+			// the UI sidebar refreshes without requiring a separate trigger.
+			for _, chSlug := range updatedChannels {
+				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"member": member})
 		case "update":
@@ -5905,22 +6569,42 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 			}
 			b.members = filteredMembers
 			b.rebuildMemberIndexLocked()
+			// Symmetry with action:create — skip DM channels (they encode
+			// their target in the slug and go through a different
+			// membership gate) and emit a channel_updated event per
+			// actually-mutated channel so SSE subscribers refresh the
+			// roster. Without this, the UI sidebar gets a half-signal
+			// lifecycle (create emits channel_updated, remove does not).
+			removedChannels := make([]string, 0, len(b.channels))
 			for i := range b.channels {
-				nextMembers := b.channels[i].Members[:0]
-				for _, existing := range b.channels[i].Members {
-					if existing != slug {
-						nextMembers = append(nextMembers, existing)
-					}
+				if b.channels[i].isDM() {
+					continue
 				}
-				b.channels[i].Members = nextMembers
-				nextDisabled := b.channels[i].Disabled[:0]
-				for _, existing := range b.channels[i].Disabled {
-					if existing != slug {
-						nextDisabled = append(nextDisabled, existing)
+				mutated := false
+				if containsString(b.channels[i].Members, slug) {
+					next := make([]string, 0, len(b.channels[i].Members))
+					for _, existing := range b.channels[i].Members {
+						if existing != slug {
+							next = append(next, existing)
+						}
 					}
+					b.channels[i].Members = next
+					mutated = true
 				}
-				b.channels[i].Disabled = nextDisabled
-				b.channels[i].UpdatedAt = now
+				if containsString(b.channels[i].Disabled, slug) {
+					next := make([]string, 0, len(b.channels[i].Disabled))
+					for _, existing := range b.channels[i].Disabled {
+						if existing != slug {
+							next = append(next, existing)
+						}
+					}
+					b.channels[i].Disabled = next
+					mutated = true
+				}
+				if mutated {
+					b.channels[i].UpdatedAt = now
+					removedChannels = append(removedChannels, b.channels[i].Slug)
+				}
 			}
 			for i := range b.tasks {
 				if b.tasks[i].Owner == slug {
@@ -5934,6 +6618,9 @@ func (b *Broker) handleOfficeMembers(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			b.publishOfficeChangeLocked(officeChangeEvent{Kind: "member_removed", Slug: slug})
+			for _, chSlug := range removedChannels {
+				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "channel_updated", Slug: chSlug})
+			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true})
 		default:
@@ -6282,6 +6969,30 @@ func (b *Broker) handleCreateDM(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.mu.Lock()
+	if b.findChannelLocked(ch.Slug) == nil {
+		now := time.Now().UTC().Format(time.RFC3339)
+		target := DMTargetAgent(ch.Slug)
+		description := "Group direct messages"
+		memberSlugs := append([]string(nil), body.Members...)
+		if target != "" {
+			description = "Direct messages with " + target
+			memberSlugs = []string{"human", target}
+		}
+		name := strings.TrimSpace(ch.Name)
+		if name == "" {
+			name = ch.Slug
+		}
+		b.channels = append(b.channels, teamChannel{
+			Slug:        ch.Slug,
+			Name:        name,
+			Type:        "dm",
+			Description: description,
+			Members:     uniqueSlugs(memberSlugs),
+			CreatedBy:   "human",
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		})
+	}
 	_ = b.saveLocked()
 	b.mu.Unlock()
 
@@ -6762,7 +7473,9 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	// Auto-create DM conversations on first message (like Slack's conversations.open)
 	if b.findChannelLocked(channel) == nil {
 		if IsDMSlug(channel) {
-			b.ensureDMConversationLocked(channel)
+			if dm := b.ensureDMConversationLocked(channel); dm != nil {
+				channel = dm.Slug
+			}
 		} else if b.channelStore != nil {
 			if _, ok := b.channelStore.GetBySlug(channel); !ok {
 				b.mu.Unlock()
@@ -6780,7 +7493,50 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "channel access denied", http.StatusForbidden)
 		return
 	}
+	// Auto-promote @slug mentions in the body into the tagged array. If a
+	// user or agent typed `@pm`, treat it as a tag — `extractMentionedSlugs`
+	// already restricts to registered agent slugs, so conversational use of
+	// an @ that doesn't match an agent is untouched. Previously this ran for
+	// agent posts only, on the theory that humans might want @ to be merely
+	// conversational. In practice humans expect every @agent to notify, and
+	// the web composer does not always commit typed @-text into an explicit
+	// tag chip.
+	//
+	// Senders allowed to auto-promote: empty / "you" / "human" (humans) and
+	// any registered agent slug. Everything else — "system", "nex", future
+	// synthetic senders — is excluded by default so automation posts do not
+	// accidentally wake agents on every @-reference they quote.
+	//
+	// Exception: when the human explicitly tags the lead (CEO), do not
+	// auto-promote OTHER agents mentioned in the body. Example:
+	// "@ceo ask @reviewer to ..." — the human's intent is for CEO to route,
+	// not for the broker to fan out in parallel. Without this guard the
+	// reviewer gets notified twice (by auto-promote AND later by CEO's
+	// explicit tag), spawning two turns with nearly identical answers.
 	tagged := uniqueSlugs(body.Tagged)
+	sender := normalizeActorSlug(body.From)
+	isHuman := sender == "" || sender == "you" || sender == "human"
+	leadSlug := officeLeadSlugFrom(b.members)
+	mentionedSlugs := extractMentionedSlugs(body.Content)
+	leadExplicitlyTagged := leadSlug != "" && containsString(tagged, leadSlug)
+	if isHuman && !leadExplicitlyTagged && leadSlug != "" && containsString(mentionedSlugs, leadSlug) && b.findMemberLocked(leadSlug) != nil {
+		tagged = append(tagged, leadSlug)
+		leadExplicitlyTagged = true
+	}
+	suppressAutoPromote := isHuman && leadExplicitlyTagged
+	if b.senderMayAutoPromoteLocked(sender) && !suppressAutoPromote {
+		for _, slug := range mentionedSlugs {
+			if slug == sender {
+				continue
+			}
+			if b.findMemberLocked(slug) == nil {
+				continue
+			}
+			if !containsString(tagged, slug) {
+				tagged = append(tagged, slug)
+			}
+		}
+	}
 	for _, taggedSlug := range tagged {
 		switch taggedSlug {
 		case "you", "human", "system":
@@ -6816,6 +7572,29 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		tagged = uniqueSlugs(append(tagged, threadParticipants...))
 	}
 
+	// Dedup near-identical consecutive broadcasts from the same agent in the
+	// same channel + thread within a short window. Observed symptom: a single
+	// CEO turn emits 2-3 team_broadcast calls with the same content in
+	// slightly different wording, each costing a full round-trip downstream.
+	// The prompt tells the model "at most one broadcast per turn", but that
+	// rule is routinely ignored; this is the broker-side safety net.
+	//
+	// Humans and system senders are exempt — this only fires for agent posts.
+	if !isHuman && sender != "" && sender != "system" && sender != "nex" {
+		if b.isDuplicateAgentBroadcastLocked(sender, channel, replyTo, body.Content) {
+			b.counter--
+			b.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":         "",
+				"deduped":    true,
+				"total":      len(b.messages),
+				"suppressed": "duplicate broadcast from the same agent in the same thread within the dedup window",
+			})
+			return
+		}
+	}
+
 	msg := channelMessage{
 		ID:        fmt.Sprintf("msg-%d", b.counter),
 		From:      body.From,
@@ -6844,9 +7623,6 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 	if msg.From != "you" && msg.From != "human" && b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
 	}
-
-	// Auto-detect skill proposals from CEO messages
-	b.parseSkillProposalLocked(msg)
 
 	if err := b.saveLocked(); err != nil {
 		b.mu.Unlock()
@@ -6938,6 +7714,27 @@ func (b *Broker) SeenTelegramGroups() map[int64]string {
 	return out
 }
 
+// MarkRoutingTargets records implicit routing recipients as active so the UI
+// can show typing/thinking state without persisting a routing banner message.
+func (b *Broker) MarkRoutingTargets(slugs []string) {
+	if len(slugs) == 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.lastTaggedAt == nil {
+		b.lastTaggedAt = make(map[string]time.Time)
+	}
+	now := time.Now()
+	for _, slug := range slugs {
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			continue
+		}
+		b.lastTaggedAt[slug] = now
+	}
+}
+
 // PostSystemMessage posts a lightweight system message that shows progress without blocking.
 func (b *Broker) PostSystemMessage(channel, content, kind string) {
 	b.mu.Lock()
@@ -6968,7 +7765,14 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 		channel = "general"
 	}
 	if b.findChannelLocked(channel) == nil {
-		return channelMessage{}, fmt.Errorf("channel not found")
+		if IsDMSlug(channel) {
+			if dm := b.ensureDMConversationLocked(channel); dm != nil {
+				channel = dm.Slug
+			}
+		}
+		if b.findChannelLocked(channel) == nil {
+			return channelMessage{}, fmt.Errorf("channel not found")
+		}
 	}
 	if !b.canAccessChannelLocked(from, channel) {
 		return channelMessage{}, fmt.Errorf("channel access denied")
@@ -7112,7 +7916,9 @@ func (b *Broker) handleGetMessages(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	// Auto-create DM conversation on read (user opens DM before sending)
 	if IsDMSlug(channel) && b.findChannelLocked(channel) == nil {
-		b.ensureDMConversationLocked(channel)
+		if dm := b.ensureDMConversationLocked(channel); dm != nil {
+			channel = dm.Slug
+		}
 	}
 	if !b.canAccessChannelLocked(accessSlug, channel) {
 		b.mu.Unlock()
@@ -9571,6 +10377,15 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	createdBy := strings.TrimSpace(body.CreatedBy)
+	if action == "propose" {
+		createdBy = normalizeActorSlug(createdBy)
+		if b.findMemberLocked(createdBy) == nil {
+			http.Error(w, "created_by must be a registered agent for skill proposals", http.StatusForbidden)
+			return
+		}
+	}
+
 	if existing := b.findSkillByNameLocked(body.Name); existing != nil {
 		http.Error(w, "skill with this name already exists", http.StatusConflict)
 		return
@@ -9588,7 +10403,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		Title:               title,
 		Description:         strings.TrimSpace(body.Description),
 		Content:             strings.TrimSpace(body.Content),
-		CreatedBy:           strings.TrimSpace(body.CreatedBy),
+		CreatedBy:           createdBy,
 		Channel:             channel,
 		Tags:                body.Tags,
 		Trigger:             strings.TrimSpace(body.Trigger),
@@ -9618,6 +10433,9 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		Timestamp: now,
 	})
 	b.appendActionLocked(msgKind, "office", channel, sk.CreatedBy, truncateSummary(sk.Title, 140), sk.ID)
+	if action == "propose" {
+		b.appendSkillProposalRequestLocked(sk, channel, now)
+	}
 
 	if err := b.saveLocked(); err != nil {
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -9874,143 +10692,35 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"skill": *sk, "channel": channel})
 }
 
-// parseSkillProposalLocked extracts a [SKILL PROPOSAL] block from a message
-// and creates a proposed skill. Must be called with b.mu held.
-func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
-	// Only the team lead (CEO) may propose skills via message blocks.
-	// If no lead exists (empty office), reject all proposals to prevent injection.
-	lead := officeLeadSlugFrom(b.members)
-	if lead == "" || msg.From != lead {
-		return
+func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string) {
+	title := strings.TrimSpace(skill.Title)
+	if title == "" {
+		title = strings.TrimSpace(skill.Name)
 	}
-
-	const startTag = "[SKILL PROPOSAL]"
-	const endTag = "[/SKILL PROPOSAL]"
-
-	channel := msg.Channel
-	if channel == "" {
-		channel = "general"
+	description := strings.TrimSpace(skill.Description)
+	createdBy := strings.TrimSpace(skill.CreatedBy)
+	if createdBy == "" {
+		createdBy = "system"
 	}
-
-	content := msg.Content
-	searchFrom := 0
-	for {
-		startIdx := strings.Index(content[searchFrom:], startTag)
-		if startIdx < 0 {
-			return
-		}
-		startIdx += searchFrom
-		blockStart := startIdx + len(startTag)
-		endRel := strings.Index(content[blockStart:], endTag)
-		if endRel < 0 {
-			return
-		}
-		endIdx := blockStart + endRel
-		block := strings.TrimSpace(content[blockStart:endIdx])
-		searchFrom = endIdx + len(endTag)
-
-		// Split on "---" separator between metadata and instructions.
-		parts := strings.SplitN(block, "---", 2)
-		if len(parts) < 2 {
-			continue
-		}
-
-		meta := strings.TrimSpace(parts[0])
-		instructions := strings.TrimSpace(parts[1])
-
-		// Parse metadata fields.
-		var name, title, description, trigger string
-		var tags []string
-		for _, line := range strings.Split(meta, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "Name:") {
-				name = strings.TrimSpace(strings.TrimPrefix(line, "Name:"))
-			} else if strings.HasPrefix(line, "Title:") {
-				title = strings.TrimSpace(strings.TrimPrefix(line, "Title:"))
-			} else if strings.HasPrefix(line, "Description:") {
-				description = strings.TrimSpace(strings.TrimPrefix(line, "Description:"))
-			} else if strings.HasPrefix(line, "Trigger:") {
-				trigger = strings.TrimSpace(strings.TrimPrefix(line, "Trigger:"))
-			} else if strings.HasPrefix(line, "Tags:") {
-				raw := strings.TrimSpace(strings.TrimPrefix(line, "Tags:"))
-				for _, t := range strings.Split(raw, ",") {
-					t = strings.TrimSpace(t)
-					if t != "" {
-						tags = append(tags, t)
-					}
-				}
-			}
-		}
-
-		if name == "" || title == "" {
-			continue
-		}
-
-		slug := skillSlug(name)
-
-		// Check for duplicate (skip archived).
-		duplicate := false
-		for _, s := range b.skills {
-			if s.Name == slug && s.Status != "archived" {
-				duplicate = true
-				break
-			}
-		}
-		if duplicate {
-			continue
-		}
-
-		now := time.Now().UTC().Format(time.RFC3339)
-		skill := teamSkill{
-			ID:          slug,
-			Name:        slug,
-			Title:       title,
-			Description: description,
-			Content:     instructions,
-			CreatedBy:   msg.From,
-			Channel:     channel,
-			Tags:        tags,
-			Trigger:     trigger,
-			UsageCount:  0,
-			Status:      "proposed",
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		b.skills = append(b.skills, skill)
-
-		// Announce the proposal.
-		b.counter++
-		b.appendMessageLocked(channelMessage{
-			ID:        fmt.Sprintf("msg-%d", b.counter),
-			From:      "system",
-			Channel:   channel,
-			Kind:      "skill_proposal",
-			Title:     "Skill Proposed: " + title,
-			Content:   fmt.Sprintf("@%s proposed a new skill **%s**: %s. Use /skills to review and approve.", msg.From, title, description),
-			Timestamp: now,
-		})
-
-		// Surface the proposal in the Requests panel as a non-blocking human decision.
-		b.counter++
-		interview := humanInterview{
-			ID:        fmt.Sprintf("request-%d", b.counter),
-			Kind:      "skill_proposal",
-			Status:    "pending",
-			From:      msg.From,
-			Channel:   channel,
-			Title:     "Approve skill: " + title,
-			Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", msg.From, title, description),
-			ReplyTo:   slug,
-			Blocking:  false,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
-			{ID: "accept", Label: "Accept"},
-			{ID: "reject", Label: "Reject"},
-		})
-		b.requests = append(b.requests, interview)
+	b.counter++
+	interview := humanInterview{
+		ID:        fmt.Sprintf("request-%d", b.counter),
+		Kind:      "skill_proposal",
+		Status:    "pending",
+		From:      createdBy,
+		Channel:   normalizeChannelSlug(channel),
+		Title:     "Approve skill: " + title,
+		Question:  fmt.Sprintf("@%s proposed skill **%s**: %s\n\nActivate it?", createdBy, title, description),
+		ReplyTo:   strings.TrimSpace(skill.Name),
+		Blocking:  false,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
+	interview.Options, interview.RecommendedID = normalizeRequestOptions(interview.Kind, "accept", []interviewOption{
+		{ID: "accept", Label: "Accept"},
+		{ID: "reject", Label: "Reject"},
+	})
+	b.requests = append(b.requests, interview)
 }
 
 // SeedDefaultSkills pre-populates the broker with the pack's default skills.

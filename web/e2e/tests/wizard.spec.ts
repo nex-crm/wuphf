@@ -33,6 +33,19 @@ async function waitForReactMount(page: Page): Promise<void> {
   );
 }
 
+async function expectNoReactErrors(
+  page: Page,
+  getErrors: () => string[],
+  context: string,
+): Promise<void> {
+  await expect(page.getByTestId('error-boundary')).toHaveCount(0);
+
+  // Avoid networkidle here: onboarding also opens the long-lived broker SSE
+  // stream, so the page is expected to keep an active request.
+  const errors = getErrors();
+  expect(errors, `Uncaught errors ${context}:\n  ${errors.join('\n  ')}`).toHaveLength(0);
+}
+
 // The wizard flow is welcome → identity → templates. Fill the two required
 // identity fields so the primary CTA enables and we can advance.
 async function advanceToTemplatesStep(page: Page): Promise<void> {
@@ -53,14 +66,7 @@ test.describe('wuphf onboarding wizard smoke', () => {
     // The Wizard renders `.wizard-step` as its root container
     // (see web/src/components/onboarding/Wizard.tsx — WelcomeStep).
     await expect(page.locator('.wizard-step').first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId('error-boundary')).toHaveCount(0);
-
-    await page.waitForLoadState('networkidle');
-    const errors = getErrors();
-    expect(
-      errors,
-      `Uncaught errors rendering wizard:\n  ${errors.join('\n  ')}`,
-    ).toHaveLength(0);
+    await expectNoReactErrors(page, getErrors, 'rendering wizard');
   });
 
   test('advancing from welcome → identity → templates step does not crash', async ({ page }) => {
@@ -76,14 +82,7 @@ test.describe('wuphf onboarding wizard smoke', () => {
 
     // Templates step renders `.wizard-panel` (welcome + identity have different markers).
     await expect(page.locator('.wizard-panel').first()).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId('error-boundary')).toHaveCount(0);
-
-    await page.waitForLoadState('networkidle');
-    const errors = getErrors();
-    expect(
-      errors,
-      `Uncaught errors advancing wizard:\n  ${errors.join('\n  ')}`,
-    ).toHaveLength(0);
+    await expectNoReactErrors(page, getErrors, 'advancing wizard');
   });
 
   test('blueprint picker shows shipped preset teams (not just "From scratch")', async ({

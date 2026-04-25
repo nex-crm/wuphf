@@ -128,7 +128,9 @@
 }
 
 /* ─── CENTER article column ─── */
-.wk-article-col { padding: 0 64px 120px; }
+/* position: relative creates the positioning context for .pam-wrap (see
+ * styles/pam.css) — Pam's desk hangs off the top-right of the column. */
+.wk-article-col { padding: 0 64px 120px; position: relative; }
 
 /* ─── Status banner ─── */
 .wk-status-banner {
@@ -910,6 +912,38 @@
   font-size: 14px;
 }
 .wk-error { color: var(--wk-wikilink-broken); }
+
+/* Subtle spinner used for in-flight modal actions. Sized to sit inline with
+ * 13px button text without forcing a layout reflow. Wiki-surface scoped —
+ * no amber, no accent gradient; it uses the neutral border tokens so the
+ * spinner reads as "working" without stealing attention.
+ */
+.wk-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--wk-border);
+  border-top-color: var(--wk-text-muted);
+  border-radius: 50%;
+  animation: wk-spin 0.6s linear infinite;
+  vertical-align: -2px;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+@keyframes wk-spin { to { transform: rotate(360deg); } }
+
+/* "Searching the wiki…" status line shown below the (virtual) lookup input
+ * while the /wiki/lookup request is in flight. Fraunces-italic per
+ * DESIGN-WIKI.md hatnote typography — light mode, no amber, no dark surfaces.
+ */
+.wk-lookup-status {
+  font-family: var(--wk-body-serif);
+  font-style: italic;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--wk-text-muted);
+  margin: 0 0 12px;
+}
 
 /* ─── Audit log view (#/wiki/_audit) ─── */
 .wk-audit {

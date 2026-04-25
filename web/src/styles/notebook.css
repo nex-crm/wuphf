@@ -5,43 +5,53 @@
  * leak into the wiki (and vice versa).
  */
 
-.notebook-surface::-webkit-scrollbar { width: 10px; height: 10px; }
-.notebook-surface::-webkit-scrollbar-track { background: transparent; }
+.notebook-surface::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.notebook-surface::-webkit-scrollbar-track {
+  background: transparent;
+}
 .notebook-surface::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.25);
   border-radius: 10px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
-.notebook-surface::-webkit-scrollbar-thumb:hover { background-color: rgba(0, 0, 0, 0.4); background-clip: padding-box; }
+.notebook-surface::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(0, 0, 0, 0.4);
+  background-clip: padding-box;
+}
 
 .notebook-surface {
   /* Design tokens — copied verbatim from the approved variant-A mock. */
-  --nb-paper:         #FAFFE5;
-  --nb-paper-dark:    #E9DFC9;
-  --nb-rule:          rgba(150, 150, 64, 0.07);
-  --nb-surface:       #FAF5E8;
-  --nb-text:          #2A2721;
-  --nb-text-muted:    #5B5547;
-  --nb-text-tertiary: #8A8373;
-  --nb-border:        #D9CEB5;
-  --nb-border-light:  #E6DEC6;
-  --nb-ink-blue:      #274472;
-  --nb-stamp-red:     #B43A2F;
-  --nb-amber:         #C78A1F;
-  --nb-amber-bg:      rgba(199, 138, 31, 0.10);
-  --nb-amber-hover:   #B07C1B;
-  --nb-green-approve: #6A8B52;
-  --nb-green-bg:      rgba(106, 139, 82, 0.10);
+  --nb-paper: #faffe5;
+  --nb-paper-dark: #e9dfc9;
+  --nb-rule: rgba(150, 150, 64, 0.07);
+  --nb-surface: #faf5e8;
+  --nb-text: #2a2721;
+  --nb-text-muted: #5b5547;
+  --nb-text-tertiary: #8a8373;
+  --nb-border: #d9ceb5;
+  --nb-border-light: #e6dec6;
+  --nb-ink-blue: #274472;
+  --nb-stamp-red: #b43a2f;
+  --nb-amber: #c78a1f;
+  --nb-amber-bg: rgba(199, 138, 31, 0.1);
+  --nb-amber-hover: #b07c1b;
+  --nb-green-approve: #6a8b52;
+  --nb-green-bg: rgba(106, 139, 82, 0.1);
 
-  --nb-display:       'Covered By Your Grace', 'Comic Sans MS', cursive;
-  --nb-body-serif:    'IBM Plex Serif', Georgia, serif;
-  --nb-chrome:        -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
-  --nb-mono:          'Geist Mono', SFMono-Regular, Menlo, monospace;
+  --nb-display: "Covered By Your Grace", "Comic Sans MS", cursive;
+  --nb-body-serif: "IBM Plex Serif", Georgia, serif;
+  --nb-chrome:
+    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto,
+    sans-serif;
+  --nb-mono: "Geist Mono", SFMono-Regular, Menlo, monospace;
 
   --nb-sidebar-width: 260px;
-  --nb-article-max:   780px;
-  --nb-appbar-h:      46px;
+  --nb-article-max: 780px;
+  --nb-appbar-h: 46px;
 
   background-color: var(--nb-paper);
   background-image:
@@ -73,7 +83,9 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
-.notebook-surface a:hover { text-decoration-style: solid; }
+.notebook-surface a:hover {
+  text-decoration-style: solid;
+}
 
 /* Focus rings per DESIGN-NOTEBOOK.md accessibility spec. */
 .notebook-surface :focus-visible {
@@ -118,7 +130,10 @@
   z-index: 10;
   min-height: var(--nb-appbar-h);
 }
-.notebook-surface .nb-appbar-title { font-weight: 600; color: var(--nb-text); }
+.notebook-surface .nb-appbar-title {
+  font-weight: 600;
+  color: var(--nb-text);
+}
 .notebook-surface .nb-appbar-meta {
   margin-left: auto;
   font-family: var(--nb-mono);
@@ -139,10 +154,9 @@
 /* ── Author shelf (left sidebar) ─────────────────────────────── */
 .notebook-surface .nb-shelf {
   background-color: var(--olive-100, #f8ffdb);
-  background-image:
-    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.16 0 0 0 0 0.14 0 0 0 0 0.11 0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='320'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.16 0 0 0 0 0.14 0 0 0 0 0.11 0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   background-repeat: repeat;
-  border-right: 1px solid rgba(0, 0, 0, 0.10);
+  border-right: 1px solid rgba(0, 0, 0, 0.1);
   box-shadow: 16px 0 24px -24px rgba(0, 0, 0, 0.15);
   padding: 24px 16px 80px;
   font-family: var(--nb-chrome);
@@ -155,13 +169,19 @@
   scrollbar-width: thin;
   scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
 }
-.notebook-surface .nb-shelf::-webkit-scrollbar { width: 8px; }
-.notebook-surface .nb-shelf::-webkit-scrollbar-track { background: transparent; }
+.notebook-surface .nb-shelf::-webkit-scrollbar {
+  width: 8px;
+}
+.notebook-surface .nb-shelf::-webkit-scrollbar-track {
+  background: transparent;
+}
 .notebook-surface .nb-shelf::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.22);
   border-radius: 4px;
 }
-.notebook-surface .nb-shelf::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.35); }
+.notebook-surface .nb-shelf::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.35);
+}
 .notebook-surface .nb-shelf-head {
   display: flex;
   align-items: center;
@@ -177,7 +197,7 @@
   margin: 0;
 }
 .notebook-surface .nb-shelf-head .nb-shelf-role {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 11px;
   color: rgba(42, 39, 33, 0.55);
   margin-top: 2px;
@@ -192,7 +212,7 @@
   gap: 1px;
 }
 .notebook-surface .nb-shelf-list .nb-date-head {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 11px;
   color: rgba(42, 39, 33, 0.55);
   padding: 14px 6px 4px;
@@ -216,7 +236,9 @@
   color: inherit;
   transition: background 120ms ease;
 }
-.notebook-surface .nb-shelf-item:hover { background: rgba(42, 39, 33, 0.04); }
+.notebook-surface .nb-shelf-item:hover {
+  background: rgba(42, 39, 33, 0.04);
+}
 .notebook-surface .nb-shelf-item.is-current {
   background: rgba(42, 39, 33, 0.06);
 }
@@ -233,10 +255,12 @@
   text-overflow: ellipsis;
   overflow-wrap: anywhere;
 }
-.notebook-surface .nb-shelf-item.is-current .nb-shelf-t { font-weight: 600; }
+.notebook-surface .nb-shelf-item.is-current .nb-shelf-t {
+  font-weight: 600;
+}
 .notebook-surface .nb-shelf-item .nb-shelf-meta {
   color: rgba(42, 39, 33, 0.55);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 11px;
   margin-top: 4px;
   display: inline-flex;
@@ -255,7 +279,7 @@
   text-transform: none;
 }
 .notebook-surface .nb-shelf-item .nb-status-draft {
-  color: #6B6B6B;
+  color: #6b6b6b;
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -265,7 +289,7 @@
   text-transform: uppercase;
 }
 .notebook-surface .nb-shelf-item .nb-status-review {
-  color: #B8860B;
+  color: #b8860b;
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -275,7 +299,7 @@
   text-transform: uppercase;
 }
 .notebook-surface .nb-shelf-item .nb-status-changes {
-  color: #B43A2F;
+  color: #b43a2f;
   font-family: inherit;
   font-size: 11px;
   font-weight: 600;
@@ -309,8 +333,14 @@
   color: var(--nb-text-muted);
   margin-bottom: 8px;
 }
-.notebook-surface .nb-crumb a { color: var(--nb-text-muted); text-decoration-style: dotted; }
-.notebook-surface .nb-crumb strong { color: var(--nb-text); font-weight: 500; }
+.notebook-surface .nb-crumb a {
+  color: var(--nb-text-muted);
+  text-decoration-style: dotted;
+}
+.notebook-surface .nb-crumb strong {
+  color: var(--nb-text);
+  font-weight: 500;
+}
 
 /* Rotated red DRAFT stamp (absolute, does NOT repeat on scroll). */
 .notebook-surface .nb-draft-stamp {
@@ -342,7 +372,8 @@
   margin-top: 16px;
 }
 .notebook-surface .nb-entry-subtitle {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
   color: var(--nb-text-muted);
   margin-top: 6px;
@@ -354,7 +385,8 @@
   align-items: center;
   gap: 10px;
   margin: 16px 0 28px;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 12px;
   color: var(--nb-text-muted);
   padding: 10px 0 14px;
@@ -365,15 +397,20 @@
   background-size: 100% 6px;
   background-position: bottom left;
 }
-.notebook-surface .nb-byline strong { color: var(--nb-text); font-weight: 500; }
+.notebook-surface .nb-byline strong {
+  color: var(--nb-text);
+  font-weight: 500;
+}
 .notebook-surface .nb-byline .nb-byline-meta {
   margin-left: auto;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 11px;
   color: var(--nb-text-tertiary);
 }
 .notebook-surface .nb-draft-pill {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.06em;
@@ -407,7 +444,9 @@
 }
 
 /* ── Body markdown ───────────────────────────────────────────── */
-.notebook-surface .nb-body { position: relative; }
+.notebook-surface .nb-body {
+  position: relative;
+}
 .notebook-surface .nb-body h2 {
   /* Plex Serif at 30px per DESIGN-NOTEBOOK Typography — NOT Caveat here
      (the mock deliberately diverges; spec wins). */
@@ -444,17 +483,29 @@
   padding: 0;
   list-style-position: outside;
 }
-.notebook-surface .nb-body ul { list-style-type: disc; }
-.notebook-surface .nb-body ol { list-style-type: decimal; }
-.notebook-surface .nb-body ul.contains-task-list { list-style: none; padding-left: 0; margin-left: 0; }
-.notebook-surface .nb-body ul.contains-task-list li.task-list-item { list-style: none; }
+.notebook-surface .nb-body ul {
+  list-style-type: disc;
+}
+.notebook-surface .nb-body ol {
+  list-style-type: decimal;
+}
+.notebook-surface .nb-body ul.contains-task-list {
+  list-style: none;
+  padding-left: 0;
+  margin-left: 0;
+}
+.notebook-surface .nb-body ul.contains-task-list li.task-list-item {
+  list-style: none;
+}
 .notebook-surface .nb-body li {
   font-size: 17px;
   line-height: 1.72;
   margin: 4px 0;
   font-family: var(--nb-body-serif);
 }
-.notebook-surface .nb-body li::marker { color: var(--nb-text-tertiary); }
+.notebook-surface .nb-body li::marker {
+  color: var(--nb-text-tertiary);
+}
 .notebook-surface .nb-body blockquote {
   /* GFM blockquotes rendered as right-gutter marginalia on desktop, inline
      callout on mobile (see media query). */
@@ -482,13 +533,18 @@
   border-radius: 2px;
   overflow-x: auto;
 }
-.notebook-surface .nb-body pre code { background: transparent; padding: 0; }
+.notebook-surface .nb-body pre code {
+  background: transparent;
+  padding: 0;
+}
 .notebook-surface .nb-body input[type="checkbox"] {
   margin-right: 6px;
   accent-color: var(--nb-green-approve);
   opacity: 1;
 }
-.notebook-surface .nb-body del { color: var(--nb-text-tertiary); }
+.notebook-surface .nb-body del {
+  color: var(--nb-text-tertiary);
+}
 
 /* Wikilinks — dashed underline, ink-blue. Broken wikilinks red. */
 .notebook-surface a.nb-wikilink {
@@ -497,7 +553,9 @@
   text-decoration-thickness: 1px;
   text-underline-offset: 3px;
 }
-.notebook-surface a.nb-wikilink.is-broken { color: var(--nb-stamp-red); }
+.notebook-surface a.nb-wikilink.is-broken {
+  color: var(--nb-stamp-red);
+}
 
 /* Marginalia — right-gutter Q/NEXT callouts (desktop). */
 .notebook-surface .nb-margin {
@@ -532,7 +590,9 @@
   font-weight: 600;
   margin-right: 6px;
 }
-.notebook-surface .nb-promoted-back a { color: var(--nb-ink-blue); }
+.notebook-surface .nb-promoted-back a {
+  color: var(--nb-ink-blue);
+}
 
 /* Inline review thread (stub until Lane C). */
 .notebook-surface .nb-review {
@@ -564,7 +624,9 @@
   gap: 10px;
   align-items: start;
 }
-.notebook-surface .nb-review-comment:first-of-type { border-top: 0; }
+.notebook-surface .nb-review-comment:first-of-type {
+  border-top: 0;
+}
 .notebook-surface .nb-review-comment .nb-comment-body {
   font-family: var(--nb-body-serif);
   font-size: 15px;
@@ -598,7 +660,8 @@
   flex-wrap: wrap;
 }
 .notebook-surface .nb-promote-btn {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 13px;
   font-weight: 600;
   line-height: 1;
@@ -614,7 +677,10 @@
   gap: 6px;
   text-decoration: none;
   border-radius: 8px;
-  transition: background-color 120ms ease-out, border-color 120ms ease-out, box-shadow 120ms ease-out;
+  transition:
+    background-color 120ms ease-out,
+    border-color 120ms ease-out,
+    box-shadow 120ms ease-out;
 }
 .notebook-surface .nb-promote-btn:hover {
   background: var(--accent-warm, #8a3fa8);
@@ -644,7 +710,8 @@
 
 /* Posterity line (bottom italic file-path footer). */
 .notebook-surface .nb-posterity {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-style: normal;
   font-size: 12px;
   color: var(--nb-text-muted);
@@ -653,10 +720,14 @@
   border-top: 0;
   background-image: none;
 }
-.notebook-surface .nb-posterity strong { color: var(--nb-text); font-weight: 600; }
+.notebook-surface .nb-posterity strong {
+  color: var(--nb-text);
+  font-weight: 600;
+}
 .notebook-surface .nb-posterity code,
 .notebook-surface .nb-posterity .nb-posterity-path {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 12px;
   font-style: normal;
   color: var(--nb-text-muted);
@@ -684,7 +755,7 @@
 }
 .notebook-surface .nb-catalog-meta {
   margin-left: auto;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 12px;
   color: var(--nb-text);
   opacity: 0.55;
@@ -700,7 +771,9 @@
   background-size: 100% 6px;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 6' preserveAspectRatio='none'><path d='M0 3.1 L 7 2.8 L 14 3.3 L 22 2.9 L 31 3.2 L 38 2.7 L 46 3.4 L 54 3.0 L 63 2.8 L 71 3.3 L 79 2.9 L 88 3.2 L 96 2.6 L 105 3.1 L 113 3.4 L 121 2.8 L 130 3.2 L 138 2.9 L 147 3.3 L 155 2.7 L 163 3.0 L 172 3.4 L 180 2.8 L 189 3.1 L 197 3.3 L 205 2.7 L 214 3.2 L 222 2.9 L 231 3.4 L 239 2.8 L 247 3.1 L 256 2.7 L 264 3.3 L 273 3.0 L 281 2.8 L 289 3.2 L 298 3.4 L 306 2.9 L 315 3.0 L 323 3.3 L 331 2.7 L 340 3.2 L 348 2.9 L 357 3.1 L 365 3.4 L 373 2.8 L 382 3.0 L 390 3.3 L 400 2.9' fill='none' stroke='%232A2721' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
-.notebook-surface .nb-shelf-row:last-of-type { background-image: none; }
+.notebook-surface .nb-shelf-row:last-of-type {
+  background-image: none;
+}
 .notebook-surface .nb-shelf-row-head {
   display: flex;
   align-items: flex-start;
@@ -731,7 +804,7 @@
 .notebook-surface .nb-shelf-card {
   background: #ffffff;
   border: none;
-  outline: 0.5px solid rgba(0, 0, 0, 0.10);
+  outline: 0.5px solid rgba(0, 0, 0, 0.1);
   outline-offset: -0.5px;
   border-radius: 8px;
   padding: 12px 14px;
@@ -749,12 +822,15 @@
   box-shadow:
     0 1px 1px rgba(42, 39, 33, 0.04),
     0 1px 2px rgba(42, 39, 33, 0.04);
-  transition: background 90ms ease, box-shadow 90ms ease, outline-color 90ms ease;
+  transition:
+    background 90ms ease,
+    box-shadow 90ms ease,
+    outline-color 90ms ease;
   position: relative;
   overflow: hidden;
 }
 .notebook-surface .nb-shelf-card:hover {
-  background: #FAFAFA;
+  background: #fafafa;
   outline-color: rgba(0, 0, 0, 0.22);
   box-shadow:
     0 1px 2px rgba(42, 39, 33, 0.06),
@@ -768,7 +844,7 @@
   display: flex;
   gap: 8px;
   align-items: center;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 11px;
   color: rgba(42, 39, 33, 0.55);
 }
@@ -787,11 +863,17 @@
 .notebook-surface .nb-shelf-card-badge-review::first-letter {
   text-transform: uppercase;
 }
-.notebook-surface .nb-shelf-card-badge-draft { color: #6B6B6B; }
-.notebook-surface .nb-shelf-card-badge-promoted { color: var(--green, #03a04c); }
-.notebook-surface .nb-shelf-card-badge-review { color: var(--nb-amber); }
+.notebook-surface .nb-shelf-card-badge-draft {
+  color: #6b6b6b;
+}
+.notebook-surface .nb-shelf-card-badge-promoted {
+  color: var(--green, #03a04c);
+}
+.notebook-surface .nb-shelf-card-badge-review {
+  color: var(--nb-amber);
+}
 .notebook-surface .nb-shelf-row-stats {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 11px;
   color: var(--nb-text);
   opacity: 0.55;
@@ -837,7 +919,7 @@
 }
 .notebook-surface .nb-review-queue-meta {
   margin-left: auto;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 12px;
   color: var(--nb-text);
   opacity: 0.55;
@@ -910,9 +992,9 @@
   flex-shrink: 0;
 }
 .notebook-surface .nb-review-card {
-  background: #EEF679;
+  background: #eef679;
   border: none;
-  outline: 0.5px solid rgba(0, 0, 0, 0.10);
+  outline: 0.5px solid rgba(0, 0, 0, 0.1);
   outline-offset: -0.5px;
   border-radius: 8px;
   padding: 12px 14px;
@@ -927,19 +1009,25 @@
   box-shadow:
     0 1px 1px rgba(42, 39, 33, 0.04),
     0 1px 2px rgba(42, 39, 33, 0.04);
-  transition: background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition:
+    background 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
   position: relative;
   overflow: hidden;
 }
 .notebook-surface .nb-review-card:hover {
-  background: #F5FB95;
+  background: #f5fb95;
   transform: translateY(-2px);
   box-shadow:
     0 1px 1px rgba(42, 39, 33, 0.05),
     0 3px 6px rgba(42, 39, 33, 0.06),
     0 8px 14px rgba(42, 39, 33, 0.05);
 }
-.notebook-surface .nb-review-card.is-active { outline: 2px solid var(--nb-ink-blue); outline-offset: -2px; }
+.notebook-surface .nb-review-card.is-active {
+  outline: 2px solid var(--nb-ink-blue);
+  outline-offset: -2px;
+}
 .notebook-surface .nb-review-card-title {
   font-family: var(--nb-body-serif);
   font-size: 15px;
@@ -966,7 +1054,7 @@
   flex-wrap: wrap;
 }
 .notebook-surface .nb-review-card-path {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 11px;
   color: var(--nb-text);
   opacity: 0.55;
@@ -979,7 +1067,7 @@
 .notebook-surface .nb-review-col-empty {
   color: var(--nb-text);
   opacity: 0.45;
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-style: normal;
   font-size: 12px;
   padding: 12px 4px;
@@ -987,12 +1075,20 @@
 
 /* Review detail drawer */
 @keyframes nb-drawer-backdrop-in {
-  from { background: rgba(0, 0, 0, 0); }
-  to   { background: rgba(0, 0, 0, 0.32); }
+  from {
+    background: rgba(0, 0, 0, 0);
+  }
+  to {
+    background: rgba(0, 0, 0, 0.32);
+  }
 }
 @keyframes nb-drawer-slide-in {
-  from { transform: translateX(100%); }
-  to   { transform: translateX(0); }
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
 }
 .notebook-surface .nb-review-drawer-backdrop {
   position: fixed;
@@ -1014,7 +1110,8 @@
   padding: 20px 24px 28px;
   overflow-y: auto;
   animation: nb-drawer-slide-in 260ms cubic-bezier(0.22, 0.61, 0.36, 1);
-  font-family: -apple-system, BlinkMacSystemFont, Inter, 'Segoe UI', Roboto, sans-serif;
+  font-family:
+    -apple-system, BlinkMacSystemFont, Inter, "Segoe UI", Roboto, sans-serif;
   color: var(--text, #1d1c1d);
   font-size: 13px;
   line-height: 1.5;
@@ -1052,7 +1149,9 @@
   cursor: pointer;
   color: var(--text-muted, #616061);
   padding: 0 0 2px;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 .notebook-surface .nb-review-drawer-close:hover {
   background: rgba(0, 0, 0, 0.05);
@@ -1151,7 +1250,9 @@
   font-size: 15px;
   color: var(--nb-text-muted);
 }
-.notebook-surface .nb-error { color: var(--nb-stamp-red); }
+.notebook-surface .nb-error {
+  color: var(--nb-stamp-red);
+}
 .notebook-surface .nb-skeleton {
   display: block;
   background: var(--nb-paper-dark);
@@ -1224,7 +1325,9 @@
   .notebook-surface .nb-shelf-list::-webkit-scrollbar-thumb:hover {
     background: rgba(42, 39, 33, 0.4);
   }
-  .notebook-surface .nb-shelf-list .nb-date-head { display: none; }
+  .notebook-surface .nb-shelf-list .nb-date-head {
+    display: none;
+  }
   .notebook-surface .nb-shelf-item {
     flex: 0 0 auto;
     min-width: 180px;
@@ -1232,9 +1335,12 @@
 }
 
 @media (max-width: 767px) {
-  .notebook-surface .nb-entry-title { font-size: 36px; }
+  .notebook-surface .nb-entry-title {
+    font-size: 36px;
+  }
   .notebook-surface .nb-draft-stamp {
-    top: 12px; right: 12px;
+    top: 12px;
+    right: 12px;
     font-size: 22px;
     padding: 3px 8px 1px;
     opacity: 0.5;
@@ -1252,14 +1358,22 @@
 }
 
 @media (max-width: 374px) {
-  .notebook-surface .nb-entry-title { font-size: 28px; }
-  .notebook-surface .nb-draft-stamp { display: none; }
-  .notebook-surface .nb-margin { display: none; }
+  .notebook-surface .nb-entry-title {
+    font-size: 28px;
+  }
+  .notebook-surface .nb-draft-stamp {
+    display: none;
+  }
+  .notebook-surface .nb-margin {
+    display: none;
+  }
 }
 
 /* Respect reduced motion — instant transitions, no pulse. */
 @media (prefers-reduced-motion: reduce) {
-  .notebook-surface .nb-promote-btn { transition: none; }
+  .notebook-surface .nb-promote-btn {
+    transition: none;
+  }
 }
 
 /* v1.3 Image support — notebook drop */
@@ -1305,7 +1419,7 @@
 }
 .nb-image-drop__toast--err {
   background: rgba(201, 74, 74, 0.08);
-  color: #C94A4A;
+  color: #c94a4a;
   border: 1px solid rgba(201, 74, 74, 0.25);
 }
 .nb-article-with-drop {
