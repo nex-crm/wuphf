@@ -23,7 +23,7 @@ type TeamSkillCreateArgs struct {
 	Content     string   `json:"content" jsonschema:"Concrete step-by-step instructions agents must follow when running the skill"`
 	Trigger     string   `json:"trigger,omitempty" jsonschema:"When agents should invoke this skill"`
 	Tags        []string `json:"tags,omitempty" jsonschema:"Optional tags such as engineering, ops, launch"`
-	Action      string   `json:"action,omitempty" jsonschema:"propose or create. Defaults to propose; create makes the skill active immediately."`
+	Action      string   `json:"action" jsonschema:"Required: propose or create. Any agent may propose; only CEO may create an active skill immediately."`
 	Channel     string   `json:"channel,omitempty" jsonschema:"Optional channel slug to log the proposal into. Defaults to the active conversation channel."`
 	MySlug      string   `json:"my_slug,omitempty" jsonschema:"Agent slug creating the skill. Defaults to WUPHF_AGENT_SLUG."`
 }
@@ -48,20 +48,16 @@ type brokerSkillResponse struct {
 func registerSkillAuthoringTools(server *mcp.Server) {
 	mcp.AddTool(server, officeWriteTool(
 		"team_skill_create",
-		"Create a durable WUPHF skill through structured fields instead of a prose block. CEO should use this when the human asks for a generated skill or reusable workflow. Use action=create when the human explicitly asked to create or activate the skill; use action=propose for unsolicited suggestions that should queue human approval first.",
+		"Create or propose a durable WUPHF skill through structured fields instead of a prose block. Any agent may use action=propose to queue human approval. Only CEO may use action=create to activate immediately when the human explicitly asked to create or activate the skill.",
 	), handleTeamSkillCreate)
 }
 
 // handleTeamSkillCreate creates a skill through the broker's structured API.
-// This is the deterministic path for CEO-authored skills; [SKILL PROPOSAL]
-// blocks remain only as a backwards-compatible parser for older prompts.
+// This is the deterministic path for agent-authored skills.
 func handleTeamSkillCreate(ctx context.Context, _ *mcp.CallToolRequest, args TeamSkillCreateArgs) (*mcp.CallToolResult, any, error) {
 	slug, err := resolveSlug(args.MySlug)
 	if err != nil {
 		return toolError(err), nil, nil
-	}
-	if slug != "ceo" {
-		return toolError(fmt.Errorf("team_skill_create is restricted to the CEO")), nil, nil
 	}
 	name := skillPathSegment(args.Name)
 	if name == "" {
@@ -73,10 +69,13 @@ func handleTeamSkillCreate(ctx context.Context, _ *mcp.CallToolRequest, args Tea
 	}
 	action := strings.ToLower(strings.TrimSpace(args.Action))
 	if action == "" {
-		action = "propose"
+		return toolError(fmt.Errorf("action is required: use propose or create")), nil, nil
 	}
 	if action != "propose" && action != "create" {
 		return toolError(fmt.Errorf("action must be propose or create")), nil, nil
+	}
+	if action == "create" && slug != "ceo" {
+		return toolError(fmt.Errorf("only CEO may use action=create; use action=propose to queue a skill proposal")), nil, nil
 	}
 	channel := resolveConversationChannel(ctx, slug, args.Channel)
 	title := strings.TrimSpace(args.Title)

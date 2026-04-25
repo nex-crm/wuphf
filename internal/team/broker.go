@@ -7588,9 +7588,6 @@ func (b *Broker) handlePostMessage(w http.ResponseWriter, r *http.Request) {
 		delete(b.lastTaggedAt, msg.From)
 	}
 
-	// Auto-detect skill proposals from CEO messages
-	b.parseSkillProposalLocked(msg)
-
 	if err := b.saveLocked(); err != nil {
 		b.mu.Unlock()
 		http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
@@ -7761,9 +7758,6 @@ func (b *Broker) PostMessage(from, channel, content string, tagged []string, rep
 	if b.lastTaggedAt != nil {
 		delete(b.lastTaggedAt, msg.From)
 	}
-	// Agent turns land here rather than through handlePostMessage. Keep the
-	// durable skill proposal side effect identical for CEO-authored blocks.
-	b.parseSkillProposalLocked(msg)
 	b.appendActionLocked("automation", msg.Source, channel, msg.From, truncateSummary(msg.Title+" "+msg.Content, 140), msg.ID)
 	if err := b.saveLocked(); err != nil {
 		return channelMessage{}, err
@@ -10347,6 +10341,15 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	createdBy := strings.TrimSpace(body.CreatedBy)
+	if action == "propose" {
+		createdBy = normalizeActorSlug(createdBy)
+		if b.findMemberLocked(createdBy) == nil {
+			http.Error(w, "created_by must be a registered agent for skill proposals", http.StatusForbidden)
+			return
+		}
+	}
+
 	if existing := b.findSkillByNameLocked(body.Name); existing != nil {
 		http.Error(w, "skill with this name already exists", http.StatusConflict)
 		return
@@ -10364,7 +10367,7 @@ func (b *Broker) handlePostSkill(w http.ResponseWriter, r *http.Request) {
 		Title:               title,
 		Description:         strings.TrimSpace(body.Description),
 		Content:             strings.TrimSpace(body.Content),
-		CreatedBy:           strings.TrimSpace(body.CreatedBy),
+		CreatedBy:           createdBy,
 		Channel:             channel,
 		Tags:                body.Tags,
 		Trigger:             strings.TrimSpace(body.Trigger),
@@ -10651,127 +10654,6 @@ func (b *Broker) handleInvokeSkill(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"skill": *sk, "channel": channel})
-}
-
-// parseSkillProposalLocked extracts a [SKILL PROPOSAL] block from a message
-// and creates a proposed skill. Must be called with b.mu held.
-func (b *Broker) parseSkillProposalLocked(msg channelMessage) {
-	// Only the team lead (CEO) may propose skills via message blocks.
-	// If no lead exists (empty office), reject all proposals to prevent injection.
-	lead := officeLeadSlugFrom(b.members)
-	if lead == "" || msg.From != lead {
-		return
-	}
-
-	const startTag = "[SKILL PROPOSAL]"
-	const endTag = "[/SKILL PROPOSAL]"
-
-	channel := msg.Channel
-	if channel == "" {
-		channel = "general"
-	}
-
-	content := msg.Content
-	searchFrom := 0
-	for {
-		startIdx := strings.Index(content[searchFrom:], startTag)
-		if startIdx < 0 {
-			return
-		}
-		startIdx += searchFrom
-		blockStart := startIdx + len(startTag)
-		endRel := strings.Index(content[blockStart:], endTag)
-		if endRel < 0 {
-			return
-		}
-		endIdx := blockStart + endRel
-		block := strings.TrimSpace(content[blockStart:endIdx])
-		searchFrom = endIdx + len(endTag)
-
-		// Split on "---" separator between metadata and instructions.
-		parts := strings.SplitN(block, "---", 2)
-		if len(parts) < 2 {
-			continue
-		}
-
-		meta := strings.TrimSpace(parts[0])
-		instructions := strings.TrimSpace(parts[1])
-
-		// Parse metadata fields.
-		var name, title, description, trigger string
-		var tags []string
-		for _, line := range strings.Split(meta, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "Name:") {
-				name = strings.TrimSpace(strings.TrimPrefix(line, "Name:"))
-			} else if strings.HasPrefix(line, "Title:") {
-				title = strings.TrimSpace(strings.TrimPrefix(line, "Title:"))
-			} else if strings.HasPrefix(line, "Description:") {
-				description = strings.TrimSpace(strings.TrimPrefix(line, "Description:"))
-			} else if strings.HasPrefix(line, "Trigger:") {
-				trigger = strings.TrimSpace(strings.TrimPrefix(line, "Trigger:"))
-			} else if strings.HasPrefix(line, "Tags:") {
-				raw := strings.TrimSpace(strings.TrimPrefix(line, "Tags:"))
-				for _, t := range strings.Split(raw, ",") {
-					t = strings.TrimSpace(t)
-					if t != "" {
-						tags = append(tags, t)
-					}
-				}
-			}
-		}
-
-		if name == "" || title == "" {
-			continue
-		}
-
-		slug := skillSlug(name)
-
-		// Check for duplicate (skip archived).
-		duplicate := false
-		for _, s := range b.skills {
-			if s.Name == slug && s.Status != "archived" {
-				duplicate = true
-				break
-			}
-		}
-		if duplicate {
-			continue
-		}
-
-		now := time.Now().UTC().Format(time.RFC3339)
-		skill := teamSkill{
-			ID:          slug,
-			Name:        slug,
-			Title:       title,
-			Description: description,
-			Content:     instructions,
-			CreatedBy:   msg.From,
-			Channel:     channel,
-			Tags:        tags,
-			Trigger:     trigger,
-			UsageCount:  0,
-			Status:      "proposed",
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		b.skills = append(b.skills, skill)
-
-		// Announce the proposal.
-		b.counter++
-		b.appendMessageLocked(channelMessage{
-			ID:        fmt.Sprintf("msg-%d", b.counter),
-			From:      "system",
-			Channel:   channel,
-			Kind:      "skill_proposal",
-			Title:     "Skill Proposed: " + title,
-			Content:   fmt.Sprintf("@%s proposed a new skill **%s**: %s. Use /skills to review and approve.", msg.From, title, description),
-			Timestamp: now,
-		})
-
-		// Surface the proposal in the Requests panel as a non-blocking human decision.
-		b.appendSkillProposalRequestLocked(skill, channel, now)
-	}
 }
 
 func (b *Broker) appendSkillProposalRequestLocked(skill teamSkill, channel, now string) {

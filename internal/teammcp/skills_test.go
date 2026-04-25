@@ -4,11 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/team"
 )
+
+func TestTeamSkillCreateRegisteredForSpecialists(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		channel  string
+		oneOnOne bool
+	}{
+		{name: "office", channel: "general"},
+		{name: "dm", channel: "dm-workflow-architect"},
+		{name: "one-on-one", channel: "dm-workflow-architect", oneOnOne: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			names := listRegisteredTools(t, tc.channel, tc.oneOnOne)
+			if !slices.Contains(names, "team_skill_create") {
+				t.Fatalf("expected team_skill_create for specialist in %s mode; tools=%v", tc.name, names)
+			}
+		})
+	}
+}
 
 // TestHandleTeamSkillRunBumpsUsageAndLogsInvocation verifies that when an
 // agent calls team_skill_run through the MCP, the broker bumps the skill's
@@ -165,6 +185,7 @@ func TestHandleTeamSkillCreateProposesSkill(t *testing.T) {
 		Content:     "1. Summarize state.\n2. Name the owner.\n3. Name the next action.",
 		Trigger:     "Before delegating multi-step work",
 		Tags:        []string{"coordination", "ops"},
+		Action:      "propose",
 		MySlug:      "ceo",
 		Channel:     "general",
 	})
@@ -202,20 +223,6 @@ func TestHandleTeamSkillCreateProposesSkill(t *testing.T) {
 	}
 	if got := len(b.Requests("general", false)); got != 1 {
 		t.Fatalf("expected 1 approval request, got %d", got)
-	}
-}
-
-func TestHandleTeamSkillCreateRejectsNonCEO(t *testing.T) {
-	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
-		Name:    "handoff-checklist",
-		Content: "1. Do it",
-		MySlug:  "pm",
-	})
-	if err != nil {
-		t.Fatalf("unexpected go error: %v", err)
-	}
-	if res == nil || !res.IsError {
-		t.Fatalf("expected IsError=true for non-CEO create, got %+v", res)
 	}
 }
 
@@ -269,5 +276,68 @@ func TestHandleTeamSkillCreateCanActivateImmediately(t *testing.T) {
 	}
 	if got := len(b.Requests("general", false)); got != 0 {
 		t.Fatalf("expected no approval request for action=create, got %d", got)
+	}
+}
+
+func TestHandleTeamSkillCreateAllowsNonCEOProposal(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	b := team.NewBroker()
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("start broker: %v", err)
+	}
+	defer b.Stop()
+
+	t.Setenv("WUPHF_TEAM_BROKER_URL", "http://"+b.Addr())
+	t.Setenv("WUPHF_BROKER_TOKEN", b.Token())
+
+	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
+		Name:    "planner-retro-loop",
+		Title:   "Planner Retro Loop",
+		Content: "1. Collect notes.\n2. Extract action items.",
+		Action:  "propose",
+		MySlug:  "planner",
+		Channel: "general",
+	})
+	if err != nil {
+		t.Fatalf("skill propose: %v", err)
+	}
+	if res == nil || res.IsError {
+		t.Fatalf("expected successful tool result, got %+v", res)
+	}
+	if got := len(b.Requests("general", false)); got != 1 {
+		t.Fatalf("expected 1 approval request, got %d", got)
+	}
+	requests := b.Requests("general", false)
+	if requests[0].From != "planner" || requests[0].ReplyTo != "planner-retro-loop" {
+		t.Fatalf("unexpected approval request: %+v", requests[0])
+	}
+}
+
+func TestHandleTeamSkillCreateRejectsNonCEOActiveCreate(t *testing.T) {
+	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
+		Name:    "handoff-checklist",
+		Content: "1. Do it",
+		Action:  "create",
+		MySlug:  "pm",
+	})
+	if err != nil {
+		t.Fatalf("unexpected go error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected IsError=true for non-CEO active create, got %+v", res)
+	}
+}
+
+func TestHandleTeamSkillCreateRequiresAction(t *testing.T) {
+	res, _, err := handleTeamSkillCreate(context.Background(), nil, TeamSkillCreateArgs{
+		Name:    "handoff-checklist",
+		Content: "1. Do it",
+		MySlug:  "pm",
+	})
+	if err != nil {
+		t.Fatalf("unexpected go error: %v", err)
+	}
+	if res == nil || !res.IsError {
+		t.Fatalf("expected IsError=true when action is omitted, got %+v", res)
 	}
 }
