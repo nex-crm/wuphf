@@ -148,6 +148,17 @@ type FactStore interface {
 	GetFact(ctx context.Context, id string) (TypedFact, bool, error)
 	ListFactsForEntity(ctx context.Context, slug string) ([]TypedFact, error)
 	ListEdgesForEntity(ctx context.Context, slug string) ([]IndexEdge, error)
+	// ListAllFacts returns every indexed fact, ordered deterministically by
+	// ID. Used by cross-entity consumers (e.g. playbook cluster detection in
+	// Slice 2 Thread C) that need to scan reinforced (predicate, object)
+	// pairs across all entities. Read-only; never mutates the fact log.
+	ListAllFacts(ctx context.Context) ([]TypedFact, error)
+	// CountFacts returns the total number of indexed facts. Cheap in both
+	// backends (SELECT COUNT(*) on SQLite, len(map) on in-memory). Callers
+	// that do full scans via ListAllFacts use this as a cheap pre-check so
+	// they can log a warning when the corpus outgrows the bounded-scan
+	// assumption (no index on predicate/object yet — tracked by Slice 3).
+	CountFacts(ctx context.Context) (int, error)
 	ResolveRedirect(ctx context.Context, slug string) (string, bool, error)
 
 	// ListFactsByPredicateObject returns every fact whose triplet matches
@@ -1005,6 +1016,32 @@ func (s *inMemoryFactStore) ListEdgesForEntity(_ context.Context, slug string) (
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]IndexEdge(nil), s.edgesBy[slug]...), nil
+}
+
+// ListAllFacts returns every fact in the store, sorted by ID. Deterministic
+// ordering keeps cross-entity consumers (playbook clustering) reproducible.
+func (s *inMemoryFactStore) ListAllFacts(_ context.Context) ([]TypedFact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.facts))
+	for id := range s.facts {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]TypedFact, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, s.facts[id])
+	}
+	return out, nil
+}
+
+// CountFacts returns len(facts) without materialising a slice. Paired with
+// ListAllFacts so a consumer can cheaply pre-check corpus size before
+// triggering a full scan.
+func (s *inMemoryFactStore) CountFacts(_ context.Context) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.facts), nil
 }
 
 func (s *inMemoryFactStore) ResolveRedirect(_ context.Context, slug string) (string, bool, error) {
