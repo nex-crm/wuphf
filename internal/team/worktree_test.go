@@ -14,15 +14,10 @@ import (
 func TestCleanupPersistedTaskWorktreesRemovesUniqueTrackedWorktrees(t *testing.T) {
 	stateDir := t.TempDir()
 	statePath := filepath.Join(stateDir, "broker-state.json")
+	t.Setenv("WUPHF_BROKER_STATE_PATH", statePath)
 
-	oldStatePath := brokerStatePath
 	oldCleanup := cleanupTaskWorktree
-	defer func() {
-		brokerStatePath = oldStatePath
-		cleanupTaskWorktree = oldCleanup
-	}()
-
-	brokerStatePath = func() string { return statePath }
+	defer func() { cleanupTaskWorktree = oldCleanup }()
 
 	var calls []string
 	cleanupTaskWorktree = func(path, branch string) error {
@@ -58,10 +53,7 @@ func TestCleanupPersistedTaskWorktreesRemovesUniqueTrackedWorktrees(t *testing.T
 func TestCleanupPersistedTaskWorktreesMissingStateIsNoOp(t *testing.T) {
 	stateDir := t.TempDir()
 	statePath := filepath.Join(stateDir, "broker-state.json")
-
-	oldStatePath := brokerStatePath
-	defer func() { brokerStatePath = oldStatePath }()
-	brokerStatePath = func() string { return statePath }
+	t.Setenv("WUPHF_BROKER_STATE_PATH", statePath)
 
 	if err := CleanupPersistedTaskWorktrees(); err != nil {
 		t.Fatalf("expected missing state cleanup to succeed, got %v", err)
@@ -191,15 +183,11 @@ func TestDefaultPrepareTaskWorktreeOverlaysCompletedSiblingTaskWorkspace(t *test
 	}
 	defer func() { _ = os.Chdir(oldCwd) }()
 	oldTaskRoot := taskWorktreeRootDir
-	oldStatePath := brokerStatePath
-	defer func() {
-		taskWorktreeRootDir = oldTaskRoot
-		brokerStatePath = oldStatePath
-	}()
+	defer func() { taskWorktreeRootDir = oldTaskRoot }()
 	taskWorktreeRootDir = func(repoRoot string) string {
 		return filepath.Join(worktreeRoot, sanitizeWorktreeToken(filepath.Base(repoRoot)))
 	}
-	brokerStatePath = func() string { return statePath }
+	t.Setenv("WUPHF_BROKER_STATE_PATH", statePath)
 
 	run := func(dir string, args ...string) {
 		t.Helper()
@@ -294,15 +282,11 @@ func TestDefaultPrepareTaskWorktreeSkipsDuplicateAndMissingCompletedSiblingSourc
 	}
 	defer func() { _ = os.Chdir(oldCwd) }()
 	oldTaskRoot := taskWorktreeRootDir
-	oldStatePath := brokerStatePath
-	defer func() {
-		taskWorktreeRootDir = oldTaskRoot
-		brokerStatePath = oldStatePath
-	}()
+	defer func() { taskWorktreeRootDir = oldTaskRoot }()
 	taskWorktreeRootDir = func(repoRoot string) string {
 		return filepath.Join(worktreeRoot, sanitizeWorktreeToken(filepath.Base(repoRoot)))
 	}
-	brokerStatePath = func() string { return statePath }
+	t.Setenv("WUPHF_BROKER_STATE_PATH", statePath)
 
 	run := func(dir string, args ...string) {
 		t.Helper()

@@ -13,14 +13,13 @@ import (
 // redirected to a temp dir so we never touch the real wiki.
 func TestOnboardingCompleteMaterializesWiki(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
 
 	// Redirect HOME so the onboarding hook writes into the test tempdir
 	// instead of ~/.wuphf. os.UserHomeDir respects $HOME on unix.
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -57,13 +56,12 @@ func TestOnboardingCompleteMaterializesWiki(t *testing.T) {
 // earlier agent notes.
 func TestOnboardingCompleteWikiIsIdempotent(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
 
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
 	// First run.
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
 		t.Fatalf("first onboardingCompleteFn: %v", err)
 	}
@@ -76,8 +74,11 @@ func TestOnboardingCompleteWikiIsIdempotent(t *testing.T) {
 		t.Fatalf("user-edit simulation: %v", err)
 	}
 
-	// Second run — e.g. the user re-picks the blueprint.
-	b2 := NewBroker()
+	// Second run — e.g. the user re-picks the blueprint. Pinning to the
+	// same broker-state.json as `b` so normalizeLoadedStateLocked observes
+	// the persistence from the first run (matches production behavior
+	// where a CLI restart reads ~/.wuphf/team/broker-state.json).
+	b2 := NewBrokerAt(b.statePath)
 	if err := b2.onboardingCompleteFn("Re-pick niche CRM", false, "niche-crm", nil); err != nil {
 		t.Fatalf("second onboardingCompleteFn: %v", err)
 	}
@@ -97,12 +98,11 @@ func TestOnboardingCompleteWikiIsIdempotent(t *testing.T) {
 // a functional empty wiki rather than a partial one.
 func TestOnboardingCompleteSynthesizedBlueprintSkipsWiki(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
 
 	tmpHome := t.TempDir()
 	t.Setenv("HOME", tmpHome)
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Run a bespoke operation", false, "", nil); err != nil {
 		t.Fatalf("onboardingCompleteFn (synthesized): %v", err)
 	}

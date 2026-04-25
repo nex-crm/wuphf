@@ -122,8 +122,6 @@ func TestOperationBlueprintMatrixBuildsBootstrapPackage(t *testing.T) {
 
 func TestOperationBlueprintMatrixSeedsBrokerOffice(t *testing.T) {
 	repoRoot := teamTestRepoRoot(t)
-	oldPathFn := brokerStatePath
-	defer func() { brokerStatePath = oldPathFn }()
 
 	for _, id := range teamOperationFixtureIDs(t, repoRoot) {
 		t.Run(id, func(t *testing.T) {
@@ -146,15 +144,12 @@ func TestOperationBlueprintMatrixSeedsBrokerOffice(t *testing.T) {
 				t.Fatalf("write manifest: %v", err)
 			}
 
-			stateDir := t.TempDir()
-			brokerStatePath = func() string { return filepath.Join(stateDir, "broker-state.json") }
-
 			blueprint, err := operations.LoadBlueprint(repoRoot, id)
 			if err != nil {
 				t.Fatalf("load blueprint: %v", err)
 			}
 
-			b := NewBroker()
+			b := newTestBroker(t)
 			members := b.OfficeMembers()
 			if len(members) != len(blueprint.Starter.Agents) {
 				t.Fatalf("expected broker office roster to match starter agents, got %d want %d", len(members), len(blueprint.Starter.Agents))
@@ -194,8 +189,6 @@ func TestOperationBlueprintMatrixSeedsBrokerOffice(t *testing.T) {
 
 func TestOperationBlueprintMatrixServesBootstrapPackageEndpoint(t *testing.T) {
 	repoRoot := teamTestRepoRoot(t)
-	oldPathFn := brokerStatePath
-	defer func() { brokerStatePath = oldPathFn }()
 
 	for _, id := range teamOperationFixtureIDs(t, repoRoot) {
 		t.Run(id, func(t *testing.T) {
@@ -218,15 +211,12 @@ func TestOperationBlueprintMatrixServesBootstrapPackageEndpoint(t *testing.T) {
 				t.Fatalf("write manifest: %v", err)
 			}
 
-			stateDir := t.TempDir()
-			brokerStatePath = func() string { return filepath.Join(stateDir, "broker-state.json") }
-
 			blueprint, err := operations.LoadBlueprint(repoRoot, id)
 			if err != nil {
 				t.Fatalf("load blueprint: %v", err)
 			}
 
-			b := NewBroker()
+			b := newTestBroker(t)
 			req := httptest.NewRequest(http.MethodGet, "/operations/bootstrap-package", nil)
 			rec := httptest.NewRecorder()
 			b.handleOperationBootstrapPackage(rec, req)

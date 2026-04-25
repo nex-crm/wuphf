@@ -3,7 +3,6 @@ package team
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"testing"
 )
 
@@ -36,14 +35,13 @@ func init() {
 	cleanupTaskWorktree = stubCleanupTaskWorktree
 	skipBrokerStateLoadOnConstruct = true
 
-	// Pin WUPHF_RUNTIME_HOME and the default brokerStatePath into
-	// process-lifetime leaked tempdirs so any test that constructs a
-	// Broker without its own isolation setup falls back to /tmp instead
-	// of the developer's real ~/.wuphf. Tests that override either via
-	// t.Setenv / brokerStatePath = ... take precedence locally; their
-	// deferred restore lands on these safe defaults. Leaked (not
-	// t.TempDir) so late writes from goroutines a test failed to stop
-	// don't race on a directory being deleted.
+	// Pin WUPHF_RUNTIME_HOME into a process-lifetime leaked tempdir so
+	// any test that constructs a Broker without its own isolation setup
+	// falls back to /tmp instead of the developer's real ~/.wuphf.
+	// defaultBrokerStatePath() consults this env var, so broker state
+	// files created by unisolated tests land under a leaked temp dir.
+	// Leaked (not t.TempDir) so late writes from goroutines a test
+	// failed to stop don't race on a directory being deleted.
 	runtimeHome, err := os.MkdirTemp("", "wuphf-test-runtime-home-*")
 	if err != nil {
 		panic(fmt.Sprintf("worktree_guard_test init: mktemp runtime home: %v", err))
@@ -51,13 +49,6 @@ func init() {
 	if err := os.Setenv("WUPHF_RUNTIME_HOME", runtimeHome); err != nil {
 		panic(fmt.Sprintf("worktree_guard_test init: setenv WUPHF_RUNTIME_HOME: %v", err))
 	}
-
-	stateDir, err := os.MkdirTemp("", "wuphf-test-broker-state-*")
-	if err != nil {
-		panic(fmt.Sprintf("worktree_guard_test init: mktemp broker state: %v", err))
-	}
-	defaultTestStatePath := filepath.Join(stateDir, "broker-state.json")
-	brokerStatePath = func() string { return defaultTestStatePath }
 }
 
 func stubPrepareTaskWorktree(taskID string) (string, string, error) {

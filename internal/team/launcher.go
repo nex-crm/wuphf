@@ -220,7 +220,7 @@ func NewLauncher(packSlug string) (*Launcher, error) {
 			fmt.Fprintf(os.Stderr, "warning: save blueprint/pack config: %v\n", err)
 		}
 		// Drop stale broker state so the new pack starts clean.
-		_ = os.Remove(brokerStatePath())
+		_ = os.Remove(defaultBrokerStatePath())
 	}
 	sessionMode, oneOnOne := loadRunningSessionMode()
 
@@ -3148,7 +3148,7 @@ func ResetBrokerState() error {
 }
 
 func ClearPersistedBrokerState() error {
-	path := brokerStatePath()
+	path := defaultBrokerStatePath()
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -4299,7 +4299,7 @@ func (l *Launcher) officeMembersSnapshot() []officeMember {
 			return mergePackMembers(members)
 		}
 	}
-	path := brokerStatePath()
+	path := defaultBrokerStatePath()
 	data, err := os.ReadFile(path)
 	if err == nil {
 		var state brokerState

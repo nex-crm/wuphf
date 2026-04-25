@@ -618,15 +618,11 @@ func TestEnqueueHeadlessCodexTurnProcessesFIFO(t *testing.T) {
 
 func TestPostHeadlessFinalMessageIfSilentPostsFinalOutput(t *testing.T) {
 	// Isolate state from the user's real ~/.wuphf/team/broker-state.json.
-	// Without this override NewBroker loads whatever prior test runs (or a
-	// real WUPHF run in ~/.wuphf/) persisted, and agentPostedSubstantiveMessageToChannelSince
-	// picks up an unrelated ceo message, making the "expected posted=true"
+	// Without isolation NewBroker could still pick up state from a shared
+	// ~/.wuphf/team/broker-state.json, and agentPostedSubstantiveMessageToChannelSince
+	// could observe an unrelated ceo message, making the "expected posted=true"
 	// assertion fail non-deterministically depending on machine history.
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(t.TempDir(), "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	channel := DMSlugFor("ceo")
 	root, err := b.PostMessage("you", channel, "Ping the CEO.", nil, "")
 	if err != nil {
@@ -1629,11 +1625,11 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 
 	// Build the task state directly instead of going through
 	// EnsurePlannedTask so we never call saveLocked — the broker-state
-	// save path races with leaked goroutines from earlier tests that
-	// read the swapped brokerStatePath global (rename .tmp -> final
-	// fails mid-flight). We don't need persistence here; we only need
-	// the task fields that headlessTurnCompletedDurably reads.
-	b := NewBroker()
+	// save path can race with leaked goroutines from earlier tests
+	// (rename .tmp -> final fails mid-flight). We don't need persistence
+	// here; we only need the task fields that headlessTurnCompletedDurably
+	// reads.
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{{
 		ID:            "task-1",
@@ -1922,10 +1918,7 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 
 func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	oldPathFn := brokerStatePath
 	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
 
 	oldPrepare := prepareTaskWorktree
 	oldCleanup := cleanupTaskWorktree
@@ -1940,7 +1933,7 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
-	b := NewBroker()
+	b := NewBrokerAt(filepath.Join(tmpDir, "broker-state.json"))
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Implement queue mode for the YouTube factory",
@@ -2085,10 +2078,7 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 	}
 	defer func() { headlessCodexRunTurn = oldRunTurn }()
 
-	oldStatePath := brokerStatePath
 	stateDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(stateDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldStatePath }()
 
 	oldPrepare := prepareTaskWorktree
 	oldCleanup := cleanupTaskWorktree
@@ -2101,7 +2091,7 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	b := NewBroker()
+	b := NewBrokerAt(filepath.Join(stateDir, "broker-state.json"))
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Define channel thesis and monetization system",

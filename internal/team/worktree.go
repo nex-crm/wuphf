@@ -279,7 +279,7 @@ func overlayWorkspaceChanges(sourceRoot, worktreePath string) error {
 }
 
 func overlayPersistedTaskWorktrees(worktreePath string, currentTaskID string) error {
-	raw, err := os.ReadFile(brokerStatePath())
+	raw, err := os.ReadFile(defaultBrokerStatePath())
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -425,7 +425,7 @@ func worktreeNamespaceToken(repoRoot string) string {
 }
 
 func CleanupPersistedTaskWorktrees() error {
-	path := brokerStatePath()
+	path := defaultBrokerStatePath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {

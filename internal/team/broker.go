@@ -58,8 +58,6 @@ const defaultAgentRateLimitWindow = time.Minute
 // the value set by internal/teammcp/server.go authHeaders().
 const agentRateLimitHeader = "X-WUPHF-Agent"
 
-var brokerStatePath = defaultBrokerStatePath
-
 // studioPackageGenerator routes Studio package generation through the
 // install-wide LLM provider so opencode-only or claude-code-only setups
 // aren't forced to have `codex` installed.
@@ -544,11 +542,10 @@ type Broker struct {
 	stopOnce sync.Once
 
 	// statePath is the on-disk broker-state.json path bound at construction.
-	// NewBroker() snapshots the package-level brokerStatePath() at call time
-	// so later monkey-patches (or a late-arriving goroutine writing via a
-	// stale closure) cannot retarget this broker's saves. NewBrokerAt()
-	// takes the path explicitly and is the preferred constructor for new
-	// code / test sites migrating off the package var.
+	// NewBrokerAt(path) sets this directly; NewBroker() resolves
+	// defaultBrokerStatePath() once and pins the result. A later-arriving
+	// goroutine writing via a stale closure (or a sibling broker built at
+	// a different path) cannot retarget this broker's saves.
 	statePath string
 }
 
@@ -896,33 +893,30 @@ func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
 	return s
 }
 
-// NewBroker creates a new channel broker with a random auth token.
-// skipBrokerStateLoadOnConstruct gates the lazy read of brokerStatePath()
-// inside NewBroker. Production keeps it false so the CLI resumes from disk
-// state. A *_test.go init flips it to true so tests that call NewBroker get
-// a fresh broker by default, immune to state leaked by prior tests via a
-// shared broker-state.json. Persistence tests that want the load call
-// b.loadState() explicitly after construction.
+// skipBrokerStateLoadOnConstruct gates the auto-load of disk state
+// inside NewBrokerAt. Production keeps it false so the CLI resumes from
+// disk state. A *_test.go init flips it to true so tests that call
+// NewBrokerAt / NewBroker get a fresh broker by default, immune to state
+// leaked by prior tests via a shared broker-state.json. Persistence
+// tests that want the load call b.loadState() explicitly after
+// construction (or use reloadedBroker(t, b)).
 var skipBrokerStateLoadOnConstruct = false
 
-// NewBroker constructs a Broker bound to the package-level brokerStatePath()
-// resolved at call time. Production code uses this directly so the CLI
-// resumes from the default ~/.wuphf/team/broker-state.json. Tests that
-// monkey-patch brokerStatePath before calling NewBroker still work —
-// they effectively pin the path via the package var and NewBroker snapshots
-// it into b.statePath below.
-//
-// New test sites (and any new code) should prefer NewBrokerAt, which is
-// explicit about the path and doesn't depend on the package var at all.
+// NewBroker constructs a Broker bound to defaultBrokerStatePath() resolved
+// at call time. Production code uses this so the CLI resumes from the
+// default ~/.wuphf/team/broker-state.json (or its WUPHF_BROKER_STATE_PATH /
+// WUPHF_RUNTIME_HOME override). Tests should prefer NewBrokerAt or the
+// newTestBroker(t) helper — both pin a per-test path explicitly.
 func NewBroker() *Broker {
-	return NewBrokerAt(brokerStatePath())
+	return NewBrokerAt(defaultBrokerStatePath())
 }
 
 // NewBrokerAt constructs a Broker whose state is persisted to statePath.
-// The path is bound at construction time and stored on the Broker; later
-// reassignments of the package-level brokerStatePath do NOT retarget this
-// broker's saves. Use this instead of NewBroker() everywhere that needs
-// path isolation — notably tests that want to pin state under t.TempDir.
+// The path is bound at construction time and stored on the Broker, so
+// late-arriving goroutines (or sibling brokers built at other paths in
+// the same process) cannot retarget this broker's saves. Use this instead
+// of NewBroker() everywhere that needs path isolation — notably tests
+// that want to pin state under t.TempDir.
 func NewBrokerAt(statePath string) *Broker {
 	b := &Broker{
 		channelStore:        channel.NewStore(),
@@ -3028,7 +3022,7 @@ func (b *Broker) Reset() {
 	b.sessionMode = mode
 	b.oneOnOneAgent = agent
 	_ = b.saveLocked()
-	_ = os.Remove(brokerStateSnapshotPath())
+	_ = os.Remove(b.stateSnapshotPath())
 	b.mu.Unlock()
 }
 
@@ -3046,13 +3040,8 @@ func defaultBrokerStatePath() string {
 	return filepath.Join(home, ".wuphf", "team", "broker-state.json")
 }
 
-func brokerStateSnapshotPath() string {
-	return brokerStatePath() + ".last-good"
-}
-
 // stateSnapshotPath returns the path the Broker writes its last-good
-// crash-recovery snapshot to. Bound to b.statePath (set at construction),
-// so it does not depend on the package-level brokerStatePath var.
+// crash-recovery snapshot to. Bound to b.statePath (set at construction).
 func (b *Broker) stateSnapshotPath() string {
 	return b.statePath + ".last-good"
 }
@@ -3231,11 +3220,12 @@ func (b *Broker) saveLocked() error {
 // cannot race on the source path of the rename.
 //
 // The previous fixed `<path>.tmp` filename was safe in production (one broker
-// owns one path) but broke the test suite: 22 *_test.go files override
-// brokerStatePath, plus a leaked tempdir from worktree_guard_test.go init()
-// is shared across every test that doesn't override. Two saves landing on
-// the same path could interleave like A.WriteFile / B.WriteFile / A.Rename /
-// B.Rename — and B's Rename failed with "no such file or directory" because
+// owns one path) but broke the test suite: many *_test.go files used to
+// monkey-patch the package-level state-path var and a leaked tempdir from
+// worktree_guard_test.go init() was shared across every unisolated test.
+// Two saves landing on the same path could interleave like A.WriteFile /
+// B.WriteFile / A.Rename / B.Rename — and B's Rename failed with
+// "no such file or directory" because
 // A had already renamed the shared tmp out from under it. That was the CI
 // flake on PR #281's `test` job. See broker_save_race_test.go for the
 // regression repro.

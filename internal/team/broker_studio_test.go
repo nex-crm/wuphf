@@ -93,12 +93,7 @@ func TestHandleStudioGeneratePackagePersistsAction(t *testing.T) {
 	}
 	defer func() { studioPackageGenerator = restore }()
 
-	tmpDir := t.TempDir()
-	prevStatePath := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = prevStatePath }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	body := map[string]any{
 		"channel": "general",
 		"actor":   "eng",
@@ -165,12 +160,7 @@ func TestHandleStudioGeneratePackagePersistsAction(t *testing.T) {
 }
 
 func TestHandleMemoryRoundTripScopedStudioRecords(t *testing.T) {
-	tmpDir := t.TempDir()
-	prevStatePath := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = prevStatePath }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 
 	writeRecord := func(namespace, key string, value any) {
 		t.Helper()
@@ -230,12 +220,7 @@ func TestHandleStudioRunWorkflowExecutesOneDraftAndUpdatesSkill(t *testing.T) {
 	t.Setenv("WUPHF_ACTION_PROVIDER", "one")
 	t.Setenv("WUPHF_ONE_BIN", writeFakeOperationOne(t))
 
-	tmpDir := t.TempDir()
-	prevStatePath := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = prevStatePath }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.skills = append(b.skills, teamSkill{
 		ID:                 "skill-sponsor-outreach-dry-run",
 		Name:               "sponsor-outreach-dry-run",
@@ -312,12 +297,7 @@ func TestHandleStudioRunWorkflowReturnsRateLimitMetadata(t *testing.T) {
 	t.Setenv("WUPHF_ACTION_PROVIDER", "one")
 	t.Setenv("WUPHF_ONE_BIN", writeRateLimitedOperationOne(t))
 
-	tmpDir := t.TempDir()
-	prevStatePath := brokerStatePath
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = prevStatePath }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.skills = append(b.skills, teamSkill{
 		ID:               "skill-consulting-live-gmail-read",
 		Name:             "consulting-live-gmail-read",

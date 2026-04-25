@@ -10,15 +10,15 @@ import (
 	"testing"
 )
 
-// newTestBroker returns a Broker backed by a temp state file.
-// It follows the same pattern used throughout broker_test.go.
+// newTestBroker returns a Broker whose state file is pinned under
+// t.TempDir(). Use this for tests that don't care about the exact
+// state path — only that the broker writes to an isolated location.
+// For tests that also need the path itself (persistence, reload), call
+// NewBrokerAt(filepath.Join(tmpDir, "broker-state.json")) directly so
+// the tmpDir is in scope.
 func newTestBroker(t *testing.T) *Broker {
 	t.Helper()
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
-	return NewBroker()
+	return NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 }
 
 func TestHandleAgentLogs_ListsRecent(t *testing.T) {

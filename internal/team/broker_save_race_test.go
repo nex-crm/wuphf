@@ -2,7 +2,7 @@ package team
 
 // Regression coverage for the test-isolation race that surfaced PR #281's
 // flaky `test` job. saveLocked used a fixed `<path>.tmp` filename, so two
-// brokers concurrently saving to the same brokerStatePath could interleave
+// brokers concurrently saving to the same state path could interleave
 // like this:
 //
 //   A.WriteFile(path.tmp, dataA)
@@ -11,11 +11,11 @@ package team
 //   B.Rename(path.tmp, path)       // FAILS: path.tmp no longer exists
 //
 // In production only one broker writes a given path, so the race is
-// invisible — but the test suite shares a single leaked tempdir from
-// worktree_guard_test.go init() across every test that does NOT override
-// brokerStatePath, plus 22 test files that DO override but leak the
-// goroutine reading the var. The TestHeadlessTurnCompletedDurably… flake
-// in CI was this race.
+// invisible — but the test suite used to share a leaked tempdir from
+// worktree_guard_test.go init() across every unisolated test, plus many
+// test files that overrode the state path and leaked goroutines reading
+// the old global. The TestHeadlessTurnCompletedDurably… flake in CI was
+// this race.
 //
 // Fix: each save uses a unique tmp filename via os.CreateTemp, so
 // concurrent saves can never race on the source of a Rename.
@@ -29,12 +29,9 @@ import (
 )
 
 func TestSaveLocked_ConcurrentBrokersSamePathDoNotRace(t *testing.T) {
-	// Pin brokerStatePath to a per-test tempdir so all N goroutines target
-	// the same path (the production failure mode).
+	// Pin every goroutine's Broker to the same per-test tempdir path so
+	// all N goroutines target the same file (the production failure mode).
 	statePath := filepath.Join(t.TempDir(), "broker-state.json")
-	oldPathFn := brokerStatePath
-	brokerStatePath = func() string { return statePath }
-	t.Cleanup(func() { brokerStatePath = oldPathFn })
 
 	const goroutines = 32
 
@@ -44,7 +41,7 @@ func TestSaveLocked_ConcurrentBrokersSamePathDoNotRace(t *testing.T) {
 	for i := 0; i < goroutines; i++ {
 		go func(i int) {
 			defer wg.Done()
-			b := NewBroker()
+			b := NewBrokerAt(statePath)
 			// EnsurePlannedTask calls saveLocked synchronously under b.mu —
 			// each broker serializes its own saves, but two brokers do not
 			// share a mutex, so they race on the on-disk tmp filename. Vary

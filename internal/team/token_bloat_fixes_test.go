@@ -1,7 +1,6 @@
 package team
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,12 +13,7 @@ import (
 // pattern — the prompt rule telling agents not to do that is routinely
 // ignored, so this enforces it at the persistence layer.
 func TestDuplicateAgentBroadcastIsSuppressed(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	now := time.Now().UTC().Format(time.RFC3339)
 	b.mu.Lock()
 	b.messages = []channelMessage{
@@ -62,12 +56,7 @@ func TestDuplicateAgentBroadcastIsSuppressed(t *testing.T) {
 // TestDuplicateAgentBroadcastWindowExpires verifies the dedup window is time
 // bounded — a follow-up beyond the window posts normally.
 func TestDuplicateAgentBroadcastWindowExpires(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	old := time.Now().UTC().Add(-2 * duplicateBroadcastWindow).Format(time.RFC3339)
 	b.mu.Lock()
 	b.messages = []channelMessage{
@@ -86,18 +75,13 @@ func TestDuplicateAgentBroadcastWindowExpires(t *testing.T) {
 // old "@planner say hi" from hours before the restart wakes planner with
 // the wrong intent).
 func TestStaleUnansweredFilteredOnResume(t *testing.T) {
-	oldPathFn := brokerStatePath
-	tmpDir := t.TempDir()
-	brokerStatePath = func() string { return filepath.Join(tmpDir, "broker-state.json") }
-	defer func() { brokerStatePath = oldPathFn }()
-
 	// This test runs with the production-like threshold, not the test-suite
 	// override from TestMain. Swap locally so production semantics win here.
 	origThreshold := staleUnansweredThreshold
 	staleUnansweredThreshold = time.Hour
 	defer func() { staleUnansweredThreshold = origThreshold }()
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	stale := time.Now().UTC().Add(-90 * time.Minute).Format(time.RFC3339)
 	fresh := time.Now().UTC().Add(-5 * time.Minute).Format(time.RFC3339)
 	b.mu.Lock()
