@@ -91,7 +91,7 @@ func TestEscapeForPromptBody_InjectionFlavoredTokens(t *testing.T) {
 			}
 			// The escaped output must NOT contain the raw pattern as a
 			// contiguous substring once lowercased and ZWSP-stripped.
-			stripped := strings.ToLower(strings.ReplaceAll(out, "​", ""))
+			stripped := strings.ToLower(strings.ReplaceAll(out, "\u200b", ""))
 			// After ZWSP removal the raw text may appear, but every
 			// occurrence should be preceded by the sentinel.
 			idx := strings.Index(stripped, tc.pattern)

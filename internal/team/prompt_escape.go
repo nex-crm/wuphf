@@ -56,7 +56,7 @@ const (
 	// (U+200B) separators render as "```" visually in most monospace fonts
 	// but tokenise as a different string to the LLM, neutralising the
 	// fence-close.
-	escapedTripleBacktick = "`​`​`"
+	escapedTripleBacktick = "`\u200b`\u200b`"
 
 	// Horizontal rule / YAML frontmatter delimiter. Spacing it out keeps
 	// the characters visible but breaks the markdown + YAML grammar.
@@ -328,7 +328,7 @@ func disruptTokens(s string) string {
 			// words break without becoming unreadable.
 			if letterRun == 3 {
 				b.WriteRune(r)
-				b.WriteRune('​') // U+200B zero-width-space
+				b.WriteRune('\u200b') // U+200B zero-width-space
 				letterRun = 0
 				continue
 			}
