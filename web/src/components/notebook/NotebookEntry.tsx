@@ -19,9 +19,8 @@ import PromotedBackCallout from "./PromotedBackCallout";
  * DRAFT stamp, sticky byline, markdown body, promoted-back callout,
  * inline review thread, actions footer, and posterity line.
  *
- * Lane B/C will hand back a richer entry payload; for now the component
- * renders whatever the API adapter returns (real or mocked) without
- * reshaping.
+ * The API adapter normalizes broker data and optional mock fixtures into the
+ * same entry shape before this component renders.
  */
 
 interface NotebookEntryProps {
@@ -67,7 +66,7 @@ export default function NotebookEntryView({
     setPending(true);
     try {
       await promoteEntry(entry.agent_slug, entry.entry_slug, {
-        proposed_wiki_path: `drafts/${entry.agent_slug}-${entry.entry_slug}`,
+        proposed_wiki_path: `team/drafts/${entry.agent_slug}-${entry.entry_slug}.md`,
         reviewer_slug: entry.reviewer_slug,
       });
     } catch (err: unknown) {

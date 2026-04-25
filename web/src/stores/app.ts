@@ -118,6 +118,7 @@ export interface AppStore {
   // Onboarding
   onboardingComplete: boolean;
   setOnboardingComplete: (v: boolean) => void;
+  resetForOnboarding: () => void;
 
   // Wiki
   wikiPath: string | null;
@@ -211,6 +212,22 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   onboardingComplete: false,
   setOnboardingComplete: (v) => set({ onboardingComplete: v }),
+  resetForOnboarding: () =>
+    set({
+      currentChannel: "general",
+      currentApp: null,
+      activeThreadId: null,
+      lastMessageId: null,
+      activeAgentSlug: null,
+      searchOpen: false,
+      composerSearchInitialQuery: "",
+      composerHelpOpen: false,
+      onboardingComplete: false,
+      wikiPath: null,
+      wikiLookupQuery: null,
+      notebookAgentSlug: null,
+      notebookEntrySlug: null,
+    }),
 
   wikiPath: null,
   setWikiPath: (path) => set({ wikiPath: path }),

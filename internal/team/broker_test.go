@@ -5638,8 +5638,8 @@ func TestBuildPromptLeadIncludesSkillAwareness(t *testing.T) {
 	if !strings.Contains(prompt, "SKILL & AGENT AWARENESS") {
 		t.Fatalf("expected SKILL & AGENT AWARENESS block in lead prompt")
 	}
-	if !strings.Contains(prompt, "[SKILL PROPOSAL]") {
-		t.Fatalf("expected [SKILL PROPOSAL] format example in lead prompt")
+	if !strings.Contains(prompt, "team_skill_create(action=create)") {
+		t.Fatalf("expected team_skill_create guidance in lead prompt")
 	}
 }
 
@@ -5931,14 +5931,12 @@ func TestHeadlessQueue_EmptyBeforePush(t *testing.T) {
 // adds exactly one turn to the target agent's queue.
 func TestHeadlessQueue_PopulatedAfterEnqueue(t *testing.T) {
 	// Override headlessCodexRunTurn to be a no-op so no real process is started.
-	origRunTurn := headlessCodexRunTurn
-	headlessCodexRunTurn = func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
+	setHeadlessCodexRunTurnForTest(t, func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
 		// Block until the context is cancelled so the worker stays "active"
 		// and doesn't drain the queue during the test assertion window.
 		<-ctx.Done()
 		return ctx.Err()
-	}
-	defer func() { headlessCodexRunTurn = origRunTurn }()
+	})
 
 	l := &Launcher{
 		pack: &agent.PackDefinition{

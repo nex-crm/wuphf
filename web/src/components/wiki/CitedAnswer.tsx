@@ -94,7 +94,10 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
       });
   }, [query]);
 
-  // Loading skeleton
+  // Loading state — Fraunces-italic status line per DESIGN-WIKI.md hatnote
+  // typography (§9 typography, §5 hatnote voice). Previously we rendered
+  // skeleton blocks, but the editorial surface reads better with a single
+  // calm status line than geometric shimmer blocks.
   if (loading) {
     return (
       <div
@@ -103,12 +106,7 @@ export default function CitedAnswer({ query }: CitedAnswerProps) {
         aria-busy="true"
         aria-label="Loading cited answer…"
       >
-        <div className="wk-hatnote wk-skeleton" aria-hidden="true" />
-        <div className="wk-skeleton wk-skeleton--body" aria-hidden="true" />
-        <div
-          className="wk-skeleton wk-skeleton--body wk-skeleton--short"
-          aria-hidden="true"
-        />
+        <p className="wk-lookup-status">Searching the wiki…</p>
       </div>
     );
   }

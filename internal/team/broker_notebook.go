@@ -311,6 +311,8 @@ func (b *Broker) handleNotebookCatalog(w http.ResponseWriter, r *http.Request) {
 					status = "changes-requested"
 				case "approved", "archived":
 					status = "promoted"
+				case "rejected", "expired":
+					status = "discarded"
 				}
 			}
 			if status == "promoted" {
