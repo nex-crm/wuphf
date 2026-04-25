@@ -186,6 +186,21 @@ func TestNewBrokerAt_PathSnapshottedAtConstruction(t *testing.T) {
 	}
 }
 
+func TestNewBrokerAt_PanicsOnEmptyPath(t *testing.T) {
+	// Empty statePath would silently degrade saveLocked into writing
+	// `<empty>.tmp.<rand>` and `.last-good` into the process cwd. The
+	// constructor must panic instead so the foot-gun surfaces at
+	// construction time, not on the first save attempt half a second
+	// later.
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected NewBrokerAt(\"\") to panic; got nil")
+		}
+	}()
+	_ = NewBrokerAt("")
+}
+
 func TestBrokerStop_NoWriteAfterReturn(t *testing.T) {
 	// Regression cover for the goroutine-drain gap: if Stop() returns
 	// while a background goroutine is still holding a reference to the

@@ -917,7 +917,15 @@ func NewBroker() *Broker {
 // the same process) cannot retarget this broker's saves. Use this instead
 // of NewBroker() everywhere that needs path isolation — notably tests
 // that want to pin state under t.TempDir.
+//
+// Panics on an empty statePath. With "" the broker would silently write
+// `.last-good` and `<empty>.tmp.<rand>` files into the process cwd, which
+// is the kind of foot-gun that only surfaces in production when a CI
+// runner happens to execute from a writable directory.
 func NewBrokerAt(statePath string) *Broker {
+	if strings.TrimSpace(statePath) == "" {
+		panic("team.NewBrokerAt: statePath must not be empty (use defaultBrokerStatePath() if no explicit path)")
+	}
 	b := &Broker{
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
