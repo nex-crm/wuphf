@@ -708,13 +708,79 @@ function readSeedSpriteCatalog() {
     throw new Error(`Invalid avatar seed catalog: ${seedCatalogPath}`)
   }
 
-  return data.sprites.map((sprite) => ({
-    id: sprite.id,
-    sourceIndex: sprite.sourceIndex,
-    palette: [...sprite.palette],
-    full: cloneGrid(sprite.full),
-    portrait: cloneGrid(sprite.portrait),
-  }))
+  const seenIds = new Set()
+
+  return data.sprites.map((sprite, index) => {
+    validateSeedSprite(sprite, index, seenIds)
+
+    return {
+      id: sprite.id,
+      sourceIndex: sprite.sourceIndex,
+      palette: [...sprite.palette],
+      full: cloneGrid(sprite.full),
+      portrait: cloneGrid(sprite.portrait),
+    }
+  })
+}
+
+function validateSeedSprite(sprite, index, seenIds) {
+  const location = `sprite at index ${index} in ${seedCatalogPath}`
+  if (!sprite || typeof sprite !== 'object' || Array.isArray(sprite)) {
+    throw new Error(`Invalid ${location}: expected an object`)
+  }
+
+  if (typeof sprite.id !== 'string' || sprite.id.length === 0) {
+    throw new Error(`Invalid ${location}: id must be a non-empty string`)
+  }
+
+  const spriteLabel = `sprite "${sprite.id}" in ${seedCatalogPath}`
+  if (seenIds.has(sprite.id)) {
+    throw new Error(`Invalid ${spriteLabel}: duplicate id`)
+  }
+  seenIds.add(sprite.id)
+
+  if (!Number.isInteger(sprite.sourceIndex)) {
+    throw new Error(`Invalid ${spriteLabel}: sourceIndex must be an integer`)
+  }
+
+  if (!Array.isArray(sprite.palette) || sprite.palette.length === 0) {
+    throw new Error(`Invalid ${spriteLabel}: palette must be a non-empty array`)
+  }
+
+  for (const [paletteIndex, color] of sprite.palette.entries()) {
+    if (typeof color !== 'string' || !/^#[0-9a-fA-F]{6}$/.test(color)) {
+      throw new Error(`Invalid ${spriteLabel}: palette entry ${paletteIndex} must be a #RRGGBB color`)
+    }
+  }
+
+  validateSeedGrid(sprite.full, 'full', spriteLabel, sprite.palette.length)
+  validateSeedGrid(sprite.portrait, 'portrait', spriteLabel, sprite.palette.length)
+}
+
+function validateSeedGrid(grid, name, spriteLabel, paletteLength) {
+  if (!Array.isArray(grid) || grid.length === 0) {
+    throw new Error(`Invalid ${spriteLabel}: ${name} grid must be a non-empty 2D array`)
+  }
+
+  const width = Array.isArray(grid[0]) ? grid[0].length : 0
+  if (width === 0) {
+    throw new Error(`Invalid ${spriteLabel}: ${name} grid rows must be non-empty arrays`)
+  }
+
+  for (const [rowIndex, row] of grid.entries()) {
+    if (!Array.isArray(row) || row.length !== width) {
+      throw new Error(`Invalid ${spriteLabel}: ${name} grid row ${rowIndex} is not rectangular`)
+    }
+
+    for (const [columnIndex, cell] of row.entries()) {
+      // Grid values are 1-based palette indexes; 0 means transparent.
+      if (!Number.isInteger(cell) || cell < 0 || cell > paletteLength) {
+        throw new Error(
+          `Invalid ${spriteLabel}: ${name} grid cell ${rowIndex},${columnIndex} has out-of-range palette index ${cell}; expected 0..${paletteLength}`,
+        )
+      }
+    }
+  }
 }
 
 function main() {
