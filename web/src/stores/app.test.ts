@@ -1,6 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { directChannelSlug, isDMChannel } from "./app";
+import { directChannelSlug, isDMChannel, useAppStore } from "./app";
+
+afterEach(() => {
+  useAppStore.setState({
+    currentChannel: "general",
+    currentApp: null,
+    activeThreadId: null,
+    lastMessageId: null,
+    activeAgentSlug: null,
+    searchOpen: false,
+    composerSearchInitialQuery: "",
+    composerHelpOpen: false,
+    onboardingComplete: false,
+    wikiPath: null,
+    wikiLookupQuery: null,
+    notebookAgentSlug: null,
+    notebookEntrySlug: null,
+  });
+});
 
 describe("DM channel helpers", () => {
   it("uses the broker canonical direct slug", () => {
@@ -13,5 +31,41 @@ describe("DM channel helpers", () => {
     expect(isDMChannel("human__pm", {})).toEqual({ agentSlug: "pm" });
     expect(isDMChannel("dm-ceo", {})).toEqual({ agentSlug: "ceo" });
     expect(isDMChannel("dm-human-ceo", {})).toEqual({ agentSlug: "ceo" });
+  });
+
+  it("resets navigation and onboarding state for a shred flow", () => {
+    useAppStore.setState({
+      currentChannel: "ceo__human",
+      currentApp: "settings",
+      activeThreadId: "thread-1",
+      lastMessageId: "msg-1",
+      activeAgentSlug: "ceo",
+      searchOpen: true,
+      composerSearchInitialQuery: "stuck task",
+      composerHelpOpen: true,
+      onboardingComplete: true,
+      wikiPath: "companies/acme",
+      wikiLookupQuery: "who owns renewal?",
+      notebookAgentSlug: "ceo",
+      notebookEntrySlug: "handoff",
+    });
+
+    useAppStore.getState().resetForOnboarding();
+
+    expect(useAppStore.getState()).toMatchObject({
+      currentChannel: "general",
+      currentApp: null,
+      activeThreadId: null,
+      lastMessageId: null,
+      activeAgentSlug: null,
+      searchOpen: false,
+      composerSearchInitialQuery: "",
+      composerHelpOpen: false,
+      onboardingComplete: false,
+      wikiPath: null,
+      wikiLookupQuery: null,
+      notebookAgentSlug: null,
+      notebookEntrySlug: null,
+    });
   });
 });

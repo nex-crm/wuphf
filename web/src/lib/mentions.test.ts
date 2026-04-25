@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseMentions } from "./mentions";
+import { extractTaggedMentions, parseMentions } from "./mentions";
 
 describe("parseMentions", () => {
   const agents = ["pm", "ceo", "founding-engineer"];
@@ -83,6 +83,41 @@ describe("parseMentions", () => {
     expect(tokens).toEqual([
       { kind: "mention", value: "pm" },
       { kind: "text", value: " @PM" },
+    ]);
+  });
+
+  it("treats @all as a special mention chip", () => {
+    expect(parseMentions("ping @all now", agents)).toEqual([
+      { kind: "text", value: "ping " },
+      { kind: "mention", value: "all" },
+      { kind: "text", value: " now" },
+    ]);
+  });
+});
+
+describe("extractTaggedMentions", () => {
+  const agents = ["pm", "ceo", "founding-engineer", "human"];
+
+  it("returns explicit agent mentions in order", () => {
+    expect(extractTaggedMentions("ping @pm then @ceo", agents)).toEqual([
+      "pm",
+      "ceo",
+    ]);
+  });
+
+  it("expands @all to every mentionable agent slug", () => {
+    expect(extractTaggedMentions("ping @all now", agents)).toEqual([
+      "pm",
+      "ceo",
+      "founding-engineer",
+    ]);
+  });
+
+  it("deduplicates explicit mentions when @all is present", () => {
+    expect(extractTaggedMentions("ping @pm and @all", agents)).toEqual([
+      "pm",
+      "ceo",
+      "founding-engineer",
     ]);
   });
 });

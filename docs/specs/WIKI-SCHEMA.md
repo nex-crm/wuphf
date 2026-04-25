@@ -171,7 +171,7 @@ Insights are facts that rise above the noise: status changes, decisions, pattern
   "confidence": 0.95,
   "created_at": "2026-04-22T14:32:00Z",
   "created_by": "archivist",
-  "source": "synthesis" 
+  "source": "synthesis"
 }
 ```
 

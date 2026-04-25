@@ -117,13 +117,38 @@ func TestPromotionHandlers_EndToEnd(t *testing.T) {
 		t.Fatal("expected SSE event within 1s")
 	}
 
+	// Add a thread comment so GET/list exercise the UI-facing review DTO
+	// instead of only the bare promotion state-machine record.
+	commentBody, _ := json.Marshal(map[string]any{"actor_slug": "ceo", "body": "Looks good."})
+	req, _ := authReq(http.MethodPost, srv.URL+"/review/"+submitRes.PromotionID+"/comment", bytes.NewReader(commentBody), token)
+	commentRes, _ := http.DefaultClient.Do(req)
+	if commentRes.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(commentRes.Body)
+		t.Fatalf("comment status=%d body=%s", commentRes.StatusCode, string(body))
+	}
+	commentRes.Body.Close()
+
 	// GET /review/{id}
-	req, _ := authReq(http.MethodGet, srv.URL+"/review/"+submitRes.PromotionID, nil, token)
+	req, _ = authReq(http.MethodGet, srv.URL+"/review/"+submitRes.PromotionID, nil, token)
 	getRes, _ := http.DefaultClient.Do(req)
 	if getRes.StatusCode != http.StatusOK {
 		t.Fatalf("get status=%d", getRes.StatusCode)
 	}
+	var getBody reviewItemResponse
+	_ = json.NewDecoder(getRes.Body).Decode(&getBody)
 	getRes.Body.Close()
+	if getBody.AgentSlug != "pm" || getBody.EntrySlug != "retro" || getBody.EntryTitle != "Retro" {
+		t.Fatalf("unexpected review item identity: %+v", getBody)
+	}
+	if getBody.ProposedWikiPath != "team/playbooks/retro.md" {
+		t.Fatalf("proposed path=%q", getBody.ProposedWikiPath)
+	}
+	if getBody.Excerpt != "body" {
+		t.Fatalf("excerpt=%q", getBody.Excerpt)
+	}
+	if len(getBody.Comments) != 1 || getBody.Comments[0].BodyMD != "Looks good." {
+		t.Fatalf("comments=%+v", getBody.Comments)
+	}
 
 	// GET /review/list
 	req, _ = authReq(http.MethodGet, srv.URL+"/review/list?scope=all", nil, token)
@@ -132,12 +157,15 @@ func TestPromotionHandlers_EndToEnd(t *testing.T) {
 		t.Fatalf("list status=%d", listRes.StatusCode)
 	}
 	var listBody struct {
-		Reviews []map[string]any `json:"reviews"`
+		Reviews []reviewItemResponse `json:"reviews"`
 	}
 	_ = json.NewDecoder(listRes.Body).Decode(&listBody)
 	listRes.Body.Close()
 	if len(listBody.Reviews) != 1 {
 		t.Fatalf("list returned %d reviews", len(listBody.Reviews))
+	}
+	if listBody.Reviews[0].EntryTitle != "Retro" || listBody.Reviews[0].Comments[0].BodyMD != "Looks good." {
+		t.Fatalf("list review not normalized: %+v", listBody.Reviews[0])
 	}
 
 	// Approve triggers the atomic promote commit. Drain any buffered SSE

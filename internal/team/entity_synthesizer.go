@@ -371,10 +371,16 @@ func (s *EntitySynthesizer) synthesize(ctx context.Context, job SynthesisJob) er
 	}
 
 	// Build prompt.
-	factListBody := renderFactsForPrompt(newFacts)
+	//
+	// Security: both the existing brief body and the fact texts are
+	// derived (however indirectly) from untrusted artifact content. Run
+	// each through EscapeForPromptBody before interpolation so a fact-log
+	// injection from an earlier run cannot hijack this synthesis. See
+	// prompt_escape.go.
+	factListBody := EscapeForPromptBody(renderFactsForPrompt(newFacts))
 	userPrompt := fmt.Sprintf(
 		"# Existing brief\n\n%s\n\n# New facts since last synthesis\n\n%s\n\n# Your task\nProduce the full updated brief markdown now.",
-		strings.TrimSpace(stripFrontmatter(existingBrief)),
+		EscapeForPromptBody(strings.TrimSpace(stripFrontmatter(existingBrief))),
 		factListBody,
 	)
 

@@ -272,3 +272,99 @@ func TestHydrateFact_LongTextTruncated(t *testing.T) {
 		t.Errorf("excerpt length = %d, want ≤ 301", len([]rune(src.Excerpt)))
 	}
 }
+
+// TestSourcesCitedBoundsValidator verifies that any citation index outside
+// the valid 1..len(sources) range is dropped from the response and the
+// drop is recorded in Notes so operators can see LLM hallucinations.
+func TestSourcesCitedBoundsValidator(t *testing.T) {
+	t.Parallel()
+
+	idx := NewWikiIndex(t.TempDir())
+	// Seed exactly 2 facts so valid citations are [1, 2]. "sarah" is a
+	// known first-name-ish token so the classifier routes to status (not
+	// general) and the handler actually invokes the provider.
+	seedFact(t, idx, "src1", "sarah-one", "person", "status", "sarah signed Q2.")
+	seedFact(t, idx, "src2", "sarah-two", "person", "observation", "sarah launched 2020.")
+
+	// LLM hallucinates [1, 99, 2, 0, -4] — only 1 and 2 are valid.
+	p := &fakeProvider{
+		response: validLLMResponse("status", "Sarah <sup>[1]</sup> <sup>[2]</sup>.", []int{1, 99, 2, 0, -4}, "complete"),
+	}
+	h := NewQueryHandler(idx, p)
+
+	ans, err := h.Answer(context.Background(), QueryRequest{
+		Query:   "sarah",
+		TopK:    10,
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Only valid citations should remain.
+	for _, c := range ans.SourcesCited {
+		if c < 1 || c > len(ans.Sources) {
+			t.Fatalf("invalid citation %d survived filter (len=%d)", c, len(ans.Sources))
+		}
+	}
+	if len(ans.SourcesCited) != 2 {
+		t.Fatalf("expected 2 valid citations after filter, got %v", ans.SourcesCited)
+	}
+
+	// The dropped indices must be recorded in Notes so operators can see
+	// the hallucination rate.
+	if !strings.Contains(ans.Notes, "dropped invalid citations") {
+		t.Fatalf("expected drop notice in Notes, got %q", ans.Notes)
+	}
+	for _, dropped := range []string{"99", "0", "-4"} {
+		if !strings.Contains(ans.Notes, dropped) {
+			t.Errorf("expected dropped index %s recorded in Notes; got %q", dropped, ans.Notes)
+		}
+	}
+}
+
+// TestFilterValidCitations unit-tests the citation filter helper directly
+// to cover edge cases without standing up the full query handler.
+func TestFilterValidCitations(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		cites     []int
+		sources   int
+		wantClean []int
+		wantDrop  []int
+	}{
+		{"empty", []int{}, 3, []int{}, nil},
+		{"all valid", []int{1, 2, 3}, 3, []int{1, 2, 3}, nil},
+		{"exact upper bound", []int{3}, 3, []int{3}, nil},
+		{"zero index rejected", []int{0, 1}, 3, []int{1}, []int{0}},
+		{"negative rejected", []int{-1, 2}, 3, []int{2}, []int{-1}},
+		{"over upper rejected", []int{1, 99}, 3, []int{1}, []int{99}},
+		{"all invalid", []int{0, 99}, 3, []int{}, []int{0, 99}},
+		{"empty sources drops everything", []int{1, 2}, 0, []int{}, []int{1, 2}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clean, dropped := filterValidCitations(tc.cites, tc.sources)
+			if !sliceEqualInt(clean, tc.wantClean) {
+				t.Errorf("clean = %v, want %v", clean, tc.wantClean)
+			}
+			if !sliceEqualInt(dropped, tc.wantDrop) {
+				t.Errorf("dropped = %v, want %v", dropped, tc.wantDrop)
+			}
+		})
+	}
+}
+
+func sliceEqualInt(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
