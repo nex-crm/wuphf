@@ -3629,6 +3629,179 @@ func TestBrokerHandlePostTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *tes
 	}
 }
 
+func TestBrokerHandlePostTaskCapabilityGapCreatesSelfHealingTask(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "eng", "Engineer")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:       "general",
+		Title:         "Post client launch update to Slack",
+		Owner:         "eng",
+		CreatedBy:     "ceo",
+		TaskType:      "follow_up",
+		ExecutionMode: "office",
+	})
+	if err != nil || reused {
+		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
+	}
+
+	detail := "Unable to continue: missing Slack integration tool path for posting the client update."
+	body, _ := json.Marshal(map[string]any{
+		"action":     "block",
+		"channel":    "general",
+		"id":         task.ID,
+		"created_by": "eng",
+		"details":    detail,
+	})
+	req, _ := http.NewRequest(http.MethodPost, "http://"+b.Addr()+"/tasks", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post block task: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 blocking task, got %d: %s", resp.StatusCode, raw)
+	}
+
+	var blocked teamTask
+	var healing teamTask
+	for _, candidate := range b.AllTasks() {
+		switch candidate.ID {
+		case task.ID:
+			blocked = candidate
+		default:
+			if candidate.Title == "Self-heal @eng on "+task.ID {
+				healing = candidate
+			}
+		}
+	}
+	if !blocked.Blocked || blocked.Status != "blocked" {
+		t.Fatalf("expected original task blocked, got %+v", blocked)
+	}
+	if healing.ID == "" {
+		t.Fatalf("expected capability-gap self-healing task, got %+v", b.AllTasks())
+	}
+	if healing.Owner != "ceo" || healing.TaskType != "incident" || healing.ExecutionMode != "office" {
+		t.Fatalf("expected office incident owned by ceo, got %+v", healing)
+	}
+	if !strings.Contains(healing.Details, "capability_gap") ||
+		!strings.Contains(healing.Details, detail) ||
+		!strings.Contains(healing.Details, "Repair the missing capability first") {
+		t.Fatalf("expected capability repair loop details, got %q", healing.Details)
+	}
+}
+
+func TestBrokerHandlePostTaskNonCapabilityBlockDoesNotCreateSelfHealingTask(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "eng", "Engineer")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	task, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:   "general",
+		Title:     "Wait for customer approval",
+		Owner:     "eng",
+		CreatedBy: "ceo",
+		TaskType:  "follow_up",
+	})
+	if err != nil {
+		t.Fatalf("ensure planned task: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"action":     "block",
+		"channel":    "general",
+		"id":         task.ID,
+		"created_by": "eng",
+		"details":    "Waiting on customer approval before sending the update.",
+	})
+	req, _ := http.NewRequest(http.MethodPost, "http://"+b.Addr()+"/tasks", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post block task: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 blocking task, got %d: %s", resp.StatusCode, raw)
+	}
+
+	for _, candidate := range b.AllTasks() {
+		if isSelfHealingTaskTitle(candidate.Title) {
+			t.Fatalf("did not expect self-healing task for non-capability blocker, got %+v", candidate)
+		}
+	}
+}
+
+func TestBrokerHandlePostTaskResumeUnblocksAfterCapabilityRepair(t *testing.T) {
+	b := newTestBroker(t)
+	ensureTestMemberAccess(b, "general", "eng", "Engineer")
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	task, _, err := b.EnsurePlannedTask(plannedTaskInput{
+		Channel:   "general",
+		Title:     "Send the launch update",
+		Owner:     "eng",
+		CreatedBy: "ceo",
+		TaskType:  "follow_up",
+	})
+	if err != nil {
+		t.Fatalf("ensure planned task: %v", err)
+	}
+	if _, changed, err := b.BlockTask(task.ID, "eng", "Unable to continue: missing Slack integration."); err != nil || !changed {
+		t.Fatalf("block task: changed=%v err=%v", changed, err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"action":     "resume",
+		"channel":    "general",
+		"id":         task.ID,
+		"created_by": "ceo",
+		"details":    "Capability repaired: Slack integration is available; retry the original update.",
+	})
+	req, _ := http.NewRequest(http.MethodPost, "http://"+b.Addr()+"/tasks", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post resume task: %v", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 resuming task, got %d: %s", resp.StatusCode, raw)
+	}
+
+	var resumed teamTask
+	for _, candidate := range b.AllTasks() {
+		if candidate.ID == task.ID {
+			resumed = candidate
+			break
+		}
+	}
+	if resumed.Blocked || resumed.Status != "in_progress" {
+		t.Fatalf("expected original task resumed after repair, got %+v", resumed)
+	}
+	if !strings.Contains(resumed.Details, "missing Slack integration") ||
+		!strings.Contains(resumed.Details, "Capability repaired") {
+		t.Fatalf("expected resume detail appended, got %q", resumed.Details)
+	}
+}
+
 func TestBrokerBlockTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *testing.T) {
 	oldPrepare := prepareTaskWorktree
 	oldCleanup := cleanupTaskWorktree

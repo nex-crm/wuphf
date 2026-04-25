@@ -297,7 +297,7 @@ type TeamRuntimeStateArgs struct {
 }
 
 type TeamTaskArgs struct {
-	Action        string   `json:"action" jsonschema:"One of: create, claim, assign, complete, block, release"`
+	Action        string   `json:"action" jsonschema:"One of: create, claim, assign, complete, block, resume, release"`
 	Channel       string   `json:"channel,omitempty" jsonschema:"Channel slug. Defaults to the agent's current channel or general."`
 	ID            string   `json:"id,omitempty" jsonschema:"Task ID for non-create actions"`
 	Title         string   `json:"title,omitempty" jsonschema:"Task title when creating a task"`
@@ -728,7 +728,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 	mcp.AddTool(server, officeWriteTool(
 		"team_task",
-		"Create, claim, assign, complete, block, or release a shared task in the office task list.",
+		"Create, claim, assign, complete, block, resume, or release a shared task in the office task list.",
 	), handleTeamTask)
 
 	registerSharedMemoryTools(server)

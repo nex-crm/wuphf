@@ -14,8 +14,8 @@ import (
 
 func newTestBrokerWithTelegramChannel(t *testing.T, chatID string) *Broker {
 	t.Helper()
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
+	statePath := leakedBrokerStatePath(t)
+	setBrokerStatePathForTest(t, func() string { return statePath })
 
 	b := NewBroker()
 	b.mu.Lock()

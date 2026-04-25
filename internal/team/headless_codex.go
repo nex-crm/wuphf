@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
 	"github.com/nex-crm/wuphf/internal/gitexec"
 	"github.com/nex-crm/wuphf/internal/provider"
@@ -908,6 +909,7 @@ func (l *Launcher) recoverTimedOutHeadlessTurn(slug string, turn headlessCodexTu
 		return
 	} else if changed {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("timeout-recovery: blocked %s after empty timeout", task.ID))
+		_, _, _ = l.requestSelfHealing(slug, task.ID, agent.EscalationStuck, reason)
 	}
 }
 
@@ -954,6 +956,7 @@ func (l *Launcher) recoverFailedHeadlessTurn(slug string, turn headlessCodexTurn
 		return
 	} else if changed {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("error-recovery: blocked %s after failed turn", task.ID))
+		_, _, _ = l.requestSelfHealing(slug, task.ID, agent.EscalationMaxRetries, reason)
 	}
 }
 
