@@ -169,7 +169,11 @@ type PamDispatcherConfig struct {
 //     e.g. `ReadArticle(relPath string) ([]byte, error)` instead of
 //     `Repo() *Repo` (pam's only use of Repo() is to call
 //     readArticle on it). Avoids the new package; trades expressivity
-//     for decoupling.
+//     for decoupling. Note: `readArticle` is package-private to
+//     `internal/team`, so this path also requires team to expose
+//     `ReadArticle` as an exported method on `*WikiWorker` (or
+//     `*Repo`) that wraps it — pam can't reach the helper directly
+//     from another package.
 //
 // Either is fine; flagging the constraint here so the next PR doesn't
 // have to relitigate it.
