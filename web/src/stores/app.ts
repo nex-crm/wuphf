@@ -1,6 +1,17 @@
 import { create } from "zustand";
 
-export type Theme = "nex";
+export type Theme = "nex" | "nex-dark";
+
+const _storedTheme = ((): Theme => {
+  try {
+    const v = localStorage.getItem("wuphf-theme");
+    if (v === "nex-dark") return "nex-dark";
+  } catch {}
+  return "nex";
+})();
+if (typeof document !== "undefined") {
+  document.documentElement.setAttribute("data-theme", _storedTheme);
+}
 
 export interface ChannelMeta {
   type: "O" | "D" | "G";
@@ -160,8 +171,9 @@ export const useAppStore = create<AppStore>((set, get) => ({
   setChannelMeta: (slug, meta) =>
     set({ channelMeta: { ...get().channelMeta, [slug]: meta } }),
 
-  theme: "nex",
+  theme: _storedTheme,
   setTheme: (t) => {
+    localStorage.setItem("wuphf-theme", t);
     document.documentElement.setAttribute("data-theme", t);
     set({ theme: t });
   },
