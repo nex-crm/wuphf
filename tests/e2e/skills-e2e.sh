@@ -369,7 +369,7 @@ done
 sleep 1
 wait_for "Type a message" 10
 
-# Use the /skills API directly to simulate what parseSkillProposalLocked does
+# Use the structured /skills API directly to create a proposal.
 # (The message POST may be blocked by pending interviews in the test environment)
 curl -s -X POST http://127.0.0.1:7890/skills \
   -H "Content-Type: application/json" \
@@ -425,8 +425,7 @@ fi
 
 screenshot "s07-ceo-proposal"
 
-# Also verify the unit test for parseSkillProposalLocked passes
-echo "  (parseSkillProposalLocked verified via go test ./internal/team/ -run TestParseSkillProposal)"
+echo "  (structured skill proposal path covered by go test ./internal/team)"
 
 cleanup
 

@@ -619,6 +619,8 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 
 		registerSharedMemoryTools(server)
 
+		registerSkillAuthoringTools(server)
+
 		mcp.AddTool(server, readOnlyTool(
 			"team_runtime_state",
 			"Return the canonical runtime snapshot for this direct session, including tasks, pending human requests, recovery summary, and runtime capabilities.",
@@ -659,6 +661,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 			"team_skill_run",
 			"Invoke a named team skill. When the human's request matches an available skill, call this BEFORE replying — do not freelance. Bumps the skill's usage, logs a skill_invocation to the channel, and returns the skill's canonical step-by-step content for you to follow.",
 		), handleTeamSkillRun)
+		registerSkillAuthoringTools(server)
 		if hasActionProvider() {
 			registerActionTools(server)
 		}
@@ -757,6 +760,7 @@ func configureServerTools(server *mcp.Server, slug string, channel string, oneOn
 		"team_skill_run",
 		"Invoke a named team skill. When the request matches an available skill (see the skill list in your prompt), call this BEFORE doing the work — do not freelance. Bumps the skill's usage, logs a skill_invocation in the channel so the office sees you followed the playbook, and returns the skill's canonical step-by-step content for you to execute.",
 	), handleTeamSkillRun)
+	registerSkillAuthoringTools(server)
 
 	// Gate external-action tools behind a configured provider. Registering 14
 	// empty action tools inflates the MCP tool schema and pushes the total
