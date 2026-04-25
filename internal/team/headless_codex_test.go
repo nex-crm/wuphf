@@ -1591,7 +1591,12 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 		Attempts: 0,
 	}, time.Now().UTC().Add(-2*time.Second), "channel_not_found")
 
-	queue := l.headlessQueues["operator"]
+	// Snapshot the queue under the launcher's headlessMu — the spawned worker
+	// goroutine drains headlessQueues under that mutex, so an unguarded read
+	// from the test races with the drain (caught by `go test -race`).
+	l.headlessMu.Lock()
+	queue := append([]headlessCodexTurn(nil), l.headlessQueues["operator"]...)
+	l.headlessMu.Unlock()
 	if len(queue) != 1 {
 		t.Fatalf("expected one retry queued for external action, got %+v", queue)
 	}
