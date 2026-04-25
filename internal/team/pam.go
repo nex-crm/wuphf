@@ -153,7 +153,26 @@ type PamDispatcherConfig struct {
 // the planned `internal/pam` extraction (Track B): once pam.go lives
 // in its own package, this interface stays with pam (the consumer) and
 // `*team.WikiWorker` continues to satisfy it via duck typing — no
-// import-cycle, no shared "core" package needed.
+// import cycle: pam never needs to import the *implementation*.
+//
+// Caveat: `Repo() *Repo` returns the team-package `*Repo` type. When
+// pam moves out, declaring this interface there still requires `import
+// "internal/team"` to name `*team.Repo` in the return type — duck
+// typing only avoids importing the implementation, not the types its
+// methods *return*. Two paths forward when the actual extraction PR
+// lands:
+//
+//  1. Hoist `Repo` into a neutral package (e.g. `internal/teamrepo`)
+//     so both team and pam import it as a peer. Cleanest, but adds
+//     a third package to the move.
+//  2. Narrow this interface so it doesn't return `*Repo` directly —
+//     e.g. `ReadArticle(relPath string) ([]byte, error)` instead of
+//     `Repo() *Repo` (pam's only use of Repo() is to call
+//     readArticle on it). Avoids the new package; trades expressivity
+//     for decoupling.
+//
+// Either is fine; flagging the constraint here so the next PR doesn't
+// have to relitigate it.
 type pamWiki interface {
 	Enqueue(ctx context.Context, slug, path, content, mode, commitMsg string) (string, int, error)
 	Repo() *Repo
