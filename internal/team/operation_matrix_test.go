@@ -216,10 +216,9 @@ func TestOperationBlueprintMatrixServesBootstrapPackageEndpoint(t *testing.T) {
 				t.Fatalf("load blueprint: %v", err)
 			}
 
-			b := newTestBroker(t)
 			req := httptest.NewRequest(http.MethodGet, "/operations/bootstrap-package", nil)
 			rec := httptest.NewRecorder()
-			b.handleOperationBootstrapPackage(rec, req)
+			handleOperationBootstrapPackage(rec, req)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 			}

@@ -343,7 +343,14 @@ func buildOperationBootstrapPackageFromRepo(ctx context.Context, profile operati
 	return buildOperationSynthesizedBootstrapPackage(profile, connections, providerName), nil
 }
 
-func (b *Broker) handleOperationBootstrapPackage(w http.ResponseWriter, r *http.Request) {
+// handleOperationBootstrapPackage serves the studio + operations
+// /bootstrap-package endpoints. It is intentionally a free function, not
+// a *Broker method: the body never touches broker state, only config +
+// the local repo. This is the dependency-inversion seam for the planned
+// internal/operation extraction (Track B) — once the operation cluster
+// moves into its own package, this function moves with it and broker.go
+// continues to wire the route through the package boundary.
+func handleOperationBootstrapPackage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
