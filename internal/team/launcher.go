@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nex-crm/wuphf/internal/action"
@@ -3103,10 +3104,21 @@ func (l *Launcher) runPaneDispatchQueue(slug string) {
 	}
 }
 
-// launcherSendNotificationToPane is the package-level seam tests swap
-// out to observe dispatch ordering without shelling out to a real tmux.
-// In production it dispatches through the method on Launcher.
-var launcherSendNotificationToPane = func(l *Launcher, paneTarget, notification string) {
+// launcherSendNotificationToPaneFn is the test seam type swapped via
+// setLauncherSendNotificationToPaneForTest.
+type launcherSendNotificationToPaneFn func(l *Launcher, paneTarget, notification string)
+
+// launcherSendNotificationToPaneOverride is read by the pane-dispatch and
+// resume goroutines, so it lives behind atomic.Pointer to stay race-clean
+// against test cleanups that fire while a worker is mid-dispatch.
+// Production reads fall through to sendNotificationToPane.
+var launcherSendNotificationToPaneOverride atomic.Pointer[launcherSendNotificationToPaneFn]
+
+func launcherSendNotificationToPane(l *Launcher, paneTarget, notification string) {
+	if p := launcherSendNotificationToPaneOverride.Load(); p != nil {
+		(*p)(l, paneTarget, notification)
+		return
+	}
 	l.sendNotificationToPane(paneTarget, notification)
 }
 

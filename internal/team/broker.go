@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	wuphf "github.com/nex-crm/wuphf"
@@ -58,10 +59,25 @@ const defaultAgentRateLimitWindow = time.Minute
 // the value set by internal/teammcp/server.go authHeaders().
 const agentRateLimitHeader = "X-WUPHF-Agent"
 
+// studioPackageGeneratorFn is the test seam type swapped via
+// setStudioPackageGeneratorForTest.
+type studioPackageGeneratorFn func(systemPrompt, prompt, cwd string) (string, error)
+
 // studioPackageGenerator routes Studio package generation through the
 // install-wide LLM provider so opencode-only or claude-code-only setups
 // aren't forced to have `codex` installed.
-var studioPackageGenerator = provider.RunConfiguredOneShot
+//
+// Lives behind atomic.Pointer because broker handlers can call it from
+// goroutines that outlive a test's t.Cleanup (Studio generation is
+// fire-and-forget on the broker's HTTP path).
+var studioPackageGeneratorOverride atomic.Pointer[studioPackageGeneratorFn]
+
+func studioPackageGenerator(systemPrompt, prompt, cwd string) (string, error) {
+	if p := studioPackageGeneratorOverride.Load(); p != nil {
+		return (*p)(systemPrompt, prompt, cwd)
+	}
+	return provider.RunConfiguredOneShot(systemPrompt, prompt, cwd)
+}
 
 var externalRetryAfterPattern = regexp.MustCompile(`(?i)retry after ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+-]+Z?)`)
 

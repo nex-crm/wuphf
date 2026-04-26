@@ -686,12 +686,10 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 	// and failing the test with an `unlinkat ... directory not empty`.
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
-	oldSendPane := launcherSendNotificationToPane
 	var paneNotifications []string
-	launcherSendNotificationToPane = func(_ *Launcher, paneTarget, notification string) {
+	setLauncherSendNotificationToPaneForTest(t, func(_ *Launcher, paneTarget, notification string) {
 		paneNotifications = append(paneNotifications, paneTarget+"\n"+notification)
-	}
-	defer func() { launcherSendNotificationToPane = oldSendPane }()
+	})
 
 	b := NewBrokerAt(leakedBrokerStatePath(t))
 	b.mu.Lock()

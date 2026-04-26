@@ -87,11 +87,9 @@ func TestDecodeStudioGeneratedPackageHandlesFencedJSON(t *testing.T) {
 }
 
 func TestHandleStudioGeneratePackagePersistsAction(t *testing.T) {
-	restore := studioPackageGenerator
-	studioPackageGenerator = func(systemPrompt, prompt, cwd string) (string, error) {
+	setStudioPackageGeneratorForTest(t, func(systemPrompt, prompt, cwd string) (string, error) {
 		return `{"topic_packet":{"title":"AI automation channel"},"script_brief":{"hook":"Start with the costly mistake."},"publish_package":{"description":"Ship with affiliate CTA.","title_options":["Option A","Option B"]}}`, nil
-	}
-	defer func() { studioPackageGenerator = restore }()
+	})
 
 	b := newTestBroker(t)
 	body := map[string]any{
