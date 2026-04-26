@@ -6,6 +6,7 @@ Usage:
   wuphf --tui        Launch with tmux TUI instead
   wuphf init         Install the latest CLI and save setup defaults
   wuphf shred        Burn the workspace down and reopen onboarding
+  wuphf upgrade      Check npm for a newer version and show the changelog
   wuphf import --from legacy  Import from a running external orchestrator (auto-detect)
   wuphf log          Show what your agents actually did (task receipts)
   wuphf memory migrate --from {nex,gbrain}  Port legacy memory into the team wiki
