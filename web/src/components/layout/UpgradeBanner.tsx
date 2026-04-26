@@ -72,6 +72,11 @@ export function UpgradeBanner() {
     // AbortController so a slow fetch from a previous run cannot resolve
     // after we've moved on (component unmount).
     const ctl = new AbortController();
+    // Note: api/client.ts get() doesn't accept an AbortSignal yet, so the
+    // request continues to completion server-side. The signal here only
+    // suppresses the resolve callbacks if the component unmounted —
+    // wiring signal through get() is a follow-up that touches every
+    // caller of the shared client and is out of scope for this PR.
     void get<UpgradeCheckResponse>("/upgrade-check")
       .then((res) => {
         if (ctl.signal.aborted) return;
@@ -95,14 +100,14 @@ export function UpgradeBanner() {
   // Drive the changelog fetch from `expanded` via an effect so the
   // AbortController's lifecycle is tied to the expand state — collapsing
   // (or unmounting) cancels an in-flight request. The "have we fetched"
-  // bit is tracked in a ref, NOT in changelog state, so calling
-  // setChangelog from inside the effect doesn't re-fire it (which would
-  // cancel its own in-flight request — observed bug).
+  // bit is latched in the resolution callbacks (NOT at fetch start), so a
+  // collapse-while-loading leaves the ref unset and the next expand can
+  // retry. The cleanup also resets the loading state so a re-expand
+  // doesn't render a stale "Loading changes…" caption.
   useEffect(() => {
     if (!expanded) return;
     if (!(current && latest)) return;
     if (changelogFetchedRef.current) return;
-    changelogFetchedRef.current = true;
     const ctl = new AbortController();
     setChangelog({ loading: true, error: null, commits: [] });
     void get<UpgradeChangelogResponse>("/upgrade-changelog", {
@@ -111,6 +116,7 @@ export function UpgradeBanner() {
     })
       .then((data) => {
         if (ctl.signal.aborted) return;
+        changelogFetchedRef.current = true;
         if (data.error) {
           setChangelog({ loading: false, error: data.error, commits: [] });
           return;
@@ -134,9 +140,9 @@ export function UpgradeBanner() {
       })
       .catch((e: unknown) => {
         if (ctl.signal.aborted) return;
-        // Allow a retry on next expand if the fetch failed — otherwise
-        // the user is stuck with the error message until reload.
-        changelogFetchedRef.current = false;
+        // Latch on error too so the user sees the error message instead
+        // of the next expand silently re-firing the same failing call.
+        changelogFetchedRef.current = true;
         setChangelog({
           loading: false,
           error: e instanceof Error ? e.message : String(e),
@@ -145,6 +151,12 @@ export function UpgradeBanner() {
       });
     return () => {
       ctl.abort();
+      // Cleanup-while-loading means neither .then nor .catch will run.
+      // Drop the loading caption so a re-expand doesn't show a stale
+      // "Loading changes…" while the new fetch is being kicked off.
+      setChangelog((prev) =>
+        prev.loading ? { loading: false, error: null, commits: [] } : prev,
+      );
     };
   }, [expanded, current, latest]);
 

@@ -481,7 +481,9 @@
   font: inherit;
 }
 .upgrade-banner-copy:hover {
-  background: rgba(0, 0, 0, 0.03);
+  /* Theme-tinted accent — `var(--blue-bg)` survives dark mode where a
+     literal `rgba(0,0,0,…)` overlay would be invisible. */
+  background: var(--blue-bg);
 }
 .upgrade-banner-copy code {
   font-family: var(--font-mono);
@@ -514,7 +516,7 @@
 
 .upgrade-banner-changelog {
   padding: 8px 20px 12px;
-  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  border-top: 1px solid var(--border);
   background: var(--bg-card);
   color: var(--text);
   max-height: 320px;

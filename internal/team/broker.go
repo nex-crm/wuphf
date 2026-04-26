@@ -4687,7 +4687,11 @@ func (b *Broker) handleUpgradeChangelog(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(map[string]any{"commits": entries})
 }
 
-var upgradeVersionParam = regexp.MustCompile(`^v?\d+(\.\d+){1,3}(-[\w.]+)?$`)
+// Semver-leaning version param. Accepts an optional `v`, 2-4 dotted numeric
+// segments, an optional pre-release after `-` (e.g. `-rc.1`, `-beta-2`), and
+// an optional build-metadata after `+` (e.g. `+build.5`). Hyphen is allowed
+// inside the suffix character class so `-beta-1` validates.
+var upgradeVersionParam = regexp.MustCompile(`^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 
 func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {

@@ -165,37 +165,71 @@ func TestCheckHitsRegistry(t *testing.T) {
 	}
 }
 
-func TestCheckOmitsCompareURLWhenUpToDate(t *testing.T) {
-	// If npm `latest` matches buildinfo, no upgrade is available and the
-	// CompareURL would be a degenerate `compare/vX...vX` link — omit it
-	// so JSON consumers don't surface a misleading no-op URL.
+// pinCurrentVersion swaps the package-level currentVersion seam for the
+// duration of the test. Restores the original on cleanup so parallel tests
+// don't observe each other's pin.
+func pinCurrentVersion(t *testing.T, v string) {
+	t.Helper()
+	prev := currentVersion
+	currentVersion = func() string { return v }
+	t.Cleanup(func() { currentVersion = prev })
+}
+
+// mockNPMRegistry returns an http.Client whose Transport rewrites the npm
+// registry URL to a httptest server that always responds with the given
+// version. Cleans up the server on test end.
+func mockNPMRegistry(t *testing.T, latest string) *http.Client {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		// Return whatever buildinfo.Current().Version says, so the
-		// comparison sees them as equal.
-		_ = json.NewEncoder(w).Encode(map[string]string{"version": "dev"})
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": latest})
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	host := strings.TrimPrefix(srv.URL, "http://")
-	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		req.URL.Scheme = "http"
 		req.URL.Host = host
 		return http.DefaultTransport.RoundTrip(req)
 	})}
+}
 
-	res, err := Check(context.Background(), client)
+func TestCheckShortCircuitsForDevBuild(t *testing.T) {
+	// On a dev binary, Check must NOT compute UpgradeAvailable or
+	// CompareURL regardless of what npm `latest` says — otherwise
+	// `dev < anything` would always tell the user to npm-install over
+	// their source build.
+	pinCurrentVersion(t, "dev")
+	res, err := Check(context.Background(), mockNPMRegistry(t, "99.0.0"))
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
-	// In a dev build, IsDevBuild=true and Check short-circuits before
-	// computing UpgradeAvailable / CompareURL — both must be zero-valued.
 	if !res.IsDevBuild {
-		t.Skipf("test only meaningful for dev-build runners; got Current=%q", res.Current)
+		t.Errorf("expected IsDevBuild=true for current=%q", res.Current)
 	}
 	if res.UpgradeAvailable {
 		t.Errorf("dev build must never report UpgradeAvailable=true")
 	}
 	if res.CompareURL != "" {
-		t.Errorf("CompareURL should be empty for dev/no-upgrade, got %q", res.CompareURL)
+		t.Errorf("CompareURL should be empty for dev build, got %q", res.CompareURL)
+	}
+}
+
+func TestCheckOmitsCompareURLWhenVersionsEqual(t *testing.T) {
+	// True up-to-date path (non-dev current matches latest). CompareURL
+	// must be empty so JSON consumers don't surface a degenerate
+	// `compare/vX...vX` link.
+	pinCurrentVersion(t, "1.2.3")
+	res, err := Check(context.Background(), mockNPMRegistry(t, "1.2.3"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if res.IsDevBuild {
+		t.Errorf("expected IsDevBuild=false for current=%q", res.Current)
+	}
+	if res.UpgradeAvailable {
+		t.Errorf("expected UpgradeAvailable=false when current==latest")
+	}
+	if res.CompareURL != "" {
+		t.Errorf("CompareURL should be empty when up-to-date, got %q", res.CompareURL)
 	}
 }
 

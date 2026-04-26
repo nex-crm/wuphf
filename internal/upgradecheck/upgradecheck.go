@@ -21,7 +21,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 )
@@ -53,9 +52,13 @@ type Result struct {
 // when the registry call fails.
 func Check(ctx context.Context, client *http.Client) (Result, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 4 * time.Second}
+		// No client.Timeout — let the caller's context govern the
+		// deadline. http.Client.Timeout caps the entire request and is
+		// NOT extended by ctx, so a hard timeout here would silently
+		// overrule the broker's 5s and the CLI's 8s budgets.
+		client = &http.Client{}
 	}
-	current := buildinfo.Current().Version
+	current := currentVersion()
 	res := Result{
 		Current:        current,
 		IsDevBuild:     IsDevVersion(current),
@@ -93,6 +96,11 @@ func IsDevVersion(v string) bool {
 	v = strings.TrimSpace(v)
 	return v == "" || v == "dev"
 }
+
+// currentVersion is a seam so tests can pin the running version without
+// mutating buildinfo or rebuilding. Production reads buildinfo.Current()
+// directly; tests overwrite this var via t.Cleanup-restored swaps.
+var currentVersion = func() string { return buildinfo.Current().Version }
 
 // ── npm registry ──────────────────────────────────────────────────────────
 
@@ -158,7 +166,8 @@ type githubCompareResponse struct {
 // conventional-commit entries.
 func FetchChangelog(ctx context.Context, client *http.Client, from, to string) ([]CommitEntry, error) {
 	if client == nil {
-		client = &http.Client{Timeout: 6 * time.Second}
+		// See note in Check: rely on the caller's context deadline.
+		client = &http.Client{}
 	}
 	url := fmt.Sprintf(
 		"https://api.github.com/repos/%s/compare/v%s...v%s",

@@ -339,11 +339,15 @@ func main() {
 }
 
 func runUpgradeCheck(args []string) {
-	jsonOut := false
-	for _, a := range args {
-		if a == "--json" {
-			jsonOut = true
-		}
+	// Use a real flag.FlagSet so `--json=true`, `--help`, and unknown flags
+	// behave consistently with the rest of the CLI (the previous
+	// hand-rolled loop silently accepted `wuphf upgrade junk` and ignored
+	// `--json=true`).
+	fs := flag.NewFlagSet("upgrade", flag.ExitOnError)
+	jsonOut := fs.Bool("json", false, "Emit the comparison as JSON for scripting")
+	fs.Usage = func() { printSubcommandHelp("upgrade") }
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
@@ -355,8 +359,10 @@ func runUpgradeCheck(args []string) {
 	// JSON output: emit the full Result (including IsDevBuild and an
 	// `error` field for scripted callers) and exit non-zero on failure
 	// so `wuphf upgrade --json | jq …` distinguishes "no upgrade" from
-	// "couldn't reach npm".
-	if jsonOut {
+	// "couldn't reach npm". Dev builds are exempt — they don't depend on
+	// npm reachability, so a network blip shouldn't trip exit-code-aware
+	// pipelines on contributor machines.
+	if *jsonOut {
 		out := struct {
 			upgradecheck.Result
 			Error string `json:"error,omitempty"`
@@ -365,7 +371,7 @@ func runUpgradeCheck(args []string) {
 			out.Error = err.Error()
 		}
 		_ = json.NewEncoder(os.Stdout).Encode(out)
-		if err != nil {
+		if err != nil && !res.IsDevBuild {
 			os.Exit(1)
 		}
 		return

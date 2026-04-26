@@ -418,7 +418,9 @@ export function getHealth() {
 // in-app upgrade banner consumes.
 export interface VersionInfo {
   version: string;
-  build_timestamp?: string;
+  // Always populated by the backend (defaults to "unknown" when no
+  // BuildTimestamp ldflag was set — see internal/buildinfo).
+  build_timestamp: string;
 }
 
 export function getVersion() {
