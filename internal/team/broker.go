@@ -3089,6 +3089,12 @@ func brokerStateShouldSnapshot(state brokerState) bool {
 }
 
 func (b *Broker) loadState() error {
+	if b.statePath == "" {
+		// Direct &Broker{} literal in a unit test that exercises only
+		// in-memory logic — no file to load from. Treat as a fresh
+		// no-state broker and let the caller proceed.
+		return nil
+	}
 	path := b.statePath
 	state, err := loadBrokerStateFile(path)
 	if err != nil {
@@ -3158,6 +3164,14 @@ func (b *Broker) loadState() error {
 }
 
 func (b *Broker) saveLocked() error {
+	if b.statePath == "" {
+		// A direct &Broker{} literal (no NewBrokerAt/NewBroker) reaching the
+		// persistence path means a test wired in-memory state but accidentally
+		// triggered a save — without this guard the empty path would silently
+		// resolve to "" + cwd-adjacent files. Fail loudly so the caller fixes
+		// the construction site instead of corrupting the test workdir.
+		return errors.New("broker: saveLocked requires a non-empty statePath; construct via NewBrokerAt(path)")
+	}
 	path := b.statePath
 	snapshotPath := b.stateSnapshotPath()
 	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.policies) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
