@@ -132,6 +132,12 @@ func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 	}
 
 	// Gate OFF (production default): NewBrokerAt() reads from disk.
+	//
+	// Mutating skipBrokerStateLoadOnConstruct mid-test is safe today
+	// because no test in this package calls t.Parallel() — the gate is
+	// process-wide and parallel siblings would race on it. If anyone
+	// adds parallel marks here later, gate the swap behind a per-test
+	// mutex or move it to t.Setenv-style instrumentation.
 	oldGate := skipBrokerStateLoadOnConstruct
 	skipBrokerStateLoadOnConstruct = false
 	t.Cleanup(func() { skipBrokerStateLoadOnConstruct = oldGate })
