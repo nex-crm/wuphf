@@ -62,9 +62,12 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 
 	target := firstNonEmpty(channel...)
 
-	var agentStreamForBridge *agentStreamBuffer
+	// Broker.AgentStream is keyed by slug and returns the same buffer on
+	// repeat calls, so a single lookup is sufficient for both the bridge-
+	// failure notice and the per-chunk pushes in the loop callbacks below.
+	var agentStream *agentStreamBuffer
 	if l.broker != nil {
-		agentStreamForBridge = l.broker.AgentStream(slug)
+		agentStream = l.broker.AgentStream(slug)
 	}
 
 	// Bridge MCP tools so the model can drive the broker. Failure is non-
@@ -77,8 +80,8 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 	if bridgeErr != nil {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("openai_compat_mcp-bridge-failed: %v (falling back to text-only)", bridgeErr))
-		if agentStreamForBridge != nil {
-			agentStreamForBridge.Push(fmt.Sprintf("[bridge unavailable: %v — replying without tools]", bridgeErr))
+		if agentStream != nil {
+			agentStream.Push(fmt.Sprintf("[bridge unavailable: %v — replying without tools]", bridgeErr))
 		}
 		tools = nil
 	}
@@ -97,16 +100,10 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 	msgs = append(msgs, agent.Message{Role: "user", Content: userPrompt})
 
-	var agentStream *agentStreamBuffer
-	if l.broker != nil {
-		agentStream = l.broker.AgentStream(slug)
-	}
-
 	// Use the ctx-aware StreamFn so cancellation propagates all the way
 	// to the HTTP request — without this a cancelled turn would pin the
 	// local server's inference slot until the model finishes generating.
 	streamFn := provider.NewOpenAICompatStreamFnWithCtx(ctx, kind)
-	_ = entry // entry held for capability lookup, see Lookup above
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
 		tools:       tools,
@@ -162,6 +159,17 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 			iterationsUsed, streamErr,
 		))
 		l.updateHeadlessProgress(slug, "error", "error", truncate(streamErr, 180), metrics)
+		// Post any partial output (e.g. the cap-hit marker the loop
+		// produced when maxIters tripped) before propagating the error,
+		// so the user sees something on-channel rather than a silent
+		// failure. Without this, finalText is computed and discarded.
+		if text := strings.TrimSpace(finalText); text != "" {
+			if msg, posted, postErr := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt); postErr != nil {
+				appendHeadlessCodexLog(slug, kind+"_partial-post-error: "+postErr.Error())
+			} else if posted {
+				appendHeadlessCodexLog(slug, fmt.Sprintf("%s_partial-post: posted partial output to #%s as %s", kind, msg.Channel, msg.ID))
+			}
+		}
 		return fmt.Errorf("%s: %s", kind, streamErr)
 	}
 

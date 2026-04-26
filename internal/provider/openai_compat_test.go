@@ -1,12 +1,14 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -367,12 +369,60 @@ func TestNormalizeOpenAICompatEndpoint_AppendsV1WhenMissing(t *testing.T) {
 		{"http://127.0.0.1:8080/v1/", "http://127.0.0.1:8080/v1/chat/completions"},
 		// Multi-tenant proxies sometimes nest /v1 under a path prefix.
 		{"https://gateway.example.com/api/v1/proxy", "https://gateway.example.com/api/v1/proxy/chat/completions"},
+		// Auth-via-query (rare but supported by some proxied gateways):
+		// query string must round-trip after the path join.
+		{"https://gw/v1?key=abc", "https://gw/v1/chat/completions?key=abc"},
+		{"https://gw?key=abc", "https://gw/v1/chat/completions?key=abc"},
+		{"https://gw/?key=abc", "https://gw/v1/chat/completions?key=abc"},
 	}
 	for _, tc := range cases {
 		got := normalizeOpenAICompatEndpoint(tc.in)
 		if got != tc.want {
 			t.Errorf("normalizeOpenAICompatEndpoint(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// TestNewOpenAICompatStreamFnWithCtx_UnregisteredKindEmitsClearError
+// prevents a future bug where someone calls the ctx-aware factory with
+// a kind that wasn't registered via NewOpenAICompatStreamFn first.
+// Without the guard, runOpenAICompatStream would build a relative URL
+// and net/http would fail six layers down with a confusing message.
+func TestNewOpenAICompatStreamFnWithCtx_UnregisteredKindEmitsClearError(t *testing.T) {
+	fn := NewOpenAICompatStreamFnWithCtx(context.Background(), "definitely-not-registered")
+	chunks := drainChunks(t, fn(nil, nil))
+	if len(chunks) != 1 || chunks[0].Type != "error" {
+		t.Fatalf("expected one error chunk, got %+v", chunks)
+	}
+	if !strings.Contains(chunks[0].Content, "definitely-not-registered") {
+		t.Errorf("error did not name the kind: %q", chunks[0].Content)
+	}
+	if !strings.Contains(chunks[0].Content, "no registered defaults") {
+		t.Errorf("error missing diagnostic hint: %q", chunks[0].Content)
+	}
+}
+
+// TestOpenAICompatDialTimeout_EnvOverride documents the env knob users
+// can flip when pointing the local-LLM provider at a remote box with
+// flaky first-connection latency (Wi-Fi, TLS handshake, etc.).
+func TestOpenAICompatDialTimeout_EnvOverride(t *testing.T) {
+	t.Setenv("WUPHF_OPENAI_COMPAT_DIAL_TIMEOUT_SECONDS", "")
+	if got := openAICompatDialTimeout(); got != 5*time.Second {
+		t.Errorf("default = %v, want 5s", got)
+	}
+	t.Setenv("WUPHF_OPENAI_COMPAT_DIAL_TIMEOUT_SECONDS", "30")
+	if got := openAICompatDialTimeout(); got != 30*time.Second {
+		t.Errorf("override = %v, want 30s", got)
+	}
+	// Garbage env value must fall back to default rather than zero (which
+	// would mean "no timeout" and reintroduce the original bug).
+	t.Setenv("WUPHF_OPENAI_COMPAT_DIAL_TIMEOUT_SECONDS", "not-a-number")
+	if got := openAICompatDialTimeout(); got != 5*time.Second {
+		t.Errorf("garbage env = %v, want 5s fallback", got)
+	}
+	t.Setenv("WUPHF_OPENAI_COMPAT_DIAL_TIMEOUT_SECONDS", "0")
+	if got := openAICompatDialTimeout(); got != 5*time.Second {
+		t.Errorf("zero env = %v, want 5s fallback (zero would mean no timeout)", got)
 	}
 }
 

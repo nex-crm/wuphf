@@ -1,9 +1,11 @@
 package provider
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 )
@@ -167,6 +169,45 @@ func TestOpenAICompatStreamFn_LiveOllama(t *testing.T) {
 		t.Fatal("no text from live ollama")
 	}
 	t.Logf("live ollama ok: %q", out)
+}
+
+// TestOpenAICompatStreamFn_LiveOllama_CtxCancelAbortsHTTP exercises the
+// WithCtx variant against a real ollama daemon to lock in the
+// cancellation contract end-to-end. The unit test
+// TestOpenAICompatToolLoop_ContextCancelStopsImmediately uses a fake
+// StreamFn so it only verifies the loop's responsiveness; this confirms
+// the *real HTTP request* aborts when ctx is cancelled, which is the
+// load-bearing property for not pinning the server's inference slot.
+func TestOpenAICompatStreamFn_LiveOllama_CtxCancelAbortsHTTP(t *testing.T) {
+	if os.Getenv("WUPHF_TEST_LIVE_OLLAMA") != "1" {
+		t.Skip("set WUPHF_TEST_LIVE_OLLAMA=1 to run against a live ollama daemon on :11434")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	fn := NewOpenAICompatStreamFnWithCtx(ctx, KindOllama)
+
+	ch := fn(
+		[]agent.Message{{Role: "user", Content: "Write a 200 word essay about clouds."}},
+		nil,
+	)
+	// Cancel after we know at least one frame is in-flight.
+	go func() {
+		time.Sleep(250 * time.Millisecond)
+		cancel()
+	}()
+	deadline := time.NewTimer(8 * time.Second)
+	defer deadline.Stop()
+	closed := false
+	for !closed {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				closed = true
+			}
+		case <-deadline.C:
+			t.Fatal("channel still open 8s after ctx cancel — HTTP request was not aborted")
+		}
+	}
+	t.Log("live ollama ctx cancel ok: channel closed within 8s of cancel")
 }
 
 // TestOpenAICompatStreamFn_LiveExo_ConnectRefused verifies the failure

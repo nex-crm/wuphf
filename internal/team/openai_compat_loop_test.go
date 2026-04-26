@@ -329,12 +329,22 @@ func TestOpenAICompatToolLoop_MaxIterationsCap(t *testing.T) {
 		maxIters:    4,
 		toolTimeout: time.Second,
 	}
-	_, iters, streamErr, _ := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "loop"}})
+	finalText, iters, streamErr, _ := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "loop"}})
 	if iters != 4 {
 		t.Errorf("iterations = %d, want 4 (the cap)", iters)
 	}
 	if !strings.Contains(streamErr, "exceeded") {
 		t.Errorf("streamErr = %q, expected exceeded-iterations message", streamErr)
+	}
+	// finalText must carry the cap-hit marker so the headless runner has
+	// something to post to the channel — runHeadlessOpenAICompatTurn
+	// returns early on streamErr but posts finalText first, and that
+	// post is the only path the user ever sees on this failure mode.
+	if finalText == "" {
+		t.Fatal("finalText empty on cap-hit; user gets a silent failure")
+	}
+	if !strings.Contains(finalText, "tool loop hit") || !strings.Contains(finalText, "iterations") {
+		t.Errorf("finalText missing marker: %q", finalText)
 	}
 }
 

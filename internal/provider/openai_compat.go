@@ -9,6 +9,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -62,6 +64,20 @@ func NewOpenAICompatStreamFn(kind, defaultBaseURL, defaultModel string) func(str
 // should use NewOpenAICompatStreamFn instead.
 func NewOpenAICompatStreamFnWithCtx(ctx context.Context, kind string) agent.StreamFn {
 	baseURL, model := openAICompatDefaultsFor(kind)
+	if baseURL == "" && model == "" {
+		// Unregistered kind: emit a clear error on the first call instead
+		// of letting an empty base URL surface six layers down as a
+		// confusing "URL must be absolute" error from net/http.
+		return func(_ []agent.Message, _ []agent.AgentTool) <-chan agent.StreamChunk {
+			ch := make(chan agent.StreamChunk, 1)
+			ch <- agent.StreamChunk{
+				Type:    "error",
+				Content: fmt.Sprintf("openai-compat: kind %q has no registered defaults — did its init() forget to call NewOpenAICompatStreamFn?", kind),
+			}
+			close(ch)
+			return ch
+		}
+	}
 	return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
 		ch := make(chan agent.StreamChunk, 64)
 		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools)
@@ -101,13 +117,23 @@ func openAICompatDefaultsFor(kind string) (string, string) {
 // `Starting httpd at 127.0.0.1 on port 8080` doesn't mention /v1, so a
 // naive base_url=http://127.0.0.1:8080 would 404 with no hint at the
 // fix).
+//
+// Query strings on the base URL are split off before the /v1 test so
+// `https://gw/v1?key=abc` round-trips to
+// `https://gw/v1/chat/completions?key=abc` rather than concatenating
+// junk. Auth-via-querystring is rare for this surface but supported by
+// some proxied gateways.
 func normalizeOpenAICompatEndpoint(baseURL string) string {
-	trimmed := strings.TrimRight(baseURL, "/")
-	if !strings.HasSuffix(trimmed, "/v1") &&
-		!strings.Contains(trimmed, "/v1/") {
-		trimmed += "/v1"
+	pathPart, queryPart := baseURL, ""
+	if idx := strings.IndexByte(baseURL, '?'); idx >= 0 {
+		pathPart, queryPart = baseURL[:idx], baseURL[idx:]
 	}
-	return trimmed + "/chat/completions"
+	pathPart = strings.TrimRight(pathPart, "/")
+	if !strings.HasSuffix(pathPart, "/v1") &&
+		!strings.Contains(pathPart, "/v1/") {
+		pathPart += "/v1"
+	}
+	return pathPart + "/chat/completions" + queryPart
 }
 
 // httpClientForOpenAICompat is overridable for tests (httptest.Server transport).
@@ -117,11 +143,23 @@ var httpClientForOpenAICompat = func() *http.Client {
 	// server can take 30s+ to emit the first SSE frame for a 32B model.
 	// Dial timeout is bounded explicitly so a wedged DNS resolver or
 	// unreachable host can't hang an agent turn until the OS-level
-	// connect timeout fires (>60s on macOS).
+	// connect timeout fires (>60s on macOS). Default 5s is comfortable
+	// for loopback; users pointing WUPHF_OLLAMA_BASE_URL at a remote box
+	// (e.g. a Mac Studio over Wi-Fi) can bump via
+	// WUPHF_OPENAI_COMPAT_DIAL_TIMEOUT_SECONDS.
 	tr := &http.Transport{
-		DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+		DialContext: (&net.Dialer{Timeout: openAICompatDialTimeout()}).DialContext,
 	}
 	return &http.Client{Transport: tr, Timeout: 0}
+}
+
+func openAICompatDialTimeout() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("WUPHF_OPENAI_COMPAT_DIAL_TIMEOUT_SECONDS")); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+			return time.Duration(n) * time.Second
+		}
+	}
+	return 5 * time.Second
 }
 
 func runOpenAICompatStream(
