@@ -1518,6 +1518,16 @@ func TestRecoverTimedOutHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *te
 	if updated.Status != "blocked" || !updated.Blocked {
 		t.Fatalf("expected task to be blocked after retry budget exhausted, got %+v", updated)
 	}
+	var healTask teamTask
+	for _, candidate := range b.AllTasks() {
+		if candidate.Title == "Self-heal @eng on "+task.ID {
+			healTask = candidate
+			break
+		}
+	}
+	if healTask.ID == "" {
+		t.Fatalf("expected self-healing task after timeout recovery, got %+v", b.AllTasks())
+	}
 }
 
 func TestRecoverFailedHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *testing.T) {
@@ -1561,6 +1571,16 @@ func TestRecoverFailedHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *test
 	}
 	if !strings.Contains(updated.Details, "Selected model is at capacity") {
 		t.Fatalf("expected failure detail appended, got %+v", updated)
+	}
+	var healTask teamTask
+	for _, candidate := range b.AllTasks() {
+		if candidate.Title == "Self-heal @eng on "+task.ID {
+			healTask = candidate
+			break
+		}
+	}
+	if healTask.ID == "" {
+		t.Fatalf("expected self-healing task after error recovery, got %+v", b.AllTasks())
 	}
 }
 

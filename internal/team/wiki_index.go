@@ -172,6 +172,26 @@ type FactStore interface {
 	// typed-predicate graph walk and counterfactual rewrite (Slice 2 Thread A).
 	ListFactsByTriplet(ctx context.Context, subject, predicate, objectPrefix string) ([]TypedFact, error)
 
+	// ListReinforcedFactsByPredicate returns every fact with a non-nil
+	// ReinforcedAt whose triplet predicate matches `predicate` exactly. Pass
+	// "" to return all reinforced facts (no predicate filter). Result is
+	// sorted by ID ascending so consumers see deterministic ordering.
+	//
+	// Backed by idx_facts_triplet_pred_obj on the SQLite store, so the cost
+	// is O(matching facts), not O(total facts). The in-memory store filters
+	// linearly — equivalent for small corpora.
+	ListReinforcedFactsByPredicate(ctx context.Context, predicate string) ([]TypedFact, error)
+
+	// ListAllFactsPaged returns up to `limit` facts whose ID is strictly
+	// greater than `afterID`, sorted by ID ascending. Pass afterID="" to
+	// start from the beginning. Pass limit<=0 for an implementation default
+	// (suggested: 1000). The caller drives pagination by feeding the last
+	// returned ID into afterID on the next call.
+	//
+	// Use this instead of ListAllFacts when the consumer can process facts
+	// incrementally — it bounds memory regardless of corpus size.
+	ListAllFactsPaged(ctx context.Context, afterID string, limit int) ([]TypedFact, error)
+
 	// IterateEntities invokes fn for every entity row in the store. Iteration
 	// order is implementation-defined but stable within a single call.
 	// Callers use this to implement signal lookups (by email, name, domain)
@@ -1052,6 +1072,56 @@ func (s *inMemoryFactStore) CountFacts(_ context.Context) (int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.facts), nil
+}
+
+// ListReinforcedFactsByPredicate returns reinforced facts (ReinforcedAt != nil)
+// optionally narrowed to a single predicate. Linear scan — acceptable for the
+// in-memory backend; the SQLite backend uses a partial index. Result is sorted
+// by ID ascending for parity with the SQLite ORDER BY id.
+func (s *inMemoryFactStore) ListReinforcedFactsByPredicate(_ context.Context, predicate string) ([]TypedFact, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []TypedFact
+	for _, f := range s.facts {
+		if f.ReinforcedAt == nil {
+			continue
+		}
+		if predicate != "" {
+			if f.Triplet == nil || f.Triplet.Predicate != predicate {
+				continue
+			}
+		}
+		out = append(out, f)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
+}
+
+// ListAllFactsPaged returns up to `limit` facts with ID > afterID, sorted by
+// ID ascending. Empty afterID starts from the beginning (lexicographically
+// "" precedes every non-empty string). limit <= 0 falls back to the
+// implementation default of 1000.
+func (s *inMemoryFactStore) ListAllFactsPaged(_ context.Context, afterID string, limit int) ([]TypedFact, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]string, 0, len(s.facts))
+	for id := range s.facts {
+		if id > afterID {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	out := make([]TypedFact, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, s.facts[id])
+	}
+	return out, nil
 }
 
 func (s *inMemoryFactStore) IterateEntities(_ context.Context, fn func(IndexEntity) error) error {

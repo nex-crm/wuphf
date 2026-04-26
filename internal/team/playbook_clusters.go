@@ -14,51 +14,20 @@ package team
 // line is appended). That is the only reinforcement counter v1.2 exposes, so
 // the cluster predicate is simply "at least one reinforced fact per entity".
 //
-// Slice 2 scope (per WIKI-SLICE2-PLAN.md Thread C):
-//   - cluster detection is a full scan over ListAllFacts. Bounded by fact
-//     count (~500 at bench time). Acceptable for Slice 2; if the corpus
-//     grows past ~10k facts, introduce a (predicate, object) SQL index.
-//   - no aggregation beyond "distinct entity count per (predicate, object)".
-//     Slice 3 may expand to weighted clustering.
+// Slice 3 Thread A change:
+//   - cluster detection now uses ListReinforcedFactsByPredicate, which is
+//     index-backed on the SQLite store (idx_facts_reinforced — partial index
+//     keyed on triplet_predicate where reinforced_at IS NOT NULL). Cost
+//     scales with matching rows, not corpus size, so the previous
+//     count > threshold "consider paging" warning is no longer needed and
+//     has been retired along with its test hook.
 
 import (
 	"context"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 )
-
-// factCountWarnThreshold is the corpus size at which clusterReinforcedFacts
-// logs a heads-up that the unbounded ListAllFacts scan is past its Slice 2
-// bench-time envelope (~500 facts). Operators who see this line in the
-// broker log should schedule the Slice 3 (predicate, object) SQL index
-// rollout. Not a fail — never truncate silently at read-time.
-//
-// Easy to tune: change this single value, no plumbing. Exported as a test
-// hook via setFactCountWarnThresholdForTest so we don't need to seed 5k
-// rows in unit tests.
-const factCountWarnThreshold = 5000
-
-// factCountWarnThresholdOverride lets tests bind a smaller threshold so the
-// warning path is exercisable without materialising 5k rows. Zero means
-// "use the production constant".
-var factCountWarnThresholdOverride int
-
-// setFactCountWarnThresholdForTest swaps the active threshold and returns a
-// restore function. Test-only — production callers never touch this.
-func setFactCountWarnThresholdForTest(v int) func() {
-	prev := factCountWarnThresholdOverride
-	factCountWarnThresholdOverride = v
-	return func() { factCountWarnThresholdOverride = prev }
-}
-
-func activeFactCountWarnThreshold() int {
-	if factCountWarnThresholdOverride > 0 {
-		return factCountWarnThresholdOverride
-	}
-	return factCountWarnThreshold
-}
 
 // FactCluster is one reinforced (predicate, object) pair observed across
 // multiple distinct entities. Emitted by clusterReinforcedFacts as input to
@@ -97,13 +66,15 @@ type FactCluster struct {
 //     strongest-first, so the head slice is the most informative window.
 //     Values ≤ 0 mean "return every qualifying cluster" (unbounded).
 //
-// When the underlying fact count exceeds factCountWarnThreshold a warning is
-// logged to stderr via the broker log. We never fail or truncate — silent
-// truncation would mask corpus growth from operators.
+// Implementation: we ask the store for the predicate-narrowed reinforced
+// slice up front (ListReinforcedFactsByPredicate). On SQLite this hits the
+// idx_facts_reinforced partial index; on the in-memory backend it filters
+// linearly. Either way, the caller no longer scans the full corpus, and
+// the (ReinforcedAt != nil) + predicate guards live in the store layer.
 //
-// Facts with nil Triplet or ReinforcedAt == nil are skipped. Clusters are
-// returned sorted by (Count desc, Predicate asc, Object asc) so prompt
-// output is stable across runs.
+// Facts with nil Triplet are skipped. Clusters are returned sorted by
+// (Count desc, Predicate asc, Object asc) so prompt output is stable
+// across runs.
 func clusterReinforcedFacts(
 	ctx context.Context,
 	store FactStore,
@@ -118,20 +89,13 @@ func clusterReinforcedFacts(
 		minDistinctEntities = 2
 	}
 
-	// Observability guard for the unbounded ListAllFacts scan. CountFacts is
-	// cheap on both backends; the warning fires once per synthesis run so it
-	// flags growth without spamming the log.
-	if count, cerr := store.CountFacts(ctx); cerr != nil {
-		// CountFacts failure is non-fatal — fall through to the scan and let
-		// the underlying ListAllFacts error (if any) bubble up instead.
-		log.Printf("playbook clusters: count facts failed (continuing): %v", cerr)
-	} else if threshold := activeFactCountWarnThreshold(); count > threshold {
-		log.Printf("playbook clusters: fact count %d exceeds %d — consider paging", count, threshold)
-	}
-
-	facts, err := store.ListAllFacts(ctx)
+	// Pull only the slice we actually cluster against. The store-layer
+	// predicate + reinforced filter means we never materialise the full fact
+	// corpus into a single Go slice. ListReinforcedFactsByPredicate accepts
+	// an empty predicate to mean "every predicate".
+	facts, err := store.ListReinforcedFactsByPredicate(ctx, predicateFilter)
 	if err != nil {
-		return nil, fmt.Errorf("playbook_clusters: list all facts: %w", err)
+		return nil, fmt.Errorf("playbook_clusters: list reinforced facts: %w", err)
 	}
 
 	// Bucket reinforced facts by (predicate, object). Use a set of entity
@@ -144,15 +108,9 @@ func clusterReinforcedFacts(
 		if f.Triplet == nil {
 			continue
 		}
-		if f.ReinforcedAt == nil {
-			continue
-		}
 		predicate := strings.TrimSpace(f.Triplet.Predicate)
 		object := strings.TrimSpace(f.Triplet.Object)
 		if predicate == "" || object == "" {
-			continue
-		}
-		if predicateFilter != "" && predicate != predicateFilter {
 			continue
 		}
 		entity := strings.TrimSpace(f.EntitySlug)

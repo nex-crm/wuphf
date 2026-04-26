@@ -16,6 +16,23 @@ import (
 
 var entityFactPathPattern = regexp.MustCompile(`^team/entities/(people|companies|customers)-[a-z0-9][a-z0-9-]*\.facts\.jsonl$`)
 
+// ghostBriefPathPattern validates team/{kind}/{slug}.md ghost-brief paths.
+// Kind segment matches factLogPathPattern's open `[a-z][a-z0-9-]*` shape so
+// the brief filesystem layout stays in lockstep with whatever singular
+// ("person", "company") or plural ("people", "companies") form the LLM
+// extractor currently emits. The wiki has both regimes coexisting today
+// (extractor-side singular vs entity_facts.go plural) — tightening this
+// pattern in isolation would silently disable Thread B in production.
+// Aligning the two regimes is its own refactor; the regex stays permissive
+// so substrate-rebuild round-trip works for whatever IndexEntity.Kind the
+// extractor mints today.
+var ghostBriefPathPattern = regexp.MustCompile(`^team/[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*\.md$`)
+
+// ghostBriefSlugPattern matches the slug shape the resolver produces.
+// Same character class as the brief path's slug segment so the two checks
+// can never disagree.
+var ghostBriefSlugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
 // CommitEntityFact writes the given content to relPath inside the wiki
 // repo and commits it under the supplied slug. Always uses "replace"
 // semantics — the caller owns the merge (the fact log appends in memory
@@ -320,4 +337,102 @@ func (r *Repo) AppendFactLog(ctx context.Context, slug, relPath, additionalConte
 		return "", 0, fmt.Errorf("fact append: resolve HEAD sha: %w", err)
 	}
 	return strings.TrimSpace(sha), len(buf), nil
+}
+
+// CommitGhostBrief writes a minimal brief for a freshly-minted entity to
+// team/{kind}/{slug}.md and commits it on the wiki branch. Idempotent:
+// if the file already exists with byte-identical content, returns the
+// current HEAD SHA without a new commit.
+//
+// kind must be one of "people", "companies", "customers". slug must
+// match [a-z0-9][a-z0-9-]*. Returns (commitSHA, bytesWritten, err).
+//
+// Closes the §7.4 substrate-rebuild gap: every ghost-entity row the
+// extractor mints in the in-memory index also lands as markdown on disk
+// so a wipe + ReconcileFromMarkdown rebuilds to a logically-identical
+// state. Mirrors the locking + git-add/diff/commit shape of
+// CommitEntityFact and CommitLintReport so the worker mutex serialises
+// every writer and re-extracting the same artifact is a no-op.
+func (r *Repo) CommitGhostBrief(ctx context.Context, kind, slug, content, message string) (string, int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		return "", 0, fmt.Errorf("ghost brief: kind is required")
+	}
+	slug = strings.TrimSpace(slug)
+	if slug == "" {
+		return "", 0, fmt.Errorf("ghost brief: slug is required")
+	}
+	if !ghostBriefSlugPattern.MatchString(slug) {
+		return "", 0, fmt.Errorf("ghost brief: slug must match [a-z0-9][a-z0-9-]*; got %q", slug)
+	}
+	relPath := fmt.Sprintf("team/%s/%s.md", kind, slug)
+	if !ghostBriefPathPattern.MatchString(relPath) {
+		return "", 0, fmt.Errorf("ghost brief: path must match team/(people|companies|customers)/{slug}.md; got %q", relPath)
+	}
+	if content == "" {
+		return "", 0, fmt.Errorf("ghost brief: content is required")
+	}
+
+	clean := filepath.ToSlash(filepath.Clean(relPath))
+	fullPath := filepath.Join(r.root, clean)
+
+	// Idempotency probe: if the file already exists with byte-identical
+	// content, return current HEAD without a new commit. Re-extraction of
+	// the same artifact is therefore a no-op at the brief layer — no
+	// orphan commits, no churn on the wiki history.
+	if existing, readErr := os.ReadFile(fullPath); readErr == nil {
+		if string(existing) == content {
+			headSha, herr := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+			if herr != nil {
+				return "", 0, fmt.Errorf("ghost brief: resolve HEAD: %w", herr)
+			}
+			return strings.TrimSpace(headSha), len(content), nil
+		}
+	} else if !os.IsNotExist(readErr) {
+		return "", 0, fmt.Errorf("ghost brief: probe existing: %w", readErr)
+	}
+
+	if err := os.MkdirAll(filepath.Dir(fullPath), 0o700); err != nil {
+		return "", 0, fmt.Errorf("ghost brief: mkdir: %w", err)
+	}
+	if err := os.WriteFile(fullPath, []byte(content), 0o600); err != nil {
+		return "", 0, fmt.Errorf("ghost brief: write: %w", err)
+	}
+
+	author := ArchivistAuthor
+	if out, err := r.runGitLocked(ctx, author, "add", "--", clean); err != nil {
+		return "", 0, fmt.Errorf("ghost brief: git add: %w: %s", err, out)
+	}
+
+	// A byte-identical re-write that the probe above missed (e.g. file
+	// existed but was dirty in the working tree) still resolves to a
+	// no-op commit here. Report current HEAD so the caller cannot tell
+	// the difference — the on-disk content is what matters for §7.4.
+	cachedDiff, err := r.runGitLocked(ctx, author, "diff", "--cached", "--name-only")
+	if err != nil {
+		return "", 0, fmt.Errorf("ghost brief: git diff --cached: %w", err)
+	}
+	if strings.TrimSpace(cachedDiff) == "" {
+		headSha, herr := r.runGitLocked(ctx, "system", "rev-parse", "--short", "HEAD")
+		if herr != nil {
+			return "", 0, fmt.Errorf("ghost brief: resolve HEAD: %w", herr)
+		}
+		return strings.TrimSpace(headSha), len(content), nil
+	}
+
+	commitMsg := strings.TrimSpace(message)
+	if commitMsg == "" {
+		commitMsg = fmt.Sprintf("archivist: ghost brief for %s/%s", kind, slug)
+	}
+	if out, err := r.runGitLocked(ctx, author, "commit", "-q", "-m", commitMsg); err != nil {
+		return "", 0, fmt.Errorf("ghost brief: git commit: %w: %s", err, out)
+	}
+	sha, err := r.runGitLocked(ctx, author, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return "", 0, fmt.Errorf("ghost brief: resolve HEAD: %w", err)
+	}
+	return strings.TrimSpace(sha), len(content), nil
 }
