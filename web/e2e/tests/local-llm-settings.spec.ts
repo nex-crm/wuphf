@@ -190,6 +190,29 @@ test.describe("Settings → Local LLMs", () => {
     });
   });
 
+  test("Save endpoint with empty inputs is a no-op (does not write resolved defaults as override)", async ({
+    page,
+  }) => {
+    // Reviewer caught a regression where leaving the inputs at their
+    // resolved defaults and clicking Save would persist those defaults
+    // as a permanent provider_endpoints override — locking future
+    // users out of upstream default changes. The fix is dirty-gating
+    // Save; this test asserts it.
+    const configPosts = stubLocalProviders(page);
+    await goToSettingsLocalLLMs(page);
+
+    // Click Save without touching either input.
+    const mlxCard = page.getByTestId("local-llm-card-mlx-lm");
+    await mlxCard.getByRole("button", { name: "Save endpoint" }).click();
+
+    // Wait long enough for any write to land — none should.
+    await page.waitForTimeout(500);
+    const sawProviderEndpointsWrite = (
+      configPosts as Record<string, unknown>[]
+    ).some((p) => p.provider_endpoints !== undefined);
+    expect(sawProviderEndpointsWrite).toBe(false);
+  });
+
   test("Recheck button re-fetches /status/local-providers", async ({
     page,
   }) => {

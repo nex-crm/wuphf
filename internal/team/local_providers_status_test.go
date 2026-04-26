@@ -206,10 +206,20 @@ func TestIsLoopbackBaseURL(t *testing.T) {
 		{"http://127.0.0.1:8080/v1", true},
 		{"http://[::1]:11434/v1", true},
 		{"http://localhost:8080", true},
+		{"http://LocalHost:8080", true},  // case-insensitive (browsers do this)
+		{"http://0.0.0.0:8080/v1", true}, // wildcard bind reachable from loopback
 		{"http://10.0.0.5:8080", false},
+		{"http://10.0.0.99:11434/v1", false}, // matches the security-guardrail test fixture
+		{"http://[2001:db8::1]:8080/v1", false},
 		{"https://api.example.com/v1", false},
 		{"", false},
 		{"::not a url", false},
+		// Decimal-encoded IPs and similar obfuscation aren't resolved
+		// here on purpose — net.ParseIP rejects "2130706433" so it
+		// falls through to the false branch, which is correct: we
+		// don't want a hostile config probing arbitrary hosts via
+		// integer encoding.
+		{"http://2130706433/v1", false},
 	}
 	for _, tc := range cases {
 		if got := isLoopbackBaseURL(tc.in); got != tc.want {
@@ -254,32 +264,103 @@ func TestProbeOpenAICompatEndpoint_Non2xx(t *testing.T) {
 	}
 }
 
-// TestHandleConfig_RoundTripsProviderEndpoints verifies the new
-// /config GET/POST surface for the Settings UI: a partial map update
-// merges into Config.ProviderEndpoints, an empty value for a kind
-// clears that key (so users can drop overrides without hand-editing
-// config.json), and unsupported kinds are rejected.
+// TestComputeLocalProviderStatuses_DocumentedSurface freezes the JSON
+// field set so any Go-side rename (e.g. binary_installed →
+// binaryInstalled) trips a backend test before it can drift the
+// LocalProviderStatus interface in web/src/api/client.ts.
+//
+// The check decodes a marshalled status into map[string]json.RawMessage
+// and asserts the key set equals the documented contract — both
+// missing fields (rename slipped through) AND extra fields (a new
+// optional field added without updating client.ts) fail loudly.
 func TestComputeLocalProviderStatuses_DocumentedSurface(t *testing.T) {
-	// Quick assertion the JSON serialization stays stable enough for
-	// the frontend type to track. If a field gets renamed accidentally,
-	// this catches it before web/src/api/client.ts silently breaks.
 	ov := localProvidersStatusOverrides{
-		lookPath: func(string) (string, error) { return "", errors.New("not found") },
-		runVer:   func(_ context.Context, _ string, _ []string) (string, error) { return "", nil },
-		probe:    func(_ context.Context, _ string) (bool, string, bool) { return false, "", false },
-		goos:     "darwin",
+		// Force every optional field to be populated so the marshalled
+		// shape exercises the full surface.
+		lookPath: func(string) (string, error) {
+			return "/usr/local/bin/fake", nil
+		},
+		runVer: func(_ context.Context, _ string, _ []string) (string, error) {
+			return "v1.2.3", nil
+		},
+		probe: func(_ context.Context, _ string) (bool, string, bool) {
+			return true, "loaded-model-x", true
+		},
+		// Pick windows so windows_note + probe_skipped_note (when
+		// platform_supported flips false) get exercised; we also need
+		// a non-windows variant to confirm install/start populate, so
+		// we run two passes below.
+		goos: "windows",
 	}
-	got := computeLocalProviderStatuses(context.Background(), ov)
-	body, err := json.Marshal(got)
-	if err != nil {
-		t.Fatal(err)
+
+	// Documented field set. Every entry MUST appear in at least one
+	// status payload across the runs below. Update this list when
+	// LocalProviderStatus genuinely gains/loses a field — and when you
+	// do, update web/src/api/client.ts in the same PR.
+	expected := map[string]bool{
+		"kind":               true,
+		"binary_installed":   true,
+		"binary_path":        true,
+		"binary_version":     true,
+		"endpoint":           true,
+		"model":              true,
+		"reachable":          true,
+		"loaded_model":       true,
+		"probed":             true,
+		"probe_skipped_note": true,
+		"platform_supported": true,
+		"windows_note":       true,
+		"install":            true,
+		"start":              true,
+		"notes":              true,
 	}
-	for _, key := range []string{
-		`"kind"`, `"binary_installed"`, `"endpoint"`, `"model"`,
-		`"reachable"`, `"platform_supported"`, `"install"`,
-	} {
-		if !strings.Contains(string(body), key) {
-			t.Errorf("response JSON missing field %s — frontend type will drift\nbody=%s", key, body)
+
+	seen := map[string]bool{}
+	collect := func(payload []LocalProviderStatus) {
+		for _, item := range payload {
+			body, err := json.Marshal(item)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			var keys map[string]json.RawMessage
+			if err := json.Unmarshal(body, &keys); err != nil {
+				t.Fatalf("unmarshal back: %v\nbody=%s", err, body)
+			}
+			for k := range keys {
+				seen[k] = true
+				if !expected[k] {
+					t.Errorf("unexpected JSON field %q surfaced — update the documented set in this test AND web/src/api/client.ts so the frontend type doesn't drift\nfull body: %s", k, body)
+				}
+			}
+		}
+	}
+
+	// Run 1: windows path → exercises windows_note + (when probe is
+	// skipped because platform_supported=false) probe_skipped_note.
+	collect(computeLocalProviderStatuses(context.Background(), ov))
+
+	// Run 2: darwin happy path → exercises install/start/probed/etc.
+	ov.goos = "darwin"
+	collect(computeLocalProviderStatuses(context.Background(), ov))
+
+	// Run 3: linux non-loopback ollama → exercises probe_skipped_note
+	// via the security guardrail (loopback-only). mlx-lm and exo keep
+	// loopback defaults so their probes still fire; the security
+	// invariant is "no probe to the *non-loopback* URL", not "no
+	// probe at all this run".
+	ov.goos = "linux"
+	t.Setenv("WUPHF_OLLAMA_BASE_URL", "http://10.0.0.99:11434/v1")
+	ov.probe = func(_ context.Context, baseURL string) (bool, string, bool) {
+		if strings.Contains(baseURL, "10.0.0.99") {
+			t.Errorf("probe should not fire for non-loopback URL %q", baseURL)
+		}
+		return true, "loaded-x", true
+	}
+	collect(computeLocalProviderStatuses(context.Background(), ov))
+
+	for k := range expected {
+		if !seen[k] {
+			t.Errorf("documented field %q never surfaced across all goos paths — either the field was dropped or a path stopped populating it", k)
 		}
 	}
 }

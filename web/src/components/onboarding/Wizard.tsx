@@ -914,11 +914,19 @@ function LocalLLMSubsection({ selected, onSelect }: LocalLLMSubsectionProps) {
                 const installed = Boolean(s?.binary_installed);
                 const running = Boolean(s?.reachable);
                 const supported = s ? s.platform_supported : true;
+                // A tile is selectable only when the platform supports
+                // it AND the binary is detected on PATH. Selecting an
+                // un-installed runtime would land the user in a shell
+                // where every agent turn fails with connection refused
+                // — the install/start commands live in Settings, so we
+                // route users there instead of letting them commit to
+                // a broken default at onboarding time.
+                const selectable = supported && installed;
                 const isSelected = selected === meta.kind;
                 const classes = [
                   "runtime-tile",
                   isSelected ? "selected" : "",
-                  supported ? "" : "disabled",
+                  selectable ? "" : "disabled",
                 ]
                   .filter(Boolean)
                   .join(" ");
@@ -928,17 +936,17 @@ function LocalLLMSubsection({ selected, onSelect }: LocalLLMSubsectionProps) {
                     ? "Running"
                     : installed
                       ? "Installed (server not started)"
-                      : "Not installed";
+                      : "Not installed — install via Settings";
                 return (
                   <button
                     key={meta.kind}
                     type="button"
                     className={classes}
                     onClick={() => {
-                      if (!supported) return;
+                      if (!selectable) return;
                       onSelect(isSelected ? "" : meta.kind);
                     }}
-                    disabled={!supported}
+                    disabled={!selectable}
                     aria-pressed={isSelected}
                     data-testid={`onboarding-local-llm-tile-${meta.kind}`}
                   >

@@ -680,16 +680,32 @@ function LocalProviderCard({
   save,
   hostPlatform,
 }: LocalProviderCardProps) {
+  // Inputs default to the user's saved override (if any) and otherwise
+  // empty so placeholders show the resolved value. We must NOT seed the
+  // input with the resolved compile-time default — Save would then
+  // persist that default as a permanent override on /config, locking
+  // future users out of upstream default changes.
   const initial = cfg.provider_endpoints?.[meta.kind];
-  const [baseURL, setBaseURL] = useState(
-    initial?.base_url ?? status?.endpoint ?? "",
-  );
-  const [model, setModel] = useState(initial?.model ?? status?.model ?? "");
+  const [baseURL, setBaseURL] = useState(initial?.base_url ?? "");
+  const [model, setModel] = useState(initial?.model ?? "");
+
+  // Save is gated on dirty so an empty form (or a form matching the
+  // saved override) doesn't write anything. The empty-empty case is
+  // also the "clear back to defaults" gesture handled server-side
+  // (broker.go:6244) — but only when the user previously had an
+  // override; submitting empty-empty against no-override is a no-op
+  // and we suppress it.
+  const trimmedBaseURL = baseURL.trim();
+  const trimmedModel = model.trim();
+  const dirty =
+    trimmedBaseURL !== (initial?.base_url ?? "") ||
+    trimmedModel !== (initial?.model ?? "");
 
   const onSaveEndpoint = async () => {
+    if (!dirty) return;
     await save({
       provider_endpoints: {
-        [meta.kind]: { base_url: baseURL.trim(), model: model.trim() },
+        [meta.kind]: { base_url: trimmedBaseURL, model: trimmedModel },
       },
     });
   };

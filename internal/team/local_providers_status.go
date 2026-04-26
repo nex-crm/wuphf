@@ -223,7 +223,16 @@ func isLoopbackBaseURL(rawURL string) bool {
 	if host == "" {
 		return false
 	}
-	if host == "localhost" {
+	// DNS resolution is intentionally not done here — we don't want
+	// the broker resolving arbitrary hostnames during a UI poll, and
+	// localhost can be remapped (`/etc/hosts`) anyway. Treat the
+	// literal name (case-insensitively, matching browser behavior) as
+	// loopback; treat `0.0.0.0` as loopback too because servers bound
+	// there are reachable from 127.0.0.1 in practice.
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	if host == "0.0.0.0" {
 		return true
 	}
 	ip := net.ParseIP(host)

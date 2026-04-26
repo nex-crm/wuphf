@@ -125,20 +125,21 @@ test.describe("Onboarding → Run agents on a local model", () => {
       page.getByTestId("onboarding-local-llm-tile-exo"),
     ).toBeVisible();
 
-    // mlx-lm is reachable in the fixture → "Running" badge.
-    await expect(
-      page.getByTestId("onboarding-local-llm-tile-mlx-lm").getByText(/Running/),
-    ).toBeVisible();
+    // mlx-lm is reachable in the fixture → "Running" badge, selectable.
+    const mlxTile = page.getByTestId("onboarding-local-llm-tile-mlx-lm");
+    await expect(mlxTile.getByText(/Running/)).toBeVisible();
+    await expect(mlxTile).toBeEnabled();
 
-    // ollama is not installed → "Not installed".
-    await expect(
-      page
-        .getByTestId("onboarding-local-llm-tile-ollama")
-        .getByText(/Not installed/),
-    ).toBeVisible();
+    // ollama is not installed → tile is disabled (selecting a runtime
+    // that isn't installed lands the user in a broken shell where
+    // every agent turn fails connection-refused). Status copy nudges
+    // them to Settings for install commands.
+    const ollamaTile = page.getByTestId("onboarding-local-llm-tile-ollama");
+    await expect(ollamaTile.getByText(/Not installed.*Settings/)).toBeVisible();
+    await expect(ollamaTile).toBeDisabled();
 
-    // exo is platform_supported=false → tile is disabled (button) and
-    // surfaces "Not supported on this OS".
+    // exo is platform_supported=false → tile is disabled and surfaces
+    // "Not supported on this OS".
     const exoTile = page.getByTestId("onboarding-local-llm-tile-exo");
     await expect(exoTile).toBeDisabled();
     await expect(exoTile.getByText(/Not supported/)).toBeVisible();
