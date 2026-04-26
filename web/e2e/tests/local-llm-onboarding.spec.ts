@@ -99,22 +99,26 @@ async function advanceToSetupStep(page: Page) {
   });
 }
 
-test.describe("Onboarding → Run agents on a local model", () => {
-  test("subsection toggles open and lists all three runtimes with installed/missing badges", async ({
+test.describe("Onboarding → Run a local model", () => {
+  test("meta-tile reveals the picker grid with all three runtimes and their badges", async ({
     page,
   }) => {
     stubStatusEndpoint(page);
     await advanceToSetupStep(page);
 
-    // The toggle is collapsed by default.
-    const toggle = page.getByTestId("onboarding-local-llm-toggle");
-    await expect(toggle).toBeVisible();
-    await expect(
-      page.getByTestId("onboarding-local-llm-tile-mlx-lm"),
-    ).toHaveCount(0);
+    // The meta-tile sits in the main runtime grid as a peer of the
+    // cloud CLIs. The picker grid is hidden until it's clicked.
+    const metaTile = page.getByTestId("onboarding-local-llm-toggle");
+    await expect(metaTile).toBeVisible();
+    await expect(metaTile).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("onboarding-local-llm-picker")).toHaveCount(
+      0,
+    );
 
-    // Expanding fetches /status/local-providers and shows three tiles.
-    await toggle.click();
+    // Click the meta-tile → picker appears + /status fetch runs.
+    await metaTile.click();
+    await expect(metaTile).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByTestId("onboarding-local-llm-picker")).toBeVisible();
     await expect(
       page.getByTestId("onboarding-local-llm-tile-mlx-lm"),
     ).toBeVisible();
@@ -145,7 +149,7 @@ test.describe("Onboarding → Run agents on a local model", () => {
     await expect(exoTile.getByText(/Not supported/)).toBeVisible();
   });
 
-  test("clicking a supported tile toggles selection (so wizard state can persist on Continue)", async ({
+  test("clicking a supported runtime tile toggles selection (so wizard state can persist on Continue)", async ({
     page,
   }) => {
     stubStatusEndpoint(page);
@@ -165,7 +169,7 @@ test.describe("Onboarding → Run agents on a local model", () => {
     await expect(mlxTile).toHaveAttribute("aria-pressed", "false");
   });
 
-  test("disabled tile (platform_supported=false) does not change selection", async ({
+  test("disabled runtime tile (platform_supported=false) does not change selection", async ({
     page,
   }) => {
     stubStatusEndpoint(page);
@@ -180,5 +184,125 @@ test.describe("Onboarding → Run agents on a local model", () => {
     // still want the handler to refuse.
     await exoTile.click({ force: true });
     await expect(exoTile).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("API key row defaults to CLI login and reveals the input only on demand", async ({
+    page,
+  }) => {
+    // The API keys panel should default to "Use CLI login" (so a user
+    // with claude/codex/gcloud already logged in doesn't see a wall of
+    // empty password fields), and reveal the input only when the user
+    // explicitly clicks "Use API key".
+    stubStatusEndpoint(page);
+    await advanceToSetupStep(page);
+
+    const cliButton = page.getByTestId("api-key-cli-ANTHROPIC_API_KEY");
+    const pasteButton = page.getByTestId("api-key-paste-ANTHROPIC_API_KEY");
+    const input = page.getByTestId("api-key-input-ANTHROPIC_API_KEY");
+
+    // Default: CLI login active, input not in the DOM.
+    await expect(cliButton).toHaveClass(/selected/);
+    await expect(pasteButton).not.toHaveClass(/selected/);
+    await expect(input).toHaveCount(0);
+
+    // Click "Use API key" → input shows + selected state flips.
+    await pasteButton.click();
+    await expect(pasteButton).toHaveClass(/selected/);
+    await expect(input).toBeVisible();
+
+    // Type a value → still shown after toggling away (we don't drop
+    // the user's pasted key when they reconsider).
+    await input.fill("sk-ant-test");
+    await cliButton.click();
+    await expect(cliButton).toHaveClass(/selected/);
+    // CLI was clicked → key cleared so the wizard doesn't ship a key
+    // the user explicitly toggled away from.
+    await expect(input).toHaveCount(0);
+  });
+
+  test("Nex API key panel hides unless memory backend needs it", async ({
+    page,
+  }) => {
+    // The Nex API key panel only matters when memory_backend === "nex".
+    // Team wiki (default) doesn't need a Nex key; surfacing the input
+    // would suggest a missing config piece when there isn't one.
+    stubStatusEndpoint(page);
+    await advanceToSetupStep(page);
+
+    // Default backend is Markdown (Team wiki) → no Nex panel.
+    await expect(page.getByTestId("wizard-nex-api-key-panel")).toHaveCount(0);
+
+    // Click the Nex memory tile → panel appears.
+    await page
+      .locator(".wizard-panel")
+      .filter({ hasText: "Organizational memory" })
+      .getByRole("button", { name: /^Nex/ })
+      .click();
+    await expect(page.getByTestId("wizard-nex-api-key-panel")).toBeVisible();
+
+    // Switch back to Team wiki → panel disappears again.
+    await page
+      .locator(".wizard-panel")
+      .filter({ hasText: "Organizational memory" })
+      .getByRole("button", { name: /Team wiki/ })
+      .click();
+    await expect(page.getByTestId("wizard-nex-api-key-panel")).toHaveCount(0);
+  });
+
+  test("picking a local runtime adds it to the fallback chain (alongside cloud CLIs)", async ({
+    page,
+  }) => {
+    // The user's stated need: "run out of cloud tokens, fall through
+    // to local — not onto pay-as-you-go API". Locked in by checking
+    // the local label appears as a row in the fallback-order list
+    // once it's selected and at least one cloud CLI is also active.
+    stubStatusEndpoint(page);
+    await advanceToSetupStep(page);
+
+    // The wizard auto-selects the first installed cloud CLI on mount,
+    // so we already have one runtime in the priority list. Confirm by
+    // looking for a single-item fallback list (which the UI hides
+    // until length > 1 — so we won't see anything yet).
+    await expect(page.locator(".runtime-priority-controls")).toHaveCount(0);
+
+    // Pick a local runtime → fallback list now has 2 entries and is
+    // shown.
+    await page.getByTestId("onboarding-local-llm-toggle").click();
+    await page.getByTestId("onboarding-local-llm-tile-mlx-lm").click();
+    await expect(page.locator(".runtime-priority-controls")).toBeVisible();
+    await expect(
+      page.locator(".runtime-priority-row-label").filter({ hasText: "MLX-LM" }),
+    ).toBeVisible();
+  });
+
+  test("toggling meta-tile off hides the picker and clears selection", async ({
+    page,
+  }) => {
+    // The meta-tile in the main grid acts as a peer of the cloud CLIs.
+    // Turning it off must hide the second-step picker AND clear any
+    // local-provider selection so the wizard doesn't ship the user a
+    // local config they didn't intend.
+    stubStatusEndpoint(page);
+    await advanceToSetupStep(page);
+
+    const metaTile = page.getByTestId("onboarding-local-llm-toggle");
+    await metaTile.click();
+    const mlxTile = page.getByTestId("onboarding-local-llm-tile-mlx-lm");
+    await mlxTile.click();
+    await expect(mlxTile).toHaveAttribute("aria-pressed", "true");
+
+    // Turn the meta-tile off.
+    await metaTile.click();
+    await expect(metaTile).toHaveAttribute("aria-pressed", "false");
+    await expect(page.getByTestId("onboarding-local-llm-picker")).toHaveCount(
+      0,
+    );
+
+    // And the selection is gone — re-opening shows the runtime
+    // unpressed.
+    await metaTile.click();
+    await expect(
+      page.getByTestId("onboarding-local-llm-tile-mlx-lm"),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 });

@@ -205,17 +205,30 @@ const BLUEPRINT_DISPLAY: Record<string, BlueprintDisplay> = {
   },
 };
 
+// API_KEY_FIELDS: each provider's auth has two valid paths — log in via
+// the provider's CLI (claude login, codex login, etc.) or paste an API
+// key here. The wizard defaults to CLI login because it's the existing
+// primary path for most users; clicking "Use API key" reveals the
+// password input so users can paste a key without it being on screen
+// the whole time.
 const API_KEY_FIELDS = [
   {
     key: "ANTHROPIC_API_KEY",
     label: "Anthropic",
     hint: "Powers Claude-based agents",
+    cliLoginCmd: "claude login",
   },
-  { key: "OPENAI_API_KEY", label: "OpenAI", hint: "Powers GPT-based agents" },
+  {
+    key: "OPENAI_API_KEY",
+    label: "OpenAI",
+    hint: "Powers GPT-based agents",
+    cliLoginCmd: "codex login",
+  },
   {
     key: "GOOGLE_API_KEY",
     label: "Google",
     hint: "Powers Gemini-based agents",
+    cliLoginCmd: "gcloud auth application-default login",
   },
 ] as const;
 
@@ -234,7 +247,7 @@ const MEMORY_BACKEND_OPTIONS: ReadonlyArray<{
   {
     value: "nex",
     label: "Nex",
-    hint: "Hosted memory graph. Ships with free tier. Needs NEX_API_KEY.",
+    hint: "Hosted memory graph that streams in HubSpot, Slack, Gmail, Calendar, and more — your tools become entities agents already know. Free tier available; needs NEX_API_KEY.",
   },
   {
     value: "gbrain",
@@ -807,7 +820,7 @@ function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
   );
 }
 
-/* ─── Local LLM subsection (used inside Step 5: Setup) ─── */
+/* ─── Local LLM picker (revealed when "Run a local model" tile is on) ─── */
 
 const LOCAL_PROVIDER_LABELS: ReadonlyArray<{
   kind: string;
@@ -819,7 +832,7 @@ const LOCAL_PROVIDER_LABELS: ReadonlyArray<{
   { kind: "exo", label: "Exo", blurb: "Multi-device pool" },
 ];
 
-interface LocalLLMSubsectionProps {
+interface LocalLLMPickerProps {
   // selected: kind that the user picked here, if any. Stored in wizard
   // state so the parent can flip the active llm_provider on Continue
   // without committing to /config until the user explicitly says so.
@@ -827,13 +840,15 @@ interface LocalLLMSubsectionProps {
   onSelect: (kind: string) => void;
 }
 
-function LocalLLMSubsection({ selected, onSelect }: LocalLLMSubsectionProps) {
+// LocalLLMPicker is the second-step grid of mlx-lm / ollama / exo
+// tiles. The parent reveals it when the "Run a local model" tile in
+// the primary runtime grid is on, so it reads as a peer of the cloud
+// CLIs rather than a tucked-away "advanced" toggle.
+function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
   const [status, setStatus] = useState<LocalProviderStatus[]>([]);
   const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
     let alive = true;
     setLoading(true);
     getLocalProvidersStatus()
@@ -842,9 +857,9 @@ function LocalLLMSubsection({ selected, onSelect }: LocalLLMSubsectionProps) {
         setStatus(data ?? []);
       })
       .catch(() => {
-        // Endpoint missing → broker hasn't shipped this yet. Show the
-        // subsection without status badges; "see Settings" link below
-        // still works.
+        // Endpoint missing → broker hasn't shipped this yet. Render
+        // tiles without status badges; the Settings link below still
+        // points users to the doctor panel for install commands.
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -852,132 +867,189 @@ function LocalLLMSubsection({ selected, onSelect }: LocalLLMSubsectionProps) {
     return () => {
       alive = false;
     };
-  }, [open]);
+  }, []);
 
   const byKind = new Map<string, LocalProviderStatus>();
   for (const s of status) byKind.set(s.kind, s);
 
   return (
     <div
+      data-testid="onboarding-local-llm-picker"
       style={{
-        marginTop: 16,
-        paddingTop: 16,
-        borderTop: "1px solid var(--border)",
+        marginTop: 12,
+        marginLeft: 12,
+        paddingLeft: 16,
+        borderLeft: "2px solid var(--accent, #b88efb)",
       }}
     >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        data-testid="onboarding-local-llm-toggle"
+      <p
         style={{
-          all: "unset",
-          cursor: "pointer",
-          fontSize: 13,
+          fontSize: 12,
           fontWeight: 600,
           color: "var(--text)",
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
+          margin: "0 0 4px 0",
         }}
       >
-        <span aria-hidden="true">{open ? "▼" : "▶"}</span>
-        Run agents on a local model instead?
-      </button>
+        Pick a local runtime
+      </p>
       <p
         style={{
           fontSize: 12,
           color: "var(--text-secondary)",
-          margin: "4px 0 0 0",
+          margin: "0 0 10px 0",
         }}
       >
-        No cloud key required. Best on macOS / Linux. Skip if you're using a
-        cloud CLI above.
+        No cloud key required. Best on macOS or Linux. Need install commands?
+        See <strong>Settings → Local LLMs</strong> after onboarding for the
+        doctor panel with copy-paste shell snippets.
       </p>
 
-      {open && (
-        <div style={{ marginTop: 10 }}>
-          {loading && (
-            <div
-              style={{
-                fontSize: 12,
-                color: "var(--text-tertiary)",
-                padding: "4px 0",
-              }}
-            >
-              Detecting local runtimes…
-            </div>
-          )}
-          {!loading && (
-            <div className="runtime-grid" style={{ marginTop: 6 }}>
-              {LOCAL_PROVIDER_LABELS.map((meta) => {
-                const s = byKind.get(meta.kind);
-                const installed = Boolean(s?.binary_installed);
-                const running = Boolean(s?.reachable);
-                const supported = s ? s.platform_supported : true;
-                // A tile is selectable only when the platform supports
-                // it AND the binary is detected on PATH. Selecting an
-                // un-installed runtime would land the user in a shell
-                // where every agent turn fails with connection refused
-                // — the install/start commands live in Settings, so we
-                // route users there instead of letting them commit to
-                // a broken default at onboarding time.
-                const selectable = supported && installed;
-                const isSelected = selected === meta.kind;
-                const classes = [
-                  "runtime-tile",
-                  isSelected ? "selected" : "",
-                  selectable ? "" : "disabled",
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-                const statusText = !supported
-                  ? "Not supported on this OS"
-                  : running
-                    ? "Running"
-                    : installed
-                      ? "Installed (server not started)"
-                      : "Not installed — install via Settings";
-                return (
-                  <button
-                    key={meta.kind}
-                    type="button"
-                    className={classes}
-                    onClick={() => {
-                      if (!selectable) return;
-                      onSelect(isSelected ? "" : meta.kind);
-                    }}
-                    disabled={!selectable}
-                    aria-pressed={isSelected}
-                    data-testid={`onboarding-local-llm-tile-${meta.kind}`}
-                  >
-                    <div className="runtime-tile-head">
-                      <span
-                        className={`runtime-tile-status ${running ? "installed" : ""}`}
-                        aria-hidden="true"
-                      />
-                      {meta.label}
-                    </div>
-                    <div className="runtime-tile-meta">
-                      {meta.blurb} · {statusText}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
+      {loading && (
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--text-tertiary)",
+            padding: "4px 0",
+          }}
+        >
+          Detecting local runtimes…
+        </div>
+      )}
+      {!loading && (
+        <div className="runtime-grid">
+          {LOCAL_PROVIDER_LABELS.map((meta) => {
+            const s = byKind.get(meta.kind);
+            const installed = Boolean(s?.binary_installed);
+            const running = Boolean(s?.reachable);
+            const supported = s ? s.platform_supported : true;
+            // A tile is selectable only when the platform supports
+            // it AND the binary is detected on PATH. Selecting an
+            // un-installed runtime would land the user in a shell
+            // where every agent turn fails with connection refused
+            // — the install/start commands live in Settings, so we
+            // route users there instead of letting them commit to
+            // a broken default at onboarding time.
+            const selectable = supported && installed;
+            const isSelected = selected === meta.kind;
+            const classes = [
+              "runtime-tile",
+              isSelected ? "selected" : "",
+              selectable ? "" : "disabled",
+            ]
+              .filter(Boolean)
+              .join(" ");
+            const statusText = !supported
+              ? "Not supported on this OS"
+              : running
+                ? "Running"
+                : installed
+                  ? "Installed (server not started)"
+                  : "Not installed — install via Settings";
+            return (
+              <button
+                key={meta.kind}
+                type="button"
+                className={classes}
+                onClick={() => {
+                  if (!selectable) return;
+                  onSelect(isSelected ? "" : meta.kind);
+                }}
+                disabled={!selectable}
+                aria-pressed={isSelected}
+                data-testid={`onboarding-local-llm-tile-${meta.kind}`}
+              >
+                <div className="runtime-tile-head">
+                  <span
+                    className={`runtime-tile-status ${running ? "installed" : ""}`}
+                    aria-hidden="true"
+                  />
+                  {meta.label}
+                </div>
+                <div className="runtime-tile-meta">
+                  {meta.blurb} · {statusText}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ApiKeyRow renders one provider's CLI-login-vs-API-key choice. Default
+// path is CLI login (most users have one of claude/codex/gcloud logged
+// in already from the runtime grid above); clicking "Use API key"
+// reveals the password input so users can paste without exposing the
+// key the whole time. If the user has any value typed in, the input
+// stays open even after toggling away — we don't drop their key.
+interface ApiKeyRowProps {
+  field: (typeof API_KEY_FIELDS)[number];
+  value: string;
+  onChange: (v: string) => void;
+}
+
+function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
+  const [showInput, setShowInput] = useState<boolean>(value.length > 0);
+  const useApiKey = showInput || value.length > 0;
+  return (
+    <div className="key-row" data-testid={`api-key-row-${field.key}`}>
+      <div className="key-label-wrap">
+        <span className="key-label">{field.label}</span>
+        <span className="key-hint">{field.hint}</span>
+      </div>
+      <div
+        className="key-input-wrap"
+        style={{ display: "flex", flexDirection: "column", gap: 6 }}
+      >
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            className={`runtime-tile ${!useApiKey ? "selected" : ""}`}
+            onClick={() => {
+              setShowInput(false);
+              if (value) onChange("");
+            }}
+            data-testid={`api-key-cli-${field.key}`}
+            style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
+          >
+            Use CLI login
+          </button>
+          <button
+            type="button"
+            className={`runtime-tile ${useApiKey ? "selected" : ""}`}
+            onClick={() => setShowInput(true)}
+            data-testid={`api-key-paste-${field.key}`}
+            style={{ padding: "6px 10px", fontSize: 12, minWidth: 0 }}
+          >
+            Use API key
+          </button>
+        </div>
+        {!useApiKey && (
           <p
             style={{
               fontSize: 11,
               color: "var(--text-tertiary)",
-              margin: "10px 0 0 0",
+              margin: 0,
+              fontFamily: "var(--font-mono)",
             }}
           >
-            Need install commands? See <strong>Settings → Local LLMs</strong>{" "}
-            after onboarding for the full doctor panel with copy-paste shell
-            snippets.
+            Run <code>{field.cliLoginCmd}</code> in a terminal — agents pick up
+            the session automatically.
           </p>
-        </div>
-      )}
+        )}
+        {useApiKey && (
+          <input
+            className="input"
+            type="password"
+            placeholder={field.key}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            autoComplete="off"
+            data-testid={`api-key-input-${field.key}`}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -1037,6 +1109,13 @@ function SetupStep({
   onNext,
   onBack,
 }: SetupStepProps) {
+  // localModeOn governs whether the second-step LocalLLMPicker is
+  // shown beneath the runtime grid. Initialised from the parent's
+  // localProvider so re-entering the step preserves the user's
+  // earlier "I want a local model" choice. Toggling the meta-tile
+  // off clears localProvider via onSelectLocalProvider("").
+  const [localModeOn, setLocalModeOn] = useState<boolean>(localProvider !== "");
+
   // A runtime is usable only when its binary is actually present on PATH.
   // "Selected and installed" drives whether we can continue without keys.
   const hasInstalledSelection = runtimePriority.some((label) => {
@@ -1160,19 +1239,53 @@ function SetupStep({
                 </button>
               );
             })}
+            {/* Run a local model — peer tile alongside the cloud CLIs.
+                Selecting it reveals the second-step picker (LocalLLMPicker)
+                below the grid. The dot stays grey because there's no single
+                binary to detect; the picker resolves which runtime is
+                actually running. */}
+            <button
+              type="button"
+              className={["runtime-tile", localModeOn ? "selected" : ""]
+                .filter(Boolean)
+                .join(" ")}
+              onClick={() => {
+                const next = !localModeOn;
+                setLocalModeOn(next);
+                if (!next) onSelectLocalProvider("");
+              }}
+              aria-pressed={localModeOn}
+              data-testid="onboarding-local-llm-toggle"
+              title="Run a local model on this machine"
+            >
+              <div className="runtime-tile-head">
+                <span className="runtime-tile-status" aria-hidden="true" />
+                Run a local model
+              </div>
+              <div className="runtime-tile-meta">
+                {localProvider
+                  ? (LOCAL_PROVIDER_LABELS.find((m) => m.kind === localProvider)
+                      ?.label ?? "selected")
+                  : "MLX-LM, Ollama, or Exo"}
+              </div>
+            </button>
           </div>
         )}
 
-        <LocalLLMSubsection
-          selected={localProvider}
-          onSelect={onSelectLocalProvider}
-        />
+        {localModeOn && (
+          <LocalLLMPicker
+            selected={localProvider}
+            onSelect={onSelectLocalProvider}
+          />
+        )}
 
         {runtimePriority.length > 1 && (
           <div className="runtime-priority-controls">
             <p className="runtime-priority-title">Fallback order</p>
             <p className="runtime-priority-hint">
-              Agents try these in order. Use the arrows to reorder.
+              Agents try these in order. Drop a local model into the chain so a
+              cloud quota hit falls through to your machine instead of
+              pay-as-you-go billing. Use the arrows to reorder.
             </p>
             {runtimePriority.map((label, idx) => (
               <div key={label} className="runtime-priority-row">
@@ -1239,22 +1352,12 @@ function SetupStep({
               : "No installed CLI selected. Add at least one key so agents can reason."}
           </p>
           {API_KEY_FIELDS.map((field) => (
-            <div className="key-row" key={field.key}>
-              <div className="key-label-wrap">
-                <span className="key-label">{field.label}</span>
-                <span className="key-hint">{field.hint}</span>
-              </div>
-              <div className="key-input-wrap">
-                <input
-                  className="input"
-                  type="password"
-                  placeholder={field.key}
-                  value={apiKeys[field.key] ?? ""}
-                  onChange={(e) => onChangeApiKey(field.key, e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-            </div>
+            <ApiKeyRow
+              key={field.key}
+              field={field}
+              value={apiKeys[field.key] ?? ""}
+              onChange={(v) => onChangeApiKey(field.key, v)}
+            />
           ))}
         </div>
       </div>
@@ -1344,37 +1447,44 @@ function SetupStep({
         )}
       </div>
 
-      <div className="wizard-panel">
-        <p className="wizard-panel-title">Nex API key</p>
-        <p
-          style={{
-            fontSize: 12,
-            color: "var(--text-secondary)",
-            margin: "-8px 0 12px 0",
-          }}
-        >
-          Unlocks hosted memory, entity briefs, and managed integrations. You
-          can skip this and paste later from Settings. Don&apos;t have one? Sign
-          up on the Identity step above.
-        </p>
-        <div className="form-group" style={{ marginBottom: 0 }}>
-          <label className="label" htmlFor="wiz-nex-api-key">
-            Nex API key{" "}
-            <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
-              (optional, paste if you have one)
-            </span>
-          </label>
-          <input
-            className="input"
-            id="wiz-nex-api-key"
-            type="password"
-            placeholder="nex-..."
-            value={nexApiKey}
-            onChange={(e) => onChangeNexApiKey(e.target.value)}
-            autoComplete="off"
-          />
+      {memoryBackend === "nex" && (
+        // Only show the Nex API key panel when the chosen memory backend
+        // actually needs it. Team wiki, GBrain, and "None" don't talk to
+        // Nex's hosted memory — surfacing the input would suggest the
+        // user has a missing piece when they don't.
+        <div className="wizard-panel" data-testid="wizard-nex-api-key-panel">
+          <p className="wizard-panel-title">Nex API key</p>
+          <p
+            style={{
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              margin: "-8px 0 12px 0",
+            }}
+          >
+            Unlocks the hosted memory graph plus managed integrations (HubSpot,
+            Slack, Gmail, Calendar, …) so agents can read your tools without you
+            wiring each one up. You can skip this and paste later from Settings.
+            Don&apos;t have one? Sign up on the Identity step above.
+          </p>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="label" htmlFor="wiz-nex-api-key">
+              Nex API key{" "}
+              <span style={{ fontSize: 11, color: "var(--text-tertiary)" }}>
+                (optional, paste if you have one)
+              </span>
+            </label>
+            <input
+              className="input"
+              id="wiz-nex-api-key"
+              type="password"
+              placeholder="nex-..."
+              value={nexApiKey}
+              onChange={(e) => onChangeNexApiKey(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="wizard-nav">
         <button className="btn btn-ghost" onClick={onBack} type="button">
@@ -1733,6 +1843,28 @@ export function Wizard({ onComplete }: WizardProps) {
     });
   }, []);
 
+  // selectLocalProvider keeps two pieces of state in sync: the picker's
+  // own localProvider variable and runtimePriority, the canonical
+  // fallback chain. Adding the local kind to the chain is what lets
+  // users say "try Claude first; if I'm out of credits, fall through
+  // to my local Qwen" without paying for the pay-as-you-go tier
+  // implicit in a bare API-key fallback.
+  const selectLocalProvider = useCallback((kind: string) => {
+    const labels = LOCAL_PROVIDER_LABELS.map((m) => m.label);
+    setRuntimePriority((prev) => {
+      // Remove any prior local entry first so picking a different
+      // local kind replaces rather than stacks them.
+      const withoutLocal = prev.filter((l) => !labels.includes(l));
+      if (!kind) return withoutLocal;
+      const meta = LOCAL_PROVIDER_LABELS.find((m) => m.kind === kind);
+      if (!meta) return withoutLocal;
+      // Append by default (fallback after cloud CLIs); user can drag
+      // it up in the priority controls to make it primary.
+      return [...withoutLocal, meta.label];
+    });
+    setLocalProvider(kind);
+  }, []);
+
   const reorderRuntime = useCallback((label: string, direction: -1 | 1) => {
     setRuntimePriority((prev) => {
       const idx = prev.indexOf(label);
@@ -2002,14 +2134,22 @@ export function Wizard({ onComplete }: WizardProps) {
     async (skipTask: boolean) => {
       setSubmitting(true);
       try {
-        // Translate UI labels to the provider ids the broker validates. Only
-        // labels that map to a supported provider ("claude-code", "codex",
-        // "opencode") are persisted — aspirational runtimes (Cursor, Windsurf)
-        // are shown in the UI but can't yet be dispatched, so we drop them
-        // from the priority list we send to the server.
+        // Translate UI labels to the provider ids the broker validates.
+        // Cloud CLI labels resolve via RUNTIMES; local labels (MLX-LM,
+        // Ollama, Exo) resolve via LOCAL_PROVIDER_LABELS so users can
+        // mix-and-match in the fallback chain — e.g. "Claude Code,
+        // then if I'm out of credits, my local Qwen". Aspirational
+        // runtimes (Cursor, Windsurf) map to null and are dropped.
         const providerPriority = runtimePriority
-          .map((label) => RUNTIMES.find((r) => r.label === label)?.provider)
-          .filter((p): p is "claude-code" | "codex" | "opencode" => p !== null);
+          .map((label) => {
+            const cloud = RUNTIMES.find((r) => r.label === label)?.provider;
+            if (cloud) return cloud;
+            const local = LOCAL_PROVIDER_LABELS.find(
+              (m) => m.label === label,
+            )?.kind;
+            return local ?? null;
+          })
+          .filter((p): p is string => p !== null && p !== "");
 
         // Persist memory backend + LLM provider choice + priority fallback
         // list + API keys so the broker reads them on next launch. Send as a
@@ -2022,14 +2162,13 @@ export function Wizard({ onComplete }: WizardProps) {
           memory_backend: memoryBackend,
         };
         if (providerPriority.length > 0) {
+          // First entry is the active provider; the full ordered list
+          // is the fallback chain. The user controls the order via the
+          // arrow buttons — if they move a local kind to slot 0 it
+          // becomes the primary; if they keep it last it's the
+          // out-of-credits fallback.
           configPayload.llm_provider = providerPriority[0];
           configPayload.llm_provider_priority = providerPriority;
-        }
-        // A local LLM opt-in trumps the cloud CLI selection — the user
-        // explicitly picked "run on my own machine" so we don't want to
-        // route them through Claude/Codex/Opencode by default.
-        if (localProvider) {
-          configPayload.llm_provider = localProvider;
         }
         // Nex API key (optional — empty string not sent so we don't clobber
         // an existing value with a blank one).
@@ -2279,7 +2418,7 @@ export function Wizard({ onComplete }: WizardProps) {
             gbrainAnthropicKey={gbrainAnthropicKey}
             onChangeGBrainAnthropicKey={setGbrainAnthropicKey}
             localProvider={localProvider}
-            onSelectLocalProvider={setLocalProvider}
+            onSelectLocalProvider={selectLocalProvider}
             onNext={nextStep}
             onBack={prevStep}
           />
