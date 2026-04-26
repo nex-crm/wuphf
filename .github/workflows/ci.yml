@@ -360,7 +360,8 @@ jobs:
       # wuphf instance can only be in one state, so we boot twice.
       #
       # Phase 1: fresh install (wizard.spec.ts). No onboarded.json.
-      # Phase 2: seeded      (smoke.spec.ts, shell). Write onboarded.json first.
+      # Phase 2: seeded      (shell suite — smoke, chat, slash-commands, dm,
+      #                       mentions, interview). Write onboarded.json first.
       # `</dev/null` on both boots prevents isPiped() from yanking wuphf into
       # scanner mode.
       - name: Start wuphf (fresh install) for wizard tests
@@ -424,11 +425,18 @@ jobs:
           echo "wuphf failed to become ready (shell)" >&2
           cat wuphf.log >&2
           exit 1
-      - name: Run Playwright shell smoke
+      - name: Run Playwright shell suite
         working-directory: web/e2e
         env:
           WUPHF_E2E_BASE_URL: http://localhost:7891
-        run: bunx playwright test tests/smoke.spec.ts
+        run: |
+          bunx playwright test \
+            tests/smoke.spec.ts \
+            tests/chat.spec.ts \
+            tests/slash-commands.spec.ts \
+            tests/dm.spec.ts \
+            tests/mentions.spec.ts \
+            tests/interview.spec.ts
       - name: Stop wuphf (shell phase)
         if: always()
         run: |
