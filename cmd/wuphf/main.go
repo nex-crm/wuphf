@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/commands"
@@ -15,6 +17,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/teammcp"
+	"github.com/nex-crm/wuphf/internal/upgradecheck"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
@@ -153,6 +156,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
 		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s upgrade      Check npm for a newer version and show the changelog\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
@@ -273,6 +277,9 @@ func main() {
 		case "init":
 			dispatch("/init", *apiKeyFlag, *format)
 			return
+		case "upgrade":
+			runUpgradeCheck(args[1:])
+			return
 		case "import":
 			runImport(args[1:])
 			return
@@ -304,6 +311,12 @@ func main() {
 		return
 	}
 
+	// Print upgrade notice (if a previous run cached one) before launching
+	// the long-running web UI or TUI, then refresh the cache asynchronously
+	// so the next launch sees the latest information.
+	maybePrintUpgradeNotice(os.Stderr)
+	upgradecheck.RefreshAsync(upgradecheck.DefaultCacheTTL)
+
 	// TUI mode: tmux-based interface
 	if *tuiMode {
 		runTeam(args, selectedBlueprint, *unsafeMode, *oneOnOne, *opusCEO, *collabMode)
@@ -312,6 +325,66 @@ func main() {
 
 	// Default: web UI
 	runWeb(args, selectedBlueprint, *unsafeMode, *webPort, *opusCEO, *collabMode, *noOpen)
+}
+
+// maybePrintUpgradeNotice writes a one-line upgrade hint when the cache says
+// a newer wuphf is on npm. Stays silent on first launch (no cache yet) and
+// when stdout is piped to keep scripts clean.
+func maybePrintUpgradeNotice(w *os.File) {
+	if isPiped() {
+		return
+	}
+	notice := upgradecheck.CachedNotice()
+	if notice == "" {
+		return
+	}
+	_, _ = fmt.Fprintln(w, "↑ "+notice)
+	_, _ = fmt.Fprintln(w)
+}
+
+func runUpgradeCheck(args []string) {
+	jsonOut := false
+	for _, a := range args {
+		if a == "--json" {
+			jsonOut = true
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	res, err := upgradecheck.CachedCheck(ctx, nil, 0)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not reach npm registry (%v)\n", err)
+	}
+
+	if jsonOut {
+		_ = json.NewEncoder(os.Stdout).Encode(res)
+		return
+	}
+
+	if res.Latest == "" {
+		fmt.Printf("You are running %s v%s. Could not reach npm to compare with the latest published version.\n",
+			appName, strings.TrimPrefix(res.Current, "v"))
+		return
+	}
+
+	if !res.UpgradeAvailable {
+		fmt.Printf("You are running %s v%s. That is the latest published version.\n",
+			appName, strings.TrimPrefix(res.Current, "v"))
+		return
+	}
+
+	fmt.Printf("Update available: v%s → v%s\n", strings.TrimPrefix(res.Current, "v"), strings.TrimPrefix(res.Latest, "v"))
+	fmt.Printf("Run: %s\n", res.UpgradeCommand)
+	fmt.Printf("Diff: %s\n\n", res.CompareURL)
+
+	entries, cerr := upgradecheck.FetchChangelog(ctx, nil, res.Current, res.Latest)
+	if cerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not fetch changelog (%v)\n", cerr)
+		return
+	}
+	fmt.Println("Changes:")
+	fmt.Print(upgradecheck.FormatChangelog(entries))
 }
 
 func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO bool, collabMode bool) {

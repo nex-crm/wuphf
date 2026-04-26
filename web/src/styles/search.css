@@ -414,6 +414,171 @@
   background: rgba(224, 30, 90, 0.12);
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   Upgrade Banner
+   ═══════════════════════════════════════════════════════════════ */
+
+.upgrade-banner {
+  background: var(--blue-bg);
+  border-bottom: 1px solid var(--blue);
+  color: var(--text);
+  animation: fadeIn 0.2s ease-out;
+}
+
+.upgrade-banner-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 20px;
+}
+
+.upgrade-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.upgrade-banner-content strong {
+  font-weight: 600;
+}
+
+.upgrade-banner-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--blue);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.upgrade-banner-link:hover {
+  opacity: 0.8;
+}
+
+.upgrade-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.upgrade-banner-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--blue);
+  border-radius: var(--radius-full);
+  padding: 4px 12px;
+  cursor: pointer;
+  color: var(--blue);
+  font: inherit;
+}
+.upgrade-banner-copy:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+.upgrade-banner-copy code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text);
+}
+.upgrade-banner-copy-hint {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.75;
+}
+
+.upgrade-banner-dismiss {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  color: var(--blue);
+  transition: background 0.1s;
+}
+.upgrade-banner-dismiss:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+
+.upgrade-banner-changelog {
+  padding: 8px 20px 12px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+  background: var(--bg-card);
+  color: var(--text);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.upgrade-banner-changelog-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 4px 0;
+}
+
+.upgrade-banner-changelog-group {
+  margin-top: 6px;
+}
+
+.upgrade-banner-changelog-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  margin-bottom: 2px;
+}
+
+.upgrade-banner-changelog-list {
+  list-style: disc;
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.upgrade-banner-scope {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-subtle);
+  border-radius: 4px;
+  padding: 0 6px;
+  color: var(--text-secondary);
+}
+
+.upgrade-banner-pr {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--blue);
+  text-decoration: none;
+}
+.upgrade-banner-pr:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 768px) {
+  .upgrade-banner-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .upgrade-banner-actions {
+    justify-content: space-between;
+  }
+  .upgrade-banner-copy code {
+    font-size: 11px;
+  }
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 768px) {
   .search-overlay {

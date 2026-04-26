@@ -19,6 +19,7 @@ import { SkillsApp } from "./components/apps/SkillsApp";
 import { TasksApp } from "./components/apps/TasksApp";
 import { ThreadsApp } from "./components/apps/ThreadsApp";
 import { Shell } from "./components/layout/Shell";
+import { UpgradeBanner } from "./components/layout/UpgradeBanner";
 import { Composer } from "./components/messages/Composer";
 import { DMView } from "./components/messages/DMView";
 import { InterviewBar } from "./components/messages/InterviewBar";
@@ -385,6 +386,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <UpgradeBanner />
       {body}
       <ToastContainer />
       <ConfirmHost />

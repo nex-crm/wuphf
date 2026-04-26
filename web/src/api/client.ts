@@ -411,6 +411,15 @@ export function getHealth() {
   }>("/health");
 }
 
+export interface VersionInfo {
+  version: string
+  build_timestamp?: string
+}
+
+export function getVersion() {
+  return get<VersionInfo>('/version')
+}
+
 // ── Tasks ──
 
 export interface Task {
