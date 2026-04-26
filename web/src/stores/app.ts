@@ -178,9 +178,16 @@ export const useAppStore = create<AppStore>((set, get) => ({
     // and sandboxed-iframe contexts both throw on localStorage writes; the
     // toggle should still update the DOM + store even if persistence fails,
     // so the user gets the visible state change for the current session.
+    // console.warn keeps a breadcrumb so a user reporting "theme doesn't
+    // stick" has something diagnosable in DevTools.
     try {
       localStorage.setItem("wuphf-theme", t);
-    } catch {}
+    } catch (err) {
+      console.warn(
+        "setTheme: localStorage.setItem failed; theme will not persist across reloads",
+        err,
+      );
+    }
     document.documentElement.setAttribute("data-theme", t);
     set({ theme: t });
   },
