@@ -1,41 +1,31 @@
-package e2e
+package team
+
+// End-to-end broker skill-invocation integration test. Exercises the
+// full lifecycle a team_skill_run / MCP skill tool flows through:
+// HTTP /skills/{name}/invoke, in-memory accessors (AllMessages,
+// Actions), action-log linkage via RelatedID, and disk persistence
+// across a broker restart.
+//
+// Sibling to TestBrokerStatePersistsAcrossReload_ChannelAndMember:
+// covers a third saveLocked call site (handleInvokeSkill), with the
+// added wrinkle of asserting per-invoker From accounting and the
+// usage_count rehydration after restart. Uses reloadedBroker(t, b)
+// for the restart leg — same opt-in-to-disk-load pattern the team
+// package's other persistence tests rely on.
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
-	"github.com/nex-crm/wuphf/internal/team"
 )
 
-// TestSkillInvocationE2E exercises the broker's skill lifecycle
-// end-to-end across the HTTP surface, the in-memory accessors, and
-// disk persistence — the same surface every team_skill_run / MCP
-// invocation flows through.
-//
-// The flow:
-//  1. Construct a broker with a bound state path (post-#316 helper
-//     pattern), seed it with a skill via SeedDefaultSkills.
-//  2. Invoke the skill twice via POST /skills/{name}/invoke,
-//     attributed to two different agent slugs.
-//  3. Assert the broker's observable state: usage_count, recorded
-//     skill_invocation messages (correct From, Channel, Kind),
-//     and the action log entries.
-//  4. Stop the broker and reconstruct a fresh one against the same
-//     state path — the persisted skill, usage count, messages, and
-//     actions must all rehydrate.
-//
-// This pins the contract every other test in the repo only exercises
-// in pieces, and asserts that the structural-isolation work (#289 +
-// #316 + this branch) didn't break the persistence path.
-func TestSkillInvocationE2E(t *testing.T) {
-	statePath := filepath.Join(t.TempDir(), "broker-state.json")
-
-	b := team.NewBrokerAt(statePath)
+func TestBrokerSkillInvocationE2E_PersistsAcrossReload(t *testing.T) {
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -57,11 +47,14 @@ func TestSkillInvocationE2E(t *testing.T) {
 
 	invoke := func(t *testing.T, invokedBy string) (skillID string, usageCount int) {
 		t.Helper()
-		body, _ := json.Marshal(map[string]string{
+		body, err := json.Marshal(map[string]string{
 			"invoked_by": invokedBy,
 			"channel":    channel,
 		})
-		req, err := http.NewRequest(http.MethodPost,
+		if err != nil {
+			t.Fatalf("marshal invoke body: %v", err)
+		}
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost,
 			"http://"+b.Addr()+"/skills/"+skillName+"/invoke", bytes.NewReader(body))
 		if err != nil {
 			t.Fatalf("build invoke request: %v", err)
@@ -123,28 +116,27 @@ func TestSkillInvocationE2E(t *testing.T) {
 	}
 
 	// Action log should also show two skill_invocation entries linked
-	// to the seeded skill ID via RelatedID.
-	var actionsForSkill int
+	// to the seeded skill ID via RelatedID, sourced from "office".
+	var actionsForSkill []officeActionLog
 	for _, a := range b.Actions() {
 		if a.Kind == "skill_invocation" && a.RelatedID == skillID {
-			actionsForSkill++
+			actionsForSkill = append(actionsForSkill, a)
 		}
 	}
-	if actionsForSkill != 2 {
-		t.Errorf("expected 2 action-log entries for skill %s, got %d (all=%+v)",
-			skillID, actionsForSkill, b.Actions())
+	if len(actionsForSkill) != 2 {
+		t.Errorf("expected 2 action-log entries for skill %s, got %d (%+v)",
+			skillID, len(actionsForSkill), actionsForSkill)
+	}
+	for _, a := range actionsForSkill {
+		if a.Source != "office" {
+			t.Errorf("skill_invocation action source=%q, want %q", a.Source, "office")
+		}
 	}
 
-	// Stop the broker before reconstructing — closes the listener and
-	// flushes any in-flight saves. Persistence must survive the
-	// restart with the same bound state path.
-	b.Stop()
-
-	b2 := team.NewBrokerAt(statePath)
-	if err := b2.StartOnPort(0); err != nil {
-		t.Fatalf("restart broker: %v", err)
-	}
-	defer b2.Stop()
+	// Restart the broker against the same state path via the documented
+	// helper — opts back in to loadState(), which test-mode NewBrokerAt
+	// otherwise skips to prevent cross-test state leakage.
+	b2 := reloadedBroker(t, b)
 
 	var rehydrated int
 	for _, m := range b2.AllMessages() {
@@ -157,7 +149,12 @@ func TestSkillInvocationE2E(t *testing.T) {
 	}
 
 	// Confirm the skill itself survived and the usage count persisted.
-	req, err := http.NewRequest(http.MethodGet,
+	if err := b2.StartOnPort(0); err != nil {
+		t.Fatalf("restart broker: %v", err)
+	}
+	defer b2.Stop()
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet,
 		"http://"+b2.Addr()+"/skills?channel="+channel, nil)
 	if err != nil {
 		t.Fatalf("build skills request: %v", err)
