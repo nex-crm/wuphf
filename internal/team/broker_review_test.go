@@ -22,7 +22,7 @@ func newReviewTestServer(t *testing.T) (*httptest.Server, *Broker, func()) {
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init repo: %v", err)
 	}
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)

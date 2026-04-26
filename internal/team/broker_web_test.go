@@ -25,7 +25,7 @@ func TestWebUIProxyHandlerForwardsOnboardingRoutes(t *testing.T) {
 	}))
 	defer upstream.Close()
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	req := httptest.NewRequest(http.MethodGet, "/onboarding/state?step=providers", nil)
 	rec := httptest.NewRecorder()
 
@@ -60,7 +60,7 @@ func TestWorkspaceShredRouteResetsBrokerWithoutShutdown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.messages = []channelMessage{{
 		ID:        "stale-message",

@@ -37,7 +37,7 @@ func TestOpenclawBridgeFullPipeline_E2E(t *testing.T) {
 		t.Fatalf("identity: %v", err)
 	}
 
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bindings := []config.OpenclawBridgeBinding{
 		{SessionKey: "agent:e2e:demo", Slug: "openclaw-demo-e2e", DisplayName: "Demo"},
 	}

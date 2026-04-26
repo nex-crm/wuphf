@@ -311,7 +311,7 @@ func TestBrokerWikiHandlersEndToEnd(t *testing.T) {
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -385,7 +385,7 @@ func TestBrokerWikiWriteRejectsBadJSON(t *testing.T) {
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -416,7 +416,7 @@ func TestBrokerWikiSearchRejectsEmptyPattern(t *testing.T) {
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -473,7 +473,7 @@ func TestBrokerWikiAuditReturnsFullLineage(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	workerCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -531,7 +531,7 @@ func TestBrokerWikiAuditRejectsBadSince(t *testing.T) {
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	workerCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -554,7 +554,7 @@ func TestBrokerWikiAuditRejectsBadSince(t *testing.T) {
 }
 
 func TestWikiPublishViaBroker(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	ch, unsubscribe := b.SubscribeWikiEvents(4)
 	defer unsubscribe()
 	evt := wikiWriteEvent{Path: "team/x.md", CommitSHA: "abc", AuthorSlug: "ceo", Timestamp: "now"}
@@ -588,7 +588,7 @@ func TestWikiRootAndBackupDirsHonorRuntimeHome(t *testing.T) {
 }
 
 func TestBrokerWikiHandlersReturn503WhenWorkerInactive(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	// No worker attached.
 	mux := http.NewServeMux()
 	mux.HandleFunc("/wiki/read", b.handleWikiRead)

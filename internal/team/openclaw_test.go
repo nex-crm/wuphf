@@ -142,7 +142,7 @@ func TestBridgeStartSubscribesAllBindings(t *testing.T) {
 // as a single session.message event — there is no delta/final split.
 func TestHandleClientEventForwardsAssistantMessage(t *testing.T) {
 	fake := newFakeOC()
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a", DisplayName: "A"}}
 	b := NewOpenclawBridge(broker, fake, bindings)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -185,7 +185,7 @@ func TestHandleClientEventForwardsAssistantMessage(t *testing.T) {
 func TestHandleClientEventSkipsUserRole(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := newFakeOC()
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
 	b := NewOpenclawBridge(broker, fake, bindings)
 	_ = b.Start(context.Background())
@@ -216,7 +216,7 @@ func TestHandleClientEventSkipsUserRole(t *testing.T) {
 func TestOnOfficeMessageSuccess(t *testing.T) {
 	fake := newFakeOC()
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
-	b := NewOpenclawBridge(NewBroker(), fake, bindings)
+	b := NewOpenclawBridge(newTestBroker(t), fake, bindings)
 	_ = b.Start(context.Background())
 	defer b.Stop()
 	err := b.OnOfficeMessage(context.Background(), "openclaw-a", "general", "hello")
@@ -234,7 +234,7 @@ func TestOnOfficeMessageRetriesTransient(t *testing.T) {
 	fake := newFakeOC()
 	fake.nextSendErrs = []error{errors.New("transient 1"), errors.New("transient 2")} // first two fail, third succeeds
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
-	b := NewOpenclawBridge(NewBroker(), fake, bindings)
+	b := NewOpenclawBridge(newTestBroker(t), fake, bindings)
 	b.SetRetryDelaysForTest([]time.Duration{10 * time.Millisecond, 10 * time.Millisecond})
 	_ = b.Start(context.Background())
 	defer b.Stop()
@@ -270,7 +270,7 @@ func TestOnOfficeMessageRetriesTransient(t *testing.T) {
 // can re-prompt.
 func TestGapEventPostsSystemNotice(t *testing.T) {
 	fake := newFakeOC()
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k-gap", Slug: "openclaw-gap"}}
 	b := NewOpenclawBridge(broker, fake, bindings)
 	_ = b.Start(context.Background())
@@ -312,7 +312,7 @@ func TestReconnectOnClientClose(t *testing.T) {
 		clients = append(clients, c)
 		return c, nil
 	}
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
 	b := NewOpenclawBridgeWithDialer(broker, nil, dialer, bindings)
 	b.backoff = NewBridgeBackoff(5*time.Millisecond, 50*time.Millisecond)
@@ -345,7 +345,7 @@ func TestReconnectOnClientClose(t *testing.T) {
 func TestStartOpenclawBridgeFromConfigNoBindings(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bridge, err := StartOpenclawBridgeFromConfig(context.Background(), broker)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -371,7 +371,7 @@ func TestStartOpenclawBridgeFromConfigWithBindings(t *testing.T) {
 	openclawBootstrapDialer = func(ctx context.Context) (openclawClient, error) { return fake, nil }
 	defer func() { openclawBootstrapDialer = nil }()
 
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bridge, err := StartOpenclawBridgeFromConfig(context.Background(), broker)
 	if err != nil {
 		t.Fatalf("bootstrap: %v", err)
@@ -436,7 +436,7 @@ func TestStartOpenclawBridgeFromConfigWithBindings(t *testing.T) {
 
 func TestRouteOpenclawMentionsLoopForwardsHumanMention(t *testing.T) {
 	fake := newFakeOC()
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "mk", Slug: "openclaw-mentions"}}
 	bridge := NewOpenclawBridge(broker, fake, bindings)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -485,7 +485,7 @@ func TestRouteOpenclawMentionsLoopForwardsHumanMention(t *testing.T) {
 
 func TestRouteOpenclawMentionsLoopIgnoresUnrelated(t *testing.T) {
 	fake := newFakeOC()
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "mk", Slug: "openclaw-only"}}
 	bridge := NewOpenclawBridge(broker, fake, bindings)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -520,7 +520,7 @@ func TestRouteOpenclawMentionsLoopIgnoresUnrelated(t *testing.T) {
 func TestRouteOpenclawMentionsLoopForwardsDMPost(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := newFakeOC()
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	// Register the bridged agent as a real office member so a DM channel can
 	// be opened against its slug.
 	if err := broker.EnsureBridgedMember("openclaw-dm", "DM Bot", "openclaw"); err != nil {
@@ -592,7 +592,7 @@ func TestRouteOpenclawMentionsLoopDedupesDMAndMention(t *testing.T) {
 	// @mention the partner would fire OnOfficeMessage twice.
 	t.Setenv("HOME", t.TempDir())
 	fake := newFakeOC()
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	if err := broker.EnsureBridgedMember("openclaw-both", "Both Bot", "openclaw"); err != nil {
 		t.Fatalf("ensure bridged member: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestRouteOpenclawMentionsLoopDedupesDMAndMention(t *testing.T) {
 }
 
 func TestSuperviseOfflineNoticeDeduped(t *testing.T) {
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	dialer := func(ctx context.Context) (openclawClient, error) {
 		return nil, errors.New("dial refused")
 	}
@@ -670,7 +670,7 @@ func TestOnOfficeMessagePermanentFailurePostsSystemMessage(t *testing.T) {
 	fake := newFakeOC()
 	fake.sendErr = errors.New("forever broken")
 	bindings := []config.OpenclawBridgeBinding{{SessionKey: "k", Slug: "openclaw-a"}}
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	b := NewOpenclawBridge(broker, fake, bindings)
 	b.SetRetryDelaysForTest([]time.Duration{5 * time.Millisecond, 5 * time.Millisecond})
 	_ = b.Start(context.Background())

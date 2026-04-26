@@ -397,7 +397,7 @@ func TestBrokerCanonicalizesLegacyDMSlugs(t *testing.T) {
 }
 
 func TestRecordAgentUsageAttachesToCurrentTurnMessagesOnly(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	now := time.Now().UTC()
 	b.mu.Lock()
 	b.messages = []channelMessage{
@@ -852,7 +852,7 @@ func TestNewBrokerSeedsBlueprintBackedOfficeRosterOnFreshState(t *testing.T) {
 func TestHandleMessagesSupportsInboxAndOutboxScopes(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members,
 		officeMember{Slug: "pm", Name: "Product Manager"},
@@ -1175,7 +1175,7 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 }
 
 func TestBrokerRateLimitsRequestsPerIP(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.rateLimitRequests = 100
 	b.rateLimitWindow = 1100 * time.Millisecond
 	mux := http.NewServeMux()
@@ -1226,7 +1226,7 @@ func TestBrokerRateLimitsRequestsPerIP(t *testing.T) {
 }
 
 func TestBrokerAuthenticatedRequestsBypassRateLimit(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.rateLimitRequests = 1
 	b.rateLimitWindow = time.Second
 	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1273,7 +1273,7 @@ func TestBrokerAuthenticatedRequestsBypassRateLimit(t *testing.T) {
 }
 
 func TestBrokerRateLimitsUsingForwardedClientIP(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.rateLimitRequests = 1
 	b.rateLimitWindow = time.Second
 	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1310,7 +1310,7 @@ func TestBrokerRateLimitsUsingForwardedClientIP(t *testing.T) {
 }
 
 func TestBrokerIgnoresForwardedClientIPFromNonLoopbackPeer(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.rateLimitRequests = 1
 	b.rateLimitWindow = time.Second
 	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1345,7 +1345,7 @@ func TestBrokerIgnoresForwardedClientIPFromNonLoopbackPeer(t *testing.T) {
 // valid Bearer token. The IP bucket alone exempts token-holders, so this is
 // the containment for runaway agent cost.
 func TestBrokerAgentRateLimitTripsOnRunawayLoop(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.agentRateLimitRequests = 5
 	b.agentRateLimitWindow = time.Second
 	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1393,7 +1393,7 @@ func TestBrokerAgentRateLimitTripsOnRunawayLoop(t *testing.T) {
 // particular agent, is not blocked by the per-agent bucket. If this breaks the
 // operator loses access to their office whenever one agent loops.
 func TestBrokerOperatorTrafficBypassesAgentRateLimit(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.agentRateLimitRequests = 1
 	b.agentRateLimitWindow = time.Second
 	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1421,7 +1421,7 @@ func TestBrokerOperatorTrafficBypassesAgentRateLimit(t *testing.T) {
 // not counted against the per-agent bucket. They do not represent loopable
 // tool calls — a single subscribe holds the connection open for minutes.
 func TestBrokerAgentRateLimitExemptsSSEPaths(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.agentRateLimitRequests = 2
 	b.agentRateLimitWindow = time.Second
 	handler := b.rateLimitMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1559,7 +1559,7 @@ func TestWebUIRebindGuard(t *testing.T) {
 // The new contract: no CORS header unless the Origin exactly matches the
 // configured web UI origin.
 func TestCORSMiddlewareDropsNullOriginWildcard(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.webUIOrigins = []string{"http://localhost:7900", "http://127.0.0.1:7900"}
 	handler := b.corsMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1598,7 +1598,7 @@ func TestCORSMiddlewareDropsNullOriginWildcard(t *testing.T) {
 // the first CEO turn) or read /onboarding/state.
 func TestBrokerOnboardingRoutesRequireAuth(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1856,7 +1856,7 @@ func createOfficeMemberForTest(t *testing.T, base, token, slug, name, role strin
 }
 
 func TestNormalizeLoadedStateRepopulatesGeneralFromOfficeRoster(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -4191,7 +4191,7 @@ func TestBrokerSyncTaskWorktreeReplacesStaleAssignedPath(t *testing.T) {
 		cleanupTaskWorktree = oldCleanup
 	}()
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task := &teamTask{
 		ID:             "task-80",
 		Title:          "Fix onboarding",
@@ -4227,7 +4227,7 @@ func TestBrokerNormalizeLoadedStateRepairsStaleAssignedWorktree(t *testing.T) {
 	}()
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.tasks = []teamTask{{
 		ID:             "task-80",
 		Channel:        "youtube-factory",
@@ -6040,7 +6040,7 @@ func TestHeadlessQueue_NoTimerDrivenWakeup(t *testing.T) {
 // default) was the source of the load-path leak: blueprint-seeded teams saw
 // ceo/planner/executor/reviewer re-appended on every broker Load.
 func TestEnsureDefaultOfficeMembersSeedsWhenEmpty(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = nil
 	b.ensureDefaultOfficeMembersLocked()
@@ -6059,7 +6059,7 @@ func TestEnsureDefaultOfficeMembersSeedsWhenEmpty(t *testing.T) {
 // growth/reviewer for niche-crm), ensureDefaultOfficeMembersLocked must NOT
 // append ceo/planner/executor/reviewer on top.
 func TestEnsureDefaultOfficeMembersNoOpWhenNonEmpty(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "operator", Name: "Operator", Role: "Operator", PermissionMode: "plan", BuiltIn: true},

@@ -33,7 +33,7 @@ func TestConfigEndpointAndHealth(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.runtimeProvider = "claude-code"
 	b.token = "test-token"
 	if err := b.StartOnPort(0); err != nil {
@@ -177,7 +177,7 @@ func TestConfigEndpointAcceptsActionProviders(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.runtimeProvider = "claude-code"
 	b.token = "test-token"
 	if err := b.StartOnPort(0); err != nil {

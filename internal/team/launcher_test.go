@@ -1247,7 +1247,7 @@ func TestTaskNotificationContentIncludesCapabilityGapRecovery(t *testing.T) {
 }
 
 func TestBuildPromptIncludesActivePolicies(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.SetSessionMode(SessionModeOffice, "ceo"); err != nil {
 		t.Fatalf("set session mode: %v", err)
 	}

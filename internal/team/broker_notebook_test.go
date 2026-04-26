@@ -22,7 +22,7 @@ func newNotebookTestServer(t *testing.T) (*httptest.Server, *Broker, func()) {
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
@@ -364,7 +364,7 @@ func TestBrokerNotebookSearchRequiresSlugAndPattern(t *testing.T) {
 
 func TestBrokerNotebookServiceUnavailable(t *testing.T) {
 	// No worker attached — every handler should 503.
-	b := NewBroker()
+	b := newTestBroker(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/notebook/write", b.handleNotebookWrite)
 	mux.HandleFunc("/notebook/read", b.handleNotebookRead)

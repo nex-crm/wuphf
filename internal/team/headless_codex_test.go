@@ -91,7 +91,7 @@ func TestBuildCodexOfficeConfigOverridesIncludesOfficeMCPEnv(t *testing.T) {
 
 	t.Setenv("WUPHF_NO_NEX", "1")
 
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	if err := broker.SetSessionMode(SessionModeOneOnOne, "pm"); err != nil {
 		t.Fatalf("SetSessionMode: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestRunHeadlessCodexTurnUsesHeadlessOfficeRuntime(t *testing.T) {
 	l := &Launcher{
 		pack:        agent.GetPack("founding-team"),
 		cwd:         t.TempDir(),
-		broker:      NewBroker(),
+		broker:      newTestBroker(t),
 		headlessCtx: context.Background(),
 	}
 
@@ -297,7 +297,7 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForCodingAgents(t *testing.T) {
 	t.Setenv("CODEX_TUI_RECORD_SESSION", "1")
 	t.Setenv("CODEX_TUI_SESSION_LOG_PATH", "/tmp/controller-session.jsonl")
 
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	ensureTestMemberAccess(broker, "general", "builder", "Builder")
 	ensureTestMemberAccess(broker, "general", "operator", "Operator")
 	task, _, err := broker.EnsurePlannedTask(plannedTaskInput{
@@ -416,7 +416,7 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForLocalWorktreeBuilder(t *test
 	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("PWD", repoRoot)
 
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	ensureTestMemberAccess(broker, "general", "builder", "Builder")
 	task, _, err := broker.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
@@ -497,7 +497,7 @@ func TestRunHeadlessCodexTurnPassesScopedChannelEnv(t *testing.T) {
 	l := &Launcher{
 		pack:        agent.GetPack("founding-team"),
 		cwd:         t.TempDir(),
-		broker:      NewBroker(),
+		broker:      newTestBroker(t),
 		headlessCtx: context.Background(),
 	}
 
@@ -971,7 +971,7 @@ func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateLeadTaskWhileActive(t *test
 func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Review and advance the proof lane",
@@ -1115,7 +1115,7 @@ func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t 
 		return nil
 	})
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
 	ensureTestMemberAccess(b, "general", "operator", "Operator")
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
@@ -1161,7 +1161,7 @@ func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t 
 func TestRecoverTimedOutHeadlessTurnBlocksTaskWithoutSubstantiveReply(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{Slug: "cmo", Name: "Chief Marketing Officer"})
 	for i := range b.channels {
@@ -1211,7 +1211,7 @@ func TestRecoverTimedOutHeadlessTurnBlocksTaskWithoutSubstantiveReply(t *testing
 func TestRecoverTimedOutHeadlessTurnLeavesTaskRunningAfterSubstantiveReply(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{Slug: "cmo", Name: "Chief Marketing Officer"})
 	for i := range b.channels {
@@ -1259,7 +1259,7 @@ func TestRecoverTimedOutHeadlessTurnLeavesTaskRunningAfterSubstantiveReply(t *te
 func TestRecoverTimedOutHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
 	ensureTestMemberAccess(b, "general", "operator", "Operator")
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
@@ -1315,7 +1315,7 @@ func TestRecoverTimedOutHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *te
 func TestRecoverFailedHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Implement queue mode for the YouTube factory",
@@ -1372,7 +1372,7 @@ func TestRecoverFailedHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *test
 func TestRecoverTimedOutLocalWorktreeRetriesEvenAfterSubstantiveReplyIfTaskStillActive(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Implement the studio build",
@@ -1427,7 +1427,7 @@ func TestRecoverTimedOutLocalWorktreeRetriesEvenAfterSubstantiveReplyIfTaskStill
 func TestRecoverTimedOutLocalWorktreeLeavesReviewReadyTaskUnchanged(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Implement the studio build",
@@ -1482,7 +1482,7 @@ func TestRecoverTimedOutLocalWorktreeLeavesReviewReadyTaskUnchanged(t *testing.T
 func TestRecoverTimedOutHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Implement the studio build",
@@ -1533,7 +1533,7 @@ func TestRecoverTimedOutHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *te
 func TestRecoverFailedHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Implement queue mode for the YouTube factory",
@@ -1587,7 +1587,7 @@ func TestRecoverFailedHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *test
 func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Send a live Slack kickoff update and pivot to Notion if needed",
@@ -1691,7 +1691,7 @@ func TestHeadlessTurnCompletedDurablyAcceptsReviewReadyTask(t *testing.T) {
 
 	// See TestHeadlessTurnCompletedDurablyRejectsCodingTurn... for why
 	// we build the task state directly rather than via EnsurePlannedTask.
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{{
 		ID:            "task-1",
@@ -1731,7 +1731,7 @@ func TestHeadlessTurnCompletedDurablyRejectsLocalWorktreeBuilderWithoutTaskState
 	}
 	defer func() { headlessCodexWorkspaceStatusSnapshot = oldSnapshot }()
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Build the dry-run intake packet",
@@ -1766,7 +1766,7 @@ func TestHeadlessTurnCompletedDurablyRejectsLocalWorktreeBuilderWithoutTaskState
 func TestHeadlessTurnCompletedDurablyRejectsExternalCompletionWithoutWorkflowEvidence(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:     "general",
 		Title:       "Create one new Notion client workspace page for the consulting engagement",
@@ -1805,7 +1805,7 @@ func TestHeadlessTurnCompletedDurablyRejectsExternalCompletionWithoutWorkflowEvi
 func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithWorkflowEvidence(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:     "general",
 		Title:       "Create one new Notion client workspace page for the consulting engagement",
@@ -1844,7 +1844,7 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithWorkflowEviden
 func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithActionEvidence(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:     "general",
 		Title:       "Verify the new Notion client workspace page for the consulting engagement",
@@ -1900,7 +1900,7 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 		headlessCodexWorkspaceStatusSnapshot = oldSnapshot
 	}()
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
@@ -2009,7 +2009,7 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 func TestHeadlessCodexTurnTimeoutForLocalWorktreeTask(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Implement the studio build",
@@ -2036,7 +2036,7 @@ func TestHeadlessCodexTurnTimeoutForLocalWorktreeTask(t *testing.T) {
 func TestHeadlessCodexTurnTimeoutForOfficeLaunchTask(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
 		Title:         "Produce the launch assets and operating pack",
@@ -2190,7 +2190,7 @@ func TestPreflightHeadlessCodexAuthFailsAndPostsSystemMessage(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	broker := NewBroker()
+	broker := newTestBroker(t)
 	l := &Launcher{broker: broker}
 
 	err := l.preflightHeadlessCodexAuth("operator", "general")
@@ -2229,7 +2229,7 @@ func TestPreflightHeadlessCodexAuthPassesWhenOpenAIKeySet(t *testing.T) {
 		t.Fatalf("save config: %v", err)
 	}
 
-	l := &Launcher{broker: NewBroker()}
+	l := &Launcher{broker: newTestBroker(t)}
 	if err := l.preflightHeadlessCodexAuth("operator", "general"); err != nil {
 		t.Fatalf("expected preflight to pass with OPENAI_API_KEY set, got %v", err)
 	}
@@ -2253,7 +2253,7 @@ func TestPreflightHeadlessCodexAuthPassesWhenAuthJSONPresent(t *testing.T) {
 		t.Fatalf("write auth.json: %v", err)
 	}
 
-	l := &Launcher{broker: NewBroker()}
+	l := &Launcher{broker: newTestBroker(t)}
 	if err := l.preflightHeadlessCodexAuth("operator", "general"); err != nil {
 		t.Fatalf("expected preflight to pass when auth.json exists, got %v", err)
 	}

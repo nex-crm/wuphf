@@ -15,7 +15,7 @@ import (
 // It verifies the endpoint is auth-gated, returns both pending and
 // permanent-failure rows in JSON, and that a nil DLQ returns 503.
 func TestHandleWikiDLQ(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 
 	// Seed a DLQ with 2 pending + 1 promoted (via RecordAttempt past the
 	// validation max_retries ceiling).
@@ -139,7 +139,7 @@ func TestHandleWikiDLQ(t *testing.T) {
 // TestHandleWikiDLQ_NilDLQReturns503 verifies the handler degrades
 // gracefully when the worker has not been booted.
 func TestHandleWikiDLQ_NilDLQReturns503(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	// Explicitly leave b.wikiDLQ = nil.
 
 	mux := http.NewServeMux()

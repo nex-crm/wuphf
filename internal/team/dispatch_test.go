@@ -28,7 +28,7 @@ func TestNormalizeProviderKind(t *testing.T) {
 }
 
 func TestMemberEffectiveProviderKind_PerAgentWins(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{
 		Slug:     "pm-codex",
@@ -45,7 +45,7 @@ func TestMemberEffectiveProviderKind_PerAgentWins(t *testing.T) {
 }
 
 func TestMemberEffectiveProviderKind_FallsBackToGlobal(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{
 		Slug: "no-binding",
@@ -66,7 +66,7 @@ func TestMemberEffectiveProviderKind_FallsBackToGlobal(t *testing.T) {
 }
 
 func TestMemberEffectiveProviderKind_DefaultsToClaudeWhenAllEmpty(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	l := &Launcher{broker: b, provider: ""}
 	// Fully empty globals fall through to claude-code. This preserves the
 	// install-default behavior that predated per-agent providers.
@@ -107,7 +107,7 @@ func TestShouldUseHeadlessDispatch(t *testing.T) {
 }
 
 func TestBrokerMemberProviderKind_Lookup(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = append(b.members, officeMember{
 		Slug:     "eng-openclaw",

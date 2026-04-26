@@ -162,7 +162,7 @@ func TestProviderFieldSurvivesBrokerReload(t *testing.T) {
 }
 
 func TestRebuildMemberIndex_AfterRemove(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.members = []officeMember{

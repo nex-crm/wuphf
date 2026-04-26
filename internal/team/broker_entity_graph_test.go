@@ -24,7 +24,7 @@ func newEntityGraphTestServer(t *testing.T) (*httptest.Server, *Broker, func()) 
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
@@ -175,7 +175,7 @@ func TestHandleEntityFact_GraphRecordFailureDoesNotBreakFactWrite(t *testing.T) 
 }
 
 func TestEntityGraphEndpoint_MissingGraphReturns503(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/entity/graph", b.requireAuth(b.handleEntityGraph))
 	srv := httptest.NewServer(mux)

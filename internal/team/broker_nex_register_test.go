@@ -50,7 +50,7 @@ func TestNexRegisterEndpoint_Success(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.token = "test-token"
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
@@ -93,7 +93,7 @@ func TestNexRegisterEndpoint_Success(t *testing.T) {
 // the payload lacks an email — the broker must reject with 400 before
 // spending an exec on nex-cli.
 func TestNexRegisterEndpoint_MissingEmail(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.token = "test-token"
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
@@ -127,7 +127,7 @@ func TestNexRegisterEndpoint_CLIMissing(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("WUPHF_NO_NEX", "")
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.token = "test-token"
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
@@ -166,7 +166,7 @@ func TestNexRegisterEndpoint_CLIMissing(t *testing.T) {
 // TestNexRegisterEndpoint_RejectsGET ensures we only accept POST — a GET
 // would indicate the caller wiring the wrong verb, worth failing fast.
 func TestNexRegisterEndpoint_RejectsGET(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.token = "test-token"
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
@@ -200,7 +200,7 @@ func TestConfigEndpoint_NexAPIKeyPersists(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.token = "test-token"
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)

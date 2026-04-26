@@ -25,7 +25,7 @@ func newEntityTestServer(t *testing.T, llmStub func(ctx context.Context, sys, us
 	if err := repo.Init(context.Background()); err != nil {
 		t.Fatalf("init: %v", err)
 	}
-	b := NewBroker()
+	b := newTestBroker(t)
 	worker := NewWikiWorker(repo, b)
 	ctx, cancel := context.WithCancel(context.Background())
 	worker.Start(ctx)
@@ -390,7 +390,7 @@ func TestBrokerEntity_BriefsList(t *testing.T) {
 }
 
 func TestBrokerEntity_WorkerDownReturns503(t *testing.T) {
-	b := NewBroker()
+	b := newTestBroker(t)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/entity/fact", b.requireAuth(b.handleEntityFact))
 	srv := httptest.NewServer(mux)
