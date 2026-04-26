@@ -123,7 +123,7 @@ func TestOpenAICompatBridge_E2E(t *testing.T) {
 		toolTimeout: 3 * time.Second,
 	}
 
-	final, iters, streamErr, err := loop.run(ctx, []agent.Message{
+	final, iters, _, streamErr, err := loop.run(ctx, []agent.Message{
 		{Role: "system", Content: "You're a helpful office agent."},
 		{Role: "user", Content: "Tell the team hi in #general."},
 	})

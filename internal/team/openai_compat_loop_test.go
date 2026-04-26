@@ -68,7 +68,7 @@ func TestOpenAICompatToolLoop_TextOnlyOneShot(t *testing.T) {
 		maxIters:    8,
 		toolTimeout: time.Second,
 	}
-	final, iters, streamErr, err := loop.run(context.Background(), []agent.Message{
+	final, iters, _, streamErr, err := loop.run(context.Background(), []agent.Message{
 		{Role: "user", Content: "say hi"},
 	})
 	if err != nil {
@@ -82,6 +82,78 @@ func TestOpenAICompatToolLoop_TextOnlyOneShot(t *testing.T) {
 	}
 	if final != "hello there." {
 		t.Errorf("finalText = %q, want %q", final, "hello there.")
+	}
+}
+
+// TestOpenAICompatToolLoop_AccumulatesUsageAcrossIterations confirms that
+// when the SSE parser surfaces a usage chunk on each streaming turn, the
+// loop sums the totals into the final ClaudeUsage return — not just the
+// last turn's. This matters because a tool-using turn streams the model
+// multiple times (one per tool round-trip) and the user's usage panel
+// should reflect the whole turn's footprint.
+func TestOpenAICompatToolLoop_AccumulatesUsageAcrossIterations(t *testing.T) {
+	stream := &scriptedStreamFn{
+		turns: []scriptedTurn{
+			{chunks: []agent.StreamChunk{
+				{Type: "tool_use", ToolName: "echo", ToolParams: map[string]any{"x": "1"}, ToolInput: `{"x":"1"}`},
+				{Type: "usage", InputTokens: 100, OutputTokens: 20},
+			}},
+			{chunks: []agent.StreamChunk{
+				{Type: "text", Content: "done"},
+				{Type: "usage", InputTokens: 30, OutputTokens: 5},
+			}},
+		},
+	}
+	tools := []agent.AgentTool{{
+		Name:    "echo",
+		Execute: func(_ map[string]any, _ context.Context, _ func(string)) (string, error) { return "ok", nil },
+	}}
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		tools:       tools,
+		toolByName:  map[string]agent.AgentTool{"echo": tools[0]},
+		maxIters:    4,
+		toolTimeout: time.Second,
+	}
+	final, iters, usage, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "go"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if streamErr != "" {
+		t.Fatalf("unexpected stream error: %s", streamErr)
+	}
+	if iters != 2 {
+		t.Errorf("iterations = %d, want 2", iters)
+	}
+	if final != "done" {
+		t.Errorf("finalText = %q, want %q", final, "done")
+	}
+	if usage.InputTokens != 130 || usage.OutputTokens != 25 {
+		t.Errorf("usage = {input:%d output:%d}, want {130, 25}", usage.InputTokens, usage.OutputTokens)
+	}
+}
+
+// TestOpenAICompatToolLoop_NoUsageStaysZero verifies that turns with no
+// usage chunks return a zero-valued ClaudeUsage so the headless runner can
+// gate its broker.RecordAgentUsage() call on input/output > 0 and avoid
+// recording empty rows when the server doesn't emit usage frames.
+func TestOpenAICompatToolLoop_NoUsageStaysZero(t *testing.T) {
+	stream := &scriptedStreamFn{
+		turns: []scriptedTurn{
+			{chunks: []agent.StreamChunk{{Type: "text", Content: "hi"}}},
+		},
+	}
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		maxIters:    4,
+		toolTimeout: time.Second,
+	}
+	_, _, usage, _, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "go"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if usage.InputTokens != 0 || usage.OutputTokens != 0 {
+		t.Errorf("usage = {input:%d output:%d}, want {0, 0}", usage.InputTokens, usage.OutputTokens)
 	}
 }
 
@@ -164,7 +236,7 @@ func TestOpenAICompatToolLoop_FullToolRoundTrip(t *testing.T) {
 		},
 	}
 
-	final, iters, streamErr, err := loop.run(context.Background(), []agent.Message{
+	final, iters, _, streamErr, err := loop.run(context.Background(), []agent.Message{
 		{Role: "user", Content: "What's the weather in Lisbon?"},
 	})
 	if err != nil {
@@ -224,7 +296,7 @@ func TestOpenAICompatToolLoop_UnknownToolDoesNotPanic(t *testing.T) {
 		maxIters:    4,
 		toolTimeout: time.Second,
 	}
-	final, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "do it"}})
+	final, _, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "do it"}})
 	if err != nil || streamErr != "" {
 		t.Fatalf("unexpected: err=%v streamErr=%q", err, streamErr)
 	}
@@ -268,7 +340,7 @@ func TestOpenAICompatToolLoop_ToolErrorPropagatesAsResult(t *testing.T) {
 		maxIters:    3,
 		toolTimeout: time.Second,
 	}
-	final, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "go"}})
+	final, _, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "go"}})
 	if err != nil || streamErr != "" {
 		t.Fatalf("unexpected: err=%v streamErr=%q", err, streamErr)
 	}
@@ -293,7 +365,7 @@ func TestOpenAICompatToolLoop_StreamErrorBreaksOut(t *testing.T) {
 		maxIters:    4,
 		toolTimeout: time.Second,
 	}
-	final, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "x"}})
+	final, _, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "x"}})
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -329,7 +401,7 @@ func TestOpenAICompatToolLoop_MaxIterationsCap(t *testing.T) {
 		maxIters:    4,
 		toolTimeout: time.Second,
 	}
-	finalText, iters, streamErr, _ := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "loop"}})
+	finalText, iters, _, streamErr, _ := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "loop"}})
 	if iters != 4 {
 		t.Errorf("iterations = %d, want 4 (the cap)", iters)
 	}
@@ -398,7 +470,7 @@ func TestOpenAICompatToolLoop_BridgeDiesMidCallSurfacesAsToolError(t *testing.T)
 		maxIters:    4,
 		toolTimeout: time.Second,
 	}
-	final, _, streamErr, err := loop.run(context.Background(), []agent.Message{
+	final, _, _, streamErr, err := loop.run(context.Background(), []agent.Message{
 		{Role: "user", Content: "post hi to #general"},
 	})
 	if err != nil {
@@ -460,7 +532,7 @@ func TestOpenAICompatToolLoop_ContextCancelStopsImmediately(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel before run
-	_, _, _, err := loop.run(ctx, []agent.Message{{Role: "user", Content: "x"}})
+	_, _, _, _, err := loop.run(ctx, []agent.Message{{Role: "user", Content: "x"}})
 	if err == nil {
 		t.Fatal("expected context.Canceled error")
 	}

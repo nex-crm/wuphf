@@ -143,7 +143,14 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		},
 	}
 
-	finalText, iterationsUsed, streamErr, err := loop.run(ctx, msgs)
+	finalText, iterationsUsed, turnUsage, streamErr, err := loop.run(ctx, msgs)
+	// Record token counts even on partial / errored turns: a failed turn
+	// can still have generated thousands of tokens we want surfaced in the
+	// usage panel. CostUSD stays at zero — local runtimes have no marginal
+	// $ cost so the broker's cost_usd column correctly remains untouched.
+	if (turnUsage.InputTokens > 0 || turnUsage.OutputTokens > 0) && l.broker != nil {
+		l.broker.RecordAgentUsage(slug, kind, turnUsage)
+	}
 	if err != nil {
 		metrics.TotalMs = time.Since(startedAt).Milliseconds()
 		l.updateHeadlessProgress(slug, "error", "error", truncate(err.Error(), 180), metrics)

@@ -186,6 +186,13 @@ func runOpenAICompatStream(
 		Model:    model,
 		Stream:   true,
 		Messages: agentMsgsToOpenAI(msgs),
+		// Ask the server to emit a final SSE frame containing token usage.
+		// Recognised by ollama, recent mlx_lm.server, exo, llama.cpp's
+		// server, and the canonical OpenAI API. Servers that don't
+		// implement this option ignore the unknown field, so the request
+		// stays well-formed; we just won't see usage from those servers
+		// (which is the same as today's behaviour).
+		StreamOptions: &openaiStreamOptions{IncludeUsage: true},
 	}
 	if len(tools) > 0 {
 		body.Tools = agentToolsToOpenAI(tools)
@@ -251,6 +258,23 @@ func parseOpenAISSEStream(ch chan<- agent.StreamChunk, kind string, body io.Read
 	// doesn't have to care which dialect the model picked.
 	var textBuf strings.Builder
 
+	// latestUsage holds the most recent usage frame seen this turn. With
+	// stream_options.include_usage the server sends exactly one trailing
+	// usage frame; some servers (llama.cpp's, older mlx_lm.server) instead
+	// stamp partial usage on every event, so we always take the last one.
+	var latestUsage *openaiUsage
+
+	flushUsage := func() {
+		if latestUsage == nil {
+			return
+		}
+		ch <- agent.StreamChunk{
+			Type:         "usage",
+			InputTokens:  latestUsage.PromptTokens,
+			OutputTokens: latestUsage.CompletionTokens,
+		}
+	}
+
 	flushTools := func() {
 		emittedStructured := false
 		for _, idx := range emitOrder {
@@ -310,14 +334,16 @@ func parseOpenAISSEStream(ch chan<- agent.StreamChunk, kind string, body io.Read
 				}
 				if payload == "[DONE]" {
 					flushTools()
+					flushUsage()
 					return
 				}
-				processOpenAISSEEvent(ch, kind, payload, toolAccumulators, &emitOrder, &textBuf)
+				processOpenAISSEEvent(ch, kind, payload, toolAccumulators, &emitOrder, &textBuf, &latestUsage)
 			}
 		}
 		if err != nil {
 			if err == io.EOF {
 				flushTools()
+				flushUsage()
 				return
 			}
 			ch <- agent.StreamChunk{Type: "error", Content: fmt.Sprintf("openai-compat (%s): read stream: %v", kind, err)}
@@ -549,6 +575,7 @@ func processOpenAISSEEvent(
 	toolAccumulators map[int]*toolAccum,
 	emitOrder *[]int,
 	textBuf *strings.Builder,
+	latestUsage **openaiUsage,
 ) {
 	var ev openaiStreamChunk
 	if err := json.Unmarshal([]byte(payload), &ev); err != nil {
@@ -557,6 +584,18 @@ func processOpenAISSEEvent(
 			Content: fmt.Sprintf("openai-compat (%s): malformed SSE payload: %v\nraw: %s", kind, err, payload),
 		}
 		return
+	}
+	// Capture usage from any frame that carries it. With
+	// stream_options.include_usage the canonical pattern is a single
+	// trailing frame whose `choices` is empty and `usage` is set; we
+	// still update on partial-usage frames to be tolerant of servers
+	// that stamp it earlier. We only record when both prompt and
+	// completion are populated to avoid latching a half-filled frame.
+	if ev.Usage != nil && latestUsage != nil {
+		if ev.Usage.PromptTokens > 0 || ev.Usage.CompletionTokens > 0 {
+			u := *ev.Usage
+			*latestUsage = &u
+		}
 	}
 	if len(ev.Choices) == 0 {
 		return
@@ -594,11 +633,20 @@ type toolAccum struct {
 // --- request shape ----------------------------------------------------------
 
 type openaiRequest struct {
-	Model      string          `json:"model"`
-	Messages   []openaiMessage `json:"messages"`
-	Stream     bool            `json:"stream"`
-	Tools      []openaiTool    `json:"tools,omitempty"`
-	ToolChoice string          `json:"tool_choice,omitempty"`
+	Model         string               `json:"model"`
+	Messages      []openaiMessage      `json:"messages"`
+	Stream        bool                 `json:"stream"`
+	StreamOptions *openaiStreamOptions `json:"stream_options,omitempty"`
+	Tools         []openaiTool         `json:"tools,omitempty"`
+	ToolChoice    string               `json:"tool_choice,omitempty"`
+}
+
+// openaiStreamOptions mirrors OpenAI's `stream_options` request field. We
+// only set `include_usage` today; the struct exists as a separate type
+// (rather than inlining a bool) so future options like `service_tier` can
+// be added without reshaping the request body.
+type openaiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 type openaiMessage struct {
@@ -654,11 +702,26 @@ func agentToolsToOpenAI(tools []agent.AgentTool) []openaiTool {
 
 type openaiStreamChunk struct {
 	Choices []openaiStreamChoice `json:"choices"`
+	// Usage is populated on the final SSE frame when the server honours
+	// stream_options.include_usage. Pointer so the zero value is
+	// distinguishable from `prompt_tokens: 0` (unlikely in practice but
+	// keeps the JSON round-trip honest).
+	Usage *openaiUsage `json:"usage,omitempty"`
 }
 
 type openaiStreamChoice struct {
 	Delta        openaiStreamDelta `json:"delta"`
 	FinishReason string            `json:"finish_reason"`
+}
+
+// openaiUsage captures the token counts a local OpenAI-compatible server
+// emits in its trailing usage frame. We don't extract cost: local runs
+// have no marginal $ cost so a zero in the broker's cost_usd column is
+// the right answer.
+type openaiUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 }
 
 type openaiStreamDelta struct {

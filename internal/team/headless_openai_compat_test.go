@@ -168,7 +168,7 @@ func TestOpenAICompatToolLoop_OnToolResultFiresPerInvocation(t *testing.T) {
 			}
 		},
 	}
-	final, _, streamErr, err := loop.run(context.Background(),
+	final, _, _, streamErr, err := loop.run(context.Background(),
 		[]agent.Message{{Role: "user", Content: "x"}})
 	if err != nil || streamErr != "" {
 		t.Fatalf("unexpected: err=%v streamErr=%q", err, streamErr)
@@ -222,7 +222,7 @@ func TestOpenAICompatToolLoop_OnToolResultDoesNotFlipForReadOnlyTools(t *testing
 			}
 		},
 	}
-	final, _, _, _ := loop.run(context.Background(),
+	final, _, _, _, _ := loop.run(context.Background(),
 		[]agent.Message{{Role: "user", Content: "x"}})
 	if broadcasted {
 		t.Fatal("broadcastedThisTurn flipped for a read-only wiki tool — runner will silently drop the agent's reply")
@@ -266,7 +266,7 @@ func TestOpenAICompatToolLoop_OnToolResultErrorDoesNotFlipBroadcasted(t *testing
 			}
 		},
 	}
-	final, _, _, _ := loop.run(context.Background(),
+	final, _, _, _, _ := loop.run(context.Background(),
 		[]agent.Message{{Role: "user", Content: "x"}})
 	if broadcasted {
 		t.Error("broadcastedThisTurn flipped on tool error — user would see no reply at all")

@@ -825,9 +825,82 @@ func TestOpenAICompatStreamFn_RequestBodyShape(t *testing.T) {
 		`"name":"t1"`,
 		`"role":"system"`,
 		`"role":"user"`,
+		`"stream_options":{"include_usage":true}`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("request body missing %q\nbody: %s", want, got)
+		}
+	}
+}
+
+// TestParseOpenAISSEStream_TrailingUsageFrame covers the canonical pattern
+// from `stream_options.include_usage`: a final SSE frame with empty choices
+// and a populated `usage` block. It must produce exactly one trailing
+// usage chunk carrying the prompt/completion token counts.
+func TestParseOpenAISSEStream_TrailingUsageFrame(t *testing.T) {
+	body := sseBody(
+		`{"choices":[{"delta":{"content":"Hello"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}`,
+	)
+
+	ch := make(chan agent.StreamChunk, 16)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "test", strings.NewReader(body))
+	}()
+
+	chunks := drainChunks(t, ch)
+	var usage *agent.StreamChunk
+	for i := range chunks {
+		if chunks[i].Type == "usage" {
+			usage = &chunks[i]
+		}
+	}
+	if usage == nil {
+		t.Fatalf("expected a usage chunk, got %+v", chunks)
+	}
+	if usage.InputTokens != 42 || usage.OutputTokens != 7 {
+		t.Errorf("usage chunk = {input:%d output:%d}, want {42, 7}", usage.InputTokens, usage.OutputTokens)
+	}
+	// The usage chunk must come AFTER the text chunks so consumers that
+	// stream-render text don't have to special-case ordering.
+	lastTextIdx := -1
+	usageIdx := -1
+	for i, c := range chunks {
+		switch c.Type {
+		case "text":
+			lastTextIdx = i
+		case "usage":
+			usageIdx = i
+		}
+	}
+	if usageIdx <= lastTextIdx {
+		t.Errorf("usage chunk emitted at index %d, expected after last text at %d", usageIdx, lastTextIdx)
+	}
+}
+
+// TestParseOpenAISSEStream_NoUsageFrameStaysSilent verifies that when the
+// server doesn't emit a usage frame (e.g. older mlx_lm.server, servers that
+// don't implement stream_options.include_usage), the parser does NOT
+// fabricate a zero-valued usage chunk. The headless runner relies on
+// "no usage chunk → don't call RecordAgentUsage" to avoid recording empty
+// rows.
+func TestParseOpenAISSEStream_NoUsageFrameStaysSilent(t *testing.T) {
+	body := sseBody(
+		`{"choices":[{"delta":{"content":"hi"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	)
+
+	ch := make(chan agent.StreamChunk, 16)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "test", strings.NewReader(body))
+	}()
+
+	for _, c := range drainChunks(t, ch) {
+		if c.Type == "usage" {
+			t.Fatalf("expected no usage chunk, got %+v", c)
 		}
 	}
 }

@@ -2,6 +2,7 @@ package team
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -71,7 +72,7 @@ func TestOpenAICompatToolLoop_LiveMLX(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 
-	finalText, iters, streamErr, err := loop.run(ctx, []agent.Message{
+	finalText, iters, usage, streamErr, err := loop.run(ctx, []agent.Message{
 		{Role: "system", Content: "You have one tool, echo_phrase. The user wants you to call it once with the phrase 'unified-steele' and then summarize what came back in a short sentence."},
 		{Role: "user", Content: "Please call echo_phrase with phrase=\"unified-steele\" and tell me what it returned."},
 	})
@@ -84,11 +85,51 @@ func TestOpenAICompatToolLoop_LiveMLX(t *testing.T) {
 	if iters > 4 {
 		t.Errorf("iterations = %d; loop did not terminate quickly", iters)
 	}
-	t.Logf("live loop ok: iters=%d tool_calls=%d final=%q", iters, calls, finalText)
+	// stream_options.include_usage is set on every request, so a healthy
+	// mlx_lm.server (>= 0.20-ish) MUST surface non-zero usage. A zero here
+	// is the regression we shipped this PR to prevent: the issue #342
+	// symptom of "Opencode/local backends don't report usage".
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 {
+		t.Errorf("usage = zero — server didn't emit a trailing usage frame, or the parser dropped it")
+	}
+	if usage.CostUSD != 0 {
+		t.Errorf("usage.CostUSD = %v, want 0 (local runs have no marginal $ cost)", usage.CostUSD)
+	}
+	t.Logf("live loop ok: iters=%d tool_calls=%d input_tokens=%d output_tokens=%d cost_usd=%.4f final=%q",
+		iters, calls, usage.InputTokens, usage.OutputTokens, usage.CostUSD, finalText)
 	// We don't insist the model called the tool — the test verifies the
 	// loop survives whichever choice the model makes. But if it called the
 	// tool, the result must echo "unified-steele".
 	if calls > 0 && !strings.Contains(strings.ToLower(finalText), "unified-steele") {
 		t.Logf("model called the tool but did not echo the phrase in final reply: %q", finalText)
+	}
+
+	// Final mile: feed the captured usage into a real Broker via the same
+	// RecordAgentUsage path the headless runner takes. This proves what
+	// the user-visible UsagePanel will show after a local-LLM turn:
+	// per-agent token counts populated, cost_usd stays at zero — which is
+	// the unambiguous "this run was local" signal.
+	b := newTestBroker(t)
+	b.RecordAgentUsage("local-llm-agent", "mlx-lm", usage)
+
+	b.mu.Lock()
+	snapshot := b.usage
+	b.mu.Unlock()
+	dump, _ := json.MarshalIndent(snapshot, "", "  ")
+	t.Logf("broker.usage after live mlx turn:\n%s", dump)
+
+	agentUsage, ok := snapshot.Agents["local-llm-agent"]
+	if !ok {
+		t.Fatal("broker did not record per-agent usage for local-llm-agent")
+	}
+	if agentUsage.InputTokens != usage.InputTokens || agentUsage.OutputTokens != usage.OutputTokens {
+		t.Errorf("broker per-agent usage = {input:%d output:%d}, want {%d, %d}",
+			agentUsage.InputTokens, agentUsage.OutputTokens, usage.InputTokens, usage.OutputTokens)
+	}
+	if agentUsage.CostUsd != 0 {
+		t.Errorf("broker per-agent cost_usd = %v, want 0 (local runs have no marginal $ cost)", agentUsage.CostUsd)
+	}
+	if agentUsage.Requests != 1 {
+		t.Errorf("broker per-agent requests = %d, want 1", agentUsage.Requests)
 	}
 }
