@@ -231,7 +231,7 @@ func validateReviewerConfig(blueprint Blueprint) error {
 			return fmt.Errorf("blueprint %s reviewer_paths contains an empty pattern (file: %s)", blueprint.ID, file)
 		}
 		if _, err := filepath.Match(stripDoubleStar(pattern), ""); err != nil {
-			return fmt.Errorf("blueprint %s reviewer_paths pattern %q is not a valid glob: %v (file: %s)", blueprint.ID, pattern, err, file)
+			return fmt.Errorf("blueprint %s reviewer_paths pattern %q is not a valid glob: %w (file: %s)", blueprint.ID, pattern, err, file)
 		}
 		if reviewer == "" {
 			return fmt.Errorf("blueprint %s reviewer_paths %q has empty reviewer value (file: %s)", blueprint.ID, pattern, file)
