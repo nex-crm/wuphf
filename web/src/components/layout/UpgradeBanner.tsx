@@ -149,19 +149,21 @@ export function UpgradeBanner() {
 
   useEffect(() => {
     if (!enabled || forced) return
-    let cancelled = false
+    // AbortController so a slow fetch from a previous run cannot resolve
+    // after we've moved on (component unmount, or future manual refresh).
+    const ctl = new AbortController()
     void Promise.all([
       getVersion().catch(() => null),
-      fetch(`https://registry.npmjs.org/${NPM_PACKAGE}/latest`)
+      fetch(`https://registry.npmjs.org/${NPM_PACKAGE}/latest`, { signal: ctl.signal })
         .then((r) => (r.ok ? (r.json() as Promise<{ version?: string }>) : null))
         .catch(() => null),
     ]).then(([cur, npm]) => {
-      if (cancelled) return
+      if (ctl.signal.aborted) return
       if (cur?.version) setCurrent(cur.version)
       if (npm?.version) setLatest(String(npm.version))
     })
     return () => {
-      cancelled = true
+      ctl.abort()
     }
   }, [enabled, forced])
 
@@ -181,26 +183,34 @@ export function UpgradeBanner() {
     return `https://github.com/${REPO}/compare/v${stripV(current)}...v${stripV(latest)}`
   }, [current, latest])
 
-  const fetchChangelog = useCallback(async () => {
-    if (!current || !latest) return
-    setChangelog({ loading: true, error: null, commits: [] })
-    try {
-      const url = `https://api.github.com/repos/${REPO}/compare/v${stripV(current)}...v${stripV(latest)}`
-      const r = await fetch(url, { headers: { Accept: 'application/vnd.github+json' } })
-      if (!r.ok) throw new Error(`GitHub ${r.status}`)
-      const data = (await r.json()) as GitHubCompareResponse
-      const commits = (data.commits ?? []).map((c) =>
-        parseCommit(c.commit?.message ?? '', c.sha ?? ''),
-      )
-      setChangelog({ loading: false, error: null, commits })
-    } catch (e) {
-      setChangelog({
-        loading: false,
-        error: e instanceof Error ? e.message : String(e),
-        commits: [],
-      })
-    }
-  }, [current, latest])
+  const fetchChangelog = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!current || !latest) return
+      setChangelog({ loading: true, error: null, commits: [] })
+      try {
+        const url = `https://api.github.com/repos/${REPO}/compare/v${stripV(current)}...v${stripV(latest)}`
+        const r = await fetch(url, {
+          headers: { Accept: 'application/vnd.github+json' },
+          signal,
+        })
+        if (!r.ok) throw new Error(`GitHub ${r.status}`)
+        const data = (await r.json()) as GitHubCompareResponse
+        const commits = (data.commits ?? []).map((c) =>
+          parseCommit(c.commit?.message ?? '', c.sha ?? ''),
+        )
+        if (signal?.aborted) return
+        setChangelog({ loading: false, error: null, commits })
+      } catch (e) {
+        if (signal?.aborted || (e instanceof DOMException && e.name === 'AbortError')) return
+        setChangelog({
+          loading: false,
+          error: e instanceof Error ? e.message : String(e),
+          commits: [],
+        })
+      }
+    },
+    [current, latest],
+  )
 
   const toggleExpanded = useCallback(() => {
     setExpanded((prev) => {
