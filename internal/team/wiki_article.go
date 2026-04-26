@@ -36,6 +36,7 @@ package team
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -301,8 +302,13 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 	sort.Slice(hits, func(i, j int) bool { return hits[i].relPath < hits[j].relPath })
 
 	// Fill author_slug per article from git log. Best-effort: if log fails,
-	// leave author_slug empty rather than abort.
-	commitBounds, _ := r.commitBoundsByPath(ctx)
+	// leave author_slug empty rather than abort. Surface the underlying
+	// error at warn level — silent swallow used to mask corrupt-repo and
+	// `git log` failures so backlinks rendered with no author + no signal.
+	commitBounds, err := r.commitBoundsByPath(ctx)
+	if err != nil {
+		log.Printf("wiki backlinks: commitBoundsByPath failed, author_slug fields will be empty: %v", err)
+	}
 	backs := make([]Backlink, 0, len(hits))
 	for _, h := range hits {
 		author := ""

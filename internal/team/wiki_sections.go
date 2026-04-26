@@ -153,7 +153,14 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 	if walkErr != nil {
 		return nil, fmt.Errorf("wiki sections: walk team/: %w", walkErr)
 	}
-	commitBounds, _ := repo.commitBoundsByPath(ctx)
+	// Best-effort: a `git log` failure shouldn't 500 the catalog request.
+	// Surface the cause at warn level rather than swallow — sections will
+	// render with empty timestamps + author fields, but the operator gets
+	// a signal rather than guessing why the UI looks blank.
+	commitBounds, err := repo.commitBoundsByPath(ctx)
+	if err != nil {
+		log.Printf("wiki sections: commitBoundsByPath failed, section timestamps + authors will be empty: %v", err)
+	}
 
 	// Assemble the section list: blueprint-declared first (in blueprint
 	// order), then discovered-only alphabetically.
