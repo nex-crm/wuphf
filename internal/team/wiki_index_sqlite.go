@@ -77,6 +77,13 @@ CREATE TABLE IF NOT EXISTS facts (
 CREATE INDEX IF NOT EXISTS idx_facts_entity   ON facts(entity_slug);
 CREATE INDEX IF NOT EXISTS idx_facts_triplet  ON facts(triplet_subject, triplet_predicate);
 CREATE INDEX IF NOT EXISTS idx_facts_triplet_pred_obj ON facts(triplet_predicate, triplet_object);
+-- Partial index for the reinforced-only cluster scan path (Slice 3 Thread A).
+-- Narrows the predicate-filtered scan to rows that actually contribute to
+-- clustering. Safe to add to existing DBs because CREATE INDEX IF NOT EXISTS
+-- is a no-op when the index already exists.
+CREATE INDEX IF NOT EXISTS idx_facts_reinforced
+  ON facts(triplet_predicate, id)
+  WHERE reinforced_at IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS entities (
   slug                    TEXT PRIMARY KEY,
@@ -396,6 +403,75 @@ func (s *SQLiteFactStore) ListAllFacts(ctx context.Context) ([]TypedFact, error)
 		 ORDER BY id ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("sqlite: list all facts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanFacts(rows)
+}
+
+// ListReinforcedFactsByPredicate returns reinforced facts (reinforced_at IS NOT
+// NULL) optionally narrowed by triplet predicate. Backed by the partial index
+// idx_facts_reinforced (triplet_predicate, id) WHERE reinforced_at IS NOT NULL,
+// so the cost is O(matching rows). Empty predicate returns every reinforced
+// fact in the store. Result is sorted by id ASC for parity with the in-memory
+// backend.
+func (s *SQLiteFactStore) ListReinforcedFactsByPredicate(ctx context.Context, predicate string) ([]TypedFact, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if predicate == "" {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT id, entity_slug, kind, type,
+			        triplet_subject, triplet_predicate, triplet_object,
+			        text, confidence, valid_from, valid_until,
+			        supersedes, contradicts_with,
+			        source_type, source_path, sentence_offset, artifact_excerpt,
+			        created_at, created_by, reinforced_at
+			 FROM facts
+			 WHERE reinforced_at IS NOT NULL
+			 ORDER BY id ASC`)
+	} else {
+		rows, err = s.db.QueryContext(ctx,
+			`SELECT id, entity_slug, kind, type,
+			        triplet_subject, triplet_predicate, triplet_object,
+			        text, confidence, valid_from, valid_until,
+			        supersedes, contradicts_with,
+			        source_type, source_path, sentence_offset, artifact_excerpt,
+			        created_at, created_by, reinforced_at
+			 FROM facts
+			 WHERE triplet_predicate = ? AND reinforced_at IS NOT NULL
+			 ORDER BY id ASC`, predicate)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list reinforced facts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	return scanFacts(rows)
+}
+
+// ListAllFactsPaged returns up to `limit` facts with id > afterID, sorted by id
+// ASC. Empty afterID starts at the beginning (the empty string sorts before
+// every non-empty id). limit <= 0 falls back to the 1000-row default.
+//
+// Keyset pagination (id > ?) over the primary key is O(log N) per page, which
+// keeps memory bounded regardless of total fact count.
+func (s *SQLiteFactStore) ListAllFactsPaged(ctx context.Context, afterID string, limit int) ([]TypedFact, error) {
+	if limit <= 0 {
+		limit = 1000
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, entity_slug, kind, type,
+		        triplet_subject, triplet_predicate, triplet_object,
+		        text, confidence, valid_from, valid_until,
+		        supersedes, contradicts_with,
+		        source_type, source_path, sentence_offset, artifact_excerpt,
+		        created_at, created_by, reinforced_at
+		 FROM facts
+		 WHERE id > ?
+		 ORDER BY id ASC
+		 LIMIT ?`, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: list all facts paged: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	return scanFacts(rows)

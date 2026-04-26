@@ -4084,7 +4084,7 @@ func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
 		}
 		return slug == b.oneOnOneAgent
 	}
-	if slug == "" || slug == "you" || slug == "human" || slug == "nex" {
+	if slug == "" || slug == "you" || slug == "human" || slug == "nex" || slug == "system" {
 		return true
 	}
 	if slug == "ceo" {
@@ -8656,6 +8656,7 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 		}
 		task := &b.tasks[i]
 		taskChannel := normalizeChannelSlug(task.Channel)
+		appendDetails := false
 		reassignPrevOwner := ""
 		reassignTriggered := false
 		cancelTriggered := false
@@ -8723,6 +8724,18 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			}
 			task.Status = "blocked"
 			task.Blocked = true
+		case "resume":
+			if task.Blocked {
+				task.Blocked = false
+			}
+			if strings.EqualFold(strings.TrimSpace(task.Status), "blocked") {
+				if strings.TrimSpace(task.Owner) != "" {
+					task.Status = "in_progress"
+				} else {
+					task.Status = "open"
+				}
+			}
+			appendDetails = true
 		case "release":
 			task.Owner = ""
 			task.Status = "open"
@@ -8740,7 +8753,14 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if strings.TrimSpace(body.Details) != "" {
-			task.Details = strings.TrimSpace(body.Details)
+			if appendDetails {
+				if err := appendTaskDetailLocked(task, body.Details); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+			} else {
+				task.Details = strings.TrimSpace(body.Details)
+			}
 		}
 		if taskType := strings.TrimSpace(body.TaskType); taskType != "" {
 			task.TaskType = taskType
@@ -8782,6 +8802,9 @@ func (b *Broker) handlePostTask(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		b.appendActionLocked("task_updated", "office", taskChannel, strings.TrimSpace(body.CreatedBy), truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
+		if action == "block" {
+			b.requestCapabilitySelfHealingLocked(task, strings.TrimSpace(body.CreatedBy), body.Details)
+		}
 		if reassignTriggered {
 			b.postTaskReassignNotificationsLocked(strings.TrimSpace(body.CreatedBy), task, reassignPrevOwner)
 		}
@@ -9020,6 +9043,7 @@ func (b *Broker) BlockTask(taskID, actor, reason string) (teamTask, bool, error)
 			return teamTask{}, false, err
 		}
 		b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), actor, truncateSummary(task.Title+" ["+task.Status+"]", 140), task.ID)
+		b.requestCapabilitySelfHealingLocked(task, actor, reason)
 		if err := b.saveLocked(); err != nil {
 			return teamTask{}, false, err
 		}
@@ -9595,6 +9619,61 @@ func (b *Broker) EnsurePlannedTask(input plannedTaskInput) (teamTask, bool, erro
 	return task, false, nil
 }
 
+// AppendTaskDetail appends non-duplicate detail text to an existing task without
+// changing ownership or status.
+func (b *Broker) AppendTaskDetail(taskID, actor, detail string) (teamTask, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	id := strings.TrimSpace(taskID)
+	if id == "" {
+		return teamTask{}, fmt.Errorf("task id required")
+	}
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return teamTask{}, fmt.Errorf("detail required")
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		actor = "system"
+	}
+
+	for i := range b.tasks {
+		task := &b.tasks[i]
+		if task.ID != id {
+			continue
+		}
+		_ = appendTaskDetailLocked(task, detail)
+		task.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+		b.appendActionLocked("task_updated", "office", normalizeChannelSlug(task.Channel), actor, truncateSummary(task.Title+" [updated]", 140), task.ID)
+		if err := b.saveLocked(); err != nil {
+			return teamTask{}, err
+		}
+		return *task, nil
+	}
+
+	return teamTask{}, fmt.Errorf("task not found")
+}
+
+func appendTaskDetailLocked(task *teamTask, detail string) error {
+	if task == nil {
+		return fmt.Errorf("task required")
+	}
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return fmt.Errorf("detail required")
+	}
+	if strings.Contains(task.Details, detail) {
+		return nil
+	}
+	task.Details = strings.TrimSpace(task.Details)
+	if task.Details != "" {
+		task.Details += "\n\n"
+	}
+	task.Details += detail
+	return nil
+}
+
 // hasUnresolvedDepsLocked returns true if any of the task's dependencies are not done.
 func (b *Broker) hasUnresolvedDepsLocked(task *teamTask) bool {
 	for _, depID := range task.DependsOn {
@@ -9718,7 +9797,7 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 		if normalizeChannelSlug(task.Channel) != channel {
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(task.Status), "done") {
+		if isTerminalTeamTaskStatus(task.Status) {
 			continue
 		}
 		sameTitle := title != "" && strings.EqualFold(strings.TrimSpace(task.Title), title)
@@ -9754,6 +9833,15 @@ func (b *Broker) findReusableTaskLocked(match taskReuseMatch) *teamTask {
 		return task
 	}
 	return nil
+}
+
+func isTerminalTeamTaskStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done", "completed", "canceled", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func (b *Broker) handleRequests(w http.ResponseWriter, r *http.Request) {
