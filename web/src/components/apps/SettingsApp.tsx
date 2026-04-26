@@ -30,6 +30,11 @@ import {
 } from "../../api/client";
 import { useAppStore } from "../../stores/app";
 import { InlineCommand } from "../ui/InlineCommand";
+import {
+  ShredDeletionsList,
+  ShredPreservationList,
+  ShredWarningCopy,
+} from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
 import { WipeModal } from "../ui/WipeModal";
 
@@ -447,14 +452,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
               severity: "critical",
               confirmLabel: "Shred workspace",
               intro: (
-                <>
-                  This permanently deletes your team, company identity, office
-                  task receipts, and saved workflows, plus local logs, sessions,
-                  provider state (including codex-headless scratch), calendar,
-                  and wiki memory. WUPHF will stop after the wipe; relaunch it
-                  to reopen onboarding. Task worktrees and config are kept.{" "}
-                  <strong>This cannot be undone.</strong>
-                </>
+                <ShredWarningCopy aftermath="WUPHF will stop after the wipe; relaunch it to reopen onboarding." />
               ),
             }}
           />{" "}
@@ -1629,33 +1627,11 @@ function DangerZoneSection() {
         </div>
         <div style={dangerStyles.listLabel}>Deletes</div>
         <ul style={dangerStyles.list}>
-          <li>
-            Onboarding flag (<code>~/.wuphf/onboarded.json</code>) so the wizard
-            reopens
-          </li>
-          <li>
-            Company identity (<code>~/.wuphf/company.json</code>)
-          </li>
-          <li>
-            Team runtime state, office, and workflows under{" "}
-            <code>~/.wuphf/</code>
-          </li>
-          <li>
-            Logs, sessions, provider state (incl. <code>codex-headless</code>{" "}
-            scratch), calendar, and local wiki memory
-          </li>
-          <li>Broker runtime state (same as Reset)</li>
+          <ShredDeletionsList />
         </ul>
         <div style={dangerStyles.listLabel}>Preserved</div>
         <ul style={dangerStyles.list}>
-          <li>
-            <strong>Task worktrees</strong> — uncommitted work on branches stays
-            on disk
-          </li>
-          <li>
-            Your global config (<code>config.json</code>) and API keys
-          </li>
-          <li>OpenClaw device identity used for gateway pairing</li>
+          <ShredPreservationList />
         </ul>
         <button
           type="button"
@@ -1691,14 +1667,7 @@ function DangerZoneSection() {
           title="Shred this workspace?"
           severity="critical"
           intro={
-            <>
-              This permanently deletes your team, company identity, office task
-              receipts, and saved workflows, plus local logs, sessions, provider
-              state (including codex-headless scratch), calendar, and wiki
-              memory. Onboarding will reopen immediately. Task worktrees,
-              config, and device identity are kept.{" "}
-              <strong>This cannot be undone.</strong>
-            </>
+            <ShredWarningCopy aftermath="Onboarding will reopen immediately." />
           }
           confirmLabel="Shred workspace"
           busy={busy}
