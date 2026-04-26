@@ -39,14 +39,12 @@ func TestQueuePaneNotification_CoalescesBurstsIntoOneDispatch(t *testing.T) {
 	var dispatches int64
 	var captured []string
 	var capturedMu sync.Mutex
-	origSend := launcherSendNotificationToPane
-	launcherSendNotificationToPane = func(_ *Launcher, _, notification string) {
+	setLauncherSendNotificationToPaneForTest(t, func(_ *Launcher, _, notification string) {
 		atomic.AddInt64(&dispatches, 1)
 		capturedMu.Lock()
 		captured = append(captured, notification)
 		capturedMu.Unlock()
-	}
-	defer func() { launcherSendNotificationToPane = origSend }()
+	})
 
 	// First enqueue dispatches immediately. Second arrives during its
 	// coalesce window and should be merged into the pending follow-up,
@@ -97,14 +95,12 @@ func TestQueuePaneNotification_SingleTagDispatchesImmediately(t *testing.T) {
 
 	l := &Launcher{}
 	dispatched := make(chan struct{}, 1)
-	origSend := launcherSendNotificationToPane
-	launcherSendNotificationToPane = func(_ *Launcher, _, _ string) {
+	setLauncherSendNotificationToPaneForTest(t, func(_ *Launcher, _, _ string) {
 		select {
 		case dispatched <- struct{}{}:
 		default:
 		}
-	}
-	defer func() { launcherSendNotificationToPane = origSend }()
+	})
 
 	startedAt := time.Now()
 	l.queuePaneNotification("pm", "team:1", "solo tag")
@@ -137,15 +133,13 @@ func TestQueuePaneNotification_DifferentSlugsRunInParallel(t *testing.T) {
 
 	l := &Launcher{}
 	var countA, countB int64
-	origSend := launcherSendNotificationToPane
-	launcherSendNotificationToPane = func(_ *Launcher, paneTarget, _ string) {
+	setLauncherSendNotificationToPaneForTest(t, func(_ *Launcher, paneTarget, _ string) {
 		if paneTarget == "team:a" {
 			atomic.AddInt64(&countA, 1)
 		} else {
 			atomic.AddInt64(&countB, 1)
 		}
-	}
-	defer func() { launcherSendNotificationToPane = origSend }()
+	})
 
 	startedAt := time.Now()
 	l.queuePaneNotification("alpha", "team:a", "first")

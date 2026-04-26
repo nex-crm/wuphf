@@ -157,3 +157,56 @@ func setHeadlessCodexWorkspaceStatusSnapshotForTest(t *testing.T, fn headlessCod
 		headlessCodexWorkspaceStatusSnapshotOverride.Store(prior)
 	})
 }
+
+// setGraphRecordFactRefsForTest swaps the entity-graph fact-ref hook.
+// Read by the broker HTTP handler goroutine in handleEntityFact.
+func setGraphRecordFactRefsForTest(t *testing.T, fn graphRecordFactRefsFn) {
+	t.Helper()
+	prior := graphRecordFactRefsOverride.Load()
+	graphRecordFactRefsOverride.Store(&fn)
+	t.Cleanup(func() {
+		graphRecordFactRefsOverride.Store(prior)
+	})
+}
+
+// setStudioPackageGeneratorForTest swaps the Studio LLM dispatcher.
+func setStudioPackageGeneratorForTest(t *testing.T, fn studioPackageGeneratorFn) {
+	t.Helper()
+	prior := studioPackageGeneratorOverride.Load()
+	studioPackageGeneratorOverride.Store(&fn)
+	t.Cleanup(func() {
+		studioPackageGeneratorOverride.Store(prior)
+	})
+}
+
+// setLauncherSendNotificationToPaneForTest swaps the pane notification
+// dispatcher. Read by the pane-dispatch and resume goroutines.
+func setLauncherSendNotificationToPaneForTest(t *testing.T, fn launcherSendNotificationToPaneFn) {
+	t.Helper()
+	prior := launcherSendNotificationToPaneOverride.Load()
+	launcherSendNotificationToPaneOverride.Store(&fn)
+	t.Cleanup(func() {
+		launcherSendNotificationToPaneOverride.Store(prior)
+	})
+}
+
+// setListHeadlessTaskRunnerProcessesForTest swaps the ps-listing seam used
+// by killStaleHeadlessTaskRunners.
+func setListHeadlessTaskRunnerProcessesForTest(t *testing.T, fn listHeadlessTaskRunnerProcessesFn) {
+	t.Helper()
+	prior := listHeadlessTaskRunnerProcessesOverride.Load()
+	listHeadlessTaskRunnerProcessesOverride.Store(&fn)
+	t.Cleanup(func() {
+		listHeadlessTaskRunnerProcessesOverride.Store(prior)
+	})
+}
+
+// setKillHeadlessTaskRunnerProcessForTest swaps the kill-by-PID seam.
+func setKillHeadlessTaskRunnerProcessForTest(t *testing.T, fn killHeadlessTaskRunnerProcessFn) {
+	t.Helper()
+	prior := killHeadlessTaskRunnerProcessOverride.Load()
+	killHeadlessTaskRunnerProcessOverride.Store(&fn)
+	t.Cleanup(func() {
+		killHeadlessTaskRunnerProcessOverride.Store(prior)
+	})
+}

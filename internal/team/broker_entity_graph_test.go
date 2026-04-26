@@ -138,11 +138,9 @@ func TestHandleEntityFact_GraphRecordFailureDoesNotBreakFactWrite(t *testing.T) 
 	defer teardown()
 
 	// Inject a failing graph recorder for the duration of this test.
-	original := graphRecordFactRefs
-	graphRecordFactRefs = func(_ context.Context, _ *EntityGraph, _ Fact) ([]EntityRef, error) {
+	setGraphRecordFactRefsForTest(t, func(_ context.Context, _ *EntityGraph, _ Fact) ([]EntityRef, error) {
 		return nil, errors.New("injected: graph record failure")
-	}
-	t.Cleanup(func() { graphRecordFactRefs = original })
+	})
 
 	payload, _ := json.Marshal(map[string]any{
 		"entity_kind": "people",

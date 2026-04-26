@@ -28,14 +28,23 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
-// graphRecordFactRefs is the test seam for the cross-entity graph hook in
-// handleEntityFact. Production code calls graph.RecordFactRefs; tests
-// override this var to inject errors and verify the
-// "graph failure keeps fact write intact" contract.
-var graphRecordFactRefs = func(ctx context.Context, graph *EntityGraph, fact Fact) ([]EntityRef, error) {
+// graphRecordFactRefsFn is the test seam type swapped via
+// setGraphRecordFactRefsForTest. graphRecordFactRefs is read by the HTTP
+// handler goroutine in handleEntityFact, so it lives behind atomic.Pointer
+// to stay race-clean against test cleanup that fires after the handler has
+// returned but while a downstream callback is still running.
+type graphRecordFactRefsFn func(ctx context.Context, graph *EntityGraph, fact Fact) ([]EntityRef, error)
+
+var graphRecordFactRefsOverride atomic.Pointer[graphRecordFactRefsFn]
+
+func graphRecordFactRefs(ctx context.Context, graph *EntityGraph, fact Fact) ([]EntityRef, error) {
+	if p := graphRecordFactRefsOverride.Load(); p != nil {
+		return (*p)(ctx, graph, fact)
+	}
 	return graph.RecordFactRefs(ctx, fact)
 }
 

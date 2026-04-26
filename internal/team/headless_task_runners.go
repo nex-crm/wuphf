@@ -2,16 +2,37 @@ package team
 
 import (
 	"bytes"
+	"context"
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
-var listHeadlessTaskRunnerProcesses = func() ([]byte, error) {
-	return exec.Command("ps", "-axo", "pid=,command=").Output()
+// Test seams behind atomic.Pointer because killStaleHeadlessTaskRunners
+// runs at launcher startup, but tests that swap these can outlive
+// concurrent launcher constructions in race-suite parallelism.
+
+type listHeadlessTaskRunnerProcessesFn func() ([]byte, error)
+type killHeadlessTaskRunnerProcessFn func(pid int)
+
+var (
+	listHeadlessTaskRunnerProcessesOverride atomic.Pointer[listHeadlessTaskRunnerProcessesFn]
+	killHeadlessTaskRunnerProcessOverride   atomic.Pointer[killHeadlessTaskRunnerProcessFn]
+)
+
+func listHeadlessTaskRunnerProcesses() ([]byte, error) {
+	if p := listHeadlessTaskRunnerProcessesOverride.Load(); p != nil {
+		return (*p)()
+	}
+	return exec.CommandContext(context.Background(), "ps", "-axo", "pid=,command=").Output()
 }
 
-var killHeadlessTaskRunnerProcess = func(pid int) {
+func killHeadlessTaskRunnerProcess(pid int) {
+	if p := killHeadlessTaskRunnerProcessOverride.Load(); p != nil {
+		(*p)(pid)
+		return
+	}
 	terminateHeadlessProcessPID(pid)
 }
 
