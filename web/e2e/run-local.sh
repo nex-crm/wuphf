@@ -22,9 +22,9 @@ set -euo pipefail
 
 phase="${1:-both}"
 case "$phase" in
-  both|wizard|shell) ;;
+  both|wizard|shell|local-llm) ;;
   *)
-    echo "usage: $0 [both|wizard|shell]" >&2
+    echo "usage: $0 [both|wizard|shell|local-llm]" >&2
     exit 2
     ;;
 esac
@@ -42,9 +42,22 @@ if [ ! -f web/dist/index.html ]; then
   (cd web && bun install --frozen-lockfile && bun run build)
 fi
 
-if [ ! -x ./wuphf ]; then
+# Always rebuild on local-llm phase — we're iterating on the broker's
+# tool-call parsing path and a stale binary is the most painful debug
+# loop possible. Other phases reuse a cached binary for speed.
+if [ "$phase" = "local-llm" ] || [ ! -x ./wuphf ]; then
   echo "[run-local] building wuphf binary"
   go build -o wuphf ./cmd/wuphf
+fi
+
+# Local-LLM phase additionally needs the stub server binary so the
+# Playwright tests run against deterministic SSE rather than a real
+# mlx_lm.server. Always rebuild — it's tiny and the fixture format
+# changes mid-iteration. Stub binary is gitignored under web/e2e/bin/.
+if [ "$phase" = "local-llm" ]; then
+  mkdir -p web/e2e/bin
+  echo "[run-local] building mlx-stub"
+  go build -o web/e2e/bin/mlx-stub ./cmd/mlx-stub
 fi
 
 if [ ! -d web/e2e/node_modules ]; then
@@ -145,9 +158,94 @@ EOF
   stop_wuphf
 }
 
+# run_local_llm_phase: deterministic chat-flow tests against a stubbed
+# mlx-lm. Boots web/e2e/bin/mlx-stub on a free port, points wuphf at
+# it via WUPHF_MLX_LM_BASE_URL, seeds onboarded.json + an
+# llm_provider=mlx-lm config so the wizard is skipped. The Playwright
+# spec drives a DM and asserts the agent's reply is rendered prose,
+# not a raw JSON code block.
+run_local_llm_phase() {
+  local stub_port="$((web_port + 1000))"
+  local stub_log="${runtime_home}/mlx-stub.log"
+  local fixture="web/e2e/fixtures/qwen-markdown-tool.txt"
+
+  echo "[run-local] starting mlx-stub on :${stub_port}; log: ${stub_log}"
+  ./web/e2e/bin/mlx-stub --port "$stub_port" --fixture "$fixture" \
+    >"$stub_log" 2>&1 &
+  local stub_pid=$!
+  trap 'kill_wuphf "${pid:-}"; kill "${stub_pid:-}" 2>/dev/null || true; rm -rf "$runtime_home"' EXIT
+
+  for _ in $(seq 1 20); do
+    if curl -sf "http://127.0.0.1:${stub_port}/v1/models" -o /dev/null; then
+      break
+    fi
+    sleep 0.2
+  done
+
+  mkdir -p "${runtime_home}/.wuphf"
+  cat > "${runtime_home}/.wuphf/onboarded.json" <<EOF
+{"version":1,"completed_at":"2026-01-01T00:00:00Z","company_name":"e2e-local-llm"}
+EOF
+  # Seed config so wuphf launches with mlx-lm as the active provider
+  # and points at the stub. WUPHF_MLX_LM_BASE_URL also overrides at
+  # runtime; we set both so the Settings UI can read either.
+  cat > "${runtime_home}/.wuphf/config.json" <<EOF
+{
+  "llm_provider": "mlx-lm",
+  "memory_backend": "markdown",
+  "provider_endpoints": {
+    "mlx-lm": {
+      "base_url": "http://127.0.0.1:${stub_port}/v1",
+      "model": "stub-model-v1"
+    }
+  }
+}
+EOF
+
+  echo "[run-local] starting wuphf (local-llm)"
+  WUPHF_RUNTIME_HOME="$runtime_home" \
+    WUPHF_MLX_LM_BASE_URL="http://127.0.0.1:${stub_port}/v1" \
+    WUPHF_MLX_LM_MODEL="stub-model-v1" \
+    ./wuphf --no-open --broker-port "$broker_port" --web-port "$web_port" --no-nex \
+    --provider mlx-lm \
+    </dev/null > "${runtime_home}/wuphf-local-llm.log" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 30); do
+    if curl -sf "http://localhost:${web_port}/onboarding/state" -o /dev/null; then
+      echo "[run-local] wuphf ready (local-llm)"
+      break
+    fi
+    sleep 1
+  done
+
+  echo "[run-local] running local-llm chat specs"
+  # set +e around playwright so we capture the exit code without
+  # tripping the outer `set -e` and losing log capture below.
+  set +e
+  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" \
+     bunx playwright test tests/local-llm-chat.spec.ts)
+  local rc=$?
+  set -e
+  # Persist logs to a stable location so post-run debugging works
+  # even though the EXIT trap wipes runtime_home. Iteration on the
+  # parser / runner relies on having the most recent broker log.
+  rm -rf /tmp/wuphf-local-llm-logs
+  mkdir -p /tmp/wuphf-local-llm-logs
+  cp -p "${runtime_home}/wuphf-local-llm.log" \
+        "${runtime_home}/mlx-stub.log" \
+        /tmp/wuphf-local-llm-logs/ 2>/dev/null || true
+  cp -rp "${runtime_home}/.wuphf/logs" /tmp/wuphf-local-llm-logs/agent-logs 2>/dev/null || true
+  echo "[run-local] logs preserved at /tmp/wuphf-local-llm-logs/"
+  kill_wuphf "${pid:-}"
+  pid=""
+  kill "${stub_pid:-}" 2>/dev/null || true
+  return $rc
+}
+
 case "$phase" in
   wizard) run_wizard_phase ;;
   shell)  run_shell_phase ;;
+  local-llm) run_local_llm_phase ;;
   both)
     run_wizard_phase
     run_shell_phase

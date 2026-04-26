@@ -350,6 +350,7 @@ func parseOpenAISSEStream(ch chan<- agent.StreamChunk, kind string, body io.Read
 func parseJSONInContentToolCall(content string) (string, string, bool) {
 	s := strings.TrimSpace(content)
 	s = stripChatTemplateTerminators(s)
+	s = stripMarkdownCodeFence(s)
 
 	// Dialect 1: <tools>{...}</tools>. Check first because it can be
 	// embedded inside surrounding prose, whereas the others require
@@ -378,6 +379,25 @@ func parseJSONInContentToolCall(content string) (string, string, bool) {
 	}
 
 	return "", "", false
+}
+
+// stripMarkdownCodeFence removes a leading ```optional-lang\n and a
+// trailing ``` so a tool-call JSON wrapped in markdown still parses.
+// Qwen2.5-Coder reflexively wraps code-shaped output (including JSON
+// tool calls) in fences when it thinks it's "writing code"; this is
+// what produced the user-visible bug where the agent reply was a
+// rendered code block of JSON instead of an executed tool.
+func stripMarkdownCodeFence(s string) string {
+	t := strings.TrimSpace(s)
+	if strings.HasPrefix(t, "```") {
+		// Drop the opening fence line: ``` or ```json or ```anything.
+		if nl := strings.IndexByte(t, '\n'); nl >= 0 {
+			t = t[nl+1:]
+		}
+	}
+	t = strings.TrimSpace(t)
+	t = strings.TrimSuffix(t, "```")
+	return strings.TrimSpace(t)
 }
 
 // stripChatTemplateTerminators removes trailing chat-template end-of-

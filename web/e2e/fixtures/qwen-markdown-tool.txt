@@ -1,0 +1,16 @@
+raw:```json
+chunk:{"name": "team_broadcast", "arguments": {"channel": "human__planner", "content": "Hi! I'm the planner — what would you like to plan today?", "my_slug": "planner", "reply_to_id": "msg-1"}}
+raw:```<|im_end|>
+stop
+---
+delay-ms: 200
+chunk:Got it — a road
+delay-ms: 400
+chunk: trip is a great idea.
+delay-ms: 400
+chunk: What's the rough route
+delay-ms: 400
+chunk: and how many days are
+delay-ms: 400
+chunk: we working with?
+stop

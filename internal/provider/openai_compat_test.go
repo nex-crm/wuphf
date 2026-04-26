@@ -309,6 +309,64 @@ func TestParseOpenAISSEStream_QwenImEndFallback(t *testing.T) {
 	}
 }
 
+// TestParseOpenAISSEStream_QwenMarkdownFenceFallback covers the
+// REAL Qwen2.5-Coder dialect captured in the agent log: model wraps
+// the tool-call JSON in a markdown code fence and adds the chat-
+// template terminator. Caught a user-visible bug where the agent
+// reply rendered as a JSON code block instead of executing the tool.
+//
+// Sample raw stream from the headless-codex-planner.log:
+//
+//	```json
+//	{"name": "team_broadcast", "arguments": {...}}
+//	```<|im_end|>
+func TestParseOpenAISSEStream_QwenMarkdownFenceFallback(t *testing.T) {
+	body := sseBody(
+		`{"choices":[{"delta":{"content":"`+
+			"```json\\n{\\\"name\\\": \\\"team_broadcast\\\", \\\"arguments\\\": "+
+			"{\\\"channel\\\": \\\"human__planner\\\", \\\"content\\\": \\\"Hi!\\\"}}\\n"+
+			"```<|im_end|>"+
+			`"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	)
+	ch := make(chan agent.StreamChunk, 8)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "mlx-lm", strings.NewReader(body))
+	}()
+	var sawToolUse bool
+	for _, c := range drainChunks(t, ch) {
+		if c.Type == "tool_use" {
+			sawToolUse = true
+			if c.ToolName != "team_broadcast" {
+				t.Errorf("ToolName = %q, want team_broadcast", c.ToolName)
+			}
+		}
+	}
+	if !sawToolUse {
+		t.Fatal("Markdown-fenced Qwen tool call did not surface as tool_use — agent reply will be the raw JSON code block")
+	}
+}
+
+// TestStripMarkdownCodeFence locks in the fence-stripping helper that
+// underpins the dialect above, plus its degenerate cases.
+func TestStripMarkdownCodeFence(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"```json\n{\"a\":1}\n```", `{"a":1}`},
+		{"```\n{\"a\":1}\n```", `{"a":1}`},
+		{"```json\n{\"a\":1}", `{"a":1}`},          // missing trailing fence
+		{"  ```json\n{\"a\":1}\n```  ", `{"a":1}`}, // leading/trailing whitespace
+		{"plain text, no fence", "plain text, no fence"},
+		{"```", ""}, // degenerate
+	}
+	for _, tc := range cases {
+		got := stripMarkdownCodeFence(tc.in)
+		if got != tc.want {
+			t.Errorf("stripMarkdownCodeFence(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestParseOpenAISSEStream_BalancedJSONIgnoresProseSummary covers the
 // case where the model emits the tool-call JSON followed by a brief
 // "I'll send that now" trailer — common with smaller open models.
