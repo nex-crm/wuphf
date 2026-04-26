@@ -25,6 +25,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -547,7 +548,10 @@ func dirSize(path string) int64 {
 	var total int64
 	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("walk %s: %w", p, err)
 		}
 		if d.IsDir() {
 			return nil

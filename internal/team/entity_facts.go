@@ -276,7 +276,11 @@ func (l *FactLog) CountSinceSHA(ctx context.Context, kind EntityKind, slug, sha 
 	// whole count — the brief has never been synthesized cleanly.
 	ts, err := l.commitTimestamp(ctx, sha)
 	if err != nil {
-		return len(facts), nil
+		// Documented contract above: an unresolvable SHA means "treat
+		// every fact as new" — the brief hasn't been synthesized at
+		// this revision yet, so the synthesizer needs to run on the
+		// full set. Don't propagate the error.
+		return len(facts), nil //nolint:nilerr // intentional: unresolved SHA = all-facts-new, per doc contract
 	}
 	// Commit timestamps are second-precision; fact CreatedAt carries
 	// sub-second precision. Compare at second resolution so a fact

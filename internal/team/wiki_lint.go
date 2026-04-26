@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -252,7 +253,14 @@ func (l *Lint) mutateFact(ctx context.Context, entitySlug, id string, mutate fun
 	for _, dir := range dirs {
 		if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
-				return nil // skip unreadable dirs
+				// Either fact-log directory may not exist on a fresh repo
+				// (per §3 they're optional) — and per-file permission errors
+				// shouldn't abort the cross-dir search since the fact may be
+				// in the other directory. Genuine I/O failures bubble up.
+				if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+					return nil
+				}
+				return fmt.Errorf("walk %s: %w", path, err)
 			}
 			if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 				return nil
@@ -276,7 +284,17 @@ func (l *Lint) mutateFact(ctx context.Context, entitySlug, id string, mutate fun
 func (l *Lint) rewriteFactInFile(ctx context.Context, root, absPath, id string, mutate func(*TypedFact), identity HumanIdentity) (bool, error) {
 	data, err := os.ReadFile(absPath)
 	if err != nil {
-		return false, nil
+		if errors.Is(err, os.ErrNotExist) {
+			// Race with concurrent worker: file vanished between WalkDir
+			// listing and our read. Treat as "fact not in this file" so
+			// the caller continues to the next candidate.
+			return false, nil
+		}
+		// Any other read error (permission denied, transient I/O) means
+		// we genuinely don't know whether the fact is here. Surface it
+		// rather than silently report "not found" — a swallowed error
+		// would let a mutate-fact request silently no-op.
+		return false, fmt.Errorf("wiki lint: read fact log %q: %w", absPath, err)
 	}
 
 	lines := strings.Split(string(data), "\n")
@@ -712,13 +730,26 @@ func formatLintReport(report LintReport) string {
 func (l *Lint) allEntitySlugs(root string) ([]string, error) {
 	teamDir := filepath.Join(root, "team")
 	info, err := os.Stat(teamDir)
-	if err != nil || !info.IsDir() {
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// Fresh repo without any team/ content yet — nothing to lint.
+			return nil, nil
+		}
+		return nil, fmt.Errorf("wiki lint: stat %q: %w", teamDir, err)
+	}
+	if !info.IsDir() {
 		return nil, nil
 	}
 
 	var slugs []string
 	err = filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("walk %s: %w", path, err)
+		}
+		if d.IsDir() {
 			return nil
 		}
 		if !strings.HasSuffix(path, ".md") {
@@ -726,7 +757,7 @@ func (l *Lint) allEntitySlugs(root string) ([]string, error) {
 		}
 		rel, err := filepath.Rel(teamDir, path)
 		if err != nil {
-			return nil
+			return fmt.Errorf("filepath.Rel(%q, %q): %w", teamDir, path, err)
 		}
 		rel = filepath.ToSlash(rel)
 		// Skip lint reports, catalog, and other non-entity files.

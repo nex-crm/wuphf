@@ -43,6 +43,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
@@ -120,7 +121,10 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 	teamDir := repo.TeamDir()
 	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("walk %s: %w", path, err)
 		}
 		if d.IsDir() {
 			// Hide compiler-output subtrees (e.g. playbooks/.compiled/**)
@@ -136,7 +140,7 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 		}
 		rel, err := filepath.Rel(repo.Root(), path)
 		if err != nil {
-			return nil
+			return fmt.Errorf("filepath.Rel(%q, %q): %w", repo.Root(), path, err)
 		}
 		rel = filepath.ToSlash(rel)
 		slug := groupFromPath(rel)
