@@ -12,6 +12,7 @@ interface CommitEntry {
   description: string
   pr: string | null
   sha: string
+  breaking: boolean
 }
 
 interface ChangelogState {
@@ -30,6 +31,7 @@ interface GitHubCompareResponse {
 }
 
 const TYPE_LABELS: Array<{ type: string; label: string }> = [
+  { type: 'breaking', label: 'Breaking changes' },
   { type: 'feat', label: 'New features' },
   { type: 'fix', label: 'Bug fixes' },
   { type: 'perf', label: 'Performance' },
@@ -39,6 +41,11 @@ const TYPE_LABELS: Array<{ type: string; label: string }> = [
 ]
 
 const KNOWN_TYPES = new Set(TYPE_LABELS.map((t) => t.type))
+
+// Accept v0.79, 0.79.15, 0.79.15.1, 1.2.3-rc.4. Anything else is rejected so
+// the URL override cannot inject arbitrary path segments into the GitHub
+// compare API call.
+const VERSION_RE = /^v?\d+(\.\d+){1,3}(-[\w.]+)?$/
 
 function stripV(v: string): string {
   return v.replace(/^v/, '')
@@ -56,38 +63,51 @@ function compareVersions(a: string, b: string): number {
   return 0
 }
 
+// Matches only a trailing `(#N)` reference so an inline `(#42)` inside the
+// description is preserved as text (matches the Go parser).
+const TRAILING_PR_RE = /\s*\(#(\d+)\)\s*$/
+
 function extractPR(s: string): string | null {
-  const m = s.match(/\(#(\d+)\)/)
+  const m = s.match(TRAILING_PR_RE)
   return m ? m[1] : null
 }
 
 function parseCommit(message: string, sha: string): CommitEntry {
   const subject = (message.split('\n')[0] ?? '').trim()
   const m = subject.match(
-    /^(feat|fix|perf|refactor|docs|chore|test|build|ci|style|revert)(\([^)]+\))?!?:\s*(.+?)\s*$/i,
+    /^(feat|fix|perf|refactor|docs|chore|test|build|ci|style|revert)(\([^)]+\))?(!)?:\s*(.+?)\s*$/i,
   )
   if (!m) {
-    return { type: 'other', scope: '', description: subject, pr: extractPR(subject), sha }
+    return {
+      type: 'other',
+      scope: '',
+      description: subject,
+      pr: extractPR(subject),
+      sha,
+      breaking: false,
+    }
   }
   const type = m[1].toLowerCase()
   const scope = (m[2] ?? '').replace(/[()]/g, '')
-  const rest = m[3]
+  const breaking = m[3] === '!'
+  const rest = m[4]
   return {
     type,
     scope,
     description: rest.replace(/\s*\(#\d+\)\s*$/, '').trim(),
     pr: extractPR(rest),
     sha,
+    breaking,
   }
 }
 
 function groupCommits(commits: CommitEntry[]) {
   const buckets = new Map<string, CommitEntry[]>()
   for (const c of commits) {
-    const bucket = KNOWN_TYPES.has(c.type) ? c.type : 'other'
-    const list = buckets.get(bucket) ?? []
+    const key = c.breaking ? 'breaking' : KNOWN_TYPES.has(c.type) ? c.type : 'other'
+    const list = buckets.get(key) ?? []
     list.push(c)
-    buckets.set(bucket, list)
+    buckets.set(key, list)
   }
   return TYPE_LABELS.flatMap(({ type, label }) => {
     const entries = buckets.get(type)
@@ -98,12 +118,15 @@ function groupCommits(commits: CommitEntry[]) {
 
 // Override pair from the URL — `?upgrade-from=v0.79.10&upgrade-to=v0.79.15` —
 // lets QA/screenshots preview the banner without a real version mismatch.
+// Both values are validated against VERSION_RE so the override cannot inject
+// arbitrary path segments into the GitHub compare API call we make later.
 function readForcedPair(): { from: string; to: string } | null {
   if (typeof window === 'undefined') return null
   const p = new URLSearchParams(window.location.search)
   const from = p.get('upgrade-from')
   const to = p.get('upgrade-to')
   if (!from || !to) return null
+  if (!VERSION_RE.test(from) || !VERSION_RE.test(to)) return null
   return { from, to }
 }
 

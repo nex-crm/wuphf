@@ -101,7 +101,7 @@ func CachedCheck(ctx context.Context, client *http.Client, ttl time.Duration) (R
 		}
 		return fresh, err
 	}
-	_ = writeCache(fresh)
+	_ = WriteCache(fresh)
 	return fresh, nil
 }
 
@@ -173,6 +173,7 @@ type CommitEntry struct {
 	Description string
 	PR          string
 	SHA         string
+	Breaking    bool
 }
 
 type githubCompareCommit struct {
@@ -228,31 +229,38 @@ func FetchChangelog(ctx context.Context, client *http.Client, from, to string) (
 }
 
 var (
-	conventionalRE = regexp.MustCompile(`^(?i)(feat|fix|perf|refactor|docs|chore|test|build|ci|style|revert)(\([^)]+\))?!?:\s*(.+?)\s*$`)
-	prRE           = regexp.MustCompile(`\(#(\d+)\)`)
+	// Capture groups: 1=type, 2=(scope), 3=! (breaking), 4=description.
+	conventionalRE = regexp.MustCompile(`^(?i)(feat|fix|perf|refactor|docs|chore|test|build|ci|style|revert)(\([^)]+\))?(!)?:\s*(.+?)\s*$`)
+	// Trailing PR ref e.g. " (#310)". Anchored to end-of-string so an inline
+	// "(#42)" inside the description is preserved as text and only the
+	// terminating reference is treated as the linked PR (matches the TS
+	// parser so the CLI and web banner render identically).
+	trailingPRRE = regexp.MustCompile(`\s*\(#(\d+)\)\s*$`)
 )
 
 func parseCommit(message, sha string) CommitEntry {
 	subject := strings.TrimSpace(strings.SplitN(message, "\n", 2)[0])
 	m := conventionalRE.FindStringSubmatch(subject)
 	if m == nil {
-		return CommitEntry{Type: "other", Description: subject, PR: extractPR(subject), SHA: sha}
+		return CommitEntry{Type: "other", Description: subject, PR: extractTrailingPR(subject), SHA: sha}
 	}
 	scope := strings.Trim(m[2], "()")
-	rest := strings.TrimSpace(m[3])
-	desc := prRE.ReplaceAllString(rest, "")
-	desc = strings.TrimSpace(desc)
+	breaking := m[3] == "!"
+	rest := strings.TrimSpace(m[4])
+	pr := extractTrailingPR(rest)
+	desc := strings.TrimSpace(trailingPRRE.ReplaceAllString(rest, ""))
 	return CommitEntry{
 		Type:        strings.ToLower(m[1]),
 		Scope:       scope,
 		Description: desc,
-		PR:          extractPR(rest),
+		PR:          pr,
 		SHA:         sha,
+		Breaking:    breaking,
 	}
 }
 
-func extractPR(s string) string {
-	m := prRE.FindStringSubmatch(s)
+func extractTrailingPR(s string) string {
+	m := trailingPRRE.FindStringSubmatch(s)
 	if m == nil {
 		return ""
 	}
@@ -260,7 +268,8 @@ func extractPR(s string) string {
 }
 
 // FormatChangelog renders entries grouped by conventional-commit type. Useful
-// for the `wuphf upgrade` subcommand.
+// for the `wuphf upgrade` subcommand. Breaking-change commits are surfaced
+// in their own group at the top regardless of their underlying type.
 func FormatChangelog(entries []CommitEntry) string {
 	if len(entries) == 0 {
 		return "  (no commits found)\n"
@@ -269,6 +278,7 @@ func FormatChangelog(entries []CommitEntry) string {
 		key, label string
 	}
 	order := []group{
+		{"breaking", "Breaking changes"},
 		{"feat", "New features"},
 		{"fix", "Bug fixes"},
 		{"perf", "Performance"},
@@ -282,6 +292,10 @@ func FormatChangelog(entries []CommitEntry) string {
 	}
 	buckets := map[string][]CommitEntry{}
 	for _, e := range entries {
+		if e.Breaking {
+			buckets["breaking"] = append(buckets["breaking"], e)
+			continue
+		}
 		k := e.Type
 		if !known[k] {
 			k = "other"
@@ -341,7 +355,10 @@ func readCache() (Result, error) {
 	return r, nil
 }
 
-func writeCache(r Result) error {
+// WriteCache persists r to disk atomically (write to a sibling tempfile then
+// rename) so concurrent wuphf launches cannot interleave bytes and produce a
+// truncated/garbled JSON file.
+func WriteCache(r Result) error {
 	path, err := cachePath()
 	if err != nil {
 		return err
@@ -350,7 +367,11 @@ func writeCache(r Result) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // ── Version comparison ────────────────────────────────────────────────────

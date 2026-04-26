@@ -95,6 +95,16 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf mcp-team")
+	case "upgrade":
+		fmt.Fprintln(os.Stderr, "wuphf upgrade — check npm for a newer wuphf and show the changelog")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Compares the running build against the latest published `wuphf` on npm.")
+		fmt.Fprintln(os.Stderr, "When behind, prints the upgrade command and a conventional-commit-grouped")
+		fmt.Fprintln(os.Stderr, "changelog from the GitHub compare API.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf upgrade           Print human-readable comparison + changelog")
+		fmt.Fprintln(os.Stderr, "  wuphf upgrade --json    Emit the comparison as JSON for scripting")
 	default:
 		fmt.Fprintf(os.Stderr, "wuphf: unknown subcommand %q — run `wuphf --help` for the list.\n", sub)
 	}
@@ -313,8 +323,14 @@ func main() {
 
 	// Print upgrade notice (if a previous run cached one) before launching
 	// the long-running web UI or TUI, then refresh the cache asynchronously
-	// so the next launch sees the latest information.
-	maybePrintUpgradeNotice(os.Stderr)
+	// so the next launch sees the latest information. Suppressed under TUI
+	// mode because the notice would land on the parent stderr just before
+	// tmux attaches (visible in shell scrollback if attach fails) — the web
+	// UI surfaces an in-app banner instead, so this stderr line is mainly
+	// for the short window before the browser opens.
+	if shouldShowUpgradeNotice(*showVersion, *channelView, *cmd != "", isPiped(), *tuiMode, firstSub) {
+		maybePrintUpgradeNotice(os.Stderr)
+	}
 	upgradecheck.RefreshAsync(upgradecheck.DefaultCacheTTL)
 
 	// TUI mode: tmux-based interface
@@ -327,13 +343,25 @@ func main() {
 	runWeb(args, selectedBlueprint, *unsafeMode, *webPort, *opusCEO, *collabMode, *noOpen)
 }
 
-// maybePrintUpgradeNotice writes a one-line upgrade hint when the cache says
-// a newer wuphf is on npm. Stays silent on first launch (no cache yet) and
-// when stdout is piped to keep scripts clean.
-func maybePrintUpgradeNotice(w *os.File) {
-	if isPiped() {
-		return
+// shouldShowUpgradeNotice gates the startup upgrade notice so it fires only
+// on interactive web-UI launches. Mirrors shouldWarnShadow: script-facing
+// entrypoints (--version, --cmd, piped) and stdio-protocol subprocesses
+// (--channel-view, mcp-team) keep their output clean. TUI mode is excluded
+// because the in-app banner is the right surface for that flow.
+func shouldShowUpgradeNotice(showVersion, channelView, cmdFlagSet, piped, tuiMode bool, subcmd string) bool {
+	if showVersion || channelView || cmdFlagSet || piped || tuiMode {
+		return false
 	}
+	if subcmd == "mcp-team" {
+		return false
+	}
+	return true
+}
+
+// maybePrintUpgradeNotice writes a one-line upgrade hint when the cache says
+// a newer wuphf is on npm. Stays silent on first launch (no cache yet).
+// Caller is responsible for the gating policy — see shouldShowUpgradeNotice.
+func maybePrintUpgradeNotice(w *os.File) {
 	notice := upgradecheck.CachedNotice()
 	if notice == "" {
 		return
@@ -352,21 +380,24 @@ func runUpgradeCheck(args []string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	res, err := upgradecheck.CachedCheck(ctx, nil, 0)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not reach npm registry (%v)\n", err)
-	}
+	// Always do a fresh fetch — the user typed `wuphf upgrade` because they
+	// want ground truth, not a cached "you're on latest" from hours ago.
+	// The cache is for the silent startup notice path (CachedNotice).
+	res, err := upgradecheck.Check(ctx, nil)
 
 	if jsonOut {
 		_ = json.NewEncoder(os.Stdout).Encode(res)
 		return
 	}
 
-	if res.Latest == "" {
-		fmt.Printf("You are running %s v%s. Could not reach npm to compare with the latest published version.\n",
-			appName, strings.TrimPrefix(res.Current, "v"))
-		return
+	if err != nil || res.Latest == "" {
+		fmt.Printf("You are running %s v%s.\n", appName, strings.TrimPrefix(res.Current, "v"))
+		fmt.Fprintf(os.Stderr, "warning: could not reach npm registry to check for updates (%v)\n", err)
+		os.Exit(1)
 	}
+
+	// Persist the fresh result so the next launch's startup notice reflects it.
+	_ = upgradecheck.WriteCache(res)
 
 	if !res.UpgradeAvailable {
 		fmt.Printf("You are running %s v%s. That is the latest published version.\n",
