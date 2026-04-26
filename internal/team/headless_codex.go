@@ -383,7 +383,18 @@ func (l *Launcher) stopHeadlessWorkers() {
 	default:
 		close(l.headlessStopCh)
 	}
+	cancel := l.headlessCancel
 	l.headlessMu.Unlock()
+	// Cancel any in-flight turn so the worker doesn't sit inside
+	// headlessCodexRunTurn for the full per-turn timeout (minutes) before
+	// noticing stopHeadlessCh closed at the outer-loop tick. Without this,
+	// production-shape paths with a real provider would hang Wait() until
+	// the turn ctx times out. Tests using the headlessCodexRunTurn override
+	// already return fast, so the bug only bites when the override is the
+	// real call path — but the cost of guarding here is one nil-check.
+	if cancel != nil {
+		cancel()
+	}
 	l.headlessWorkerWg.Wait()
 }
 
