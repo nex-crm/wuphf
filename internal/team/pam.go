@@ -180,7 +180,7 @@ type PamDispatcher struct {
 // NewPamDispatcher wires a dispatcher against the given worker. The publisher
 // may be nil in tests that don't care about SSE fan-out. Worker is typed as
 // the narrow `pamWiki` interface — *WikiWorker satisfies it today, and any
-// future test seam or alternative backend only needs Enqueue + Repo.
+// future test seam or alternative backend only needs Enqueue + ReadArticle.
 func NewPamDispatcher(worker pamWiki, publisher pamEventPublisher, cfg PamDispatcherConfig) *PamDispatcher {
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = DefaultPamTimeout
