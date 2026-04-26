@@ -57,7 +57,7 @@ fi
 if [ "$phase" = "local-llm" ]; then
   mkdir -p web/e2e/bin
   echo "[run-local] building mlx-stub"
-  go build -o web/e2e/bin/mlx-stub ./cmd/mlx-stub
+  go build -o web/e2e/bin/mlx-stub ./internal/testing/mlx-stub
 fi
 
 if [ ! -d web/e2e/node_modules ]; then
@@ -167,7 +167,10 @@ EOF
 run_local_llm_phase() {
   local stub_port="$((web_port + 1000))"
   local stub_log="${runtime_home}/mlx-stub.log"
-  local fixture="web/e2e/fixtures/qwen-markdown-tool.txt"
+  # MLX_STUB_FIXTURE lets a Playwright spec swap the response script
+  # without touching this driver — useful for the structured-
+  # tool-call vs JSON-in-content vs text-only dialect sweep.
+  local fixture="${MLX_STUB_FIXTURE:-web/e2e/fixtures/qwen-markdown-tool.txt}"
 
   echo "[run-local] starting mlx-stub on :${stub_port}; log: ${stub_log}"
   ./web/e2e/bin/mlx-stub --port "$stub_port" --fixture "$fixture" \

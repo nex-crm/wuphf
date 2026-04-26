@@ -348,6 +348,145 @@ func TestParseOpenAISSEStream_QwenMarkdownFenceFallback(t *testing.T) {
 	}
 }
 
+// TestStripChatTemplateTerminators covers the per-template-family
+// suffix stripper directly. The helper underpins both the markdown-
+// fence dialect and the bare-JSON dialect — a regression here lets a
+// trailing chat-template marker break the HasSuffix("}") check
+// downstream and the agent reply silently regresses to raw JSON.
+func TestStripChatTemplateTerminators(t *testing.T) {
+	cases := []struct{ in, want string }{
+		// Each known terminator stripped individually.
+		{`{"name":"x"}<|im_end|>`, `{"name":"x"}`},
+		{`{"name":"x"}<|endoftext|>`, `{"name":"x"}`},
+		{`{"name":"x"}<|end_of_text|>`, `{"name":"x"}`},
+		{`{"name":"x"}<|eot_id|>`, `{"name":"x"}`},
+		{`{"name":"x"}<|eom_id|>`, `{"name":"x"}`},
+		{`{"name":"x"}</s>`, `{"name":"x"}`},
+		// Trailing whitespace + terminator combos. Mixing actual
+		// whitespace before the terminator MUST get stripped — the
+		// loop alternates TrimRight(whitespace) and TrimSuffix
+		// (terminator) so callers don't have to care about ordering.
+		{"{\"name\":\"x\"}\n<|im_end|>", `{"name":"x"}`},
+		{"{\"name\":\"x\"}<|im_end|> \t", `{"name":"x"}`},
+		{"{\"name\":\"x\"}<|im_end|>\r\n", `{"name":"x"}`},
+		// Multiple terminators chained (some templates double-emit).
+		{"{\"name\":\"x\"}<|im_end|></s>", `{"name":"x"}`},
+		// Plain content untouched.
+		{"plain text", "plain text"},
+		// Empty.
+		{"", ""},
+		// Terminator appearing in the middle stays put — only suffix
+		// matches strip. Otherwise we'd corrupt content that mentions
+		// the marker mid-sentence.
+		{`prose <|im_end|> with trailing}`, `prose <|im_end|> with trailing}`},
+	}
+	for _, tc := range cases {
+		got := stripChatTemplateTerminators(tc.in)
+		if got != tc.want {
+			t.Errorf("stripChatTemplateTerminators(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestExtractFirstBalancedToolCall covers the lenient-fallback dialect
+// directly: a balanced {...} object at index 0, optionally followed by
+// trailing whitespace / template markers / a brief summary. Conservative
+// by design — anything that risks misreading prose-with-an-example as
+// a tool invocation must return ok=false.
+func TestExtractFirstBalancedToolCall(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          string
+		wantOK      bool
+		wantToolID  string
+		wantHasArgs bool
+	}{
+		{
+			name:        "bare object",
+			in:          `{"name":"do","arguments":{"a":1}}`,
+			wantOK:      true,
+			wantToolID:  "do",
+			wantHasArgs: true,
+		},
+		{
+			name:        "object plus brief trailing summary",
+			in:          `{"name":"do","arguments":{}}` + "\n\nDone.",
+			wantOK:      true,
+			wantToolID:  "do",
+			wantHasArgs: true,
+		},
+		{
+			name:        "object plus very long trailing prose rejected",
+			in:          `{"name":"do","arguments":{}}` + strings.Repeat(" trailing", 50),
+			wantOK:      false,
+			wantToolID:  "",
+			wantHasArgs: false,
+		},
+		{
+			name:       "prose-then-object rejected",
+			in:         `Here's how: {"name":"do","arguments":{}}`,
+			wantOK:     false,
+			wantToolID: "",
+		},
+		{
+			name:       "trailing brace in another { rejected",
+			in:         `{"name":"a","arguments":{}}{"name":"b"}`,
+			wantOK:     false,
+			wantToolID: "",
+		},
+		{
+			name:       "unbalanced braces rejected",
+			in:         `{"name":"a","arguments":{}`,
+			wantOK:     false,
+			wantToolID: "",
+		},
+		{
+			name:       "string with a literal brace inside doesn't confuse depth",
+			in:         `{"name":"do","arguments":{"a":"x{}y"}}`,
+			wantOK:     true,
+			wantToolID: "do",
+		},
+		{
+			name:       "escaped quote in string doesn't break parser",
+			in:         `{"name":"do","arguments":{"a":"\""}}`,
+			wantOK:     true,
+			wantToolID: "do",
+		},
+		{
+			name:       "missing arguments rejected",
+			in:         `{"name":"do"}`,
+			wantOK:     false,
+			wantToolID: "",
+		},
+		{
+			name:       "string arguments rejected",
+			in:         `{"name":"do","arguments":"hello"}`,
+			wantOK:     false,
+			wantToolID: "",
+		},
+		{
+			name:       "empty",
+			in:         "",
+			wantOK:     false,
+			wantToolID: "",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			name, args, ok := extractFirstBalancedToolCall(tc.in)
+			if ok != tc.wantOK {
+				t.Errorf("ok = %v, want %v (name=%q args=%q)", ok, tc.wantOK, name, args)
+			}
+			if name != tc.wantToolID {
+				t.Errorf("name = %q, want %q", name, tc.wantToolID)
+			}
+			if tc.wantHasArgs && !strings.HasPrefix(args, "{") {
+				t.Errorf("args = %q, want object-shape", args)
+			}
+		})
+	}
+}
+
 // TestStripMarkdownCodeFence locks in the fence-stripping helper that
 // underpins the dialect above, plus its degenerate cases.
 func TestStripMarkdownCodeFence(t *testing.T) {

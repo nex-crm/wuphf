@@ -417,21 +417,42 @@ type transportClosedErr struct{ op string }
 func (e *transportClosedErr) Error() string { return e.op + ": transport closed (subprocess exited)" }
 
 // TestOpenAICompatToolLoop_ContextCancelStopsImmediately verifies a
-// cancelled context aborts cleanly even mid-stream.
+// cancelled context aborts cleanly even mid-stream AND that the loop
+// drains the underlying StreamFn channel — without the drain
+// goroutine, the streamer would block forever on a full channel
+// after the loop returned, leaking a goroutine per cancelled turn.
+//
+// The reviewer flagged the original test for not actually exercising
+// the drain path: removing the `go func() { for range ch {} }()`
+// line in openai_compat_loop.go used to leave this test green. The
+// new assertion uses an unbuffered channel and a goroutine that
+// blocks on send forever — if the drain doesn't run, the streamer
+// goroutine never returns and the test's GoroutineLeakTracker fails.
 func TestOpenAICompatToolLoop_ContextCancelStopsImmediately(t *testing.T) {
-	// Stream chunks slowly so we can cancel mid-turn.
+	streamerExited := make(chan struct{})
 	streamFn := func(_ []agent.Message, _ []agent.AgentTool) <-chan agent.StreamChunk {
-		ch := make(chan agent.StreamChunk)
+		ch := make(chan agent.StreamChunk) // unbuffered: send blocks until received
 		go func() {
 			defer close(ch)
-			time.Sleep(50 * time.Millisecond)
+			defer close(streamerExited)
+			// First send blocks indefinitely unless the loop's drain
+			// goroutine reads it. If the drain is removed, this
+			// streamer goroutine wedges and the test's deadline below
+			// trips.
 			select {
-			case ch <- agent.StreamChunk{Type: "text", Content: "should not arrive"}:
-			default:
+			case ch <- agent.StreamChunk{Type: "text", Content: "after-cancel-1"}:
+			case <-time.After(5 * time.Second):
+				return
+			}
+			select {
+			case ch <- agent.StreamChunk{Type: "text", Content: "after-cancel-2"}:
+			case <-time.After(5 * time.Second):
+				return
 			}
 		}()
 		return ch
 	}
+
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
 		maxIters:    1,
@@ -442,5 +463,15 @@ func TestOpenAICompatToolLoop_ContextCancelStopsImmediately(t *testing.T) {
 	_, _, _, err := loop.run(ctx, []agent.Message{{Role: "user", Content: "x"}})
 	if err == nil {
 		t.Fatal("expected context.Canceled error")
+	}
+
+	// The streamer goroutine MUST exit — meaning the drain goroutine
+	// the loop spawns successfully read past the blocking sends. If
+	// this trips we've reintroduced a per-cancel goroutine leak.
+	select {
+	case <-streamerExited:
+		// drain worked; streamer ran to close(ch)
+	case <-time.After(2 * time.Second):
+		t.Fatal("streamer goroutine did not exit within 2s of ctx cancel — drain goroutine missing or broken; production runs would leak a goroutine + an open channel per cancelled turn")
 	}
 }

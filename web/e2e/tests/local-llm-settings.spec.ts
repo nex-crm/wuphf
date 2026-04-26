@@ -213,6 +213,70 @@ test.describe("Settings → Local LLMs", () => {
     expect(sawProviderEndpointsWrite).toBe(false);
   });
 
+  test("Saved endpoint round-trips through a page reload", async ({ page }) => {
+    // The user-stated need: "I want to point mlx-lm at a custom
+    // model, hit save, refresh, and have my override stick." Stub
+    // /config so the same recorded POST also drives the next GET.
+    const configPosts = stubLocalProviders(page);
+    await goToSettingsLocalLLMs(page);
+
+    const mlxCard = page.getByTestId("local-llm-card-mlx-lm");
+    await mlxCard
+      .getByTestId("local-llm-base-url-mlx-lm")
+      .fill("http://127.0.0.1:9000/v1");
+    await mlxCard.getByTestId("local-llm-model-mlx-lm").fill("custom-model-v2");
+    await mlxCard.getByRole("button", { name: "Save endpoint" }).click();
+    await expect
+      .poll(() => configPosts.length, { timeout: 5_000 })
+      .toBeGreaterThan(0);
+
+    // Reload the shell — Settings → Local LLMs again should show the
+    // user's override pre-filled, not the placeholder.
+    await page.reload();
+    await waitForReactMount(page);
+    await page.getByLabel("Open settings").click();
+    await page.getByRole("button", { name: "Local LLMs" }).click();
+    const baseURLAfter = await page
+      .getByTestId("local-llm-base-url-mlx-lm")
+      .inputValue();
+    const modelAfter = await page
+      .getByTestId("local-llm-model-mlx-lm")
+      .inputValue();
+    expect(baseURLAfter).toBe("http://127.0.0.1:9000/v1");
+    expect(modelAfter).toBe("custom-model-v2");
+  });
+
+  test("doctor card surfaces a clear failure state when /status/local-providers errors", async ({
+    page,
+  }) => {
+    // Settings page must NOT crash or render a half-filled state
+    // when the broker can't service /status/local-providers (5xx,
+    // network error, missing endpoint). The user reads the dot color
+    // + status copy, so an inline failure note is required.
+    page.route("**/status/local-providers*", (route: Route) =>
+      route.fulfill({ status: 500, contentType: "text/plain", body: "down" }),
+    );
+    page.route("**/config*", (route: Route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          llm_provider: "claude-code",
+          provider_endpoints: {},
+        }),
+      }),
+    );
+
+    await goToSettingsLocalLLMs(page);
+    // Section header still renders (no React crash).
+    await expect(page.getByText(/Local LLMs/i).first()).toBeVisible();
+    // An inline failure note must surface so the user sees WHY their
+    // detection didn't run — silent empty section was the bug.
+    await expect(page.getByText(/Failed to load status/i).first()).toBeVisible({
+      timeout: 5_000,
+    });
+  });
+
   test("Recheck button re-fetches /status/local-providers", async ({
     page,
   }) => {

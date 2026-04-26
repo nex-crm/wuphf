@@ -1,0 +1,5 @@
+tool: name=team_broadcast args={"channel":"human__planner","content":"Posted via structured tool_calls."}
+tool_done
+---
+chunk:Done — message posted.
+stop

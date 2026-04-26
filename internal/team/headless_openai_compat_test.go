@@ -40,6 +40,45 @@ func TestIsOpenAICompatKind(t *testing.T) {
 	}
 }
 
+// TestLooksUnparsedToolCall pins the post-loop backstop predicate
+// directly. The runner replaces finalText with a friendly message
+// when this returns true; a regression that loosens the predicate
+// (e.g. fires on prose with the word `arguments`) would silently
+// hide real model output, while a regression that tightens it would
+// re-introduce the user-visible bug of raw JSON in chat. Conservative
+// requirement: starts with `{` AND contains both `"name"` and
+// `"arguments"` substrings.
+func TestLooksUnparsedToolCall(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{"bare tool-call shape", `{"name":"x","arguments":{}}`, true},
+		{"with leading whitespace", `   {"name":"x","arguments":{}}`, true},
+		{"object missing arguments", `{"name":"x"}`, false},
+		{"object missing name", `{"arguments":{}}`, false},
+		{"prose mentions arguments", `here are the arguments: see the docs`, false},
+		{"prose mentions name", `the name field is required`, false},
+		{"prose with both keywords but no leading brace", `it has a "name" and "arguments" but is prose`, false},
+		{"empty", "", false},
+		{"only braces", "{}", false},
+		// Real-world Qwen output that prompted this fix:
+		{
+			name: "Qwen markdown-fenced shape",
+			in:   "```json\n{\"name\":\"team_broadcast\",\"arguments\":{\"channel\":\"general\"}}\n```",
+			want: false, // doesn't START with { (leads with the fence) — caller already strips fences
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := looksUnparsedToolCall(tc.in); got != tc.want {
+				t.Errorf("looksUnparsedToolCall(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestIsUserVisiblePostTool freezes the closed set of MCP tools the
 // runner treats as "this tool ALREADY posted a user-visible reply
 // to the channel; suppress the post-loop finalText post so we don't

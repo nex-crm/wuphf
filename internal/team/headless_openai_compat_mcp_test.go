@@ -6,8 +6,6 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/nex-crm/wuphf/internal/agent"
 )
 
 // fakeMCPInput is the typed input for the fake tool below; declared at
@@ -159,7 +157,6 @@ func TestMCPSessionToAgentTools_MultiToolFanOut(t *testing.T) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "fake", Version: "0"}, nil)
 
 	for _, name := range []string{"alpha", "beta", "gamma"} {
-		name := name
 		mcp.AddTool(server, &mcp.Tool{Name: name, Description: name}, func(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, struct{}, error) {
 			return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: name + "-result"}}}, struct{}{}, nil
 		})
@@ -208,5 +205,4 @@ func TestMCPSessionToAgentTools_MultiToolFanOut(t *testing.T) {
 			t.Errorf("Execute %s: got %q, want substring %q (closure capture bug?)", tt.Name, got, want)
 		}
 	}
-	_ = agent.AgentTool{} // import safety
 }

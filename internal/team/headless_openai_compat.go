@@ -105,50 +105,18 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// local server's inference slot until the model finishes generating.
 	streamFn := provider.NewOpenAICompatStreamFnWithCtx(ctx, kind)
 
-	// Live-output suppression for JSON-in-content tool calls. Open
-	// models (Qwen2.5-Coder via mlx_lm.server, in particular) emit
-	// tool calls as `{"name":"...","arguments":{...}}<|im_end|>` —
-	// streamed character-by-character. Without this gate the user
-	// would watch the raw JSON type itself out in the live-output
-	// panel before the orchestrator silently swaps it for a tool_use
-	// chunk. We detect "looks like a JSON tool call" by checking
-	// whether the cumulative text starts with `{` (whitespace-
-	// trimmed). If it does, we hold off pushing chunks to agentStream
-	// until either the parser fires (in which case the JSON never
-	// appears) or the stream ends with no tool-call match.
-	var (
-		liveBuf   strings.Builder
-		looksJSON bool
-		decided   bool
-	)
-
-	// broadcastedThisTurn flips true the first time the agent uses a
-	// user-visible posting tool (team_broadcast, reply, etc.). Used at
-	// the end of the turn to suppress a duplicate text post — without
-	// it, every turn produces both the tool's content + an iteration-2
-	// "Great, I've sent that!" summary, which compounds into a fan-out
-	// loop when the broker dispatches each post back to the agent.
-	var broadcastedThisTurn bool
-
-	// Throughput readout. Local LLMs are an order of magnitude slower
-	// than cloud APIs, so users want feedback that the machine is
-	// actually doing something — not just a static "drafting response"
-	// label that could mean "stuck". We track cumulative chars over a
-	// rolling 1s window and surface ~tok/s in the progress label
-	// (~4 chars per token, English; close enough for a vibe readout).
-	// Updates capped at one-per-750ms so the broker SSE stream isn't
-	// pummeled on fast models.
-	var (
-		streamedChars int
-		tpsAnchorAt   time.Time
-		tpsAnchorChrs int
-	)
-	flushLiveBuf := func() {
-		if liveBuf.Len() > 0 && agentStream != nil {
-			agentStream.Push(liveBuf.String())
-		}
-		liveBuf.Reset()
-	}
+	// All policy-bearing per-turn state is owned by openAICompatTurnState
+	// (see openai_compat_turn_state.go). The state machine is
+	// independently unit-tested via openai_compat_turn_state_test.go.
+	state := newOpenAICompatTurnState(&runtimeTurnSinks{
+		l:    l,
+		slug: slug,
+		// agentStream may be nil during edge-case launcher setups; the
+		// sink's pushAgentStream short-circuits on nil so the state
+		// machine stays oblivious.
+		stream:  agentStream,
+		metrics: &metrics,
+	})
 
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
@@ -156,99 +124,13 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		toolByName:  toolByName,
 		maxIters:    maxOpenAICompatToolIterations,
 		toolTimeout: 90 * time.Second,
-		onText: func(s string) {
-			if s == "" {
-				return
-			}
-			streamedChars += len(s)
-			// Rolling tok/s readout in the progress label.
-			now := time.Now()
-			if tpsAnchorAt.IsZero() {
-				tpsAnchorAt = now
-				tpsAnchorChrs = streamedChars
-			} else if now.Sub(tpsAnchorAt) >= 750*time.Millisecond {
-				delta := streamedChars - tpsAnchorChrs
-				elapsed := now.Sub(tpsAnchorAt).Seconds()
-				if delta > 0 && elapsed > 0 {
-					// Standard ~4 chars per token; close enough for a
-					// vibe readout. Round to nearest int so the label
-					// doesn't flicker on every chunk.
-					tps := float64(delta) / 4.0 / elapsed
-					l.updateHeadlessProgress(slug, "active", "text",
-						fmt.Sprintf("drafting response · ~%.0f tok/s", tps),
-						metrics)
-				}
-				tpsAnchorAt = now
-				tpsAnchorChrs = streamedChars
-			}
-			if agentStream == nil {
-				return
-			}
-			if !decided {
-				// Buffer until we've seen enough non-whitespace to
-				// decide; ~8 chars is enough to disambiguate `{ ` vs
-				// real prose.
-				liveBuf.WriteString(s)
-				trimmed := strings.TrimLeft(liveBuf.String(), " \t\r\n")
-				if len(trimmed) >= 8 || strings.ContainsAny(trimmed, "\n") {
-					if strings.HasPrefix(trimmed, "{") {
-						looksJSON = true
-					}
-					decided = true
-					if !looksJSON {
-						flushLiveBuf()
-					}
-				}
-				return
-			}
-			if looksJSON {
-				// Hold back; the parser at end-of-stream may convert
-				// this entire buffer to a tool_use. If it doesn't,
-				// the post-loop unparsed-tool-call backstop replaces
-				// the JSON with a clearer message.
-				liveBuf.WriteString(s)
-				return
-			}
-			agentStream.Push(s)
-		},
+		onText:      state.onText,
 		onToolUse: func(name, rawInput string) {
-			// Tool firing means the streamed JSON we held back was a
-			// tool-call invocation — discard the buffer so the next
-			// iteration starts fresh, and reset the throughput +
-			// JSON-detection state so iteration 2 doesn't inherit
-			// stale flags from iteration 1.
-			liveBuf.Reset()
-			looksJSON = false
-			decided = false
-			tpsAnchorAt = time.Time{}
-			tpsAnchorChrs = 0
-			streamedChars = 0
-			if agentStream != nil {
-				agentStream.Push(fmt.Sprintf("[tool_use %s] %s", name, rawInput))
-			}
+			state.onToolUseChunk(name, rawInput)
 			l.updateHeadlessProgress(slug, "active", "tool", "running "+name, metrics)
 		},
-		onError: func(msg string) {
-			if agentStream != nil {
-				agentStream.Push("[error] " + msg)
-			}
-		},
-		onToolResult: func(name, result string, err error) {
-			if err != nil {
-				appendHeadlessCodexLog(slug, fmt.Sprintf("openai_compat_tool_error: %s -> %v", name, err))
-				return
-			}
-			appendHeadlessCodexLog(slug, fmt.Sprintf("openai_compat_tool_ok: %s -> %s", name, truncate(result, 240)))
-			// Track when the agent already posted a user-visible message
-			// in this turn via team_broadcast / reply / direct message
-			// tools. The post-loop "post finalText to channel" hook would
-			// otherwise double-post: once from the tool, again from
-			// iteration-2's "I've sent that" summary. We suppress the
-			// second post so the channel sees one reply per user message.
-			if isUserVisiblePostTool(name) {
-				broadcastedThisTurn = true
-			}
-		},
+		onError:      state.onError,
+		onToolResult: state.onToolResult,
 		onFirstEvent: func() {
 			metrics.FirstEventMs = durationMillis(startedAt, time.Now())
 		},
@@ -314,7 +196,7 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 
-	if text != "" && !broadcastedThisTurn {
+	if text != "" && state.shouldPostFinalText() {
 		// Suppress when the agent already posted via team_broadcast /
 		// reply / etc this turn. Posting finalText here would
 		// double-up the user-visible reply AND fan out through the
