@@ -102,9 +102,18 @@ type Launcher struct {
 	headlessActive       map[string]*headlessCodexActiveTurn
 	headlessQueues       map[string][]headlessCodexTurn
 	headlessDeferredLead *headlessCodexTurn
-	webMode              bool
-	paneBackedAgents     bool // web mode may spawn per-agent tmux panes; true when panes are live
-	noOpen               bool
+	// headlessStopCh is closed by stopHeadlessWorkers to tell every active
+	// runHeadlessCodexQueue goroutine to exit at its next outer-loop tick.
+	// Lazily allocated by spawnHeadlessWorker / stopHeadlessWorkers under
+	// headlessMu so the zero-value Launcher used in tests doesn't need an
+	// explicit init. headlessWorkerWg tracks live worker goroutines so the
+	// stop helper can drain them deterministically — closing the channel is
+	// a request, the WaitGroup is the proof everyone observed it.
+	headlessStopCh   chan struct{}
+	headlessWorkerWg sync.WaitGroup
+	webMode          bool
+	paneBackedAgents bool // web mode may spawn per-agent tmux panes; true when panes are live
+	noOpen           bool
 
 	// failedPaneSlugs records agents whose tmux pane/window creation failed.
 	// agentPaneTargets() omits them so the pane-capture loops don't spin on

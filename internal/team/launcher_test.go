@@ -578,7 +578,7 @@ func TestNotificationTargetsForDMChannelCodexRuntimeUsesHeadlessTarget(t *testin
 
 func TestDeliverDMMessageQueuesCodexHeadlessTurn(t *testing.T) {
 	b := newTestBroker(t)
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.notifyLastDelivered = make(map[string]time.Time)

@@ -228,7 +228,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 				appendHeadlessCodexLog(slug, "queue-replace: refreshed pending turn for same task")
 			}
 			if startWorker {
-				go l.runHeadlessCodexQueue(slug)
+				l.spawnHeadlessWorker(slug)
 			}
 			return
 		}
@@ -277,7 +277,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 			l.headlessMu.Unlock()
 			appendHeadlessCodexLog(slug, "queue-replace: lead queue at cap, replacing pending turn with urgent task notification")
 			if startWorker {
-				go l.runHeadlessCodexQueue(slug)
+				l.spawnHeadlessWorker(slug)
 			}
 			return
 		}
@@ -309,27 +309,7 @@ func (l *Launcher) enqueueHeadlessCodexTurnRecord(slug string, turn headlessCode
 		cancel()
 	}
 	if startWorker {
-		// TODO(test-isolation): this goroutine has no per-test cleanup channel,
-		// so under `go test -race ./internal/team/` it outlives the spawning
-		// test and trips DATA RACE on subsequent tests' setup of headlessActive
-		// / headlessQueues maps. Reproducible:
-		//
-		//   bash scripts/test-go.sh ./internal/team   # passes (-race carved out)
-		//   go test -race ./internal/team             # flakes
-		//
-		// The race detector trace (representative — different tests on each run):
-		//
-		//   Write at ... by goroutine N (this gowrap, after test exit):
-		//     (*Launcher).beginHeadlessCodexTurn  ← l.headlessActive[slug] = …
-		//   Previous read at ... by goroutine N-1 (test cleanup, finished):
-		//     TestRecoverFailedHeadlessTurnRequeues...  ← delete(l.headlessActive, slug)
-		//
-		// Fix shape: thread a per-test stop channel through Launcher (or
-		// reuse l.broker.stopCh) and have runHeadlessCodexQueue select on
-		// it inside its outer for-loop, so test cleanup can drain in-flight
-		// workers before the next TestMain leg starts. Tracked alongside
-		// the carve-out in .github/workflows/ci.yml (go-test-list).
-		go l.runHeadlessCodexQueue(slug)
+		l.spawnHeadlessWorker(slug)
 	}
 }
 
@@ -371,8 +351,57 @@ func (l *Launcher) headlessLeadTurnNeedsImmediateWakeLocked(slug, prompt string)
 	return false
 }
 
-func (l *Launcher) runHeadlessCodexQueue(slug string) {
+// spawnHeadlessWorker starts a runHeadlessCodexQueue goroutine and registers
+// it with l.headlessWorkerWg so stopHeadlessWorkers can drain it. Lazily
+// initialises l.headlessStopCh; safe for any Launcher (including bare
+// `&Launcher{}` literals that tests construct). All `go runHeadlessCodexQueue`
+// sites must funnel through here so no worker escapes the WaitGroup.
+func (l *Launcher) spawnHeadlessWorker(slug string) {
+	l.headlessMu.Lock()
+	if l.headlessStopCh == nil {
+		l.headlessStopCh = make(chan struct{})
+	}
+	stop := l.headlessStopCh
+	l.headlessWorkerWg.Add(1)
+	l.headlessMu.Unlock()
+	go l.runHeadlessCodexQueue(slug, stop)
+}
+
+// stopHeadlessWorkers signals every live runHeadlessCodexQueue goroutine to
+// exit at its next outer-loop tick and waits for them to drain. Idempotent —
+// safe to call multiple times. Used by tests via t.Cleanup so a queue worker
+// spawned by the current test can't outlive the test and race the next test's
+// setup of headlessActive / headlessQueues / the test t.TempDir cleanup.
+func (l *Launcher) stopHeadlessWorkers() {
+	l.headlessMu.Lock()
+	if l.headlessStopCh == nil {
+		l.headlessStopCh = make(chan struct{})
+	}
+	select {
+	case <-l.headlessStopCh:
+		// already closed; idempotent re-entry
+	default:
+		close(l.headlessStopCh)
+	}
+	l.headlessMu.Unlock()
+	l.headlessWorkerWg.Wait()
+}
+
+func (l *Launcher) runHeadlessCodexQueue(slug string, stop <-chan struct{}) {
+	defer l.headlessWorkerWg.Done()
 	for {
+		// Stop signal short-circuits the loop before grabbing more work.
+		// The check is cheap (non-blocking select) and only fires on test
+		// cleanup or graceful shutdown — production traffic never closes
+		// stop while the worker is in steady state.
+		select {
+		case <-stop:
+			l.headlessMu.Lock()
+			delete(l.headlessWorkers, slug)
+			l.headlessMu.Unlock()
+			return
+		default:
+		}
 		func() {
 			defer recoverPanicTo("runHeadlessCodexQueue", fmt.Sprintf("slug=%s", slug))
 			turn, turnCtx, startedAt, timeout, ok := l.beginHeadlessCodexTurn(slug)

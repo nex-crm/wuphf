@@ -183,7 +183,7 @@ func TestAutoPromote_SystemAndSyntheticSendersSkipped(t *testing.T) {
 func TestAutoPromote_EndToEnd_HumanTagsPM_DispatchesToPM(t *testing.T) {
 	b := newBrokerWithPM(t)
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.notifyLastDelivered = make(map[string]time.Time)

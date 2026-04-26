@@ -600,7 +600,7 @@ func TestEnqueueHeadlessCodexTurnProcessesFIFO(t *testing.T) {
 		return nil
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 
 	// Use a specialist slug (not the lead/ceo) so the cap-at-1 and queue-hold
 	// logic for the lead agent does not interfere with this FIFO test.
@@ -665,7 +665,7 @@ func TestSendTaskUpdatePassesTaskChannelToHeadlessTurn(t *testing.T) {
 		return nil
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.provider = "codex"
 	l.pack = agent.GetPack("founding-team")
 
@@ -726,7 +726,7 @@ func TestEnqueueHeadlessCodexTurnCancelsStaleTurn(t *testing.T) {
 		return nil
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.enqueueHeadlessCodexTurn("ceo", "first")
 	waitForSignal(t, started)
 	time.Sleep(35 * time.Millisecond)
@@ -861,14 +861,32 @@ func canonicalPath(path string) string {
 	return path
 }
 
-func newHeadlessLauncherForTest() *Launcher {
-	return &Launcher{
+func newHeadlessLauncherForTest(t *testing.T) *Launcher {
+	t.Helper()
+	l := &Launcher{
 		headlessCtx:     context.Background(),
 		headlessWorkers: make(map[string]bool),
 		headlessActive:  make(map[string]*headlessCodexActiveTurn),
 		headlessQueues:  make(map[string][]headlessCodexTurn),
 		pack:            &agent.PackDefinition{LeadSlug: "ceo"}, // deterministic lead; avoids reading global broker state
 	}
+	// Drain queue workers before the test's t.TempDir cleanup runs.
+	// t.Cleanup is LIFO, and t.TempDir registers its cleanup at the
+	// moment t.TempDir() returns — which test code calls BEFORE
+	// reaching this helper. So our cleanup fires first (drains worker),
+	// then TempDir cleanup runs (RemoveAll), avoiding the
+	// "directory not empty" failure that's been red-listing
+	// release-build runs.
+	//
+	// LIMIT: tests that restore package-level overrides via classic
+	// `defer` (prepareTaskWorktree, etc.) still race the worker —
+	// defers fire BEFORE t.Cleanup, so the worker is still alive when
+	// the override restorer runs. That's pre-existing and gated by
+	// CI's `-race` carve-out for internal/team. Convert those tests'
+	// `defer restore()` to `t.Cleanup(restore)` to fix the residual
+	// race; not done here to keep this PR scoped.
+	t.Cleanup(l.stopHeadlessWorkers)
+	return l
 }
 
 func TestFinishHeadlessTurnWakesLeadWhenAllSpecialistsDone(t *testing.T) {
@@ -877,7 +895,7 @@ func TestFinishHeadlessTurnWakesLeadWhenAllSpecialistsDone(t *testing.T) {
 		woken <- specialistSlug
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 
 	// Simulate "fe" finishing with no other specialists active.
 	l.finishHeadlessTurn("fe")
@@ -894,7 +912,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenOtherSpecialistsActive(t *testing.
 		woken <- specialistSlug
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	// "be" is still active while "fe" finishes.
 	l.headlessActive["be"] = &headlessCodexActiveTurn{}
 
@@ -914,7 +932,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadFinishes(t *testing.T) {
 		woken <- specialistSlug
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	// CEO finishes — should not self-wake.
 	l.finishHeadlessTurn("ceo")
 
@@ -932,7 +950,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadAlreadyQueued(t *testing.T) {
 		woken <- specialistSlug
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	// CEO already has a pending turn.
 	l.headlessQueues["ceo"] = []headlessCodexTurn{{Prompt: "pending work"}}
 
@@ -947,7 +965,7 @@ func TestFinishHeadlessTurnDoesNotWakeLeadWhenLeadAlreadyQueued(t *testing.T) {
 }
 
 func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateLeadTaskWhileActive(t *testing.T) {
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
 	l.headlessActive["ceo"] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
@@ -993,7 +1011,7 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 	}
 
 	cancelled := false
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
 	l.broker = b
 	l.headlessWorkers["ceo"] = true
@@ -1023,7 +1041,7 @@ func TestEnqueueHeadlessCodexTurnRecordQueuesUrgentLeadWakeForSameTask(t *testin
 }
 
 func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateAgentTaskWhileActive(t *testing.T) {
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
 	l.headlessActive["eng"] = &headlessCodexActiveTurn{
 		Turn: headlessCodexTurn{
@@ -1045,7 +1063,7 @@ func TestEnqueueHeadlessCodexTurnRecordDropsDuplicateAgentTaskWhileActive(t *tes
 }
 
 func TestEnqueueHeadlessCodexTurnRecordReplacesPendingAgentTaskTurn(t *testing.T) {
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
 	l.headlessWorkers["eng"] = true
 	l.headlessQueues["eng"] = []headlessCodexTurn{{
@@ -1072,7 +1090,7 @@ func TestEnqueueHeadlessCodexTurnRecordReplacesPendingAgentTaskTurn(t *testing.T
 }
 
 func TestEnqueueHeadlessCodexTurnRecordAllowsRetryBehindActiveAgentTask(t *testing.T) {
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.pack = &agent.PackDefinition{LeadSlug: "ceo"}
 	l.headlessWorkers["eng"] = true
 	l.headlessActive["eng"] = &headlessCodexActiveTurn{
@@ -1142,7 +1160,7 @@ func TestWakeLeadAfterSpecialistFallsBackToCompletedTaskUpdateWhenNoBroadcast(t 
 	}
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.sessionName = "test"
@@ -1186,7 +1204,7 @@ func TestRecoverTimedOutHeadlessTurnBlocksTaskWithoutSubstantiveReply(t *testing
 		t.Fatalf("post status: %v", err)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.recoverTimedOutHeadlessTurn("cmo", headlessCodexTurn{TaskID: task.ID}, time.Now().UTC().Add(-2*time.Second), headlessCodexTurnTimeout)
 
@@ -1237,7 +1255,7 @@ func TestRecoverTimedOutHeadlessTurnLeavesTaskRunningAfterSubstantiveReply(t *te
 		t.Fatalf("post substantive message: %v", err)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.recoverTimedOutHeadlessTurn("cmo", headlessCodexTurn{TaskID: task.ID}, startedAt, headlessCodexTurnTimeout)
 
@@ -1274,7 +1292,7 @@ func TestRecoverTimedOutHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *te
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.headlessWorkers["eng"] = true
 
@@ -1328,7 +1346,7 @@ func TestRecoverFailedHeadlessTurnRetriesLocalWorktreeOnceBeforeBlocking(t *test
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.headlessWorkers["eng"] = true
 
@@ -1394,7 +1412,7 @@ func TestRecoverTimedOutLocalWorktreeRetriesEvenAfterSubstantiveReplyIfTaskStill
 		Timestamp: startedAt.Add(time.Second).Format(time.RFC3339),
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.headlessWorkers["eng"] = true
 
@@ -1450,7 +1468,7 @@ func TestRecoverTimedOutLocalWorktreeLeavesReviewReadyTaskUnchanged(t *testing.T
 		break
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	l.recoverTimedOutHeadlessTurn("eng", headlessCodexTurn{
@@ -1495,7 +1513,7 @@ func TestRecoverTimedOutHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *te
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	l.recoverTimedOutHeadlessTurn("eng", headlessCodexTurn{
@@ -1546,7 +1564,7 @@ func TestRecoverFailedHeadlessTurnBlocksLocalWorktreeAfterRetryExhausted(t *test
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	l.recoverFailedHeadlessTurn("eng", headlessCodexTurn{
@@ -1601,7 +1619,7 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	l.recoverFailedHeadlessTurn("operator", headlessCodexTurn{
@@ -1661,7 +1679,7 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 	task := b.tasks[0]
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	ok, reason := l.headlessTurnCompletedDurably("eng", &headlessCodexActiveTurn{
@@ -1706,7 +1724,7 @@ func TestHeadlessTurnCompletedDurablyAcceptsReviewReadyTask(t *testing.T) {
 	task := b.tasks[0]
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	ok, reason := l.headlessTurnCompletedDurably("eng", &headlessCodexActiveTurn{
@@ -1744,7 +1762,7 @@ func TestHeadlessTurnCompletedDurablyRejectsLocalWorktreeBuilderWithoutTaskState
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	ok, reason := l.headlessTurnCompletedDurably("builder", &headlessCodexActiveTurn{
@@ -1787,7 +1805,7 @@ func TestHeadlessTurnCompletedDurablyRejectsExternalCompletionWithoutWorkflowEvi
 		}
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	ok, reason := l.headlessTurnCompletedDurably("builder", &headlessCodexActiveTurn{
@@ -1829,7 +1847,7 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithWorkflowEviden
 		t.Fatalf("record action: %v", err)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	ok, reason := l.headlessTurnCompletedDurably("builder", &headlessCodexActiveTurn{
@@ -1868,7 +1886,7 @@ func TestHeadlessTurnCompletedDurablyAcceptsExternalCompletionWithActionEvidence
 		t.Fatalf("record action: %v", err)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	ok, reason := l.headlessTurnCompletedDurably("reviewer", &headlessCodexActiveTurn{
@@ -1914,7 +1932,7 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.headlessQueues["builder"] = []headlessCodexTurn{{TaskID: task.ID}}
 
@@ -1975,7 +1993,7 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 		return nil
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.headlessWorkers["eng"] = true
 	l.headlessQueues["eng"] = []headlessCodexTurn{{
@@ -1986,11 +2004,11 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 		EnqueuedAt: time.Now(),
 	}}
 
-	done := make(chan struct{})
-	go func() {
-		l.runHeadlessCodexQueue("eng")
-		close(done)
-	}()
+	// Drive the worker through the standard spawn helper so wg + stop channel
+	// are wired correctly; t.Cleanup (registered by newHeadlessLauncherForTest)
+	// drains it via stopHeadlessWorkers, which is the equivalent of the
+	// previous explicit `<-done` wait.
+	l.spawnHeadlessWorker("eng")
 
 	first := waitForString(t, processed)
 	second := waitForString(t, processed)
@@ -2003,7 +2021,6 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 	if !strings.Contains(second, "Selected model is at capacity") {
 		t.Fatalf("expected retry prompt to include provider failure, got %q", second)
 	}
-	waitForSignal(t, done)
 }
 
 func TestHeadlessCodexTurnTimeoutForLocalWorktreeTask(t *testing.T) {
@@ -2022,7 +2039,7 @@ func TestHeadlessCodexTurnTimeoutForLocalWorktreeTask(t *testing.T) {
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	if got := l.headlessCodexTurnTimeoutForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexLocalWorktreeTurnTimeout {
@@ -2049,7 +2066,7 @@ func TestHeadlessCodexTurnTimeoutForOfficeLaunchTask(t *testing.T) {
 		t.Fatalf("ensure planned task: %v reused=%v", err, reused)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 
 	if got := l.headlessCodexTurnTimeoutForTurn(headlessCodexTurn{TaskID: task.ID}); got != headlessCodexOfficeLaunchTurnTimeout {
@@ -2067,7 +2084,7 @@ func TestEnqueueHeadlessCodexTurnDefersLeadUntilSpecialistFinishes(t *testing.T)
 		return nil
 	})
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.headlessActive["eng"] = &headlessCodexActiveTurn{}
 
 	l.enqueueHeadlessCodexTurn("ceo", "task-5 blocked after timeout")
@@ -2126,7 +2143,7 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 	}
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.headlessActive["eng"] = &headlessCodexActiveTurn{}
 
