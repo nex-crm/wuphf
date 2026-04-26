@@ -77,7 +77,8 @@ func connectIntegration(spec channelIntegrationSpec) tea.Cmd {
 				15*time.Second,
 			)
 			if err != nil {
-				if _, ok := err.(*api.AuthError); ok {
+				var authErr *api.AuthError
+				if errors.As(err, &authErr) {
 					return channelIntegrationDoneMsg{err: err}
 				}
 				continue

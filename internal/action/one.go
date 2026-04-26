@@ -635,7 +635,8 @@ func (o *OneCLI) run(ctx context.Context, args []string) ([]byte, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.Error); ok && ee.Err == exec.ErrNotFound {
+		var execErr *exec.Error
+		if errors.As(err, &execErr) && errors.Is(execErr.Err, exec.ErrNotFound) {
 			return nil, fmt.Errorf("one CLI not found. Install One, make npx available, or set WUPHF_ONE_BIN")
 		}
 		msg := strings.TrimSpace(stderr.String())

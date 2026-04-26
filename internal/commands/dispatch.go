@@ -2,6 +2,7 @@ package commands
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -92,7 +93,7 @@ func dispatchInternal(input string, apiKey string, format string, timeout int, a
 
 	err := cmd.Execute(ctx, args)
 	if err != nil {
-		if err == ErrQuit {
+		if errors.Is(err, ErrQuit) {
 			return CommandResult{Output: "", ExitCode: 0}
 		}
 		return CommandResult{

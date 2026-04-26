@@ -1509,8 +1509,8 @@ func TestDetectUntaggedMentions(t *testing.T) {
 	nonAgents := []string{"you", "human", "nex", "team", "everyone"}
 	for _, na := range nonAgents {
 		content := fmt.Sprintf("@%s please reply", na)
-		if got := detectUntaggedMentions(content, nil); len(got) != 0 {
-			t.Fatalf("@%s should not be flagged, got %v", na, got)
+		if found := detectUntaggedMentions(content, nil); len(found) != 0 {
+			t.Fatalf("@%s should not be flagged, got %v", na, found)
 		}
 	}
 

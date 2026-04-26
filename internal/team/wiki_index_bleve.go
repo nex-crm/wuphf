@@ -14,6 +14,7 @@ package team
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/blevesearch/bleve/v2"
@@ -46,7 +47,7 @@ func NewBleveTextIndex(dir string) (*BleveTextIndex, error) {
 	// ErrorIndexPathDoesNotExist — the dir or bleve metadata does not exist yet.
 	// ErrorIndexMetaMissing     — the dir exists but is empty (e.g. t.TempDir()).
 	// Both cases: create a new index.
-	if err != bleve.ErrorIndexPathDoesNotExist && err != bleve.ErrorIndexMetaMissing {
+	if !errors.Is(err, bleve.ErrorIndexPathDoesNotExist) && !errors.Is(err, bleve.ErrorIndexMetaMissing) {
 		return nil, fmt.Errorf("bleve open %s: %w", dir, err)
 	}
 

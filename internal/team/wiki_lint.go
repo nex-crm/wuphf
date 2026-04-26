@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -262,7 +263,7 @@ func (l *Lint) mutateFact(ctx context.Context, entitySlug, id string, mutate fun
 				return filepath.SkipAll
 			}
 			return nil
-		}); err != nil && err != filepath.SkipAll {
+		}); err != nil && !errors.Is(err, filepath.SkipAll) {
 			return err
 		}
 	}

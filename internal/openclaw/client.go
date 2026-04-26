@@ -61,7 +61,10 @@ func Dial(ctx context.Context, cfg Config) (*Client, error) {
 	dialer := websocket.Dialer{HandshakeTimeout: cfg.DialTimeout}
 	dctx, cancel := context.WithTimeout(ctx, cfg.DialTimeout)
 	defer cancel()
-	conn, _, err := dialer.DialContext(dctx, cfg.URL, nil)
+	conn, resp, err := dialer.DialContext(dctx, cfg.URL, nil)
+	if resp != nil && resp.Body != nil {
+		_ = resp.Body.Close()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("openclaw dial: %w", err)
 	}

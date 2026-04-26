@@ -8,16 +8,26 @@ issues:
 linters:
   default: none
   enable:
+    - bodyclose
     - errcheck
+    - errorlint
     - govet
     - ineffassign
-    - staticcheck
     - misspell
+    - staticcheck
     - unconvert
+    # Followups (own PR each — too many existing findings to land here):
+    #   - contextcheck (26 findings: ctx threading)
+    #   - gocritic (40 findings: mostly diagnostic-tag style nits)
+    #   - nilerr (29 findings: returning nil after non-nil err)
+    #   - noctx (95 findings: net/http and exec.Command without context)
   settings:
     errcheck:
       exclude-functions:
         - (io.Closer).Close
+    govet:
+      enable:
+        - shadow
     staticcheck:
       # Disable the QF* quickfix suggestions (pure style hints) and the
       # ST1000/ST1003/ST1021 naming/comment rules (pedantic, massive scope).
@@ -37,6 +47,14 @@ linters:
       - path: _test\.go
         linters:
           - errcheck
+          - bodyclose
+          - errorlint
+      # govet's shadow check on `err` is famously noisy in idiomatic Go
+      # (every nested `if err := ...; err != nil` shadows). Keep shadow on
+      # for non-err identifiers (real bugs hide there) but mute the err case.
+      - linters:
+          - govet
+        text: 'shadow: declaration of "err"'
 formatters:
   enable:
     - gofmt
