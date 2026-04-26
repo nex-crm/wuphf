@@ -174,7 +174,13 @@ export const useAppStore = create<AppStore>((set, get) => ({
 
   theme: _storedTheme,
   setTheme: (t) => {
-    localStorage.setItem("wuphf-theme", t);
+    // Same try/catch shape as the read path above. Safari private browsing
+    // and sandboxed-iframe contexts both throw on localStorage writes; the
+    // toggle should still update the DOM + store even if persistence fails,
+    // so the user gets the visible state change for the current session.
+    try {
+      localStorage.setItem("wuphf-theme", t);
+    } catch {}
     document.documentElement.setAttribute("data-theme", t);
     set({ theme: t });
   },
