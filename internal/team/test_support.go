@@ -43,20 +43,23 @@ func DisableRealTaskWorktreeForTests() {
 		panic("team: DisableRealTaskWorktreeForTests must only be called from tests " +
 			"(it mutates package-level worktree dispatch vars with no restore path)")
 	}
-	allowRealTaskWorktree = false
+	allowRealTaskWorktree.Store(false)
 	skipBrokerStateLoadOnConstruct = true
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	prep := prepareTaskWorktreeFn(func(taskID string) (string, string, error) {
 		path, branch := stubTaskWorktreePath(taskID)
 		return path, branch, nil
-	}
-	cleanupTaskWorktree = func(string, string) error { return nil }
+	})
+	prepareTaskWorktreeOverride.Store(&prep)
+	cleanup := cleanupTaskWorktreeFn(func(string, string) error { return nil })
+	cleanupTaskWorktreeOverride.Store(&cleanup)
 	// Stub verifyTaskWorktreeWritable too: rejectFalseLocalWorktreeBlock
 	// in broker.go calls it with the stub path, which never exists on
 	// disk, so the default `os.Stat` check would fail. No tests exercise
 	// this path today, but keeping the three worktree vars stubbed
 	// together preserves the "real-worktree is off for tests" contract
 	// as defense-in-depth for future callers.
-	verifyTaskWorktreeWritable = func(string) error { return nil }
+	verify := verifyTaskWorktreeWritableFn(func(string) error { return nil })
+	verifyTaskWorktreeWritableOverride.Store(&verify)
 
 	// If the caller's test package hasn't set WUPHF_RUNTIME_HOME, point
 	// it at a process-lifetime leaked tempdir so any implicit
@@ -79,11 +82,78 @@ func DisableRealTaskWorktreeForTests() {
 // queue worker spawned by enqueueHeadlessCodexTurnRecord — the worker could
 // outlive the test's deferred restore and observe the swap mid-call. Use
 // this helper instead.
+//
+// CONSTRAINT: tests using any setXForTest helper in this file must NOT call
+// t.Parallel(). The setters do an atomic Load → atomic Store pair which is
+// non-atomic AS A PAIR; parallel setters can scramble the cleanup chain (T1
+// captures prior=A, T2 captures prior=A, T1 stores B, T2 stores C, T1
+// cleanup stores A, T2 cleanup stores A — both lose). Single-test
+// race-safety against background goroutines is the goal here, not parallel
+// test composition.
 func setHeadlessCodexRunTurnForTest(t *testing.T, fn func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error) {
 	t.Helper()
 	prior := headlessCodexRunTurnOverride.Load()
 	headlessCodexRunTurnOverride.Store(&fn)
 	t.Cleanup(func() {
 		headlessCodexRunTurnOverride.Store(prior)
+	})
+}
+
+// setPrepareTaskWorktreeForTest swaps the prepareTaskWorktree dispatcher
+// for the duration of the test. Same race motivation as
+// setHeadlessCodexRunTurnForTest: the headless queue worker can read the
+// dispatcher after the test's deferred restore has already run.
+func setPrepareTaskWorktreeForTest(t *testing.T, fn prepareTaskWorktreeFn) {
+	t.Helper()
+	prior := prepareTaskWorktreeOverride.Load()
+	prepareTaskWorktreeOverride.Store(&fn)
+	t.Cleanup(func() {
+		prepareTaskWorktreeOverride.Store(prior)
+	})
+}
+
+// setCleanupTaskWorktreeForTest swaps the cleanupTaskWorktree dispatcher
+// for the duration of the test.
+func setCleanupTaskWorktreeForTest(t *testing.T, fn cleanupTaskWorktreeFn) {
+	t.Helper()
+	prior := cleanupTaskWorktreeOverride.Load()
+	cleanupTaskWorktreeOverride.Store(&fn)
+	t.Cleanup(func() {
+		cleanupTaskWorktreeOverride.Store(prior)
+	})
+}
+
+// setTaskWorktreeRootDirForTest swaps the taskWorktreeRootDir dispatcher
+// for the duration of the test.
+func setTaskWorktreeRootDirForTest(t *testing.T, fn taskWorktreeRootDirFn) {
+	t.Helper()
+	prior := taskWorktreeRootDirOverride.Load()
+	taskWorktreeRootDirOverride.Store(&fn)
+	t.Cleanup(func() {
+		taskWorktreeRootDirOverride.Store(prior)
+	})
+}
+
+// setVerifyTaskWorktreeWritableForTest swaps the verifyTaskWorktreeWritable
+// dispatcher for the duration of the test.
+func setVerifyTaskWorktreeWritableForTest(t *testing.T, fn verifyTaskWorktreeWritableFn) {
+	t.Helper()
+	prior := verifyTaskWorktreeWritableOverride.Load()
+	verifyTaskWorktreeWritableOverride.Store(&fn)
+	t.Cleanup(func() {
+		verifyTaskWorktreeWritableOverride.Store(prior)
+	})
+}
+
+// setHeadlessCodexWorkspaceStatusSnapshotForTest swaps the snapshot function
+// for the duration of the test. Same race motivation as
+// setPrepareTaskWorktreeForTest: the snapshot is read by the headless queue
+// worker on a goroutine that can outlive the test's t.Cleanup.
+func setHeadlessCodexWorkspaceStatusSnapshotForTest(t *testing.T, fn headlessCodexWorkspaceStatusSnapshotFn) {
+	t.Helper()
+	prior := headlessCodexWorkspaceStatusSnapshotOverride.Load()
+	headlessCodexWorkspaceStatusSnapshotOverride.Store(&fn)
+	t.Cleanup(func() {
+		headlessCodexWorkspaceStatusSnapshotOverride.Store(prior)
 	})
 }

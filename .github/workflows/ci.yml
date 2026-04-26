@@ -91,11 +91,10 @@ jobs:
   # Generates the list of Go packages for the go-test-matrix fan-out below.
   # Separate job so the matrix can consume its output via
   # strategy.matrix.package: ${{ fromJSON(needs.go-test-list.outputs.packages) }}.
-  # Also emits a parallel `race` flag per package: internal/team and
-  # internal/teammcp (and subpackages) opt OUT of -race until the
-  # test-isolation memo's 7-step fix plan completes — the race detector
-  # trips on the very shared state that worktree_guard_test.go now guards
-  # against. Everything else gets -race.
+  # Also emits a parallel `race` flag per package: internal/teammcp opts OUT
+  # of -race until its own test-isolation cleanup lands. internal/team is
+  # in-race after the worktree-seam atomic.Pointer migration. Everything
+  # else gets -race.
   go-test-list:
     runs-on: ubuntu-latest
     outputs:
@@ -113,15 +112,15 @@ jobs:
           # spawning a matrix leg for a test-less package burns CI minutes
           # for no signal. `jq -R -s` reads stdin as a single string; split
           # on newlines, drop empties, then map each package to an object
-          # with the race flag (no -race for internal/team or
-          # internal/teammcp; see comment above).
+          # with the race flag (no -race for internal/teammcp; see comment
+          # above).
           packages=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... \
             | jq -R -s -c '
                 split("\n")
                 | map(select(length > 0))
                 | map({
                     package: .,
-                    race: (test("/internal/team(mcp)?($|/)") | not)
+                    race: (test("/internal/teammcp($|/)") | not)
                   })
               ')
           echo "packages=${packages}" >> "$GITHUB_OUTPUT"

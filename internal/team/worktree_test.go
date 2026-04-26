@@ -16,14 +16,11 @@ func TestCleanupPersistedTaskWorktreesRemovesUniqueTrackedWorktrees(t *testing.T
 	statePath := filepath.Join(stateDir, "broker-state.json")
 	t.Setenv("WUPHF_BROKER_STATE_PATH", statePath)
 
-	oldCleanup := cleanupTaskWorktree
-	defer func() { cleanupTaskWorktree = oldCleanup }()
-
 	var calls []string
-	cleanupTaskWorktree = func(path, branch string) error {
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error {
 		calls = append(calls, path+"|"+branch)
 		return nil
-	}
+	})
 
 	state := struct {
 		Tasks []teamTask `json:"tasks"`
@@ -69,11 +66,9 @@ func TestDefaultPrepareTaskWorktreeOverlaysDirtyWorkspace(t *testing.T) {
 		t.Fatalf("getwd: %v", err)
 	}
 	defer func() { _ = os.Chdir(oldCwd) }()
-	oldTaskRoot := taskWorktreeRootDir
-	defer func() { taskWorktreeRootDir = oldTaskRoot }()
-	taskWorktreeRootDir = func(repoRoot string) string {
+	setTaskWorktreeRootDirForTest(t, func(repoRoot string) string {
 		return filepath.Join(worktreeRoot, sanitizeWorktreeToken(filepath.Base(repoRoot)))
-	}
+	})
 
 	run := func(args ...string) {
 		t.Helper()
@@ -182,11 +177,9 @@ func TestDefaultPrepareTaskWorktreeOverlaysCompletedSiblingTaskWorkspace(t *test
 		t.Fatalf("getwd: %v", err)
 	}
 	defer func() { _ = os.Chdir(oldCwd) }()
-	oldTaskRoot := taskWorktreeRootDir
-	defer func() { taskWorktreeRootDir = oldTaskRoot }()
-	taskWorktreeRootDir = func(repoRoot string) string {
+	setTaskWorktreeRootDirForTest(t, func(repoRoot string) string {
 		return filepath.Join(worktreeRoot, sanitizeWorktreeToken(filepath.Base(repoRoot)))
-	}
+	})
 	t.Setenv("WUPHF_BROKER_STATE_PATH", statePath)
 
 	run := func(dir string, args ...string) {
@@ -281,11 +274,9 @@ func TestDefaultPrepareTaskWorktreeSkipsDuplicateAndMissingCompletedSiblingSourc
 		t.Fatalf("getwd: %v", err)
 	}
 	defer func() { _ = os.Chdir(oldCwd) }()
-	oldTaskRoot := taskWorktreeRootDir
-	defer func() { taskWorktreeRootDir = oldTaskRoot }()
-	taskWorktreeRootDir = func(repoRoot string) string {
+	setTaskWorktreeRootDirForTest(t, func(repoRoot string) string {
 		return filepath.Join(worktreeRoot, sanitizeWorktreeToken(filepath.Base(repoRoot)))
-	}
+	})
 	t.Setenv("WUPHF_BROKER_STATE_PATH", statePath)
 
 	run := func(dir string, args ...string) {
@@ -387,11 +378,9 @@ func TestDefaultPrepareTaskWorktreeSkipsDuplicateAndMissingCompletedSiblingSourc
 }
 
 func TestWorktreePathLooksSafeAllowsManagedAndLegacyRoots(t *testing.T) {
-	oldTaskRoot := taskWorktreeRootDir
-	defer func() { taskWorktreeRootDir = oldTaskRoot }()
-	taskWorktreeRootDir = func(string) string {
+	setTaskWorktreeRootDirForTest(t, func(string) string {
 		return filepath.Join(t.TempDir(), "task-worktrees", "repo")
-	}
+	})
 
 	managed := filepath.Join(taskWorktreeRootDir("repo"), "wuphf-task-task-1")
 	if !worktreePathLooksSafe(managed) {

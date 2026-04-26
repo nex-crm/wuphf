@@ -10,14 +10,57 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/nex-crm/wuphf/internal/gitexec"
 )
 
-var prepareTaskWorktree = defaultPrepareTaskWorktree
-var cleanupTaskWorktree = defaultCleanupTaskWorktree
-var taskWorktreeRootDir = defaultTaskWorktreeRootDir
-var verifyTaskWorktreeWritable = defaultVerifyTaskWorktreeWritable
+// Test seams for the worktree dispatch path. These read from background
+// goroutines (headless codex queue worker, launcher recovery) while tests
+// install per-test stubs, so the seams must be race-safe. Tests must use
+// the setXForTest helpers in test_support.go — never assign to the
+// override pointers directly. Same shape as headlessCodexRunTurnOverride.
+type (
+	prepareTaskWorktreeFn        func(taskID string) (string, string, error)
+	cleanupTaskWorktreeFn        func(path, branch string) error
+	taskWorktreeRootDirFn        func(repoRoot string) string
+	verifyTaskWorktreeWritableFn func(path string) error
+)
+
+var (
+	prepareTaskWorktreeOverride        atomic.Pointer[prepareTaskWorktreeFn]
+	cleanupTaskWorktreeOverride        atomic.Pointer[cleanupTaskWorktreeFn]
+	taskWorktreeRootDirOverride        atomic.Pointer[taskWorktreeRootDirFn]
+	verifyTaskWorktreeWritableOverride atomic.Pointer[verifyTaskWorktreeWritableFn]
+)
+
+func prepareTaskWorktree(taskID string) (string, string, error) {
+	if p := prepareTaskWorktreeOverride.Load(); p != nil {
+		return (*p)(taskID)
+	}
+	return defaultPrepareTaskWorktree(taskID)
+}
+
+func cleanupTaskWorktree(path, branch string) error {
+	if p := cleanupTaskWorktreeOverride.Load(); p != nil {
+		return (*p)(path, branch)
+	}
+	return defaultCleanupTaskWorktree(path, branch)
+}
+
+func taskWorktreeRootDir(repoRoot string) string {
+	if p := taskWorktreeRootDirOverride.Load(); p != nil {
+		return (*p)(repoRoot)
+	}
+	return defaultTaskWorktreeRootDir(repoRoot)
+}
+
+func verifyTaskWorktreeWritable(path string) error {
+	if p := verifyTaskWorktreeWritableOverride.Load(); p != nil {
+		return (*p)(path)
+	}
+	return defaultVerifyTaskWorktreeWritable(path)
+}
 
 // allowRealTaskWorktree gates access to the real git-worktree codepath. In
 // production it stays true; an init() in a *_test.go file in this package
@@ -25,7 +68,13 @@ var verifyTaskWorktreeWritable = defaultVerifyTaskWorktreeWritable
 // against the developer's `wuphf` repo. Tests that legitimately need the real
 // codepath (always against a tempdir-rooted repo) opt in via
 // allowRealTaskWorktreeForTest(t), which scopes the re-enable to one test.
-var allowRealTaskWorktree = true
+//
+// atomic.Bool because the production read in defaultPrepareTaskWorktree
+// happens on goroutines spawned by the headless queue worker, which can
+// outlive a test's deferred restore.
+var allowRealTaskWorktree atomic.Bool
+
+func init() { allowRealTaskWorktree.Store(true) }
 
 // errRealTaskWorktreeDisabled is returned by defaultPrepareTaskWorktree when
 // it is called from a test that has not opted into the real codepath. The
@@ -47,7 +96,7 @@ var overlaySourceWorkspaceSkipPrefixes = []string{
 }
 
 func defaultPrepareTaskWorktree(taskID string) (string, string, error) {
-	if !allowRealTaskWorktree {
+	if !allowRealTaskWorktree.Load() {
 		return "", "", errRealTaskWorktreeDisabled
 	}
 	repoRoot, err := gitRepoRoot()
