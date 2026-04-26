@@ -21,6 +21,8 @@ import {
   type ConfigSnapshot,
   type ConfigUpdate,
   getConfig,
+  getLocalProvidersStatus,
+  type LocalProviderStatus,
   resetWorkspace,
   shredWorkspace,
   updateConfig,
@@ -31,6 +33,7 @@ import { showNotice } from "../ui/Toast";
 
 type SectionId =
   | "general"
+  | "local-llms"
   | "company"
   | "keys"
   | "integrations"
@@ -54,6 +57,7 @@ const SECTION_GROUPS: SectionGroup[] = [
     label: "Workspace",
     items: [
       { id: "general", Icon: SettingsIcon, name: "General" },
+      { id: "local-llms", Icon: Terminal, name: "Local LLMs" },
       { id: "company", Icon: Building, name: "Company" },
     ],
   },
@@ -437,9 +441,16 @@ function GeneralSection({ cfg, save }: SectionProps) {
           value={provider}
           onChange={(e) => setProvider(e.target.value as typeof provider)}
         >
-          <option value="claude-code">Claude Code</option>
-          <option value="codex">Codex</option>
-          <option value="opencode">Opencode</option>
+          <optgroup label="Cloud">
+            <option value="claude-code">Claude Code</option>
+            <option value="codex">Codex</option>
+            <option value="opencode">Opencode</option>
+          </optgroup>
+          <optgroup label="Local">
+            <option value="mlx-lm">MLX-LM (Apple Silicon)</option>
+            <option value="ollama">Ollama</option>
+            <option value="exo">Exo</option>
+          </optgroup>
         </select>
       </Field>
       <Field label="Memory Backend" hint="--memory-backend">
@@ -533,6 +544,428 @@ function GeneralSection({ cfg, save }: SectionProps) {
           <div style={styles.filePath}>{cfg.config_path}</div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Local LLMs section ─────────────────────────────────────────────────
+
+interface LocalProviderMeta {
+  kind: string;
+  label: string;
+  blurb: string;
+}
+
+const LOCAL_PROVIDERS: LocalProviderMeta[] = [
+  {
+    kind: "mlx-lm",
+    label: "MLX-LM",
+    blurb:
+      "Apple's MLX-backed inference server. Apple Silicon only. Best fit for native macOS performance.",
+  },
+  {
+    kind: "ollama",
+    label: "Ollama",
+    blurb:
+      "Cross-platform local model runner with the largest model catalog. Works on macOS and Linux.",
+  },
+  {
+    kind: "exo",
+    label: "Exo",
+    blurb:
+      "Distributes inference across multiple devices. Useful when you want to pool a Mac Studio + a laptop.",
+  },
+];
+
+function detectHostPlatform(): "macos" | "linux" | "windows" | "other" {
+  if (typeof navigator === "undefined") return "other";
+  const p = navigator.platform.toLowerCase();
+  const ua = navigator.userAgent.toLowerCase();
+  if (p.includes("mac") || ua.includes("mac os")) return "macos";
+  if (p.includes("linux") || ua.includes("linux")) return "linux";
+  if (p.includes("win") || ua.includes("windows")) return "windows";
+  return "other";
+}
+
+function StatusDot({ status }: { status: LocalProviderStatus | undefined }) {
+  let color = "var(--text-tertiary)";
+  let title = "Status unknown";
+  if (!status) {
+    /* default */
+  } else if (status.binary_installed && status.reachable) {
+    color = "#16a34a"; // green
+    title = `Running${status.loaded_model ? ` · ${status.loaded_model}` : ""}`;
+  } else if (status.binary_installed) {
+    color = "#d97706"; // yellow/amber
+    title = "Installed but server not reachable — start it from a terminal";
+  } else {
+    color = "#dc2626"; // red
+    title = "Not installed";
+  }
+  return (
+    <span
+      title={title}
+      style={{
+        display: "inline-block",
+        width: 10,
+        height: 10,
+        borderRadius: "50%",
+        background: color,
+        marginRight: 8,
+        flexShrink: 0,
+      }}
+    />
+  );
+}
+
+function CommandRow({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      showNotice("Copy failed — select the text and copy manually.", "error");
+    }
+  };
+  return (
+    <div
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+        padding: "6px 8px",
+        background: "var(--bg-card-soft, var(--bg-card))",
+        border: "1px solid var(--border-light)",
+        borderRadius: 4,
+        marginTop: 6,
+      }}
+    >
+      <code
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 12,
+          flex: 1,
+          overflowX: "auto",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {command}
+      </code>
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={onCopy}
+        style={{ flexShrink: 0 }}
+      >
+        {copied ? "Copied" : "Copy"}
+      </button>
+    </div>
+  );
+}
+
+interface LocalProviderCardProps {
+  meta: LocalProviderMeta;
+  status: LocalProviderStatus | undefined;
+  cfg: ConfigSnapshot;
+  save: (patch: ConfigUpdate) => Promise<void>;
+  hostPlatform: ReturnType<typeof detectHostPlatform>;
+}
+
+function LocalProviderCard({
+  meta,
+  status,
+  cfg,
+  save,
+  hostPlatform,
+}: LocalProviderCardProps) {
+  const initial = cfg.provider_endpoints?.[meta.kind];
+  const [baseURL, setBaseURL] = useState(
+    initial?.base_url ?? status?.endpoint ?? "",
+  );
+  const [model, setModel] = useState(initial?.model ?? status?.model ?? "");
+
+  const onSaveEndpoint = async () => {
+    await save({
+      provider_endpoints: {
+        [meta.kind]: { base_url: baseURL.trim(), model: model.trim() },
+      },
+    });
+  };
+
+  const onSetDefault = async () => {
+    await save({ llm_provider: meta.kind as ConfigUpdate["llm_provider"] });
+  };
+
+  const isDefault = cfg.llm_provider === meta.kind;
+  const installCmd =
+    status?.install?.[hostPlatform === "windows" ? "linux" : hostPlatform];
+  const startCmd =
+    status?.start?.[hostPlatform === "windows" ? "linux" : hostPlatform];
+
+  return (
+    <div
+      data-testid={`local-llm-card-${meta.kind}`}
+      style={{
+        border: "1px solid var(--border-light)",
+        borderRadius: 6,
+        padding: 14,
+        marginBottom: 14,
+        background: "var(--bg-card)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 12,
+          marginBottom: 6,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center" }}>
+          <StatusDot status={status} />
+          <strong style={{ fontSize: 14 }}>{meta.label}</strong>
+          {isDefault && (
+            <span
+              style={{
+                marginLeft: 10,
+                fontSize: 11,
+                padding: "1px 6px",
+                background: "var(--accent-100, #eef)",
+                color: "var(--accent-500, #44a)",
+                borderRadius: 3,
+              }}
+            >
+              Default
+            </span>
+          )}
+          {status?.binary_version && (
+            <span
+              style={{
+                marginLeft: 8,
+                fontSize: 11,
+                color: "var(--text-tertiary)",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              {status.binary_version}
+            </span>
+          )}
+        </div>
+        {!isDefault && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={onSetDefault}
+            data-testid={`local-llm-set-default-${meta.kind}`}
+          >
+            Set as default
+          </button>
+        )}
+      </div>
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--text-tertiary)",
+          margin: "4px 0 10px",
+        }}
+      >
+        {meta.blurb}
+      </p>
+
+      {status?.windows_note && (
+        <div style={{ ...styles.banner, fontSize: 12 }}>
+          <span style={{ fontSize: 14, flexShrink: 0 }}>{"⚠"}</span>
+          <div>{status.windows_note}</div>
+        </div>
+      )}
+
+      <Field
+        label="Base URL"
+        hint={`WUPHF_${meta.kind.toUpperCase().replace(/-/g, "_")}_BASE_URL`}
+      >
+        <input
+          style={styles.input}
+          placeholder={status?.endpoint ?? "http://127.0.0.1:8080/v1"}
+          value={baseURL}
+          onChange={(e) => setBaseURL(e.target.value)}
+          data-testid={`local-llm-base-url-${meta.kind}`}
+        />
+      </Field>
+      <Field
+        label="Model"
+        hint={`WUPHF_${meta.kind.toUpperCase().replace(/-/g, "_")}_MODEL`}
+      >
+        <input
+          style={styles.input}
+          placeholder={status?.model ?? ""}
+          value={model}
+          onChange={(e) => setModel(e.target.value)}
+          data-testid={`local-llm-model-${meta.kind}`}
+        />
+      </Field>
+      <SaveButton label="Save endpoint" onSave={onSaveEndpoint} />
+
+      {!status?.binary_installed && installCmd && (
+        <div
+          style={{
+            marginTop: 12,
+            paddingTop: 10,
+            borderTop: "1px dashed var(--border-light)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              marginBottom: 4,
+              color: "var(--text-secondary)",
+            }}
+          >
+            Install
+          </div>
+          <CommandRow command={installCmd} />
+          {startCmd && (
+            <>
+              <div
+                style={{
+                  fontSize: 12,
+                  fontWeight: 500,
+                  marginTop: 10,
+                  marginBottom: 4,
+                  color: "var(--text-secondary)",
+                }}
+              >
+                Start
+              </div>
+              <CommandRow command={startCmd} />
+            </>
+          )}
+        </div>
+      )}
+      {status?.binary_installed && !status.reachable && startCmd && (
+        <div
+          style={{
+            marginTop: 12,
+            paddingTop: 10,
+            borderTop: "1px dashed var(--border-light)",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              color: "var(--text-secondary)",
+              marginBottom: 4,
+            }}
+          >
+            Installed but the server isn't responding on{" "}
+            <code style={{ fontFamily: "var(--font-mono)" }}>
+              {status.endpoint}
+            </code>
+            . Start it from a terminal:
+          </div>
+          <CommandRow command={startCmd} />
+        </div>
+      )}
+      {(status?.notes ?? []).map((note) => (
+        <p
+          key={note}
+          style={{
+            fontSize: 11,
+            color: "var(--text-tertiary)",
+            marginTop: 8,
+            marginBottom: 0,
+          }}
+        >
+          {note}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function LocalLLMsSection({ cfg, save }: SectionProps) {
+  const hostPlatform = detectHostPlatform();
+  // refetch on the same cadence settings normally do; doctor probes are
+  // cheap (~2s worst case for a wedged server) but we don't want to
+  // hammer the broker every render.
+  const { data, isLoading, error, refetch, isFetching } = useQuery({
+    queryKey: ["local-providers-status"],
+    queryFn: getLocalProvidersStatus,
+    refetchInterval: 30_000,
+    staleTime: 5_000,
+  });
+
+  const byKind = new Map<string, LocalProviderStatus>();
+  for (const s of data ?? []) byKind.set(s.kind, s);
+
+  return (
+    <div>
+      <h2 style={styles.sectionTitle}>Local LLMs</h2>
+      <p style={styles.sectionDesc}>
+        Run wuphf agents through a model on your own machine — no cloud key
+        required. Status indicators detect what's installed and what's
+        responding; install commands are copy-paste only (we never run shell
+        commands for you).
+      </p>
+
+      {hostPlatform === "windows" && (
+        <div style={styles.banner}>
+          <span style={{ fontSize: 14, flexShrink: 0 }}>{"⚠"}</span>
+          <div>
+            Local LLMs run best on macOS or Linux. Native Windows isn't
+            supported; install your runtime inside WSL2 (Ubuntu) and the broker
+            will detect it from there.
+          </div>
+        </div>
+      )}
+
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginBottom: 8,
+        }}
+      >
+        <div style={styles.groupTitle}>Available runtimes</div>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          onClick={() => refetch()}
+          disabled={isFetching}
+          data-testid="local-llms-refresh"
+        >
+          <Refresh style={{ width: 14, height: 14, marginRight: 4 }} />
+          {isFetching ? "Checking…" : "Recheck"}
+        </button>
+      </div>
+
+      {isLoading && (
+        <div style={{ color: "var(--text-tertiary)", fontSize: 13 }}>
+          Detecting installed runtimes…
+        </div>
+      )}
+      {error && (
+        <div style={{ color: "var(--danger-500, #c33)", fontSize: 13 }}>
+          Failed to load status:{" "}
+          {error instanceof Error ? error.message : String(error)}
+        </div>
+      )}
+
+      {!(isLoading || error) &&
+        LOCAL_PROVIDERS.map((meta) => (
+          <LocalProviderCard
+            key={meta.kind}
+            meta={meta}
+            status={byKind.get(meta.kind)}
+            cfg={cfg}
+            save={save}
+            hostPlatform={hostPlatform}
+          />
+        ))}
     </div>
   );
 }
@@ -1290,8 +1723,8 @@ function DangerZoneSection() {
         <div style={dangerStyles.cardSubtitle}>
           Full wipe. Deletes your team, company identity, office task receipts,
           saved workflows, local memory, logs, and provider session state, then
-          returns you to onboarding. Use this to start completely fresh or to try
-          a different blueprint.
+          returns you to onboarding. Use this to start completely fresh or to
+          try a different blueprint.
         </div>
         <div style={dangerStyles.listLabel}>Deletes</div>
         <ul style={dangerStyles.list}>
@@ -1464,6 +1897,9 @@ export function SettingsApp() {
       </nav>
       <div style={styles.body} key={dataKey}>
         {section === "general" && <GeneralSection cfg={data} save={save} />}
+        {section === "local-llms" && (
+          <LocalLLMsSection cfg={data} save={save} />
+        )}
         {section === "company" && <CompanySection cfg={data} save={save} />}
         {section === "keys" && <KeysSection cfg={data} save={save} />}
         {section === "integrations" && (

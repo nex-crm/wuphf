@@ -634,13 +634,48 @@ export function setMemory(namespace: string, key: string, value: string) {
 
 // ── Config (Settings) ──
 
-export type LLMProvider = "claude-code" | "codex" | "opencode";
+export type LLMProvider =
+  | "claude-code"
+  | "codex"
+  | "opencode"
+  | "mlx-lm"
+  | "ollama"
+  | "exo";
 export type MemoryBackend = "nex" | "gbrain" | "none";
 export type ActionProvider = "auto" | "one" | "composio" | "";
+
+export interface ProviderEndpoint {
+  base_url?: string;
+  model?: string;
+}
+
+// LocalProviderStatus mirrors internal/team/local_providers_status.go.
+// One entry per registered local OpenAI-compatible kind. Test
+// `TestComputeLocalProviderStatuses_DocumentedSurface` keeps the JSON
+// field names in lockstep with this type.
+export interface LocalProviderStatus {
+  kind: string;
+  binary_installed: boolean;
+  binary_path?: string;
+  binary_version?: string;
+  endpoint: string;
+  model: string;
+  reachable: boolean;
+  loaded_model?: string;
+  probed: boolean;
+  probe_skipped_note?: string;
+  platform_supported: boolean;
+  windows_note?: string;
+  install?: Record<string, string>;
+  start?: Record<string, string>;
+  notes?: string[];
+}
 
 export interface ConfigSnapshot {
   // Runtime
   llm_provider?: LLMProvider;
+  llm_provider_priority?: string[];
+  provider_endpoints?: Record<string, ProviderEndpoint>;
   memory_backend?: MemoryBackend;
   action_provider?: ActionProvider;
   team_lead_slug?: string;
@@ -680,6 +715,7 @@ export interface ConfigSnapshot {
 
 export type ConfigUpdate = Partial<{
   llm_provider: LLMProvider;
+  provider_endpoints: Record<string, ProviderEndpoint>;
   memory_backend: MemoryBackend;
   action_provider: ActionProvider;
   team_lead_slug: string;
@@ -717,6 +753,15 @@ export function getConfig() {
 
 export function updateConfig(patch: ConfigUpdate) {
   return post<{ status: string }>("/config", patch);
+}
+
+// Doctor endpoint — one entry per registered local OpenAI-compatible
+// runtime. Settings page polls this; Onboarding wizard reads it on
+// mount. The broker probes loopback endpoints only (see
+// internal/team/local_providers_status.go), so calling this never
+// triggers outbound traffic.
+export function getLocalProvidersStatus() {
+  return get<LocalProviderStatus[]>("/status/local-providers");
 }
 
 // ── Workspace wipes (Danger Zone) ──

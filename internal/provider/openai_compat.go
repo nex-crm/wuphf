@@ -111,6 +111,15 @@ func openAICompatDefaultsFor(kind string) (string, string) {
 	return d.baseURL, d.model
 }
 
+// OpenAICompatDefaults returns the compile-time default base URL and
+// model for kind, or ("", "") if kind has no registered defaults. The
+// status endpoint in internal/team/ uses this to resolve the effective
+// endpoint shown to users without duplicating the kind→endpoint table.
+// Exported because the team package can't import the unexported helper.
+func OpenAICompatDefaults(kind string) (baseURL, model string) {
+	return openAICompatDefaultsFor(kind)
+}
+
 // normalizeOpenAICompatEndpoint joins baseURL with /chat/completions,
 // auto-appending /v1 when the user pasted a server's listening address
 // without it (a common copy/paste from `mlx_lm.server` startup output —

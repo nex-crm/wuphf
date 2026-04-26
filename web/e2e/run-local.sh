@@ -127,8 +127,9 @@ stop_wuphf() {
 run_wizard_phase() {
   rm -f "${runtime_home}/.wuphf/onboarded.json"
   start_wuphf "wizard"
-  echo "[run-local] running wizard.spec.ts"
-  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" bunx playwright test tests/wizard.spec.ts)
+  # Wizard-phase specs: anything that needs the unseeded onboarding flow.
+  echo "[run-local] running wizard-phase specs"
+  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" bunx playwright test tests/wizard.spec.ts tests/local-llm-onboarding.spec.ts)
   stop_wuphf
 }
 
@@ -138,8 +139,9 @@ run_shell_phase() {
 {"version":1,"completed_at":"2026-01-01T00:00:00Z","company_name":"e2e-local"}
 EOF
   start_wuphf "shell"
-  echo "[run-local] running smoke.spec.ts"
-  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" bunx playwright test tests/smoke.spec.ts)
+  # Shell-phase specs: post-onboarding UI surfaces (smoke, settings).
+  echo "[run-local] running shell-phase specs"
+  (cd web/e2e && WUPHF_E2E_BASE_URL="http://localhost:${web_port}" bunx playwright test tests/smoke.spec.ts tests/local-llm-settings.spec.ts)
   stop_wuphf
 }
 

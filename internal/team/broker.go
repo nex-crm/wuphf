@@ -1590,6 +1590,7 @@ func (b *Broker) StartOnPort(port int) error {
 	mux.HandleFunc("/queue", b.requireAuth(b.handleQueue))
 	mux.HandleFunc("/company", b.requireAuth(b.handleCompany))
 	mux.HandleFunc("/config", b.requireAuth(b.handleConfig))
+	mux.HandleFunc("/status/local-providers", b.requireAuth(b.handleLocalProvidersStatus))
 	mux.HandleFunc("/nex/register", b.requireAuth(b.handleNexRegister))
 	mux.HandleFunc("/v1/logs", b.requireAuth(b.handleOTLPLogs))
 	mux.HandleFunc("/events", b.handleEvents)
@@ -5960,6 +5961,7 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			// Runtime
 			"llm_provider":          config.ResolveLLMProvider(""),
 			"llm_provider_priority": cfg.LLMProviderPriority,
+			"provider_endpoints":    cfg.ProviderEndpoints,
 			"memory_backend":        config.ResolveMemoryBackend(""),
 			"action_provider":       config.ResolveActionProvider(),
 			"team_lead_slug":        cfg.TeamLeadSlug,
@@ -6034,22 +6036,29 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			TelegramToken   *string `json:"telegram_bot_token,omitempty"`
 			OpenclawToken   *string `json:"openclaw_token,omitempty"`
 			OpenclawGateway *string `json:"openclaw_gateway_url,omitempty"`
+			// ProviderEndpoints is a partial-update map: keys present in
+			// the payload replace the corresponding entry; absent keys are
+			// preserved. Pass an empty value (`{"base_url":"","model":""}`)
+			// to clear a kind back to its compile-time defaults.
+			ProviderEndpoints *map[string]config.ProviderEndpoint `json:"provider_endpoints,omitempty"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 
-		// Validate enum fields before touching config.
-		var provider string
+		// Validate enum fields before touching config. ValidateKind is the
+		// single source of truth — every Register() at init() time adds
+		// its Kind here, so adding a new local runtime (mlx-lm, ollama,
+		// exo, …) doesn't require editing this handler.
+		var llmProvider string
 		if body.LLMProvider != nil {
-			provider = strings.TrimSpace(strings.ToLower(*body.LLMProvider))
-			switch provider {
-			case "claude-code", "codex", "opencode":
-				// ok
-			default:
-				http.Error(w, "unsupported llm_provider", http.StatusBadRequest)
-				return
+			llmProvider = strings.TrimSpace(strings.ToLower(*body.LLMProvider))
+			if llmProvider != "" {
+				if err := provider.ValidateKind(llmProvider); err != nil {
+					http.Error(w, "unsupported llm_provider: "+err.Error(), http.StatusBadRequest)
+					return
+				}
 			}
 		}
 		var providerPriority []string
@@ -6063,11 +6072,8 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				if id == "" {
 					continue
 				}
-				switch id {
-				case "claude-code", "codex", "opencode":
-					// ok
-				default:
-					http.Error(w, "unsupported entry in llm_provider_priority: "+id, http.StatusBadRequest)
+				if err := provider.ValidateKind(id); err != nil {
+					http.Error(w, "unsupported entry in llm_provider_priority: "+err.Error(), http.StatusBadRequest)
 					return
 				}
 				if seen[id] {
@@ -6090,8 +6096,8 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		changed := false
 
 		// Enum/string fields
-		if provider != "" {
-			cfg.LLMProvider = provider
+		if llmProvider != "" {
+			cfg.LLMProvider = llmProvider
 			changed = true
 		}
 		if body.LLMProviderPriority != nil {
@@ -6238,6 +6244,36 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			cfg.OpenclawGatewayURL = strings.TrimSpace(*body.OpenclawGateway)
 			changed = true
 		}
+		if body.ProviderEndpoints != nil {
+			// Partial merge: only kinds present in the payload are touched,
+			// so the Settings UI can update one runtime's endpoint without
+			// shipping the whole map. Validate each key against the
+			// registry — same source of truth as llm_provider.
+			if cfg.ProviderEndpoints == nil {
+				cfg.ProviderEndpoints = map[string]config.ProviderEndpoint{}
+			}
+			for kind, ep := range *body.ProviderEndpoints {
+				k := strings.TrimSpace(strings.ToLower(kind))
+				if k == "" {
+					continue
+				}
+				if err := provider.ValidateKind(k); err != nil {
+					http.Error(w, "unsupported provider_endpoints kind: "+err.Error(), http.StatusBadRequest)
+					return
+				}
+				ep.BaseURL = strings.TrimSpace(ep.BaseURL)
+				ep.Model = strings.TrimSpace(ep.Model)
+				if ep.BaseURL == "" && ep.Model == "" {
+					// Treat the empty-empty case as a clear so the user can
+					// drop their override and fall back to compile-time
+					// defaults without hand-editing config.json.
+					delete(cfg.ProviderEndpoints, k)
+				} else {
+					cfg.ProviderEndpoints[k] = ep
+				}
+			}
+			changed = true
+		}
 
 		if !changed {
 			http.Error(w, "no fields to update", http.StatusBadRequest)
@@ -6250,10 +6286,10 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		// Keep /health in sync for this process so the wizard choice is
 		// reflected immediately without requiring a broker restart.
-		if provider != "" {
+		if llmProvider != "" {
 			b.mu.Lock()
-			providerChanged := b.runtimeProvider != provider
-			b.runtimeProvider = provider
+			providerChanged := b.runtimeProvider != llmProvider
+			b.runtimeProvider = llmProvider
 			if providerChanged {
 				b.publishOfficeChangeLocked(officeChangeEvent{Kind: "office_reseeded"})
 			}

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-import { get, post } from "../../api/client";
+import {
+  get,
+  getLocalProvidersStatus,
+  type LocalProviderStatus,
+  post,
+} from "../../api/client";
 import { ONBOARDING_COPY } from "../../lib/constants";
 import { useAppStore } from "../../stores/app";
 import { Kbd, MOD_KEY } from "../ui/Kbd";
@@ -802,6 +807,173 @@ function TeamStep({ agents, onToggle, onNext, onBack }: TeamStepProps) {
   );
 }
 
+/* ─── Local LLM subsection (used inside Step 5: Setup) ─── */
+
+const LOCAL_PROVIDER_LABELS: ReadonlyArray<{
+  kind: string;
+  label: string;
+  blurb: string;
+}> = [
+  { kind: "mlx-lm", label: "MLX-LM", blurb: "macOS · Apple Silicon" },
+  { kind: "ollama", label: "Ollama", blurb: "macOS / Linux" },
+  { kind: "exo", label: "Exo", blurb: "Multi-device pool" },
+];
+
+interface LocalLLMSubsectionProps {
+  // selected: kind that the user picked here, if any. Stored in wizard
+  // state so the parent can flip the active llm_provider on Continue
+  // without committing to /config until the user explicitly says so.
+  selected: string;
+  onSelect: (kind: string) => void;
+}
+
+function LocalLLMSubsection({ selected, onSelect }: LocalLLMSubsectionProps) {
+  const [status, setStatus] = useState<LocalProviderStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setLoading(true);
+    getLocalProvidersStatus()
+      .then((data) => {
+        if (!alive) return;
+        setStatus(data ?? []);
+      })
+      .catch(() => {
+        // Endpoint missing → broker hasn't shipped this yet. Show the
+        // subsection without status badges; "see Settings" link below
+        // still works.
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+
+  const byKind = new Map<string, LocalProviderStatus>();
+  for (const s of status) byKind.set(s.kind, s);
+
+  return (
+    <div
+      style={{
+        marginTop: 16,
+        paddingTop: 16,
+        borderTop: "1px solid var(--border)",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        data-testid="onboarding-local-llm-toggle"
+        style={{
+          all: "unset",
+          cursor: "pointer",
+          fontSize: 13,
+          fontWeight: 600,
+          color: "var(--text)",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+        }}
+      >
+        <span aria-hidden="true">{open ? "▼" : "▶"}</span>
+        Run agents on a local model instead?
+      </button>
+      <p
+        style={{
+          fontSize: 12,
+          color: "var(--text-secondary)",
+          margin: "4px 0 0 0",
+        }}
+      >
+        No cloud key required. Best on macOS / Linux. Skip if you're using a
+        cloud CLI above.
+      </p>
+
+      {open && (
+        <div style={{ marginTop: 10 }}>
+          {loading && (
+            <div
+              style={{
+                fontSize: 12,
+                color: "var(--text-tertiary)",
+                padding: "4px 0",
+              }}
+            >
+              Detecting local runtimes…
+            </div>
+          )}
+          {!loading && (
+            <div className="runtime-grid" style={{ marginTop: 6 }}>
+              {LOCAL_PROVIDER_LABELS.map((meta) => {
+                const s = byKind.get(meta.kind);
+                const installed = Boolean(s?.binary_installed);
+                const running = Boolean(s?.reachable);
+                const supported = s ? s.platform_supported : true;
+                const isSelected = selected === meta.kind;
+                const classes = [
+                  "runtime-tile",
+                  isSelected ? "selected" : "",
+                  supported ? "" : "disabled",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+                const statusText = !supported
+                  ? "Not supported on this OS"
+                  : running
+                    ? "Running"
+                    : installed
+                      ? "Installed (server not started)"
+                      : "Not installed";
+                return (
+                  <button
+                    key={meta.kind}
+                    type="button"
+                    className={classes}
+                    onClick={() => {
+                      if (!supported) return;
+                      onSelect(isSelected ? "" : meta.kind);
+                    }}
+                    disabled={!supported}
+                    aria-pressed={isSelected}
+                    data-testid={`onboarding-local-llm-tile-${meta.kind}`}
+                  >
+                    <div className="runtime-tile-head">
+                      <span
+                        className={`runtime-tile-status ${running ? "installed" : ""}`}
+                        aria-hidden="true"
+                      />
+                      {meta.label}
+                    </div>
+                    <div className="runtime-tile-meta">
+                      {meta.blurb} · {statusText}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <p
+            style={{
+              fontSize: 11,
+              color: "var(--text-tertiary)",
+              margin: "10px 0 0 0",
+            }}
+          >
+            Need install commands? See <strong>Settings → Local LLMs</strong>{" "}
+            after onboarding for the full doctor panel with copy-paste shell
+            snippets.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ─── Step 5: Setup ─── */
 
 interface SetupStepProps {
@@ -820,6 +992,11 @@ interface SetupStepProps {
   onChangeGBrainOpenAIKey: (v: string) => void;
   gbrainAnthropicKey: string;
   onChangeGBrainAnthropicKey: (v: string) => void;
+  // Local-LLM opt-in chosen here; submitted with the rest of the wizard
+  // payload at /onboarding/complete and applied to llm_provider so the
+  // user's selection takes effect on first agent turn.
+  localProvider: string;
+  onSelectLocalProvider: (kind: string) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -847,6 +1024,8 @@ function SetupStep({
   onChangeGBrainOpenAIKey,
   gbrainAnthropicKey,
   onChangeGBrainAnthropicKey,
+  localProvider,
+  onSelectLocalProvider,
   onNext,
   onBack,
 }: SetupStepProps) {
@@ -865,8 +1044,12 @@ function SetupStep({
   const gbrainSelected = memoryBackend === "gbrain";
   const gbrainOpenAIMissing =
     gbrainSelected && gbrainOpenAIKey.trim().length === 0;
+  // Picking a local LLM is an alternative path — once selected the user
+  // doesn't need a cloud CLI installed or any cloud API key set.
+  const hasLocalProvider = localProvider.trim().length > 0;
   const canContinue =
-    (hasInstalledSelection || hasAnyApiKey) && !gbrainOpenAIMissing;
+    (hasInstalledSelection || hasAnyApiKey || hasLocalProvider) &&
+    !gbrainOpenAIMissing;
 
   return (
     <div className="wizard-step">
@@ -971,6 +1154,11 @@ function SetupStep({
             })}
           </div>
         )}
+
+        <LocalLLMSubsection
+          selected={localProvider}
+          onSelect={onSelectLocalProvider}
+        />
 
         {runtimePriority.length > 1 && (
           <div className="runtime-priority-controls">
@@ -1443,6 +1631,11 @@ export function Wizard({ onComplete }: WizardProps) {
   // with the first installed CLI once prereqs land so the happy path still
   // works with zero clicks.
   const [runtimePriority, setRuntimePriority] = useState<string[]>([]);
+  // localProvider is the local OpenAI-compat kind the user opted into in
+  // the SetupStep subsection (mlx-lm | ollama | exo | "" for none).
+  // When non-empty, it overrides whatever cloud CLI was selected and is
+  // applied as llm_provider on /onboarding/complete.
+  const [localProvider, setLocalProvider] = useState<string>("");
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   // Matches MEMORY_BACKEND_OPTIONS[0] (the "Markdown (default)" tile) and the
   // server-side `config.ResolveMemoryBackend` default. Shipping 'nex' here
@@ -1824,6 +2017,12 @@ export function Wizard({ onComplete }: WizardProps) {
           configPayload.llm_provider = providerPriority[0];
           configPayload.llm_provider_priority = providerPriority;
         }
+        // A local LLM opt-in trumps the cloud CLI selection — the user
+        // explicitly picked "run on my own machine" so we don't want to
+        // route them through Claude/Codex/Opencode by default.
+        if (localProvider) {
+          configPayload.llm_provider = localProvider;
+        }
         // Nex API key (optional — empty string not sent so we don't clobber
         // an existing value with a blank one).
         const trimmedNex = nexApiKey.trim();
@@ -2071,6 +2270,8 @@ export function Wizard({ onComplete }: WizardProps) {
             onChangeGBrainOpenAIKey={setGbrainOpenAIKey}
             gbrainAnthropicKey={gbrainAnthropicKey}
             onChangeGBrainAnthropicKey={setGbrainAnthropicKey}
+            localProvider={localProvider}
+            onSelectLocalProvider={setLocalProvider}
             onNext={nextStep}
             onBack={prevStep}
           />
