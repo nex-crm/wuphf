@@ -17,4 +17,4 @@ on:
 
 jobs:
   check:
-    uses: nex-crm/.github/.github/workflows/docs-link-check.yml@v0.6.2
+    uses: nex-crm/.github/.github/workflows/docs-link-check.yml@34310b131f22dd1c541ea1f2aa6cf1bd531a426b # v0.6.2
