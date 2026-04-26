@@ -112,7 +112,26 @@ type headlessCodexActiveTurn struct {
 	WorkspaceSnapshot string
 }
 
-var headlessCodexWorkspaceStatusSnapshot = func(path string) string {
+// headlessCodexWorkspaceStatusSnapshotFn is the seam type swapped by tests
+// via setHeadlessCodexWorkspaceStatusSnapshotForTest. Kept as a named type so
+// the atomic.Pointer below stays readable.
+type headlessCodexWorkspaceStatusSnapshotFn func(path string) string
+
+// headlessCodexWorkspaceStatusSnapshotOverride is read by the headless queue
+// worker (see runHeadlessCodexQueue → headlessTurnCompletedDurably) and by
+// recoverFailedHeadlessTurn — both run on goroutines that can outlive a
+// test's t.Cleanup. Tests must never assign directly; use
+// setHeadlessCodexWorkspaceStatusSnapshotForTest in test_support.go.
+var headlessCodexWorkspaceStatusSnapshotOverride atomic.Pointer[headlessCodexWorkspaceStatusSnapshotFn]
+
+func headlessCodexWorkspaceStatusSnapshot(path string) string {
+	if p := headlessCodexWorkspaceStatusSnapshotOverride.Load(); p != nil {
+		return (*p)(path)
+	}
+	return defaultHeadlessCodexWorkspaceStatusSnapshot(path)
+}
+
+func defaultHeadlessCodexWorkspaceStatusSnapshot(path string) string {
 	path = normalizeHeadlessWorkspaceDir(path)
 	if path == "" {
 		return ""

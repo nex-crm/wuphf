@@ -1648,11 +1648,9 @@ func TestRecoverFailedHeadlessTurnRequeuesExternalActionBeforeBlocking(t *testin
 func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
-	headlessCodexWorkspaceStatusSnapshot = func(string) string {
+	setHeadlessCodexWorkspaceStatusSnapshotForTest(t, func(string) string {
 		return "after-change"
-	}
-	defer func() { headlessCodexWorkspaceStatusSnapshot = oldSnapshot }()
+	})
 
 	// Build the task state directly instead of going through
 	// EnsurePlannedTask so we never call saveLocked — broker save
@@ -1697,11 +1695,9 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 func TestHeadlessTurnCompletedDurablyAcceptsReviewReadyTask(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
-	headlessCodexWorkspaceStatusSnapshot = func(string) string {
+	setHeadlessCodexWorkspaceStatusSnapshotForTest(t, func(string) string {
 		return "after-change"
-	}
-	defer func() { headlessCodexWorkspaceStatusSnapshot = oldSnapshot }()
+	})
 
 	// See TestHeadlessTurnCompletedDurablyRejectsCodingTurn... for why
 	// we build the task state directly rather than via EnsurePlannedTask.
@@ -1739,11 +1735,9 @@ func TestHeadlessTurnCompletedDurablyAcceptsReviewReadyTask(t *testing.T) {
 func TestHeadlessTurnCompletedDurablyRejectsLocalWorktreeBuilderWithoutTaskStateOrEvidence(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
-	headlessCodexWorkspaceStatusSnapshot = func(string) string {
+	setHeadlessCodexWorkspaceStatusSnapshotForTest(t, func(string) string {
 		return "after-change"
-	}
-	defer func() { headlessCodexWorkspaceStatusSnapshot = oldSnapshot }()
+	})
 
 	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
@@ -1898,19 +1892,15 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 	t.Setenv("HOME", t.TempDir())
 
 	worktreeDir := t.TempDir()
-	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
 	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return worktreeDir, worktreeBranchName(taskID), nil
 	})
-	headlessCodexWorkspaceStatusSnapshot = func(path string) string {
+	setHeadlessCodexWorkspaceStatusSnapshotForTest(t, func(path string) string {
 		if !samePath(path, worktreeDir) {
 			t.Fatalf("expected workspace snapshot to target %q, got %q", worktreeDir, path)
 		}
 		return "snapshot"
-	}
-	defer func() {
-		headlessCodexWorkspaceStatusSnapshot = oldSnapshot
-	}()
+	})
 
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "builder", "Builder")

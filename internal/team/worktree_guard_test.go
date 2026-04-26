@@ -67,12 +67,18 @@ func stubCleanupTaskWorktree(string, string) error { return nil }
 // allowRealTaskWorktreeForTest opts the current test into the real
 // defaultPrepareTaskWorktree / defaultCleanupTaskWorktree codepath.
 //
-// The worktree dispatch seams are now atomic.Pointer-backed (see
-// worktree.go), so the mutate-and-restore is race-safe — but parallel
-// tests in this package STILL must not all opt in at once, because the
-// real codepath chdirs into a tempdir-scoped repo. Each current caller
-// (worktree_test.go) builds its own tempdir + chdirs into it without
-// t.Parallel().
+// Each individual Store/Load on the underlying atomic primitives is
+// race-safe, but the THREE stores together (allow + prepare override +
+// cleanup override) are not coherent as a tuple. A concurrent caller
+// observing the post-flip state may see allow=true while the override
+// pointers are still mid-update or vice versa. The current callers in
+// worktree_test.go avoid this by:
+//   - never running t.Parallel() in the opt-in test, AND
+//   - chdiring into a tempdir-scoped repo (so even if they did parallel,
+//     each would be in its own working directory).
+//
+// Future callers who need t.Parallel() must serialize the opt-in
+// (e.g. wrap the triple in a sync.Mutex) — atomic alone won't help.
 func allowRealTaskWorktreeForTest(t *testing.T) {
 	t.Helper()
 	prevAllow := allowRealTaskWorktree.Load()

@@ -82,6 +82,14 @@ func DisableRealTaskWorktreeForTests() {
 // queue worker spawned by enqueueHeadlessCodexTurnRecord — the worker could
 // outlive the test's deferred restore and observe the swap mid-call. Use
 // this helper instead.
+//
+// CONSTRAINT: tests using any setXForTest helper in this file must NOT call
+// t.Parallel(). The setters do an atomic Load → atomic Store pair which is
+// non-atomic AS A PAIR; parallel setters can scramble the cleanup chain (T1
+// captures prior=A, T2 captures prior=A, T1 stores B, T2 stores C, T1
+// cleanup stores A, T2 cleanup stores A — both lose). Single-test
+// race-safety against background goroutines is the goal here, not parallel
+// test composition.
 func setHeadlessCodexRunTurnForTest(t *testing.T, fn func(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error) {
 	t.Helper()
 	prior := headlessCodexRunTurnOverride.Load()
@@ -134,5 +142,18 @@ func setVerifyTaskWorktreeWritableForTest(t *testing.T, fn verifyTaskWorktreeWri
 	verifyTaskWorktreeWritableOverride.Store(&fn)
 	t.Cleanup(func() {
 		verifyTaskWorktreeWritableOverride.Store(prior)
+	})
+}
+
+// setHeadlessCodexWorkspaceStatusSnapshotForTest swaps the snapshot function
+// for the duration of the test. Same race motivation as
+// setPrepareTaskWorktreeForTest: the snapshot is read by the headless queue
+// worker on a goroutine that can outlive the test's t.Cleanup.
+func setHeadlessCodexWorkspaceStatusSnapshotForTest(t *testing.T, fn headlessCodexWorkspaceStatusSnapshotFn) {
+	t.Helper()
+	prior := headlessCodexWorkspaceStatusSnapshotOverride.Load()
+	headlessCodexWorkspaceStatusSnapshotOverride.Store(&fn)
+	t.Cleanup(func() {
+		headlessCodexWorkspaceStatusSnapshotOverride.Store(prior)
 	})
 }
