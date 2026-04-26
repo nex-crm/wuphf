@@ -1,5 +1,3 @@
-import type { ReactNode } from "react";
-
 // Single source of truth for "what does shred actually do?". Any UI that
 // warns about shred — banner buttons, danger-zone cards, confirm modals —
 // pulls copy from here so the description never drifts from
@@ -12,24 +10,36 @@ import type { ReactNode } from "react";
 const DELETIONS_PROSE =
   "your team, company identity, office state, and saved workflows, plus local logs, sessions, provider state (including codex-headless scratch), calendar, and wiki memory";
 
+// Aftermath copy is a single canonical sentence used by every shred surface
+// (inline banner, Danger Zone modal, danger-zone card subtitle). Both call
+// sites trigger the same `/workspace/shred` → `b.Reset` flow on the broker
+// (see `internal/team/broker.go` `RouteOptions{ResetRuntime: b.Reset}`), so
+// they share user-observable behavior — the prose should match too.
+const AFTERMATH_PROSE = "Onboarding will reopen immediately.";
+
 const PRESERVED_PROSE =
   "Task worktrees, your global config and API keys, and your OpenClaw device identity are kept.";
 
-export interface ShredWarningCopyProps {
-  // Sentence describing what happens after the wipe — varies by call site
-  // (e.g. "WUPHF will stop after the wipe; relaunch it to reopen onboarding."
-  // for the inline restart banner vs. "Onboarding will reopen immediately."
-  // for the Danger Zone modal where the broker is about to keep running).
-  aftermath: ReactNode;
-}
-
 // ShredWarningCopy renders the canonical destructive-warning paragraph used
-// in confirm modals. Pass `aftermath` for the trailing context sentence.
-export function ShredWarningCopy({ aftermath }: ShredWarningCopyProps) {
+// in confirm modals. No props by design — keeping the copy uniform across
+// every shred surface is the whole point of this module.
+export function ShredWarningCopy() {
   return (
     <>
-      This permanently deletes {DELETIONS_PROSE}. {aftermath} {PRESERVED_PROSE}{" "}
-      <strong>This cannot be undone.</strong>
+      This permanently deletes {DELETIONS_PROSE}. {AFTERMATH_PROSE}{" "}
+      {PRESERVED_PROSE} <strong>This cannot be undone.</strong>
+    </>
+  );
+}
+
+// ShredCardSubtitle renders the short summary used at the top of the Danger
+// Zone shred card (above the bullet lists). Keeps the prose anchored to the
+// same source of truth as the modal intro.
+export function ShredCardSubtitle() {
+  return (
+    <>
+      Full wipe. Deletes {DELETIONS_PROSE}, then returns you to onboarding. Use
+      this to start completely fresh or to try a different blueprint.
     </>
   );
 }

@@ -31,6 +31,7 @@ import {
 import { useAppStore } from "../../stores/app";
 import { InlineCommand } from "../ui/InlineCommand";
 import {
+  ShredCardSubtitle,
   ShredDeletionsList,
   ShredPreservationList,
   ShredWarningCopy,
@@ -465,9 +466,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
               title: "Shred this workspace?",
               severity: "critical",
               confirmLabel: "Shred workspace",
-              intro: (
-                <ShredWarningCopy aftermath="WUPHF will stop after the wipe; relaunch it to reopen onboarding." />
-              ),
+              intro: <ShredWarningCopy />,
             }}
           />{" "}
           then relaunch to apply.
@@ -1566,8 +1565,11 @@ function DangerZoneSection() {
   const handleShred = async () => {
     setBusy(true);
     try {
-      await shred();
-      setOpen(null);
+      // Leave the modal mounted on failure so the user can retry without
+      // having to reopen the Danger Zone and re-type the confirm phrase.
+      // useShredAction surfaces the failure toast and never throws.
+      const ok = await shred();
+      if (ok) setOpen(null);
     } finally {
       setBusy(false);
     }
@@ -1623,10 +1625,7 @@ function DangerZoneSection() {
           <span>Shred workspace</span>
         </div>
         <div style={dangerStyles.cardSubtitle}>
-          Full wipe. Deletes your team, company identity, office task receipts,
-          saved workflows, local memory, logs, and provider session state, then
-          returns you to onboarding. Use this to start completely fresh or to
-          try a different blueprint.
+          <ShredCardSubtitle />
         </div>
         <div style={dangerStyles.listLabel}>Deletes</div>
         <ul style={dangerStyles.list}>
@@ -1669,9 +1668,7 @@ function DangerZoneSection() {
         <WipeModal
           title="Shred this workspace?"
           severity="critical"
-          intro={
-            <ShredWarningCopy aftermath="Onboarding will reopen immediately." />
-          }
+          intro={<ShredWarningCopy />}
           confirmLabel="Shred workspace"
           busy={busy}
           onConfirm={handleShred}
