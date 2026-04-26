@@ -1,7 +1,6 @@
 package team
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -115,9 +114,6 @@ func TestFindUnansweredMessagesNexReplyDoesNotCountAsAgentAnswer(t *testing.T) {
 
 func TestBuildResumePacketWithTasksAndMessages(t *testing.T) {
 	// Suppress broker state path for this test.
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
 	tasks := []teamTask{
 		{ID: "t1", Title: "Build the login page", Owner: "fe", Status: "in_progress"},
 		{ID: "t2", Title: "Design API schema", Owner: "fe", Status: "pending"},
@@ -182,10 +178,7 @@ func TestBuildResumePacketMessagesOnly(t *testing.T) {
 // --- Tests for Launcher.buildResumePackets ---
 
 func TestBuildResumePacketsTaggedMessageRoutesToTaggedAgent(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.messages = []channelMessage{
 		{ID: "h1", From: "you", Content: "hey @fe please build the login page", Tagged: []string{"fe"}, Timestamp: "2026-04-14T10:00:00Z"},
@@ -220,10 +213,7 @@ func TestBuildResumePacketsTaggedMessageRoutesToTaggedAgent(t *testing.T) {
 }
 
 func TestBuildResumePacketsIncludesDynamicBrokerMembersOutsideLaunchPack(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO"},
@@ -264,10 +254,7 @@ func TestBuildResumePacketsIncludesDynamicBrokerMembersOutsideLaunchPack(t *test
 }
 
 func TestBuildResumePacketsUntaggedMessageRoutesToLead(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.messages = []channelMessage{
 		{ID: "h1", From: "you", Content: "what should we build next?", Timestamp: "2026-04-14T10:00:00Z"},
@@ -298,10 +285,7 @@ func TestBuildResumePacketsUntaggedMessageRoutesToLead(t *testing.T) {
 }
 
 func TestBuildResumePacketsInFlightTasksIncluded(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{
 		{ID: "t1", Title: "Build dashboard", Owner: "fe", Status: "in_progress"},
@@ -331,10 +315,7 @@ func TestBuildResumePacketsInFlightTasksIncluded(t *testing.T) {
 }
 
 func TestBuildResumePacketsEmptyWhenNothingInFlight(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	// No tasks, no messages.
 	l := &Launcher{
 		broker: b,
@@ -360,10 +341,7 @@ func TestResumeInFlightWorkNoBrokerNoPanic(t *testing.T) {
 }
 
 func TestResumeInFlightWorkNoPackNoPanic(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.messages = []channelMessage{
 		{ID: "h1", From: "you", Content: "unanswered question", Timestamp: "2026-04-14T10:00:00Z"},
@@ -377,10 +355,7 @@ func TestResumeInFlightWorkNoPackNoPanic(t *testing.T) {
 }
 
 func TestBuildResumePacketsUnansweredRoutesToLead(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.messages = []channelMessage{
 		// answered: has a reply
@@ -419,10 +394,7 @@ func TestBuildResumePacketsUnansweredRoutesToLead(t *testing.T) {
 }
 
 func TestBuildResumePacketsSkipsAgentsNotInPack(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.tasks = []teamTask{
 		// "designer" is NOT in the pack below — their task should be skipped.
@@ -460,10 +432,7 @@ func TestBuildResumePacketsSkipsAgentsNotInPack(t *testing.T) {
 }
 
 func TestBuildResumePacketsSkipsTaggedAgentsNotInPack(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	b.messages = []channelMessage{
 		// Tagged @old-agent who is no longer in the pack.
@@ -547,10 +516,7 @@ func TestResumeInFlightWorkHeadlessEnqueuesLeadEvenWhenSpecialistsPresent(t *tes
 	// Fix: enqueue the lead first so its queue entry is set before specialists'
 	// queues are populated — the queue-hold check fires only when OTHER slugs
 	// have non-empty queues at the time of the CEO enqueue.
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	b.mu.Lock()
 	// fe has an in-flight task (specialist).
 	b.tasks = []teamTask{
@@ -667,12 +633,9 @@ func TestResumeInFlightWorkTUIClaudeRoutesHeadless(t *testing.T) {
 	// Leaked path (not t.TempDir) so a headless worker goroutine that
 	// outlives the test can keep writing without racing the dir cleanup
 	// and failing the test with an `unlinkat ... directory not empty`.
-	statePath := leakedBrokerStatePath(t)
-	setBrokerStatePathForTest(t, func() string { return statePath })
-
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
-	b := NewBroker()
+	b := NewBrokerAt(leakedBrokerStatePath(t))
 	b.mu.Lock()
 	b.tasks = []teamTask{
 		{ID: "t1", Title: "Build login form", Owner: "fe", Status: "in_progress"},
@@ -721,9 +684,6 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 	// Leaked path (not t.TempDir) so a headless worker goroutine that
 	// outlives the test can keep writing without racing the dir cleanup
 	// and failing the test with an `unlinkat ... directory not empty`.
-	statePath := leakedBrokerStatePath(t)
-	setBrokerStatePathForTest(t, func() string { return statePath })
-
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
 	oldSendPane := launcherSendNotificationToPane
@@ -733,7 +693,7 @@ func TestResumeInFlightWorkRoutesPerAgentProviderBinding(t *testing.T) {
 	}
 	defer func() { launcherSendNotificationToPane = oldSendPane }()
 
-	b := NewBroker()
+	b := NewBrokerAt(leakedBrokerStatePath(t))
 	b.mu.Lock()
 	b.members = []officeMember{
 		{Slug: "ceo", Name: "CEO", Provider: provider.ProviderBinding{Kind: provider.KindClaudeCode}},

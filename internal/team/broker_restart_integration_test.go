@@ -27,9 +27,7 @@ import (
 
 func TestBrokerStatePersistsAcrossReload_ChannelAndMember(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "broker-state.json")
-	setBrokerStatePathForTest(t, func() string { return statePath })
-
-	b := NewBroker()
+	b := NewBrokerAt(statePath)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("StartOnPort: %v", err)
 	}
@@ -98,7 +96,7 @@ func TestBrokerStatePersistsAcrossReload_ChannelAndMember(t *testing.T) {
 	// Fresh broker on the same path, loads from disk. reloadedBroker
 	// constructs a Broker and explicitly calls loadState — the only
 	// way to opt back into disk read under the test-mode gate.
-	reloaded := reloadedBroker(t)
+	reloaded := reloadedBroker(t, b)
 
 	// Channel round-tripped.
 	reloaded.mu.Lock()

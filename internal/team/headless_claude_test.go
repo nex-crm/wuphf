@@ -67,13 +67,9 @@ func TestHeadlessClaudeModel_OpusForLeadOnly(t *testing.T) {
 }
 
 // TestHeadlessClaudeModel_CustomLeadSlug verifies model selection when the
-// pack defines a non-"ceo" lead slug.
-// brokerStatePath is redirected to an empty temp dir so officeMembersSnapshot()
-// falls through to the pack definition instead of loading live state.
+// pack defines a non-"ceo" lead slug. No broker is constructed, so
+// officeMembersSnapshot() falls through to the pack definition.
 func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-
 	l := &Launcher{
 		pack: &agent.PackDefinition{
 			LeadSlug: "captain",
@@ -116,7 +112,6 @@ func TestHeadlessClaudeModel_CustomLeadSlug(t *testing.T) {
 func TestRunHeadlessClaudeTurn_NoResumeFlag(t *testing.T) {
 	// Redirect broker state to an isolated temp dir.
 	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
 
 	origCommandContext := headlessClaudeCommandContext
 	origLookPath := headlessClaudeLookPath
@@ -137,7 +132,7 @@ func TestRunHeadlessClaudeTurn_NoResumeFlag(t *testing.T) {
 		return exec.CommandContext(ctx, "/bin/true")
 	}
 
-	b := NewBroker()
+	b := NewBrokerAt(filepath.Join(tmpDir, "broker-state.json"))
 	l := minimalLauncher(false)
 	l.broker = b
 	l.cwd = tmpDir

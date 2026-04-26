@@ -71,29 +71,6 @@ func DisableRealTaskWorktreeForTests() {
 	}
 }
 
-// setBrokerStatePathForTest redirects brokerStatePath() to fn for the
-// duration of the test, then restores the prior override on cleanup.
-//
-// Tests previously did `oldFn := brokerStatePath; brokerStatePath = ...`
-// against a package-level var. That pattern was a data race against the
-// headless-codex queue worker spawned by resumeInFlightWork — the worker
-// could outlive the test's deferred restore and observe the swap mid-call.
-// Use this helper instead. Reads use atomic.Pointer.Load and the cleanup
-// runs via t.Cleanup so the override stays installed until ALL goroutines
-// the test spawned have either finished or panicked.
-func setBrokerStatePathForTest(t *testing.T, fn func() string) {
-	t.Helper()
-	prior := brokerStatePathOverride.Load()
-	brokerStatePathOverride.Store(&fn)
-	t.Cleanup(func() {
-		if prior == nil {
-			brokerStatePathOverride.Store(nil)
-			return
-		}
-		brokerStatePathOverride.Store(prior)
-	})
-}
-
 // setHeadlessCodexRunTurnForTest redirects headlessCodexRunTurn(...) to fn
 // for the duration of the test, then restores the prior override on cleanup.
 //
@@ -107,10 +84,6 @@ func setHeadlessCodexRunTurnForTest(t *testing.T, fn func(l *Launcher, ctx conte
 	prior := headlessCodexRunTurnOverride.Load()
 	headlessCodexRunTurnOverride.Store(&fn)
 	t.Cleanup(func() {
-		if prior == nil {
-			headlessCodexRunTurnOverride.Store(nil)
-			return
-		}
 		headlessCodexRunTurnOverride.Store(prior)
 	})
 }

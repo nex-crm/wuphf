@@ -20,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	wuphf "github.com/nex-crm/wuphf"
@@ -58,28 +57,6 @@ const defaultAgentRateLimitWindow = time.Minute
 // broker call so the broker can attribute cost back to the agent. Must match
 // the value set by internal/teammcp/server.go authHeaders().
 const agentRateLimitHeader = "X-WUPHF-Agent"
-
-// brokerStatePathOverride lets tests redirect the state path to a temp dir
-// without racing with production goroutines (the headless-codex queue worker
-// spawned by resumeInFlightWork can outlive a test's deferred cleanup).
-//
-// Production reads via brokerStatePath() — a function, not a var — go through
-// the atomic. Tests must call setBrokerStatePathForTest(t, fn) instead of
-// mutating a package-level variable directly.
-var brokerStatePathOverride atomic.Pointer[func() string]
-
-// brokerStatePath returns the current state-file path. Defaults to
-// defaultBrokerStatePath; tests can override via setBrokerStatePathForTest.
-//
-// Race safety: read goes through atomic.Pointer.Load so it can interleave
-// safely with a test's override + cleanup, even if a queue worker spawned
-// before cleanup observes the swap mid-test.
-func brokerStatePath() string {
-	if p := brokerStatePathOverride.Load(); p != nil {
-		return (*p)()
-	}
-	return defaultBrokerStatePath()
-}
 
 // studioPackageGenerator routes Studio package generation through the
 // install-wide LLM provider so opencode-only or claude-code-only setups
@@ -563,6 +540,13 @@ type Broker struct {
 
 	stopCh   chan struct{} // closed by Stop(); signals background goroutines to exit
 	stopOnce sync.Once
+
+	// statePath is the on-disk broker-state.json path bound at construction.
+	// NewBrokerAt(path) sets this directly; NewBroker() resolves
+	// defaultBrokerStatePath() once and pins the result. A later-arriving
+	// goroutine writing via a stale closure (or a sibling broker built at
+	// a different path) cannot retarget this broker's saves.
+	statePath string
 }
 
 func taskNeedsLocalWorktree(task *teamTask) bool {
@@ -909,16 +893,39 @@ func (b *Broker) AgentStream(slug string) *agentStreamBuffer {
 	return s
 }
 
-// NewBroker creates a new channel broker with a random auth token.
-// skipBrokerStateLoadOnConstruct gates the lazy read of brokerStatePath()
-// inside NewBroker. Production keeps it false so the CLI resumes from disk
-// state. A *_test.go init flips it to true so tests that call NewBroker get
-// a fresh broker by default, immune to state leaked by prior tests via a
-// shared broker-state.json. Persistence tests that want the load call
-// b.loadState() explicitly after construction.
+// skipBrokerStateLoadOnConstruct gates the auto-load of disk state
+// inside NewBrokerAt. Production keeps it false so the CLI resumes from
+// disk state. A *_test.go init flips it to true so tests that call
+// NewBrokerAt / NewBroker get a fresh broker by default, immune to state
+// leaked by prior tests via a shared broker-state.json. Persistence
+// tests that want the load call b.loadState() explicitly after
+// construction (or use reloadedBroker(t, b)).
 var skipBrokerStateLoadOnConstruct = false
 
+// NewBroker constructs a Broker bound to defaultBrokerStatePath() resolved
+// at call time. Production code uses this so the CLI resumes from the
+// default ~/.wuphf/team/broker-state.json (or its WUPHF_BROKER_STATE_PATH /
+// WUPHF_RUNTIME_HOME override). Tests should prefer NewBrokerAt or the
+// newTestBroker(t) helper — both pin a per-test path explicitly.
 func NewBroker() *Broker {
+	return NewBrokerAt(defaultBrokerStatePath())
+}
+
+// NewBrokerAt constructs a Broker whose state is persisted to statePath.
+// The path is bound at construction time and stored on the Broker, so
+// late-arriving goroutines (or sibling brokers built at other paths in
+// the same process) cannot retarget this broker's saves. Use this instead
+// of NewBroker() everywhere that needs path isolation — notably tests
+// that want to pin state under t.TempDir.
+//
+// Panics on an empty statePath. With "" the broker would silently write
+// `.last-good` and `<empty>.tmp.<rand>` files into the process cwd, which
+// is the kind of foot-gun that only surfaces in production when a CI
+// runner happens to execute from a writable directory.
+func NewBrokerAt(statePath string) *Broker {
+	if strings.TrimSpace(statePath) == "" {
+		panic("team.NewBrokerAt: statePath must not be empty (use defaultBrokerStatePath() if no explicit path)")
+	}
 	b := &Broker{
 		channelStore:        channel.NewStore(),
 		token:               generateToken(),
@@ -941,6 +948,8 @@ func NewBroker() *Broker {
 		agentRateLimitBuckets:  make(map[string]ipRateLimitBucket),
 		agentRateLimitWindow:   defaultAgentRateLimitWindow,
 		agentRateLimitRequests: defaultAgentRateLimitRequestsPerWindow,
+
+		statePath: statePath,
 	}
 	if !skipBrokerStateLoadOnConstruct {
 		_ = b.loadState()
@@ -1578,8 +1587,8 @@ func (b *Broker) StartOnPort(port int) error {
 	// completeFn posts the first task as a human message and seeds the team.
 	onboarding.RegisterRoutes(mux, b.onboardingCompleteFn, b.packSlug, b.requireAuth)
 	// Workspace wipes: POST /workspace/reset (narrow) and /workspace/shred (full).
-	// These clear disk state and reset the live broker in-process so the web UI
-	// can transition straight into onboarding without killing the broker.
+	// After a successful wipe, b.Reset clears live in-memory broker state so the
+	// broker stays up without repersisting stale messages back onto disk.
 	// Auth-gated via requireAuth because shred permanently deletes state and
 	// must not be reachable without the broker token.
 	workspace.RegisterRoutesWithOptions(mux, workspace.RouteOptions{
@@ -3020,7 +3029,7 @@ func (b *Broker) Reset() {
 	b.sessionMode = mode
 	b.oneOnOneAgent = agent
 	_ = b.saveLocked()
-	_ = os.Remove(brokerStateSnapshotPath())
+	_ = os.Remove(b.stateSnapshotPath())
 	b.mu.Unlock()
 }
 
@@ -3038,8 +3047,10 @@ func defaultBrokerStatePath() string {
 	return filepath.Join(home, ".wuphf", "team", "broker-state.json")
 }
 
-func brokerStateSnapshotPath() string {
-	return brokerStatePath() + ".last-good"
+// stateSnapshotPath returns the path the Broker writes its last-good
+// crash-recovery snapshot to. Bound to b.statePath (set at construction).
+func (b *Broker) stateSnapshotPath() string {
+	return b.statePath + ".last-good"
 }
 
 func loadBrokerStateFile(path string) (brokerState, error) {
@@ -3078,7 +3089,13 @@ func brokerStateShouldSnapshot(state brokerState) bool {
 }
 
 func (b *Broker) loadState() error {
-	path := brokerStatePath()
+	if b.statePath == "" {
+		// Direct &Broker{} literal in a unit test that exercises only
+		// in-memory logic — no file to load from. Treat as a fresh
+		// no-state broker and let the caller proceed.
+		return nil
+	}
+	path := b.statePath
 	state, err := loadBrokerStateFile(path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
@@ -3086,7 +3103,7 @@ func (b *Broker) loadState() error {
 		}
 		state = brokerState{}
 	}
-	snapshotPath := brokerStateSnapshotPath()
+	snapshotPath := b.stateSnapshotPath()
 	if snapshot, snapErr := loadBrokerStateFile(snapshotPath); snapErr == nil {
 		if brokerStateActivityScore(snapshot) > brokerStateActivityScore(state) {
 			state = snapshot
@@ -3147,8 +3164,16 @@ func (b *Broker) loadState() error {
 }
 
 func (b *Broker) saveLocked() error {
-	path := brokerStatePath()
-	snapshotPath := brokerStateSnapshotPath()
+	if b.statePath == "" {
+		// A direct &Broker{} literal (no NewBrokerAt/NewBroker) reaching the
+		// persistence path means a test wired in-memory state but accidentally
+		// triggered a save — without this guard the empty path would silently
+		// resolve to "" + cwd-adjacent files. Fail loudly so the caller fixes
+		// the construction site instead of corrupting the test workdir.
+		return errors.New("broker: saveLocked requires a non-empty statePath; construct via NewBrokerAt(path)")
+	}
+	path := b.statePath
+	snapshotPath := b.stateSnapshotPath()
 	if len(b.messages) == 0 && len(b.tasks) == 0 && len(activeRequests(b.requests)) == 0 && len(b.actions) == 0 && len(b.signals) == 0 && len(b.decisions) == 0 && len(b.watchdogs) == 0 && len(b.policies) == 0 && len(b.scheduler) == 0 && len(b.skills) == 0 && len(b.sharedMemory) == 0 && isDefaultChannelState(b.channels) && isDefaultOfficeMemberState(b.members) && b.counter == 0 && b.notificationSince == "" && b.insightsSince == "" && usageStateIsZero(b.usage) && b.sessionMode == SessionModeOffice && b.oneOnOneAgent == DefaultOneOnOneAgent {
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
@@ -3216,11 +3241,12 @@ func (b *Broker) saveLocked() error {
 // cannot race on the source path of the rename.
 //
 // The previous fixed `<path>.tmp` filename was safe in production (one broker
-// owns one path) but broke the test suite: 22 *_test.go files override
-// brokerStatePath, plus a leaked tempdir from worktree_guard_test.go init()
-// is shared across every test that doesn't override. Two saves landing on
-// the same path could interleave like A.WriteFile / B.WriteFile / A.Rename /
-// B.Rename — and B's Rename failed with "no such file or directory" because
+// owns one path) but broke the test suite: many *_test.go files used to
+// monkey-patch the package-level state-path var and a leaked tempdir from
+// worktree_guard_test.go init() was shared across every unisolated test.
+// Two saves landing on the same path could interleave like A.WriteFile /
+// B.WriteFile / A.Rename / B.Rename — and B's Rename failed with
+// "no such file or directory" because
 // A had already renamed the shared tmp out from under it. That was the CI
 // flake on PR #281's `test` job. See broker_save_race_test.go for the
 // regression repro.

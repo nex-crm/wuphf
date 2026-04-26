@@ -46,26 +46,13 @@ func ensureOperationsFallbackFS(t *testing.T) {
 	operations.SetFallbackFS(sub)
 }
 
-// withIsolatedBrokerState gives the test a broker with its own state file
-// and a clean broker state on disk, then cleans up when done.
-func withIsolatedBrokerState(t *testing.T) func() {
-	t.Helper()
-	tmpDir := t.TempDir()
-	setBrokerStatePathForTest(t, func() string { return filepath.Join(tmpDir, "broker-state.json") })
-	// setBrokerStatePathForTest registers t.Cleanup; the returned no-op
-	// preserves the legacy "call this when done" call-site shape.
-	return func() {}
-}
-
 // TestOnboardingCompleteSeedsFromPickedBlueprint verifies that when the
 // wizard POSTs a curated blueprint id, the broker seeds the exact member
 // list from that blueprint's starter.agents — not ceo/planner/executor/
 // reviewer from DefaultManifest.
 func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -114,9 +101,7 @@ func TestOnboardingCompleteSeedsFromPickedBlueprint(t *testing.T) {
 // dropping the blueprint's other specialists.
 func TestOnboardingCompleteHonorsAgentFilter(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", []string{"ceo", "builder"}); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -153,9 +138,7 @@ func TestOnboardingCompleteHonorsAgentFilter(t *testing.T) {
 // lead and posts a system message explaining the fallback.
 func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", []string{}); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -191,9 +174,7 @@ func TestOnboardingCompleteAgentsEmptySeedsLeadOnly(t *testing.T) {
 // seeds the resulting team — NOT the DefaultManifest roster.
 func TestOnboardingCompleteFromScratchSynthesizes(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Build an automated customer-support operation", false, "", nil); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -218,9 +199,7 @@ func TestOnboardingCompleteFromScratchSynthesizes(t *testing.T) {
 
 func TestOnboardingCompleteFromScratchHonorsSelectedFoundingAgents(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Build an automated customer-support operation", false, "", []string{"ceo", "founding-engineer"}); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -289,9 +268,7 @@ func TestBlankSlateMembersExplicitLeadOnlySelectionStaysLeadOnly(t *testing.T) {
 // seeds the team but does not post an onboarding_origin message.
 func TestOnboardingCompleteSkipTaskSeedsNoKickoff(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("", true, "niche-crm", nil); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -322,15 +299,13 @@ func TestOnboardingCompleteSkipTaskSeedsNoKickoff(t *testing.T) {
 // team on the next broker restart.
 func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("", true, "niche-crm", nil); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
 
 	// Fresh broker instance re-reads state from disk.
-	reloaded := reloadedBroker(t)
+	reloaded := reloadedBroker(t, b)
 	reloaded.mu.Lock()
 	slugs := make([]string, 0, len(reloaded.members))
 	for _, m := range reloaded.members {
@@ -365,9 +340,7 @@ func TestOnboardingCompleteSkipTaskPersistsTeam(t *testing.T) {
 // HTTP 500). No partial state should be seeded.
 func TestOnboardingCompleteLoadBlueprintErrorReturnsError(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	err := b.onboardingCompleteFn("go", false, "definitely-not-a-real-blueprint", nil)
 	if err == nil {
 		t.Fatalf("expected error for unknown blueprint, got nil")
@@ -383,9 +356,7 @@ func TestOnboardingCompleteLoadBlueprintErrorReturnsError(t *testing.T) {
 // broker_onboarding.go:49-53 (pre-rewrite) must survive the unified flow.
 func TestOnboardingCompleteDedupesDuplicateTaskMessage(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("hello world", false, "niche-crm", nil); err != nil {
 		t.Fatalf("first call: %v", err)
 	}
@@ -412,9 +383,7 @@ func TestOnboardingCompleteDedupesDuplicateTaskMessage(t *testing.T) {
 // "blank-slate-N" prefix, so persisted rows are self-describing.
 func TestTaskIDsUseBlueprintPrefix(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("Stand up niche CRM", false, "niche-crm", nil); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -441,9 +410,7 @@ func TestTaskIDsUseBlueprintPrefix(t *testing.T) {
 // synthesis-path contract: nil selectedAgents means no filtering applied.
 func TestSeedFromBlueprintNilAgentsKeepsFullRoster(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	if err := b.onboardingCompleteFn("go", false, "niche-crm", nil); err != nil {
 		t.Fatalf("onboardingCompleteFn: %v", err)
 	}
@@ -516,9 +483,7 @@ func TestBlankSlateOfficeChannelsFromBlueprint_RendersCommandSlug(t *testing.T) 
 // claude process — the symptom the user reported during the ui test.
 func TestOnboardingCompleteEmitsOfficeReseededEvent(t *testing.T) {
 	ensureOperationsFallbackFS(t)
-	defer withIsolatedBrokerState(t)()
-
-	b := NewBroker()
+	b := newTestBroker(t)
 	events, unsubscribe := b.SubscribeOfficeChanges(32)
 	defer unsubscribe()
 

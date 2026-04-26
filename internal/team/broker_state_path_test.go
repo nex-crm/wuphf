@@ -1,7 +1,7 @@
 package team
 
 // Characterization tests for broker state-path resolution. Intended as
-// the floor that the "Track A" refactor (replacing the brokerStatePath
+// the floor that the "Track A" refactor (replacing the state-path
 // package-var with a Broker constructor argument) must not regress.
 //
 // The existing TestBrokerPersistsAndReloadsState + Loads… tests cover
@@ -76,16 +76,15 @@ func TestDefaultBrokerStatePath_RelativeFallbackWhenHomeMissing(t *testing.T) {
 }
 
 func TestBrokerStateSnapshotPathIsLastGoodSibling(t *testing.T) {
-	// Snapshot path is always `<brokerStatePath>.last-good` — same
-	// directory, same base name plus suffix. The load-side path (hit
-	// by TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered)
-	// relies on this exact shape. Post-refactor, if snapshot
-	// derivation drifts to a different directory or format, recovery
-	// silently breaks.
+	// Snapshot path is always `<statePath>.last-good` — same directory,
+	// same base name plus suffix. The load-side path (hit by
+	// TestBrokerLoadsLastGoodSnapshotWhenPrimaryStateIsClobbered) relies
+	// on this exact shape. If snapshot derivation ever drifts to a
+	// different directory or format, recovery silently breaks.
 	statePath := filepath.Join(t.TempDir(), "broker-state.json")
-	setBrokerStatePathForTest(t, func() string { return statePath })
+	b := NewBrokerAt(statePath)
 
-	got := brokerStateSnapshotPath()
+	got := b.stateSnapshotPath()
 	want := statePath + ".last-good"
 	if got != want {
 		t.Fatalf("snapshot path drifted: got %q, want %q", got, want)
@@ -101,17 +100,16 @@ func TestBrokerStateSnapshotPathIsLastGoodSibling(t *testing.T) {
 
 func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 	// The TestMain in this package flips skipBrokerStateLoadOnConstruct
-	// to true so NewBroker() starts fresh and tests don't cross-
+	// to true so NewBrokerAt() starts fresh and tests don't cross-
 	// contaminate via a shared broker-state.json. Persistence-checking
-	// tests opt back into disk load via reloadedBroker(t). Track A
-	// must preserve this contract: constructor argument or not, a
-	// test-mode NewBroker() must NOT auto-load.
+	// tests opt back into disk load via reloadedBroker(t, b). Track A
+	// must preserve this contract: a test-mode constructor must NOT
+	// auto-load.
 	statePath := leakedBrokerStatePath(t)
-	setBrokerStatePathForTest(t, func() string { return statePath })
 
 	// Seed disk with a distinctive message. If the gate is broken,
-	// NewBroker() will pick it up.
-	seed := NewBroker()
+	// NewBrokerAt() will pick it up.
+	seed := NewBrokerAt(statePath)
 	seed.mu.Lock()
 	seed.messages = []channelMessage{{
 		ID:        "seed-msg",
@@ -130,20 +128,79 @@ func TestNewBroker_SkipStateLoadGateRespected(t *testing.T) {
 	if !skipBrokerStateLoadOnConstruct {
 		t.Fatal("precondition: skipBrokerStateLoadOnConstruct should be true in tests")
 	}
-	gated := NewBroker()
+	gated := NewBrokerAt(statePath)
 	if got := len(gated.Messages()); got != 0 {
 		t.Fatalf("gate=true must yield 0 messages on construct; got %d", got)
 	}
 
-	// Gate OFF (production default): NewBroker() reads from disk.
+	// Gate OFF (production default): NewBrokerAt() reads from disk.
 	oldGate := skipBrokerStateLoadOnConstruct
 	skipBrokerStateLoadOnConstruct = false
 	t.Cleanup(func() { skipBrokerStateLoadOnConstruct = oldGate })
-	loaded := NewBroker()
+	loaded := NewBrokerAt(statePath)
 	msgs := loaded.Messages()
 	if len(msgs) != 1 || msgs[0].ID != "seed-msg" {
 		t.Fatalf("gate=false must auto-load seed; got %+v", msgs)
 	}
+}
+
+func TestNewBrokerAt_PathSnapshottedAtConstruction(t *testing.T) {
+	// NewBrokerAt binds the state path to the Broker at construction so a
+	// later construction of a second broker at a different path can't
+	// retarget the first broker's saves. Contract: after construction,
+	// every save from this broker lands at b.statePath regardless of
+	// what other brokers (constructed later, with other paths) are doing
+	// in the same process.
+	boundPath := filepath.Join(t.TempDir(), "bound-state.json")
+	b := NewBrokerAt(boundPath)
+
+	// Construct a second broker at a distinct path — simulates another
+	// test running alongside this one. Its statePath must not bleed into
+	// b's saves. Held by `other` so a future constructor-time goroutine in
+	// NewBrokerAt would still have an explicit reference to stop on.
+	unboundPath := filepath.Join(t.TempDir(), "should-not-be-written.json")
+	other := NewBrokerAt(unboundPath)
+	_ = other
+
+	b.mu.Lock()
+	b.messages = []channelMessage{{
+		ID:        "bound-msg",
+		From:      "ceo",
+		Content:   "belongs to the bound path",
+		Timestamp: "2026-04-25T00:00:00Z",
+	}}
+	b.counter = 1
+	if err := b.saveLocked(); err != nil {
+		b.mu.Unlock()
+		t.Fatalf("saveLocked: %v", err)
+	}
+	b.mu.Unlock()
+
+	if _, err := os.Stat(boundPath); err != nil {
+		t.Fatalf("bound path missing after save: %v", err)
+	}
+	if _, err := os.Stat(unboundPath); !os.IsNotExist(err) {
+		t.Fatalf("unbound path was written: err=%v", err)
+	}
+	if b.stateSnapshotPath() != boundPath+".last-good" {
+		t.Fatalf("snapshot method did not derive from bound path: got %q, want %q",
+			b.stateSnapshotPath(), boundPath+".last-good")
+	}
+}
+
+func TestNewBrokerAt_PanicsOnEmptyPath(t *testing.T) {
+	// Empty statePath would silently degrade saveLocked into writing
+	// `<empty>.tmp.<rand>` and `.last-good` into the process cwd. The
+	// constructor must panic instead so the foot-gun surfaces at
+	// construction time, not on the first save attempt half a second
+	// later.
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected NewBrokerAt(\"\") to panic; got nil")
+		}
+	}()
+	_ = NewBrokerAt("")
 }
 
 func TestBrokerStop_NoWriteAfterReturn(t *testing.T) {
@@ -160,9 +217,7 @@ func TestBrokerStop_NoWriteAfterReturn(t *testing.T) {
 	// reads a refactored `b.statePath` via a pointer captured at Start
 	// time and continues writing after b.stopCh closes).
 	statePath := leakedBrokerStatePath(t)
-	setBrokerStatePathForTest(t, func() string { return statePath })
-
-	b := NewBroker()
+	b := NewBrokerAt(statePath)
 	b.mu.Lock()
 	b.messages = []channelMessage{{
 		ID:        "pre-stop",
