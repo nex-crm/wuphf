@@ -196,9 +196,9 @@ func (t *TelegramTransport) drainOutbound(ctx context.Context) error {
 			}
 			// Send typing indicator before the message
 			if chatIDInt, err := strconv.ParseInt(chatID, 10, 64); err == nil {
-				_ = SendTypingAction(t.BotToken, chatIDInt)
+				_ = SendTypingAction(ctx, t.BotToken, chatIDInt)
 			}
-			if err := t.SendToTelegram(chatID, msg); err != nil {
+			if err := t.SendToTelegram(ctx, chatID, msg); err != nil {
 				// Transient send failure — message was already dequeued,
 				// so we log and move on. In a future version we could
 				// implement retry with dead-letter semantics.
@@ -232,7 +232,7 @@ func (t *TelegramTransport) typingLoop(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			_ = SendTypingAction(t.BotToken, chatID)
+			_ = SendTypingAction(ctx, t.BotToken, chatID)
 		}
 	}
 }
@@ -258,9 +258,9 @@ func (t *TelegramTransport) HandleInbound(chatID int64, chatType string, from *t
 }
 
 // SendToTelegram sends a broker message to the specified Telegram chat with HTML formatting.
-func (t *TelegramTransport) SendToTelegram(chatID string, msg channelMessage) error {
+func (t *TelegramTransport) SendToTelegram(ctx context.Context, chatID string, msg channelMessage) error {
 	text := formatTelegramOutbound(msg)
-	return t.sendMessageHTML(chatID, text)
+	return t.sendMessageHTML(ctx, chatID, text)
 }
 
 // resolveUser maps a Telegram user to an office member slug.
@@ -400,17 +400,21 @@ func (t *TelegramTransport) getUpdates(ctx context.Context, offset int64) ([]tel
 }
 
 // sendMessage calls the Telegram sendMessage endpoint (plain text).
-func (t *TelegramTransport) sendMessage(chatID, text string) error {
-	return t.sendMessageWithMode(chatID, text, "")
+func (t *TelegramTransport) sendMessage(ctx context.Context, chatID, text string) error {
+	return t.sendMessageWithMode(ctx, chatID, text, "")
 }
 
 // sendMessageHTML calls the Telegram sendMessage endpoint with HTML parse mode.
-func (t *TelegramTransport) sendMessageHTML(chatID, text string) error {
-	return t.sendMessageWithMode(chatID, text, "HTML")
+func (t *TelegramTransport) sendMessageHTML(ctx context.Context, chatID, text string) error {
+	return t.sendMessageWithMode(ctx, chatID, text, "HTML")
 }
 
 // sendMessageWithMode calls the Telegram sendMessage endpoint with an optional parse_mode.
-func (t *TelegramTransport) sendMessageWithMode(chatID, text, parseMode string) error {
+//
+// The 30s deadline is derived from the caller's ctx (typically the
+// transport drainOutbound goroutine's ctx) so a transport shutdown
+// cancels any in-flight send instead of letting it ride out the full 30s.
+func (t *TelegramTransport) sendMessageWithMode(ctx context.Context, chatID, text, parseMode string) error {
 	url := fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBase, t.BotToken)
 
 	payload := map[string]string{
@@ -426,7 +430,7 @@ func (t *TelegramTransport) sendMessageWithMode(chatID, text, parseMode string) 
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
@@ -455,7 +459,11 @@ func (t *TelegramTransport) sendMessageWithMode(chatID, text, parseMode string) 
 }
 
 // SendTypingAction sends a "typing" chat action to a Telegram chat.
-func SendTypingAction(token string, chatID int64) error {
+//
+// The 30s deadline is derived from the caller's ctx — transport drain and
+// typing loops pass their parent ctx so a transport shutdown cancels any
+// in-flight chat-action call.
+func SendTypingAction(ctx context.Context, token string, chatID int64) error {
 	url := fmt.Sprintf("%s/bot%s/sendChatAction", telegramAPIBase, token)
 
 	data, err := json.Marshal(map[string]any{
@@ -466,7 +474,7 @@ func SendTypingAction(token string, chatID int64) error {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
