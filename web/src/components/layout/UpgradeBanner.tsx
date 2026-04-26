@@ -62,7 +62,10 @@ export function UpgradeBanner() {
     error: null,
     commits: [],
   });
-  const changelogCtl = useRef<AbortController | null>(null);
+  // Latched at fetch-start so the effect's dep list doesn't include the
+  // changelog state (which would re-fire the effect on every setChangelog
+  // and abort the in-flight request mid-loop).
+  const changelogFetchedRef = useRef(false);
 
   useEffect(() => {
     if (!enabled || forced) return;
@@ -91,13 +94,16 @@ export function UpgradeBanner() {
 
   // Drive the changelog fetch from `expanded` via an effect so the
   // AbortController's lifecycle is tied to the expand state — collapsing
-  // (or unmounting) cancels an in-flight request.
+  // (or unmounting) cancels an in-flight request. The "have we fetched"
+  // bit is tracked in a ref, NOT in changelog state, so calling
+  // setChangelog from inside the effect doesn't re-fire it (which would
+  // cancel its own in-flight request — observed bug).
   useEffect(() => {
     if (!expanded) return;
     if (!(current && latest)) return;
-    if (changelog.commits.length > 0 || changelog.loading) return;
+    if (changelogFetchedRef.current) return;
+    changelogFetchedRef.current = true;
     const ctl = new AbortController();
-    changelogCtl.current = ctl;
     setChangelog({ loading: true, error: null, commits: [] });
     void get<UpgradeChangelogResponse>("/upgrade-changelog", {
       from: current,
@@ -128,6 +134,9 @@ export function UpgradeBanner() {
       })
       .catch((e: unknown) => {
         if (ctl.signal.aborted) return;
+        // Allow a retry on next expand if the fetch failed — otherwise
+        // the user is stuck with the error message until reload.
+        changelogFetchedRef.current = false;
         setChangelog({
           loading: false,
           error: e instanceof Error ? e.message : String(e),
@@ -137,7 +146,7 @@ export function UpgradeBanner() {
     return () => {
       ctl.abort();
     };
-  }, [expanded, current, latest, changelog.commits.length, changelog.loading]);
+  }, [expanded, current, latest]);
 
   const upgradeNeeded = useMemo(() => {
     if (!(current && latest)) return false;
