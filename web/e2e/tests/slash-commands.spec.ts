@@ -36,7 +36,10 @@ test.describe("wuphf web slash commands", () => {
 
     const composer = page.locator(".composer-input");
     await composer.click();
-    await composer.type("/");
+    // pressSequentially (not fill) — autocomplete is keystroke-driven; bulk
+    // fill skips the per-key trigger that opens the panel. type() works but
+    // is deprecated as of Playwright 1.38.
+    await composer.pressSequentially("/");
 
     const panel = page.locator(".autocomplete.open");
     await expect(panel).toBeVisible({ timeout: 5_000 });
@@ -48,7 +51,7 @@ test.describe("wuphf web slash commands", () => {
     expect(await items.count()).toBeGreaterThan(1);
 
     await composer.fill("");
-    await composer.type("/he");
+    await composer.pressSequentially("/he");
 
     // Wait for the panel AND for ≥1 item to render before pressing Tab.
     // toBeVisible alone is a paint check; Composer's keydown handler reads

@@ -15,9 +15,15 @@ export function collectReactErrors(page: Page): () => string[] {
   page.on("console", (msg) => {
     if (msg.type() === "error") {
       const text = msg.text();
+      // The boundary's own log line is `[WUPHF ErrorBoundary]` — see
+      // web/src/App.tsx:69 (`console.error("[WUPHF ErrorBoundary]", ...)`).
+      // The earlier "Error boundary" substring (with a space) never matched
+      // and was silent dead code; the DOM check in expectNoReactErrors still
+      // caught the rendered case but the textual path is what surfaces
+      // mid-render crashes that don't unmount the tree.
       if (
         text.includes("Minified React error") ||
-        text.includes("Error boundary")
+        text.includes("WUPHF ErrorBoundary")
       ) {
         errors.push(text);
       }
