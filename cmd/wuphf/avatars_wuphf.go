@@ -182,7 +182,7 @@ var spriteCRO = pixelSprite{
 	{0, 0, 0, 1, 1, 0, 0, 0, 0, 5, 5, 5, 0, 0},
 }
 
-// spriteForSlug returns the extracted office-sheet sprite for mapped roles,
+// spriteForSlug returns the generated avatar sprite for mapped roles,
 // or a seeded procedural variation for dynamic slugs. frame alternates 0/1.
 func spriteForSlug(slug string, frame ...int) pixelSprite {
 	f := 0
@@ -191,7 +191,7 @@ func spriteForSlug(slug string, frame ...int) pixelSprite {
 	}
 
 	if sprite, ok := knownOfficeSpriteForSlug(slug); ok {
-		_ = f // The extracted office-sheet sprites are static for now.
+		_ = f // The generated sprites are static for now.
 		return cloneSprite(sprite.Full)
 	}
 

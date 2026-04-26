@@ -44,8 +44,8 @@ export function getAgentColor(slug: string): string {
 
 /**
  * Paint a pixel-art agent avatar into an existing canvas element.
- * Known agents render from the extracted office-sheet portraits plus a few
- * hand-tuned hybrids; everything else keeps the deterministic procedural fallback.
+ * Known agents render from the generated avatar catalog; everything else keeps
+ * the deterministic procedural fallback.
  */
 export function drawPixelAvatar(
   canvas: HTMLCanvasElement,
