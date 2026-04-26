@@ -450,9 +450,9 @@ function GeneralSection({ cfg, save }: SectionProps) {
                 <>
                   This permanently deletes your team, company identity, office
                   task receipts, and saved workflows, plus local logs, sessions,
-                  provider state, calendar, and wiki memory. WUPHF will stop
-                  after the wipe; relaunch it to reopen onboarding. Task
-                  worktrees and config are kept.{" "}
+                  provider state (including codex-headless scratch), calendar,
+                  and wiki memory. WUPHF will stop after the wipe; relaunch it
+                  to reopen onboarding. Task worktrees and config are kept.{" "}
                   <strong>This cannot be undone.</strong>
                 </>
               ),
@@ -1641,7 +1641,8 @@ function DangerZoneSection() {
             <code>~/.wuphf/</code>
           </li>
           <li>
-            Logs, sessions, provider state, calendar, and local wiki memory
+            Logs, sessions, provider state (incl. <code>codex-headless</code>{" "}
+            scratch), calendar, and local wiki memory
           </li>
           <li>Broker runtime state (same as Reset)</li>
         </ul>
@@ -1693,8 +1694,9 @@ function DangerZoneSection() {
             <>
               This permanently deletes your team, company identity, office task
               receipts, and saved workflows, plus local logs, sessions, provider
-              state, calendar, and wiki memory. Onboarding will reopen
-              immediately. Task worktrees, config, and device identity are kept.{" "}
+              state (including codex-headless scratch), calendar, and wiki
+              memory. Onboarding will reopen immediately. Task worktrees,
+              config, and device identity are kept.{" "}
               <strong>This cannot be undone.</strong>
             </>
           }
