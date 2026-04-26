@@ -147,6 +147,17 @@ export function formatMarkdown(raw: string): string {
   return result.join("");
 }
 
+function isSafeUrl(url: string): boolean {
+  const trimmed = url.trim().toLowerCase();
+  return (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("mailto:") ||
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("#")
+  );
+}
+
 function formatInline(text: string): string {
   let s = escapeHtml(text);
   // Bold
@@ -155,10 +166,15 @@ function formatInline(text: string): string {
   s = s.replace(/\*(.+?)\*/g, "<em>$1</em>");
   // Inline code
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
-  // Links
+  // Links — reject dangerous schemes (javascript:, data:, vbscript:)
   s = s.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a class="msg-link" href="$2" target="_blank" rel="noopener">$1</a>',
+    (_match, label: string, url: string) => {
+      if (isSafeUrl(url)) {
+        return `<a class="msg-link" href="${url}" target="_blank" rel="noopener">${label}</a>`;
+      }
+      return `<span class="msg-link">${label}</span>`;
+    },
   );
   // @mentions
   s = s.replace(/@(\w[\w-]*)/g, '<span class="mention">@$1</span>');
