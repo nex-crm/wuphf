@@ -3,13 +3,16 @@ package provider
 // Ollama runs as a local daemon (`brew services start ollama`) on :11434
 // and exposes both its native API and an OpenAI-compatible surface at
 // /v1/chat/completions. The default model below is a coder-tuned Qwen2.5
-// in q4_K_M GGUF; pull it with `ollama pull qwen2.5-coder:32b-instruct-q4_K_M`.
+// at the 7B size so first-run installs work on 16 GB Macs; pull it with
+// `ollama pull qwen2.5-coder:7b-instruct-q4_K_M`. 64 GB+ users can pin
+// 32b in their config:
 //
-// Override per-run via WUPHF_OLLAMA_BASE_URL / WUPHF_OLLAMA_MODEL or via
-// config.ProviderEndpoints["ollama"].
+//	"provider_endpoints": { "ollama": { "model": "qwen2.5-coder:32b-instruct-q4_K_M" } }
+//
+// or env: WUPHF_OLLAMA_MODEL=qwen2.5-coder:32b-instruct-q4_K_M.
 const (
 	defaultOllamaBaseURL = "http://127.0.0.1:11434/v1"
-	defaultOllamaModel   = "qwen2.5-coder:32b-instruct-q4_K_M"
+	defaultOllamaModel   = "qwen2.5-coder:7b-instruct-q4_K_M"
 )
 
 func init() {

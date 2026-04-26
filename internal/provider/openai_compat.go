@@ -7,8 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/agent"
 	"github.com/nex-crm/wuphf/internal/config"
@@ -35,23 +38,94 @@ import (
 // servers split a single tool call across multiple SSE frames and may
 // interleave deltas for parallel tool calls.
 func NewOpenAICompatStreamFn(kind, defaultBaseURL, defaultModel string) func(string) agent.StreamFn {
+	registerOpenAICompatDefaults(kind, defaultBaseURL, defaultModel)
 	return func(_ string) agent.StreamFn {
+		// TODO: per-agent endpoint when ProviderBinding.Model is set —
+		// today the slug is unused because ResolveProviderEndpoint keys
+		// on Kind only.
 		return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
 			ch := make(chan agent.StreamChunk, 64)
-			go runOpenAICompatStream(ch, kind, defaultBaseURL, defaultModel, msgs, tools)
+			go runOpenAICompatStream(context.Background(), ch, kind, defaultBaseURL, defaultModel, msgs, tools)
 			return ch
 		}
 	}
 }
 
+// NewOpenAICompatStreamFnWithCtx returns a StreamFn whose underlying HTTP
+// request lifetime is bound to ctx. Cancelling ctx aborts the in-flight
+// request and frees the local server's inference slot — important for
+// single-threaded inference servers (mlx_lm.server) where a leaked
+// request blocks every queued agent until the model finishes generating.
+//
+// The kind must already be registered (its defaults are looked up from
+// the registry populated at init() time). Callers without a turn ctx
+// should use NewOpenAICompatStreamFn instead.
+func NewOpenAICompatStreamFnWithCtx(ctx context.Context, kind string) agent.StreamFn {
+	baseURL, model := openAICompatDefaultsFor(kind)
+	return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
+		ch := make(chan agent.StreamChunk, 64)
+		go runOpenAICompatStream(ctx, ch, kind, baseURL, model, msgs, tools)
+		return ch
+	}
+}
+
+// openAICompatDefaultsByKind is populated by NewOpenAICompatStreamFn so
+// the ctx-aware variant can resolve compile-time defaults without
+// duplicating the kind→endpoint table.
+var (
+	openAICompatDefaultsMu sync.RWMutex
+	openAICompatDefaults   = map[string]openAICompatKindDefaults{}
+)
+
+type openAICompatKindDefaults struct {
+	baseURL string
+	model   string
+}
+
+func registerOpenAICompatDefaults(kind, baseURL, model string) {
+	openAICompatDefaultsMu.Lock()
+	defer openAICompatDefaultsMu.Unlock()
+	openAICompatDefaults[kind] = openAICompatKindDefaults{baseURL, model}
+}
+
+func openAICompatDefaultsFor(kind string) (string, string) {
+	openAICompatDefaultsMu.RLock()
+	defer openAICompatDefaultsMu.RUnlock()
+	d := openAICompatDefaults[kind]
+	return d.baseURL, d.model
+}
+
+// normalizeOpenAICompatEndpoint joins baseURL with /chat/completions,
+// auto-appending /v1 when the user pasted a server's listening address
+// without it (a common copy/paste from `mlx_lm.server` startup output —
+// `Starting httpd at 127.0.0.1 on port 8080` doesn't mention /v1, so a
+// naive base_url=http://127.0.0.1:8080 would 404 with no hint at the
+// fix).
+func normalizeOpenAICompatEndpoint(baseURL string) string {
+	trimmed := strings.TrimRight(baseURL, "/")
+	if !strings.HasSuffix(trimmed, "/v1") &&
+		!strings.Contains(trimmed, "/v1/") {
+		trimmed += "/v1"
+	}
+	return trimmed + "/chat/completions"
+}
+
 // httpClientForOpenAICompat is overridable for tests (httptest.Server transport).
 var httpClientForOpenAICompat = func() *http.Client {
-	// Long-running streaming connections — no overall request timeout.
-	// The dial timeout still bounds connect failures (e.g., server not up).
-	return &http.Client{Timeout: 0}
+	// Long-running streaming connections — no overall request timeout
+	// (Timeout: 0) and no ResponseHeaderTimeout because a busy local
+	// server can take 30s+ to emit the first SSE frame for a 32B model.
+	// Dial timeout is bounded explicitly so a wedged DNS resolver or
+	// unreachable host can't hang an agent turn until the OS-level
+	// connect timeout fires (>60s on macOS).
+	tr := &http.Transport{
+		DialContext: (&net.Dialer{Timeout: 5 * time.Second}).DialContext,
+	}
+	return &http.Client{Transport: tr, Timeout: 0}
 }
 
 func runOpenAICompatStream(
+	parentCtx context.Context,
 	ch chan<- agent.StreamChunk,
 	kind, defaultBaseURL, defaultModel string,
 	msgs []agent.Message, tools []agent.AgentTool,
@@ -59,7 +133,7 @@ func runOpenAICompatStream(
 	defer close(ch)
 
 	baseURL, model := config.ResolveProviderEndpoint(kind, defaultBaseURL, defaultModel)
-	endpoint := strings.TrimRight(baseURL, "/") + "/chat/completions"
+	endpoint := normalizeOpenAICompatEndpoint(baseURL)
 
 	body := openaiRequest{
 		Model:    model,
@@ -77,7 +151,7 @@ func runOpenAICompatStream(
 		return
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -180,6 +254,13 @@ func parseOpenAISSEStream(ch chan<- agent.StreamChunk, kind string, body io.Read
 		if len(line) > 0 {
 			payload, ok := stripSSEDataPrefix(line)
 			if ok {
+				// Empty `data:` frames are SSE keep-alive heartbeats —
+				// ollama and llama.cpp's server emit them under load.
+				// Skip silently; treating them as malformed JSON would
+				// abort the whole turn.
+				if payload == "" {
+					continue
+				}
 				if payload == "[DONE]" {
 					flushTools()
 					return

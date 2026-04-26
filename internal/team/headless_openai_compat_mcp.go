@@ -77,6 +77,14 @@ func (l *Launcher) connectOpenAICompatMCPBridge(
 // connectOpenAICompatMCPBridge so unit tests can exercise the conversion
 // against an in-memory MCP server (mcp.NewInMemoryTransports) without
 // spawning a real subprocess.
+//
+// Lifetime invariant: the returned AgentTool slice's Execute closures
+// capture session, so they remain valid only while the session is open.
+// Callers are expected to invoke the matching cleanup func returned by
+// connectOpenAICompatMCPBridge before any reference to the AgentTools
+// goes out of scope. Today the loop returns before cleanup fires; if a
+// future async tool-execution refactor changes that, this contract needs
+// an explicit guard.
 func mcpSessionToAgentTools(ctx context.Context, session *mcp.ClientSession) ([]agent.AgentTool, error) {
 	listCtx, listCancel := context.WithTimeout(ctx, 5*time.Second)
 	listed, err := session.ListTools(listCtx, &mcp.ListToolsParams{})
@@ -87,16 +95,16 @@ func mcpSessionToAgentTools(ctx context.Context, session *mcp.ClientSession) ([]
 
 	tools := make([]agent.AgentTool, 0, len(listed.Tools))
 	for _, t := range listed.Tools {
-		t := t // capture
 		schema, _ := normalizeMCPInputSchema(t.InputSchema)
 		tools = append(tools, agent.AgentTool{
 			Name:        t.Name,
 			Description: t.Description,
 			Schema:      schema,
 			Execute: func(params map[string]any, ctx context.Context, onUpdate func(string)) (string, error) {
-				callCtx, callCancel := context.WithTimeout(ctx, 60*time.Second)
-				defer callCancel()
-				result, err := session.CallTool(callCtx, &mcp.CallToolParams{
+				// Pass the caller's ctx straight through — the loop owns
+				// the per-call timeout (lp.toolTimeout). Wrapping with a
+				// hardcoded inner timeout would silently shadow it.
+				result, err := session.CallTool(ctx, &mcp.CallToolParams{
 					Name:      t.Name,
 					Arguments: params,
 				})

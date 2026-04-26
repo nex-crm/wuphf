@@ -338,6 +338,74 @@ func TestOpenAICompatToolLoop_MaxIterationsCap(t *testing.T) {
 	}
 }
 
+// TestOpenAICompatToolLoop_BridgeDiesMidCallSurfacesAsToolError simulates
+// the realistic failure mode where the `wuphf mcp-team` subprocess (or
+// any MCP transport) goes away between turns: the OOM-killer takes mlx
+// out, a panic in the broker subprocess unwinds, etc. The loop must
+// surface the failure to the model as a "Tool X failed" trailer (so the
+// next turn can apologize) rather than panicking or hanging.
+//
+// The MCP bridge's NewInMemoryTransports tests verify normal call/reply
+// paths; this test fills the gap by ripping the transport out from
+// underneath an Execute callback that's already been bound.
+func TestOpenAICompatToolLoop_BridgeDiesMidCallSurfacesAsToolError(t *testing.T) {
+	// brokenTool simulates a tool whose underlying transport has died:
+	// it returns a Go error instead of a result. The loop must treat
+	// this as "Tool X failed: ...".
+	brokenTool := agent.AgentTool{
+		Name: "broker_post_message",
+		Execute: func(_ map[string]any, _ context.Context, _ func(string)) (string, error) {
+			return "", &transportClosedErr{op: "broker_post_message"}
+		},
+	}
+
+	stream := &scriptedStreamFn{
+		turns: []scriptedTurn{
+			{chunks: []agent.StreamChunk{
+				{Type: "tool_use", ToolName: "broker_post_message", ToolParams: map[string]any{"channel": "general"}, ToolInput: `{"channel":"general"}`},
+			}},
+			{
+				chunks: []agent.StreamChunk{
+					{Type: "text", Content: "Sorry, the broker is offline right now."},
+				},
+				expectMessages: func(t *testing.T, msgs []agent.Message) {
+					last := msgs[len(msgs)-1]
+					if !strings.Contains(last.Content, "broker_post_message") {
+						t.Errorf("tool name missing from failure trailer: %q", last.Content)
+					}
+					if !strings.Contains(last.Content, "transport closed") {
+						t.Errorf("transport error not surfaced to model: %q", last.Content)
+					}
+				},
+			},
+		},
+	}
+
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		tools:       []agent.AgentTool{brokenTool},
+		toolByName:  map[string]agent.AgentTool{"broker_post_message": brokenTool},
+		maxIters:    4,
+		toolTimeout: time.Second,
+	}
+	final, _, streamErr, err := loop.run(context.Background(), []agent.Message{
+		{Role: "user", Content: "post hi to #general"},
+	})
+	if err != nil {
+		t.Fatalf("loop.run returned Go error (should have surfaced via prompt instead): %v", err)
+	}
+	if streamErr != "" {
+		t.Fatalf("unexpected stream error: %s", streamErr)
+	}
+	if !strings.Contains(final, "broker is offline") {
+		t.Errorf("model did not get a chance to apologize: %q", final)
+	}
+}
+
+type transportClosedErr struct{ op string }
+
+func (e *transportClosedErr) Error() string { return e.op + ": transport closed (subprocess exited)" }
+
 // TestOpenAICompatToolLoop_ContextCancelStopsImmediately verifies a
 // cancelled context aborts cleanly even mid-stream.
 func TestOpenAICompatToolLoop_ContextCancelStopsImmediately(t *testing.T) {

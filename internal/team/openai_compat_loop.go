@@ -186,17 +186,21 @@ func (lp *openAICompatToolLoop) run(ctx context.Context, msgs []agent.Message) (
 				lp.onToolResult(tc.ToolName, out, nil)
 			}
 		}
+		// TODO: localize the trailer — non-English-speaking deployments may
+		// want this hook configurable. Hardcoded English for v1 because all
+		// agent prompts in wuphf today assume English.
 		msgs = append(msgs, agent.Message{
 			Role:    "user",
 			Content: strings.Join(resultBlocks, "\n\n") + "\n\nIf the tool results answer the user's request, reply with a final message. Only call another tool if it's strictly required.",
 		})
 	}
 
-	// Loop exhausted. Surface the running text as a partial reply so the
-	// user sees something instead of silence; an explicit error message
-	// prefix is intentional so they can debug the runaway tool loop.
+	// Loop exhausted. Surface a marker as the final text so the broker's
+	// "post if silent" hook still fires — without this the user sees a
+	// silent failure (streamErr propagates up but `text != ""` gates the
+	// channel post in runHeadlessOpenAICompatTurn).
 	if finalText == "" {
-		finalText = ""
+		finalText = fmt.Sprintf("(tool loop hit %d iterations without resolving — see latency log for details)", lp.maxIters)
 	}
 	return finalText, iterations, fmt.Sprintf("openai-compat: tool loop exceeded %d iterations without resolving", lp.maxIters), nil
 }
@@ -205,6 +209,12 @@ func (lp *openAICompatToolLoop) run(ctx context.Context, msgs []agent.Message) (
 // content of a synthetic assistant message. The wuphf agent.Message shape
 // doesn't carry structured tool_calls, so we use a `[tool_call name args]`
 // trailer that any chat-completion model parses fine in subsequent turns.
+//
+// ToolUseID is intentionally not serialized: this loop forces serial tool
+// execution (one call per iteration) so there is no ambiguity to resolve
+// in the prompt history. If a future extension allows parallel tool
+// execution, the IDs will need to thread through here so the model can
+// disambiguate which result belongs to which call.
 func encodeAssistantToolIntent(prefixText string, toolUses []agent.StreamChunk) string {
 	var b strings.Builder
 	if t := strings.TrimSpace(prefixText); t != "" {

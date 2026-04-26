@@ -62,14 +62,24 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 
 	target := firstNonEmpty(channel...)
 
+	var agentStreamForBridge *agentStreamBuffer
+	if l.broker != nil {
+		agentStreamForBridge = l.broker.AgentStream(slug)
+	}
+
 	// Bridge MCP tools so the model can drive the broker. Failure is non-
 	// fatal; we degrade to text-only chat so the user still sees a reply.
+	// We push the failure into agentStream too so it shows up in the live
+	// UI, not only in the on-disk log.
 	tools, cleanup, bridgeErr := l.connectOpenAICompatMCPBridge(ctx, slug, target)
 	if cleanup != nil {
 		defer cleanup()
 	}
 	if bridgeErr != nil {
 		appendHeadlessCodexLog(slug, fmt.Sprintf("openai_compat_mcp-bridge-failed: %v (falling back to text-only)", bridgeErr))
+		if agentStreamForBridge != nil {
+			agentStreamForBridge.Push(fmt.Sprintf("[bridge unavailable: %v — replying without tools]", bridgeErr))
+		}
 		tools = nil
 	}
 
@@ -92,7 +102,11 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		agentStream = l.broker.AgentStream(slug)
 	}
 
-	streamFn := entry.StreamFn(slug)
+	// Use the ctx-aware StreamFn so cancellation propagates all the way
+	// to the HTTP request — without this a cancelled turn would pin the
+	// local server's inference slot until the model finishes generating.
+	streamFn := provider.NewOpenAICompatStreamFnWithCtx(ctx, kind)
+	_ = entry // entry held for capability lookup, see Lookup above
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
 		tools:       tools,

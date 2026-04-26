@@ -321,6 +321,61 @@ func TestParseOpenAISSEStream_StructuredToolCallsBeatFallback(t *testing.T) {
 	}
 }
 
+// TestParseOpenAISSEStream_IgnoresEmptyDataFrames verifies that empty
+// `data:\n\n` frames — which ollama and llama.cpp's server emit as
+// keep-alive heartbeats under load — don't abort the stream. Earlier
+// versions hit this mid-stream and turned every keep-alive into a fatal
+// "unexpected end of JSON input" error chunk; the live MLX tests didn't
+// catch it because mlx_lm.server doesn't emit them.
+func TestParseOpenAISSEStream_IgnoresEmptyDataFrames(t *testing.T) {
+	body := "data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n" +
+		"data:\n\n" +
+		"data: \n\n" + // also exercise the trailing-space variant
+		"data: {\"choices\":[{\"delta\":{\"content\":\"b\"},\"finish_reason\":\"stop\"}]}\n\n" +
+		"data: [DONE]\n\n"
+	ch := make(chan agent.StreamChunk, 8)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "ollama", strings.NewReader(body))
+	}()
+	chunks := drainChunks(t, ch)
+	for _, c := range chunks {
+		if c.Type == "error" {
+			t.Fatalf("empty data frame should not produce error chunk: %+v", c)
+		}
+	}
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 text chunks (a, b), got %d: %+v", len(chunks), chunks)
+	}
+	if chunks[0].Content != "a" || chunks[1].Content != "b" {
+		t.Errorf("ordered text wrong: %+v", chunks)
+	}
+}
+
+// TestNormalizeOpenAICompatEndpoint_AppendsV1WhenMissing prevents the
+// silent-404 footgun where a user pasting `http://127.0.0.1:8080` from
+// mlx_lm.server's startup banner gets a confusing
+// `HTTP 404 from http://127.0.0.1:8080/chat/completions` instead of a
+// working request.
+func TestNormalizeOpenAICompatEndpoint_AppendsV1WhenMissing(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"http://127.0.0.1:8080", "http://127.0.0.1:8080/v1/chat/completions"},
+		{"http://127.0.0.1:8080/", "http://127.0.0.1:8080/v1/chat/completions"},
+		{"http://127.0.0.1:8080/v1", "http://127.0.0.1:8080/v1/chat/completions"},
+		{"http://127.0.0.1:8080/v1/", "http://127.0.0.1:8080/v1/chat/completions"},
+		// Multi-tenant proxies sometimes nest /v1 under a path prefix.
+		{"https://gateway.example.com/api/v1/proxy", "https://gateway.example.com/api/v1/proxy/chat/completions"},
+	}
+	for _, tc := range cases {
+		got := normalizeOpenAICompatEndpoint(tc.in)
+		if got != tc.want {
+			t.Errorf("normalizeOpenAICompatEndpoint(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 // TestParseOpenAISSEStream_IgnoresCommentLines verifies SSE comment lines
 // (servers sometimes send keep-alive pings as `: ping`) don't break parsing.
 func TestParseOpenAISSEStream_IgnoresCommentLines(t *testing.T) {
