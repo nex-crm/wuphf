@@ -21,6 +21,7 @@ package migration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -171,6 +172,12 @@ func (a *NexAdapter) Iter(ctx context.Context) (<-chan MigrationRecord, error) {
 				return
 			}
 			if err := a.iterType(ctx, objectType, out); err != nil {
+				// Cancellation/deadline: exit cleanly without the warning
+				// — the outer ctx.Err() check would catch this on the next
+				// iteration anyway.
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return
+				}
 				// Per-type failures don't abort the whole walk — a legacy
 				// install might have one broken table without the rest
 				// being unreachable. The error is already annotated with
@@ -188,8 +195,8 @@ func (a *NexAdapter) Iter(ctx context.Context) (<-chan MigrationRecord, error) {
 func (a *NexAdapter) iterType(ctx context.Context, objectType string, out chan<- MigrationRecord) error {
 	offset := 0
 	for {
-		if ctx.Err() != nil {
-			return nil
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		page, err := a.fetchPage(ctx, objectType, a.pageSize, offset)
 		if err != nil {

@@ -528,7 +528,9 @@ func killRunningSession(blueprint string) error {
 	if err != nil {
 		// Launcher couldn't hydrate — likely no running session anyway.
 		// Fall through silently; the workspace wipe will still proceed.
-		return nil
+		// This is the documented "tolerate broken config" behavior so
+		// users can always clean up after a bad blueprint edit.
+		return nil //nolint:nilerr // intentional: broken config shouldn't block cleanup
 	}
 	return l.Kill()
 }

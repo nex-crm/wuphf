@@ -24,20 +24,14 @@ func TestParseHeadlessTaskRunnerProcesses(t *testing.T) {
 }
 
 func TestKillStaleHeadlessTaskRunnersKillsOnlyMatchingProcesses(t *testing.T) {
-	oldList := listHeadlessTaskRunnerProcesses
-	oldKill := killHeadlessTaskRunnerProcess
-	listHeadlessTaskRunnerProcesses = func() ([]byte, error) {
+	setListHeadlessTaskRunnerProcessesForTest(t, func() ([]byte, error) {
 		return []byte("123 node /opt/homebrew/bin/codex -a never -s workspace-write exec -C /private/var/folders/x/T/wuphf-task-task-3 -c mcp_servers.wuphf-office.command=\"/tmp/wuphf\" -\n124 /opt/homebrew/bin/codex exec -C /tmp/elsewhere -\n125 node /opt/homebrew/bin/codex -a never -s workspace-write exec -C /private/var/folders/x/T/wuphf-task-task-9 -c something_else=1 -\n"), nil
-	}
-	defer func() {
-		listHeadlessTaskRunnerProcesses = oldList
-		killHeadlessTaskRunnerProcess = oldKill
-	}()
+	})
 
 	var killed []int
-	killHeadlessTaskRunnerProcess = func(pid int) {
+	setKillHeadlessTaskRunnerProcessForTest(t, func(pid int) {
 		killed = append(killed, pid)
-	}
+	})
 
 	killStaleHeadlessTaskRunners()
 

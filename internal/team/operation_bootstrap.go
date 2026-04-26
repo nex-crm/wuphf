@@ -702,11 +702,18 @@ func buildOperationBootstrapPackageFromLegacySeedDocs(repoRoot string, runtimeCo
 	}
 	selected, err := selectOperationPackFile(packs, profile)
 	if err != nil {
-		return operationBootstrapPackage{}, false, nil
+		// Legacy seed docs exist but none match this profile (selector
+		// returns "no matching operation pack" / "no operation packs").
+		// That's not a hard error: the caller falls back to the
+		// synthesized bootstrap. Signal "not found" via ok=false.
+		return operationBootstrapPackage{}, false, nil //nolint:nilerr // intentional: legacy-pack miss falls back to synthesis
 	}
 	blueprint, err := operations.LoadBlueprint(repoRoot, operationFirstNonEmpty(selected.Doc.Workspace.PipelineID, selected.Doc.Metadata.ID))
 	if err != nil {
-		return operationBootstrapPackage{}, false, nil
+		// The legacy pack referenced a blueprint that no longer ships in
+		// the templates dir. Same posture as above: fall back to the
+		// synthesized bootstrap rather than fail the boot.
+		return operationBootstrapPackage{}, false, nil //nolint:nilerr // intentional: missing blueprint falls back to synthesis
 	}
 	sourceDir := filepath.Dir(selected.Path)
 	backlog, err := loadOperationBacklogDocOptionalCandidates(
