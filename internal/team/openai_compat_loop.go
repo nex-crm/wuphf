@@ -124,13 +124,28 @@ func (lp *openAICompatToolLoop) run(ctx context.Context, msgs []agent.Message) (
 					}
 					turnToolUses = append(turnToolUses, chunk)
 				case "usage":
-					// Sum across iterations: a tool-using turn streams
-					// the model multiple times and we want the full
-					// turn's footprint, not just the last iteration.
-					usage.InputTokens += chunk.InputTokens
+					// Output tokens are per-iteration (the tokens the
+					// model just generated this round), so summing
+					// across iterations gives the turn's total
+					// generation cost.
 					usage.OutputTokens += chunk.OutputTokens
 					usage.CacheReadTokens += chunk.CacheReadTokens
 					usage.CacheCreationTokens += chunk.CacheCreationTokens
+					// Input tokens are cumulative WITHIN each iteration
+					// (each request body includes the full prior
+					// conversation: system + user + asst_iter1 +
+					// tool_result_iter1 + ... + asst_iterN-1 +
+					// tool_result_iterN-1). Summing across iterations
+					// would double-count the system prompt N times for
+					// an N-iteration turn, making mlx-lm's panel totals
+					// 2-5× larger than equivalent Claude/Codex turns
+					// for no real reason. The last iteration's
+					// prompt_tokens is the turn's true input footprint.
+					// Use max() rather than overwrite so a server that
+					// emits a degenerate later frame can't shrink it.
+					if chunk.InputTokens > usage.InputTokens {
+						usage.InputTokens = chunk.InputTokens
+					}
 				case "error":
 					turnErr = chunk.Content
 					if lp.onError != nil {

@@ -346,6 +346,13 @@ func parseOpenAISSEStream(ch chan<- agent.StreamChunk, kind string, body io.Read
 				flushUsage()
 				return
 			}
+			// Surface anything we already captured before the read
+			// failed — a long generation that broke connection mid-
+			// stream still produced real tokens the user wants
+			// counted, matching the headless runner's intent at
+			// headless_openai_compat.go's "Record token counts even
+			// on partial / errored turns" comment.
+			flushUsage()
 			ch <- agent.StreamChunk{Type: "error", Content: fmt.Sprintf("openai-compat (%s): read stream: %v", kind, err)}
 			return
 		}
@@ -587,14 +594,26 @@ func processOpenAISSEEvent(
 	}
 	// Capture usage from any frame that carries it. With
 	// stream_options.include_usage the canonical pattern is a single
-	// trailing frame whose `choices` is empty and `usage` is set; we
-	// still update on partial-usage frames to be tolerant of servers
-	// that stamp it earlier. We only record when both prompt and
-	// completion are populated to avoid latching a half-filled frame.
+	// trailing frame whose `choices` is empty and `usage` is set;
+	// llama.cpp's server stamps partial usage on every event instead.
+	//
+	// Latch policy: only overwrite when the new frame's totals are
+	// monotonically larger than what we've already seen. Prevents two
+	// real failure modes:
+	//   1. A degenerate trailing `0/0` frame from clobbering an earlier
+	//      complete count (some servers emit one on errored turns).
+	//   2. A speculative-decoding reject path where mlx_lm.server has
+	//      been observed to follow up a `prompt_tokens=N, completion=K`
+	//      frame with `prompt_tokens=N, completion=0` after rolling
+	//      back rejected tokens — without monotonic guard we'd lose K.
 	if ev.Usage != nil && latestUsage != nil {
-		if ev.Usage.PromptTokens > 0 || ev.Usage.CompletionTokens > 0 {
-			u := *ev.Usage
-			*latestUsage = &u
+		incoming := *ev.Usage
+		if *latestUsage == nil ||
+			(incoming.PromptTokens >= (*latestUsage).PromptTokens &&
+				incoming.CompletionTokens >= (*latestUsage).CompletionTokens) {
+			if incoming.PromptTokens > 0 || incoming.CompletionTokens > 0 {
+				*latestUsage = &incoming
+			}
 		}
 	}
 	if len(ev.Choices) == 0 {

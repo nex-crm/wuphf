@@ -904,3 +904,66 @@ func TestParseOpenAISSEStream_NoUsageFrameStaysSilent(t *testing.T) {
 		}
 	}
 }
+
+// TestParseOpenAISSEStream_AllZeroUsageDoesNotLatch covers the latch
+// invariant separately from the no-frame-at-all case above. A frame
+// with `prompt_tokens=0, completion_tokens=0` MUST NOT fabricate a
+// usage chunk, otherwise a server that emits a degenerate empty
+// usage frame on errored turns would burn a Requests bump in the
+// broker without any real numbers attached. (Kept as its own test
+// so a future change to the latch policy can't silently regress this
+// edge by passing the broader no-usage-server test.)
+func TestParseOpenAISSEStream_AllZeroUsageDoesNotLatch(t *testing.T) {
+	body := sseBody(
+		`{"choices":[{"delta":{"content":"hi"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":0,"completion_tokens":0,"total_tokens":0}}`,
+	)
+
+	ch := make(chan agent.StreamChunk, 16)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "test", strings.NewReader(body))
+	}()
+
+	for _, c := range drainChunks(t, ch) {
+		if c.Type == "usage" {
+			t.Fatalf("zero-valued usage frame must not produce a usage chunk, got %+v", c)
+		}
+	}
+}
+
+// TestParseOpenAISSEStream_LaterPartialUsageDoesNotClobber covers the
+// monotonic-latch invariant: once we've seen a frame with real numbers
+// (e.g. prompt=42, completion=7), a later frame that's strictly smaller
+// (e.g. prompt=42, completion=0 — observed pattern from speculative-
+// decoding rejects on mlx_lm.server) must not overwrite the captured
+// count. Without this guard a turn's completion tokens would be silently
+// lost, surfacing as zero in the user's usage panel.
+func TestParseOpenAISSEStream_LaterPartialUsageDoesNotClobber(t *testing.T) {
+	body := sseBody(
+		`{"choices":[{"delta":{"content":"Hi"}}]}`,
+		`{"choices":[],"usage":{"prompt_tokens":42,"completion_tokens":7,"total_tokens":49}}`,
+		`{"choices":[],"usage":{"prompt_tokens":42,"completion_tokens":0,"total_tokens":42}}`,
+	)
+
+	ch := make(chan agent.StreamChunk, 16)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "test", strings.NewReader(body))
+	}()
+
+	var usage *agent.StreamChunk
+	for _, c := range drainChunks(t, ch) {
+		c := c
+		if c.Type == "usage" {
+			usage = &c
+		}
+	}
+	if usage == nil {
+		t.Fatalf("expected a usage chunk")
+	}
+	if usage.InputTokens != 42 || usage.OutputTokens != 7 {
+		t.Errorf("usage = {input:%d output:%d}, want {42, 7} (later partial frame must not clobber)", usage.InputTokens, usage.OutputTokens)
+	}
+}

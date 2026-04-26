@@ -85,12 +85,19 @@ func TestOpenAICompatToolLoop_TextOnlyOneShot(t *testing.T) {
 	}
 }
 
-// TestOpenAICompatToolLoop_AccumulatesUsageAcrossIterations confirms that
-// when the SSE parser surfaces a usage chunk on each streaming turn, the
-// loop sums the totals into the final ClaudeUsage return — not just the
-// last turn's. This matters because a tool-using turn streams the model
-// multiple times (one per tool round-trip) and the user's usage panel
-// should reflect the whole turn's footprint.
+// TestOpenAICompatToolLoop_AccumulatesUsageAcrossIterations confirms the
+// loop's per-field accumulation policy:
+//   - OutputTokens SUMs across iterations (each iteration generates new
+//     tokens, so the turn cost is the sum).
+//   - InputTokens MAXes across iterations (each iteration's prompt is
+//     cumulative — it already contains every prior iteration's history —
+//     so summing would charge the system prompt N times for an N-
+//     iteration turn).
+//
+// In this scripted scenario iteration 1 sends 100 prompt tokens and
+// generates 20; iteration 2 sees the iter-1 history echoed back, so its
+// prompt grows to 150 (the larger value), while it generates a new 5.
+// Correct totals: {input:150, output:25} — NOT {input:250, output:25}.
 func TestOpenAICompatToolLoop_AccumulatesUsageAcrossIterations(t *testing.T) {
 	stream := &scriptedStreamFn{
 		turns: []scriptedTurn{
@@ -100,7 +107,7 @@ func TestOpenAICompatToolLoop_AccumulatesUsageAcrossIterations(t *testing.T) {
 			}},
 			{chunks: []agent.StreamChunk{
 				{Type: "text", Content: "done"},
-				{Type: "usage", InputTokens: 30, OutputTokens: 5},
+				{Type: "usage", InputTokens: 150, OutputTokens: 5},
 			}},
 		},
 	}
@@ -128,8 +135,8 @@ func TestOpenAICompatToolLoop_AccumulatesUsageAcrossIterations(t *testing.T) {
 	if final != "done" {
 		t.Errorf("finalText = %q, want %q", final, "done")
 	}
-	if usage.InputTokens != 130 || usage.OutputTokens != 25 {
-		t.Errorf("usage = {input:%d output:%d}, want {130, 25}", usage.InputTokens, usage.OutputTokens)
+	if usage.InputTokens != 150 || usage.OutputTokens != 25 {
+		t.Errorf("usage = {input:%d output:%d}, want {150, 25}", usage.InputTokens, usage.OutputTokens)
 	}
 }
 
