@@ -158,6 +158,9 @@ func TestHandleConfig_ProviderEndpointsRejectsDangerousURLSchemes(t *testing.T) 
 		"//no-scheme.example.com/v1",
 		"http://", // hostless
 		"https://",
+		"http://:8080",      // port-only host (Host=":8080", Hostname()="")
+		"http://:8080/v1",   // port-only host with path
+		"https://:443/path", // port-only HTTPS
 		"not a url at all",
 	} {
 		body := `{"provider_endpoints":{"mlx-lm":{"base_url":"` + badURL + `","model":"x"}}}`
@@ -213,8 +216,11 @@ func TestValidateProviderEndpointURL(t *testing.T) {
 		{"/relative/path", true},
 		{"", true},
 		{"   ", true},
-		{"http://", true},  // empty host
-		{"https://", true}, // empty host
+		{"http://", true},           // empty host
+		{"https://", true},          // empty host
+		{"http://:8080", true},      // port-only — Host=":8080" but Hostname()=""
+		{"http://:8080/v1", true},   // port-only with path
+		{"https://:443/path", true}, // port-only HTTPS
 	}
 	for _, tc := range cases {
 		err := validateProviderEndpointURL(tc.in)

@@ -275,6 +275,46 @@ test.describe("Onboarding → Run a local model", () => {
     ).toBeVisible();
   });
 
+  test("status fetch failure: fall-open so the picker isn't deadlocked", async ({
+    page,
+  }) => {
+    // Regression for the contradiction CodeRabbit caught in v6: the
+    // fetch-error banner says "you can still pick a runtime", but the
+    // tile-disable logic was keying on `installed=Boolean(undefined)`
+    // and disabling every tile. After this fix, an unreachable status
+    // endpoint must NOT trap the user — tiles render selectable, the
+    // banner is honest, and the agent-turn surface (or the doctor
+    // card in Settings) will catch a real install gap later.
+    page.route("**/status/local-providers*", (route: Route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "text/plain",
+        body: "broker offline",
+      }),
+    );
+    await advanceToSetupStep(page);
+
+    await page.getByTestId("onboarding-local-llm-toggle").click();
+    await expect(
+      page.getByTestId("onboarding-local-llm-fetch-error"),
+    ).toBeVisible();
+
+    // All three tiles remain selectable. Each one shows the
+    // "Status unknown" copy so the user knows we couldn't probe.
+    for (const kind of ["mlx-lm", "ollama", "exo"] as const) {
+      const tile = page.getByTestId(`onboarding-local-llm-tile-${kind}`);
+      await expect(tile).toBeVisible();
+      await expect(tile).toBeEnabled();
+      await expect(tile.getByText(/Status unknown/)).toBeVisible();
+    }
+
+    // Click actually selects — locks in that the click handler isn't
+    // short-circuiting on `selectable=false`.
+    const mlxTile = page.getByTestId("onboarding-local-llm-tile-mlx-lm");
+    await mlxTile.click();
+    await expect(mlxTile).toHaveAttribute("aria-pressed", "true");
+  });
+
   test("toggling meta-tile off hides the picker and clears selection", async ({
     page,
   }) => {

@@ -103,12 +103,12 @@ test.describe("Local-LLM chat flow (stubbed mlx-lm)", () => {
     await openPlannerDM(page);
     await sendDirectMessage(page, "Plan a quick weekend road trip.");
 
-    // Wait specifically for an agent message ROW to land — the
-    // streaming-indicator placeholder that uses .cc-thinking
-    // doesn't have a [data-msg-id], so anchoring here forces the
-    // test to wait for a real persisted reply.
+    // Wait specifically for an agent-authored persisted row.
+    // MessageBubble stamps `data-author-kind="agent"`, so this gates
+    // on the real reply and not on the streaming-indicator
+    // placeholder (no data-msg-id) or the human prompt (kind=human).
     await expect(
-      page.locator("[data-msg-id]").filter({ hasNotText: /^You$/ }).first(),
+      page.locator('[data-msg-id][data-author-kind="agent"]').first(),
     ).toBeVisible({ timeout: 90_000 });
 
     // Live Output panel renders mcp_tool_event entries via

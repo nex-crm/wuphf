@@ -100,7 +100,13 @@ kill_wuphf() {
 }
 
 cleanup() {
+  # Both the broker (`pid`) and the mlx-stub (`stub_pid`) must be
+  # tracked at script scope so an abnormal exit (Ctrl-C, set -e
+  # bailing on a phase) doesn't leak processes that are still bound
+  # to the test ports. Phase functions assign these vars; cleanup
+  # tolerates them being unset.
   kill_wuphf "${pid:-}"
+  kill_wuphf "${stub_pid:-}"
   rm -rf "$runtime_home"
 }
 trap cleanup EXIT
@@ -175,15 +181,23 @@ run_local_llm_phase() {
   echo "[run-local] starting mlx-stub on :${stub_port}; log: ${stub_log}"
   ./web/e2e/bin/mlx-stub --port "$stub_port" --fixture "$fixture" \
     >"$stub_log" 2>&1 &
-  local stub_pid=$!
-  trap 'kill_wuphf "${pid:-}"; kill "${stub_pid:-}" 2>/dev/null || true; rm -rf "$runtime_home"' EXIT
+  # Note: stub_pid is script-global (no `local`) so the EXIT trap's
+  # cleanup() can reach it if we abort before the explicit kill below.
+  stub_pid=$!
 
+  local ready=0
   for _ in $(seq 1 20); do
     if curl -sf "http://127.0.0.1:${stub_port}/v1/models" -o /dev/null; then
+      ready=1
       break
     fi
     sleep 0.2
   done
+  if [ "$ready" -ne 1 ]; then
+    echo "[run-local] mlx-stub failed to become ready on :${stub_port}" >&2
+    cat "$stub_log" >&2 || true
+    exit 1
+  fi
 
   mkdir -p "${runtime_home}/.wuphf"
   cat > "${runtime_home}/.wuphf/onboarded.json" <<EOF
@@ -213,13 +227,20 @@ EOF
     --provider mlx-lm \
     </dev/null > "${runtime_home}/wuphf-local-llm.log" 2>&1 &
   pid=$!
+  local ready=0
   for _ in $(seq 1 30); do
     if curl -sf "http://localhost:${web_port}/onboarding/state" -o /dev/null; then
       echo "[run-local] wuphf ready (local-llm)"
+      ready=1
       break
     fi
     sleep 1
   done
+  if [ "$ready" -ne 1 ]; then
+    echo "[run-local] wuphf failed to become ready (local-llm)" >&2
+    cat "${runtime_home}/wuphf-local-llm.log" >&2 || true
+    exit 1
+  fi
 
   echo "[run-local] running local-llm chat specs"
   # set +e around playwright so we capture the exit code without
@@ -241,7 +262,8 @@ EOF
   echo "[run-local] logs preserved at /tmp/wuphf-local-llm-logs/"
   kill_wuphf "${pid:-}"
   pid=""
-  kill "${stub_pid:-}" 2>/dev/null || true
+  kill_wuphf "${stub_pid:-}"
+  stub_pid=""
   return $rc
 }
 
@@ -280,27 +302,48 @@ EOF
   for entry in "${fixtures[@]}"; do
     local name="${entry%%:*}"
     local fixture="${entry#*:}"
+    local stub_log="${runtime_home}/mlx-stub-${name}.log"
+    local wuphf_log="${runtime_home}/wuphf-${name}.log"
     echo "[run-local] dialect-sweep: ${name} (${fixture})"
 
     ./web/e2e/bin/mlx-stub --port "$stub_port" --fixture "$fixture" \
-      >"${runtime_home}/mlx-stub-${name}.log" 2>&1 &
-    local stub_pid=$!
+      >"$stub_log" 2>&1 &
+    # Script-global stub_pid so cleanup() can reach it if we exit early.
+    stub_pid=$!
+    local stub_ready=0
     for _ in $(seq 1 20); do
-      if curl -sf "http://127.0.0.1:${stub_port}/v1/models" -o /dev/null; then break; fi
+      if curl -sf "http://127.0.0.1:${stub_port}/v1/models" -o /dev/null; then
+        stub_ready=1
+        break
+      fi
       sleep 0.2
     done
+    if [ "$stub_ready" -ne 1 ]; then
+      echo "[run-local] dialect-sweep ${name}: mlx-stub failed to become ready" >&2
+      cat "$stub_log" >&2 || true
+      exit 1
+    fi
 
     WUPHF_RUNTIME_HOME="$runtime_home" \
       WUPHF_MLX_LM_BASE_URL="http://127.0.0.1:${stub_port}/v1" \
       WUPHF_MLX_LM_MODEL="stub-model-v1" \
       ./wuphf --no-open --broker-port "$broker_port" --web-port "$web_port" --no-nex \
       --provider mlx-lm \
-      </dev/null > "${runtime_home}/wuphf-${name}.log" 2>&1 &
+      </dev/null > "$wuphf_log" 2>&1 &
     pid=$!
+    local wuphf_ready=0
     for _ in $(seq 1 30); do
-      if curl -sf "http://localhost:${web_port}/onboarding/state" -o /dev/null; then break; fi
+      if curl -sf "http://localhost:${web_port}/onboarding/state" -o /dev/null; then
+        wuphf_ready=1
+        break
+      fi
       sleep 1
     done
+    if [ "$wuphf_ready" -ne 1 ]; then
+      echo "[run-local] dialect-sweep ${name}: wuphf failed to become ready" >&2
+      cat "$wuphf_log" >&2 || true
+      exit 1
+    fi
 
     set +e
     (cd web/e2e && DIALECT_NAME="$name" \
@@ -312,7 +355,8 @@ EOF
 
     kill_wuphf "${pid:-}"
     pid=""
-    kill "${stub_pid:-}" 2>/dev/null || true
+    kill_wuphf "${stub_pid:-}"
+    stub_pid=""
     # Wait for ports to free.
     for _ in $(seq 1 10); do
       if ! (exec 3<>/dev/tcp/127.0.0.1/"$web_port") 2>/dev/null; then break; fi

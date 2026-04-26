@@ -55,14 +55,18 @@ async function sendDirectMessage(page: Page, body: string) {
   await expect(composer).toHaveValue("");
 }
 
-// agentReplyLanded waits until at least one chat row appears that
-// isn't the human's own message. We anchor on the `[data-msg-id]`
-// row attribute the broker stamps on every persisted message — any
-// streaming-only placeholder (no msg-id) doesn't satisfy this and
-// avoids the false-pass the v6 reviewer caught in earlier specs.
+// agentReplyLanded waits for an actual agent-authored chat row.
+// MessageBubble stamps `data-author-kind="agent"` on every persisted
+// agent message so we can target it precisely — earlier specs tried
+// to filter by `hasNotText: /^You$/` against a row's full textContent
+// (which includes avatar label "You", author name, timestamp, AND the
+// message body), so the regex was a no-op and the spec passed even
+// when only the human prompt had landed (CodeRabbit caught this).
+// Streaming-indicator placeholders don't carry data-msg-id either, so
+// this gate is doubly precise.
 async function agentReplyLanded(page: Page) {
   await expect(
-    page.locator("[data-msg-id]").filter({ hasNotText: /^You$/ }).first(),
+    page.locator('[data-msg-id][data-author-kind="agent"]').first(),
   ).toBeVisible({ timeout: 90_000 });
 }
 
@@ -84,15 +88,16 @@ test.describe(`Local-LLM dialect parity (${dialect})`, () => {
     await expect(page.getByTestId("error-boundary")).toHaveCount(0);
     expect(errors, errors.join("\n")).toEqual([]);
 
-    // Cross-dialect structural invariant. We scan every persisted
-    // message in the channel — both the human's prompts and the
-    // agent's replies. The agent's content from the structured-
-    // tool-call fixture does include the literal text "structured
-    // tool_calls" in its reply ("Posted via structured tool_calls."),
-    // so we can't blanket-reject the substring; we look for shapes
-    // that ONLY appear when a parser dialect failed and the raw JSON
-    // tool call leaked verbatim.
-    const messageBodies = await page.locator("[data-msg-id]").allTextContents();
+    // Cross-dialect structural invariant. Scan agent-authored rows
+    // only — the human prompt contains the literal dialect name
+    // ("structured") which would skew a substring check; pinning to
+    // `data-author-kind="agent"` keeps the assertion targeted at the
+    // surface the parser actually controls. We look for shapes that
+    // only appear when a parser dialect failed and the raw JSON tool
+    // call leaked verbatim into rendered prose.
+    const messageBodies = await page
+      .locator('[data-msg-id][data-author-kind="agent"]')
+      .allTextContents();
     for (const body of messageBodies) {
       if (body.includes("```json")) {
         throw new Error(

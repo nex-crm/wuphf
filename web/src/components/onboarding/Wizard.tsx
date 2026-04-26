@@ -945,16 +945,26 @@ function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
         <div className="runtime-grid">
           {LOCAL_PROVIDER_LABELS.map((meta) => {
             const s = byKind.get(meta.kind);
-            const installed = Boolean(s?.binary_installed);
+            // When `s` is undefined the status probe didn't return a
+            // record for this kind — either the broker is unreachable
+            // (fetchError set) or the response was malformed. In that
+            // "unknown" state we fall OPEN so the banner copy ("you
+            // can still pick a runtime — install commands live in
+            // Settings") matches what the UI actually does. The
+            // agent-turn surface and the Settings doctor card will
+            // catch a real install gap later with a clear error;
+            // here we just don't trap the user.
+            //
+            // When `s` IS defined we trust it: a tile is selectable
+            // only when the platform supports the runtime AND the
+            // binary is on PATH. Selecting an un-installed runtime
+            // would land the user in a shell where every agent turn
+            // fails connection-refused, so we route them to Settings
+            // instead of letting them commit to a broken default.
+            const statusKnown = s !== undefined;
+            const installed = statusKnown ? Boolean(s.binary_installed) : true;
             const running = Boolean(s?.reachable);
-            const supported = s ? s.platform_supported : true;
-            // A tile is selectable only when the platform supports
-            // it AND the binary is detected on PATH. Selecting an
-            // un-installed runtime would land the user in a shell
-            // where every agent turn fails with connection refused
-            // — the install/start commands live in Settings, so we
-            // route users there instead of letting them commit to
-            // a broken default at onboarding time.
+            const supported = statusKnown ? s.platform_supported : true;
             const selectable = supported && installed;
             const isSelected = selected === meta.kind;
             const classes = [
@@ -964,13 +974,15 @@ function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
             ]
               .filter(Boolean)
               .join(" ");
-            const statusText = !supported
-              ? "Not supported on this OS"
-              : running
-                ? "Running"
-                : installed
-                  ? "Installed (server not started)"
-                  : "Not installed — install via Settings";
+            const statusText = !statusKnown
+              ? "Status unknown — verify in Settings"
+              : !supported
+                ? "Not supported on this OS"
+                : running
+                  ? "Running"
+                  : installed
+                    ? "Installed (server not started)"
+                    : "Not installed — install via Settings";
             return (
               <button
                 key={meta.kind}

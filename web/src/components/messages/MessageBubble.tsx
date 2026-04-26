@@ -92,6 +92,11 @@ export function MessageBubble({
     <div
       className={`message animate-fade${grouped ? " message-grouped" : ""}${isReply ? " message-reply" : ""}`}
       data-msg-id={message.id}
+      // Precise author selectors so e2e specs can filter without parsing
+      // textContent. `data-author-kind` is "human" | "agent"; `data-author-slug`
+      // carries the raw `from` (e.g. "you", "human", or an agent slug like "planner").
+      data-author-kind={isHuman ? "human" : "agent"}
+      data-author-slug={message.from}
     >
       {/* Avatar */}
       <div

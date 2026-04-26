@@ -5973,7 +5973,11 @@ func validateProviderEndpointURL(raw string) error {
 	default:
 		return fmt.Errorf("unsupported scheme %q (must be http or https)", u.Scheme)
 	}
-	if strings.TrimSpace(u.Host) == "" {
+	// Use Hostname() not Host: url.Parse("http://:8080") yields
+	// Host=":8080" but Hostname()="", so checking Host would let a
+	// port-only URL through and persist a hostless endpoint that
+	// fails later at request time.
+	if strings.TrimSpace(u.Hostname()) == "" {
 		return fmt.Errorf("missing host")
 	}
 	return nil

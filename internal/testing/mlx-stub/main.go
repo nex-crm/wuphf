@@ -119,7 +119,16 @@ func parseFixture(path string) (*fixture, error) {
 			continue
 		}
 		if strings.HasPrefix(line, "delay-ms:") {
-			n, _ := strconv.Atoi(strings.TrimSpace(line[len("delay-ms:"):]))
+			// Surface parse errors loudly. A typo'd `delay-ms: 5o`
+			// (letter o) used to silently become 0 — frame got
+			// appended with no pause and the run continued, masking
+			// fixture bugs. Same footgun shape as the unrecognised-
+			// line case above; both should reach the author fast.
+			val := strings.TrimSpace(line[len("delay-ms:"):])
+			n, err := strconv.Atoi(val)
+			if err != nil {
+				return nil, fmt.Errorf("fixture %s: invalid delay-ms %q: %w", path, val, err)
+			}
 			cur.frames = append(cur.frames, frame{kind: "delay", delayMs: n})
 			continue
 		}
