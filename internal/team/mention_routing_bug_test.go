@@ -128,7 +128,7 @@ func fullDispatchLauncher(t *testing.T) (*Launcher, chan string, func()) {
 	}
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex" // forces headless dispatch for every agent
 	l.notifyLastDelivered = make(map[string]time.Time)
@@ -278,7 +278,7 @@ func TestBug_FocusMode_HumanTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T
 		t.Fatalf("enable focus mode: %v", err)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.focusMode = true
@@ -318,7 +318,7 @@ func TestBug_FocusMode_CEOTagsWizardHiredPM_SpecialistIsImmediate(t *testing.T) 
 		t.Fatalf("enable focus mode: %v", err)
 	}
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.focusMode = true
@@ -364,7 +364,7 @@ func TestBug_DisabledMember_ExplicitTagDoesNotBypassMute(t *testing.T) {
 	}
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.notifyLastDelivered = make(map[string]time.Time)
@@ -431,7 +431,7 @@ func TestBug_DMToWizardHiredPM_Dispatch(t *testing.T) {
 	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.notifyLastDelivered = make(map[string]time.Time)
@@ -475,7 +475,7 @@ func TestBug_TagWizardHiredPM_InGeneral_Dispatch(t *testing.T) {
 	b.members = append(b.members, officeMember{Slug: "pm", Name: "Product Manager"})
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.notifyLastDelivered = make(map[string]time.Time)
@@ -525,7 +525,7 @@ func TestBug_RootCause_ChannelMembershipFilterDropsExplicitMention(t *testing.T)
 	// Note: #general's ch.Members was NOT updated to include "fe".
 	b.mu.Unlock()
 
-	l := newHeadlessLauncherForTest()
+	l := newHeadlessLauncherForTest(t)
 	l.broker = b
 	l.provider = "codex"
 	l.notifyLastDelivered = make(map[string]time.Time)
