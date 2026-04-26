@@ -6248,7 +6248,10 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			// Partial merge: only kinds present in the payload are touched,
 			// so the Settings UI can update one runtime's endpoint without
 			// shipping the whole map. Validate each key against the
-			// registry — same source of truth as llm_provider.
+			// registry — same source of truth as llm_provider. `changed`
+			// flips ONLY when at least one entry actually mutates state,
+			// so an empty-map payload (or one whose entries are all
+			// empty-key skips) doesn't force a config.Save round-trip.
 			if cfg.ProviderEndpoints == nil {
 				cfg.ProviderEndpoints = map[string]config.ProviderEndpoint{}
 			}
@@ -6267,12 +6270,18 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 					// Treat the empty-empty case as a clear so the user can
 					// drop their override and fall back to compile-time
 					// defaults without hand-editing config.json.
-					delete(cfg.ProviderEndpoints, k)
+					if _, existed := cfg.ProviderEndpoints[k]; existed {
+						delete(cfg.ProviderEndpoints, k)
+						changed = true
+					}
 				} else {
-					cfg.ProviderEndpoints[k] = ep
+					prev, existed := cfg.ProviderEndpoints[k]
+					if !existed || prev != ep {
+						cfg.ProviderEndpoints[k] = ep
+						changed = true
+					}
 				}
 			}
-			changed = true
 		}
 
 		if !changed {

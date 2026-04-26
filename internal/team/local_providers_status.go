@@ -193,14 +193,20 @@ func computeOneStatus(ctx context.Context, spec localProviderSpec, ov localProvi
 	// Probing arbitrary remote URLs from the broker would let a hostile
 	// config trigger outbound traffic to anywhere, and a slow remote
 	// can hang the Settings page render.
-	if st.PlatformSupported && isLoopbackBaseURL(endpoint) {
+	switch {
+	case !st.PlatformSupported:
+		// WindowsNote (above) already explains the platform gate;
+		// don't add a second note that misattributes the skip to a
+		// non-loopback URL. Probed stays false; UI uses
+		// PlatformSupported to render the disabled state.
+	case isLoopbackBaseURL(endpoint):
 		probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
 		reachable, loadedModel, _ := ov.probe(probeCtx, endpoint)
 		cancel()
 		st.Reachable = reachable
 		st.LoadedModel = loadedModel
 		st.Probed = true
-	} else if endpoint != "" {
+	case endpoint != "":
 		st.Probed = false
 		st.ProbeSkippedNote = "Reachability probe is loopback-only; configured endpoint is non-local."
 	}

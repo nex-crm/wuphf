@@ -847,19 +847,26 @@ interface LocalLLMPickerProps {
 function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
   const [status, setStatus] = useState<LocalProviderStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string>("");
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setFetchError("");
     getLocalProvidersStatus()
       .then((data) => {
         if (!alive) return;
         setStatus(data ?? []);
       })
-      .catch(() => {
-        // Endpoint missing → broker hasn't shipped this yet. Render
-        // tiles without status badges; the Settings link below still
-        // points users to the doctor panel for install commands.
+      .catch((err: unknown) => {
+        if (!alive) return;
+        // Surfaced inline below the tiles so a 401 / 5xx / missing
+        // endpoint isn't silently rendered as "every runtime is
+        // platform_supported but not installed". Lets users distinguish
+        // "the broker can't reach detection" from "you have nothing
+        // installed".
+        const msg = err instanceof Error ? err.message : String(err);
+        setFetchError(msg);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -913,6 +920,25 @@ function LocalLLMPicker({ selected, onSelect }: LocalLLMPickerProps) {
           }}
         >
           Detecting local runtimes…
+        </div>
+      )}
+      {!loading && fetchError && (
+        <div
+          data-testid="onboarding-local-llm-fetch-error"
+          style={{
+            fontSize: 12,
+            color: "var(--danger-500, #c33)",
+            padding: "6px 8px",
+            background: "var(--danger-50, #fee)",
+            border: "1px solid var(--danger-200, #fcc)",
+            borderRadius: 4,
+            marginBottom: 8,
+          }}
+        >
+          Couldn't reach the broker to check installed runtimes:{" "}
+          <code style={{ fontFamily: "var(--font-mono)" }}>{fetchError}</code>.
+          You can still pick a runtime — install/start commands live in{" "}
+          <strong>Settings → Local LLMs</strong> after onboarding.
         </div>
       )}
       {!loading && (

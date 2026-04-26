@@ -715,10 +715,19 @@ function LocalProviderCard({
   };
 
   const isDefault = cfg.llm_provider === meta.kind;
-  const installCmd =
-    status?.install?.[hostPlatform === "windows" ? "linux" : hostPlatform];
-  const startCmd =
-    status?.start?.[hostPlatform === "windows" ? "linux" : hostPlatform];
+  // Windows users get the WSL2 banner above; suppressing the install
+  // commands here avoids contradicting it (a user reading "use WSL2"
+  // shouldn't see a bare `brew install ollama` snippet that won't run
+  // in their host shell). They run the linux command inside WSL once
+  // they're there.
+  const cmdPlatform: "macos" | "linux" | undefined =
+    hostPlatform === "macos"
+      ? "macos"
+      : hostPlatform === "linux"
+        ? "linux"
+        : undefined;
+  const installCmd = cmdPlatform ? status?.install?.[cmdPlatform] : undefined;
+  const startCmd = cmdPlatform ? status?.start?.[cmdPlatform] : undefined;
 
   return (
     <div
