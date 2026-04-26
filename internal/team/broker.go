@@ -4066,6 +4066,19 @@ func defaultTeamChannelDescription(slug, name string) string {
 	return label + " focused work. Use this channel for discussion, decisions, and execution specific to that stream."
 }
 
+// reservedChannelSlugs are slug values that canAccessChannelLocked treats as
+// universally trusted senders. Any user-created channel sharing one of these
+// slugs would inherit that trust — every actor in the trust list could read
+// every message in that channel without an explicit Members entry. The
+// channel-create handler guards against this by rejecting create requests
+// whose slug matches this set; keep the two lists in sync.
+var reservedChannelSlugs = map[string]bool{
+	"system": true,
+	"nex":    true,
+	"you":    true,
+	"human":  true,
+}
+
 func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
 	slug = normalizeActorSlug(slug)
 	channel = normalizeChannelSlug(channel)
@@ -4075,6 +4088,9 @@ func (b *Broker) canAccessChannelLocked(slug, channel string) bool {
 		}
 		return slug == b.oneOnOneAgent
 	}
+	// NOTE: any new entry added here MUST also be added to
+	// reservedChannelSlugs above so the channel-create handler keeps the
+	// invariant "no user channel can shadow a trusted sender slug".
 	if slug == "" || slug == "you" || slug == "human" || slug == "nex" || slug == "system" {
 		return true
 	}
@@ -6773,6 +6789,15 @@ func (b *Broker) handleChannels(w http.ResponseWriter, r *http.Request) {
 		case "create":
 			if slug == "" {
 				http.Error(w, "slug required", http.StatusBadRequest)
+				return
+			}
+			if reservedChannelSlugs[slug] {
+				// Reject slugs that canAccessChannelLocked treats as universally
+				// trusted senders. Without this gate, a user-created channel
+				// named e.g. "system" would let every trusted-sender slug read
+				// + post in it without an explicit Members entry — defeating
+				// the membership check the rest of the auth path relies on.
+				http.Error(w, "slug is reserved", http.StatusBadRequest)
 				return
 			}
 			if b.findChannelLocked(slug) != nil {

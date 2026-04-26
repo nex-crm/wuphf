@@ -1755,6 +1755,63 @@ func TestChannelDescriptionsAreVisibleButContentStaysRestricted(t *testing.T) {
 	}
 }
 
+// TestChannelCreateRejectsReservedSlugs guards against a privilege-escalation
+// shape: canAccessChannelLocked treats a small set of slugs ("system", "nex",
+// "you", "human") as universally trusted senders. A user-created channel
+// sharing one of those slugs would let every trusted-sender slug read + post
+// in it without an explicit Members entry. The reservedChannelSlugs guard at
+// the channel-create handler prevents that; this test pins the invariant.
+func TestChannelCreateRejectsReservedSlugs(t *testing.T) {
+	b := newTestBroker(t)
+	if err := b.StartOnPort(0); err != nil {
+		t.Fatalf("failed to start broker: %v", err)
+	}
+	defer b.Stop()
+
+	base := fmt.Sprintf("http://%s", b.Addr())
+
+	for _, reserved := range []string{"system", "nex", "you", "human"} {
+		t.Run(reserved, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{
+				"action":     "create",
+				"slug":       reserved,
+				"name":       reserved,
+				"created_by": "ceo",
+			})
+			req, _ := http.NewRequest(http.MethodPost, base+"/channels", bytes.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+b.Token())
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("create %s: %v", reserved, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("create %s: expected 400, got %d", reserved, resp.StatusCode)
+			}
+		})
+	}
+
+	// Sanity: a non-reserved slug still creates successfully.
+	body, _ := json.Marshal(map[string]any{
+		"action":     "create",
+		"slug":       "feature-launch",
+		"name":       "Feature Launch",
+		"created_by": "ceo",
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/channels", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("create feature-launch: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create feature-launch: expected 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestChannelUpdateMutatesDescriptionAndMembers(t *testing.T) {
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
