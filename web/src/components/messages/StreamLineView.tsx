@@ -316,7 +316,14 @@ function ToolCallCard({
     "tool";
   const args = objectFromToolField(item.arguments ?? item.args);
   const result = normalizeToolResult(item.result);
-  const errorField = item.error;
+  // The tool-event payload omits `error` for successful calls, so the
+  // field arrives as undefined (not null). The previous `!== null`
+  // gate let undefined through and rendered an "× ERROR / undefined"
+  // chip for every successful tool call. Treat null AND undefined AND
+  // the empty string as "no error".
+  const hasError =
+    item.error !== null && item.error !== undefined && item.error !== "";
+  const errorField = hasError ? item.error : null;
 
   const { summaryArg, summaryResult, summaryError } = useMemo(() => {
     const pick = [
@@ -358,7 +365,7 @@ function ToolCallCard({
     }
 
     let sumError = "";
-    if (errorField !== null) {
+    if (hasError) {
       sumError =
         typeof errorField === "string" ? errorField.slice(0, 60) : "Error";
     }
@@ -368,7 +375,7 @@ function ToolCallCard({
       summaryResult: sumResult,
       summaryError: sumError,
     };
-  }, [args, result, errorField]);
+  }, [args, result, errorField, hasError]);
 
   const cleanArgs = useMemo<Record<string, unknown>>(() => {
     const out: Record<string, unknown> = {};
@@ -421,7 +428,7 @@ function ToolCallCard({
                 ))}
               </>
             )}
-          {errorField !== null && (
+          {hasError && (
             <>
               <div className="cc-tool-section-label cc-tool-error">
                 {"\u2717 Error"}
