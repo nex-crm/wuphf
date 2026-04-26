@@ -5597,7 +5597,8 @@ func switchSessionMode(mode, agent string) tea.Cmd {
 		if err != nil {
 			return channelResetDoneMsg{err: err}
 		}
-		resp, err := http.DefaultClient.Do(req)
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Do(req)
 		if err != nil {
 			return channelResetDoneMsg{err: err}
 		}
@@ -5651,7 +5652,8 @@ func switchFocusMode(enabled bool) tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		resp, err := http.DefaultClient.Do(req)
+		client := &http.Client{Timeout: 3 * time.Second}
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil
 		}
