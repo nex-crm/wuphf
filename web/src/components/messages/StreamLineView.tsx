@@ -16,8 +16,13 @@ interface StreamLineViewProps {
  */
 export function StreamLineView({ line, compact = false }: StreamLineViewProps) {
   if (!line.parsed) {
+    // Raw chunks from agentStream.Push (local-LLM streaming text). The
+    // useAgentStream hook coalesces consecutive raw events into a
+    // single StreamLine, so this branch renders the running model
+    // output as a continuous text block \u2014 not one chunk per row.
+    // Trailing ellipsis keeps the live-output panel visually capped.
     const text =
-      line.data.length > 400 ? `${line.data.slice(0, 400)}\u2026` : line.data;
+      line.data.length > 1200 ? `${line.data.slice(0, 1200)}\u2026` : line.data;
     return <div className="stream-line stream-line-raw">{text}</div>;
   }
 

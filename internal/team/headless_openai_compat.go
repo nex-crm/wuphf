@@ -122,6 +122,14 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		decided   bool
 	)
 
+	// broadcastedThisTurn flips true the first time the agent uses a
+	// user-visible posting tool (team_broadcast, reply, etc.). Used at
+	// the end of the turn to suppress a duplicate text post — without
+	// it, every turn produces both the tool's content + an iteration-2
+	// "Great, I've sent that!" summary, which compounds into a fan-out
+	// loop when the broker dispatches each post back to the agent.
+	var broadcastedThisTurn bool
+
 	// Throughput readout. Local LLMs are an order of magnitude slower
 	// than cloud APIs, so users want feedback that the machine is
 	// actually doing something — not just a static "drafting response"
@@ -231,6 +239,15 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 				return
 			}
 			appendHeadlessCodexLog(slug, fmt.Sprintf("openai_compat_tool_ok: %s -> %s", name, truncate(result, 240)))
+			// Track when the agent already posted a user-visible message
+			// in this turn via team_broadcast / reply / direct message
+			// tools. The post-loop "post finalText to channel" hook would
+			// otherwise double-post: once from the tool, again from
+			// iteration-2's "I've sent that" summary. We suppress the
+			// second post so the channel sees one reply per user message.
+			if isUserVisiblePostTool(name) {
+				broadcastedThisTurn = true
+			}
 		},
 		onFirstEvent: func() {
 			metrics.FirstEventMs = durationMillis(startedAt, time.Now())
@@ -297,7 +314,11 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	}
 	l.updateHeadlessProgress(slug, "idle", "idle", summary, metrics)
 
-	if text != "" {
+	if text != "" && !broadcastedThisTurn {
+		// Suppress when the agent already posted via team_broadcast /
+		// reply / etc this turn. Posting finalText here would
+		// double-up the user-visible reply AND fan out through the
+		// broker's channel-dispatch back to the agent itself.
 		appendHeadlessCodexLog(slug, kind+"_result: "+text)
 		msg, posted, err := l.postHeadlessFinalMessageIfSilent(slug, target, notification, text, startedAt)
 		if err != nil {
@@ -307,6 +328,26 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		}
 	}
 	return nil
+}
+
+// isUserVisiblePostTool reports whether name is one of the MCP tools
+// that itself posts a message to a channel the user is reading. When
+// the agent invokes one of these in a turn, the post-loop final-text
+// hook should NOT also post finalText (which would be the model's
+// "I've done it" follow-up summary), or the user sees double-replies
+// per turn AND triggers a fan-out loop because each post re-fires
+// the agent through the broker's channel-dispatch path.
+func isUserVisiblePostTool(name string) bool {
+	switch name {
+	case
+		"team_broadcast",
+		"team_reply",
+		"reply",
+		"direct_message",
+		"broker_post_message":
+		return true
+	}
+	return false
 }
 
 // looksUnparsedToolCall reports whether text resembles a tool-call
