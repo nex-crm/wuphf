@@ -402,7 +402,42 @@ func (e *Extractor) apply(ctx context.Context, out extractionOutput, artifactPat
 	// succeeded and SubmitFacts was atomic from the caller's perspective. A
 	// persistence failure is logged + queued to the DLQ for replay.
 	e.persistFactLogs(ctx, out.ArtifactSHA, factsToWrite)
+	// Closes the §7.4 round-trip for the entity layer: a fresh ghost row in
+	// the in-memory index also lands as a markdown brief on disk, so a wipe
+	// + ReconcileFromMarkdown rebuilds the entity (not just its facts).
+	// Non-fatal — the index row already exists, brief failures are
+	// recoverable via lint/reconcile.
+	e.persistGhostBriefs(ctx, entitiesToWrite)
 	return nil
+}
+
+// persistGhostBriefs writes a deterministic minimal brief for every
+// freshly-minted entity row in entitiesToWrite. Idempotent at the
+// commit layer (Repo.CommitGhostBrief returns HEAD without committing
+// when the file already matches), so re-extracting the same artifact
+// does not create orphan commits.
+//
+// Errors are logged and otherwise swallowed: the IndexEntity row is
+// already populated in-memory, and a missing brief is recoverable on
+// the next extraction run or via reconcile. Failing the caller here
+// would leave the in-memory index ahead of disk in a way the existing
+// DLQ retry path cannot recover (re-running extraction would skip
+// SubmitFacts as a no-op for already-known entities).
+func (e *Extractor) persistGhostBriefs(ctx context.Context, entities []IndexEntity) {
+	if len(entities) == 0 || e.worker == nil {
+		return
+	}
+	repo := e.worker.Repo()
+	if repo == nil {
+		return
+	}
+	for _, ent := range entities {
+		brief := MinimalBrief(ent)
+		msg := fmt.Sprintf("archivist: ghost brief for %s/%s", ent.Kind, ent.Slug)
+		if _, _, err := repo.CommitGhostBrief(ctx, ent.Kind, ent.Slug, brief, msg); err != nil {
+			log.Printf("wiki_extractor: ghost brief commit %s/%s: %v (continuing)", ent.Kind, ent.Slug, err)
+		}
+	}
 }
 
 // persistFactLogs appends newly-introduced facts to wiki/facts/{kind}/{slug}.jsonl

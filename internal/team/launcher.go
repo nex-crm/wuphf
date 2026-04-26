@@ -3900,7 +3900,7 @@ func (l *Launcher) buildPrompt(slug string) string {
 		sb.WriteString("- team_broadcast: Post to channel. CRITICAL: text @-mentions alone do NOT wake agents — include the slug in the `tagged` parameter.\n")
 		sb.WriteString("- team_poll: LAST RESORT — read recent messages only when pushed context is genuinely missing something you need. Do NOT call this by default; the pushed notification already contains thread context and task state.\n")
 		sb.WriteString("- team_bridge: CEO-only bridge for cross-channel context. Ask the CEO to use it.\n")
-		sb.WriteString("- team_task: Claim, complete, block, or release tasks in your domain.\n")
+		sb.WriteString("- team_task: Claim, complete, block, resume, or release tasks in your domain.\n")
 		sb.WriteString("- team_skill_run: When @ceo tells you to run a skill, or when the request clearly matches one, call team_skill_run(skill_name) BEFORE doing the work. It returns the canonical step-by-step content — follow it exactly instead of freelancing. Failing to invoke the skill leaves the office with no trace that the playbook was actually used.\n")
 		sb.WriteString("- team_skill_create: Propose a reusable skill yourself with action=propose when you spot a repeatable workflow. You do not need to ask @ceo to propose it for you. Only @ceo may use action=create.\n")
 		sb.WriteString("- team_action_connections / team_action_search / team_action_knowledge: inspect connected external systems and the exact action/workflow schema before you improvise. If connection listing is flaky, do NOT stop there; search/knowledge still give you the real action contract.\n")
@@ -4847,4 +4847,5 @@ func (l *Launcher) postEscalation(slug, taskID string, reason agent.EscalationRe
 		body = fmt.Sprintf("Heads up: %s escalation on %s: %s", who, taskID, detail)
 	}
 	l.broker.PostSystemMessage("general", body, "escalation")
+	_, _, _ = l.requestSelfHealing(slug, taskID, reason, detail)
 }
