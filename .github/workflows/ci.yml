@@ -79,13 +79,26 @@ jobs:
         with:
           version: v2.11.4
           args: --timeout=5m
+      - name: Cache govulncheck binary
+        # The version below is pinned, so the compiled binary at
+        # ~/go/bin/govulncheck is reusable across every CI run that
+        # doesn't bump GOVULNCHECK_VERSION. Saves ~10-15s of `go install`
+        # (download + compile) per run on warm cache.
+        id: cache-govulncheck
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache@v5.0.5
+        with:
+          path: ~/go/bin/govulncheck
+          key: govulncheck-${{ runner.os }}-v1.1.4
+      - name: Install govulncheck
+        if: steps.cache-govulncheck.outputs.cache-hit != 'true'
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
       - name: Run govulncheck
         # Catches reachable CVEs in the Go stdlib + modules. Flags us when we
         # fall behind on a Go minor bump without having to wait for a CVE
         # advisory to make noise. Pinned to an explicit version so a new
         # govulncheck release cannot flip pass/fail on the same commit.
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+          export PATH="$(go env GOPATH)/bin:$PATH"
           govulncheck ./...
 
   # Single test job. We previously fanned out one matrix leg per Go package
