@@ -1641,9 +1641,10 @@ func TestHeadlessTurnCompletedDurablyRejectsCodingTurnWithoutTaskStateOrEvidence
 	defer func() { headlessCodexWorkspaceStatusSnapshot = oldSnapshot }()
 
 	// Build the task state directly instead of going through
-	// EnsurePlannedTask so we never call saveLocked — the broker-state
-	// save path can race with leaked goroutines from earlier tests
-	// (rename .tmp -> final fails mid-flight). We don't need persistence
+	// EnsurePlannedTask so we never call saveLocked — broker save
+	// goroutines spawned by this test can outlive t.TempDir cleanup and
+	// race the rename .tmp -> final step (same root cause as
+	// leakedBrokerStatePath in launcher_test.go). We don't need persistence
 	// here; we only need the task fields that headlessTurnCompletedDurably
 	// reads.
 	b := newTestBroker(t)
