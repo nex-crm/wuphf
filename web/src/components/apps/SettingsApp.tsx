@@ -380,6 +380,35 @@ interface SectionProps {
   save: (patch: ConfigUpdate) => Promise<void>;
 }
 
+// useShredAction wraps `shredWorkspace()` with the cleanup both call sites
+// (GeneralSection's inline button and DangerZoneSection's full card) need on
+// success: clear the query cache, route the user back to a sensible default
+// channel, and reset onboarding state so the wizard reopens. The broker's
+// `AfterShred` hook (`internal/team/broker.go`) calls `requestShutdown()`, so
+// the page typically re-mounts shortly after — but until it does, the user
+// shouldn't be left on a Settings tab whose `cfg` query just got invalidated.
+function useShredAction() {
+  const queryClient = useQueryClient();
+  const resetForOnboarding = useAppStore((s) => s.resetForOnboarding);
+  return async (): Promise<boolean> => {
+    try {
+      const result: WorkspaceWipeResult = await shredWorkspace();
+      if (!result.ok) {
+        showNotice(result.error || "Shred failed", "error");
+        return false;
+      }
+      queryClient.clear();
+      window.history.replaceState(null, "", "#/channels/general");
+      resetForOnboarding();
+      showNotice("Workspace shredded. Onboarding reopened.", "success");
+      return true;
+    } catch (err) {
+      showNotice(err instanceof Error ? err.message : "Shred failed", "error");
+      return false;
+    }
+  };
+}
+
 function GeneralSection({ cfg, save }: SectionProps) {
   const [provider, setProvider] = useState(cfg.llm_provider ?? "claude-code");
   const [memory, setMemory] = useState(cfg.memory_backend ?? "nex");
@@ -394,24 +423,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
   const [email, setEmail] = useState(cfg.email ?? "");
   const [devUrl, setDevUrl] = useState(cfg.dev_url ?? "");
-  const queryClient = useQueryClient();
-
-  const runShred = async () => {
-    try {
-      const result: WorkspaceWipeResult = await shredWorkspace();
-      if (!result.ok) {
-        showNotice(result.error || "Shred failed", "error");
-        return;
-      }
-      queryClient.clear();
-      showNotice(
-        "Workspace shredded. Relaunch wuphf to start onboarding.",
-        "success",
-      );
-    } catch (err) {
-      showNotice(err instanceof Error ? err.message : "Shred failed", "error");
-    }
-  };
+  const runShred = useShredAction();
 
   const onSave = async () => {
     const patch: ConfigUpdate = {
@@ -446,7 +458,9 @@ function GeneralSection({ cfg, save }: SectionProps) {
           launch-time settings. Run{" "}
           <InlineCommand
             command="wuphf shred"
-            onRun={runShred}
+            onRun={async () => {
+              await runShred();
+            }}
             destructive={{
               title: "Shred this workspace?",
               severity: "critical",
@@ -1530,7 +1544,7 @@ function DangerZoneSection() {
   const [open, setOpen] = useState<DangerAction | null>(null);
   const [busy, setBusy] = useState(false);
   const queryClient = useQueryClient();
-  const resetForOnboarding = useAppStore((s) => s.resetForOnboarding);
+  const shred = useShredAction();
 
   const handleReset = async () => {
     setBusy(true);
@@ -1552,20 +1566,9 @@ function DangerZoneSection() {
   const handleShred = async () => {
     setBusy(true);
     try {
-      const result: WorkspaceWipeResult = await shredWorkspace();
-      if (!result.ok) {
-        showNotice(result.error || "Shred failed", "error");
-        setBusy(false);
-        return;
-      }
-      queryClient.clear();
-      window.history.replaceState(null, "", "#/channels/general");
-      resetForOnboarding();
+      await shred();
       setOpen(null);
-      setBusy(false);
-      showNotice("Workspace shredded. Onboarding reopened.", "success");
-    } catch (err) {
-      showNotice(err instanceof Error ? err.message : "Shred failed", "error");
+    } finally {
       setBusy(false);
     }
   };

@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 export type WipeSeverity = "warn" | "critical";
 
@@ -114,16 +114,65 @@ export function WipeModal({
 }: WipeModalProps) {
   const [value, setValue] = useState("");
   const enabled = !busy && value.trim().toLowerCase() === WIPE_CONFIRM_PHRASE;
+  const titleId = useId();
+  const bodyId = useId();
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  // Track where the press started so accidental drag-out from the input to
+  // the backdrop (common while selecting the displayed phrase to copy) does
+  // not dismiss the modal — `click` would otherwise fire on the backdrop and
+  // cancel.
+  const backdropPressRef = useRef(false);
+
+  // Focus the input on mount. biome's a11y/noAutofocus rule explicitly allows
+  // imperative focus via `useRef`+`useEffect` — only the JSX `autoFocus`
+  // attribute is forbidden — and the type-the-phrase friction is much worse
+  // when users have to click into the input first.
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  // Escape closes the modal — keyboard parity with backdrop click. Skipped
+  // while busy so an in-flight wipe cannot be canceled mid-flight by a stray
+  // keypress (matches the backdrop guard on line 119).
+  useEffect(() => {
+    if (busy) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
 
   return (
-    <div style={styles.backdrop} onClick={busy ? undefined : onCancel}>
-      <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
-        <div style={styles.title}>{title}</div>
-        <div style={styles.body}>{intro}</div>
+    <div
+      style={styles.backdrop}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby={titleId}
+      aria-describedby={bodyId}
+      onMouseDown={(e) => {
+        backdropPressRef.current = e.target === e.currentTarget;
+      }}
+      onMouseUp={(e) => {
+        if (busy) return;
+        if (backdropPressRef.current && e.target === e.currentTarget) {
+          onCancel();
+        }
+        backdropPressRef.current = false;
+      }}
+    >
+      <div style={styles.panel}>
+        <div id={titleId} style={styles.title}>
+          {title}
+        </div>
+        <div id={bodyId} style={styles.body}>
+          {intro}
+        </div>
         <label style={styles.inputLabel}>
           Type <code>{WIPE_CONFIRM_PHRASE}</code> to confirm
         </label>
         <input
+          ref={inputRef}
           type="text"
           style={styles.input}
           placeholder={WIPE_CONFIRM_PHRASE}

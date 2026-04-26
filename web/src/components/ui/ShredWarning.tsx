@@ -6,8 +6,11 @@ import type { ReactNode } from "react";
 // `internal/workspace/workspace.go:Shred`. When that function changes,
 // update this file (and only this file).
 
+// `internal/workspace/workspace.go:Shred` removes the entire `~/.wuphf/office`
+// directory, not just task receipts — narrowing the prose here would give
+// users the wrong impression that other office state survives.
 const DELETIONS_PROSE =
-  "your team, company identity, office task receipts, and saved workflows, plus local logs, sessions, provider state (including codex-headless scratch), calendar, and wiki memory";
+  "your team, company identity, office state, and saved workflows, plus local logs, sessions, provider state (including codex-headless scratch), calendar, and wiki memory";
 
 const PRESERVED_PROSE =
   "Task worktrees, your global config and API keys, and your OpenClaw device identity are kept.";

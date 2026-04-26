@@ -53,16 +53,29 @@ export function InlineCommand({
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
   const palette = PALETTES[tone];
+  // Show the ring on either pointer-hover or keyboard-focus so keyboard-only
+  // users get the same affordance mouse users do — the chip lives in the
+  // middle of a paragraph, so without an explicit focus indicator a tabbed
+  // landing is invisible.
+  const ringActive = (hover || focus) && !busy;
 
   const run = async () => {
     if (busy) return;
     setBusy(true);
     try {
       await onRun();
-      setOpen(false);
+    } catch (err) {
+      // Caller-site `() => void run()` (used inside WipeModal's onConfirm)
+      // would otherwise drop a rejected promise on the floor, leaving the
+      // modal mounted with `busy` already flipped back. Surface to console
+      // and close the modal so callers don't have to wrap every onRun in a
+      // try/catch defensively.
+      console.error("[InlineCommand] onRun threw:", err);
     } finally {
       setBusy(false);
+      setOpen(false);
     }
   };
 
@@ -82,9 +95,12 @@ export function InlineCommand({
         onClick={handleClick}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
+        onFocus={() => setFocus(true)}
+        onBlur={() => setFocus(false)}
         disabled={busy}
         title={ariaLabel || `Run ${command}`}
         aria-label={ariaLabel || `Run ${command}`}
+        aria-busy={busy}
         style={{
           display: "inline-flex",
           alignItems: "center",
@@ -92,21 +108,25 @@ export function InlineCommand({
           fontFamily: "var(--font-mono)",
           fontSize: "inherit",
           padding: "1px 8px",
-          background: hover && !busy ? palette.bgHover : palette.bg,
+          background: ringActive ? palette.bgHover : palette.bg,
           color: palette.fg,
           border: "none",
           borderRadius: 4,
           cursor: busy ? "progress" : "pointer",
-          boxShadow: hover && !busy ? `0 0 0 2px ${palette.ring}` : "none",
-          transition: "background 0.12s, box-shadow 0.12s",
+          boxShadow: ringActive ? `0 0 0 2px ${palette.ring}` : "none",
+          // Dim while busy so the non-destructive path has *some* affordance
+          // beyond `cursor: progress`; the destructive path gets the modal
+          // as a richer busy surface.
+          opacity: busy ? 0.65 : 1,
+          transition: "background 0.12s, box-shadow 0.12s, opacity 0.12s",
           verticalAlign: "baseline",
           lineHeight: 1.45,
           ...style,
         }}
       >
         <PlaySolid
-          width={9}
-          height={9}
+          width={11}
+          height={11}
           style={{ flexShrink: 0, opacity: 0.85 }}
         />
         <span>{command}</span>
