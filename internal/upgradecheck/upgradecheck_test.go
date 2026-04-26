@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -140,34 +138,6 @@ func TestCheckHitsRegistry(t *testing.T) {
 	}
 	if !res.UpgradeAvailable {
 		t.Errorf("expected UpgradeAvailable=true (current=%q)", res.Current)
-	}
-	if res.Notice() == "" {
-		t.Errorf("expected non-empty Notice")
-	}
-}
-
-func TestWriteCacheAtomic(t *testing.T) {
-	// Sandbox the cache to a temp HOME so we don't pollute ~/.wuphf.
-	t.Setenv("HOME", t.TempDir())
-
-	r := Result{Current: "0.79.10", Latest: "0.79.15", UpgradeAvailable: true}
-	if err := WriteCache(r); err != nil {
-		t.Fatalf("WriteCache: %v", err)
-	}
-
-	got, err := readCache()
-	if err != nil {
-		t.Fatalf("readCache: %v", err)
-	}
-	if got.Latest != "0.79.15" || !got.UpgradeAvailable {
-		t.Errorf("readCache returned %+v", got)
-	}
-
-	// The .tmp sibling must not be left behind after a successful rename.
-	home, _ := os.UserHomeDir()
-	tmp := filepath.Join(home, ".wuphf", "upgrade-check.json.tmp")
-	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
-		t.Errorf("expected %s to be absent after rename, got err=%v", tmp, err)
 	}
 }
 

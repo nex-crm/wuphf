@@ -1,7 +1,13 @@
 // Package upgradecheck compares the running wuphf version against the latest
 // published on npm and (optionally) summarises the diff via the GitHub
 // compare API. It is consumed by the `wuphf upgrade` subcommand and by the
-// startup notice printed before launching the web UI or TUI.
+// in-app web banner.
+//
+// Scope note: the npm shim (npm/bin/wuphf.js, PR #273) already self-heals
+// when the installed wuphf binary falls behind the latest published release,
+// printing its own one-line stderr hint. This package intentionally does
+// NOT add a second startup notice — it only powers explicit user-driven
+// surfaces (`wuphf upgrade`, the web banner).
 package upgradecheck
 
 import (
@@ -11,8 +17,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -26,35 +30,16 @@ const (
 	NPMPackage     = "wuphf"
 	GitHubRepo     = "nex-crm/wuphf"
 	NPMRegistryURL = "https://registry.npmjs.org/" + NPMPackage + "/latest"
-
-	// DefaultCacheTTL throttles the npm registry lookup so we do not hit it
-	// on every wuphf launch.
-	DefaultCacheTTL = 6 * time.Hour
 )
 
 // Result reports the comparison between the running version and the latest
 // published version.
 type Result struct {
-	Current          string    `json:"current"`
-	Latest           string    `json:"latest"`
-	UpgradeAvailable bool      `json:"upgrade_available"`
-	CompareURL       string    `json:"compare_url"`
-	UpgradeCommand   string    `json:"upgrade_command"`
-	CheckedAt        time.Time `json:"checked_at"`
-}
-
-// Notice returns a one-line summary suitable for stderr.
-func (r Result) Notice() string {
-	if !r.UpgradeAvailable {
-		return ""
-	}
-	return fmt.Sprintf(
-		"Update available: v%s → v%s. Run `%s` (changes: %s)",
-		strings.TrimPrefix(r.Current, "v"),
-		strings.TrimPrefix(r.Latest, "v"),
-		r.UpgradeCommand,
-		r.CompareURL,
-	)
+	Current          string `json:"current"`
+	Latest           string `json:"latest"`
+	UpgradeAvailable bool   `json:"upgrade_available"`
+	CompareURL       string `json:"compare_url"`
+	UpgradeCommand   string `json:"upgrade_command"`
 }
 
 // Check fetches the latest version from npm and compares it to the running
@@ -68,7 +53,6 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 	res := Result{
 		Current:        current,
 		UpgradeCommand: "npm install -g " + NPMPackage + "@latest",
-		CheckedAt:      time.Now().UTC(),
 	}
 
 	latest, err := fetchLatestVersion(ctx, client)
@@ -84,47 +68,6 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 		strings.TrimPrefix(latest, "v"),
 	)
 	return res, nil
-}
-
-// CachedCheck returns the most recent cached Result if it is fresher than
-// ttl, otherwise it performs a Check and writes the new result to the cache.
-// A failed network call falls back to the (possibly stale) cache.
-func CachedCheck(ctx context.Context, client *http.Client, ttl time.Duration) (Result, error) {
-	cached, cachedErr := readCache()
-	if cachedErr == nil && time.Since(cached.CheckedAt) < ttl {
-		return cached, nil
-	}
-	fresh, err := Check(ctx, client)
-	if err != nil {
-		if cachedErr == nil {
-			return cached, nil
-		}
-		return fresh, err
-	}
-	_ = WriteCache(fresh)
-	return fresh, nil
-}
-
-// RefreshAsync kicks off a background refresh of the cache. Suitable for
-// firing during startup without blocking the user-visible launch path.
-func RefreshAsync(ttl time.Duration) {
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = CachedCheck(ctx, nil, ttl)
-	}()
-}
-
-// CachedNotice returns the notice for the most recent cached result, or an
-// empty string if the cache is missing or the user is on the latest version.
-// It never performs network I/O — call RefreshAsync separately to keep the
-// cache fresh.
-func CachedNotice() string {
-	r, err := readCache()
-	if err != nil {
-		return ""
-	}
-	return r.Notice()
 }
 
 // ── npm registry ──────────────────────────────────────────────────────────
@@ -325,59 +268,16 @@ func FormatChangelog(entries []CommitEntry) string {
 	return b.String()
 }
 
-// ── Cache ─────────────────────────────────────────────────────────────────
-
-func cachePath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	dir := filepath.Join(home, ".wuphf")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, "upgrade-check.json"), nil
-}
-
-func readCache() (Result, error) {
-	var r Result
-	path, err := cachePath()
-	if err != nil {
-		return r, err
-	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return r, err
-	}
-	if err := json.Unmarshal(data, &r); err != nil {
-		return r, err
-	}
-	return r, nil
-}
-
-// WriteCache persists r to disk atomically (write to a sibling tempfile then
-// rename) so concurrent wuphf launches cannot interleave bytes and produce a
-// truncated/garbled JSON file.
-func WriteCache(r Result) error {
-	path, err := cachePath()
-	if err != nil {
-		return err
-	}
-	data, err := json.MarshalIndent(r, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
-}
-
 // ── Version comparison ────────────────────────────────────────────────────
 
 // compareVersions compares dotted-numeric versions like "0.79.10". Returns
 // -1 if a < b, 0 if equal, 1 if a > b. Non-numeric segments collapse to 0.
+//
+// Pre-release suffixes (e.g. "0.79.10-rc.1") are not interpreted; the
+// numeric tail is parsed up to the first non-numeric character, so
+// "0.79.10-rc.1" sorts equal to "0.79.10". Acceptable here because npm's
+// `latest` dist-tag is conventionally a stable release. If we ever publish
+// pre-releases under `latest`, swap in a real semver comparator.
 func compareVersions(a, b string) int {
 	pa := splitVersion(a)
 	pb := splitVersion(b)

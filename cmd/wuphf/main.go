@@ -321,17 +321,12 @@ func main() {
 		return
 	}
 
-	// Print upgrade notice (if a previous run cached one) before launching
-	// the long-running web UI or TUI, then refresh the cache asynchronously
-	// so the next launch sees the latest information. Suppressed under TUI
-	// mode because the notice would land on the parent stderr just before
-	// tmux attaches (visible in shell scrollback if attach fails) — the web
-	// UI surfaces an in-app banner instead, so this stderr line is mainly
-	// for the short window before the browser opens.
-	if shouldShowUpgradeNotice(*showVersion, *channelView, *cmd != "", isPiped(), *tuiMode, firstSub) {
-		maybePrintUpgradeNotice(os.Stderr)
-	}
-	upgradecheck.RefreshAsync(upgradecheck.DefaultCacheTTL)
+	// No startup upgrade notice here: the npm shim (npm/bin/wuphf.js, PR
+	// #273) already prints a one-line stderr hint pointing at
+	// `npm install -g wuphf@latest` before exec'ing the binary, and
+	// transparently downloads & runs a newer release when one exists. The
+	// in-app web banner is the additive surface for that flow; the shim
+	// owns the CLI surface.
 
 	// TUI mode: tmux-based interface
 	if *tuiMode {
@@ -341,33 +336,6 @@ func main() {
 
 	// Default: web UI
 	runWeb(args, selectedBlueprint, *unsafeMode, *webPort, *opusCEO, *collabMode, *noOpen)
-}
-
-// shouldShowUpgradeNotice gates the startup upgrade notice so it fires only
-// on interactive web-UI launches. Mirrors shouldWarnShadow: script-facing
-// entrypoints (--version, --cmd, piped) and stdio-protocol subprocesses
-// (--channel-view, mcp-team) keep their output clean. TUI mode is excluded
-// because the in-app banner is the right surface for that flow.
-func shouldShowUpgradeNotice(showVersion, channelView, cmdFlagSet, piped, tuiMode bool, subcmd string) bool {
-	if showVersion || channelView || cmdFlagSet || piped || tuiMode {
-		return false
-	}
-	if subcmd == "mcp-team" {
-		return false
-	}
-	return true
-}
-
-// maybePrintUpgradeNotice writes a one-line upgrade hint when the cache says
-// a newer wuphf is on npm. Stays silent on first launch (no cache yet).
-// Caller is responsible for the gating policy — see shouldShowUpgradeNotice.
-func maybePrintUpgradeNotice(w *os.File) {
-	notice := upgradecheck.CachedNotice()
-	if notice == "" {
-		return
-	}
-	_, _ = fmt.Fprintln(w, "↑ "+notice)
-	_, _ = fmt.Fprintln(w)
 }
 
 func runUpgradeCheck(args []string) {
@@ -381,8 +349,7 @@ func runUpgradeCheck(args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	// Always do a fresh fetch — the user typed `wuphf upgrade` because they
-	// want ground truth, not a cached "you're on latest" from hours ago.
-	// The cache is for the silent startup notice path (CachedNotice).
+	// want ground truth.
 	res, err := upgradecheck.Check(ctx, nil)
 
 	if jsonOut {
@@ -395,9 +362,6 @@ func runUpgradeCheck(args []string) {
 		fmt.Fprintf(os.Stderr, "warning: could not reach npm registry to check for updates (%v)\n", err)
 		os.Exit(1)
 	}
-
-	// Persist the fresh result so the next launch's startup notice reflects it.
-	_ = upgradecheck.WriteCache(res)
 
 	if !res.UpgradeAvailable {
 		fmt.Printf("You are running %s v%s. That is the latest published version.\n",
