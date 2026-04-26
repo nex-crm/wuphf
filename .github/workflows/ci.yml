@@ -125,9 +125,30 @@ jobs:
           name: web-dist
           path: web/dist
       - name: Tests with race detector (everything except teammcp)
-        run: go test -race -timeout 15m $(go list ./... | grep -vE '/internal/teammcp($|/)')
+        # `set -euo pipefail` + the empty-package guard close a fail-open
+        # path: bash does NOT propagate failures inside `$(...)`, so a
+        # transient `go list` error or a regex tweak that drops every
+        # match would otherwise degrade the step to `go test -race
+        # -timeout 15m` against the cwd package only — green CI, every
+        # subpackage silently skipped. `pipefail` surfaces the inner
+        # failure; the guard catches an empty match list.
+        run: |
+          set -euo pipefail
+          pkgs=$(go list ./... | grep -vE '/internal/teammcp($|/)')
+          if [ -z "$pkgs" ]; then
+            echo "no packages matched — refusing to run an empty go test suite" >&2
+            exit 1
+          fi
+          go test -race -timeout 15m $pkgs
       - name: Tests without race (internal/teammcp)
-        run: go test -timeout 15m $(go list ./... | grep -E '/internal/teammcp($|/)')
+        run: |
+          set -euo pipefail
+          pkgs=$(go list ./... | grep -E '/internal/teammcp($|/)')
+          if [ -z "$pkgs" ]; then
+            echo "no packages matched — refusing to run an empty go test suite" >&2
+            exit 1
+          fi
+          go test -timeout 15m $pkgs
 
   # Keep a standalone vet job so config drift (a new vet check landing in
   # a Go minor bump, or an unknown //go:build tag) surfaces with its own
