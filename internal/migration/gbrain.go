@@ -133,7 +133,11 @@ func (a *GBrainAdapter) iterViaList(ctx context.Context, out chan<- MigrationRec
 	offset := 0
 	for {
 		if ctx.Err() != nil {
-			return nil
+			// Caller cancelled mid-scan. We deliberately return nil
+			// (not ctx.Err()) so Iter() does NOT trigger the fallback
+			// query — a cancelled context should stop the migration,
+			// not retry it via a different transport.
+			return nil //nolint:nilerr // intentional: cancellation stops migration without fallback
 		}
 		raw, err := a.caller.Call(ctx, "list_pages", map[string]any{
 			"limit":  a.pageSize,
@@ -151,7 +155,8 @@ func (a *GBrainAdapter) iterViaList(ctx context.Context, out chan<- MigrationRec
 		}
 		for _, p := range pages {
 			if ctx.Err() != nil {
-				return nil
+				// Same rationale as the outer ctx.Err() check.
+				return nil //nolint:nilerr // intentional: cancellation stops migration without fallback
 			}
 			rec, ok := a.hydratePage(ctx, p)
 			if !ok {

@@ -95,7 +95,11 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 
 	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			// Per-entry walk errors (permission denied on a single file,
+			// transient FS issue) shouldn't blow up the whole catalog.
+			// Skip the offending entry and keep walking — the catalog
+			// degrades gracefully by missing one row.
+			return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
 		}
 		if d.IsDir() {
 			// team/inbox/ holds raw ingested source material (scanner dumps),
@@ -114,13 +118,19 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 		}
 		rel, err := filepath.Rel(r.Root(), path)
 		if err != nil {
-			return nil
+			// filepath.Rel only fails when path isn't under r.Root(), which
+			// shouldn't happen during a WalkDir rooted at r.Root() — skip
+			// defensively rather than abort the catalog build.
+			return nil //nolint:nilerr // intentional: defensive skip, keep walking
 		}
 		rel = filepath.ToSlash(rel)
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			// Best-effort read: a transient I/O failure on a single article
+			// shouldn't fail the catalog. The article will reappear on the
+			// next walk; in the meantime the row is omitted.
+			return nil //nolint:nilerr // intentional: skip unreadable file, keep walking
 		}
 
 		entry := CatalogEntry{
@@ -235,7 +245,7 @@ func (r *Repo) BuildArticle(ctx context.Context, relPath string) (ArticleMeta, e
 	if err != nil {
 		// Non-fatal: surface the article without backlinks rather than 500.
 		// The UI degrades gracefully.
-		return meta, nil
+		return meta, nil //nolint:nilerr // intentional: backlink failure degrades to empty backlinks
 	}
 	meta.Backlinks = backs
 
@@ -261,7 +271,9 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 
 	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable entries rather than abort
+			// Skip unreadable entries rather than abort the backlink scan.
+			// Missing one source means at most one missing backlink row.
+			return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
 		}
 		if d.IsDir() {
 			return nil
@@ -271,7 +283,8 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 		}
 		rel, err := filepath.Rel(r.Root(), path)
 		if err != nil {
-			return nil
+			// Defensive: filepath.Rel shouldn't fail under a rooted walk.
+			return nil //nolint:nilerr // intentional: defensive skip, keep walking
 		}
 		rel = filepath.ToSlash(rel)
 		if rel == target {
@@ -280,7 +293,8 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			return nil
+			// Best-effort read: skip the article rather than abort.
+			return nil //nolint:nilerr // intentional: skip unreadable file, keep walking
 		}
 		targets := parseWikilinkTargets(content)
 		for _, t := range targets {

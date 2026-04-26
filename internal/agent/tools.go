@@ -205,7 +205,10 @@ func localToolDefinitions() []AgentTool {
 					}
 					data, err := os.ReadFile(path)
 					if err != nil {
-						return nil
+						// Skip unreadable files (binary, permission denied);
+						// grep is best-effort and shouldn't abort the whole
+						// scan because of one bad file.
+						return nil //nolint:nilerr // intentional: skip unreadable file, keep walking
 					}
 					lines := strings.Split(string(data), "\n")
 					for i, line := range lines {

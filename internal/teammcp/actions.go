@@ -632,7 +632,12 @@ func handleTeamActionWorkflowSchedule(ctx context.Context, _ *mcp.CallToolReques
 				"ok":    false,
 				"error": execErr.Error(),
 			}
-			return textResult(prettyObject(result)), nil, nil
+			// The workflow is scheduled even though the immediate run
+			// failed; surface the failure inside the result payload
+			// (run_now.ok=false + error) rather than as a tool-call
+			// error so the agent sees a structured response and can
+			// decide whether to retry.
+			return textResult(prettyObject(result)), nil, nil //nolint:nilerr // intentional: surface execErr inside result, schedule succeeded
 		}
 		_ = brokerRecordAction(ctx, "external_workflow_executed", provider.Name(), channel, slug, fmt.Sprintf("Scheduled workflow %s via %s and ran it once immediately", args.Key, titleCaser.String(provider.Name())), args.Key)
 		_ = touchWorkflowSkill(ctx, args.Key, runResult.Status, time.Now().UTC())

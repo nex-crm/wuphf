@@ -58,8 +58,10 @@ func ReadScanManifest() (*ScanManifest, error) {
 	}
 	var data ScanManifest
 	if err := json.Unmarshal(raw, &data); err != nil {
-		// Corruption recovery — start fresh.
-		return emptyManifest(), nil
+		// Corruption recovery — start fresh. Per the package doc:
+		// "Losing the manifest costs us one redundant re-scan, not
+		// correctness." Don't propagate the unmarshal error.
+		return emptyManifest(), nil //nolint:nilerr // intentional: corruption recovery, documented behavior
 	}
 	if data.Version != scanManifestVersion || data.Files == nil {
 		return emptyManifest(), nil

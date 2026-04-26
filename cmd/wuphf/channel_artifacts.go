@@ -342,11 +342,14 @@ func recentWorkflowRunArtifacts(limit int) []workflowRunArtifact {
 	entries := []workflowRunArtifact{}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d == nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".runs.jsonl") {
-			return nil
+			// Skip unreadable/non-matching entries; the workflows index
+			// is read-only and best-effort, missing one row is acceptable.
+			return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
 		}
 		info, statErr := d.Info()
 		if statErr != nil {
-			return nil
+			// Race: file vanished between WalkDir listing and stat. Skip.
+			return nil //nolint:nilerr // intentional: stat race, keep walking
 		}
 		artifact, ok := readWorkflowRunArtifact(path, info)
 		if ok {

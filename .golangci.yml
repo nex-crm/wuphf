@@ -14,13 +14,13 @@ linters:
     - govet
     - ineffassign
     - misspell
+    - nilerr
     - noctx
     - staticcheck
     - unconvert
     # Followups (own PR each — too many existing findings to land here):
     #   - contextcheck (26 findings: ctx threading)
     #   - gocritic (40 findings: mostly diagnostic-tag style nits)
-    #   - nilerr (29 findings: returning nil after non-nil err)
   settings:
     errcheck:
       exclude-functions:

@@ -189,7 +189,11 @@ func (a *NexAdapter) iterType(ctx context.Context, objectType string, out chan<-
 	offset := 0
 	for {
 		if ctx.Err() != nil {
-			return nil
+			// Caller cancelled. Return nil (not ctx.Err()) so the outer
+			// goroutine doesn't print a "warning: context canceled" per
+			// object type — the outer loop also checks ctx.Err() and
+			// exits cleanly.
+			return nil //nolint:nilerr // intentional: cancellation, outer loop handles exit
 		}
 		page, err := a.fetchPage(ctx, objectType, a.pageSize, offset)
 		if err != nil {

@@ -3197,16 +3197,24 @@ func killPersistedOfficeProcess() error {
 	}
 	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
 	if err != nil || pid <= 0 {
+		// Stale or corrupt PID file: there's no process to kill, just
+		// clear the file so the next launcher boots cleanly. Don't
+		// surface the parse error — the caller's intent is "shut
+		// anything down", and an unparseable PID file means there's
+		// nothing to shut down.
 		_ = clearOfficePIDFile()
-		return nil
+		return nil //nolint:nilerr // intentional: corrupt PID file is a no-op
 	}
 	if pid == os.Getpid() {
 		return nil
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
+		// On Unix os.FindProcess never errors, but cover the API
+		// contract: if it ever does, clear the stale PID file and
+		// continue — there's nothing to kill.
 		_ = clearOfficePIDFile()
-		return nil
+		return nil //nolint:nilerr // intentional: no process to kill, clear PID and move on
 	}
 	_ = proc.Kill()
 	return nil

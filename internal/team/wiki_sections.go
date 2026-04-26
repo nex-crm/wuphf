@@ -120,7 +120,9 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 	teamDir := repo.TeamDir()
 	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			// Skip unreadable entries; section discovery degrades by
+			// missing one row rather than 500ing the catalog.
+			return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
 		}
 		if d.IsDir() {
 			// Hide compiler-output subtrees (e.g. playbooks/.compiled/**)
@@ -136,7 +138,8 @@ func DiscoverSections(ctx context.Context, repo *Repo, blueprint *operations.Blu
 		}
 		rel, err := filepath.Rel(repo.Root(), path)
 		if err != nil {
-			return nil
+			// Defensive: filepath.Rel shouldn't fail under a rooted walk.
+			return nil //nolint:nilerr // intentional: defensive skip, keep walking
 		}
 		rel = filepath.ToSlash(rel)
 		slug := groupFromPath(rel)
