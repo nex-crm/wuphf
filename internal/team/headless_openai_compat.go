@@ -104,6 +104,44 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 	// to the HTTP request — without this a cancelled turn would pin the
 	// local server's inference slot until the model finishes generating.
 	streamFn := provider.NewOpenAICompatStreamFnWithCtx(ctx, kind)
+
+	// Live-output suppression for JSON-in-content tool calls. Open
+	// models (Qwen2.5-Coder via mlx_lm.server, in particular) emit
+	// tool calls as `{"name":"...","arguments":{...}}<|im_end|>` —
+	// streamed character-by-character. Without this gate the user
+	// would watch the raw JSON type itself out in the live-output
+	// panel before the orchestrator silently swaps it for a tool_use
+	// chunk. We detect "looks like a JSON tool call" by checking
+	// whether the cumulative text starts with `{` (whitespace-
+	// trimmed). If it does, we hold off pushing chunks to agentStream
+	// until either the parser fires (in which case the JSON never
+	// appears) or the stream ends with no tool-call match.
+	var (
+		liveBuf   strings.Builder
+		looksJSON bool
+		decided   bool
+	)
+
+	// Throughput readout. Local LLMs are an order of magnitude slower
+	// than cloud APIs, so users want feedback that the machine is
+	// actually doing something — not just a static "drafting response"
+	// label that could mean "stuck". We track cumulative chars over a
+	// rolling 1s window and surface ~tok/s in the progress label
+	// (~4 chars per token, English; close enough for a vibe readout).
+	// Updates capped at one-per-750ms so the broker SSE stream isn't
+	// pummeled on fast models.
+	var (
+		streamedChars int
+		tpsAnchorAt   time.Time
+		tpsAnchorChrs int
+	)
+	flushLiveBuf := func() {
+		if liveBuf.Len() > 0 && agentStream != nil {
+			agentStream.Push(liveBuf.String())
+		}
+		liveBuf.Reset()
+	}
+
 	loop := openAICompatToolLoop{
 		streamFn:    streamFn,
 		tools:       tools,
@@ -111,11 +149,72 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		maxIters:    maxOpenAICompatToolIterations,
 		toolTimeout: 90 * time.Second,
 		onText: func(s string) {
-			if agentStream != nil && s != "" {
-				agentStream.Push(s)
+			if s == "" {
+				return
 			}
+			streamedChars += len(s)
+			// Rolling tok/s readout in the progress label.
+			now := time.Now()
+			if tpsAnchorAt.IsZero() {
+				tpsAnchorAt = now
+				tpsAnchorChrs = streamedChars
+			} else if now.Sub(tpsAnchorAt) >= 750*time.Millisecond {
+				delta := streamedChars - tpsAnchorChrs
+				elapsed := now.Sub(tpsAnchorAt).Seconds()
+				if delta > 0 && elapsed > 0 {
+					// Standard ~4 chars per token; close enough for a
+					// vibe readout. Round to nearest int so the label
+					// doesn't flicker on every chunk.
+					tps := float64(delta) / 4.0 / elapsed
+					l.updateHeadlessProgress(slug, "active", "text",
+						fmt.Sprintf("drafting response · ~%.0f tok/s", tps),
+						metrics)
+				}
+				tpsAnchorAt = now
+				tpsAnchorChrs = streamedChars
+			}
+			if agentStream == nil {
+				return
+			}
+			if !decided {
+				// Buffer until we've seen enough non-whitespace to
+				// decide; ~8 chars is enough to disambiguate `{ ` vs
+				// real prose.
+				liveBuf.WriteString(s)
+				trimmed := strings.TrimLeft(liveBuf.String(), " \t\r\n")
+				if len(trimmed) >= 8 || strings.ContainsAny(trimmed, "\n") {
+					if strings.HasPrefix(trimmed, "{") {
+						looksJSON = true
+					}
+					decided = true
+					if !looksJSON {
+						flushLiveBuf()
+					}
+				}
+				return
+			}
+			if looksJSON {
+				// Hold back; the parser at end-of-stream may convert
+				// this entire buffer to a tool_use. If it doesn't,
+				// the post-loop unparsed-tool-call backstop replaces
+				// the JSON with a clearer message.
+				liveBuf.WriteString(s)
+				return
+			}
+			agentStream.Push(s)
 		},
 		onToolUse: func(name, rawInput string) {
+			// Tool firing means the streamed JSON we held back was a
+			// tool-call invocation — discard the buffer so the next
+			// iteration starts fresh, and reset the throughput +
+			// JSON-detection state so iteration 2 doesn't inherit
+			// stale flags from iteration 1.
+			liveBuf.Reset()
+			looksJSON = false
+			decided = false
+			tpsAnchorAt = time.Time{}
+			tpsAnchorChrs = 0
+			streamedChars = 0
 			if agentStream != nil {
 				agentStream.Push(fmt.Sprintf("[tool_use %s] %s", name, rawInput))
 			}
@@ -175,6 +274,16 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 
 	metrics.TotalMs = time.Since(startedAt).Milliseconds()
 	text := strings.TrimSpace(finalText)
+	// Backstop: if the loop's final reply LOOKS like a tool-call shape
+	// the parser couldn't disambiguate, don't post the raw JSON to the
+	// channel as the agent's message — replace it with a short hint
+	// pointing at the latency log. This is a recoverable case: the
+	// model emitted something tool-call-shaped that didn't match any
+	// of our supported dialects (legacy bug: posted the JSON verbatim).
+	if looksUnparsedToolCall(text) {
+		appendHeadlessCodexLog(slug, kind+"_unparsed_tool_call: "+truncate(text, 480))
+		text = "(local model emitted a tool-call shape we couldn't parse — see the agent log for the raw output and try a different model or prompt)"
+	}
 	appendHeadlessCodexLatency(slug, fmt.Sprintf("status=ok provider=%s total_ms=%d first_event_ms=%d first_text_ms=%d iterations=%d final_chars=%d",
 		kind, metrics.TotalMs,
 		metrics.FirstEventMs, metrics.FirstTextMs,
@@ -198,6 +307,21 @@ func (l *Launcher) runHeadlessOpenAICompatTurn(ctx context.Context, slug string,
 		}
 	}
 	return nil
+}
+
+// looksUnparsedToolCall reports whether text resembles a tool-call
+// JSON shape we'd have wanted to dispatch but couldn't. Used as a
+// last-ditch backstop in runHeadlessOpenAICompatTurn so a model that
+// emits tool-call-shaped output in an unsupported dialect doesn't
+// have its raw JSON posted to the channel as if it were the agent's
+// reply. Conservative: only fires when the trimmed content starts
+// with `{` and contains both `"name"` and `"arguments"` substrings.
+func looksUnparsedToolCall(text string) bool {
+	t := strings.TrimSpace(text)
+	if !strings.HasPrefix(t, "{") {
+		return false
+	}
+	return strings.Contains(t, `"name"`) && strings.Contains(t, `"arguments"`)
 }
 
 // isOpenAICompatKind reports whether kind is one of the local OpenAI-

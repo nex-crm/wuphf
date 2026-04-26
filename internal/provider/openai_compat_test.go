@@ -274,6 +274,87 @@ func TestParseOpenAISSEStream_QwenToolsTagFallback(t *testing.T) {
 	}
 }
 
+// TestParseOpenAISSEStream_QwenImEndFallback locks in the Qwen-style
+// `{json}<|im_end|>` shape mlx_lm.server actually emits (no <tools>
+// wrapper, just bare JSON followed by the chat-template terminator).
+// This was the failure mode in screenshot bug "agent reply is the raw
+// tool-call JSON" — the trailing `<|im_end|>` made the previous
+// HasSuffix("}") check bail out, and the JSON got streamed back to
+// the user verbatim.
+func TestParseOpenAISSEStream_QwenImEndFallback(t *testing.T) {
+	body := sseBody(
+		`{"choices":[{"delta":{"content":"{\"name\": \"team_broadcast\", \"arguments\": {\"channel\": \"ceo__human\", \"content\": \"hi team\"}}<|im_end|>"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	)
+	ch := make(chan agent.StreamChunk, 8)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "mlx-lm", strings.NewReader(body))
+	}()
+	var sawToolUse bool
+	for _, c := range drainChunks(t, ch) {
+		if c.Type == "tool_use" {
+			sawToolUse = true
+			if c.ToolName != "team_broadcast" {
+				t.Errorf("ToolName = %q, want team_broadcast", c.ToolName)
+			}
+			ch, _ := c.ToolParams["channel"].(string)
+			if ch != "ceo__human" {
+				t.Errorf("ToolParams[channel] = %v, want ceo__human", c.ToolParams["channel"])
+			}
+		}
+	}
+	if !sawToolUse {
+		t.Fatal("Qwen <|im_end|> dialect did not surface as tool_use — agent reply will be the raw JSON")
+	}
+}
+
+// TestParseOpenAISSEStream_BalancedJSONIgnoresProseSummary covers the
+// case where the model emits the tool-call JSON followed by a brief
+// "I'll send that now" trailer — common with smaller open models.
+// The first balanced object should still be detected as a tool call.
+func TestParseOpenAISSEStream_BalancedJSONIgnoresProseSummary(t *testing.T) {
+	body := sseBody(
+		`{"choices":[{"delta":{"content":"{\"name\": \"team_broadcast\", \"arguments\": {\"channel\": \"general\", \"content\": \"x\"}}\n\nDone."}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	)
+	ch := make(chan agent.StreamChunk, 8)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "mlx-lm", strings.NewReader(body))
+	}()
+	var sawToolUse bool
+	for _, c := range drainChunks(t, ch) {
+		if c.Type == "tool_use" {
+			sawToolUse = true
+		}
+	}
+	if !sawToolUse {
+		t.Fatal("balanced JSON + brief trailer did not surface as tool_use")
+	}
+}
+
+// TestParseOpenAISSEStream_BalancedJSONRejectsProsePrecedingJSON keeps
+// the parser conservative: prose-then-JSON is treated as prose. We
+// don't want a model that types "Here's an example: {…}" to trigger
+// an actual tool invocation.
+func TestParseOpenAISSEStream_BalancedJSONRejectsProsePrecedingJSON(t *testing.T) {
+	body := sseBody(
+		`{"choices":[{"delta":{"content":"Here is an example: {\"name\":\"do\",\"arguments\":{}}"}}]}`,
+		`{"choices":[{"delta":{},"finish_reason":"stop"}]}`,
+	)
+	ch := make(chan agent.StreamChunk, 8)
+	go func() {
+		defer close(ch)
+		parseOpenAISSEStream(ch, "mlx-lm", strings.NewReader(body))
+	}()
+	for _, c := range drainChunks(t, ch) {
+		if c.Type == "tool_use" {
+			t.Fatalf("prose-then-JSON misread as invocation: %+v", c)
+		}
+	}
+}
+
 // TestParseOpenAISSEStream_QwenToolsTagFallback_OnlyOneBlock guards against
 // a model that emits multiple <tools> blocks (sometimes happens when it's
 // reasoning aloud). Conservative path: do not invoke either; surface as

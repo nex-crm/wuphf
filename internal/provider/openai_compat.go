@@ -328,15 +328,20 @@ func parseOpenAISSEStream(ch chan<- agent.StreamChunk, kind string, body io.Read
 
 // parseJSONInContentToolCall returns (name, rawArgs, true) when content
 // contains an unambiguous tool invocation that didn't come through the
-// structured tool_calls SSE deltas. Two dialects are recognised, in this
-// order:
+// structured tool_calls SSE deltas. Three dialects are recognised, in
+// this order:
 //
-//  1. The whole content is a single JSON object
-//     {"name":"<id>","arguments":{...}} — emitted by the OpenAI-compatible
-//     side of mlx_lm.server when a model isn't OpenAI-fine-tuned.
-//  2. The content contains a single <tools>{json}</tools> block — the
-//     wrapper Qwen2.5-Coder uses by default. Any text outside the wrapper
-//     is the model's commentary and is ignored for the tool-call shape.
+//  1. <tools>{json}</tools> block (Qwen2.5-Coder default) — embedded in
+//     prose, only the body is parsed.
+//  2. Bare JSON object {"name":"<id>","arguments":{...}} — emitted by
+//     the OpenAI-compatible side of mlx_lm.server when a model isn't
+//     OpenAI-fine-tuned. Trailing chat-template markers like
+//     `<|im_end|>` / `<|endoftext|>` and trailing prose summaries are
+//     stripped before the match so a real tool call still fires.
+//  3. The first balanced {…} that parses as a {name, arguments} pair
+//     and is followed only by chat-template tokens, whitespace, or
+//     trailing summary lines. Lenient enough to catch Qwen's
+//     `{json}<|im_end|>` shape without firing on prose-with-an-example.
 //
 // Returns ok=false on anything else: prose mentioning a tool, JSON with
 // extra fields, arguments-as-string, multiple <tools> blocks, etc.
@@ -344,19 +349,122 @@ func parseOpenAISSEStream(ch chan<- agent.StreamChunk, kind string, body io.Read
 // positive executes a tool that wasn't actually requested.
 func parseJSONInContentToolCall(content string) (string, string, bool) {
 	s := strings.TrimSpace(content)
+	s = stripChatTemplateTerminators(s)
 
-	// Dialect 2: <tools>{...}</tools>. Check first because it can be
-	// embedded inside surrounding prose, whereas dialect 1 requires the
-	// whole content to be JSON.
+	// Dialect 1: <tools>{...}</tools>. Check first because it can be
+	// embedded inside surrounding prose, whereas the others require
+	// the JSON to dominate the content.
 	if name, args, ok := extractToolsTagToolCall(s); ok {
 		return name, args, true
 	}
 
-	// Dialect 1: bare JSON object spanning the entire content.
-	if !strings.HasPrefix(s, "{") || !strings.HasSuffix(s, "}") {
+	// Dialect 2: bare JSON object spanning (essentially) the whole
+	// content — after we've already stripped the trailing template
+	// terminators above.
+	if strings.HasPrefix(s, "{") && strings.HasSuffix(s, "}") {
+		if name, args, ok := parseToolCallObject(s); ok {
+			return name, args, true
+		}
+	}
+
+	// Dialect 3: first balanced {…} object. Required to start at index
+	// 0 (so the tool-call is the first thing the model emitted) — if
+	// the model wrote prose THEN a JSON, we treat it as prose. The
+	// substring must parse as a {name, arguments} pair AND nothing
+	// after it can be code/JSON; only whitespace, template markers,
+	// and a brief trailing summary are tolerated.
+	if name, args, ok := extractFirstBalancedToolCall(s); ok {
+		return name, args, true
+	}
+
+	return "", "", false
+}
+
+// stripChatTemplateTerminators removes trailing chat-template end-of-
+// turn tokens that some servers leak into the content stream. mlx_lm
+// .server with Qwen-family templates emits `<|im_end|>`; Llama
+// templates emit `<|eot_id|>` or `<|end_of_text|>`. Removing these
+// lets the {…}-suffix check on the JSON-in-content path actually fire
+// when the model wrapped its tool call as `{json}<|im_end|>`.
+func stripChatTemplateTerminators(s string) string {
+	terminators := []string{
+		"<|im_end|>",
+		"<|endoftext|>",
+		"<|end_of_text|>",
+		"<|eot_id|>",
+		"<|eom_id|>",
+		"</s>",
+	}
+	for changed := true; changed; {
+		changed = false
+		s = strings.TrimRight(s, " \t\r\n")
+		for _, t := range terminators {
+			if strings.HasSuffix(s, t) {
+				s = strings.TrimSuffix(s, t)
+				changed = true
+			}
+		}
+	}
+	return strings.TrimSpace(s)
+}
+
+// extractFirstBalancedToolCall scans for the first `{` at index 0 and
+// walks brace depth (respecting strings + escapes) to find the
+// matching `}`. The substring is then validated as a tool-call object.
+// What follows must be only whitespace, chat-template terminators
+// (already stripped above), or a brief trailing summary <= 200 chars
+// without further braces — preventing prose-with-example from
+// triggering an invocation.
+func extractFirstBalancedToolCall(s string) (string, string, bool) {
+	if !strings.HasPrefix(s, "{") {
 		return "", "", false
 	}
-	return parseToolCallObject(s)
+	depth := 0
+	inString := false
+	escaped := false
+	end := -1
+	for i, r := range s {
+		if escaped {
+			escaped = false
+			continue
+		}
+		if r == '\\' && inString {
+			escaped = true
+			continue
+		}
+		if r == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if r == '{' {
+			depth++
+		} else if r == '}' {
+			depth--
+			if depth == 0 {
+				end = i + 1
+				break
+			}
+		}
+	}
+	if end < 0 {
+		return "", "", false
+	}
+	candidate := s[:end]
+	tail := strings.TrimSpace(s[end:])
+	// The tail can be empty, a brief summary, or repeated template
+	// markers (already stripped — left in for safety). Reject if the
+	// tail itself contains another `{` — that's prose mentioning JSON,
+	// not a clean tool-call-then-summary.
+	if strings.ContainsRune(tail, '{') {
+		return "", "", false
+	}
+	if len(tail) > 200 {
+		return "", "", false
+	}
+	return parseToolCallObject(candidate)
 }
 
 // extractToolsTagToolCall pulls the body out of a single <tools>...</tools>
