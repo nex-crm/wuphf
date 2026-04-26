@@ -2,6 +2,7 @@ package teammcp
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/team"
@@ -17,4 +18,15 @@ import (
 func TestMain(m *testing.M) {
 	team.DisableRealTaskWorktreeForTests()
 	os.Exit(m.Run())
+}
+
+// newTestBroker mirrors internal/team's unexported newTestBroker(t):
+// returns a Broker whose state path is pinned under t.TempDir(), so each
+// test gets its own bound statePath rather than sharing the package-var
+// default resolution. Use this for any teammcp test that constructs a
+// broker; reach for team.NewBrokerAt directly only when the test also
+// needs the path string itself.
+func newTestBroker(t *testing.T) *team.Broker {
+	t.Helper()
+	return team.NewBrokerAt(filepath.Join(t.TempDir(), "broker-state.json"))
 }

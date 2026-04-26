@@ -292,7 +292,7 @@ func TestIsOneOnOneModeFromEnv(t *testing.T) {
 
 func TestHandleTeamMemberCreateTriggersReconfigure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestHandleTeamMemberCreateTriggersReconfigure(t *testing.T) {
 func TestHandleTeamChannelCreateTriggersReconfigure(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -406,7 +406,7 @@ func TestHandleTeamChannelCreateRequiresExplicitSlug(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("WUPHF_CHANNEL", "general")
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -458,7 +458,7 @@ func TestHandleHumanMessageUsesDirectSessionLabelInOneOnOneMode(t *testing.T) {
 	t.Setenv("WUPHF_ONE_ON_ONE", "1")
 	t.Setenv("WUPHF_AGENT_SLUG", "ceo")
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -494,7 +494,7 @@ func TestHandleHumanMessageUsesDirectSessionLabelInOneOnOneMode(t *testing.T) {
 func TestHandleTeamMemoryWriteAndQueryPrivate(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -530,7 +530,7 @@ func TestHandleTeamMemoryWriteAndQueryPrivate(t *testing.T) {
 func TestHandleTeamMemoryWriteHintsPromotionForDurableNote(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -585,7 +585,7 @@ func TestHandleTeamMemoryQueryAutoIncludesSharedNexMemory(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -650,7 +650,7 @@ func TestHandleTeamMemoryPromoteWritesSharedNexMemory(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -710,7 +710,7 @@ func TestHandleTeamMemoryQuerySharedSuggestsRoutingHint(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -743,7 +743,7 @@ func TestHandleTeamPollOneOnOneHighlightsLatestHumanRequest(t *testing.T) {
 	t.Setenv("WUPHF_ONE_ON_ONE", "1")
 	t.Setenv("WUPHF_AGENT_SLUG", "ceo")
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -785,7 +785,7 @@ func TestHandleTeamPollScopesMessagesForNonCEO(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -863,7 +863,7 @@ func TestHandleTeamTaskStatusReportsWorktreeIsolation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -949,7 +949,7 @@ func TestHandleTeamTaskReturnsWorktreeGuidance(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1020,7 +1020,7 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 	t.Setenv("WUPHF_NO_NEX", "1")
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1117,7 +1117,7 @@ func TestHandleTeamRuntimeStateIncludesRecoveryAndCapabilities(t *testing.T) {
 func TestHandleTeamRequestDefaultsApprovalOptions(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1164,7 +1164,7 @@ func TestHandleTeamPollUsesAgentScopedTranscript(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1205,7 +1205,7 @@ func TestHandleTeamBroadcastDefaultsToLatestTaggedChannelAndThread(t *testing.T)
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1266,7 +1266,7 @@ func TestHandleTeamPollDefaultsToLatestTaggedChannel(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1312,7 +1312,7 @@ func TestHandleTeamTaskUsesTaskChannelWhenIDGiven(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1368,7 +1368,7 @@ func TestHandleHumanMessageDefaultsToDirectReplyThreadInOneOnOneMode(t *testing.
 	t.Setenv("WUPHF_ONE_ON_ONE", "1")
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1409,7 +1409,7 @@ func TestHandleTeamInboxAndOutboxExposeOwnedTranscriptSlices(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ctx := context.Background()
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1533,7 +1533,7 @@ func TestDetectUntaggedMentions(t *testing.T) {
 func TestHandleTeamPlanCreatesDependentBlockedTasks(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1587,7 +1587,7 @@ func TestHandleTeamPlanCreatesDependentBlockedTasks(t *testing.T) {
 func TestHandleTeamPlanPreservesTaskMetadata(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -1635,7 +1635,7 @@ func TestHandleTeamPlanPreservesTaskMetadata(t *testing.T) {
 func TestHandleTeamTaskCreatePreservesTaskMetadata(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}

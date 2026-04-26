@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/nex-crm/wuphf/internal/agent"
-	"github.com/nex-crm/wuphf/internal/team"
 )
 
 func TestTeamSkillCreateRegisteredForSpecialists(t *testing.T) {
@@ -36,7 +35,7 @@ func TestTeamSkillCreateRegisteredForSpecialists(t *testing.T) {
 // to the calling agent (not "you").
 func TestHandleTeamSkillRunBumpsUsageAndLogsInvocation(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -145,7 +144,7 @@ func TestHandleTeamSkillRunBumpsUsageAndLogsInvocation(t *testing.T) {
 // (so the agent sees the failure) rather than panicking.
 func TestHandleTeamSkillRunMissingSkillReturnsToolError(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -169,7 +168,7 @@ func TestHandleTeamSkillRunMissingSkillReturnsToolError(t *testing.T) {
 
 func TestHandleTeamSkillCreateProposesSkill(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -228,7 +227,7 @@ func TestHandleTeamSkillCreateProposesSkill(t *testing.T) {
 
 func TestHandleTeamSkillCreateCanActivateImmediately(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -281,7 +280,7 @@ func TestHandleTeamSkillCreateCanActivateImmediately(t *testing.T) {
 
 func TestHandleTeamSkillCreateAllowsNonCEOProposal(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}

@@ -11,7 +11,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/nex-crm/wuphf/internal/action"
-	"github.com/nex-crm/wuphf/internal/team"
 )
 
 type stubActionProvider struct{}
@@ -174,7 +173,7 @@ func TestRequireTeamActionApprovalBypasses(t *testing.T) {
 
 func TestHandleTeamActionExecuteLogsBrokerAction(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -215,7 +214,7 @@ func TestHandleTeamActionExecuteLogsBrokerAction(t *testing.T) {
 
 func TestHandleTeamActionWorkflowCreateMirrorsSkill(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -268,7 +267,7 @@ func TestHandleTeamActionWorkflowCreateMirrorsSkill(t *testing.T) {
 
 func TestHandleTeamActionWorkflowScheduleCreatesSchedulerJob(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
@@ -321,7 +320,7 @@ func TestHandleTeamActionWorkflowScheduleCreatesSchedulerJob(t *testing.T) {
 
 func TestHandleTeamActionWorkflowScheduleRunNowExecutesImmediately(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	b := team.NewBroker()
+	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("start broker: %v", err)
 	}
