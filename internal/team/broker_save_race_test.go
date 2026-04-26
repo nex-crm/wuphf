@@ -1,7 +1,8 @@
 package team
 
-// Regression coverage for the test-isolation race that surfaced PR #281's
-// flaky `test` job. saveLocked used a fixed `<path>.tmp` filename, so two
+// Regression coverage for the test-isolation race that surfaced as a
+// flaky `test` job on PR #281's CI run, then was fixed in PR #282.
+// saveLocked used a fixed `<path>.tmp` filename, so two
 // brokers concurrently saving to the same state path could interleave
 // like this:
 //
