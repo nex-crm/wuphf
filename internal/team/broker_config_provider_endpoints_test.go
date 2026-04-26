@@ -245,3 +245,91 @@ func TestHandleConfig_LLMProviderAcceptsRegisteredLocalKinds(t *testing.T) {
 		}
 	}
 }
+
+// TestHandleConfig_LLMProviderRejectsMemberOnlyKinds is the v7 Major
+// finding: provider.ValidateKind accepts kinds that are valid for
+// per-member bindings (e.g. openclaw) but are NOT registered as
+// runnable global LLM providers — config.AllowLLMProviderKind is
+// only called from each runtime's init() in internal/provider/*.go,
+// and openclaw deliberately omits that registration. Persisting
+// llm_provider=openclaw used to silently succeed; the resolver
+// would then normalize the value back to "" on load and the user's
+// choice would be lost. The broker now rejects member-only kinds at
+// the boundary so the failure is loud and immediate.
+func TestHandleConfig_LLMProviderRejectsMemberOnlyKinds(t *testing.T) {
+	withWuphfHomeDir(t)
+	b := newTestBroker(t)
+	for _, kind := range []string{"openclaw", "totally-fake"} {
+		body := `{"llm_provider":"` + kind + `"}`
+		rec := configRequest(t, b, http.MethodPost, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("POST llm_provider=%q expected 400, got %d %s", kind, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "unsupported llm_provider") {
+			t.Errorf("POST llm_provider=%q response did not name the field: %s", kind, rec.Body.String())
+		}
+	}
+}
+
+// TestHandleConfig_LLMProviderClearsToDefault is the v7 Major paired
+// finding: nil pointer vs empty string must round-trip distinctly.
+// The Settings UI clears a saved provider override by posting
+// {"llm_provider":""} — that gesture must reach disk + the in-process
+// runtimeProvider so /health stops reporting the stale value
+// without a broker restart.
+func TestHandleConfig_LLMProviderClearsToDefault(t *testing.T) {
+	withWuphfHomeDir(t)
+	b := newTestBroker(t)
+
+	// Seed an override.
+	if rec := configRequest(t, b, http.MethodPost, `{"llm_provider":"mlx-lm"}`); rec.Code != http.StatusOK {
+		t.Fatalf("seed POST: %d %s", rec.Code, rec.Body.String())
+	}
+	cfg, _ := config.Load()
+	if cfg.LLMProvider != "mlx-lm" {
+		t.Fatalf("seed didn't persist: cfg.LLMProvider=%q", cfg.LLMProvider)
+	}
+
+	// Clear via empty string.
+	if rec := configRequest(t, b, http.MethodPost, `{"llm_provider":""}`); rec.Code != http.StatusOK {
+		t.Fatalf("clear POST: %d %s", rec.Code, rec.Body.String())
+	}
+	cfg, _ = config.Load()
+	if cfg.LLMProvider != "" {
+		t.Errorf("clear didn't reach disk: cfg.LLMProvider=%q", cfg.LLMProvider)
+	}
+}
+
+// TestHandleConfig_LLMProviderPriorityRejectsMemberOnlyKinds is the
+// counterpart to the singular `llm_provider` test. The priority
+// list is the fallback chain for the global LLM provider, so each
+// entry has the same runnable-only requirement.
+func TestHandleConfig_LLMProviderPriorityRejectsMemberOnlyKinds(t *testing.T) {
+	withWuphfHomeDir(t)
+	b := newTestBroker(t)
+	body := `{"llm_provider_priority":["claude-code","openclaw","mlx-lm"]}`
+	rec := configRequest(t, b, http.MethodPost, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for priority with openclaw, got %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "openclaw") {
+		t.Errorf("400 body did not name the offending entry: %s", rec.Body.String())
+	}
+}
+
+// TestHandleConfig_ProviderEndpointsRejectsMemberOnlyKinds extends
+// the provider_endpoints validation to the same restriction — a
+// per-kind HTTP endpoint config only makes sense for runtimes the
+// resolver can dispatch as a global LLM.
+func TestHandleConfig_ProviderEndpointsRejectsMemberOnlyKinds(t *testing.T) {
+	withWuphfHomeDir(t)
+	b := newTestBroker(t)
+	body := `{"provider_endpoints":{"openclaw":{"base_url":"http://127.0.0.1:9000/v1","model":"x"}}}`
+	rec := configRequest(t, b, http.MethodPost, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for provider_endpoints[openclaw], got %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "openclaw") {
+		t.Errorf("400 body did not name the offending kind: %s", rec.Body.String())
+	}
+}

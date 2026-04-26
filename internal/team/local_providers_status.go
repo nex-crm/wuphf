@@ -45,7 +45,7 @@ type localProviderSpec struct {
 	kind            string
 	binaryName      string
 	versionArgs     []string
-	platformAllowed func(goos string) bool
+	platformAllowed func(goos, goarch string) bool
 	install         map[string]string
 	start           map[string]string
 	notes           []string
@@ -56,11 +56,14 @@ var localProviderSpecs = []localProviderSpec{
 		kind:        provider.KindMLXLM,
 		binaryName:  "mlx_lm.server",
 		versionArgs: []string{"--version"},
-		platformAllowed: func(goos string) bool {
-			// MLX is Apple-Silicon only; users on Linux/Windows get a
-			// clear "not supported here" so they don't waste time
-			// trying to install it.
-			return goos == "darwin"
+		platformAllowed: func(goos, goarch string) bool {
+			// MLX requires Apple Silicon — checking only goos=="darwin"
+			// would mark Intel Macs as supported, where MLX wheels
+			// don't load. The wizard tile + Settings doctor card both
+			// key off PlatformSupported, so getting this wrong sends
+			// Intel-Mac users into a "Running" UI for a runtime that
+			// can't start.
+			return goos == "darwin" && goarch == "arm64"
 		},
 		install: map[string]string{
 			"macos": "pipx install mlx-lm",
@@ -76,10 +79,10 @@ var localProviderSpecs = []localProviderSpec{
 		kind:        provider.KindOllama,
 		binaryName:  "ollama",
 		versionArgs: []string{"--version"},
-		platformAllowed: func(goos string) bool {
-			// Ollama runs on macOS / Linux natively. On Windows we
-			// recommend WSL2 rather than the native installer to keep
-			// the supported surface narrow.
+		platformAllowed: func(goos, _ string) bool {
+			// Ollama runs on macOS / Linux natively (both arm64 and
+			// amd64). On Windows we recommend WSL2 rather than the
+			// native installer to keep the supported surface narrow.
 			return goos == "darwin" || goos == "linux"
 		},
 		install: map[string]string{
@@ -95,7 +98,7 @@ var localProviderSpecs = []localProviderSpec{
 		kind:        provider.KindExo,
 		binaryName:  "exo",
 		versionArgs: []string{"--version"},
-		platformAllowed: func(goos string) bool {
+		platformAllowed: func(goos, _ string) bool {
 			return goos == "darwin" || goos == "linux"
 		},
 		install: map[string]string{
@@ -113,12 +116,14 @@ var localProviderSpecs = []localProviderSpec{
 }
 
 // localProvidersStatusOverrides lets tests stub binary detection,
-// version probing, HTTP probing, and runtime.GOOS without exec'ing.
+// version probing, HTTP probing, and runtime.GOOS/GOARCH without
+// exec'ing or pinning the test box's architecture.
 type localProvidersStatusOverrides struct {
 	lookPath func(name string) (string, error)
 	runVer   func(ctx context.Context, path string, args []string) (string, error)
 	probe    func(ctx context.Context, baseURL string) (reachable bool, loadedModel string, ok bool)
 	goos     string
+	goarch   string
 }
 
 // defaultLocalProvidersOverrides returns the production wiring.
@@ -128,6 +133,7 @@ func defaultLocalProvidersOverrides() localProvidersStatusOverrides {
 		runVer:   runVersionCommand,
 		probe:    probeOpenAICompatEndpoint,
 		goos:     runtime.GOOS,
+		goarch:   runtime.GOARCH,
 	}
 }
 
@@ -160,7 +166,7 @@ func computeLocalProviderStatuses(ctx context.Context, ov localProvidersStatusOv
 func computeOneStatus(ctx context.Context, spec localProviderSpec, ov localProvidersStatusOverrides) LocalProviderStatus {
 	st := LocalProviderStatus{
 		Kind:              spec.kind,
-		PlatformSupported: spec.platformAllowed(ov.goos),
+		PlatformSupported: spec.platformAllowed(ov.goos, ov.goarch),
 		Install:           spec.install,
 		Start:             spec.start,
 		Notes:             append([]string(nil), spec.notes...),

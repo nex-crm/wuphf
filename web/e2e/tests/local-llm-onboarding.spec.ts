@@ -275,6 +275,37 @@ test.describe("Onboarding → Run a local model", () => {
     ).toBeVisible();
   });
 
+  test("removing a local row from the fallback chain clears the picker selection (no drift)", async ({
+    page,
+  }) => {
+    // Regression for the v7 Major finding: localProvider and
+    // runtimePriority were two sources of truth. Removing a local
+    // row via the ✕ button only updated runtimePriority; localProvider
+    // stayed set, so canContinue stayed true and finishOnboarding()
+    // serialized a config without the local runtime in the chain.
+    // The fix syncs both sides — the meta-tile must visibly un-select
+    // and the picker tile must lose its aria-pressed=true state.
+    stubStatusEndpoint(page);
+    await advanceToSetupStep(page);
+
+    await page.getByTestId("onboarding-local-llm-toggle").click();
+    const mlxTile = page.getByTestId("onboarding-local-llm-tile-mlx-lm");
+    await mlxTile.click();
+    await expect(mlxTile).toHaveAttribute("aria-pressed", "true");
+
+    // Remove via the ✕ button on the fallback chain row.
+    const mlxRow = page.locator(".runtime-priority-row").filter({
+      has: page.locator(".runtime-priority-row-label", { hasText: "MLX-LM" }),
+    });
+    await mlxRow.getByRole("button", { name: /Remove MLX-LM/i }).click();
+
+    // Picker tile is no longer pressed AND the row is gone.
+    await expect(mlxTile).toHaveAttribute("aria-pressed", "false");
+    await expect(
+      page.locator(".runtime-priority-row-label").filter({ hasText: "MLX-LM" }),
+    ).toHaveCount(0);
+  });
+
   test("status fetch failure: fall-open so the picker isn't deadlocked", async ({
     page,
   }) => {

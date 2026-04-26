@@ -1879,6 +1879,20 @@ export function Wizard({ onComplete }: WizardProps) {
       if (prev.includes(label)) return prev.filter((l) => l !== label);
       return [...prev, label];
     });
+    // Keep `localProvider` in sync with `runtimePriority`: when the
+    // user removes a local-runtime row from the fallback chain via
+    // the ✕ button, the picker/meta-tile must un-select too.
+    // Without this, `localProvider` stays set, `canContinue` stays
+    // true, and finishOnboarding() serializes a config without the
+    // local runtime — the chain says one thing, the picker shows
+    // another, the wizard ships the chain. Single source of truth
+    // wins; clear localProvider whenever its label leaves the
+    // priority list. (Adding a local label flows through
+    // selectLocalProvider, which sets both sides.)
+    const localMeta = LOCAL_PROVIDER_LABELS.find((m) => m.label === label);
+    if (localMeta) {
+      setLocalProvider((cur) => (cur === localMeta.kind ? "" : cur));
+    }
   }, []);
 
   // selectLocalProvider keeps two pieces of state in sync: the picker's
@@ -2327,10 +2341,18 @@ export function Wizard({ onComplete }: WizardProps) {
       const hasAnyApiKey = Object.values(apiKeys).some(
         (v) => v.trim().length > 0,
       );
+      // Keyboard gate must mirror SetupStep's own canContinue logic
+      // (line ~1176): a keyboard-only user who picks just `mlx-lm` /
+      // `ollama` / `exo` should be able to advance with Enter even
+      // though they didn't install a cloud CLI or paste an API key.
+      // Without this, the primary-CTA enabled state and the Enter
+      // gate disagreed — visually advanceable, keyboardly stuck.
+      const hasLocalProvider = localProvider.trim().length > 0;
       const gbrainOpenAIMissing =
         memoryBackend === "gbrain" && gbrainOpenAIKey.trim().length === 0;
       const canSetupContinue =
-        (hasInstalledSelection || hasAnyApiKey) && !gbrainOpenAIMissing;
+        (hasInstalledSelection || hasAnyApiKey || hasLocalProvider) &&
+        !gbrainOpenAIMissing;
 
       switch (step) {
         case "welcome":

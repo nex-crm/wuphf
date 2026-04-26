@@ -6086,18 +6086,30 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Validate enum fields before touching config. ValidateKind is the
-		// single source of truth — every Register() at init() time adds
-		// its Kind here, so adding a new local runtime (mlx-lm, ollama,
-		// exo, …) doesn't require editing this handler.
-		var llmProvider string
+		// Validate enum fields before touching config. The "global LLM
+		// provider" surface (llm_provider, llm_provider_priority, and
+		// the provider_endpoints map keys) must use
+		// config.IsLLMProviderKindAllowed — provider.ValidateKind is
+		// broader and accepts member-only kinds like openclaw that the
+		// runtime launcher can't dispatch as a global default. Per-
+		// member binding kinds keep ValidateKind below.
+		//
+		// Nil pointer vs empty string: a nil body field means "the
+		// client didn't send it, leave the saved value alone"; an
+		// explicit empty string means "clear my override and fall back
+		// to the install default". Both must round-trip.
+		var (
+			llmProvider    string
+			llmProviderSet bool
+		)
 		if body.LLMProvider != nil {
+			llmProviderSet = true
 			llmProvider = strings.TrimSpace(strings.ToLower(*body.LLMProvider))
-			if llmProvider != "" {
-				if err := provider.ValidateKind(llmProvider); err != nil {
-					http.Error(w, "unsupported llm_provider: "+err.Error(), http.StatusBadRequest)
-					return
-				}
+			if llmProvider != "" && !config.IsLLMProviderKindAllowed(llmProvider) {
+				http.Error(w, "unsupported llm_provider "+strconv.Quote(llmProvider)+
+					" (allowed: "+strings.Join(config.AllowedLLMProviderKinds(), ", ")+")",
+					http.StatusBadRequest)
+				return
 			}
 		}
 		var providerPriority []string
@@ -6111,8 +6123,10 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				if id == "" {
 					continue
 				}
-				if err := provider.ValidateKind(id); err != nil {
-					http.Error(w, "unsupported entry in llm_provider_priority: "+err.Error(), http.StatusBadRequest)
+				if !config.IsLLMProviderKindAllowed(id) {
+					http.Error(w, "unsupported entry in llm_provider_priority: "+strconv.Quote(id)+
+						" (allowed: "+strings.Join(config.AllowedLLMProviderKinds(), ", ")+")",
+						http.StatusBadRequest)
 					return
 				}
 				if seen[id] {
@@ -6134,8 +6148,13 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 		cfg, _ := config.Load()
 		changed := false
 
-		// Enum/string fields
-		if llmProvider != "" {
+		// Enum/string fields. `llmProviderSet` distinguishes "client
+		// sent the field with a value" (use it) and "client sent the
+		// field with empty string" (clear back to install default)
+		// from "client didn't send the field" (leave alone). Without
+		// this distinction the Settings UI couldn't drop a saved
+		// provider override.
+		if llmProviderSet {
 			cfg.LLMProvider = llmProvider
 			changed = true
 		}
@@ -6299,8 +6318,15 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				if k == "" {
 					continue
 				}
-				if err := provider.ValidateKind(k); err != nil {
-					http.Error(w, "unsupported provider_endpoints kind: "+err.Error(), http.StatusBadRequest)
+				// provider_endpoints keys must be runnable global LLM
+				// kinds (mlx-lm/ollama/exo/claude-code/codex/...) —
+				// openclaw, while a valid per-member binding, has no
+				// HTTP base_url + model concept and must not get a row
+				// in this map.
+				if !config.IsLLMProviderKindAllowed(k) {
+					http.Error(w, "unsupported provider_endpoints kind: "+strconv.Quote(k)+
+						" (allowed: "+strings.Join(config.AllowedLLMProviderKinds(), ", ")+")",
+						http.StatusBadRequest)
 					return
 				}
 				ep.BaseURL = strings.TrimSpace(ep.BaseURL)
@@ -6345,9 +6371,13 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "save failed", http.StatusInternalServerError)
 			return
 		}
-		// Keep /health in sync for this process so the wizard choice is
-		// reflected immediately without requiring a broker restart.
-		if llmProvider != "" {
+		// Keep /health in sync for this process so the wizard choice
+		// (or a clear back to default) is reflected immediately
+		// without requiring a broker restart. Use `llmProviderSet`
+		// for the same reason described at the write-back above —
+		// nil-vs-empty must round-trip, otherwise /health keeps
+		// reporting the stale provider after a clear.
+		if llmProviderSet {
 			b.mu.Lock()
 			providerChanged := b.runtimeProvider != llmProvider
 			b.runtimeProvider = llmProvider

@@ -47,7 +47,8 @@ func TestComputeLocalProviderStatuses_AllInstalledAndReachable(t *testing.T) {
 		probe: func(_ context.Context, baseURL string) (bool, string, bool) {
 			return true, "fake-loaded-model:" + baseURL, true
 		},
-		goos: "darwin",
+		goos:   "darwin",
+		goarch: "arm64",
 	}
 	got := computeLocalProviderStatuses(context.Background(), ov)
 	if len(got) != 3 {
@@ -90,6 +91,7 @@ func TestComputeLocalProviderStatuses_NoneInstalled(t *testing.T) {
 		runVer:   func(_ context.Context, _ string, _ []string) (string, error) { return "", nil },
 		probe:    func(_ context.Context, _ string) (bool, string, bool) { return false, "", true },
 		goos:     "darwin",
+		goarch:   "arm64",
 	}
 	got := computeLocalProviderStatuses(context.Background(), ov)
 	for _, s := range got {
@@ -126,6 +128,38 @@ func TestComputeLocalProviderStatuses_LinuxHidesMLXButShowsOllamaExo(t *testing.
 		case provider.KindOllama, provider.KindExo:
 			if !s.PlatformSupported {
 				t.Errorf("%s: PlatformSupported = false on linux", s.Kind)
+			}
+		}
+	}
+}
+
+// TestComputeLocalProviderStatuses_IntelMacRejectsMLXLM is the v7
+// Major regression: marking every `darwin` host as MLX-supported
+// sent Intel-Mac users to a UI that advertised the runtime as
+// Running, even though MLX wheels don't load on x86_64. Now mlx-lm
+// requires darwin+arm64; Intel Macs see PlatformSupported=false
+// and the disabled-tile copy the wizard already renders for
+// Linux/Windows.
+func TestComputeLocalProviderStatuses_IntelMacRejectsMLXLM(t *testing.T) {
+	ov := localProvidersStatusOverrides{
+		lookPath: func(string) (string, error) { return "", errors.New("not found") },
+		runVer:   func(_ context.Context, _ string, _ []string) (string, error) { return "", nil },
+		probe:    func(_ context.Context, _ string) (bool, string, bool) { return false, "", false },
+		goos:     "darwin",
+		goarch:   "amd64", // Intel Mac
+	}
+	got := computeLocalProviderStatuses(context.Background(), ov)
+	for _, s := range got {
+		switch s.Kind {
+		case provider.KindMLXLM:
+			if s.PlatformSupported {
+				t.Errorf("mlx-lm: PlatformSupported = true on darwin/amd64 (Intel Mac); MLX requires Apple Silicon")
+			}
+		case provider.KindOllama, provider.KindExo:
+			// Ollama/Exo work on both arm64 and amd64 — Intel Mac users
+			// should still see those as supported.
+			if !s.PlatformSupported {
+				t.Errorf("%s: PlatformSupported = false on darwin/amd64", s.Kind)
 			}
 		}
 	}
@@ -176,7 +210,8 @@ func TestComputeLocalProviderStatuses_NonLoopbackEndpointSkipsProbe(t *testing.T
 			}
 			return false, "", true
 		},
-		goos: "darwin",
+		goos:   "darwin",
+		goarch: "arm64",
 	}
 	got := computeLocalProviderStatuses(context.Background(), ov)
 	for _, s := range got {
@@ -340,7 +375,13 @@ func TestComputeLocalProviderStatuses_DocumentedSurface(t *testing.T) {
 	collect(computeLocalProviderStatuses(context.Background(), ov))
 
 	// Run 2: darwin happy path → exercises install/start/probed/etc.
+	// goarch=arm64 because mlx-lm's platformAllowed gate now requires
+	// Apple Silicon — without this the run would mark mlx-lm
+	// PlatformSupported=false and skip the install/start payload, so
+	// `install` / `start` wouldn't show up in `seen` and the field-set
+	// assertion below would fail.
 	ov.goos = "darwin"
+	ov.goarch = "arm64"
 	collect(computeLocalProviderStatuses(context.Background(), ov))
 
 	// Run 3: linux non-loopback ollama → exercises probe_skipped_note

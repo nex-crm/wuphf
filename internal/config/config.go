@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -326,6 +327,39 @@ func normalizeLLMProvider(value string) string {
 		return name
 	}
 	return ""
+}
+
+// IsLLMProviderKindAllowed reports whether name is registered as a runnable
+// global LLM provider kind. Use this at API boundaries that persist the
+// install-wide `llm_provider` (or members of `llm_provider_priority` /
+// `provider_endpoints` map keys) — provider.ValidateKind is broader and
+// includes member-only kinds (e.g. openclaw) that the runtime launcher
+// cannot dispatch as a global default. The empty string is NOT allowed
+// here so callers must handle the "clear back to default" gesture
+// explicitly with a nil-vs-empty check on the request body.
+func IsLLMProviderKindAllowed(name string) bool {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return false
+	}
+	allowedLLMProviderKindsMu.RLock()
+	defer allowedLLMProviderKindsMu.RUnlock()
+	_, ok := allowedLLMProviderKinds[name]
+	return ok
+}
+
+// AllowedLLMProviderKinds returns a sorted snapshot of the registered global
+// LLM provider kinds. Useful for error messages that want to list what was
+// expected without poking at package internals.
+func AllowedLLMProviderKinds() []string {
+	allowedLLMProviderKindsMu.RLock()
+	out := make([]string, 0, len(allowedLLMProviderKinds))
+	for k := range allowedLLMProviderKinds {
+		out = append(out, k)
+	}
+	allowedLLMProviderKindsMu.RUnlock()
+	sort.Strings(out)
+	return out
 }
 
 var codexModelLinePattern = regexp.MustCompile(`(?m)^\s*model\s*=\s*("([^"\\]|\\.)*"|'[^']*')`)
