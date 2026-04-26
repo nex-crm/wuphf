@@ -153,7 +153,7 @@ function isSafeUrl(url: string): boolean {
     trimmed.startsWith("http://") ||
     trimmed.startsWith("https://") ||
     trimmed.startsWith("mailto:") ||
-    trimmed.startsWith("/") ||
+    (trimmed.startsWith("/") && !trimmed.startsWith("//")) ||
     trimmed.startsWith("#")
   );
 }
@@ -171,7 +171,7 @@ function formatInline(text: string): string {
     /\[([^\]]+)\]\(([^)]+)\)/g,
     (_match, label: string, url: string) => {
       if (isSafeUrl(url)) {
-        return `<a class="msg-link" href="${url}" target="_blank" rel="noopener">${label}</a>`;
+        return `<a class="msg-link" href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
       }
       return `<span class="msg-link">${label}</span>`;
     },
