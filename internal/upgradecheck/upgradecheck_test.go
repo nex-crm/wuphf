@@ -20,11 +20,32 @@ func TestCompareVersions(t *testing.T) {
 		{"0.79.10", "0.79.10.1", -1},
 		{"0.80.0", "0.79.99", 1},
 		{"dev", "0.79.10", -1}, // "dev" → 0, so any real version wins
+		// Pre-release suffixes are stripped, so an -rc on the same base
+		// version sorts equal (NOT below — splitVersion previously had a
+		// bug where "10-rc" parsed to 0 and inverted ordering).
+		{"0.79.10-rc.1", "0.79.10", 0},
+		{"0.79.10", "0.79.10-rc.1", 0},
+		{"0.79.10-rc.1", "0.79.11", -1},
 	}
 	for _, c := range cases {
 		got := compareVersions(c.a, c.b)
 		if got != c.want {
 			t.Errorf("compareVersions(%q,%q)=%d want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+func TestIsDevVersion(t *testing.T) {
+	cases := map[string]bool{
+		"":         true,
+		"dev":      true,
+		"  dev  ":  true,
+		"0.79.10":  false,
+		"v0.79.10": false,
+	}
+	for in, want := range cases {
+		if got := IsDevVersion(in); got != want {
+			t.Errorf("IsDevVersion(%q)=%v want %v", in, got, want)
 		}
 	}
 }
@@ -138,6 +159,43 @@ func TestCheckHitsRegistry(t *testing.T) {
 	}
 	if !res.UpgradeAvailable {
 		t.Errorf("expected UpgradeAvailable=true (current=%q)", res.Current)
+	}
+	if res.CompareURL == "" {
+		t.Errorf("expected non-empty CompareURL when UpgradeAvailable=true")
+	}
+}
+
+func TestCheckOmitsCompareURLWhenUpToDate(t *testing.T) {
+	// If npm `latest` matches buildinfo, no upgrade is available and the
+	// CompareURL would be a degenerate `compare/vX...vX` link — omit it
+	// so JSON consumers don't surface a misleading no-op URL.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Return whatever buildinfo.Current().Version says, so the
+		// comparison sees them as equal.
+		_ = json.NewEncoder(w).Encode(map[string]string{"version": "dev"})
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		req.URL.Scheme = "http"
+		req.URL.Host = host
+		return http.DefaultTransport.RoundTrip(req)
+	})}
+
+	res, err := Check(context.Background(), client)
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	// In a dev build, IsDevBuild=true and Check short-circuits before
+	// computing UpgradeAvailable / CompareURL — both must be zero-valued.
+	if !res.IsDevBuild {
+		t.Skipf("test only meaningful for dev-build runners; got Current=%q", res.Current)
+	}
+	if res.UpgradeAvailable {
+		t.Errorf("dev build must never report UpgradeAvailable=true")
+	}
+	if res.CompareURL != "" {
+		t.Errorf("CompareURL should be empty for dev/no-upgrade, got %q", res.CompareURL)
 	}
 }
 

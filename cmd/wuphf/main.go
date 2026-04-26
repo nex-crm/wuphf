@@ -352,8 +352,29 @@ func runUpgradeCheck(args []string) {
 	// want ground truth.
 	res, err := upgradecheck.Check(ctx, nil)
 
+	// JSON output: emit the full Result (including IsDevBuild and an
+	// `error` field for scripted callers) and exit non-zero on failure
+	// so `wuphf upgrade --json | jq …` distinguishes "no upgrade" from
+	// "couldn't reach npm".
 	if jsonOut {
-		_ = json.NewEncoder(os.Stdout).Encode(res)
+		out := struct {
+			upgradecheck.Result
+			Error string `json:"error,omitempty"`
+		}{Result: res}
+		if err != nil {
+			out.Error = err.Error()
+		}
+		_ = json.NewEncoder(os.Stdout).Encode(out)
+		if err != nil {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if res.IsDevBuild {
+		fmt.Printf("You are running a dev build of %s (built from source, version=%q).\n",
+			appName, res.Current)
+		fmt.Println("Skipping npm comparison — this binary did not come from npm.")
 		return
 	}
 

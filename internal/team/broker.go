@@ -36,6 +36,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/upgradecheck"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
@@ -1508,6 +1509,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
 	mux.HandleFunc("/version", b.handleVersion)
+	mux.HandleFunc("/upgrade-check", b.requireAuth(b.handleUpgradeCheck))
+	mux.HandleFunc("/upgrade-changelog", b.requireAuth(b.handleUpgradeChangelog))
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
@@ -4629,6 +4632,62 @@ func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(buildinfo.Current())
 }
+
+// handleUpgradeCheck proxies the npm-registry comparison through the broker
+// instead of letting the browser hit registry.npmjs.org directly. The web
+// banner uses this so that (a) we have one server-side place to add caching
+// in front of the registry, (b) a corporate-NAT'd workstation doesn't burn
+// every user's anonymous npm/GitHub quota.
+func (b *Broker) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	res, err := upgradecheck.Check(ctx, nil)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		// Status 200 with the partial Result + an error field — the
+		// banner UI degrades gracefully (renders nothing) when Latest
+		// is empty, which is preferable to a noisy 5xx in the browser
+		// console for a non-critical check.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"current":           res.Current,
+			"latest":            res.Latest,
+			"upgrade_available": res.UpgradeAvailable,
+			"is_dev_build":      res.IsDevBuild,
+			"compare_url":       res.CompareURL,
+			"upgrade_command":   res.UpgradeCommand,
+			"error":             err.Error(),
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// handleUpgradeChangelog proxies the GitHub compare API for the same reasons
+// as handleUpgradeCheck. The `from` and `to` query params are validated
+// against a strict version regex so a crafted call cannot inject path
+// segments into the upstream compare URL.
+func (b *Broker) handleUpgradeChangelog(w http.ResponseWriter, r *http.Request) {
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	if !upgradeVersionParam.MatchString(from) || !upgradeVersionParam.MatchString(to) {
+		http.Error(w, "from/to must look like v0.79.10 (or 0.79.10)", http.StatusBadRequest)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	entries, err := upgradecheck.FetchChangelog(ctx, nil, from, to)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"commits": []any{},
+			"error":   err.Error(),
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"commits": entries})
+}
+
+var upgradeVersionParam = regexp.MustCompile(`^v?\d+(\.\d+){1,3}(-[\w.]+)?$`)
 
 func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {

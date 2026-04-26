@@ -1,142 +1,49 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { getVersion } from "../../api/client";
+import { get } from "../../api/client";
+import {
+  type CommitEntry,
+  compareVersions,
+  groupCommits,
+  isDevVersion,
+  parseCommit,
+  readForcedPair,
+  safeLocalStorageGet,
+  safeLocalStorageSet,
+  stripV,
+  VERSION_RE,
+} from "./upgradeBanner.utils";
 
 const REPO = "nex-crm/wuphf";
-const NPM_PACKAGE = "wuphf";
 const UPGRADE_COMMAND = "npm install -g wuphf@latest";
 const DISMISSED_KEY = "wuphf-upgrade-dismissed-version";
 
-interface CommitEntry {
-  type: string;
-  scope: string;
-  description: string;
-  pr: string | null;
-  sha: string;
-  breaking: boolean;
+interface UpgradeCheckResponse {
+  current: string;
+  latest: string;
+  upgrade_available: boolean;
+  is_dev_build: boolean;
+  compare_url?: string;
+  upgrade_command: string;
+  error?: string;
+}
+
+interface UpgradeChangelogResponse {
+  commits?: Array<{
+    type: string;
+    scope: string;
+    description: string;
+    pr: string;
+    sha: string;
+    breaking: boolean;
+  }>;
+  error?: string;
 }
 
 interface ChangelogState {
   loading: boolean;
   error: string | null;
   commits: CommitEntry[];
-}
-
-interface GitHubCompareCommit {
-  sha: string;
-  commit: { message: string };
-}
-
-interface GitHubCompareResponse {
-  commits?: GitHubCompareCommit[];
-}
-
-const TYPE_LABELS: Array<{ type: string; label: string }> = [
-  { type: "breaking", label: "Breaking changes" },
-  { type: "feat", label: "New features" },
-  { type: "fix", label: "Bug fixes" },
-  { type: "perf", label: "Performance" },
-  { type: "refactor", label: "Refactoring" },
-  { type: "docs", label: "Documentation" },
-  { type: "other", label: "Other changes" },
-];
-
-const KNOWN_TYPES = new Set(TYPE_LABELS.map((t) => t.type));
-
-// Accept v0.79, 0.79.15, 0.79.15.1, 1.2.3-rc.4. Anything else is rejected so
-// the URL override cannot inject arbitrary path segments into the GitHub
-// compare API call.
-const VERSION_RE = /^v?\d+(\.\d+){1,3}(-[\w.]+)?$/;
-
-function stripV(v: string): string {
-  return v.replace(/^v/, "");
-}
-
-function compareVersions(a: string, b: string): number {
-  const pa = stripV(a)
-    .split(".")
-    .map((n) => parseInt(n, 10) || 0);
-  const pb = stripV(b)
-    .split(".")
-    .map((n) => parseInt(n, 10) || 0);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const x = pa[i] ?? 0;
-    const y = pb[i] ?? 0;
-    if (x !== y) return x < y ? -1 : 1;
-  }
-  return 0;
-}
-
-// Matches only a trailing `(#N)` reference so an inline `(#42)` inside the
-// description is preserved as text (matches the Go parser).
-const TRAILING_PR_RE = /\s*\(#(\d+)\)\s*$/;
-
-function extractPR(s: string): string | null {
-  const m = s.match(TRAILING_PR_RE);
-  return m ? m[1] : null;
-}
-
-function parseCommit(message: string, sha: string): CommitEntry {
-  const subject = (message.split("\n")[0] ?? "").trim();
-  const m = subject.match(
-    /^(feat|fix|perf|refactor|docs|chore|test|build|ci|style|revert)(\([^)]+\))?(!)?:\s*(.+?)\s*$/i,
-  );
-  if (!m) {
-    return {
-      type: "other",
-      scope: "",
-      description: subject,
-      pr: extractPR(subject),
-      sha,
-      breaking: false,
-    };
-  }
-  const type = m[1].toLowerCase();
-  const scope = (m[2] ?? "").replace(/[()]/g, "");
-  const breaking = m[3] === "!";
-  const rest = m[4];
-  return {
-    type,
-    scope,
-    description: rest.replace(/\s*\(#\d+\)\s*$/, "").trim(),
-    pr: extractPR(rest),
-    sha,
-    breaking,
-  };
-}
-
-function groupCommits(commits: CommitEntry[]) {
-  const buckets = new Map<string, CommitEntry[]>();
-  for (const c of commits) {
-    const key = c.breaking
-      ? "breaking"
-      : KNOWN_TYPES.has(c.type)
-        ? c.type
-        : "other";
-    const list = buckets.get(key) ?? [];
-    list.push(c);
-    buckets.set(key, list);
-  }
-  return TYPE_LABELS.flatMap(({ type, label }) => {
-    const entries = buckets.get(type);
-    if (!entries || entries.length === 0) return [];
-    return [{ label, entries }];
-  });
-}
-
-// Override pair from the URL — `?upgrade-from=v0.79.10&upgrade-to=v0.79.15` —
-// lets QA/screenshots preview the banner without a real version mismatch.
-// Both values are validated against VERSION_RE so the override cannot inject
-// arbitrary path segments into the GitHub compare API call we make later.
-function readForcedPair(): { from: string; to: string } | null {
-  if (typeof window === "undefined") return null;
-  const p = new URLSearchParams(window.location.search);
-  const from = p.get("upgrade-from");
-  const to = p.get("upgrade-to");
-  if (!(from && to)) return null;
-  if (!(VERSION_RE.test(from) && VERSION_RE.test(to))) return null;
-  return { from, to };
 }
 
 export function UpgradeBanner() {
@@ -155,26 +62,22 @@ export function UpgradeBanner() {
     error: null,
     commits: [],
   });
+  const changelogCtl = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!enabled || forced) return;
     // AbortController so a slow fetch from a previous run cannot resolve
-    // after we've moved on (component unmount, or future manual refresh).
+    // after we've moved on (component unmount).
     const ctl = new AbortController();
-    void Promise.all([
-      getVersion().catch(() => null),
-      fetch(`https://registry.npmjs.org/${NPM_PACKAGE}/latest`, {
-        signal: ctl.signal,
+    void get<UpgradeCheckResponse>("/upgrade-check")
+      .then((res) => {
+        if (ctl.signal.aborted) return;
+        if (res.current) setCurrent(res.current);
+        if (res.latest) setLatest(res.latest);
       })
-        .then((r) =>
-          r.ok ? (r.json() as Promise<{ version?: string }>) : null,
-        )
-        .catch(() => null),
-    ]).then(([cur, npm]) => {
-      if (ctl.signal.aborted) return;
-      if (cur?.version) setCurrent(cur.version);
-      if (npm?.version) setLatest(String(npm.version));
-    });
+      .catch(() => {
+        // Broker unreachable or returned a non-2xx — degrade silently.
+      });
     return () => {
       ctl.abort();
     };
@@ -182,12 +85,64 @@ export function UpgradeBanner() {
 
   useEffect(() => {
     if (!latest) return;
-    const d = localStorage.getItem(DISMISSED_KEY);
+    const d = safeLocalStorageGet(DISMISSED_KEY);
     setDismissed(d === latest);
   }, [latest]);
 
+  // Drive the changelog fetch from `expanded` via an effect so the
+  // AbortController's lifecycle is tied to the expand state — collapsing
+  // (or unmounting) cancels an in-flight request.
+  useEffect(() => {
+    if (!expanded) return;
+    if (!(current && latest)) return;
+    if (changelog.commits.length > 0 || changelog.loading) return;
+    const ctl = new AbortController();
+    changelogCtl.current = ctl;
+    setChangelog({ loading: true, error: null, commits: [] });
+    void get<UpgradeChangelogResponse>("/upgrade-changelog", {
+      from: current,
+      to: latest,
+    })
+      .then((data) => {
+        if (ctl.signal.aborted) return;
+        if (data.error) {
+          setChangelog({ loading: false, error: data.error, commits: [] });
+          return;
+        }
+        // The broker forwards entries already parsed, but we re-parse from
+        // the description if a future broker version emits raw commit
+        // messages — defensive only.
+        const commits: CommitEntry[] = (data.commits ?? []).map((c) =>
+          c.type
+            ? {
+                type: c.type,
+                scope: c.scope ?? "",
+                description: c.description ?? "",
+                pr: c.pr || null,
+                sha: c.sha ?? "",
+                breaking: !!c.breaking,
+              }
+            : parseCommit(c.description ?? "", c.sha ?? ""),
+        );
+        setChangelog({ loading: false, error: null, commits });
+      })
+      .catch((e: unknown) => {
+        if (ctl.signal.aborted) return;
+        setChangelog({
+          loading: false,
+          error: e instanceof Error ? e.message : String(e),
+          commits: [],
+        });
+      });
+    return () => {
+      ctl.abort();
+    };
+  }, [expanded, current, latest, changelog.commits.length, changelog.loading]);
+
   const upgradeNeeded = useMemo(() => {
     if (!(current && latest)) return false;
+    if (isDevVersion(current)) return false;
+    if (!(VERSION_RE.test(current) && VERSION_RE.test(latest))) return false;
     return compareVersions(current, latest) < 0;
   }, [current, latest]);
 
@@ -196,58 +151,9 @@ export function UpgradeBanner() {
     return `https://github.com/${REPO}/compare/v${stripV(current)}...v${stripV(latest)}`;
   }, [current, latest]);
 
-  const fetchChangelog = useCallback(
-    async (signal?: AbortSignal) => {
-      if (!(current && latest)) return;
-      setChangelog({ loading: true, error: null, commits: [] });
-      try {
-        const url = `https://api.github.com/repos/${REPO}/compare/v${stripV(current)}...v${stripV(latest)}`;
-        const r = await fetch(url, {
-          headers: { Accept: "application/vnd.github+json" },
-          signal,
-        });
-        if (!r.ok) throw new Error(`GitHub ${r.status}`);
-        const data = (await r.json()) as GitHubCompareResponse;
-        const commits = (data.commits ?? []).map((c) =>
-          parseCommit(c.commit?.message ?? "", c.sha ?? ""),
-        );
-        if (signal?.aborted) return;
-        setChangelog({ loading: false, error: null, commits });
-      } catch (e) {
-        if (
-          signal?.aborted ||
-          (e instanceof DOMException && e.name === "AbortError")
-        )
-          return;
-        setChangelog({
-          loading: false,
-          error: e instanceof Error ? e.message : String(e),
-          commits: [],
-        });
-      }
-    },
-    [current, latest],
-  );
-
   const toggleExpanded = useCallback(() => {
-    setExpanded((prev) => {
-      const next = !prev;
-      if (
-        next &&
-        changelog.commits.length === 0 &&
-        !changelog.loading &&
-        !changelog.error
-      ) {
-        void fetchChangelog();
-      }
-      return next;
-    });
-  }, [
-    changelog.commits.length,
-    changelog.loading,
-    changelog.error,
-    fetchChangelog,
-  ]);
+    setExpanded((prev) => !prev);
+  }, []);
 
   const copyUpgradeCommand = useCallback(async () => {
     try {
@@ -260,7 +166,7 @@ export function UpgradeBanner() {
   }, []);
 
   const dismiss = useCallback(() => {
-    if (latest) localStorage.setItem(DISMISSED_KEY, latest);
+    if (latest) safeLocalStorageSet(DISMISSED_KEY, latest);
     setDismissed(true);
   }, [latest]);
 
@@ -374,13 +280,15 @@ export function UpgradeBanner() {
               <ul className="upgrade-banner-changelog-list">
                 {group.entries.map((entry) => (
                   <li key={entry.sha}>
-                    {entry.scope && (
-                      <span className="upgrade-banner-scope">
-                        {entry.scope}
-                      </span>
-                    )}{" "}
+                    {entry.scope ? (
+                      <>
+                        <span className="upgrade-banner-scope">
+                          {entry.scope}
+                        </span>{" "}
+                      </>
+                    ) : null}
                     {entry.description}
-                    {entry.pr && (
+                    {entry.pr ? (
                       <>
                         {" "}
                         <a
@@ -392,7 +300,7 @@ export function UpgradeBanner() {
                           #{entry.pr}
                         </a>
                       </>
-                    )}
+                    ) : null}
                   </li>
                 ))}
               </ul>

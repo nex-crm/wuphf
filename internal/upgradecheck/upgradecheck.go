@@ -38,8 +38,14 @@ type Result struct {
 	Current          string `json:"current"`
 	Latest           string `json:"latest"`
 	UpgradeAvailable bool   `json:"upgrade_available"`
-	CompareURL       string `json:"compare_url"`
-	UpgradeCommand   string `json:"upgrade_command"`
+	// IsDevBuild is true when Current is the buildinfo "dev" sentinel — i.e.
+	// the binary was compiled from source without a release ldflag. Callers
+	// MUST treat UpgradeAvailable as meaningless in that case (the comparison
+	// `dev < anything` is true but the user did not install via npm and the
+	// upgrade command is wrong for them).
+	IsDevBuild     bool   `json:"is_dev_build"`
+	CompareURL     string `json:"compare_url,omitempty"`
+	UpgradeCommand string `json:"upgrade_command"`
 }
 
 // Check fetches the latest version from npm and compares it to the running
@@ -52,6 +58,7 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 	current := buildinfo.Current().Version
 	res := Result{
 		Current:        current,
+		IsDevBuild:     IsDevVersion(current),
 		UpgradeCommand: "npm install -g " + NPMPackage + "@latest",
 	}
 
@@ -60,14 +67,31 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 		return res, err
 	}
 	res.Latest = latest
+	// A dev build's "version" is the literal string "dev" — comparing it
+	// numerically against npm's `latest` would always say "upgrade
+	// available" and tell the user to `npm install -g`, which would
+	// blindly replace their source build. Bail out cleanly instead;
+	// callers render the dev-build branch off IsDevBuild.
+	if res.IsDevBuild {
+		return res, nil
+	}
 	res.UpgradeAvailable = compareVersions(current, latest) < 0
-	res.CompareURL = fmt.Sprintf(
-		"https://github.com/%s/compare/v%s...v%s",
-		GitHubRepo,
-		strings.TrimPrefix(current, "v"),
-		strings.TrimPrefix(latest, "v"),
-	)
+	if res.UpgradeAvailable {
+		res.CompareURL = fmt.Sprintf(
+			"https://github.com/%s/compare/v%s...v%s",
+			GitHubRepo,
+			strings.TrimPrefix(current, "v"),
+			strings.TrimPrefix(latest, "v"),
+		)
+	}
 	return res, nil
+}
+
+// IsDevVersion reports whether v is a non-released ("dev") wuphf build. This
+// matches buildinfo.Current()'s fallback when no release ldflag was set.
+func IsDevVersion(v string) bool {
+	v = strings.TrimSpace(v)
+	return v == "" || v == "dev"
 }
 
 // ── npm registry ──────────────────────────────────────────────────────────
@@ -273,11 +297,11 @@ func FormatChangelog(entries []CommitEntry) string {
 // compareVersions compares dotted-numeric versions like "0.79.10". Returns
 // -1 if a < b, 0 if equal, 1 if a > b. Non-numeric segments collapse to 0.
 //
-// Pre-release suffixes (e.g. "0.79.10-rc.1") are not interpreted; the
-// numeric tail is parsed up to the first non-numeric character, so
-// "0.79.10-rc.1" sorts equal to "0.79.10". Acceptable here because npm's
-// `latest` dist-tag is conventionally a stable release. If we ever publish
-// pre-releases under `latest`, swap in a real semver comparator.
+// Pre-release suffixes (e.g. "0.79.10-rc.1") are stripped before comparison
+// so "0.79.10-rc.1" sorts equal to "0.79.10". This is intentionally NOT a
+// full semver comparator — npm's `latest` dist-tag is conventionally a
+// stable release and we only need ordering within the stable line. If we
+// ever publish pre-releases under `latest`, swap in a real semver lib.
 func compareVersions(a, b string) int {
 	pa := splitVersion(a)
 	pb := splitVersion(b)
@@ -300,6 +324,12 @@ func compareVersions(a, b string) int {
 
 func splitVersion(v string) []int {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	// Drop pre-release suffix like "-rc.1" so it doesn't poison the dotted
+	// segments (Atoi on "10-rc" returns 0, which would order an rc release
+	// BELOW its prior stable — exactly opposite of intent).
+	if i := strings.IndexByte(v, '-'); i >= 0 {
+		v = v[:i]
+	}
 	parts := strings.Split(v, ".")
 	out := make([]int, len(parts))
 	for i, p := range parts {
