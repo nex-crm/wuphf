@@ -2,6 +2,48 @@ import { describe, expect, it } from "vitest";
 
 import { formatMarkdown } from "./markdown";
 
+// XSS regression sweep specific to local-LLM content shapes. The
+// general link sanitizer is covered below; these target the new
+// sources from feat/local-llms (chat-template markers leaking,
+// JSON-shaped content the parser failed to extract, model output
+// that mentions `<script>` mid-prose). MessageBubble renders all of
+// these via formatMarkdown — pinning that the helper escapes them
+// closes the trust-comment refresh from the v6 security review.
+describe("formatMarkdown — local-LLM content shapes", () => {
+  it("escapes chat-template markers like <|im_end|> as text", () => {
+    const out = formatMarkdown("Hello world <|im_end|>");
+    expect(out).toContain("&lt;|im_end|&gt;");
+    expect(out).not.toContain("<|im_end|>");
+  });
+
+  it("escapes a literal <script> mention from a chatty model", () => {
+    const out = formatMarkdown(
+      "Reminder: never paste <script>alert(1)</script> into prod.",
+    );
+    expect(out).toContain("&lt;script&gt;");
+    expect(out).not.toContain("<script>");
+  });
+
+  it("escapes raw HTML embedded by a model 'helpfully' rendering output", () => {
+    const out = formatMarkdown(
+      "Here is the result: <img src=x onerror=alert(1) /> — good luck!",
+    );
+    expect(out).not.toMatch(/<img\s/);
+    expect(out).toContain("&lt;img");
+  });
+
+  it("renders JSON-shaped content as text without parsing or executing", () => {
+    // The runner has a backstop that replaces unparsed tool-call
+    // shapes with a friendly hint, but if a model emits real-looking
+    // JSON in a chat reply (inside a code block), it still renders
+    // as plain text — never as live HTML.
+    const out = formatMarkdown(
+      'Here is your record: `{"name":"x","arguments":{"y":1}}`',
+    );
+    expect(out).toContain("&quot;name&quot;");
+  });
+});
+
 describe("formatMarkdown link sanitization", () => {
   it("renders http and https URLs as links", () => {
     expect(formatMarkdown("[x](https://example.com)")).toContain(

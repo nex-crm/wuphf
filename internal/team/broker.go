@@ -12,6 +12,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -5944,6 +5945,40 @@ func (b *Broker) handleCompany(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// validateProviderEndpointURL gates user-supplied base URLs persisted
+// to ~/.wuphf/config.json so a locally-authenticated client can't
+// pivot future agent turns to attacker-controlled targets via
+// schemes our HTTP client doesn't service (or persist URLs that
+// would surprise users on next launch). Allowed: http://… and
+// https://… with a non-empty host. Rejected: file://, gopher://,
+// unix://, schemeless paths, hostless URLs, raw IPs without scheme,
+// userinfo-only URLs, etc.
+//
+// Loopback hosts are allowed — wuphf's whole point is local-LLM
+// pointing at 127.0.0.1, and the runtime probe code already gates
+// reachability scans on isLoopbackBaseURL elsewhere. The threat we
+// care about here is "URL the agent runner will later POST a
+// system prompt + conversation to," which is governed by scheme +
+// host, not by loopback-vs-public.
+func validateProviderEndpointURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("malformed URL: %w", err)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		// ok
+	case "":
+		return fmt.Errorf("missing scheme (must be http or https)")
+	default:
+		return fmt.Errorf("unsupported scheme %q (must be http or https)", u.Scheme)
+	}
+	if strings.TrimSpace(u.Host) == "" {
+		return fmt.Errorf("missing host")
+	}
+	return nil
+}
+
 // handleConfig exposes GET/POST over ~/.wuphf/config.json for the web UI
 // settings page and onboarding wizard. All POST fields are optional; clients
 // can update one without touching the others. Secret fields (API keys, tokens)
@@ -6266,6 +6301,19 @@ func (b *Broker) handleConfig(w http.ResponseWriter, r *http.Request) {
 				}
 				ep.BaseURL = strings.TrimSpace(ep.BaseURL)
 				ep.Model = strings.TrimSpace(ep.Model)
+				// Security gate: a malicious authenticated client (or
+				// anyone with write access to ~/.wuphf/config.json) must
+				// not be able to redirect future agent turns to file://,
+				// gopher://, unix://, or schemeless URLs. Allow only the
+				// two URL families our HTTP client actually services
+				// (http, https) and require a non-empty host so a
+				// `http://` no-op can't slip through.
+				if ep.BaseURL != "" {
+					if err := validateProviderEndpointURL(ep.BaseURL); err != nil {
+						http.Error(w, "invalid provider_endpoints["+k+"].base_url: "+err.Error(), http.StatusBadRequest)
+						return
+					}
+				}
 				if ep.BaseURL == "" && ep.Model == "" {
 					// Treat the empty-empty case as a clear so the user can
 					// drop their override and fall back to compile-time

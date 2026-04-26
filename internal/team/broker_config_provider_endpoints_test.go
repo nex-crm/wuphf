@@ -139,6 +139,91 @@ func TestHandleConfig_ProviderEndpointsRejectsUnknownKind(t *testing.T) {
 	}
 }
 
+// TestHandleConfig_ProviderEndpointsRejectsDangerousURLSchemes is the
+// security gate from the v6 review (HIGH): a locally-authenticated
+// client must NOT be able to persist `file://`, `gopher://`,
+// `unix://`, schemeless, or hostless URLs as a provider endpoint.
+// Persisting one would let the attacker redirect every subsequent
+// agent turn to their own target — exfiltrating the system prompt
+// + conversation history. Allowed schemes are http and https only;
+// host must be non-empty.
+func TestHandleConfig_ProviderEndpointsRejectsDangerousURLSchemes(t *testing.T) {
+	withWuphfHomeDir(t)
+	b := newTestBroker(t)
+	for _, badURL := range []string{
+		"file:///etc/passwd",
+		"gopher://evil.example.com/",
+		"unix:///var/run/mlx.sock",
+		"javascript:alert(1)",
+		"//no-scheme.example.com/v1",
+		"http://", // hostless
+		"https://",
+		"not a url at all",
+	} {
+		body := `{"provider_endpoints":{"mlx-lm":{"base_url":"` + badURL + `","model":"x"}}}`
+		rec := configRequest(t, b, http.MethodPost, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("base_url=%q: expected 400, got %d %s", badURL, rec.Code, rec.Body.String())
+		}
+		if !strings.Contains(rec.Body.String(), "base_url") {
+			t.Errorf("base_url=%q: 400 body did not name the offending field: %s", badURL, rec.Body.String())
+		}
+	}
+}
+
+// TestHandleConfig_ProviderEndpointsAcceptsLoopbackAndHTTPS is the
+// positive case for the security gate above. Loopback HTTP is the
+// canonical local-LLM target (mlx_lm.server, ollama, exo); HTTPS to
+// a remote host is supported when users tunnel an LLM. Both must
+// pass the validator.
+func TestHandleConfig_ProviderEndpointsAcceptsLoopbackAndHTTPS(t *testing.T) {
+	withWuphfHomeDir(t)
+	b := newTestBroker(t)
+	for _, goodURL := range []string{
+		"http://127.0.0.1:8080/v1",
+		"http://localhost:11434/v1",
+		"http://[::1]:8080/v1",
+		"https://gateway.example.com/v1",
+		"https://gateway.example.com/v1?key=abc",
+		"http://192.168.1.10:8080/v1", // user explicitly pointed at a LAN box
+	} {
+		body := `{"provider_endpoints":{"mlx-lm":{"base_url":"` + goodURL + `","model":"x"}}}`
+		rec := configRequest(t, b, http.MethodPost, body)
+		if rec.Code != http.StatusOK {
+			t.Errorf("base_url=%q: expected 200, got %d %s", goodURL, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+// TestValidateProviderEndpointURL exercises the predicate directly
+// so a regression localizes here rather than in the broker handler.
+func TestValidateProviderEndpointURL(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantErr bool
+	}{
+		{"http://127.0.0.1:8080/v1", false},
+		{"https://api.example.com/v1", false},
+		{"HTTP://Example.com/v1", false}, // case-insensitive scheme
+		{"file:///etc/passwd", true},
+		{"gopher://example.com", true},
+		{"unix:///socket", true},
+		{"javascript:alert(1)", true},
+		{"//host.example.com/path", true}, // schemeless protocol-relative
+		{"/relative/path", true},
+		{"", true},
+		{"   ", true},
+		{"http://", true},  // empty host
+		{"https://", true}, // empty host
+	}
+	for _, tc := range cases {
+		err := validateProviderEndpointURL(tc.in)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("validateProviderEndpointURL(%q) err=%v, wantErr=%v", tc.in, err, tc.wantErr)
+		}
+	}
+}
+
 // TestHandleConfig_LLMProviderAcceptsRegisteredLocalKinds locks in the
 // fix that closed the v1 review: the broker's POST validation must
 // accept mlx-lm/ollama/exo (not just claude-code/codex/opencode), so

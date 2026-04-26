@@ -1015,7 +1015,7 @@ interface ApiKeyRowProps {
   onChange: (v: string) => void;
 }
 
-function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
+export function ApiKeyRow({ field, value, onChange }: ApiKeyRowProps) {
   const [showInput, setShowInput] = useState<boolean>(value.length > 0);
   const useApiKey = showInput || value.length > 0;
   return (

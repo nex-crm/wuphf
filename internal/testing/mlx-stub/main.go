@@ -234,7 +234,17 @@ func main() {
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *flagPort)
 	log.Printf("mlx-stub listening on %s; fixture=%s turns=%d", addr, *flagFixture, len(fx.turns))
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	// Use http.Server (not ListenAndServe) so we can set
+	// ReadHeaderTimeout — gosec / staff review minimum hardening
+	// for any HTTP listener. ReadTimeout is generous because
+	// Playwright sometimes pauses mid-request during debugger attach.
+	srv := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+	}
+	if err := srv.ListenAndServe(); err != nil {
 		log.Fatal(err)
 	}
 }

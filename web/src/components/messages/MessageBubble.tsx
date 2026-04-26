@@ -69,9 +69,14 @@ export function MessageBubble({
         }))
     : [];
 
-  // SECURITY: formatMarkdown escapes all HTML via escapeHtml() before rendering.
-  // Only trusted broker messages use this path — human input renders via the
-  // safe renderMentions path below (builds ReactNode children, no innerHTML).
+  // SECURITY: formatMarkdown escapes all HTML via escapeHtml() and gates link
+  // hrefs through isSafeUrl() before building the output, so the agent path
+  // here cannot inject script tags or javascript:/data: URLs even when the
+  // model emits attacker-controlled markdown. Local-LLM updates added new
+  // sources of agent content (mlx-lm, ollama, exo) — those go through the
+  // same formatMarkdown path so the same XSS posture applies. Human input
+  // takes the safe ReactNode path via renderMentions; tests live in
+  // src/lib/markdown.test.ts (XSS regression sweep).
   const renderedHtml = !isHuman ? formatMarkdown(message.content || "") : "";
 
   // Turn human text like "@pm when are you free?" into mention chips for

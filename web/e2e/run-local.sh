@@ -22,9 +22,9 @@ set -euo pipefail
 
 phase="${1:-both}"
 case "$phase" in
-  both|wizard|shell|local-llm) ;;
+  both|wizard|shell|local-llm|local-llm-dialects) ;;
   *)
-    echo "usage: $0 [both|wizard|shell|local-llm]" >&2
+    echo "usage: $0 [both|wizard|shell|local-llm|local-llm-dialects]" >&2
     exit 2
     ;;
 esac
@@ -245,10 +245,93 @@ EOF
   return $rc
 }
 
+# run_local_llm_dialects_phase: parser-dialect parity sweep. Restarts
+# the stub once per fixture (markdown-fenced JSON / structured
+# tool_calls / text-only) so the single dialects spec runs against
+# each parser branch end-to-end. The fixture in play is named via
+# DIALECT_NAME so the spec body knows which assertions to skip vs
+# enforce.
+run_local_llm_dialects_phase() {
+  local stub_port="$((web_port + 1000))"
+  local rc=0
+  declare -a fixtures=(
+    "markdown:web/e2e/fixtures/qwen-markdown-tool.txt"
+    "structured:web/e2e/fixtures/structured-tool-call.txt"
+    "text-only:web/e2e/fixtures/text-only-reply.txt"
+  )
+
+  mkdir -p "${runtime_home}/.wuphf"
+  cat > "${runtime_home}/.wuphf/onboarded.json" <<EOF
+{"version":1,"completed_at":"2026-01-01T00:00:00Z","company_name":"e2e-local-llm-dialects"}
+EOF
+  cat > "${runtime_home}/.wuphf/config.json" <<EOF
+{
+  "llm_provider": "mlx-lm",
+  "memory_backend": "markdown",
+  "provider_endpoints": {
+    "mlx-lm": {
+      "base_url": "http://127.0.0.1:${stub_port}/v1",
+      "model": "stub-model-v1"
+    }
+  }
+}
+EOF
+
+  for entry in "${fixtures[@]}"; do
+    local name="${entry%%:*}"
+    local fixture="${entry#*:}"
+    echo "[run-local] dialect-sweep: ${name} (${fixture})"
+
+    ./web/e2e/bin/mlx-stub --port "$stub_port" --fixture "$fixture" \
+      >"${runtime_home}/mlx-stub-${name}.log" 2>&1 &
+    local stub_pid=$!
+    for _ in $(seq 1 20); do
+      if curl -sf "http://127.0.0.1:${stub_port}/v1/models" -o /dev/null; then break; fi
+      sleep 0.2
+    done
+
+    WUPHF_RUNTIME_HOME="$runtime_home" \
+      WUPHF_MLX_LM_BASE_URL="http://127.0.0.1:${stub_port}/v1" \
+      WUPHF_MLX_LM_MODEL="stub-model-v1" \
+      ./wuphf --no-open --broker-port "$broker_port" --web-port "$web_port" --no-nex \
+      --provider mlx-lm \
+      </dev/null > "${runtime_home}/wuphf-${name}.log" 2>&1 &
+    pid=$!
+    for _ in $(seq 1 30); do
+      if curl -sf "http://localhost:${web_port}/onboarding/state" -o /dev/null; then break; fi
+      sleep 1
+    done
+
+    set +e
+    (cd web/e2e && DIALECT_NAME="$name" \
+       WUPHF_E2E_BASE_URL="http://localhost:${web_port}" \
+       bunx playwright test tests/local-llm-dialects.spec.ts)
+    local sub_rc=$?
+    set -e
+    [ "$sub_rc" -ne 0 ] && rc=$sub_rc
+
+    kill_wuphf "${pid:-}"
+    pid=""
+    kill "${stub_pid:-}" 2>/dev/null || true
+    # Wait for ports to free.
+    for _ in $(seq 1 10); do
+      if ! (exec 3<>/dev/tcp/127.0.0.1/"$web_port") 2>/dev/null; then break; fi
+      sleep 1
+    done
+  done
+
+  rm -rf /tmp/wuphf-local-llm-logs
+  mkdir -p /tmp/wuphf-local-llm-logs
+  cp -p "${runtime_home}"/*.log /tmp/wuphf-local-llm-logs/ 2>/dev/null || true
+  echo "[run-local] logs preserved at /tmp/wuphf-local-llm-logs/"
+  return $rc
+}
+
 case "$phase" in
   wizard) run_wizard_phase ;;
   shell)  run_shell_phase ;;
   local-llm) run_local_llm_phase ;;
+  local-llm-dialects) run_local_llm_dialects_phase ;;
   both)
     run_wizard_phase
     run_shell_phase

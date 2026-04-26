@@ -103,12 +103,13 @@ test.describe("Local-LLM chat flow (stubbed mlx-lm)", () => {
     await openPlannerDM(page);
     await sendDirectMessage(page, "Plan a quick weekend road trip.");
 
-    // Wait for the agent's reply to land first (means a turn ran).
+    // Wait specifically for an agent message ROW to land — the
+    // streaming-indicator placeholder that uses .cc-thinking
+    // doesn't have a [data-msg-id], so anchoring here forces the
+    // test to wait for a real persisted reply.
     await expect(
-      page.locator(".cc-thinking, .message-text").first(),
-    ).toBeVisible({
-      timeout: 90_000,
-    });
+      page.locator("[data-msg-id]").filter({ hasNotText: /^You$/ }).first(),
+    ).toBeVisible({ timeout: 90_000 });
 
     // Live Output panel renders mcp_tool_event entries via
     // ToolCallCard. The fix at 4e2cf5ed treats null AND undefined AND
@@ -123,48 +124,10 @@ test.describe("Local-LLM chat flow (stubbed mlx-lm)", () => {
     );
   });
 
-  test("structured tool_calls dialect: tool fires, post-tool text follows", async ({
-    page,
-  }) => {
-    // The Qwen markdown-fenced fixture covers the JSON-in-content
-    // dialect; this spec exercises the OPENAI-NATIVE structured
-    // tool_calls path. Different parser branch in openai_compat.go,
-    // same user-visible contract: tool output lands as a real
-    // message; raw `arguments` payload never leaks into chat.
-    //
-    // We can't easily swap fixtures inside a Playwright run (the
-    // stub is started once per phase by run-local.sh), so we use
-    // page.route to redirect /v1/chat/completions to a freshly
-    // synthesized SSE response that matches the structured-dialect
-    // shape. The route runs purely in-browser; the wuphf binary
-    // doesn't see it. So instead we drive the assertion via the
-    // primary fixture and double-check that NEITHER dialect leaks
-    // raw JSON to chat — the structural property the parser must
-    // hold across all dialects.
-    await openPlannerDM(page);
-    await sendDirectMessage(page, "What can you help me with?");
-
-    // Wait for a reply.
-    await expect(
-      page.locator(".cc-thinking, .message-text").first(),
-    ).toBeVisible({
-      timeout: 90_000,
-    });
-
-    // Cross-dialect invariant: at no point should the visible chat
-    // contain `arguments` or `\`\`\`json` — both would mean a parser
-    // dialect failed and the runner posted JSON as text.
-    const messageBodies = await page
-      .locator(".message-text, .msg-text, [data-msg-id] [class*='message']")
-      .allTextContents();
-    for (const body of messageBodies) {
-      if (body.includes('"arguments"') || body.includes("```json")) {
-        throw new Error(
-          `Cross-dialect invariant broken — JSON leaked into chat:\n${body}`,
-        );
-      }
-    }
-  });
+  // Note: cross-dialect coverage (markdown-fenced JSON, structured
+  // tool_calls, text-only) lives in local-llm-dialects.spec.ts which
+  // run-local.sh iterates over each fixture for. This file is the
+  // markdown-fenced default-fixture surface only.
 
   test("Settings → Local LLMs reachable from the same shell session", async ({
     page,
