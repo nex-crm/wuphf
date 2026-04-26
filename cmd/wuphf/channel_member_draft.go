@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -244,7 +245,7 @@ func mutateOfficeMemberSpec(draft channelMemberDraft, activeChannel string) tea.
 			"permission_mode": strings.TrimSpace(draft.PermissionMode),
 			"created_by":      "you",
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/office-members", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/office-members", bytes.NewReader(body))
 		if err != nil {
 			return channelMemberDraftDoneMsg{err: err}
 		}
@@ -264,7 +265,7 @@ func mutateOfficeMemberSpec(draft channelMemberDraft, activeChannel string) tea.
 				"channel": activeChannel,
 				"slug":    draft.Slug,
 			})
-			addReq, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channel-members", bytes.NewReader(addBody))
+			addReq, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/channel-members", bytes.NewReader(addBody))
 			if err == nil {
 				addReq.Header.Set("Content-Type", "application/json")
 				if addResp, doErr := client.Do(addReq); doErr == nil {

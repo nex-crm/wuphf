@@ -11,6 +11,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -241,7 +242,9 @@ type messageRow struct {
 }
 
 func fetchMessages() []messageRow {
-	req, _ := http.NewRequest(http.MethodGet, brokerURL+"/messages", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, brokerURL+"/messages", nil)
 	req.Header.Set("Authorization", "Bearer "+brokerToken)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -323,7 +326,9 @@ func mustPost(err error) {
 
 func brokerPOST(path string, body any) (string, error) {
 	data, _ := json.Marshal(body)
-	req, _ := http.NewRequest(http.MethodPost, brokerURL+path, bytes.NewReader(data))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, brokerURL+path, bytes.NewReader(data))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+brokerToken)
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -342,7 +347,10 @@ func brokerPOST(path string, body any) (string, error) {
 func waitHealth(timeout time.Duration) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		resp, err := http.Get(brokerURL + "/health")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, brokerURL+"/health", nil)
+		resp, err := http.DefaultClient.Do(req)
+		cancel()
 		if err == nil && resp.StatusCode == http.StatusOK {
 			resp.Body.Close()
 			return

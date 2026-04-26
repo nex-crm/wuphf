@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,8 +51,8 @@ func normalizeBrokerURL(raw string) string {
 }
 
 // newBrokerRequest creates an HTTP request with the broker auth header.
-func newBrokerRequest(method, url string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequest(method, normalizeBrokerURL(url), body)
+func newBrokerRequest(ctx context.Context, method, url string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, normalizeBrokerURL(url), body)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +71,7 @@ func pollBroker(sinceID string, channel string) tea.Cmd {
 		if sinceID != "" {
 			url += "&since_id=" + sinceID
 		}
-		req, err := newBrokerRequest(http.MethodGet, url, nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, url, nil)
 		if err != nil {
 			return channelMsg{}
 		}
@@ -98,7 +99,7 @@ func pollBroker(sinceID string, channel string) tea.Cmd {
 
 func pollMembers(channel string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/members?channel="+channel, nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/members?channel="+channel, nil)
 		if err != nil {
 			return channelMembersMsg{}
 		}
@@ -126,7 +127,7 @@ func pollMembers(channel string) tea.Cmd {
 
 func pollOfficeMembers() tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/office-members", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/office-members", nil)
 		if err != nil {
 			return channelOfficeMembersMsg{}
 		}
@@ -154,7 +155,7 @@ func pollOfficeMembers() tea.Cmd {
 
 func pollChannels() tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/channels", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/channels", nil)
 		if err != nil {
 			return channelChannelsMsg{}
 		}
@@ -187,7 +188,7 @@ func createDMChannel(agentSlug string) tea.Cmd {
 			"members": []string{"human", agentSlug},
 			"type":    "direct",
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channels/dm", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/channels/dm", bytes.NewReader(body))
 		if err != nil {
 			return channelDMCreatedMsg{err: err, agentSlug: agentSlug}
 		}
@@ -211,7 +212,11 @@ func createDMChannel(agentSlug string) tea.Cmd {
 func pollHealth() tea.Cmd {
 	return func() tea.Msg {
 		client := &http.Client{Timeout: 1200 * time.Millisecond}
-		resp, err := client.Get(brokerURL("/health"))
+		req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, brokerURL("/health"), nil)
+		if err != nil {
+			return channelHealthMsg{}
+		}
+		resp, err := client.Do(req)
 		if err != nil {
 			return channelHealthMsg{}
 		}
@@ -244,7 +249,7 @@ func mutateChannel(action, slug, description string) tea.Cmd {
 			"description": description,
 			"created_by":  "you",
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
 		if err != nil {
 			return channelPostDoneMsg{err: err}
 		}
@@ -279,7 +284,7 @@ func mutateChannelMember(channel, action, slug string) tea.Cmd {
 			"channel": channel,
 			"slug":    slug,
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channel-members", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/channel-members", bytes.NewReader(body))
 		if err != nil {
 			return channelPostDoneMsg{err: err}
 		}
@@ -310,7 +315,7 @@ func mutateOfficeMember(action, slug, name string) tea.Cmd {
 			"role":       name,
 			"created_by": "you",
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/office-members", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/office-members", bytes.NewReader(body))
 		if err != nil {
 			return channelPostDoneMsg{err: err}
 		}
@@ -349,7 +354,7 @@ func mutateTask(action, taskID, owner, channel string) tea.Cmd {
 			"owner":      owner,
 			"created_by": "you",
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/tasks", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/tasks", bytes.NewReader(body))
 		if err != nil {
 			return channelTaskMutationDoneMsg{err: err}
 		}
@@ -381,7 +386,7 @@ func mutateTask(action, taskID, owner, channel string) tea.Cmd {
 
 func pollUsage() tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/usage", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/usage", nil)
 		if err != nil {
 			return channelUsageMsg{}
 		}
@@ -410,7 +415,7 @@ func pollUsage() tea.Cmd {
 
 func pollTasks(channel string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/tasks?channel="+channel, nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/tasks?channel="+channel, nil)
 		if err != nil {
 			return channelTasksMsg{}
 		}
@@ -434,7 +439,7 @@ func pollTasks(channel string) tea.Cmd {
 
 func pollSkills(channel string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/skills?channel="+channel, nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/skills?channel="+channel, nil)
 		if err != nil {
 			return channelSkillsMsg{}
 		}
@@ -469,7 +474,7 @@ func pollOfficeLedger() tea.Cmd {
 
 func pollActions() tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/actions", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/actions", nil)
 		if err != nil {
 			return channelActionsMsg{}
 		}
@@ -493,7 +498,7 @@ func pollActions() tea.Cmd {
 
 func pollSignals() tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/signals", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/signals", nil)
 		if err != nil {
 			return channelSignalsMsg{}
 		}
@@ -515,7 +520,7 @@ func pollSignals() tea.Cmd {
 
 func pollDecisions() tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/decisions", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/decisions", nil)
 		if err != nil {
 			return channelDecisionsMsg{}
 		}
@@ -537,7 +542,7 @@ func pollDecisions() tea.Cmd {
 
 func pollWatchdogs() tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/watchdogs", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/watchdogs", nil)
 		if err != nil {
 			return channelWatchdogsMsg{}
 		}
@@ -559,7 +564,7 @@ func pollWatchdogs() tea.Cmd {
 
 func pollScheduler() tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/scheduler", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/scheduler", nil)
 		if err != nil {
 			return channelSchedulerMsg{}
 		}
@@ -583,7 +588,7 @@ func pollScheduler() tea.Cmd {
 
 func pollRequests(channel string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, "http://127.0.0.1:7890/requests?channel="+channel, nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, "http://127.0.0.1:7890/requests?channel="+channel, nil)
 		if err != nil {
 			return channelRequestsMsg{}
 		}
@@ -626,7 +631,7 @@ func postHumanInterrupt(channel string) tea.Cmd {
 				{"id": "redirect", "label": "Redirect — I'll type new instructions"},
 			},
 		})
-		req, _ := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/requests", bytes.NewReader(body))
+		req, _ := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/requests", bytes.NewReader(body))
 		client := &http.Client{Timeout: 2 * time.Second}
 		resp, err := client.Do(req)
 		if err != nil {
@@ -645,7 +650,7 @@ func postInterviewAnswer(interview channelInterview, choiceID, choiceText, custo
 			"choice_text": choiceText,
 			"custom_text": customText,
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/requests/answer", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/requests/answer", bytes.NewReader(body))
 		if err != nil {
 			return channelInterviewAnswerDoneMsg{err: err}
 		}

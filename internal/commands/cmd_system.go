@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,7 +82,7 @@ func cmdInit(ctx *SlashContext, args string) error {
 		return err
 	}
 
-	notice, err := setup.InstallLatestCLI()
+	notice, err := setup.InstallLatestCLI(context.Background())
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -56,7 +57,19 @@ func request[T any](c *Client, method, path string, body any, timeout time.Durat
 		reqBody = bytes.NewReader(b)
 	}
 
-	req, err := http.NewRequest(method, path, reqBody)
+	t := c.Timeout
+	if timeout > 0 {
+		t = timeout
+	}
+	// The api.Client is invoked from many call sites that don't currently
+	// thread a context. Use a per-request background context with the
+	// configured timeout as the deadline — equivalent behaviour to the
+	// previous c.HTTPClient.Timeout but satisfies noctx and lets the request
+	// be cancelled when the deadline elapses.
+	ctx, cancel := context.WithTimeout(context.Background(), t)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, method, path, reqBody)
 	if err != nil {
 		return zero, fmt.Errorf("create request: %w", err)
 	}
@@ -68,10 +81,6 @@ func request[T any](c *Client, method, path string, body any, timeout time.Durat
 		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
 
-	t := c.Timeout
-	if timeout > 0 {
-		t = timeout
-	}
 	c.HTTPClient.Timeout = t
 
 	resp, err := c.HTTPClient.Do(req)
@@ -114,7 +123,10 @@ func (c *Client) getRaw(path string, timeout time.Duration) (string, error) {
 	}
 	c.HTTPClient.Timeout = t
 
-	req, err := http.NewRequest(http.MethodGet, path, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), t)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}

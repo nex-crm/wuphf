@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -701,7 +702,7 @@ func hasInstalledRuntimeCLI(prereqs []prereqResult) bool {
 func (m onboardingModel) fetchPrereqsCmd() tea.Cmd {
 	url := m.brokerURL + "/onboarding/prereqs"
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, url, nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, url, nil)
 		if err != nil {
 			return prereqsLoadedMsg{results: []prereqResult{
 				{Name: "git", Required: true, Found: false},
@@ -748,7 +749,7 @@ func (m onboardingModel) validateKeyCmd(key string) tea.Cmd {
 	url := m.brokerURL + "/onboarding/validate-key"
 	return func() tea.Msg {
 		payload, _ := json.Marshal(map[string]string{"key": key, "provider": "anthropic"})
-		req, err := newBrokerRequest(http.MethodPost, url, bytes.NewReader(payload))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
 			return keyValidatedMsg{status: "unverified"}
 		}
@@ -779,7 +780,7 @@ func (m onboardingModel) validateKeyCmd(key string) tea.Cmd {
 func (m onboardingModel) fetchTemplatesCmd() tea.Cmd {
 	url := m.brokerURL + "/onboarding/templates"
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodGet, url, nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodGet, url, nil)
 		if err != nil {
 			return templatesLoadedMsg{templates: defaultTemplates()}
 		}
@@ -824,7 +825,7 @@ func (m onboardingModel) submitProgressCmd(step string, answers map[string]inter
 			"step":    step,
 			"answers": answers,
 		})
-		req, err := newBrokerRequest(http.MethodPost, url, bytes.NewReader(payload))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
 			return onboardingProgressMsg{err: err}
 		}
@@ -845,7 +846,7 @@ func (m onboardingModel) completeOnboardingCmd(task string, skipTask bool) tea.C
 			"first_task": task,
 			"skip_task":  skipTask,
 		})
-		req, err := newBrokerRequest(http.MethodPost, url, bytes.NewReader(payload))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, url, bytes.NewReader(payload))
 		if err != nil {
 			// If broker isn't up yet, treat as complete (graceful).
 			return completeMsg{err: nil}
@@ -873,7 +874,7 @@ type onboardingState struct {
 
 func fetchOnboardingState(brokerURL string) (onboardingState, error) {
 	client := &http.Client{Timeout: 3 * time.Second}
-	req, err := newBrokerRequest(http.MethodGet, brokerURL+"/onboarding/state", nil)
+	req, err := newBrokerRequest(context.Background(), http.MethodGet, brokerURL+"/onboarding/state", nil)
 	if err != nil {
 		return onboardingState{Onboarded: true}, err
 	}

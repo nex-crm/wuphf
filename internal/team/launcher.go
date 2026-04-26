@@ -295,7 +295,7 @@ func checkGHCapability() (installed bool, authed bool, note string) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return false, false, "gh CLI not found in PATH; agents won't be able to open real PRs. Install from https://cli.github.com."
 	}
-	cmd := exec.Command("gh", "auth", "status")
+	cmd := exec.CommandContext(context.Background(), "gh", "auth", "status")
 	if err := cmd.Run(); err != nil {
 		return true, false, "gh installed but not authenticated; run `gh auth login` so agents can open real PRs."
 	}
@@ -352,7 +352,7 @@ func (l *Launcher) Launch() error {
 	}
 
 	// Kill any existing session
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	// Resolve wuphf binary path for the channel view
 	wuphfBinary, _ := os.Executable()
@@ -373,7 +373,7 @@ func (l *Launcher) Launch() error {
 		)
 	}
 	channelCmd := fmt.Sprintf("%s %s --channel-view 2>>%s", strings.Join(channelEnv, " "), wuphfBinary, shellQuote(channelStderrLogPath()))
-	err = exec.Command("tmux", "-L", tmuxSocketName, "new-session", "-d",
+	err = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "new-session", "-d",
 		"-s", l.sessionName,
 		"-n", "team",
 		"-c", l.cwd,
@@ -385,47 +385,47 @@ func (l *Launcher) Launch() error {
 
 	// Keep tmux mouse off for this session so native terminal selection/copy works.
 	// WUPHF is keyboard-first; we don't want the TUI or tmux to steal mouse events.
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"mouse", "off",
 	).Run()
 
 	// Hide tmux's default status bar — our channel TUI has its own.
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"status", "off",
 	).Run()
 	// Keep panes visible if a process exits so crashes don't collapse the layout.
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
 		"remain-on-exit", "on",
 	).Run()
 
 	// Pane border cosmetics — kept so the channel pane renders with a border
 	// title. Per-agent panes are not spawned in the default path; they live
 	// only as an internal fallback (see trySpawnWebAgentPanes).
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-status", "top",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-format", " #{pane_title} ",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-style", "fg=colour240",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-active-border-style", "fg=colour45",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"pane-border-lines", "heavy",
 	).Run()
 
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 		"-T", "📢 channel",
 	).Run()
 
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-window",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-window",
 		"-t", l.sessionName+":team",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 	).Run()
 
@@ -1263,12 +1263,12 @@ func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
 		deadSince = time.Time{}
 		snapshotWritten = false
 		target := l.sessionName + ":team.0"
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
 			"-t", target,
 			"-c", l.cwd,
 			channelCmd,
 		).Run()
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", target,
 			"-T", "📢 channel",
 		).Run()
@@ -1276,7 +1276,7 @@ func (l *Launcher) watchChannelPaneLoop(channelCmd string) {
 }
 
 func (l *Launcher) channelPaneStatus() (string, error) {
-	out, err := exec.Command("tmux", "-L", tmuxSocketName, "display-message",
+	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "display-message",
 		"-p",
 		"-t", l.sessionName+":team.0",
 		"#{pane_dead} #{pane_dead_status} #{pane_current_command}",
@@ -1362,7 +1362,7 @@ func (l *Launcher) primeVisibleAgents() {
 				continue
 			}
 			if shouldPrimeClaudePane(content) {
-				_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+				_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
 					"-t", target.PaneTarget,
 					"Enter",
 				).Run()
@@ -2090,12 +2090,12 @@ func (l *Launcher) OneOnOneAgent() string {
 
 // killStaleBroker kills any process holding the configured broker port from a previous run.
 func killStaleBroker() {
-	out, err := exec.Command("lsof", "-i", fmt.Sprintf(":%d", brokeraddr.ResolvePort()), "-t").Output()
+	out, err := exec.CommandContext(context.Background(), "lsof", "-i", fmt.Sprintf(":%d", brokeraddr.ResolvePort()), "-t").Output()
 	if err != nil || len(out) == 0 {
 		return
 	}
 	for _, pid := range strings.Fields(strings.TrimSpace(string(out))) {
-		_ = exec.Command("kill", "-9", pid).Run()
+		_ = exec.CommandContext(context.Background(), "kill", "-9", pid).Run()
 	}
 	time.Sleep(500 * time.Millisecond)
 }
@@ -2161,9 +2161,9 @@ func (l *Launcher) Attach() error {
 	if os.Getenv("TERM_PROGRAM") == "iTerm.app" {
 		// tmux -CC mode: iTerm2 takes over window management.
 		// Creates native iTerm2 tabs/splits for each tmux window/pane.
-		cmd = exec.Command("tmux", "-L", tmuxSocketName, "-CC", "attach-session", "-t", l.sessionName)
+		cmd = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "-CC", "attach-session", "-t", l.sessionName)
 	} else {
-		cmd = exec.Command("tmux", "-L", tmuxSocketName, "attach-session", "-t", l.sessionName)
+		cmd = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "attach-session", "-t", l.sessionName)
 	}
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
@@ -2195,10 +2195,10 @@ func (l *Launcher) Kill() error {
 		_ = clearOfficePIDFile()
 		return nil
 	}
-	err := exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+	err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 	if err != nil {
 		// Check if the session simply doesn't exist
-		out, _ := exec.Command("tmux", "-L", tmuxSocketName, "list-sessions").CombinedOutput()
+		out, _ := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "list-sessions").CombinedOutput()
 		if strings.Contains(string(out), "no server") || strings.Contains(string(out), "error connecting") {
 			return nil // no session running, nothing to kill
 		}
@@ -2249,7 +2249,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 	l.provider = config.ResolveLLMProvider("")
 	if !l.usesPaneRuntime() {
 		if l.paneBackedAgents {
-			_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+			_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 			l.paneBackedAgents = false
 		}
 		return nil
@@ -2310,7 +2310,7 @@ func (l *Launcher) reconfigureVisibleAgents() error {
 		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
 		// respawn-pane -k kills the current process and starts a new one
 		// in the same pane — preserving size and position
-		out, err := exec.Command("tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
+		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "respawn-pane", "-k",
 			"-t", target,
 			"-c", l.cwd,
 			cmd,
@@ -3120,19 +3120,19 @@ var launcherSendNotificationToPane = func(l *Launcher, paneTarget, notification 
 // type + Enter unconditionally, so rapid direct calls will race each other.
 // queuePaneNotification serializes per-slug and inserts the minimum gap.
 func (l *Launcher) sendNotificationToPane(paneTarget, notification string) {
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "/clear", "Enter",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "-l", notification,
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "send-keys",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "send-keys",
 		"-t", paneTarget, "Enter",
 	).Run()
 }
 
 func (l *Launcher) capturePaneTargetContent(target string) (string, error) {
-	out, err := exec.Command("tmux", "-L", tmuxSocketName, "capture-pane",
+	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "capture-pane",
 		"-p", "-J",
 		"-t", target,
 	).CombinedOutput()
@@ -3213,7 +3213,9 @@ func killPersistedOfficeProcess() error {
 }
 
 func resetBrokerState(baseURL, token string) error {
-	req, err := http.NewRequest(http.MethodPost, baseURL+"/reset", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/reset", nil)
 	if err != nil {
 		return err
 	}
@@ -3243,13 +3245,13 @@ func (l *Launcher) clearAgentPanes() error {
 			continue // skip pane 0 (channel TUI)
 		}
 		target := fmt.Sprintf("%s:team.%d", l.sessionName, idx)
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-pane", "-t", target).Run()
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-pane", "-t", target).Run()
 	}
 	return nil
 }
 
 func (l *Launcher) clearOverflowAgentWindows() {
-	out, err := exec.Command("tmux", "-L", tmuxSocketName, "list-windows",
+	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "list-windows",
 		"-t", l.sessionName,
 		"-F", "#{window_name}",
 	).CombinedOutput()
@@ -3261,14 +3263,14 @@ func (l *Launcher) clearOverflowAgentWindows() {
 		if !strings.HasPrefix(name, "agent-") {
 			continue
 		}
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-window",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-window",
 			"-t", fmt.Sprintf("%s:%s", l.sessionName, name),
 		).Run()
 	}
 }
 
 func (l *Launcher) listTeamPanes() ([]int, error) {
-	out, err := exec.Command("tmux", "-L", tmuxSocketName, "list-panes",
+	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "list-panes",
 		"-t", l.sessionName+":team",
 		"-F", "#{pane_index} #{pane_title}",
 	).CombinedOutput()
@@ -3284,7 +3286,7 @@ func (l *Launcher) listTeamPanes() ([]int, error) {
 
 // HasLiveTmuxSession returns true if a wuphf-team tmux session is running.
 func HasLiveTmuxSession() bool {
-	err := exec.Command("tmux", "-L", tmuxSocketName, "has-session", "-t", SessionName).Run()
+	err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "has-session", "-t", SessionName).Run()
 	return err == nil
 }
 
@@ -3342,7 +3344,7 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
+		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "split-window", "-h",
 			"-t", l.sessionName+":team",
 			"-p", "65",
 			"-c", l.cwd,
@@ -3355,22 +3357,22 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 			}
 			return nil, fmt.Errorf("spawn one-on-one agent: %w (tmux: %s)", err, detail)
 		}
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-layout",
 			"-t", l.sessionName+":team",
 			"main-vertical",
 		).Run()
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", l.sessionName+":team.0",
 			"-T", "📢 direct",
 		).Run()
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", fmt.Sprintf("%s:team.1", l.sessionName),
 			"-T", fmt.Sprintf("🤖 %s (@%s)", l.getAgentName(slug), slug),
 		).Run()
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-window",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-window",
 			"-t", l.sessionName+":team",
 		).Run()
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", l.sessionName+":team.0",
 		).Run()
 		return []string{slug}, nil
@@ -3394,7 +3396,7 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window", "-h",
+	out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "split-window", "-h",
 		"-t", l.sessionName+":team",
 		"-p", "65",
 		"-c", l.cwd,
@@ -3419,7 +3421,7 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 			l.recordPaneSpawnFailure(visible[i].Slug, fmt.Sprintf("claudeCommand: %v", err))
 			continue
 		}
-		out, err := exec.Command("tmux", "-L", tmuxSocketName, "split-window",
+		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "split-window",
 			"-t", l.sessionName+":team.1",
 			"-c", l.cwd,
 			agentCmd,
@@ -3440,21 +3442,21 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 
 	// Apply tiled layout to agent panes, but keep channel (pane 0) as main-vertical
 	// Use main-vertical first to keep channel on the left
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-layout",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-layout",
 		"-t", l.sessionName+":team",
 		"main-vertical",
 	).Run()
 
 	// Now set pane titles
 	var visibleSlugs []string
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 		"-T", "📢 channel",
 	).Run()
 	for i, a := range visible {
 		paneIdx := i + 1 // pane 0 is channel
 		name := l.getAgentName(a.Slug)
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 			"-t", fmt.Sprintf("%s:team.%d", l.sessionName, paneIdx),
 			"-T", fmt.Sprintf("🤖 %s (@%s)", name, a.Slug),
 		).Run()
@@ -3462,10 +3464,10 @@ func (l *Launcher) spawnVisibleAgents() ([]string, error) {
 	}
 
 	// Focus channel pane
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-window",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-window",
 		"-t", l.sessionName+":team",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "select-pane",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "select-pane",
 		"-t", l.sessionName+":team.0",
 	).Run()
 
@@ -3487,7 +3489,7 @@ func (l *Launcher) spawnOverflowAgents() {
 			continue
 		}
 		windowName := overflowWindowName(member.Slug)
-		out, err := exec.Command("tmux", "-L", tmuxSocketName, "new-window", "-d",
+		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "new-window", "-d",
 			"-t", l.sessionName,
 			"-n", windowName,
 			"-c", l.cwd,
@@ -3522,14 +3524,14 @@ func (l *Launcher) detectDeadPanesAfterSpawn(members []officeMember) {
 		if !ok || target.PaneTarget == "" {
 			continue
 		}
-		out, err := exec.Command("tmux", "-L", tmuxSocketName, "display-message",
+		out, err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "display-message",
 			"-t", target.PaneTarget,
 			"-p", "#{pane_dead}",
 		).CombinedOutput()
 		if err != nil || strings.TrimSpace(string(out)) != "1" {
 			continue
 		}
-		history, _ := exec.Command("tmux", "-L", tmuxSocketName, "capture-pane",
+		history, _ := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "capture-pane",
 			"-t", target.PaneTarget,
 			"-p", "-J", "-S", "-200",
 		).CombinedOutput()
@@ -3596,13 +3598,13 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 
 	// Remove any stale session from a previous run. Ignore errors — the common
 	// case is "no such session".
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	// Create a detached session with a placeholder pane 0. Agent panes are
 	// attached as splits afterward so agentPaneTargets() (which starts at
 	// team.1) maps correctly.
 	placeholderCmd := "sh -c 'while :; do sleep 3600; done'"
-	if err := exec.Command("tmux", "-L", tmuxSocketName, "new-session", "-d",
+	if err := exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "new-session", "-d",
 		"-s", l.sessionName,
 		"-n", "team",
 		"-c", l.cwd,
@@ -3611,18 +3613,18 @@ func (l *Launcher) trySpawnWebAgentPanes() {
 		l.reportPaneFallback(true, "tmux new-session failed", err)
 		return
 	}
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"mouse", "off",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-option", "-t", l.sessionName,
 		"status", "off",
 	).Run()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "set-window-option", "-t", l.sessionName+":team",
 		"remain-on-exit", "on",
 	).Run()
 
 	if _, err := l.spawnVisibleAgents(); err != nil {
-		_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+		_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 		l.reportPaneFallback(true, "spawn visible agents failed", err)
 		return
 	}
@@ -4457,7 +4459,9 @@ func loadRunningSessionMode() (string, string) {
 		return SessionModeOffice, DefaultOneOnOneAgent
 	}
 
-	req, err := http.NewRequest(http.MethodGet, brokerBaseURL()+"/session-mode", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerBaseURL()+"/session-mode", nil)
 	if err != nil {
 		return SessionModeOffice, DefaultOneOnOneAgent
 	}
@@ -4699,12 +4703,12 @@ func (l *Launcher) LaunchWeb(webPort int) error {
 		if answer == "" || answer == "y" || answer == "yes" {
 			fmt.Println()
 			fmt.Println("  Nex CLI not found. Installing...")
-			if _, installErr := setup.InstallLatestCLI(); installErr != nil {
+			if _, installErr := setup.InstallLatestCLI(context.Background()); installErr != nil {
 				fmt.Printf("  Could not install: %v\n", installErr)
 				fmt.Println("  Continuing without Nex.")
 			}
 			if nexBin := nex.BinaryPath(); nexBin != "" {
-				cmd := exec.Command(nexBin, "setup")
+				cmd := exec.CommandContext(context.Background(), nexBin, "setup")
 				cmd.Stdin = os.Stdin
 				cmd.Stdout = os.Stdout
 				cmd.Stderr = os.Stderr
@@ -4811,11 +4815,11 @@ func openBrowser(url string) {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
-		cmd = exec.Command("open", url)
+		cmd = exec.CommandContext(context.Background(), "open", url)
 	case "linux":
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.CommandContext(context.Background(), "xdg-open", url)
 	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", "", url)
+		cmd = exec.CommandContext(context.Background(), "cmd", "/c", "start", "", url)
 	default:
 		return
 	}

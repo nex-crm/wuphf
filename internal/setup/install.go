@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,7 +12,8 @@ const defaultCLIPackage = "@nex-ai/nex"
 
 // InstallLatestCLI installs the latest published CLI from npm.
 // The package and installer binary can be overridden for tests via env vars.
-func InstallLatestCLI() (string, error) {
+// The context controls cancellation of the spawned npm install process.
+func InstallLatestCLI(ctx context.Context) (string, error) {
 	bin := strings.TrimSpace(os.Getenv("WUPHF_CLI_INSTALL_BIN"))
 	if bin == "" {
 		bin = "npm"
@@ -26,7 +28,7 @@ func InstallLatestCLI() (string, error) {
 		return "", fmt.Errorf("%s is required to install the latest CLI from npm", bin)
 	}
 
-	cmd := exec.Command(path, "install", "-g", pkg+"@latest")
+	cmd := exec.CommandContext(ctx, path, "install", "-g", pkg+"@latest")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if trimmed := strings.TrimSpace(string(output)); trimmed != "" {

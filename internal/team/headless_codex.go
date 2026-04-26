@@ -146,7 +146,7 @@ func defaultHeadlessCodexWorkspaceStatusSnapshot(path string) string {
 func (l *Launcher) launchHeadlessCodex() error {
 	killStaleBroker()
 	killStaleHeadlessTaskRunners()
-	_ = exec.Command("tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
+	_ = exec.CommandContext(context.Background(), "tmux", "-L", tmuxSocketName, "kill-session", "-t", l.sessionName).Run()
 
 	l.broker = NewBroker()
 	l.broker.packSlug = l.packSlug

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/gitexec"
 )
@@ -257,7 +258,13 @@ func defaultTaskWorktreeRootDir(repoRoot string) string {
 }
 
 func runGit(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
+	// Bound each git invocation so a hung credential-helper or filesystem
+	// stall in a worktree can't pin the broker forever. 60s is generous for
+	// the longest real operations (clone, fsck) and short enough to surface
+	// hangs.
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = gitexec.CleanEnv()
 	var stderr bytes.Buffer
@@ -269,7 +276,9 @@ func runGit(dir string, args ...string) error {
 }
 
 func runGitOutput(dir string, args ...string) ([]byte, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = gitexec.CleanEnv()
 	var stdout bytes.Buffer
@@ -435,7 +444,9 @@ func copyWorkspacePath(src, dst string, info os.FileInfo) error {
 }
 
 func gitRefExists(dir, ref string) bool {
-	cmd := exec.Command("git", "show-ref", "--verify", "--quiet", ref)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "show-ref", "--verify", "--quiet", ref)
 	cmd.Dir = dir
 	cmd.Env = gitexec.CleanEnv()
 	return cmd.Run() == nil

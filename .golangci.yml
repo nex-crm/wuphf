@@ -14,13 +14,13 @@ linters:
     - govet
     - ineffassign
     - misspell
+    - noctx
     - staticcheck
     - unconvert
     # Followups (own PR each — too many existing findings to land here):
     #   - contextcheck (26 findings: ctx threading)
     #   - gocritic (40 findings: mostly diagnostic-tag style nits)
     #   - nilerr (29 findings: returning nil after non-nil err)
-    #   - noctx (95 findings: net/http and exec.Command without context)
   settings:
     errcheck:
       exclude-functions:
@@ -49,6 +49,7 @@ linters:
           - errcheck
           - bodyclose
           - errorlint
+          - noctx
       # govet's shadow check on `err` is famously noisy in idiomatic Go
       # (every nested `if err := ...; err != nil` shadows). Keep shadow on
       # for non-err identifiers (real bugs hide there) but mute the err case.

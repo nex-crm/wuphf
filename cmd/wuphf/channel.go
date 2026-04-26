@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -4263,7 +4264,7 @@ func postToChannel(text string, replyTo string, channel string) tea.Cmd {
 			"tagged":   extractTagsFromText(text),
 			"reply_to": strings.TrimSpace(replyTo),
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/messages", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/messages", bytes.NewReader(body))
 		if err != nil {
 			return channelPostDoneMsg{err: err}
 		}
@@ -5506,7 +5507,7 @@ func createSkill(description, channel string) tea.Cmd {
 			"channel":     channel,
 		}
 		body, _ := json.Marshal(payload)
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/skills", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/skills", bytes.NewReader(body))
 		if err != nil {
 			return channelSkillsMsg{}
 		}
@@ -5523,7 +5524,7 @@ func createSkill(description, channel string) tea.Cmd {
 
 func invokeSkill(name string) tea.Cmd {
 	return func() tea.Msg {
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/skills/"+name+"/invoke", nil)
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/skills/"+name+"/invoke", nil)
 		if err != nil {
 			return channelSkillsMsg{}
 		}
@@ -5543,7 +5544,7 @@ func resetDMSession(agent string, channel string) tea.Cmd {
 			"agent":   agent,
 			"channel": channel,
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/reset-dm", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/reset-dm", bytes.NewReader(body))
 		if err != nil {
 			return channelResetDMDoneMsg{err: err}
 		}
@@ -5593,7 +5594,7 @@ func switchSessionMode(mode, agent string) tea.Cmd {
 			"mode":  mode,
 			"agent": agent,
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/session-mode", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/session-mode", bytes.NewReader(body))
 		if err != nil {
 			return channelResetDoneMsg{err: err}
 		}
@@ -5647,7 +5648,7 @@ func switchFocusMode(enabled bool) tea.Cmd {
 		body, _ := json.Marshal(map[string]any{
 			"focus_mode": enabled,
 		})
-		req, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/focus-mode", bytes.NewReader(body))
+		req, err := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/focus-mode", bytes.NewReader(body))
 		if err != nil {
 			return nil
 		}
@@ -5662,7 +5663,7 @@ func switchFocusMode(enabled bool) tea.Cmd {
 
 func applyTeamSetup() tea.Cmd {
 	return func() tea.Msg {
-		notice, err := setup.InstallLatestCLI()
+		notice, err := setup.InstallLatestCLI(context.Background())
 		if err != nil {
 			return channelInitDoneMsg{err: err}
 		}
@@ -5762,16 +5763,23 @@ func mapString(m map[string]any, key string) string {
 }
 
 func openBrowserURL(url string) error {
+	// openBrowserURL spawns a detached helper that hands the URL to the OS.
+	// We use context.Background() because the child must outlive this call —
+	// the user keeps interacting with the browser long after we return — and
+	// noctx's "use CommandContext" recommendation is satisfied by the
+	// background ctx. Cancellation isn't meaningful for a fire-and-forget
+	// open-in-browser handoff.
+	ctx := context.Background()
 	var cmd *exec.Cmd
 	switch {
 	case url == "":
 		return nil
 	case isDarwin():
-		cmd = exec.Command("open", url)
+		cmd = exec.CommandContext(ctx, "open", url)
 	case isLinux():
-		cmd = exec.Command("xdg-open", url)
+		cmd = exec.CommandContext(ctx, "xdg-open", url)
 	case isWindows():
-		cmd = exec.Command("cmd", "/c", "start", "", url)
+		cmd = exec.CommandContext(ctx, "cmd", "/c", "start", "", url)
 	default:
 		return fmt.Errorf("unsupported platform")
 	}
@@ -5784,10 +5792,18 @@ func isWindows() bool { return runtime.GOOS == "windows" }
 
 // killTeamSession kills the entire wuphf-team tmux session and all agent processes.
 func killTeamSession() {
+	// Best-effort cleanup at process exit; cap each step so a hung tmux or
+	// broker doesn't keep us alive forever.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	// Kill tmux session (kills all agent processes in all panes/windows)
-	_ = exec.Command("tmux", "-L", "wuphf", "kill-session", "-t", "wuphf-team").Run()
+	_ = exec.CommandContext(ctx, "tmux", "-L", "wuphf", "kill-session", "-t", "wuphf-team").Run()
 	// Stop the broker
-	if resp, err := http.Get(brokerURL("/health")); err == nil {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, brokerURL("/health"), nil)
+	if err != nil {
+		return
+	}
+	if resp, err := http.DefaultClient.Do(req); err == nil {
 		_ = resp.Body.Close()
 	}
 }

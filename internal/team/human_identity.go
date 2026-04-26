@@ -55,6 +55,7 @@ package team
 // people have each edited once, both are in the registry.
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -281,7 +282,9 @@ func runGitConfig(key string) string {
 	// gitexec.CleanEnv strips GIT_CONFIG_PARAMETERS and friends: when wuphf
 	// runs inside a git hook, the outer git may inject `-c` overrides
 	// via that env var which would silently override --global reads.
-	cmd := exec.Command("git", "config", "--global", key)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "config", "--global", key)
 	cmd.Env = gitexec.CleanEnv()
 	out, err := cmd.Output()
 	if err != nil {
