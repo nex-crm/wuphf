@@ -12,6 +12,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/commands"
 	"github.com/nex-crm/wuphf/internal/config"
+	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/teammcp"
 	"github.com/nex-crm/wuphf/internal/workspace"
@@ -184,14 +185,17 @@ func main() {
 		}
 		_ = os.Setenv("WUPHF_MEMORY_BACKEND", normalized)
 	}
-	if provider := strings.TrimSpace(*providerFlag); provider != "" {
-		switch provider {
-		case "claude-code", "codex", "opencode":
-			_ = os.Setenv("WUPHF_LLM_PROVIDER", provider)
-		default:
-			fmt.Fprintf(os.Stderr, "error: unsupported provider %q (expected claude-code, codex, or opencode)\n", provider)
+	if providerKind := strings.TrimSpace(*providerFlag); providerKind != "" {
+		// Delegate validation to the provider registry — every Register()
+		// call adds its Kind to the allow-list, so adding a new local
+		// runtime (mlx-lm, ollama, exo, …) is one Register() away from
+		// also being a valid --provider flag value without touching this
+		// switch.
+		if err := provider.ValidateKind(providerKind); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
 		}
+		_ = os.Setenv("WUPHF_LLM_PROVIDER", providerKind)
 	}
 	startFromScratch := *fromScratchFlag
 	if startFromScratch {

@@ -126,3 +126,88 @@ func TestOpenAICompatStreamFn_LiveMLXServerTools(t *testing.T) {
 		t.Logf("model declined the tool and replied in text: %q (non-fatal — Qwen2.5-Coder is not deterministic on tool-use, the test verifies parsing not model policy)", strings.TrimSpace(textBuf.String()))
 	}
 }
+
+// TestOpenAICompatStreamFn_LiveOllama exercises the registered ollama
+// provider against a real ollama daemon on :11434. Skipped unless
+// WUPHF_TEST_LIVE_OLLAMA=1; the model name comes from
+// WUPHF_OLLAMA_MODEL (default: the registered package default, which
+// must be `ollama pull`'d ahead of time).
+//
+// This is the parity check for the Ollama path: same code as mlx-lm,
+// different daemon. Running it during local verification confirms the
+// shared SSE streamer, /v1 normalizer, and ctx plumbing all work
+// against a second OpenAI-compatible implementation.
+func TestOpenAICompatStreamFn_LiveOllama(t *testing.T) {
+	if os.Getenv("WUPHF_TEST_LIVE_OLLAMA") != "1" {
+		t.Skip("set WUPHF_TEST_LIVE_OLLAMA=1 (and ensure WUPHF_OLLAMA_MODEL is pulled) to run against a live ollama daemon on :11434")
+	}
+
+	entry := Lookup(KindOllama)
+	if entry == nil {
+		t.Fatal("ollama not registered")
+	}
+	ch := entry.StreamFn("live-ollama-agent")(
+		[]agent.Message{
+			{Role: "system", Content: "Be terse."},
+			{Role: "user", Content: "Reply with exactly: pong."},
+		},
+		nil,
+	)
+	var got strings.Builder
+	for chunk := range ch {
+		switch chunk.Type {
+		case "text":
+			got.WriteString(chunk.Content)
+		case "error":
+			t.Fatalf("provider error: %s", chunk.Content)
+		}
+	}
+	out := strings.TrimSpace(got.String())
+	if out == "" {
+		t.Fatal("no text from live ollama")
+	}
+	t.Logf("live ollama ok: %q", out)
+}
+
+// TestOpenAICompatStreamFn_LiveExo_ConnectRefused verifies the failure
+// path is friendly: when no exo daemon is running on :52415 (the
+// realistic state for users on a single Mac), the StreamFn must surface
+// one clear error chunk including the URL and a hint about the local
+// server, not crash or hang. This is the test that protects against
+// regressions in `runOpenAICompatStream`'s early-error path.
+//
+// Always-on (no env gate) because it doesn't require any external
+// process — connection refused is the expected reality.
+func TestOpenAICompatStreamFn_LiveExo_ConnectRefused(t *testing.T) {
+	entry := Lookup(KindExo)
+	if entry == nil {
+		t.Fatal("exo not registered")
+	}
+	// Force a base URL that nothing's listening on. Use an unlikely high
+	// port to avoid colliding with a real daemon if the user has one.
+	t.Setenv("WUPHF_EXO_BASE_URL", "http://127.0.0.1:1/v1")
+
+	ch := entry.StreamFn("exo-down-agent")(
+		[]agent.Message{{Role: "user", Content: "ping"}},
+		nil,
+	)
+	var (
+		errCount int
+		lastErr  string
+	)
+	for chunk := range ch {
+		if chunk.Type == "error" {
+			errCount++
+			lastErr = chunk.Content
+		}
+	}
+	if errCount != 1 {
+		t.Fatalf("expected exactly 1 error chunk on connect-refused, got %d", errCount)
+	}
+	if !strings.Contains(lastErr, "127.0.0.1:1") {
+		t.Errorf("error did not mention the URL: %q", lastErr)
+	}
+	if !strings.Contains(lastErr, "Is the local server running") {
+		t.Errorf("error missing the hint we ship for users: %q", lastErr)
+	}
+}
