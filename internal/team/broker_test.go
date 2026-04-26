@@ -2678,17 +2678,10 @@ func TestBrokerTaskCreateReusesExistingOpenTask(t *testing.T) {
 }
 
 func TestBrokerEnsurePlannedTaskKeepsScopedDuplicateTitlesDistinct(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	b := newTestBroker(t)
 
 	first, reused, err := b.EnsurePlannedTask(plannedTaskInput{
@@ -2800,17 +2793,10 @@ func TestBrokerTaskCreateKeepsDistinctTasksInSameThread(t *testing.T) {
 }
 
 func TestBrokerTaskPlanAssignsWorktreeForLocalWorktreeTask(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "operator", "Operator")
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
@@ -3198,17 +3184,10 @@ func TestBrokerTaskCompleteRejectsLiveBusinessTheater(t *testing.T) {
 }
 
 func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
@@ -3288,22 +3267,15 @@ func TestBrokerStoresLedgerAndReviewLifecycle(t *testing.T) {
 }
 
 func TestBrokerReleaseTaskCleansWorktree(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
 	var cleanedPath, cleanedBranch string
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error {
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error {
 		cleanedPath = path
 		cleanedBranch = branch
 		return nil
-	}
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
@@ -3352,24 +3324,17 @@ func TestBrokerReleaseTaskCleansWorktree(t *testing.T) {
 }
 
 func TestBrokerApproveRetainsLocalWorktree(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
 	cleanupCalls := 0
 	worktreeRoot := t.TempDir()
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		path := filepath.Join(worktreeRoot, "wuphf-task-"+taskID)
 		initUsableGitWorktree(t, path)
 		return path, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error {
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error {
 		cleanupCalls++
 		return nil
-	}
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
 	b := newTestBroker(t)
 	if err := b.StartOnPort(0); err != nil {
 		t.Fatalf("failed to start broker: %v", err)
@@ -3465,26 +3430,17 @@ func ensureTestMemberAccess(b *Broker, channel, slug, name string) {
 }
 
 func TestBrokerHandlePostTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	oldVerify := verifyTaskWorktreeWritable
 	worktreeDir := t.TempDir()
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return worktreeDir, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	verifyTaskWorktreeWritable = func(path string) error {
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
+	setVerifyTaskWorktreeWritableForTest(t, func(path string) error {
 		if path != worktreeDir {
 			t.Fatalf("expected probe path %q, got %q", worktreeDir, path)
 		}
 		return nil
-	}
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-		verifyTaskWorktreeWritable = oldVerify
-	}()
-
+	})
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
 	if err := b.StartOnPort(0); err != nil {
@@ -3721,26 +3677,17 @@ func TestBrokerHandlePostTaskResumeUnblocksAfterCapabilityRepair(t *testing.T) {
 }
 
 func TestBrokerBlockTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	oldVerify := verifyTaskWorktreeWritable
 	worktreeDir := t.TempDir()
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return worktreeDir, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	verifyTaskWorktreeWritable = func(path string) error {
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
+	setVerifyTaskWorktreeWritableForTest(t, func(path string) error {
 		if path != worktreeDir {
 			t.Fatalf("expected probe path %q, got %q", worktreeDir, path)
 		}
 		return nil
-	}
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-		verifyTaskWorktreeWritable = oldVerify
-	}()
-
+	})
 	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
@@ -3784,17 +3731,10 @@ func TestBrokerBlockTaskRejectsFalseReadOnlyBlockForWritableWorktree(t *testing.
 }
 
 func TestBrokerEnsurePlannedTaskQueuesConcurrentExclusiveOwnerWork(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "executor", "Executor")
 
@@ -3972,26 +3912,17 @@ func TestBrokerTaskPlanReusesExistingActiveLane(t *testing.T) {
 }
 
 func TestBrokerBlockTaskAllowsReadOnlyBlockWhenWriteProbeFails(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	oldVerify := verifyTaskWorktreeWritable
 	worktreeDir := t.TempDir()
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return worktreeDir, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	verifyTaskWorktreeWritable = func(path string) error {
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
+	setVerifyTaskWorktreeWritableForTest(t, func(path string) error {
 		if path != worktreeDir {
 			t.Fatalf("expected probe path %q, got %q", worktreeDir, path)
 		}
 		return fmt.Errorf("permission denied")
-	}
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-		verifyTaskWorktreeWritable = oldVerify
-	}()
-
+	})
 	b := newTestBroker(t)
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",
@@ -4021,17 +3952,10 @@ func TestBrokerBlockTaskAllowsReadOnlyBlockWhenWriteProbeFails(t *testing.T) {
 }
 
 func TestBrokerCompleteClosesReviewTaskAndUnblocksDependents(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
 	if err := b.StartOnPort(0); err != nil {
@@ -4126,11 +4050,9 @@ func TestBrokerCompleteClosesReviewTaskAndUnblocksDependents(t *testing.T) {
 }
 
 func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
 	var prepareCalls []string
 	worktreeRoot := t.TempDir()
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		prepareCalls = append(prepareCalls, taskID)
 		if len(prepareCalls) > 1 {
 			return "", "", fmt.Errorf("unexpected prepareTaskWorktree call for %s", taskID)
@@ -4138,13 +4060,8 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 		path := filepath.Join(worktreeRoot, "wuphf-task-"+taskID)
 		initUsableGitWorktree(t, path)
 		return path, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "builder", "Builder")
 	ensureTestMemberAccess(b, "general", "operator", "Operator")
@@ -4231,23 +4148,16 @@ func TestBrokerCreateTaskReusesCompletedDependencyWorktree(t *testing.T) {
 }
 
 func TestBrokerSyncTaskWorktreeReplacesStaleAssignedPath(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
 	stalePath := t.TempDir()
 	freshPath := filepath.Join(t.TempDir(), "fresh-worktree")
 	var cleaned []string
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return freshPath, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error {
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error {
 		cleaned = append(cleaned, path+"|"+branch)
 		return nil
-	}
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
 	b := newTestBroker(t)
 	task := &teamTask{
 		ID:             "task-80",
@@ -4270,19 +4180,12 @@ func TestBrokerSyncTaskWorktreeReplacesStaleAssignedPath(t *testing.T) {
 }
 
 func TestBrokerNormalizeLoadedStateRepairsStaleAssignedWorktree(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
 	stalePath := t.TempDir()
 	freshPath := filepath.Join(t.TempDir(), "fresh-worktree")
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return freshPath, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	now := time.Now().UTC().Format(time.RFC3339)
 	b := newTestBroker(t)
 	b.tasks = []teamTask{{
@@ -4373,17 +4276,10 @@ func TestBrokerUpdatesTaskByIDAcrossChannels(t *testing.T) {
 }
 
 func TestBrokerCompleteAlreadyDoneTaskStaysApproved(t *testing.T) {
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return "/tmp/wuphf-task-" + taskID, "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(path, branch string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(path, branch string) error { return nil })
 	b := newTestBroker(t)
 	ensureTestMemberAccess(b, "general", "eng", "Engineer")
 	if err := b.StartOnPort(0); err != nil {

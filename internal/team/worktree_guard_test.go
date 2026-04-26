@@ -11,28 +11,31 @@ import (
 // production build. Production defaults in worktree.go remain:
 //   - allowRealTaskWorktree = true
 //   - unscopedWikiRootAllowed = true
-//   - prepareTaskWorktree = defaultPrepareTaskWorktree
-//   - cleanupTaskWorktree = defaultCleanupTaskWorktree
+//   - prepareTaskWorktreeOverride = nil  (falls through to defaultPrepareTaskWorktree)
+//   - cleanupTaskWorktreeOverride = nil  (falls through to defaultCleanupTaskWorktree)
 //
 // Under `go test`, init() below replaces all four with safe defaults:
 //   - The two guards are disabled so any test that reaches the real
 //     codepath without opting in panics / errors loudly.
-//   - The two vars are stubbed so indirect callers (e.g. EnsureTask →
-//     syncTaskWorktreeLocked → prepareTaskWorktree on a coding-agent
-//     task) get a deterministic fake path + branch instead of
-//     registering a worktree against the developer's wuphf repo.
+//   - The two override pointers are populated with stubs so indirect
+//     callers (e.g. EnsureTask → syncTaskWorktreeLocked →
+//     prepareTaskWorktree on a coding-agent task) get a deterministic
+//     fake path + branch instead of registering a worktree against the
+//     developer's wuphf repo.
 //
 // Tests that legitimately need the real prepare/cleanup codepath (the
 // three cases in worktree_test.go that build a tempdir-scoped repo and
 // chdir into it) must opt in via allowRealTaskWorktreeForTest(t) AND
 // call defaultPrepareTaskWorktree directly. Tests that want custom
-// stub behavior continue to monkey-patch prepareTaskWorktree; their
-// defer-restore lands on the stub below, not the real codepath.
+// stub behavior call setPrepareTaskWorktreeForTest(t, fn); the
+// per-test t.Cleanup restores the package-init stub.
 func init() {
-	allowRealTaskWorktree = false
+	allowRealTaskWorktree.Store(false)
 	unscopedWikiRootAllowed = false
-	prepareTaskWorktree = stubPrepareTaskWorktree
-	cleanupTaskWorktree = stubCleanupTaskWorktree
+	prep := prepareTaskWorktreeFn(stubPrepareTaskWorktree)
+	prepareTaskWorktreeOverride.Store(&prep)
+	cleanup := cleanupTaskWorktreeFn(stubCleanupTaskWorktree)
+	cleanupTaskWorktreeOverride.Store(&cleanup)
 	skipBrokerStateLoadOnConstruct = true
 
 	// Pin WUPHF_RUNTIME_HOME into a process-lifetime leaked tempdir so
@@ -62,26 +65,25 @@ func stubPrepareTaskWorktree(taskID string) (string, string, error) {
 func stubCleanupTaskWorktree(string, string) error { return nil }
 
 // allowRealTaskWorktreeForTest opts the current test into the real
-// defaultPrepareTaskWorktree / defaultCleanupTaskWorktree codepath. It
-// mutates three package-level globals (allowRealTaskWorktree,
-// prepareTaskWorktree, cleanupTaskWorktree) without synchronization and
-// restores them via t.Cleanup. Call sites MUST NOT call t.Parallel() in
-// the same test, and the test MUST NOT spawn background brokers/workers
-// that read those function pointers concurrently — both conditions hold
-// for the three current callers in worktree_test.go (no t.Parallel, no
-// Broker goroutines). If a future caller needs either, convert this to
-// a mutex-guarded swap like setHeadlessWakeLeadFn in broker_test.go.
+// defaultPrepareTaskWorktree / defaultCleanupTaskWorktree codepath.
+//
+// The worktree dispatch seams are now atomic.Pointer-backed (see
+// worktree.go), so the mutate-and-restore is race-safe — but parallel
+// tests in this package STILL must not all opt in at once, because the
+// real codepath chdirs into a tempdir-scoped repo. Each current caller
+// (worktree_test.go) builds its own tempdir + chdirs into it without
+// t.Parallel().
 func allowRealTaskWorktreeForTest(t *testing.T) {
 	t.Helper()
-	prevAllow := allowRealTaskWorktree
-	prevPrepare := prepareTaskWorktree
-	prevCleanup := cleanupTaskWorktree
-	allowRealTaskWorktree = true
-	prepareTaskWorktree = defaultPrepareTaskWorktree
-	cleanupTaskWorktree = defaultCleanupTaskWorktree
+	prevAllow := allowRealTaskWorktree.Load()
+	prevPrepare := prepareTaskWorktreeOverride.Load()
+	prevCleanup := cleanupTaskWorktreeOverride.Load()
+	allowRealTaskWorktree.Store(true)
+	prepareTaskWorktreeOverride.Store(nil)
+	cleanupTaskWorktreeOverride.Store(nil)
 	t.Cleanup(func() {
-		allowRealTaskWorktree = prevAllow
-		prepareTaskWorktree = prevPrepare
-		cleanupTaskWorktree = prevCleanup
+		allowRealTaskWorktree.Store(prevAllow)
+		prepareTaskWorktreeOverride.Store(prevPrepare)
+		cleanupTaskWorktreeOverride.Store(prevCleanup)
 	})
 }

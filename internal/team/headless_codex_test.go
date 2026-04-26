@@ -262,7 +262,6 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForCodingAgents(t *testing.T) {
 	oldLookPath := headlessCodexLookPath
 	oldExecutablePath := headlessCodexExecutablePath
 	oldCommandContext := headlessCodexCommandContext
-	oldPrepareTaskWorktree := prepareTaskWorktree
 	headlessCodexLookPath = func(file string) (string, error) {
 		switch file {
 		case "codex":
@@ -277,14 +276,13 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForCodingAgents(t *testing.T) {
 		cmdArgs = append(cmdArgs, args...)
 		return exec.CommandContext(ctx, os.Args[0], cmdArgs...)
 	}
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return worktreeDir, worktreeBranchName(taskID), nil
-	}
+	})
 	defer func() {
 		headlessCodexLookPath = oldLookPath
 		headlessCodexExecutablePath = oldExecutablePath
 		headlessCodexCommandContext = oldCommandContext
-		prepareTaskWorktree = oldPrepareTaskWorktree
 	}()
 
 	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
@@ -385,7 +383,6 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForLocalWorktreeBuilder(t *test
 	oldLookPath := headlessCodexLookPath
 	oldExecutablePath := headlessCodexExecutablePath
 	oldCommandContext := headlessCodexCommandContext
-	oldPrepareTaskWorktree := prepareTaskWorktree
 	headlessCodexLookPath = func(file string) (string, error) {
 		switch file {
 		case "codex":
@@ -400,14 +397,13 @@ func TestRunHeadlessCodexTurnUsesAssignedWorktreeForLocalWorktreeBuilder(t *test
 		cmdArgs = append(cmdArgs, args...)
 		return exec.CommandContext(ctx, os.Args[0], cmdArgs...)
 	}
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return worktreeDir, worktreeBranchName(taskID), nil
-	}
+	})
 	defer func() {
 		headlessCodexLookPath = oldLookPath
 		headlessCodexExecutablePath = oldExecutablePath
 		headlessCodexCommandContext = oldCommandContext
-		prepareTaskWorktree = oldPrepareTaskWorktree
 	}()
 
 	t.Setenv("GO_WANT_HEADLESS_CODEX_HELPER_PROCESS", "1")
@@ -1902,11 +1898,10 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 	t.Setenv("HOME", t.TempDir())
 
 	worktreeDir := t.TempDir()
-	oldPrepareTaskWorktree := prepareTaskWorktree
 	oldSnapshot := headlessCodexWorkspaceStatusSnapshot
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return worktreeDir, worktreeBranchName(taskID), nil
-	}
+	})
 	headlessCodexWorkspaceStatusSnapshot = func(path string) string {
 		if !samePath(path, worktreeDir) {
 			t.Fatalf("expected workspace snapshot to target %q, got %q", worktreeDir, path)
@@ -1914,7 +1909,6 @@ func TestBeginHeadlessCodexTurnCapturesWorktreeForLocalWorktreeBuilder(t *testin
 		return "snapshot"
 	}
 	defer func() {
-		prepareTaskWorktree = oldPrepareTaskWorktree
 		headlessCodexWorkspaceStatusSnapshot = oldSnapshot
 	}()
 
@@ -1956,17 +1950,10 @@ func TestRunHeadlessCodexQueueRetriesLocalWorktreeAfterGenericError(t *testing.T
 	t.Setenv("HOME", t.TempDir())
 	tmpDir := t.TempDir()
 
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return filepath.Join(tmpDir, "wuphf-task-"+taskID), "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(string, string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(string, string) error { return nil })
 	setHeadlessWakeLeadFn(t, func(_ *Launcher, _ string) {})
 
 	b := NewBrokerAt(filepath.Join(tmpDir, "broker-state.json"))
@@ -2108,17 +2095,10 @@ func TestEnqueueHeadlessCodexTurnBypassesLeadHoldForReviewReadyTask(t *testing.T
 
 	stateDir := t.TempDir()
 
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return filepath.Join(stateDir, "wuphf-task-"+taskID), "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(string, string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(string, string) error { return nil })
 	b := NewBrokerAt(filepath.Join(stateDir, "broker-state.json"))
 	task, reused, err := b.EnsurePlannedTask(plannedTaskInput{
 		Channel:       "general",

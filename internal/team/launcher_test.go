@@ -2022,17 +2022,10 @@ func TestRelevantTaskForTargetCrossChannel(t *testing.T) {
 	// the "Active task" line and giving specialists the wrong response instruction.
 	tmpDir := t.TempDir()
 
-	oldPrepare := prepareTaskWorktree
-	oldCleanup := cleanupTaskWorktree
-	prepareTaskWorktree = func(taskID string) (string, string, error) {
+	setPrepareTaskWorktreeForTest(t, func(taskID string) (string, string, error) {
 		return filepath.Join(tmpDir, "wuphf-task-"+taskID), "wuphf-" + taskID, nil
-	}
-	cleanupTaskWorktree = func(string, string) error { return nil }
-	defer func() {
-		prepareTaskWorktree = oldPrepare
-		cleanupTaskWorktree = oldCleanup
-	}()
-
+	})
+	setCleanupTaskWorktreeForTest(t, func(string, string) error { return nil })
 	b := NewBrokerAt(filepath.Join(tmpDir, "broker-state.json"))
 
 	// Create "engineering" channel directly in broker state.
