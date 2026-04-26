@@ -129,12 +129,11 @@ func TestWorkspaceShredRoutePostShredBrokerAcceptsNewState(t *testing.T) {
 	t.Setenv("WUPHF_RUNTIME_HOME", home)
 
 	// Pin broker state path explicitly so the assertion doesn't depend on
-	// defaultBrokerStatePath()'s home resolution. setBrokerStatePathForTest
-	// installs an atomic override that production reads via brokerStatePath().
+	// defaultBrokerStatePath()'s home resolution. NewBrokerAt binds the
+	// path at construction (Track A.1, #289) — every save from this broker
+	// lands at statePath regardless of process-wide env state.
 	statePath := filepath.Join(home, "broker-state.json")
-	setBrokerStatePathForTest(t, func() string { return statePath })
-
-	b := NewBroker()
+	b := NewBrokerAt(statePath)
 	b.mu.Lock()
 	b.messages = []channelMessage{{
 		ID:        "pre-shred",
