@@ -373,7 +373,7 @@ func (s *AgentService) runAgentWorker(slug string, ma *ManagedAgent, stopCh <-ch
 
 		if !running {
 			s.mu.Lock()
-			if current, ok := s.agents[slug]; ok && current == ma {
+			if cur, stillRegistered := s.agents[slug]; stillRegistered && cur == ma {
 				delete(s.tickTimers, slug)
 			}
 			s.mu.Unlock()

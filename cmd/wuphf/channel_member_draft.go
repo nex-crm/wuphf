@@ -267,8 +267,8 @@ func mutateOfficeMemberSpec(draft channelMemberDraft, activeChannel string) tea.
 			addReq, err := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channel-members", bytes.NewReader(addBody))
 			if err == nil {
 				addReq.Header.Set("Content-Type", "application/json")
-				if resp, doErr := client.Do(addReq); doErr == nil {
-					_ = resp.Body.Close()
+				if addResp, doErr := client.Do(addReq); doErr == nil {
+					_ = addResp.Body.Close()
 				}
 			}
 		}

@@ -507,7 +507,7 @@ func (s *SQLiteFactStore) ResolveRedirect(ctx context.Context, slug string) (str
 	var to string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT slug_to FROM redirects WHERE slug_from = ?`, slug).Scan(&to)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return slug, false, nil
 	}
 	if err != nil {
