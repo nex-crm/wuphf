@@ -136,7 +136,7 @@ func discoverTelegramGroups(token string) tea.Cmd {
 		for _, g := range groups {
 			seen[g.ChatID] = true
 		}
-		req, reqErr := newBrokerRequest("GET", "http://127.0.0.1:7890/telegram/groups", nil)
+		req, reqErr := newBrokerRequest(context.Background(), "GET", "http://127.0.0.1:7890/telegram/groups", nil)
 		if reqErr == nil {
 			client := &http.Client{Timeout: 2 * time.Second}
 			if resp, err := client.Do(req); err == nil {
@@ -237,7 +237,7 @@ func connectTelegramGroup(token string, group team.TelegramGroup) tea.Cmd {
 				"bot_token_env": "WUPHF_TELEGRAM_BOT_TOKEN",
 			},
 		})
-		req, reqErr := newBrokerRequest(http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
+		req, reqErr := newBrokerRequest(context.Background(), http.MethodPost, "http://127.0.0.1:7890/channels", bytes.NewReader(body))
 		if reqErr == nil {
 			client := &http.Client{Timeout: 3 * time.Second}
 			resp, err := client.Do(req)

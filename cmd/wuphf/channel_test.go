@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -47,7 +48,7 @@ func TestNewBrokerRequestUsesEnvTokenAtRequestTime(t *testing.T) {
 		t.Fatalf("set env: %v", err)
 	}
 
-	req, err := newBrokerRequest("GET", "http://127.0.0.1:7890/messages", nil)
+	req, err := newBrokerRequest(context.Background(), "GET", "http://127.0.0.1:7890/messages", nil)
 	if err != nil {
 		t.Fatalf("newBrokerRequest: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestNewBrokerRequestFallsBackToTokenFile(t *testing.T) {
 	}
 	brokerTokenPath = tokenFile.Name()
 
-	req, err := newBrokerRequest("GET", "http://127.0.0.1:7890/messages", nil)
+	req, err := newBrokerRequest(context.Background(), "GET", "http://127.0.0.1:7890/messages", nil)
 	if err != nil {
 		t.Fatalf("newBrokerRequest: %v", err)
 	}

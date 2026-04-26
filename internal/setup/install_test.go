@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,7 +21,7 @@ func TestInstallLatestCLI(t *testing.T) {
 	t.Setenv("WUPHF_CLI_INSTALL_BIN", "npm")
 	t.Setenv("WUPHF_CLI_PACKAGE", "@example/wuphf")
 
-	notice, err := InstallLatestCLI()
+	notice, err := InstallLatestCLI(context.Background())
 	if err != nil {
 		t.Fatalf("InstallLatestCLI returned error: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestInstallLatestCLIReturnsHelpfulFailure(t *testing.T) {
 	t.Setenv("WUPHF_CLI_INSTALL_BIN", "npm")
 	t.Setenv("WUPHF_CLI_PACKAGE", "@example/wuphf")
 
-	_, err := InstallLatestCLI()
+	_, err := InstallLatestCLI(context.Background())
 	if err == nil {
 		t.Fatal("expected install failure")
 	}

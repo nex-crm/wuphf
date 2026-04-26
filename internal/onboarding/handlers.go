@@ -1,6 +1,7 @@
 package onboarding
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -268,7 +269,7 @@ func onboardingPartialCompanyName(partial *PartialProgress) string {
 
 // validateProviderKey pings the provider API with a minimal request to verify
 // the key. Returns "valid", "invalid", "unreachable", or "format_error".
-func validateProviderKey(provider, key string) string {
+func validateProviderKey(ctx context.Context, provider, key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return "format_error"
@@ -278,12 +279,12 @@ func validateProviderKey(provider, key string) string {
 		if !strings.HasPrefix(key, "sk-ant-") || len(key) < 20 {
 			return "format_error"
 		}
-		return pingAnthropic(key)
+		return pingAnthropic(ctx, key)
 	case "openai":
 		if !strings.HasPrefix(key, "sk-") || len(key) < 20 {
 			return "format_error"
 		}
-		return pingOpenAI(key)
+		return pingOpenAI(ctx, key)
 	case "gemini":
 		if len(key) < 10 {
 			return "format_error"
@@ -295,10 +296,10 @@ func validateProviderKey(provider, key string) string {
 	}
 }
 
-func pingAnthropic(key string) string {
+func pingAnthropic(ctx context.Context, key string) string {
 	client := &http.Client{Timeout: 3 * time.Second}
 	body := strings.NewReader(`{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}`)
-	req, err := http.NewRequest(http.MethodPost, "https://api.anthropic.com/v1/messages", body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.anthropic.com/v1/messages", body)
 	if err != nil {
 		return "unreachable"
 	}
@@ -320,9 +321,9 @@ func pingAnthropic(key string) string {
 	}
 }
 
-func pingOpenAI(key string) string {
+func pingOpenAI(ctx context.Context, key string) string {
 	client := &http.Client{Timeout: 3 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.openai.com/v1/models", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.openai.com/v1/models", nil)
 	if err != nil {
 		return "unreachable"
 	}
@@ -394,7 +395,7 @@ func HandleValidateKey(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid json", http.StatusBadRequest)
 		return
 	}
-	status := validateProviderKey(body.Provider, body.Key)
+	status := validateProviderKey(r.Context(), body.Provider, body.Key)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": status})
 }

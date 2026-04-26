@@ -426,7 +426,14 @@ func (t *TelegramTransport) sendMessageWithMode(chatID, text, parseMode string) 
 		return err
 	}
 
-	resp, err := t.client.Post(url, "application/json", bytes.NewReader(data))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("telegram send: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := t.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram send: %w", err)
 	}
@@ -459,7 +466,14 @@ func SendTypingAction(token string, chatID int64) error {
 		return err
 	}
 
-	resp, err := http.Post(url, "application/json", bytes.NewReader(data))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("telegram typing: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram typing: %w", err)
 	}
@@ -494,7 +508,13 @@ type TelegramGroup struct {
 // VerifyBot checks the bot token by calling getMe and returns the bot's display name.
 func VerifyBot(token string) (string, error) {
 	url := fmt.Sprintf("%s/bot%s/getMe", telegramAPIBase, token)
-	resp, err := http.Get(url)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("telegram getMe: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("telegram getMe: %w", err)
 	}
@@ -533,7 +553,13 @@ func DiscoverGroups(token string) ([]TelegramGroup, error) {
 	// Use offset=-100 to peek at recent updates without consuming them.
 	// This way the transport's pollInbound doesn't lose messages.
 	url := fmt.Sprintf("%s/bot%s/getUpdates?timeout=0&offset=-100", telegramAPIBase, token)
-	resp, err := http.Get(url)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("telegram getUpdates: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("telegram getUpdates: %w", err)
 	}
@@ -590,7 +616,14 @@ func SendTelegramMessage(token string, chatID int64, text string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.Post(url, "application/json", bytes.NewReader(payload))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("telegram send: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("telegram send: %w", err)
 	}
@@ -614,7 +647,13 @@ func SendTelegramMessage(token string, chatID int64, text string) error {
 // VerifyChat checks if a chat ID is valid and returns its title.
 func VerifyChat(token string, chatID int64) (string, error) {
 	url := fmt.Sprintf("%s/bot%s/getChat?chat_id=%d", telegramAPIBase, token, chatID)
-	resp, err := http.Get(url)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", fmt.Errorf("telegram getChat: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("telegram getChat: %w", err)
 	}

@@ -1594,7 +1594,8 @@ func (b *Broker) StartOnPort(port int) error {
 	})
 
 	addr := fmt.Sprintf("127.0.0.1:%d", port)
-	ln, err := net.Listen("tcp", addr)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(context.Background(), "tcp", addr)
 	if err != nil {
 		return err
 	}
@@ -2416,7 +2417,7 @@ func (b *Broker) webUIProxyHandler(brokerURL, stripPrefix string) http.Handler {
 			target += "?" + r.URL.RawQuery
 		}
 
-		proxyReq, err := http.NewRequest(r.Method, target, r.Body)
+		proxyReq, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
 		if err != nil {
 			http.Error(w, "proxy error", http.StatusBadGateway)
 			return
@@ -4758,12 +4759,13 @@ func respawnAgentPane(slug string) {
 			paneIdx := i + 1 // pane 0 is channel view
 			target := fmt.Sprintf("wuphf-team:team.%d", paneIdx)
 			// Send Ctrl+C to interrupt, then exit to terminate
-			_ = exec.Command("tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
+			ctx := context.Background()
+			_ = exec.CommandContext(ctx, "tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
 			time.Sleep(500 * time.Millisecond)
-			_ = exec.Command("tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
+			_ = exec.CommandContext(ctx, "tmux", "-L", "wuphf", "send-keys", "-t", target, "C-c", "").Run()
 			time.Sleep(500 * time.Millisecond)
 			// Respawn the pane with a fresh claude session
-			_ = exec.Command("tmux", "-L", "wuphf", "respawn-pane", "-k", "-t", target).Run()
+			_ = exec.CommandContext(ctx, "tmux", "-L", "wuphf", "respawn-pane", "-k", "-t", target).Run()
 			return
 		}
 	}
@@ -8211,7 +8213,7 @@ func (b *Broker) capturePaneActivity(slugOverride string) map[string]string {
 	b.mu.Unlock()
 
 	for _, check := range checks {
-		paneOut, err := exec.Command("tmux", "-L", "wuphf", "capture-pane",
+		paneOut, err := exec.CommandContext(context.Background(), "tmux", "-L", "wuphf", "capture-pane",
 			"-p", "-J",
 			"-t", check.target).CombinedOutput()
 		if err != nil {
