@@ -88,54 +88,20 @@ jobs:
           go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
           govulncheck ./...
 
-  # Generates the list of Go packages for the go-test-matrix fan-out below.
-  # Separate job so the matrix can consume its output via
-  # strategy.matrix.package: ${{ fromJSON(needs.go-test-list.outputs.packages) }}.
-  # Also emits a parallel `race` flag per package: internal/teammcp opts OUT
-  # of -race until its own test-isolation cleanup lands. internal/team is
-  # in-race after the worktree-seam atomic.Pointer migration. Everything
-  # else gets -race.
-  go-test-list:
+  # Single test job. We previously fanned out one matrix leg per Go package
+  # (28 legs at peak) for nicer per-package red x's, but each leg paid
+  # ~12-15s of checkout + setup-go + download-artifact overhead for ~20-50s
+  # of actual test work — ~14 runner-minutes per CI run on overhead alone.
+  # `go test ./...` runs packages in parallel within one process up to
+  # GOMAXPROCS, so wall clock is bounded by the long-pole package
+  # (`internal/team`, ~2.5m with -race) regardless of fan-out. Collapsing
+  # gives ~80% compute reduction at no wall-clock cost. teammcp opts out
+  # of -race until its test-isolation cleanup lands; everything else gets
+  # the race detector. -timeout 15m is generous headroom over the ~3m
+  # observed locally (race instrumentation 2-3x's wall-clock).
+  go-test:
+    needs: web
     runs-on: ubuntu-latest
-    outputs:
-      packages: ${{ steps.list.outputs.packages }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - id: list
-        run: |
-          set -euo pipefail
-          # Emit a JSON array of {package, race} objects. Only packages with
-          # actual *_test.go files (TestGoFiles or XTestGoFiles) are emitted —
-          # spawning a matrix leg for a test-less package burns CI minutes
-          # for no signal. `jq -R -s` reads stdin as a single string; split
-          # on newlines, drop empties, then map each package to an object
-          # with the race flag (no -race for internal/teammcp; see comment
-          # above).
-          packages=$(go list -f '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}' ./... \
-            | jq -R -s -c '
-                split("\n")
-                | map(select(length > 0))
-                | map({
-                    package: .,
-                    race: (test("/internal/teammcp($|/)") | not)
-                  })
-              ')
-          echo "packages=${packages}" >> "$GITHUB_OUTPUT"
-
-  go-test-matrix:
-    needs: [web, go-test-list]
-    runs-on: ubuntu-latest
-    strategy:
-      # One flaky package shouldn't mask other real failures. Each matrix
-      # leg is independent, so let them all finish and surface their own
-      # red x's.
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.go-test-list.outputs.packages) }}
-    name: "go test ${{ matrix.package }}"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
@@ -145,16 +111,10 @@ jobs:
         with:
           name: web-dist
           path: web/dist
-      - name: Test
-        # `-timeout 5m` is a per-package margin. Race instrumentation 2-3x's
-        # wall-clock, so 5m is comfortable headroom for the slowest
-        # per-package legs (internal/team* hit ~1-2m locally without race).
-        run: |
-          if [ "${{ matrix.race }}" = "true" ]; then
-            go test -race -timeout 5m ${{ matrix.package }}
-          else
-            go test -timeout 5m ${{ matrix.package }}
-          fi
+      - name: Tests with race detector (everything except teammcp)
+        run: go test -race -timeout 15m $(go list ./... | grep -vE '/internal/teammcp($|/)')
+      - name: Tests without race (internal/teammcp)
+        run: go test -timeout 15m $(go list ./... | grep -E '/internal/teammcp($|/)')
 
   # Keep a standalone vet job so config drift (a new vet check landing in
   # a Go minor bump, or an unknown //go:build tag) surfaces with its own
