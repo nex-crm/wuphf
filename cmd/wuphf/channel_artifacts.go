@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -341,15 +342,23 @@ func recentWorkflowRunArtifacts(limit int) []workflowRunArtifact {
 	root := filepath.Join(filepath.Dir(config.ConfigPath()), "workflows")
 	entries := []workflowRunArtifact{}
 	_ = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d == nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".runs.jsonl") {
-			// Skip unreadable/non-matching entries; the workflows index
-			// is read-only and best-effort, missing one row is acceptable.
-			return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("walk %s: %w", path, err)
+		}
+		if d == nil || d.IsDir() || !strings.HasSuffix(d.Name(), ".runs.jsonl") {
+			return nil
 		}
 		info, statErr := d.Info()
 		if statErr != nil {
-			// Race: file vanished between WalkDir listing and stat. Skip.
-			return nil //nolint:nilerr // intentional: stat race, keep walking
+			// Race: file vanished between WalkDir listing and stat. Other
+			// stat errors propagate so we don't silently miss rows.
+			if errors.Is(statErr, fs.ErrNotExist) {
+				return nil
+			}
+			return fmt.Errorf("stat %s: %w", path, statErr)
 		}
 		artifact, ok := readWorkflowRunArtifact(path, info)
 		if ok {

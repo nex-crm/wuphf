@@ -35,7 +35,9 @@ package team
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -95,11 +97,13 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 
 	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			// Per-entry walk errors (permission denied on a single file,
-			// transient FS issue) shouldn't blow up the whole catalog.
-			// Skip the offending entry and keep walking — the catalog
-			// degrades gracefully by missing one row.
-			return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
+			// Missing or unreadable entries shouldn't blow up the whole
+			// catalog: skip and keep walking. Anything else (disk corruption,
+			// mount lost) bubbles up so the caller doesn't silently lose data.
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("walk %s: %w", path, err)
 		}
 		if d.IsDir() {
 			// team/inbox/ holds raw ingested source material (scanner dumps),
@@ -118,19 +122,22 @@ func (r *Repo) BuildCatalog(ctx context.Context) ([]CatalogEntry, error) {
 		}
 		rel, err := filepath.Rel(r.Root(), path)
 		if err != nil {
-			// filepath.Rel only fails when path isn't under r.Root(), which
-			// shouldn't happen during a WalkDir rooted at r.Root() — skip
-			// defensively rather than abort the catalog build.
-			return nil //nolint:nilerr // intentional: defensive skip, keep walking
+			// filepath.Rel only fails when path isn't under r.Root(); during
+			// a WalkDir rooted at r.Root() that's a programming error — bubble
+			// up rather than silently dropping an article from the catalog.
+			return fmt.Errorf("filepath.Rel(%q, %q): %w", r.Root(), path, err)
 		}
 		rel = filepath.ToSlash(rel)
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			// Best-effort read: a transient I/O failure on a single article
-			// shouldn't fail the catalog. The article will reappear on the
-			// next walk; in the meantime the row is omitted.
-			return nil //nolint:nilerr // intentional: skip unreadable file, keep walking
+			// Missing/unreadable files are skipped (race with deletes,
+			// per-file permission), genuine I/O failures bubble up so the
+			// caller doesn't silently lose articles to disk corruption.
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("read %s: %w", path, err)
 		}
 
 		entry := CatalogEntry{
@@ -271,9 +278,13 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 
 	walkErr := filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			// Skip unreadable entries rather than abort the backlink scan.
-			// Missing one source means at most one missing backlink row.
-			return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
+			// Missing/unreadable entries are skipped (race with deletes,
+			// per-file permission); genuine I/O failures bubble so we don't
+			// silently report empty backlinks on disk corruption.
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("walk %s: %w", path, err)
 		}
 		if d.IsDir() {
 			return nil
@@ -283,8 +294,7 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 		}
 		rel, err := filepath.Rel(r.Root(), path)
 		if err != nil {
-			// Defensive: filepath.Rel shouldn't fail under a rooted walk.
-			return nil //nolint:nilerr // intentional: defensive skip, keep walking
+			return fmt.Errorf("filepath.Rel(%q, %q): %w", r.Root(), path, err)
 		}
 		rel = filepath.ToSlash(rel)
 		if rel == target {
@@ -293,8 +303,10 @@ func (r *Repo) backlinksFor(ctx context.Context, target string) ([]Backlink, err
 
 		content, err := os.ReadFile(path)
 		if err != nil {
-			// Best-effort read: skip the article rather than abort.
-			return nil //nolint:nilerr // intentional: skip unreadable file, keep walking
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("read %s: %w", path, err)
 		}
 		targets := parseWikilinkTargets(content)
 		for _, t := range targets {

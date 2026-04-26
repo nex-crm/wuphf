@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -252,11 +253,14 @@ func (l *Lint) mutateFact(ctx context.Context, entitySlug, id string, mutate fun
 	for _, dir := range dirs {
 		if err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
-				// Skip unreadable dirs/files. Either fact-log directory may
-				// not exist on a fresh repo (per §3 they're optional) and a
-				// single permission error shouldn't abort the cross-dir
-				// search — the fact may still be in the other directory.
-				return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
+				// Either fact-log directory may not exist on a fresh repo
+				// (per §3 they're optional) — and per-file permission errors
+				// shouldn't abort the cross-dir search since the fact may be
+				// in the other directory. Genuine I/O failures bubble up.
+				if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+					return nil
+				}
+				return fmt.Errorf("walk %s: %w", path, err)
 			}
 			if d.IsDir() || !strings.HasSuffix(path, ".jsonl") {
 				return nil
@@ -739,18 +743,21 @@ func (l *Lint) allEntitySlugs(root string) ([]string, error) {
 
 	var slugs []string
 	err = filepath.WalkDir(teamDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			// Skip unreadable entries; lint best-effort enumerates what's
-			// readable rather than aborting on a single bad file.
-			return nil //nolint:nilerr // intentional: skip unreadable entries, keep walking
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				return nil
+			}
+			return fmt.Errorf("walk %s: %w", path, err)
+		}
+		if d.IsDir() {
+			return nil
 		}
 		if !strings.HasSuffix(path, ".md") {
 			return nil
 		}
 		rel, err := filepath.Rel(teamDir, path)
 		if err != nil {
-			// Defensive: filepath.Rel shouldn't fail under a rooted walk.
-			return nil //nolint:nilerr // intentional: defensive skip, keep walking
+			return fmt.Errorf("filepath.Rel(%q, %q): %w", teamDir, path, err)
 		}
 		rel = filepath.ToSlash(rel)
 		// Skip lint reports, catalog, and other non-entity files.

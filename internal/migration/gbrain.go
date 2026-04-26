@@ -23,6 +23,7 @@ package migration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -120,10 +121,17 @@ func (a *GBrainAdapter) Iter(ctx context.Context) (<-chan MigrationRecord, error
 	out := make(chan MigrationRecord, 16)
 	go func() {
 		defer close(out)
-		if err := a.iterViaList(ctx, out); err == nil {
+		err := a.iterViaList(ctx, out)
+		if err == nil {
 			return
 		}
-		// list_pages unavailable — fall back to a query scan. Best effort.
+		// Cancellation/deadline must stop the migration — falling back to
+		// the query scan would just hit the same cancelled ctx and burn
+		// more time. Any other error means list_pages is unavailable;
+		// best-effort fallback to a query scan.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		}
 		_ = a.iterViaQuery(ctx, out)
 	}()
 	return out, nil
@@ -132,12 +140,8 @@ func (a *GBrainAdapter) Iter(ctx context.Context) (<-chan MigrationRecord, error
 func (a *GBrainAdapter) iterViaList(ctx context.Context, out chan<- MigrationRecord) error {
 	offset := 0
 	for {
-		if ctx.Err() != nil {
-			// Caller cancelled mid-scan. We deliberately return nil
-			// (not ctx.Err()) so Iter() does NOT trigger the fallback
-			// query — a cancelled context should stop the migration,
-			// not retry it via a different transport.
-			return nil //nolint:nilerr // intentional: cancellation stops migration without fallback
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 		raw, err := a.caller.Call(ctx, "list_pages", map[string]any{
 			"limit":  a.pageSize,
@@ -154,9 +158,8 @@ func (a *GBrainAdapter) iterViaList(ctx context.Context, out chan<- MigrationRec
 			return nil
 		}
 		for _, p := range pages {
-			if ctx.Err() != nil {
-				// Same rationale as the outer ctx.Err() check.
-				return nil //nolint:nilerr // intentional: cancellation stops migration without fallback
+			if err := ctx.Err(); err != nil {
+				return err
 			}
 			rec, ok := a.hydratePage(ctx, p)
 			if !ok {
