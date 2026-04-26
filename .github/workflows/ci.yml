@@ -49,6 +49,13 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    # Single source of truth for govulncheck binary location. `go install`
+    # writes to $GOBIN if set (else $GOPATH/bin), so pinning GOBIN here
+    # keeps the cache path, install destination, and PATH lookup below
+    # locked to one literal — eliminates the silent-cache-miss class of
+    # bug if a future setup-go release shifts the default GOPATH.
+    env:
+      GOBIN: ${{ github.workspace }}/.gobin
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # ratchet:actions/checkout@v6
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
@@ -81,13 +88,13 @@ jobs:
           args: --timeout=5m
       - name: Cache govulncheck binary
         # The version below is pinned, so the compiled binary at
-        # ~/go/bin/govulncheck is reusable across every CI run that
-        # doesn't bump GOVULNCHECK_VERSION. Saves ~10-15s of `go install`
+        # $GOBIN/govulncheck is reusable across every CI run that doesn't
+        # bump the govulncheck version. Saves ~10-15s of `go install`
         # (download + compile) per run on warm cache.
         id: cache-govulncheck
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # ratchet:actions/cache@v5.0.5
         with:
-          path: ~/go/bin/govulncheck
+          path: ${{ env.GOBIN }}/govulncheck
           key: govulncheck-${{ runner.os }}-v1.1.4
       - name: Install govulncheck
         if: steps.cache-govulncheck.outputs.cache-hit != 'true'
@@ -98,7 +105,7 @@ jobs:
         # advisory to make noise. Pinned to an explicit version so a new
         # govulncheck release cannot flip pass/fail on the same commit.
         run: |
-          export PATH="$(go env GOPATH)/bin:$PATH"
+          export PATH="${{ env.GOBIN }}:$PATH"
           govulncheck ./...
 
   # Single test job. We previously fanned out one matrix leg per Go package
@@ -124,14 +131,22 @@ jobs:
         with:
           name: web-dist
           path: web/dist
+      # `set -euo pipefail` + the empty-package guard close a fail-open
+      # path: bash does NOT propagate failures inside `$(...)`, so a
+      # transient `go list` error or a regex tweak that drops every match
+      # would otherwise degrade the step to `go test -race -timeout 15m`
+      # against the cwd package only — green CI, every subpackage silently
+      # skipped. `pipefail` surfaces the inner failure; the guard catches
+      # an empty match list.
+      #
+      # On failure: the matrix used to give one red x per failing package
+      # in the PR checks list; collapsed, both invocations swallow per-
+      # package status into a single red x. `tee` to a log file + a
+      # `grep '^FAIL'` summary at the end of the step reclaims the per-
+      # package signal in the step's own log without bringing back the
+      # matrix overhead. Logs are uploaded as an artifact on failure for
+      # offline triage.
       - name: Tests with race detector (everything except teammcp)
-        # `set -euo pipefail` + the empty-package guard close a fail-open
-        # path: bash does NOT propagate failures inside `$(...)`, so a
-        # transient `go list` error or a regex tweak that drops every
-        # match would otherwise degrade the step to `go test -race
-        # -timeout 15m` against the cwd package only — green CI, every
-        # subpackage silently skipped. `pipefail` surfaces the inner
-        # failure; the guard catches an empty match list.
         run: |
           set -euo pipefail
           pkgs=$(go list ./... | grep -vE '/internal/teammcp($|/)')
@@ -139,7 +154,16 @@ jobs:
             echo "no packages matched — refusing to run an empty go test suite" >&2
             exit 1
           fi
-          go test -race -timeout 15m $pkgs
+          set +e
+          go test -race -timeout 15m $pkgs 2>&1 | tee go-test-race.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Failing packages (race suite)"
+            grep -E '^(FAIL|--- FAIL)' go-test-race.log || echo "(no FAIL lines parsed; see full log above)"
+            echo "::endgroup::"
+            exit "$status"
+          fi
       - name: Tests without race (internal/teammcp)
         run: |
           set -euo pipefail
@@ -148,7 +172,26 @@ jobs:
             echo "no packages matched — refusing to run an empty go test suite" >&2
             exit 1
           fi
-          go test -timeout 15m $pkgs
+          set +e
+          go test -timeout 15m $pkgs 2>&1 | tee go-test-teammcp.log
+          status=${PIPESTATUS[0]}
+          set -e
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Failing packages (teammcp suite)"
+            grep -E '^(FAIL|--- FAIL)' go-test-teammcp.log || echo "(no FAIL lines parsed; see full log above)"
+            echo "::endgroup::"
+            exit "$status"
+          fi
+      - name: Upload go test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # ratchet:actions/upload-artifact@v7
+        with:
+          name: go-test-logs
+          path: |
+            go-test-race.log
+            go-test-teammcp.log
+          retention-days: 7
+          if-no-files-found: ignore
 
   # Keep a standalone vet job so config drift (a new vet check landing in
   # a Go minor bump, or an unknown //go:build tag) surfaces with its own
