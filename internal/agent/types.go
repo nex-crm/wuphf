@@ -101,8 +101,9 @@ type StreamFn func(msgs []Message, tools []AgentTool) <-chan StreamChunk
 type EscalationReason string
 
 const (
-	EscalationStuck      EscalationReason = "stuck"       // no phase change for too many ticks
-	EscalationMaxRetries EscalationReason = "max_retries" // PhaseError seen too many times for one task
+	EscalationStuck         EscalationReason = "stuck"          // no phase change for too many ticks
+	EscalationMaxRetries    EscalationReason = "max_retries"    // PhaseError seen too many times for one task
+	EscalationCapabilityGap EscalationReason = "capability_gap" // agent identified missing capability needed to proceed
 )
 
 // Escalator is a callback invoked when an agent can't make forward progress.

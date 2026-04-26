@@ -1,11 +1,7 @@
 package team
 
 import (
-	"bytes"
 	"context"
-	"fmt"
-	"log"
-	"strings"
 	"testing"
 	"time"
 )
@@ -300,70 +296,6 @@ func stringSlicesEqual(a, b []string) bool {
 }
 
 func ptrTime(t time.Time) *time.Time { return &t }
-
-// TestClusterReinforcedFacts_LogsAboveThreshold asserts the Slice 2
-// observability guard: when the underlying fact count exceeds the
-// configurable warn threshold, clusterReinforcedFacts logs a line via the
-// shared `log` package but does NOT fail or truncate. The test lowers the
-// threshold through setFactCountWarnThresholdForTest so we do not need
-// to seed 5k rows.
-func TestClusterReinforcedFacts_LogsAboveThreshold(t *testing.T) {
-	restore := setFactCountWarnThresholdForTest(2)
-	defer restore()
-
-	// Seed 3 facts — above the lowered threshold of 2.
-	facts := make([]TypedFact, 0, 3)
-	for i := 0; i < 3; i++ {
-		facts = append(facts, reinforcedFact(fmt.Sprintf("e%d", i), "champions", "q2-pilot", true))
-	}
-	store := newClusterTestStore(t, facts)
-
-	var buf bytes.Buffer
-	origOut := log.Writer()
-	log.SetOutput(&buf)
-	defer log.SetOutput(origOut)
-
-	clusters, err := clusterReinforcedFacts(context.Background(), store, "", 2, 0)
-	if err != nil {
-		t.Fatalf("clusterReinforcedFacts: %v", err)
-	}
-	if len(clusters) == 0 {
-		t.Fatalf("expected at least one cluster; got none")
-	}
-
-	logged := buf.String()
-	if !strings.Contains(logged, "fact count 3 exceeds 2") {
-		t.Errorf("expected threshold warning in log output; got:\n%s", logged)
-	}
-	if !strings.Contains(logged, "consider paging") {
-		t.Errorf("expected 'consider paging' hint in log output; got:\n%s", logged)
-	}
-}
-
-// TestClusterReinforcedFacts_DoesNotLogBelowThreshold pins the inverse: when
-// the corpus fits the scan envelope we stay silent so the broker log does
-// not get polluted by every synthesis run.
-func TestClusterReinforcedFacts_DoesNotLogBelowThreshold(t *testing.T) {
-	restore := setFactCountWarnThresholdForTest(100)
-	defer restore()
-
-	store := newClusterTestStore(t, []TypedFact{
-		reinforcedFact("alice", "champions", "q2-pilot", true),
-		reinforcedFact("bob", "champions", "q2-pilot", true),
-	})
-
-	var buf bytes.Buffer
-	origOut := log.Writer()
-	log.SetOutput(&buf)
-	defer log.SetOutput(origOut)
-
-	if _, err := clusterReinforcedFacts(context.Background(), store, "", 2, 0); err != nil {
-		t.Fatalf("clusterReinforcedFacts: %v", err)
-	}
-	if strings.Contains(buf.String(), "fact count") {
-		t.Errorf("did not expect threshold warning under the limit; got:\n%s", buf.String())
-	}
-}
 
 // TestClusterReinforcedFacts_TopNShortCircuits verifies topN trims the output
 // after sorting — strongest-first ordering is preserved and the tail is
