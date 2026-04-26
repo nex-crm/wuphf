@@ -180,8 +180,9 @@ func TestHandleClientEventForwardsAssistantMessage(t *testing.T) {
 // would boomerang back into #general as though the bridged agent had spoken.
 //
 // We snapshot the broker state before emitting the event and assert the delta
-// is zero, not that openclaw-a never appears, because NewBroker() rehydrates
-// from persisted state that may contain messages from prior runs or tests.
+// is zero rather than asserting openclaw-a never appears at all — newTestBroker(t)
+// gets a per-test tempdir, but a future helper change that rehydrates seeded
+// state would still leave the delta-based assertion correct.
 func TestHandleClientEventSkipsUserRole(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	fake := newFakeOC()
