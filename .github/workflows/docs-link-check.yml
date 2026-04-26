@@ -1,0 +1,20 @@
+name: docs-link-check
+
+# Delegates to nex-crm/.github reusable. Catches dead links in Markdown
+# + MDX before they reach customers (especially relevant on this public
+# docs site). PR runs are scoped to doc paths; the weekly cron catches
+# external-link rot.
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - '**/*.mdx'
+      - 'docs/**'
+  schedule:
+    - cron: '0 9 * * 1'  # Monday 09:00 UTC
+  workflow_dispatch:
+
+jobs:
+  check:
+    uses: nex-crm/.github/.github/workflows/docs-link-check.yml@34310b131f22dd1c541ea1f2aa6cf1bd531a426b # v0.6.2
