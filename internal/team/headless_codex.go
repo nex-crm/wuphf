@@ -45,11 +45,14 @@ var (
 // turn runner. Tests substitute via setHeadlessCodexRunTurnForTest.
 func defaultHeadlessCodexRunTurn(l *Launcher, ctx context.Context, slug, notification string, channel ...string) error {
 	if l != nil {
-		switch l.memberEffectiveProviderKind(slug) {
-		case provider.KindCodex:
+		kind := l.memberEffectiveProviderKind(slug)
+		switch {
+		case kind == provider.KindCodex:
 			return l.runHeadlessCodexTurn(ctx, slug, notification, channel...)
-		case provider.KindOpencode:
+		case kind == provider.KindOpencode:
 			return l.runHeadlessOpencodeTurn(ctx, slug, notification, channel...)
+		case isOpenAICompatKind(kind):
+			return l.runHeadlessOpenAICompatTurn(ctx, slug, notification, channel...)
 		default:
 			return l.runHeadlessClaudeTurn(ctx, slug, notification, channel...)
 		}

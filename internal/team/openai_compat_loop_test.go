@@ -1,0 +1,368 @@
+package team
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nex-crm/wuphf/internal/agent"
+)
+
+// scriptedStreamFn is a programmable agent.StreamFn for tests. Each call to
+// the returned function pops the next script entry; the loop expects them
+// in order.
+type scriptedStreamFn struct {
+	turns []scriptedTurn
+	calls int
+}
+
+type scriptedTurn struct {
+	chunks []agent.StreamChunk
+	// expectMessages, when non-nil, runs the supplied predicate against the
+	// msgs the loop passed in. Lets each turn assert the running history.
+	expectMessages func(*testing.T, []agent.Message)
+	// recordedTools holds the tools slice the loop passed in for this turn.
+	// Populated for the test to inspect after run().
+	recordedTools []agent.AgentTool
+}
+
+func (s *scriptedStreamFn) fn(t *testing.T) agent.StreamFn {
+	return func(msgs []agent.Message, tools []agent.AgentTool) <-chan agent.StreamChunk {
+		idx := s.calls
+		s.calls++
+		if idx >= len(s.turns) {
+			t.Fatalf("scripted stream over-called: turn=%d, only %d scripted", idx+1, len(s.turns))
+		}
+		turn := &s.turns[idx]
+		if turn.expectMessages != nil {
+			turn.expectMessages(t, msgs)
+		}
+		turn.recordedTools = append([]agent.AgentTool(nil), tools...)
+		ch := make(chan agent.StreamChunk, len(turn.chunks)+1)
+		go func() {
+			defer close(ch)
+			for _, c := range turn.chunks {
+				ch <- c
+			}
+		}()
+		return ch
+	}
+}
+
+// TestOpenAICompatToolLoop_TextOnlyOneShot is the simplest possible
+// happy path: model emits a single text chunk and finishes. Verifies the
+// loop returns finalText after exactly one iteration with no tool churn.
+func TestOpenAICompatToolLoop_TextOnlyOneShot(t *testing.T) {
+	stream := &scriptedStreamFn{
+		turns: []scriptedTurn{
+			{chunks: []agent.StreamChunk{
+				{Type: "text", Content: "hello there."},
+			}},
+		},
+	}
+
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		maxIters:    8,
+		toolTimeout: time.Second,
+	}
+	final, iters, streamErr, err := loop.run(context.Background(), []agent.Message{
+		{Role: "user", Content: "say hi"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if streamErr != "" {
+		t.Fatalf("unexpected stream error: %s", streamErr)
+	}
+	if iters != 1 {
+		t.Errorf("iterations = %d, want 1", iters)
+	}
+	if final != "hello there." {
+		t.Errorf("finalText = %q, want %q", final, "hello there.")
+	}
+}
+
+// TestOpenAICompatToolLoop_FullToolRoundTrip is the core e2e test for the
+// MCP bridge: model fires a tool, the loop dispatches to AgentTool.Execute,
+// the synthetic user-message containing the result is appended, and the
+// next streamfn turn sees the tool output and finalizes with text.
+//
+// This is the kind of test that would have caught regressions in any of:
+//   - tool dispatch routing by name
+//   - parameter pass-through to Execute
+//   - tool-result formatting in the next-turn prompt
+//   - the "stop when no tools fired" termination condition
+func TestOpenAICompatToolLoop_FullToolRoundTrip(t *testing.T) {
+	stream := &scriptedStreamFn{
+		turns: []scriptedTurn{
+			{
+				chunks: []agent.StreamChunk{
+					{Type: "text", Content: "Looking it up..."},
+					{Type: "tool_use", ToolName: "lookup_weather", ToolParams: map[string]any{"city": "Lisbon"}, ToolInput: `{"city":"Lisbon"}`, ToolUseID: "c1"},
+				},
+				expectMessages: func(t *testing.T, msgs []agent.Message) {
+					if len(msgs) != 1 || msgs[0].Role != "user" {
+						t.Errorf("turn 1 expected single user msg, got %+v", msgs)
+					}
+				},
+			},
+			{
+				chunks: []agent.StreamChunk{
+					{Type: "text", Content: "It's 22°C and sunny in Lisbon."},
+				},
+				expectMessages: func(t *testing.T, msgs []agent.Message) {
+					if len(msgs) != 3 {
+						t.Fatalf("turn 2 expected 3 msgs (user, assistant, user-with-tool-result), got %d: %+v", len(msgs), msgs)
+					}
+					if msgs[1].Role != "assistant" {
+						t.Errorf("turn 2 msg[1].Role = %q, want assistant", msgs[1].Role)
+					}
+					if !strings.Contains(msgs[1].Content, "[tool_call lookup_weather") {
+						t.Errorf("turn 2 msg[1] missing tool_call marker: %q", msgs[1].Content)
+					}
+					if msgs[2].Role != "user" {
+						t.Errorf("turn 2 msg[2].Role = %q, want user (tool result)", msgs[2].Role)
+					}
+					if !strings.Contains(msgs[2].Content, "22°C") {
+						t.Errorf("turn 2 msg[2] missing tool output: %q", msgs[2].Content)
+					}
+				},
+			},
+		},
+	}
+
+	var capturedParams map[string]any
+	weatherTool := agent.AgentTool{
+		Name:        "lookup_weather",
+		Description: "Look up the current weather for a city.",
+		Schema:      map[string]any{"type": "object"},
+		Execute: func(params map[string]any, ctx context.Context, onUpdate func(string)) (string, error) {
+			capturedParams = params
+			return "22°C, sunny", nil
+		},
+	}
+
+	var (
+		toolUseHook    int
+		toolResultHook int
+	)
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		tools:       []agent.AgentTool{weatherTool},
+		toolByName:  map[string]agent.AgentTool{"lookup_weather": weatherTool},
+		maxIters:    4,
+		toolTimeout: 2 * time.Second,
+		onToolUse:   func(name, raw string) { toolUseHook++ },
+		onToolResult: func(name, result string, err error) {
+			if err != nil {
+				t.Errorf("tool reported error: %v", err)
+			}
+			toolResultHook++
+		},
+	}
+
+	final, iters, streamErr, err := loop.run(context.Background(), []agent.Message{
+		{Role: "user", Content: "What's the weather in Lisbon?"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if streamErr != "" {
+		t.Fatalf("unexpected stream error: %s", streamErr)
+	}
+	if iters != 2 {
+		t.Errorf("iterations = %d, want 2", iters)
+	}
+	if final != "It's 22°C and sunny in Lisbon." {
+		t.Errorf("finalText = %q", final)
+	}
+	if got, _ := capturedParams["city"].(string); got != "Lisbon" {
+		t.Errorf("Execute params[city] = %v, want Lisbon", capturedParams["city"])
+	}
+	if toolUseHook != 1 {
+		t.Errorf("onToolUse fired %d times, want 1", toolUseHook)
+	}
+	if toolResultHook != 1 {
+		t.Errorf("onToolResult fired %d times, want 1", toolResultHook)
+	}
+	// Tools must be visible to the model on every iteration, not just the
+	// first — otherwise the model can't follow up its own tool call.
+	if got := stream.turns[1].recordedTools; len(got) != 1 || got[0].Name != "lookup_weather" {
+		t.Errorf("turn 2 tools = %+v, want lookup_weather still visible", got)
+	}
+}
+
+// TestOpenAICompatToolLoop_UnknownToolDoesNotPanic verifies the loop
+// returns a graceful "Tool X not available" message into the next turn
+// rather than panicking when the model hallucinates a tool name. This is
+// the realistic case for smaller open models that try to call tools they
+// don't have.
+func TestOpenAICompatToolLoop_UnknownToolDoesNotPanic(t *testing.T) {
+	stream := &scriptedStreamFn{
+		turns: []scriptedTurn{
+			{chunks: []agent.StreamChunk{
+				{Type: "tool_use", ToolName: "made_up_tool", ToolParams: map[string]any{}, ToolInput: "{}"},
+			}},
+			{
+				chunks: []agent.StreamChunk{
+					{Type: "text", Content: "Sorry — I can't actually do that."},
+				},
+				expectMessages: func(t *testing.T, msgs []agent.Message) {
+					if got := msgs[len(msgs)-1].Content; !strings.Contains(got, "is not available") {
+						t.Errorf("unavailable tool message missing: %q", got)
+					}
+				},
+			},
+		},
+	}
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		toolByName:  map[string]agent.AgentTool{},
+		maxIters:    4,
+		toolTimeout: time.Second,
+	}
+	final, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "do it"}})
+	if err != nil || streamErr != "" {
+		t.Fatalf("unexpected: err=%v streamErr=%q", err, streamErr)
+	}
+	if !strings.Contains(final, "I can't actually do that") {
+		t.Errorf("finalText = %q", final)
+	}
+}
+
+// TestOpenAICompatToolLoop_ToolErrorPropagatesAsResult exercises the
+// failure path: a tool that returns an error must surface its message in
+// the next-turn prompt as a "Tool X failed: ..." block, not crash the
+// loop. The model can then choose to apologize or try a different tool.
+func TestOpenAICompatToolLoop_ToolErrorPropagatesAsResult(t *testing.T) {
+	stream := &scriptedStreamFn{
+		turns: []scriptedTurn{
+			{chunks: []agent.StreamChunk{
+				{Type: "tool_use", ToolName: "broken", ToolParams: map[string]any{}, ToolInput: "{}"},
+			}},
+			{
+				chunks: []agent.StreamChunk{
+					{Type: "text", Content: "It looks like that tool broke."},
+				},
+				expectMessages: func(t *testing.T, msgs []agent.Message) {
+					if got := msgs[len(msgs)-1].Content; !strings.Contains(got, "broken") || !strings.Contains(got, "kaboom") {
+						t.Errorf("error trailer missing: %q", got)
+					}
+				},
+			},
+		},
+	}
+	broken := agent.AgentTool{
+		Name: "broken",
+		Execute: func(_ map[string]any, _ context.Context, _ func(string)) (string, error) {
+			return "", errors.New("kaboom")
+		},
+	}
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		tools:       []agent.AgentTool{broken},
+		toolByName:  map[string]agent.AgentTool{"broken": broken},
+		maxIters:    3,
+		toolTimeout: time.Second,
+	}
+	final, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "go"}})
+	if err != nil || streamErr != "" {
+		t.Fatalf("unexpected: err=%v streamErr=%q", err, streamErr)
+	}
+	if !strings.Contains(final, "broke") {
+		t.Errorf("finalText = %q", final)
+	}
+}
+
+// TestOpenAICompatToolLoop_StreamErrorBreaksOut verifies a model-emitted
+// error chunk halts the loop and is returned as streamErr, not as an
+// invocation that keeps going.
+func TestOpenAICompatToolLoop_StreamErrorBreaksOut(t *testing.T) {
+	stream := &scriptedStreamFn{
+		turns: []scriptedTurn{
+			{chunks: []agent.StreamChunk{
+				{Type: "error", Content: "rate limited"},
+			}},
+		},
+	}
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		maxIters:    4,
+		toolTimeout: time.Second,
+	}
+	final, _, streamErr, err := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "x"}})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if streamErr != "rate limited" {
+		t.Errorf("streamErr = %q, want rate limited", streamErr)
+	}
+	if final != "" {
+		t.Errorf("finalText = %q on error path, want empty", final)
+	}
+}
+
+// TestOpenAICompatToolLoop_MaxIterationsCap protects against runaway
+// tool-only loops. The loop must cap and surface a clear error string
+// instead of looping forever.
+func TestOpenAICompatToolLoop_MaxIterationsCap(t *testing.T) {
+	infiniteToolTurn := scriptedTurn{chunks: []agent.StreamChunk{
+		{Type: "tool_use", ToolName: "echo", ToolParams: map[string]any{}, ToolInput: "{}"},
+	}}
+	stream := &scriptedStreamFn{turns: []scriptedTurn{
+		infiniteToolTurn, infiniteToolTurn, infiniteToolTurn, infiniteToolTurn,
+	}}
+
+	echo := agent.AgentTool{
+		Name: "echo",
+		Execute: func(_ map[string]any, _ context.Context, _ func(string)) (string, error) {
+			return "ok", nil
+		},
+	}
+	loop := openAICompatToolLoop{
+		streamFn:    stream.fn(t),
+		tools:       []agent.AgentTool{echo},
+		toolByName:  map[string]agent.AgentTool{"echo": echo},
+		maxIters:    4,
+		toolTimeout: time.Second,
+	}
+	_, iters, streamErr, _ := loop.run(context.Background(), []agent.Message{{Role: "user", Content: "loop"}})
+	if iters != 4 {
+		t.Errorf("iterations = %d, want 4 (the cap)", iters)
+	}
+	if !strings.Contains(streamErr, "exceeded") {
+		t.Errorf("streamErr = %q, expected exceeded-iterations message", streamErr)
+	}
+}
+
+// TestOpenAICompatToolLoop_ContextCancelStopsImmediately verifies a
+// cancelled context aborts cleanly even mid-stream.
+func TestOpenAICompatToolLoop_ContextCancelStopsImmediately(t *testing.T) {
+	// Stream chunks slowly so we can cancel mid-turn.
+	streamFn := func(_ []agent.Message, _ []agent.AgentTool) <-chan agent.StreamChunk {
+		ch := make(chan agent.StreamChunk)
+		go func() {
+			defer close(ch)
+			time.Sleep(50 * time.Millisecond)
+			select {
+			case ch <- agent.StreamChunk{Type: "text", Content: "should not arrive"}:
+			default:
+			}
+		}()
+		return ch
+	}
+	loop := openAICompatToolLoop{
+		streamFn:    streamFn,
+		maxIters:    1,
+		toolTimeout: time.Second,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel before run
+	_, _, _, err := loop.run(ctx, []agent.Message{{Role: "user", Content: "x"}})
+	if err == nil {
+		t.Fatal("expected context.Canceled error")
+	}
+}

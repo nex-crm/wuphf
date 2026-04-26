@@ -71,6 +71,20 @@ type Config struct {
 	OpenclawBridges    []OpenclawBridgeBinding `json:"openclaw_bridges,omitempty"`
 	OpenclawGatewayURL string                  `json:"openclaw_gateway_url,omitempty"`
 	OpenclawToken      string                  `json:"openclaw_token,omitempty"`
+
+	// ProviderEndpoints overrides the default base URL / model for OpenAI-
+	// compatible local runtimes (mlx-lm, ollama, exo). Keys are provider Kind
+	// strings; missing keys fall back to compile-time defaults declared in
+	// internal/provider/<kind>.go. Per-kind env vars
+	// (WUPHF_MLX_LM_BASE_URL, WUPHF_OLLAMA_MODEL, etc.) take precedence over
+	// this map.
+	ProviderEndpoints map[string]ProviderEndpoint `json:"provider_endpoints,omitempty"`
+}
+
+// ProviderEndpoint configures one OpenAI-compatible HTTP backend.
+type ProviderEndpoint struct {
+	BaseURL string `json:"base_url,omitempty"`
+	Model   string `json:"model,omitempty"`
 }
 
 const (
@@ -772,6 +786,40 @@ func ResolveOpenclawGatewayURL() string {
 		return v
 	}
 	return "ws://127.0.0.1:18789"
+}
+
+// ResolveProviderEndpoint resolves the base URL and model for an OpenAI-
+// compatible local provider Kind (mlx-lm, ollama, exo). Resolution order:
+//
+//  1. Per-kind env vars: WUPHF_<KIND>_BASE_URL and WUPHF_<KIND>_MODEL
+//     (kind uppercased with '-' → '_'; e.g. mlx-lm → WUPHF_MLX_LM_BASE_URL).
+//  2. Config.ProviderEndpoints[kind].
+//  3. The compile-time defaults supplied by the caller.
+//
+// Returned values are always non-empty when defaults are non-empty; this
+// helper never returns "" for a registered Kind.
+func ResolveProviderEndpoint(kind, defaultBaseURL, defaultModel string) (string, string) {
+	envKind := strings.ToUpper(strings.ReplaceAll(kind, "-", "_"))
+	baseURL := strings.TrimSpace(os.Getenv("WUPHF_" + envKind + "_BASE_URL"))
+	model := strings.TrimSpace(os.Getenv("WUPHF_" + envKind + "_MODEL"))
+	if baseURL == "" || model == "" {
+		cfg, _ := Load()
+		if ep, ok := cfg.ProviderEndpoints[kind]; ok {
+			if baseURL == "" {
+				baseURL = strings.TrimSpace(ep.BaseURL)
+			}
+			if model == "" {
+				model = strings.TrimSpace(ep.Model)
+			}
+		}
+	}
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+	if model == "" {
+		model = defaultModel
+	}
+	return baseURL, model
 }
 
 // ResolveOpenclawIdentityPath returns where the Ed25519 device identity is

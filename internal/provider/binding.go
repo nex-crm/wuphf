@@ -10,6 +10,13 @@ const (
 	KindCodex      = "codex"
 	KindOpencode   = "opencode"
 	KindOpenclaw   = "openclaw"
+	// Local OpenAI-compatible HTTP runtimes. All three expose the same
+	// /v1/chat/completions API; only their default base URL and model differ.
+	// Configure per-kind overrides via Config.ProviderEndpoints or
+	// WUPHF_<KIND>_BASE_URL / WUPHF_<KIND>_MODEL.
+	KindMLXLM  = "mlx-lm"
+	KindOllama = "ollama"
+	KindExo    = "exo"
 )
 
 // ProviderBinding is the per-agent runtime selection persisted on an office
@@ -37,11 +44,13 @@ type OpenclawProviderBinding struct {
 // The empty string is valid and means "use install-wide default."
 func ValidateKind(s string) error {
 	switch s {
-	case "", KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw:
+	case "",
+		KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw,
+		KindMLXLM, KindOllama, KindExo:
 		return nil
 	default:
-		return fmt.Errorf("unknown provider kind %q (valid: %s, %s, %s, %s, or empty)",
-			s, KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw)
+		return fmt.Errorf("unknown provider kind %q (valid: %s, %s, %s, %s, %s, %s, %s, or empty)",
+			s, KindClaudeCode, KindCodex, KindOpencode, KindOpenclaw, KindMLXLM, KindOllama, KindExo)
 	}
 }
 
