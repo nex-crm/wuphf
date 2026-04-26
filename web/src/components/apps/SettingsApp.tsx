@@ -29,7 +29,9 @@ import {
   type WorkspaceWipeResult,
 } from "../../api/client";
 import { useAppStore } from "../../stores/app";
+import { InlineCommand } from "../ui/InlineCommand";
 import { showNotice } from "../ui/Toast";
+import { WipeModal } from "../ui/WipeModal";
 
 type SectionId =
   | "general"
@@ -387,6 +389,24 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
   const [email, setEmail] = useState(cfg.email ?? "");
   const [devUrl, setDevUrl] = useState(cfg.dev_url ?? "");
+  const queryClient = useQueryClient();
+
+  const runShred = async () => {
+    try {
+      const result: WorkspaceWipeResult = await shredWorkspace();
+      if (!result.ok) {
+        showNotice(result.error || "Shred failed", "error");
+        return;
+      }
+      queryClient.clear();
+      showNotice(
+        "Workspace shredded. Relaunch wuphf to start onboarding.",
+        "success",
+      );
+    } catch (err) {
+      showNotice(err instanceof Error ? err.message : "Shred failed", "error");
+    }
+  };
 
   const onSave = async () => {
     const patch: ConfigUpdate = {
@@ -419,17 +439,25 @@ function GeneralSection({ cfg, save }: SectionProps) {
           </strong>
           New values save immediately, but agents already running keep their
           launch-time settings. Run{" "}
-          <code
-            style={{
-              fontFamily: "var(--font-mono)",
-              padding: "1px 6px",
-              background: "var(--warning-200)",
-              color: "var(--warning-500)",
-              borderRadius: 3,
+          <InlineCommand
+            command="wuphf shred"
+            onRun={runShred}
+            destructive={{
+              title: "Shred this workspace?",
+              severity: "critical",
+              confirmLabel: "Shred workspace",
+              intro: (
+                <>
+                  This permanently deletes your team, company identity, office
+                  task receipts, and saved workflows, plus local logs, sessions,
+                  provider state, calendar, and wiki memory. WUPHF will stop
+                  after the wipe; relaunch it to reopen onboarding. Task
+                  worktrees and config are kept.{" "}
+                  <strong>This cannot be undone.</strong>
+                </>
+              ),
             }}
-          >
-            wuphf shred
-          </code>{" "}
+          />{" "}
           then relaunch to apply.
         </div>
       </div>
@@ -1496,159 +1524,7 @@ const dangerStyles = {
         : "var(--yellow, #e5a00d)",
     fontFamily: "var(--font-sans)",
   }),
-  modalBackdrop: {
-    position: "fixed" as const,
-    inset: 0,
-    background: "rgba(0,0,0,0.6)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1000,
-  },
-  modalPanel: {
-    width: "min(520px, calc(100vw - 40px))",
-    background: "var(--bg-card)",
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-md)",
-    padding: 24,
-    boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-  } as const,
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: 700,
-    color: "var(--text)",
-    marginBottom: 10,
-  } as const,
-  modalBody: {
-    fontSize: 13,
-    color: "var(--text-secondary)",
-    lineHeight: 1.55,
-    marginBottom: 16,
-  } as const,
-  modalInputLabel: {
-    fontSize: 11,
-    fontWeight: 600,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-    color: "var(--text-tertiary)",
-    marginBottom: 6,
-    display: "block",
-  } as const,
-  modalInput: {
-    width: "100%",
-    background: "var(--bg-warm)",
-    border: "1px solid var(--border)",
-    color: "var(--text)",
-    borderRadius: "var(--radius-sm)",
-    height: 38,
-    fontSize: 14,
-    padding: "0 12px",
-    outline: "none",
-    fontFamily: "var(--font-mono)",
-  } as const,
-  modalRow: {
-    display: "flex",
-    gap: 8,
-    justifyContent: "flex-end",
-    marginTop: 18,
-  } as const,
-  modalCancel: {
-    padding: "9px 16px",
-    fontSize: 13,
-    fontWeight: 500,
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    cursor: "pointer" as const,
-    color: "var(--text)",
-    background: "transparent",
-    fontFamily: "var(--font-sans)",
-  } as const,
-  modalConfirm: (severity: "warn" | "critical", enabled: boolean) => ({
-    padding: "9px 16px",
-    fontSize: 13,
-    fontWeight: 600,
-    border: "none",
-    borderRadius: "var(--radius-sm)",
-    cursor: enabled ? "pointer" : ("not-allowed" as const),
-    color: "#fff",
-    background: enabled
-      ? severity === "critical"
-        ? "var(--red, #e5484d)"
-        : "var(--yellow, #e5a00d)"
-      : "var(--bg-warm)",
-    opacity: enabled ? 1 : 0.6,
-    fontFamily: "var(--font-sans)",
-  }),
 };
-
-const CONFIRM_PHRASE = "i can spell responsibility";
-
-interface WipeModalProps {
-  title: string;
-  severity: "warn" | "critical";
-  intro: ReactNode;
-  confirmLabel: string;
-  busy: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-// WipeModal gates a destructive action behind a type-the-exact-phrase confirm.
-// The placeholder and the body copy both surface the full phrase so there's no mystery
-// about what to type — we want the friction, not the guesswork.
-function WipeModal({
-  title,
-  severity,
-  intro,
-  confirmLabel,
-  busy,
-  onConfirm,
-  onCancel,
-}: WipeModalProps) {
-  const [value, setValue] = useState("");
-  const enabled = !busy && value.trim().toLowerCase() === CONFIRM_PHRASE;
-
-  return (
-    <div
-      style={dangerStyles.modalBackdrop}
-      onClick={busy ? undefined : onCancel}
-    >
-      <div style={dangerStyles.modalPanel} onClick={(e) => e.stopPropagation()}>
-        <div style={dangerStyles.modalTitle}>{title}</div>
-        <div style={dangerStyles.modalBody}>{intro}</div>
-        <label style={dangerStyles.modalInputLabel}>
-          Type <code>{CONFIRM_PHRASE}</code> to confirm
-        </label>
-        <input
-          type="text"
-          style={dangerStyles.modalInput}
-          placeholder={CONFIRM_PHRASE}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          disabled={busy}
-        />
-        <div style={dangerStyles.modalRow}>
-          <button
-            type="button"
-            style={dangerStyles.modalCancel}
-            onClick={onCancel}
-            disabled={busy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            style={dangerStyles.modalConfirm(severity, enabled)}
-            onClick={enabled ? onConfirm : undefined}
-            disabled={!enabled}
-          >
-            {busy ? "Working…" : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 type DangerAction = "reset" | "shred";
 
