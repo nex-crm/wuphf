@@ -68,6 +68,16 @@ func TestOperationBootstrapPackageRouteRejectsUnauth(t *testing.T) {
 	// change accidentally registers the bare handler without the
 	// requireAuth wrapper, every operation route silently becomes
 	// unauthenticated. This catches that immediately.
+	//
+	// Two cases per route:
+	//   - no Authorization header (the obvious miss)
+	//   - Bearer token that's not the broker's (catches a regression
+	//     where a future "looser" auth wrapper is swapped in — e.g.
+	//     one that accepts any non-empty token without comparing).
+	//
+	// Note: the broker is constructed once and shared across the
+	// for-loop. If a future refactor splits this into per-subtest
+	// brokers, move `defer b.Stop()` inside the subtest closure.
 	statePath := filepath.Join(t.TempDir(), "broker-state.json")
 	b := NewBrokerAt(statePath)
 	if err := b.StartOnPort(0); err != nil {
@@ -76,7 +86,7 @@ func TestOperationBootstrapPackageRouteRejectsUnauth(t *testing.T) {
 	defer b.Stop()
 
 	for _, path := range []string{"/operations/bootstrap-package", "/studio/bootstrap-package"} {
-		t.Run(path, func(t *testing.T) {
+		t.Run(path+"/no-token", func(t *testing.T) {
 			req, err := http.NewRequest(http.MethodGet, "http://"+b.Addr()+path, nil)
 			if err != nil {
 				t.Fatalf("NewRequest %s: %v", path, err)
@@ -89,6 +99,26 @@ func TestOperationBootstrapPackageRouteRejectsUnauth(t *testing.T) {
 			defer resp.Body.Close()
 			if resp.StatusCode != http.StatusUnauthorized {
 				t.Fatalf("GET %s without token: expected 401, got %d", path, resp.StatusCode)
+			}
+		})
+
+		t.Run(path+"/wrong-token", func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, "http://"+b.Addr()+path, nil)
+			if err != nil {
+				t.Fatalf("NewRequest %s: %v", path, err)
+			}
+			// A non-empty token that does not match the broker's. A
+			// regression that switches requireAuth to "any non-empty
+			// Bearer accepted" would pass the no-token case but fail
+			// here.
+			req.Header.Set("Authorization", "Bearer not-the-real-token")
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("GET %s: %v", path, err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("GET %s with wrong token: expected 401, got %d", path, resp.StatusCode)
 			}
 		})
 	}
