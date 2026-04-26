@@ -154,9 +154,11 @@ func TestNewBrokerAt_PathSnapshottedAtConstruction(t *testing.T) {
 
 	// Construct a second broker at a distinct path — simulates another
 	// test running alongside this one. Its statePath must not bleed into
-	// b's saves.
+	// b's saves. Held by `other` so a future constructor-time goroutine in
+	// NewBrokerAt would still have an explicit reference to stop on.
 	unboundPath := filepath.Join(t.TempDir(), "should-not-be-written.json")
-	_ = NewBrokerAt(unboundPath)
+	other := NewBrokerAt(unboundPath)
+	_ = other
 
 	b.mu.Lock()
 	b.messages = []channelMessage{{
