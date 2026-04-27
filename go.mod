@@ -17,7 +17,7 @@ require (
 	golang.org/x/text v0.36.0
 	google.golang.org/genai v1.54.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.49.1
+	modernc.org/sqlite v1.50.0
 )
 
 require (
