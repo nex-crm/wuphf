@@ -193,11 +193,9 @@ describe("messageMarkdown — @mentions render as chips", () => {
     expect(chip).not.toBeNull();
     expect(chip?.textContent).toBe("@nazz");
     expect(chip?.tagName.toLowerCase()).toBe("span");
-    // No <a> should exist for the mention.
-    const anchors = container.querySelectorAll("a");
-    for (const a of anchors) {
-      expect(a.getAttribute("href")).not.toContain("wuphf-mention:");
-    }
+    // The mention must render as a span chip; no <a> element of any kind
+    // should remain in the document for it.
+    expect(container.querySelector("a")).toBeNull();
   });
 
   it("supports multiple mentions in one message", () => {

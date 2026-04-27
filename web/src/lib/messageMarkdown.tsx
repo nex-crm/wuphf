@@ -14,9 +14,14 @@
  * inside the anchor renderer below.
  *
  * @mentions:
- *   Mentions are mapped to mdast link nodes with a synthetic `wuphf-mention:`
- *   URL scheme. The anchor renderer detects that scheme and emits a styled
+ *   Mentions are mapped to mdast link nodes with a fragment URL ("#") and a
+ *   `data-wuphf-mention="true"` hProperty as the discriminator. The anchor
+ *   renderer detects that data attribute and emits a styled
  *   <span class="mention"> chip — never an <a> with a clickable href.
+ *   (Note: an earlier draft used a `wuphf-mention:` URL scheme, but
+ *   ReactMarkdown's defaultUrlTransform stripped it as an unknown scheme,
+ *   so the chip never rendered. The data-attribute pattern mirrors how
+ *   wikiLinkRemarkPlugin tags wikilinks via `data-wikilink`.)
  */
 
 import type { ComponentProps, ReactElement, ReactNode } from "react";
@@ -59,8 +64,9 @@ interface MdParent {
 
 /**
  * Remark plugin that rewrites `@slug` substrings inside text nodes into
- * link nodes with a `wuphf-mention:slug` URL. The renderer below converts
- * those into mention chips. Following the wikilink plugin pattern.
+ * link nodes carrying a `data-wuphf-mention="true"` hProperty (the URL is
+ * a no-op `#` fragment). The renderer below converts those into mention
+ * chips. Following the wikiLinkRemarkPlugin pattern.
  */
 export function mentionRemarkPlugin() {
   return function plugin() {
@@ -175,7 +181,16 @@ function isSafeHref(href: string | undefined): boolean {
  */
 export const messageMarkdownComponents: Partial<Components> = {
   a: (props: AnchorProps): ReactElement => {
-    const { href, children, ...rest } = props;
+    // ReactMarkdown v10 augments component props with ExtraProps, which
+    // includes a `node` (hast Element). Pull it out before spreading so it
+    // never lands on the DOM <a> element (would trigger an "unrecognized
+    // prop on DOM element" warning in dev).
+    const {
+      href,
+      children,
+      node: _node,
+      ...rest
+    } = props as AnchorProps & { node?: unknown };
     const record = rest as Record<string, unknown>;
     if (record["data-wuphf-mention"] === "true") {
       // Mention chip — never a navigable link.
