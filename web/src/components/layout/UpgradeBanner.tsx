@@ -344,8 +344,8 @@ export function UpgradeBanner() {
         aria-controls pointing at a missing node when collapsed, which the
         ARIA APG disclosure pattern warns AT support is inconsistent for.
         Children stay gated on `expanded` so the changelog fetch effect
-        (line 122) keeps its fetch-on-expand semantics — nothing renders or
-        triggers state subscriptions while collapsed.
+        keeps its fetch-on-expand semantics — nothing renders or triggers
+        state subscriptions while collapsed.
       */}
       <div
         id={changelogId}
