@@ -26,9 +26,14 @@ function renderChat(content: string) {
 }
 
 describe("messageMarkdown — XSS hardening", () => {
+  // Each XSS test asserts BOTH that the element is rendered (length > 0)
+  // AND that its href/src is safe. Without the length check, a future
+  // refactor that drops the element entirely would let the test pass
+  // vacuously (for…of over an empty NodeList) without proving the property.
   it("neutralises [x](javascript:alert(1))", () => {
     const { container } = renderChat("[click](javascript:alert(1))");
     const anchors = container.querySelectorAll("a");
+    expect(anchors.length).toBeGreaterThan(0);
     for (const a of anchors) {
       const href = a.getAttribute("href") ?? "";
       expect(href.toLowerCase()).not.toMatch(/^javascript:/);
@@ -40,6 +45,7 @@ describe("messageMarkdown — XSS hardening", () => {
       "[click](data:text/html,<script>alert(1)</script>)",
     );
     const anchors = container.querySelectorAll("a");
+    expect(anchors.length).toBeGreaterThan(0);
     for (const a of anchors) {
       const href = a.getAttribute("href") ?? "";
       expect(href.toLowerCase()).not.toMatch(/^data:text\/html/);
@@ -49,6 +55,7 @@ describe("messageMarkdown — XSS hardening", () => {
   it("neutralises [x](vbscript:msgbox)", () => {
     const { container } = renderChat("[click](vbscript:msgbox)");
     const anchors = container.querySelectorAll("a");
+    expect(anchors.length).toBeGreaterThan(0);
     for (const a of anchors) {
       const href = a.getAttribute("href") ?? "";
       expect(href.toLowerCase()).not.toMatch(/^vbscript:/);
@@ -58,6 +65,7 @@ describe("messageMarkdown — XSS hardening", () => {
   it("neutralises whitespace-prefixed javascript: URIs", () => {
     const { container } = renderChat("[click](  javascript:alert(1))");
     const anchors = container.querySelectorAll("a");
+    expect(anchors.length).toBeGreaterThan(0);
     for (const a of anchors) {
       const href = a.getAttribute("href") ?? "";
       expect(href.toLowerCase()).not.toMatch(/javascript:/);
@@ -82,6 +90,7 @@ describe("messageMarkdown — XSS hardening", () => {
   it("neutralises ![x](javascript:alert(1)) image markdown", () => {
     const { container } = renderChat("![alt](javascript:alert(1))");
     const imgs = container.querySelectorAll("img");
+    expect(imgs.length).toBeGreaterThan(0);
     for (const img of imgs) {
       const src = img.getAttribute("src") ?? "";
       expect(src.toLowerCase()).not.toMatch(/^javascript:/);
@@ -93,17 +102,21 @@ describe("messageMarkdown — XSS hardening", () => {
       "![alt](data:text/html,<script>alert(1)</script>)",
     );
     const imgs = container.querySelectorAll("img");
+    expect(imgs.length).toBeGreaterThan(0);
     for (const img of imgs) {
       const src = img.getAttribute("src") ?? "";
       expect(src.toLowerCase()).not.toMatch(/^data:text\/html/);
     }
   });
 
-  it("neutralises GFM-style autolink <javascript:alert(1)>", () => {
-    // remark-gfm autolink literals can produce <a href="javascript:..."> from
-    // <scheme:...> syntax. The default urlTransform must strip it.
+  it("neutralises CommonMark autolink <javascript:alert(1)>", () => {
+    // CommonMark <scheme:...> autolinks can produce <a href="javascript:...">.
+    // The default react-markdown urlTransform must strip it. (No relation to
+    // remark-gfm — GFM autolink literals are bare http://... without angle
+    // brackets, a different syntax.)
     const { container } = renderChat("<javascript:alert(1)>");
     const anchors = container.querySelectorAll("a");
+    expect(anchors.length).toBeGreaterThan(0);
     for (const a of anchors) {
       const href = a.getAttribute("href") ?? "";
       expect(href.toLowerCase()).not.toMatch(/^javascript:/);
