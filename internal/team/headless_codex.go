@@ -406,16 +406,23 @@ func (l *Launcher) stopHeadlessWorkers() {
 		close(l.headlessStopCh)
 	}
 	cancel := l.headlessCancel
+	// Collect per-turn cancels so we can fire them outside the lock.
+	// Needed when l.headlessCtx is nil (bare &Launcher{} in tests): in that
+	// case turnCtx is derived from context.Background() and canceling
+	// l.headlessCancel is a no-op, so the only way to unblock an in-flight
+	// turn is to cancel its own context directly.
+	var turnCancels []context.CancelFunc
+	for _, active := range l.headlessActive {
+		if active != nil && active.Cancel != nil {
+			turnCancels = append(turnCancels, active.Cancel)
+		}
+	}
 	l.headlessMu.Unlock()
-	// Cancel any in-flight turn so the worker doesn't sit inside
-	// headlessCodexRunTurn for the full per-turn timeout (minutes) before
-	// noticing stopHeadlessCh closed at the outer-loop tick. Without this,
-	// production-shape paths with a real provider would hang Wait() until
-	// the turn ctx times out. Tests using the headlessCodexRunTurn override
-	// already return fast, so the bug only bites when the override is the
-	// real call path — but the cost of guarding here is one nil-check.
 	if cancel != nil {
 		cancel()
+	}
+	for _, c := range turnCancels {
+		c()
 	}
 	l.headlessWorkerWg.Wait()
 }
@@ -1038,6 +1045,19 @@ func (l *Launcher) timedOutTurnAlreadyRecovered(task *teamTask, slug string, sta
 func (l *Launcher) beginHeadlessCodexTurn(slug string) (headlessCodexTurn, context.Context, time.Time, time.Duration, bool) {
 	l.headlessMu.Lock()
 	defer l.headlessMu.Unlock()
+
+	// If stopHeadlessWorkers already fired, don't start a new turn. This closes
+	// the race where a worker goroutine passed the outer stop-channel check
+	// just before stopHeadlessWorkers closed headlessStopCh, causing the worker
+	// to block in headlessCodexRunTurn with no cancel registered in headlessActive.
+	if l.headlessStopCh != nil {
+		select {
+		case <-l.headlessStopCh:
+			delete(l.headlessWorkers, slug)
+			return headlessCodexTurn{}, nil, time.Time{}, 0, false
+		default:
+		}
+	}
 
 	queue := l.headlessQueues[slug]
 	if len(queue) == 0 {
