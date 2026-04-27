@@ -61,6 +61,19 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # ratchet:actions/setup-go@v6
         with:
           go-version-file: go.mod
+      - name: Check VERSION sentinel
+        # internal/buildinfo/VERSION is the embedded fallback when no release
+        # ldflag is set. It MUST stay literally "dev" so contributor / source
+        # builds resolve to a dev sentinel and IsDevVersion suppresses the
+        # upgrade banner. Issue #350: a hand-edited "0.0.7.1" passed as a
+        # real semver and produced a downgrade prompt against npm latest.
+        run: |
+          contents=$(tr -d '[:space:]' < internal/buildinfo/VERSION)
+          if [ "$contents" != "dev" ]; then
+            echo "internal/buildinfo/VERSION must be the literal 'dev', got: $contents" >&2
+            echo "Real release versions are injected via goreleaser's ldflag at build time." >&2
+            exit 1
+          fi
       - name: Check gofmt
         # Belt-and-braces net against the golangci-lint `gofmt` formatter (see
         # .golangci.yml). `-s` matches that linter's simplify=true default so

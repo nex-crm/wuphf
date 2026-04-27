@@ -32,11 +32,17 @@ export const VERSION_RE =
   /^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 // Buildinfo's "dev" sentinel — see internal/buildinfo/buildinfo.go. Keep
-// in sync with upgradecheck.IsDevVersion.
+// in sync with upgradecheck.IsDevVersion. Also rejects garbage strings and
+// any sub-0.1.0 version as a sentinel (#350: a stale VERSION file shipping
+// "0.0.7.1" passed through this guard and produced a false "upgrade
+// available v0.0.7.1 → v0.79.2" — actually a downgrade).
 export function isDevVersion(v: string | null | undefined): boolean {
   if (!v) return true;
   const t = v.trim();
-  return t === "" || t === "dev";
+  if (t === "" || t === "dev") return true;
+  if (!VERSION_RE.test(t)) return true;
+  if (compareVersions(t, "0.1.0") < 0) return true;
+  return false;
 }
 
 // Trim FIRST then strip leading `v` so " v0.79.10" parses correctly. Mirror

@@ -94,9 +94,27 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 
 // IsDevVersion reports whether v is a non-released ("dev") wuphf build. This
 // matches buildinfo.Current()'s fallback when no release ldflag was set.
+//
+// Defense-in-depth: also classify anything that doesn't match VersionParamRE
+// (garbage strings, partial sentinels) and any version below 0.1.0 as a dev
+// build. Issue #350: a stale `internal/buildinfo/VERSION` containing
+// "0.0.7.1" was passing through as a real "current" because it parses fine
+// as semver — and that compared `< 0.79.2` (npm latest) so the banner told
+// every contributor / source build to "upgrade" to an older release. The
+// VERSION file is now `dev`, but treat sub-0.1.0 numbers as a sentinel too
+// so a future stray edit can't reproduce the bug.
 func IsDevVersion(v string) bool {
 	v = strings.TrimSpace(v)
-	return v == "" || v == "dev"
+	if v == "" || v == "dev" {
+		return true
+	}
+	if !VersionParamRE.MatchString(v) {
+		return true
+	}
+	if compareVersions(v, "0.1.0") < 0 {
+		return true
+	}
+	return false
 }
 
 // currentVersion is a seam so tests can pin the running version without

@@ -48,11 +48,45 @@ func TestIsDevVersion(t *testing.T) {
 		"  dev  ":  true,
 		"0.79.10":  false,
 		"v0.79.10": false,
+		// Sub-0.1.0 versions are sentinel-classified — see #350. The stale
+		// VERSION file shipped "0.0.7.1" and the banner treated it as a
+		// real semver "current" against npm latest.
+		"0.0.7.1": true,
+		"0.0.0":   true,
+		"v0.0.1":  true,
+		"0.1.0":   false,
+		// Garbage / partial strings classify as dev rather than crashing
+		// the comparator downstream.
+		"not-a-version": true,
+		"v":             true,
+		"1":             true, // VersionParamRE requires ≥2 segments
 	}
 	for in, want := range cases {
 		if got := IsDevVersion(in); got != want {
 			t.Errorf("IsDevVersion(%q)=%v want %v", in, got, want)
 		}
+	}
+}
+
+// TestCheckShortCircuitsForStaleVersionFile pins the exact regression from
+// issue #350: the embedded VERSION file held "0.0.7.1" while npm latest was
+// "0.79.2", and the banner happily told every contributor build to
+// "upgrade" — actually a downgrade. With IsDevVersion's sub-0.1.0 guard,
+// this path now classifies as a dev build and short-circuits.
+func TestCheckShortCircuitsForStaleVersionFile(t *testing.T) {
+	pinCurrentVersion(t, "0.0.7.1")
+	res, err := Check(context.Background(), mockNPMRegistry(t, "0.79.2"))
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if !res.IsDevBuild {
+		t.Errorf("expected IsDevBuild=true for stale VERSION %q", res.Current)
+	}
+	if res.UpgradeAvailable {
+		t.Errorf("stale VERSION must not surface as UpgradeAvailable=true")
+	}
+	if res.CompareURL != "" {
+		t.Errorf("CompareURL should be empty for sentinel current, got %q", res.CompareURL)
 	}
 }
 
@@ -156,6 +190,11 @@ func TestCheckHitsRegistry(t *testing.T) {
 		return http.DefaultTransport.RoundTrip(req)
 	})}
 
+	// Pin a non-dev current so this test exercises the registry path
+	// regardless of what buildinfo.Current() resolves to. With the embedded
+	// VERSION file now `dev` (#350), an unpinned test would short-circuit
+	// at IsDevBuild and never assert UpgradeAvailable.
+	pinCurrentVersion(t, "1.2.3")
 	res, err := Check(context.Background(), client)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
