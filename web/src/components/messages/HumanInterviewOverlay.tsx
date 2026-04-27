@@ -15,7 +15,6 @@ export function HumanInterviewOverlay() {
   const queryClient = useQueryClient();
   const [submitting, setSubmitting] = useState(false);
   const seenNonBlockingIds = useRef<Set<string>>(new Set());
-  const blockingPendingIdRef = useRef<string | null>(null);
 
   // Toast non-blocking requests once each
   useEffect(() => {
@@ -26,10 +25,6 @@ export function HumanInterviewOverlay() {
       showNotice(`@${req.from || "someone"} asked: ${req.question}`, "info");
     }
   }, [pending]);
-
-  useEffect(() => {
-    blockingPendingIdRef.current = blockingPending?.id ?? null;
-  }, [blockingPending?.id]);
 
   if (!blockingPending) return null;
 
@@ -61,12 +56,7 @@ export function HumanInterviewOverlay() {
           await cancelRequest(requestId);
           await queryClient.invalidateQueries({ queryKey: ["requests"] });
           await queryClient.invalidateQueries({ queryKey: ["requests-badge"] });
-          if (
-            blockingPendingIdRef.current === requestId ||
-            blockingPendingIdRef.current === null
-          ) {
-            showNotice("Request canceled.", "info");
-          }
+          showNotice("Request canceled.", "info");
         } catch (err: unknown) {
           const message =
             err instanceof Error ? err.message : "Failed to cancel request";

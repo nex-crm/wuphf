@@ -4799,7 +4799,7 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 	}
 
 	messageBody, _ := json.Marshal(map[string]any{
-		"from":     "",
+		"from":     "you",
 		"channel":  "general",
 		"content":  "Let's keep moving in this thread.",
 		"reply_to": "msg-thread-1",
@@ -4841,6 +4841,24 @@ func TestBrokerHumanInterviewDoesNotBlockAndCancelsOnHumanMessage(t *testing.T) 
 	}
 	if byID[createdFollowUp.Request.ID].Status != "pending" {
 		t.Fatalf("expected queued follow-up interview to remain pending, got %+v", byID[createdFollowUp.Request.ID])
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, base+"/interview", nil)
+	req.Header.Set("Authorization", "Bearer "+b.Token())
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("get active interview failed: %v", err)
+	}
+	var activeInterview struct {
+		Pending *humanInterview `json:"pending"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&activeInterview); err != nil {
+		resp.Body.Close()
+		t.Fatalf("decode active interview: %v", err)
+	}
+	resp.Body.Close()
+	if activeInterview.Pending == nil || activeInterview.Pending.ID != createdFollowUp.Request.ID {
+		t.Fatalf("expected active interview to switch to follow-up %q, got %+v", createdFollowUp.Request.ID, activeInterview.Pending)
 	}
 
 	req, _ = http.NewRequest(http.MethodGet, base+"/interview/answer?id="+created.Request.ID, nil)

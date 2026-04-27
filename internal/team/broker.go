@@ -4069,8 +4069,25 @@ func humanSenderMayCancelInterviews(sender string) bool {
 	}
 }
 
-func (b *Broker) cancelActiveHumanInterviewsLocked(actor, reason, channel, replyTo string) int {
+func (b *Broker) cancelRequestLocked(req *humanInterview, actor, reason string) {
+	if req == nil {
+		return
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
+	req.Status = "canceled"
+	req.UpdatedAt = now
+	req.ReminderAt = ""
+	req.FollowUpAt = ""
+	req.RecheckAt = ""
+	req.DueAt = ""
+	b.completeSchedulerJobsLocked("request", req.ID, req.Channel)
+	b.resolveWatchdogAlertsLocked("request", req.ID, req.Channel)
+	summary := truncateSummary(strings.TrimSpace(reason+" "+req.Title+" "+req.Question), 140)
+	b.appendActionLocked("request_canceled", "office", req.Channel, actor, summary, req.ID)
+	b.pendingInterview = firstBlockingRequest(b.requests)
+}
+
+func (b *Broker) cancelActiveHumanInterviewsLocked(actor, reason, channel, replyTo string) int {
 	count := 0
 	targetChannel := normalizeChannelSlug(channel)
 	targetReplyTo := strings.TrimSpace(replyTo)
@@ -4085,21 +4102,9 @@ func (b *Broker) cancelActiveHumanInterviewsLocked(actor, reason, channel, reply
 		if targetReplyTo != "" && strings.TrimSpace(b.requests[i].ReplyTo) != targetReplyTo {
 			continue
 		}
-		b.requests[i].Status = "canceled"
-		b.requests[i].UpdatedAt = now
-		b.requests[i].ReminderAt = ""
-		b.requests[i].FollowUpAt = ""
-		b.requests[i].RecheckAt = ""
-		b.requests[i].DueAt = ""
-		b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
-		b.resolveWatchdogAlertsLocked("request", b.requests[i].ID, b.requests[i].Channel)
-		summary := truncateSummary(strings.TrimSpace(reason+" "+b.requests[i].Title+" "+b.requests[i].Question), 140)
-		b.appendActionLocked("request_canceled", "office", b.requests[i].Channel, actor, summary, b.requests[i].ID)
+		b.cancelRequestLocked(&b.requests[i], actor, reason)
 		count++
 		break
-	}
-	if count > 0 {
-		b.pendingInterview = firstBlockingRequest(b.requests)
 	}
 	return count
 }
@@ -10444,15 +10449,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			if b.requests[i].ID != id {
 				continue
 			}
-			b.requests[i].Status = "canceled"
-			b.requests[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
-			b.requests[i].ReminderAt = ""
-			b.requests[i].FollowUpAt = ""
-			b.requests[i].RecheckAt = ""
-			b.requests[i].DueAt = ""
-			b.completeSchedulerJobsLocked("request", b.requests[i].ID, b.requests[i].Channel)
-			b.pendingInterview = firstBlockingRequest(b.requests)
-			b.appendActionLocked("request_canceled", "office", b.requests[i].Channel, b.requests[i].From, truncateSummary(b.requests[i].Title+" "+b.requests[i].Question, 140), b.requests[i].ID)
+			b.cancelRequestLocked(&b.requests[i], b.requests[i].From, "")
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return

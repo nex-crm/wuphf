@@ -2327,8 +2327,6 @@ func (m channelModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.requests = msg.requests
 		m.pending = msg.pending
-		if m.pending == nil {
-		}
 		if m.pending != nil && m.pending.ID != prevID {
 			m.selectedOption = m.recommendedOptionIndex()
 			m.input = nil
@@ -3825,10 +3823,14 @@ func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.Picke
 }
 
 func (m channelModel) buildRequestActionPickerOptions(req channelInterview) []tui.PickerOption {
+	dismissDescription := "Cancel this request"
+	if req.Blocking {
+		dismissDescription = "Cancel this request and unblock the team"
+	}
 	options := []tui.PickerOption{
 		{Label: "Focus request", Value: "focus:" + req.ID, Description: "Open this request in the app"},
 		{Label: "Answer request", Value: "answer:" + req.ID, Description: "Bring it into the composer"},
-		{Label: "Dismiss request", Value: "dismiss:" + req.ID, Description: "Cancel this request and unblock the team"},
+		{Label: "Dismiss request", Value: "dismiss:" + req.ID, Description: dismissDescription},
 	}
 	if req.ReplyTo != "" {
 		options = append(options, tui.PickerOption{Label: "Open thread", Value: "open:" + req.ID, Description: "Jump to the related thread"})
