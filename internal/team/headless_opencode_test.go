@@ -4,9 +4,31 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 )
+
+func TestBuildHeadlessOpencodeArgsRequestsJSONFormat(t *testing.T) {
+	args := buildHeadlessOpencodeArgs("anthropic/claude-sonnet-4", "do the thing")
+	formatIdx := slices.Index(args, "--format")
+	if formatIdx == -1 || formatIdx+1 >= len(args) || args[formatIdx+1] != "json" {
+		t.Fatalf("expected `--format json` in args, got %v", args)
+	}
+	if args[len(args)-1] != "do the thing" {
+		t.Fatalf("expected prompt as last positional arg, got %v", args)
+	}
+}
+
+func TestBuildHeadlessOpencodeArgsOmitsModelWhenUnset(t *testing.T) {
+	args := buildHeadlessOpencodeArgs("", "ack")
+	if slices.Contains(args, "--model") {
+		t.Fatalf("expected no --model flag when model is empty, got %v", args)
+	}
+	if !slices.Contains(args, "--format") {
+		t.Fatalf("expected --format json even without a model, got %v", args)
+	}
+}
 
 // TestWriteHeadlessOpencodeMCPConfigConcurrent verifies that concurrent calls
 // to writeHeadlessOpencodeMCPConfig (as happen when CEO + planner + reviewer
