@@ -72,9 +72,41 @@ describe("messageMarkdown — XSS hardening", () => {
 
   it("does not render raw HTML event handlers like <img onerror>", () => {
     const { container } = renderChat("<img src=x onerror=alert(1)>");
+    // skipHtml on react-markdown v10 drops raw HTML entirely (rather than
+    // escaping it to text). The security property is that no live img
+    // element exists in the DOM, so the onerror handler can't fire.
+    expect(container.querySelectorAll("img").length).toBe(0);
+    expect(container.querySelectorAll("script").length).toBe(0);
+  });
+
+  it("neutralises ![x](javascript:alert(1)) image markdown", () => {
+    const { container } = renderChat("![alt](javascript:alert(1))");
     const imgs = container.querySelectorAll("img");
     for (const img of imgs) {
-      expect(img.getAttribute("onerror")).toBeNull();
+      const src = img.getAttribute("src") ?? "";
+      expect(src.toLowerCase()).not.toMatch(/^javascript:/);
+    }
+  });
+
+  it("neutralises ![x](data:text/html,...) image markdown", () => {
+    const { container } = renderChat(
+      "![alt](data:text/html,<script>alert(1)</script>)",
+    );
+    const imgs = container.querySelectorAll("img");
+    for (const img of imgs) {
+      const src = img.getAttribute("src") ?? "";
+      expect(src.toLowerCase()).not.toMatch(/^data:text\/html/);
+    }
+  });
+
+  it("neutralises GFM-style autolink <javascript:alert(1)>", () => {
+    // remark-gfm autolink literals can produce <a href="javascript:..."> from
+    // <scheme:...> syntax. The default urlTransform must strip it.
+    const { container } = renderChat("<javascript:alert(1)>");
+    const anchors = container.querySelectorAll("a");
+    for (const a of anchors) {
+      const href = a.getAttribute("href") ?? "";
+      expect(href.toLowerCase()).not.toMatch(/^javascript:/);
     }
   });
 });
