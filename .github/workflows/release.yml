@@ -30,16 +30,28 @@ jobs:
     # full stop. The previous `npm-publish` env gate paused every run
     # waiting on a human approval and the queue stalled for ~13 tags
     # (#350) before anyone noticed the banner was advertising stale
-    # versions. The defensive value of the gate (preventing an accidental
-    # npm publish from a malicious tag push) is already covered by:
-    #   - branch-protected `main`, so tags on main are reviewed in PRs
-    #   - the smoke-test-npx job below failing the run if the published
-    #     binary self-reports the wrong version
-    #   - .github/workflows/release-drift.yml screaming if any of the
-    #     four distribution surfaces ever drift apart
-    # If we ever need a humans-in-the-loop step again, prefer a tag-name
-    # convention (e.g. `vX.Y.Z-rc.N` skips publish-to-latest) over a
-    # silent env gate that nobody monitors.
+    # versions.
+    #
+    # The defensive value the gate was supposed to provide (catch an
+    # unintended npm publish) is covered by these layered controls,
+    # accurate to today's setup:
+    #
+    #   1. Branch-protected `main` (1 review, dismiss-stale, conversation
+    #      resolution). All commits land via reviewed PR. `auto-release.yml`
+    #      then creates `v*` tags from those reviewed commits — so the
+    #      invariant is "every tag points at a reviewed commit", NOT
+    #      "every tag itself was reviewed".
+    #   2. smoke-test-npx (below) runs AFTER npm publish and fails the
+    #      Release run if the just-published binary self-reports a
+    #      different version from the tag. Detective, not preventive —
+    #      catches a corrupt artifact, not a malicious tag.
+    #   3. release-drift.yml runs daily + after every Release completion,
+    #      screaming if git tag, GitHub Release, npm latest, or the
+    #      npx-installed binary's self-report ever diverge.
+    #
+    # If we ever need a preventive humans-in-the-loop step again, prefer
+    # a tag-name convention (e.g. `vX.Y.Z-rc.N` skips `--tag latest`) or
+    # a tag ruleset over a silent env gate that nobody monitors.
     permissions:
       contents: write
     outputs:
