@@ -180,11 +180,30 @@ export function UpgradeBanner() {
     setExpanded((prev) => !prev);
   }, []);
 
+  // Track the "Copied!" reset timer so an unmount within 1.5s of a copy
+  // doesn't fire setCopied on a dead component (React swallows it but
+  // the timer still owns a closure on the unmounted instance).
+  const copyTimerRef = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    },
+    [],
+  );
+
   const copyUpgradeCommand = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(UPGRADE_COMMAND);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopied(false);
+      }, 1500);
     } catch {
       // Clipboard API unavailable; ignore.
     }
@@ -195,10 +214,16 @@ export function UpgradeBanner() {
     setDismissed(true);
   }, [latest]);
 
-  if (!(enabled && upgradeNeeded) || dismissed) return null;
-  if (!(current && latest)) return null;
+  // Memoise the grouped commits so a render that doesn't change the
+  // commit list (e.g. expand/collapse toggling) doesn't re-bucket. The
+  // null-guard `if (!(current && latest)) return null;` previously sat
+  // here as well — removed because upgradeNeeded already requires both.
+  const grouped = useMemo(
+    () => groupCommits(changelog.commits),
+    [changelog.commits],
+  );
 
-  const grouped = groupCommits(changelog.commits);
+  if (!(enabled && upgradeNeeded) || dismissed) return null;
 
   return (
     <div className="upgrade-banner" role="status">

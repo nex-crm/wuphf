@@ -170,6 +170,15 @@ type githubCompareResponse struct {
 // FetchChangelog calls the GitHub compare API and parses the commit list into
 // conventional-commit entries.
 func FetchChangelog(ctx context.Context, client *http.Client, from, to string) ([]CommitEntry, error) {
+	// Defense-in-depth: validate from/to here too, not just at the
+	// broker handler. Today both call sites are safe (broker validates
+	// via upgradeVersionParam, CLI feeds buildinfo + npm registry
+	// values), but a future caller reaching this package directly
+	// must NOT be able to ship `..` / `/` / `@host` segments to the
+	// upstream compare URL.
+	if !VersionParamRE.MatchString(from) || !VersionParamRE.MatchString(to) {
+		return nil, fmt.Errorf("upgradecheck: invalid version params from=%q to=%q", from, to)
+	}
 	if client == nil {
 		// See note in Check: same generous outer cap as a safety net
 		// for callers that forget to set a context deadline.
@@ -209,6 +218,13 @@ func FetchChangelog(ctx context.Context, client *http.Client, from, to string) (
 	}
 	return out, nil
 }
+
+// VersionParamRE accepts an optional `v`, 2-4 dotted numeric segments, an
+// optional pre-release suffix after `-`, and an optional `+build.5` build
+// metadata. MIRRORED in internal/team/broker.go (upgradeVersionParam) and
+// web/src/components/layout/upgradeBanner.utils.ts (VERSION_RE) — keep all
+// three in sync so a future tightening doesn't drift between them.
+var VersionParamRE = regexp.MustCompile(`^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
 
 var (
 	// Capture groups: 1=type, 2=(scope), 3=! (breaking), 4=description.
