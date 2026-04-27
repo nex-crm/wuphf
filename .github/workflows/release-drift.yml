@@ -112,7 +112,7 @@ jobs:
           # Order matters for the error message: the surface that's
           # FURTHEST behind names the stuck step. git ahead of GitHub →
           # goreleaser/release.yml didn't run for the latest tag. GitHub
-          # ahead of npm → npm-publish env gate or NPM_TOKEN issue.
+          # ahead of npm → npm publish step failed or NPM_TOKEN expired.
           fail=0
           if [ "$git_version" != "$gh_version" ]; then
             echo "::error::git tag ($git_tag) is ahead of GitHub Release ($gh_tag)"
@@ -122,8 +122,9 @@ jobs:
           fi
           if [ "$gh_version" != "$npm_version" ]; then
             echo "::error::GitHub Release ($gh_tag) is ahead of npm latest (v$npm_version)"
-            echo "::error::most likely: the npm-publish environment gate is awaiting approval"
-            echo "::error::check: gh run list --workflow=release.yml --limit=5 (look for status=waiting)"
+            echo "::error::npm publish step likely failed; common causes: expired NPM_TOKEN,"
+            echo "::error::npm registry outage, or version-already-published"
+            echo "::error::check: gh run list --workflow=release.yml --limit=5 (look for status=failure)"
             fail=1
           fi
           if [ "$fail" -ne 0 ]; then
