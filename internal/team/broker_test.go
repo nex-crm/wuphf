@@ -1166,7 +1166,14 @@ func TestBrokerAuthRejectsUnauthenticated(t *testing.T) {
 func TestBrokerRateLimitsRequestsPerIP(t *testing.T) {
 	b := newTestBroker(t)
 	b.rateLimitRequests = 100
-	b.rateLimitWindow = 1100 * time.Millisecond
+	b.rateLimitWindow = time.Second
+
+	// Synthetic clock: starts at a fixed point; advance() jumps it past the window
+	// so the test never sleeps for real.
+	fakeClock := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	b.nowFn = func() time.Time { return fakeClock }
+	advance := func(d time.Duration) { fakeClock = fakeClock.Add(d) }
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/messages", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -1205,7 +1212,8 @@ func TestBrokerRateLimitsRequestsPerIP(t *testing.T) {
 		t.Fatalf("expected sane Retry-After seconds, got %q", retryAfter)
 	}
 
-	time.Sleep(b.rateLimitWindow + 50*time.Millisecond)
+	// Advance the synthetic clock past the window — no real sleep needed.
+	advance(b.rateLimitWindow + time.Millisecond)
 
 	resp = doRequest("")
 	resp.Body.Close()
