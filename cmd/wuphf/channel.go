@@ -3824,7 +3824,7 @@ func (m channelModel) buildTaskActionPickerOptions(task channelTask) []tui.Picke
 
 func (m channelModel) buildRequestActionPickerOptions(req channelInterview) []tui.PickerOption {
 	dismissDescription := "Cancel this request"
-	if req.Blocking {
+	if req.Blocking || req.Required {
 		dismissDescription = "Cancel this request and unblock the team"
 	}
 	options := []tui.PickerOption{

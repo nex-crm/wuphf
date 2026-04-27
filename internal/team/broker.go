@@ -4070,7 +4070,7 @@ func humanSenderMayCancelInterviews(sender string) bool {
 }
 
 func (b *Broker) cancelRequestLocked(req *humanInterview, actor, reason string) {
-	if req == nil {
+	if req == nil || !requestIsActive(*req) {
 		return
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
