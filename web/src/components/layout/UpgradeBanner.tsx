@@ -62,21 +62,21 @@ export function UpgradeBanner() {
     error: null,
     commits: [],
   });
-  // Latched at fetch-start so the effect's dep list doesn't include the
-  // changelog state (which would re-fire the effect on every setChangelog
-  // and abort the in-flight request mid-loop).
+  // Per-component latch so a successful (or non-abort-failed) fetch is
+  // not retried when the user toggles expanded off and on again. Set in
+  // the resolution callbacks (NOT at fetch-start) so a collapse-while-
+  // loading leaves the ref unset and the next expand can retry.
   const changelogFetchedRef = useRef(false);
 
   useEffect(() => {
     if (!enabled || forced) return;
-    // AbortController so a slow fetch from a previous run cannot resolve
-    // after we've moved on (component unmount).
+    // The AbortController here only flag-guards against post-unmount
+    // setState — `get()` in api/client.ts doesn't currently accept an
+    // AbortSignal, so the underlying fetch still completes server-side
+    // (broker still does the upstream call). Threading signal through
+    // the shared client is a follow-up that touches every caller of
+    // get() and is out of scope for this PR.
     const ctl = new AbortController();
-    // Note: api/client.ts get() doesn't accept an AbortSignal yet, so the
-    // request continues to completion server-side. The signal here only
-    // suppresses the resolve callbacks if the component unmounted —
-    // wiring signal through get() is a follow-up that touches every
-    // caller of the shared client and is out of scope for this PR.
     void get<UpgradeCheckResponse>("/upgrade-check")
       .then((res) => {
         if (ctl.signal.aborted) return;
@@ -97,13 +97,14 @@ export function UpgradeBanner() {
     setDismissed(d === latest);
   }, [latest]);
 
-  // Drive the changelog fetch from `expanded` via an effect so the
-  // AbortController's lifecycle is tied to the expand state — collapsing
-  // (or unmounting) cancels an in-flight request. The "have we fetched"
-  // bit is latched in the resolution callbacks (NOT at fetch start), so a
-  // collapse-while-loading leaves the ref unset and the next expand can
-  // retry. The cleanup also resets the loading state so a re-expand
-  // doesn't render a stale "Loading changes…" caption.
+  // Drive the changelog fetch from `expanded`. Same caveat as the
+  // upgrade-check effect above: the AbortController only flag-guards
+  // setState on unmount; the broker still completes the GitHub call.
+  // The "have we fetched" bit is latched in the resolution callbacks
+  // (NOT at fetch start), so a collapse-while-loading leaves the ref
+  // unset and the next expand can retry. The cleanup also resets the
+  // loading state so a re-expand doesn't render a stale "Loading
+  // changes…" caption.
   useEffect(() => {
     if (!expanded) return;
     if (!(current && latest)) return;
@@ -121,9 +122,12 @@ export function UpgradeBanner() {
           setChangelog({ loading: false, error: data.error, commits: [] });
           return;
         }
-        // The broker forwards entries already parsed, but we re-parse from
-        // the description if a future broker version emits raw commit
-        // messages — defensive only.
+        // The broker forwards entries already parsed by upgradecheck on
+        // the Go side (with explicit JSON tags ensuring lowercase keys),
+        // so the `c.type` branch is always taken in practice. The
+        // parseCommit fallback is a forward-compat seam for a future
+        // broker version that might emit raw commit messages — keep it
+        // even though it's effectively dead code today.
         const commits: CommitEntry[] = (data.commits ?? []).map((c) =>
           c.type
             ? {

@@ -21,6 +21,13 @@ describe("compareVersions", () => {
     ["0.79.10-rc.1", "0.79.10", 0],
     ["0.79.10", "0.79.10-rc.1", 0],
     ["0.79.10-rc.1", "0.79.11", -1],
+    // Locks in current intent: rc.1 vs rc.2 compares equal because the
+    // suffix is stripped. If we ever publish pre-releases under npm's
+    // `latest` and want to nudge between rc.N values, the comparator
+    // (and its Go twin) needs a real semver upgrade — see the comment
+    // in upgradeBanner.utils.ts compareVersions().
+    ["1.0.0-rc.1", "1.0.0-rc.2", 0],
+    ["1.0.0-rc.2", "1.0.0-rc.1", 0],
   ] as const)("compareVersions(%s, %s) === %i", (a, b, want) => {
     expect(compareVersions(a, b)).toBe(want);
   });
