@@ -2498,7 +2498,14 @@ func (b *Broker) Messages() []channelMessage {
 }
 
 func (b *Broker) HasPendingInterview() bool {
-	return b.HasBlockingRequest()
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, req := range b.requests {
+		if requestIsHumanInterview(req) && requestIsActive(req) {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *Broker) HasBlockingRequest() bool {
@@ -10449,7 +10456,7 @@ func (b *Broker) handlePostRequest(w http.ResponseWriter, r *http.Request) {
 			if b.requests[i].ID != id {
 				continue
 			}
-			b.cancelRequestLocked(&b.requests[i], b.requests[i].From, "")
+			b.cancelRequestLocked(&b.requests[i], body.From, "")
 			if err := b.saveLocked(); err != nil {
 				http.Error(w, "failed to persist broker state", http.StatusInternalServerError)
 				return
