@@ -129,27 +129,45 @@ func TestSQLiteFactStore_PersistAcrossClose(t *testing.T) {
 	// Walk every fact via ListAllFactsPaged with a limit smaller than the
 	// total row count, exercising the keyset pagination path end to end.
 	//
-	// Three independent assertions on `seen`:
+	// Independent assertions on `seen`:
 	//   1) every row appears (set equality)
 	//   2) rows are id-ASC sorted (a driver collation regression would surface
 	//      as out-of-order pages but the keyset cursor advances by the page's
 	//      *last* element — silently skipping IDs and false-passing a naive
 	//      length check)
 	//   3) row count matches expected
+	//   4) the walk crossed at least one page boundary (factCount > pageLimit
+	//      so a LIMIT regression that returned every row in one page would
+	//      false-pass the pagination objective of this test)
+	//   5) the cursor advances every iteration (a regression where
+	//      ListAllFactsPaged kept returning the same non-empty tail page would
+	//      hang the test instead of failing fast)
+	const pageLimit = 2
 	var seen []string
 	after := ""
+	pagesSeen := 0
 	for {
-		page, err := s2.ListAllFactsPaged(ctx, after, 2)
+		page, err := s2.ListAllFactsPaged(ctx, after, pageLimit)
 		if err != nil {
 			t.Fatalf("ListAllFactsPaged after=%q: %v", after, err)
 		}
 		if len(page) == 0 {
 			break
 		}
+		pagesSeen++
+		lastID := page[len(page)-1].ID
+		if after != "" && lastID == after {
+			t.Fatalf("ListAllFactsPaged cursor did not advance past %q", after)
+		}
 		for _, f := range page {
 			seen = append(seen, f.ID)
 		}
-		after = page[len(page)-1].ID
+		after = lastID
+	}
+	wantPages := (factCount + pageLimit - 1) / pageLimit
+	if pagesSeen < wantPages {
+		t.Errorf("ListAllFactsPaged spanned %d pages, want >= %d (pageLimit=%d, factCount=%d)",
+			pagesSeen, wantPages, pageLimit, factCount)
 	}
 	if len(seen) != factCount {
 		t.Fatalf("ListAllFactsPaged walked %d rows, want %d (seen=%v)", len(seen), factCount, seen)
