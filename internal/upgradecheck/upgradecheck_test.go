@@ -41,21 +41,6 @@ func TestCompareVersions(t *testing.T) {
 	}
 }
 
-func TestIsDevVersion(t *testing.T) {
-	cases := map[string]bool{
-		"":         true,
-		"dev":      true,
-		"  dev  ":  true,
-		"0.79.10":  false,
-		"v0.79.10": false,
-	}
-	for in, want := range cases {
-		if got := IsDevVersion(in); got != want {
-			t.Errorf("IsDevVersion(%q)=%v want %v", in, got, want)
-		}
-	}
-}
-
 func TestParseCommit(t *testing.T) {
 	cases := []struct {
 		msg             string
@@ -138,25 +123,8 @@ func TestFormatChangelogPromotesBreakingChanges(t *testing.T) {
 }
 
 func TestCheckHitsRegistry(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasSuffix(r.URL.Path, "/wuphf/latest") {
-			t.Errorf("unexpected path %q", r.URL.Path)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]string{"version": "99.0.0"})
-	}))
-	defer srv.Close()
-
-	// Inject a per-test client whose Transport rewrites the npm registry URL
-	// to our httptest server. Avoids mutating http.DefaultTransport, which
-	// would leak between concurrent tests in this package.
-	host := strings.TrimPrefix(srv.URL, "http://")
-	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		req.URL.Scheme = "http"
-		req.URL.Host = host
-		return http.DefaultTransport.RoundTrip(req)
-	})}
-
-	res, err := Check(context.Background(), client)
+	mockNPMRegistry(t, "99.0.0")
+	res, err := Check(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -181,21 +149,27 @@ func pinCurrentVersion(t *testing.T, v string) {
 	t.Cleanup(func() { currentVersion = prev })
 }
 
-// mockNPMRegistry returns an http.Client whose Transport rewrites the npm
-// registry URL to a httptest server that always responds with the given
-// version. Cleans up the server on test end.
-func mockNPMRegistry(t *testing.T, latest string) *http.Client {
+// pinNPMRegistryURL swaps NPMRegistryURL for the test duration so callers
+// can point it at a httptest server without injecting a custom RoundTripper
+// on every Check call. Restores on cleanup.
+func pinNPMRegistryURL(t *testing.T, url string) {
+	t.Helper()
+	prev := NPMRegistryURL
+	NPMRegistryURL = url
+	t.Cleanup(func() { NPMRegistryURL = prev })
+}
+
+// mockNPMRegistry stands up a httptest server that always responds with the
+// given version and points NPMRegistryURL at it for the duration of the
+// test. Callers can then call Check(ctx, nil) and the default client will
+// hit the fake.
+func mockNPMRegistry(t *testing.T, latest string) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]string{"version": latest})
 	}))
 	t.Cleanup(srv.Close)
-	host := strings.TrimPrefix(srv.URL, "http://")
-	return &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		req.URL.Scheme = "http"
-		req.URL.Host = host
-		return http.DefaultTransport.RoundTrip(req)
-	})}
+	pinNPMRegistryURL(t, srv.URL)
 }
 
 func TestCheckShortCircuitsForDevBuild(t *testing.T) {
@@ -204,7 +178,8 @@ func TestCheckShortCircuitsForDevBuild(t *testing.T) {
 	// `dev < anything` would always tell the user to npm-install over
 	// their source build.
 	pinCurrentVersion(t, "dev")
-	res, err := Check(context.Background(), mockNPMRegistry(t, "99.0.0"))
+	mockNPMRegistry(t, "99.0.0")
+	res, err := Check(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -224,7 +199,8 @@ func TestCheckOmitsCompareURLWhenVersionsEqual(t *testing.T) {
 	// must be empty so JSON consumers don't surface a degenerate
 	// `compare/vX...vX` link.
 	pinCurrentVersion(t, "1.2.3")
-	res, err := Check(context.Background(), mockNPMRegistry(t, "1.2.3"))
+	mockNPMRegistry(t, "1.2.3")
+	res, err := Check(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("Check: %v", err)
 	}
@@ -238,7 +214,3 @@ func TestCheckOmitsCompareURLWhenVersionsEqual(t *testing.T) {
 		t.Errorf("CompareURL should be empty when up-to-date, got %q", res.CompareURL)
 	}
 }
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

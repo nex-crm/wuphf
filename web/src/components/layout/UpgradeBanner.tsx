@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { get } from "../../api/client";
 import {
@@ -72,8 +79,14 @@ export function UpgradeBanner() {
   // Per-component latch so a successful (or non-abort-failed) fetch is
   // not retried when the user toggles expanded off and on again. Set in
   // the resolution callbacks (NOT at fetch-start) so a collapse-while-
-  // loading leaves the ref unset and the next expand can retry.
-  const changelogFetchedRef = useRef(false);
+  // loading leaves the ref unset and the next expand can retry. Keyed by
+  // `${current}→${latest}` rather than a bare boolean so a future feature
+  // that re-checks (e.g. periodic broker poll) and changes current/latest
+  // re-triggers the fetch instead of silently rendering the stale cache.
+  const changelogFetchedRef = useRef<string | null>(null);
+  // Stable id so the toggle button's aria-controls can point at the
+  // collapsible drawer for assistive tech.
+  const changelogId = useId();
 
   useEffect(() => {
     if (!enabled || forced) return;
@@ -116,7 +129,8 @@ export function UpgradeBanner() {
   useEffect(() => {
     if (!expanded) return;
     if (!(current && latest)) return;
-    if (changelogFetchedRef.current) return;
+    const fetchKey = `${current}→${latest}`;
+    if (changelogFetchedRef.current === fetchKey) return;
     const ctl = new AbortController();
     setChangelog({ loading: true, error: null, commits: [] });
     void get<UpgradeChangelogResponse>("/upgrade-changelog", {
@@ -125,7 +139,7 @@ export function UpgradeBanner() {
     })
       .then((data) => {
         if (ctl.signal.aborted) return;
-        changelogFetchedRef.current = true;
+        changelogFetchedRef.current = fetchKey;
         if (data.error) {
           setChangelog({ loading: false, error: data.error, commits: [] });
           return;
@@ -154,7 +168,7 @@ export function UpgradeBanner() {
         if (ctl.signal.aborted) return;
         // Latch on error too so the user sees the error message instead
         // of the next expand silently re-firing the same failing call.
-        changelogFetchedRef.current = true;
+        changelogFetchedRef.current = fetchKey;
         setChangelog({
           loading: false,
           error: e instanceof Error ? e.message : String(e),
@@ -240,7 +254,14 @@ export function UpgradeBanner() {
   if (!(current && latest)) return null;
 
   return (
-    <div className="upgrade-banner" role="status">
+    // role="region" + an accessible name lets the banner be navigable as a
+    // landmark without auto-announcing on every render the way role="status"
+    // (a live region) would for what is really an interactive container.
+    <div
+      className="upgrade-banner"
+      role="region"
+      aria-label="Upgrade available"
+    >
       <div className="upgrade-banner-row">
         <div className="upgrade-banner-content">
           <svg
@@ -267,6 +288,7 @@ export function UpgradeBanner() {
             className="upgrade-banner-link"
             onClick={toggleExpanded}
             aria-expanded={expanded}
+            aria-controls={changelogId}
           >
             {expanded ? "Hide changes" : "What's new"}
           </button>
@@ -315,7 +337,7 @@ export function UpgradeBanner() {
         </div>
       </div>
       {expanded && (
-        <div className="upgrade-banner-changelog">
+        <div id={changelogId} className="upgrade-banner-changelog">
           {changelog.loading && (
             <div className="upgrade-banner-changelog-status">
               Loading changes…
@@ -353,17 +375,25 @@ export function UpgradeBanner() {
                     ) : null}
                     {entry.description}
                     {entry.pr ? (
-                      <>
-                        {" "}
-                        <a
-                          href={`https://github.com/${REPO}/pull/${entry.pr}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="upgrade-banner-pr"
-                        >
-                          #{entry.pr}
-                        </a>
-                      </>
+                      // Defensive: only render an anchor when the PR ref is
+                      // numeric so a future broker change emitting a
+                      // non-numeric token can't produce a malformed
+                      // /pull/<token> URL. Falls back to plain text.
+                      /^\d+$/.test(entry.pr) ? (
+                        <>
+                          {" "}
+                          <a
+                            href={`https://github.com/${REPO}/pull/${entry.pr}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="upgrade-banner-pr"
+                          >
+                            #{entry.pr}
+                          </a>
+                        </>
+                      ) : (
+                        <span className="upgrade-banner-pr"> #{entry.pr}</span>
+                      )
                     ) : null}
                   </li>
                 ))}

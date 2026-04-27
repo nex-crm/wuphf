@@ -511,7 +511,10 @@
   transition: background 0.1s;
 }
 .upgrade-banner-dismiss:hover {
-  background: rgba(0, 0, 0, 0.06);
+  /* Theme-tinted accent — matches the copy button so the hover affordance
+     survives dark mode where a literal `rgba(0,0,0,…)` overlay would be
+     invisible against `var(--bg-card)`. */
+  background: var(--blue-bg);
 }
 
 .upgrade-banner-changelog {

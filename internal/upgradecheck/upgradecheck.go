@@ -27,10 +27,15 @@ import (
 )
 
 const (
-	NPMPackage     = "wuphf"
-	GitHubRepo     = "nex-crm/wuphf"
-	NPMRegistryURL = "https://registry.npmjs.org/" + NPMPackage + "/latest"
+	NPMPackage = "wuphf"
+	GitHubRepo = "nex-crm/wuphf"
 )
+
+// NPMRegistryURL is a var (not a const) so tests can swap in a httptest
+// server URL directly without the RoundTripper indirection the original
+// fixture used. Production code must NOT mutate this at runtime — it is
+// effectively const outside test setup.
+var NPMRegistryURL = "https://registry.npmjs.org/" + NPMPackage + "/latest"
 
 // Result reports the comparison between the running version and the latest
 // published version.
@@ -63,7 +68,7 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 	current := currentVersion()
 	res := Result{
 		Current:        current,
-		IsDevBuild:     IsDevVersion(current),
+		IsDevBuild:     buildinfo.IsDev(current),
 		UpgradeCommand: "npm install -g " + NPMPackage + "@latest",
 	}
 
@@ -90,13 +95,6 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 		)
 	}
 	return res, nil
-}
-
-// IsDevVersion reports whether v is a non-released ("dev") wuphf build. This
-// matches buildinfo.Current()'s fallback when no release ldflag was set.
-func IsDevVersion(v string) bool {
-	v = strings.TrimSpace(v)
-	return v == "" || v == "dev"
 }
 
 // currentVersion is a seam so tests can pin the running version without
