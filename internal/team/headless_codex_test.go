@@ -2264,3 +2264,36 @@ func TestIsCodexAuthError(t *testing.T) {
 		}
 	}
 }
+
+func TestHeadlessCodexTurnTimeoutEnv(t *testing.T) {
+	const name = "WUPHF_TURN_TIMEOUT_TEST_ONLY"
+	fallback := 4 * time.Minute
+	cases := []struct {
+		label string
+		set   bool
+		val   string
+		want  time.Duration
+	}{
+		{label: "unset falls back", set: false, want: fallback},
+		{label: "empty falls back", set: true, val: "", want: fallback},
+		{label: "whitespace falls back", set: true, val: "   ", want: fallback},
+		{label: "garbage falls back", set: true, val: "not-a-duration", want: fallback},
+		{label: "zero falls back", set: true, val: "0s", want: fallback},
+		{label: "negative falls back", set: true, val: "-30s", want: fallback},
+		{label: "minutes parsed", set: true, val: "6m", want: 6 * time.Minute},
+		{label: "seconds parsed", set: true, val: "90s", want: 90 * time.Second},
+		{label: "hours parsed", set: true, val: "1h", want: time.Hour},
+	}
+	for _, c := range cases {
+		t.Run(c.label, func(t *testing.T) {
+			if c.set {
+				t.Setenv(name, c.val)
+			} else {
+				os.Unsetenv(name)
+			}
+			if got := headlessCodexTurnTimeoutEnv(name, fallback); got != c.want {
+				t.Fatalf("headlessCodexTurnTimeoutEnv(%q=%q) = %s, want %s", name, c.val, got, c.want)
+			}
+		})
+	}
+}
