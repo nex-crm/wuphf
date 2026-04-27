@@ -411,6 +411,22 @@ export function getHealth() {
   }>("/health");
 }
 
+// /version returns the build-info baked into the running broker binary
+// (set at link time via -ldflags `-X .../buildinfo.Version=...`). For an
+// upgrade-vs-latest comparison, call /upgrade-check instead — it pairs this
+// with the npm-registry latest in a single round trip and is what the
+// in-app upgrade banner consumes.
+export interface VersionInfo {
+  version: string;
+  // Always populated by the backend (defaults to "unknown" when no
+  // BuildTimestamp ldflag was set — see internal/buildinfo).
+  build_timestamp: string;
+}
+
+export function getVersion() {
+  return get<VersionInfo>("/version");
+}
+
 // ── Tasks ──
 
 export interface Task {

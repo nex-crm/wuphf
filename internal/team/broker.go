@@ -24,6 +24,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	wuphf "github.com/nex-crm/wuphf"
 	"github.com/nex-crm/wuphf/internal/action"
 	"github.com/nex-crm/wuphf/internal/agent"
@@ -36,6 +38,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/onboarding"
 	"github.com/nex-crm/wuphf/internal/operations"
 	"github.com/nex-crm/wuphf/internal/provider"
+	"github.com/nex-crm/wuphf/internal/upgradecheck"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
@@ -1508,6 +1511,8 @@ func (b *Broker) StartOnPort(port int) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", b.handleHealth) // no auth — used for liveness checks
 	mux.HandleFunc("/version", b.handleVersion)
+	mux.HandleFunc("/upgrade-check", b.requireAuth(b.handleUpgradeCheck))
+	mux.HandleFunc("/upgrade-changelog", b.requireAuth(b.handleUpgradeChangelog))
 	mux.HandleFunc("/session-mode", b.requireAuth(b.handleSessionMode))
 	mux.HandleFunc("/focus-mode", b.requireAuth(b.handleFocusMode))
 	mux.HandleFunc("/messages", b.requireAuth(b.handleMessages))
@@ -4628,6 +4633,204 @@ func (b *Broker) handleVersion(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(buildinfo.Current())
+}
+
+// handleUpgradeCheck proxies the npm-registry comparison through the broker
+// instead of letting the browser hit registry.npmjs.org directly. The web
+// banner uses this so that (a) we have one server-side place to cache the
+// result, (b) a corporate-NAT'd workstation doesn't burn every user's
+// anonymous npm/GitHub quota on every page load.
+func (b *Broker) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	res, err := upgradeCheckCached(r.Context())
+	w.Header().Set("Content-Type", "application/json")
+	// upgradecheck.Check populates Current from buildinfo BEFORE the
+	// upstream call, so a transport failure still arrives with
+	// Current set. The right "do we have anything useful" signal is
+	// Latest — empty Latest with an error means we couldn't talk to
+	// npm at all (cold cache + outage), which deserves a 502 so
+	// observability tools see the upstream failure. Banner's
+	// .catch() already swallows non-2xx silently.
+	if err != nil && res.Latest == "" {
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"current": res.Current,
+			"error":   err.Error(),
+		})
+		return
+	}
+	if err != nil {
+		// Partial result (Current AND Latest populated, but something
+		// else failed) — degrade gracefully with 200 + error field
+		// so the banner can render nothing without a console-spamming
+		// 5xx for a non-critical check.
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"current":           res.Current,
+			"latest":            res.Latest,
+			"upgrade_available": res.UpgradeAvailable,
+			"is_dev_build":      res.IsDevBuild,
+			"compare_url":       res.CompareURL,
+			"upgrade_command":   res.UpgradeCommand,
+			"error":             err.Error(),
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(res)
+}
+
+// handleUpgradeChangelog proxies the GitHub compare API for the same reasons
+// as handleUpgradeCheck. The `from` and `to` query params are validated
+// against a strict version regex so a crafted call cannot inject path
+// segments into the upstream compare URL. Mirrors VERSION_RE in
+// web/src/components/layout/upgradeBanner.utils.ts — keep both regexes in
+// sync so a future tightening doesn't drift.
+func (b *Broker) handleUpgradeChangelog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	from := strings.TrimSpace(r.URL.Query().Get("from"))
+	to := strings.TrimSpace(r.URL.Query().Get("to"))
+	w.Header().Set("Content-Type", "application/json")
+	if !upgradeVersionParam.MatchString(from) || !upgradeVersionParam.MatchString(to) {
+		// Match the upstream-failure shape so the banner's .catch
+		// path renders one error message instead of branching on
+		// HTTP status.
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"commits": []any{},
+			"error":   "from/to must look like v0.79.10 (or 0.79.10)",
+		})
+		return
+	}
+	entries, err := upgradeChangelogCached(r.Context(), from, to)
+	if err != nil {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"commits": []any{},
+			"error":   err.Error(),
+		})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"commits": entries})
+}
+
+// Semver-leaning version param. Accepts an optional `v`, 2-4 dotted numeric
+// segments, an optional pre-release after `-` (e.g. `-rc.1`, `-beta-2`), and
+// an optional build-metadata after `+` (e.g. `+build.5`). Hyphen is allowed
+// inside the suffix character class so `-beta-1` validates.
+//
+// MIRRORED in web/src/components/layout/upgradeBanner.utils.ts as
+// VERSION_RE — keep them in sync so a future tightening doesn't drift.
+var upgradeVersionParam = regexp.MustCompile(`^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+
+// ── Upgrade-check caching ─────────────────────────────────────────────────
+//
+// Memoise the npm registry result for 30 minutes and the GitHub compare
+// result for 1 hour so N tabs / page reloads / shell remounts on one
+// machine result in at most one upstream hit per TTL window. Coalesces
+// concurrent requests via singleflight so a parallel page-load burst still
+// only sends one upstream call. Without this, an office full of users on
+// the same NAT could exhaust npm/GitHub's anonymous quota in normal use.
+
+const (
+	upgradeCheckTTL     = 30 * time.Minute
+	upgradeChangelogTTL = time.Hour
+	upgradeUpstreamTime = 5 * time.Second
+	// Negative-cache window: pin upstream failures briefly so an outage
+	// doesn't bypass the cache and let every banner load hammer
+	// npm/GitHub. Short enough that recovery is observed quickly;
+	// singleflight only collapses concurrent bursts, not back-to-back
+	// retries.
+	upgradeFailureTTL = 60 * time.Second
+)
+
+// upgradeChangelogKey is the canonical cache key for the changelog entry
+// keyed by (from, to). Exported (lowercase but used from
+// broker_upgrade_test.go in the same package) so the test that pre-seeds
+// the cache uses the same encoding the production code does — keeps them
+// from drifting.
+func upgradeChangelogKey(from, to string) string { return from + "→" + to }
+
+type upgradeCheckCacheEntry struct {
+	res     upgradecheck.Result
+	err     error
+	storeAt time.Time
+}
+
+type upgradeChangelogCacheEntry struct {
+	entries []upgradecheck.CommitEntry
+	err     error
+	storeAt time.Time
+}
+
+var (
+	upgradeCheckCache   atomic.Pointer[upgradeCheckCacheEntry]
+	upgradeChangelog    sync.Map // key "from→to" → *upgradeChangelogCacheEntry
+	upgradeCheckGroup   singleflight.Group
+	upgradeChangelogFlt singleflight.Group
+)
+
+func upgradeCheckCached(_ context.Context) (upgradecheck.Result, error) {
+	if e := upgradeCheckCache.Load(); e != nil {
+		// Successes use the long TTL; failures use the short
+		// negative-TTL so we recover from an outage without
+		// re-hammering during the window.
+		ttl := upgradeCheckTTL
+		if e.err != nil {
+			ttl = upgradeFailureTTL
+		}
+		if time.Since(e.storeAt) < ttl {
+			return e.res, e.err
+		}
+	}
+	// Singleflight leader uses a broker-owned context, NOT the caller's
+	// HTTP ctx — otherwise a single client cancellation (page nav,
+	// browser close) aborts the upstream fetch for every concurrent
+	// waiter. The waiters have their own contexts that gate when they
+	// observe the result; only the leader's context governs the actual
+	// upstream call.
+	v, _, _ := upgradeCheckGroup.Do("check", func() (any, error) {
+		fctx, cancel := context.WithTimeout(context.Background(), upgradeUpstreamTime)
+		defer cancel()
+		res, err := upgradecheck.Check(fctx, nil)
+		// Cache success AND failure (different TTLs above) so a
+		// stream of failed retries during an outage doesn't bypass
+		// the broker shielding this feature exists to provide.
+		upgradeCheckCache.Store(&upgradeCheckCacheEntry{res: res, err: err, storeAt: time.Now()})
+		return upgradeCheckCacheEntry{res: res, err: err}, nil
+	})
+	entry := v.(upgradeCheckCacheEntry)
+	return entry.res, entry.err
+}
+
+func upgradeChangelogCached(_ context.Context, from, to string) ([]upgradecheck.CommitEntry, error) {
+	key := upgradeChangelogKey(from, to)
+	if v, ok := upgradeChangelog.Load(key); ok {
+		e := v.(*upgradeChangelogCacheEntry)
+		ttl := upgradeChangelogTTL
+		if e.err != nil {
+			ttl = upgradeFailureTTL
+		}
+		if time.Since(e.storeAt) < ttl {
+			return e.entries, e.err
+		}
+	}
+	// See upgradeCheckCached: leader uses broker-owned background ctx
+	// so client cancellations don't kill the shared upstream fetch.
+	v, _, _ := upgradeChangelogFlt.Do(key, func() (any, error) {
+		fctx, cancel := context.WithTimeout(context.Background(), upgradeUpstreamTime+3*time.Second)
+		defer cancel()
+		entries, err := upgradecheck.FetchChangelog(fctx, nil, from, to)
+		upgradeChangelog.Store(key, &upgradeChangelogCacheEntry{entries: entries, err: err, storeAt: time.Now()})
+		return upgradeChangelogCacheEntry{entries: entries, err: err}, nil
+	})
+	entry := v.(upgradeChangelogCacheEntry)
+	return entry.entries, entry.err
 }
 
 func (b *Broker) handleSessionMode(w http.ResponseWriter, r *http.Request) {

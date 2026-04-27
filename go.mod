@@ -13,6 +13,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/sahilm/fuzzy v0.1.1
+	golang.org/x/sync v0.20.0
 	golang.org/x/text v0.36.0
 	google.golang.org/genai v1.54.0
 	gopkg.in/yaml.v3 v3.0.1

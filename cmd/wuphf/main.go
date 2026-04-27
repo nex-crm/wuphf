@@ -3,11 +3,14 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/nex-crm/wuphf/internal/buildinfo"
 	"github.com/nex-crm/wuphf/internal/commands"
@@ -15,6 +18,7 @@ import (
 	"github.com/nex-crm/wuphf/internal/provider"
 	"github.com/nex-crm/wuphf/internal/team"
 	"github.com/nex-crm/wuphf/internal/teammcp"
+	"github.com/nex-crm/wuphf/internal/upgradecheck"
 	"github.com/nex-crm/wuphf/internal/workspace"
 )
 
@@ -92,6 +96,16 @@ func printSubcommandHelp(sub string) {
 		fmt.Fprintln(os.Stderr, "")
 		fmt.Fprintln(os.Stderr, "Usage:")
 		fmt.Fprintln(os.Stderr, "  wuphf mcp-team")
+	case "upgrade":
+		fmt.Fprintln(os.Stderr, "wuphf upgrade — check npm for a newer wuphf and show the changelog")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Compares the running build against the latest published `wuphf` on npm.")
+		fmt.Fprintln(os.Stderr, "When behind, prints the upgrade command and a conventional-commit-grouped")
+		fmt.Fprintln(os.Stderr, "changelog from the GitHub compare API.")
+		fmt.Fprintln(os.Stderr, "")
+		fmt.Fprintln(os.Stderr, "Usage:")
+		fmt.Fprintln(os.Stderr, "  wuphf upgrade           Print human-readable comparison + changelog")
+		fmt.Fprintln(os.Stderr, "  wuphf upgrade --json    Emit the comparison as JSON for scripting")
 	default:
 		fmt.Fprintf(os.Stderr, "wuphf: unknown subcommand %q — run `wuphf --help` for the list.\n", sub)
 	}
@@ -153,6 +167,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "  %s              Launch multi-agent team (web UI on :%d)\n", appName, *webPort)
 		fmt.Fprintf(os.Stderr, "  %s --tui        Launch with tmux TUI instead\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s init         Install the latest CLI and save setup defaults\n", appName)
+		fmt.Fprintf(os.Stderr, "  %s upgrade      Check npm for a newer version and show the changelog\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s shred        Burn the workspace down and reopen onboarding\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s import --from legacy  Import from a running external orchestrator (auto-detect)\n", appName)
 		fmt.Fprintf(os.Stderr, "  %s log          Show what your agents actually did (task receipts)\n", appName)
@@ -273,6 +288,9 @@ func main() {
 		case "init":
 			dispatch("/init", *apiKeyFlag, *format)
 			return
+		case "upgrade":
+			runUpgradeCheck(args[1:])
+			return
 		case "import":
 			runImport(args[1:])
 			return
@@ -304,6 +322,13 @@ func main() {
 		return
 	}
 
+	// No startup upgrade notice here: the npm shim (npm/bin/wuphf.js, PR
+	// #273) already prints a one-line stderr hint pointing at
+	// `npm install -g wuphf@latest` before exec'ing the binary, and
+	// transparently downloads & runs a newer release when one exists. The
+	// in-app web banner is the additive surface for that flow; the shim
+	// owns the CLI surface.
+
 	// TUI mode: tmux-based interface
 	if *tuiMode {
 		runTeam(args, selectedBlueprint, *unsafeMode, *oneOnOne, *opusCEO, *collabMode)
@@ -312,6 +337,109 @@ func main() {
 
 	// Default: web UI
 	runWeb(args, selectedBlueprint, *unsafeMode, *webPort, *opusCEO, *collabMode, *noOpen)
+}
+
+// upgradeJSONOutput is the wire shape emitted by `wuphf upgrade --json`.
+// Embeds upgradecheck.Result so adding a field there flows through, plus an
+// explicit Error field that is populated when the upstream call failed.
+// Extracted as a function (and as a top-level shape) so the JSON contract
+// is testable without invoking the os.Exit-bearing runUpgradeCheck path.
+func upgradeJSONOutput(res upgradecheck.Result, err error) struct {
+	upgradecheck.Result
+	Error string `json:"error,omitempty"`
+} {
+	out := struct {
+		upgradecheck.Result
+		Error string `json:"error,omitempty"`
+	}{Result: res}
+	if err != nil {
+		out.Error = err.Error()
+	}
+	return out
+}
+
+func runUpgradeCheck(args []string) {
+	// Use a real flag.FlagSet so `--json=true`, `--help`, and unknown flags
+	// behave consistently with the rest of the CLI (the previous
+	// hand-rolled loop silently accepted `wuphf upgrade junk` and ignored
+	// `--json=true`).
+	// ContinueOnError so we get to handle the error here — under
+	// ExitOnError the Parse call would call os.Exit itself and the
+	// branch below would be unreachable.
+	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "Emit the comparison as JSON for scripting")
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() { printSubcommandHelp("upgrade") }
+	if err := fs.Parse(args); err != nil {
+		// flag prints the error itself; just exit. flag.ErrHelp on
+		// `--help` exits 0, anything else is a usage error → 2.
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
+		os.Exit(2)
+	}
+
+	// Always do a fresh fetch — the user typed `wuphf upgrade` because they
+	// want ground truth. Each upstream call gets its own deadline so a slow
+	// npm response doesn't eat the GitHub-compare budget and trigger a
+	// misleading "could not fetch changelog" warning.
+	checkCtx, cancelCheck := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelCheck()
+	res, err := upgradecheck.Check(checkCtx, nil)
+
+	// JSON output: emit the full Result (including IsDevBuild and an
+	// `error` field for scripted callers) and exit non-zero on failure
+	// so `wuphf upgrade --json | jq …` distinguishes "no upgrade" from
+	// "couldn't reach npm". Dev builds are exempt — they don't depend on
+	// npm reachability, so a network blip shouldn't trip exit-code-aware
+	// pipelines on contributor machines.
+	if *jsonOut {
+		_ = json.NewEncoder(os.Stdout).Encode(upgradeJSONOutput(res, err))
+		// Exit non-zero when we couldn't actually compare — distinguishes
+		// "no upgrade" from "couldn't reach npm" for `wuphf upgrade --json | jq …`
+		// pipelines. Dev builds are exempt: they don't depend on npm
+		// reachability so a network blip on a contributor box shouldn't
+		// trip exit-code-aware scripts.
+		if !res.IsDevBuild && (err != nil || res.Latest == "") {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if res.IsDevBuild {
+		fmt.Printf("You are running a dev build of %s (built from source, version=%q).\n",
+			appName, res.Current)
+		fmt.Println("Skipping npm comparison — this binary did not come from npm.")
+		return
+	}
+
+	if err != nil || res.Latest == "" {
+		fmt.Printf("You are running %s v%s.\n", appName, strings.TrimPrefix(res.Current, "v"))
+		fmt.Fprintf(os.Stderr, "warning: could not reach npm registry to check for updates (%v)\n", err)
+		os.Exit(1)
+	}
+
+	if !res.UpgradeAvailable {
+		fmt.Printf("You are running %s v%s. That is the latest published version.\n",
+			appName, strings.TrimPrefix(res.Current, "v"))
+		return
+	}
+
+	fmt.Printf("Update available: v%s → v%s\n", strings.TrimPrefix(res.Current, "v"), strings.TrimPrefix(res.Latest, "v"))
+	fmt.Printf("Run: %s\n", res.UpgradeCommand)
+	fmt.Printf("Diff: %s\n\n", res.CompareURL)
+
+	// Fresh deadline for the GitHub call so a slow npm earlier doesn't
+	// shrink the budget here.
+	clCtx, cancelCL := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancelCL()
+	entries, cerr := upgradecheck.FetchChangelog(clCtx, nil, res.Current, res.Latest)
+	if cerr != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not fetch changelog (%v)\n", cerr)
+		return
+	}
+	fmt.Println("Changes:")
+	fmt.Print(upgradecheck.FormatChangelog(entries))
 }
 
 func runTeam(args []string, packSlug string, unsafe bool, oneOnOne bool, opusCEO bool, collabMode bool) {
