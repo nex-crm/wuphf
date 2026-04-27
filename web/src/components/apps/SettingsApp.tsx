@@ -29,7 +29,15 @@ import {
   type WorkspaceWipeResult,
 } from "../../api/client";
 import { useAppStore } from "../../stores/app";
+import { InlineCommand } from "../ui/InlineCommand";
+import {
+  ShredCardSubtitle,
+  ShredDeletionsList,
+  ShredPreservationList,
+  ShredWarningCopy,
+} from "../ui/ShredWarning";
 import { showNotice } from "../ui/Toast";
+import { WipeModal } from "../ui/WipeModal";
 
 type SectionId =
   | "general"
@@ -373,6 +381,35 @@ interface SectionProps {
   save: (patch: ConfigUpdate) => Promise<void>;
 }
 
+// useShredAction wraps `shredWorkspace()` with the cleanup both call sites
+// (GeneralSection's inline button and DangerZoneSection's full card) need on
+// success: clear the query cache, route the user back to a sensible default
+// channel, and reset onboarding state so the wizard reopens. The broker's
+// `AfterShred` hook (`internal/team/broker.go`) calls `requestShutdown()`, so
+// the page typically re-mounts shortly after — but until it does, the user
+// shouldn't be left on a Settings tab whose `cfg` query just got invalidated.
+function useShredAction() {
+  const queryClient = useQueryClient();
+  const resetForOnboarding = useAppStore((s) => s.resetForOnboarding);
+  return async (): Promise<boolean> => {
+    try {
+      const result: WorkspaceWipeResult = await shredWorkspace();
+      if (!result.ok) {
+        showNotice(result.error || "Shred failed", "error");
+        return false;
+      }
+      queryClient.clear();
+      window.history.replaceState(null, "", "#/channels/general");
+      resetForOnboarding();
+      showNotice("Workspace shredded. Onboarding reopened.", "success");
+      return true;
+    } catch (err) {
+      showNotice(err instanceof Error ? err.message : "Shred failed", "error");
+      return false;
+    }
+  };
+}
+
 function GeneralSection({ cfg, save }: SectionProps) {
   const [provider, setProvider] = useState(cfg.llm_provider ?? "claude-code");
   const [memory, setMemory] = useState(cfg.memory_backend ?? "nex");
@@ -387,6 +424,7 @@ function GeneralSection({ cfg, save }: SectionProps) {
   const [blueprint, setBlueprint] = useState(cfg.blueprint ?? "");
   const [email, setEmail] = useState(cfg.email ?? "");
   const [devUrl, setDevUrl] = useState(cfg.dev_url ?? "");
+  const runShred = useShredAction();
 
   const onSave = async () => {
     const patch: ConfigUpdate = {
@@ -419,17 +457,18 @@ function GeneralSection({ cfg, save }: SectionProps) {
           </strong>
           New values save immediately, but agents already running keep their
           launch-time settings. Run{" "}
-          <code
-            style={{
-              fontFamily: "var(--font-mono)",
-              padding: "1px 6px",
-              background: "var(--warning-200)",
-              color: "var(--warning-500)",
-              borderRadius: 3,
+          <InlineCommand
+            command="wuphf shred"
+            onRun={async () => {
+              await runShred();
             }}
-          >
-            wuphf shred
-          </code>{" "}
+            destructive={{
+              title: "Shred this workspace?",
+              severity: "critical",
+              confirmLabel: "Shred workspace",
+              intro: <ShredWarningCopy />,
+            }}
+          />{" "}
           then relaunch to apply.
         </div>
       </div>
@@ -1496,159 +1535,7 @@ const dangerStyles = {
         : "var(--yellow, #e5a00d)",
     fontFamily: "var(--font-sans)",
   }),
-  modalBackdrop: {
-    position: "fixed" as const,
-    inset: 0,
-    background: "rgba(0,0,0,0.6)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 1000,
-  },
-  modalPanel: {
-    width: "min(520px, calc(100vw - 40px))",
-    background: "var(--bg-card)",
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-md)",
-    padding: 24,
-    boxShadow: "0 20px 60px rgba(0,0,0,0.4)",
-  } as const,
-  modalTitle: {
-    fontSize: 17,
-    fontWeight: 700,
-    color: "var(--text)",
-    marginBottom: 10,
-  } as const,
-  modalBody: {
-    fontSize: 13,
-    color: "var(--text-secondary)",
-    lineHeight: 1.55,
-    marginBottom: 16,
-  } as const,
-  modalInputLabel: {
-    fontSize: 11,
-    fontWeight: 600,
-    textTransform: "uppercase" as const,
-    letterSpacing: "0.06em",
-    color: "var(--text-tertiary)",
-    marginBottom: 6,
-    display: "block",
-  } as const,
-  modalInput: {
-    width: "100%",
-    background: "var(--bg-warm)",
-    border: "1px solid var(--border)",
-    color: "var(--text)",
-    borderRadius: "var(--radius-sm)",
-    height: 38,
-    fontSize: 14,
-    padding: "0 12px",
-    outline: "none",
-    fontFamily: "var(--font-mono)",
-  } as const,
-  modalRow: {
-    display: "flex",
-    gap: 8,
-    justifyContent: "flex-end",
-    marginTop: 18,
-  } as const,
-  modalCancel: {
-    padding: "9px 16px",
-    fontSize: 13,
-    fontWeight: 500,
-    border: "1px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    cursor: "pointer" as const,
-    color: "var(--text)",
-    background: "transparent",
-    fontFamily: "var(--font-sans)",
-  } as const,
-  modalConfirm: (severity: "warn" | "critical", enabled: boolean) => ({
-    padding: "9px 16px",
-    fontSize: 13,
-    fontWeight: 600,
-    border: "none",
-    borderRadius: "var(--radius-sm)",
-    cursor: enabled ? "pointer" : ("not-allowed" as const),
-    color: "#fff",
-    background: enabled
-      ? severity === "critical"
-        ? "var(--red, #e5484d)"
-        : "var(--yellow, #e5a00d)"
-      : "var(--bg-warm)",
-    opacity: enabled ? 1 : 0.6,
-    fontFamily: "var(--font-sans)",
-  }),
 };
-
-const CONFIRM_PHRASE = "i can spell responsibility";
-
-interface WipeModalProps {
-  title: string;
-  severity: "warn" | "critical";
-  intro: ReactNode;
-  confirmLabel: string;
-  busy: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}
-
-// WipeModal gates a destructive action behind a type-the-exact-phrase confirm.
-// The placeholder and the body copy both surface the full phrase so there's no mystery
-// about what to type — we want the friction, not the guesswork.
-function WipeModal({
-  title,
-  severity,
-  intro,
-  confirmLabel,
-  busy,
-  onConfirm,
-  onCancel,
-}: WipeModalProps) {
-  const [value, setValue] = useState("");
-  const enabled = !busy && value.trim().toLowerCase() === CONFIRM_PHRASE;
-
-  return (
-    <div
-      style={dangerStyles.modalBackdrop}
-      onClick={busy ? undefined : onCancel}
-    >
-      <div style={dangerStyles.modalPanel} onClick={(e) => e.stopPropagation()}>
-        <div style={dangerStyles.modalTitle}>{title}</div>
-        <div style={dangerStyles.modalBody}>{intro}</div>
-        <label style={dangerStyles.modalInputLabel}>
-          Type <code>{CONFIRM_PHRASE}</code> to confirm
-        </label>
-        <input
-          type="text"
-          style={dangerStyles.modalInput}
-          placeholder={CONFIRM_PHRASE}
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          disabled={busy}
-        />
-        <div style={dangerStyles.modalRow}>
-          <button
-            type="button"
-            style={dangerStyles.modalCancel}
-            onClick={onCancel}
-            disabled={busy}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            style={dangerStyles.modalConfirm(severity, enabled)}
-            onClick={enabled ? onConfirm : undefined}
-            disabled={!enabled}
-          >
-            {busy ? "Working…" : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 type DangerAction = "reset" | "shred";
 
@@ -1656,7 +1543,7 @@ function DangerZoneSection() {
   const [open, setOpen] = useState<DangerAction | null>(null);
   const [busy, setBusy] = useState(false);
   const queryClient = useQueryClient();
-  const resetForOnboarding = useAppStore((s) => s.resetForOnboarding);
+  const shred = useShredAction();
 
   const handleReset = async () => {
     setBusy(true);
@@ -1678,20 +1565,12 @@ function DangerZoneSection() {
   const handleShred = async () => {
     setBusy(true);
     try {
-      const result: WorkspaceWipeResult = await shredWorkspace();
-      if (!result.ok) {
-        showNotice(result.error || "Shred failed", "error");
-        setBusy(false);
-        return;
-      }
-      queryClient.clear();
-      window.history.replaceState(null, "", "#/channels/general");
-      resetForOnboarding();
-      setOpen(null);
-      setBusy(false);
-      showNotice("Workspace shredded. Onboarding reopened.", "success");
-    } catch (err) {
-      showNotice(err instanceof Error ? err.message : "Shred failed", "error");
+      // Leave the modal mounted on failure so the user can retry without
+      // having to reopen the Danger Zone and re-type the confirm phrase.
+      // useShredAction surfaces the failure toast and never throws.
+      const ok = await shred();
+      if (ok) setOpen(null);
+    } finally {
       setBusy(false);
     }
   };
@@ -1746,39 +1625,15 @@ function DangerZoneSection() {
           <span>Shred workspace</span>
         </div>
         <div style={dangerStyles.cardSubtitle}>
-          Full wipe. Deletes your team, company identity, office task receipts,
-          saved workflows, local memory, logs, and provider session state, then
-          returns you to onboarding. Use this to start completely fresh or to
-          try a different blueprint.
+          <ShredCardSubtitle />
         </div>
         <div style={dangerStyles.listLabel}>Deletes</div>
         <ul style={dangerStyles.list}>
-          <li>
-            Onboarding flag (<code>~/.wuphf/onboarded.json</code>) so the wizard
-            reopens
-          </li>
-          <li>
-            Company identity (<code>~/.wuphf/company.json</code>)
-          </li>
-          <li>
-            Team runtime state, office, and workflows under{" "}
-            <code>~/.wuphf/</code>
-          </li>
-          <li>
-            Logs, sessions, provider state, calendar, and local wiki memory
-          </li>
-          <li>Broker runtime state (same as Reset)</li>
+          <ShredDeletionsList />
         </ul>
         <div style={dangerStyles.listLabel}>Preserved</div>
         <ul style={dangerStyles.list}>
-          <li>
-            <strong>Task worktrees</strong> — uncommitted work on branches stays
-            on disk
-          </li>
-          <li>
-            Your global config (<code>config.json</code>) and API keys
-          </li>
-          <li>OpenClaw device identity used for gateway pairing</li>
+          <ShredPreservationList />
         </ul>
         <button
           type="button"
@@ -1813,15 +1668,7 @@ function DangerZoneSection() {
         <WipeModal
           title="Shred this workspace?"
           severity="critical"
-          intro={
-            <>
-              This permanently deletes your team, company identity, office task
-              receipts, and saved workflows, plus local logs, sessions, provider
-              state, calendar, and wiki memory. Onboarding will reopen
-              immediately. Task worktrees, config, and device identity are kept.{" "}
-              <strong>This cannot be undone.</strong>
-            </>
-          }
+          intro={<ShredWarningCopy />}
           confirmLabel="Shred workspace"
           busy={busy}
           onConfirm={handleShred}
