@@ -31,9 +31,11 @@ const KNOWN_TYPES = new Set(TYPE_LABELS.map((t) => t.type));
 export const VERSION_RE =
   /^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
-// Buildinfo's "dev" sentinel — see internal/buildinfo/buildinfo.go. Keep
-// in sync with upgradecheck.IsDevVersion. Also rejects garbage strings and
-// any sub-0.1.0 version as a sentinel.
+// Buildinfo's "dev" sentinel — keep in sync with the Go twins:
+// buildinfo.IsDev (canonical literal sentinel) and upgradecheck.IsDevVersion
+// (extended check that also rejects garbage and sub-0.1.0 versions). This
+// helper applies the full extended logic so the URL-override preview path
+// classifies stale-VERSION builds as dev too.
 //
 // Note: on the production banner path, UpgradeBanner.tsx trusts the
 // server-authoritative `is_dev_build` flag from /upgrade-check first, so
@@ -91,6 +93,14 @@ const TRAILING_PR_RE = /\s*\(#(\d+)\)\s*$/;
 export function extractPR(s: string): string | null {
   const m = s.match(TRAILING_PR_RE);
   return m ? m[1] : null;
+}
+
+// Build a GitHub /pull/<n> URL only when the PR token is a clean number.
+// Returns null for anything else so a future broker change emitting a
+// non-numeric ref (or a parser bug) can't produce a malformed URL the
+// banner would still render as a clickable link.
+export function prGitHubURL(repo: string, pr: string): string | null {
+  return /^\d+$/.test(pr) ? `https://github.com/${repo}/pull/${pr}` : null;
 }
 
 // Conventional-commit parser. Mirrors internal/upgradecheck.parseCommit so

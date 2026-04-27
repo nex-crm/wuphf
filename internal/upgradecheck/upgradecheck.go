@@ -27,10 +27,20 @@ import (
 )
 
 const (
-	NPMPackage     = "wuphf"
-	GitHubRepo     = "nex-crm/wuphf"
-	NPMRegistryURL = "https://registry.npmjs.org/" + NPMPackage + "/latest"
+	NPMPackage = "wuphf"
+	GitHubRepo = "nex-crm/wuphf"
 )
+
+// npmRegistryURL is a var (not a const) so tests can swap in a httptest
+// server URL directly without the RoundTripper indirection the original
+// fixture used. Unexported so cross-package callers can't mutate it.
+//
+// Caveat: tests that swap this MUST NOT call t.Parallel() — concurrent
+// reads in fetchLatestVersion against a write in pinNPMRegistryURL trip
+// the race detector. The serial-by-default usage here is fine; if a
+// future test wants parallel execution, thread the URL through Check
+// instead of swapping the package var.
+var npmRegistryURL = "https://registry.npmjs.org/" + NPMPackage + "/latest"
 
 // Result reports the comparison between the running version and the latest
 // published version.
@@ -92,28 +102,29 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 	return res, nil
 }
 
-// IsDevVersion reports whether v is a non-released ("dev") wuphf build. This
-// matches buildinfo.Current()'s fallback when no release ldflag was set.
+// IsDevVersion reports whether v should be treated as a non-released
+// ("dev") wuphf build. The literal sentinel set ("" / "dev") lives in
+// internal/buildinfo as IsDev — this is the single source of truth.
+// IsDevVersion layers two domain-specific guards on top, both motivated
+// by issue #350:
 //
-// Defense-in-depth: also classify anything that doesn't match VersionParamRE
-// (garbage strings, partial sentinels) and any version below 0.1.0 as a dev
-// build. Issue #350: a stale `internal/buildinfo/VERSION` containing
-// "0.0.7.1" was passing through as a real "current" because it parses fine
-// as semver — and that compared `< 0.79.2` (npm latest) so the banner told
-// every contributor / source build to "upgrade" to an older release. The
-// VERSION file is now `dev`, but treat sub-0.1.0 numbers as a sentinel too
-// so a future stray edit can't reproduce the bug.
+//  1. Anything that doesn't match VersionParamRE (garbage, partial
+//     sentinels) — a malformed `current` shouldn't be compared against
+//     npm `latest` as if it were semver.
+//  2. Any version below 0.1.0 — a stale `internal/buildinfo/VERSION` of
+//     "0.0.7.1" parsed fine as semver and the banner told every
+//     contributor / source build to "upgrade" to an older release.
 //
 // One-way ratchet: this permanently retires the 0.0.x namespace as a
 // published wuphf version. wuphf is at v0.83.x as of this change, so
-// loosening the threshold for an actual 0.0.x release would be a regression
-// to the bug shape this guard exists to prevent. If we ever need a sub-0.1
+// loosening the threshold for an actual 0.0.x release would regress to
+// the bug shape this guard exists to prevent. If we ever need a sub-0.1
 // pre-release (don't), explicitly bump this and update the test cases.
 func IsDevVersion(v string) bool {
-	v = strings.TrimSpace(v)
-	if v == "" || v == "dev" {
+	if buildinfo.IsDev(v) {
 		return true
 	}
+	v = strings.TrimSpace(v)
 	if !VersionParamRE.MatchString(v) {
 		return true
 	}
@@ -135,7 +146,7 @@ type npmManifest struct {
 }
 
 func fetchLatestVersion(ctx context.Context, client *http.Client) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, NPMRegistryURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, npmRegistryURL, nil)
 	if err != nil {
 		return "", err
 	}
