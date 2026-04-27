@@ -153,6 +153,28 @@ describe("messageMarkdown — link safety preserved for normal URLs", () => {
     const a = container.querySelector("a");
     expect(a?.getAttribute("href")).toBe("#section");
   });
+
+  it("rejects protocol-relative URLs (//evil.com)", () => {
+    const { container } = renderChat("[click](//evil.com/path)");
+    const a = container.querySelector("a");
+    expect(a).not.toBeNull();
+    // SAFE_URL_RE rejects `//host/...` so href is dropped.
+    expect(a?.getAttribute("href")).toBeNull();
+  });
+
+  it("does not open same-origin paths in a new tab", () => {
+    const { container } = renderChat("[doc](/wiki/team/launch)");
+    const a = container.querySelector("a");
+    expect(a?.getAttribute("target")).toBeNull();
+    expect(a?.getAttribute("rel")).toBeNull();
+  });
+
+  it("does not open fragment links in a new tab", () => {
+    const { container } = renderChat("[here](#section)");
+    const a = container.querySelector("a");
+    expect(a?.getAttribute("target")).toBeNull();
+    expect(a?.getAttribute("rel")).toBeNull();
+  });
 });
 
 describe("messageMarkdown — visual class mapping", () => {

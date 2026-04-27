@@ -37,7 +37,12 @@ const MENTION_RE = /(?:^|[^a-zA-Z0-9_])@([a-z0-9][a-z0-9-]{1,29})\b/g;
 // defaultUrlTransform already strips javascript:, vbscript:, and data:
 // (except safe image variants); this re-checks because url handling is too
 // important to depend on a single layer.
-const SAFE_URL_RE = /^(https?:|mailto:|tel:|\/|#|\.\.?\/|\?)/i;
+//
+// `\/(?!\/)` rejects protocol-relative URLs (`//evil.com`) while still
+// allowing genuine same-origin paths (`/wiki/team/launch`). ReactMarkdown's
+// defaultUrlTransform passes `//host/...` through as-is, so the allowlist
+// has to do the work.
+const SAFE_URL_RE = /^(https?:|mailto:|tel:|\/(?!\/)|#|\.\.?\/|\?)/i;
 
 // ── AST types (minimal mdast surface for the remark plugin) ──
 
@@ -197,13 +202,17 @@ export const messageMarkdownComponents: Partial<Components> = {
       return <span className="mention">{children}</span>;
     }
     const safe = isSafeHref(href) ? href : undefined;
+    // Only external schemes pop a new tab. Fragment links (`#section`) and
+    // same-origin relative paths (`/wiki/...`) navigate in-place so
+    // anchor-to-section scrolling and TanStack-Router transitions still work.
+    const isExternal = !!safe && /^(https?:|mailto:|tel:)/i.test(safe);
     return (
       <a
         {...rest}
         href={safe}
         className="msg-link"
-        target="_blank"
-        rel="noopener noreferrer"
+        target={isExternal ? "_blank" : undefined}
+        rel={isExternal ? "noopener noreferrer" : undefined}
       >
         {children}
       </a>
