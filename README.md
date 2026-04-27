@@ -1,4 +1,4 @@
-# WUPHF
+# WUPHF (pronounced "woof")
 
 <p align="center">
   <img src="assets/hero.png" alt="WUPHF onboarding — Your AI team, visible and working." width="720" />
