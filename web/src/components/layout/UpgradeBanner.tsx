@@ -54,6 +54,13 @@ export function UpgradeBanner() {
 
   const [current, setCurrent] = useState<string | null>(forced?.from ?? null);
   const [latest, setLatest] = useState<string | null>(forced?.to ?? null);
+  // Server-authoritative dev-build flag (set from /upgrade-check). The Go
+  // side has the canonical view of what counts as a dev build (buildinfo's
+  // "" / "dev" sentinel) — trusting the server flag means a future
+  // buildinfo change adding a new sentinel flows through automatically.
+  // The URL-override path skips the server call so this stays false
+  // (intentional: QA preview shouldn't be classified as dev).
+  const [isDevBuildSrv, setIsDevBuildSrv] = useState(false);
   const [dismissed, setDismissed] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -82,6 +89,7 @@ export function UpgradeBanner() {
         if (ctl.signal.aborted) return;
         if (res.current) setCurrent(res.current);
         if (res.latest) setLatest(res.latest);
+        setIsDevBuildSrv(!!res.is_dev_build);
       })
       .catch(() => {
         // Broker unreachable or returned a non-2xx — degrade silently.
@@ -166,10 +174,12 @@ export function UpgradeBanner() {
 
   const upgradeNeeded = useMemo(() => {
     if (!(current && latest)) return false;
-    if (isDevVersion(current)) return false;
+    // Server flag is authoritative; the local check is the
+    // URL-override fallback.
+    if (isDevBuildSrv || isDevVersion(current)) return false;
     if (!(VERSION_RE.test(current) && VERSION_RE.test(latest))) return false;
     return compareVersions(current, latest) < 0;
-  }, [current, latest]);
+  }, [current, latest, isDevBuildSrv]);
 
   const compareUrl = useMemo(() => {
     if (!(current && latest)) return "";

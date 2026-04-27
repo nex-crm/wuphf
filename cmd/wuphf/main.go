@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -338,15 +339,43 @@ func main() {
 	runWeb(args, selectedBlueprint, *unsafeMode, *webPort, *opusCEO, *collabMode, *noOpen)
 }
 
+// upgradeJSONOutput is the wire shape emitted by `wuphf upgrade --json`.
+// Embeds upgradecheck.Result so adding a field there flows through, plus an
+// explicit Error field that is populated when the upstream call failed.
+// Extracted as a function (and as a top-level shape) so the JSON contract
+// is testable without invoking the os.Exit-bearing runUpgradeCheck path.
+func upgradeJSONOutput(res upgradecheck.Result, err error) struct {
+	upgradecheck.Result
+	Error string `json:"error,omitempty"`
+} {
+	out := struct {
+		upgradecheck.Result
+		Error string `json:"error,omitempty"`
+	}{Result: res}
+	if err != nil {
+		out.Error = err.Error()
+	}
+	return out
+}
+
 func runUpgradeCheck(args []string) {
 	// Use a real flag.FlagSet so `--json=true`, `--help`, and unknown flags
 	// behave consistently with the rest of the CLI (the previous
 	// hand-rolled loop silently accepted `wuphf upgrade junk` and ignored
 	// `--json=true`).
-	fs := flag.NewFlagSet("upgrade", flag.ExitOnError)
+	// ContinueOnError so we get to handle the error here — under
+	// ExitOnError the Parse call would call os.Exit itself and the
+	// branch below would be unreachable.
+	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "Emit the comparison as JSON for scripting")
+	fs.SetOutput(os.Stderr)
 	fs.Usage = func() { printSubcommandHelp("upgrade") }
 	if err := fs.Parse(args); err != nil {
+		// flag prints the error itself; just exit. flag.ErrHelp on
+		// `--help` exits 0, anything else is a usage error → 2.
+		if errors.Is(err, flag.ErrHelp) {
+			os.Exit(0)
+		}
 		os.Exit(2)
 	}
 
@@ -365,14 +394,7 @@ func runUpgradeCheck(args []string) {
 	// npm reachability, so a network blip shouldn't trip exit-code-aware
 	// pipelines on contributor machines.
 	if *jsonOut {
-		out := struct {
-			upgradecheck.Result
-			Error string `json:"error,omitempty"`
-		}{Result: res}
-		if err != nil {
-			out.Error = err.Error()
-		}
-		_ = json.NewEncoder(os.Stdout).Encode(out)
+		_ = json.NewEncoder(os.Stdout).Encode(upgradeJSONOutput(res, err))
 		// Exit non-zero when we couldn't actually compare — distinguishes
 		// "no upgrade" from "couldn't reach npm" for `wuphf upgrade --json | jq …`
 		// pipelines. Dev builds are exempt: they don't depend on npm

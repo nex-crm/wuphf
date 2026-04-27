@@ -355,10 +355,14 @@ func compareVersions(a, b string) int {
 
 func splitVersion(v string) []int {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
-	// Drop pre-release suffix like "-rc.1" so it doesn't poison the dotted
-	// segments (Atoi on "10-rc" returns 0, which would order an rc release
-	// BELOW its prior stable — exactly opposite of intent).
+	// Drop pre-release suffix (`-rc.1`) AND build metadata (`+build.5`)
+	// so neither poisons the dotted segments (Atoi on "10-rc" returns
+	// 0, which would order an rc release BELOW its prior stable —
+	// exactly opposite of intent). Mirror in the TS twin.
 	if i := strings.IndexByte(v, '-'); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.IndexByte(v, '+'); i >= 0 {
 		v = v[:i]
 	}
 	parts := strings.Split(v, ".")

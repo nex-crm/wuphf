@@ -23,10 +23,13 @@ export const TYPE_LABELS: Array<{ type: string; label: string }> = [
 
 const KNOWN_TYPES = new Set(TYPE_LABELS.map((t) => t.type));
 
-// Accept v0.79, 0.79.15, 0.79.15.1, 1.2.3-rc.4. Anything else is rejected
-// by callers that need to validate user-supplied versions (URL override,
-// broker query param echo).
-export const VERSION_RE = /^v?\d+(\.\d+){1,3}(-[\w.]+)?$/;
+// Accept v0.79, 0.79.15, 0.79.15.1, 1.2.3-rc.4, 1.2.3-beta-1, 1.2.3+build.5.
+// Character class mirrors internal/upgradecheck/upgradecheck.go's
+// VersionParamRE and internal/team/broker.go's upgradeVersionParam — keep
+// all three in sync. Hyphen is allowed inside the suffix character class
+// so `-beta-1` validates.
+export const VERSION_RE =
+  /^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
 // Buildinfo's "dev" sentinel — see internal/buildinfo/buildinfo.go. Keep
 // in sync with upgradecheck.IsDevVersion.
@@ -36,13 +39,16 @@ export function isDevVersion(v: string | null | undefined): boolean {
   return t === "" || t === "dev";
 }
 
+// Trim FIRST then strip leading `v` so " v0.79.10" parses correctly. Mirror
+// of the Go behaviour: strings.TrimPrefix(strings.TrimSpace(v), "v").
 export function stripV(v: string): string {
-  return v.replace(/^v/, "");
+  return v.trim().replace(/^v/, "");
 }
 
-// Compare dotted-numeric versions. Pre-release suffixes (e.g. "-rc.1") are
-// stripped before comparison so an rc on the same base sorts equal — matches
-// the Go `compareVersions` behaviour in internal/upgradecheck.
+// Compare dotted-numeric versions. Pre-release (`-rc.1`) AND build-metadata
+// (`+build.5`) suffixes are stripped before comparison so all of
+// `0.79.10`, `0.79.10-rc.1`, `0.79.10+build.5` sort equal — matches the Go
+// `compareVersions` behaviour in internal/upgradecheck.
 export function compareVersions(a: string, b: string): number {
   const pa = splitVersion(a);
   const pb = splitVersion(b);
@@ -56,9 +62,13 @@ export function compareVersions(a: string, b: string): number {
 }
 
 function splitVersion(v: string): number[] {
-  let s = stripV(v).trim();
+  let s = stripV(v);
+  // Strip pre-release suffix first, then build metadata (or vice
+  // versa — order doesn't matter, both are dropped before splitting).
   const dash = s.indexOf("-");
   if (dash >= 0) s = s.slice(0, dash);
+  const plus = s.indexOf("+");
+  if (plus >= 0) s = s.slice(0, plus);
   return s.split(".").map((n) => Number.parseInt(n, 10) || 0);
 }
 

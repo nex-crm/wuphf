@@ -81,6 +81,17 @@ func TestHandleUpgradeChangelog_BadParamMatchesUpstreamErrorShape(t *testing.T) 
 	if body.Error == "" {
 		t.Errorf("expected non-empty error field on 400, got %+v", body)
 	}
+	// Lock the documented contract: the bad-param path returns the
+	// SAME shape as the upstream-failure path so the banner's .catch
+	// can render one message instead of branching on HTTP status. A
+	// future change that removes commits or returns null must fail
+	// the test loudly.
+	if body.Commits == nil {
+		t.Errorf("expected commits to be an empty array, got nil")
+	}
+	if len(body.Commits) != 0 {
+		t.Errorf("expected empty commits, got %d entries", len(body.Commits))
+	}
 }
 
 func TestUpgradeEndpoints_RequireAuthToken(t *testing.T) {
@@ -156,7 +167,9 @@ func TestHandleUpgradeChangelog_ResponseShapeMatchesBannerExpectations(t *testin
 	// changelog cache, then asserts the served JSON uses lowercase
 	// keys exactly matching what UpgradeBanner.tsx reads.
 	resetUpgradeCaches(t)
-	upgradeChangelog.Store("v0.1.0→v0.1.1", &upgradeChangelogCacheEntry{
+	// Use the production key helper so the test stays in sync if the
+	// broker's encoding ever changes.
+	upgradeChangelog.Store(upgradeChangelogKey("v0.1.0", "v0.1.1"), &upgradeChangelogCacheEntry{
 		entries: []upgradecheck.CommitEntry{{
 			Type: "feat", Scope: "wiki", Description: "x",
 			PR: "1", SHA: "abc", Breaking: true,

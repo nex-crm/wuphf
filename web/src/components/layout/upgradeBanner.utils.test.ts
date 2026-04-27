@@ -28,6 +28,12 @@ describe("compareVersions", () => {
     // in upgradeBanner.utils.ts compareVersions().
     ["1.0.0-rc.1", "1.0.0-rc.2", 0],
     ["1.0.0-rc.2", "1.0.0-rc.1", 0],
+    // Build metadata is also stripped (mirrors the Go splitVersion).
+    ["1.2.3+build.5", "1.2.3", 0],
+    ["1.2.3", "1.2.3+build.5", 0],
+    // Leading whitespace shouldn't break stripV — trim first, strip
+    // leading "v" second.
+    [" v0.79.10", "0.79.10", 0],
   ] as const)("compareVersions(%s, %s) === %i", (a, b, want) => {
     expect(compareVersions(a, b)).toBe(want);
   });
@@ -174,6 +180,8 @@ describe("VERSION_RE", () => {
     ["v0.79.10", true],
     ["0.79.10.1", true],
     ["1.2.3-rc.4", true],
+    ["1.2.3-beta-1", true],
+    ["1.2.3+build.5", true],
     ["dev", false],
     ["", false],
     ["../etc/passwd", false],

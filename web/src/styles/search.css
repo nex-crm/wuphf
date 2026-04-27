@@ -568,19 +568,6 @@
   text-decoration: underline;
 }
 
-@media (max-width: 768px) {
-  .upgrade-banner-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .upgrade-banner-actions {
-    justify-content: space-between;
-  }
-  .upgrade-banner-copy code {
-    font-size: 11px;
-  }
-}
-
 /* ─── Responsive ─── */
 @media (max-width: 768px) {
   .search-overlay {
@@ -595,6 +582,17 @@
   .channel-wizard-modal {
     margin: 16px;
     max-width: none;
+  }
+
+  .upgrade-banner-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .upgrade-banner-actions {
+    justify-content: space-between;
+  }
+  .upgrade-banner-copy code {
+    font-size: 11px;
   }
 }
 

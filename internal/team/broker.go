@@ -4648,21 +4648,26 @@ func (b *Broker) handleUpgradeCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := upgradeCheckCached(r.Context())
 	w.Header().Set("Content-Type", "application/json")
-	if err != nil && res.Current == "" {
-		// Hard transport failure on a cold cache — surface 502 so
-		// observability tools see the upstream outage. Banner's
-		// .catch() already swallows non-2xx silently.
+	// upgradecheck.Check populates Current from buildinfo BEFORE the
+	// upstream call, so a transport failure still arrives with
+	// Current set. The right "do we have anything useful" signal is
+	// Latest — empty Latest with an error means we couldn't talk to
+	// npm at all (cold cache + outage), which deserves a 502 so
+	// observability tools see the upstream failure. Banner's
+	// .catch() already swallows non-2xx silently.
+	if err != nil && res.Latest == "" {
 		w.WriteHeader(http.StatusBadGateway)
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"error": err.Error(),
+			"current": res.Current,
+			"error":   err.Error(),
 		})
 		return
 	}
 	if err != nil {
-		// Partial result (Current populated, Latest empty) — degrade
-		// gracefully with 200 + error field so the banner can render
-		// nothing without a console-spamming 5xx for a non-critical
-		// check.
+		// Partial result (Current AND Latest populated, but something
+		// else failed) — degrade gracefully with 200 + error field
+		// so the banner can render nothing without a console-spamming
+		// 5xx for a non-critical check.
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"current":           res.Current,
 			"latest":            res.Latest,
@@ -4736,7 +4741,20 @@ const (
 	upgradeCheckTTL     = 30 * time.Minute
 	upgradeChangelogTTL = time.Hour
 	upgradeUpstreamTime = 5 * time.Second
+	// Negative-cache window: pin upstream failures briefly so an outage
+	// doesn't bypass the cache and let every banner load hammer
+	// npm/GitHub. Short enough that recovery is observed quickly;
+	// singleflight only collapses concurrent bursts, not back-to-back
+	// retries.
+	upgradeFailureTTL = 60 * time.Second
 )
+
+// upgradeChangelogKey is the canonical cache key for the changelog entry
+// keyed by (from, to). Exported (lowercase but used from
+// broker_upgrade_test.go in the same package) so the test that pre-seeds
+// the cache uses the same encoding the production code does — keeps them
+// from drifting.
+func upgradeChangelogKey(from, to string) string { return from + "→" + to }
 
 type upgradeCheckCacheEntry struct {
 	res     upgradecheck.Result
@@ -4757,49 +4775,61 @@ var (
 	upgradeChangelogFlt singleflight.Group
 )
 
-func upgradeCheckCached(ctx context.Context) (upgradecheck.Result, error) {
-	if e := upgradeCheckCache.Load(); e != nil && time.Since(e.storeAt) < upgradeCheckTTL {
-		return e.res, e.err
+func upgradeCheckCached(_ context.Context) (upgradecheck.Result, error) {
+	if e := upgradeCheckCache.Load(); e != nil {
+		// Successes use the long TTL; failures use the short
+		// negative-TTL so we recover from an outage without
+		// re-hammering during the window.
+		ttl := upgradeCheckTTL
+		if e.err != nil {
+			ttl = upgradeFailureTTL
+		}
+		if time.Since(e.storeAt) < ttl {
+			return e.res, e.err
+		}
 	}
-	v, err, _ := upgradeCheckGroup.Do("check", func() (any, error) {
-		fctx, cancel := context.WithTimeout(ctx, upgradeUpstreamTime)
+	// Singleflight leader uses a broker-owned context, NOT the caller's
+	// HTTP ctx — otherwise a single client cancellation (page nav,
+	// browser close) aborts the upstream fetch for every concurrent
+	// waiter. The waiters have their own contexts that gate when they
+	// observe the result; only the leader's context governs the actual
+	// upstream call.
+	v, _, _ := upgradeCheckGroup.Do("check", func() (any, error) {
+		fctx, cancel := context.WithTimeout(context.Background(), upgradeUpstreamTime)
 		defer cancel()
 		res, err := upgradecheck.Check(fctx, nil)
-		// Cache successes only — a transient registry outage shouldn't
-		// pin the failure for 30 minutes.
-		if err == nil {
-			upgradeCheckCache.Store(&upgradeCheckCacheEntry{res: res, storeAt: time.Now()})
-		}
+		// Cache success AND failure (different TTLs above) so a
+		// stream of failed retries during an outage doesn't bypass
+		// the broker shielding this feature exists to provide.
+		upgradeCheckCache.Store(&upgradeCheckCacheEntry{res: res, err: err, storeAt: time.Now()})
 		return upgradeCheckCacheEntry{res: res, err: err}, nil
 	})
 	entry := v.(upgradeCheckCacheEntry)
-	if err != nil {
-		return entry.res, err
-	}
 	return entry.res, entry.err
 }
 
-func upgradeChangelogCached(ctx context.Context, from, to string) ([]upgradecheck.CommitEntry, error) {
-	key := from + "→" + to
+func upgradeChangelogCached(_ context.Context, from, to string) ([]upgradecheck.CommitEntry, error) {
+	key := upgradeChangelogKey(from, to)
 	if v, ok := upgradeChangelog.Load(key); ok {
 		e := v.(*upgradeChangelogCacheEntry)
-		if time.Since(e.storeAt) < upgradeChangelogTTL {
+		ttl := upgradeChangelogTTL
+		if e.err != nil {
+			ttl = upgradeFailureTTL
+		}
+		if time.Since(e.storeAt) < ttl {
 			return e.entries, e.err
 		}
 	}
-	v, err, _ := upgradeChangelogFlt.Do(key, func() (any, error) {
-		fctx, cancel := context.WithTimeout(ctx, upgradeUpstreamTime+3*time.Second)
+	// See upgradeCheckCached: leader uses broker-owned background ctx
+	// so client cancellations don't kill the shared upstream fetch.
+	v, _, _ := upgradeChangelogFlt.Do(key, func() (any, error) {
+		fctx, cancel := context.WithTimeout(context.Background(), upgradeUpstreamTime+3*time.Second)
 		defer cancel()
 		entries, err := upgradecheck.FetchChangelog(fctx, nil, from, to)
-		if err == nil {
-			upgradeChangelog.Store(key, &upgradeChangelogCacheEntry{entries: entries, storeAt: time.Now()})
-		}
+		upgradeChangelog.Store(key, &upgradeChangelogCacheEntry{entries: entries, err: err, storeAt: time.Now()})
 		return upgradeChangelogCacheEntry{entries: entries, err: err}, nil
 	})
 	entry := v.(upgradeChangelogCacheEntry)
-	if err != nil {
-		return entry.entries, err
-	}
 	return entry.entries, entry.err
 }
 

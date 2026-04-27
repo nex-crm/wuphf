@@ -26,6 +26,12 @@ func TestCompareVersions(t *testing.T) {
 		{"0.79.10-rc.1", "0.79.10", 0},
 		{"0.79.10", "0.79.10-rc.1", 0},
 		{"0.79.10-rc.1", "0.79.11", -1},
+		// Build metadata is also stripped (mirrors the TS twin).
+		{"1.2.3+build.5", "1.2.3", 0},
+		{"1.2.3", "1.2.3+build.5", 0},
+		// Leading whitespace shouldn't break parsing — TrimSpace runs
+		// before TrimPrefix("v").
+		{" v0.79.10", "0.79.10", 0},
 	}
 	for _, c := range cases {
 		got := compareVersions(c.a, c.b)
