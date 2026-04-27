@@ -14,6 +14,7 @@ import {
   groupCommits,
   isDevVersion,
   parseCommit,
+  prGitHubURL,
   readForcedPair,
   safeLocalStorageGet,
   safeLocalStorageSet,
@@ -374,34 +375,32 @@ export function UpgradeBanner() {
                       </>
                     ) : null}
                     {entry.description}
-                    {entry.pr ? (
-                      // Defensive: only render an anchor when the PR ref is
-                      // numeric so a future broker change emitting a
-                      // non-numeric token can't produce a malformed
-                      // /pull/<token> URL. Falls back to plain text.
-                      /^\d+$/.test(entry.pr) ? (
-                        <>
-                          {" "}
-                          <a
-                            href={`https://github.com/${REPO}/pull/${entry.pr}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="upgrade-banner-pr"
-                          >
-                            #{entry.pr}
-                          </a>
-                        </>
-                      ) : (
-                        // Non-numeric PR token — render as muted plain text
-                        // (the .upgrade-banner-pr class would inherit
-                        // anchor-style hover-underline + accent colour and
-                        // mislead the user into thinking it's clickable).
-                        <span className="upgrade-banner-pr-text">
-                          {" "}
-                          #{entry.pr}
-                        </span>
-                      )
-                    ) : null}
+                    {entry.pr
+                      ? (() => {
+                          // Anchor only when prGitHubURL accepts the token —
+                          // a non-numeric ref renders as muted plain text so
+                          // it doesn't masquerade as a broken link.
+                          const prURL = prGitHubURL(REPO, entry.pr);
+                          return prURL ? (
+                            <>
+                              {" "}
+                              <a
+                                href={prURL}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="upgrade-banner-pr"
+                              >
+                                #{entry.pr}
+                              </a>
+                            </>
+                          ) : (
+                            <span className="upgrade-banner-pr-text">
+                              {" "}
+                              #{entry.pr}
+                            </span>
+                          );
+                        })()
+                      : null}
                   </li>
                 ))}
               </ul>

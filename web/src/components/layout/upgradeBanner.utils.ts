@@ -81,6 +81,14 @@ export function extractPR(s: string): string | null {
   return m ? m[1] : null;
 }
 
+// Build a GitHub /pull/<n> URL only when the PR token is a clean number.
+// Returns null for anything else so a future broker change emitting a
+// non-numeric ref (or a parser bug) can't produce a malformed URL the
+// banner would still render as a clickable link.
+export function prGitHubURL(repo: string, pr: string): string | null {
+  return /^\d+$/.test(pr) ? `https://github.com/${repo}/pull/${pr}` : null;
+}
+
 // Conventional-commit parser. Mirrors internal/upgradecheck.parseCommit so
 // the CLI and web banner render the same text for the same input. Capture
 // groups: 1=type, 2=(scope), 3=! (breaking), 4=description.

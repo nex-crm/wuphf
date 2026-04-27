@@ -5,6 +5,7 @@ import {
   groupCommits,
   isDevVersion,
   parseCommit,
+  prGitHubURL,
   VERSION_RE,
 } from "./upgradeBanner.utils";
 
@@ -189,5 +190,30 @@ describe("VERSION_RE", () => {
     ["v0.79.10; rm -rf /", false],
   ] as const)("VERSION_RE.test(%j) === %s", (input, want) => {
     expect(VERSION_RE.test(input)).toBe(want);
+  });
+});
+
+describe("prGitHubURL", () => {
+  // Locks the safety contract: anything non-numeric returns null so the
+  // banner falls back to plain text instead of producing a clickable
+  // /pull/<token> URL with garbage in it.
+  it("returns the GitHub /pull/<n> URL for a clean numeric ref", () => {
+    expect(prGitHubURL("nex-crm/wuphf", "310")).toBe(
+      "https://github.com/nex-crm/wuphf/pull/310",
+    );
+  });
+
+  it.each([
+    ["abc", "non-numeric"],
+    ["310; rm -rf /", "shell-injection attempt"],
+    ["3.10", "decimal"],
+    ["310 ", "trailing whitespace"],
+    [" 310", "leading whitespace"],
+    ["", "empty"],
+    ["310/extra", "path segment"],
+    ["310?x=1", "query string"],
+    ["#310", "with hash prefix"],
+  ] as const)("returns null for %j (%s)", (input, _label) => {
+    expect(prGitHubURL("nex-crm/wuphf", input)).toBeNull();
   });
 });
