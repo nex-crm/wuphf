@@ -103,6 +103,12 @@ func Check(ctx context.Context, client *http.Client) (Result, error) {
 // every contributor / source build to "upgrade" to an older release. The
 // VERSION file is now `dev`, but treat sub-0.1.0 numbers as a sentinel too
 // so a future stray edit can't reproduce the bug.
+//
+// One-way ratchet: this permanently retires the 0.0.x namespace as a
+// published wuphf version. wuphf is at v0.83.x as of this change, so
+// loosening the threshold for an actual 0.0.x release would be a regression
+// to the bug shape this guard exists to prevent. If we ever need a sub-0.1
+// pre-release (don't), explicitly bump this and update the test cases.
 func IsDevVersion(v string) bool {
 	v = strings.TrimSpace(v)
 	if v == "" || v == "dev" {

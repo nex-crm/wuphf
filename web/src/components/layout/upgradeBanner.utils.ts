@@ -33,9 +33,15 @@ export const VERSION_RE =
 
 // Buildinfo's "dev" sentinel — see internal/buildinfo/buildinfo.go. Keep
 // in sync with upgradecheck.IsDevVersion. Also rejects garbage strings and
-// any sub-0.1.0 version as a sentinel (#350: a stale VERSION file shipping
-// "0.0.7.1" passed through this guard and produced a false "upgrade
-// available v0.0.7.1 → v0.79.2" — actually a downgrade).
+// any sub-0.1.0 version as a sentinel.
+//
+// Note: on the production banner path, UpgradeBanner.tsx trusts the
+// server-authoritative `is_dev_build` flag from /upgrade-check first, so
+// this local check is dead code in the #350 reproducer. It only fires on
+// the URL-override (?upgrade-from=…&upgrade-to=…) preview path used by QA
+// and screenshots — keeping the twin in sync with the Go side prevents a
+// future preview pair from rendering a downgrade-shaped banner during
+// pre-launch sweeps.
 export function isDevVersion(v: string | null | undefined): boolean {
   if (!v) return true;
   const t = v.trim();
