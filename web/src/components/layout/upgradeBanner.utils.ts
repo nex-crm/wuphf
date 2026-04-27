@@ -31,8 +31,8 @@ const KNOWN_TYPES = new Set(TYPE_LABELS.map((t) => t.type));
 export const VERSION_RE =
   /^v?\d+(\.\d+){1,3}(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
-// Buildinfo's "dev" sentinel — see internal/buildinfo/buildinfo.go. Keep
-// in sync with upgradecheck.IsDevVersion.
+// Buildinfo's "dev" sentinel — keep in sync with buildinfo.IsDev in
+// internal/buildinfo/buildinfo.go (the canonical Go-side helper).
 export function isDevVersion(v: string | null | undefined): boolean {
   if (!v) return true;
   const t = v.trim();

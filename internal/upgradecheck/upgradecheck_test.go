@@ -149,20 +149,25 @@ func pinCurrentVersion(t *testing.T, v string) {
 	t.Cleanup(func() { currentVersion = prev })
 }
 
-// pinNPMRegistryURL swaps NPMRegistryURL for the test duration so callers
+// pinNPMRegistryURL swaps npmRegistryURL for the test duration so callers
 // can point it at a httptest server without injecting a custom RoundTripper
 // on every Check call. Restores on cleanup.
 func pinNPMRegistryURL(t *testing.T, url string) {
 	t.Helper()
-	prev := NPMRegistryURL
-	NPMRegistryURL = url
-	t.Cleanup(func() { NPMRegistryURL = prev })
+	prev := npmRegistryURL
+	npmRegistryURL = url
+	t.Cleanup(func() { npmRegistryURL = prev })
 }
 
 // mockNPMRegistry stands up a httptest server that always responds with the
-// given version and points NPMRegistryURL at it for the duration of the
+// given version and points npmRegistryURL at it for the duration of the
 // test. Callers can then call Check(ctx, nil) and the default client will
 // hit the fake.
+//
+// t.Cleanup ordering matters here: srv.Close is registered BEFORE
+// pinNPMRegistryURL, and t.Cleanup runs LIFO — so the URL pin restores
+// first, THEN the server closes. Reordering would leave a window where
+// npmRegistryURL points at a closed server.
 func mockNPMRegistry(t *testing.T, latest string) {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

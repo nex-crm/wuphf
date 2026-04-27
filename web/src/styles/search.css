@@ -571,6 +571,15 @@
   text-decoration: underline;
 }
 
+/* Non-clickable PR token — same monospace shape as .upgrade-banner-pr but
+   muted, no hover affordance, so a defensive non-numeric fallback in
+   UpgradeBanner.tsx doesn't masquerade as a broken link. */
+.upgrade-banner-pr-text {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 768px) {
   .search-overlay {

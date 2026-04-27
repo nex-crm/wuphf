@@ -31,11 +31,16 @@ const (
 	GitHubRepo = "nex-crm/wuphf"
 )
 
-// NPMRegistryURL is a var (not a const) so tests can swap in a httptest
+// npmRegistryURL is a var (not a const) so tests can swap in a httptest
 // server URL directly without the RoundTripper indirection the original
-// fixture used. Production code must NOT mutate this at runtime — it is
-// effectively const outside test setup.
-var NPMRegistryURL = "https://registry.npmjs.org/" + NPMPackage + "/latest"
+// fixture used. Unexported so cross-package callers can't mutate it.
+//
+// Caveat: tests that swap this MUST NOT call t.Parallel() — concurrent
+// reads in fetchLatestVersion against a write in pinNPMRegistryURL trip
+// the race detector. The serial-by-default usage here is fine; if a
+// future test wants parallel execution, thread the URL through Check
+// instead of swapping the package var.
+var npmRegistryURL = "https://registry.npmjs.org/" + NPMPackage + "/latest"
 
 // Result reports the comparison between the running version and the latest
 // published version.
@@ -109,7 +114,7 @@ type npmManifest struct {
 }
 
 func fetchLatestVersion(ctx context.Context, client *http.Client) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, NPMRegistryURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, npmRegistryURL, nil)
 	if err != nil {
 		return "", err
 	}

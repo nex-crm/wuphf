@@ -392,7 +392,14 @@ export function UpgradeBanner() {
                           </a>
                         </>
                       ) : (
-                        <span className="upgrade-banner-pr"> #{entry.pr}</span>
+                        // Non-numeric PR token — render as muted plain text
+                        // (the .upgrade-banner-pr class would inherit
+                        // anchor-style hover-underline + accent colour and
+                        // mislead the user into thinking it's clickable).
+                        <span className="upgrade-banner-pr-text">
+                          {" "}
+                          #{entry.pr}
+                        </span>
                       )
                     ) : null}
                   </li>
